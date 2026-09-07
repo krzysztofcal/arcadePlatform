@@ -55,6 +55,7 @@
   var CLOSED_TABLE_REDIRECT_SECONDS = 5;
   var WINNER_REVEAL_MS = 3_500;
   var TARGETED_REACTION_EFFECT_TTL_MS = 1_200;
+  var AUTO_REBUY_FEEDBACK_MS = 3_000;
   var CHIP_FLY_MS = 420;
   var SETTLEMENT_CHIP_FLY_MS = 780;
   var AUTO_JOIN_RETRY_DELAYS_MS = [250, 750, 1500, 3000];
@@ -184,6 +185,8 @@
   var pendingLeaveRetryAfterReconnect = false;
   var pendingLeaveNavigation = false;
   var leaveConfirmOpen = false;
+  var autoRebuyConfirmOpen = false;
+  var pendingAutoRebuyConfirmationBuyIn = null;
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
@@ -225,6 +228,8 @@
   var rebuyPanelDismissed = false;
   var autoRebuyAttemptedForCurrentBust = false;
   var rebuyBalanceLoading = false;
+  var autoRebuyFeedbackTimer = null;
+  var autoRebuyFeedbackState = { visible: false, buyIn: null };
   var stickyWinnerReveal = {
     handId: null,
     visibleUntilMs: 0,
@@ -515,6 +520,15 @@
     return Number.isSafeInteger(buyIn) && buyIn > 0 ? buyIn : null;
   }
 
+  function normalizeRebuySource(source){
+    return source === 'auto' ? 'auto' : 'manual';
+  }
+
+  function normalizeAuthoritativeBuyIn(value){
+    var buyIn = Number(value);
+    return Number.isSafeInteger(buyIn) && buyIn > 0 ? buyIn : null;
+  }
+
   function clientBuyInDeclaration(){
     return currentTableBuyIn() || LEGACY_WS_BUY_IN;
   }
@@ -528,9 +542,99 @@
     }
     if (els.autoRebuyPreferenceHint){
       els.autoRebuyPreferenceHint.textContent = buyIn == null
-        ? 'Automatically uses the current table buy-in from your account each time you run out of chips.'
+        ? 'Auto rebuy becomes available once this table reports its authoritative buy-in.'
         : 'Automatically uses ' + formatNumber(buyIn) + ' CH from your account each time you run out of chips.';
     }
+  }
+
+  function renderAutoRebuyFeedback(){
+    if (!els.autoRebuyBalanceToast) return;
+    var visible = autoRebuyFeedbackState.visible === true && normalizeAuthoritativeBuyIn(autoRebuyFeedbackState.buyIn) != null;
+    els.autoRebuyBalanceToast.hidden = !visible;
+    els.autoRebuyBalanceToast.textContent = visible
+      ? ('-' + formatNumber(autoRebuyFeedbackState.buyIn) + ' CH')
+      : '';
+  }
+
+  function clearAutoRebuyFeedbackTimer(){
+    if (!autoRebuyFeedbackTimer) return;
+    window.clearTimeout(autoRebuyFeedbackTimer);
+    autoRebuyFeedbackTimer = null;
+  }
+
+  function hideAutoRebuyFeedback(){
+    clearAutoRebuyFeedbackTimer();
+    autoRebuyFeedbackState.visible = false;
+    autoRebuyFeedbackState.buyIn = null;
+    renderAutoRebuyFeedback();
+    renderSeats();
+  }
+
+  function showAutoRebuyFeedback(buyIn){
+    var authoritativeBuyIn = normalizeAuthoritativeBuyIn(buyIn);
+    if (authoritativeBuyIn == null) return false;
+    clearAutoRebuyFeedbackTimer();
+    autoRebuyFeedbackState.visible = true;
+    autoRebuyFeedbackState.buyIn = authoritativeBuyIn;
+    renderAutoRebuyFeedback();
+    renderSeats();
+    autoRebuyFeedbackTimer = window.setTimeout(function(){
+      autoRebuyFeedbackTimer = null;
+      autoRebuyFeedbackState.visible = false;
+      autoRebuyFeedbackState.buyIn = null;
+      renderAutoRebuyFeedback();
+      renderSeats();
+    }, AUTO_REBUY_FEEDBACK_MS);
+    return true;
+  }
+
+  function renderAutoRebuyConfirmationCopy(buyIn){
+    if (!els.autoRebuyConfirmCopy) return;
+    els.autoRebuyConfirmCopy.textContent = 'Auto rebuy will use ' + formatNumber(buyIn)
+      + ' CH from your account each time you run out of chips. You can disable it later.';
+  }
+
+  function closeAutoRebuyConfirm(restoreFocus){
+    var wasOpen = autoRebuyConfirmOpen;
+    autoRebuyConfirmOpen = false;
+    pendingAutoRebuyConfirmationBuyIn = null;
+    if (els.autoRebuyConfirmModal) els.autoRebuyConfirmModal.hidden = true;
+    if (els.autoRebuyPreference) els.autoRebuyPreference.checked = false;
+    if (restoreFocus && wasOpen && els.autoRebuyPreference && typeof els.autoRebuyPreference.focus === 'function') {
+      els.autoRebuyPreference.focus();
+    }
+  }
+
+  function openAutoRebuyConfirm(buyIn){
+    var authoritativeBuyIn = normalizeAuthoritativeBuyIn(buyIn);
+    if (authoritativeBuyIn == null || !els.autoRebuyConfirmModal) return false;
+    autoRebuyConfirmOpen = true;
+    pendingAutoRebuyConfirmationBuyIn = authoritativeBuyIn;
+    renderAutoRebuyConfirmationCopy(authoritativeBuyIn);
+    els.autoRebuyConfirmModal.hidden = false;
+    if (els.autoRebuyConfirmYes && typeof els.autoRebuyConfirmYes.focus === 'function') els.autoRebuyConfirmYes.focus();
+    return true;
+  }
+
+  function confirmAutoRebuy(){
+    if (!autoRebuyConfirmOpen) return;
+    var authoritativeBuyIn = currentTableBuyIn();
+    if (authoritativeBuyIn == null){
+      closeAutoRebuyConfirm(true);
+      renderSocialPreferences();
+      return;
+    }
+    if (authoritativeBuyIn !== pendingAutoRebuyConfirmationBuyIn){
+      pendingAutoRebuyConfirmationBuyIn = authoritativeBuyIn;
+      renderAutoRebuyConfirmationCopy(authoritativeBuyIn);
+      return;
+    }
+    writeAutoRebuyPref(true);
+    closeAutoRebuyConfirm(false);
+    klog('poker_auto_rebuy_pref_changed', { enabled: true });
+    renderSocialPreferences();
+    render();
+    maybeTriggerAutoRebuy();
   }
 
   function syncSocialPreferencesIdentity(userId){
@@ -1849,7 +1953,8 @@
           tableId: rebuyOperation.tableId,
           userId: rebuyOperation.userId,
           payload: rebuyOperation.payload,
-          phase: rebuyOperation.phase
+          phase: rebuyOperation.phase,
+          source: normalizeRebuySource(rebuyOperation.source)
         }));
       }
     } catch (_err){}
@@ -1883,7 +1988,8 @@
         requestId: parsed.requestId,
         tableId: parsed.tableId,
         userId: parsed.userId,
-        payload: parsed.payload
+        payload: parsed.payload,
+        source: normalizeRebuySource(parsed.source)
       };
     } catch (_err){
       return null;
@@ -1907,6 +2013,7 @@
       clearRebuyOperation();
       rebuyPanelDismissed = true;
       state.statusText = 'Buy-in accepted';
+      if (operation.source === 'auto') showAutoRebuyFeedback(result && result.buyIn);
       render();
       return result;
     }).catch(function(error){
@@ -1950,8 +2057,10 @@
     var funded = Number.isFinite(stack) && stack > 0 && state.playerState.canRebuy !== true
       && (status === 'WAITING_NEXT_HAND' || status === 'ACTIVE');
     if (funded){
+      var recoveredSource = normalizeRebuySource(rebuyOperation.source);
       clearRebuyOperation();
       rebuyPanelDismissed = true;
+      if (recoveredSource === 'auto') showAutoRebuyFeedback(currentTableBuyIn());
       return true;
     }
     if (rebuyOperation.phase === 'pending' && rebuyOperation.resumeAttempted !== true
@@ -3358,6 +3467,7 @@
       var article = document.createElement('article');
       var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
       var hero = isCurrentUserSeat(seat);
+      var showAutoRebuyIndicator = hero && !isGuestMode && isSignedIn() && isAutoRebuyEnabled();
       var lastAction = getSeatLastBettingRoundAction(seat);
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
       var waitingNextHand = !!(seat && String(seat.status || '').toUpperCase() === 'WAITING_NEXT_HAND');
@@ -3387,6 +3497,24 @@
       renderSeatAvatar(avatar, seat);
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
       if (active) updateSeatTurnClock(avatar, getTurnClockState());
+
+      var autoRebuyIndicator = null;
+      if (showAutoRebuyIndicator){
+        autoRebuyIndicator = document.createElement('span');
+        autoRebuyIndicator.className = 'poker-auto-rebuy-indicator';
+        autoRebuyIndicator.textContent = '↻';
+        autoRebuyIndicator.setAttribute('aria-label', 'Auto rebuy enabled');
+        autoRebuyIndicator.setAttribute('title', 'Auto rebuy enabled');
+      }
+
+      var autoRebuyAvatarToast = null;
+      if (hero && !isGuestMode && isSignedIn() && autoRebuyFeedbackState.visible === true){
+        autoRebuyAvatarToast = document.createElement('div');
+        autoRebuyAvatarToast.className = 'poker-auto-rebuy-toast poker-auto-rebuy-toast--avatar';
+        autoRebuyAvatarToast.setAttribute('role', 'status');
+        autoRebuyAvatarToast.setAttribute('aria-live', 'polite');
+        autoRebuyAvatarToast.textContent = 'Auto rebuy: +' + formatNumber(autoRebuyFeedbackState.buyIn) + ' CH';
+      }
 
       var seatNumber = null;
       if (seat && Number.isInteger(seat.seatNo)){
@@ -3423,6 +3551,8 @@
       status.style.top = statusPosition.top;
 
       article.appendChild(avatar);
+      if (autoRebuyIndicator) article.appendChild(autoRebuyIndicator);
+      if (autoRebuyAvatarToast) article.appendChild(autoRebuyAvatarToast);
       if (seatNumber) article.appendChild(seatNumber);
       if (seat && lastAction){
         var actionBadge = document.createElement('div');
@@ -4070,6 +4200,10 @@
     if (els.startBtn) els.startBtn.disabled = !liveReady;
     if (els.leaveBtn) els.leaveBtn.disabled = !liveReady;
     if ((!signedIn || !seated) && leaveConfirmOpen) closeLeaveConfirm();
+    if ((!signedIn || isGuestMode) && autoRebuyConfirmOpen){
+      closeAutoRebuyConfirm(false);
+      renderSocialPreferences();
+    }
     if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
 
     if (els.foldBtn){
@@ -4212,6 +4346,7 @@
     if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
     renderCommunityCards();
     renderSeats();
+    renderAutoRebuyFeedback();
     renderHeroCards();
     positionHeroCards();
     renderSeatChips();
@@ -4548,6 +4683,54 @@
     if (restoreFocus && wasOpen && els.socialSettingsToggle && typeof els.socialSettingsToggle.focus === 'function') els.socialSettingsToggle.focus();
   }
 
+  function getSocialSettingsViewport(){
+    var width = Number(window.innerWidth);
+    var height = Number(window.innerHeight);
+    if (!(width > 0) && document.documentElement) width = Number(document.documentElement.clientWidth);
+    if (!(height > 0) && document.documentElement) height = Number(document.documentElement.clientHeight);
+    if (!(width > 0) && els.screen && typeof els.screen.getBoundingClientRect === 'function') width = Number(els.screen.getBoundingClientRect().width);
+    if (!(height > 0) && els.screen && typeof els.screen.getBoundingClientRect === 'function') height = Number(els.screen.getBoundingClientRect().height);
+    return { width: width > 0 ? width : 0, height: height > 0 ? height : 0 };
+  }
+
+  function positionSocialSettingsPanel(){
+    if (!els.socialSettingsPanel || els.socialSettingsPanel.hidden || !els.socialSettingsToggle
+      || typeof els.socialSettingsToggle.getBoundingClientRect !== 'function'
+      || typeof els.socialSettingsPanel.getBoundingClientRect !== 'function') return;
+    var viewport = getSocialSettingsViewport();
+    if (!(viewport.width > 0) || !(viewport.height > 0)) return;
+    var toggleRect = els.socialSettingsToggle.getBoundingClientRect();
+    var panelRect = els.socialSettingsPanel.getBoundingClientRect();
+    var edge = 8;
+    var gap = 8;
+    var panelWidth = Number(panelRect.width) > 0 ? Number(panelRect.width) : 260;
+    var panelHeight = Number(panelRect.height) > 0 ? Number(panelRect.height) : 0;
+    var availableAbove = Math.max(0, Number(toggleRect.top) - edge - gap);
+    var availableBelow = Math.max(0, viewport.height - Number(toggleRect.bottom) - edge - gap);
+    var placeAbove = availableAbove >= availableBelow;
+    var availablePreferred = placeAbove ? availableAbove : availableBelow;
+    if (panelHeight > availablePreferred && availablePreferred > 0){
+      els.socialSettingsPanel.style.maxHeight = 'min(' + Math.floor(availablePreferred) + 'px, calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px))';
+      panelRect = els.socialSettingsPanel.getBoundingClientRect();
+      panelHeight = Number(panelRect.height) > 0 ? Number(panelRect.height) : 0;
+    } else {
+      els.socialSettingsPanel.style.removeProperty('max-height');
+    }
+    var top = placeAbove ? Number(toggleRect.top) - panelHeight - gap : Number(toggleRect.bottom) + gap;
+    if (top < edge) top = edge;
+    var maxTop = viewport.height - panelHeight - edge;
+    if (maxTop < edge) maxTop = edge;
+    top = Math.max(edge, Math.min(top, maxTop));
+
+    var right = viewport.width - Number(toggleRect.right);
+    var maxRight = viewport.width - panelWidth - edge;
+    if (maxRight < edge) maxRight = edge;
+    right = Math.max(edge, Math.min(right, maxRight));
+    els.socialSettingsPanel.style.top = 'max(' + Math.round(top) + 'px, calc(env(safe-area-inset-top) + ' + edge + 'px))';
+    els.socialSettingsPanel.style.right = 'max(' + Math.round(right) + 'px, calc(env(safe-area-inset-right) + ' + edge + 'px))';
+    els.socialSettingsPanel.style.left = 'auto';
+  }
+
   function updateSocialPreference(key, enabled){
     socialPreferences[key] = enabled === true;
     if (key === 'reactionBubblesEnabled' && !socialPreferences.reactionBubblesEnabled) clearReactionArtifacts();
@@ -4604,10 +4787,13 @@
     });
   }
 
-  function requestManualRebuy(){
+  function requestManualRebuy(source){
+    var requestedSource = normalizeRebuySource(source);
     if (!state.playerState || state.playerState.canRebuy !== true) return Promise.resolve();
+    if (requestedSource === 'auto' && currentTableBuyIn() == null) return Promise.resolve();
     if (rebuyOperation && rebuyOperation.phase === 'pending') return Promise.resolve({ ok: true, pending: true });
     if (rebuyOperation && rebuyOperation.phase === 'error'){
+      rebuyOperation.source = requestedSource;
       rebuyOperation.phase = 'pending';
       rebuyOperation.resumeAttempted = true;
       persistPendingRebuy();
@@ -4622,9 +4808,12 @@
       requestId: requestId,
       tableId: state.tableId,
       userId: state.currentUserId,
+      source: requestedSource,
       payload: { tableId: state.tableId }
     };
-    rebuyOperation.payload.amount = clientBuyInDeclaration();
+    rebuyOperation.payload.amount = requestedSource === 'auto'
+      ? currentTableBuyIn()
+      : clientBuyInDeclaration();
     persistPendingRebuy();
     setError('');
     renderRebuyPanel();
@@ -4633,8 +4822,10 @@
 
   function maybeTriggerAutoRebuy(){
     var playerState = state.playerState || null;
+    if (!rebuyOperation) rebuyOperation = loadPendingRebuy();
     if (!isAutoRebuyEnabled()) return;
     if (!playerState || playerState.status !== 'OUT_OF_CHIPS' || playerState.canRebuy !== true) return;
+    if (currentTableBuyIn() == null) return;
     if (autoRebuyAttemptedForCurrentBust) return;
     if (rebuyOperation && (rebuyOperation.phase === 'pending' || rebuyOperation.phase === 'error')) return;
     autoRebuyAttemptedForCurrentBust = true;
@@ -4642,7 +4833,7 @@
     // synchronously. A definitive failure (e.g. insufficient_chips) later
     // re-opens the panel for manual recovery.
     rebuyPanelDismissed = true;
-    requestManualRebuy();
+    requestManualRebuy('auto');
   }
 
   function bindMenu(){
@@ -4664,8 +4855,12 @@
       closeMenu();
       if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = !opening;
       els.socialSettingsToggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      if (opening) positionSocialSettingsPanel();
     });
     if (els.socialSettingsClose) els.socialSettingsClose.addEventListener('click', closeSocialSettings);
+    if (window && typeof window.addEventListener === 'function') window.addEventListener('resize', function(){
+      if (els.socialSettingsPanel && !els.socialSettingsPanel.hidden) positionSocialSettingsPanel();
+    });
     document.addEventListener('click', function(event){
       var target = event && event.target;
       if (!target) return;
@@ -4678,6 +4873,10 @@
       if (event && event.key === 'Escape') {
         closeMenu();
         closeSocialSettings(true);
+        if (autoRebuyConfirmOpen){
+          closeAutoRebuyConfirm(true);
+          renderSocialPreferences();
+        }
       }
     });
   }
@@ -4731,6 +4930,11 @@
     });
     if (els.leaveConfirmCancel) els.leaveConfirmCancel.addEventListener('click', function(){
       closeLeaveConfirm();
+    });
+    if (els.autoRebuyConfirmYes) els.autoRebuyConfirmYes.addEventListener('click', confirmAutoRebuy);
+    if (els.autoRebuyConfirmCancel) els.autoRebuyConfirmCancel.addEventListener('click', function(){
+      closeAutoRebuyConfirm(true);
+      renderSocialPreferences();
     });
     if (els.rebuyBtn) els.rebuyBtn.addEventListener('click', requestManualRebuy);
     if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', leaveAndReturnToLobby);
@@ -4788,9 +4992,22 @@
     if (els.reactionHistoryPreference) els.reactionHistoryPreference.addEventListener('change', function(){ updateSocialPreference('reactionHistoryEnabled', els.reactionHistoryPreference.checked); });
     if (els.botReactionsPreference) els.botReactionsPreference.addEventListener('change', function(){ updateSocialPreference('botReactionsEnabled', els.botReactionsPreference.checked); });
     if (els.autoRebuyPreference) els.autoRebuyPreference.addEventListener('change', function(){
-      writeAutoRebuyPref(els.autoRebuyPreference.checked);
-      klog('poker_auto_rebuy_pref_changed', { enabled: els.autoRebuyPreference.checked === true });
-      if (els.autoRebuyPreference.checked) maybeTriggerAutoRebuy();
+      if (els.autoRebuyPreference.checked){
+        els.autoRebuyPreference.checked = false;
+        var buyIn = currentTableBuyIn();
+        if (buyIn == null){
+          renderSocialPreferences();
+          return;
+        }
+        openAutoRebuyConfirm(buyIn);
+        renderSocialPreferences();
+        return;
+      }
+      closeAutoRebuyConfirm(false);
+      writeAutoRebuyPref(false);
+      klog('poker_auto_rebuy_pref_changed', { enabled: false });
+      renderSocialPreferences();
+      render();
     });
     document.addEventListener('click', function(event){
       var target = event && event.target;
@@ -4814,6 +5031,7 @@
     if (typeof document.querySelector === 'function') els.centerLayer = document.querySelector('.poker-center-layer');
     if (!els.scene) els.scene = els.screen;
     els.xpBadge = document.getElementById('xpBadge');
+    els.autoRebuyBalanceToast = document.getElementById('pokerV2AutoRebuyBalanceToast');
     els.bootSplash = document.getElementById('pokerBootSplash');
     els.menuToggle = document.getElementById('pokerMenuToggle');
     els.menuPanel = document.getElementById('pokerMenuPanel');
@@ -4861,6 +5079,10 @@
     els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
     els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
     els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
+    els.autoRebuyConfirmModal = document.getElementById('pokerV2AutoRebuyConfirmModal');
+    els.autoRebuyConfirmCopy = document.getElementById('pokerV2AutoRebuyConfirmCopy');
+    els.autoRebuyConfirmYes = document.getElementById('pokerV2AutoRebuyConfirmYes');
+    els.autoRebuyConfirmCancel = document.getElementById('pokerV2AutoRebuyConfirmCancel');
     els.rebuyPanel = document.getElementById('pokerV2RebuyPanel');
     els.rebuyTitle = document.getElementById('pokerV2RebuyTitle');
     els.rebuyCopy = document.getElementById('pokerV2RebuyCopy');
@@ -4973,6 +5195,7 @@
   function applySignedOutState(){
     syncSocialPreferencesIdentity(null);
     clearRebuyOperation();
+    hideAutoRebuyFeedback();
     clearReactionHistory();
     stopLiveMode();
     resetQueuedPreactionState();
@@ -5326,6 +5549,7 @@
     shouldAutoJoin = readAutoJoinParam();
     bindMenu();
     bindControls();
+    renderSocialPreferences();
     document.addEventListener('langchange', function(){ buildReactionMenu(); render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
     if (!tableId){

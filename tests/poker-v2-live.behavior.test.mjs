@@ -112,12 +112,15 @@ function createHarness(options = {}){
   const elements = {};
   [
     'xpBadge',
+    'pokerV2AutoRebuyBalanceToast',
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink', 'pokerSocialSettingsToggle', 'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
     'pokerReactionBubblesPreference', 'pokerReactionHistoryPreference', 'pokerBotReactionsPreference',
+    'pokerAutoRebuyPreference', 'pokerAutoRebuyPreferenceWrap', 'pokerAutoRebuyPreferenceHint',
     'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
+    'pokerV2AutoRebuyConfirmModal', 'pokerV2AutoRebuyConfirmTitle', 'pokerV2AutoRebuyConfirmCopy', 'pokerV2AutoRebuyConfirmYes', 'pokerV2AutoRebuyConfirmCancel',
     'pokerV2ReactionControl', 'pokerV2ReactionBtn', 'pokerV2ReactionMenu', 'pokerV2ReactionHint',
     'pokerReactionHistory', 'pokerReactionHistoryToggle', 'pokerReactionHistoryCount', 'pokerReactionHistoryPanel', 'pokerReactionHistoryList',
     'pokerV2RebuyPanel', 'pokerV2RebuyTitle', 'pokerV2RebuyCopy', 'pokerV2RebuyBalance', 'pokerV2RebuyBtn', 'pokerV2RebuyLobbyBtn', 'pokerV2RebuyWatchBtn', 'pokerV2RebuyAccountLink',
@@ -142,13 +145,16 @@ function createHarness(options = {}){
   elements.pokerV2AmountPreaction.type = 'checkbox';
   elements.pokerV2AllInPreaction.type = 'checkbox';
   elements.pokerV2LeaveConfirmModal.hidden = true;
+  elements.pokerV2AutoRebuyConfirmModal.hidden = true;
   elements.pokerV2ClosedTableModal.hidden = true;
   elements.pokerV2RebuyPanel.hidden = true;
+  elements.pokerV2AutoRebuyBalanceToast.hidden = true;
   elements.pokerMenuPanel.setAttribute('hidden', 'hidden');
   elements.pokerSocialSettingsPanel.hidden = true;
   elements.pokerReactionBubblesPreference.type = 'checkbox';
   elements.pokerReactionHistoryPreference.type = 'checkbox';
   elements.pokerBotReactionsPreference.type = 'checkbox';
+  elements.pokerAutoRebuyPreference.type = 'checkbox';
 
   const documentEvents = {};
   const logs = [];
@@ -249,6 +255,8 @@ function createHarness(options = {}){
   FakeDate.UTC = Date.UTC;
   const sandbox = {
     window: {
+      innerWidth: 320,
+      innerHeight: 640,
       location: {
         search: typeof options.search === 'string' ? options.search : '?tableId=table-1',
         href: ''
@@ -2427,7 +2435,8 @@ test('poker v2 resumes a stored rebuy only after a full snapshot and never creat
   });
 
   const fundedHarness = createHarness({
-    sessionStorageEntries: { 'poker:pendingRebuy:user-1:table-1': stored }
+    sessionStorageEntries: { 'poker:pendingRebuy:user-1:table-1': stored },
+    localStorageEntries: new Map([['kcswh:poker-auto-rebuy:v1:user-1', JSON.stringify({ enabled: true })]])
   });
   fundedHarness.fireDomContentLoaded();
   await fundedHarness.flush();
@@ -2438,6 +2447,7 @@ test('poker v2 resumes a stored rebuy only after a full snapshot and never creat
   await fundedHarness.flush();
   assert.equal(fundedHarness.rebuyRequestIds.length, 0);
   assert.equal(fundedHarness.getSessionStorage('poker:pendingRebuy:user-1:table-1'), null);
+  assert.equal(fundedHarness.elements.pokerV2AutoRebuyBalanceToast.hidden, true, 'legacy pending records without source stay manual');
 
   const pendingHarness = createHarness({
     sessionStorageEntries: { 'poker:pendingRebuy:user-1:table-1': stored }
@@ -2475,6 +2485,223 @@ function autoRebuySnapshot(playerState){
     }
   };
 }
+
+test('poker v2 confirms the authoritative buy-in before enabling auto-rebuy and updates the hero indicator', async () => {
+  const storage = new Map();
+  const harness = createHarness({ localStorageEntries: storage });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'ACTIVE', stack: 500, canRebuy: false }));
+  await harness.flush();
+
+  const preferenceKey = 'kcswh:poker-auto-rebuy:v1:user-1';
+  harness.elements.pokerAutoRebuyPreference.click();
+  assert.equal(harness.elements.pokerV2AutoRebuyConfirmModal.hidden, false);
+  assert.equal(harness.elements.pokerV2AutoRebuyConfirmCopy.textContent,
+    'Auto rebuy will use 500 CH from your account each time you run out of chips. You can disable it later.');
+  assert.equal(harness.elements.pokerAutoRebuyPreference.checked, false);
+  assert.equal(harness.getLocalStorage(preferenceKey), null);
+
+  harness.elements.pokerV2AutoRebuyConfirmCancel.click();
+  assert.equal(harness.elements.pokerV2AutoRebuyConfirmModal.hidden, true);
+  assert.equal(harness.elements.pokerAutoRebuyPreference.checked, false);
+  assert.equal(harness.getLocalStorage(preferenceKey), null);
+
+  harness.elements.pokerAutoRebuyPreference.click();
+  harness.elements.pokerV2AutoRebuyConfirmYes.click();
+  await harness.flush();
+  assert.equal(JSON.parse(harness.getLocalStorage(preferenceKey)).enabled, true);
+  assert.equal(harness.elements.pokerAutoRebuyPreference.checked, true);
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.ok(findChildByClass(heroSeat, 'poker-auto-rebuy-indicator'));
+
+  harness.elements.pokerAutoRebuyPreference.click();
+  await harness.flush();
+  assert.equal(JSON.parse(harness.getLocalStorage(preferenceKey)).enabled, false);
+  const disabledHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.equal(findChildByClass(disabledHeroSeat, 'poker-auto-rebuy-indicator'), undefined);
+});
+
+test('poker v2 never renders the auto-rebuy indicator for a guest hero', async () => {
+  const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
+  const harness = createHarness({
+    token: null,
+    search: '?tableId=table-1&guest=1',
+    guestSession: { token: `aaa.${guestPayload}.zzz`, tableId: 'table-1', expiresAt: Date.now() + 60_000 },
+    localStorageEntries: new Map([['kcswh:poker-auto-rebuy:v1:guest_user_1', JSON.stringify({ enabled: true })]])
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  const snapshot = autoRebuySnapshot({ status: 'ACTIVE', stack: 500, canRebuy: false });
+  snapshot.payload.table.members[0].userId = 'guest_user_1';
+  snapshot.payload.public.seats[0].userId = 'guest_user_1';
+  snapshot.payload.private.userId = 'guest_user_1';
+  ws.onSnapshot(snapshot);
+  await harness.flush();
+
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-indicator'), undefined);
+  assert.equal(harness.elements.pokerAutoRebuyPreferenceWrap.hidden, true);
+});
+
+test('poker v2 shows synchronized auto-rebuy feedback only after authoritative success', async () => {
+  let resolveRebuy = null;
+  const harness = createHarness({
+    localStorageEntries: new Map([['kcswh:poker-auto-rebuy:v1:user-1', JSON.stringify({ enabled: true })]]),
+    sendRebuy(){
+      return new Promise((resolve) => { resolveRebuy = resolve; });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+
+  assert.equal(harness.rebuyPayloads.length, 1);
+  assert.equal(JSON.parse(harness.getSessionStorage('poker:pendingRebuy:user-1:table-1')).source, 'auto');
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
+  const pendingHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.equal(findChildByClass(pendingHeroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+
+  resolveRebuy({ ok: true, buyIn: 500 });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, false);
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.textContent, '-500 CH');
+  const successHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.equal(findChildByClass(successHeroSeat, 'poker-auto-rebuy-toast--avatar').textContent, 'Auto rebuy: +500 CH');
+
+  harness.advanceTime(2_999);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, false);
+  harness.advanceTime(1);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
+  const expiredHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.equal(findChildByClass(expiredHeroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+});
+
+test('poker v2 keeps manual rebuy free of auto-rebuy feedback', async () => {
+  let resolveRebuy = null;
+  const harness = createHarness({
+    sendRebuy(){
+      return new Promise((resolve) => { resolveRebuy = resolve; });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+  harness.elements.pokerV2RebuyBtn.click();
+  await harness.flush();
+  assert.equal(JSON.parse(harness.getSessionStorage('poker:pendingRebuy:user-1:table-1')).source, 'manual');
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
+  resolveRebuy({ ok: true, buyIn: 500 });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+});
+
+test('poker v2 classifies a manual retry of recovered auto-rebuy as manual', async () => {
+  let resolveRebuy = null;
+  const stored = JSON.stringify({
+    phase: 'error',
+    requestId: 'rebuy_auto_retry_1',
+    tableId: 'table-1',
+    userId: 'user-1',
+    source: 'auto',
+    payload: { tableId: 'table-1', amount: 500 }
+  });
+  const harness = createHarness({
+    localStorageEntries: new Map([['kcswh:poker-auto-rebuy:v1:user-1', JSON.stringify({ enabled: true })]]),
+    sessionStorageEntries: { 'poker:pendingRebuy:user-1:table-1': stored },
+    sendRebuy(){
+      return new Promise((resolve) => { resolveRebuy = resolve; });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+
+  assert.equal(harness.rebuyRequestIds.length, 0);
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
+  harness.elements.pokerV2RebuyBtn.click();
+  await harness.flush();
+
+  assert.deepEqual(harness.rebuyRequestIds, ['rebuy_auto_retry_1']);
+  assert.equal(JSON.parse(harness.getSessionStorage('poker:pendingRebuy:user-1:table-1')).source, 'manual');
+  resolveRebuy({ ok: true, buyIn: 500 });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+});
+
+test('poker v2 recovers an auto-rebuy success from a funded snapshot exactly once', async () => {
+  const stored = JSON.stringify({
+    phase: 'pending',
+    requestId: 'rebuy_auto_recovered_1',
+    tableId: 'table-1',
+    userId: 'user-1',
+    source: 'auto',
+    payload: { tableId: 'table-1', amount: 100 }
+  });
+  const harness = createHarness({
+    localStorageEntries: new Map([['kcswh:poker-auto-rebuy:v1:user-1', JSON.stringify({ enabled: true })]]),
+    sessionStorageEntries: { 'poker:pendingRebuy:user-1:table-1': stored }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  const funded = autoRebuySnapshot({ status: 'WAITING_NEXT_HAND', stack: 500, canRebuy: false });
+  ws.onSnapshot(funded);
+  await harness.flush();
+
+  assert.equal(harness.rebuyRequestIds.length, 0);
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.textContent, '-500 CH');
+  assert.equal(harness.getSessionStorage('poker:pendingRebuy:user-1:table-1'), null);
+  harness.advanceTime(2_999);
+  ws.onSnapshot(funded);
+  await harness.flush();
+  harness.advanceTime(1);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true, 'repeated funded snapshots must not reset the shared feedback timer');
+});
+
+test('poker v2 fails closed when enabling auto-rebuy without an authoritative buy-in', async () => {
+  const storage = new Map();
+  const harness = createHarness({ localStorageEntries: storage });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  const snapshot = autoRebuySnapshot({ status: 'ACTIVE', stack: 500, canRebuy: false });
+  delete snapshot.payload.table.buyIn;
+  ws.onSnapshot(snapshot);
+  await harness.flush();
+
+  harness.elements.pokerAutoRebuyPreference.click();
+  assert.equal(harness.elements.pokerV2AutoRebuyConfirmModal.hidden, true);
+  assert.equal(harness.elements.pokerAutoRebuyPreference.checked, false);
+  assert.equal(harness.getLocalStorage('kcswh:poker-auto-rebuy:v1:user-1'), null);
+  assert.equal(harness.rebuyPayloads.length, 0);
+});
 
 test('poker v2 auto-rebuy fires exactly one existing rebuy request when enabled and out of chips', async () => {
   const harness = createHarness({
