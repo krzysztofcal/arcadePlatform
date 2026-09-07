@@ -9,13 +9,8 @@ const RETAINED_MODES = [
   "existing-30d-recovery-repair",
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-automatic",
-  "closed-human-30d-prepare",
-  "closed-human-30d-canary",
   "closed-human-30d-recovery-diagnostic",
-  "closed-human-policy-diagnostic",
   "closed-human-30d-recovery-repair",
-  "closed-human-30d-lifecycle-completion",
-  "closed-human-30d-activation",
   "escrow-retention-audit",
   "escrow-retention-verify",
   "external-scheduled-automatic",
@@ -33,6 +28,11 @@ const RETIRED_MODES = [
   "escrow-retention-authorize-canary",
   "escrow-retention-execute",
   "escrow-retention-activate",
+  "closed-human-30d-prepare",
+  "closed-human-30d-canary",
+  "closed-human-policy-diagnostic",
+  "closed-human-30d-lifecycle-completion",
+  "closed-human-30d-activation",
 ];
 
 const RETIRED_INPUTS = [
@@ -41,6 +41,13 @@ const RETIRED_INPUTS = [
   "escrow_retention_batch_id",
   "escrow_retention_account_ids_sha256",
   "escrow_retention_confirmation",
+  "closed_human_canary_batch_id",
+  "closed_human_canary_confirmation",
+  "closed_human_lifecycle_batch_id",
+  "closed_human_lifecycle_table_id",
+  "closed_human_lifecycle_cutoff",
+  "closed_human_activation_batch_id",
+  "closed_human_activation_confirmation",
 ];
 
 const RETAINED_STEPS = [
@@ -48,18 +55,21 @@ const RETAINED_STEPS = [
   "Diagnose existing 30-day durable recovery",
   "Repair exact existing 30-day durable recovery",
   "Run bot-only 7-day summary diagnostic",
-  "Prepare closed human-table 30-day Stage retention",
-  "Execute exact closed human-table 30-day Stage canary",
   "Diagnose closed human-table 30-day durable recovery",
-  "Diagnose closed-human retention policy",
   "Repair exact closed human-table 30-day durable recovery",
-  "Complete exact closed-human table lifecycle",
-  "Activate closed-human 30-day Stage automatic retention",
   "Run activated bot-only 7-day Stage automation",
   "Run activated closed-human 30-day Stage automation",
   "Run Stage escrow account retention",
   "Audit Stage escrow account retention",
   "Verify Stage escrow account-retention recovery",
+];
+
+const RETIRED_STEPS = [
+  "Prepare closed human-table 30-day Stage retention",
+  "Execute exact closed human-table 30-day Stage canary",
+  "Diagnose closed-human retention policy",
+  "Complete exact closed-human table lifecycle",
+  "Activate closed-human 30-day Stage automatic retention",
 ];
 
 const modeOptionsBlock = workflow.slice(workflow.indexOf("type: choice"), workflow.indexOf("schedule:"));
@@ -81,13 +91,6 @@ for (const retired of RETIRED_MODES) {
 assert.deepEqual([...inputNames].sort(), [
   "escrow_retention_recovery_confirmation",
   "escrow_retention_recovery_object_path",
-  "closed_human_canary_batch_id",
-  "closed_human_canary_confirmation",
-  "closed_human_lifecycle_batch_id",
-  "closed_human_lifecycle_table_id",
-  "closed_human_lifecycle_cutoff",
-  "closed_human_activation_batch_id",
-  "closed_human_activation_confirmation",
   "mode",
   "stage_30d_recovery_batch_id",
 ].sort(), "exact retained dispatch inputs");
@@ -99,6 +102,14 @@ for (const retired of RETIRED_INPUTS) {
 
 for (const step of RETAINED_STEPS) {
   assert.equal(stepNames.includes(step), true, `retained step must exist: ${step}`);
+}
+
+for (const step of RETIRED_STEPS) {
+  assert.equal(stepNames.includes(step), false, `retired step must be absent: ${step}`);
+}
+
+for (const retired of RETIRED_MODES) {
+  assert.doesNotMatch(workflow, new RegExp(`inputs\\.mode\\s*(?:==|!=)\\s*'${retired}'`));
 }
 
 assert.doesNotMatch(workflow, /Repair exact bot-only 7-day recovery for batch 15/);
@@ -146,13 +157,8 @@ for (const mode of [
   "existing-30d-recovery-repair",
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-automatic",
-  "closed-human-30d-prepare",
-  "closed-human-30d-canary",
   "closed-human-30d-recovery-diagnostic",
-  "closed-human-policy-diagnostic",
   "closed-human-30d-recovery-repair",
-  "closed-human-30d-lifecycle-completion",
-  "closed-human-30d-activation",
   "escrow-retention-audit",
   "escrow-retention-verify",
 ]) {
@@ -169,15 +175,7 @@ assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
-assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-canary'/);
-assert.match(stageJobIf, /inputs\.mode != 'closed-human-policy-diagnostic'/);
-assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-lifecycle-completion'/);
-assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-activation'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
-assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-canary'/);
-assert.match(stageJobIf, /inputs\.mode == 'closed-human-policy-diagnostic'/);
-assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-lifecycle-completion'/);
-assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-activation'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
@@ -249,23 +247,6 @@ assert.match(closedHumanDiagnosticRun, /--diagnose-recovery/);
 assert.match(closedHumanDiagnosticRun, /stage_30d_recovery_batch_id/);
 assert.doesNotMatch(closedHumanDiagnosticRun, /--repair-recovery|--execute|--automatic/);
 
-const closedHumanPolicyDiagnosticRun = workflow.match(
-  /- name: Diagnose closed-human retention policy[\s\S]*?(?=\n\s+- name:|\s*$)/,
-)[0];
-assert.match(closedHumanPolicyDiagnosticRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'closed-human-policy-diagnostic'/);
-assert.match(closedHumanPolicyDiagnosticRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
-assert.match(closedHumanPolicyDiagnosticRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
-assert.match(closedHumanPolicyDiagnosticRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
-assert.match(closedHumanPolicyDiagnosticRun, /test "\$GITHUB_REPOSITORY_OWNER" = "krzysztofcal"/);
-assert.match(closedHumanPolicyDiagnosticRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
-assert.match(closedHumanPolicyDiagnosticRun, /CHIPS_LEDGER_BOT_ONLY_EXECUTE/);
-assert.match(closedHumanPolicyDiagnosticRun, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC/);
-assert.match(closedHumanPolicyDiagnosticRun, /CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE/);
-assert.match(closedHumanPolicyDiagnosticRun, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC/);
-assert.match(closedHumanPolicyDiagnosticRun, /--policy stage-ledger-closed-human-table-retention-30d-v1/);
-assert.match(closedHumanPolicyDiagnosticRun, /--diagnose-policy/);
-assert.doesNotMatch(closedHumanPolicyDiagnosticRun, /github\.event_name == 'schedule'|--prepare-only|--execute|--automatic|--repair-recovery|--diagnose-recovery|UPDATE|INSERT|DELETE|prune/i);
-
 const closedHumanRepairRun = workflow.match(
   /- name: Repair exact closed human-table 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
@@ -276,35 +257,6 @@ assert.match(closedHumanRepairRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_AUTOMATIC
 assert.match(closedHumanRepairRun, /GITHUB_ACTOR" != "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(closedHumanRepairRun, /--policy stage-ledger-closed-human-table-retention-30d-v1 \\\n\s+--repair-recovery \\\n\s+--batch-id "\$STAGE_30D_RECOVERY_BATCH_ID"/);
 assert.doesNotMatch(closedHumanRepairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
-
-const closedHumanCanaryRun = workflow.match(
-  /- name: Execute exact closed human-table 30-day Stage canary[\s\S]*?(?=\n\s+- name:|\s*$)/,
-)[0];
-assert.match(closedHumanCanaryRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'closed-human-30d-canary'/);
-assert.match(closedHumanCanaryRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
-assert.match(closedHumanCanaryRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
-assert.match(closedHumanCanaryRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
-assert.match(closedHumanCanaryRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
-assert.match(closedHumanCanaryRun, /CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE: "1"/);
-assert.match(closedHumanCanaryRun, /closed_human_canary_batch_id/);
-assert.match(closedHumanCanaryRun, /closed_human_canary_confirmation/);
-assert.match(closedHumanCanaryRun, /closed_human_canary_confirmation must be exactly GO <batch_id>/);
-assert.match(closedHumanCanaryRun, /--policy closed-human-table-30d \\\n\s+--execute \\\n\s+--approved-batch-id "\$CLOSED_HUMAN_CANARY_BATCH_ID" \\\n\s+--approved-batch-confirmation "\$CLOSED_HUMAN_CANARY_CONFIRMATION"/);
-assert.doesNotMatch(closedHumanCanaryRun, /--prepare-only|--automatic|schedule/);
-assert.doesNotMatch(closedHumanCanaryRun, /Production|SUPABASE_PROD_/i);
-const closedHumanActivationRun = workflow.match(
-  /- name: Activate closed-human 30-day Stage automatic retention[\s\S]*?(?=\n\s+- name:|\s*$)/,
-)[0];
-assert.match(closedHumanActivationRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'closed-human-30d-activation'/);
-assert.match(closedHumanActivationRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
-assert.match(closedHumanActivationRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
-assert.match(closedHumanActivationRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
-assert.match(closedHumanActivationRun, /closed_human_activation_batch_id/);
-assert.match(closedHumanActivationRun, /closed_human_activation_confirmation/);
-assert.match(closedHumanActivationRun, /test "\$CLOSED_HUMAN_ACTIVATION_BATCH_ID" = "334"/);
-assert.match(closedHumanActivationRun, /ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY 334/);
-assert.match(closedHumanActivationRun, /--activate/);
-assert.doesNotMatch(closedHumanActivationRun, /github\.event_name == 'schedule'|--execute|--automatic|--prepare-only|--complete-lifecycle|Production|SUPABASE_PROD_/i);
 
 const closedHumanAutomaticRun = workflow.match(
   /- name: Run activated closed-human 30-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
@@ -339,25 +291,5 @@ assert.match(independentFailureAggregator, /steps\.closed_human_automatic\.outco
 assert.match(independentFailureAggregator, /steps\.escrow_automatic\.outcome/);
 assert.match(independentFailureAggregator, /exit 1/);
 assert.doesNotMatch(independentFailureAggregator, /--execute|--automatic|prune|Production|SUPABASE_PROD_/i);
-
-const lifecycleRun = workflow.match(
-  /- name: Complete exact closed-human table lifecycle[\s\S]*?(?=\n\s+- name:|\s*$)/,
-)[0];
-assert.match(lifecycleRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'closed-human-30d-lifecycle-completion'/);
-assert.match(lifecycleRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
-assert.match(lifecycleRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
-assert.match(lifecycleRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
-assert.match(lifecycleRun, /closed_human_lifecycle_batch_id/);
-assert.match(lifecycleRun, /closed_human_lifecycle_table_id/);
-assert.match(lifecycleRun, /closed_human_lifecycle_cutoff/);
-assert.match(lifecycleRun, /test "\$CLOSED_HUMAN_LIFECYCLE_BATCH_ID" = "334"/);
-assert.match(lifecycleRun, /test "\$CLOSED_HUMAN_LIFECYCLE_TABLE_ID" = "ec3f4897-c7bb-4d92-b63d-a38401e9a5c4"/);
-assert.match(lifecycleRun, /test "\$CLOSED_HUMAN_LIFECYCLE_CUTOFF" = "2026-08-05 16:33:12\.024\+00"/);
-assert.match(lifecycleRun, /--complete-lifecycle/);
-assert.match(lifecycleRun, /--batch-id "\$CLOSED_HUMAN_LIFECYCLE_BATCH_ID"/);
-assert.match(lifecycleRun, /--table-id "\$CLOSED_HUMAN_LIFECYCLE_TABLE_ID"/);
-assert.match(lifecycleRun, /--cutoff "\$CLOSED_HUMAN_LIFECYCLE_CUTOFF"/);
-assert.doesNotMatch(lifecycleRun, /github\.event_name == 'schedule'|--execute|--automatic|--prepare-only|--repair|--diagnose|prune|Production|SUPABASE_PROD_/i);
-assert.doesNotMatch(lifecycleRun, /CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE: "1"/);
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");
