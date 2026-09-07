@@ -20,7 +20,7 @@ test('tests job gates only Playwright steps on PR paths', () => {
   assert.match(detectionStep, /id: playwright_changes/);
   assert.match(detectionStep, /github\.event_name == 'pull_request'/);
   assert.match(detectionStep, /git fetch --no-tags --depth=1 origin "\$PR_BASE_SHA"/);
-  assert.match(detectionStep, /git diff --name-only "\$PR_BASE_SHA" "\$GITHUB_SHA"/);
+  assert.match(detectionStep, /git diff --name-only --no-renames "\$PR_BASE_SHA" "\$GITHUB_SHA"/);
   assert.match(detectionStep, /node scripts\/should-run-playwright\.mjs --github-output "\$GITHUB_OUTPUT"/);
 
   const browserStep = (name) => testsSrc.match(
@@ -56,6 +56,7 @@ test('CI verify gates browser work without skipping structural or unit checks', 
   )?.[0] || '';
   assert.match(detectionStep, /id: playwright_changes/);
   assert.match(detectionStep, /github\.event_name == 'pull_request'/);
+  assert.match(detectionStep, /git diff --name-only --no-renames "\$PR_BASE_SHA" "\$GITHUB_SHA"/);
   assert.match(detectionStep, /node scripts\/should-run-playwright\.mjs --github-output "\$GITHUB_OUTPUT"/);
 
   for (const name of ['Install Playwright Browsers', 'Playwright E2E tests']) {

@@ -135,7 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
-          git diff --name-only "$PR_BASE_SHA" "$GITHUB_SHA" \
+          git diff --name-only --no-renames "$PR_BASE_SHA" "$GITHUB_SHA" \
             | node scripts/should-run-playwright.mjs --github-output "$GITHUB_OUTPUT"
 
       - name: Install dependencies
