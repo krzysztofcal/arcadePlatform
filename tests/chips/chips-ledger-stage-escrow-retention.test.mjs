@@ -71,7 +71,7 @@ function uuidIdsSha256(ids) {
   return crypto.createHash("sha256").update(`${ids.join("\n")}\n`, "utf8").digest("hex");
 }
 
-function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], legacyBatchRows = [], legacyProofRows = [], accountRows = [], candidateAccountRows = null, accountInvariantRows = null, tableRows = [], registryRows = [] } = {}) {
+function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows = [], legacyBatchRows = [], legacyProofRows = [], accountRows = [], candidateAccountRows = null, candidateAccountRowsByBatchId = null, accountInvariantRows = null, tableRows = [], registryRows = [] } = {}) {
   const queries = [];
   let transactionOpen = false;
   let released = false;
@@ -118,7 +118,12 @@ function reservedAuditSession({ failOn = null, policyEnabled = false, batchRows 
           ambiguous_archive_binding_count: "0",
         }];
       }
-      if (query === RETENTION_ACCOUNTS_SQL) return candidateAccountRows || accountRows;
+      if (query === RETENTION_ACCOUNTS_SQL) {
+        const requestedBatchId = parameters[2] == null ? null : String(parameters[2]);
+        return (requestedBatchId && candidateAccountRowsByBatchId?.[requestedBatchId])
+          || candidateAccountRows
+          || accountRows;
+      }
       if (query === RETENTION_BATCHES_SQL) return batchRows;
       if (query === RETENTION_LEGACY_PROOFS_FOR_TABLES_SQL) return legacyProofRows;
       if (query === RETENTION_LEGACY_BATCHES_SQL) return legacyBatchRows;
@@ -250,6 +255,28 @@ test("scheduled escrow audit aggregates global account invariants and bounds ful
   assert.match(RETENTION_ACCOUNTS_SQL, /cumulative_account_count\s*<=\s*\$2::integer/i);
   assert.match(RETENTION_ACCOUNTS_SQL, /join public\.chips_accounts accounts\s+on accounts\.id = candidates\.id/is);
   assert.doesNotMatch(RETENTION_ACCOUNTS_SQL, /where accounts\.system_key\s+like\s+'POKER_TABLE%'/i);
+});
+
+test("exact escrow batch scope is applied before the scheduled candidate window", async () => {
+  const lateBatchId = "111";
+  const lateBatch = completeBatch({ batch_id: lateBatchId, destructive_go_batch_id: lateBatchId });
+  const session = reservedAuditSession({
+    batchRows: [lateBatch],
+    candidateAccountRows: [],
+    candidateAccountRowsByBatchId: { [lateBatchId]: [account()] },
+  });
+  const result = await readOnlyEscrowAudit({
+    sql: session,
+    expectedSystemIdentifier: "7656985631720456337",
+    candidateBatchId: lateBatchId,
+    telemetry: false,
+  });
+  const candidateQuery = session.queries.find(({ query }) => query === RETENTION_ACCOUNTS_SQL);
+  assert.deepEqual(candidateQuery.parameters, [10, 20, lateBatchId]);
+  assert.match(RETENTION_ACCOUNTS_SQL, /batches\.batch_id\s*=\s*\$3::bigint/i);
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].batchId, lateBatchId);
+  assert.equal(result.candidates[0].accountIds.length, 1);
 });
 
 test("complete escrow retirement receipt still reports retired", () => {

@@ -565,7 +565,8 @@ left join archive_match_counts on archive_match_counts.table_id = scoped.table_i
 // This query begins at the small archive/proof scope and reaches an account by
 // its exact canonical system key.  It preserves the current fail-closed
 // archive-binding rule, all account dependency guards, and full batch-unit
-// selection while returning at most MAX_RETIREMENT_ACCOUNTS_PER_RUN rows.
+// selection while returning at most MAX_RETIREMENT_ACCOUNTS_PER_RUN rows.  An
+// exact batch scope is optional and is applied before the scheduled ranking.
 export const RETENTION_ACCOUNTS_SQL = `
 with valid_legacy_proofs as (
   select proofs.*
@@ -585,6 +586,7 @@ with valid_legacy_proofs as (
       select pg_catalog.array_agg(ids.table_id order by ids.table_id)
       from pg_catalog.unnest(proofs.batch_table_ids) ids(table_id)
     )
+    and ($3::bigint is null or proofs.batch_id = $3::bigint)
 ), archive_matches as (
   select
     batches.batch_id,
@@ -603,6 +605,7 @@ with valid_legacy_proofs as (
   from public.chips_ledger_archive_batches batches
   where batches.project_ref = '${STAGE_PROJECT_REF}'
     and batches.source_policy_id = '${BOT_ONLY_RETENTION_POLICY_ID}'
+    and ($3::bigint is null or batches.batch_id = $3::bigint)
   union all
   select
     batches.batch_id,
@@ -623,6 +626,7 @@ with valid_legacy_proofs as (
   cross join lateral unnest(proofs.batch_table_ids) ids(table_id)
   where batches.project_ref = '${STAGE_PROJECT_REF}'
     and batches.source_policy_id = '${LEGACY_STAGE_ALLOWLIST_POLICY_ID}'
+    and ($3::bigint is null or batches.batch_id = $3::bigint)
 ), archive_match_counts as (
   select table_id, count(*)::bigint as match_count
   from archive_matches
@@ -886,7 +890,7 @@ async function sessionTransaction(sql, run, { phase, telemetry, readOnly, transa
   }
 }
 
-export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAGE_SYSTEM_IDENTIFIER, telemetry = null, phase = RETIREMENT_PHASES.AUDIT } = {}) {
+export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAGE_SYSTEM_IDENTIFIER, telemetry = null, phase = RETIREMENT_PHASES.AUDIT, candidateBatchId = null } = {}) {
   if (!sql || typeof sql.unsafe !== "function"
     || (typeof sql.begin !== "function" && typeof sql.release !== "function")) {
     fail("PostgreSQL audit adapter is required");
@@ -920,7 +924,7 @@ export async function readOnlyEscrowAudit({ sql, expectedSystemIdentifier = STAG
     const invariant = invariantRows[0];
     const accountRows = (await read(
       RETENTION_ACCOUNTS_SQL,
-      [MAX_RETIREMENT_BATCHES_PER_RUN, MAX_RETIREMENT_ACCOUNTS_PER_RUN],
+      [MAX_RETIREMENT_BATCHES_PER_RUN, MAX_RETIREMENT_ACCOUNTS_PER_RUN, candidateBatchId],
       "escrow_retention_accounts",
       "account_candidate",
     )).map(normalizeRow);
@@ -2051,7 +2055,7 @@ async function fullyRevalidateCandidate({
   attempt = 1,
 } = {}) {
   await assertAdvisoryLock(sql, lockSession, { phase, batchId: candidate.batchId, attempt, telemetry });
-  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase });
+  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase, candidateBatchId: candidate.batchId });
   const current = validateFreshCandidate(audit, candidate);
   let verified;
   try {
@@ -2138,7 +2142,7 @@ async function revalidateCanaryAuthorization({
       expectedAccountIdsSha256,
     });
   }
-  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase });
+  const audit = await readOnlyEscrowAudit({ sql, telemetry, phase, candidateBatchId: batchId });
   if (audit.stageIdentity !== STAGE_SYSTEM_IDENTIFIER
     || !audit.fenceActive
     || !audit.fenceEnforcementActive) {
@@ -2367,7 +2371,7 @@ export async function runStageEscrowAccountRetention({
       return result;
     }
     currentPhase = RETIREMENT_PHASES.AUDIT;
-    const audit = await readOnlyEscrowAudit({ sql, telemetry, phase: currentPhase });
+    const audit = await readOnlyEscrowAudit({ sql, telemetry, phase: currentPhase, candidateBatchId: batchId });
     log("chips_ledger_stage_escrow_account_retention_audit", {
       stage_system_identifier: audit.stageIdentity,
       backend_pid: audit.backendPid,
