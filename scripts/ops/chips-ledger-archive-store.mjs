@@ -56,6 +56,7 @@ const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN = "32753223679";
 const LEGACY_STAGE_ALLOWLIST_DIAGNOSTIC_SOURCE_RUN_SHA256 = "aa82076e7e4d7fd1e027889be94868e5662652cc29ae2dc7b55a4196b260ed0e";
 const REPLACEMENT_VERIFICATION_MAX_GETS = 2;
 export const STORAGE_GET_MAX_ATTEMPTS = 4;
+export const STORAGE_GET_MAX_RETRY_AFTER_MS = 60_000;
 export const STORAGE_GET_RETRY_BACKOFF_MS = Object.freeze([250, 1000, 2500]);
 export const STORAGE_GET_429_RETRY_BACKOFF_MS = Object.freeze([1000, 2500, 5000]);
 const TRANSIENT_STORAGE_NETWORK_ERROR_CODES = new Set([
@@ -699,10 +700,12 @@ function retryAfterMilliseconds(response) {
   if (!value) return null;
   if (NON_NEGATIVE_INTEGER_RE.test(value)) {
     const milliseconds = Number(value) * 1000;
-    return Number.isSafeInteger(milliseconds) ? milliseconds : null;
+    return Math.min(STORAGE_GET_MAX_RETRY_AFTER_MS, milliseconds);
   }
   const retryAt = Date.parse(value);
-  return Number.isNaN(retryAt) ? null : Math.max(0, retryAt - Date.now());
+  return Number.isNaN(retryAt)
+    ? null
+    : Math.min(STORAGE_GET_MAX_RETRY_AFTER_MS, Math.max(0, retryAt - Date.now()));
 }
 
 async function waitForStorageGetRetry(deps, attempt, response = null) {

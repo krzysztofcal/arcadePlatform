@@ -454,6 +454,29 @@ try {
   assert.deepEqual(retryAfterEvents, ["fetch-1", "sleep-2000", "fetch-2"]);
   assert.equal(retryAfterValue.bytes.equals(privateObjectBytes), true);
 
+  const cappedRetryAfterSleeps = [];
+  let cappedRetryAfterCalls = 0;
+  const cappedRetryAfterValue = await downloadPrivateArchiveObject(
+    resolveStorageTarget("stage", ENV),
+    privateObjectPath,
+    {
+      fetch: async () => {
+        cappedRetryAfterCalls += 1;
+        if (cappedRetryAfterCalls === 1) {
+          return new Response("rate limited", { status: 429, headers: { "retry-after": "3600" } });
+        }
+        return new Response(privateObjectBytes, {
+          status: 200,
+          headers: { "content-type": "application/gzip" },
+        });
+      },
+      sleep: (milliseconds) => { cappedRetryAfterSleeps.push(milliseconds); },
+    },
+  );
+  assert.equal(cappedRetryAfterCalls, 2);
+  assert.deepEqual(cappedRetryAfterSleeps, [60000], "large Retry-After must be capped per wait");
+  assert.equal(cappedRetryAfterValue.bytes.equals(privateObjectBytes), true);
+
   const exhausted544Calls = [];
   const exhausted544Sleeps = [];
   await assert.rejects(
