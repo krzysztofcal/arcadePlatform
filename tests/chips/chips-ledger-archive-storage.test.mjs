@@ -411,9 +411,48 @@ try {
 
   const recoveredAfter429 = await runPrivateGetScenario([429, 200]);
   assert.equal(recoveredAfter429.calls.length, 2, "HTTP 429 may have one bounded read-only retry");
-  assert.deepEqual(recoveredAfter429.sleeps, [250]);
+  assert.deepEqual(recoveredAfter429.sleeps, [1000]);
   assert.equal(recoveredAfter429.calls.every(({ method }) => method === "GET"), true);
   assert.equal(recoveredAfter429.value.bytes.equals(privateObjectBytes), true);
+
+  const retryAfterEvents = [];
+  let releaseRetryAfter;
+  const retryAfterGate = new Promise((resolve) => { releaseRetryAfter = resolve; });
+  let retryAfterCalls = 0;
+  const retryAfterRun = downloadPrivateArchiveObject(
+    resolveStorageTarget("stage", ENV),
+    privateObjectPath,
+    {
+      fetch: async () => {
+        retryAfterCalls += 1;
+        retryAfterEvents.push(`fetch-${retryAfterCalls}`);
+        if (retryAfterCalls === 1) {
+          return new Response("rate limited", { status: 429, headers: { "retry-after": "2" } });
+        }
+        return new Response(privateObjectBytes, {
+          status: 200,
+          headers: { "content-type": "application/gzip" },
+        });
+      },
+      sleep: async (milliseconds) => {
+        retryAfterEvents.push(`sleep-${milliseconds}`);
+        await retryAfterGate;
+      },
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  try {
+    assert.deepEqual(
+      retryAfterEvents,
+      ["fetch-1", "sleep-2000"],
+      "Retry-After must delay the next GET attempt",
+    );
+  } finally {
+    releaseRetryAfter();
+  }
+  const retryAfterValue = await retryAfterRun;
+  assert.deepEqual(retryAfterEvents, ["fetch-1", "sleep-2000", "fetch-2"]);
+  assert.equal(retryAfterValue.bytes.equals(privateObjectBytes), true);
 
   const exhausted544Calls = [];
   const exhausted544Sleeps = [];
