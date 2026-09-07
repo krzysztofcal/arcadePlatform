@@ -323,6 +323,7 @@ function createHarness(options = {}){
     Buffer,
     console
   };
+  if (options.i18n) sandbox.window.I18N = options.i18n;
   sandbox.window.document = sandbox.document;
   sandbox.window.fetch = sandbox.fetch;
   sandbox.window.sessionStorage = sandbox.sessionStorage;
@@ -460,6 +461,10 @@ function findChildByClass(node, className){
 
 function reactionHistoryRows(harness){
   return harness.elements.pokerReactionHistoryList.children.filter((child) => child.className === 'poker-reaction-history__entry');
+}
+
+function reactionMenuOption(harness, reactionKey){
+  return harness.elements.pokerV2ReactionMenu.children.find((child) => child.dataset.reactionKey === reactionKey);
 }
 
 async function bootReactionHistoryHarness(options = {}){
@@ -781,6 +786,59 @@ test('reaction menu exposes cheers and gg to humans and sends cheers through the
   cheersOption.click();
   await harness.flush();
   assert.deepEqual(harness.reactionPayloads, ['cheers']);
+});
+
+test('poker v2 localizes reaction menu and history on langchange without changing reaction keys', async () => {
+  let language = 'en';
+  const translations = {
+    pokerReaction_nice_hand: { en: 'Nice hand!', pl: 'Dobre rozdanie!' },
+    pokerReaction_ambient_thinking: { en: 'Thinking...', pl: 'Myślę...' }
+  };
+  const i18n = {
+    t(key){ return translations[key] && translations[key][language] || ''; }
+  };
+  const { harness, ws } = await bootReactionHistoryHarness({ i18n, historySenderIsBot: true });
+  const englishOption = reactionMenuOption(harness, 'nice_hand');
+  assert.equal(englishOption.textContent, '👍 Nice hand!');
+  assert.equal(englishOption.attributes['aria-label'], 'Nice hand!');
+
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'nice_hand' } });
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'ambient_thinking' } });
+  await harness.flush();
+  assert.deepEqual(
+    reactionHistoryRows(harness).map((row) => findChildByClass(row, 'poker-reaction-history__reaction').textContent),
+    ['👍 Nice hand!', '🤔 Thinking...'],
+  );
+
+  language = 'pl';
+  harness.fireDocumentEvent('langchange', { detail: { lang: 'pl' } });
+  await harness.flush();
+  const polishOption = reactionMenuOption(harness, 'nice_hand');
+  assert.equal(polishOption.textContent, '👍 Dobre rozdanie!');
+  assert.equal(polishOption.attributes['aria-label'], 'Dobre rozdanie!');
+  assert.deepEqual(
+    reactionHistoryRows(harness).map((row) => findChildByClass(row, 'poker-reaction-history__reaction').textContent),
+    ['👍 Dobre rozdanie!', '🤔 Myślę...'],
+  );
+  assert.equal(harness.getCreateCount(), 1, 'language change should not reload the live client');
+
+  polishOption.click();
+  await harness.flush();
+  assert.deepEqual(harness.reactionPayloads, ['nice_hand']);
+});
+
+test('poker reaction labels fall back to the catalog label when a translation is missing', async () => {
+  const { harness, ws } = await bootReactionHistoryHarness({ i18n: { t(){ return ''; } }, historySenderIsBot: true });
+  const option = reactionMenuOption(harness, 'nice_hand');
+  assert.equal(option.textContent, '👍 Nice hand!');
+  assert.equal(option.attributes['aria-label'], 'Nice hand!');
+  assert.doesNotMatch(option.textContent, /pokerReaction_nice_hand/);
+
+  ws.onReaction({ payload: { seatNo: 2, reactionKey: 'ambient_thinking' } });
+  await harness.flush();
+  const historyText = findChildByClass(reactionHistoryRows(harness)[0], 'poker-reaction-history__reaction').textContent;
+  assert.equal(historyText, '🤔 Thinking...');
+  assert.doesNotMatch(historyText, /pokerReaction_ambient_thinking/);
 });
 
 test('reaction history appends only an authoritative table_reaction once', async () => {

@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 const root = process.cwd();
 const source = fs.readFileSync(path.join(root, 'js', 'i18n.js'), 'utf8');
+const pokerSource = fs.readFileSync(path.join(root, 'poker', 'poker-v2.js'), 'utf8');
 
 const sandbox = {
   window: {},
@@ -59,6 +60,22 @@ for (const key of requiredKeys){
   const value = sandbox.window.I18N.t(key);
   assert.ok(value && value.length > 0, `translation for ${key} should exist`);
   assert.notEqual(value, key, `translation for ${key} should not fallback to raw key`);
+}
+
+const reactionCatalogMatch = pokerSource.match(/var REACTION_CATALOG = \[([\s\S]*?)\n  \];/);
+assert.ok(reactionCatalogMatch, 'poker reaction catalog should be discoverable');
+const reactionKeys = [...reactionCatalogMatch[1].matchAll(/\{\s*key:\s*'([^']+)'/g)].map((match) => match[1]);
+assert.ok(reactionKeys.length > 0, 'poker reaction catalog should contain entries');
+assert.equal(new Set(reactionKeys).size, reactionKeys.length, 'poker reaction keys should be unique');
+
+for (const lang of ['en', 'pl']){
+  sandbox.window.I18N.setLang(lang);
+  for (const reactionKey of reactionKeys){
+    const key = `pokerReaction_${reactionKey}`;
+    const value = sandbox.window.I18N.t(key);
+    assert.equal(typeof value, 'string', `${key} should resolve to text in ${lang}`);
+    assert.ok(value.trim(), `${key} should not be empty in ${lang}`);
+  }
 }
 
 sandbox.window.I18N.setLang('pl');
