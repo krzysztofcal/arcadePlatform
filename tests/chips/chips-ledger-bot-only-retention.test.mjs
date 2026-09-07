@@ -36,6 +36,7 @@ const proofSeqscanGuardMigration = fs.readFileSync("supabase/migrations/20260905
 const proofSeqscanGuardRemovalMigration = fs.readFileSync("supabase/migrations/20260905173000_chips_ledger_bot_only_proof_remove_seqscan_hint.sql", "utf8");
 const scopedCleanupLifecycleGateMigration = fs.readFileSync("supabase/migrations/20260906120000_chips_ledger_bot_only_scoped_cleanup_lifecycle_gate.sql", "utf8");
 const transactionIdentityIndexMigration = fs.readFileSync("supabase/migrations/20260906130000_chips_transaction_idempotency_transaction_id_table_id_idx.sql", "utf8");
+const proofCandidateQueryShapeMigration = fs.readFileSync("supabase/migrations/20260907100000_chips_ledger_bot_only_candidate_query_shape.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
@@ -436,6 +437,28 @@ function transactionIdentityIndexContract() {
   assert.match(transactionIdentityIndexMigration, /set local maintenance_work_mem = '128MB'/i);
   assert.doesNotMatch(transactionIdentityIndexMigration, /create index concurrently/i);
   assert.doesNotMatch(transactionIdentityIndexMigration, /drop index|create or replace function|chips_prune|production/i);
+}
+
+function proofCandidateQueryShapeContract() {
+  const replacement = proofCandidateQueryShapeMigration.match(/replacement text := \$replacement\$([\s\S]*?)\$replacement\$/)?.[1] || "";
+  assert.match(proofCandidateQueryShapeMigration, /pg_get_functiondef\([\s\S]*chips_assert_bot_only_archive_proof_lifecycle_gate/i);
+  assert.match(proofCandidateQueryShapeMigration, /old_source_branch/);
+  assert.match(proofCandidateQueryShapeMigration, /source_branch_count <> 6/);
+  assert.match(replacement, /with candidate_transaction_ids as \(/);
+  assert.equal((replacement.match(/from public\.chips_transactions transactions/g) || []).length, 7, "candidate branches must read chips_transactions directly");
+  assert.doesNotMatch(replacement, /table_transaction_rows/);
+  assert.doesNotMatch(replacement, /unknown_registry_rows/);
+  assert.match(replacement, /lower\(coalesce\(transactions\.idempotency_key, ''\)\) like any/);
+  assert.match(replacement, /lower\(coalesce\(transactions\.metadata::text, ''\)\) like '%' \|\| p_table_id::text \|\| '%'/);
+  assert.match(replacement, /lower\(coalesce\(transactions\.reference, ''\)\) like any/);
+  assert.match(replacement, /transactions\.idempotency_key ~\*/);
+  assert.match(replacement, /jsonb_typeof\(transactions\.metadata\) = 'object'/);
+  assert.match(replacement, /pg_input_is_valid\(transactions\.metadata #>> '\{\}', 'jsonb'::text\)/);
+  assert.match(replacement, /transactions\.reference ~\*/);
+  assert.ok((replacement.match(/\bunion\b/gi) || []).length >= 10, "candidate evidence must remain UNION-deduplicated");
+  assert.match(proofCandidateQueryShapeMigration, /target_transaction_evidence as \(/);
+  assert.match(proofCandidateQueryShapeMigration, /hot_identity_rows as \(/);
+  assert.doesNotMatch(proofCandidateQueryShapeMigration, /set local statement_timeout|create index|chips_prune_and_cleanup_bot_only_archive_batch/i);
 }
 
 function scopedCleanupLifecycleGateContract() {
@@ -1996,6 +2019,7 @@ failClosedLifecycleContract();
 lifecycleGateScopeContract();
 proofPerformanceContract();
 transactionIdentityIndexContract();
+proofCandidateQueryShapeContract();
 scopedCleanupLifecycleGateContract();
 retryAndAccountingContract();
 
