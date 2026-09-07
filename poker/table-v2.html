@@ -36,6 +36,7 @@
   </div>
   <div class="poker-table-screen" id="pokerTableScreen">
     <a id="xpBadge" class="xp-badge xp-badge--loading poker-v2-xp-badge" aria-live="polite" aria-busy="true" href="/xp.html"><span class="xp-badge__label">XP</span></a>
+    <div class="poker-auto-rebuy-toast poker-auto-rebuy-toast--balance" id="pokerV2AutoRebuyBalanceToast" role="status" aria-live="polite" hidden></div>
 
     <button type="button" class="poker-menu-toggle" id="pokerMenuToggle" aria-label="Toggle table menu" aria-expanded="false" aria-controls="pokerMenuPanel">
       <span></span>
@@ -160,6 +161,17 @@
         <div class="poker-confirm-actions">
           <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2LeaveConfirmYes">Yes</button>
           <button type="button" class="poker-live-btn" id="pokerV2LeaveConfirmCancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="poker-confirm-modal poker-auto-rebuy-confirm-modal" id="pokerV2AutoRebuyConfirmModal" role="dialog" aria-modal="true" aria-labelledby="pokerV2AutoRebuyConfirmTitle" aria-describedby="pokerV2AutoRebuyConfirmCopy" hidden>
+      <div class="poker-confirm-dialog">
+        <div class="poker-confirm-title" id="pokerV2AutoRebuyConfirmTitle">Confirm auto rebuy</div>
+        <p class="poker-auto-rebuy-confirm-copy" id="pokerV2AutoRebuyConfirmCopy">Auto rebuy will use the current table buy-in from your account each time you run out of chips. You can disable it later.</p>
+        <div class="poker-confirm-actions">
+          <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2AutoRebuyConfirmYes">Confirm</button>
+          <button type="button" class="poker-live-btn" id="pokerV2AutoRebuyConfirmCancel">Cancel</button>
         </div>
       </div>
     </div>
