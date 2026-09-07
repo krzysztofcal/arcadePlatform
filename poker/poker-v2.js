@@ -54,6 +54,7 @@
   };
   var CLOSED_TABLE_REDIRECT_SECONDS = 5;
   var WINNER_REVEAL_MS = 3_500;
+  var REGULAR_REACTION_TTL_MS = 3_500;
   var TARGETED_REACTION_EFFECT_TTL_MS = 1_200;
   var AUTO_REBUY_FEEDBACK_MS = 3_000;
   var CHIP_FLY_MS = 420;
@@ -250,6 +251,7 @@
   var settlementAnimationNodes = [];
   var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
   var reactionBubblesBySeatNo = {};
+  var reactionBubbleNodesBySeatNo = {};
   var targetedReactionEffectsById = {};
   var targetedReactionEffectNodesById = {};
   var reactionRenderNodes = [];
@@ -2484,10 +2486,11 @@
 
   function clearReactionBubbles(){
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
-      var bubble = reactionBubblesBySeatNo[seatNo];
-      if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
+      clearReactionBubble(seatNo);
     });
-    reactionBubblesBySeatNo = {};
+    Object.keys(reactionBubbleNodesBySeatNo).forEach(function(seatNo){
+      removeReactionBubbleNode(seatNo);
+    });
     Object.keys(targetedReactionEffectsById).forEach(function(effectId){
       var effect = targetedReactionEffectsById[effectId];
       if (effect && effect.timer) window.clearTimeout(effect.timer);
@@ -2518,7 +2521,14 @@
   function clearReactionBubble(seatNo){
     var bubble = reactionBubblesBySeatNo[seatNo];
     if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
+    removeReactionBubbleNode(seatNo);
     delete reactionBubblesBySeatNo[seatNo];
+  }
+
+  function removeReactionBubbleNode(seatNo){
+    var node = reactionBubbleNodesBySeatNo[seatNo];
+    if (node && node.parentNode) node.parentNode.removeChild(node);
+    delete reactionBubbleNodesBySeatNo[seatNo];
   }
 
   function clearReactionArtifacts(filter){
@@ -2687,13 +2697,13 @@
       return;
     }
     var previous = reactionBubblesBySeatNo[seatNo];
-    if (previous && previous.timer) window.clearTimeout(previous.timer);
+    if (previous) clearReactionBubble(seatNo);
     var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, senderUserId: ownerUserId, senderIsBot: senderIsBot, animate: true, timer: null };
     bubble.timer = window.setTimeout(function(){
       if (reactionBubblesBySeatNo[seatNo] !== bubble) return;
-      delete reactionBubblesBySeatNo[seatNo];
+      clearReactionBubble(seatNo);
       renderSeats();
-    }, 3_500);
+    }, REGULAR_REACTION_TTL_MS);
     reactionBubblesBySeatNo[seatNo] = bubble;
     renderSeats();
   }
@@ -3620,6 +3630,56 @@
     reactionRenderNodes.push(node);
   }
 
+  function getReactionBubblePlacementClass(seatNo){
+    var slotIndex = Number.isInteger(renderedSeatSlots[seatNo]) ? renderedSeatSlots[seatNo] : null;
+    if (slotIndex === 0) return ' poker-reaction-anchor--top';
+    if (slotIndex === 1 || slotIndex === 2) return ' poker-reaction-anchor--right';
+    if (slotIndex === 4 || slotIndex === 5) return ' poker-reaction-anchor--left';
+    if (slotIndex === 3){
+      var currentSeat = deriveCurrentSeat();
+      return currentSeat && currentSeat.seatNo === Number(seatNo)
+        ? ' poker-reaction-anchor--hero'
+        : ' poker-reaction-anchor--bottom';
+    }
+    return '';
+  }
+
+  function renderRegularReactionBubble(seatNo, reactionBubble, reactionEntry, anchor){
+    var reducedMotion = prefersReducedMotion();
+    var anchorNode = reactionBubbleNodesBySeatNo[seatNo];
+    if (!anchorNode){
+      anchorNode = document.createElement('div');
+      reactionBubbleNodesBySeatNo[seatNo] = anchorNode;
+      var bubble = document.createElement('div');
+      bubble.setAttribute('role', 'status');
+      anchorNode.appendChild(bubble);
+    }
+    if (!anchorNode.parentNode) els.reactionLayer.appendChild(anchorNode);
+    anchorNode.className = 'poker-reaction-anchor' + getReactionBubblePlacementClass(seatNo);
+    anchorNode.style.left = anchor.x + '%';
+    anchorNode.style.top = anchor.y + '%';
+    var bubbleNode = anchorNode.children && anchorNode.children[0];
+    if (!bubbleNode){
+      clearReactionBubble(seatNo);
+      return;
+    }
+    bubbleNode.className = 'poker-seat-reaction-bubble' + (reactionBubble.animate && !reducedMotion ? ' poker-seat-reaction-bubble--enter' : '');
+    bubbleNode.setAttribute('role', 'status');
+    bubbleNode.textContent = reactionEntry.emoji + ' ' + reactionLabel(reactionEntry);
+    var floatingEmoji = anchorNode.children && anchorNode.children[1];
+    if (reducedMotion){
+      if (floatingEmoji && floatingEmoji.parentNode) floatingEmoji.parentNode.removeChild(floatingEmoji);
+      return;
+    }
+    if (!floatingEmoji){
+      floatingEmoji = document.createElement('span');
+      anchorNode.appendChild(floatingEmoji);
+    }
+    floatingEmoji.className = 'poker-seat-reaction-float';
+    floatingEmoji.setAttribute('aria-hidden', 'true');
+    floatingEmoji.textContent = reactionEntry.emoji;
+  }
+
   function getReactionLayerDimensions(){
     var width = Number(els.reactionLayer && els.reactionLayer.clientWidth);
     var height = Number(els.reactionLayer && els.reactionLayer.clientHeight);
@@ -3712,16 +3772,7 @@
         clearReactionBubble(seatNo);
         return;
       }
-      var anchorNode = document.createElement('div');
-      anchorNode.className = 'poker-reaction-anchor';
-      anchorNode.style.left = anchor.x + '%';
-      anchorNode.style.top = anchor.y + '%';
-      var bubble = document.createElement('div');
-      bubble.className = 'poker-seat-reaction-bubble' + (reactionBubble.animate ? ' poker-seat-reaction-bubble--enter' : '');
-      bubble.setAttribute('role', 'status');
-      bubble.textContent = reactionEntry.emoji + ' ' + reactionLabel(reactionEntry);
-      anchorNode.appendChild(bubble);
-      appendReactionRenderNode(anchorNode);
+      renderRegularReactionBubble(seatNo, reactionBubble, reactionEntry, anchor);
     });
   }
 
