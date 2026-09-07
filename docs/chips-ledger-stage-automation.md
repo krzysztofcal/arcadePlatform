@@ -46,12 +46,14 @@ ongoing operations:
 | `escrow-retention-verify` | Verify an existing account recovery object |
 | `external-scheduled-automatic` | External/VPS fallback for native bot-only + closed-human + escrow automation |
 
-The rollout-only modes (first bot-only canary prepare/execute, bot-only batch 15
-recovery repair, legacy Stage allowlist prepare/orchestrate/batch-13 execute,
-and escrow retention canary prepare/authorize/execute/activate) are no longer
-exposed through the workflow. The underlying archive/recovery scripts remain in
-the repository where they are still needed for immutable evidence, audits, and
-controlled recovery operations.
+The closed-human `prepare`, `canary`, policy-diagnostic, lifecycle-completion,
+and activation rollout controls are retired and no longer exposed through the
+workflow. The earlier rollout-only modes (first bot-only canary
+prepare/execute, bot-only batch 15 recovery repair, legacy Stage allowlist
+prepare/orchestrate/batch-13 execute, and escrow retention canary
+prepare/authorize/execute/activate) are also no longer exposed. The underlying
+archive/recovery scripts remain in the repository where they are still needed
+for immutable evidence, audits, and controlled recovery operations.
 
 ## Recovery durability
 
