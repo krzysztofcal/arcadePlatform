@@ -11,15 +11,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
+      - name: Detect Playwright-relevant changes
+        id: playwright_changes
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+          git diff --name-only "$PR_BASE_SHA" "$GITHUB_SHA" \
+            | node scripts/should-run-playwright.mjs --github-output "$GITHUB_OUTPUT"
       - name: Structural guards
         run: npm run ci:guards
       - name: Install dependencies
         run: npm ci || npm i
       - name: Install Playwright Browsers
+        if: ${{ github.event_name != 'pull_request' || steps.playwright_changes.outputs.required == 'true' }}
         run: npx playwright install --with-deps chromium
       - name: Unit checks
         run: npm run test:unit
       - name: Playwright E2E tests
+        if: ${{ github.event_name != 'pull_request' || steps.playwright_changes.outputs.required == 'true' }}
         run: npm run test:e2e
         env:
           PLAYWRIGHT: 1
