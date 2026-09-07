@@ -2186,6 +2186,11 @@ const automaticStageEnv = {
   GITHUB_EVENT_NAME: "schedule",
   CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1",
 };
+const externalAutomaticStageEnv = {
+  ...automaticStageEnv,
+  GITHUB_EVENT_NAME: "workflow_dispatch",
+  CHIPS_LEDGER_CLOSED_HUMAN_EXTERNAL_AUTOMATIC: "1",
+};
 const automaticCanaryEvidence = {
   ...closedHumanCanaryEvidence,
   closedHumanTableId: CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId,
@@ -2687,7 +2692,8 @@ const manualOnlyAutomaticHarness = makeAutomaticClosedHumanHarness({ policyEnabl
 manualOnlyAutomaticHarness.policyRow.canary_batch_id = "334";
 manualOnlyAutomaticHarness.policyRow.canary_confirmation = "GO 334";
 const manualOnlyAutomaticResult = await runAutomaticClosedHumanStageAutomation({
-  env: automaticStageEnv,
+  // This is the external/VPS workflow_dispatch path, not a native schedule.
+  env: externalAutomaticStageEnv,
   deps: manualOnlyAutomaticHarness.deps,
 });
 assert.equal(manualOnlyAutomaticResult.state, "no-op");
