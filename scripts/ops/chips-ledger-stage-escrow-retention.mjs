@@ -13,12 +13,12 @@ import {
 import {
   ARCHIVE_MAX_BYTES,
   ARCHIVE_MIME_TYPE,
+  createStorageVerificationContext,
   downloadPrivateArchiveObject,
   readPrivateObjectIfExists,
   resolveStorageTarget,
   uploadOrVerifyPrivateObject,
   verifyArchiveBytes,
-  verifyArchiveBucket,
 } from "./chips-ledger-archive-store.mjs";
 import {
   buildPruneEvidence,
@@ -31,6 +31,7 @@ import {
   STAGE_PROJECT_REF,
   STAGE_SYSTEM_IDENTIFIER,
   assertDurableRecoveryForEvidence,
+  createDurableRecoveryContext,
   inspectDurableRecoveryState,
   initializeStageConnection,
   validateStageEnvironment,
@@ -2048,6 +2049,18 @@ export async function runStageEscrowAccountRetention({
   }
   const config = deps.config || validateStageEnvironment(env, { requireCommitSha: true });
   const moduleEnv = deps.moduleEnv || moduleEnvironment(config);
+  const storageVerificationContext = deps.storageVerificationContext || createStorageVerificationContext();
+  const durableRecoveryContext = deps.durableRecoveryContext || createDurableRecoveryContext();
+  const storageDeps = {
+    ...deps,
+    storageVerificationContext,
+    durableRecoveryContext,
+  };
+  const verifyBucket = deps.verifyBucket || ((storageTarget, options = {}) => (
+    options.fresh
+      ? storageVerificationContext.verifyFresh(storageTarget, storageDeps)
+      : storageVerificationContext.verify(storageTarget, storageDeps)
+  ));
   let pool = deps.pool || null;
   let sql = deps.sql || null;
   const telemetry = deps.telemetry === undefined ? undefined : deps.telemetry;
@@ -2145,8 +2158,7 @@ export async function runStageEscrowAccountRetention({
     if (audit.unknownForeignKeys?.length) fail("unknown foreign key dependency blocks escrow account retirement");
     if (audit.unknownDeleteTriggers?.length) fail("unknown DELETE trigger dependency blocks escrow account retirement");
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
-    if (deps.verifyBucket) await deps.verifyBucket(storageTarget);
-    else await verifyArchiveBucket(storageTarget, deps);
+    await verifyBucket(storageTarget);
     const candidatePool = batchId
       ? audit.candidates.filter((candidate) => text(candidate.batchId) === text(batchId))
       : audit.candidates;
@@ -2170,7 +2182,7 @@ export async function runStageEscrowAccountRetention({
         storageTarget,
         moduleEnv,
         cwd,
-        deps,
+        deps: storageDeps,
         telemetry,
         expectedRecovery: null,
         phase: RETIREMENT_PHASES.PREPARE,
@@ -2190,7 +2202,7 @@ export async function runStageEscrowAccountRetention({
       const storedRecovery = await ensureAccountRecoveryObject({
         storageTarget,
         recovery,
-        deps,
+        deps: storageDeps,
         expectedSnapshot: snapshot,
         expectedAccountIds: prepared.candidate.accountIds,
         allowCreate: mode !== "execute",
@@ -2216,7 +2228,7 @@ export async function runStageEscrowAccountRetention({
         storageTarget,
         moduleEnv,
         cwd,
-        deps,
+        deps: storageDeps,
         telemetry,
         expectedRecovery: storedRecovery,
         phase: RETIREMENT_PHASES.RECOVERY,
@@ -2254,7 +2266,7 @@ export async function runStageEscrowAccountRetention({
             storageTarget,
             moduleEnv,
             cwd,
-            deps,
+            deps: storageDeps,
             telemetry,
             expectedRecovery: recovery,
             phase: RETIREMENT_PHASES.EXECUTE,
@@ -2293,7 +2305,7 @@ export async function runStageEscrowAccountRetention({
             storageTarget,
             moduleEnv,
             cwd,
-            deps,
+            deps: storageDeps,
             telemetry,
             expectedRecovery: recovery,
             phase: RETIREMENT_PHASES.RECOVERY,
@@ -2397,6 +2409,18 @@ export async function runStageEscrowAccountRetentionControl({
   }
   const config = deps.config || validateStageEnvironment(env, { requireCommitSha: true });
   const moduleEnv = deps.moduleEnv || moduleEnvironment(config);
+  const storageVerificationContext = deps.storageVerificationContext || createStorageVerificationContext();
+  const durableRecoveryContext = deps.durableRecoveryContext || createDurableRecoveryContext();
+  const storageDeps = {
+    ...deps,
+    storageVerificationContext,
+    durableRecoveryContext,
+  };
+  const verifyBucket = deps.verifyBucket || ((storageTarget, options = {}) => (
+    options.fresh
+      ? storageVerificationContext.verifyFresh(storageTarget, storageDeps)
+      : storageVerificationContext.verify(storageTarget, storageDeps)
+  ));
   const pool = deps.pool || (deps.sql ? null : createStagePool(config, deps.postgres || postgres));
   const sql = deps.sql || (pool && typeof pool.reserve === "function" ? await pool.reserve() : pool);
   if (!sql) fail("Stage PostgreSQL session is required");
@@ -2423,15 +2447,14 @@ export async function runStageEscrowAccountRetentionControl({
       const storageTarget = deps.storageTarget || (typeof deps.revalidateCanary === "function"
         ? null
         : resolveStorageTarget("stage", moduleEnv, { singleTarget: true }));
-      if (storageTarget && deps.verifyBucket) await deps.verifyBucket(storageTarget);
-      else if (storageTarget) await verifyArchiveBucket(storageTarget, deps);
+      if (storageTarget) await verifyBucket(storageTarget);
       await revalidateCanaryAuthorization({
         sql,
         lockSession,
         storageTarget,
         moduleEnv,
         cwd,
-        deps,
+        deps: storageDeps,
         telemetry,
         batchId,
         expectedAccountIdsSha256,

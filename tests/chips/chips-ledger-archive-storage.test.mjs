@@ -12,6 +12,7 @@ import {
 import {
   ARCHIVE_BUCKET,
   ARCHIVE_MAX_BYTES,
+  createStorageVerificationContext,
   downloadPrivateArchiveObject,
   TABLE_IDENTITY_SUMMARY_ERROR_CODES,
   assertTableIdentitySummary,
@@ -354,6 +355,23 @@ try {
     "read-only bucket verification must never create or update a bucket",
   );
 
+  const runScopedBucketStorage = makeFetch({ bucketInitiallyExists: true });
+  const runScopedBucketContext = createStorageVerificationContext();
+  const runScopedTarget = resolveStorageTarget("stage", ENV);
+  await Promise.all([
+    runScopedBucketContext.verify(runScopedTarget, { fetch: runScopedBucketStorage.fetch }),
+    runScopedBucketContext.verify(runScopedTarget, { fetch: runScopedBucketStorage.fetch }),
+    runScopedBucketContext.verify(runScopedTarget, { fetch: runScopedBucketStorage.fetch }),
+  ]);
+  await runScopedBucketContext.verify(runScopedTarget, { fetch: runScopedBucketStorage.fetch });
+  assert.equal(
+    runScopedBucketStorage.calls.filter(({ method, path: requestPath }) => (
+      method === "GET" && requestPath === `/storage/v1/bucket/${ARCHIVE_BUCKET}`
+    )).length,
+    1,
+    "a run-scoped bucket context must coalesce repeated verification requests",
+  );
+
   const privateObjectPath = `v1/sha256/${"a".repeat(64)}.jsonl.gz`;
   const privateObjectBytes = Buffer.from("verified private archive");
   const runPrivateGetScenario = async (outcomes) => {
@@ -393,9 +411,71 @@ try {
 
   const recoveredAfter429 = await runPrivateGetScenario([429, 200]);
   assert.equal(recoveredAfter429.calls.length, 2, "HTTP 429 may have one bounded read-only retry");
-  assert.deepEqual(recoveredAfter429.sleeps, [250]);
+  assert.deepEqual(recoveredAfter429.sleeps, [1000]);
   assert.equal(recoveredAfter429.calls.every(({ method }) => method === "GET"), true);
   assert.equal(recoveredAfter429.value.bytes.equals(privateObjectBytes), true);
+
+  const retryAfterEvents = [];
+  let releaseRetryAfter;
+  const retryAfterGate = new Promise((resolve) => { releaseRetryAfter = resolve; });
+  let retryAfterCalls = 0;
+  const retryAfterRun = downloadPrivateArchiveObject(
+    resolveStorageTarget("stage", ENV),
+    privateObjectPath,
+    {
+      fetch: async () => {
+        retryAfterCalls += 1;
+        retryAfterEvents.push(`fetch-${retryAfterCalls}`);
+        if (retryAfterCalls === 1) {
+          return new Response("rate limited", { status: 429, headers: { "retry-after": "2" } });
+        }
+        return new Response(privateObjectBytes, {
+          status: 200,
+          headers: { "content-type": "application/gzip" },
+        });
+      },
+      sleep: async (milliseconds) => {
+        retryAfterEvents.push(`sleep-${milliseconds}`);
+        await retryAfterGate;
+      },
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  try {
+    assert.deepEqual(
+      retryAfterEvents,
+      ["fetch-1", "sleep-2000"],
+      "Retry-After must delay the next GET attempt",
+    );
+  } finally {
+    releaseRetryAfter();
+  }
+  const retryAfterValue = await retryAfterRun;
+  assert.deepEqual(retryAfterEvents, ["fetch-1", "sleep-2000", "fetch-2"]);
+  assert.equal(retryAfterValue.bytes.equals(privateObjectBytes), true);
+
+  const cappedRetryAfterSleeps = [];
+  let cappedRetryAfterCalls = 0;
+  const cappedRetryAfterValue = await downloadPrivateArchiveObject(
+    resolveStorageTarget("stage", ENV),
+    privateObjectPath,
+    {
+      fetch: async () => {
+        cappedRetryAfterCalls += 1;
+        if (cappedRetryAfterCalls === 1) {
+          return new Response("rate limited", { status: 429, headers: { "retry-after": "3600" } });
+        }
+        return new Response(privateObjectBytes, {
+          status: 200,
+          headers: { "content-type": "application/gzip" },
+        });
+      },
+      sleep: (milliseconds) => { cappedRetryAfterSleeps.push(milliseconds); },
+    },
+  );
+  assert.equal(cappedRetryAfterCalls, 2);
+  assert.deepEqual(cappedRetryAfterSleeps, [60000], "large Retry-After must be capped per wait");
+  assert.equal(cappedRetryAfterValue.bytes.equals(privateObjectBytes), true);
 
   const exhausted544Calls = [];
   const exhausted544Sleeps = [];

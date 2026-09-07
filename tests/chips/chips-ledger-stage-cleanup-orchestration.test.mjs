@@ -8,6 +8,7 @@ import postgres from "postgres";
 import {
   BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
   BOT_ONLY_AUTOMATIC_MAX_DRY_RUN_ATTEMPTS,
+  createDurableRecoveryContext,
   DURABLE_RECOVERY_STATES,
   assertAutomaticBotOnlyRecoveryReconstructionState,
   executeVerifiedCycle,
@@ -888,6 +889,61 @@ async function durableRecoveryInspectionContracts() {
   );
   assert.equal(legacyMismatch.state, DURABLE_RECOVERY_STATES.MISMATCH);
   assert.match(legacyMismatch.error.message, /committed legacy evidence/);
+}
+
+async function durableRecoveryContextContracts() {
+  const proven = makeProvenAutomaticRow("29");
+  const storageTarget = {
+    target: "stage",
+    projectRef: "krydukthwdvccggbyjfw",
+    baseUrl: "https://storage.example.test",
+    serviceKey: "stage-test-key",
+  };
+  const reads = [];
+  const deps = {
+    readPrivateObjectIfExists: async (_target, objectPath) => {
+      reads.push(objectPath);
+      return null;
+    },
+  };
+  const context = createDurableRecoveryContext();
+  await inspectDurableRecoveryState(storageTarget, proven.row, { ...deps, durableRecoveryContext: context });
+  await inspectDurableRecoveryState(storageTarget, proven.row, { ...deps, durableRecoveryContext: context });
+  assert.equal(reads.length, 2, "same batch/path/SHA should reuse one durable recovery inspection");
+
+  const differentSha = {
+    ...proven.row,
+    compressed_sha256: "b".repeat(64),
+    object_path: `v1/sha256/${"b".repeat(64)}.jsonl.gz`,
+  };
+  await inspectDurableRecoveryState(storageTarget, differentSha, { ...deps, durableRecoveryContext: context });
+  assert.equal(reads.length, 4, "durable recovery must not cross-reuse a different committed SHA");
+
+  const differentPath = {
+    ...proven.row,
+    object_path: `v1/sha256/${"c".repeat(64)}.jsonl.gz`,
+  };
+  await inspectDurableRecoveryState(storageTarget, differentPath, { ...deps, durableRecoveryContext: context });
+  assert.equal(reads.length, 6, "durable recovery must not cross-reuse a different object path");
+}
+
+async function destructiveExecuteEvidenceBoundaryContract() {
+  const proven = makeProvenAutomaticRow("30");
+  let bucketCalls = 0;
+  let pruneCalls = 0;
+  await assert.rejects(
+    () => executeVerifiedCycle({
+      row: proven.row,
+      durable: null,
+      verifyBucket: async () => { bucketCalls += 1; },
+      storageDeps: {
+        pruneArchive: async () => { pruneCalls += 1; },
+      },
+    }),
+    /execute requires both durable recovery copies/,
+  );
+  assert.equal(bucketCalls, 0, "missing durable recovery must fail before the bucket boundary");
+  assert.equal(pruneCalls, 0, "missing durable recovery must fail before destructive prune");
 }
 
 async function captureAutomaticFailure(scheduler) {
@@ -3006,6 +3062,8 @@ function staticWorkflowContracts() {
 staticOrchestrationContract();
 staticWorkflowContracts();
 await durableRecoveryInspectionContracts();
+await durableRecoveryContextContracts();
+await destructiveExecuteEvidenceBoundaryContract();
 await schedulerContracts();
 await legacyOrchestratedPruneArgumentTypesContract();
 await legacyReadOnlyDryRunPruneContract();
