@@ -1427,6 +1427,20 @@ const CLOSED_HUMAN_DURABLE_REGISTRY_BINDING_SQL = `select
   from public.chips_transaction_idempotency registry
  where registry.archive_batch_id = $1::bigint;`;
 
+const CLOSED_HUMAN_COMPLETED_LIFECYCLE_SQL = `select
+    tables.id::text as table_id,
+    tables.human_retention_complete_at::text as human_retention_complete_at
+  from public.poker_tables tables
+  join (
+    select min(registry.table_id::text)::uuid as table_id
+      from public.chips_transaction_idempotency registry
+     where registry.archive_batch_id = $1::bigint
+     having count(*) = $2::bigint
+        and count(distinct registry.table_id) = 1
+        and count(*) filter (where registry.table_id is null) = 0
+  ) binding on binding.table_id = tables.id
+ where tables.human_retention_complete_at is not null;`;
+
 async function readClosedHumanDurableRegistryBinding(sql, row, expectedTableId = null) {
   const batchId = text(row?.batch_id);
   if (!batchId) fail("closed-human durable registry binding requires an exact batch");
@@ -1443,11 +1457,12 @@ async function readClosedHumanDurableRegistryBinding(sql, row, expectedTableId =
   const nullTableCount = Number(result.null_table_count);
   const exactTableCount = Number(result.exact_table_count);
   const registryTableId = text(result.registry_table_id).toLowerCase();
-  if (![registryCount, distinctTableCount, nullTableCount, exactTableCount].every(Number.isSafeInteger)
+  if (![registryCount, distinctTableCount, nullTableCount].every(Number.isSafeInteger)
     || registryCount !== Number(row.transaction_count)
     || distinctTableCount !== 1
     || nullTableCount !== 0
-    || exactTableCount !== registryCount
+    || (expectedTableId != null
+      && (!Number.isSafeInteger(exactTableCount) || exactTableCount !== registryCount))
     || !validUuid(registryTableId)
     || (expectedTableId != null && registryTableId !== String(expectedTableId).toLowerCase())) {
     fail(`exact closed-human batch ${batchId} durable registry binding is not exact`);
@@ -1458,6 +1473,32 @@ async function readClosedHumanDurableRegistryBinding(sql, row, expectedTableId =
     nullTableCount,
     exactTableCount,
     tableId: registryTableId,
+  };
+}
+
+async function readClosedHumanCompletedLifecycleMarker(sql, row) {
+  const batchId = text(row?.batch_id);
+  const transactionCount = Number(row?.transaction_count);
+  if (!batchId || !Number.isSafeInteger(transactionCount) || transactionCount < 1) {
+    fail(`closed-human completed lifecycle batch ${batchId || "unknown"} has invalid archive counts`);
+  }
+  const rows = await sql.unsafe(
+    CLOSED_HUMAN_COMPLETED_LIFECYCLE_SQL,
+    [batchId, transactionCount],
+  );
+  if (rows.length > 1) {
+    fail(`closed-human completed cycle table marker is not unique for batch ${batchId}`);
+  }
+  if (rows.length === 0) return null;
+  const tableId = text(rows[0]?.table_id).toLowerCase();
+  const marker = rows[0];
+  if (!validUuid(tableId) || !marker.human_retention_complete_at) {
+    fail(`closed-human completed cycle table marker is invalid for batch ${batchId}`);
+  }
+  return {
+    tablePresent: true,
+    marker,
+    lifecycleComplete: true,
   };
 }
 
@@ -4162,6 +4203,14 @@ async function readClosedHumanCompletedLifecycleState({ row, identity, sql } = {
   if (batchId === CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId) {
     return { tablePresent: false, marker: null, lifecycleComplete: true };
   }
+
+  // A completed lifecycle is terminal.  Resolve its durable marker before
+  // asking the active/recovery binding validator to re-prove the batch.  The
+  // lookup remains scoped to the batch's complete registry cardinality and
+  // one non-null table, while the strict binding path below remains required
+  // for every batch whose lifecycle is not complete.
+  const completedLifecycle = await readClosedHumanCompletedLifecycleMarker(sql, row);
+  if (completedLifecycle) return completedLifecycle;
 
   const registry = await readClosedHumanDurableRegistryBinding(sql, row);
   const markerRows = await sql.unsafe(CLOSED_HUMAN_LIFECYCLE_MARKER_SQL, [registry.tableId]);

@@ -2239,6 +2239,7 @@ function makeAutomaticClosedHumanHarness({
   invalidCandidateEvidence = false,
   invalidCanaryDurableEvidence = false,
   canaryTablePresent = true,
+  candidateBatchId = "335",
 } = {}) {
   const canaryRow = makeClosedHumanCanaryRow({
     ...CLOSED_HUMAN_AUTOMATIC_ACTIVATION,
@@ -2253,7 +2254,7 @@ function makeAutomaticClosedHumanHarness({
     destructive_go_batch_id: "334",
   });
   const candidateRow = makeClosedHumanCanaryRow({
-    batch_id: "335",
+    batch_id: candidateBatchId,
     object_path: `v1/sha256/${automaticCandidateCompressedSha}.jsonl.gz`,
     cutoff: "2026-08-14T00:00:00.000000Z",
     cursor_end_created_at: "2026-08-13T00:00:00.000000Z",
@@ -2300,6 +2301,8 @@ function makeAutomaticClosedHumanHarness({
     recoveryInspections: 0,
     verifyBucketCalls: 0,
     manifestReads: 0,
+    exactBindingCalls: 0,
+    completedLifecycleLookupCalls: 0,
     pruneCalls: [],
     sqlCalls: [],
   };
@@ -2325,6 +2328,19 @@ function makeAutomaticClosedHumanHarness({
       if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
       if (query.includes("chips_table_fence_is_active")) return [{ active: true }];
       if (query.includes("chips_table_fence_control")) return [{ enforcement_active: true }];
+      if (query.includes("human_retention_complete_at is not null")
+        && query.includes("archive_batch_id = $1::bigint")) {
+        state.completedLifecycleLookupCalls += 1;
+        const batchId = String(values[0]);
+        const candidateTableId = automaticCandidateEvidence.closedHumanTableId;
+        if (batchId === String(candidateBatchId) && state.markers.has(candidateTableId)) {
+          return [{
+            table_id: candidateTableId,
+            human_retention_complete_at: state.markers.get(candidateTableId),
+          }];
+        }
+        return [];
+      }
       if (query.includes("from public.chips_transaction_idempotency")) {
         const batchId = String(values[0]);
         const batch = batchId === "334" ? canaryRow : candidateRow;
@@ -2332,11 +2348,14 @@ function makeAutomaticClosedHumanHarness({
           ? CLOSED_HUMAN_AUTOMATIC_ACTIVATION.tableId
           : automaticCandidateEvidence.closedHumanTableId;
         const invalid = batchId === "334" && invalidCanaryDurableEvidence;
+        state.exactBindingCalls += 1;
+        const completedCandidate = batchId === String(candidateBatchId)
+          && state.markers.has(automaticCandidateEvidence.closedHumanTableId);
         return [{
           registry_count: invalid ? "1" : String(batch.transaction_count),
           distinct_table_count: "1",
           null_table_count: "0",
-          exact_table_count: invalid ? "0" : String(batch.transaction_count),
+          exact_table_count: invalid || completedCandidate ? "0" : String(batch.transaction_count),
           registry_table_id: invalid ? "00000000-0000-4000-8000-000000000099" : tableId,
         }];
       }
@@ -2432,7 +2451,7 @@ function makeAutomaticClosedHumanHarness({
       assert.equal(argv.includes("--approved-batch-id"), false);
       state.executeCalls += 1;
       candidateRow.destructive_go_at = "2026-08-14T00:03:00.000000Z";
-      candidateRow.destructive_go_batch_id = "335";
+      candidateRow.destructive_go_batch_id = String(candidateBatchId);
       candidateRow.pruned_at = "2026-08-14T00:04:00.000000Z";
       candidateRow.pruned_transaction_count = 1;
       candidateRow.pruned_entry_count = 2;
@@ -2648,6 +2667,41 @@ assert.equal(
   "completed closed-human no-work retry must not read the Storage manifest",
 );
 
+// Regression for the live batch 669 flow: after the first automatic prune has
+// written human_retention_complete_at, the next run must recognize that
+// terminal lifecycle before attempting the exact registry-binding validator.
+const completedBatch669Harness = makeAutomaticClosedHumanHarness({ candidateBatchId: "669" });
+const completedBatch669FirstRun = await runAutomaticClosedHumanStageAutomation({
+  env: automaticStageEnv,
+  deps: completedBatch669Harness.deps,
+});
+assert.equal(completedBatch669FirstRun.processed[0].batchId, "669");
+assert.equal(completedBatch669FirstRun.processed[0].lifecycleState, "human_retention_complete");
+const completedBatch669ExactBindingCalls = completedBatch669Harness.state.exactBindingCalls;
+const completedBatch669ExecuteCalls = completedBatch669Harness.state.executeCalls;
+const completedBatch669LifecycleCalls = completedBatch669Harness.state.lifecycleCalls;
+const completedBatch669DestructivePrunes = completedBatch669Harness.state.pruneCalls
+  .filter((argv) => argv.includes("--execute")).length;
+const completedBatch669SecondRun = await runAutomaticClosedHumanStageAutomation({
+  env: automaticStageEnv,
+  deps: completedBatch669Harness.deps,
+});
+assert.equal(completedBatch669SecondRun.processed.length, 0);
+assert.equal(completedBatch669SecondRun.stopReason, "no_eligible_closed_human_table");
+assert.equal(completedBatch669Harness.state.completedLifecycleLookupCalls, 1);
+assert.equal(
+  completedBatch669Harness.state.exactBindingCalls,
+  completedBatch669ExactBindingCalls,
+  "completed batch 669 must not revalidate exact registry binding",
+);
+assert.equal(completedBatch669Harness.state.executeCalls, completedBatch669ExecuteCalls);
+assert.equal(completedBatch669Harness.state.lifecycleCalls, completedBatch669LifecycleCalls);
+assert.equal(
+  completedBatch669Harness.state.pruneCalls.filter((argv) => argv.includes("--execute")).length,
+  completedBatch669DestructivePrunes,
+  "completed batch 669 must not be destructively pruned twice",
+);
+
 automaticHarness.state.liveTables.delete(automaticCandidateEvidence.closedHumanTableId);
 automaticHarness.state.markers.delete(automaticCandidateEvidence.closedHumanTableId);
 const automaticAfterTableCleanup = await runAutomaticClosedHumanStageAutomation({
@@ -2736,6 +2790,7 @@ for (const harness of [
   automaticHarness,
   automaticWithoutCanaryTableHarness,
   invalidDurableCanaryHarness,
+  completedBatch669Harness,
   completedMissingDurableHarness,
   completedMismatchedEvidenceHarness,
   incompleteAutomaticHarness,
