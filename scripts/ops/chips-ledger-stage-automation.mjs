@@ -4077,6 +4077,21 @@ function assertCanonicalManualLifecycleOperator(env) {
   }
 }
 
+function assertCanonicalExternalClosedHumanAutomaticOperator(env) {
+  const exactValues = {
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_ACTOR: "krzysztofcal",
+  };
+  for (const [key, expected] of Object.entries(exactValues)) {
+    if (text(env[key]) !== expected) {
+      fail(`external closed-human automatic retention requires canonical owner workflow ${key}`);
+    }
+  }
+}
+
 function assertExactClosedHumanLifecycleTarget({ batchId, tableId, cutoff }) {
   const target = CLOSED_HUMAN_LIFECYCLE_COMPLETION_TARGET;
   const batchIdText = batchId == null ? null : String(batchId);
@@ -5001,8 +5016,13 @@ export async function runAutomaticClosedHumanStageAutomation({
     || text(env.CHIPS_LEDGER_BOT_ONLY_AUTOMATIC) === "1") {
     fail("automatic closed-human retention cannot share a manual or bot-only execution gate");
   }
-  if (text(env.GITHUB_EVENT_NAME) && text(env.GITHUB_EVENT_NAME) !== "schedule") {
-    fail("automatic closed-human retention is schedule-only");
+  const eventName = text(env.GITHUB_EVENT_NAME);
+  const externalAutomatic = text(env.CHIPS_LEDGER_CLOSED_HUMAN_EXTERNAL_AUTOMATIC) === "1";
+  if (eventName && eventName !== "schedule") {
+    if (eventName !== "workflow_dispatch" || !externalAutomatic) {
+      fail("automatic closed-human retention is schedule-only or external-scheduled-automatic");
+    }
+    assertCanonicalExternalClosedHumanAutomaticOperator(env);
   }
   if (text(env.GITHUB_REPOSITORY) && text(env.GITHUB_REPOSITORY) !== "krzysztofcal/arcadePlatform") {
     fail("automatic closed-human retention requires the canonical repository");

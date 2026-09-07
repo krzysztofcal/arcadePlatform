@@ -310,11 +310,20 @@ const closedHumanAutomaticRun = workflow.match(
   /- name: Run activated closed-human 30-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
 assert.match(closedHumanAutomaticRun, /id: closed_human_automatic/);
-assert.match(closedHumanAutomaticRun, /continue-on-error: \$\{\{ github\.event_name == 'schedule'/);
-assert.match(closedHumanAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
+assert.equal(
+  closedHumanAutomaticRun.match(/^        if: (.+)$/m)?.[1],
+  "\${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}",
+  "external dispatch must not skip the activated closed-human automatic step",
+);
+assert.equal(
+  closedHumanAutomaticRun.match(/^        continue-on-error: (.+)$/m)?.[1],
+  "\${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}",
+  "external closed-human failures must remain independently aggregated",
+);
 assert.match(closedHumanAutomaticRun, /CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"/);
+assert.match(closedHumanAutomaticRun, /CHIPS_LEDGER_CLOSED_HUMAN_EXTERNAL_AUTOMATIC: "1"/);
 assert.match(closedHumanAutomaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy closed-human-table-30d --automatic/);
-assert.doesNotMatch(closedHumanAutomaticRun, /github\.event_name == 'workflow_dispatch'|--approved-batch-id|--execute(?:\s|$)|\bACTIVATE\b|GO 334|Production|SUPABASE_PROD_/i);
+assert.doesNotMatch(closedHumanAutomaticRun, /--approved-batch-id|--execute(?:\s|$)|\bACTIVATE\b|GO 334|Production|SUPABASE_PROD_/i);
 
 const closedHumanAutomaticRunStart = workflow.indexOf("- name: Run activated closed-human 30-day Stage automation");
 const escrowAutomaticRunStart = workflow.indexOf("- name: Run Stage escrow account retention");

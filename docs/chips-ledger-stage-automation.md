@@ -17,8 +17,8 @@ credentials; there is no Production scheduler or Production operation path.
 - Stage escrow account retention is completed and active. It runs on the same
   15-minute native cron.
 - `external-scheduled-automatic` is the VPS/external fallback dispatch mode for
-  the same bot-only 7-day and escrow account retention automatic steps. It does
-  not introduce a separate policy or batch limit.
+  the same bot-only 7-day, closed-human 30-day, and escrow account retention
+  automatic steps. It does not introduce a separate policy or batch limit.
 - The workflow concurrency group is `chips-ledger-stage-automation` with
   `cancel-in-progress: false` and `queue: max`.
 
@@ -44,7 +44,7 @@ ongoing operations:
 | `closed-human-30d-recovery-repair` | Owner-only, exact-batch recovery repair for a proven/unpruned closed-human batch with missing durable recovery |
 | `escrow-retention-audit` | Read-only Stage escrow retention audit |
 | `escrow-retention-verify` | Verify an existing account recovery object |
-| `external-scheduled-automatic` | External/VPS fallback for native bot-only + escrow automation |
+| `external-scheduled-automatic` | External/VPS fallback for native bot-only + closed-human + escrow automation |
 
 The rollout-only modes (first bot-only canary prepare/execute, bot-only batch 15
 recovery repair, legacy Stage allowlist prepare/orchestrate/batch-13 execute,

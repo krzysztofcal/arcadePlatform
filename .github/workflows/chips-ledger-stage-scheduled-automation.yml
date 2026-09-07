@@ -65,7 +65,7 @@ on:
         required: false
         type: string
   schedule:
-    # Second cron runs Stage escrow retention every 15 minutes.
+    # Second cron runs the Stage retention paths every 15 minutes.
     - cron: "17 2 * * *"
     - cron: "7,22,37,52 * * * *"
 
@@ -438,12 +438,13 @@ jobs:
         run: node scripts/ops/chips-ledger-stage-automation.mjs --policy bot-only-7d --automatic
 
       - name: Run activated closed-human 30-day Stage automation
-        if: ${{ github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *' }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}
         id: closed_human_automatic
-        continue-on-error: ${{ github.event_name == 'schedule' }}
+        continue-on-error: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
           CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC: "1"
+          CHIPS_LEDGER_CLOSED_HUMAN_EXTERNAL_AUTOMATIC: "1"
         run: node scripts/ops/chips-ledger-stage-automation.mjs --policy closed-human-table-30d --automatic
 
       - name: Run Stage escrow account retention
