@@ -9,6 +9,7 @@ const lifecycleMarkerRlsMigration = fs.readFileSync("supabase/migrations/2026090
 const lifecycleAclMigration = fs.readFileSync("supabase/migrations/20260905130000_chips_ledger_closed_human_lifecycle_completion_acl.sql", "utf8");
 const automaticActivationMigration = fs.readFileSync("supabase/migrations/20260905140000_chips_ledger_closed_human_automatic_activation.sql", "utf8");
 const activationPostPruneMigration = fs.readFileSync("supabase/migrations/20260905150000_chips_ledger_closed_human_activation_post_prune.sql", "utf8");
+const automaticP9273Migration = fs.readFileSync("supabase/migrations/20260907120000_chips_ledger_closed_human_automatic_p9273_registry_binding.sql", "utf8");
 const cleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
 
 assert.match(migration, /human_retention_complete_at timestamptz/);
@@ -77,6 +78,13 @@ assert.match(activationPostPruneMigration, /exact_table_count/);
 assert.match(activationPostPruneMigration, /durable activation evidence/);
 assert.doesNotMatch(activationPostPruneMigration, /20260904160000|20260904170000/);
 assert.doesNotMatch(activationPostPruneMigration, /grant\s+(insert|update|delete)\b/i);
+assert.match(automaticP9273Migration, /pg_get_functiondef\(/);
+assert.match(automaticP9273Migration, /count\(distinct registry\.transaction_id\)/);
+assert.match(automaticP9273Migration, /count\(\*\) filter \(where registry\.table_id = p_table_id\)/);
+assert.match(automaticP9273Migration, /registry\.archive_batch_id is not null[\s\S]*registry\.archive_batch_id <> batch\.batch_id/);
+assert.match(automaticP9273Migration, /where registry\.transaction_id = any\(p_transaction_ids\);/);
+assert.match(automaticP9273Migration, /foreign_archive_mapping_count <> 0/);
+assert.doesNotMatch(automaticP9273Migration, /update public\.chips_transaction_idempotency/);
 assert.match(cleanup, /t\.has_human_participant is true and t\.human_retention_complete_at is not null/);
 assert.match(cleanup, /t\.has_human_participant is not true and t\.bot_only_retention_complete_at is not null/);
 

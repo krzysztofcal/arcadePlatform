@@ -1527,6 +1527,293 @@ async function assertClosedHumanPostPruneActivation(sql) {
   });
 }
 
+async function assertClosedHumanAutomaticP9273RegistryBinding(sql) {
+  const tableId = "7af59a48-5804-4c78-b8c3-d81e5e721d6c";
+  const userAccountId = "00000000-0000-4000-8000-00000000f668";
+  const escrowId = "00000000-0000-4000-8000-00000000f669";
+  const transactionIds = [
+    "2f4bbd34-b313-46cd-af44-20908814d4c8",
+    "2ad26bec-abc1-40df-a667-8d5e9b56f7fa",
+  ];
+  const cutoff = "2026-08-08T15:06:08.598Z";
+  const createdAt = ["2026-07-23T21:51:07.945476Z", "2026-07-24T19:54:53.206093Z"];
+  const ROLLBACK = new Error("closed-human-automatic-p9273-rollback");
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("select public.chips_set_table_fence_active(false);");
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $p9273_stage_gate$ select '7656985631720456337'::text $p9273_stage_gate$;`);
+    await tx.unsafe(`create or replace function public.chips_assert_archive_prune_target(p_project_ref text, p_transaction_count bigint)
+      returns text language plpgsql security definer set search_path = ''
+      as $p9273_target_gate$
+      begin
+        if p_project_ref = 'krydukthwdvccggbyjfw' and p_transaction_count between 1 and 5000 then
+          return '7656985631720456337';
+        end if;
+        raise exception 'test target gate rejected request';
+      end
+      $p9273_target_gate$;`);
+    await tx.unsafe(`create or replace function public.chips_assert_closed_human_table_lifecycle_gate(
+        p_table_id uuid, p_cutoff timestamptz, p_current_batch_id bigint default null
+      ) returns void language plpgsql security definer set search_path = ''
+      as $p9273_lifecycle_gate$
+      begin
+        return;
+      end
+      $p9273_lifecycle_gate$;`);
+
+    // The automatic wrapper's policy read must see the same activated shape as
+    // Stage.  The fixture is rollback-only; disabling triggers for this setup
+    // avoids manufacturing canary batch 334 while leaving the production
+    // policy guard and the automatic function itself under test.
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe(`update public.chips_stage_closed_human_table_retention_policy
+      set enabled = true,
+          canary_batch_id = 334,
+          canary_confirmation = 'GO 334',
+          activation_go_at = timezone('utc', now()),
+          activation_confirmation = 'ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY 334',
+          activated_at = timezone('utc', now())
+      where policy_id = 'stage-ledger-closed-human-table-retention-30d-v1';`);
+    await tx.unsafe("set local session_replication_role = 'origin';");
+
+    await tx.unsafe(`insert into public.poker_tables (id, status, has_human_participant)
+      values ($1::uuid, 'CLOSED', true);`, [tableId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, user_id, system_key, account_type, status, balance, next_entry_seq)
+      values ($1::uuid, $2::uuid, null, 'USER', 'active', 100, 1);`, [userAccountId, primaryUserId]);
+    await tx.unsafe(`insert into public.chips_accounts (id, user_id, system_key, account_type, status, balance, next_entry_seq)
+      values ($1::uuid, null, $2, 'ESCROW', 'active', 0, 1);`, [escrowId, `POKER_TABLE:${tableId}`]);
+    await tx.unsafe(`insert into public.poker_state (table_id, state)
+      values ($1::uuid, '{"phase":"HAND_DONE","handId":""}'::jsonb);`, [tableId]);
+
+    const entryIds = [];
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      const isBuyIn = index === 0;
+      const registryKey = isBuyIn
+        ? `join-buyin:${tableId}:${primaryUserId}:p9273-fresh`
+        : `poker:human-terminal-cashout:v1:${tableId}:p9273-fresh`;
+      await tx.unsafe(`insert into public.chips_transactions (
+        id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+      ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, $7::uuid, $8::timestamptz);`, [
+        transactionIds[index],
+        `table:${tableId}`,
+        JSON.stringify({ tableId }),
+        registryKey,
+        (isBuyIn ? "a" : "b").repeat(64),
+        isBuyIn ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+        primaryUserId,
+        sql.typed(createdAt[index], 25),
+      ]);
+      const rows = await tx.unsafe(`with accounts as (
+        select id, account_type from public.chips_accounts
+        where id = $2::uuid or id = $3::uuid
+      )
+      insert into public.chips_entries (transaction_id, account_id, amount, metadata)
+      select $1::uuid, id,
+             case
+               when $4::boolean and account_type = 'USER' then -100
+               when $4::boolean and account_type = 'ESCROW' then 100
+               when not $4::boolean and account_type = 'USER' then 100
+               when not $4::boolean and account_type = 'ESCROW' then -100
+             end,
+             '{}'::jsonb
+      from accounts order by account_type::text returning id;`, [
+        transactionIds[index], userAccountId, escrowId, isBuyIn,
+      ]);
+      entryIds.push(...rows.map((row) => String(row.id)));
+    }
+    entryIds.sort((left, right) => (BigInt(left) < BigInt(right) ? -1 : 1));
+
+    const hashRows = await tx.unsafe(
+      `select public.chips_archive_uuid_ids_sha256($1::uuid[]) as transaction_hash,
+              public.chips_archive_bigint_ids_sha256($2::bigint[]) as entry_hash;`,
+      [transactionIds, entryIds],
+    );
+    const transactionHash = hashRows[0].transaction_hash;
+    const entryHash = hashRows[0].entry_hash;
+    const compressedSha = "6".repeat(64);
+    const objectPath = `v1/sha256/${compressedSha}.jsonl.gz`;
+    await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+      batch_id, object_path, project_ref, format_version, source_policy_id, cutoff,
+      cursor_end_created_at, cursor_end_id, first_created_at, last_created_at,
+      transaction_count, entry_count, tx_types, raw_bytes, compressed_bytes,
+      raw_sha256, compressed_sha256, credits, debits, net_amount, status,
+      committed_at, archive_proof_verified_at, archived_transaction_ids_sha256,
+      archived_entry_ids_sha256
+    ) overriding system value values (
+      669, $1, 'krydukthwdvccggbyjfw', 1,
+      'stage-ledger-closed-human-table-retention-30d-v1', $2::timestamptz,
+      $3::timestamptz, $4::uuid, $5::timestamptz, $6::timestamptz,
+      2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
+      200, 80, $7, $8, 200, 200, 0, 'committed', timezone('utc', now()),
+      timezone('utc', now()), $9, $10
+    );`, [
+      objectPath,
+      sql.typed(cutoff, 25),
+      sql.typed(createdAt[1], 25), transactionIds[1],
+      sql.typed(createdAt[0], 25), sql.typed(createdAt[1], 25),
+      "7".repeat(64), compressedSha, transactionHash, entryHash,
+    ]);
+
+    const beforeRows = await tx.unsafe(`select
+      count(*) as registry_count,
+      count(distinct transaction_id) as distinct_transaction_count,
+      count(distinct table_id) as distinct_table_count,
+      count(*) filter (where table_id is null) as null_table_count,
+      count(*) filter (where table_id = $2::uuid) as exact_table_count,
+      count(*) filter (where archive_batch_id is null) as fresh_mapping_count
+      from public.chips_transaction_idempotency
+      where transaction_id = any($1::uuid[]);`, [transactionIds, tableId]);
+    assert.equal(Number(beforeRows[0].registry_count), 2, "batch 669 fixture must have two registry rows");
+    assert.equal(Number(beforeRows[0].distinct_transaction_count), 2);
+    assert.equal(Number(beforeRows[0].distinct_table_count), 1);
+    assert.equal(Number(beforeRows[0].null_table_count), 0);
+    assert.equal(Number(beforeRows[0].exact_table_count), 2);
+    assert.equal(Number(beforeRows[0].fresh_mapping_count), 2, "batch 669 fixture must have two NULL mappings before execute");
+
+    const executeRows = await tx.unsafe(
+      `select public.chips_auto_prune_closed_human_table_archive_batch(
+        $1, $2::uuid[], $3::bigint[], $4::uuid
+      ) as result;`,
+      [objectPath, transactionIds, entryIds, tableId],
+    );
+    assert.equal(executeRows[0].result.state, "pruned", "fresh NULL registry mappings must pass P9273 and prune");
+
+    const postExecuteRows = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($1::uuid[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where transaction_id = any($1::uuid[])) as registry_rows,
+      (select count(*) from public.chips_transaction_idempotency where transaction_id = any($1::uuid[])
+        and archive_batch_id = 669) as mapped_rows,
+      (select pruned_at from public.chips_ledger_archive_batches where batch_id = 669) as pruned_at,
+      (select destructive_go_batch_id from public.chips_ledger_archive_batches where batch_id = 669) as go_batch_id;`,
+      [transactionIds],
+    );
+    assert.equal(Number(postExecuteRows[0].hot_transactions), 0);
+    assert.equal(Number(postExecuteRows[0].hot_entries), 0);
+    assert.equal(Number(postExecuteRows[0].registry_rows), 2);
+    assert.equal(Number(postExecuteRows[0].mapped_rows), 2);
+    assert.ok(postExecuteRows[0].pruned_at);
+    assert.equal(String(postExecuteRows[0].go_batch_id), "669");
+
+    const retryRows = await tx.unsafe(
+      `select public.chips_auto_prune_closed_human_table_archive_batch(
+        $1, $2::uuid[], $3::bigint[], $4::uuid
+      ) as result;`,
+      [objectPath, transactionIds, entryIds, tableId],
+    );
+    assert.equal(retryRows[0].result.state, "already_pruned", "already-pruned automatic retry must remain idempotent");
+
+    const expectP9273 = async (savepoint, operation) => {
+      await tx.unsafe(`savepoint ${savepoint};`);
+      let caught = null;
+      try {
+        await operation();
+      } catch (error) {
+        caught = error;
+      }
+      assert.equal(caught?.code, "P9273", `${savepoint} must fail with P9273`);
+      assert.match(caught?.message || "", /Automatic closed-human target registry binding is not exact/);
+      await tx.unsafe(`rollback to savepoint ${savepoint};`);
+      await tx.unsafe(`release savepoint ${savepoint};`);
+    };
+
+    const insertGuardFixture = async ({ batchId, tableId: guardTableId, mode }) => {
+      const guardTransactionIds = [
+        `00000000-0000-4000-8000-${String(batchId).padStart(12, "0")}`,
+        `00000000-0000-4000-8000-${String(batchId + 1).padStart(12, "0")}`,
+      ];
+      const guardEntryIds = [
+        String(9700000 + batchId), String(9700100 + batchId),
+        String(9700200 + batchId), String(9700300 + batchId),
+      ];
+      const compressedShaForGuard = String(batchId % 10).repeat(64);
+      const guardPath = `v1/sha256/${compressedShaForGuard}.jsonl.gz`;
+      await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+        batch_id, object_path, project_ref, format_version, source_policy_id, cutoff,
+        first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+        raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits,
+        net_amount, status, committed_at, archive_proof_verified_at,
+        archived_transaction_ids_sha256, archived_entry_ids_sha256
+      ) overriding system value values (
+        $1, $2, 'krydukthwdvccggbyjfw', 1,
+        'stage-ledger-closed-human-table-retention-30d-v1', $3::timestamptz,
+        $4::timestamptz, $4::timestamptz, 2, 4, '{"TABLE_BUY_IN":2}'::jsonb,
+        100, 80, $5, $6, 20, 20, 0, 'committed', timezone('utc', now()),
+        timezone('utc', now()), $5, $6
+      );`, [
+        batchId, guardPath, sql.typed(cutoff, 25), sql.typed(createdAt[0], 25),
+        "8".repeat(64), compressedShaForGuard,
+      ]);
+      const registryRows = guardTransactionIds.map((transactionId, index) => ({
+        transactionId,
+        tableId: mode === "wrong_table"
+          ? "00000000-0000-4000-8000-00000000ffff"
+          : mode === "null_table" && index === 0 ? null : guardTableId,
+        archiveBatchId: mode === "foreign" ? 669 : null,
+      }));
+      for (let index = 0; index < registryRows.length; index += 1) {
+        const row = registryRows[index];
+        await tx.unsafe(`insert into public.chips_transaction_idempotency (
+          idempotency_key, transaction_id, payload_hash, tx_type, user_id,
+          transaction_created_at, archive_batch_id, table_id, key_format_version, key_format
+        ) values ($1, $2::uuid, $3, 'TABLE_BUY_IN', null, $4::timestamptz,
+          $5::bigint, $6::uuid, 1, 'fixture');`, [
+          `p9273-${mode}-${batchId}-${index}`,
+          row.transactionId,
+          (index === 0 ? "9" : "a").repeat(64),
+          sql.typed(createdAt[index], 25),
+          row.archiveBatchId,
+          row.tableId,
+        ]);
+      }
+      return { guardPath, guardTransactionIds, guardEntryIds };
+    };
+
+    const foreign = await insertGuardFixture({
+      batchId: 670,
+      tableId: "00000000-0000-4000-8000-00000000f670",
+      mode: "foreign",
+    });
+    await expectP9273("p9273_foreign_mapping", () => tx.unsafe(
+      `select public.chips_auto_prune_closed_human_table_archive_batch(
+        $1, $2::uuid[], $3::bigint[], $4::uuid
+      );`,
+      [foreign.guardPath, foreign.guardTransactionIds, foreign.guardEntryIds, "00000000-0000-4000-8000-00000000f670"],
+    ));
+
+    const wrongTable = await insertGuardFixture({
+      batchId: 671,
+      tableId: "00000000-0000-4000-8000-00000000f671",
+      mode: "wrong_table",
+    });
+    await expectP9273("p9273_wrong_table", () => tx.unsafe(
+      `select public.chips_auto_prune_closed_human_table_archive_batch(
+        $1, $2::uuid[], $3::bigint[], $4::uuid
+      );`,
+      [wrongTable.guardPath, wrongTable.guardTransactionIds, wrongTable.guardEntryIds, "00000000-0000-4000-8000-00000000f671"],
+    ));
+
+    const nullTable = await insertGuardFixture({
+      batchId: 672,
+      tableId: "00000000-0000-4000-8000-00000000f672",
+      mode: "null_table",
+    });
+    await expectP9273("p9273_null_table", () => tx.unsafe(
+      `select public.chips_auto_prune_closed_human_table_archive_batch(
+        $1, $2::uuid[], $3::bigint[], $4::uuid
+      );`,
+      [nullTable.guardPath, nullTable.guardTransactionIds, nullTable.guardEntryIds, "00000000-0000-4000-8000-00000000f672"],
+    ));
+
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
+
 async function assertClosedHumanPruneEvidence(sql) {
   const closedHumanPolicyId = "stage-ledger-closed-human-table-retention-30d-v1";
   const ROLLBACK = new Error("closed-human-prune-evidence-rollback");
@@ -2684,6 +2971,7 @@ async function main() {
   await assertClosedHumanPolicyRls(sql);
   await assertClosedHumanLifecycleMarkerRls(sql);
   await assertClosedHumanPostPruneActivation(sql);
+  await assertClosedHumanAutomaticP9273RegistryBinding(sql);
   await assertClosedHumanPruneEvidence(sql);
   await assertLegacyAllowlistCleanupContracts(sql);
   await assertLegacyUnprunedRegistrySelectorContract(sql);
