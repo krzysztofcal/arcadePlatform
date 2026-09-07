@@ -2612,6 +2612,46 @@ test('poker v2 keeps manual rebuy free of auto-rebuy feedback', async () => {
   assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
 });
 
+test('poker v2 classifies a manual retry of recovered auto-rebuy as manual', async () => {
+  let resolveRebuy = null;
+  const stored = JSON.stringify({
+    phase: 'error',
+    requestId: 'rebuy_auto_retry_1',
+    tableId: 'table-1',
+    userId: 'user-1',
+    source: 'auto',
+    payload: { tableId: 'table-1', amount: 500 }
+  });
+  const harness = createHarness({
+    localStorageEntries: new Map([['kcswh:poker-auto-rebuy:v1:user-1', JSON.stringify({ enabled: true })]]),
+    sessionStorageEntries: { 'poker:pendingRebuy:user-1:table-1': stored },
+    sendRebuy(){
+      return new Promise((resolve) => { resolveRebuy = resolve; });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onStatus('auth_ok', { roomId: 'table-1' });
+  await harness.flush();
+  ws.onSnapshot(autoRebuySnapshot({ status: 'OUT_OF_CHIPS', stack: 0, canRebuy: true }));
+  await harness.flush();
+
+  assert.equal(harness.rebuyRequestIds.length, 0);
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
+  harness.elements.pokerV2RebuyBtn.click();
+  await harness.flush();
+
+  assert.deepEqual(harness.rebuyRequestIds, ['rebuy_auto_retry_1']);
+  assert.equal(JSON.parse(harness.getSessionStorage('poker:pendingRebuy:user-1:table-1')).source, 'manual');
+  resolveRebuy({ ok: true, buyIn: 500 });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+});
+
 test('poker v2 recovers an auto-rebuy success from a funded snapshot exactly once', async () => {
   const stored = JSON.stringify({
     phase: 'pending',

@@ -4793,6 +4793,7 @@
     if (requestedSource === 'auto' && currentTableBuyIn() == null) return Promise.resolve();
     if (rebuyOperation && rebuyOperation.phase === 'pending') return Promise.resolve({ ok: true, pending: true });
     if (rebuyOperation && rebuyOperation.phase === 'error'){
+      rebuyOperation.source = requestedSource;
       rebuyOperation.phase = 'pending';
       rebuyOperation.resumeAttempted = true;
       persistPendingRebuy();
