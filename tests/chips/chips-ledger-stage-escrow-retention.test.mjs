@@ -859,6 +859,33 @@ test("automatic disabled policy audits on the reserved session and releases its 
   assert.equal(session.queries.some(({ query }) => query.includes("pg_advisory_unlock")), true);
 });
 
+test("automatic empty escrow backlog skips Storage verification", async () => {
+  const session = reservedAuditSession({ policyEnabled: true });
+  let verifyBucketCalls = 0;
+  let storageReads = 0;
+  const result = await runStageEscrowAccountRetention({
+    mode: "automatic",
+    deps: {
+      sql: session,
+      config: { dbUrl: "postgres://stage.example.invalid/db" },
+      telemetry: false,
+      verifyBucket: async () => {
+        verifyBucketCalls += 1;
+        throw new Error("empty escrow backlog must not verify Storage");
+      },
+      readPrivateObjectIfExists: async () => {
+        storageReads += 1;
+        throw new Error("empty escrow backlog must not read Storage");
+      },
+    },
+  });
+  assert.equal(result.state, "complete");
+  assert.equal(result.policyEnabled, true);
+  assert.equal(result.eligible, 0);
+  assert.equal(verifyBucketCalls, 0);
+  assert.equal(storageReads, 0);
+});
+
 test("initial escrow connection retries a fresh client only for transient failures", async () => {
   for (const code of ["CONNECT_TIMEOUT", "57014", "42501"]) {
     const clients = [];

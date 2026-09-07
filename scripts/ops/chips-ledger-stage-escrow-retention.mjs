@@ -2155,16 +2155,20 @@ export async function runStageEscrowAccountRetention({
       result = { ...base, state: mode === "audit" ? "audit" : "disabled", durationMs: Date.now() - startedAt };
       return result;
     }
-    if (audit.unknownForeignKeys?.length) fail("unknown foreign key dependency blocks escrow account retirement");
-    if (audit.unknownDeleteTriggers?.length) fail("unknown DELETE trigger dependency blocks escrow account retirement");
-    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
-    await verifyBucket(storageTarget);
     const candidatePool = batchId
       ? audit.candidates.filter((candidate) => text(candidate.batchId) === text(batchId))
       : audit.candidates;
     if (batchId && candidatePool.length !== 1) {
       fail(`exact escrow account-retirement batch ${batchId} is not a current safe candidate`);
     }
+    if (candidatePool.length === 0) {
+      result = { ...base, state: "complete", durationMs: Date.now() - startedAt };
+      return result;
+    }
+    if (audit.unknownForeignKeys?.length) fail("unknown foreign key dependency blocks escrow account retirement");
+    if (audit.unknownDeleteTriggers?.length) fail("unknown DELETE trigger dependency blocks escrow account retirement");
+    const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
+    await verifyBucket(storageTarget);
     if (expectedAccountIdsSha256 && candidatePool.length === 1
       && accountIdsSha256(candidatePool[0].accountIds) !== text(expectedAccountIdsSha256).toLowerCase()) {
       fail(`escrow account-retirement batch ${batchId} account ID SHA-256 changed`);
@@ -2272,6 +2276,7 @@ export async function runStageEscrowAccountRetention({
             phase: RETIREMENT_PHASES.EXECUTE,
             attempt,
           });
+          await verifyBucket(storageTarget, { fresh: true });
           const returned = await runRetirementDatabaseFunction({
             sql,
             candidate: current.candidate,
