@@ -4131,6 +4131,37 @@ async function readExactHumanRetentionMarker(tx, tableId, { forUpdate = false } 
   return rows[0];
 }
 
+async function readClosedHumanCompletedLifecycleState({ row, identity, sql } = {}) {
+  const batchId = text(row?.batch_id);
+  const binding = assertClosedHumanExecuteBatch(row, batchId, identity);
+  if (binding.receiptCount !== 5) {
+    fail(`closed-human batch ${batchId} requires a complete prune receipt`);
+  }
+  if (!binding.hasExactGo) {
+    fail(`closed-human batch ${batchId} requires its exact destructive GO`);
+  }
+
+  // The activation canary has no automatic lifecycle-completion step here;
+  // its marker was required when the automatic policy was activated.  A real
+  // candidate still revalidates the canary through verifyCanary() below.
+  if (batchId === CLOSED_HUMAN_AUTOMATIC_ACTIVATION.batchId) {
+    return { tablePresent: false, marker: null, lifecycleComplete: true };
+  }
+
+  const registry = await readClosedHumanDurableRegistryBinding(sql, row);
+  const markerRows = await sql.unsafe(CLOSED_HUMAN_LIFECYCLE_MARKER_SQL, [registry.tableId]);
+  if (markerRows.length > 1
+    || (markerRows.length === 1 && text(markerRows[0]?.table_id) !== registry.tableId)) {
+    fail(`closed-human completed cycle table marker is not unique for batch ${batchId}`);
+  }
+  const marker = markerRows[0] || null;
+  return {
+    tablePresent: marker != null,
+    marker,
+    lifecycleComplete: marker != null && Boolean(marker.human_retention_complete_at),
+  };
+}
+
 async function completeClosedHumanLifecycleInTransaction({
   sql,
   batchId,
@@ -5118,39 +5149,47 @@ export async function runAutomaticClosedHumanStageAutomation({
           }));
           stopReason = "processed_one_closed_human_table";
         } else if (ownCycle.latestCompleted) {
-          await verifyCanary();
-          markAutomaticPhase("automatic.completed-recovery", ownCycle.latestCompleted);
-          const completed = await verifyClosedHumanCompletedAutomaticCycle({
+          const lifecycleState = await readClosedHumanCompletedLifecycleState({
             row: ownCycle.latestCompleted,
             identity,
             sql,
-            lockSession,
-            pruneStore,
-            storageTarget,
-            storageDeps,
           });
-          if (completed.tablePresent && !completed.marker.human_retention_complete_at) {
-            const lifecycle = await completeClosedHumanAutomaticLifecycle({
+          await assertAdvisoryLock(sql, lockSession);
+          if (!lifecycleState.lifecycleComplete) {
+            await verifyCanary();
+            markAutomaticPhase("automatic.completed-recovery", ownCycle.latestCompleted);
+            const completed = await verifyClosedHumanCompletedAutomaticCycle({
+              row: ownCycle.latestCompleted,
+              identity,
               sql,
-              row: completed.row,
-              identity,
-              evidence: completed.dry.evidence,
-              deps,
               lockSession,
+              pruneStore,
+              storageTarget,
+              storageDeps,
             });
-            processed.push(closedHumanAutomaticBatchReport({
-              row: lifecycle.exactRow || completed.row,
-              identity,
-              dry: completed.dry,
-              durable: completed.durable,
-              executed: { state: "already_pruned", evidence: completed.dry.evidence },
-              lifecycle,
-              deployedCommitSha,
-              dryRunAttempts: completed.dryRun.dryRunAttempts,
-              dryRunRetryCount: completed.dryRun.dryRunRetryCount,
-              dryRunSqlstates: completed.dryRun.dryRunSqlstates,
-            }));
-            stopReason = "completed_pending_human_lifecycle";
+            if (completed.tablePresent && !completed.marker.human_retention_complete_at) {
+              const lifecycle = await completeClosedHumanAutomaticLifecycle({
+                sql,
+                row: completed.row,
+                identity,
+                evidence: completed.dry.evidence,
+                deps,
+                lockSession,
+              });
+              processed.push(closedHumanAutomaticBatchReport({
+                row: lifecycle.exactRow || completed.row,
+                identity,
+                dry: completed.dry,
+                durable: completed.durable,
+                executed: { state: "already_pruned", evidence: completed.dry.evidence },
+                lifecycle,
+                deployedCommitSha,
+                dryRunAttempts: completed.dryRun.dryRunAttempts,
+                dryRunRetryCount: completed.dryRun.dryRunRetryCount,
+                dryRunSqlstates: completed.dryRun.dryRunSqlstates,
+              }));
+              stopReason = "completed_pending_human_lifecycle";
+            }
           }
         }
 
