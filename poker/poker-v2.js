@@ -2160,6 +2160,10 @@
     return null;
   }
 
+  function reactionLabel(entry){
+    return entry ? t('pokerReaction_' + entry.key, entry.label) : '';
+  }
+
   function clearReactionHistoryExpiryTimer(){
     if (!reactionHistoryExpiryTimer) return;
     window.clearTimeout(reactionHistoryExpiryTimer);
@@ -2207,7 +2211,7 @@
       separator.setAttribute('aria-hidden', 'true');
       var reaction = document.createElement('span');
       reaction.className = 'poker-reaction-history__reaction';
-      reaction.textContent = entry.emoji + ' ' + entry.label;
+      reaction.textContent = entry.emoji + ' ' + reactionLabel(entry);
       author.appendChild(nickname);
       author.appendChild(seat);
       row.appendChild(author);
@@ -2615,12 +2619,13 @@
     REACTION_CATALOG.forEach(function(entry){
       if (entry.humanSelectable === false) return;
       var option = document.createElement('button');
+      var label = reactionLabel(entry);
       option.type = 'button';
       option.className = 'poker-reaction-option';
       option.setAttribute('role', 'menuitem');
-      option.setAttribute('aria-label', entry.label);
+      option.setAttribute('aria-label', label);
       option.dataset.reactionKey = entry.key;
-      option.textContent = entry.emoji + ' ' + entry.label;
+      option.textContent = entry.emoji + ' ' + label;
       option.addEventListener('click', function(){ sendReaction(entry.key); });
       els.reactionMenu.appendChild(option);
     });
@@ -3534,7 +3539,7 @@
       anchorNode.style.top = fromY + '%';
       flyout.className = 'poker-seat-target-reaction-flyout' + (effect.animate && !reducedMotion ? ' poker-seat-target-reaction-flyout--enter' : '');
       flyout.setAttribute('role', 'status');
-      flyout.setAttribute('aria-label', entry.label);
+      flyout.setAttribute('aria-label', reactionLabel(entry));
       flyout.textContent = entry.emoji;
       flyout.style.setProperty('--reaction-delta-x', deltaX + 'px');
       flyout.style.setProperty('--reaction-delta-y', deltaY + 'px');
@@ -3584,7 +3589,7 @@
       var bubble = document.createElement('div');
       bubble.className = 'poker-seat-reaction-bubble' + (reactionBubble.animate ? ' poker-seat-reaction-bubble--enter' : '');
       bubble.setAttribute('role', 'status');
-      bubble.textContent = reactionEntry.emoji + ' ' + reactionEntry.label;
+      bubble.textContent = reactionEntry.emoji + ' ' + reactionLabel(reactionEntry);
       anchorNode.appendChild(bubble);
       appendReactionRenderNode(anchorNode);
     });
@@ -5321,7 +5326,7 @@
     shouldAutoJoin = readAutoJoinParam();
     bindMenu();
     bindControls();
-    document.addEventListener('langchange', function(){ render(); });
+    document.addEventListener('langchange', function(){ buildReactionMenu(); render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
     if (!tableId){
       startDemoMode();
