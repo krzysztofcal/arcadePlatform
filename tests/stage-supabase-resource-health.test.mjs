@@ -131,3 +131,28 @@ test('monitor samples twice 60s apart via GET only; unavailable API stays unknow
   assert.equal(failed.state, 'unknown');
   assert.ok(!JSON.stringify(failed).includes('private db details'));
 });
+
+test('monitor classifies safe Metrics API failures without exposing secrets', async () => {
+  const secret = 'metrics-secret-do-not-log';
+  const diskUtilizationResponse = {
+    metrics: { fs_size_bytes: 10 * GiB, fs_avail_bytes: 9 * GiB, fs_used_bytes: GiB },
+  };
+  const scenarios = [
+    ['metrics_http_403', async () => ({ ok: false, status: 403, text: async () => secret })],
+    ['metrics_timeout', async () => { throw Object.assign(new Error(secret), { name: 'TimeoutError' }); }],
+    ['metrics_parse_failed', async () => ({ ok: true, text: async () => `node_cpu_seconds_total{broken ${secret}` })],
+  ];
+  for (const [expected, metricsResponse] of scenarios) {
+    const report = await monitor({ SUPABASE_STAGE_MANAGEMENT_TOKEN: secret }, async (url) => {
+      if (url.endsWith('/metrics')) return metricsResponse();
+      return {
+        ok: true,
+        json: async () => url.endsWith('/config/disk/util')
+          ? diskUtilizationResponse : { attributes: diskConfiguration },
+      };
+    }, async () => {}, () => 0, async () => ({ capacity, relations: [] }));
+    assert.equal(report.state, 'unknown');
+    assert.deepEqual(report.errors, [expected]);
+    assert.ok(!JSON.stringify(report).includes(secret));
+  }
+});
