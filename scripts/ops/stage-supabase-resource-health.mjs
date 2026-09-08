@@ -114,6 +114,21 @@ function filesystemCapacityPercent(diskUtilization) {
     ? diskUtilization.fsUsedBytes / diskUtilization.fsSizeBytes * 100 : null;
 }
 
+function isTimeoutError(error) {
+  const code = error?.code || error?.cause?.code;
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError'
+    || ['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'].includes(code);
+}
+
+function metricsErrorCode(error) {
+  if (error?.metricsCode === 'metrics_parse_failed') return 'metrics_parse_failed';
+  const status = Number(error?.httpStatus);
+  if (Number.isInteger(status) && status >= 100 && status <= 599) {
+    return status === 403 ? 'metrics_http_403' : `metrics_http_${status}`;
+  }
+  return isTimeoutError(error) ? 'metrics_timeout' : 'metrics_unavailable';
+}
+
 export function classify(window, capacity, diskUtilization) {
   const cpu = level(window.cpuPercent, 70, 85);
   const wait = level(window.iowaitPercent, 10, 20);
@@ -174,18 +189,23 @@ export async function monitor(env = process.env, fetchImpl = fetch, wait = sleep
       method: 'GET', redirect: 'error', signal: AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${env.SUPABASE_STAGE_MANAGEMENT_TOKEN}` },
     });
-    if (!response.ok) throw new Error('api_failed');
+    if (!response.ok) throw Object.assign(new Error('api_failed'), { httpStatus: response.status });
     return json ? response.json() : response.text();
+  }
+  async function scrapeMetrics() {
+    const source = await get('analytics/endpoints/metrics');
+    try { return parseMetrics(source); }
+    catch { throw Object.assign(new Error('metrics_parse_failed'), { metricsCode: 'metrics_parse_failed' }); }
   }
   let window = { windowSeconds: null, cpuPercent: null, iowaitPercent: null, disks: [] };
   let disk = null, diskUtilization = null, capacity = null, relations = [];
   try {
-    const first = parseMetrics(await get('analytics/endpoints/metrics'));
+    const first = await scrapeMetrics();
     const start = now();
     await wait(60000);
-    const second = parseMetrics(await get('analytics/endpoints/metrics'));
+    const second = await scrapeMetrics();
     window = measureWindow(first, second, (now() - start) / 1000);
-  } catch { errors.push('metrics_unavailable'); }
+  } catch (error) { errors.push(metricsErrorCode(error)); }
   try { disk = (await get('config/disk', true)).attributes; } catch { errors.push('disk_config_unavailable'); }
   try {
     diskUtilization = parseDiskUtilization(await get('config/disk/util', true));
