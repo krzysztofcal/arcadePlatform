@@ -1,0 +1,10 @@
+# Keep the existing Stage queue contract until actionlint recognizes the newer
+# GitHub Actions concurrency.queue syntax.
+self-hosted-runner:
+  labels:
+    - stage-db-ipv6
+
+paths:
+  .github/workflows/chips-ledger-stage-scheduled-automation.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'

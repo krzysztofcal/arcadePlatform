@@ -5,6 +5,19 @@ on:
     branches: [ main ]
 
 jobs:
+  actionlint:
+    name: actionlint
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate all GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color -shellcheck= -pyflakes=
+
   verify:
     runs-on: ubuntu-latest
     steps:
