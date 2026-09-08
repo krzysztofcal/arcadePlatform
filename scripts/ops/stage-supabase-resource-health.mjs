@@ -48,49 +48,111 @@ export function parseMetrics(source) {
 }
 
 export function measureWindow(first, second, seconds) {
-  const result = { windowSeconds: seconds, cpuPercent: null, iowaitPercent: null, disks: [] };
-  if (!Number.isFinite(seconds) || seconds < 55 || seconds > 75) return result;
-  const deltas = [];
-  // A reset or a changed series set invalidates the window, never becomes zero load.
-  if (first.size !== second.size) return result;
-  for (const [key, current] of second) {
-    const previous = first.get(key);
-    if (!previous || current.value < previous.value) return result;
-    deltas.push({ ...current, delta: current.value - previous.value });
+  const result = {
+    windowSeconds: seconds, cpuPercent: null, iowaitPercent: null, disks: [], measurementReason: null,
+  };
+  if (!Number.isFinite(seconds) || seconds < 55 || seconds > 75) {
+    result.measurementReason = 'window_out_of_range';
+    return result;
   }
-  const cpus = new Map();
-  for (const sample of deltas.filter((s) => s.name === CPU)) {
+  let measurementReason = null;
+  const setReason = (reason) => {
+    if (!measurementReason) measurementReason = reason;
+  };
+  const group = (samples, names, getGroupKey, getMemberKey) => {
+    const groups = new Map();
+    for (const sample of samples.values()) {
+      if (!names.includes(sample.name)) continue;
+      const groupKey = getGroupKey(sample);
+      if (!groupKey) continue;
+      if (!groups.has(groupKey)) groups.set(groupKey, new Map());
+      groups.get(groupKey).set(getMemberKey(sample), sample);
+    }
+    return groups;
+  };
+  const sameKeys = (left, right) => left.size === right.size
+    && [...left.keys()].every((key) => right.has(key));
+  const cpuGroupKey = (sample) => {
     const { cpu, mode, ...instance } = sample.labels;
-    if (!cpu || !CPU_MODES.includes(mode)) continue;
-    const key = JSON.stringify([instance, cpu]);
-    if (!cpus.has(key)) cpus.set(key, {});
-    cpus.get(key)[mode] = sample.delta;
+    return cpu && CPU_MODES.includes(mode)
+      ? JSON.stringify([Object.entries(instance).sort(), cpu]) : null;
+  };
+  const firstCpus = group(first, [CPU], cpuGroupKey, (sample) => sample.labels.mode);
+  const secondCpus = group(second, [CPU], cpuGroupKey, (sample) => sample.labels.mode);
+  if (!firstCpus.size || !secondCpus.size) {
+    setReason('cpu_series_missing');
+  } else if (!sameKeys(firstCpus, secondCpus)) {
+    setReason('series_set_changed');
+  } else {
+    let total = 0, idle = 0, wait = 0;
+    let cpuInvalid = null;
+    for (const [key, firstModes] of firstCpus) {
+      const secondModes = secondCpus.get(key);
+      if (!CPU_MODES.every((mode) => firstModes.has(mode) && secondModes.has(mode))) {
+        cpuInvalid = 'cpu_modes_incomplete';
+        break;
+      }
+      const deltas = {};
+      for (const mode of CPU_MODES) {
+        const previous = firstModes.get(mode);
+        const current = secondModes.get(mode);
+        if (current.value < previous.value) {
+          cpuInvalid = 'counter_reset';
+          break;
+        }
+        deltas[mode] = current.value - previous.value;
+      }
+      if (cpuInvalid) break;
+      const ticks = Object.values(deltas).reduce((sum, value) => sum + value, 0);
+      if (!Number.isFinite(ticks) || ticks < seconds * 0.8 || ticks > seconds * 1.2) {
+        cpuInvalid = 'cpu_ticks_invalid';
+        break;
+      }
+      total += ticks;
+      idle += deltas.idle;
+      wait += deltas.iowait;
+    }
+    if (cpuInvalid) setReason(cpuInvalid);
+    else if (!Number.isFinite(total) || total <= 0) setReason('cpu_ticks_invalid');
+    else {
+      result.cpuPercent = 100 * (total - idle - wait) / total;
+      result.iowaitPercent = 100 * wait / total;
+    }
   }
-  let total = 0, idle = 0, wait = 0;
-  for (const modes of cpus.values()) {
-    if (!CPU_MODES.every((mode) => Object.hasOwn(modes, mode))) return result;
-    const ticks = Object.values(modes).reduce((a, b) => a + b, 0);
-    if (ticks < seconds * 0.8 || ticks > seconds * 1.2) return result;
-    total += ticks; idle += modes.idle; wait += modes.iowait;
-  }
-  if (total > 0) {
-    result.cpuPercent = 100 * (total - idle - wait) / total;
-    result.iowaitPercent = 100 * wait / total;
-  }
-  const devices = new Map();
-  for (const sample of deltas.filter((s) => DISK.includes(s.name))) {
-    const device = sample.labels.device;
-    if (!device) continue;
-    const key = JSON.stringify(Object.entries(sample.labels).sort());
-    if (!devices.has(key)) devices.set(key, { device });
-    devices.get(key)[sample.name] = sample.delta / seconds;
-  }
-  for (const device of devices.values()) {
-    if (DISK.every((name) => Number.isFinite(device[name]))) result.disks.push({
-      device: device.device, readBytesPerSecond: device[DISK[0]], writeBytesPerSecond: device[DISK[1]],
-      readIops: device[DISK[2]], writeIops: device[DISK[3]],
+  const diskGroupKey = (sample) => sample.labels.device
+    ? JSON.stringify(Object.entries(sample.labels).sort()) : null;
+  const firstDisks = group(first, DISK, diskGroupKey, (sample) => sample.name);
+  const secondDisks = group(second, DISK, diskGroupKey, (sample) => sample.name);
+  let diskReset = false;
+  for (const [key, firstSeries] of firstDisks) {
+    const secondSeries = secondDisks.get(key);
+    if (!secondSeries || !DISK.every((name) => firstSeries.has(name) && secondSeries.has(name))) continue;
+    const deltas = {};
+    for (const name of DISK) {
+      const previous = firstSeries.get(name);
+      const current = secondSeries.get(name);
+      if (current.value < previous.value) {
+        diskReset = true;
+        break;
+      }
+      deltas[name] = current.value - previous.value;
+    }
+    if (diskReset) break;
+    result.disks.push({
+      device: firstSeries.get(DISK[0]).labels.device,
+      readBytesPerSecond: deltas[DISK[0]] / seconds,
+      writeBytesPerSecond: deltas[DISK[1]] / seconds,
+      readIops: deltas[DISK[2]] / seconds,
+      writeIops: deltas[DISK[3]] / seconds,
     });
   }
+  if (diskReset) {
+    result.disks = [];
+    setReason('counter_reset');
+  } else if (!result.disks.length) {
+    setReason('disk_series_incomplete');
+  }
+  result.measurementReason = measurementReason;
   return result;
 }
 
@@ -203,7 +265,9 @@ export async function monitor(env = process.env, fetchImpl = fetch, wait = sleep
     try { return parseMetrics(source); }
     catch { throw Object.assign(new Error('metrics_parse_failed'), { metricsCode: 'metrics_parse_failed' }); }
   }
-  let window = { windowSeconds: null, cpuPercent: null, iowaitPercent: null, disks: [] };
+  let window = {
+    windowSeconds: null, cpuPercent: null, iowaitPercent: null, disks: [], measurementReason: null,
+  };
   let disk = null, diskUtilization = null, capacity = null, relations = [];
   try {
     const first = await scrapeMetrics();
