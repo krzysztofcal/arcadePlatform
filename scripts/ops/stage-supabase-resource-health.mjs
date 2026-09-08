@@ -17,6 +17,11 @@ const DISK = ['node_disk_read_bytes_total', 'node_disk_written_bytes_total',
 const SERIES_RE = new RegExp(`^(?:${[CPU, ...DISK].join('|')})(?:\\{|\\s)`);
 const CPU_MODES = ['idle', 'iowait', 'irq', 'nice', 'softirq', 'steal', 'system', 'user'];
 
+function safeBytes(value) {
+  const bytes = Number(value);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+}
+
 // Only documented Supabase series are interpreted; unknown series are ignored.
 export function parseMetrics(source) {
   const samples = new Map();
@@ -89,30 +94,49 @@ export function measureWindow(first, second, seconds) {
   return result;
 }
 
+export function parseDiskUtilization(payload) {
+  const metrics = payload?.metrics;
+  if (!metrics || typeof metrics !== 'object') return null;
+  const fsSizeBytes = safeBytes(metrics.fs_size_bytes);
+  const fsAvailBytes = safeBytes(metrics.fs_avail_bytes);
+  const fsUsedBytes = safeBytes(metrics.fs_used_bytes);
+  if (fsSizeBytes == null || fsAvailBytes == null || fsUsedBytes == null
+    || fsSizeBytes <= 0 || fsAvailBytes > fsSizeBytes || fsUsedBytes > fsSizeBytes) return null;
+  return { fsSizeBytes, fsAvailBytes, fsUsedBytes };
+}
+
 const level = (value, warning, critical) => value == null ? 'unknown'
   : value >= critical ? 'critical' : value >= warning ? 'warning' : 'healthy';
 
-export function classify(window, capacity, disk) {
+function filesystemCapacityPercent(diskUtilization) {
+  return diskUtilization?.fsSizeBytes > 0
+    && diskUtilization.fsUsedBytes <= diskUtilization.fsSizeBytes
+    ? diskUtilization.fsUsedBytes / diskUtilization.fsSizeBytes * 100 : null;
+}
+
+export function classify(window, capacity, diskUtilization) {
   const cpu = level(window.cpuPercent, 70, 85);
   const wait = level(window.iowaitPercent, 10, 20);
   const pressure = cpu === 'critical' || wait === 'critical' ? 'critical'
     : cpu === 'unknown' || wait === 'unknown' || !window.disks.length ? 'unknown'
     : cpu === 'warning' || wait === 'warning' ? 'warning' : 'healthy';
-  const diskBytes = Number(disk?.size_gb) * 1024 ** 3;
-  const configuredBytes = Number.isSafeInteger(diskBytes) && diskBytes > 0 ? diskBytes : null;
   const dbBytes = capacity?.available && Number.isSafeInteger(capacity.dbTotalBytes) && capacity.dbTotalBytes > 0
     ? capacity.dbTotalBytes : null;
-  const capacityPercent = dbBytes != null && configuredBytes ? dbBytes / configuredBytes * 100 : null;
-  let capacityState = level(capacityPercent, 70, 85);
-  if (['healthy', 'unknown'].includes(capacityState) && capacity?.capacityStatus === 'warning') capacityState = 'warning';
-  const states = [pressure, capacityState, capacityPercent == null ? 'unknown' : 'healthy'];
-  return { state: states.includes('critical') ? 'critical' : states.includes('unknown') ? 'unknown'
-    : states.includes('warning') ? 'warning' : 'healthy', pressureState: pressure, capacityState,
-  databaseBytes: dbBytes, ledgerBytes: capacity?.ledgerTotalBytes ?? null, configuredBytes, capacityPercent,
-  cleanupDecision: 'not_evaluated_monitor_only' };
+  const capacityPercent = filesystemCapacityPercent(diskUtilization);
+  const capacityState = level(capacityPercent, 70, 85);
+  const state = pressure === 'critical' ? 'critical'
+    : pressure === 'unknown' || capacityState === 'unknown' ? 'unknown'
+    : pressure === 'warning' || capacityState === 'critical' || capacityState === 'warning' ? 'warning'
+    : 'healthy';
+  return { state, pressureState: pressure, capacityState,
+    databaseBytes: dbBytes, ledgerBytes: capacity?.ledgerTotalBytes ?? null,
+    filesystemSizeBytes: diskUtilization?.fsSizeBytes ?? null,
+    filesystemAvailableBytes: diskUtilization?.fsAvailBytes ?? null,
+    filesystemUsedBytes: diskUtilization?.fsUsedBytes ?? null, capacityPercent,
+    cleanupDecision: 'not_evaluated_monitor_only' };
 }
 
-export async function readCapacity(env, disk, createSql = postgres) {
+export async function readCapacity(env, diskUtilization, createSql = postgres) {
   const url = new URL(env.SUPABASE_STAGE_DB_URL);
   const direct = url.hostname === `db.${STAGE_REF}.supabase.co`;
   const pooler = /^[a-z0-9-]+\.pooler\.supabase\.com$/.test(url.hostname)
@@ -127,9 +151,9 @@ export async function readCapacity(env, disk, createSql = postgres) {
         from pg_catalog.pg_settings where name = 'statement_timeout'`);
       const identity = await tx.unsafe('select system_identifier::text from pg_catalog.pg_control_system()');
       if (identity[0]?.system_identifier !== STAGE_SYSTEM_IDENTIFIER) throw new Error('invalid_stage_identity');
-      const capacity = await loadLedgerCapacity(env, (query) => tx.unsafe(query));
+      const capacity = await loadLedgerCapacity(env, (query) => tx.unsafe(query), undefined, { includeRowCounts: false });
       let relations = [];
-      const { capacityState } = classify({ cpuPercent: null, iowaitPercent: null, disks: [] }, capacity, disk);
+      const capacityState = level(filesystemCapacityPercent(diskUtilization), 70, 85);
       if (['warning', 'critical'].includes(capacityState)) {
         relations = await tx.unsafe(`select n.nspname as schema, c.relname as relation,
           pg_total_relation_size(c.oid)::text as bytes
@@ -154,7 +178,7 @@ export async function monitor(env = process.env, fetchImpl = fetch, wait = sleep
     return json ? response.json() : response.text();
   }
   let window = { windowSeconds: null, cpuPercent: null, iowaitPercent: null, disks: [] };
-  let disk = null, capacity = null, relations = [];
+  let disk = null, diskUtilization = null, capacity = null, relations = [];
   try {
     const first = parseMetrics(await get('analytics/endpoints/metrics'));
     const start = now();
@@ -163,10 +187,17 @@ export async function monitor(env = process.env, fetchImpl = fetch, wait = sleep
     window = measureWindow(first, second, (now() - start) / 1000);
   } catch { errors.push('metrics_unavailable'); }
   try { disk = (await get('config/disk', true)).attributes; } catch { errors.push('disk_config_unavailable'); }
-  try { ({ capacity, relations } = await read(env, disk)); } catch { errors.push('capacity_unavailable'); }
-  const health = classify(window, capacity, disk);
+  try {
+    diskUtilization = parseDiskUtilization(await get('config/disk/util', true));
+    if (!diskUtilization) errors.push('disk_utilization_unavailable');
+  } catch { errors.push('disk_utilization_unavailable'); }
+  try { ({ capacity, relations } = await read(env, diskUtilization)); } catch { errors.push('capacity_unavailable'); }
+  const health = classify(window, capacity, diskUtilization);
   return { ...health, ...window, diskConfiguration: disk ? {
     sizeGb: disk.size_gb, iops: disk.iops, throughputMibps: disk.throughput_mibps, type: disk.type,
+  } : null, diskUtilization: diskUtilization ? {
+    fsSizeBytes: diskUtilization.fsSizeBytes, fsAvailBytes: diskUtilization.fsAvailBytes,
+    fsUsedBytes: diskUtilization.fsUsedBytes,
   } : null, wal: null, diskIoConsumedPercent: null,
   unavailable: ['wal_no_verified_series', 'disk_io_budget_no_authoritative_series', 'historical_growth_no_history'],
   largestRelations: relations, errors };

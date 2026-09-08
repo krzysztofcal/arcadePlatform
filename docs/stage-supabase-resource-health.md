@@ -18,6 +18,7 @@ Only these Management API GET requests are made:
 
 - `/v1/projects/krydukthwdvccggbyjfw/analytics/endpoints/metrics` (twice).
 - `/v1/projects/krydukthwdvccggbyjfw/config/disk` (once).
+- `/v1/projects/krydukthwdvccggbyjfw/config/disk/util` (once).
 
 Each request has a 15-second timeout, no retries and no redirects. Two scrapes
 are separated by a 60-second sleep; the actual elapsed window must be 55–75
@@ -26,12 +27,13 @@ canonical Stage and the read-only transaction verifies `pg_control_system()`
 against Stage's system identifier before reading capacity. One connection,
 at most 5-second statement timeout (preserving a lower configured limit), 10-second connect timeout, 5-minute job timeout.
 
-`loadLedgerCapacity` is extracted unchanged from `admin-ops-summary`: exact row
-counts and the existing PostgreSQL table/index/database size definitions remain
-shared. Exact counts may time out on an overloaded DB, yielding unknown capacity.
-Only a capacity warning/critical runs the largest-relations SELECT, `LIMIT 10`,
-inside the same read-only boundary. No telemetry tables, history artifacts,
-Storage operations, cleanup calls, migrations or maintenance SQL are introduced.
+`loadLedgerCapacity` remains shared with `admin-ops-summary`: the admin keeps its
+default exact row counts and response/logging contract, while this monitor uses
+`includeRowCounts: false`. The monitor still reads PostgreSQL table/index sizes
+and `pg_database_size()` without running exact ledger row counts. Only a
+capacity warning/critical runs the largest-relations SELECT, `LIMIT 10`, inside
+the same read-only boundary. No telemetry tables, history artifacts, Storage
+operations, cleanup calls, migrations or maintenance SQL are introduced.
 The admin API response, warning threshold and logging contract are unchanged.
 The standalone script follows the existing ops klog pattern without importing
 DB/auth startup logging; each monitor invocation emits one klog.
@@ -56,13 +58,21 @@ window, not instantaneous gauges or proof of pressure across multiple windows.
 Missing CPU/iowait or complete disk counters produces unknown pressure.
 Disk throughput/IOPS are observations, not an inferred saturation percentage.
 
-Capacity warning/critical: 70/85% of configured disk size (GiB), plus the existing
-`ADMIN_LEDGER_DB_WARNING_MB` warning (default 800 MiB). This ratio is **database
-bytes / configured disk bytes**, not filesystem used space: WAL/system files are
-not included in `pg_database_size`. Capacity and pressure have separate states;
-capacity-only critical does not make pressure critical or authorize/block cleanup.
-Critical wins over unknown, which wins over warning, then healthy. Unknown and
-critical make the monitor job fail visibly; no cleanup workflow depends on it.
+Filesystem capacity warning/critical: 70/85% of
+`fs_used_bytes / fs_size_bytes` from the authoritative `/config/disk/util`
+response. `fs_avail_bytes`, `fs_used_bytes` and `fs_size_bytes` are reported
+separately. The `/config/disk` response is retained for configured `size_gb`,
+IOPS, throughput and disk type. PostgreSQL `pg_database_size()` is reported as
+`databaseBytes` separately and is not used to reconstruct filesystem
+capacity. The existing `ADMIN_LEDGER_DB_WARNING_MB` warning (default 800 MiB)
+continues to belong to the admin contract.
+
+Capacity and pressure have separate states. When pressure is healthy and
+capacity alone is critical, `capacityState=critical` but top-level `state=warning`;
+the monitor remains observation-only and cannot authorize or block cleanup.
+Critical resource pressure wins over unknown, which wins over warning, then
+healthy. Unknown and critical resource pressure make the monitor job fail
+visibly; no cleanup workflow depends on it.
 
 ## Explicitly unavailable
 
@@ -82,6 +92,8 @@ API references (reviewed September 8, 2026):
 - https://supabase.com/docs/reference/api/v1-scrape-project-metrics (analytics_logs_read)
 - https://supabase.com/docs/reference/api/v1-get-database-disk (infra_disk_config_read;
   attributes.size_gb, iops, throughput_mibps, type)
+- https://supabase.com/docs/reference/api/v1-get-disk-utilization
+  (infra_disk_config_read; metrics.fs_size_bytes, fs_avail_bytes, fs_used_bytes)
 - https://github.com/supabase/postgres/blob/develop/ansible/files/postgres_exporter.service.j2
 
 Operational impact: one independent scheduled observation every 15 minutes after

@@ -9,15 +9,24 @@ export function resolveLedgerDbWarningMb(rawValue) {
   return num;
 }
 
-export async function loadLedgerCapacity(env, runSql, klog = () => {}) {
+export async function loadLedgerCapacity(
+  env,
+  runSql,
+  klog = () => {},
+  { includeRowCounts = true } = {},
+) {
   const warningMb = resolveLedgerDbWarningMb(env.ADMIN_LEDGER_DB_WARNING_MB);
   const warningThresholdBytes = warningMb * 1024 * 1024;
   const measuredAt = new Date().toISOString();
   try {
+    const rowCountColumns = includeRowCounts
+      ? `
+  (select count(*) from public.chips_transactions) as tx_rows,
+  (select count(*) from public.chips_entries)      as entry_rows,`
+      : "";
     const rows = await runSql(
       `select
-  (select count(*) from public.chips_transactions) as tx_rows,
-  (select count(*) from public.chips_entries)      as entry_rows,
+${rowCountColumns}
   (select pg_table_size('public.chips_transactions'))        as tx_table_bytes,
   (select pg_indexes_size('public.chips_transactions'))      as tx_index_bytes,
   (select pg_total_relation_size('public.chips_transactions')) as tx_total_bytes,
@@ -41,8 +50,8 @@ export async function loadLedgerCapacity(env, runSql, klog = () => {}) {
       : "OK";
     const result = {
       available: true,
-      transactionRowCount: Number(row.tx_rows) || 0,
-      entryRowCount: Number(row.entry_rows) || 0,
+      transactionRowCount: includeRowCounts ? Number(row.tx_rows) || 0 : null,
+      entryRowCount: includeRowCounts ? Number(row.entry_rows) || 0 : null,
       transactionTableBytes: Number(row.tx_table_bytes) || 0,
       transactionIndexBytes: Number(row.tx_index_bytes) || 0,
       transactionTotalBytes: transactionTotalBytes || 0,
