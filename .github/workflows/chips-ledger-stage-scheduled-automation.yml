@@ -13,6 +13,7 @@ on:
           - existing-30d-recovery-diagnostic
           - existing-30d-recovery-repair
           - bot-only-7d-summary-diagnostic
+          - bot-only-7d-selector-diagnostic
           - bot-only-7d-automatic
           - closed-human-30d-recovery-diagnostic
           - closed-human-30d-recovery-repair
@@ -46,7 +47,7 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair')) || inputs.mode == 'closed-human-30d-recovery-repair'))) }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-selector-diagnostic' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref == 'refs/heads/main') || (vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair')) || inputs.mode == 'closed-human-30d-recovery-repair'))) )) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -77,7 +78,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-selector-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -277,6 +278,18 @@ jobs:
           test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
           test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
           node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs --summary-only
+
+      - name: Run bot-only 7-day selector diagnostic
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-selector-diagnostic' }}
+        env:
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
+          test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
+          node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs --selector-diagnostic
 
       - name: Run activated bot-only 7-day Stage automation
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-automatic') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'external-scheduled-automatic') }}

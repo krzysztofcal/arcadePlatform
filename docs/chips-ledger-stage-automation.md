@@ -4,18 +4,23 @@ This workflow is Stage-only and intentionally unavailable for Production. It
 hardcodes the canonical Stage project `krydukthwdvccggbyjfw` and PostgreSQL
 system identifier `7656985631720456337`. The workflow passes only Stage
 credentials; there is no Production scheduler or Production operation path.
+All scheduled and automatic paths remain blocked while
+`CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=0`; the manual selector diagnostic is
+the single read-only exception.
 
 ## Active policies and schedules
 
 - The existing 30-day Stage maintenance (`stage-ledger-auto-retention-30d-v1`)
-  runs once per day on the native cron:
+  is configured for the native daily cron but remains blocked while
+  `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=0`:
   - `17 2 * * *`
 - The bot-only 7-day retention policy
-  (`stage-ledger-bot-only-retention-7d-v1`) is active and runs every 15 minutes
-  on the native cron:
+  (`stage-ledger-bot-only-retention-7d-v1`) remains behind
+  `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=0`; its configured native cron is not
+  currently allowed to run:
   - `7,22,37,52 * * * *`
-- Stage escrow account retention is completed and active. It runs on the same
-  15-minute native cron.
+- Stage escrow account retention remains behind the same disabled gate and does
+  not run on the configured 15-minute native cron.
 - `external-scheduled-automatic` is the VPS/external fallback dispatch mode for
   the same bot-only 7-day, closed-human 30-day, and escrow account retention
   automatic steps. It does not introduce a separate policy or batch limit.
@@ -39,6 +44,7 @@ ongoing operations:
 | `existing-30d-recovery-diagnostic` | Read-only diagnosis of the current 30-day cycle or an exact 30-day batch |
 | `existing-30d-recovery-repair` | Owner-only, exact-batch recovery repair for a proven/unpruned 30-day batch with missing durable recovery |
 | `bot-only-7d-summary-diagnostic` | Read-only bot-only table identity summary diagnostic |
+| `bot-only-7d-selector-diagnostic` | Read-only discovery and one-table exact revalidation diagnostic for the PR #959 bot-only selectors; allowed while the global automation gate is `0` |
 | `bot-only-7d-automatic` | Run the activated bot-only 7-day automatic cleanup on demand |
 | `closed-human-30d-recovery-diagnostic` | Read-only diagnosis of the closed-human 30-day cycle or an exact batch |
 | `closed-human-30d-recovery-repair` | Owner-only, exact-batch recovery repair for a proven/unpruned closed-human batch with missing durable recovery |
