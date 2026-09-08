@@ -15,6 +15,28 @@ function windowFor(user = 12, iowait = 6) {
   }
   return { first, second, window: measureWindow(first, second, 60) };
 }
+function addMetric(samples, name, labels, value) {
+  samples.set(JSON.stringify([name, Object.entries(labels).sort()]), { name, labels, value });
+}
+function addCpuGroup(samples, cpu) {
+  for (const mode of ['idle', 'iowait', 'irq', 'nice', 'softirq', 'steal', 'system', 'user']) {
+    addMetric(samples, 'node_cpu_seconds_total', {
+      supabase_project_ref: 'krydukthwdvccggbyjfw', service_type: 'db', cpu, mode,
+    }, mode === 'idle' ? 42 : mode === 'user' ? 12 : mode === 'iowait' ? 6 : 0);
+  }
+}
+function addDiskGroup(samples, device, value = 0) {
+  for (const name of [
+    'node_disk_read_bytes_total', 'node_disk_written_bytes_total',
+    'node_disk_reads_completed_total', 'node_disk_writes_completed_total',
+  ]) addMetric(samples, name, {
+    supabase_project_ref: 'krydukthwdvccggbyjfw', service_type: 'db', device,
+  }, value);
+}
+function deleteMetric(samples, predicate) {
+  const entry = [...samples].find(([, sample]) => predicate(sample));
+  if (entry) samples.delete(entry[0]);
+}
 const GiB = 1024 ** 3;
 const capacity = { available: true, dbTotalBytes: GiB, ledgerTotalBytes: 100, capacityStatus: 'OK' };
 const diskConfiguration = { size_gb: 10, iops: 3000, throughput_mibps: 125, type: 'gp3' };
@@ -53,16 +75,108 @@ test('critical uses average CPU/iowait over the window; capacity cannot change p
   assert.equal(parseDiskUtilization({ metrics: { fs_size_bytes: 0, fs_avail_bytes: 0, fs_used_bytes: 0 } }), null);
 });
 
-test('missing, reset, stale, changed series or out-of-bounds window remains unknown', () => {
+test('invalid windows remain unknown with an exact measurement reason', () => {
   const { first, second } = windowFor();
-  for (const seconds of [0, 54, 76, NaN]) assert.equal(measureWindow(first, second, seconds).cpuPercent, null);
-  assert.equal(measureWindow(first, first, 60).cpuPercent, null);
-  second.values().next().value.value = -1;
-  assert.equal(measureWindow(first, second, 60).cpuPercent, null);
+  for (const seconds of [0, 54, 76, NaN]) {
+    const result = measureWindow(first, second, seconds);
+    assert.equal(result.cpuPercent, null);
+    assert.equal(result.measurementReason, 'window_out_of_range');
+  }
+  const stale = measureWindow(first, first, 60);
+  assert.equal(stale.cpuPercent, null);
+  assert.equal(stale.measurementReason, 'cpu_ticks_invalid');
+
+  const resetFirst = parseMetrics(fixture);
+  const resetSecond = parseMetrics(fixture);
+  const resetFirstCpu = [...resetFirst.values()].find((sample) => sample.name === 'node_cpu_seconds_total' && sample.labels.mode === 'user');
+  const resetSecondCpu = [...resetSecond.values()].find((sample) => sample.name === 'node_cpu_seconds_total' && sample.labels.mode === 'user');
+  resetFirstCpu.value = 100;
+  resetSecondCpu.value = 90;
+  const reset = measureWindow(resetFirst, resetSecond, 60);
+  assert.equal(reset.cpuPercent, null);
+  assert.equal(reset.measurementReason, 'counter_reset');
+
   first.delete(first.keys().next().value);
-  assert.equal(measureWindow(first, second, 60).cpuPercent, null);
-  assert.equal(classify(measureWindow(new Map(), new Map(), 60), capacity, diskUtilization).state, 'unknown');
+  const incompleteDisk = measureWindow(first, second, 60);
+  assert.equal(incompleteDisk.cpuPercent, 20);
+  assert.equal(incompleteDisk.disks.length, 0);
+  assert.equal(incompleteDisk.measurementReason, 'disk_series_incomplete');
+
+  const missingCpu = measureWindow(new Map(), new Map(), 60);
+  assert.equal(missingCpu.measurementReason, 'cpu_series_missing');
+  assert.equal(classify(missingCpu, capacity, diskUtilization).state, 'unknown');
   assert.throws(() => parseMetrics(fixture.replace(/ 0\n/, ' NaN\n')));
+});
+
+test('required CPU series changes are diagnosed, while unrelated disk churn is ignored', () => {
+  const changed = windowFor();
+  addCpuGroup(changed.second, '1');
+  const changedWindow = measureWindow(changed.first, changed.second, 60);
+  assert.equal(changedWindow.cpuPercent, null);
+  assert.equal(changedWindow.measurementReason, 'series_set_changed');
+
+  const churn = windowFor();
+  addMetric(churn.second, 'node_disk_read_bytes_total', {
+    supabase_project_ref: 'krydukthwdvccggbyjfw', service_type: 'db', device: 'transient-device',
+  }, 1);
+  const churnWindow = measureWindow(churn.first, churn.second, 60);
+  assert.equal(churnWindow.cpuPercent, 20);
+  assert.equal(churnWindow.iowaitPercent, 10);
+  assert.equal(churnWindow.disks.length, 1);
+  assert.equal(churnWindow.measurementReason, null);
+});
+
+test('incomplete CPU modes and ticks remain unknown without affecting valid disk deltas', () => {
+  const modes = windowFor();
+  deleteMetric(modes.second, (sample) => sample.name === 'node_cpu_seconds_total' && sample.labels.mode === 'user');
+  const incompleteModes = measureWindow(modes.first, modes.second, 60);
+  assert.equal(incompleteModes.cpuPercent, null);
+  assert.equal(incompleteModes.disks.length, 1);
+  assert.equal(incompleteModes.measurementReason, 'cpu_modes_incomplete');
+
+  const ticks = windowFor();
+  deleteMetric(ticks.second, (sample) => sample.name === 'node_cpu_seconds_total' && sample.labels.mode === 'idle');
+  addMetric(ticks.second, 'node_cpu_seconds_total', {
+    supabase_project_ref: 'krydukthwdvccggbyjfw', service_type: 'db', cpu: '0', mode: 'idle',
+  }, 100);
+  const invalidTicks = measureWindow(ticks.first, ticks.second, 60);
+  assert.equal(invalidTicks.cpuPercent, null);
+  assert.equal(invalidTicks.disks.length, 1);
+  assert.equal(invalidTicks.measurementReason, 'cpu_ticks_invalid');
+});
+
+test('incomplete required disk measurement is not converted to zero', () => {
+  const { first, second } = windowFor();
+  deleteMetric(second, (sample) => sample.name === 'node_disk_reads_completed_total');
+  const window = measureWindow(first, second, 60);
+  assert.equal(window.cpuPercent, 20);
+  assert.equal(window.iowaitPercent, 10);
+  assert.deepEqual(window.disks, []);
+  assert.equal(window.measurementReason, 'disk_series_incomplete');
+  assert.equal(classify(window, capacity, diskUtilization).state, 'unknown');
+});
+
+test('existing or newly complete disk devices fail closed without erasing CPU', () => {
+  const missing = windowFor();
+  addDiskGroup(missing.first, 'device_2');
+  addDiskGroup(missing.second, 'device_2', 600);
+  deleteMetric(missing.second, (sample) => sample.labels.device === 'device_2'
+    && sample.name === 'node_disk_read_bytes_total');
+  const incomplete = measureWindow(missing.first, missing.second, 60);
+  assert.equal(incomplete.cpuPercent, 20);
+  assert.equal(incomplete.iowaitPercent, 10);
+  assert.deepEqual(incomplete.disks, []);
+  assert.equal(incomplete.measurementReason, 'disk_series_incomplete');
+  assert.equal(classify(incomplete, capacity, diskUtilization).pressureState, 'unknown');
+  assert.equal(classify(incomplete, capacity, diskUtilization).state, 'unknown');
+
+  const added = windowFor();
+  addDiskGroup(added.second, 'device_2', 600);
+  const changed = measureWindow(added.first, added.second, 60);
+  assert.equal(changed.cpuPercent, 20);
+  assert.deepEqual(changed.disks, []);
+  assert.equal(changed.measurementReason, 'series_set_changed');
+  assert.equal(classify(changed, capacity, diskUtilization).state, 'unknown');
 });
 
 test('capacity and largest relations share read-only Stage transaction; top 10 only on alert', async () => {
@@ -124,6 +238,7 @@ test('monitor samples twice 60s apart via GET only; unavailable API stays unknow
   assert.equal(calls.filter((url) => url.endsWith('/config/disk/util')).length, 1);
   assert.deepEqual(report.diskUtilization, diskUtilization);
   assert.equal(report.pressureState, 'unknown'); // unchanged counters are stale, not idle
+  assert.equal(report.measurementReason, 'cpu_ticks_invalid');
   assert.equal(report.cleanupDecision, 'not_evaluated_monitor_only');
   assert.ok(!JSON.stringify(report).includes('test-secret'));
   const failed = await monitor({}, async () => { throw new Error('no HTTP expected'); },
