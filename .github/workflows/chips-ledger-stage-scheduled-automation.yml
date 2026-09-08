@@ -161,6 +161,13 @@ jobs:
           process.stdout.write("Stage read-only fence preflight passed\n");
           NODE
 
+      - name: Enforce Stage resource health before automatic retention
+        if: ${{ (github.event_name == 'schedule' && (github.event.schedule == '7,22,37,52 * * * *' || github.event.schedule == '17 2 * * *')) || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'external-scheduled-automatic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'existing-30d')) }}
+        timeout-minutes: 5
+        env:
+          SUPABASE_STAGE_MANAGEMENT_TOKEN: ${{ secrets.SUPABASE_STAGE_MANAGEMENT_TOKEN }}
+        run: node scripts/ops/stage-supabase-resource-health.mjs --enforce
+
       - name: Run existing 30-day Stage automation
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'existing-30d') }}
         env:

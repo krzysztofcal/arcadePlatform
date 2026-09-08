@@ -129,6 +129,12 @@ function metricsErrorCode(error) {
   return isTimeoutError(error) ? 'metrics_timeout' : 'metrics_unavailable';
 }
 
+export function evaluateCleanupDecision(state) {
+  if (state === 'healthy') return 'allowed_healthy';
+  if (state === 'warning') return 'allowed_warning';
+  return state === 'critical' ? 'blocked_resource_critical' : 'blocked_resource_unknown';
+}
+
 export function classify(window, capacity, diskUtilization) {
   const cpu = level(window.cpuPercent, 70, 85);
   const wait = level(window.iowaitPercent, 10, 20);
@@ -225,8 +231,9 @@ export async function monitor(env = process.env, fetchImpl = fetch, wait = sleep
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const report = await monitor();
+  if (process.argv.includes('--enforce')) report.cleanupDecision = evaluateCleanupDecision(report.state);
   klog('stage_supabase_resource_health', report);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `## Stage Supabase resource health\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
-  if (report.state === 'unknown' || report.state === 'critical') process.exitCode = 1;
+  if (!['healthy', 'warning'].includes(report.state)) process.exitCode = 1;
 }
