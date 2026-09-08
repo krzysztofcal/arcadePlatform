@@ -1,0 +1,31 @@
+name: Stage Supabase Resource Health
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '3,18,33,48 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage-supabase-resource-health
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    if: ${{ github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.actor == github.repository_owner) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Read Stage resource health
+        run: node scripts/ops/stage-supabase-resource-health.mjs
+        env:
+          SUPABASE_STAGE_MANAGEMENT_TOKEN: ${{ secrets.SUPABASE_STAGE_MANAGEMENT_TOKEN }}
+          SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}

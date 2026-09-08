@@ -1,0 +1,14 @@
+# Minimal excerpt: https://github.com/supabase/supabase-grafana/blob/main/docs/metrics.md
+# Only project_ref_1 is replaced with canonical Stage; values/labels retain fixture shape.
+node_disk_written_bytes_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",device="device_1"} 0
+node_cpu_seconds_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",cpu="0",mode="idle"} 0
+node_cpu_seconds_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",cpu="0",mode="iowait"} 0
+node_cpu_seconds_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",cpu="0",mode="irq"} 0
+node_cpu_seconds_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",cpu="0",mode="nice"} 0
+node_cpu_seconds_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",cpu="0",mode="softirq"} 0
+node_cpu_seconds_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",cpu="0",mode="steal"} 0
+node_cpu_seconds_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",cpu="0",mode="system"} 0
+node_cpu_seconds_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",cpu="0",mode="user"} 0
+node_disk_read_bytes_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",device="device_1"} 0
+node_disk_writes_completed_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",device="device_1"} 0
+node_disk_reads_completed_total{supabase_project_ref="krydukthwdvccggbyjfw",service_type="db",device="device_1"} 0
