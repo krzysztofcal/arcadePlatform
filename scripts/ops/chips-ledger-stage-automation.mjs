@@ -5913,7 +5913,8 @@ export async function runAutomaticBotOnlyStageAutomation({
               now,
               deps: {
                 sql,
-                selector: "bot-only-7d",
+                selector: BOT_ONLY_EXACT_TABLE_SELECTOR,
+                tableIds: [row.bot_only_table_id],
                 schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
                 sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
                 targetOptions: { singleTarget: true },

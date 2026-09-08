@@ -415,11 +415,26 @@ try {
   assert.equal(recoveredAfter544.value.bytes.equals(privateObjectBytes), true);
   assert.equal(recoveredAfter544.value.sha256, crypto.createHash("sha256").update(privateObjectBytes).digest("hex"));
 
-  const recoveredAfter429 = await runPrivateGetScenario([429, 200]);
-  assert.equal(recoveredAfter429.calls.length, 2, "HTTP 429 may have one bounded read-only retry");
-  assert.deepEqual(recoveredAfter429.sleeps, [1000]);
+  const recoveredAfter429 = await runPrivateGetScenario([429, 429, 429, 429, 429, 200]);
+  assert.equal(recoveredAfter429.calls.length, 6, "SlowDown can recover on the sixth GET");
+  assert.deepEqual(recoveredAfter429.sleeps, [2000, 5000, 10000, 20000, 30000]);
   assert.equal(recoveredAfter429.calls.every(({ method }) => method === "GET"), true);
   assert.equal(recoveredAfter429.value.bytes.equals(privateObjectBytes), true);
+
+  const exhaustedSlowDownCalls = [];
+  const exhaustedSlowDownSleeps = [];
+  await assert.rejects(
+    () => downloadPrivateArchiveObject(resolveStorageTarget("stage", ENV), privateObjectPath, {
+      fetch: async (_url, init = {}) => {
+        exhaustedSlowDownCalls.push(init.method || "GET");
+        return responseJson({ code: "SlowDown" }, 429);
+      },
+      sleep: (milliseconds) => { exhaustedSlowDownSleeps.push(milliseconds); },
+    }),
+    /HTTP 429/,
+  );
+  assert.deepEqual(exhaustedSlowDownCalls, Array(6).fill("GET"));
+  assert.deepEqual(exhaustedSlowDownSleeps, [2000, 5000, 10000, 20000, 30000]);
 
   const permanent429Calls = [];
   const permanent429Sleeps = [];

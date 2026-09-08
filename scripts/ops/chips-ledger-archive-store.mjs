@@ -58,7 +58,8 @@ const REPLACEMENT_VERIFICATION_MAX_GETS = 2;
 export const STORAGE_GET_MAX_ATTEMPTS = 4;
 export const STORAGE_GET_MAX_RETRY_AFTER_MS = 60_000;
 export const STORAGE_GET_RETRY_BACKOFF_MS = Object.freeze([250, 1000, 2500]);
-export const STORAGE_GET_429_RETRY_BACKOFF_MS = Object.freeze([1000, 2500, 5000]);
+export const STORAGE_GET_SLOWDOWN_MAX_ATTEMPTS = 6;
+export const STORAGE_GET_429_RETRY_BACKOFF_MS = Object.freeze([2000, 5000, 10000, 20000, 30000]);
 const TRANSIENT_STORAGE_NETWORK_ERROR_CODES = new Set([
   "ECONNABORTED",
   "ECONNREFUSED",
@@ -774,19 +775,22 @@ async function storageRequest(storageTarget, requestPath, options = {}, deps = {
       ...(options.headers || {}),
     },
   };
-  const maxAttempts = method === "GET" ? STORAGE_GET_MAX_ATTEMPTS : 1;
+  // Six total attempts is the hard ceiling, including mixed failures. Only
+  // SlowDown can extend a GET beyond the ordinary four-attempt budget.
+  const maxAttempts = method === "GET" ? STORAGE_GET_SLOWDOWN_MAX_ATTEMPTS : 1;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let response = null;
     try {
       response = await fetchImpl(`${storageTarget.baseUrl}${requestPath}`, request);
-      if (method !== "GET" || !(await isRetryableStorageGetResponse(response)) || attempt === maxAttempts) {
+      const responseLimit = response.status === 429 ? maxAttempts : STORAGE_GET_MAX_ATTEMPTS;
+      if (method !== "GET" || !(await isRetryableStorageGetResponse(response)) || attempt >= responseLimit) {
         if (method === "GET" && !response.ok) {
           await logFailedStorageGet(deps, { operation, response, attempt });
         }
         return response;
       }
     } catch (error) {
-      if (method !== "GET" || !isTransientStorageNetworkError(error) || attempt === maxAttempts) {
+      if (method !== "GET" || !isTransientStorageNetworkError(error) || attempt >= STORAGE_GET_MAX_ATTEMPTS) {
         if (method === "GET") await logFailedStorageGet(deps, { operation, attempt, error });
         throw error;
       }

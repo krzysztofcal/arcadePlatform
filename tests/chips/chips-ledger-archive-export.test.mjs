@@ -143,8 +143,8 @@ async function assertBotOnlyPlannerGuardScope() {
     const queries = await runWith(selector);
     assert.equal(
       queries.some(({ query }) => query === "set local enable_nestloop = off;"),
-      true,
-      `${selector} snapshot must use the bot-only planner guard`,
+      false,
+      `${selector} must allow targeted index/nested-loop lookups`,
     );
   }
 
@@ -179,9 +179,12 @@ async function assertBotOnlyDiscoveryAndExactBindings() {
     selector: BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
     tableLimit: 6,
   });
-  const discovery = queries.find(({ parameters }) => parameters.length === 5);
-  assert.equal(discovery?.parameters[4], 6);
-  assert.match(discovery?.query || "", /limit \(\$2::int \* \$5::int\)/);
+  const discovery = queries.find(({ query }) => query === BOT_ONLY_TABLE_DISCOVERY_SQL);
+  assert.equal(discovery?.parameters[2], 6);
+  assert.match(discovery.query, /limit \(\$2::int \+ 1\)/);
+  assert.match(discovery.query, /limit least\(\$3::int, 6\)/);
+  assert.doesNotMatch(discovery.query, /public\.chips_transactions|public\.chips_entries|normalized_metadata|candidate_entry_shapes/);
+  assert.equal(queries.length, 2, "empty discovery must not fall back to the global export/anomaly pipeline");
 
   queries.length = 0;
   await readSnapshot(sql, {
@@ -191,10 +194,18 @@ async function assertBotOnlyDiscoveryAndExactBindings() {
     tableIds: [tableId],
   });
   const exact = queries.find(({ parameters }) => parameters.length === 5);
-  assert.deepEqual(exact?.parameters[4], [tableId]);
-  assert.match(exact?.query || "", /stats\.table_id = any\(\$5::uuid\[\]\)/);
-  assert.match(BOT_ONLY_TABLE_DISCOVERY_SQL, /limit \(\$2::int \* \$5::int\)/);
-  assert.match(BOT_ONLY_EXACT_TABLE_SQL, /stats\.table_id = any\(\$5::uuid\[\]\)/);
+  assert.equal(exact?.parameters[4], tableId);
+  const scopedInput = BOT_ONLY_EXACT_TABLE_SQL.split("table_transaction_metadata as materialized")[0];
+  assert.match(scopedInput, /where registry\.table_id = \$5::uuid/);
+  assert.match(scopedInput, /transactions\.id in \(select registry\.transaction_id from target_registry registry\)/);
+  assert.match(BOT_ONLY_EXACT_TABLE_SQL, /from target_transactions transactions/);
+  assert.match(BOT_ONLY_EXACT_TABLE_SQL, /from target_registry registry/);
+  // Unbound identities must still be checked through every evidence channel.
+  for (const evidence of ["registry.table_id is null", "lower(registry.idempotency_key)",
+    "lower(transactions.reference)", "->>'tableId'", "lower(accounts.system_key)"]) {
+    assert.ok(scopedInput.includes(evidence), evidence);
+  }
+  assert.match(BOT_ONLY_EXACT_TABLE_SQL, /from unknown_target_identity unknown/);
 }
 
 await assertBotOnlyDiscoveryAndExactBindings();

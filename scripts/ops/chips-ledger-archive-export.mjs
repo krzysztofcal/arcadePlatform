@@ -513,10 +513,7 @@ select e.id::text as id, e.sequence::text as sequence, e.tx_type::text as tx_typ
 // without calling that raising fence function from a diagnostic read.  The
 // input-validity check makes malformed legacy strings a row-level fail-closed
 // value instead of aborting the whole snapshot.
-export const BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE = `
-table_transaction_metadata as materialized (
-  select transactions.*,
-         case
+const NORMALIZED_TABLE_METADATA_SQL = `case
            when transactions.metadata is not null
              and pg_catalog.jsonb_typeof(transactions.metadata) = 'object'
              then transactions.metadata
@@ -528,8 +525,14 @@ table_transaction_metadata as materialized (
              )
              then (transactions.metadata #>> '{}')::jsonb
            else null::jsonb
-         end as normalized_metadata
-    from public.chips_transactions transactions
+         end`;
+
+function botOnlyNormalizedTransactionsCte(transactionSource = "public.chips_transactions", registrySource = "public.chips_transaction_idempotency") {
+  return `
+table_transaction_metadata as materialized (
+  select transactions.*,
+         ${NORMALIZED_TABLE_METADATA_SQL} as normalized_metadata
+    from ${transactionSource} transactions
    where transactions.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
 ), table_transaction_classification as materialized (
   select metadata.*,
@@ -577,7 +580,7 @@ table_transaction_metadata as materialized (
          registry.table_id,
          registry.key_format_version,
          registry.key_format
-    from public.chips_transaction_idempotency registry
+    from ${registrySource} registry
 ), unknown_registry_transactions as materialized (
   select registry.idempotency_key,
          registry.transaction_id,
@@ -623,6 +626,9 @@ table_transaction_metadata as materialized (
    where evidence.table_id is not null
 )
 `;
+}
+
+export const BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE = botOnlyNormalizedTransactionsCte();
 
 // Legacy allowlist generation is a fixed historical proof basis. It is
 // intentionally separate from BOT_ONLY_CANDIDATE_SQL: the normal seven-day
@@ -942,8 +948,9 @@ select eligible.id::text as id,
  order by eligible.created_at asc, eligible.id asc;
 `;
 
-export const BOT_ONLY_CANDIDATE_SQL = `
-with ${BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE}, table_rows as materialized (
+function botOnlyCandidateSql(sourceCte) {
+  return `
+with ${sourceCte}, table_rows as materialized (
   select registry.table_id,
          max(registry.transaction_created_at) as newest_created_at,
          count(*)::bigint as identity_count,
@@ -1146,21 +1153,77 @@ select eligible.id::text as id,
  order by eligible.created_at asc, eligible.id asc
  limit $2::int;
 `;
+}
 
-// Automatic retention discovers several complete table identities once, then
-// revalidates one identity per archive batch.  Keep both variants derived from
-// the audited selector so the lifecycle guards cannot drift between paths.
-export const BOT_ONLY_TABLE_DISCOVERY_SQL = BOT_ONLY_CANDIDATE_SQL
-  .replace(
-    "limit 1\n), selected_table_evidence",
-    "limit $5::int\n), selected_table_evidence",
-  )
-  .replace("limit $2::int;\n", "limit ($2::int * $5::int);\n");
+export const BOT_ONLY_CANDIDATE_SQL = botOnlyCandidateSql(BOT_ONLY_NORMALIZED_TABLE_TRANSACTIONS_CTE);
 
-export const BOT_ONLY_EXACT_TABLE_SQL = BOT_ONLY_CANDIDATE_SQL.replace(
-  "and stats.eligible_count = stats.identity_count\n",
-  "and stats.eligible_count = stats.identity_count\n     and stats.table_id = any($5::uuid[])\n",
-);
+// Discovery is only a shortlist, never export authorization. Read at most
+// batchSize + 1 registry identities per lifecycle-eligible table; the extra row
+// rejects oversized tables without exporting or shaping their transactions.
+export const BOT_ONLY_TABLE_DISCOVERY_SQL = `
+select tables.id::text as table_id, stats.*
+  from public.poker_tables tables
+  join public.chips_accounts escrow
+    on escrow.account_type::text = 'ESCROW'
+   and escrow.system_key = 'POKER_TABLE:' || tables.id::text
+  cross join lateral (
+    select max(registry.transaction_created_at)::text as newest_created_at,
+           count(*)::bigint as identity_count,
+           count(*) filter (
+             where registry.user_id is null
+               and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+               and registry.transaction_created_at < $1::timestamptz
+               and registry.archive_batch_id is null
+           )::bigint as eligible_count,
+           public.chips_archive_text_ids_sha256(coalesce(array_agg(registry.idempotency_key order by registry.idempotency_key), array[]::text[])) as registry_keys_sha256,
+           public.chips_archive_text_ids_sha256(coalesce(array_agg(registry.idempotency_key order by registry.idempotency_key)
+             filter (where registry.user_id is not null), array[]::text[])) as out_of_scope_keys_sha256
+      from (
+        select registry.* from public.chips_transaction_idempotency registry
+         where registry.table_id = tables.id
+         limit ($2::int + 1)
+      ) registry
+  ) stats
+ where tables.status::text = 'CLOSED'
+   and tables.has_human_participant is false
+   and tables.bot_only_proof_eligible is true
+   and escrow.status::text = 'active'
+   and escrow.balance = 0
+   and stats.identity_count between 1 and $2::int
+   and stats.eligible_count = stats.identity_count
+ order by tables.id
+ limit least($3::int, 6);
+`;
+
+// Scope registry and transaction inputs BEFORE normalization/materialization.
+// Unbound registry identities still need all four evidence channels: key,
+// normalized metadata, reference and escrow. Their lookup can require scans,
+// but only identities implicating this table reach the full export pipeline.
+export const BOT_ONLY_EXACT_TABLE_SQL = botOnlyCandidateSql(`
+target_registry as materialized (
+  select registry.* from public.chips_transaction_idempotency registry
+   where registry.table_id = $5::uuid
+  union all
+  select registry.* from public.chips_transaction_idempotency registry
+  join public.chips_transactions transactions on transactions.id = registry.transaction_id
+   where registry.table_id is null
+     and registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+     and (
+       lower(registry.idempotency_key) like '%' || $5::uuid::text || '%'
+       or lower(transactions.reference) like '%' || $5::uuid::text || '%'
+       or lower(btrim((${NORMALIZED_TABLE_METADATA_SQL})->>'tableId')) = $5::uuid::text
+       or exists (
+         select 1 from public.chips_entries entries
+         join public.chips_accounts accounts on accounts.id = entries.account_id
+          where entries.transaction_id = transactions.id
+            and accounts.account_type::text = 'ESCROW'
+            and lower(accounts.system_key) = 'poker_table:' || $5::uuid::text
+       )
+     )
+), target_transactions as materialized (
+  select transactions.* from public.chips_transactions transactions
+   where transactions.id in (select registry.transaction_id from target_registry registry)
+), ${botOnlyNormalizedTransactionsCte("target_transactions", "target_registry")}`);
 
 // A no-candidate result is not necessarily an empty database.  Keep the
 // diagnostic read-only and separate from the candidate selector so prepare-only
@@ -1463,41 +1526,16 @@ function normalizeBlockingAnomalies(rows) {
 }
 
 function normalizeBotOnlyDiscoveryTables(candidates) {
-  const tables = new Map();
-  for (const candidate of candidates || []) {
+  return (candidates || []).map((candidate) => {
     const tableId = text(candidate.table_id);
     if (!UUID_RE.test(tableId)) fail("bot-only discovery returned an invalid table ID");
-    const current = tables.get(tableId) || {
-      table_id: tableId,
-      newest_created_at: text(candidate.table_newest_created_at),
-      identity_count: toBigIntString(candidate.table_identity_count, "bot-only discovery identity_count"),
-      eligible_count: toBigIntString(candidate.table_eligible_count, "bot-only discovery eligible_count"),
-      out_of_scope_keys_sha256: text(candidate.table_out_of_scope_keys_sha256),
-      transaction_ids: [],
-      row_count: 0,
-    };
-    if (current.newest_created_at !== text(candidate.table_newest_created_at)
-      || current.identity_count !== toBigIntString(candidate.table_identity_count, "bot-only discovery identity_count")
-      || current.eligible_count !== toBigIntString(candidate.table_eligible_count, "bot-only discovery eligible_count")
-      || current.out_of_scope_keys_sha256 !== text(candidate.table_out_of_scope_keys_sha256)) {
-      fail(`bot-only discovery returned inconsistent evidence for table ${tableId}`);
-    }
-    current.row_count += 1;
-    current.transaction_ids.push(text(candidate.idempotency_key));
-    tables.set(tableId, current);
-  }
-  return [...tables.values()].sort((left, right) => left.table_id.localeCompare(right.table_id)).map((table) => {
-    const uniqueKeys = [...new Set(table.transaction_ids)].sort();
-    if (uniqueKeys.length !== table.row_count || table.row_count !== Number(table.eligible_count)) {
-      fail(`bot-only discovery returned an incomplete table ${table.table_id}`);
-    }
     return {
-      table_id: table.table_id,
-      newest_created_at: table.newest_created_at,
-      identity_count: table.identity_count,
-      eligible_count: table.eligible_count,
-      registry_keys_sha256: crypto.createHash("sha256").update(`${uniqueKeys.join("\n")}\n`).digest("hex"),
-      out_of_scope_keys_sha256: table.out_of_scope_keys_sha256,
+      table_id: tableId,
+      newest_created_at: text(candidate.newest_created_at),
+      identity_count: toBigIntString(candidate.identity_count, "bot-only discovery identity_count"),
+      eligible_count: toBigIntString(candidate.eligible_count, "bot-only discovery eligible_count"),
+      registry_keys_sha256: text(candidate.registry_keys_sha256),
+      out_of_scope_keys_sha256: text(candidate.out_of_scope_keys_sha256),
     };
   });
 }
@@ -2370,7 +2408,7 @@ export async function readSnapshot(sql, options) {
       query: "set transaction isolation level repeatable read, read only;",
       telemetry,
     });
-    if (botOnlySelector) {
+    if (selector === "bot-only-7d") {
       // Measured on Stage: the bot-only selector's eligible_transactions CTE joins
       // materially under-estimated CTE scans as Nested Loop and exceeded the 120 s
       // statement budget. Disabling nested loops for this one bounded snapshot lets
@@ -2417,8 +2455,6 @@ export async function readSnapshot(sql, options) {
       candidateParameters = [
         timestampParam(options.cutoff),
         options.batchSize,
-        timestampParam(options.cursor?.created_at || null),
-        options.cursor?.id || null,
         options.tableLimit || 1,
       ];
     } else if (botOnlyExactTable) {
@@ -2427,7 +2463,7 @@ export async function readSnapshot(sql, options) {
         options.batchSize,
         timestampParam(options.cursor?.created_at || null),
         options.cursor?.id || null,
-        options.tableIds,
+        options.tableIds[0],
       ];
     } else {
       candidateParameters = [
@@ -2462,7 +2498,7 @@ export async function readSnapshot(sql, options) {
         telemetry,
       })
       : [];
-    const blockingAnomalies = (selector === "bot-only-7d" || botOnlyDiscovery) && candidates.length === 0
+    const blockingAnomalies = selector === "bot-only-7d" && candidates.length === 0
       ? normalizeBlockingAnomalies(await observedQuery(tx, {
         phase: "snapshot.blocking_anomalies",
         queryName: "bot_only_blocking_anomalies",
