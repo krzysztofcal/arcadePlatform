@@ -7,8 +7,10 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import postgres from "postgres";
 import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  BOT_ONLY_EXACT_TABLE_SELECTOR,
   BOT_ONLY_RETENTION_DAYS,
   BOT_ONLY_RETENTION_POLICY_ID,
+  BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
   CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   EXPORT_SCHEMA_VERSION,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
@@ -1092,6 +1094,61 @@ function botOnlyNoCandidateReport({ exported, identity, deployedCommitSha }) {
     blockingAnomalies,
     reason: blockingAnomalies.length ? "blocking_anomalies" : "no_eligible_bot_only_table",
   };
+}
+
+function markCandidateSelectorTimeout(error) {
+  if (sqlStateOf(error) === "57014"
+    && error?.chipsLedgerQueryPhase === "snapshot.candidate_selector"
+    && error?.chipsLedgerQueryName === "bot_only_candidate_selector") {
+    error.message = `candidate_selector_timeout: ${error.message}`;
+    error.stageRetentionReason = "candidate_selector_timeout";
+  }
+  return error;
+}
+
+function assertBotOnlyDiscoveryResult(exported) {
+  if (exported?.noCandidate) {
+    if ((exported.blockingAnomalies || []).length) fail("automatic bot-only discovery reported a blocking anomaly");
+    return [];
+  }
+  const tables = exported?.candidateTables;
+  if (!Array.isArray(tables) || tables.length > BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN) {
+    fail("automatic bot-only discovery returned an invalid table set");
+  }
+  const seen = new Set();
+  return tables.map((table) => {
+    const tableId = text(table?.table_id);
+    if (!validUuid(tableId) || seen.has(tableId)) fail("automatic bot-only discovery returned duplicate or invalid table IDs");
+    seen.add(tableId);
+    for (const field of ["newest_created_at", "identity_count", "eligible_count", "registry_keys_sha256", "out_of_scope_keys_sha256"]) {
+      if (!text(table?.[field])) fail(`automatic bot-only discovery evidence is missing ${field}`);
+    }
+    return { ...table, table_id: tableId };
+  });
+}
+
+function assertBotOnlyExactTableRevalidation(exported, discoveredTable) {
+  if (exported?.noCandidate) {
+    fail(`exact-table revalidation no longer matches discovered table ${discoveredTable.table_id}`);
+  }
+  const exact = exported?.bot_only;
+  const fieldsMatch = exact
+    && exact.table_id === discoveredTable.table_id
+    && Number(exact.table_count) === 1
+    && String(exact.identity_count) === String(discoveredTable.identity_count)
+    && String(exact.eligible_count) === String(discoveredTable.eligible_count)
+    && exact.registry_keys_sha256 === discoveredTable.registry_keys_sha256
+    && exact.out_of_scope_keys_sha256 === discoveredTable.out_of_scope_keys_sha256;
+  let timestampsMatch = false;
+  try {
+    timestampsMatch = timestampToMicros(exact?.newest_created_at) === timestampToMicros(discoveredTable.newest_created_at);
+  } catch {
+    timestampsMatch = false;
+  }
+  if (!fieldsMatch || !timestampsMatch) {
+    fail(`exact-table revalidation evidence differs for discovered table ${discoveredTable.table_id}`);
+  }
+  return exported;
 }
 
 function receiptFieldCount(row) {
@@ -5790,6 +5847,40 @@ export async function runAutomaticBotOnlyStageAutomation({
         };
       } else {
         let stopReason = null;
+        let discoveredTables = null;
+        let nextDiscoveredTable = 0;
+        const discoverTables = async () => {
+          if (discoveredTables !== null) return discoveredTables;
+          markAutomaticPhase("automatic.discovery");
+          let exported;
+          try {
+            exported = await (deps.exportArchive || runExport)({
+              argv: [
+                "--target", "stage", "--cutoff-days", String(BOT_ONLY_RETENTION_DAYS),
+                "--batch-size", String(STAGE_MAX_BATCH_SIZE),
+                "--output", path.join(tempRoot, "automatic-discovery.archive.jsonl.gz"),
+                "--manifest", path.join(tempRoot, "automatic-discovery.archive.manifest.json"),
+              ],
+              env: moduleEnv,
+              cwd: tempRoot,
+              now,
+              deps: {
+                sql,
+                selector: BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
+                schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
+                sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
+                tableLimit: BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN,
+                targetOptions: { singleTarget: true },
+                noCandidateIfEmpty: true,
+                emit: false,
+              },
+            });
+          } catch (error) {
+            throw markCandidateSelectorTimeout(error);
+          }
+          discoveredTables = assertBotOnlyDiscoveryResult(exported);
+          return discoveredTables;
+        };
         for (let index = 0; index < BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN; index += 1) {
           markAutomaticPhase("automatic.select");
           await assertAdvisoryLock(sql, lockSession);
@@ -5822,7 +5913,8 @@ export async function runAutomaticBotOnlyStageAutomation({
               now,
               deps: {
                 sql,
-                selector: "bot-only-7d",
+                selector: BOT_ONLY_EXACT_TABLE_SELECTOR,
+                tableIds: [row.bot_only_table_id],
                 schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
                 sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
                 targetOptions: { singleTarget: true },
@@ -6259,14 +6351,15 @@ export async function runAutomaticBotOnlyStageAutomation({
             continue;
           }
 
+          const discovered = await discoverTables();
+          if (nextDiscoveredTable >= discovered.length) {
+            stopReason = "no_eligible_bot_only_table";
+            break;
+          }
+          const discoveredTable = discovered[nextDiscoveredTable++];
           const artifactPath = path.join(tempRoot, "automatic-" + String(index) + ".archive.jsonl.gz");
           const manifestPath = path.join(tempRoot, "automatic-" + String(index) + ".archive.manifest.json");
-          markAutomaticPhase("automatic.export");
-          // A read-only timeout of exactly the bot-only candidate selector must
-          // not take down the whole scheduled run. Only a fresh-candidate export
-          // (no active or incomplete batch to resume) may stop early; timeouts
-          // anywhere else in export (entries, blocking anomalies) plus resume,
-          // proof, recovery, dry-run, execute and cleanup stay fail-closed.
+          markAutomaticPhase("automatic.revalidation", { bot_only_table_id: discoveredTable.table_id });
           let exported;
           try {
             exported = await (deps.exportArchive || runExport)({
@@ -6279,7 +6372,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               now,
               deps: {
                 sql,
-                selector: "bot-only-7d",
+                selector: BOT_ONLY_EXACT_TABLE_SELECTOR,
+                tableIds: [discoveredTable.table_id],
+                tableLimit: 1,
                 schemaVersion: BOT_ONLY_EXPORT_SCHEMA_VERSION,
                 sourcePolicyId: BOT_ONLY_RETENTION_POLICY_ID,
                 targetOptions: { singleTarget: true },
@@ -6288,21 +6383,9 @@ export async function runAutomaticBotOnlyStageAutomation({
               },
             });
           } catch (error) {
-            if (sqlStateOf(error) !== "57014"
-              || error.chipsLedgerQueryPhase !== "snapshot.candidate_selector"
-              || error.chipsLedgerQueryName !== "bot_only_candidate_selector") {
-              throw error;
-            }
-            stopReason = "candidate_selector_timeout";
-            break;
+            throw markCandidateSelectorTimeout(error);
           }
-          if (exported.noCandidate) {
-            if ((exported.blockingAnomalies || []).length) {
-              fail("automatic bot-only selector reported a blocking anomaly");
-            }
-            stopReason = "no_eligible_bot_only_table";
-            break;
-          }
+          assertBotOnlyExactTableRevalidation(exported, discoveredTable);
           markAutomaticPhase("automatic.storage");
           await (deps.ensureArchiveBucket || ensureArchiveBucket)(storageTarget, storageDeps);
           const stored = await (deps.storeArchive || storeArchive)({

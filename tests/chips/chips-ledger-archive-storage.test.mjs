@@ -39,8 +39,11 @@ const ENV = {
   SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
 };
 
-function responseJson(value, status = 200) {
-  return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+function responseJson(value, status = 200, headers = {}) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
 }
 
 function bucket() {
@@ -388,6 +391,9 @@ try {
           headers: { "content-type": "application/gzip" },
         });
       }
+      if (outcome === 429) {
+        return responseJson({ code: "SlowDown" }, 429);
+      }
       return new Response("temporary Storage failure", { status: outcome });
     };
     const value = await downloadPrivateArchiveObject(
@@ -409,11 +415,41 @@ try {
   assert.equal(recoveredAfter544.value.bytes.equals(privateObjectBytes), true);
   assert.equal(recoveredAfter544.value.sha256, crypto.createHash("sha256").update(privateObjectBytes).digest("hex"));
 
-  const recoveredAfter429 = await runPrivateGetScenario([429, 200]);
-  assert.equal(recoveredAfter429.calls.length, 2, "HTTP 429 may have one bounded read-only retry");
-  assert.deepEqual(recoveredAfter429.sleeps, [1000]);
+  const recoveredAfter429 = await runPrivateGetScenario([429, 429, 429, 429, 429, 200]);
+  assert.equal(recoveredAfter429.calls.length, 6, "SlowDown can recover on the sixth GET");
+  assert.deepEqual(recoveredAfter429.sleeps, [2000, 5000, 10000, 20000, 30000]);
   assert.equal(recoveredAfter429.calls.every(({ method }) => method === "GET"), true);
   assert.equal(recoveredAfter429.value.bytes.equals(privateObjectBytes), true);
+
+  const exhaustedSlowDownCalls = [];
+  const exhaustedSlowDownSleeps = [];
+  await assert.rejects(
+    () => downloadPrivateArchiveObject(resolveStorageTarget("stage", ENV), privateObjectPath, {
+      fetch: async (_url, init = {}) => {
+        exhaustedSlowDownCalls.push(init.method || "GET");
+        return responseJson({ code: "SlowDown" }, 429);
+      },
+      sleep: (milliseconds) => { exhaustedSlowDownSleeps.push(milliseconds); },
+    }),
+    /HTTP 429/,
+  );
+  assert.deepEqual(exhaustedSlowDownCalls, Array(6).fill("GET"));
+  assert.deepEqual(exhaustedSlowDownSleeps, [2000, 5000, 10000, 20000, 30000]);
+
+  const permanent429Calls = [];
+  const permanent429Sleeps = [];
+  await assert.rejects(
+    () => downloadPrivateArchiveObject(resolveStorageTarget("stage", ENV), privateObjectPath, {
+      fetch: async (_url, init = {}) => {
+        permanent429Calls.push(init.method || "GET");
+        return responseJson({ code: "TooManyRequests" }, 429);
+      },
+      sleep: (milliseconds) => { permanent429Sleeps.push(milliseconds); },
+    }),
+    /HTTP 429/,
+  );
+  assert.deepEqual(permanent429Calls, ["GET"], "a permanent Storage 429 must not be retried");
+  assert.deepEqual(permanent429Sleeps, []);
 
   const retryAfterEvents = [];
   let releaseRetryAfter;
@@ -427,7 +463,7 @@ try {
         retryAfterCalls += 1;
         retryAfterEvents.push(`fetch-${retryAfterCalls}`);
         if (retryAfterCalls === 1) {
-          return new Response("rate limited", { status: 429, headers: { "retry-after": "2" } });
+          return responseJson({ code: "SlowDown" }, 429, { "retry-after": "2" });
         }
         return new Response(privateObjectBytes, {
           status: 200,
@@ -463,7 +499,7 @@ try {
       fetch: async () => {
         cappedRetryAfterCalls += 1;
         if (cappedRetryAfterCalls === 1) {
-          return new Response("rate limited", { status: 429, headers: { "retry-after": "3600" } });
+          return responseJson({ code: "SlowDown" }, 429, { "retry-after": "3600" });
         }
         return new Response(privateObjectBytes, {
           status: 200,

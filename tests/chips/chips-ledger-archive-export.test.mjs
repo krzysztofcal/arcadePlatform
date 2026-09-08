@@ -3,6 +3,10 @@ import {
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
+  BOT_ONLY_EXACT_TABLE_SELECTOR,
+  BOT_ONLY_EXACT_TABLE_SQL,
+  BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
+  BOT_ONLY_TABLE_DISCOVERY_SQL,
   CLOSED_HUMAN_TABLE_CANDIDATE_SQL,
   CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   PRUNABLE_CANDIDATE_SQL,
@@ -117,7 +121,14 @@ async function assertBotOnlyPlannerGuardScope() {
         },
       }),
     };
-    await readSnapshot(sql, { cutoff, batchSize: 5000, selector });
+    await readSnapshot(sql, {
+      cutoff,
+      batchSize: 5000,
+      selector,
+      ...(selector === BOT_ONLY_EXACT_TABLE_SELECTOR
+        ? { tableIds: ["00000000-0000-4000-8000-000000000020"] }
+        : {}),
+    });
     return queries;
   };
 
@@ -127,6 +138,15 @@ async function assertBotOnlyPlannerGuardScope() {
     true,
     "bot-only-7d snapshot must disable nested loops for the candidate selector",
   );
+
+  for (const selector of [BOT_ONLY_TABLE_DISCOVERY_SELECTOR, BOT_ONLY_EXACT_TABLE_SELECTOR]) {
+    const queries = await runWith(selector);
+    assert.equal(
+      queries.some(({ query }) => query === "set local enable_nestloop = off;"),
+      false,
+      `${selector} must allow targeted index/nested-loop lookups`,
+    );
+  }
 
   for (const selector of ["standard", "prunable"]) {
     const queries = await runWith(selector);
@@ -139,6 +159,56 @@ async function assertBotOnlyPlannerGuardScope() {
 }
 
 await assertBotOnlyPlannerGuardScope();
+
+async function assertBotOnlyDiscoveryAndExactBindings() {
+  const tableId = "00000000-0000-4000-8000-000000000020";
+  const queries = [];
+  const sql = {
+    typed: (value, type) => ({ value, type }),
+    begin: async (callback) => callback({
+      unsafe: async (query, parameters = []) => {
+        queries.push({ query, parameters });
+        return [];
+      },
+    }),
+  };
+
+  await readSnapshot(sql, {
+    cutoff: "2026-08-07T03:32:29.388506Z",
+    batchSize: 5000,
+    selector: BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
+    tableLimit: 6,
+  });
+  const discovery = queries.find(({ query }) => query === BOT_ONLY_TABLE_DISCOVERY_SQL);
+  assert.equal(discovery?.parameters[2], 6);
+  assert.match(discovery.query, /limit \(\$2::int \+ 1\)/);
+  assert.match(discovery.query, /limit least\(\$3::int, 6\)/);
+  assert.doesNotMatch(discovery.query, /public\.chips_transactions|public\.chips_entries|normalized_metadata|candidate_entry_shapes/);
+  assert.equal(queries.length, 2, "empty discovery must not fall back to the global export/anomaly pipeline");
+
+  queries.length = 0;
+  await readSnapshot(sql, {
+    cutoff: "2026-08-07T03:32:29.388506Z",
+    batchSize: 5000,
+    selector: BOT_ONLY_EXACT_TABLE_SELECTOR,
+    tableIds: [tableId],
+  });
+  const exact = queries.find(({ parameters }) => parameters.length === 5);
+  assert.equal(exact?.parameters[4], tableId);
+  const scopedInput = BOT_ONLY_EXACT_TABLE_SQL.split("table_transaction_metadata as materialized")[0];
+  assert.match(scopedInput, /where registry\.table_id = \$5::uuid/);
+  assert.match(scopedInput, /transactions\.id in \(select registry\.transaction_id from target_registry registry\)/);
+  assert.match(BOT_ONLY_EXACT_TABLE_SQL, /from target_transactions transactions/);
+  assert.match(BOT_ONLY_EXACT_TABLE_SQL, /from target_registry registry/);
+  // Unbound identities must still be checked through every evidence channel.
+  for (const evidence of ["registry.table_id is null", "lower(registry.idempotency_key)",
+    "lower(transactions.reference)", "->>'tableId'", "lower(accounts.system_key)"]) {
+    assert.ok(scopedInput.includes(evidence), evidence);
+  }
+  assert.match(BOT_ONLY_EXACT_TABLE_SQL, /from unknown_target_identity unknown/);
+}
+
+await assertBotOnlyDiscoveryAndExactBindings();
 
 async function assertSnapshotQueryTelemetry() {
   const telemetry = [];

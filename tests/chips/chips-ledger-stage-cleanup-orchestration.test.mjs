@@ -16,7 +16,9 @@ import {
   runAutomaticBotOnlyStageAutomation,
 } from "../../scripts/ops/chips-ledger-stage-automation.mjs";
 import {
+  BOT_ONLY_EXACT_TABLE_SELECTOR,
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
   LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
@@ -193,7 +195,6 @@ function manifestSelectRowFromSchedulerRow(row) {
 function fakeScheduler({
   enabled = true,
   candidateCount = 3,
-  blockingAfter = null,
   failExecuteOnce = false,
   failDownloadBeforeRecovery = false,
   realExecute = false,
@@ -205,6 +206,7 @@ function fakeScheduler({
   dryRunSqlstates = [],
   executeSqlstates = [],
   executeAlreadyCleanedAfterFailure = false,
+  exactRevalidationMismatch = false,
   exportSqlstate = null,
   exportSqlstatePhase = null,
   exportSqlstateQueryName = null,
@@ -217,6 +219,9 @@ function fakeScheduler({
   const executionCounts = new Map();
   const state = {
     candidateCalls: 0,
+    discoveryCalls: 0,
+    revalidationCalls: 0,
+    selectedTableId: null,
     exportCalls: 0,
     storeCalls: 0,
     executeCalls: 0,
@@ -256,6 +261,16 @@ function fakeScheduler({
     tableId,
     distinctTables: 1,
     outOfScopeKeysSha256: "2".repeat(64),
+  });
+
+  const tableIdFor = (index) => `00000000-0000-4000-8000-${String(200 + index).padStart(12, "0")}`;
+  const discoveredTable = (index) => ({
+    table_id: tableIdFor(index),
+    newest_created_at: "2026-08-17T00:00:00.000Z",
+    identity_count: "1",
+    eligible_count: "1",
+    registry_keys_sha256: "1".repeat(64),
+    out_of_scope_keys_sha256: "2".repeat(64),
   });
 
   const sql = {
@@ -315,7 +330,7 @@ function fakeScheduler({
       if (options.fresh) state.freshVerifyBucketCalls += 1;
     },
     ensureArchiveBucket: async () => {},
-    exportArchive: async () => {
+    exportArchive: async ({ deps: exportDeps = {} } = {}) => {
       state.exportCalls += 1;
       if (exportSqlstate) {
         const error = new Error(`simulated export ${exportSqlstate}`);
@@ -324,12 +339,36 @@ function fakeScheduler({
         if (exportSqlstateQueryName) error.chipsLedgerQueryName = exportSqlstateQueryName;
         throw error;
       }
+      if (exportDeps.selector === BOT_ONLY_TABLE_DISCOVERY_SELECTOR) {
+        state.discoveryCalls += 1;
+        const remaining = Math.max(0, Math.min(candidateCount, 6) - state.candidateCalls);
+        const tables = Array.from({ length: remaining }, (_, index) => discoveredTable(state.candidateCalls + index));
+        state.candidateCalls += tables.length;
+        return tables.length
+          ? { noCandidate: false, candidateTables: tables }
+          : { noCandidate: true, candidateTables: [], blockingAnomalies: [] };
+      }
+      if (exportDeps.selector === BOT_ONLY_EXACT_TABLE_SELECTOR) {
+        state.revalidationCalls += 1;
+        const tableId = exportDeps.tableIds?.[0];
+        state.selectedTableId = tableId;
+        return {
+          noCandidate: false,
+          bot_only: {
+            table_id: tableId,
+            table_count: 1,
+            newest_created_at: "2026-08-17T00:00:00.000Z",
+            identity_count: exactRevalidationMismatch ? 2 : 1,
+            eligible_count: 1,
+            registry_keys_sha256: "1".repeat(64),
+            out_of_scope_keys_sha256: "2".repeat(64),
+          },
+        };
+      }
       if (state.candidateCalls >= candidateCount) {
         return {
           noCandidate: true,
-          blockingAnomalies: blockingAfter !== null && state.candidateCalls >= blockingAfter
-            ? [{ code: "candidate_anomaly" }]
-            : [],
+          blockingAnomalies: [],
           options: { projectRef: "krydukthwdvccggbyjfw" },
         };
       }
@@ -342,7 +381,8 @@ function fakeScheduler({
       const archiveBytes = Buffer.from(`archive-${index}`);
       const compressedSha = crypto.createHash("sha256").update(archiveBytes).digest("hex");
       const objectPath = `v1/sha256/${compressedSha}.jsonl.gz`;
-      const tableId = `00000000-0000-4000-8000-${String(200 + index).padStart(12, "0")}`;
+      const tableId = state.selectedTableId || tableIdFor(index);
+      state.selectedTableId = null;
       const row = {
         object_path: objectPath,
         project_ref: "krydukthwdvccggbyjfw",
@@ -1057,8 +1097,10 @@ async function schedulerContracts() {
   assert.deepEqual(enabledResult.processed.map((row) => row.dbMutationConfirmed), [true, true, true]);
   assert.deepEqual(enabledResult.processed.map((row) => row.retryState), ["already_cleaned", "already_cleaned", "already_cleaned"]);
   assert.equal(enabledResult.stopReason, "no_eligible_bot_only_table");
-  assert.equal(enabled.state.exportCalls, 4, "three fresh exports plus one bounded no-candidate probe");
-  assert.equal(enabled.state.exportCalls - enabled.state.storeCalls, 1, "each fresh automatic batch is exported exactly once");
+  assert.equal(enabled.state.discoveryCalls, 1, "one global discovery feeds all archive batches");
+  assert.equal(enabled.state.revalidationCalls, 3, "each archive batch revalidates exactly one table");
+  assert.equal(enabled.state.exportCalls, 4, "one discovery plus three exact-table revalidations");
+  assert.equal(enabled.state.exportCalls - enabled.state.storeCalls, 1, "discovery is not an archive batch");
   assert.equal(enabled.state.proofRegisterCalls, 3, "fresh automatic batches register proof exactly once");
   assert.equal(enabled.state.persistCalls, 3, "fresh automatic batches persist recovery exactly once");
   assert.equal(enabled.state.storeCalls, 3);
@@ -1079,10 +1121,10 @@ async function schedulerContracts() {
     exportSqlstatePhase: "snapshot.candidate_selector",
     exportSqlstateQueryName: "bot_only_candidate_selector",
   });
-  const selectorTimeoutResult = await runAutomaticBotOnlyStageAutomation(selectorTimeout);
-  assert.equal(selectorTimeoutResult.state, "completed");
-  assert.equal(selectorTimeoutResult.stopReason, "candidate_selector_timeout");
-  assert.deepEqual(selectorTimeoutResult.processed, []);
+  const selectorTimeoutFailure = await captureAutomaticFailure(selectorTimeout);
+  assert.equal(selectorTimeoutFailure.error.stageRetentionReason, "candidate_selector_timeout");
+  assert.match(selectorTimeoutFailure.error.message, /candidate_selector_timeout/);
+  assert.deepEqual(selectorTimeoutFailure.report.processed_batches, []);
   assert.equal(selectorTimeout.state.exportCalls, 1, "the timed-out candidate probe must be the only export attempt");
   assert.equal(selectorTimeout.state.storeCalls, 0, "a candidate selector timeout must not write the archive");
   assert.equal(selectorTimeout.state.proofRegisterCalls, 0, "a candidate selector timeout must not register proof");
@@ -1098,7 +1140,20 @@ async function schedulerContracts() {
   });
   const blockingAnomalyFailure = await captureAutomaticFailure(blockingAnomalyTimeout);
   assert.match(blockingAnomalyFailure.error.message, /simulated export 57014/);
-  assert.match(blockingAnomalyFailure.report.phase, /automatic\.export/);
+  assert.match(blockingAnomalyFailure.report.phase, /automatic\.discovery/);
+
+  const changedBeforeRevalidation = fakeScheduler({
+    enabled: true,
+    candidateCount: 1,
+    exactRevalidationMismatch: true,
+  });
+  const changedBeforeRevalidationFailure = await captureAutomaticFailure(changedBeforeRevalidation);
+  assert.match(changedBeforeRevalidationFailure.error.message, /exact-table revalidation evidence differs/);
+  assert.equal(changedBeforeRevalidation.state.discoveryCalls, 1);
+  assert.equal(changedBeforeRevalidation.state.revalidationCalls, 1);
+  assert.equal(changedBeforeRevalidation.state.storeCalls, 0, "state change before revalidation must fail before archive write");
+  assert.equal(changedBeforeRevalidation.state.proofRegisterCalls, 0);
+  assert.equal(changedBeforeRevalidation.state.destructiveSqlMutations, 0);
 
   const proven = makeProvenAutomaticRow("27");
   const legalRestart = fakeScheduler({
@@ -1835,13 +1890,6 @@ async function schedulerContracts() {
   assert.equal(capacityResult.processed.length, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
   assert.equal(capacity.state.storeCalls, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
   assert.equal(capacityResult.stopReason, "batch_limit_reached", "the bounded run must report its full capacity");
-
-  const anomaly = fakeScheduler({ enabled: true, candidateCount: 1, blockingAfter: 1 });
-  await assert.rejects(
-    runAutomaticBotOnlyStageAutomation(anomaly),
-    /blocking anomaly/,
-  );
-  assert.equal(anomaly.state.storeCalls, 1, "anomaly must stop before the next batch");
 
   const interrupted = fakeScheduler({ enabled: true, candidateCount: 1, failExecuteOnce: true });
   await assert.rejects(runAutomaticBotOnlyStageAutomation(interrupted), /simulated interruption/);
