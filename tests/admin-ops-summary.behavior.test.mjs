@@ -124,11 +124,13 @@ function ledgerRowFixture() {
 }
 
 test("ledger capacity maps SQL rows to the ops contract with table/index/total sizes", async () => {
+  let query;
   const summary = await loadLedgerCapacity(
     { ADMIN_LEDGER_DB_WARNING_MB: "800" },
-    async () => ledgerRowFixture(),
+    async (sql) => { query = sql; return ledgerRowFixture(); },
   );
 
+  assert.match(query, /count\(\*\) from public\.chips_transactions/);
   assert.equal(summary.available, true);
   assert.equal(summary.transactionRowCount, 19800);
   assert.equal(summary.entryRowCount, 39700);
