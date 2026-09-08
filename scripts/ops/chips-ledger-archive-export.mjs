@@ -2489,7 +2489,7 @@ export async function readSnapshot(sql, options) {
       telemetry,
     });
     const ids = botOnlyDiscovery ? [] : candidates.map((candidate) => text(candidate.id));
-    const entries = ids.length
+    const entries = options.includeEntries !== false && ids.length
       ? await observedQuery(tx, {
         phase: "snapshot.entries",
         queryName: "snapshot_entries",

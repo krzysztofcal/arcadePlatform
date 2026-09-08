@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import {
+  BOT_ONLY_EXACT_TABLE_SELECTOR,
+  BOT_ONLY_EXACT_TABLE_SQL,
+  BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
+  BOT_ONLY_TABLE_DISCOVERY_SQL,
+} from "../../scripts/ops/chips-ledger-archive-export.mjs";
+import { runBotOnlySelectorDiagnostic } from "../../scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs";
 
 const diagnostic = fs.readFileSync("scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs", "utf8");
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-timeout-diagnostic.yml", "utf8");
@@ -10,6 +17,9 @@ assert.doesNotMatch(diagnostic, /EXPLAIN\s*\([^)]*ANALYZE/i);
 assert.match(diagnostic, /set local statement_timeout = '\$\{REPLAY_STATEMENT_TIMEOUT_MS\}ms'/);
 assert.match(diagnostic, /selectorReplay/);
 assert.match(diagnostic, /runBotOnlyTableIdentitySummaryDiagnostic/);
+assert.match(diagnostic, /runBotOnlySelectorDiagnostic/);
+assert.match(diagnostic, /BOT_ONLY_TABLE_DISCOVERY_SQL/);
+assert.match(diagnostic, /BOT_ONLY_EXACT_TABLE_SQL/);
 assert.match(diagnostic, /runExport/);
 assert.match(diagnostic, /verifyLocalArchive/);
 assert.match(diagnostic, /diagnoseTableIdentitySummary/);
@@ -49,6 +59,80 @@ assert.match(diagnostic, /output_contains_transaction_ids: false/);
 assert.match(diagnostic, /output_contains_registry_keys: false/);
 assert.match(diagnostic, /storage_access: false/);
 assert.doesNotMatch(diagnostic, /\b(?:insert|update|delete|truncate|alter|drop)\s+(?:into\s+)?public\./i);
+
+const selectorDiagnosticSource = diagnostic.slice(
+  diagnostic.indexOf("function selectorTableId"),
+  diagnostic.indexOf("export async function runStageTimeoutDiagnostic"),
+);
+assert.match(selectorDiagnosticSource, /readSnapshot/);
+assert.match(selectorDiagnosticSource, /includeEntries: false/);
+assert.doesNotMatch(
+  selectorDiagnosticSource,
+  /BOT_ONLY_CANDIDATE_SQL|runExport|storeArchive|pruneArchive|downloadPrivateArchiveObject|ensureArchiveBucket|registerProof|executeVerifiedCycle/i,
+);
+assert.doesNotMatch(selectorDiagnosticSource, /\b(?:insert|update|delete|truncate|alter|drop)\b/i);
+
+const SELECTOR_TABLE_ID = "00000000-0000-4000-8000-000000000020";
+
+function selectorSql({ discoveryRows, exactRows }) {
+  const calls = [];
+  const sql = {
+    typed: (value, type) => ({ value, type }),
+    async begin(callback) {
+      return callback({
+        async unsafe(query, parameters = []) {
+          calls.push({ query, parameters });
+          if (query.includes("set transaction isolation level")) return [];
+          if (query === BOT_ONLY_TABLE_DISCOVERY_SQL) return discoveryRows;
+          if (query === BOT_ONLY_EXACT_TABLE_SQL) return exactRows;
+          throw new Error(`unexpected selector diagnostic SQL: ${query.slice(0, 80)}`);
+        },
+      });
+    },
+  };
+  return { sql, calls };
+}
+
+const identityAndFence = { fence_active: true, enforcement_active: true };
+const cutoff = "2026-09-01T00:00:00.000Z";
+
+{
+  const { sql, calls } = selectorSql({ discoveryRows: [], exactRows: [] });
+  const report = await runBotOnlySelectorDiagnostic({ sql, cutoff, identityAndFence });
+  assert.equal(report.state, "no_candidate");
+  assert.equal(report.discovery.selector, BOT_ONLY_TABLE_DISCOVERY_SELECTOR);
+  assert.equal(report.discovery.result_count, 0);
+  assert.equal(report.discovery.sqlstate, "00000");
+  assert.equal(report.discovery.table_id, null);
+  assert.equal(report.discovery.elapsed_ms >= 0, true);
+  assert.equal(report.exact_revalidation, null);
+  assert.equal(calls.filter(({ query }) => query === BOT_ONLY_TABLE_DISCOVERY_SQL).length, 1);
+  assert.equal(calls.filter(({ query }) => query === BOT_ONLY_EXACT_TABLE_SQL).length, 0);
+  assert.equal(calls.length, 2, "empty discovery must not run an entries query");
+}
+
+{
+  const { sql, calls } = selectorSql({
+    discoveryRows: [{ table_id: SELECTOR_TABLE_ID }],
+    exactRows: [{ table_id: SELECTOR_TABLE_ID }],
+  });
+  const report = await runBotOnlySelectorDiagnostic({ sql, cutoff, identityAndFence });
+  assert.equal(report.state, "revalidated");
+  assert.equal(report.selected_table_id, SELECTOR_TABLE_ID);
+  assert.equal(report.discovery.selector, BOT_ONLY_TABLE_DISCOVERY_SELECTOR);
+  assert.equal(report.discovery.result_count, 1);
+  assert.equal(report.discovery.table_id, SELECTOR_TABLE_ID);
+  assert.equal(report.exact_revalidation.selector, BOT_ONLY_EXACT_TABLE_SELECTOR);
+  assert.equal(report.exact_revalidation.result_count, 1);
+  assert.equal(report.exact_revalidation.table_id, SELECTOR_TABLE_ID);
+  assert.equal(report.exact_revalidation.sqlstate, "00000");
+  assert.equal(report.exact_revalidation.elapsed_ms >= 0, true);
+  assert.equal(calls.filter(({ query }) => query === BOT_ONLY_TABLE_DISCOVERY_SQL).length, 1);
+  assert.equal(calls.filter(({ query }) => query === BOT_ONLY_EXACT_TABLE_SQL).length, 1);
+  const exactCall = calls.find(({ query }) => query === BOT_ONLY_EXACT_TABLE_SQL);
+  assert.equal(exactCall.parameters[4], SELECTOR_TABLE_ID);
+  assert.equal(calls.length, 4, "selector diagnostic must omit the entries query");
+}
 
 assert.match(workflow, /workflow_dispatch:/);
 assert.doesNotMatch(workflow, /schedule:/);

@@ -8,10 +8,15 @@ import { gunzipSync } from "node:zlib";
 import {
   BOT_ONLY_BLOCKING_ANOMALY_SQL,
   BOT_ONLY_CANDIDATE_SQL,
+  BOT_ONLY_EXACT_TABLE_SELECTOR,
+  BOT_ONLY_EXACT_TABLE_SQL,
   BOT_ONLY_RETENTION_DAYS,
   BOT_ONLY_RETENTION_POLICY_ID,
+  BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
+  BOT_ONLY_TABLE_DISCOVERY_SQL,
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   parseJsonl,
+  readSnapshot,
   runExport,
 } from "./chips-ledger-archive-export.mjs";
 import {
@@ -42,6 +47,10 @@ const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const EXACT_BOT_ONLY_DIAGNOSTIC_BATCH_ID = "481";
+const BOT_ONLY_SELECTOR_QUERY_NAMES = Object.freeze({
+  [BOT_ONLY_TABLE_DISCOVERY_SELECTOR]: "bot_only_table_discovery_selector",
+  [BOT_ONLY_EXACT_TABLE_SELECTOR]: "bot_only_exact_table_selector",
+});
 const BOT_ONLY_PROOF_FUNCTION_DEFINITION_SQL = `
 select pg_catalog.pg_get_functiondef(
   'public.chips_assert_bot_only_archive_proof_lifecycle_gate(uuid,bigint,timestamptz,uuid[],text[])'::pg_catalog.regprocedure
@@ -340,6 +349,10 @@ function sqlSha256(query) {
 
 function stringify(value) {
   return JSON.stringify(value, (_key, nested) => (typeof nested === "bigint" ? nested.toString() : nested), 2);
+}
+
+function klog(kind, data) {
+  process.stdout.write(`[klog] ${kind} ${JSON.stringify(data)}\n`);
 }
 
 function boundedReadOnlySql(sql) {
@@ -760,7 +773,133 @@ export async function runBotOnlyTableIdentitySummaryDiagnostic({ config, sql, cu
   }
 }
 
-export async function runStageTimeoutDiagnostic({ env = process.env, now = new Date(), summaryOnly = false, batchId = null } = {}) {
+function selectorTableId(value, label) {
+  const tableId = String(value ?? "").trim().toLowerCase();
+  if (!UUID_RE.test(tableId)) throw new Error(`${label} returned an invalid table ID`);
+  return tableId;
+}
+
+function selectorQueryReport({ selector, query, telemetry, resultCount, tableId, error = null }) {
+  const queryEvent = [...telemetry].reverse().find((event) => (
+    event.phase === "snapshot.candidate_selector" && event.sql_sha256 === sqlSha256(query)
+  ));
+  return {
+    selector,
+    query_name: BOT_ONLY_SELECTOR_QUERY_NAMES[selector],
+    sql_sha256: sqlSha256(query),
+    elapsed_ms: queryEvent?.elapsed_ms ?? null,
+    sqlstate: queryEvent?.sqlstate || (error ? sqlState(error) : "00000"),
+    result_count: resultCount,
+    table_id: tableId,
+    read_only: true,
+    ...(error ? { error_class: "selector_query_failed" } : {}),
+  };
+}
+
+async function runBotOnlySelectorQuery({ sql, selector, query, cutoff, tableIds = undefined }) {
+  const telemetry = [];
+  try {
+    const snapshot = await readSnapshot(sql, {
+      cutoff,
+      batchSize: STAGE_MAX_BATCH_SIZE,
+      selector,
+      tableLimit: selector === BOT_ONLY_TABLE_DISCOVERY_SELECTOR ? 1 : undefined,
+      tableIds,
+      includeEntries: false,
+      telemetry: (event) => telemetry.push(event),
+    });
+    const rawTableId = selector === BOT_ONLY_TABLE_DISCOVERY_SELECTOR
+      ? snapshot.candidates[0]?.table_id
+      : tableIds[0];
+    const report = selectorQueryReport({
+      selector,
+      query,
+      telemetry,
+      resultCount: snapshot.candidates.length,
+      tableId: rawTableId == null ? null : String(rawTableId).trim().toLowerCase(),
+    });
+    klog("chips_ledger_stage_bot_only_selector", report);
+    return { snapshot, report };
+  } catch (error) {
+    const report = selectorQueryReport({
+      selector,
+      query,
+      telemetry,
+      resultCount: null,
+      tableId: selector === BOT_ONLY_EXACT_TABLE_SELECTOR && tableIds?.length === 1
+        ? String(tableIds[0]).trim().toLowerCase()
+        : null,
+      error,
+    });
+    klog("chips_ledger_stage_bot_only_selector", report);
+    const diagnosticError = error instanceof Error ? error : new Error(String(error));
+    diagnosticError.selectorDiagnosticReport = report;
+    throw diagnosticError;
+  }
+}
+
+export async function runBotOnlySelectorDiagnostic({ sql, cutoff, identityAndFence }) {
+  if (!identityAndFence?.fence_active || !identityAndFence?.enforcement_active) {
+    throw new Error("bot-only selector diagnostic requires the active Stage TABLE fence");
+  }
+
+  const discovery = await runBotOnlySelectorQuery({
+    sql,
+    selector: BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
+    query: BOT_ONLY_TABLE_DISCOVERY_SQL,
+    cutoff,
+  });
+  if (discovery.snapshot.candidates.length > 1) {
+    throw new Error("bot-only selector discovery returned more than one table");
+  }
+
+  const discoveredTableId = discovery.snapshot.candidates.length === 1
+    ? selectorTableId(discovery.snapshot.candidates[0].table_id, "bot-only selector discovery")
+    : null;
+  let exact = null;
+  if (discoveredTableId) {
+    exact = await runBotOnlySelectorQuery({
+      sql,
+      selector: BOT_ONLY_EXACT_TABLE_SELECTOR,
+      query: BOT_ONLY_EXACT_TABLE_SQL,
+      cutoff,
+      tableIds: [discoveredTableId],
+    });
+    for (const candidate of exact.snapshot.candidates) {
+      if (selectorTableId(candidate.table_id, "bot-only exact selector") !== discoveredTableId) {
+        throw new Error(`bot-only exact selector returned a different table than ${discoveredTableId}`);
+      }
+    }
+  }
+
+  return {
+    state: exact === null
+      ? "no_candidate"
+      : exact.snapshot.candidates.length === 0 ? "revalidation_empty" : "revalidated",
+    cutoff,
+    selected_table_id: discoveredTableId,
+    discovery: discovery.report,
+    exact_revalidation: exact?.report || null,
+    read_only_contract: {
+      transaction: "repeatable read, read only",
+      writes: false,
+      database_mutations: false,
+      storage_access: false,
+      statement_timeout_changed: false,
+      discovery_queries: 1,
+      exact_queries: exact === null ? 0 : 1,
+      output_contains_rows: false,
+    },
+  };
+}
+
+export async function runStageTimeoutDiagnostic({
+  env = process.env,
+  now = new Date(),
+  summaryOnly = false,
+  selectorDiagnostic = false,
+  batchId = null,
+} = {}) {
   const config = validateStageEnvironment(env, { requireCommitSha: true });
   const sql = postgres(config.dbUrl, {
     max: 1,
@@ -777,6 +916,25 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
     const identityAndFence = await readIdentityAndFence(sql);
     if (identityAndFence.system_identifier !== STAGE_SYSTEM_IDENTIFIER) {
       throw new Error("database is not canonical Stage");
+    }
+
+    if (selectorDiagnostic) {
+      if (summaryOnly || batchId !== null) {
+        throw new Error("bot-only selector diagnostic cannot be combined with another diagnostic mode");
+      }
+      return {
+        event: "chips_ledger_stage_bot_only_selector_diagnostic",
+        target: "stage",
+        mode: "bot-only-7d-selector-diagnostic",
+        project_ref: STAGE_PROJECT_REF,
+        deployed_commit_sha: config.deployedCommitSha,
+        stage_identity_and_fence: identityAndFence,
+        selector_diagnostic: await runBotOnlySelectorDiagnostic({
+          sql,
+          cutoff,
+          identityAndFence,
+        }),
+      };
     }
 
     if (batchId != null) {
@@ -879,11 +1037,16 @@ export async function runStageTimeoutDiagnostic({ env = process.env, now = new D
 if (process.argv[1] && process.argv[1].endsWith("chips-ledger-stage-timeout-diagnostic.mjs")) {
   const argv = process.argv.slice(2);
   let summaryOnly = false;
+  let selectorDiagnostic = false;
   let batchId = null;
   let invalid = false;
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === "--summary-only" && !summaryOnly) {
       summaryOnly = true;
+      continue;
+    }
+    if (argv[index] === "--selector-diagnostic" && !selectorDiagnostic) {
+      selectorDiagnostic = true;
       continue;
     }
     if (argv[index] === "--batch-id" && batchId === null && argv[index + 1] && !argv[index + 1].startsWith("--")) {
@@ -894,11 +1057,11 @@ if (process.argv[1] && process.argv[1].endsWith("chips-ledger-stage-timeout-diag
     invalid = true;
     break;
   }
-  if (invalid || (summaryOnly && batchId !== null)) {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs [--summary-only | --batch-id 481]\n");
+  if (invalid || (summaryOnly && batchId !== null) || (selectorDiagnostic && (summaryOnly || batchId !== null))) {
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-timeout-diagnostic.mjs [--summary-only | --batch-id 481 | --selector-diagnostic]\n");
     process.exitCode = 1;
   } else {
-    runStageTimeoutDiagnostic({ summaryOnly, batchId })
+    runStageTimeoutDiagnostic({ summaryOnly, selectorDiagnostic, batchId })
       .then((report) => process.stdout.write(`${stringify(report)}\n`))
     .catch((error) => {
       process.stderr.write(`chips-ledger-stage-timeout-diagnostic failed: ${redactedError(error)}\n`);

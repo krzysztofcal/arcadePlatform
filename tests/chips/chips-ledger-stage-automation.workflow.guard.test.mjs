@@ -8,6 +8,7 @@ const RETAINED_MODES = [
   "existing-30d-recovery-diagnostic",
   "existing-30d-recovery-repair",
   "bot-only-7d-summary-diagnostic",
+  "bot-only-7d-selector-diagnostic",
   "bot-only-7d-automatic",
   "closed-human-30d-recovery-diagnostic",
   "closed-human-30d-recovery-repair",
@@ -55,6 +56,7 @@ const RETAINED_STEPS = [
   "Diagnose existing 30-day durable recovery",
   "Repair exact existing 30-day durable recovery",
   "Run bot-only 7-day summary diagnostic",
+  "Run bot-only 7-day selector diagnostic",
   "Diagnose closed human-table 30-day durable recovery",
   "Repair exact closed human-table 30-day durable recovery",
   "Run activated bot-only 7-day Stage automation",
@@ -156,6 +158,7 @@ for (const mode of [
   "existing-30d-recovery-diagnostic",
   "existing-30d-recovery-repair",
   "bot-only-7d-summary-diagnostic",
+  "bot-only-7d-selector-diagnostic",
   "bot-only-7d-automatic",
   "closed-human-30d-recovery-diagnostic",
   "closed-human-30d-recovery-repair",
@@ -169,7 +172,7 @@ for (const retired of RETIRED_MODES) {
 }
 
 const stageJobIf = workflow.match(
-  /^jobs:\n\s+stage-archive:\n\s+if: .*$/m,
+  /^    if: .*$/m,
 )[0];
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
@@ -178,6 +181,10 @@ assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
+assert.match(
+  stageJobIf,
+  /if: \$\{\{ \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-selector-diagnostic'\) \|\| \(vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' &&/,
+);
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
 assert.match(stageJobIf, /github\.actor == github\.repository_owner/);
 
@@ -199,6 +206,7 @@ assert.doesNotMatch(existingRun, /--policy|--prepare-only|--execute|--automatic/
 const botOnlyAutomaticRun = workflow.match(
   /- name: Run activated bot-only 7-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
+assert.doesNotMatch(botOnlyAutomaticRun, /bot-only-7d-selector-diagnostic/);
 assert.match(botOnlyAutomaticRun, /id: bot_only_automatic/);
 assert.match(botOnlyAutomaticRun, /continue-on-error: \$\{\{ github\.event_name == 'schedule'/);
 assert.match(botOnlyAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
@@ -206,6 +214,15 @@ assert.match(botOnlyAutomaticRun, /inputs\.mode == 'bot-only-7d-automatic'/);
 assert.match(botOnlyAutomaticRun, /inputs\.mode == 'external-scheduled-automatic'/);
 assert.match(botOnlyAutomaticRun, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"/);
 assert.match(botOnlyAutomaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy bot-only-7d --automatic/);
+
+const selectorDiagnosticRun = workflow.match(
+  /- name: Run bot-only 7-day selector diagnostic[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(selectorDiagnosticRun, /inputs\.mode == 'bot-only-7d-selector-diagnostic'/);
+assert.match(selectorDiagnosticRun, /node scripts\/ops\/chips-ledger-stage-timeout-diagnostic\.mjs --selector-diagnostic/);
+assert.match(selectorDiagnosticRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_EXECUTE:-\}"/);
+assert.match(selectorDiagnosticRun, /test -z "\$\{CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-\}"/);
+assert.doesNotMatch(selectorDiagnosticRun, /CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED|--execute|--automatic|Storage|prune|archive upload/i);
 
 const escrowAutomaticRun = workflow.match(
   /- name: Run Stage escrow account retention[\s\S]*?(?=\n\s+- name:|\s*$)/,
