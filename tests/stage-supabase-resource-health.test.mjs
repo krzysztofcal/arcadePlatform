@@ -25,6 +25,14 @@ function addCpuGroup(samples, cpu) {
     }, mode === 'idle' ? 42 : mode === 'user' ? 12 : mode === 'iowait' ? 6 : 0);
   }
 }
+function addDiskGroup(samples, device, value = 0) {
+  for (const name of [
+    'node_disk_read_bytes_total', 'node_disk_written_bytes_total',
+    'node_disk_reads_completed_total', 'node_disk_writes_completed_total',
+  ]) addMetric(samples, name, {
+    supabase_project_ref: 'krydukthwdvccggbyjfw', service_type: 'db', device,
+  }, value);
+}
 function deleteMetric(samples, predicate) {
   const entry = [...samples].find(([, sample]) => predicate(sample));
   if (entry) samples.delete(entry[0]);
@@ -146,6 +154,29 @@ test('incomplete required disk measurement is not converted to zero', () => {
   assert.deepEqual(window.disks, []);
   assert.equal(window.measurementReason, 'disk_series_incomplete');
   assert.equal(classify(window, capacity, diskUtilization).state, 'unknown');
+});
+
+test('existing or newly complete disk devices fail closed without erasing CPU', () => {
+  const missing = windowFor();
+  addDiskGroup(missing.first, 'device_2');
+  addDiskGroup(missing.second, 'device_2', 600);
+  deleteMetric(missing.second, (sample) => sample.labels.device === 'device_2'
+    && sample.name === 'node_disk_read_bytes_total');
+  const incomplete = measureWindow(missing.first, missing.second, 60);
+  assert.equal(incomplete.cpuPercent, 20);
+  assert.equal(incomplete.iowaitPercent, 10);
+  assert.deepEqual(incomplete.disks, []);
+  assert.equal(incomplete.measurementReason, 'disk_series_incomplete');
+  assert.equal(classify(incomplete, capacity, diskUtilization).pressureState, 'unknown');
+  assert.equal(classify(incomplete, capacity, diskUtilization).state, 'unknown');
+
+  const added = windowFor();
+  addDiskGroup(added.second, 'device_2', 600);
+  const changed = measureWindow(added.first, added.second, 60);
+  assert.equal(changed.cpuPercent, 20);
+  assert.deepEqual(changed.disks, []);
+  assert.equal(changed.measurementReason, 'series_set_changed');
+  assert.equal(classify(changed, capacity, diskUtilization).state, 'unknown');
 });
 
 test('capacity and largest relations share read-only Stage transaction; top 10 only on alert', async () => {

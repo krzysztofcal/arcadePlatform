@@ -123,34 +123,58 @@ export function measureWindow(first, second, seconds) {
     ? JSON.stringify(Object.entries(sample.labels).sort()) : null;
   const firstDisks = group(first, DISK, diskGroupKey, (sample) => sample.name);
   const secondDisks = group(second, DISK, diskGroupKey, (sample) => sample.name);
-  let diskReset = false;
+  const complete = (series) => series && DISK.every((name) => series.has(name));
+  const firstComplete = new Set();
+  let diskReason = null;
   for (const [key, firstSeries] of firstDisks) {
-    const secondSeries = secondDisks.get(key);
-    if (!secondSeries || !DISK.every((name) => firstSeries.has(name) && secondSeries.has(name))) continue;
-    const deltas = {};
-    for (const name of DISK) {
-      const previous = firstSeries.get(name);
-      const current = secondSeries.get(name);
-      if (current.value < previous.value) {
-        diskReset = true;
-        break;
-      }
-      deltas[name] = current.value - previous.value;
+    if (!complete(firstSeries)) {
+      diskReason = 'disk_series_incomplete';
+      break;
     }
-    if (diskReset) break;
-    result.disks.push({
-      device: firstSeries.get(DISK[0]).labels.device,
-      readBytesPerSecond: deltas[DISK[0]] / seconds,
-      writeBytesPerSecond: deltas[DISK[1]] / seconds,
-      readIops: deltas[DISK[2]] / seconds,
-      writeIops: deltas[DISK[3]] / seconds,
-    });
+    firstComplete.add(key);
+    const secondSeries = secondDisks.get(key);
+    if (!complete(secondSeries)) {
+      diskReason = 'disk_series_incomplete';
+      break;
+    }
   }
-  if (diskReset) {
-    result.disks = [];
-    setReason('counter_reset');
-  } else if (!result.disks.length) {
-    setReason('disk_series_incomplete');
+  if (!diskReason && [...secondDisks].some(([key, series]) => complete(series) && !firstComplete.has(key))) {
+    diskReason = 'series_set_changed';
+  }
+  if (diskReason) {
+    setReason(diskReason);
+  } else {
+    const disks = [];
+    let diskReset = false;
+    for (const key of firstComplete) {
+      const firstSeries = firstDisks.get(key);
+      const secondSeries = secondDisks.get(key);
+      const deltas = {};
+      for (const name of DISK) {
+        const previous = firstSeries.get(name);
+        const current = secondSeries.get(name);
+        if (current.value < previous.value) {
+          diskReset = true;
+          break;
+        }
+        deltas[name] = current.value - previous.value;
+      }
+      if (diskReset) break;
+      disks.push({
+        device: firstSeries.get(DISK[0]).labels.device,
+        readBytesPerSecond: deltas[DISK[0]] / seconds,
+        writeBytesPerSecond: deltas[DISK[1]] / seconds,
+        readIops: deltas[DISK[2]] / seconds,
+        writeIops: deltas[DISK[3]] / seconds,
+      });
+    }
+    if (diskReset) {
+      setReason('counter_reset');
+    } else if (!disks.length) {
+      setReason('disk_series_incomplete');
+    } else {
+      result.disks = disks;
+    }
   }
   result.measurementReason = measurementReason;
   return result;
