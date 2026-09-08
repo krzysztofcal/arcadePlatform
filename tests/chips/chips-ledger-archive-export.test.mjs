@@ -3,6 +3,10 @@ import {
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
+  BOT_ONLY_EXACT_TABLE_SELECTOR,
+  BOT_ONLY_EXACT_TABLE_SQL,
+  BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
+  BOT_ONLY_TABLE_DISCOVERY_SQL,
   CLOSED_HUMAN_TABLE_CANDIDATE_SQL,
   CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   PRUNABLE_CANDIDATE_SQL,
@@ -117,7 +121,14 @@ async function assertBotOnlyPlannerGuardScope() {
         },
       }),
     };
-    await readSnapshot(sql, { cutoff, batchSize: 5000, selector });
+    await readSnapshot(sql, {
+      cutoff,
+      batchSize: 5000,
+      selector,
+      ...(selector === BOT_ONLY_EXACT_TABLE_SELECTOR
+        ? { tableIds: ["00000000-0000-4000-8000-000000000020"] }
+        : {}),
+    });
     return queries;
   };
 
@@ -127,6 +138,15 @@ async function assertBotOnlyPlannerGuardScope() {
     true,
     "bot-only-7d snapshot must disable nested loops for the candidate selector",
   );
+
+  for (const selector of [BOT_ONLY_TABLE_DISCOVERY_SELECTOR, BOT_ONLY_EXACT_TABLE_SELECTOR]) {
+    const queries = await runWith(selector);
+    assert.equal(
+      queries.some(({ query }) => query === "set local enable_nestloop = off;"),
+      true,
+      `${selector} snapshot must use the bot-only planner guard`,
+    );
+  }
 
   for (const selector of ["standard", "prunable"]) {
     const queries = await runWith(selector);
@@ -139,6 +159,45 @@ async function assertBotOnlyPlannerGuardScope() {
 }
 
 await assertBotOnlyPlannerGuardScope();
+
+async function assertBotOnlyDiscoveryAndExactBindings() {
+  const tableId = "00000000-0000-4000-8000-000000000020";
+  const queries = [];
+  const sql = {
+    typed: (value, type) => ({ value, type }),
+    begin: async (callback) => callback({
+      unsafe: async (query, parameters = []) => {
+        queries.push({ query, parameters });
+        return [];
+      },
+    }),
+  };
+
+  await readSnapshot(sql, {
+    cutoff: "2026-08-07T03:32:29.388506Z",
+    batchSize: 5000,
+    selector: BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
+    tableLimit: 6,
+  });
+  const discovery = queries.find(({ parameters }) => parameters.length === 5);
+  assert.equal(discovery?.parameters[4], 6);
+  assert.match(discovery?.query || "", /limit \(\$2::int \* \$5::int\)/);
+
+  queries.length = 0;
+  await readSnapshot(sql, {
+    cutoff: "2026-08-07T03:32:29.388506Z",
+    batchSize: 5000,
+    selector: BOT_ONLY_EXACT_TABLE_SELECTOR,
+    tableIds: [tableId],
+  });
+  const exact = queries.find(({ parameters }) => parameters.length === 5);
+  assert.deepEqual(exact?.parameters[4], [tableId]);
+  assert.match(exact?.query || "", /stats\.table_id = any\(\$5::uuid\[\]\)/);
+  assert.match(BOT_ONLY_TABLE_DISCOVERY_SQL, /limit \(\$2::int \* \$5::int\)/);
+  assert.match(BOT_ONLY_EXACT_TABLE_SQL, /stats\.table_id = any\(\$5::uuid\[\]\)/);
+}
+
+await assertBotOnlyDiscoveryAndExactBindings();
 
 async function assertSnapshotQueryTelemetry() {
   const telemetry = [];

@@ -18,6 +18,8 @@ export const CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID = "stage-ledger-closed-human
 export const LEGACY_STAGE_ALLOWLIST_POLICY_ID = "legacy_stage_allowlist_v1";
 export const BOT_ONLY_EXPORT_SCHEMA_VERSION = 2;
 export const BOT_ONLY_RETENTION_DAYS = 7;
+export const BOT_ONLY_TABLE_DISCOVERY_SELECTOR = "bot-only-7d-discovery";
+export const BOT_ONLY_EXACT_TABLE_SELECTOR = "bot-only-7d-exact-table";
 export const LEGACY_STAGE_ALLOWLIST_TABLE_COUNT = 974;
 export const LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT = 10;
 export const LEGACY_STAGE_ALLOWLIST_BATCH_COUNT = Math.ceil(
@@ -1145,6 +1147,21 @@ select eligible.id::text as id,
  limit $2::int;
 `;
 
+// Automatic retention discovers several complete table identities once, then
+// revalidates one identity per archive batch.  Keep both variants derived from
+// the audited selector so the lifecycle guards cannot drift between paths.
+export const BOT_ONLY_TABLE_DISCOVERY_SQL = BOT_ONLY_CANDIDATE_SQL
+  .replace(
+    "limit 1\n), selected_table_evidence",
+    "limit $5::int\n), selected_table_evidence",
+  )
+  .replace("limit $2::int;\n", "limit ($2::int * $5::int);\n");
+
+export const BOT_ONLY_EXACT_TABLE_SQL = BOT_ONLY_CANDIDATE_SQL.replace(
+  "and stats.eligible_count = stats.identity_count\n",
+  "and stats.eligible_count = stats.identity_count\n     and stats.table_id = any($5::uuid[])\n",
+);
+
 // A no-candidate result is not necessarily an empty database.  Keep the
 // diagnostic read-only and separate from the candidate selector so prepare-only
 // can explain which fail-closed condition prevented selection without relaxing
@@ -1443,6 +1460,46 @@ function normalizeBlockingAnomalies(rows) {
     transaction_count: toBigIntString(row.transaction_count, "blocking anomaly transaction_count"),
     table_count: toBigIntString(row.table_count, "blocking anomaly table_count"),
   }));
+}
+
+function normalizeBotOnlyDiscoveryTables(candidates) {
+  const tables = new Map();
+  for (const candidate of candidates || []) {
+    const tableId = text(candidate.table_id);
+    if (!UUID_RE.test(tableId)) fail("bot-only discovery returned an invalid table ID");
+    const current = tables.get(tableId) || {
+      table_id: tableId,
+      newest_created_at: text(candidate.table_newest_created_at),
+      identity_count: toBigIntString(candidate.table_identity_count, "bot-only discovery identity_count"),
+      eligible_count: toBigIntString(candidate.table_eligible_count, "bot-only discovery eligible_count"),
+      out_of_scope_keys_sha256: text(candidate.table_out_of_scope_keys_sha256),
+      transaction_ids: [],
+      row_count: 0,
+    };
+    if (current.newest_created_at !== text(candidate.table_newest_created_at)
+      || current.identity_count !== toBigIntString(candidate.table_identity_count, "bot-only discovery identity_count")
+      || current.eligible_count !== toBigIntString(candidate.table_eligible_count, "bot-only discovery eligible_count")
+      || current.out_of_scope_keys_sha256 !== text(candidate.table_out_of_scope_keys_sha256)) {
+      fail(`bot-only discovery returned inconsistent evidence for table ${tableId}`);
+    }
+    current.row_count += 1;
+    current.transaction_ids.push(text(candidate.idempotency_key));
+    tables.set(tableId, current);
+  }
+  return [...tables.values()].sort((left, right) => left.table_id.localeCompare(right.table_id)).map((table) => {
+    const uniqueKeys = [...new Set(table.transaction_ids)].sort();
+    if (uniqueKeys.length !== table.row_count || table.row_count !== Number(table.eligible_count)) {
+      fail(`bot-only discovery returned an incomplete table ${table.table_id}`);
+    }
+    return {
+      table_id: table.table_id,
+      newest_created_at: table.newest_created_at,
+      identity_count: table.identity_count,
+      eligible_count: table.eligible_count,
+      registry_keys_sha256: crypto.createHash("sha256").update(`${uniqueKeys.join("\n")}\n`).digest("hex"),
+      out_of_scope_keys_sha256: table.out_of_scope_keys_sha256,
+    };
+  });
 }
 
 function sqlState(error) {
@@ -2295,6 +2352,14 @@ export async function readSnapshot(sql, options) {
   const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   const telemetry = options.telemetry;
   const selector = options.selector || "standard";
+  const botOnlyDiscovery = selector === BOT_ONLY_TABLE_DISCOVERY_SELECTOR;
+  const botOnlyExactTable = selector === BOT_ONLY_EXACT_TABLE_SELECTOR;
+  const botOnlySelector = selector === "bot-only-7d" || botOnlyDiscovery || botOnlyExactTable;
+  if (botOnlyExactTable && (!Array.isArray(options.tableIds)
+    || options.tableIds.length !== 1
+    || !UUID_RE.test(text(options.tableIds[0])))) {
+    fail("exact bot-only table revalidation requires exactly one table ID");
+  }
   const legacyStageAllowlistPlan = selector === "legacy-stage-allowlist-v1"
     ? assertLegacyStageAllowlistPlan(options.legacyStageAllowlistPlan, options.cutoff)
     : null;
@@ -2305,7 +2370,7 @@ export async function readSnapshot(sql, options) {
       query: "set transaction isolation level repeatable read, read only;",
       telemetry,
     });
-    if (selector === "bot-only-7d") {
+    if (botOnlySelector) {
       // Measured on Stage: the bot-only selector's eligible_transactions CTE joins
       // materially under-estimated CTE scans as Nested Loop and exceeded the 120 s
       // statement budget. Disabling nested loops for this one bounded snapshot lets
@@ -2318,19 +2383,21 @@ export async function readSnapshot(sql, options) {
         telemetry,
       });
     }
-    const candidateSql = selector === "standard"
-      ? CANDIDATE_SQL
-      : selector === "prunable"
-        ? PRUNABLE_CANDIDATE_SQL
-        : selector === "bot-only-7d"
-          ? BOT_ONLY_CANDIDATE_SQL
-          : selector === "closed-human-table-30d"
-            ? CLOSED_HUMAN_TABLE_CANDIDATE_SQL
-          : selector === "legacy-stage-allowlist-v1"
-            ? LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL
-            : fail("snapshot selector must be standard, prunable, bot-only-7d, closed-human-table-30d, or legacy-stage-allowlist-v1");
-    const candidateParameters = selector === "legacy-stage-allowlist-v1"
-      ? [
+    let candidateSql;
+    switch (selector) {
+      case "standard": candidateSql = CANDIDATE_SQL; break;
+      case "prunable": candidateSql = PRUNABLE_CANDIDATE_SQL; break;
+      case "bot-only-7d": candidateSql = BOT_ONLY_CANDIDATE_SQL; break;
+      case BOT_ONLY_TABLE_DISCOVERY_SELECTOR: candidateSql = BOT_ONLY_TABLE_DISCOVERY_SQL; break;
+      case BOT_ONLY_EXACT_TABLE_SELECTOR: candidateSql = BOT_ONLY_EXACT_TABLE_SQL; break;
+      case "closed-human-table-30d": candidateSql = CLOSED_HUMAN_TABLE_CANDIDATE_SQL; break;
+      case "legacy-stage-allowlist-v1": candidateSql = LEGACY_STAGE_ALLOWLIST_CANDIDATE_SQL; break;
+      default: fail("snapshot selector must be standard, prunable, bot-only-7d, bot-only-7d-discovery, bot-only-7d-exact-table, closed-human-table-30d, or legacy-stage-allowlist-v1");
+    }
+
+    let candidateParameters;
+    if (selector === "legacy-stage-allowlist-v1") {
+      candidateParameters = [
         timestampParam(options.cutoff),
         legacyStageAllowlistPlan.batchTableIds,
         options.batchSize,
@@ -2343,22 +2410,40 @@ export async function readSnapshot(sql, options) {
         legacyStageAllowlistPlan.batchNumber,
         legacyStageAllowlistPlan.batchTableCount,
         LEGACY_STAGE_ALLOWLIST_BATCH_TABLE_LIMIT,
-      ]
-      : selector === "closed-human-table-30d"
-        ? [timestampParam(options.cutoff), options.batchSize]
-        : [
+      ];
+    } else if (selector === "closed-human-table-30d") {
+      candidateParameters = [timestampParam(options.cutoff), options.batchSize];
+    } else if (botOnlyDiscovery) {
+      candidateParameters = [
+        timestampParam(options.cutoff),
+        options.batchSize,
+        timestampParam(options.cursor?.created_at || null),
+        options.cursor?.id || null,
+        options.tableLimit || 1,
+      ];
+    } else if (botOnlyExactTable) {
+      candidateParameters = [
+        timestampParam(options.cutoff),
+        options.batchSize,
+        timestampParam(options.cursor?.created_at || null),
+        options.cursor?.id || null,
+        options.tableIds,
+      ];
+    } else {
+      candidateParameters = [
         timestampParam(options.cutoff),
         options.batchSize,
         timestampParam(options.cursor?.created_at || null),
         options.cursor?.id || null,
       ];
+    }
     const candidates = await observedQuery(tx, {
       phase: "snapshot.candidate_selector",
       queryName: selector === "standard"
         ? "standard_candidate_selector"
         : selector === "prunable"
           ? "prunable_candidate_selector"
-          : selector === "bot-only-7d"
+          : botOnlySelector
             ? "bot_only_candidate_selector"
             : selector === "closed-human-table-30d"
               ? "closed_human_table_candidate_selector"
@@ -2367,7 +2452,7 @@ export async function readSnapshot(sql, options) {
       parameters: candidateParameters,
       telemetry,
     });
-    const ids = candidates.map((candidate) => text(candidate.id));
+    const ids = botOnlyDiscovery ? [] : candidates.map((candidate) => text(candidate.id));
     const entries = ids.length
       ? await observedQuery(tx, {
         phase: "snapshot.entries",
@@ -2377,7 +2462,7 @@ export async function readSnapshot(sql, options) {
         telemetry,
       })
       : [];
-    const blockingAnomalies = selector === "bot-only-7d" && candidates.length === 0
+    const blockingAnomalies = (selector === "bot-only-7d" || botOnlyDiscovery) && candidates.length === 0
       ? normalizeBlockingAnomalies(await observedQuery(tx, {
         phase: "snapshot.blocking_anomalies",
         queryName: "bot_only_blocking_anomalies",
@@ -2450,7 +2535,10 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
 
   try {
     const selector = deps.selector || "standard";
-    const schemaVersion = deps.schemaVersion || (selector === "bot-only-7d" ? BOT_ONLY_EXPORT_SCHEMA_VERSION : EXPORT_SCHEMA_VERSION);
+    const botOnlySelector = selector === "bot-only-7d"
+      || selector === BOT_ONLY_TABLE_DISCOVERY_SELECTOR
+      || selector === BOT_ONLY_EXACT_TABLE_SELECTOR;
+    const schemaVersion = deps.schemaVersion || (botOnlySelector ? BOT_ONLY_EXPORT_SCHEMA_VERSION : EXPORT_SCHEMA_VERSION);
     const legacyStageAllowlistPlan = selector === "legacy-stage-allowlist-v1"
       ? deps.legacyStageAllowlistPlan
       : null;
@@ -2459,10 +2547,29 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       selector,
       telemetry: deps.telemetry,
       legacyStageAllowlistPlan,
+      tableLimit: deps.tableLimit,
+      tableIds: deps.tableIds,
     });
     const immutableLegacyStageAllowlistEvidence = selector === "legacy-stage-allowlist-v1"
       ? structuredClone(legacyStageAllowlistPlan.archiveManifest)
       : null;
+    if (selector === BOT_ONLY_TABLE_DISCOVERY_SELECTOR) {
+      const candidateTables = normalizeBotOnlyDiscoveryTables(snapshot.candidates);
+      if (deps.noCandidateIfEmpty && candidateTables.length === 0) {
+        return {
+          noCandidate: true,
+          candidateTables,
+          options,
+          blockingAnomalies: snapshot.blockingAnomalies,
+        };
+      }
+      return {
+        noCandidate: false,
+        candidateTables,
+        options,
+        blockingAnomalies: snapshot.blockingAnomalies,
+      };
+    }
     if (deps.noCandidateIfEmpty && snapshot.candidates.length === 0) {
       return {
         noCandidate: true,

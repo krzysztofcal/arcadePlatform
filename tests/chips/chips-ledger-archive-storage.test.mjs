@@ -39,8 +39,11 @@ const ENV = {
   SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
 };
 
-function responseJson(value, status = 200) {
-  return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+function responseJson(value, status = 200, headers = {}) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
 }
 
 function bucket() {
@@ -388,6 +391,9 @@ try {
           headers: { "content-type": "application/gzip" },
         });
       }
+      if (outcome === 429) {
+        return responseJson({ code: "SlowDown" }, 429);
+      }
       return new Response("temporary Storage failure", { status: outcome });
     };
     const value = await downloadPrivateArchiveObject(
@@ -415,6 +421,21 @@ try {
   assert.equal(recoveredAfter429.calls.every(({ method }) => method === "GET"), true);
   assert.equal(recoveredAfter429.value.bytes.equals(privateObjectBytes), true);
 
+  const permanent429Calls = [];
+  const permanent429Sleeps = [];
+  await assert.rejects(
+    () => downloadPrivateArchiveObject(resolveStorageTarget("stage", ENV), privateObjectPath, {
+      fetch: async (_url, init = {}) => {
+        permanent429Calls.push(init.method || "GET");
+        return responseJson({ code: "TooManyRequests" }, 429);
+      },
+      sleep: (milliseconds) => { permanent429Sleeps.push(milliseconds); },
+    }),
+    /HTTP 429/,
+  );
+  assert.deepEqual(permanent429Calls, ["GET"], "a permanent Storage 429 must not be retried");
+  assert.deepEqual(permanent429Sleeps, []);
+
   const retryAfterEvents = [];
   let releaseRetryAfter;
   const retryAfterGate = new Promise((resolve) => { releaseRetryAfter = resolve; });
@@ -427,7 +448,7 @@ try {
         retryAfterCalls += 1;
         retryAfterEvents.push(`fetch-${retryAfterCalls}`);
         if (retryAfterCalls === 1) {
-          return new Response("rate limited", { status: 429, headers: { "retry-after": "2" } });
+          return responseJson({ code: "SlowDown" }, 429, { "retry-after": "2" });
         }
         return new Response(privateObjectBytes, {
           status: 200,
@@ -463,7 +484,7 @@ try {
       fetch: async () => {
         cappedRetryAfterCalls += 1;
         if (cappedRetryAfterCalls === 1) {
-          return new Response("rate limited", { status: 429, headers: { "retry-after": "3600" } });
+          return responseJson({ code: "SlowDown" }, 429, { "retry-after": "3600" });
         }
         return new Response(privateObjectBytes, {
           status: 200,

@@ -734,9 +734,10 @@ async function safeStorageErrorCode(response) {
   }
   try {
     const body = await response.clone().json();
-    return safeStorageErrorCodeValue(body?.code || body?.error_code || body?.error?.code);
+    return safeStorageErrorCodeValue(body?.code || body?.error_code || body?.error?.code || body?.error);
   } catch {
-    return null;
+    const body = await response.clone().text().catch(() => "");
+    return /^SlowDown$/i.test(body.trim()) ? "SlowDown" : null;
   }
 }
 
@@ -753,8 +754,10 @@ async function logFailedStorageGet(deps, { operation, response = null, attempt }
   });
 }
 
-function isRetryableStorageGetStatus(status) {
-  return status === 429 || (status >= 500 && status <= 599);
+async function isRetryableStorageGetResponse(response) {
+  if (response?.status >= 500 && response.status <= 599) return true;
+  if (response?.status !== 429) return false;
+  return (await safeStorageErrorCode(response))?.toLowerCase() === "slowdown";
 }
 
 async function storageRequest(storageTarget, requestPath, options = {}, deps = {}) {
@@ -776,7 +779,7 @@ async function storageRequest(storageTarget, requestPath, options = {}, deps = {
     let response = null;
     try {
       response = await fetchImpl(`${storageTarget.baseUrl}${requestPath}`, request);
-      if (method !== "GET" || !isRetryableStorageGetStatus(response.status) || attempt === maxAttempts) {
+      if (method !== "GET" || !(await isRetryableStorageGetResponse(response)) || attempt === maxAttempts) {
         if (method === "GET" && !response.ok) {
           await logFailedStorageGet(deps, { operation, response, attempt });
         }
