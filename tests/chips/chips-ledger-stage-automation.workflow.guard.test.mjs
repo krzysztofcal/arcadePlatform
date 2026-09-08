@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import YAML from "yaml";
 
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-scheduled-automation.yml", "utf8");
+const parsedWorkflow = YAML.parse(workflow);
+const stageJobIfExpression = parsedWorkflow.jobs?.["stage-archive"]?.if;
+assert.equal(typeof stageJobIfExpression, "string", "stage-archive.if must be a YAML string");
+let stageJobIfParenthesisBalance = 0;
+for (const character of stageJobIfExpression) {
+  if (character === "(") stageJobIfParenthesisBalance += 1;
+  if (character === ")") stageJobIfParenthesisBalance -= 1;
+  assert.ok(stageJobIfParenthesisBalance >= 0, "stage-archive.if has an unexpected closing parenthesis");
+}
+assert.equal(stageJobIfParenthesisBalance, 0, "stage-archive.if parentheses must balance");
 
 const RETAINED_MODES = [
   "existing-30d",
