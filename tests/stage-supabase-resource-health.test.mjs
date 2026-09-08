@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 import {
-  parseMetrics, measureWindow, parseDiskUtilization, classify, readCapacity, monitor,
+  parseMetrics, measureWindow, parseDiskUtilization, classify, readCapacity, monitor, evaluateCleanupDecision,
 } from '../scripts/ops/stage-supabase-resource-health.mjs';
 
 const fixture = fs.readFileSync(new URL('./fixtures/stage-resource-metrics.prom', import.meta.url), 'utf8');
@@ -155,4 +155,20 @@ test('monitor classifies safe Metrics API failures without exposing secrets', as
     assert.deepEqual(report.errors, [expected]);
     assert.ok(!JSON.stringify(report).includes(secret));
   }
+});
+
+test('cleanup enforcement blocks critical/unknown and preserves safe capacity-only retention', () => {
+  for (const [window, utilization, expected] of [
+    [windowFor(54, 0).window, diskUtilization, 'blocked_resource_critical'],
+    [windowFor(0, 15).window, diskUtilization, 'blocked_resource_critical'],
+    [measureWindow(new Map(), new Map(), 60), diskUtilization, 'blocked_resource_unknown'],
+    [windowFor(6, 0).window, diskUtilization, 'allowed_healthy'],
+    [windowFor().window, diskUtilization, 'allowed_warning'],
+    [windowFor(6, 0).window, { ...diskUtilization, fsUsedBytes: 9 * GiB, fsAvailBytes: GiB }, 'allowed_warning'],
+  ]) {
+    const report = classify(window, capacity, utilization);
+    assert.equal(evaluateCleanupDecision(report.state), expected);
+    assert.equal(report.cleanupDecision, 'not_evaluated_monitor_only');
+  }
+  assert.equal(evaluateCleanupDecision(undefined), 'blocked_resource_unknown');
 });

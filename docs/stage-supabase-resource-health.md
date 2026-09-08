@@ -1,18 +1,27 @@
-# Stage Supabase resource monitor (Issue #962, PR1)
+# Stage Supabase resource monitor (Issue #962, PR1/PR2)
 
 The independent `Stage Supabase Resource Health` workflow runs every 15 minutes
 and supports owner dispatch from canonical `main`. It does not consult or change
-`CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED`. No cleanup caller imports the monitor.
-This is observation only: `cleanupDecision=not_evaluated_monitor_only`, including
-critical capacity. No circuit breaker is implemented in PR1.
+`CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED`. Standalone execution remains observation-only:
+`cleanupDecision=not_evaluated_monitor_only`.
+
+Automatic Stage retention runs the same live measurement with `--enforce` before
+any cleanup mutation: both native schedules, external dispatch, manual
+`bot-only-7d-automatic` and `existing-30d`. Healthy/warning report
+`allowed_healthy`/`allowed_warning` and allow existing bounded retention.
+Critical/unknown report `blocked_resource_critical`/`blocked_resource_unknown`
+and fail the job before cleanup Storage writes or DB mutations. The kill switch
+remains mandatory and takes precedence; diagnostics and explicit recovery flows
+are outside this guard. The Management API secret is scoped to the guard step.
+There is no cached decision, retry or live bypass.
 
 ## Credentials and read boundaries
 
-Add GitHub secret `SUPABASE_STAGE_MANAGEMENT_TOKEN`: a fine-grained token scoped
+Use GitHub secret `SUPABASE_STAGE_MANAGEMENT_TOKEN`: a fine-grained token scoped
 to the Stage project with **only** `analytics_logs_read` and
 `infra_disk_config_read`. The workflow also uses existing `SUPABASE_STAGE_DB_URL`.
-It does not need a service-role Storage key. Token creation/configuration and
-Stage execution are not part of this PR.
+It does not need a service-role Storage key. The existing secret is reused;
+no new token is required.
 
 Only these Management API GET requests are made:
 
@@ -69,10 +78,10 @@ continues to belong to the admin contract.
 
 Capacity and pressure have separate states. When pressure is healthy and
 capacity alone is critical, `capacityState=critical` but top-level `state=warning`;
-the monitor remains observation-only and cannot authorize or block cleanup.
+enforcement allows bounded cleanup without widening eligibility or batch limits.
 Critical resource pressure wins over unknown, which wins over warning, then
 healthy. Unknown and critical resource pressure make the monitor job fail
-visibly; no cleanup workflow depends on it.
+visibly; enforcement blocks retention on either state.
 
 ## Explicitly unavailable
 
@@ -81,8 +90,8 @@ reviewed Supabase API/docs. It is reported as null, never reconstructed from
 IOPS, throughput or time spent in I/O. WAL is also null: the official metrics
 fixture/dashboard does not establish a WAL series; the Supabase postgres exporter
 service explicitly disables the default WAL collector. This does not prove a
-particular live project lacks custom WAL metrics. No live Stage scrape was made;
-adding a verified WAL mapping can follow actual read-only rollout evidence.
+particular live project lacks custom WAL metrics. Adding a verified WAL mapping
+requires actual read-only rollout evidence.
 Historical DB growth is unavailable because PR1 stores no history. Optional
 unavailable signals are named explicitly and do not masquerade as zero.
 
@@ -96,9 +105,13 @@ API references (reviewed September 8, 2026):
   (infra_disk_config_read; metrics.fs_size_bytes, fs_avail_bytes, fs_used_bytes)
 - https://github.com/supabase/postgres/blob/develop/ansible/files/postgres_exporter.service.j2
 
-Operational impact: one independent scheduled observation every 15 minutes after
-merge, two API scrapes, one disk-config GET, and bounded read-only SQL. Missing
+Operational impact: each automatic retention cycle adds one live measurement
+(about 60 seconds, at most five minutes for the guard). Critical/unknown fails
+the cycle and may grow backlog; Stage availability takes priority. The independent
+monitor and its schedule are unchanged. Each measurement uses two Metrics GETs,
+one disk-config GET, one disk-utilization GET and bounded read-only SQL. Missing
 credentials produce a visible unknown result. Logs and job summary contain only
 interpreted observations, never raw metrics, HTTP bodies, errors or credentials.
-No Stage run is required to review this PR. Production, frontend, cleanup
+After code review, validate one healthy automatic Stage cycle and its existing
+receipts. Production, frontend, cleanup
 selectors, batch sizes, retries and recovery/proof contracts are unchanged.

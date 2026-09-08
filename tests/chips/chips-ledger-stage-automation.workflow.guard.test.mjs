@@ -320,4 +320,33 @@ assert.match(independentFailureAggregator, /steps\.escrow_automatic\.outcome/);
 assert.match(independentFailureAggregator, /exit 1/);
 assert.doesNotMatch(independentFailureAggregator, /--execute|--automatic|prune|Production|SUPABASE_PROD_/i);
 
+
+// One fail-fast resource boundary covers all automatic retention entry points.
+const stageJob = parsedWorkflow.jobs['stage-archive'];
+const resourceSteps = stageJob.steps.filter((step) => step.name === 'Enforce Stage resource health before automatic retention');
+assert.equal(resourceSteps.length, 1);
+const resourceGuard = resourceSteps[0];
+assert.equal(resourceGuard.run, 'node scripts/ops/stage-supabase-resource-health.mjs --enforce');
+assert.equal(resourceGuard['continue-on-error'], undefined);
+assert.equal(stageJob['continue-on-error'], undefined);
+assert.equal(resourceGuard.env.SUPABASE_STAGE_MANAGEMENT_TOKEN, '${{ secrets.SUPABASE_STAGE_MANAGEMENT_TOKEN }}');
+assert.equal(stageJob.env.SUPABASE_STAGE_MANAGEMENT_TOKEN, undefined);
+assert.equal(stageJob.steps.filter((step) => step.env?.SUPABASE_STAGE_MANAGEMENT_TOKEN).length, 1);
+assert.equal(resourceGuard.if, "${{ (github.event_name == 'schedule' && (github.event.schedule == '7,22,37,52 * * * *' || github.event.schedule == '17 2 * * *')) || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'external-scheduled-automatic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'existing-30d')) }}");
+for (const name of [
+  'Run existing 30-day Stage automation',
+  'Run activated bot-only 7-day Stage automation',
+  'Run activated closed-human 30-day Stage automation',
+  'Run Stage escrow account retention',
+]) {
+  const step = stageJob.steps.find((item) => item.name === name);
+  assert.ok(stageJob.steps.indexOf(resourceGuard) < stageJob.steps.indexOf(step));
+  assert.doesNotMatch(step.if, /always\(|failure\(|cancelled\(/, 'cleanup must retain implicit success()');
+}
+
+const finalRetentionCheck = stageJob.steps.find((step) => step.name === 'Fail scheduled retention run after independent path failures');
+assert.match(finalRetentionCheck.if, /always\(\)/);
+assert.equal(finalRetentionCheck['continue-on-error'], undefined);
+assert.doesNotMatch(finalRetentionCheck.run, /GITHUB_ENV|GITHUB_OUTPUT|resource_health/);
+
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");
