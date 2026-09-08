@@ -11,7 +11,8 @@ the single read-only exception.
 ## Active policies and schedules
 
 - The existing 30-day Stage maintenance (`stage-ledger-auto-retention-30d-v1`)
-  runs once per day on the native cron:
+  is configured for the native daily cron but remains blocked while
+  `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=0`:
   - `17 2 * * *`
 - The bot-only 7-day retention policy
   (`stage-ledger-bot-only-retention-7d-v1`) remains behind

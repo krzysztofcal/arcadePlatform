@@ -43,6 +43,10 @@ import {
 } from "./chips-ledger-stage-automation.mjs";
 
 const REPLAY_STATEMENT_TIMEOUT_MS = 120000;
+const STATEMENT_TIMEOUT_SQL = `
+select setting::bigint as statement_timeout_ms
+  from pg_catalog.pg_settings
+ where name = 'statement_timeout';`;
 const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_RE = /^[0-9a-f]{64}$/;
@@ -366,7 +370,15 @@ function boundedReadOnlySql(sql) {
             ? await tx.unsafe(query)
             : await tx.unsafe(query, parameters);
           if (!timeoutConfigured && /^\s*set transaction\b/i.test(query)) {
-            await tx.unsafe(`set local statement_timeout = '${REPLAY_STATEMENT_TIMEOUT_MS}ms';`);
+            const timeoutRows = await tx.unsafe(STATEMENT_TIMEOUT_SQL);
+            const configuredTimeoutMs = Number(timeoutRows[0]?.statement_timeout_ms);
+            if (!Number.isSafeInteger(configuredTimeoutMs) || configuredTimeoutMs < 0) {
+              throw new Error("statement_timeout setting is invalid");
+            }
+            const boundedTimeoutMs = configuredTimeoutMs === 0
+              ? REPLAY_STATEMENT_TIMEOUT_MS
+              : Math.min(configuredTimeoutMs, REPLAY_STATEMENT_TIMEOUT_MS);
+            await tx.unsafe(`set local statement_timeout = '${boundedTimeoutMs}ms';`);
             timeoutConfigured = true;
           }
           return result;
@@ -843,8 +855,9 @@ export async function runBotOnlySelectorDiagnostic({ sql, cutoff, identityAndFen
     throw new Error("bot-only selector diagnostic requires the active Stage TABLE fence");
   }
 
+  const boundedSql = boundedReadOnlySql(sql);
   const discovery = await runBotOnlySelectorQuery({
-    sql,
+    sql: boundedSql,
     selector: BOT_ONLY_TABLE_DISCOVERY_SELECTOR,
     query: BOT_ONLY_TABLE_DISCOVERY_SQL,
     cutoff,
@@ -859,7 +872,7 @@ export async function runBotOnlySelectorDiagnostic({ sql, cutoff, identityAndFen
   let exact = null;
   if (discoveredTableId) {
     exact = await runBotOnlySelectorQuery({
-      sql,
+      sql: boundedSql,
       selector: BOT_ONLY_EXACT_TABLE_SELECTOR,
       query: BOT_ONLY_EXACT_TABLE_SQL,
       cutoff,
@@ -885,7 +898,8 @@ export async function runBotOnlySelectorDiagnostic({ sql, cutoff, identityAndFen
       writes: false,
       database_mutations: false,
       storage_access: false,
-      statement_timeout_changed: false,
+      statement_timeout_policy: "min(configured, 120000ms)",
+      statement_timeout_max_ms: REPLAY_STATEMENT_TIMEOUT_MS,
       discovery_queries: 1,
       exact_queries: exact === null ? 0 : 1,
       output_contains_rows: false,

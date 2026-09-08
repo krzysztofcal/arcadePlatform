@@ -15,6 +15,9 @@ assert.match(diagnostic, /set transaction isolation level repeatable read, read 
 assert.match(diagnostic, /explain \(format json, verbose true, costs true, settings true\)/i);
 assert.doesNotMatch(diagnostic, /EXPLAIN\s*\([^)]*ANALYZE/i);
 assert.match(diagnostic, /set local statement_timeout = '\$\{REPLAY_STATEMENT_TIMEOUT_MS\}ms'/);
+assert.match(diagnostic, /from pg_catalog\.pg_settings/);
+assert.match(diagnostic, /Math\.min\(configuredTimeoutMs, REPLAY_STATEMENT_TIMEOUT_MS\)/);
+assert.match(diagnostic, /configuredTimeoutMs === 0/);
 assert.match(diagnostic, /selectorReplay/);
 assert.match(diagnostic, /runBotOnlyTableIdentitySummaryDiagnostic/);
 assert.match(diagnostic, /runBotOnlySelectorDiagnostic/);
@@ -74,7 +77,7 @@ assert.doesNotMatch(selectorDiagnosticSource, /\b(?:insert|update|delete|truncat
 
 const SELECTOR_TABLE_ID = "00000000-0000-4000-8000-000000000020";
 
-function selectorSql({ discoveryRows, exactRows }) {
+function selectorSql({ discoveryRows, exactRows, statementTimeoutMs = "0" }) {
   const calls = [];
   const sql = {
     typed: (value, type) => ({ value, type }),
@@ -83,6 +86,8 @@ function selectorSql({ discoveryRows, exactRows }) {
         async unsafe(query, parameters = []) {
           calls.push({ query, parameters });
           if (query.includes("set transaction isolation level")) return [];
+          if (query.includes("from pg_catalog.pg_settings")) return [{ statement_timeout_ms: statementTimeoutMs }];
+          if (query.startsWith("set local statement_timeout")) return [];
           if (query === BOT_ONLY_TABLE_DISCOVERY_SQL) return discoveryRows;
           if (query === BOT_ONLY_EXACT_TABLE_SQL) return exactRows;
           throw new Error(`unexpected selector diagnostic SQL: ${query.slice(0, 80)}`);
@@ -106,15 +111,18 @@ const cutoff = "2026-09-01T00:00:00.000Z";
   assert.equal(report.discovery.table_id, null);
   assert.equal(report.discovery.elapsed_ms >= 0, true);
   assert.equal(report.exact_revalidation, null);
+  assert.equal(report.read_only_contract.statement_timeout_max_ms, 120000);
   assert.equal(calls.filter(({ query }) => query === BOT_ONLY_TABLE_DISCOVERY_SQL).length, 1);
   assert.equal(calls.filter(({ query }) => query === BOT_ONLY_EXACT_TABLE_SQL).length, 0);
-  assert.equal(calls.length, 2, "empty discovery must not run an entries query");
+  assert.equal(calls.filter(({ query }) => query.startsWith("set local statement_timeout = '120000ms'")).length, 1);
+  assert.equal(calls.length, 4, "empty discovery must not run an entries query");
 }
 
 {
   const { sql, calls } = selectorSql({
     discoveryRows: [{ table_id: SELECTOR_TABLE_ID }],
     exactRows: [{ table_id: SELECTOR_TABLE_ID }],
+    statementTimeoutMs: "5000",
   });
   const report = await runBotOnlySelectorDiagnostic({ sql, cutoff, identityAndFence });
   assert.equal(report.state, "revalidated");
@@ -127,11 +135,13 @@ const cutoff = "2026-09-01T00:00:00.000Z";
   assert.equal(report.exact_revalidation.table_id, SELECTOR_TABLE_ID);
   assert.equal(report.exact_revalidation.sqlstate, "00000");
   assert.equal(report.exact_revalidation.elapsed_ms >= 0, true);
+  assert.equal(report.read_only_contract.statement_timeout_policy, "min(configured, 120000ms)");
   assert.equal(calls.filter(({ query }) => query === BOT_ONLY_TABLE_DISCOVERY_SQL).length, 1);
   assert.equal(calls.filter(({ query }) => query === BOT_ONLY_EXACT_TABLE_SQL).length, 1);
   const exactCall = calls.find(({ query }) => query === BOT_ONLY_EXACT_TABLE_SQL);
   assert.equal(exactCall.parameters[4], SELECTOR_TABLE_ID);
-  assert.equal(calls.length, 4, "selector diagnostic must omit the entries query");
+  assert.equal(calls.filter(({ query }) => query.startsWith("set local statement_timeout = '5000ms'")).length, 2);
+  assert.equal(calls.length, 8, "selector diagnostic must omit the entries query");
 }
 
 assert.match(workflow, /workflow_dispatch:/);

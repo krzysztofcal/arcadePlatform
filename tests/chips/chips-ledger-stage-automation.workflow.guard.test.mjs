@@ -183,7 +183,7 @@ assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(
   stageJobIf,
-  /if: \$\{\{ \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-selector-diagnostic'\) \|\| \(vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' &&/,
+  /if: \$\{\{ \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-selector-diagnostic' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner && github\.ref == 'refs\/heads\/main'\) \|\| \(vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' &&/,
 );
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
 assert.match(stageJobIf, /github\.actor == github\.repository_owner/);
