@@ -114,7 +114,7 @@ function createHarness(options = {}){
     'xpBadge',
     'pokerV2AutoRebuyBalanceToast',
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink', 'pokerMenuLeave', 'pokerMenuSettings', 'pokerMenuSignIn', 'pokerMenuGuestInfo',
-    'pokerSocialSettingsToggle', 'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
+    'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
     'pokerReactionBubblesPreference', 'pokerReactionHistoryPreference', 'pokerBotReactionsPreference',
     'pokerAutoRebuyPreference', 'pokerAutoRebuyPreferenceWrap', 'pokerAutoRebuyPreferenceHint',
     'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
@@ -122,7 +122,7 @@ function createHarness(options = {}){
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
     'pokerV2AutoRebuyConfirmModal', 'pokerV2AutoRebuyConfirmTitle', 'pokerV2AutoRebuyConfirmCopy', 'pokerV2AutoRebuyConfirmYes', 'pokerV2AutoRebuyConfirmCancel',
-    'pokerV2ReactionControl', 'pokerV2ReactionBtn', 'pokerV2ReactionMenu', 'pokerV2ReactionHint',
+    'pokerV2ReactionControl', 'pokerV2ReactionBtn', 'pokerV2ReactionMenu',
     'pokerReactionHistory', 'pokerReactionHistoryToggle', 'pokerReactionHistoryCount', 'pokerReactionHistoryPanel', 'pokerReactionHistoryList',
     'pokerV2RebuyPanel', 'pokerV2RebuyTitle', 'pokerV2RebuyCopy', 'pokerV2RebuyBalance', 'pokerV2RebuyBtn', 'pokerV2RebuyLobbyBtn', 'pokerV2RebuyWatchBtn', 'pokerV2RebuyAccountLink',
     'pokerV2ClosedTableModal', 'pokerV2ClosedTableTitle', 'pokerV2ClosedTableCountdown',
@@ -767,8 +767,6 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
 
   assert.deepEqual(harness.reactionPayloads, ['wow']);
   assert.equal(harness.elements.pokerV2ReactionBtn.disabled, true);
-  assert.equal(harness.elements.pokerV2ReactionHint.hidden, false);
-  assert.equal(harness.elements.pokerV2ReactionHint.textContent, 'You can react once every 4 seconds');
 
   harness.advanceTime(3_999);
   await harness.flush();
@@ -776,7 +774,6 @@ test('poker v2 disables reactions for four seconds after an accepted reaction', 
   harness.advanceTime(1);
   await harness.flush();
   assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
-  assert.equal(harness.elements.pokerV2ReactionHint.hidden, true);
 });
 
 test('reaction menu exposes cheers and gg to humans and sends cheers through the existing path', async () => {
@@ -1025,27 +1022,28 @@ test('bot preference suppresses and clears bot artifacts while human reactions r
   assert.equal(reactionHistoryRows(harness).length, 0);
 });
 
-test('Escape closes the social settings panel and restores focus to its toggle', async () => {
+test('Escape closes the social settings panel and restores focus to the hamburger settings action', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
-  harness.elements.pokerSocialSettingsToggle.click();
+  harness.elements.pokerMenuToggle.click();
+  harness.elements.pokerMenuSettings.click();
   assert.equal(harness.elements.pokerSocialSettingsPanel.hidden, false);
-  assert.equal(harness.elements.pokerSocialSettingsToggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(harness.elements.pokerMenuSettings.getAttribute('aria-expanded'), 'true');
 
   harness.fireDocumentEvent('keydown', { key: 'Escape' });
   assert.equal(harness.elements.pokerSocialSettingsPanel.hidden, true);
-  assert.equal(harness.elements.pokerSocialSettingsToggle.getAttribute('aria-expanded'), 'false');
-  assert.equal(harness.elements.pokerSocialSettingsToggle._focused, true);
+  assert.equal(harness.elements.pokerMenuSettings.getAttribute('aria-expanded'), 'false');
+  assert.equal(harness.elements.pokerMenuSettings._focused, true);
 });
 
-test('Escape does not steal focus to the social settings toggle when the panel is already closed', async () => {
+test('Escape does not steal focus to the hamburger settings action when the panel is already closed', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
   harness.fireDocumentEvent('keydown', { key: 'Escape' });
   assert.equal(harness.elements.pokerSocialSettingsPanel.hidden, true);
-  assert.equal(harness.elements.pokerSocialSettingsToggle._focused, undefined);
+  assert.equal(harness.elements.pokerMenuSettings._focused, undefined);
 });
 
 test('poker v2 uses the WS settlement reveal deadline for targeted reactions', async () => {
@@ -1697,7 +1695,6 @@ test('poker v2 applies local cooldown after a server reaction rate limit', async
   await harness.flush();
 
   assert.equal(harness.elements.pokerV2ReactionBtn.disabled, true);
-  assert.equal(harness.elements.pokerV2ReactionHint.hidden, false);
   harness.advanceTime(4_000);
   await harness.flush();
   assert.equal(harness.elements.pokerV2ReactionBtn.disabled, false);
@@ -4490,10 +4487,52 @@ test('poker v2 closes menu on link click and outside click', async () => {
   harness.elements.pokerLobbyLink.click();
   assert.equal(harness.elements.pokerMenuToggle.attributes['aria-expanded'], 'false');
   assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), true);
+  assert.equal(harness.elements.pokerV2LeaveConfirmModal.hidden, true, 'an unseated user should follow the lobby link without confirmation');
 
   harness.elements.pokerMenuToggle.click();
   harness.fireDocumentEvent('click', { target: makeElement('outside') });
   assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), true);
+
+  const seated = createHarness();
+  seated.fireDomContentLoaded();
+  await seated.flush();
+  const ws = seated.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: null, status: 'LOBBY' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await seated.flush();
+
+  seated.elements.pokerMenuToggle.click();
+  seated.elements.pokerLobbyLink.click();
+  assert.equal(seated.elements.pokerV2LeaveConfirmModal.hidden, false, 'Back to lobby should confirm while seated');
+  seated.elements.pokerV2LeaveConfirmCancel.click();
+  assert.equal(seated.leavePayloads.length, 0, 'cancelling Back to lobby should keep the player at the table');
+  assert.equal(seated.windowLocation.href, '');
+
+  seated.elements.pokerMenuToggle.click();
+  seated.elements.pokerLobbyLink.click();
+  seated.elements.pokerV2LeaveConfirmYes.click();
+  await seated.flush();
+  assert.equal(seated.leavePayloads.length, 1);
+  assert.equal(seated.windowLocation.href, '/poker/');
+
+  seated.elements.xpBadge.click();
+  assert.equal(seated.elements.pokerV2LeaveConfirmModal.hidden, false, 'XP badge should confirm while seated');
+  seated.elements.pokerV2LeaveConfirmCancel.click();
+  assert.equal(seated.leavePayloads.length, 1, 'cancelling XP navigation should keep the player at the table');
+
+  seated.elements.xpBadge.click();
+  seated.elements.pokerV2LeaveConfirmYes.click();
+  await seated.flush();
+  assert.equal(seated.leavePayloads.length, 2);
+  assert.equal(seated.windowLocation.href, '/xp.html');
 });
 
 test('poker v2 keeps secondary landscape actions in the hamburger and gates join on an actionable snapshot', async () => {

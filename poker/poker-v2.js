@@ -185,6 +185,8 @@
   var authUnsubscribe = null;
   var pendingLeaveRetryAfterReconnect = false;
   var pendingLeaveNavigation = false;
+  var pendingLeaveDestination = '/poker/';
+  var leaveConfirmDestination = '/poker/';
   var leaveConfirmOpen = false;
   var autoRebuyConfirmOpen = false;
   var pendingAutoRebuyConfirmationBuyIn = null;
@@ -1898,7 +1900,7 @@
     if (pendingLeaveNavigation && !hasRenderableCurrentSeat()){
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;
-      navigateToLobby();
+      navigateAfterLeave();
       return;
     }
     if (pendingLeaveNavigation && pendingLeaveRetryAfterReconnect && hasRenderableCurrentSeat() && isWsReady()){
@@ -1909,6 +1911,10 @@
 
   function isSignedIn(){
     return !!state.currentUserId;
+  }
+
+  function isSeatedAtLiveTable(){
+    return !!(state && state.mode === 'live' && state.tableId && deriveCurrentSeat());
   }
 
   function isCurrentUserSeat(seat){
@@ -2588,10 +2594,6 @@
     if (els.reactionControl) els.reactionControl.hidden = !signedIn || !seated;
     els.reactionBtn.hidden = !signedIn || !seated;
     els.reactionBtn.disabled = !canUse || cooldownActive;
-    if (els.reactionHint){
-      els.reactionHint.hidden = !cooldownActive;
-      els.reactionHint.textContent = cooldownActive ? 'You can react once every 4 seconds' : '';
-    }
     if (!canUse) closeReactionMenu();
   }
 
@@ -3276,7 +3278,7 @@
   function resolveHeroSeatStackPoint(source){
     var halfX = resolveVisualHalfPercent(source, 'x', 8);
     var halfY = resolveVisualHalfPercent(source, 'y', 4);
-    var gapX = source.sceneWidth ? Math.max(2, 8 / source.sceneWidth * 100) : 3;
+    var gapX = source.sceneWidth ? Math.max(2, 4 / source.sceneWidth * 100) : 2;
     var point = {
       x: source.x + source.radiusX + halfX + gapX,
       y: source.y + Math.min(1.6, source.radiusY * 0.15)
@@ -3286,13 +3288,13 @@
     return point;
   }
 
-  function resolveSeatChipPoint(source, direction){
+  function resolveSeatChipPoint(source, direction, gap){
     var unit = normalizeDirection(direction);
     var edgeDistance = Math.sqrt(Math.pow(unit.x * source.radiusX, 2) + Math.pow(unit.y * source.radiusY, 2));
-    var gap = 7;
+    var chipGap = Number.isFinite(gap) ? gap : 7;
     var point = {
-      x: source.x + unit.x * (edgeDistance + gap),
-      y: source.y + unit.y * (edgeDistance + gap)
+      x: source.x + unit.x * (edgeDistance + chipGap),
+      y: source.y + unit.y * (edgeDistance + chipGap)
     };
     point = keepSeatChipOutOfCenterLane(point, source);
     point.x = clampNumber(point.x, 10, 90);
@@ -3306,7 +3308,7 @@
     var directions = resolveSeatChipDirections(source);
     return {
       bet: resolveSeatChipPoint(source, directions.bet),
-      stack: isCurrentUserSeat(seat) ? resolveHeroSeatStackPoint(source) : resolveSeatChipPoint(source, directions.stack)
+      stack: isCurrentUserSeat(seat) ? resolveHeroSeatStackPoint(source) : resolveSeatChipPoint(source, directions.stack, 4)
     };
   }
 
@@ -4581,7 +4583,7 @@
     pendingLeaveNavigation = false;
     state.statusText = 'Leaving...';
     renderInfoPanel();
-    navigateToLobby();
+    navigateAfterLeave();
     return true;
   }
 
@@ -4590,8 +4592,9 @@
     if (els.leaveConfirmModal) els.leaveConfirmModal.hidden = true;
   }
 
-  function openLeaveConfirm(){
+  function openLeaveConfirm(destination){
     if (!els.leaveConfirmModal) return;
+    leaveConfirmDestination = normalizeLeaveDestination(destination);
     leaveConfirmOpen = true;
     els.leaveConfirmModal.hidden = false;
   }
@@ -4790,9 +4793,8 @@
   function closeSocialSettings(restoreFocus){
     var wasOpen = !!(els.socialSettingsPanel && !els.socialSettingsPanel.hidden);
     if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = true;
-    if (els.socialSettingsToggle) els.socialSettingsToggle.setAttribute('aria-expanded', 'false');
     if (els.menuSettings) els.menuSettings.setAttribute('aria-expanded', 'false');
-    var opener = socialSettingsOpener || els.socialSettingsToggle;
+    var opener = socialSettingsOpener;
     socialSettingsOpener = null;
     if (restoreFocus && wasOpen && opener && typeof opener.focus === 'function') opener.focus();
   }
@@ -4808,7 +4810,7 @@
   }
 
   function positionSocialSettingsPanel(trigger){
-    var settingsTrigger = trigger || socialSettingsOpener || els.socialSettingsToggle;
+    var settingsTrigger = trigger || socialSettingsOpener;
     if (!els.socialSettingsPanel || els.socialSettingsPanel.hidden || !settingsTrigger
       || typeof settingsTrigger.getBoundingClientRect !== 'function'
       || typeof els.socialSettingsPanel.getBoundingClientRect !== 'function') return;
@@ -4859,11 +4861,25 @@
     renderReactionHistory();
   }
 
-  function navigateToLobby(){
+  function normalizeLeaveDestination(destination){
+    return destination === '/xp.html' ? '/xp.html' : '/poker/';
+  }
+
+  function navigateToDestination(destination){
     cancelClosedTableRedirect();
     clearReactionHistory();
     if (!window || !window.location) return;
-    window.location.href = '/poker/';
+    window.location.href = normalizeLeaveDestination(destination);
+  }
+
+  function navigateToLobby(){
+    navigateToDestination('/poker/');
+  }
+
+  function navigateAfterLeave(){
+    var destination = pendingLeaveDestination || '/poker/';
+    pendingLeaveDestination = '/poker/';
+    navigateToDestination(destination);
   }
 
   function isStaleSessionError(error){
@@ -4876,7 +4892,11 @@
     return code === 'STALE_SESSION' || code === 'session_rebound' || code === 'ws_closed' || code === 'timeout' || code === 'ws_unavailable';
   }
 
-  function leaveAndReturnToLobby(){
+  function leaveAndReturnToLobby(destination){
+    var leaveDestination = destination == null
+      ? (pendingLeaveNavigation ? pendingLeaveDestination : '/poker/')
+      : normalizeLeaveDestination(destination);
+    pendingLeaveDestination = leaveDestination;
     clearRebuyOperation();
     pendingLeaveNavigation = true;
     try {
@@ -4887,7 +4907,7 @@
       pendingLeaveNavigation = false;
       state.statusText = 'Leave accepted';
       renderInfoPanel();
-      navigateToLobby();
+      navigateAfterLeave();
     }).catch(function(err){
       if (isRetryableLeaveError(err) && currentAccessToken && !pendingLeaveRetryAfterReconnect){
         pendingLeaveRetryAfterReconnect = true;
@@ -4898,6 +4918,7 @@
       }
       pendingLeaveRetryAfterReconnect = false;
       pendingLeaveNavigation = false;
+      pendingLeaveDestination = '/poker/';
       setError(err && err.message ? err.message : 'Failed to leave');
     });
   }
@@ -4960,24 +4981,29 @@
       else els.menuPanel.setAttribute('hidden', 'hidden');
       els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
     });
-    ['lobbyLink'].forEach(function(key){
-      if (!els[key]) return;
-      els[key].addEventListener('click', function(){
+    function bindDestinationLink(link, destination){
+      if (!link) return;
+      link.addEventListener('click', function(event){
+        if (!isSeatedAtLiveTable()){
+          closeMenu();
+          return;
+        }
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
         closeMenu();
+        setError('');
+        openLeaveConfirm(destination);
       });
-    });
+    }
+    bindDestinationLink(els.lobbyLink, '/poker/');
+    bindDestinationLink(els.xpBadge, '/xp.html');
     function toggleSocialSettings(trigger){
       var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
       closeMenu();
       if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = !opening;
-      els.socialSettingsToggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
       if (els.menuSettings) els.menuSettings.setAttribute('aria-expanded', opening ? 'true' : 'false');
-      socialSettingsOpener = opening ? (trigger || els.socialSettingsToggle) : null;
+      socialSettingsOpener = opening ? (trigger || els.menuSettings) : null;
       if (opening) positionSocialSettingsPanel(socialSettingsOpener);
     }
-    if (els.socialSettingsToggle) els.socialSettingsToggle.addEventListener('click', function(){
-      toggleSocialSettings(els.socialSettingsToggle);
-    });
     if (els.menuSettings) els.menuSettings.addEventListener('click', function(){
       toggleSocialSettings(els.menuSettings);
     });
@@ -5055,17 +5081,18 @@
     });
     if (els.leaveBtn) els.leaveBtn.addEventListener('click', function(){
       setError('');
-      openLeaveConfirm();
+      openLeaveConfirm('/poker/');
     });
     if (els.menuLeave) els.menuLeave.addEventListener('click', function(){
       closeMenu();
       setError('');
-      openLeaveConfirm();
+      openLeaveConfirm('/poker/');
     });
     if (els.leaveConfirmYes) els.leaveConfirmYes.addEventListener('click', function(){
+      var destination = leaveConfirmDestination;
       closeLeaveConfirm();
       setError('');
-      leaveAndReturnToLobby();
+      leaveAndReturnToLobby(destination);
     });
     if (els.leaveConfirmCancel) els.leaveConfirmCancel.addEventListener('click', function(){
       closeLeaveConfirm();
@@ -5179,7 +5206,6 @@
     els.menuSettings = document.getElementById('pokerMenuSettings');
     els.menuSignIn = document.getElementById('pokerMenuSignIn');
     els.menuGuestInfo = document.getElementById('pokerMenuGuestInfo');
-    els.socialSettingsToggle = document.getElementById('pokerSocialSettingsToggle');
     els.socialSettingsPanel = document.getElementById('pokerSocialSettingsPanel');
     els.socialSettingsClose = document.getElementById('pokerSocialSettingsClose');
     els.reactionBubblesPreference = document.getElementById('pokerReactionBubblesPreference');
@@ -5213,7 +5239,6 @@
     els.reactionBtn = document.getElementById('pokerV2ReactionBtn');
     els.reactionControl = document.getElementById('pokerV2ReactionControl');
     els.reactionMenu = document.getElementById('pokerV2ReactionMenu');
-    els.reactionHint = document.getElementById('pokerV2ReactionHint');
     els.reactionHistory = document.getElementById('pokerReactionHistory');
     els.reactionHistoryToggle = document.getElementById('pokerReactionHistoryToggle');
     els.reactionHistoryCount = document.getElementById('pokerReactionHistoryCount');
