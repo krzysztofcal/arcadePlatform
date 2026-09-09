@@ -35,6 +35,7 @@ const gamesCatalog = JSON.parse(await readFile(path.join(root, 'js', 'games.json
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
 assert.doesNotMatch(indexHtml, /pokerClassicEntry/, 'poker lobby should no longer expose the classic table entry');
+assert.match(indexHtml, /id="pokerMaxPlayers"[^>]*min="2" max="6"/, 'poker lobby should expose only the supported 2-6 player range');
 assert.match(tableV2Html, /id="pokerV2JoinBtn"/, 'poker table v2 should include live join control');
 assert.match(tableV2Html, /id="pokerLobbyLink"/, 'poker table v2 should include a back-to-lobby link in the hamburger menu');
 assert.match(tableV2Html, /id="pokerV2ClosedTableModal"/, 'poker table v2 should render the closed-table redirect notice');

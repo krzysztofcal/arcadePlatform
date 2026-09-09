@@ -3,6 +3,8 @@
 
   var CREATE_URL = '/.netlify/functions/poker-create-table';
   var QUICK_SEAT_URL = '/.netlify/functions/poker-quick-seat';
+  var LOBBY_MIN_PLAYERS = 2;
+  var LOBBY_MAX_PLAYERS = 6;
   var PROGRESSION_URL = '/.netlify/functions/poker-progression';
   var GUEST_SESSION_URL = '/.netlify/functions/poker-guest-session';
   var WS_JOIN_ENDPOINT = 'ws:join';
@@ -1502,6 +1504,14 @@
       return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', formatChips(amount));
     }
 
+    function resolveLobbyMaxPlayers(){
+      var parsed = parseInt(maxPlayersInput ? maxPlayersInput.value : LOBBY_MAX_PLAYERS, 10);
+      if (!isFinite(parsed)) parsed = LOBBY_MAX_PLAYERS;
+      var maxPlayers = Math.max(LOBBY_MIN_PLAYERS, Math.min(LOBBY_MAX_PLAYERS, Math.trunc(parsed)));
+      if (maxPlayersInput) maxPlayersInput.value = String(maxPlayers);
+      return maxPlayers;
+    }
+
     function handleInsufficientChips(error){
       if (!error || error.code !== 'insufficient_chips') return false;
       setError(errorEl, insufficientChipsMessage(error.requiredBuyIn));
@@ -2010,7 +2020,7 @@
 
     async function quickSeat(){
       setError(errorEl, null);
-      var maxPlayers = parseInt(maxPlayersInput ? maxPlayersInput.value : 6, 10) || 6;
+      var maxPlayers = resolveLobbyMaxPlayers();
       var payload = { maxPlayers: maxPlayers };
       setLoading(quickSeatBtn, true);
       try {
@@ -2057,7 +2067,7 @@
         setError(errorEl, 'This table tier is not available for your current bankroll.');
         return;
       }
-      var maxPlayers = parseInt(maxPlayersInput ? maxPlayersInput.value : 6, 10) || 6;
+      var maxPlayers = resolveLobbyMaxPlayers();
       setLoading(createBtn, true);
       try {
         var data = await apiPost(CREATE_URL, { maxPlayers: maxPlayers, buyIn: buyIn });
