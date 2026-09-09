@@ -157,6 +157,7 @@ function createHarness(options = {}){
   elements.pokerAutoRebuyPreference.type = 'checkbox';
 
   const documentEvents = {};
+  const windowEvents = {};
   const logs = [];
   const joinPayloads = [];
   const joinRequestIds = [];
@@ -257,6 +258,8 @@ function createHarness(options = {}){
     window: {
       innerWidth: 320,
       innerHeight: 640,
+      addEventListener(type, fn){ windowEvents[type] = windowEvents[type] || []; windowEvents[type].push(fn); },
+      removeEventListener(type, fn){ windowEvents[type] = (windowEvents[type] || []).filter((handler) => handler !== fn); },
       location: {
         search: typeof options.search === 'string' ? options.search : '?tableId=table-1',
         href: ''
@@ -376,6 +379,11 @@ async function flush(){
     handlers.forEach((fn) => fn(event || {}));
   }
 
+  function fireWindowEvent(type, event){
+    const handlers = windowEvents[type] || [];
+    handlers.forEach((fn) => fn(event || {}));
+  }
+
   function advanceTime(ms){
     nowMs += Math.max(0, Number(ms) || 0);
     const due = timeoutTimers
@@ -403,11 +411,13 @@ async function flush(){
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
     fireDocumentEvent,
+    fireWindowEvent,
     flush,
     advanceTime,
     getCreateOptions(){ return createOptions; },
     getCreateCount(){ return createCount; },
     getDestroyCount(){ return destroyCount; },
+    getWindowListenerCount(type){ return (windowEvents[type] || []).length; },
     setAuthToken(nextToken){ activeToken = nextToken; },
     triggerAuthChange(user, session, event){
       if (!authChangeHandler) return null;
@@ -5692,4 +5702,67 @@ test('poker v2 clears stale private hole cards when a full snapshot removes the 
   assert.equal(harness.elements.pokerHeroCards.hidden, false, 'seated user keeps the hero cards area');
   assert.equal(harness.elements.pokerHeroCards.children.length, 2, 'two placeholders');
   assert.ok(harness.elements.pokerHeroCards.children.every((child) => /poker-card--back/.test(child.className)), 'placeholders must be face-down, not the stale 3C/7S cards');
+});
+
+test('poker v2 keeps live state and one resize binding across responsive transitions', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-layout-resize',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h', '2c'],
+    potTotal: 60,
+    actions: ['FOLD', 'CALL', 'RAISE'],
+    projectedActions: ['FOLD', 'CALL', 'RAISE'],
+    constraints: { toCall: 10, minRaiseTo: 80, maxRaiseTo: 200 },
+    stateVersion: 50,
+    turnUserId: 'villain-1',
+    stacks: { 'user-1': 150 },
+    holeCards: ['3C', '7S']
+  }));
+  await harness.flush();
+
+  harness.elements.pokerV2AmountInput.value = '120';
+  (harness.elements.pokerV2AmountInput._listeners.input || []).forEach((fn) => fn({ target: harness.elements.pokerV2AmountInput }));
+  harness.elements.pokerV2AmountPreaction.click();
+  await harness.flush();
+
+  const before = {
+    createCount: harness.getCreateCount(),
+    destroyCount: harness.getDestroyCount(),
+    joinCount: harness.joinPayloads.length,
+    seatCount: harness.elements.pokerSeatLayer.children.length,
+    seatLayout: harness.elements.pokerSeatLayer.children.map((seat) => seat.className + ':' + seat.dataset.pokerSlot).join('|'),
+    heroCardCount: harness.elements.pokerHeroCards.children.length,
+    potText: harness.elements.pokerPotPill.textContent,
+    amount: harness.elements.pokerV2AmountInput.value,
+    amountLabel: harness.elements.pokerV2AmountBtn.textContent,
+    preaction: harness.elements.pokerV2AmountPreaction.checked
+  };
+
+  assert.equal(before.preaction, true, 'off-turn amount pre-action should be selected before resize');
+  assert.equal(harness.getWindowListenerCount('resize'), 1, 'responsive presentation must use one resize listener');
+  assert.equal(harness.getWindowListenerCount('orientationchange'), 1, 'responsive presentation must use one orientation listener');
+
+  harness.fireWindowEvent('orientationchange');
+  harness.fireWindowEvent('resize');
+  harness.fireWindowEvent('resize');
+  harness.advanceTime(0);
+  await harness.flush();
+
+  assert.deepEqual({
+    createCount: harness.getCreateCount(),
+    destroyCount: harness.getDestroyCount(),
+    joinCount: harness.joinPayloads.length,
+    seatCount: harness.elements.pokerSeatLayer.children.length,
+    seatLayout: harness.elements.pokerSeatLayer.children.map((seat) => seat.className + ':' + seat.dataset.pokerSlot).join('|'),
+    heroCardCount: harness.elements.pokerHeroCards.children.length,
+    potText: harness.elements.pokerPotPill.textContent,
+    amount: harness.elements.pokerV2AmountInput.value,
+    amountLabel: harness.elements.pokerV2AmountBtn.textContent,
+    preaction: harness.elements.pokerV2AmountPreaction.checked
+  }, before, 'resize/orientation presentation refresh must not reset live UI or the socket');
+  assert.equal(harness.getWindowListenerCount('resize'), 1, 'repeated resize events must not add bindings');
+  assert.equal(harness.getWindowListenerCount('orientationchange'), 1, 'repeated orientation events must not add bindings');
+  assert.equal(harness.actPayloads.length, 0, 'responsive presentation refresh must not send a gameplay action');
 });

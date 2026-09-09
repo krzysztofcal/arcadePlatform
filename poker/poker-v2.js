@@ -266,6 +266,7 @@
   var reactionHistoryUserId = null;
   var reactionHistoryEntries = [];
   var reactionHistoryExpiryTimer = null;
+  var layoutRefreshTimer = null;
   var reactionHistoryPanelOpen = false;
   var socialPreferencesIdentity = null;
   var socialPreferences = defaultSocialPreferences();
@@ -3179,6 +3180,31 @@
     };
   }
 
+  function syncRenderedSeatAnchorsFromLayout(){
+    Object.keys(renderedSeatAvatars).forEach(function(seatNo){
+      var measured = getSeatAvatarAnchorFromRect(Number(seatNo));
+      if (!measured) return;
+      renderedSeatAnchors[seatNo] = {
+        x: measured.x,
+        y: measured.y
+      };
+    });
+  }
+
+  function refreshLayoutPresentation(){
+    layoutRefreshTimer = null;
+    syncRenderedSeatAnchorsFromLayout();
+    positionHeroCards();
+    renderSeatChips();
+    renderDealerChip();
+    renderReactionBubbles();
+  }
+
+  function scheduleLayoutPresentationRefresh(){
+    if (layoutRefreshTimer != null) return;
+    layoutRefreshTimer = window.setTimeout(refreshLayoutPresentation, 0);
+  }
+
   function resolveSeatChipDirections(anchor){
     var dx = anchor.x - 50;
     var dy = anchor.y - 50;
@@ -3495,6 +3521,7 @@
         + (hero ? ' poker-seat--hero' : '')
         + (waitingNextHand ? ' poker-seat--waiting-next-hand' : '')
         + (!seat ? ' poker-seat--empty' : '');
+      article.dataset.pokerSlot = String(rotatedIndex);
       article.style.left = anchor.x + '%';
       article.style.top = anchor.y + '%';
       if (seat && Number.isInteger(seat.seatNo)) {
@@ -3609,6 +3636,7 @@
       }
       els.seatLayer.appendChild(article);
     }
+    syncRenderedSeatAnchorsFromLayout();
     scheduleTargetedReactionDismiss();
     renderReactionBubbles();
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
@@ -4909,9 +4937,14 @@
       if (opening) positionSocialSettingsPanel();
     });
     if (els.socialSettingsClose) els.socialSettingsClose.addEventListener('click', closeSocialSettings);
-    if (window && typeof window.addEventListener === 'function') window.addEventListener('resize', function(){
-      if (els.socialSettingsPanel && !els.socialSettingsPanel.hidden) positionSocialSettingsPanel();
-    });
+    if (window && typeof window.addEventListener === 'function') {
+      var refreshResponsivePresentation = function(){
+        scheduleLayoutPresentationRefresh();
+        if (els.socialSettingsPanel && !els.socialSettingsPanel.hidden) positionSocialSettingsPanel();
+      };
+      window.addEventListener('resize', refreshResponsivePresentation);
+      window.addEventListener('orientationchange', refreshResponsivePresentation);
+    }
     document.addEventListener('click', function(event){
       var target = event && event.target;
       if (!target) return;
