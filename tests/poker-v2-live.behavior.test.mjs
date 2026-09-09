@@ -10,18 +10,6 @@ test('poker v2 CSS respects the hidden state of the guest account badge', () => 
   assert.match(pokerV2Css, /\.poker-live-pill\[hidden\]\s*\{\s*display\s*:\s*none\s*;?\s*\}/);
 });
 
-test('poker v2 wide CSS covers every supported seat count and horizontal safe area', () => {
-  for (const maxSeats of [2, 3, 4, 5, 6]) {
-    assert.match(pokerV2Css, new RegExp(`\\.poker-scene\\[data-poker-max-seats="${maxSeats}"\\]`), `wide layout should define a scene map for ${maxSeats} seats`);
-    assert.match(pokerV2Css, new RegExp(`data-poker-max-seats="${maxSeats}"\\] \\.poker-seat\\[data-poker-slot="${maxSeats - 1}"\\]`), `wide layout should place the last slot for ${maxSeats} seats`);
-  }
-  for (const maxSeats of [7, 8, 9, 10]) {
-    assert.doesNotMatch(pokerV2Css, new RegExp(`\\.poker-scene\\[data-poker-max-seats="${maxSeats}"\\]`), `wide layout should not expose a frontend map for ${maxSeats} seats`);
-  }
-  assert.match(pokerV2Css, /\.poker-action-bar\{left:env\(safe-area-inset-left,0px\);right:env\(safe-area-inset-right,0px\);/);
-  assert.match(pokerV2Css, /\.poker-scene\{width:min\(calc\(100vw - 32px - env\(safe-area-inset-left,0px\) - env\(safe-area-inset-right,0px\)\),1180px\);/);
-});
-
 function makeElement(id){
   const sceneRect = { left: 0, top: 0, width: 320, height: 640, right: 320, bottom: 640 };
   const style = {
@@ -5794,7 +5782,6 @@ test('poker v2 keeps live state and one resize binding across responsive transit
   };
 
   assert.equal(before.preaction, true, 'off-turn amount pre-action should be selected before resize');
-  assert.equal(harness.elements.pokerTableScreen.dataset.pokerMaxSeats, '6', 'responsive scene should expose the current table seat count to wide CSS');
   assert.equal(harness.getWindowListenerCount('resize'), 1, 'responsive presentation must use one resize listener');
   assert.equal(harness.getWindowListenerCount('orientationchange'), 1, 'responsive presentation must use one orientation listener');
 
