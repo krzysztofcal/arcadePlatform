@@ -38,6 +38,10 @@ assert.doesNotMatch(indexHtml, /pokerClassicEntry/, 'poker lobby should no longe
 assert.match(indexHtml, /id="pokerMaxPlayers"[^>]*min="2" max="6"/, 'poker lobby should expose only the supported 2-6 player range');
 assert.match(tableV2Html, /id="pokerV2JoinBtn"/, 'poker table v2 should include live join control');
 assert.match(tableV2Html, /id="pokerLobbyLink"/, 'poker table v2 should include a back-to-lobby link in the hamburger menu');
+assert.match(tableV2Html, /id="pokerMenuLeave"[^>]*>Leave table</, 'poker table v2 should expose leave table in the hamburger menu');
+assert.match(tableV2Html, /id="pokerMenuSettings"[^>]*>Table settings</, 'poker table v2 should expose table settings in the hamburger menu');
+assert.match(tableV2Html, /id="pokerMenuSignIn"/, 'poker table v2 should expose account access in the hamburger menu');
+assert.match(tableV2Html, /id="pokerMenuGuestInfo"/, 'poker table v2 should expose guest account information in the hamburger menu');
 assert.match(tableV2Html, /id="pokerV2ClosedTableModal"/, 'poker table v2 should render the closed-table redirect notice');
 assert.match(tableV2Html, /id="pokerV2GuestPanel"/, 'poker table v2 should render the guest restrictions panel');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyBalanceToast"/, 'poker table v2 should render the table-side auto-rebuy toast');
@@ -63,6 +67,12 @@ assert.match(tableV2Css, /\.poker-closed-table-modal\{z-index:65;\}/, 'poker tab
 assert.match(tableV2Css, /\.poker-guest-panel\{margin-top:12px; padding:14px 14px 12px; border-radius:18px; border:1px solid rgba\(255,223,180,0\.2\); background:rgba\(8,13,22,0\.72\);\}/, 'poker table v2 should style the guest restrictions panel');
 assert.match(tableV2Css, /\.poker-guest-panel__item--blocked::before\{content:"✕"; color:#ffb5b5;\}/, 'guest restrictions panel should visibly mark blocked items');
 assert.match(tableV2Css, /\.poker-action-bar\{position:fixed; right:max\(10px, env\(safe-area-inset-right\)\); bottom:max\(10px, env\(safe-area-inset-bottom\)\); width:min\(33vw, 196px\); display:grid; grid-template-columns:40px minmax\(0, 1fr\);/, 'poker table v2 action rail should dock to the bottom-right with a left-side vertical amount slider');
+assert.match(tableV2Css, /\.poker-menu-panel button\{/, 'poker table v2 hamburger actions should use the existing menu surface');
+assert.match(tableV2Css, /\.poker-menu-guest-info\{/, 'poker table v2 should style guest information inside the hamburger');
+assert.match(tableV2Css, /@media \(min-width:560px\) and \(orientation:landscape\)\{[\s\S]*?\.poker-live-panel\{[\s\S]*?display:contents;/, 'landscape should remove the live panel from normal game flow');
+assert.match(tableV2Css, /@media \(min-width:560px\) and \(orientation:landscape\)\{[\s\S]*?\.poker-live-meta\{[\s\S]*?position:fixed;/, 'landscape connection state should use a compact overlay rail');
+assert.match(tableV2Css, /@media \(min-width:560px\) and \(orientation:landscape\)\{[\s\S]*?aspect-ratio:3\.25 \/ 1;/, 'landscape scene should preserve a natural wide oval ratio');
+assert.doesNotMatch(tableV2Css, /@media \([^)]*max-height:\s*(?:500|360)px[^)]*\)[\s\S]*?orientation:\s*landscape/, 'landscape must not use artificial low-height scene caps');
 assert.match(tableV2Css, /\.poker-social-settings\{[^}]*right:calc\(env\(safe-area-inset-right\) \+ 8px\)[^}]*max-height:min\(420px,/, 'table settings should use a responsive viewport-safe popup surface');
 assert.match(tableV2Css, /\.poker-auto-rebuy-indicator\{/, 'poker table v2 should style the compact auto-rebuy indicator');
 assert.match(tableV2Css, /\.poker-auto-rebuy-toast--balance\{position:fixed;/, 'poker table v2 should style the table-side auto-rebuy toast');

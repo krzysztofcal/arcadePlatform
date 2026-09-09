@@ -125,7 +125,8 @@ function createHarness(options = {}){
   [
     'xpBadge',
     'pokerV2AutoRebuyBalanceToast',
-    'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink', 'pokerSocialSettingsToggle', 'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
+    'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink', 'pokerMenuLeave', 'pokerMenuSettings', 'pokerMenuSignIn', 'pokerMenuGuestInfo',
+    'pokerSocialSettingsToggle', 'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
     'pokerReactionBubblesPreference', 'pokerReactionHistoryPreference', 'pokerBotReactionsPreference',
     'pokerAutoRebuyPreference', 'pokerAutoRebuyPreferenceWrap', 'pokerAutoRebuyPreferenceHint',
     'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
@@ -268,8 +269,8 @@ function createHarness(options = {}){
   FakeDate.UTC = Date.UTC;
   const sandbox = {
     window: {
-      innerWidth: 320,
-      innerHeight: 640,
+      innerWidth: Number.isFinite(options.innerWidth) ? options.innerWidth : 320,
+      innerHeight: Number.isFinite(options.innerHeight) ? options.innerHeight : 640,
       addEventListener(type, fn){ windowEvents[type] = windowEvents[type] || []; windowEvents[type].push(fn); },
       removeEventListener(type, fn){ windowEvents[type] = (windowEvents[type] || []).filter((handler) => handler !== fn); },
       location: {
@@ -1803,6 +1804,7 @@ test('poker v2 guest mode shows restrictions panel, hides XP badge, and still au
   assert.equal(harness.elements.xpBadge.hidden, true, 'guest mode should hide the XP badge');
   assert.equal(harness.elements.pokerV2GuestBadge.hidden, false, 'guest mode should show the guest badge');
   assert.equal(harness.elements.pokerV2GuestPanel.hidden, false, 'guest mode should show the restrictions panel');
+  assert.equal(harness.elements.pokerMenuGuestInfo.hidden, false, 'guest account information should be available from the hamburger');
 
   sendInitialTableSnapshot(harness, { tableId: 'guest_table_1' });
   await harness.flush();
@@ -4504,6 +4506,45 @@ test('poker v2 closes menu on link click and outside click', async () => {
   harness.elements.pokerMenuToggle.click();
   harness.fireDocumentEvent('click', { target: makeElement('outside') });
   assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), true);
+});
+
+test('poker v2 keeps secondary landscape actions in the hamburger and gates join on an actionable snapshot', async () => {
+  const harness = createHarness({ innerWidth: 568, innerHeight: 320 });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'landscape should not show Join before the table snapshot is actionable');
+  assert.equal(harness.elements.pokerMenuSettings.hidden, false, 'table settings should be available from the existing hamburger');
+  assert.equal(harness.elements.pokerMenuSignIn.hidden, true, 'an authenticated user should not see a redundant sign-in action');
+
+  harness.elements.pokerMenuToggle.click();
+  harness.elements.pokerMenuSettings.click();
+  assert.equal(harness.elements.pokerMenuPanel.hasAttribute('hidden'), true, 'opening settings from the hamburger should close the hamburger panel');
+  assert.equal(harness.elements.pokerSocialSettingsPanel.hidden, false, 'the hamburger settings action should reuse the existing settings panel');
+  assert.equal(harness.elements.pokerMenuSettings.attributes['aria-expanded'], 'true');
+
+  harness.fireDocumentEvent('keydown', { key: 'Escape' });
+  assert.equal(harness.elements.pokerSocialSettingsPanel.hidden, true);
+  assert.equal(harness.elements.pokerMenuSettings._focused, true, 'closing hamburger settings should restore focus to its opener');
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'landscape should expose Join once a signed-in user can act');
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot(amountSnapshot({
+    handId: 'hand-landscape-menu',
+    phase: 'TURN',
+    board: ['As', 'Kd', '3h'],
+    potTotal: 20,
+    actions: ['FOLD', 'CHECK'],
+    constraints: { toCall: 0 },
+    stateVersion: 2,
+    youSeat: 1
+  }));
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'Join should disappear after the authoritative snapshot seats the user');
+  assert.equal(harness.elements.pokerMenuLeave.hidden, false, 'Leave table should be exposed from the hamburger once seated');
 });
 
 test('poker v2 waits for auth before enabling join and starts auth watch when signed out', async () => {

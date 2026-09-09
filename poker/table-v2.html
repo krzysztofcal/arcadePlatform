@@ -46,6 +46,17 @@
 
     <nav class="poker-menu-panel" id="pokerMenuPanel" hidden>
       <a id="pokerLobbyLink" href="/poker/">Back to lobby</a>
+      <button type="button" class="poker-menu-action" id="pokerMenuLeave" hidden>Leave table</button>
+      <button type="button" class="poker-menu-action" id="pokerMenuSettings">Table settings</button>
+      <button type="button" class="poker-menu-action" id="pokerMenuSignIn">Sign in to join this table</button>
+      <section class="poker-menu-guest-info" id="pokerMenuGuestInfo" hidden aria-labelledby="pokerMenuGuestInfoTitle">
+        <div class="poker-menu-guest-info__title" id="pokerMenuGuestInfoTitle">Guest account information</div>
+        <ul class="poker-menu-guest-info__list">
+          <li>Practice poker</li>
+          <li>Unlimited bot games</li>
+          <li>Create an account to unlock 500 CH, multiplayer, XP and persistent chips.</li>
+        </ul>
+      </section>
     </nav>
 
     <section class="poker-social-settings" id="pokerSocialSettingsPanel" aria-labelledby="pokerSocialSettingsTitle" hidden>

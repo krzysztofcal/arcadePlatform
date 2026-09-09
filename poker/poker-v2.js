@@ -267,6 +267,7 @@
   var reactionHistoryEntries = [];
   var reactionHistoryExpiryTimer = null;
   var layoutRefreshTimer = null;
+  var socialSettingsOpener = null;
   var reactionHistoryPanelOpen = false;
   var socialPreferencesIdentity = null;
   var socialPreferences = defaultSocialPreferences();
@@ -3205,6 +3206,26 @@
     layoutRefreshTimer = window.setTimeout(refreshLayoutPresentation, 0);
   }
 
+  function isLandscapePresentation(){
+    var width = Number(window.innerWidth);
+    var height = Number(window.innerHeight);
+    return width >= 560 && height > 0 && width > height;
+  }
+
+  function syncJoinVisibility(){
+    if (!els.joinBtn) return;
+    if (!isLandscapePresentation()){
+      els.joinBtn.hidden = false;
+      return;
+    }
+    var signedIn = isSignedIn();
+    var seated = !!deriveCurrentSeat();
+    var joinPending = isJoinOperationPending();
+    var needsUserJoin = signedIn && !seated && !!state.tableId
+      && (joinPending || (isWsReady() && state.hasAppliedAuthoritativeSnapshot === true));
+    els.joinBtn.hidden = !needsUserJoin;
+  }
+
   function resolveSeatChipDirections(anchor){
     var dx = anchor.x - 50;
     var dy = anchor.y - 50;
@@ -4252,12 +4273,17 @@
       });
     }
 
+    var accountActionText = isGuestMode ? 'Create account and get 500 CH Welcome Bonus' : 'Sign in to join this table';
     if (els.signInBtn) {
       els.signInBtn.hidden = signedIn && !isGuestMode;
       els.signInBtn.textContent = isGuestMode ? 'Create account and get 500 CH Welcome Bonus' : 'Sign in';
     }
+    if (els.menuSignIn) {
+      els.menuSignIn.hidden = signedIn && !isGuestMode;
+      els.menuSignIn.textContent = accountActionText;
+    }
+    if (els.menuGuestInfo) els.menuGuestInfo.hidden = !isGuestMode;
     if (els.guestBadge) els.guestBadge.hidden = !isGuestMode;
-    if (els.joinBtn) els.joinBtn.hidden = false;
     if (els.joinBtn) els.joinBtn.disabled = joinDisabled;
     if (els.joinBtn) {
       if (joinOperation.phase === 'reserving') els.joinBtn.textContent = 'Reserving seat…';
@@ -4270,6 +4296,7 @@
       if (joinPending) els.joinBtn.setAttribute('aria-busy', 'true');
       else els.joinBtn.removeAttribute('aria-busy');
     }
+    syncJoinVisibility();
     if (els.joinSeat) els.joinSeat.disabled = !signedIn || seated || !liveReady;
     if (els.joinBuyIn) els.joinBuyIn.disabled = !signedIn || seated || !liveReady;
     if (els.joinSeat && suggestedSeatNoParam && !seated && !els.joinSeat.dataset.userEdited) {
@@ -4279,6 +4306,10 @@
     if (els.leaveBtn) els.leaveBtn.hidden = !signedIn || !seated;
     if (els.startBtn) els.startBtn.disabled = !liveReady;
     if (els.leaveBtn) els.leaveBtn.disabled = !liveReady;
+    if (els.menuLeave) {
+      els.menuLeave.hidden = !signedIn || !seated;
+      els.menuLeave.disabled = !liveReady;
+    }
     if ((!signedIn || !seated) && leaveConfirmOpen) closeLeaveConfirm();
     if ((!signedIn || isGuestMode) && autoRebuyConfirmOpen){
       closeAutoRebuyConfirm(false);
@@ -4760,7 +4791,10 @@
     var wasOpen = !!(els.socialSettingsPanel && !els.socialSettingsPanel.hidden);
     if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = true;
     if (els.socialSettingsToggle) els.socialSettingsToggle.setAttribute('aria-expanded', 'false');
-    if (restoreFocus && wasOpen && els.socialSettingsToggle && typeof els.socialSettingsToggle.focus === 'function') els.socialSettingsToggle.focus();
+    if (els.menuSettings) els.menuSettings.setAttribute('aria-expanded', 'false');
+    var opener = socialSettingsOpener || els.socialSettingsToggle;
+    socialSettingsOpener = null;
+    if (restoreFocus && wasOpen && opener && typeof opener.focus === 'function') opener.focus();
   }
 
   function getSocialSettingsViewport(){
@@ -4773,13 +4807,14 @@
     return { width: width > 0 ? width : 0, height: height > 0 ? height : 0 };
   }
 
-  function positionSocialSettingsPanel(){
-    if (!els.socialSettingsPanel || els.socialSettingsPanel.hidden || !els.socialSettingsToggle
-      || typeof els.socialSettingsToggle.getBoundingClientRect !== 'function'
+  function positionSocialSettingsPanel(trigger){
+    var settingsTrigger = trigger || socialSettingsOpener || els.socialSettingsToggle;
+    if (!els.socialSettingsPanel || els.socialSettingsPanel.hidden || !settingsTrigger
+      || typeof settingsTrigger.getBoundingClientRect !== 'function'
       || typeof els.socialSettingsPanel.getBoundingClientRect !== 'function') return;
     var viewport = getSocialSettingsViewport();
     if (!(viewport.width > 0) || !(viewport.height > 0)) return;
-    var toggleRect = els.socialSettingsToggle.getBoundingClientRect();
+    var toggleRect = settingsTrigger.getBoundingClientRect();
     var panelRect = els.socialSettingsPanel.getBoundingClientRect();
     var edge = 8;
     var gap = 8;
@@ -4920,6 +4955,7 @@
     if (!els.menuToggle || !els.menuPanel) return;
     els.menuToggle.addEventListener('click', function(){
       var hidden = els.menuPanel.hasAttribute('hidden');
+      if (hidden) closeSocialSettings(false);
       if (hidden) els.menuPanel.removeAttribute('hidden');
       else els.menuPanel.setAttribute('hidden', 'hidden');
       els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
@@ -4930,17 +4966,26 @@
         closeMenu();
       });
     });
-    if (els.socialSettingsToggle) els.socialSettingsToggle.addEventListener('click', function(){
+    function toggleSocialSettings(trigger){
       var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
       closeMenu();
       if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = !opening;
       els.socialSettingsToggle.setAttribute('aria-expanded', opening ? 'true' : 'false');
-      if (opening) positionSocialSettingsPanel();
+      if (els.menuSettings) els.menuSettings.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      socialSettingsOpener = opening ? (trigger || els.socialSettingsToggle) : null;
+      if (opening) positionSocialSettingsPanel(socialSettingsOpener);
+    }
+    if (els.socialSettingsToggle) els.socialSettingsToggle.addEventListener('click', function(){
+      toggleSocialSettings(els.socialSettingsToggle);
+    });
+    if (els.menuSettings) els.menuSettings.addEventListener('click', function(){
+      toggleSocialSettings(els.menuSettings);
     });
     if (els.socialSettingsClose) els.socialSettingsClose.addEventListener('click', closeSocialSettings);
     if (window && typeof window.addEventListener === 'function') {
       var refreshResponsivePresentation = function(){
         scheduleLayoutPresentationRefresh();
+        syncJoinVisibility();
         if (els.socialSettingsPanel && !els.socialSettingsPanel.hidden) positionSocialSettingsPanel();
       };
       window.addEventListener('resize', refreshResponsivePresentation);
@@ -4991,6 +5036,10 @@
       });
     }
     if (els.signInBtn) els.signInBtn.addEventListener('click', openSignIn);
+    if (els.menuSignIn) els.menuSignIn.addEventListener('click', function(){
+      closeMenu();
+      openSignIn();
+    });
     if (els.foldBtn) els.foldBtn.addEventListener('click', function(){
       handleAction('FOLD');
     });
@@ -5005,6 +5054,11 @@
       });
     });
     if (els.leaveBtn) els.leaveBtn.addEventListener('click', function(){
+      setError('');
+      openLeaveConfirm();
+    });
+    if (els.menuLeave) els.menuLeave.addEventListener('click', function(){
+      closeMenu();
       setError('');
       openLeaveConfirm();
     });
@@ -5121,6 +5175,10 @@
     els.menuToggle = document.getElementById('pokerMenuToggle');
     els.menuPanel = document.getElementById('pokerMenuPanel');
     els.lobbyLink = document.getElementById('pokerLobbyLink');
+    els.menuLeave = document.getElementById('pokerMenuLeave');
+    els.menuSettings = document.getElementById('pokerMenuSettings');
+    els.menuSignIn = document.getElementById('pokerMenuSignIn');
+    els.menuGuestInfo = document.getElementById('pokerMenuGuestInfo');
     els.socialSettingsToggle = document.getElementById('pokerSocialSettingsToggle');
     els.socialSettingsPanel = document.getElementById('pokerSocialSettingsPanel');
     els.socialSettingsClose = document.getElementById('pokerSocialSettingsClose');
