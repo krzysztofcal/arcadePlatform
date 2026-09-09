@@ -3306,9 +3306,16 @@
     var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : null;
     var source = getSeatAvatarAnchorFromRect(seatNo) || { x: anchor.x, y: anchor.y, radiusX: 8, radiusY: 5 };
     var directions = resolveSeatChipDirections(source);
+    var stackDirection = directions.stack;
+    var stackGap = 4;
+    var isLandscapePokerLayout = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width:560px) and (orientation:landscape)').matches;
+    if (isLandscapePokerLayout && renderedSeatSlots[seatNo] === 0){
+      stackDirection = { x: 1, y: 0 };
+      stackGap = source.sceneHeight && source.sceneHeight < 220 ? 10 : 8;
+    }
     return {
       bet: resolveSeatChipPoint(source, directions.bet),
-      stack: isCurrentUserSeat(seat) ? resolveHeroSeatStackPoint(source) : resolveSeatChipPoint(source, directions.stack, 4)
+      stack: isCurrentUserSeat(seat) ? resolveHeroSeatStackPoint(source) : resolveSeatChipPoint(source, stackDirection, stackGap)
     };
   }
 
