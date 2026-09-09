@@ -190,6 +190,10 @@ limit $2::int;
 // The manual exporter deliberately keeps its broad, lifecycle-safe selector.
 // Stage automation uses this independent selector so the JSONL itself is
 // prunable-only before Storage or proof state is created.
+// Keep final ID membership wrapped in IS TRUE: this prevents semi-join pull-up
+// and lets PostgreSQL hash the validated IDs once despite low CTE estimates (#967).
+// IDs are non-null and eligible_ids groups uniquely per transaction; export
+// multiplicity, all eligibility checks, ordering and the final limit are unchanged.
 export const PRUNABLE_CANDIDATE_SQL = `
 with base as (
   select t.*
@@ -351,7 +355,7 @@ select
   e.escrow_balance,
   (select count(*)::text from public.chips_entries entries where entries.transaction_id = e.id) as entry_count
 from eligible e
-join eligible_ids ids on ids.id = e.id
+where (e.id in (select id from eligible_ids)) is true
 order by e.created_at asc, e.id asc
 limit $2::int;
 `;
