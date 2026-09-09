@@ -72,6 +72,9 @@ assert.match(tableV2Css, /\.poker-menu-guest-info\{/, 'poker table v2 should sty
 assert.match(tableV2Css, /@media \(min-width:560px\) and \(orientation:landscape\)\{[\s\S]*?\.poker-live-panel\{[\s\S]*?display:contents;/, 'landscape should remove the live panel from normal game flow');
 assert.match(tableV2Css, /@media \(min-width:560px\) and \(orientation:landscape\)\{[\s\S]*?\.poker-live-meta\{[\s\S]*?position:fixed;/, 'landscape connection state should use a compact overlay rail');
 assert.match(tableV2Css, /@media \(min-width:560px\) and \(orientation:landscape\)\{[\s\S]*?aspect-ratio:3\.25 \/ 1;/, 'landscape scene should preserve a natural wide oval ratio');
+assert.doesNotMatch(tableV2Css, /\.poker-seat:not\(\.poker-seat--hero\) \.poker-seat-name\{display:none!important?;\}/, 'landscape must keep opponent names readable');
+assert.doesNotMatch(tableV2Css, /\.poker-seat\[data-poker-slot="0"\] \.poker-seat-name\{visibility:hidden;\}/, 'landscape must keep the top seat name readable');
+assert.doesNotMatch(tableV2Css, /\.poker-seat\[data-poker-slot="0"\] \.poker-seat-cards\{visibility:hidden;\}/, 'landscape must keep the top seat card backs visible');
 assert.doesNotMatch(tableV2Css, /@media \([^)]*max-height:\s*(?:500|360)px[^)]*\)[\s\S]*?orientation:\s*landscape/, 'landscape must not use artificial low-height scene caps');
 assert.match(tableV2Css, /\.poker-social-settings\{[^}]*right:calc\(env\(safe-area-inset-right\) \+ 8px\)[^}]*max-height:min\(420px,/, 'table settings should use a responsive viewport-safe popup surface');
 assert.match(tableV2Css, /\.poker-auto-rebuy-indicator\{/, 'poker table v2 should style the compact auto-rebuy indicator');
