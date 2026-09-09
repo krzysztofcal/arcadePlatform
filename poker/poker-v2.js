@@ -3482,6 +3482,7 @@
 
   function renderSeats(){
     if (!els.seatLayer) return;
+    if (els.scene && els.scene.dataset) els.scene.dataset.pokerMaxSeats = String(state.maxSeats);
     clearReactionBubblesWithChangedOwners();
     clearTargetedReactionEffectsWithChangedOwners();
     els.seatLayer.innerHTML = '';
