@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   buildArchiveBytes,
   buildExportRecord,
@@ -210,12 +211,14 @@ async function assertBotOnlyDiscoveryAndExactBindings() {
 
 await assertBotOnlyDiscoveryAndExactBindings();
 
-async function assertSnapshotQueryTelemetry() {
+async function assertSnapshotQueryTelemetry(selector, queryName) {
   const telemetry = [];
+  const queries = [];
   const sql = {
     typed: (value, type) => ({ value, type }),
     begin: async (callback) => callback({
       unsafe: async (query, parameters = []) => {
+        queries.push(query);
         if (parameters.length === 4) {
           const error = new Error("canceling statement due to statement timeout");
           error.code = "57014";
@@ -230,21 +233,25 @@ async function assertSnapshotQueryTelemetry() {
     () => readSnapshot(sql, {
       cutoff: "2026-08-07T03:32:29.388506Z",
       batchSize: 5000,
-      selector: "bot-only-7d",
+      selector,
       telemetry: (event) => telemetry.push(event),
     }),
     /statement timeout/,
   );
   const failed = telemetry.find((event) => event.sqlstate === "57014");
   assert.equal(failed?.phase, "snapshot.candidate_selector");
-  assert.equal(failed?.query_name, "bot_only_candidate_selector");
+  assert.equal(failed?.query_name, queryName);
   assert.match(failed?.sql_sha256 || "", /^[0-9a-f]{64}$/);
   assert.equal(failed?.read_only, true);
   assert.equal(Object.hasOwn(failed || {}, "parameters"), false);
   assert.equal(Object.hasOwn(failed || {}, "rows"), false);
+  assert.equal(createHash("sha256").update(queries.at(-1)).digest("hex"), failed.sql_sha256,
+    "timeout must stop at candidate selection");
+  assert.equal(queries.some((query) => /\b(insert|update|delete)\b/i.test(query)), false);
 }
 
-await assertSnapshotQueryTelemetry();
+await assertSnapshotQueryTelemetry("bot-only-7d", "bot_only_candidate_selector");
+await assertSnapshotQueryTelemetry("prunable", "prunable_candidate_selector");
 
 assert.throws(() => resolveTarget("unknown", {}), /target must be exactly stage or prod/);
 await assert.rejects(

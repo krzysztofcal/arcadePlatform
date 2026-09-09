@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { PRUNABLE_CANDIDATE_SQL } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 
 const CUTOFF = "2026-08-13T00:00:00.000000Z";
 const PAYLOAD_HASH = "a".repeat(64);
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+// Pin the complete pre-#967 selector, not a separately maintained predicate.
+const ORIGINAL_SQL = PRUNABLE_CANDIDATE_SQL.replace(
+  "where (e.id in (select id from eligible_ids)) is true",
+  "join eligible_ids ids on ids.id = e.id",
+);
+assert.equal(createHash("sha256").update(ORIGINAL_SQL).digest("hex"),
+  "0eaac2040038a1c490e8965401c6f57739c141695a5046a38815777df0d479df");
 
 function uuid(number) {
   return `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
@@ -155,12 +163,15 @@ async function insertCandidate(db, {
 }
 
 async function select(db, options = {}) {
-  const result = await db.query(PRUNABLE_CANDIDATE_SQL, [
+  const parameters = [
     options.cutoff || CUTOFF,
     options.limit || 5000,
     options.cursorCreatedAt || null,
     options.cursorId || null,
-  ]);
+  ];
+  const result = await db.query(PRUNABLE_CANDIDATE_SQL, parameters);
+  const original = await db.query(ORIGINAL_SQL, parameters);
+  assert.deepEqual(result.rows, original.rows, "exact ordered export rows must match the original selector");
   return result.rows;
 }
 
@@ -212,6 +223,8 @@ try {
     ["wrong cash-out direction", { number: 24, txType: "TABLE_CASH_OUT", direction: "wrong", createdAt: "2026-08-12T00:00:02.000000Z" }],
   ];
   for (const [, fixture] of rejected) await insertCandidate(db, fixture);
+  await insertCandidate(db, { number: 25, createdAt: CUTOFF });
+  await insertCandidate(db, { number: 26, createdAt: "2026-08-14T00:00:00Z" });
 
   const rows = await select(db);
   assert.deepEqual(rows.map((row) => row.id), [validBuyIn, validCashOut, sameTimestampLow, sameTimestampHigh, legacyMissingTable]);
@@ -225,6 +238,22 @@ try {
     cursorId: sameTimestampLow,
   });
   assert.deepEqual(afterTieLow.map((row) => row.id), [sameTimestampHigh, legacyMissingTable]);
+  assert.deepEqual(await select(db, { cutoff: "2026-08-01T00:00:00Z" }), []);
+  assert.deepEqual(await select(db, { cursorCreatedAt: CUTOFF, cursorId: uuid(999) }), []);
+
+  const explained = await db.query(`explain (analyze, format json) ${PRUNABLE_CANDIDATE_SQL}`,
+    [CUTOFF, 5000, null, null]);
+  const nodes = [];
+  function visit(node) {
+    nodes.push(node);
+    for (const child of node.Plans || []) visit(child);
+  }
+  visit(explained.rows[0]["QUERY PLAN"][0].Plan);
+  const membership = nodes.find((node) => /hashed SubPlan/.test(node.Filter || ""));
+  assert.ok(membership, "ID membership must use a once-built hashed subplan, not repeated global aggregation");
+  const validation = nodes.find((node) => node["Node Type"] === "Aggregate" && node["Group Key"]?.length === 2);
+  assert.ok(validation, "accounting validation aggregate must remain present");
+  assert.equal(validation["Actual Loops"], 1, "global accounting/registry validation runs once");
 } finally {
   await db.close();
 }
