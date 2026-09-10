@@ -95,7 +95,7 @@ test("poker progression table access allows available tiers, locks historical lo
         highestUnlockedBuyIn: 5000,
         availableBuyIns: [5000, 1000],
         tiers: [
-          { buyIn: 100, unlockBankroll: 110, available: false },
+          { buyIn: 100, unlockBankroll: 100, available: false },
           { buyIn: 1000, unlockBankroll: 1100, available: true },
           { buyIn: 5000, unlockBankroll: 5500, available: true }
         ]
@@ -143,6 +143,7 @@ test("poker progression table access allows available tiers, locks historical lo
       httpMethod: "GET", queryStringParameters: { tableId: "table-100" }, headers: { origin, authorization: "Bearer token" }
     });
     assert.equal(JSON.parse(locked.body).tableAccess.allowed, false);
+    assert.equal(JSON.parse(locked.body).tableAccess.viewAllowed, true);
     assert.equal(JSON.parse(locked.body).tableAccess.reason, "buy_in_tier_locked");
 
     const rejoin = await makeAccessHandler("table-100", { id: "table-100", status: "OPEN", buy_in: 100, stakes: { sb: 1, bb: 2 } }, [{ ok: 1 }])({

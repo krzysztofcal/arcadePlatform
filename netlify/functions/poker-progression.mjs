@@ -63,7 +63,7 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: "invalid_table_economy" };
   }
   if (!progression.availableBuyIns.includes(normalizedBuyIn)) {
-    return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: "buy_in_tier_locked" };
+    return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "buy_in_tier_locked" };
   }
   return { tableId, buyIn: normalizedBuyIn, allowed: true, rejoin: false, reason: "available" };
 }

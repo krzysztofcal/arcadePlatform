@@ -38,7 +38,19 @@ test("progression resolves the default catalog and unlocks only the highest tier
   assert.equal(tiers.at(-1), 10_000_000);
   assert.deepEqual(evaluatePokerProgression({ balance: 550, tiers }).availableBuyIns, [500, 100]);
   assert.deepEqual(evaluatePokerProgression({ balance: 550, tiers }).tiers.find((tier) => tier.buyIn === 500)?.stakes, { sb: 5, bb: 10 });
+  assert.equal(calculateUnlockBankroll(100), 100);
   assert.equal(calculateUnlockBankroll(500), 550);
+});
+
+test("the 100 CH tier unlocks at exactly 100 CH while higher tiers keep their buffer", () => {
+  const tiers = [100, 500, 1_000];
+  const belowMinimum = evaluatePokerProgression({ balance: 99, tiers });
+  const atMinimum = evaluatePokerProgression({ balance: 100, tiers });
+  assert.deepEqual(belowMinimum.availableBuyIns, []);
+  assert.deepEqual(atMinimum.availableBuyIns, [100]);
+  assert.equal(atMinimum.tiers.find((tier) => tier.buyIn === 100)?.unlockBankroll, 100);
+  assert.equal(atMinimum.tiers.find((tier) => tier.buyIn === 500)?.unlockBankroll, 550);
+  assert.equal(atMinimum.tiers.find((tier) => tier.buyIn === 1_000)?.unlockBankroll, 1_100);
 });
 
 test("progression accepts a sorted deduplicated configured catalog and rejects invalid configuration", () => {

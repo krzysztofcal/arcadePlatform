@@ -152,7 +152,7 @@ const run = async () => {
     const handler = makeHandler({ mode: "prefer_humans", queries, notifications, logs, balance: 99 });
     const res = await callQuickSeat(handler, { maxPlayers: 6 });
     assert.equal(res.statusCode, 409);
-    assert.deepEqual(JSON.parse(res.body), { error: "buy_in_tier_locked", buyIn: 100, requiredBuyIn: 100, requiredBankroll: 110, balance: 99 });
+    assert.deepEqual(JSON.parse(res.body), { error: "buy_in_tier_locked", buyIn: 100, requiredBuyIn: 100, requiredBankroll: 100, balance: 99 });
     assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("update public.poker_tables")), false);
     assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
     assert.equal(notifications.length, 0);

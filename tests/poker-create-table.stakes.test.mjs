@@ -160,7 +160,7 @@ const runCustomBuyInRolloutGuard = async () => {
   assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false, "custom buy-in must not create a DB table while the WS is too old");
 };
 
-const runLockedBuyIn = async () => {
+const runLockedBuyInCreation = async () => {
   const queries = [];
   let capabilityChecks = 0;
   const handler = makeHandler(queries, {
@@ -175,16 +175,11 @@ const runLockedBuyIn = async () => {
     headers: { origin: "https://example.test", authorization: "Bearer token" },
     body: JSON.stringify({ maxPlayers: 6, buyIn: 500 })
   });
-  assert.equal(response.statusCode, 409);
-  assert.deepEqual(JSON.parse(response.body), {
-    error: "buy_in_tier_locked",
-    buyIn: 500,
-    requiredBuyIn: 500,
-    requiredBankroll: 550,
-    balance: 500
-  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(JSON.parse(response.body).tableId, "table-1");
   assert.equal(capabilityChecks, 1, "custom buy-in capability should be checked before the DB transaction");
-  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), false);
+  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("account_type = 'user'")), false, "table creation must not read progression eligibility");
+  assert.equal(queries.some((entry) => entry.query.toLowerCase().includes("insert into public.poker_tables")), true);
 };
 
 const runWsCapabilityHeaderCheck = async () => {
@@ -257,7 +252,7 @@ await runInvalidBuyIn();
 await runSlashStakes();
 await runCustomBuyIn();
 await runCustomBuyInRolloutGuard();
-await runLockedBuyIn();
+await runLockedBuyInCreation();
 await runWsCapabilityHeaderCheck();
 await runSlowNotifyDoesNotDelayResponse();
 await runMaintenanceGuard();
