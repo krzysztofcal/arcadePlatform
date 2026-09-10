@@ -596,7 +596,6 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
   .poker-reaction-history{position:relative;z-index:31;flex:0 0 34px;width:34px;}
   .poker-reaction-history__toggle{width:34px;height:36px;min-height:36px;}
   .poker-reaction-history__panel{position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px + 36px + 8px);right:calc(env(safe-area-inset-right,0px) + 12px);bottom:auto;}
-  .poker-reaction-menu{position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px + 36px + 8px);right:calc(env(safe-area-inset-right,0px) + 12px);bottom:auto;}
   .poker-action-reaction .poker-reaction-menu{position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px + 36px + 8px);right:calc(env(safe-area-inset-right,0px) + 12px);bottom:auto;}
 }
 
