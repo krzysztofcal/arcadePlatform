@@ -249,6 +249,7 @@ assert.match(escrowAutomaticRun, /id: escrow_automatic/);
 assert.match(escrowAutomaticRun, /continue-on-error: \$\{\{ github\.event_name == 'schedule'/);
 assert.match(escrowAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(escrowAutomaticRun, /inputs\.mode == 'external-scheduled-automatic'/);
+assert.doesNotMatch(escrowAutomaticRun, /inputs\.mode == 'external-existing-30d'/);
 assert.match(escrowAutomaticRun, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
 
 assert.equal((workflow.match(/github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/g) || []).length, 5);

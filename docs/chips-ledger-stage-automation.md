@@ -80,12 +80,20 @@ The existing service is:
 - service: `/etc/systemd/system/arcade-chips-ledger-dispatch.service`;
 - dispatcher: `/usr/local/bin/arcade-chips-ledger-dispatch.sh`;
 - daily UTC slot: `02:04` for `external-existing-30d`;
+- local slot: `04:04 Europe/Warsaw` during CEST and `03:04` during CET;
 - 15-minute slots: `external-scheduled-automatic` remain unchanged.
 
 The daily dispatcher checks that the canonical workflow on `main` advertises
 `external-existing-30d` before sending it. This makes the pre-merge VPS
 configuration dormant against the old workflow and preserves the existing
 native daily route until the new route is available. The rollout order is:
+
+Safe VPS diagnosis is read-only: inspect `systemctl status`/`systemctl show`
+for the timer and service, run `systemd-analyze calendar '*-*-* 02:04:00'`,
+review bounded `journalctl -u arcade-chips-ledger-dispatch.service` output,
+and inspect the canonical workflow content/run history with `gh api` and `gh run list`.
+Do not run `gh workflow run`, the cleanup Node scripts, SQL, or Storage commands
+during diagnosis.
 
 1. Install the daily `02:04 UTC` timer entry and the capability-gated
    dispatcher on the VPS. Reload systemd and verify the timer/service status
