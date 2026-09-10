@@ -3311,7 +3311,7 @@
     var isLandscapePokerLayout = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width:560px) and (orientation:landscape)').matches;
     if (isLandscapePokerLayout && renderedSeatSlots[seatNo] === 0){
       stackDirection = { x: 1, y: 0 };
-      stackGap = source.sceneHeight && source.sceneHeight < 220 ? 10 : 8;
+      stackGap = source.sceneHeight && source.sceneHeight < 220 ? 4 : 0;
     }
     return {
       bet: resolveSeatChipPoint(source, directions.bet),
