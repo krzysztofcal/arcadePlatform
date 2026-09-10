@@ -256,6 +256,7 @@ function loadLobbyHarness(options = {}){
   elements.pokerLobbyContent.dataset.requiredBuyIn = '100';
 
   const fetchCalls = [];
+  const fetchRequests = [];
   const wsCreates = [];
   let requestLobbySnapshotCalls = 0;
   const lobbyClients = [];
@@ -352,6 +353,7 @@ function loadLobbyHarness(options = {}){
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     fetch: async (url, requestOptions) => {
       fetchCalls.push(String(url));
+      fetchRequests.push({ url: String(url), options: requestOptions || {} });
       if (typeof options.fetchResponse === 'function') return options.fetchResponse(String(url));
       return { ok: true, json: async () => ({ ok: true }) };
     },
@@ -372,6 +374,7 @@ function loadLobbyHarness(options = {}){
   return {
     elements,
     fetchCalls,
+    fetchRequests,
     wsCreates,
     getLobbyOptions: () => lobbyClients.length ? lobbyClients[lobbyClients.length - 1].options : null,
     getLobbyClient: (index) => lobbyClients[index == null ? lobbyClients.length - 1 : index] || null,
@@ -449,6 +452,47 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
   assert.equal(quickSeatGuardHarness.fetchCalls.some((url) => url.includes('poker-quick-seat')), true, 'quick-seat should let backend preserve funded-seat reconnect semantics');
   assert.equal(quickSeatGuardHarness.elements.pokerError.textContent, 'You need at least 100 CH to join a table.');
   assert.equal(quickSeatGuardHarness.elements.pokerQuickSeat.disabled, false);
+}
+
+{
+  const progression = {
+    availableBuyIns: [100],
+    tiers: [{ buyIn: 100, available: true, unlocked: true, stakes: { sb: 1, bb: 2 } }],
+    balance: 100,
+    highestUnlockedBuyIn: 100,
+    highestUnlockedIndex: 0
+  };
+  const quickSeatHarness = loadLobbyHarness({
+    fetchResponse: async (url) => {
+      if (url.includes('poker-progression')) return { ok: true, status: 200, json: async () => progression };
+      if (url.includes('poker-quick-seat')) return { ok: true, status: 200, json: async () => ({ ok: true, tableId: 'table-quick-seat' }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  quickSeatHarness.elements.pokerMaxPlayers.value = '10';
+  quickSeatHarness.elements.pokerQuickSeat.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const quickSeatRequest = quickSeatHarness.fetchRequests.find((entry) => entry.url.includes('poker-quick-seat'));
+  assert.ok(quickSeatRequest, 'quick-seat should issue a request');
+  assert.equal(JSON.parse(quickSeatRequest.options.body).maxPlayers, 6, 'quick-seat should clamp oversized frontend input to 6 players');
+
+  const createHarness = loadLobbyHarness({
+    fetchResponse: async (url) => {
+      if (url.includes('poker-progression')) return { ok: true, status: 200, json: async () => progression };
+      if (url.includes('poker-create-table')) return { ok: true, status: 200, json: async () => ({ tableId: 'table-create' }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  createHarness.elements.pokerMaxPlayers.value = '1';
+  createHarness.elements.pokerCreate.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const createRequest = createHarness.fetchRequests.find((entry) => entry.url.includes('poker-create-table'));
+  assert.ok(createRequest, 'create-table should issue a request');
+  assert.equal(JSON.parse(createRequest.options.body).maxPlayers, 2, 'create-table should clamp undersized frontend input to 2 players');
 }
 
 {

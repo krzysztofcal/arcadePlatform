@@ -35,10 +35,16 @@ const gamesCatalog = JSON.parse(await readFile(path.join(root, 'js', 'games.json
 assert.match(indexHtml, /src="\/js\/build-info\.js" defer/, 'poker index should include build-info bootstrap script');
 assert.equal(indexHtml.indexOf('/js/build-info.js') < indexHtml.indexOf('/poker/poker-ws-client.js'), true, 'poker index should load build-info before ws client');
 assert.doesNotMatch(indexHtml, /pokerClassicEntry/, 'poker lobby should no longer expose the classic table entry');
+assert.match(indexHtml, /id="pokerMaxPlayers"[^>]*min="2" max="6"/, 'poker lobby should expose only the supported 2-6 player range');
 assert.match(tableV2Html, /id="pokerV2JoinBtn"/, 'poker table v2 should include live join control');
 assert.match(tableV2Html, /id="pokerLobbyLink"/, 'poker table v2 should include a back-to-lobby link in the hamburger menu');
+assert.match(tableV2Html, /id="pokerMenuLeave"[^>]*>Leave table</, 'poker table v2 should expose leave table in the hamburger menu');
+assert.match(tableV2Html, /id="pokerMenuSettings"[^>]*>Table settings</, 'poker table v2 should expose table settings in the hamburger menu');
+assert.match(tableV2Html, /id="pokerMenuSignIn"/, 'poker table v2 should expose account access in the hamburger menu');
+assert.match(tableV2Html, /id="pokerMenuGuestInfo"/, 'poker table v2 should expose guest account information in the hamburger menu');
 assert.match(tableV2Html, /id="pokerV2ClosedTableModal"/, 'poker table v2 should render the closed-table redirect notice');
-assert.match(tableV2Html, /id="pokerV2GuestPanel"/, 'poker table v2 should render the guest restrictions panel');
+assert.doesNotMatch(tableV2Html, /id="pokerV2GuestPanel"/, 'poker table v2 should keep guest restrictions in the hamburger menu');
+assert.doesNotMatch(tableV2Html, /id="pokerV2(?:LeaveBtn|GuestBadge|SignInBtn)"/, 'poker table v2 should not render removed topbar controls');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyBalanceToast"/, 'poker table v2 should render the table-side auto-rebuy toast');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyConfirmModal"/, 'poker table v2 should render an auto-rebuy confirmation modal');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyConfirmYes"[^>]*>Confirm</, 'auto-rebuy confirmation should provide a Confirm action');
@@ -47,8 +53,8 @@ assert.doesNotMatch(tableV2Html, /(?:topbar\.js|js\/chips\/client\.js)/, 'poker 
 assert.match(indexHtml, /Create account or sign in/, 'poker lobby signed-out CTA should not promise the welcome bonus before eligibility is known');
 assert.match(indexHtml, /id="pokerWelcomeBonusBanner"/, 'poker lobby should render an eligible-user welcome bonus banner');
 assert.match(indexHtml, /Claim bonus/, 'poker lobby welcome bonus banner should include a claim CTA');
-assert.match(tableV2Html, /Create account and get 500 CH Welcome Bonus/, 'poker table guest CTA should advertise the welcome bonus');
-assert.match(tableV2Html, /\+500 CH welcome bonus/, 'guest panel should list the welcome bonus as an account unlock');
+assert.match(tableV2Html, /Create an account to unlock 500 CH/, 'poker table guest information should advertise the welcome bonus');
+assert.match(tableV2Html, /500 CH/, 'guest account information should list the welcome bonus as an account unlock');
 assert.doesNotMatch(indexHtml + tableV2Html, /Sign in and get 500 CH/i, 'guest bonus copy should not promise a sign-in reward');
 assert.doesNotMatch(tableV2Html, /pokerClassicLink/, 'poker table v2 should not expose the classic table link');
 assert.doesNotMatch(tableV2Html, /pokerV2Link/, 'poker table v2 should not expose a self-link in the hamburger menu');
@@ -59,8 +65,6 @@ assert.match(tableV2Html, /id="pokerReactionLayer"/, 'poker table v2 should rend
 assert.equal(tableV2Html.indexOf('id="pokerDealerChip"') < tableV2Html.indexOf('class="poker-center-layer"'), true, 'dealer chip should not live inside the center layer');
 assert.match(tableV2Css, /\.poker-menu-panel\[hidden\]\{display:none;\}/, 'poker table v2 menu should hard-hide when hidden attribute is present');
 assert.match(tableV2Css, /\.poker-closed-table-modal\{z-index:65;\}/, 'poker table v2 should style the closed-table redirect notice');
-assert.match(tableV2Css, /\.poker-guest-panel\{margin-top:12px; padding:14px 14px 12px; border-radius:18px; border:1px solid rgba\(255,223,180,0\.2\); background:rgba\(8,13,22,0\.72\);\}/, 'poker table v2 should style the guest restrictions panel');
-assert.match(tableV2Css, /\.poker-guest-panel__item--blocked::before\{content:"✕"; color:#ffb5b5;\}/, 'guest restrictions panel should visibly mark blocked items');
 assert.match(tableV2Css, /\.poker-action-bar\{position:fixed; right:max\(10px, env\(safe-area-inset-right\)\); bottom:max\(10px, env\(safe-area-inset-bottom\)\); width:min\(33vw, 196px\); display:grid; grid-template-columns:40px minmax\(0, 1fr\);/, 'poker table v2 action rail should dock to the bottom-right with a left-side vertical amount slider');
 assert.match(tableV2Css, /\.poker-social-settings\{[^}]*right:calc\(env\(safe-area-inset-right\) \+ 8px\)[^}]*max-height:min\(420px,/, 'table settings should use a responsive viewport-safe popup surface');
 assert.match(tableV2Css, /\.poker-auto-rebuy-indicator\{/, 'poker table v2 should style the compact auto-rebuy indicator');
@@ -72,10 +76,6 @@ assert.doesNotMatch(tableV2Css, /\.poker-seat--hero \.poker-seat-avatar\{[^}]*bo
 assert.match(tableV2Css, /\.poker-seat--hero\.poker-seat--active \.poker-seat-avatar\{border-color:rgba\(84,245,152,0\.88\);/, 'hero avatar should turn green only on the active turn');
 assert.match(tableV2Html, /id="pokerBootSplash"/, 'poker table v2 should render a boot splash to avoid raw HTML flash');
 assert.match(tableV2Html, /id="pokerV2AmountValue"/, 'poker table v2 should render a compact amount value for the action slider');
-const reactionControlIndex = tableV2Html.indexOf('id="pokerV2ReactionControl"');
-const actionBarIndex = tableV2Html.indexOf('class="poker-action-bar"');
-const actionButtonsIndex = tableV2Html.indexOf('class="poker-action-buttons"');
-assert.equal(actionBarIndex < reactionControlIndex && reactionControlIndex < actionButtonsIndex, true, 'reaction control should live above the poker action buttons');
 assert.match(tableV2Html, /id="pokerV2ReactionControl" hidden/, 'reaction control should stay hidden until a seated player can use it');
 assert.match(tableV2Css, /\.poker-seat-reaction-bubble--enter\{[^}]*animation:poker-reaction-bubble-lifecycle/, 'reaction bubble entry should have a lifecycle animation');
 assert.match(tableV2Css, /\.poker-action-reaction \.poker-reaction-menu\{[^}]*bottom:calc\(100% \+ 8px\)/, 'reaction menu should fly out above the poker actions');
