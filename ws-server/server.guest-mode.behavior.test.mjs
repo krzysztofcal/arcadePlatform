@@ -351,14 +351,22 @@ test("guest live subscription before create join bootstraps the first hand witho
     assert.equal(authOk.type, "authOk");
 
     // poker-ws-client requests live state after authOk, before the UI joins.
-    const subscribed = nextMessageMatching(ws, (frame) =>
-      frame.type === "table_state" && frame.requestId === "guest-client-sub"
-    );
+    const beforeJoinFrames = [];
+    const recordBeforeJoin = (data) => { beforeJoinFrames.push(JSON.parse(String(data))); };
+    ws.on("message", recordBeforeJoin);
     sendFrame(ws, {
       version: "1.0", type: "table_state_sub", requestId: "guest-client-sub",
       ts: "2026-02-28T00:00:02Z", payload: { tableId },
     });
-    assert.equal((await subscribed).payload.hand.status, "INIT");
+    const pong = nextMessageOfType(ws, "pong");
+    sendFrame(ws, {
+      version: "1.0", type: "ping", requestId: "guest-client-barrier",
+      ts: "2026-02-28T00:00:02Z", payload: { clientTime: "2026-02-28T00:00:02Z" },
+    });
+    await pong;
+    ws.off("message", recordBeforeJoin);
+    assert.equal(beforeJoinFrames.some((frame) => frame.type !== "pong"), false,
+      "subscription must not materialize a missing guest runtime or reject cold start");
 
     const ack = nextCommandResultForRequest(ws, "guest-client-join");
     const joinedState = nextMessageMatching(ws, (frame) =>
@@ -483,6 +491,8 @@ test("guest reconnect within grace preserves the table, then disconnect evicts i
     const second = await connectClient(port);
     await hello(second);
     await auth(second, guestToken, "auth-guest-disconnect-second");
+    sendFrame(second, { version: "1.0", type: "table_state_sub", requestId: "guest-grace-sub",
+      ts: "2026-02-28T00:00:02Z", payload: { tableId: guestTableId } });
     const secondJoin = await joinTable(second, guestTableId, "join-guest-disconnect-second", "resume");
     assert.equal(secondJoin.ack.payload.status, "accepted");
     assert.equal(secondJoin.ack.payload.reason, "already_joined");
@@ -515,6 +525,8 @@ test("guest reconnect within grace preserves the table, then disconnect evicts i
     const third = await connectClient(port);
     await hello(third);
     await auth(third, guestToken, "auth-guest-disconnect-third");
+    sendFrame(third, { version: "1.0", type: "table_state_sub", requestId: "guest-evicted-sub",
+      ts: "2026-02-28T00:00:02Z", payload: { tableId: guestTableId } });
     sendFrame(third, tableJoinFrame(guestTableId, "join-guest-after-eviction", "resume"));
     const rejected = await nextCommandResultForRequest(third, "join-guest-after-eviction");
     assert.equal(rejected.payload.status, "rejected");

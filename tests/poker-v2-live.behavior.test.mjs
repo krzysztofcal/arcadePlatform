@@ -1804,11 +1804,15 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
 });
 
 test('poker v2 guest mode uses hamburger account information, hides XP badge, and still auto-joins', async () => {
+  let rejectFirstJoin;
   const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
   const guestToken = `aaa.${guestPayload}.zzz`;
   const harness = createHarness({
     search: '?tableId=guest_table_1&guest=1&autoJoin=1',
     token: null,
+    sendJoin: (_payload, { attempt }) => attempt === 1
+      ? new Promise((_resolve, reject) => { rejectFirstJoin = reject; })
+      : Promise.resolve({ ok: true, seatNo: 1 }),
     guestSession: {
       token: guestToken,
       tableId: 'guest_table_1',
@@ -1828,9 +1832,23 @@ test('poker v2 guest mode uses hamburger account information, hides XP badge, an
   assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'guest mode should not expose the signed-in Join CTA');
   assert.equal(harness.elements.pokerMenuGuestInfo.hidden, false, 'guest account information should be available from the hamburger');
 
-  sendInitialTableSnapshot(harness, { tableId: 'guest_table_1' });
+  const coldStartJoinCount = harness.joinPayloads.length;
+  const seatedSnapshot = {
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'guest_table_1', stateVersion: 0,
+      table: { tableId: 'guest_table_1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'guest_user_1', seat: 1 }] },
+      public: {
+        hand: { handId: null, status: 'INIT' }, pot: { total: 0 },
+        seats: [{ userId: 'guest_user_1', seatNo: 1, status: 'ACTIVE' }]
+      },
+      you: { seat: 1 }
+    }
+  };
+  ws.onSnapshot(seatedSnapshot);
   await harness.flush();
-  await waitFor(() => harness.joinPayloads.length === 1);
+  assert.equal(harness.joinPayloads.length, 1, 'projected guest seat must not suppress the required join');
+  assert.equal(coldStartJoinCount, 1, 'guest cold start must join before its first authoritative snapshot');
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({
     tableId: 'guest_table_1',
     buyIn: 100,
@@ -1840,6 +1858,32 @@ test('poker v2 guest mode uses hamburger account information, hides XP badge, an
   }));
   const storedGuestSession = JSON.parse(harness.getSessionStorage('poker:guestSession'));
   assert.equal(storedGuestSession.createPending, false, 'create intent must be consumed before the join resolves');
+  const pendingKey = 'poker:pendingJoin:guest_user_1:guest_table_1';
+  assert.equal(JSON.parse(harness.getSessionStorage(pendingKey)).requestId, harness.joinRequestIds[0],
+    'a projected seat must not acknowledge or discard the pending guest command');
+  ws.onStatus('join_pending', { requestId: harness.joinRequestIds[0] });
+  ws.onStatus('reconnecting', { attempt: 1 });
+  ws.onStatus('auth_ok');
+  ws.onSnapshot(seatedSnapshot);
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1, 'transport recovery owns replay of the unresolved command');
+  assert.equal(JSON.parse(harness.getSessionStorage(pendingKey)).payload.guestJoinIntent, 'create');
+
+  rejectFirstJoin(Object.assign(new Error('temporarily_unavailable'), { code: 'temporarily_unavailable' }));
+  await harness.flush();
+  harness.advanceTime(250);
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 2, 'retry must still join despite the projected seat and consumed create intent');
+  assert.equal(harness.joinPayloads[1].guestJoinIntent, 'resume');
+  ws.onSnapshot(seatedSnapshot);
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 2, 'accepted join must not repeat on snapshots');
+  ws.onStatus('reconnecting', { attempt: 1 });
+  ws.onStatus('auth_ok');
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 3, 'guest reconnect must resume even before a recovery snapshot');
+  assert.equal(harness.joinPayloads[2].guestJoinIntent, 'resume');
+  assert.equal(harness.startPayloads.length, 0);
 });
 
 test('poker v2 treats a historical guest session as resume-only and redirects on table_closed', async () => {
