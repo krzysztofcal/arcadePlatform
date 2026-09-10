@@ -11,9 +11,10 @@ the single read-only exception.
 ## Active policies and schedules
 
 - The existing 30-day Stage maintenance (`stage-ledger-auto-retention-30d-v1`)
-  is configured for the native daily cron but remains blocked while
-  `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=0`:
-  - `17 2 * * *`
+  is dispatched once daily by the authenticated VPS scheduler at `02:04 UTC`
+  and remains blocked while `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=0`. The
+  native daily `17 2 * * *` route is intentionally not active; the VPS route
+  must be staged before this workflow revision is activated.
 - The bot-only 7-day retention policy
   (`stage-ledger-bot-only-retention-7d-v1`) remains behind
   `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED=0`; its configured native cron is not
@@ -21,9 +22,15 @@ the single read-only exception.
   - `7,22,37,52 * * * *`
 - Stage escrow account retention remains behind the same disabled gate and does
   not run on the configured 15-minute native cron.
+- `external-existing-30d` is the dedicated VPS dispatch mode for exactly one
+  existing 30-day Stage automation cycle. It passes the Stage resource-health
+  guard and is accepted only from the canonical repository `main` ref by the
+  repository owner. It does not activate bot-only, closed-human or escrow
+  cleanup.
 - `external-scheduled-automatic` is the VPS/external fallback dispatch mode for
   the same bot-only 7-day, closed-human 30-day, and escrow account retention
-  automatic steps. It does not introduce a separate policy or batch limit.
+  automatic steps. It remains 15-minute-only and does not activate
+  `existing-30d`.
 - The workflow concurrency group is `chips-ledger-stage-automation` with
   `cancel-in-progress: false` and `queue: max`.
 
@@ -50,6 +57,7 @@ ongoing operations:
 | `closed-human-30d-recovery-repair` | Owner-only, exact-batch recovery repair for a proven/unpruned closed-human batch with missing durable recovery |
 | `escrow-retention-audit` | Read-only Stage escrow retention audit |
 | `escrow-retention-verify` | Verify an existing account recovery object |
+| `external-existing-30d` | VPS daily dispatch for exactly the existing 30-day Stage cycle |
 | `external-scheduled-automatic` | External/VPS fallback for native bot-only + closed-human + escrow automation |
 
 The closed-human `prepare`, `canary`, policy-diagnostic, lifecycle-completion,
@@ -60,6 +68,45 @@ prepare/orchestrate/batch-13 execute, and escrow retention canary
 prepare/authorize/execute/activate) are also no longer exposed. The underlying
 archive/recovery scripts remain in the repository where they are still needed
 for immutable evidence, audits, and controlled recovery operations.
+
+## VPS scheduler rollout and ownership
+
+The VPS is a scheduler/wake-up service only. It sends an authenticated GitHub
+Actions `workflow_dispatch` to `krzysztofcal/arcadePlatform` on `main`; it does
+not hold Supabase credentials, run SQL, access Storage, or perform cleanup.
+The existing service is:
+
+- timer: `/etc/systemd/system/arcade-chips-ledger-dispatch.timer`;
+- service: `/etc/systemd/system/arcade-chips-ledger-dispatch.service`;
+- dispatcher: `/usr/local/bin/arcade-chips-ledger-dispatch.sh`;
+- daily UTC slot: `02:04` for `external-existing-30d`;
+- 15-minute slots: `external-scheduled-automatic` remain unchanged.
+
+The daily dispatcher checks that the canonical workflow on `main` advertises
+`external-existing-30d` before sending it. This makes the pre-merge VPS
+configuration dormant against the old workflow and preserves the existing
+native daily route until the new route is available. The rollout order is:
+
+1. Install the daily `02:04 UTC` timer entry and the capability-gated
+   dispatcher on the VPS. Reload systemd and verify the timer/service status
+   and bounded journal output; do not manually dispatch cleanup.
+2. Confirm the authenticated `gh` identity is the repository owner and its
+   token is limited to the workflow-dispatch/content-read capability needed by
+   this service. Rotate it through the VPS `gh` configuration without copying
+   any Stage or Production secret to the host.
+3. Merge this workflow revision only after step 1 is complete. This revision
+   removes the native `17 2 * * *` route, so there is then one authoritative
+   daily route: the VPS dispatch.
+4. Observe the first normal daily run for the exact checkout SHA, accepted
+   mode/dispatcher identity, resource-health result, selector result, archive
+   and recovery evidence, dry-run, prune receipt, mappings, post-check and
+   accounting conservation. A dispatch failure is visible and is not retried
+   or caught up automatically.
+
+The repository workflow independently validates the canonical repository,
+non-fork event, owner dispatcher, `main` ref, Stage feature gate and resource
+health before the existing cleanup step. The existing concurrency group and
+`cancel-in-progress: false` remain unchanged.
 
 ## Recovery durability
 
