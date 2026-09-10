@@ -1726,6 +1726,9 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
   assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Checking seat reservation…');
   assert.equal(harness.elements.pokerV2ErrorText.hidden, true);
 
+  ws.onStatus('reconnecting', { attempt: 1 });
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Connecting…', 'reconnect must take priority over a pending join status');
+
   ws.onSnapshot({
     kind: 'stateSnapshot',
     payload: {
@@ -3300,6 +3303,7 @@ test('poker v2 retries Play now auto-join after a transient authoritative join f
   assert.equal(harness.elements.pokerV2ErrorText.hidden, false);
   assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'a rejected join should make Join actionable again');
   assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join');
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Live table connected', 'a rejected join must not leave a pending banner status');
 
   harness.advanceTime(250);
   await harness.flush();

@@ -2121,10 +2121,12 @@
 
   function setJoinOperationPhase(phase){
     joinOperation.phase = phase;
-    if (phase === 'reserving') state.statusText = 'Reserving seat…';
-    else if (phase === 'checking') state.statusText = 'Checking seat reservation…';
-    else if (phase === 'waiting_next_hand') state.statusText = 'Seat reserved · Joining next hand';
-    else if (phase === 'active') state.statusText = LIVE_STATUS_COPY.live;
+    if (isWsReady() && !state.reconnectGate){
+      if (phase === 'reserving') state.statusText = 'Reserving seat…';
+      else if (phase === 'checking') state.statusText = 'Checking seat reservation…';
+      else if (phase === 'waiting_next_hand') state.statusText = 'Seat reserved · Joining next hand';
+      else if (phase === 'active') state.statusText = LIVE_STATUS_COPY.live;
+    }
     renderInfoPanel();
     renderControls();
   }
@@ -4018,6 +4020,12 @@
   }
 
   function resolveLiveBannerStatus(){
+    var statusText = state.statusText || '';
+    if (!isWsReady() || state.reconnectGate) return statusText;
+    if (statusText !== LIVE_STATUS_COPY.live
+      && statusText !== 'Reserving seat…'
+      && statusText !== 'Checking seat reservation…'
+      && statusText !== 'Seat reserved · Joining next hand') return statusText;
     if (joinOperation.phase === 'reserving') return 'Reserving seat…';
     if (joinOperation.phase === 'checking') return 'Checking seat reservation…';
     if (joinOperation.phase === 'waiting_next_hand' || currentPlayerStatus() === 'WAITING_NEXT_HAND'){
@@ -4028,7 +4036,7 @@
       && state.statusText === LIVE_STATUS_COPY.live){
       return 'Joined';
     }
-    return state.statusText || '';
+    return statusText;
   }
 
   function renderInfoPanel(){
@@ -4550,6 +4558,8 @@
       joinOperation.requestId = null;
       joinOperation.payload = null;
       joinOperation.phase = 'rejected';
+      if (isWsReady() && !state.reconnectGate) state.statusText = LIVE_STATUS_COPY.live;
+      renderInfoPanel();
       renderControls();
       throw error;
     });
