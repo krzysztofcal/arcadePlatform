@@ -221,6 +221,11 @@ export function evaluateCleanupDecision(state) {
   return state === 'critical' ? 'blocked_resource_critical' : 'blocked_resource_unknown';
 }
 
+export function exitCodeFor(state, enforce) {
+  if (state === 'critical') return 1;
+  return enforce && !['healthy', 'warning'].includes(state) ? 1 : 0;
+}
+
 export function classify(window, capacity, diskUtilization) {
   const cpu = level(window.cpuPercent, 70, 85);
   const wait = level(window.iowaitPercent, 10, 20);
@@ -318,10 +323,12 @@ export async function monitor(env = process.env, fetchImpl = fetch, wait = sleep
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const enforce = process.argv.includes('--enforce');
   const report = await monitor();
-  if (process.argv.includes('--enforce')) report.cleanupDecision = evaluateCleanupDecision(report.state);
+  if (enforce) report.cleanupDecision = evaluateCleanupDecision(report.state);
   klog('stage_supabase_resource_health', report);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `## Stage Supabase resource health\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
-  if (!['healthy', 'warning'].includes(report.state)) process.exitCode = 1;
+  const exitCode = exitCodeFor(report.state, enforce);
+  if (exitCode) process.exitCode = exitCode;
 }
