@@ -4026,6 +4026,7 @@
       && statusText !== 'Reserving seat…'
       && statusText !== 'Checking seat reservation…'
       && statusText !== 'Seat reserved · Joining next hand') return statusText;
+    if (joinOperation.phase === 'active' && !deriveCurrentSeat()) return 'Checking seat reservation…';
     if (joinOperation.phase === 'reserving') return 'Reserving seat…';
     if (joinOperation.phase === 'checking') return 'Checking seat reservation…';
     if (joinOperation.phase === 'waiting_next_hand' || currentPlayerStatus() === 'WAITING_NEXT_HAND'){

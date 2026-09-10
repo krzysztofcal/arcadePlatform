@@ -542,6 +542,8 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(JSON.stringify(harness.joinPayloads[0]), JSON.stringify({ tableId: 'table-1', buyIn: 500, autoSeat: true, preferredSeatNo: 3 }));
   assert.equal(harness.elements.pokerTableScreen.attributes['data-boot-ready'], '1');
   assert.equal(harness.elements.pokerBootSplash.hidden, true);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'accepted Join stays hidden while the authoritative seat is pending');
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Checking seat reservation…', 'accepted Join keeps an awaiting-seat banner until the snapshot arrives');
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
