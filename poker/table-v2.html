@@ -35,7 +35,6 @@
     <div class="poker-boot-splash__card">Loading table…</div>
   </div>
   <div class="poker-table-screen" id="pokerTableScreen">
-    <a id="xpBadge" class="xp-badge xp-badge--loading poker-v2-xp-badge" aria-live="polite" aria-busy="true" href="/xp.html"><span class="xp-badge__label">XP</span></a>
     <div class="poker-auto-rebuy-toast poker-auto-rebuy-toast--balance" id="pokerV2AutoRebuyBalanceToast" role="status" aria-live="polite" hidden></div>
 
     <button type="button" class="poker-menu-toggle" id="pokerMenuToggle" aria-label="Toggle table menu" aria-expanded="false" aria-controls="pokerMenuPanel">
@@ -74,18 +73,35 @@
     </section>
 
     <section class="poker-live-panel">
-      <div class="poker-live-meta">
-        <div class="poker-live-status" id="pokerV2LiveStatus">Connecting…</div>
-        <div class="poker-live-table-meta" id="pokerV2TableMeta">Table</div>
-        <div class="poker-live-turn" id="pokerV2TurnText">Waiting for action</div>
-      </div>
-      <div class="poker-live-actions">
-        <div class="poker-live-pill" id="pokerV2GuestBadge" hidden>Guest account</div>
-        <button type="button" class="poker-live-btn" id="pokerV2SignInBtn">Create account and get 500 CH Welcome Bonus</button>
-        <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2JoinBtn">Join</button>
-        <button type="button" class="poker-live-btn" id="pokerV2LeaveBtn" hidden>Leave</button>
-        <input type="hidden" id="pokerV2SeatNo" value="1">
-        <input type="hidden" id="pokerV2BuyIn" value="100">
+      <div class="poker-live-topbar">
+        <div class="poker-live-meta">
+          <div class="poker-live-status" id="pokerV2LiveStatus">Connecting…</div>
+          <div class="poker-live-table-meta" id="pokerV2TableMeta">Table</div>
+          <div class="poker-live-turn" id="pokerV2TurnText">Waiting for action</div>
+        </div>
+        <div class="poker-top-right-rail">
+          <div class="poker-live-actions">
+            <div class="poker-live-pill" id="pokerV2GuestBadge" hidden>Guest account</div>
+            <button type="button" class="poker-live-btn" id="pokerV2SignInBtn">Create account and get 500 CH Welcome Bonus</button>
+            <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2JoinBtn">Join</button>
+            <button type="button" class="poker-live-btn" id="pokerV2LeaveBtn" hidden>Leave</button>
+            <input type="hidden" id="pokerV2SeatNo" value="1">
+            <input type="hidden" id="pokerV2BuyIn" value="100">
+          </div>
+          <div class="poker-top-right-reactions">
+            <div class="poker-action-reaction" id="pokerV2ReactionControl" hidden>
+              <button type="button" class="poker-live-btn poker-reaction-btn" id="pokerV2ReactionBtn" aria-label="Send a table reaction" aria-haspopup="menu" aria-expanded="false" aria-controls="pokerV2ReactionMenu" hidden><span aria-hidden="true">🙂</span></button>
+              <div class="poker-reaction-menu" id="pokerV2ReactionMenu" role="menu" aria-label="Reactions" hidden></div>
+            </div>
+            <div class="poker-reaction-history" id="pokerReactionHistory" hidden>
+              <button type="button" class="poker-live-btn poker-reaction-history__toggle" id="pokerReactionHistoryToggle" aria-label="Reaction history, 0 messages" aria-expanded="false" aria-controls="pokerReactionHistoryPanel"><span aria-hidden="true">💬</span><span class="poker-reaction-history__count" id="pokerReactionHistoryCount">0</span></button>
+              <section class="poker-reaction-history__panel" id="pokerReactionHistoryPanel" aria-label="Table reaction history" hidden>
+                <div class="poker-reaction-history__list" id="pokerReactionHistoryList"></div>
+              </section>
+            </div>
+          </div>
+          <a id="xpBadge" class="xp-badge xp-badge--loading poker-v2-xp-badge" aria-live="polite" aria-busy="true" href="/xp.html"><span class="xp-badge__label">XP</span></a>
+        </div>
       </div>
       <section class="poker-guest-panel" id="pokerV2GuestPanel" hidden aria-labelledby="pokerV2GuestPanelTitle">
         <div class="poker-guest-panel__title" id="pokerV2GuestPanelTitle">Guest account</div>
@@ -126,19 +142,9 @@
     </div>
 
     <div class="poker-action-bar" id="pokerActionBar">
-      <div class="poker-reaction-history" id="pokerReactionHistory" hidden>
-        <button type="button" class="poker-live-btn poker-reaction-history__toggle" id="pokerReactionHistoryToggle" aria-label="Reaction history, 0 messages" aria-expanded="false" aria-controls="pokerReactionHistoryPanel"><span aria-hidden="true">💬</span><span class="poker-reaction-history__count" id="pokerReactionHistoryCount">0</span></button>
-      </div>
-      <section class="poker-reaction-history__panel" id="pokerReactionHistoryPanel" aria-label="Table reaction history" hidden>
-        <div class="poker-reaction-history__list" id="pokerReactionHistoryList"></div>
-      </section>
       <div class="poker-action-amount-input" id="pokerV2AmountInputWrap">
         <strong id="pokerV2AmountValue">20</strong>
         <input type="range" id="pokerV2AmountInput" value="20" min="1" max="20" step="1">
-      </div>
-      <div class="poker-action-reaction" id="pokerV2ReactionControl" hidden>
-        <button type="button" class="poker-live-btn poker-reaction-btn" id="pokerV2ReactionBtn" aria-label="Send a table reaction" aria-haspopup="menu" aria-expanded="false" aria-controls="pokerV2ReactionMenu" hidden><span aria-hidden="true">🙂</span></button>
-        <div class="poker-reaction-menu" id="pokerV2ReactionMenu" role="menu" aria-label="Reactions" hidden></div>
       </div>
       <div class="poker-action-buttons">
         <button type="button" class="poker-action-btn poker-action-btn--fold" id="pokerV2FoldBtn" hidden>Fold</button>
