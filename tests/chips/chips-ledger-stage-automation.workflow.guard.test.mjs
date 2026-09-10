@@ -25,6 +25,7 @@ const RETAINED_MODES = [
   "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
   "escrow-retention-verify",
+  "external-existing-30d",
   "external-scheduled-automatic",
 ];
 
@@ -136,8 +137,8 @@ assert.doesNotMatch(workflow, /Activate Stage escrow account-retention automatio
 assert.doesNotMatch(workflow, /CHIPS_LEDGER_BOT_ONLY_EXECUTE: "1"|CHIPS_LEDGER_LEGACY_STAGE_ALLOWLIST_EXECUTE|CHIPS_LEDGER_ESCROW_ACCOUNT_RETENTION_(AUTHORIZE_CANARY|EXECUTE|ACTIVATE)/);
 assert.doesNotMatch(workflow, /legacy-stage-allowlist|execute-batch-13|audit-batch-13/);
 
-assert.equal((workflow.match(/- cron:/g) || []).length, 2);
-assert.match(workflow, /- cron: "17 2 \* \* \*"/);
+assert.equal((workflow.match(/- cron:/g) || []).length, 1);
+assert.doesNotMatch(workflow, /- cron: "17 2 \* \* \*"/);
 assert.match(workflow, /- cron: "7,22,37,52 \* \* \* \*"/);
 
 const concurrencyBlock = workflow.match(
@@ -189,7 +190,9 @@ assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
+assert.match(stageJobIf, /inputs\.mode != 'external-existing-30d'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
+assert.match(stageJobIf, /inputs\.mode == 'external-existing-30d'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(
@@ -209,10 +212,13 @@ assert.doesNotMatch(preflightStep, /set transaction read write|insert\s|update\s
 const existingRun = workflow.match(
   /- name: Run existing 30-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
-assert.match(existingRun, /github\.event_name == 'schedule' && github\.event\.schedule == '17 2 \* \* \*'/);
-assert.match(existingRun, /github\.event_name == 'workflow_dispatch' && inputs\.mode == 'existing-30d'/);
+assert.match(existingRun, /github\.event_name == 'workflow_dispatch'/);
+assert.match(existingRun, /inputs\.mode == 'existing-30d'/);
+assert.match(existingRun, /inputs\.mode == 'external-existing-30d'/);
 assert.match(existingRun, /run: node scripts\/ops\/chips-ledger-stage-automation\.mjs\s*$/m);
 assert.doesNotMatch(existingRun, /--policy|--prepare-only|--execute|--automatic/);
+assert.doesNotMatch(existingRun, /github\.event_name == 'schedule'/);
+assert.doesNotMatch(existingRun, /external-scheduled-automatic/);
 
 const botOnlyAutomaticRun = workflow.match(
   /- name: Run activated bot-only 7-day Stage automation[\s\S]*?(?=\n\s+- name:|\s*$)/,
@@ -223,6 +229,7 @@ assert.match(botOnlyAutomaticRun, /continue-on-error: \$\{\{ github\.event_name 
 assert.match(botOnlyAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(botOnlyAutomaticRun, /inputs\.mode == 'bot-only-7d-automatic'/);
 assert.match(botOnlyAutomaticRun, /inputs\.mode == 'external-scheduled-automatic'/);
+assert.doesNotMatch(botOnlyAutomaticRun, /inputs\.mode == 'external-existing-30d'/);
 assert.match(botOnlyAutomaticRun, /CHIPS_LEDGER_BOT_ONLY_AUTOMATIC: "1"/);
 assert.match(botOnlyAutomaticRun, /node scripts\/ops\/chips-ledger-stage-automation\.mjs --policy bot-only-7d --automatic/);
 
@@ -242,9 +249,10 @@ assert.match(escrowAutomaticRun, /id: escrow_automatic/);
 assert.match(escrowAutomaticRun, /continue-on-error: \$\{\{ github\.event_name == 'schedule'/);
 assert.match(escrowAutomaticRun, /github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/);
 assert.match(escrowAutomaticRun, /inputs\.mode == 'external-scheduled-automatic'/);
+assert.doesNotMatch(escrowAutomaticRun, /inputs\.mode == 'external-existing-30d'/);
 assert.match(escrowAutomaticRun, /node scripts\/ops\/chips-ledger-stage-escrow-retention\.mjs --automatic/);
 
-assert.equal((workflow.match(/github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/g) || []).length, 4);
+assert.equal((workflow.match(/github\.event_name == 'schedule' && github\.event\.schedule == '7,22,37,52 \* \* \* \*'/g) || []).length, 5);
 
 const diagnosticRun = workflow.match(
   /- name: Diagnose existing 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
@@ -332,7 +340,7 @@ assert.equal(stageJob['continue-on-error'], undefined);
 assert.equal(resourceGuard.env.SUPABASE_STAGE_MANAGEMENT_TOKEN, '${{ secrets.SUPABASE_STAGE_MANAGEMENT_TOKEN }}');
 assert.equal(stageJob.env.SUPABASE_STAGE_MANAGEMENT_TOKEN, undefined);
 assert.equal(stageJob.steps.filter((step) => step.env?.SUPABASE_STAGE_MANAGEMENT_TOKEN).length, 1);
-assert.equal(resourceGuard.if, "${{ (github.event_name == 'schedule' && (github.event.schedule == '7,22,37,52 * * * *' || github.event.schedule == '17 2 * * *')) || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'external-scheduled-automatic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'existing-30d')) }}");
+assert.equal(resourceGuard.if, "${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'external-scheduled-automatic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'existing-30d' || inputs.mode == 'external-existing-30d')) }}");
 for (const name of [
   'Run existing 30-day Stage automation',
   'Run activated bot-only 7-day Stage automation',

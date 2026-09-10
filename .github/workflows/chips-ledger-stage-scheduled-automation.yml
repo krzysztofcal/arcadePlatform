@@ -19,6 +19,7 @@ on:
           - closed-human-30d-recovery-repair
           - escrow-retention-audit
           - escrow-retention-verify
+          - external-existing-30d
           - external-scheduled-automatic
       stage_30d_recovery_batch_id:
         description: Exact Stage 30-day recovery batch_id (optional for existing-30d-recovery-diagnostic; required for existing-30d-recovery-repair)
@@ -33,8 +34,7 @@ on:
         required: false
         type: string
   schedule:
-    # Second cron runs the Stage retention paths every 15 minutes.
-    - cron: "17 2 * * *"
+    # The VPS owns the daily existing-30d wake-up; native cron stays 15-minute-only.
     - cron: "7,22,37,52 * * * *"
 
 concurrency:
@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-selector-diagnostic' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref == 'refs/heads/main') || (vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair')) || inputs.mode == 'closed-human-30d-recovery-repair'))) ) }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-selector-diagnostic' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref == 'refs/heads/main') || (vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair' && inputs.mode != 'external-existing-30d') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'external-existing-30d')) || inputs.mode == 'closed-human-30d-recovery-repair'))) ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -162,14 +162,14 @@ jobs:
           NODE
 
       - name: Enforce Stage resource health before automatic retention
-        if: ${{ (github.event_name == 'schedule' && (github.event.schedule == '7,22,37,52 * * * *' || github.event.schedule == '17 2 * * *')) || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'external-scheduled-automatic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'existing-30d')) }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'external-scheduled-automatic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'existing-30d' || inputs.mode == 'external-existing-30d')) }}
         timeout-minutes: 5
         env:
           SUPABASE_STAGE_MANAGEMENT_TOKEN: ${{ secrets.SUPABASE_STAGE_MANAGEMENT_TOKEN }}
         run: node scripts/ops/stage-supabase-resource-health.mjs --enforce
 
       - name: Run existing 30-day Stage automation
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'existing-30d') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d' || inputs.mode == 'external-existing-30d') }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
         run: node scripts/ops/chips-ledger-stage-automation.mjs
