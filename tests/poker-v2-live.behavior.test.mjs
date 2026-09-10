@@ -646,14 +646,15 @@ test('poker v2 tears down the previous user socket and ignores stale access pref
   assert.equal(pendingPreflights.length, 2);
 
   // Start a newer B preflight before the first B request resolves. The newer
-  // result denies access; the older successful result must not resurrect A/B.
+  // result denies even view access; the older successful result must not
+  // resurrect A/B.
   harness.triggerAuthChange({ id: 'user-b' });
   await harness.flush();
   assert.equal(pendingPreflights.length, 3);
   pendingPreflights[2].resolve({
     ok: true,
     status: 200,
-    json: async () => ({ tableAccess: { tableId: 'table-1', buyIn: 500, allowed: false, rejoin: false, reason: 'buy_in_tier_locked' } })
+    json: async () => ({ tableAccess: { tableId: 'table-1', buyIn: 500, allowed: false, viewAllowed: false, rejoin: false, reason: 'table_not_open' } })
   });
   await harness.flush();
   assert.equal(harness.getCreateCount(), 1, 'denied user B must not create a replacement socket');
@@ -667,6 +668,36 @@ test('poker v2 tears down the previous user socket and ignores stale access pref
   await harness.flush();
   assert.equal(harness.getCreateCount(), 1, 'stale successful preflight must be ignored');
   assert.equal(harness.getDestroyCount(), 1, 'stale result must not restore the destroyed socket');
+});
+
+test('poker v2 lets a locked-tier viewer observe the table but keeps authoritative seat denial', async () => {
+  const harness = createHarness({
+    tableAccess: { tableId: 'table-1', buyIn: 500, allowed: false, viewAllowed: true, rejoin: false, reason: 'buy_in_tier_locked' },
+    sendJoin(payload){
+      assert.equal(payload.buyIn, 500, 'the join command should use the authoritative table buy-in');
+      const error = new Error('buy_in_tier_locked');
+      error.code = 'buy_in_tier_locked';
+      error.requiredBankroll = 550;
+      error.balance = 500;
+      error.buyIn = 500;
+      return Promise.reject(error);
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  assert.equal(harness.getCreateCount(), 1, 'a locked-tier user should still start the live viewer');
+  sendInitialTableSnapshot(harness, { buyIn: 500 });
+  await harness.flush();
+  await waitFor(() => harness.elements.pokerV2JoinBtn.hidden === false);
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join');
+
+  harness.elements.pokerV2JoinBtn.click();
+  await harness.flush();
+
+  assert.equal(harness.joinPayloads.length, 1, 'the viewer should still be able to attempt the authoritative seat command');
+  assert.equal(harness.elements.pokerV2ErrorText.textContent, 'You need at least 550 CH to unlock 500 CH tables.');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'a rejected locked-tier seat should make Join actionable again');
 });
 
 test('poker v2 ignores stale auth tokens and initial identity results', async () => {

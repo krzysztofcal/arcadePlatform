@@ -1734,9 +1734,9 @@
           if (Number(tier.buyIn) === previousBuyIn) option.selected = true;
           buyInInput.appendChild(option);
         });
-        var availableTiers = data.tiers.filter(function(tier){ return tier.available === true; });
-        if (!availableTiers.some(function(tier){ return Number(tier.buyIn) === previousBuyIn; })){
-          buyInInput.value = availableTiers.length ? String(availableTiers[0].buyIn) : (data.tiers.length ? String(data.tiers[0].buyIn) : '100');
+        var hasConfiguredPreviousBuyIn = data.tiers.some(function(tier){ return Number(tier.buyIn) === previousBuyIn; });
+        if (!hasConfiguredPreviousBuyIn){
+          buyInInput.value = data.tiers.length ? String(data.tiers[0].buyIn) : '100';
         }
         if (createBtn) createBtn.disabled = data.tiers.length === 0;
       }
@@ -1917,13 +1917,13 @@
       return !!(actual && expected && actual.sb === expected.sb && actual.bb === expected.bb);
     }
 
-    function canOpenLobbyTable(table){
+    function canViewLobbyTable(table){
       if (!progressionState || !table) return false;
       var tableId = typeof table.tableId === 'string' ? table.tableId : table.id;
       if (Array.isArray(progressionState.rejoinableTableIds) && progressionState.rejoinableTableIds.includes(tableId)) return true;
       var buyIn = Number(table.buyIn);
       var tier = Array.isArray(progressionState.tiers) ? progressionState.tiers.find(function(item){ return Number(item.buyIn) === buyIn; }) : null;
-      return !!(tier && tier.available === true && isCanonicalTableForTier(table, tier));
+      return !!(tier && isCanonicalTableForTier(table, tier));
     }
 
     function renderTables(tables){
@@ -1961,8 +1961,8 @@
         openBtn.className = 'poker-btn';
         openBtn.dataset.open = tableId;
         openBtn.textContent = t('open', 'Open');
-        var available = canOpenLobbyTable(tbl);
-        if (!available){
+        var canView = canViewLobbyTable(tbl);
+        if (!canView){
           row.className += ' poker-table-row--locked';
           openBtn.textContent = 'Unavailable';
           openBtn.title = 'This table tier is not available for your current bankroll.';
@@ -2095,8 +2095,8 @@
           var id = typeof item.tableId === 'string' ? item.tableId : item.id;
           return id === target.dataset.open;
         });
-        if (!canOpenLobbyTable(table)){
-          setError(errorEl, 'This table tier is not available for your current bankroll.');
+        if (!canViewLobbyTable(table)){
+          setError(errorEl, 'This table is not available.');
           return;
         }
         navigateToPokerTable(target.dataset.open);
