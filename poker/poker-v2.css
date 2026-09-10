@@ -451,8 +451,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
   /* Landscape is a game surface: keep connection copy in a small overlay rail
      and let the table own the available vertical space. */
   .poker-live-panel{position:fixed;top:max(8px,calc(env(safe-area-inset-top,0px) + 8px));left:calc(max(12px,env(safe-area-inset-left,0px)) + 62px);right:calc(max(12px,env(safe-area-inset-right,0px)));z-index:27;width:auto;margin:0;padding:0;border:0;background:transparent;box-shadow:none;display:block;}
-  .poker-live-topbar{display:flex;align-items:center;gap:10px;width:100%;}
-  .poker-live-meta{position:static;flex:1 1 auto;min-width:0;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1.1fr);align-items:center;gap:4px 10px;min-height:32px;padding:5px 10px;border:1px solid rgba(255,223,180,0.18);border-radius:999px;background:rgba(7,12,21,0.78);box-shadow:0 8px 18px rgba(0,0,0,0.28),inset 0 1px 1px rgba(255,255,255,0.08);pointer-events:none;}
+  .poker-live-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;}
+  .poker-live-meta{position:static;flex:0 1 min(44vw,480px);max-width:min(44vw,calc(50% - 24px),480px);min-width:0;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1.1fr);align-items:center;gap:4px 10px;min-height:32px;padding:5px 10px;border:1px solid rgba(255,223,180,0.18);border-radius:999px;background:rgba(7,12,21,0.78);box-shadow:0 8px 18px rgba(0,0,0,0.28),inset 0 1px 1px rgba(255,255,255,0.08);pointer-events:none;}
   .poker-top-right-rail{display:flex;align-items:center;flex:0 0 auto;gap:6px;min-width:0;}
   .poker-top-right-reactions{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
   .poker-top-right-rail .poker-v2-xp-badge{position:static;top:auto;right:auto;display:block;flex:0 1 auto;min-width:58px;max-width:min(42vw,220px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
