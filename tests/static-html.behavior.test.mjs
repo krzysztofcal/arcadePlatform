@@ -43,7 +43,8 @@ assert.match(tableV2Html, /id="pokerMenuSettings"[^>]*>Table settings</, 'poker 
 assert.match(tableV2Html, /id="pokerMenuSignIn"/, 'poker table v2 should expose account access in the hamburger menu');
 assert.match(tableV2Html, /id="pokerMenuGuestInfo"/, 'poker table v2 should expose guest account information in the hamburger menu');
 assert.match(tableV2Html, /id="pokerV2ClosedTableModal"/, 'poker table v2 should render the closed-table redirect notice');
-assert.match(tableV2Html, /id="pokerV2GuestPanel"/, 'poker table v2 should render the guest restrictions panel');
+assert.doesNotMatch(tableV2Html, /id="pokerV2GuestPanel"/, 'poker table v2 should keep guest restrictions in the hamburger menu');
+assert.doesNotMatch(tableV2Html, /id="pokerV2(?:LeaveBtn|GuestBadge|SignInBtn)"/, 'poker table v2 should not render removed topbar controls');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyBalanceToast"/, 'poker table v2 should render the table-side auto-rebuy toast');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyConfirmModal"/, 'poker table v2 should render an auto-rebuy confirmation modal');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyConfirmYes"[^>]*>Confirm</, 'auto-rebuy confirmation should provide a Confirm action');
@@ -52,8 +53,8 @@ assert.doesNotMatch(tableV2Html, /(?:topbar\.js|js\/chips\/client\.js)/, 'poker 
 assert.match(indexHtml, /Create account or sign in/, 'poker lobby signed-out CTA should not promise the welcome bonus before eligibility is known');
 assert.match(indexHtml, /id="pokerWelcomeBonusBanner"/, 'poker lobby should render an eligible-user welcome bonus banner');
 assert.match(indexHtml, /Claim bonus/, 'poker lobby welcome bonus banner should include a claim CTA');
-assert.match(tableV2Html, /Create account and get 500 CH Welcome Bonus/, 'poker table guest CTA should advertise the welcome bonus');
-assert.match(tableV2Html, /\+500 CH welcome bonus/, 'guest panel should list the welcome bonus as an account unlock');
+assert.match(tableV2Html, /Create an account to unlock 500 CH/, 'poker table guest information should advertise the welcome bonus');
+assert.match(tableV2Html, /500 CH/, 'guest account information should list the welcome bonus as an account unlock');
 assert.doesNotMatch(indexHtml + tableV2Html, /Sign in and get 500 CH/i, 'guest bonus copy should not promise a sign-in reward');
 assert.doesNotMatch(tableV2Html, /pokerClassicLink/, 'poker table v2 should not expose the classic table link');
 assert.doesNotMatch(tableV2Html, /pokerV2Link/, 'poker table v2 should not expose a self-link in the hamburger menu');
@@ -64,8 +65,6 @@ assert.match(tableV2Html, /id="pokerReactionLayer"/, 'poker table v2 should rend
 assert.equal(tableV2Html.indexOf('id="pokerDealerChip"') < tableV2Html.indexOf('class="poker-center-layer"'), true, 'dealer chip should not live inside the center layer');
 assert.match(tableV2Css, /\.poker-menu-panel\[hidden\]\{display:none;\}/, 'poker table v2 menu should hard-hide when hidden attribute is present');
 assert.match(tableV2Css, /\.poker-closed-table-modal\{z-index:65;\}/, 'poker table v2 should style the closed-table redirect notice');
-assert.match(tableV2Css, /\.poker-guest-panel\{margin-top:12px; padding:14px 14px 12px; border-radius:18px; border:1px solid rgba\(255,223,180,0\.2\); background:rgba\(8,13,22,0\.72\);\}/, 'poker table v2 should style the guest restrictions panel');
-assert.match(tableV2Css, /\.poker-guest-panel__item--blocked::before\{content:"✕"; color:#ffb5b5;\}/, 'guest restrictions panel should visibly mark blocked items');
 assert.match(tableV2Css, /\.poker-action-bar\{position:fixed; right:max\(10px, env\(safe-area-inset-right\)\); bottom:max\(10px, env\(safe-area-inset-bottom\)\); width:min\(33vw, 196px\); display:grid; grid-template-columns:40px minmax\(0, 1fr\);/, 'poker table v2 action rail should dock to the bottom-right with a left-side vertical amount slider');
 assert.match(tableV2Css, /\.poker-social-settings\{[^}]*right:calc\(env\(safe-area-inset-right\) \+ 8px\)[^}]*max-height:min\(420px,/, 'table settings should use a responsive viewport-safe popup surface');
 assert.match(tableV2Css, /\.poker-auto-rebuy-indicator\{/, 'poker table v2 should style the compact auto-rebuy indicator');

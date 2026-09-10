@@ -294,7 +294,8 @@ async function openPokerTable(player: Player, tableId: string) {
 async function joinPokerTable(player: Player) {
   await expect(player.page.locator('#pokerV2JoinBtn')).toBeEnabled();
   await player.page.locator('#pokerV2JoinBtn').click();
-  await expect(player.page.locator('#pokerV2JoinBtn')).toHaveText('Joined');
+  await expect(player.page.locator('#pokerV2JoinBtn')).toBeHidden();
+  await expect(player.page.locator('#pokerV2LiveStatus')).toHaveText('Joined');
 }
 
 async function readVisiblePokerState(page: Page) {
@@ -378,7 +379,8 @@ async function performFirstSafeLegalAction(player: Player) {
 async function cleanupPlayers(players: Player[]) {
   await Promise.all(players.map(async (player) => {
     try {
-      const leave = player.page.locator('#pokerV2LeaveBtn');
+      await player.page.locator('#pokerMenuToggle').click();
+      const leave = player.page.locator('#pokerMenuLeave');
       if (await leave.isVisible()) {
         await leave.click();
         await player.page.locator('#pokerV2LeaveConfirmYes').click();

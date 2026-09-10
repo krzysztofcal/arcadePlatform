@@ -4,12 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 
-const pokerV2Css = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.css'), 'utf8');
-
-test('poker v2 CSS respects the hidden state of the guest account badge', () => {
-  assert.match(pokerV2Css, /\.poker-live-pill\[hidden\]\s*\{\s*display\s*:\s*none\s*;?\s*\}/);
-});
-
 function makeElement(id){
   const sceneRect = { left: 0, top: 0, width: 320, height: 640, right: 320, bottom: 640 };
   const style = {
@@ -119,8 +113,8 @@ function createHarness(options = {}){
     'pokerAutoRebuyPreference', 'pokerAutoRebuyPreferenceWrap', 'pokerAutoRebuyPreferenceHint',
     'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
-    'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2GuestPanel', 'pokerV2GuestBadge', 'pokerV2SignInBtn', 'pokerV2SeatNo',
-    'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
+    'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SeatNo',
+    'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
     'pokerV2AutoRebuyConfirmModal', 'pokerV2AutoRebuyConfirmTitle', 'pokerV2AutoRebuyConfirmCopy', 'pokerV2AutoRebuyConfirmYes', 'pokerV2AutoRebuyConfirmCancel',
     'pokerV2ReactionControl', 'pokerV2ReactionBtn', 'pokerV2ReactionMenu',
     'pokerReactionHistory', 'pokerReactionHistoryToggle', 'pokerReactionHistoryCount', 'pokerReactionHistoryPanel', 'pokerReactionHistoryList',
@@ -432,7 +426,7 @@ async function flush(){
 }
 
 function confirmLeave(harness){
-  harness.elements.pokerV2LeaveBtn.click();
+  harness.elements.pokerMenuLeave.click();
   harness.elements.pokerV2LeaveConfirmYes.click();
 }
 
@@ -527,10 +521,12 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
 
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'v2 should bootstrap a WS client when tableId is present');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'join must stay hidden until the authoritative table snapshot is actionable');
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join must wait for the authoritative table snapshot');
   sendInitialTableSnapshot(harness, { buyIn: 500 });
   await harness.flush();
   await waitFor(() => harness.elements.pokerV2JoinBtn.disabled === false);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'actionable Join should be visible in live mode');
   assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join', 'v2 should not mark the user as seated before a live snapshot confirms it');
   assert.equal(harness.elements.pokerV2StartBtn.hidden, true, 'start hand should stay hidden until a live seat is confirmed');
   assert.equal(harness.elements.pokerV2StackText.textContent, '—', 'v2 should not show demo stack data before a live snapshot');
@@ -576,6 +572,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false, 'v2 should surface the primary turn action');
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Check', 'v2 should keep check compact when there is nothing to call');
   assert.equal(harness.elements.pokerV2AmountBtn.hidden, false, 'v2 should surface bet/raise when legal');
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Joined', 'authoritative seat confirmation should move the status into Joined');
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true, 'join should stay disabled once the user is seated');
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   assert.ok(heroSeat, 'v2 should render a dedicated hero seat');
@@ -1717,13 +1714,16 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
   await harness.flush();
 
   assert.equal(harness.joinPayloads.length, 1);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true);
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true);
-  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Reserving seat…');
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join');
   assert.equal(harness.elements.pokerV2JoinBtn.attributes['aria-busy'], 'true');
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Reserving seat…');
   assert.ok(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'));
 
   ws.onStatus('join_pending', { requestId: harness.joinRequestIds[0], reason: 'soft_timeout' });
-  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Checking reservation…');
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join');
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Checking seat reservation…');
   assert.equal(harness.elements.pokerV2ErrorText.hidden, true);
 
   ws.onSnapshot({
@@ -1761,11 +1761,13 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
   assert.equal(findSeatChild(heroSeat, 'poker-seat-cards'), undefined);
   assert.equal(harness.elements.pokerHeroCards.hidden, true);
   assert.equal(harness.elements.pokerV2FoldBtn.hidden, true);
-  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Joining next hand');
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Seat reserved · Joining next hand');
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true);
   assert.equal(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'), null);
 });
 
-test('poker v2 guest mode shows restrictions panel, hides XP badge, and still auto-joins', async () => {
+test('poker v2 guest mode uses hamburger account information, hides XP badge, and still auto-joins', async () => {
   const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
   const guestToken = `aaa.${guestPayload}.zzz`;
   const harness = createHarness({
@@ -1787,8 +1789,7 @@ test('poker v2 guest mode shows restrictions panel, hides XP badge, and still au
   assert.ok(ws, 'guest mode should still bootstrap a WS client');
   assert.equal(ws.guestToken, guestToken);
   assert.equal(harness.elements.xpBadge.hidden, true, 'guest mode should hide the XP badge');
-  assert.equal(harness.elements.pokerV2GuestBadge.hidden, false, 'guest mode should show the guest badge');
-  assert.equal(harness.elements.pokerV2GuestPanel.hidden, false, 'guest mode should show the restrictions panel');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'guest mode should not expose the signed-in Join CTA');
   assert.equal(harness.elements.pokerMenuGuestInfo.hidden, false, 'guest account information should be available from the hamburger');
 
   sendInitialTableSnapshot(harness, { tableId: 'guest_table_1' });
@@ -1861,8 +1862,6 @@ test('poker v2 authenticated user takes precedence over a matching guest session
   assert.ok(ws, 'authenticated user flow should bootstrap a WS client');
   assert.equal(ws.guestToken, null);
   assert.equal(harness.elements.xpBadge.hidden, false, 'authenticated user mode should keep the XP badge visible');
-  assert.equal(harness.elements.pokerV2GuestBadge.hidden, true, 'authenticated user mode should not show the guest badge');
-  assert.equal(harness.elements.pokerV2GuestPanel.hidden, true, 'authenticated user mode should not show the restrictions panel');
 });
 
 test('poker v2 never labels a resolved authenticated user as a guest while its token is pending', async () => {
@@ -1884,8 +1883,6 @@ test('poker v2 never labels a resolved authenticated user as a guest while its t
   await harness.flush();
   await harness.flush();
 
-  assert.equal(harness.elements.pokerV2GuestBadge.hidden, true);
-  assert.equal(harness.elements.pokerV2GuestPanel.hidden, true);
   assert.equal(harness.elements.xpBadge.hidden, false);
   assert.equal(harness.getCreateOptions(), null, 'room should wait for the authenticated token instead of opening a guest socket');
 });
@@ -1901,8 +1898,6 @@ test('poker v2 ignores stale guest query when there is no matching guest session
   assert.ok(ws, 'registered user flow should still bootstrap a WS client');
   assert.equal(ws.guestToken, null);
   assert.equal(harness.elements.xpBadge.hidden, false, 'registered user mode should keep the XP badge visible');
-  assert.equal(harness.elements.pokerV2GuestBadge.hidden, true, 'registered user mode should not show the guest badge');
-  assert.equal(harness.elements.pokerV2GuestPanel.hidden, true, 'registered user mode should not show the restrictions panel');
 });
 
 test('poker v2 ignores a guest session for a different table', async () => {
@@ -1925,8 +1920,6 @@ test('poker v2 ignores a guest session for a different table', async () => {
   assert.ok(ws, 'registered user flow should still bootstrap when stale guest storage exists');
   assert.equal(ws.guestToken, null);
   assert.equal(harness.elements.xpBadge.hidden, false);
-  assert.equal(harness.elements.pokerV2GuestBadge.hidden, true);
-  assert.equal(harness.elements.pokerV2GuestPanel.hidden, true);
 });
 
 test('poker v2 shows a closed-table countdown, cancels on recovery, and redirects after five seconds', async () => {
@@ -3305,6 +3298,8 @@ test('poker v2 retries Play now auto-join after a transient authoritative join f
   assert.equal(harness.joinPayloads.length, 1);
   assert.equal(harness.elements.pokerV2ErrorText.textContent, 'authoritative_join_rehydrate_failed');
   assert.equal(harness.elements.pokerV2ErrorText.hidden, false);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'a rejected join should make Join actionable again');
+  assert.equal(harness.elements.pokerV2JoinBtn.textContent, 'Join');
 
   harness.advanceTime(250);
   await harness.flush();
@@ -4581,7 +4576,7 @@ test('poker v2 waits for auth before enabling join and starts auth watch when si
 
   assert.equal(harness.getCreateOptions(), null, 'signed-out bootstrap should not start ws immediately');
   assert.match(harness.elements.pokerV2LiveStatus.textContent, /Sign in to join this table/);
-  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true);
   assert.equal(harness.elements.pokerV2JoinBtn.disabled, true);
   assert.equal(harness.getIntervalCount(), 1, 'signed-out mode should start auth polling for later login');
 });
@@ -4719,7 +4714,7 @@ test('poker v2 cancel leave keeps the player on the table and sends no leave pay
   });
   await harness.flush();
 
-  harness.elements.pokerV2LeaveBtn.click();
+  harness.elements.pokerMenuLeave.click();
   harness.elements.pokerV2LeaveConfirmCancel.click();
   await harness.flush();
 
@@ -5178,9 +5173,9 @@ test('poker v2 late snapshot after recovery timeout restores live status and cle
   });
   await harness.flush();
 
-  // Gate opens (status/error UI restored), even though the player is seated so
-  // the join button stays disabled for the seated state.
-  assert.match(harness.elements.pokerV2LiveStatus.textContent, /live/i, 'status back to live');
+  // Gate opens (status/error UI restored), and the authoritative seat is
+  // represented by the passive Joined banner state.
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Joined', 'status back to joined');
   assert.equal(harness.elements.pokerV2ErrorText.textContent.indexOf('Snapshot recovery timed out'), -1, 'timeout message cleared');
   assert.equal(harness.elements.pokerV2ErrorText.textContent.trim(), '', 'error text cleared');
 });

@@ -3208,24 +3208,16 @@
     layoutRefreshTimer = window.setTimeout(refreshLayoutPresentation, 0);
   }
 
-  function isLandscapePresentation(){
-    var width = Number(window.innerWidth);
-    var height = Number(window.innerHeight);
-    return width >= 560 && height > 0 && width > height;
-  }
-
   function syncJoinVisibility(){
     if (!els.joinBtn) return;
-    if (!isLandscapePresentation()){
-      els.joinBtn.hidden = false;
-      return;
-    }
-    var signedIn = isSignedIn();
+    var signedIn = isSignedIn() && !isGuestMode;
     var seated = !!deriveCurrentSeat();
     var joinPending = isJoinOperationPending();
-    var needsUserJoin = signedIn && !seated && !!state.tableId
-      && (joinPending || (isWsReady() && state.hasAppliedAuthoritativeSnapshot === true));
-    els.joinBtn.hidden = !needsUserJoin;
+    var waitingForAuthoritativeSeat = joinOperation.phase === 'active' && !seated;
+    var canJoin = state.mode === 'live' && signedIn && !seated && !!state.tableId
+      && !state.reconnectGate && isWsReady() && state.hasAppliedAuthoritativeSnapshot === true
+      && !joinPending && !waitingForAuthoritativeSeat;
+    els.joinBtn.hidden = !canJoin;
   }
 
   function resolveSeatChipDirections(anchor){
@@ -4025,8 +4017,22 @@
     if (outOfChips) refreshRebuyBalance();
   }
 
+  function resolveLiveBannerStatus(){
+    if (joinOperation.phase === 'reserving') return 'Reserving seat…';
+    if (joinOperation.phase === 'checking') return 'Checking seat reservation…';
+    if (joinOperation.phase === 'waiting_next_hand' || currentPlayerStatus() === 'WAITING_NEXT_HAND'){
+      return 'Seat reserved · Joining next hand';
+    }
+    if (state.hasAppliedAuthoritativeSnapshot === true
+      && deriveCurrentSeat()
+      && state.statusText === LIVE_STATUS_COPY.live){
+      return 'Joined';
+    }
+    return state.statusText || '';
+  }
+
   function renderInfoPanel(){
-    if (els.liveStatus) els.liveStatus.textContent = state.statusText || '';
+    if (els.liveStatus) els.liveStatus.textContent = resolveLiveBannerStatus();
     if (els.tableMeta) {
       var parts = [];
       if (state.tableId) parts.push('Table ' + shortId(state.tableId));
@@ -4052,7 +4058,6 @@
       }
     }
     if (els.xpBadge) els.xpBadge.hidden = !!isGuestMode;
-    if (els.guestPanel) els.guestPanel.hidden = !isGuestMode;
     renderRebuyPanel();
   }
 
@@ -4270,7 +4275,9 @@
     var showLiveActionButtons = showActionButtons && !preactionMode;
     var actionControlsLocked = !liveReady || !usersTurn || controlsLocked || playerSittingOut;
     var joinPending = isJoinOperationPending();
-    var joinDisabled = !signedIn || seated || !state.tableId || !liveReady || !state.hasAppliedAuthoritativeSnapshot || joinPending;
+    var joinDisabled = !signedIn || isGuestMode || seated || !state.tableId || !liveReady
+      || state.reconnectGate || !state.hasAppliedAuthoritativeSnapshot || joinPending
+      || (joinOperation.phase === 'active' && !seated);
     if (!seated || !activeHand || isCurrentUserFolded() || playerSittingOut) clearQueuedPreaction();
     if (preactionMode) {
       syncQueuedPreactionWithPreactionState({
@@ -4283,25 +4290,14 @@
     }
 
     var accountActionText = isGuestMode ? 'Create account and get 500 CH Welcome Bonus' : 'Sign in to join this table';
-    if (els.signInBtn) {
-      els.signInBtn.hidden = signedIn && !isGuestMode;
-      els.signInBtn.textContent = isGuestMode ? 'Create account and get 500 CH Welcome Bonus' : 'Sign in';
-    }
     if (els.menuSignIn) {
       els.menuSignIn.hidden = signedIn && !isGuestMode;
       els.menuSignIn.textContent = accountActionText;
     }
     if (els.menuGuestInfo) els.menuGuestInfo.hidden = !isGuestMode;
-    if (els.guestBadge) els.guestBadge.hidden = !isGuestMode;
     if (els.joinBtn) els.joinBtn.disabled = joinDisabled;
     if (els.joinBtn) {
-      if (joinOperation.phase === 'reserving') els.joinBtn.textContent = 'Reserving seat…';
-      else if (joinOperation.phase === 'checking') els.joinBtn.textContent = 'Checking reservation…';
-      else if (seated && currentPlayerStatus() === 'WAITING_NEXT_HAND') els.joinBtn.textContent = 'Joining next hand';
-      else if (seated) els.joinBtn.textContent = 'Joined';
-      else if (!signedIn) els.joinBtn.textContent = 'Join';
-      else if (!liveReady) els.joinBtn.textContent = 'Connecting…';
-      else els.joinBtn.textContent = 'Join';
+      els.joinBtn.textContent = 'Join';
       if (joinPending) els.joinBtn.setAttribute('aria-busy', 'true');
       else els.joinBtn.removeAttribute('aria-busy');
     }
@@ -4312,9 +4308,7 @@
       els.joinSeat.value = String(suggestedSeatNoParam);
     }
     if (els.startBtn) els.startBtn.hidden = !signedIn || !seated;
-    if (els.leaveBtn) els.leaveBtn.hidden = !signedIn || !seated;
     if (els.startBtn) els.startBtn.disabled = !liveReady;
-    if (els.leaveBtn) els.leaveBtn.disabled = !liveReady;
     if (els.menuLeave) {
       els.menuLeave.hidden = !signedIn || !seated;
       els.menuLeave.disabled = !liveReady;
@@ -4731,12 +4725,8 @@
     if (suggestedSeatNoParam && els.joinSeat) els.joinSeat.value = String(suggestedSeatNoParam);
     autoJoinErrorActive = false;
     setError('');
-    beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'auto' }).then(function(result){
+    beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'auto' }).then(function(){
       resetAutoJoinRetryState();
-      state.statusText = result && result.joinStatus === 'WAITING_NEXT_HAND'
-        ? 'Seat reserved · Joining next hand'
-        : (result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted');
-      renderInfoPanel();
     }).catch(function(err){
       autoJoinAttempted = false;
       autoJoinErrorActive = true;
@@ -4779,10 +4769,6 @@
         : preferredSeatNo;
       reconnectSeatNo = null;
       lastKnownCurrentSeatNo = resolvedSeatNo;
-      state.statusText = result && result.joinStatus === 'WAITING_NEXT_HAND'
-        ? 'Seat reserved · Joining next hand'
-        : ('Reconnected to seat ' + resolvedSeatNo);
-      renderInfoPanel();
     }).catch(function(err){
       autoJoinAttempted = false;
       reconnectSeatNo = preferredSeatNo;
@@ -5068,7 +5054,6 @@
         renderControls();
       });
     }
-    if (els.signInBtn) els.signInBtn.addEventListener('click', openSignIn);
     if (els.menuSignIn) els.menuSignIn.addEventListener('click', function(){
       closeMenu();
       openSignIn();
@@ -5077,18 +5062,9 @@
       handleAction('FOLD');
     });
     if (els.joinBtn) els.joinBtn.addEventListener('click', function(){
-      beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'manual' }).then(function(result){
-        state.statusText = result && result.joinStatus === 'WAITING_NEXT_HAND'
-          ? 'Seat reserved · Joining next hand'
-          : (result && result.seatNo != null ? ('Joined seat ' + result.seatNo) : 'Join accepted');
-        renderInfoPanel();
-      }).catch(function(err){
+      beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'manual' }).catch(function(err){
         setError(joinErrorMessage(err));
       });
-    });
-    if (els.leaveBtn) els.leaveBtn.addEventListener('click', function(){
-      setError('');
-      openLeaveConfirm('/poker/');
     });
     if (els.menuLeave) els.menuLeave.addEventListener('click', function(){
       closeMenu();
@@ -5236,13 +5212,9 @@
     els.turnText = document.getElementById('pokerV2TurnText');
     els.stackText = document.getElementById('pokerV2StackText');
     els.errorText = document.getElementById('pokerV2ErrorText');
-    els.guestPanel = document.getElementById('pokerV2GuestPanel');
-    els.signInBtn = document.getElementById('pokerV2SignInBtn');
-    els.guestBadge = document.getElementById('pokerV2GuestBadge');
     els.joinBtn = document.getElementById('pokerV2JoinBtn');
     els.joinSeat = document.getElementById('pokerV2SeatNo');
     els.joinBuyIn = document.getElementById('pokerV2BuyIn');
-    els.leaveBtn = document.getElementById('pokerV2LeaveBtn');
     els.reactionBtn = document.getElementById('pokerV2ReactionBtn');
     els.reactionControl = document.getElementById('pokerV2ReactionControl');
     els.reactionMenu = document.getElementById('pokerV2ReactionMenu');
