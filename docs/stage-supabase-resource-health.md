@@ -3,7 +3,9 @@
 The independent `Stage Supabase Resource Health` workflow runs every 15 minutes
 and supports owner dispatch from canonical `main`. It does not consult or change
 `CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED`. Standalone execution remains observation-only:
-`cleanupDecision=not_evaluated_monitor_only`.
+`cleanupDecision=not_evaluated_monitor_only`. In standalone mode, `healthy`,
+`warning` and `unknown` exit 0; `critical` exits 1. An `unknown` result remains
+visible in `klog` and the GitHub step summary.
 
 Automatic Stage retention runs the same live measurement with `--enforce` before
 any cleanup mutation: both native schedules, external dispatch, manual
@@ -80,8 +82,9 @@ Capacity and pressure have separate states. When pressure is healthy and
 capacity alone is critical, `capacityState=critical` but top-level `state=warning`;
 enforcement allows bounded cleanup without widening eligibility or batch limits.
 Critical resource pressure wins over unknown, which wins over warning, then
-healthy. Unknown and critical resource pressure make the monitor job fail
-visibly; enforcement blocks retention on either state.
+healthy. In standalone mode, unknown resource pressure is reported without
+failing the monitor job, while critical resource pressure fails it. With
+`--enforce`, both unknown and critical fail the job and block retention.
 
 ## Explicitly unavailable
 
@@ -107,8 +110,10 @@ API references (reviewed September 8, 2026):
 
 Operational impact: each automatic retention cycle adds one live measurement
 (about 60 seconds, at most five minutes for the guard). Critical/unknown fails
-the cycle and may grow backlog; Stage availability takes priority. The independent
-monitor and its schedule are unchanged. Each measurement uses two Metrics GETs,
+the enforced retention cycle and may grow backlog; Stage availability takes
+priority. The independent monitor and its schedule remain unchanged, but an
+unknown result is now visible without failing that monitor job. Each measurement
+uses two Metrics GETs,
 one disk-config GET, one disk-utilization GET and bounded read-only SQL. Missing
 credentials produce a visible unknown result. Logs and job summary contain only
 interpreted observations, never raw metrics, HTTP bodies, errors or credentials.
