@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 import {
-  parseMetrics, measureWindow, parseDiskUtilization, classify, readCapacity, monitor, evaluateCleanupDecision,
+  parseMetrics, measureWindow, parseDiskUtilization, classify, readCapacity, monitor,
+  evaluateCleanupDecision, exitCodeFor,
 } from '../scripts/ops/stage-supabase-resource-health.mjs';
 
 const fixture = fs.readFileSync(new URL('./fixtures/stage-resource-metrics.prom', import.meta.url), 'utf8');
@@ -286,4 +287,16 @@ test('cleanup enforcement blocks critical/unknown and preserves safe capacity-on
     assert.equal(report.cleanupDecision, 'not_evaluated_monitor_only');
   }
   assert.equal(evaluateCleanupDecision(undefined), 'blocked_resource_unknown');
+});
+
+test('monitor-only tolerates unknown while enforce fails closed', () => {
+  for (const [state, monitorOnlyExitCode, enforceExitCode] of [
+    ['healthy', 0, 0],
+    ['warning', 0, 0],
+    ['unknown', 0, 1],
+    ['critical', 1, 1],
+  ]) {
+    assert.equal(exitCodeFor(state, false), monitorOnlyExitCode);
+    assert.equal(exitCodeFor(state, true), enforceExitCode);
+  }
 });
