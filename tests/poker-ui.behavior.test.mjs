@@ -496,6 +496,36 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
 }
 
 {
+  const lockedProgression = {
+    availableBuyIns: [],
+    tiers: [
+      { buyIn: 100, available: false, unlocked: false, stakes: { sb: 1, bb: 2 } },
+      { buyIn: 500, available: false, unlocked: false, stakes: { sb: 5, bb: 10 } }
+    ],
+    balance: 99,
+    highestUnlockedBuyIn: null,
+    highestUnlockedIndex: -1
+  };
+  const lockedCreateHarness = loadLobbyHarness({
+    fetchResponse: async (url) => {
+      if (url.includes('poker-progression')) return { ok: true, status: 200, json: async () => lockedProgression };
+      if (url.includes('poker-create-table')) return { ok: true, status: 200, json: async () => ({ tableId: 'table-create-locked-tier' }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(lockedCreateHarness.elements.pokerCreate.disabled, false, 'create-table should remain enabled when every tier is progression-locked');
+  assert.equal(lockedCreateHarness.elements.pokerBuyIn.children.every((option) => option.disabled !== true), true, 'configured tiers should remain selectable for table creation');
+  lockedCreateHarness.elements.pokerBuyIn.value = '500';
+  lockedCreateHarness.elements.pokerCreate.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const lockedCreateRequest = lockedCreateHarness.fetchRequests.find((entry) => entry.url.includes('poker-create-table'));
+  assert.ok(lockedCreateRequest, 'create-table should reach the endpoint for a locked tier');
+  assert.equal(JSON.parse(lockedCreateRequest.options.body).buyIn, 500);
+}
+
+{
   const fallbackHarness = loadLobbyHarness({
     balanceError: true,
     fetchResponse: async (url) => {

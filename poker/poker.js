@@ -1731,7 +1731,6 @@
           var option = document.createElement('option');
           option.value = String(tier.buyIn);
           option.textContent = formatChips(tier.buyIn) + ' CH · blinds ' + formatStakesUi(tier.stakes);
-          option.disabled = tier.available !== true;
           if (Number(tier.buyIn) === previousBuyIn) option.selected = true;
           buyInInput.appendChild(option);
         });
@@ -1739,7 +1738,7 @@
         if (!availableTiers.some(function(tier){ return Number(tier.buyIn) === previousBuyIn; })){
           buyInInput.value = availableTiers.length ? String(availableTiers[0].buyIn) : (data.tiers.length ? String(data.tiers[0].buyIn) : '100');
         }
-        if (createBtn) createBtn.disabled = availableTiers.length === 0;
+        if (createBtn) createBtn.disabled = data.tiers.length === 0;
       }
       if (quickSeatBtn) quickSeatBtn.disabled = !(progressionState && Array.isArray(progressionState.availableBuyIns) && progressionState.availableBuyIns.length > 0);
       if (progressionRoadmap){
@@ -2060,24 +2059,12 @@
         setError(errorEl, t('pokerErrInvalidBuyIn', 'Invalid buy-in'));
         return;
       }
-      var tier = progressionState && Array.isArray(progressionState.tiers)
-        ? progressionState.tiers.find(function(item){ return Number(item.buyIn) === buyIn; })
-        : null;
-      if (!tier || tier.available !== true){
-        setError(errorEl, 'This table tier is not available for your current bankroll.');
-        return;
-      }
       var maxPlayers = resolveLobbyMaxPlayers();
       setLoading(createBtn, true);
       try {
         var data = await apiPost(CREATE_URL, { maxPlayers: maxPlayers, buyIn: buyIn });
         if (data.tableId){
-          if (tier && tier.available === true){
-            navigateToPokerTable(data.tableId);
-          } else {
-            setError(errorEl, 'Table created, but it is not currently available for your bankroll.');
-            refreshLobby('table_created');
-          }
+          navigateToPokerTable(data.tableId);
         } else {
           setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
         }

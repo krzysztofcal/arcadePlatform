@@ -75,6 +75,7 @@ export function resolvePokerBuyInTiers(env = process.env) {
 
 export function calculateUnlockBankroll(buyIn) {
   const normalizedBuyIn = normalizePositiveSafeInteger(buyIn, "invalid_buy_in");
+  if (normalizedBuyIn === DEFAULT_CASH_TABLE_BUY_IN_CHIPS) return normalizedBuyIn;
   const buffer = Math.ceil(normalizedBuyIn / 10);
   if (!Number.isSafeInteger(buffer) || normalizedBuyIn > Number.MAX_SAFE_INTEGER - buffer) {
     const error = new Error("poker_buy_in_tiers_config_invalid");

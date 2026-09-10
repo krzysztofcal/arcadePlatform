@@ -95,7 +95,7 @@ test("poker progression table access allows available tiers, locks historical lo
         highestUnlockedBuyIn: 5000,
         availableBuyIns: [5000, 1000],
         tiers: [
-          { buyIn: 100, unlockBankroll: 110, available: false },
+          { buyIn: 100, unlockBankroll: 100, available: false },
           { buyIn: 1000, unlockBankroll: 1100, available: true },
           { buyIn: 5000, unlockBankroll: 5500, available: true }
         ]
