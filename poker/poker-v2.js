@@ -780,7 +780,7 @@
     }
     return fetchTableAccess(token).then(function(access){
       if (!isCurrentPreflight()) return false;
-      if (access.allowed !== true) {
+      if (access.allowed !== true && access.viewAllowed !== true) {
         currentAccessToken = null;
         stopLiveMode();
         state.statusText = LIVE_STATUS_COPY.error;

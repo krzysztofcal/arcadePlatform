@@ -3,7 +3,7 @@ import { formatStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
 import { checkWsBuyInCapability, notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
 import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../shared/poker-domain/table-economy.mjs";
-import { calculateUnlockBankroll, isConfiguredPokerBuyIn, readPokerProgression, resolvePokerBuyInTiers } from "../../shared/poker-domain/poker-progression.mjs";
+import { isConfiguredPokerBuyIn, resolvePokerBuyInTiers } from "../../shared/poker-domain/poker-progression.mjs";
 
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
 
@@ -121,17 +121,6 @@ export async function handler(event) {
   let transactionResult = null;
   try {
     transactionResult = await beginSql(async (tx) => {
-      const progression = await readPokerProgression(tx, { userId: auth.userId });
-      if (!progression.availableBuyIns.includes(buyIn)) {
-        const tier = progression.tiers.find((item) => item.buyIn === buyIn);
-        return {
-          kind: "buy_in_tier_locked",
-          buyIn,
-          requiredBuyIn: buyIn,
-          requiredBankroll: tier?.unlockBankroll ?? calculateUnlockBankroll(buyIn),
-          balance: progression.balance
-        };
-      }
       const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson, buyIn });
       return { kind: "created", tableId: created.tableId };
     });
@@ -140,19 +129,6 @@ export async function handler(event) {
     return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }
 
-  if (transactionResult?.kind === "buy_in_tier_locked") {
-    return {
-      statusCode: 409,
-      headers: mergeHeaders(cors),
-      body: JSON.stringify({
-        error: "buy_in_tier_locked",
-        buyIn: transactionResult.buyIn,
-        requiredBuyIn: transactionResult.requiredBuyIn,
-        requiredBankroll: transactionResult.requiredBankroll,
-        balance: transactionResult.balance
-      })
-    };
-  }
   const tableId = transactionResult?.kind === "created" ? transactionResult.tableId : null;
   if (!tableId) {
     klog("poker_create_table_error", { message: "invalid_transaction_result" });
