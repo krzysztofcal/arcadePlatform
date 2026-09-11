@@ -188,4 +188,3 @@ tests/chips/
 ## Complexity Tracking
 
 No constitution violations require justification. The additional migration definition of the existing archive-batch guard is required to preserve the current receipt protection while admitting exactly one new v1/source-policy receipt state; a new generic abstraction would be more complex and less constrained.
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
