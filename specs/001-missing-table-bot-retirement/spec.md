@@ -1,6 +1,6 @@
 # Feature Specification: Historical Missing-Table Bot Identity Retirement
 
-**Feature Branch**: main (specification-only pass on current main)
+**Feature Branch**: agent/001-missing-table-bot-retirement
 
 **Created**: 2026-09-11
 
@@ -26,19 +26,21 @@ The 2026-09-11 Stage research is a point-in-time baseline, not permission to del
 
 The current live main was verified at 25d5a7b9 after the Spec Kit bootstrap merge. Its existing ledger behavior still rejects a new TABLE transaction when the referenced table is missing or closed before an economic effect, and it exposes terminal table_closed and idempotency_retired outcomes. The existing replay path still relies on retained registry data for successful historical replay, so retirement intentionally changes the later retry result for the narrow retired class.
 
+The initial identity classification for this issue was already performed and recorded in the 2026-09-11 research result. This feature documents that classification and revalidates it against current live-repository and Stage evidence; it MUST NOT build a new generic or persistent classification framework or a new scheduler.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Classify registry identities with evidence (Priority: P1)
 
-As a Stage maintainer, I need every material idempotency identity class classified by its replay and lifecycle contract so that only proven-safe historical identities can be considered for retirement.
+As a Stage maintainer, I need the existing 2026-09-11 identity classification documented and revalidated against current live-repository and Stage evidence so that only proven-safe historical identities can be considered for retirement.
 
 **Why this priority**: A high row count or old age is not evidence that an identity can be removed. Classification is the safety boundary for all later action.
 
-**Independent Test**: A read-only Stage audit produces a classification for every material identity class, includes the evidence and growth contribution for each class, and leaves any class without sufficient evidence in the unknown/fail-closed category.
+**Independent Test**: A bounded, read-only Stage audit documents and revalidates the existing 2026-09-11 classification for every material identity class, includes the evidence and growth contribution for each class, and leaves any class without sufficient evidence in the unknown/fail-closed category.
 
 **Acceptance Scenarios**:
 
-1. **Given** registry rows from multiple producers, transaction types, key formats, table or account ownership contexts, archive states, and ages, **When** a read-only classification is run, **Then** the result reports each class's producer, key format/version, replay behavior, hot or archived state, age, and rows/day and bytes/day contribution.
+1. **Given** registry rows from multiple producers, transaction types, key formats, table or account ownership contexts, archive states, and ages, **When** the existing research classification is documented and revalidated with a bounded read-only audit, **Then** the result reports each class's producer, key format/version, replay behavior, hot or archived state, age, and rows/day and bytes/day contribution.
 2. **Given** a class with an incomplete or conflicting replay, lifecycle, archive, identity, or accounting contract, **When** classification is run, **Then** the class is marked unknown/fail-closed and is not proposed for retirement.
 3. **Given** the research baseline and a newer live repository or Stage distribution, **When** the baseline is reconciled, **Then** differences are reported as current measurements and the historical counts are not treated as authorization.
 
@@ -103,10 +105,10 @@ As a Stage maintainer, I need a measurable before-and-after view of the registry
 ### Functional Requirements
 
 - **FR-001**: The Stage audit MUST inventory the registry by transaction type, user identity presence, producer or runtime path, key format and version, table or account ownership, hot versus archived or pruned transaction state, archive policy, age, and observed rows/day and bytes/day contribution.
-- **FR-002**: Every material identity class MUST be explicitly classified as hot-forever required, bounded-hot then retireable, lifecycle-retireable, or unknown/fail-closed, with code and data evidence recorded for the classification.
+- **FR-002**: The material identity classification for this issue MUST be based on the classification already performed in the 2026-09-11 research result. The feature MUST document and revalidate that classification against current live-repository and Stage evidence, assigning every material class to hot-forever required, bounded-hot then retireable, lifecycle-retireable, or unknown/fail-closed with code and data evidence. It MUST NOT build a new generic or persistent classification framework or a new scheduler.
 - **FR-003**: V1 MUST consider only historical bot-internal TABLE identities in the four research-identified key families: managed-bot-seed-buyin, bot-seed-buyin, poker:bot-replacement-buyin:v1, and poker:bot-terminal-cashout:v1.
-- **FR-004**: A V1 candidate MUST have a null user identity, a TABLE transaction type, an absent authoritative poker table, an existing archive and prune record from the Stage 30-day policy, no hot transaction or entry, and complete immutable identity, lifecycle, archive, proof, count, and hash evidence.
-- **FR-005**: V1 MUST retire only a complete archive batch in which every included registry identity satisfies every candidate condition; per-key or partial-batch retirement is prohibited.
+- **FR-004**: Each V1 retirement candidate and batch MUST satisfy all of the following before mutation: the stored eligibility predicates MUST include exactly `source_policy_id = 'stage-ledger-auto-retention-30d-v1'` and `key_format_version = 1`; each key MUST belong to a supported bot-internal TABLE key family; the authoritative parser MUST successfully derive a `tableId`; the parsed `tableId` MUST equal the stored `table_id`; an active and enforced TABLE transaction fence MUST be in force before mutation; the archive batch MUST be committed; archive proof MUST be verified; pruning MUST be complete and exact; `registry_count` MUST equal `transaction_count`; no hot transactions or entries may remain; the authoritative `poker_tables` row MUST be absent; and the exact sorted identity set, count, and hash MUST match the immutable batch evidence. The candidate MUST also have a null user identity and a TABLE transaction type.
+- **FR-005**: V1 MUST use whole-batch-only retirement: it MUST retire only a complete archive batch in which every included registry identity satisfies every candidate condition; per-key or partial-batch retirement is prohibited.
 - **FR-006**: A destructive Stage action MUST require an exact batch selection and explicit human confirmation, and MUST verify the target Stage identity before any mutation.
 - **FR-007**: A successful retirement MUST remove exactly the proven registry identity set and record an immutable cleanup result containing the exact count and identity-set hash as one atomic outcome.
 - **FR-008**: If any required validation is missing, ambiguous, inconsistent, unauthorized, or fails, the operation MUST fail closed with no registry deletion and no economic mutation.
@@ -116,7 +118,7 @@ As a Stage maintainer, I need a measurable before-and-after view of the registry
 - **FR-012**: BUY_IN, CASH_OUT, WELCOME_BONUS, PROMO_BONUS, and ADMIN_ADJUST full-replay identities MUST remain retained with their existing replay snapshots and retry behavior.
 - **FR-013**: Legacy or unknown identity formats MUST remain retained and MUST fail closed when evidence is insufficient.
 - **FR-014**: Normal CLOSED bot-only TABLE cleanup owned by #890 MUST remain unchanged; V1 MUST reuse its ownership boundary rather than duplicating or broadening it.
-- **FR-015**: V1 MUST NOT introduce a generic TTL, a generic registry archive, one permanent tombstone per retired key, a new permanent scheduler, or an automatic backlog-draining loop.
+- **FR-015**: V1 MUST NOT introduce a generic TTL, a generic registry archive, one permanent tombstone per retired key, a new generic or persistent classification framework, a new permanent scheduler, or an automatic backlog-draining loop.
 - **FR-016**: Any V1 destructive path MUST be Stage-only. It MUST NOT mutate, enable, or roll out to Production.
 - **FR-017**: The outcome MUST report the residual hot registry rows/day and bytes/day by identity class and 30-day and one-year capacity projections, without claiming a full database plateau.
 
@@ -130,6 +132,8 @@ As a Stage maintainer, I need a measurable before-and-after view of the registry
 ## Scope Boundaries and Exclusions
 
 V1 includes only the historical missing-table gap for bot-internal TABLE identities that have already passed the existing Stage 30-day archive and prune boundary and are eligible as a complete batch.
+
+The existing 2026-09-11 research classification is the starting point for this feature. V1 documents and revalidates that classification against current live-repository and Stage evidence; it does not build a new generic or persistent classification framework or scheduler.
 
 V1 explicitly excludes human TABLE identities, full-replay identities, legacy or unknown formats, OPEN or existing tables, normal CLOSED bot-only cleanup owned by #890, hot ledger transactions or entries, partial or mixed batches, and any identity whose evidence is incomplete or ambiguous.
 
@@ -153,6 +157,7 @@ This specification defines behavior, safety boundaries, acceptance criteria, and
 ## Assumptions
 
 - The 2026-09-11 research comment is the primary research input. Its Stage counts are historical measurements and must be rechecked against the live repository and current Stage evidence before planning or any owner-confirmed action.
+- The identity classification was already performed by the 2026-09-11 research; this feature documents and revalidates it and does not create a reusable generic or persistent classification framework or scheduler.
 - The live GitHub repository and current main are authoritative for current code behavior. The existing archive, proof, prune, receipt, lifecycle, and TABLE-fence mechanisms remain the preferred evidence and safety boundaries where the later plan confirms they apply.
 - Existing #890 remains the owner of normal CLOSED bot-only TABLE cleanup.
 - A retired historical bot-internal identity is allowed to lose successful historical replay; terminal table_closed or retired rejection is an accepted V1 semantic outcome when it prevents a second economic effect.
