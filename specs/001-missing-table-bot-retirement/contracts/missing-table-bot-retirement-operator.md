@@ -17,7 +17,7 @@ node scripts/ops/chips-ledger-missing-table-bot-retirement.mjs --target stage --
 
 The implementation must reject a Production target, a Production credential variable, an unknown mode, a missing required value, a non-positive count, or a non-lowercase 64-character SHA. There is no scheduler mode, loop mode, generic policy flag, or implicit execute mode.
 
-The wrapper uses the existing `SUPABASE_STAGE_DB_URL`, `SUPABASE_STAGE_URL`, and `SUPABASE_STAGE_SERVICE_ROLE_KEY` validation path. It verifies project ref `krydukthwdvccggbyjfw` and physical system identifier `7656985631720456337`. Secrets are read from the environment and never emitted.
+The wrapper is DB-only. It requires `SUPABASE_STAGE_DB_URL`, checks the canonical project ref `krydukthwdvccggbyjfw`, obtains the physical identity through `createPruneStore(sql).getIdentity()`, and calls `chips_assert_archive_prune_stage()` before the database operation. It must reject a Production target and any `SUPABASE_PROD_*` or `PRODUCTION_*` credential variable. It must not require or read `SUPABASE_STAGE_URL` or `SUPABASE_STAGE_SERVICE_ROLE_KEY`; it has no Supabase REST or Storage path. Secrets are read from the environment and never emitted.
 
 ## Database function
 
@@ -36,6 +36,18 @@ public.chips_retire_missing_table_bot_registry_batch(
 The function is `SECURITY DEFINER`, uses an empty `search_path`, is owned by `chips_ledger_archive_pruner`, and is executable only through the existing operator role. It must not be directly executable by public, `anon`, `authenticated`, or `service_role`.
 
 The function derives the sorted registry key set from `archive_batch_id = p_batch_id`; the caller cannot pass a subset for deletion. It computes the canonical SHA with `chips_archive_text_ids_sha256(text[])` and compares both derived count and SHA with the supplied values. The SQL parser and all lifecycle/evidence predicates are authoritative inside this function.
+
+## Preserved effective archive-batch contract
+
+The migration must base its guard change on the effective function definition returned by `pg_get_functiondef('public.chips_guard_archive_batch_mutations()'::regprocedure)` after all existing migrations. The effective contract includes:
+
+- the all-null `registry_cleaned_*` state;
+- the unchanged `format_version = 2`, `source_policy_id = 'stage-ledger-bot-only-retention-7d-v1'` bot-only cleanup receipt and its exact `chips.bot_only_go` lifecycle gate;
+- the unchanged `format_version = 2`, `source_policy_id = 'legacy_stage_allowlist_v1'` cleanup receipt with its existing proof/cleanup latch path;
+- the later closed-human GO alternative, in which `chips.closed_human_go = '1'` is accepted alongside `chips.bot_only_go = '1'` while the bot-only alternative remains valid;
+- write-once proof, prune, bot-proof, cleanup, and GO fields, separate proof/prune and prune/cleanup transitions, and the existing role/latch ACL boundaries.
+
+The new V1 branch is an additional `format_version = 1` plus exact `stage-ledger-auto-retention-30d-v1` cleanup state. If the current guard does not contain the legacy branch and both GO anchors, the migration must abort rather than copying an older definition or weakening the effective contract. A minimal regression contract covers the legacy receipt and closed-human/bot-only GO behavior.
 
 ## `audit` behavior
 

@@ -4,19 +4,20 @@ This runbook describes the later implementation and Stage canary sequence. It is
 
 ## Preconditions
 
-Use only the canonical Stage connection values validated by `validateStageEnvironment()`:
+The DB-only wrapper requires the canonical Stage database connection and identity checks:
 
 - `SUPABASE_STAGE_DB_URL`;
-- `SUPABASE_STAGE_URL` for `https://krydukthwdvccggbyjfw.supabase.co`;
-- `SUPABASE_STAGE_SERVICE_ROLE_KEY` as required by the existing Stage tooling.
+- canonical Stage project ref `krydukthwdvccggbyjfw` parsed/checked from the database target;
+- `createPruneStore(sql).getIdentity()` and `chips_assert_archive_prune_stage()` confirming PostgreSQL system identifier `7656985631720456337`.
 
-The wrapper must reject any `SUPABASE_PROD_*` or `PRODUCTION_*` variable. It must verify PostgreSQL system identifier `7656985631720456337` through `chips_assert_archive_prune_stage()` and must not accept a Production target.
+It must reject any Production target or `SUPABASE_PROD_*`/`PRODUCTION_*` credential variable. It must not require or read `SUPABASE_STAGE_URL` or `SUPABASE_STAGE_SERVICE_ROLE_KEY`, because this operator has no Supabase REST or Storage path. Do not expand `validateStageEnvironment()` merely for this DB-only wrapper.
 
 Before a canary, confirm that the deployed database includes:
 
 - the additive v1 cleanup-receipt branch;
 - `chips_retire_missing_table_bot_registry_batch(...)`;
 - the current TABLE fence, parser, archive proof, prune receipt, registry mapping guard, and canonical text hash functions.
+- the effective `chips_guard_archive_batch_mutations()` contract, including the unchanged all-null state, the `format_version = 2` bot-only receipt, the `format_version = 2` `legacy_stage_allowlist_v1` receipt, and the existing `chips.bot_only_go` plus `chips.closed_human_go` behavior.
 
 No browser, WebSocket, runtime, workflow, Storage, or Production change is required for this feature.
 
@@ -53,6 +54,7 @@ Select one smallest `ready` batch after independent review. Record its batch ID,
 - no hot transaction or entry exists;
 - every authoritative `poker_tables` row is absent;
 - no human, full-replay, legacy, unknown, or normal #890 CLOSED-table identity is included.
+- the minimal regression contract for the legacy receipt branch and the current closed-human/bot-only GO guard has passed.
 
 The operator then requires explicit owner confirmation in the exact form `GO <batch_id>` and runs:
 
@@ -81,7 +83,7 @@ Probe one retired bot-internal key through the existing TABLE transaction path. 
 
 Retry the exact batch with the same count and SHA. It must return `already_retired` without mutation. A different count, SHA, batch ID, partial receipt, residual mapping, or target must fail closed.
 
-After the canary, run the read-only classification and residual-horizon audit again. Continue only with separately reviewed exact batches. Do not create a scheduler, automatic draining loop, generic TTL, generic archive, or per-key tombstone under this feature.
+After the canary, run the read-only classification and residual-horizon audit again and recheck the preserved legacy receipt and closed-human GO contracts. Continue only with separately reviewed exact batches. Do not create a scheduler, automatic draining loop, generic TTL, generic archive, generic/persistent classification framework, or per-key tombstone under this feature.
 
 ## Validation after implementation
 
