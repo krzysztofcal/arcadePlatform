@@ -27,6 +27,7 @@ const RETAINED_MODES = [
   "escrow-retention-verify",
   "external-existing-30d",
   "external-scheduled-automatic",
+  "missing-table-bot-retirement-canary",
 ];
 
 const RETIRED_MODES = [
@@ -106,6 +107,10 @@ assert.deepEqual([...inputNames].sort(), [
   "escrow_retention_recovery_confirmation",
   "escrow_retention_recovery_object_path",
   "mode",
+  "missing_table_retirement_batch_id",
+  "missing_table_retirement_confirmation",
+  "missing_table_retirement_registry_count",
+  "missing_table_retirement_registry_sha256",
   "stage_30d_recovery_batch_id",
 ].sort(), "exact retained dispatch inputs");
 
@@ -153,9 +158,16 @@ assert.match(workflow, /vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1'/);
 assert.equal((workflow.match(/^    timeout-minutes: 60$/gm) || []).length, 1);
 assert.equal((workflow.match(/^    timeout-minutes: 30$/gm) || []).length, 0);
 assert.match(workflow, /SUPABASE_STAGE_DB_URL: \${{ secrets\.SUPABASE_STAGE_DB_URL }}/);
-assert.match(workflow, /SUPABASE_STAGE_URL: \${{ secrets\.SUPABASE_STAGE_URL }}/);
-assert.match(workflow, /SUPABASE_STAGE_SERVICE_ROLE_KEY: \${{ secrets\.SUPABASE_STAGE_SERVICE_ROLE_KEY }}/);
+assert.match(workflow, /SUPABASE_STAGE_URL: \${{ inputs\.mode != 'missing-table-bot-retirement-canary' && secrets\.SUPABASE_STAGE_URL \|\| '' }}/);
+assert.match(workflow, /SUPABASE_STAGE_SERVICE_ROLE_KEY: \${{ inputs\.mode != 'missing-table-bot-retirement-canary' && secrets\.SUPABASE_STAGE_SERVICE_ROLE_KEY \|\| '' }}/);
 assert.doesNotMatch(workflow, /SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
+
+const checkoutStep = parsedWorkflow.jobs["stage-archive"].steps.find((step) => step.id === "checkout");
+assert.equal(checkoutStep.with.ref, "${{ github.sha }}");
+assert.equal(checkoutStep.with["fetch-depth"], 1);
+const checkoutShaStep = parsedWorkflow.jobs["stage-archive"].steps.find((step) => step.id === "checkout-sha");
+assert.match(checkoutShaStep.run, /checked_out_sha="\$\(git rev-parse HEAD\)"/);
+assert.match(checkoutShaStep.run, /test "\$checked_out_sha" = "\$GITHUB_SHA"/);
 
 assert.match(workflow, /set transaction read only/);
 assert.match(workflow, /pg_control_system/);
@@ -176,12 +188,43 @@ for (const mode of [
   "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
   "escrow-retention-verify",
+  "missing-table-bot-retirement-canary",
 ]) {
   assert.match(preflightStep, new RegExp(`inputs\\.mode == '${mode}'`));
 }
 for (const retired of RETIRED_MODES) {
   assert.doesNotMatch(preflightStep, new RegExp(`inputs\\.mode == '${retired}'`));
 }
+
+const missingTableRetirementCanary = parsedWorkflow.jobs["stage-archive"].steps.find(
+  (step) => step.name === "Execute exact missing-table bot retirement Stage canary",
+);
+assert.ok(missingTableRetirementCanary, "missing-table retirement canary step must exist");
+assert.equal(
+  missingTableRetirementCanary.if,
+  "${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'missing-table-bot-retirement-canary' }}",
+);
+assert.deepEqual(
+  Object.keys(missingTableRetirementCanary.env).sort(),
+  [
+    "DEPLOYED_COMMIT_SHA",
+    "MISSING_TABLE_RETIREMENT_BATCH_ID",
+    "MISSING_TABLE_RETIREMENT_CONFIRMATION",
+    "MISSING_TABLE_RETIREMENT_REGISTRY_COUNT",
+    "MISSING_TABLE_RETIREMENT_REGISTRY_SHA256",
+    "SUPABASE_STAGE_DB_URL",
+  ].sort(),
+  "canary step must use DB URL and workflow inputs only",
+);
+assert.equal(
+  missingTableRetirementCanary.env.SUPABASE_STAGE_DB_URL,
+  "${{ secrets.SUPABASE_STAGE_DB_URL }}",
+);
+assert.match(
+  missingTableRetirementCanary.run,
+  /node scripts\/ops\/chips-ledger-missing-table-bot-retirement\.mjs \\\n\s+--target stage \\\n\s+--mode execute \\\n\s+--batch-id "\$MISSING_TABLE_RETIREMENT_BATCH_ID" \\\n\s+--registry-count "\$MISSING_TABLE_RETIREMENT_REGISTRY_COUNT" \\\n\s+--registry-sha256 "\$MISSING_TABLE_RETIREMENT_REGISTRY_SHA256" \\\n\s+--confirmation "\$MISSING_TABLE_RETIREMENT_CONFIRMATION"/,
+);
+assert.doesNotMatch(missingTableRetirementCanary.run, /retry|for \(|while \(|schedule|automatic|Storage|SUPABASE_STAGE_URL|SERVICE_ROLE|next batch/i);
 
 const stageJobIf = workflow.match(
   /^    if: .*$/m,
@@ -193,6 +236,11 @@ assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'external-existing-30d'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode == 'external-existing-30d'/);
+assert.match(
+  stageJobIf,
+  /\|\| \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'missing-table-bot-retirement-canary' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner\)/,
+);
+assert.match(stageJobIf, /inputs\.mode != 'missing-table-bot-retirement-canary'/);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(
