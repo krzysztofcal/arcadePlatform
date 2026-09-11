@@ -115,9 +115,11 @@ mapping returns `already_retired`; a mismatching receipt is rejected.
 The `DB Stage Apply PR` workflow run `34610702293` automatically applied
 `20260911100000_chips_ledger_missing_table_bot_registry_retirement.sql` to the
 shared Stage database, so that migration is recorded in Stage history. The
-implementation did not execute retirement, use a live `GO <batch_id>`, perform
-a Stage canary, or perform registry cleanup. Production remains untouched. Any
-later Stage canary requires independent review and explicit owner authorization.
+owner-authorized Stage canary was subsequently executed by workflow run
+`34620142707` at exact implementation HEAD
+`2729d7e5cb32b48ffcda0e12e37d6d6775af71c6`. It retired only exact batch `10`
+with the reviewed count/hash inputs. No subsequent batch was executed and
+Production remains untouched.
 
 ## Preserved effective contracts
 
@@ -153,37 +155,72 @@ mapping for each retired exact batch. Residual growth remains separately
 reported by identity class; it is not treated as a proof of a global database
 plateau.
 
-## Post-canary evidence template
+## Post-canary evidence
 
-The following is the required record format for a later owner-authorized Stage
-canary. During this implementation it remains pending and contains no live
-values.
+The following records the supplied evidence for the owner-authorized Stage
+canary. Values that were not supplied or directly observed remain explicitly
+unverified; no live replay result is inferred. The project and system values
+below are the canonical target contract enforced by preflight; no separate
+post-run identity read is claimed.
 
 ```json
 {
-  "status": "pending_owner_authorized_stage_canary",
-  "live_values_recorded": false,
+  "status": "completed_with_replay_evidence_limitation",
+  "workflow_run_id": "34620142707",
+  "implementation_head": "2729d7e5cb32b48ffcda0e12e37d6d6775af71c6",
   "target": "stage",
   "project_ref": "krydukthwdvccggbyjfw",
   "system_identifier": "7656985631720456337",
-  "batch_ids": [],
-  "registry_key_count": null,
-  "registry_keys_sha256": null,
-  "receipt_status": null,
-  "residual_rows_per_day_by_class": null,
-  "residual_bytes_per_day_by_class": null,
-  "projection_30d_by_class": null,
-  "projection_1y_by_class": null,
-  "balances": null,
-  "next_entry_seq": null,
-  "ledger_rows": null,
-  "provenance_rows": null,
-  "retired_key_replay_result": null,
-  "abort_or_blocking_reason": null
+  "batch_ids": ["10"],
+  "registry_key_count": 4,
+  "registry_keys_sha256": "ff17fa8a81407577126c7324970bb02070ddd6db8b10088af8d17391b0bf04d4",
+  "operator_inputs": {
+    "registry_count": 4,
+    "registry_keys_sha256": "ff17fa8a81407577126c7324970bb02070ddd6db8b10088af8d17391b0bf04d4",
+    "confirmation": "GO 10"
+  },
+  "operator_result": "retired",
+  "receipt_status": "present",
+  "receipt": {
+    "status": "present",
+    "registry_cleaned_key_count": 4,
+    "registry_cleaned_keys_sha256": "ff17fa8a81407577126c7324970bb02070ddd6db8b10088af8d17391b0bf04d4",
+    "hash_matches_operator_input": true
+  },
+  "remaining_registry_count": 0,
+  "remaining_archive_batch_mappings": 0,
+  "pre_canary": {
+    "hot_transactions": 0,
+    "hot_entries": 0,
+    "authoritative_poker_tables": 0
+  },
+  "residual_rows_per_day_by_class": "not_recorded_in_supplied_evidence",
+  "residual_bytes_per_day_by_class": "not_recorded_in_supplied_evidence",
+  "projection_30d_by_class": "not_recorded_in_supplied_evidence",
+  "projection_1y_by_class": "not_recorded_in_supplied_evidence",
+  "post_canary": {
+    "p_execute_false_retry": "already_retired",
+    "balances": "not_recorded_in_supplied_evidence",
+    "next_entry_seq": "not_recorded_in_supplied_evidence",
+    "ledger_rows": "not_recorded_in_supplied_evidence",
+    "provenance_rows": "not_recorded_in_supplied_evidence"
+  },
+  "retired_key_replay": {
+    "status": "not_executed",
+    "reason": "Exact retired key is unavailable after retirement; the archive batch retains only the identity-set hash.",
+    "fundamental_contract_test": "covered_by_disposable_postgresql_contract"
+  },
+  "economic_effect_verification": "live_retired_key_replay_not_executed; no-second-economic-effect behavior remains covered by the disposable contract test",
+  "additional_batches_executed": 0,
+  "production_mutation": false,
+  "abort_or_blocking_reason": "Live retired-key replay evidence is unavailable after exact-key deletion."
 }
 ```
 
-The live values may be filled only after independent review and an owner-
-authorized Stage canary. No scheduler, automatic draining loop, generic TTL,
-per-key tombstone, generic registry archive, or generic classification
-framework is part of this feature.
+The canary evidence confirms one receipt-backed exact whole-batch retirement and
+the independent `p_execute = false` terminal retry result. The retired-key
+replay was not executed because the exact key is unavailable after retirement;
+its no-second-economic-effect behavior remains covered by the fundamental
+disposable PostgreSQL contract test. No scheduler, automatic draining loop,
+generic TTL, per-key tombstone, generic registry archive, or generic
+classification framework is part of this feature.
