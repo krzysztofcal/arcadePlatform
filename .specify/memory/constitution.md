@@ -46,24 +46,21 @@ CSP headers MUST be updated in the same change.
 
 ### V. Fundamental Tests and Concrete Plans
 
-Testing is required for critical logic and MUST remain fundamental, deterministic,
-and proportional. Critical coverage includes poker engine reducers and state
-transitions, WebSocket runtime behavior, table create/close/cleanup lifecycle,
-reconnect and resynchronization, and backend business rules. Critical logic
-changes MUST be validated with the existing tests where applicable. New tests
-MUST NOT be added unless the user explicitly requests them; when tests are
-requested, authors MUST prefer extending existing test files. Tests for UI
-rendering, CSS layout, JSP views, or simple glue code remain out of scope unless
-the user explicitly requests them. Heavy test frameworks and speculative test
-suites are prohibited.
+Only fundamental, deterministic tests for critical logic are required, and test
+work MUST remain proportional. Critical coverage includes poker engine reducers
+and state transitions, WebSocket runtime behavior, table create/close/cleanup
+lifecycle, reconnect and resynchronization, and backend business rules.
+Authors MUST prefer extending existing test files. Broad or speculative suites,
+including UI rendering, CSS/layout, JSP views, or simple glue code, are
+prohibited. Heavy test frameworks are prohibited.
 
 Plans and specifications MUST name concrete file paths, function names, and
 properties, and MUST stay concise enough to review. Spec Kit plans MUST include
 a Constitution Check, MUST NOT include Git commands, and MUST NOT include full
-implementation code unless the code is trivial. When a repository snapshot matching
-arcadePlatform-repomix*.txt exists, agents MUST analyze it before requesting
-code context and MUST use it as the source of truth for the captured repository
-state.
+implementation code unless the code is trivial. When a repository snapshot
+matching arcadePlatform-repomix*.txt is needed, agents MAY use it as historical
+or offline fallback context. The live GitHub repository MUST remain the primary
+source of truth for current code; a conflicting snapshot MUST NOT override it.
 
 ## Deployment and Safety Gates
 
@@ -110,6 +107,14 @@ Deployment or preview work MUST use the target-specific workflow and evidence
 for that target. A bootstrap or documentation change MUST NOT be used as a
 reason to alter runtime code, migrations, cleanup workflows, or Production.
 
+The $speckit-implement workflow MUST execute only setup or implementation
+changes explicitly required by the current specification, plan, and tasks. It
+MUST NOT create or modify .gitignore, .npmignore, other ignore files,
+tooling/configuration files, dependencies, or perform generic setup cleanup
+because a repository or tool happens to suggest them. Each such change requires
+an explicit requirement in all applicable current feature artifacts. No
+feature artifacts means no generic setup changes.
+
 ## Governance
 
 This constitution formalizes the project rules in agents.md and skills.md and
@@ -132,4 +137,4 @@ resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
 not an allowed resolution.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-09-11
+**Version**: 1.0.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-09-11

@@ -116,7 +116,10 @@ Agents MUST use this to locate logic quickly.
 - `/tools/poker-e2e-*.mjs`
 
 ### Rule
-- DO NOT add new tests unless asked
+- Only fundamental, deterministic tests for critical logic
+- Prefer extending existing test files
+- No broad or speculative test suites
+- No UI rendering, CSS/layout, JSP-view, or simple-glue test suites
 - Use existing tests for understanding behavior
 
 ---
@@ -186,7 +189,8 @@ When solving a problem:
 2. Find entry point (JS or function)
 3. Trace flow:
    - UI → WS → runtime → shared logic
-4. Verify against repo snapshot
+4. Verify against the live GitHub repository; use a repo snapshot only as a
+   historical/offline fallback
 5. Implement minimal fix
 
 ---

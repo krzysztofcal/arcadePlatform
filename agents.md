@@ -9,9 +9,13 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ## 🧠 Core Rules (CRITICAL)
 
-1. **Repo snapshot is source of truth**
-   - ALWAYS analyze `arcadePlatform-repomix*.txt`
-   - DO NOT ask user for code if it exists there
+1. **Live GitHub repository is the primary source of truth**
+   - Treat the live GitHub repository as authoritative for current code.
+   - Use the current checkout and branch to inspect the change under review,
+     and verify current behavior against the live repository when needed.
+   - `arcadePlatform-repomix*.txt` is only a historical/offline snapshot and
+     fallback for context when the live repository is unavailable.
+   - If the live repository and a snapshot disagree, the live repository wins.
 
 2. **Keep solutions simple**
    - No over-engineering
@@ -96,7 +100,7 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ## 🧪 Testing Policy (IMPORTANT)
 
-Testing is REQUIRED, but ONLY for critical logic.
+Only fundamental, deterministic tests for critical logic are required.
 
 ### ✅ When to write tests
 - Poker engine logic (reducers, state transitions)
@@ -116,6 +120,8 @@ Testing is REQUIRED, but ONLY for critical logic.
 - Keep tests deterministic
 - Focus on edge cases and failure scenarios
 - Do NOT introduce heavy test frameworks
+- Do NOT add broad, speculative, UI, CSS, layout, JSP-view, or simple-glue
+  test suites
 
 ---
 
@@ -127,6 +133,10 @@ When writing a plan:
 - Be concise
 - DO NOT include git commands
 - DO NOT write full code unless trivial
+- `$speckit-implement` MUST NOT create or modify generic ignore files,
+  tooling/configuration files, dependencies, or perform setup cleanup unless
+  the current specification, plan, and tasks explicitly require that exact
+  change
 
 ---
 
