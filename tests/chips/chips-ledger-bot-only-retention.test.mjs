@@ -25,6 +25,14 @@ import {
   parseTableIdempotencyKey,
 } from "../../scripts/ops/_shared/chips-table-idempotency.mjs";
 import { validateStageEnvironment } from "../../scripts/ops/chips-ledger-stage-automation.mjs";
+import {
+  STAGE_PROJECT_REF,
+  STAGE_SYSTEM_IDENTIFIER,
+  buildPostCanaryEvidenceTemplate,
+  buildResidualHorizonReport,
+  parseRetirementArgs,
+  validateDbOnlyStageEnvironment,
+} from "../../scripts/ops/chips-ledger-missing-table-bot-retirement.mjs";
 
 const migration = fs.readFileSync("supabase/migrations/20260818100000_chips_ledger_bot_only_retention.sql", "utf8");
 const lifecycleGateMigration = fs.readFileSync("supabase/migrations/20260826100000_chips_ledger_bot_only_lifecycle_gate_scope.sql", "utf8");
@@ -38,6 +46,14 @@ const scopedCleanupLifecycleGateMigration = fs.readFileSync("supabase/migrations
 const transactionIdentityIndexMigration = fs.readFileSync("supabase/migrations/20260906130000_chips_transaction_idempotency_transaction_id_table_id_idx.sql", "utf8");
 const proofCandidateQueryShapeMigration = fs.readFileSync("supabase/migrations/20260907100000_chips_ledger_bot_only_candidate_query_shape.sql", "utf8");
 const closedTableCleanup = fs.readFileSync("ws-server/poker/persistence/closed-table-cleanup.mjs", "utf8");
+const missingTableRetirementMigrationPath = "supabase/migrations/20260911100000_chips_ledger_missing_table_bot_registry_retirement.sql";
+const missingTableRetirementOperatorPath = "scripts/ops/chips-ledger-missing-table-bot-retirement.mjs";
+const missingTableRetirementMigration = fs.existsSync(missingTableRetirementMigrationPath)
+  ? fs.readFileSync(missingTableRetirementMigrationPath, "utf8")
+  : "";
+const missingTableRetirementOperator = fs.existsSync(missingTableRetirementOperatorPath)
+  ? fs.readFileSync(missingTableRetirementOperatorPath, "utf8")
+  : "";
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000020";
 const TX_ID = "00000000-0000-4000-8000-000000000021";
@@ -485,6 +501,101 @@ function scopedCleanupLifecycleGateContract() {
   assert.equal(patchedTwoSiteShape.includes(oldGate), false);
 }
 
+function effectiveArchiveGuardRegressionContract() {
+  assert.ok(missingTableRetirementMigration, "issue #978 migration must exist");
+  assert.ok(missingTableRetirementOperator, "issue #978 DB-only operator must exist");
+
+  const currentReceipt = missingTableRetirementMigration.slice(
+    missingTableRetirementMigration.indexOf("add constraint chips_ledger_archive_batches_cleanup_receipt_check"),
+    missingTableRetirementMigration.indexOf("do $", missingTableRetirementMigration.indexOf("add constraint chips_ledger_archive_batches_cleanup_receipt_check")),
+  );
+  assert.match(currentReceipt, /registry_cleaned_at is null[\s\S]*registry_cleaned_keys_sha256 is null/);
+  assert.match(currentReceipt, /format_version = 2[\s\S]*stage-ledger-bot-only-retention-7d-v1/);
+  assert.match(currentReceipt, /source_policy_id = 'legacy_stage_allowlist_v1'/);
+  assert.match(currentReceipt, /format_version = 1[\s\S]*stage-ledger-auto-retention-30d-v1/);
+
+  assert.match(missingTableRetirementMigration, /(?:pg_catalog\.)?pg_get_functiondef\(\s*'public\.chips_guard_archive_batch_mutations\(\)'::(?:pg_catalog\.)?regprocedure\s*\)/);
+  assert.match(missingTableRetirementMigration, /execute patched/);
+  assert.match(missingTableRetirementMigration, /chips\.bot_only_go/);
+  assert.match(missingTableRetirementMigration, /chips\.closed_human_go/);
+  assert.doesNotMatch(missingTableRetirementMigration, /create or replace function public\.chips_guard_archive_batch_mutations\(\)/);
+  assert.match(missingTableRetirementMigration, /registry_cleaned_key_count = transaction_count/);
+
+  assert.match(missingTableRetirementOperator, /SUPABASE_STAGE_DB_URL/);
+  assert.match(missingTableRetirementOperator, /createPruneStore\(sql\)/);
+  assert.match(missingTableRetirementOperator, /\.getIdentity\(\)/);
+  assert.match(missingTableRetirementOperator, /chips_assert_archive_prune_stage/);
+  assert.match(missingTableRetirementOperator, /SUPABASE_PROD_|PRODUCTION_/);
+  assert.doesNotMatch(missingTableRetirementOperator, /validateStageEnvironment|SUPABASE_STAGE_SERVICE_ROLE_KEY|console\.log/);
+}
+
+function missingTableRetirementOperatorContract() {
+  assert.deepEqual(parseRetirementArgs(["--target", "stage", "--mode", "audit"]), {
+    help: false,
+    target: "stage",
+    mode: "audit",
+    batchId: null,
+    registryCount: null,
+    registrySha256: null,
+    confirmation: null,
+  });
+  assert.deepEqual(parseRetirementArgs([
+    "--target", "stage",
+    "--mode", "execute",
+    "--batch-id", "12",
+    "--registry-count", "2",
+    "--registry-sha256", "a".repeat(64),
+    "--confirmation", "GO 12",
+  ]), {
+    help: false,
+    target: "stage",
+    mode: "execute",
+    batchId: "12",
+    registryCount: "2",
+    registrySha256: "a".repeat(64),
+    confirmation: "GO 12",
+  });
+  assertThrowsMessage(() => parseRetirementArgs(["--target", "production", "--mode", "audit"]), /Production/);
+  assertThrowsMessage(() => parseRetirementArgs(["--target", "stage", "--mode", "execute", "--batch-id", "12"]), /requires batch id/);
+  assertThrowsMessage(() => parseRetirementArgs([
+    "--target", "stage", "--mode", "execute", "--batch-id", "12", "--registry-count", "2",
+    "--registry-sha256", "A".repeat(64), "--confirmation", "GO 12",
+  ]), /lowercase/);
+
+  const stageEnvironment = validateDbOnlyStageEnvironment({
+    SUPABASE_STAGE_DB_URL: `postgresql://postgres.${STAGE_PROJECT_REF}@db.${STAGE_PROJECT_REF}.supabase.co:5432/postgres`,
+  });
+  assert.equal(stageEnvironment.projectRef, STAGE_PROJECT_REF);
+  assert.equal(stageEnvironment.systemIdentifier, STAGE_SYSTEM_IDENTIFIER);
+  assert.doesNotThrow(() => validateDbOnlyStageEnvironment({
+    SUPABASE_STAGE_DB_URL: `postgresql://postgres.${STAGE_PROJECT_REF}@db.${STAGE_PROJECT_REF}.supabase.co:5432/postgres`,
+    SUPABASE_STAGE_URL: "",
+  }));
+  assertThrowsMessage(() => validateDbOnlyStageEnvironment({
+    SUPABASE_STAGE_DB_URL: `postgresql://postgres.${STAGE_PROJECT_REF}@db.${STAGE_PROJECT_REF}.supabase.co:5432/postgres`,
+    SUPABASE_PROD_DB_URL: "present",
+  }), /Production credential/);
+
+  const template = buildPostCanaryEvidenceTemplate();
+  assert.equal(template.target, "stage");
+  assert.equal(template.live_values_recorded, false);
+  assert.equal(template.status, "pending_owner_authorized_stage_canary");
+  const report = buildResidualHorizonReport({
+    inventory: { registry_count: "2" },
+    classes: [{
+      identity_class: "bot-internal-table",
+      rows_per_day: "1.5",
+      bytes_per_day: "10",
+      hot_rows_per_day: "0.5",
+      hot_bytes_per_day: "4",
+    }],
+  });
+  assert.equal(report.projection.horizon_30d[0].rows, 45);
+  assert.equal(report.projection.hot_horizon_30d[0].projected_value, 15);
+  assert.equal(report.projection.hot_bytes_per_day_30d[0].projected_value, 120);
+  assert.equal(report.canary.live_values_recorded, false);
+}
+
 function retryAndAccountingContract() {
   const candidate = botCandidate();
   const record = botRecord(candidate);
@@ -821,6 +932,331 @@ async function overrideArchiveIdentityGates(tx) {
     end
     $bot_only_scope_test_target$;
   `);
+}
+
+async function insertMissingTableRetirementBatch(tx, {
+  rows = null,
+  completePrune = true,
+  tableExists = false,
+  hotTransactionIndex = null,
+} = {}) {
+  const tableId = randomUUID();
+  const defaultRows = [
+    {
+      key: `bot-seed-buyin:${tableId}:${randomUUID()}`,
+      transactionId: randomUUID(),
+      txType: "TABLE_BUY_IN",
+      userId: null,
+      keyFormatVersion: 1,
+      keyFormat: "bot-seed-buyin",
+    },
+    {
+      key: `poker:bot-terminal-cashout:v1:${tableId}:${randomUUID()}`,
+      transactionId: randomUUID(),
+      txType: "TABLE_CASH_OUT",
+      userId: null,
+      keyFormatVersion: 1,
+      keyFormat: "poker:bot-terminal-cashout:v1",
+    },
+  ];
+  const registryRows = (rows || defaultRows).map((row) => ({
+    ...row,
+    transactionId: row.transactionId || randomUUID(),
+    userId: row.userId === undefined ? null : row.userId,
+    keyFormatVersion: row.keyFormatVersion === undefined ? 1 : row.keyFormatVersion,
+  }));
+  const entryIds = registryRows.flatMap((_, index) => [String(10000 + index * 2), String(10001 + index * 2)]);
+  const transactionIds = registryRows.map((row) => row.transactionId);
+  const registryKeys = registryRows.map((row) => row.key);
+  const hashes = await tx.unsafe(`
+    select
+      public.chips_archive_uuid_ids_sha256($1::uuid[]) as transaction_hash,
+      public.chips_archive_bigint_ids_sha256($2::bigint[]) as entry_hash,
+      public.chips_archive_text_ids_sha256($3::text[]) as registry_hash;
+  `, [transactionIds, entryIds, registryKeys]);
+  const hash = hashes[0];
+  const objectHash = `${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`.slice(0, 64);
+  const createdAt = "2026-07-01T00:00:00.000Z";
+  const count = registryRows.length;
+  const entryCount = count * 2;
+  const archiveRows = await tx.unsafe(`
+    insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, format_version, cutoff,
+      first_created_at, last_created_at, transaction_count, entry_count, tx_types,
+      raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits, net_amount,
+      source_policy_id, archived_transaction_ids_sha256, archived_entry_ids_sha256,
+      archive_proof_verified_at, pruned_at, pruned_transaction_count, pruned_entry_count,
+      pruned_transaction_ids_sha256, pruned_entry_ids_sha256, status, committed_at
+    ) values (
+      $1, 'krydukthwdvccggbyjfw', 1, '2026-07-02T00:00:00Z',
+      $2::timestamptz, $2::timestamptz, $3::bigint, $4::bigint,
+      $5::jsonb, 100, 80, $6, $7, 100, 100, 0,
+      'stage-ledger-auto-retention-30d-v1', $8, $9, $10::timestamptz,
+      $11::timestamptz, $12::bigint, $13::bigint, $14, $15,
+      'committed', timezone('utc', now())
+    ) returning batch_id::text;
+  `, [
+    `v1/sha256/${objectHash}.jsonl.gz`,
+    createdAt,
+    count,
+    entryCount,
+    { TABLE_BUY_IN: registryRows.filter((row) => row.txType === "TABLE_BUY_IN").length,
+      TABLE_CASH_OUT: registryRows.filter((row) => row.txType === "TABLE_CASH_OUT").length },
+    "a".repeat(64),
+    "b".repeat(64),
+    hash.transaction_hash,
+    hash.entry_hash,
+    createdAt,
+    completePrune ? createdAt : null,
+    completePrune ? count : null,
+    completePrune ? entryCount : null,
+    completePrune ? hash.transaction_hash : null,
+    completePrune ? hash.entry_hash : null,
+  ]);
+  const batchId = archiveRows[0].batch_id;
+
+  for (const row of registryRows) {
+    await tx.unsafe(`
+      insert into public.chips_transaction_idempotency (
+        idempotency_key, transaction_id, payload_hash, tx_type, user_id,
+        transaction_created_at, archive_batch_id, table_id, key_format_version, key_format
+      ) values ($1, $2::uuid, $3, $4::public.chips_tx_type, $5::uuid,
+                $6::timestamptz, $7::bigint, $8::uuid, $9::integer, $10);
+    `, [
+      row.key,
+      row.transactionId,
+      "c".repeat(64),
+      row.txType,
+      row.userId,
+      createdAt,
+      batchId,
+      row.tableId || tableId,
+      row.keyFormatVersion,
+      row.keyFormat,
+    ]);
+  }
+
+  if (tableExists) {
+    await tx.unsafe("insert into public.poker_tables (id, status) values ($1::uuid, 'CLOSED');", [tableId]);
+  }
+  if (hotTransactionIndex != null) {
+    const hotRow = registryRows[hotTransactionIndex];
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe(`
+      insert into public.chips_transactions
+        (id, idempotency_key, payload_hash, tx_type, metadata, created_at)
+      values ($1::uuid, $2, $3, $4::public.chips_tx_type, '{}'::jsonb, $5::timestamptz);
+    `, [hotRow.transactionId, hotRow.key, "c".repeat(64), hotRow.txType, createdAt]);
+    await tx.unsafe("set local session_replication_role = 'origin';");
+  }
+  return {
+    batchId,
+    tableId,
+    transactionIds,
+    registryKeys,
+    registryCount: count,
+    registryKeysSha256: hash.registry_hash,
+  };
+}
+
+async function callMissingTableRetirement(tx, fixture, {
+  execute = false,
+  registryKeyCount = fixture.registryCount,
+  registryKeysSha256 = fixture.registryKeysSha256,
+  confirmation = null,
+} = {}) {
+  const rows = await tx.unsafe(`
+    select public.chips_retire_missing_table_bot_registry_batch(
+      $1::bigint, $2::bigint, $3::text, $4::boolean, $5::text
+    ) as result;
+  `, [fixture.batchId, registryKeyCount, registryKeysSha256, execute, confirmation]);
+  return rows[0].result;
+}
+
+async function readEconomicSnapshot(tx) {
+  const rows = await tx.unsafe(`
+    select
+      (select coalesce(sum(balance), 0)::text from public.chips_accounts) as balances,
+      (select coalesce(sum(next_entry_seq), 0)::text from public.chips_accounts) as next_entry_seq,
+      (select count(*)::text from public.chips_transactions) as transactions,
+      (select count(*)::text from public.chips_entries) as entries;
+  `);
+  return rows[0];
+}
+
+async function expectMissingTableRetirementRejected(tx, savepoint, operation) {
+  await tx.unsafe(`savepoint ${savepoint};`);
+  let caught = null;
+  try {
+    await operation();
+  } catch (error) {
+    caught = error;
+  }
+  await tx.unsafe(`rollback to savepoint ${savepoint};`);
+  await tx.unsafe(`release savepoint ${savepoint};`);
+  assert.ok(caught, `${savepoint} must fail closed`);
+  assert.match(String(caught.code || ""), /^(P8901|P894[0-9])$/, `${savepoint} error code`);
+  return caught;
+}
+
+async function missingTableRetirementHappyPathPostgresContract(sql) {
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await overrideArchiveIdentityGates(tx);
+    await enableTableFence(tx, true);
+    const fixture = await insertMissingTableRetirementBatch(tx);
+    const before = await readEconomicSnapshot(tx);
+    const ready = await callMissingTableRetirement(tx, fixture);
+    assert.equal(ready.state, "ready");
+    assert.equal(Number(ready.registry_count), fixture.registryCount);
+    assert.equal(ready.registry_keys_sha256, fixture.registryKeysSha256);
+    assert.deepEqual(await readEconomicSnapshot(tx), before, "audit must not change economic state");
+
+    const retired = await callMissingTableRetirement(tx, fixture, {
+      execute: true,
+      confirmation: `GO ${fixture.batchId}`,
+    });
+    assert.equal(retired.state, "retired");
+    assert.equal(Number(retired.registry_key_count), fixture.registryCount);
+    assert.equal(retired.registry_keys_sha256, fixture.registryKeysSha256);
+    const receipt = await tx.unsafe(`
+      select registry_cleaned_at, registry_cleaned_key_count, registry_cleaned_keys_sha256
+        from public.chips_ledger_archive_batches
+       where batch_id = $1::bigint;
+    `, [fixture.batchId]);
+    assert.ok(receipt[0].registry_cleaned_at);
+    assert.equal(Number(receipt[0].registry_cleaned_key_count), fixture.registryCount);
+    assert.equal(receipt[0].registry_cleaned_keys_sha256, fixture.registryKeysSha256);
+    assert.deepEqual(await readEconomicSnapshot(tx), before, "retirement must not change balances or ledger rows");
+
+    await expectDatabaseError(tx, "retired_key_replay", async () => tx.unsafe(`
+      insert into public.chips_transactions
+        (id, idempotency_key, payload_hash, tx_type, metadata, created_at)
+      values ($1::uuid, $2::text, $3::text, 'TABLE_BUY_IN', jsonb_build_object('tableId', $4::text), now());
+    `, [randomUUID(), fixture.registryKeys[0], "d".repeat(64), fixture.tableId]), "P8903", /closed or missing/);
+    assert.deepEqual(await readEconomicSnapshot(tx), before, "retired-key replay must have no economic effect");
+    throw DB_ROLLBACK;
+  }).catch((error) => {
+    if (error !== DB_ROLLBACK) throw error;
+  });
+}
+
+async function missingTableRetirementFailClosedMatrixPostgresContract(sql) {
+  const cases = [
+    {
+      name: "protected-human",
+      rows: [{
+        key: `join-buyin:${randomUUID()}:${randomUUID()}`,
+        txType: "TABLE_BUY_IN",
+        userId: randomUUID(),
+        keyFormatVersion: 1,
+        keyFormat: "join-buyin",
+      }],
+    },
+    {
+      name: "full-replay",
+      rows: [{
+        key: `bot-seed-buyin:${randomUUID()}:${randomUUID()}`,
+        txType: "BUY_IN",
+        keyFormatVersion: 1,
+        keyFormat: "bot-seed-buyin",
+      }],
+    },
+    {
+      name: "legacy-unknown",
+      rows: [{
+        key: `legacy-unknown:${randomUUID()}`,
+        txType: "TABLE_BUY_IN",
+        keyFormatVersion: null,
+        keyFormat: "legacy-unknown",
+      }],
+    },
+    { name: "existing-table", tableExists: true },
+    { name: "hot-transaction", hotTransactionIndex: 0 },
+    {
+      name: "unsupported-key",
+      rows: [{
+        key: `unsupported:${randomUUID()}`,
+        txType: "TABLE_BUY_IN",
+        keyFormatVersion: 1,
+        keyFormat: "unsupported",
+      }],
+    },
+    {
+      name: "mixed-batch",
+      rows: [
+        {
+          key: `bot-seed-buyin:${randomUUID()}:${randomUUID()}`,
+          txType: "TABLE_BUY_IN",
+          keyFormatVersion: 1,
+          keyFormat: "bot-seed-buyin",
+        },
+        {
+          key: `legacy-unknown:${randomUUID()}`,
+          txType: "TABLE_BUY_IN",
+          keyFormatVersion: null,
+          keyFormat: "legacy-unknown",
+        },
+      ],
+    },
+    { name: "proof-prune-mismatch", completePrune: false },
+  ];
+
+  for (const testCase of cases) {
+    await sql.begin(async (tx) => {
+      await overrideArchiveIdentityGates(tx);
+      await enableTableFence(tx, true);
+      const fixture = await insertMissingTableRetirementBatch(tx, testCase);
+      await expectMissingTableRetirementRejected(tx, `retire_${testCase.name.replaceAll("-", "_")}`, () => callMissingTableRetirement(tx, fixture));
+      throw DB_ROLLBACK;
+    }).catch((error) => {
+      if (error !== DB_ROLLBACK) throw error;
+    });
+  }
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe(`
+      create or replace function public.chips_assert_archive_prune_stage()
+      returns text language sql security definer set search_path = ''
+      as $wrong_stage_identity$ select 'wrong-stage-identity'::text $wrong_stage_identity$;
+    `);
+    await enableTableFence(tx, true);
+    const fixture = await insertMissingTableRetirementBatch(tx);
+    await expectMissingTableRetirementRejected(tx, "retire_wrong_stage", () => callMissingTableRetirement(tx, fixture));
+    throw DB_ROLLBACK;
+  }).catch((error) => {
+    if (error !== DB_ROLLBACK) throw error;
+  });
+}
+
+async function missingTableRetirementExactRetryPostgresContract(sql) {
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await overrideArchiveIdentityGates(tx);
+    await enableTableFence(tx, true);
+    const fixture = await insertMissingTableRetirementBatch(tx);
+    const retired = await callMissingTableRetirement(tx, fixture, {
+      execute: true,
+      confirmation: `GO ${fixture.batchId}`,
+    });
+    assert.equal(retired.state, "retired");
+    const retry = await callMissingTableRetirement(tx, fixture, {
+      execute: true,
+      confirmation: `GO ${fixture.batchId}`,
+    });
+    assert.equal(retry.state, "already_retired");
+    assert.equal(Number(retry.registry_key_count), fixture.registryCount);
+    assert.equal(retry.registry_keys_sha256, fixture.registryKeysSha256);
+    await expectMissingTableRetirementRejected(tx, "retire_receipt_mismatch", () => callMissingTableRetirement(tx, fixture, {
+      execute: true,
+      registryKeyCount: fixture.registryCount - 1,
+      registryKeysSha256: "0".repeat(64),
+      confirmation: `GO ${fixture.batchId}`,
+    }));
+    throw DB_ROLLBACK;
+  }).catch((error) => {
+    if (error !== DB_ROLLBACK) throw error;
+  });
 }
 
 async function insertHumanUserEscrowTransaction(tx, fixture, { createdAt } = {}) {
@@ -2007,6 +2443,9 @@ async function runPostgresFundamentalContracts() {
     await humanEntryShapeDiagnosticPostgresContract(sql);
     await ageBoundaryPostgresContract(sql);
     await retryDestructiveOperatorPostgresContract(sql);
+    await missingTableRetirementHappyPathPostgresContract(sql);
+    await missingTableRetirementFailClosedMatrixPostgresContract(sql);
+    await missingTableRetirementExactRetryPostgresContract(sql);
     process.stdout.write("chips-ledger-bot-only-retention PostgreSQL selector and fundamental contracts passed\n");
   } finally {
     await sql.end({ timeout: 5 });
@@ -2021,6 +2460,8 @@ proofPerformanceContract();
 transactionIdentityIndexContract();
 proofCandidateQueryShapeContract();
 scopedCleanupLifecycleGateContract();
+effectiveArchiveGuardRegressionContract();
+missingTableRetirementOperatorContract();
 retryAndAccountingContract();
 
 if (POSTGRES_TEST_DB_URL) {
