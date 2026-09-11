@@ -8,9 +8,9 @@
 
 V1 closes one finite historical gap: registry identities for bot-internal TABLE transactions whose authoritative `poker_tables` row is absent and whose rows already crossed the existing Stage 30-day archive, proof, and prune boundary. The operation is an exact whole `chips_ledger_archive_batches` batch retirement. It removes only the registry rows proven to belong to that batch and records the existing `registry_cleaned_at`, `registry_cleaned_key_count`, and `registry_cleaned_keys_sha256` receipt atomically.
 
-The smallest design is one additive migration, one narrow Stage-only `SECURITY DEFINER` database operator, one manual read-only audit/execute wrapper, and one audit document. It reuses the existing archive-pruner role, DB-only Stage assertion, `createPruneStore(sql).getIdentity()`, TABLE parser, canonical text hash, archive/prune receipts, and archive-batch mapping. The wrapper does not require the REST URL or service-role key because it has no Supabase REST or Storage path. It does not reuse the existing #890 cleanup operator as the lifecycle gate because that operator correctly requires a present `CLOSED` bot-only table; this feature requires the opposite state, an absent authoritative table. Ledger pruning is already complete before this operator runs, so the new operator deletes registry rows and writes the cleanup receipt only.
+The smallest design is one additive migration, one narrow Stage-only `SECURITY DEFINER` database operator, one manual read-only audit/execute wrapper, one owner-gated manual dispatch path in the existing Stage automation workflow, and one audit document. It reuses the existing archive-pruner role, DB-only Stage assertion, `createPruneStore(sql).getIdentity()`, TABLE parser, canonical text hash, archive/prune receipts, and archive-batch mapping. The wrapper does not require the REST URL or service-role key because it has no Supabase REST or Storage path. It does not reuse the existing #890 cleanup operator as the lifecycle gate because that operator correctly requires a present `CLOSED` bot-only table; this feature requires the opposite state, an absent authoritative table. Ledger pruning is already complete before this operator runs, so the new operator deletes registry rows and writes the cleanup receipt only.
 
-The 2026-09-11 classification is an input and is revalidated by a bounded read-only audit. No generic classifier, TTL, archive registry, tombstone, scheduler, or draining loop is introduced. No runtime, browser, WebSocket, migration execution, Stage database, Storage, or Production action is part of this plan phase.
+The 2026-09-11 classification is an input and is revalidated by a bounded read-only audit. No generic classifier, TTL, archive registry, tombstone, scheduler, or draining loop is introduced. No runtime, browser, WebSocket, migration execution, Stage database, Storage, or Production action is part of this plan phase; the only workflow change is the manual dispatch wiring described below, and that workflow is not dispatched here.
 
 ## Technical Context
 
@@ -20,7 +20,7 @@ The 2026-09-11 classification is an input and is revalidated by a bounded read-o
 
 **Storage**: Existing PostgreSQL tables and archive batch evidence. No new table, Storage object, registry archive, or tombstone is added. The retirement path consumes an already committed and pruned archive batch; it does not perform archive or Storage writes.
 
-**Testing**: Extend `tests/chips/chips-ledger-bot-only-retention.test.mjs` with static migration contracts and a disposable PostgreSQL contract when `CHIPS_MIGRATIONS_TEST_DB_URL` is available. Run the existing `node scripts/syntax-check.mjs` and `node scripts/test-all.mjs` after implementation; no Stage mutation is a test prerequisite.
+**Testing**: Extend `tests/chips/chips-ledger-bot-only-retention.test.mjs` with static migration contracts and a disposable PostgreSQL contract when `CHIPS_MIGRATIONS_TEST_DB_URL` is available; extend the existing `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` only with the fundamental owner-gate/input/operator contract for the manual mode. Run the existing `node scripts/syntax-check.mjs`, `node scripts/test-all.mjs`, and the workflow guard after implementation; no Stage mutation is a test prerequisite.
 
 **Target Platform**: Canonical Stage database `krydukthwdvccggbyjfw` with PostgreSQL system identifier `7656985631720456337`, invoked manually from the existing Node.js operations environment with `SUPABASE_STAGE_DB_URL`. The wrapper obtains the physical identity through `createPruneStore(sql).getIdentity()` and `chips_assert_archive_prune_stage()`, rejects Production target/credential variables, and neither requires nor reads `SUPABASE_STAGE_URL` or `SUPABASE_STAGE_SERVICE_ROLE_KEY`.
 
@@ -99,7 +99,13 @@ The wrapper will:
 - emit only aggregate, copyable structured `klog` output and a nonzero failure for any rejected or ambiguous execution;
 - contain no cron entry, workflow dispatch, automatic loop, Storage write, archive export, or call to `runAutomaticBotOnlyStageAutomation()`.
 
-### 3. Add the operator/audit documentation
+### 3. Extend the existing workflow with one owner-gated manual canary path
+
+Extend `.github/workflows/chips-ledger-stage-scheduled-automation.yml` without creating another workflow or scheduler. Add the `workflow_dispatch` mode `missing-table-bot-retirement-canary` and only its four conditional string inputs: `missing_table_retirement_batch_id`, `missing_table_retirement_registry_count`, `missing_table_retirement_registry_sha256`, and `missing_table_retirement_confirmation`; these inputs have no destructive defaults and are required by the canary step when that mode is selected.
+
+The mode is admitted only for the canonical `krzysztofcal/arcadePlatform` repository, a non-fork run, and the repository owner. The existing checkout is pinned to the selected workflow commit (`github.sha`) and keeps the existing `git rev-parse HEAD`/`GITHUB_SHA` assertion. The existing read-only Stage identity/TABLE-fence preflight runs before the canary step. The canary step exposes only `SUPABASE_STAGE_DB_URL` and the four workflow inputs, invokes `node scripts/ops/chips-ledger-missing-table-bot-retirement.mjs --target stage --mode execute ...` exactly once for the supplied batch/count/hash/confirmation, and has no retry, next-batch path, Storage, service-role, or scheduler behavior. The mode is excluded from the generic automation gate and all existing automatic/resource-health paths. The existing workflow guard test receives only the corresponding static contract. No workflow dispatch is performed during implementation.
+
+### 4. Add the operator/audit documentation
 
 Create `docs/issue-978-idempotency-retention-audit.md` with:
 
@@ -111,7 +117,7 @@ Create `docs/issue-978-idempotency-retention-audit.md` with:
 - the breaking semantic impact: a very old retired bot-internal retry can return terminal `table_closed`/retired rejection, while the existing fence must prevent a second transaction, entry, balance change, or provenance change;
 - residual rows/day, bytes/day, 30-day, and one-year measurements by class, without claiming a full registry plateau.
 
-### 4. Add only fundamental deterministic coverage
+### 5. Add only fundamental deterministic coverage
 
 Extend `tests/chips/chips-ledger-bot-only-retention.test.mjs`, which already contains the parser/hash/role/receipt fixtures and disposable PostgreSQL contract, with one small static guard regression contract and three fundamental behavioral groups:
 
@@ -130,7 +136,7 @@ The later implementation/rollout must follow this order:
 2. Run the wrapper in read-only `audit` mode. Re-measure the complete identity classification and current missing-table whole-batch set. Compare the result with the research estimate of about 10,080 identities and report every difference; never treat the estimate as authorization.
 3. Select one smallest exact batch that is fully `ready`, capture its batch ID, derived registry count, identity-set SHA, policy, proof/prune evidence, and missing-table summary, then independently review the report.
 4. Before the canary, verify the active/enforced TABLE fence, zero hot rows/entries for the exact batch, absent authoritative tables, account balances, ledger conservation, and the absence of human/full-replay/legacy/unknown identities. Run the minimal effective-guard regression contract confirming that the legacy receipt branch and closed-human `chips.closed_human_go`/bot-only GO behavior remain intact.
-5. Provide explicit owner confirmation in the exact form `GO <batch_id>` and run `execute` with the same batch ID, count, and SHA. The database function repeats every guard in the serializable transaction.
+5. Provide explicit owner confirmation in the exact form `GO <batch_id>` and, when the later owner-authorized canary is approved, dispatch the existing workflow's `missing-table-bot-retirement-canary` mode with the same batch ID, count, and SHA. That mode invokes the existing operator once after the read-only preflight; the database function repeats every guard in the serializable transaction. This plan/implementation does not dispatch the workflow.
 6. Verify the committed receipt, exact registry count decrease, zero residual batch mappings, unchanged balances/`next_entry_seq`/ledger conservation, and no Storage or table mutation.
 7. Run a bounded deleted-key retry probe. It must receive the documented terminal `table_closed`/retired result and create no transaction, entry, balance, or provenance effect.
 8. Re-run the read-only class and residual-horizon audit. Stop on any new missing-table class, mixed batch, count/hash drift, or indefinite growth signal; do not add a scheduler or automatic drain under this feature.
@@ -144,6 +150,7 @@ This plan phase performs none of these Stage mutations or canary steps.
 - It adds one policy-specific migration branch and one narrow operator, while retaining existing archive/prune/fence/parser/hash/role mechanisms and deriving the archive-batch guard from its latest effective definition.
 - It does not alter the WebSocket authoritative runtime or introduce another poker-state source.
 - It is Stage-only, serializable, exact-batch, fail-closed, and has no balance, ledger, Production, or automatic-scheduler path.
+- It extends only the existing Stage workflow with an owner-gated manual dispatch path; it adds no workflow, scheduler, automatic drain, or Production path.
 - The wrapper uses `klog`, a DB-only Stage preflight, introduces no JSP/browser/CSS/CSP surface, and adds no dependency.
 - Tests cover only critical retirement/retry/safety boundaries in an existing chips retention test file, with one minimal regression contract for legacy receipt and closed-human GO preservation.
 - All plan artifacts name concrete paths, procedures, fields, and constraints and contain no Git commands.
@@ -180,10 +187,14 @@ docs/
 └── issue-978-idempotency-retention-audit.md
 
 tests/chips/
-└── chips-ledger-bot-only-retention.test.mjs  # extend existing fundamental contracts
+├── chips-ledger-bot-only-retention.test.mjs  # extend existing fundamental contracts
+└── chips-ledger-stage-automation.workflow.guard.test.mjs  # extend existing manual-path guard
+
+.github/workflows/
+└── chips-ledger-stage-scheduled-automation.yml  # extend existing dispatch only
 ```
 
-**Structure Decision**: Keep the database boundary in the existing chronological migration stream, keep the operator beside the existing Stage ledger tools, keep audit/runbook material in `docs/`, and extend the existing bot-only retention test because it already owns the relevant fixtures and safety contracts. No browser, WebSocket, runtime, workflow, or generic setup path is added.
+**Structure Decision**: Keep the database boundary in the existing chronological migration stream, keep the operator beside the existing Stage ledger tools, keep audit/runbook material in `docs/`, and extend the existing bot-only retention and workflow guard tests because they already own the relevant fixtures and safety contracts. No browser, WebSocket, runtime, new workflow, scheduler, or generic setup path is added; the existing Stage workflow receives one manual owner-gated dispatch path.
 
 ## Complexity Tracking
 

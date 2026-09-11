@@ -103,7 +103,8 @@ The protected-class matrix and effective-guard regression contract are written b
 **Purpose**: Validate the completed feature against the approved artifacts while preserving the narrow scope.
 
 - [X] T016 Run the existing critical validation commands `node scripts/syntax-check.mjs`, `node tests/chips/chips-ledger-bot-only-retention.test.mjs`, and `npm test`, and validate the scenarios in `specs/001-missing-table-bot-retirement/quickstart.md`; use `CHIPS_MIGRATIONS_TEST_DB_URL` only for the disposable database contract and perform no Stage or Production mutation (plan: validation; Constitution III, V)
-- [X] T017 Perform the final scope and safety review across `supabase/migrations/20260911100000_chips_ledger_missing_table_bot_registry_retirement.sql`, `scripts/ops/chips-ledger-missing-table-bot-retirement.mjs`, `tests/chips/chips-ledger-bot-only-retention.test.mjs`, and `docs/issue-978-idempotency-retention-audit.md`; confirm exactly one additive migration, one DB-only manual operator, three behavioral test groups plus the minimal guard regression, no runtime/WS/browser/Storage/workflow/Production change, no generic setup cleanup, and no scheduler/tombstone/classification framework (FR-015, FR-016, SC-008, Constitution I, III, V)
+- [X] T017 Perform the final scope and safety review across `supabase/migrations/20260911100000_chips_ledger_missing_table_bot_registry_retirement.sql`, `scripts/ops/chips-ledger-missing-table-bot-retirement.mjs`, `tests/chips/chips-ledger-bot-only-retention.test.mjs`, and `docs/issue-978-idempotency-retention-audit.md`; confirm exactly one additive migration, one DB-only manual operator, three behavioral test groups plus the minimal guard regression, no runtime/WS/browser/Storage/Production change, only the approved extension of `.github/workflows/chips-ledger-stage-scheduled-automation.yml`, no new workflow or scheduler, no generic setup cleanup, and no tombstone/classification framework (FR-015, FR-016, SC-008, Constitution I, III, V)
+- [X] T018 Extend `.github/workflows/chips-ledger-stage-scheduled-automation.yml` with the owner-gated `workflow_dispatch` mode `missing-table-bot-retirement-canary` and only the four conditional string inputs; pin checkout to `github.sha`, retain the checked-out SHA assertion, reuse the existing read-only Stage identity/TABLE-fence preflight, exclude the mode from generic/automatic paths, and invoke `node scripts/ops/chips-ledger-missing-table-bot-retirement.mjs --target stage --mode execute ...` exactly once with `SUPABASE_STAGE_DB_URL` plus input-derived batch/count/hash/confirmation and no defaults, retry, next-batch, Storage, or service-role requirement. Extend only `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` with the fundamental guard contract; do not dispatch the workflow or mutate Stage/Production (plan: secure manual execution wiring; FR-006, FR-016, SC-008, Constitution III, V)
 
 ## Dependencies & Execution Order
 
@@ -115,7 +116,7 @@ The protected-class matrix and effective-guard regression contract are written b
 - **User Story 2 (Phase 4)**: T006-T009 are written before T010-T012; T010 is the only migration task, T011 is the only database operator definition in that migration, and T012 depends on the read-only audit/preflight shape from T003/T004 plus the function from T011. T012 is the first task that performs strict per-batch `p_execute = false` validation and wires execute; T013 follows that contract.
 - **User Story 3 (Phase 5)**: Its pre-implementation tests are T008-T009 in the shared P1 test block; T010-T011 preserve the shared migration/operator contract, and this phase adds no duplicate implementation path.
 - **User Story 4 (Phase 6)**: T014 depends on the audit shape from T003/T004 and remains read-only; T015 follows the resulting report and creates only a post-canary evidence template, with live values deferred to a later owner-authorized Stage canary.
-- **Polish (Phase 7)**: T016 and T017 run after all desired story work and must not perform Stage/Production actions.
+- **Polish (Phase 7)**: T016-T018 run after all desired story work; T018 changes only the existing workflow wiring and guard test, and none of T016-T018 may dispatch the workflow or perform Stage/Production actions.
 
 ### User Story Dependencies
 
@@ -153,6 +154,7 @@ The protected-class matrix and effective-guard regression contract are written b
 2. Deliver one reviewed exact-batch retirement with receipt/replay evidence.
 3. Validate protected identity and effective guard preservation.
 4. Reconcile residual growth and capacity projections.
+5. If later independently approved, use the existing owner-gated workflow mode for one exact Stage canary; this implementation does not dispatch it.
 
 ## Notes
 

@@ -21,6 +21,7 @@ on:
           - escrow-retention-verify
           - external-existing-30d
           - external-scheduled-automatic
+          - missing-table-bot-retirement-canary
       stage_30d_recovery_batch_id:
         description: Exact Stage 30-day recovery batch_id (optional for existing-30d-recovery-diagnostic; required for existing-30d-recovery-repair)
         required: false
@@ -31,6 +32,22 @@ on:
         type: string
       escrow_retention_recovery_confirmation:
         description: Exact VERIFY <recovery_object_path> confirmation (only for verify)
+        required: false
+        type: string
+      missing_table_retirement_batch_id:
+        description: Exact Stage missing-table retirement batch_id (only for the owner-gated canary)
+        required: false
+        type: string
+      missing_table_retirement_registry_count:
+        description: Exact Stage missing-table retirement registry count (only for the owner-gated canary)
+        required: false
+        type: string
+      missing_table_retirement_registry_sha256:
+        description: Exact Stage missing-table retirement registry SHA-256 (only for the owner-gated canary)
+        required: false
+        type: string
+      missing_table_retirement_confirmation:
+        description: Exact GO batch confirmation (only for the owner-gated canary)
         required: false
         type: string
   schedule:
@@ -47,17 +64,20 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-selector-diagnostic' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref == 'refs/heads/main') || (vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair' && inputs.mode != 'external-existing-30d') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'external-existing-30d')) || inputs.mode == 'closed-human-30d-recovery-repair'))) ) }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-selector-diagnostic' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref == 'refs/heads/main') || (vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair' && inputs.mode != 'external-existing-30d' && inputs.mode != 'missing-table-bot-retirement-canary') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'external-existing-30d')) || inputs.mode == 'closed-human-30d-recovery-repair'))) ) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'missing-table-bot-retirement-canary' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
-      SUPABASE_STAGE_URL: ${{ secrets.SUPABASE_STAGE_URL }}
-      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY }}
+      SUPABASE_STAGE_URL: ${{ inputs.mode != 'missing-table-bot-retirement-canary' && secrets.SUPABASE_STAGE_URL || '' }}
+      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ inputs.mode != 'missing-table-bot-retirement-canary' && secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY || '' }}
     steps:
       - name: Checkout
         id: checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -78,7 +98,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-selector-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-selector-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'missing-table-bot-retirement-canary') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -160,6 +180,33 @@ jobs:
 
           process.stdout.write("Stage read-only fence preflight passed\n");
           NODE
+
+      - name: Execute exact missing-table bot retirement Stage canary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'missing-table-bot-retirement-canary' }}
+        env:
+          SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
+          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
+          MISSING_TABLE_RETIREMENT_BATCH_ID: ${{ inputs.missing_table_retirement_batch_id }}
+          MISSING_TABLE_RETIREMENT_REGISTRY_COUNT: ${{ inputs.missing_table_retirement_registry_count }}
+          MISSING_TABLE_RETIREMENT_REGISTRY_SHA256: ${{ inputs.missing_table_retirement_registry_sha256 }}
+          MISSING_TABLE_RETIREMENT_CONFIRMATION: ${{ inputs.missing_table_retirement_confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
+          test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
+          test -n "$MISSING_TABLE_RETIREMENT_BATCH_ID"
+          test -n "$MISSING_TABLE_RETIREMENT_REGISTRY_COUNT"
+          test -n "$MISSING_TABLE_RETIREMENT_REGISTRY_SHA256"
+          test -n "$MISSING_TABLE_RETIREMENT_CONFIRMATION"
+          node scripts/ops/chips-ledger-missing-table-bot-retirement.mjs \
+            --target stage \
+            --mode execute \
+            --batch-id "$MISSING_TABLE_RETIREMENT_BATCH_ID" \
+            --registry-count "$MISSING_TABLE_RETIREMENT_REGISTRY_COUNT" \
+            --registry-sha256 "$MISSING_TABLE_RETIREMENT_REGISTRY_SHA256" \
+            --confirmation "$MISSING_TABLE_RETIREMENT_CONFIRMATION"
 
       - name: Enforce Stage resource health before automatic retention
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '7,22,37,52 * * * *') || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'external-scheduled-automatic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'existing-30d' || inputs.mode == 'external-existing-30d')) }}
