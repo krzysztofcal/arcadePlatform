@@ -325,6 +325,73 @@ test("guest can auth and join only its token-bound guest_table_*", async () => {
   }
 });
 
+test("guest live subscription before create join bootstraps the first hand without persistence", async () => {
+  const secret = "guest-client-order-secret";
+  const guestUserId = "guest_user_client_order";
+  const tableId = "guest_table_client_order";
+  const { dir, filePath } = await writePersistedFile({});
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+    },
+  });
+  let output = "";
+  child.stdout.on("data", (buf) => { output += String(buf); });
+  child.stderr.on("data", (buf) => { output += String(buf); });
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    const authOk = await auth(ws, makeGuestJwt({
+      secret, sub: guestUserId, tableId, nickname: "Guest9710",
+    }));
+    assert.equal(authOk.type, "authOk");
+
+    // poker-ws-client requests live state after authOk, before the UI joins.
+    const beforeJoinFrames = [];
+    const recordBeforeJoin = (data) => { beforeJoinFrames.push(JSON.parse(String(data))); };
+    ws.on("message", recordBeforeJoin);
+    sendFrame(ws, {
+      version: "1.0", type: "table_state_sub", requestId: "guest-client-sub",
+      ts: "2026-02-28T00:00:02Z", payload: { tableId },
+    });
+    const pong = nextMessageOfType(ws, "pong");
+    sendFrame(ws, {
+      version: "1.0", type: "ping", requestId: "guest-client-barrier",
+      ts: "2026-02-28T00:00:02Z", payload: { clientTime: "2026-02-28T00:00:02Z" },
+    });
+    await pong;
+    ws.off("message", recordBeforeJoin);
+    assert.equal(beforeJoinFrames.some((frame) => frame.type !== "pong"), false,
+      "subscription must not materialize a missing guest runtime or reject cold start");
+
+    const ack = nextCommandResultForRequest(ws, "guest-client-join");
+    const joinedState = nextMessageMatching(ws, (frame) =>
+      frame.type === "table_state" && frame.requestId === "guest-client-join"
+    );
+    sendFrame(ws, tableJoinFrame(tableId, "guest-client-join", "create"));
+    assert.equal((await ack).payload.status, "accepted");
+    const state = (await joinedState).payload;
+    assert.equal(state.hand.status, "PREFLOP");
+    assert.ok(state.hand.handId);
+    assert.ok(state.pot.total > 0);
+    assert.equal(state.seats.find((seat) => seat.userId === guestUserId)?.seatNo, 1);
+    const bots = state.seats.filter((seat) => seat.isBot);
+    assert.deepEqual(bots.map((seat) => seat.seatNo), [2, 3, 4]);
+    assert.ok(bots.every((seat) => seat.userId.endsWith(tableId)));
+    assert.deepEqual(await readPersistedFile(filePath), {});
+    assert.doesNotMatch(output, /ws_state_persist_start|poker_ledger/);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("explicit guest leave evicts the in-memory table without authoritative persistence", async () => {
   const secret = "guest-explicit-leave-secret";
   const guestUserId = "guest_user_explicit_leave";
@@ -424,6 +491,8 @@ test("guest reconnect within grace preserves the table, then disconnect evicts i
     const second = await connectClient(port);
     await hello(second);
     await auth(second, guestToken, "auth-guest-disconnect-second");
+    sendFrame(second, { version: "1.0", type: "table_state_sub", requestId: "guest-grace-sub",
+      ts: "2026-02-28T00:00:02Z", payload: { tableId: guestTableId } });
     const secondJoin = await joinTable(second, guestTableId, "join-guest-disconnect-second", "resume");
     assert.equal(secondJoin.ack.payload.status, "accepted");
     assert.equal(secondJoin.ack.payload.reason, "already_joined");
@@ -456,6 +525,8 @@ test("guest reconnect within grace preserves the table, then disconnect evicts i
     const third = await connectClient(port);
     await hello(third);
     await auth(third, guestToken, "auth-guest-disconnect-third");
+    sendFrame(third, { version: "1.0", type: "table_state_sub", requestId: "guest-evicted-sub",
+      ts: "2026-02-28T00:00:02Z", payload: { tableId: guestTableId } });
     sendFrame(third, tableJoinFrame(guestTableId, "join-guest-after-eviction", "resume"));
     const rejected = await nextCommandResultForRequest(third, "join-guest-after-eviction");
     assert.equal(rejected.payload.status, "rejected");

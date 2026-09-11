@@ -2136,6 +2136,8 @@
   }
 
   function reconcileJoinOperationFromSnapshot(){
+    // Guest seats can be projected before the required join is acknowledged.
+    if (isGuestMode) return false;
     var seat = deriveCurrentSeat();
     if (!seat) return false;
     var waiting = currentPlayerStatus() === 'WAITING_NEXT_HAND';
@@ -4569,9 +4571,10 @@
   }
 
   function resumePendingJoinOperation(){
-    if (state.reconnectGate) return false;
-    if (!state.hasAppliedAuthoritativeSnapshot) return false;
-    if (deriveCurrentSeat()){
+    if (!isGuestMode && state.reconnectGate) return false;
+    if (!isGuestMode && !state.hasAppliedAuthoritativeSnapshot) return false;
+    if (isGuestMode && isJoinOperationPending()) return true;
+    if (!isGuestMode && deriveCurrentSeat()){
       reconcileJoinOperationFromSnapshot();
       return false;
     }
@@ -4712,7 +4715,7 @@
     autoJoinRetryTimer = window.setTimeout(function(){
       autoJoinRetryTimer = null;
       autoJoinAttempted = false;
-      if (deriveCurrentSeat()){
+      if (!isGuestMode && deriveCurrentSeat()){
         resetAutoJoinRetryState();
         return;
       }
@@ -4722,10 +4725,10 @@
   }
 
   function autoJoinSeat(){
-    if (!state.hasAppliedAuthoritativeSnapshot) return;
-    if (state.reconnectGate) return;
+    if (!isGuestMode && !state.hasAppliedAuthoritativeSnapshot) return;
+    if (!isGuestMode && state.reconnectGate) return;
     if (!shouldAutoJoin) return;
-    if (deriveCurrentSeat()){
+    if (isGuestMode ? joinOperation.phase === 'active' : deriveCurrentSeat()){
       autoJoinAttempted = false;
       resetAutoJoinRetryState();
       return;
@@ -4758,9 +4761,11 @@
       : lastKnownCurrentSeatNo;
     reconnectSeatNo = Number.isInteger(seatNo) && seatNo > 0 ? seatNo : null;
     autoJoinAttempted = false;
+    if (isGuestMode && !isJoinOperationPending()) joinOperation.phase = 'idle';
   }
 
   function rejoinSeatAfterReconnect(){
+    if (isGuestMode) return false;
     if (state.reconnectGate) return false;
     if (!Number.isInteger(reconnectSeatNo) || reconnectSeatNo < 1) return false;
     if (autoJoinAttempted) return true;
@@ -5477,6 +5482,13 @@
           render();
           if (pendingLeaveRetryAfterReconnect){
             if (!state.reconnectGate) leaveAndReturnToLobby();
+            return;
+          }
+          if (isGuestMode){
+            // Missing guest runtimes have no subscription snapshot. Join must
+            // resolve create/resume before the snapshot recovery gate can open.
+            if (!resumePendingJoinOperation()) autoJoinSeat();
+            if (state.reconnectGate) startSnapshotRecovery(gen);
             return;
           }
           if (state.reconnectGate){

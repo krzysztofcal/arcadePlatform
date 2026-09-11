@@ -4993,12 +4993,9 @@ wss.on("connection", (ws) => {
           });
           return;
         }
-        tableManager.materializeGuestTable({
-          tableId,
-          guestUserId: connState.session.userId,
-          nickname: connState.session.nickname || connState.nickname || null,
-          nowMs: Date.now()
-        });
+        // Only guest table_join(create) may create a runtime. A subscription
+        // can arrive first; its join will provide the snapshot or table_closed.
+        if (!tableManager.listTableIds().includes(tableId)) return;
       }
 
       const wantsSnapshot = frame.payload?.view === "snapshot" || frame.payload?.mode === "snapshot";
