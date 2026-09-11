@@ -17,7 +17,7 @@ The accepted 2026-09-11 research measured canonical Stage project
 | Bot-internal TABLE identities in the four observed families | 99,874 | Candidate source only when every batch guard passes |
 | New registry rows in seven days | 21,614, about 3,088/day | Measurement only; no generic TTL |
 | Human TABLE identities | 268 | Retain on the human TABLE path |
-| Full-replay identities | 42 | Retain on the full-replay path |
+| Complete full-replay non-TABLE identities | 42 | Retain on the full-replay path |
 | Legacy or unknown TABLE identities | 2,052 | Retain and report as protected/unknown |
 | Older TABLE identities with missing `poker_tables` rows | about 33.7k | Historical gap under this feature’s evidence rules |
 | Missing-table bot identities mapped to the 30-day archive policy | 10,183 | Revalidate by exact batch |
@@ -28,8 +28,16 @@ The fresh audit reports mapped, unmapped, and material hot identities from the
 full `public.chips_transaction_idempotency` table. It reports key/version,
 transaction type, user ownership, producer presence, replay state, archive and
 prune state, policy, age, hot transaction/entry state, and rows/day plus
-bytes/day. It emits hot and total 30-day and one-year projections as estimates
-only. It does not persist a classifier and does not authorize a batch.
+bytes/day. Its identity classes distinguish human TABLE identities, complete
+full-replay non-TABLE identities, bot-internal TABLE identities, and
+legacy/unknown/other identities. A full-replay class requires one of the five
+existing full-replay transaction types and all three replay snapshot fields;
+non-TABLE rows without a complete snapshot, including MINT rows, remain
+legacy/unknown/other. It emits hot and total 30-day and one-year projections as
+estimates only. It does not persist a classifier and does not authorize a batch.
+
+The current Stage review confirms 42 complete full-replay identities: BUY_IN 11,
+CASH_OUT 11, WELCOME_BONUS 6, PROMO_BONUS 8, and ADMIN_ADJUST 6.
 
 V1 recognizes only these parser families, with `key_format_version = 1`:
 
@@ -38,9 +46,10 @@ V1 recognizes only these parser families, with `key_format_version = 1`:
 - `poker:bot-replacement-buyin:v1`;
 - `poker:bot-terminal-cashout:v1`.
 
-Human TABLE identities, full-replay identities, legacy/unknown identities,
-normal #890 CLOSED bot-only tables, present tables, hot rows, malformed keys,
-unsupported keys, mixed batches, and incomplete evidence remain protected.
+Human TABLE identities, complete full-replay non-TABLE identities,
+legacy/unknown identities, normal #890 CLOSED bot-only tables, present tables,
+hot rows, malformed keys, unsupported keys, mixed batches, and incomplete
+evidence remain protected.
 
 ## Exact eligibility contract
 
@@ -103,9 +112,12 @@ batch, verifies the affected count, and writes
 `registry_cleaned_keys_sha256` atomically. A matching receipt with no residual
 mapping returns `already_retired`; a mismatching receipt is rejected.
 
-The implementation PR does not run this command against Stage, does not use a
-live `GO <batch_id>`, and does not perform a canary. Any later Stage canary
-requires independent review and an explicit owner authorization.
+The `DB Stage Apply PR` workflow run `34610702293` automatically applied
+`20260911100000_chips_ledger_missing_table_bot_registry_retirement.sql` to the
+shared Stage database, so that migration is recorded in Stage history. The
+implementation did not execute retirement, use a live `GO <batch_id>`, perform
+a Stage canary, or perform registry cleanup. Production remains untouched. Any
+later Stage canary requires independent review and explicit owner authorization.
 
 ## Preserved effective contracts
 

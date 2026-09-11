@@ -18,6 +18,13 @@ export const RETIREMENT_KEY_FORMATS = Object.freeze([
   "poker:bot-replacement-buyin:v1",
   "poker:bot-terminal-cashout:v1",
 ]);
+export const RETIREMENT_FULL_REPLAY_TX_TYPES = Object.freeze([
+  "BUY_IN",
+  "CASH_OUT",
+  "WELCOME_BONUS",
+  "PROMO_BONUS",
+  "ADMIN_ADJUST",
+]);
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const INTEGER_RE = /^(0|[1-9][0-9]*)$/;
@@ -179,10 +186,19 @@ const CLASSIFICATION_SQL = `
 with classified as (
   select
     case
-      when registry.user_id is not null then 'human-or-user-owned'
-      when registry.tx_type::text not in ('TABLE_BUY_IN', 'TABLE_CASH_OUT') then 'full-replay-or-other'
-      when registry.key_format_version = 1
+      when registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+        and registry.user_id is not null then 'human-table'
+      when registry.tx_type::text in ('TABLE_BUY_IN', 'TABLE_CASH_OUT')
+        and registry.user_id is null
+        and registry.replay_transaction is null
+        and registry.replay_entries is null
+        and registry.replay_completed_at is null
+        and registry.key_format_version = 1
         and registry.key_format = any($1::text[]) then 'bot-internal-table'
+      when registry.tx_type::text = any($2::text[])
+        and registry.replay_transaction is not null
+        and registry.replay_entries is not null
+        and registry.replay_completed_at is not null then 'complete-full-replay'
       else 'legacy-or-unknown'
     end as identity_class,
     registry.tx_type::text as tx_type,
@@ -198,7 +214,10 @@ with classified as (
       when registry.replay_transaction is null
        and registry.replay_entries is null
        and registry.replay_completed_at is null then 'no-full-replay'
-      else 'full-replay'
+      when registry.replay_transaction is not null
+       and registry.replay_entries is not null
+       and registry.replay_completed_at is not null then 'complete-full-replay'
+      else 'incomplete-full-replay'
     end as replay_state,
     case when registry.archive_batch_id is null then 'unmapped' else 'mapped' end as archive_state,
     coalesce(batches.source_policy_id, '<unmapped>') as source_policy_id,
@@ -476,7 +495,10 @@ export function buildPostCanaryEvidenceTemplate() {
 
 async function runAudit(tx, { writeKlog = klog } = {}) {
   const inventoryRows = await tx.unsafe(INVENTORY_SQL);
-  const classRows = await tx.unsafe(CLASSIFICATION_SQL, [RETIREMENT_KEY_FORMATS]);
+  const classRows = await tx.unsafe(CLASSIFICATION_SQL, [
+    RETIREMENT_KEY_FORMATS,
+    RETIREMENT_FULL_REPLAY_TX_TYPES,
+  ]);
   const candidates = await tx.unsafe(CANDIDATE_SQL);
   const normalizedClasses = classRows.map((row) => ({
     identity_class: rowValue(row, "identity_class"),
@@ -620,11 +642,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === modulePath) {
       process.stdout.write(`${result.usage}\n`);
     }
   } catch (error) {
-    process.stderr.write(JSON.stringify({
+    klog("chips_ledger_missing_table_bot_retirement_error", {
       event: "chips_ledger_missing_table_bot_retirement_error",
       code: error.code || "CHIPS_RETIREMENT_FAILED",
       message: error.message,
-    }) + "\n");
+    }, process.stderr.write.bind(process.stderr));
     process.exitCode = 1;
   }
 }

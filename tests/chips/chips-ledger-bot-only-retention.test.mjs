@@ -31,6 +31,7 @@ import {
   buildPostCanaryEvidenceTemplate,
   buildResidualHorizonReport,
   parseRetirementArgs,
+  RETIREMENT_FULL_REPLAY_TX_TYPES,
   validateDbOnlyStageEnvironment,
 } from "../../scripts/ops/chips-ledger-missing-table-bot-retirement.mjs";
 
@@ -527,6 +528,20 @@ function effectiveArchiveGuardRegressionContract() {
   assert.match(missingTableRetirementOperator, /chips_assert_archive_prune_stage/);
   assert.match(missingTableRetirementOperator, /SUPABASE_PROD_|PRODUCTION_/);
   assert.doesNotMatch(missingTableRetirementOperator, /validateStageEnvironment|SUPABASE_STAGE_SERVICE_ROLE_KEY|console\.log/);
+  assert.deepEqual(RETIREMENT_FULL_REPLAY_TX_TYPES, [
+    "BUY_IN",
+    "CASH_OUT",
+    "WELCOME_BONUS",
+    "PROMO_BONUS",
+    "ADMIN_ADJUST",
+  ]);
+  assert.match(missingTableRetirementOperator, /when registry\.tx_type::text in \('TABLE_BUY_IN', 'TABLE_CASH_OUT'\)[\s\S]*and registry\.user_id is not null then 'human-table'/);
+  assert.match(missingTableRetirementOperator, /when registry\.tx_type::text = any\(\$2::text\[\]\)[\s\S]*replay_transaction is not null[\s\S]*replay_entries is not null[\s\S]*replay_completed_at is not null then 'complete-full-replay'/);
+  assert.match(missingTableRetirementOperator, /else 'legacy-or-unknown'/);
+  assert.doesNotMatch(missingTableRetirementOperator, /when registry\.user_id is not null then 'human-or-user-owned'/);
+  assert.match(missingTableRetirementOperator, /klog\("chips_ledger_missing_table_bot_retirement_error"/);
+  assert.match(missingTableRetirementOperator, /process\.stderr\.write\.bind\(process\.stderr\)/);
+  assert.doesNotMatch(missingTableRetirementOperator, /process\.stderr\.write\(JSON\.stringify/);
 }
 
 function missingTableRetirementOperatorContract() {
