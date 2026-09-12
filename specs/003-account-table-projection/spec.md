@@ -31,7 +31,7 @@ As an authenticated user, I can see my current poker tables on the Account page 
 
 **Why this priority**: This exposes the backend value in the accepted Account-page design while keeping the UI read-only and bounded to the existing profile flow.
 
-**Independent Test**: Run the existing Account-page behavior harness with a deterministic `ProfileClient` response containing `poker.tables` and inspect the rendered table rows.
+**Independent Test**: Inspect Account on the real Deploy Preview after authenticated join/buy-in against WS Preview; use existing preview/E2E or manual preview, without new unit/VM rendering tests.
 
 **Acceptance Scenarios**:
 
@@ -58,8 +58,11 @@ As an authenticated user, I can see my current poker tables on the Account page 
 - **FR-006**: If the WS projection call fails, times out, is unavailable, or fails validation, the profile-me request MUST still return HTTP 200 with the correct ledger `balance` and `poker: null`.
 - **FR-007**: A failed WS projection MUST be observable through the existing `klog` path without logging private poker state or access tokens.
 - **FR-008**: Existing profile-me requests without `includePoker=1`, including PATCH requests, MUST retain their current response and error behavior.
-- **FR-009**: The Account page MUST request the opt-in projection only for the authenticated Account flow, render the returned table list or unavailable state, and abbreviate a table ID only for visible UI text; full IDs MUST remain in DOM data and navigation values.
-- **FR-010**: Critical deterministic coverage MUST extend existing behavior tests for the profile function, WS server/table manager, and Account page; no broad new test suite is required.
+- **FR-009**: The authenticated Account and global chips flows MUST use the opt-in projection. Account renders tables/unavailable state with full IDs in DOM data and navigation values; only visible labels may abbreviate IDs.
+- **FR-010**: Critical deterministic coverage MUST extend existing backend/WS behavior tests only. UI presentation uses real preview/E2E/manual verification; no UI rendering or simple-glue unit/VM tests.
+- **FR-011**: `js/chips/client.js` and `js/topbar.js` MUST preserve wallet `CH` and show separate `Poker: <sum of authoritative stack> CH` for positive active stacks, hiding it for empty/unavailable projections. WS failure MUST NOT overwrite wallet balance.
+- **FR-012**: Correct preview-only `/internal/account/poker` routing in `infra/vps/Caddyfile` and real preview Caddy configuration. Verify actual Deploy Preview → WS Preview JSON and matching token plus bounded journal.
+- **FR-013**: Constitution 1.1.0 and `agents.md` MUST encode the three requested governance rules. No migration is included, so automatic Stage migration apply is not an effect; the authenticated application smoke intentionally uses shared Stage wallet/runtime state. No Production changes.
 
 ### Key Entities
 

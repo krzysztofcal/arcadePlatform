@@ -14,7 +14,7 @@ Add an opt-in Account projection to `netlify/functions/profile-me.mjs`. It combi
 
 **Storage**: Existing chips ledger and existing WS runtime/persistence bootstrap. No schema or migration change.
 
-**Testing**: Node built-in `node:test` behavior suites, existing Account-page VM harness, syntax checks, and the repository test runner.
+**Testing**: Fundamental backend/WS `node:test` suites, syntax and repository runner; presentation uses real preview smoke, never new UI/VM rendering tests.
 
 **Target Platform**: Netlify deploy-preview/production functions, Ubuntu WS runtime, and existing desktop/mobile Account page.
 
@@ -28,7 +28,7 @@ Add an opt-in Account projection to `netlify/functions/profile-me.mjs`. It combi
 
 Pre-research: PASS. The change extends `profile-me`, `poker-ws-runtime-notify`, `table-manager`, `server.mjs`, `profile-client`, and the existing Account page instead of introducing a parallel table source, database query, dependency, or browser module. WS runtime state remains authoritative; the chips ledger remains the balance authority. Failure is safe (`poker: null`, no fabricated balance), logging uses `klog`, and private state is excluded.
 
-Post-design: PASS. The design has no schema/config/ignore/dependency edits, uses existing internal-token and timeout patterns, keeps JSP/CSP compatibility, extends existing deterministic behavior tests, and names the exact WS Preview Deploy gate required before preview E2E verification. No Production action or PR merge is part of the plan.
+Post-design (revised): PASS. Preview Caddy routing is explicitly required; no schema/ignore/dependency edits are needed. Existing token/timeout patterns and JSP/CSP compatibility are preserved. Fundamental backend/WS tests and exact-HEAD real preview verification are required. No Production action or PR merge is part of the plan.
 
 ## Project Structure
 
@@ -60,19 +60,35 @@ tests/public-profiles.behavior.test.mjs
 tests/public-profile-ui.contract.test.mjs
 ws-server/poker/table/table-manager.behavior.test.mjs
 ws-server/server.behavior.test.mjs
-tests/account-page.test.mjs
+js/chips/client.js
+js/topbar.js
+infra/vps/Caddyfile
 ```
 
 **Structure Decision**: Reuse the existing Netlify function, shared WS adapter, WS internal HTTP routing, table manager, global browser clients, Account markup, and their current behavior tests. No new project or test suite is introduced.
 
 ## Implementation Phases
 
-1. Add failing tests for the profile response success/fallback and the table-manager projection contract; add the minimal server-route and Account rendering assertions needed by the accepted scenarios.
+1. Cover profile success/failure and table-manager/server contracts with fundamental tests; use real preview for Account presentation.
 2. Implement `tableManager.projectUserTables(userId)` using authoritative core members, `tableSnapshot`, and `tableMeta`, returning only sanitized fields with the complete `tableId`.
 3. Add the token-protected read-only WS route and the existing shared adapter call. Extend `profile-me` only for exact `includePoker=1`; resolve balance independently and convert WS failure/invalid output to `poker: null`.
 4. Extend the existing ProfileClient request options and Account-page rendering. Keep the full ID in `data-table-id`/navigation values and use a UI-only abbreviation helper for visible text.
 5. Run targeted tests, syntax/full checks, self-review, and the exact-SHA WS Preview Deploy. Only after the deploy succeeds for the implementation SHA run preview E2E verification.
 
-## Complexity Tracking
+## PR #983 correction plan and Constitution Check
+
+Fix the verified public routing gap in the preview block of `infra/vps/Caddyfile`
+and preview Caddy runtime. Preserve Production configuration. Extend existing
+`js/chips/client.js` authenticated request machinery for `profile-me?includePoker=1`
+and `js/topbar.js` for a separately labeled authoritative stack sum, refreshed on
+auth, chips transactions, and returning to the page. Wallet remains independent.
+No new script/dependency/ignore file or migration is required; automatic Stage
+migration apply is not an intended effect of this PR. The application smoke does
+intentionally exercise shared Stage buy-in/runtime state through normal APIs.
+Update Constitution/agents guidance, then verify exact-final-HEAD deployed WS and
+real Netlify → public WS calls, including wallet-safe projection failure.
+Pre-implementation test-task review: PASS after removing UI/VM rendering test
+requirements; only fundamental backend/WS tests are planned. T014–T017 define the
+remaining work, including real runtime evidence; earlier local E2E is insufficient.
 
 No constitution violations or new abstraction beyond the existing WS internal adapter seam. The only new helper is the small projection method/normalizer required to keep the WS authority and the Netlify response contract explicit.

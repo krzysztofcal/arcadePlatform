@@ -126,9 +126,6 @@ function seedNodes(document, includePagination = false) {
     "bonusCampaignList",
     "welcomeBonusClaimButton",
     "welcomeBonusStatus",
-    "pokerAccountPanel",
-    "pokerAccountStatus",
-    "pokerTableList",
   ];
   ids.forEach(id => {
     document.__nodes.set(id, createElement("div", id));
@@ -165,7 +162,6 @@ function buildContext(chipsClient, options = {}) {
     },
     location: { hash: "" },
     ChipsClient: chipsClient,
-    ProfileClient: options.profileClient || null,
     sessionStorage: {
       getItem(key) {
         return sessionValues.has(key) ? sessionValues.get(key) : null;

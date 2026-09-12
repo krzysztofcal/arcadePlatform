@@ -69,6 +69,11 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
   - `journalctl -u ws-server.service`
 - When debugging a specific poker table, filter by `tableId` and correlate `ws_state_persist_*`, `ws_settled_rollover_*`, `ws_bot_autoplay_*`, `ws_table_janitor_*`, and cleanup logs with `poker_state`, `poker_actions`, `poker_seats`, and `poker_tables`.
 
+### Intentional automatic Stage migrations
+- A same-repository PR touching `supabase/migrations/**` can trigger `DB Stage Apply PR` and mutate shared Stage; this is not a read-only check.
+- Agents may intentionally use automatic Stage apply without a separate GO for each ordinary migration. Before push/PR, spec/plan/tasks must explicitly declare that intended shared Stage effect.
+- Never include migrations accidentally. Applied Stage migrations are immutable; corrections use new, forward-only migrations. Production still requires separate explicit authorization.
+
 ---
 
 ## 🧩 Agent Roles
@@ -116,6 +121,7 @@ Only fundamental, deterministic tests for critical logic are required.
 - JSP views
 
 ### Rules
+- Before `$speckit-implement`, Constitution Check must inspect planned test tasks and correct any prohibited requirements in spec/plan/tasks. TDD/test-first and generated Spec Kit tasks cannot override fundamental-tests-only policy; verify UI presentation through existing preview/E2E/manual preview where appropriate.
 - Prefer extending existing test files
 - Keep tests deterministic
 - Focus on edge cases and failure scenarios
@@ -171,4 +177,6 @@ Task is complete when:
 - WS state and UI are consistent
 - Critical paths are covered with tests
 - Code is simple and readable
-- For WS-affecting PR preview work, the selected PR ref has been manually deployed with `WS Preview Deploy`, or the agent has explicitly reported that this external deploy is still required.
+- For WS-affecting work, exact-final-HEAD `WS Preview Deploy` and real preview verification are required. Deploy Preview → WS Preview calls must be exercised between the actual environments; green CI does not prove configuration/integration.
+- Changes depending on Stage DB/runtime require safe Stage smoke/read-only validation or an explicit reason Stage mutation/testing is unnecessary. Verify only relevant targets; not every PR needs all Stage deployments. Production requires separate explicit authorization.
+- Never mark a PR READY/merge-ready with missing required runtime evidence or a failing manual smoke.

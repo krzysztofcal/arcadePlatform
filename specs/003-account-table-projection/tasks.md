@@ -48,6 +48,21 @@
 
 ## Dependencies and order
 
+## PR #983 runtime correction and bankroll visibility
+
+No migrations are included: automatic shared Stage migration apply is not an
+effect of this PR. The authenticated buy-in smoke intentionally exercises Stage
+wallet/runtime state through existing application APIs. Preview Caddy routing
+configuration is explicitly in scope; no Production change is authorized.
+
+- [X] T014 Diagnose real Deploy Preview → WS Preview HTTP shape, token matching, and bounded journal; correct the preview-only `/internal/account/poker` route in `infra/vps/Caddyfile` and the preview host configuration.
+- [ ] T015 Extend `js/chips/client.js` and `js/topbar.js` to request the existing profile projection and display a separate sum of authoritative stacks; hide on empty/unavailable and preserve wallet independently. Verify UI only in real preview, without unit/VM rendering tests or new scripts.
+- [X] T016 Update Constitution to 1.1.0 and `agents.md` with intentional automatic Stage apply, pre-implementation test-task policy, and real target-runtime verification; reconcile spec/plan test requirements.
+- [ ] T017 Run fundamental tests, syntax, npm test, review; push and deploy exact-final-HEAD WS Preview; inspect bounded journal and perform real authenticated join/buy-in/Account/badge/failure smoke; update PR rationale and evidence without merging.
+
+Constitution Check before implementation: only backend/WS fundamental tests are
+planned. No UI rendering, CSS/layout, JSP-view, or simple-glue tests are authorized.
+
 - T001, T002, and T003 are independent RED tests and must fail before T004–T007 implementation work.
 - T004 precedes T005; T005 and T006 are the two sides of the WS internal contract, and T007 consumes T006.
 - T007 precedes T009–T010 because the Account page consumes the public response.
