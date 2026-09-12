@@ -13,6 +13,7 @@
   var publicProfileSaveResetTimer = null;
   var passwordRecoveryActive = false;
   var signupConfirmationPending = false;
+  var accountPokerProjection = undefined;
   var WELCOME_BONUS_SUCCESS = 'Bonus added to your account.';
   var ledgerState = {
     entries: [],
@@ -77,6 +78,9 @@
     nodes.bonusCampaignList = doc.getElementById('bonusCampaignList');
     nodes.welcomeBonusClaimButton = doc.getElementById('welcomeBonusClaimButton');
     nodes.welcomeBonusStatus = doc.getElementById('welcomeBonusStatus');
+    nodes.pokerAccountPanel = doc.getElementById('pokerAccountPanel');
+    nodes.pokerAccountStatus = doc.getElementById('pokerAccountStatus');
+    nodes.pokerTableList = doc.getElementById('pokerTableList');
     nodes.publicProfileEditor = doc.getElementById('publicProfileEditor');
     nodes.publicProfileForm = doc.getElementById('publicProfileForm');
     nodes.publicProfileAvatar = doc.getElementById('publicProfileAvatar');
@@ -148,6 +152,7 @@
     setBlockVisibility(nodes.forms, false);
     setBlockVisibility(nodes.account, false);
     setBlockVisibility(nodes.chipPanel, false);
+    clearPokerProjection();
     setBlockVisibility(nodes.signupConfirmation, true);
     if (nodes.signupConfirmationMessage){
       nodes.signupConfirmationMessage.textContent = tf('confirmationEmailSent', { email: email }, 'We sent a confirmation link to {email}.');
@@ -242,6 +247,7 @@
 
     if (!hasUser){
       publicProfile = null;
+      clearPokerProjection();
       setBlockVisibility(nodes.publicProfileEditor, false);
       clearChips();
       return;
@@ -251,7 +257,8 @@
     var displayName = meta.full_name || meta.name || user.email || 'Player';
     if (nodes.userEmail){ nodes.userEmail.textContent = user.email || 'Unknown email'; }
     if (nodes.userName){ nodes.userName.textContent = displayName; }
-    loadPublicProfile();
+    clearPokerProjection();
+    loadPublicProfile(true);
   }
 
   function setPublicProfileErrors(errors){
@@ -305,6 +312,84 @@
     if (nodes.publicHandleHint) nodes.publicHandleHint.textContent = profile.handleCanBeCustomized ? t('publicHandleHint', 'You can change your generated handle once. It then becomes permanent.') : t('publicHandleLockedHint', 'This handle is permanent.');
     if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
     setPublicProfileErrors(null);
+  }
+
+  function abbreviatedTableId(tableId){
+    var value = String(tableId || '').trim();
+    return value.length > 8 ? '…' + value.slice(-4) : value;
+  }
+
+  function clearPokerProjection(){
+    accountPokerProjection = undefined;
+    setBlockVisibility(nodes.pokerAccountPanel, false);
+    if (nodes.pokerAccountStatus){
+      nodes.pokerAccountStatus.textContent = '';
+      nodes.pokerAccountStatus.hidden = true;
+      nodes.pokerAccountStatus.dataset.tone = '';
+    }
+    if (nodes.pokerTableList) nodes.pokerTableList.innerHTML = '';
+  }
+
+  function renderPokerState(poker){
+    if (!nodes.pokerAccountPanel || !nodes.pokerTableList) return;
+    setBlockVisibility(nodes.pokerAccountPanel, true);
+    nodes.pokerTableList.innerHTML = '';
+
+    if (!poker){
+      if (nodes.pokerAccountStatus){
+        nodes.pokerAccountStatus.textContent = t('accountPokerUnavailable', 'Poker tables are unavailable right now. Please try again.');
+        nodes.pokerAccountStatus.hidden = false;
+        nodes.pokerAccountStatus.dataset.tone = 'info';
+      }
+      return;
+    }
+
+    var tables = Array.isArray(poker.tables) ? poker.tables : [];
+    if (nodes.pokerAccountStatus){
+      nodes.pokerAccountStatus.textContent = tables.length
+        ? ''
+        : t('accountPokerEmpty', 'You are not currently in a poker table.');
+      nodes.pokerAccountStatus.hidden = tables.length > 0;
+      nodes.pokerAccountStatus.dataset.tone = '';
+    }
+
+    var fragment = doc.createDocumentFragment();
+    tables.forEach(function(table){
+      var tableId = table && typeof table.tableId === 'string' ? table.tableId.trim() : '';
+      if (!tableId) return;
+
+      var row = doc.createElement('div');
+      row.className = 'account-bonus__item poker-table';
+      row.dataset.tableId = tableId;
+      row.setAttribute('data-table-id', tableId);
+
+      var heading = doc.createElement('div');
+      heading.className = 'account-bonus__title poker-table__id';
+      heading.textContent = abbreviatedTableId(tableId);
+      row.appendChild(heading);
+
+      var details = [];
+      if (table.status) details.push(String(table.status));
+      if (table.seatNo !== null && table.seatNo !== undefined && Number.isSafeInteger(Number(table.seatNo))) details.push(tf('accountPokerSeat', { seat: Number(table.seatNo) }, 'Seat {seat}'));
+      if (table.stack !== null && table.stack !== undefined && Number.isSafeInteger(Number(table.stack))) details.push(Number(table.stack).toLocaleString() + ' CH');
+      if (table.stakes && Number.isSafeInteger(Number(table.stakes.sb)) && Number.isSafeInteger(Number(table.stakes.bb))){
+        details.push(String(table.stakes.sb) + '/' + String(table.stakes.bb));
+      }
+      if (table.handStatus) details.push(String(table.handStatus));
+      if (details.length){
+        var meta = doc.createElement('div');
+        meta.className = 'account-note poker-table__meta';
+        meta.textContent = details.join(' · ');
+        row.appendChild(meta);
+      }
+      fragment.appendChild(row);
+    });
+    nodes.pokerTableList.appendChild(fragment);
+  }
+
+  function renderPokerProjection(profile){
+    accountPokerProjection = profile && Object.prototype.hasOwnProperty.call(profile, 'poker') ? profile.poker : null;
+    renderPokerState(accountPokerProjection);
   }
 
   function setAvatarState(state, message, tone){
@@ -373,14 +458,16 @@
     if (publicProfileInFlight) return publicProfileInFlight;
     var requestedUserKey = getUserKey(currentUser);
     var requestedGeneration = publicProfileGeneration;
-    var request = window.ProfileClient.getMe(!!force).then(function(profile){
+    var request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
       if (requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
       renderPublicProfile(profile);
+      renderPokerProjection(profile);
       return profile;
     }).catch(function(error){
       klog('profile:account_load_failed', { code: error && error.code ? error.code : 'request_failed' });
       if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
         setBlockVisibility(nodes.publicProfileEditor, false);
+        clearPokerProjection();
         setStatus(t('publicProfileLoadError', 'Could not load your public profile. Please refresh and try again.'), 'error');
       }
       return null;
@@ -1151,6 +1238,7 @@
     doc.addEventListener('auth:signin-request', function(){
       setBlockVisibility(nodes.forms, true);
       setBlockVisibility(nodes.account, false);
+      clearPokerProjection();
       if (nodes.signInEmail){ nodes.signInEmail.focus(); }
     });
 
@@ -1226,6 +1314,7 @@
     doc.addEventListener('langchange', function(){
       setWelcomeBonusVisibility(nodes.welcomeBonusPanel && !nodes.welcomeBonusPanel.hidden);
       if (currentUser){ refreshWelcomeBonus(currentUser); }
+      if (accountPokerProjection !== undefined) renderPokerState(accountPokerProjection);
       queueLedgerRender();
     });
   }

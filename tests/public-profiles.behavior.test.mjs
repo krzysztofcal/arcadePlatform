@@ -247,6 +247,75 @@ test("profile-me maps locked and taken handle errors", async () => {
   }
 });
 
+test("profile-me includePoker returns the full authoritative table projection and balance", async () => {
+  const tableId = "table-full-runtime-identifier-4f2a";
+  const calls = [];
+  const handler = createProfileMeHandler({
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    ensureUserProfile: async () => profile(),
+    getUserBalance: async (userId) => {
+      calls.push(["balance", userId]);
+      return { balance: 735 };
+    },
+    loadPokerProjection: async (userId) => {
+      calls.push(["poker", userId]);
+      return {
+        inPoker: true,
+        tables: [{ tableId, status: "OPEN", seatNo: 2, seatStatus: "ACTIVE", stack: 980, stakes: { sb: 5, bb: 10 }, maxPlayers: 6, stateVersion: 42, handStatus: "FLOP" }]
+      };
+    }
+  });
+
+  const response = await handler(event("GET", null, { includePoker: "1" }));
+  const body = JSON.parse(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.balance, 735);
+  assert.equal(body.poker.inPoker, true);
+  assert.equal(body.poker.tables[0].tableId, tableId);
+  assert.deepEqual(calls, [["balance", USER_ID], ["poker", USER_ID]]);
+});
+
+test("profile-me keeps the correct balance when authoritative poker projection is unavailable", async () => {
+  const handler = createProfileMeHandler({
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    ensureUserProfile: async () => profile(),
+    getUserBalance: async () => ({ balance: 735 }),
+    loadPokerProjection: async () => { throw new Error("ws_projection_unavailable"); }
+  });
+
+  const response = await handler(event("GET", null, { includePoker: "1" }));
+  const body = JSON.parse(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.balance, 735);
+  assert.notEqual(body.balance, 0);
+  assert.equal(body.poker, null);
+});
+
+test("profile-me preserves wallet when the public WS proxy returns a successful non-JSON response", async () => {
+  const logs = [];
+  const handler = createProfileMeHandler({
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    ensureUserProfile: async () => profile(),
+    getUserBalance: async () => ({ balance: 708 }),
+    env: { POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.example", POKER_WS_INTERNAL_TOKEN: "test-token" },
+    fetchImpl: async (url, options) => {
+      assert.equal(new URL(url).pathname, "/internal/account/poker");
+      assert.equal(new URL(url).searchParams.get("userId"), USER_ID);
+      assert.equal(options.headers.authorization, "Bearer test-token");
+      return new Response("OK", { status: 200, headers: { "content-type": "text/plain" } });
+    },
+    klog: (kind, data) => logs.push({ kind, data })
+  });
+  const response = await handler(event("GET", null, { includePoker: "1" }));
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.balance, 708);
+  assert.equal(body.poker, null);
+  assert.ok(logs.some(log => log.data.reason === "invalid_json"));
+});
+
 test("one-time handle lock and unique conflicts are enforced by profile updates", async () => {
   await assert.rejects(
     () => updateUserProfile(USER_ID, { handle: "second-handle" }, {

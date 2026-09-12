@@ -6,6 +6,7 @@
   win.__topbarBooted = true;
   const chipNodes = { badge: null, amount: null, bonus: null, ready: false };
   let chipInFlight = null;
+  let pokerRequestGeneration = 0;
   let chipHasHydratedValue = false;
   let chipRequestGeneration = 0;
   let chipIdentityUserId = null;
@@ -247,6 +248,12 @@
         badge.appendChild(bonus);
       }
     }
+    if (!badge.querySelector('#chipBadgePoker')){
+      const poker = doc.createElement('span');
+      poker.id = 'chipBadgePoker';
+      poker.hidden = true;
+      badge.appendChild(poker);
+    }
     if (topbarRight && badge.parentNode !== topbarRight){
       topbarRight.appendChild(badge);
     }
@@ -300,6 +307,8 @@
   }
 
   function hideChipBadge(){
+    pokerRequestGeneration += 1;
+    renderPokerBadge(null);
     ensureChipNodes();
     if (chipNodes.badge){
       chipNodes.badge.classList.remove('chip-pill--loading');
@@ -372,6 +381,8 @@
       return;
     }
     chipRequestGeneration += 1;
+    pokerRequestGeneration += 1;
+    renderPokerBadge(null);
     chipInFlight = null;
     chipHasHydratedValue = false;
     invalidateWelcomeBonusBadge();
@@ -472,6 +483,35 @@
     return welcomeBonusInFlight;
   }
 
+  function renderPokerBadge(poker){
+    const node = doc.getElementById('chipBadgePoker');
+    if (!node) return;
+    let total = 0;
+    const tables = poker && poker.inPoker === true && Array.isArray(poker.tables) ? poker.tables : [];
+    for (const table of tables){
+      if (!Number.isSafeInteger(table.stack) || table.stack < 0){ total = 0; break; }
+      total += table.stack;
+    }
+    const visible = isAuthed() && Number.isSafeInteger(total) && total > 0;
+    node.textContent = visible ? ' · Poker: ' + total + ' CH' : '';
+    node.hidden = !visible;
+  }
+
+  async function refreshPokerBadge(){
+    if (!isAuthed() || !window.ChipsClient || typeof window.ChipsClient.fetchPokerProjection !== 'function') return;
+    const generation = ++pokerRequestGeneration;
+    const identityGeneration = chipRequestGeneration;
+    try {
+      const poker = await window.ChipsClient.fetchPokerProjection();
+      if (generation !== pokerRequestGeneration || identityGeneration !== chipRequestGeneration) return;
+      renderPokerBadge(poker);
+    } catch (_err){
+      if (generation !== pokerRequestGeneration || identityGeneration !== chipRequestGeneration) return;
+      renderPokerBadge(null);
+      if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log('topbar_poker_projection_unavailable', {});
+    }
+  }
+
   async function refreshChipBadge(){
     normalizeTopbarBadges();
     ensureChipNodes();
@@ -492,6 +532,7 @@
       return;
     }
     chipsClientWaitTries = 0;
+    refreshPokerBadge();
     if (chipInFlight){ return chipInFlight; }
     if (!chipHasHydratedValue) setChipBadge('', { loading: true });
     const requestGeneration = chipRequestGeneration;
@@ -572,6 +613,7 @@
 
   function wireChipEvents(){
     if (!doc || typeof doc.addEventListener !== 'function') return;
+    doc.addEventListener('ui:visible', refreshChipBadge);
     doc.addEventListener('chips:tx-complete', function(){
       refreshChipBadge();
       invalidateWelcomeBonusBadge();

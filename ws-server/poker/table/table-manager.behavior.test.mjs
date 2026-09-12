@@ -3261,6 +3261,72 @@ test("public profile failure and timeout return initials fallback without reject
   assert.equal(snapshot.members.length, 1);
 });
 
+test("projects full current-user table ids from authoritative runtime membership", () => {
+  const userId = "user-account-001";
+  const tableId = "table-full-runtime-identifier-4f2a";
+  const tableManager = createTableManager({ maxSeats: 6 });
+
+  tableManager.restoreTableFromPersisted(tableId, {
+    tableStatus: "OPEN",
+    tableMeta: { maxPlayers: 6, buyIn: 500, stakes: { sb: 5, bb: 10 } },
+    coreState: {
+      version: 42,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [
+        { userId, seat: 2 },
+        { userId: "unrelated-user", seat: 3 }
+      ],
+      seats: { [userId]: 2, "unrelated-user": 3 },
+      seatDetailsByUserId: {
+        [userId]: { isBot: false },
+        "unrelated-user": { isBot: false }
+      },
+      publicStacks: { [userId]: 980, "unrelated-user": 700 },
+      pokerState: {
+        tableId,
+        phase: "FLOP",
+        seats: [
+          { userId, seatNo: 2, status: "ACTIVE" },
+          { userId: "unrelated-user", seatNo: 3, status: "ACTIVE" }
+        ],
+        stacks: { [userId]: 980, "unrelated-user": 700 }
+      }
+    }
+  });
+
+  tableManager.restoreTableFromPersisted("table-bot-only", {
+    tableMeta: { maxPlayers: 6, buyIn: 500, stakes: { sb: 5, bb: 10 } },
+    coreState: {
+      version: 3,
+      roomId: "table-bot-only",
+      maxSeats: 6,
+      members: [{ userId: "bot-only-user", seat: 1 }],
+      seats: { "bot-only-user": 1 },
+      seatDetailsByUserId: { "bot-only-user": { isBot: true } },
+      publicStacks: { "bot-only-user": 500 },
+      pokerState: null
+    }
+  });
+
+  assert.deepEqual(tableManager.projectUserTables(userId), {
+    inPoker: true,
+    tables: [{
+      tableId,
+      status: "OPEN",
+      seatNo: 2,
+      seatStatus: "ACTIVE",
+      stack: 980,
+      stakes: { sb: 5, bb: 10 },
+      maxPlayers: 6,
+      stateVersion: 42,
+      handStatus: "FLOP"
+    }]
+  });
+  assert.equal(tableManager.projectUserTables("missing-user").inPoker, false);
+  assert.deepEqual(tableManager.projectUserTables("missing-user").tables, []);
+});
+
 test("materialized table keeps its configured buy-in immutable", () => {
   const tableManager = createTableManager({ maxSeats: 6, defaultBuyIn: null });
   const first = tableManager.materializeLobbyTable({
