@@ -81,3 +81,26 @@ Run from the feature worktree.
 Final commit-specific test results, exact-HEAD WS Preview Deploy URL, bounded
 service journal review and repeated authenticated smoke evidence are recorded
 in the existing PR #983 description after the final commit is deployed.
+
+## Completed implementation verification
+
+- Implementation SHA `c7e176e22f4b87dc9ee001b034011e16cfca2453`: fundamental
+  backend/WS tests 249/249 passed; `npm run syntax` passed (218 files);
+  `npm test` passed (142 runner groups, 680 TAP passes, three optional skips,
+  zero failures). `npm run check:all`, `npm run ci:guards`, commit hooks and
+  diff whitespace checks passed. Independent review findings were resolved.
+- [WS Preview Deploy 34726298617](https://github.com/krzysztofcal/arcadePlatform/actions/runs/34726298617)
+  succeeded for that exact SHA; deployed WS metadata and Netlify Deploy Preview
+  `6aa5e4636347760008a38658` both matched it.
+- Repeated real authenticated smoke passed with full table ID
+  `6cd5d0d3-5537-44a7-a453-cfa380001320`: wallet 500 → 400, authoritative
+  stack 100, immediate Account row present, and `CH: 400 · Poker: 100 CH`
+  on Account and home. Empty projection hid the extra badge.
+- Real per-user proxy failure returned `poker: null` with wallet 400;
+  restoration recovered the table, and a visible-page event refreshed the
+  badge. The script asserted byte-for-byte restoration of the entire proxy
+  file, including all other hosts. Bounded preview service journal reviewed.
+- The closing documentation commit changes no application/test code. It must
+  still receive its own exact-final-HEAD WS Preview Deploy and repeated real
+  authenticated smoke; that final release evidence is kept in PR #983 so
+  recording the run URL does not change the verified HEAD again.
