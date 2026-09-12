@@ -43,8 +43,8 @@
 ## Phase 3: Verification and handoff
 
 - [X] T011 [US1] [US2] Run the focused existing behavior tests, `npm run syntax`, `npm test`, and whitespace/self-review; confirm no private state, token, dependency, schema, configuration, or ignore-file changes were introduced.
-- [ ] T012 [US1] [US2] Run the repository review/self-review against the spec, plan, tasks, and constitution, then dispatch the manual WS Preview Deploy workflow from `main` with the implementation SHA and verify successful deployment for that exact SHA before preview E2E.
-- [ ] T013 [US1] [US2] Run configured preview E2E only after exact-SHA WS Preview Deploy success, inspect bounded `ws-server-preview.service` journal evidence, and record the unmerged branch/PR handoff without merging.
+- [X] T012 [US1] [US2] Run the repository review/self-review against the spec, plan, tasks, and constitution, then dispatch the manual WS Preview Deploy workflow from `main` with the implementation SHA and verify successful deployment for that exact SHA before preview E2E.
+- [X] T013 [US1] [US2] Run configured preview E2E only after exact-SHA WS Preview Deploy success, inspect bounded `ws-server-preview.service` journal evidence, and record the unmerged branch/PR handoff without merging.
 
 ## Dependencies and order
 
