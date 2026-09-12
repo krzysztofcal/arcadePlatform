@@ -2331,6 +2331,59 @@ export function createTableManager({
     return [...tables.keys()].sort((left, right) => left.localeCompare(right));
   }
 
+  function projectUserTables(userId) {
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!normalizedUserId) {
+      return { inPoker: false, tables: [] };
+    }
+
+    const projectedTables = [];
+    for (const tableId of listTableIds()) {
+      const table = tables.get(tableId);
+      if (!table || normalizeTableStatus(table.tableStatus) === "CLOSED") {
+        continue;
+      }
+
+      const membership = normalizeAuthoritativeMembers(table)
+        .find((member) => member.userId === normalizedUserId && !isCoreStateBotUser(table.coreState, normalizedUserId));
+      if (!membership) {
+        continue;
+      }
+
+      const snapshot = tableSnapshot(tableId, normalizedUserId);
+      const userSeat = Array.isArray(snapshot?.seats)
+        ? snapshot.seats.find((seat) => seat?.userId === normalizedUserId)
+        : null;
+      const stackValue = snapshot?.stacks?.[normalizedUserId];
+      const stack = stackValue === null || stackValue === undefined
+        ? null
+        : Number.isSafeInteger(Number(stackValue)) && Number(stackValue) >= 0
+          ? Number(stackValue)
+          : null;
+      const metadata = tableMeta(tableId);
+      const stakes = metadata?.stakes && Number.isInteger(metadata.stakes.sb) && Number.isInteger(metadata.stakes.bb)
+        ? { sb: metadata.stakes.sb, bb: metadata.stakes.bb }
+        : null;
+
+      projectedTables.push({
+        tableId,
+        status: normalizeTableStatus(table.tableStatus),
+        seatNo: membership.seat,
+        seatStatus: typeof userSeat?.status === "string" ? userSeat.status : null,
+        stack,
+        stakes,
+        maxPlayers: Number.isInteger(metadata?.maxPlayers) ? metadata.maxPlayers : null,
+        stateVersion: Number.isInteger(snapshot?.stateVersion) ? snapshot.stateVersion : 0,
+        handStatus: typeof snapshot?.hand?.status === "string" ? snapshot.hand.status : null
+      });
+    }
+
+    return {
+      inPoker: projectedTables.length > 0,
+      tables: projectedTables
+    };
+  }
+
   // Closed-table retention coordination. beginTableRetirement atomically claims
   // candidate table ids that are NOT currently materialized in the runtime
   // (tables) and NOT mid-bootstrap (pendingBootstrapByTableId). Claimed ids
@@ -2456,6 +2509,7 @@ export function createTableManager({
     orderedSubscribers,
     orderedConnectionsForTable,
     listTableIds,
+    projectUserTables,
     beginTableRetirement,
     endTableRetirement,
     isTableRetiring,

@@ -126,6 +126,9 @@ function seedNodes(document, includePagination = false) {
     "bonusCampaignList",
     "welcomeBonusClaimButton",
     "welcomeBonusStatus",
+    "pokerAccountPanel",
+    "pokerAccountStatus",
+    "pokerTableList",
   ];
   ids.forEach(id => {
     document.__nodes.set(id, createElement("div", id));
@@ -162,6 +165,7 @@ function buildContext(chipsClient, options = {}) {
     },
     location: { hash: "" },
     ChipsClient: chipsClient,
+    ProfileClient: options.profileClient || null,
     sessionStorage: {
       getItem(key) {
         return sessionValues.has(key) ? sessionValues.get(key) : null;
@@ -198,6 +202,90 @@ function findByClassToken(node, className) {
   }
   return null;
 }
+
+test("renders Account poker tables with full machine id and UI-only abbreviated label", async () => {
+  const tableId = "table-full-runtime-identifier-4f2a";
+  const calls = [];
+  const { windowObj, document } = buildContext({}, {
+    profileClient: {
+      getMe(force, options) {
+        calls.push({ force, options });
+        return Promise.resolve({
+          handle: "blue-fox-482731",
+          displayName: "Blue Fox 482731",
+          bio: "",
+          avatar: { type: "default", variant: "fox-blue" },
+          handleCanBeCustomized: true,
+          leaderboardVisible: true,
+          balance: 735,
+          poker: {
+            inPoker: true,
+            tables: [{ tableId, status: "OPEN", seatNo: 2, seatStatus: "ACTIVE", stack: 980, stakes: { sb: 5, bb: 10 }, maxPlayers: 6, stateVersion: 42, handStatus: "FLOP" }]
+          }
+        });
+      },
+      clear() {},
+      applyAvatar() {}
+    }
+  });
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+  await flush();
+
+  const list = document.getElementById("pokerTableList");
+  assert.equal(calls[0].force, true);
+  assert.equal(calls[0].options.includePoker, true);
+  assert.equal(document.getElementById("pokerAccountPanel").hidden, false);
+  assert.equal(list.children.length, 1);
+  const row = list.children[0];
+  assert.equal(row.dataset.tableId, tableId);
+  assert.equal(findByClassToken(row, "poker-table__id").textContent, "…4f2a");
+});
+
+test("renders an unavailable Account poker projection without inventing table rows", async () => {
+  const { windowObj, document } = buildContext({}, {
+    profileClient: {
+      getMe() {
+        return Promise.resolve({
+          handle: "blue-fox-482731",
+          displayName: "Blue Fox 482731",
+          bio: "",
+          avatar: { type: "default", variant: "fox-blue" },
+          handleCanBeCustomized: true,
+          leaderboardVisible: true,
+          balance: 735,
+          poker: null
+        });
+      },
+      clear() {},
+      applyAvatar() {}
+    }
+  });
+  const context = vm.createContext({
+    window: windowObj,
+    document,
+    requestAnimationFrame: windowObj.requestAnimationFrame,
+    CustomEvent: function() {},
+  });
+  vm.runInContext(source, context);
+
+  await flush();
+  await flush();
+  await flush();
+  await flush();
+
+  assert.equal(document.getElementById("pokerTableList").children.length, 0);
+  assert.match(document.getElementById("pokerAccountStatus").textContent, /unavailable/i);
+});
 
 test("renders formatted chip ledger dates", async () => {
   const chipsClient = {

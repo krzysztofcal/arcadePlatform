@@ -247,6 +247,52 @@ test("profile-me maps locked and taken handle errors", async () => {
   }
 });
 
+test("profile-me includePoker returns the full authoritative table projection and balance", async () => {
+  const tableId = "table-full-runtime-identifier-4f2a";
+  const calls = [];
+  const handler = createProfileMeHandler({
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    ensureUserProfile: async () => profile(),
+    getUserBalance: async (userId) => {
+      calls.push(["balance", userId]);
+      return { balance: 735 };
+    },
+    loadPokerProjection: async (userId) => {
+      calls.push(["poker", userId]);
+      return {
+        inPoker: true,
+        tables: [{ tableId, status: "OPEN", seatNo: 2, seatStatus: "ACTIVE", stack: 980, stakes: { sb: 5, bb: 10 }, maxPlayers: 6, stateVersion: 42, handStatus: "FLOP" }]
+      };
+    }
+  });
+
+  const response = await handler(event("GET", null, { includePoker: "1" }));
+  const body = JSON.parse(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.balance, 735);
+  assert.equal(body.poker.inPoker, true);
+  assert.equal(body.poker.tables[0].tableId, tableId);
+  assert.deepEqual(calls, [["balance", USER_ID], ["poker", USER_ID]]);
+});
+
+test("profile-me keeps the correct balance when authoritative poker projection is unavailable", async () => {
+  const handler = createProfileMeHandler({
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    ensureUserProfile: async () => profile(),
+    getUserBalance: async () => ({ balance: 735 }),
+    loadPokerProjection: async () => { throw new Error("ws_projection_unavailable"); }
+  });
+
+  const response = await handler(event("GET", null, { includePoker: "1" }));
+  const body = JSON.parse(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(body.balance, 735);
+  assert.notEqual(body.balance, 0);
+  assert.equal(body.poker, null);
+});
+
 test("one-time handle lock and unique conflicts are enforced by profile updates", async () => {
   await assert.rejects(
     () => updateUserProfile(USER_ID, { handle: "second-handle" }, {

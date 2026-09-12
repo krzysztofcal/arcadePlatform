@@ -79,17 +79,19 @@
     try { document.dispatchEvent(new CustomEvent('profile:updated', { detail: profile || null })); } catch (_err){}
   }
 
-  async function getMe(force){
+  async function getMe(force, options){
+    var includePoker = !!(options && options.includePoker);
     var userId = await currentUserId();
     if (!userId) throw staleIdentityError();
-    if (!force && cache && cache.userId === userId) return cache.profile;
-    if (!force && inFlight && inFlight.userId === userId) return inFlight.promise;
-    var request = authedFetch(ME_URL, { method: 'GET' }).then(parse).then(async function(profile){
+    if (!force && cache && cache.userId === userId && (!includePoker || cache.includePoker === true)) return cache.profile;
+    if (!force && inFlight && inFlight.userId === userId && inFlight.includePoker === includePoker) return inFlight.promise;
+    var url = includePoker ? ME_URL + '?includePoker=1' : ME_URL;
+    var request = authedFetch(url, { method: 'GET' }).then(parse).then(async function(profile){
       if (await currentUserId() !== userId) throw staleIdentityError();
-      cache = { userId: userId, profile: profile };
+      cache = { userId: userId, profile: profile, includePoker: includePoker };
       return profile;
     });
-    inFlight = { userId: userId, promise: request };
+    inFlight = { userId: userId, includePoker: includePoker, promise: request };
     request.finally(function(){ if (inFlight && inFlight.promise === request) inFlight = null; }).catch(function(){});
     return request;
   }
@@ -100,7 +102,7 @@
     var response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) });
     var profile = await parse(response);
     if (await currentUserId() !== userId) throw staleIdentityError();
-    cache = { userId: userId, profile: profile };
+    cache = { userId: userId, profile: profile, includePoker: false };
     notify(profile);
     return profile;
   }
@@ -142,7 +144,7 @@
     }));
     var userId = await currentUserId();
     if (!userId) throw staleIdentityError();
-    cache = { userId: userId, profile: profile };
+    cache = { userId: userId, profile: profile, includePoker: false };
     notify(profile);
     onProgress('done');
     return profile;
@@ -174,7 +176,7 @@
     var profile = await parse(await authedFetch(AVATAR_REMOVE_URL, { method: 'DELETE' }));
     var userId = await currentUserId();
     if (!userId) throw staleIdentityError();
-    cache = { userId: userId, profile: profile };
+    cache = { userId: userId, profile: profile, includePoker: false };
     notify(profile);
     return profile;
   }
