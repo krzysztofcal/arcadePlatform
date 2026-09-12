@@ -4,7 +4,7 @@
 
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, and `contracts/account-poker-projection.md`
 
-**Tests**: Required for the backend/WS contracts and the existing public-profile client contract. Account UI rendering is verified through the existing preview E2E; no new unit/VM UI-rendering test is added.
+**Tests**: Required for the backend/WS contracts only. Account UI rendering is verified through the existing preview E2E; no new unit/VM UI-rendering test is added.
 
 ## Phase 1: User Story 1 — Read my authoritative poker tables (P1)
 
@@ -56,9 +56,9 @@ wallet/runtime state through existing application APIs. Preview Caddy routing
 configuration is explicitly in scope; no Production change is authorized.
 
 - [X] T014 Diagnose real Deploy Preview → WS Preview HTTP shape, token matching, and bounded journal; correct the preview-only `/internal/account/poker` route in `infra/vps/Caddyfile` and the preview host configuration.
-- [ ] T015 Extend `js/chips/client.js` and `js/topbar.js` to request the existing profile projection and display a separate sum of authoritative stacks; hide on empty/unavailable and preserve wallet independently. Verify UI only in real preview, without unit/VM rendering tests or new scripts.
+- [X] T015 Extend `js/chips/client.js` and `js/topbar.js` to request the existing profile projection and display a separate sum of authoritative stacks; hide on empty/unavailable and preserve wallet independently. Emit global `ui:visible` from the existing global badge lifecycle in `js/ui/xp-overlay.js`; load that existing script in `poker/index.html` and `leaderboard.html`. Verify UI only in real preview, without unit/VM rendering tests or new scripts.
 - [X] T016 Update Constitution to 1.1.0 and `agents.md` with intentional automatic Stage apply, pre-implementation test-task policy, and real target-runtime verification; reconcile spec/plan test requirements.
-- [ ] T017 Run fundamental tests, syntax, npm test, review; push and deploy exact-final-HEAD WS Preview; inspect bounded journal and perform real authenticated join/buy-in/Account/badge/failure smoke; update PR rationale and evidence without merging.
+- [ ] T017 Correct observed listener-order/request-correlation races in existing fundamental WS tests without weakening assertions; run fundamental tests, syntax, npm test, review; push and deploy exact-final-HEAD WS Preview; inspect bounded journal and perform real authenticated join/buy-in/Account/badge/failure smoke; update PR rationale and evidence without merging.
 
 Constitution Check before implementation: only backend/WS fundamental tests are
 planned. No UI rendering, CSS/layout, JSP-view, or simple-glue tests are authorized.

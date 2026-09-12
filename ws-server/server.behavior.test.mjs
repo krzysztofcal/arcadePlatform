@@ -3088,13 +3088,19 @@ test("table_leave non-override path does not fabricate accepted success from WS 
     await auth(actor, actorToken, "auth-leave-non-override-actor");
     await auth(other, otherToken, "auth-leave-non-override-other");
 
+    const actorJoinResponses = Promise.all([
+      nextCommandResultForRequest(actor, "join-leave-non-override-actor"),
+      nextMessageOfType(actor, "table_state")
+    ]);
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-non-override-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    const actorJoinAck = await nextMessageOfType(actor, "commandResult");
-    await nextMessageOfType(actor, "table_state");
+    const [actorJoinAck] = await actorJoinResponses;
     assert.equal(actorJoinAck.payload.status, "accepted");
+    const otherJoinResponses = Promise.all([
+      nextCommandResultForRequest(other, "join-leave-non-override-other"),
+      nextMessageOfType(other, "table_state")
+    ]);
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-non-override-other", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const otherJoinAck = await nextMessageOfType(other, "commandResult");
-    await nextMessageOfType(other, "table_state");
+    const [otherJoinAck] = await otherJoinResponses;
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     sendFrame(actor, {
@@ -5752,11 +5758,16 @@ test("human hello gets one bot reply while preflop raise and duplicate request s
     const snapshot = await nextMessageOfType(ws, "stateSnapshot");
     const handId = snapshot.payload.public.hand.handId;
     const helloFrame = { version: "1.0", type: "reaction_send", requestId: "hello-reaction-integration", ts: "2026-08-05T18:00:02Z", payload: { tableId, reactionKey: "hello" } };
+    // Register before sending: the ACK and reactions can share one socket read.
+    const helloResponses = Promise.all([
+      nextCommandResultForRequest(ws, helloFrame.requestId),
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo === 1, 1000),
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo !== 1, 2000)
+    ]);
     sendFrame(ws, helloFrame);
-    assert.equal((await nextCommandResultForRequest(ws, helloFrame.requestId)).payload.status, "accepted");
-    const humanHello = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo === 1, 1000);
+    const [helloAck, humanHello, botHello] = await helloResponses;
+    assert.equal(helloAck.payload.status, "accepted");
     assert.deepEqual(humanHello.payload, { seatNo: 1, reactionKey: "hello" });
-    const botHello = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo !== 1, 2000);
     assert.deepEqual(botHello.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "hello" });
     await assert.rejects(
       nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "hello", 1300),
@@ -7182,8 +7193,11 @@ test("observer snapshot stays public-state consistent with seated snapshot after
     assert.equal(Array.isArray(seatedPayload.private?.holeCards), true);
     assert.equal(seatedPayload.private.holeCards.length, 2);
 
+    const observerResponse = nextMessageForRequest(observerWs, {
+      type: "stateSnapshot", requestId: "snap-observer-public-observer-final"
+    });
     sendFrame(observerWs, { version: "1.0", type: "table_state_sub", requestId: "snap-observer-public-observer-final", ts: "2026-02-28T01:30:05Z", payload: { tableId, view: "snapshot" } });
-    const observerSnapshot = await nextMessageOfType(observerWs, "stateSnapshot");
+    const observerSnapshot = await observerResponse;
 
     assert.equal(observerSnapshot.payload.stateVersion, seatedPayload.stateVersion);
     assert.deepEqual(observerSnapshot.payload.table, seatedPayload.table);

@@ -57,11 +57,13 @@ js/account-page.js
 js/i18n.js
 account.html
 tests/public-profiles.behavior.test.mjs
-tests/public-profile-ui.contract.test.mjs
 ws-server/poker/table/table-manager.behavior.test.mjs
 ws-server/server.behavior.test.mjs
 js/chips/client.js
 js/topbar.js
+js/ui/xp-overlay.js
+poker/index.html
+leaderboard.html
 infra/vps/Caddyfile
 ```
 
@@ -81,7 +83,9 @@ Fix the verified public routing gap in the preview block of `infra/vps/Caddyfile
 and preview Caddy runtime. Preserve Production configuration. Extend existing
 `js/chips/client.js` authenticated request machinery for `profile-me?includePoker=1`
 and `js/topbar.js` for a separately labeled authoritative stack sum, refreshed on
-auth, chips transactions, and returning to the page. Wallet remains independent.
+auth, chips transactions, and returning to the page. `js/ui/xp-overlay.js` emits
+the global `ui:visible` signal from its existing global badge lifecycle; native lifecycle
+listeners remain centralized as required by the repository guards. Wallet remains independent.
 No new script/dependency/ignore file or migration is required; automatic Stage
 migration apply is not an intended effect of this PR. The application smoke does
 intentionally exercise shared Stage buy-in/runtime state through normal APIs.
@@ -92,3 +96,13 @@ requirements; only fundamental backend/WS tests are planned. T014–T017 define 
 remaining work, including real runtime evidence; earlier local E2E is insufficient.
 
 No constitution violations or new abstraction beyond the existing WS internal adapter seam. The only new helper is the small projection method/normalizer required to keep the WS authority and the Netlify response contract explicit.
+
+Verification follow-up: stabilize only the existing fundamental WS tests that
+failed during final validation. Register reaction listeners before sending the
+trigger, and correlate explicit snapshot replies by request ID so queued
+broadcasts cannot satisfy the wrong assertion. Preserve all runtime behavior,
+assertions and timeout bounds; no new UI/VM tests or test framework.
+
+Load the existing `js/ui/xp-overlay.js` in `poker/index.html` and
+`leaderboard.html`, the two global-topbar pages missing that lifecycle owner.
+This reuses the existing asset; no new script file or dependency is introduced.

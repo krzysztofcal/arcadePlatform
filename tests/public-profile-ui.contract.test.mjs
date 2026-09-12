@@ -130,32 +130,6 @@ test("profile cache is user-scoped and stale responses are discarded", async () 
   await assert.rejects(stale, { code: "stale_identity" });
 });
 
-test("profile client requests the optional poker projection without shortening table ids", async () => {
-  const tableId = "table-full-runtime-identifier-4f2a";
-  const requests = [];
-  const client = await loadProfileClient(async (url, options) => {
-    requests.push({ url, options });
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        handle: "blue-fox-482731",
-        displayName: "Blue Fox 482731",
-        bio: "",
-        avatar: { type: "default", variant: "fox-blue" },
-        poker: { inPoker: true, tables: [{ tableId }] },
-      }),
-    };
-  }, () => "user-a");
-
-  const profile = await client.getMe(true, { includePoker: true });
-  assert.equal(requests[0].url, "/.netlify/functions/profile-me?includePoker=1");
-  assert.equal(requests[0].options.method, "GET");
-  assert.equal(profile.poker.tables[0].tableId, tableId);
-  await client.getMe(false);
-  assert.equal(requests.length, 1, "a rich response may satisfy a later profile-only read");
-});
-
 test("topbar derives its visible signed-in identity from the public profile", async () => {
   const [source, accountSource] = await Promise.all([read("js/auth/supabaseClient.js"), read("js/account-page.js")]);
   assert.match(source, /name = profile && profile\.displayName \? profile\.displayName : t\('player'/);

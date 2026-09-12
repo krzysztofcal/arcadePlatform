@@ -613,7 +613,7 @@
 
   function wireChipEvents(){
     if (!doc || typeof doc.addEventListener !== 'function') return;
-    doc.addEventListener('xp:visible', refreshChipBadge);
+    doc.addEventListener('ui:visible', refreshChipBadge);
     doc.addEventListener('chips:tx-complete', function(){
       refreshChipBadge();
       invalidateWelcomeBonusBadge();

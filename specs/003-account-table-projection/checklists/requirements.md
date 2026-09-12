@@ -21,6 +21,6 @@
 ## Scope and verification
 
 - [x] CHK009 Existing profile-me GET/PATCH behavior is protected as a compatibility requirement.
-- [x] CHK010 Test scope is minimal and names existing backend, WS, and Account-page behavior files rather than requiring a broad suite.
+- [x] CHK010 Test scope is minimal and names existing backend/WS behavior files; Account presentation uses real preview smoke without new UI/VM tests.
 - [x] CHK011 Measurable outcomes cover exact identifiers, failure fallback, UI machine-readable identifiers, and regression compatibility.
 - [x] CHK012 Out-of-scope items include migrations, dependencies, production deployment, and speculative poker actions.
