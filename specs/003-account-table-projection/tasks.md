@@ -4,7 +4,7 @@
 
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, and `contracts/account-poker-projection.md`
 
-**Tests**: Required for the two backend contract cases and the minimal WS/Account behavior described in the specification. Tests extend existing files.
+**Tests**: Required for the backend/WS contracts and the existing public-profile client contract. Account UI rendering is verified through the existing preview E2E; no new unit/VM UI-rendering test is added.
 
 ## Phase 1: User Story 1 — Read my authoritative poker tables (P1)
 
@@ -29,9 +29,9 @@
 
 **Goal**: Render the projection in the existing Account flow while limiting abbreviation to visible UI text.
 
-### Tests first
+### Preview validation
 
-- [X] T008 [US2] Extend `tests/account-page.test.mjs` with the existing VM harness to assert that Account requests/rendering keep the full table ID in machine-readable data and abbreviate only the visible label, including the `poker: null` state.
+- [X] T008 [US2] Verify Account UI rendering through the existing preview E2E: available tables keep the complete `tableId` in machine-readable values and abbreviate only visible text, while `poker: null` shows the unavailable state. Do not add a unit/VM UI-rendering test.
 
 ### Implementation
 
@@ -51,11 +51,11 @@
 - T001, T002, and T003 are independent RED tests and must fail before T004–T007 implementation work.
 - T004 precedes T005; T005 and T006 are the two sides of the WS internal contract, and T007 consumes T006.
 - T007 precedes T009–T010 because the Account page consumes the public response.
-- T008 must be written before T009–T010 and may be run after T007's contract is defined.
+- T008 runs after T009–T010 and the exact-SHA WS Preview Deploy, using the existing preview E2E rather than a new unit/VM UI-rendering test.
 - T011 follows all implementation tasks; T012 follows passing focused/full checks; T013 follows an exact-SHA successful preview deploy.
 
 ## Parallel opportunities
 
 - T001, T002, and T003 can be authored/run in parallel because they touch separate existing test files.
 - T005 and T006 can be implemented in parallel after T004's response shape is fixed; T007 then integrates them.
-- T008 is independent of the WS server test once the public response contract is fixed.
+- T008 validates the implemented Account flow after the backend/public response contract and Account rendering are in place.
