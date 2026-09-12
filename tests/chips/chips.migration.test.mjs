@@ -1158,6 +1158,82 @@ async function assertArchivePrunerRoleContracts(sql) {
     assert.equal(Number(receiptRows[0].hot_entries), 0);
     assert.equal(Number(receiptRows[0].mappings), 2);
     assert.equal(Number(receiptRows[0].receipt_count), 2);
+
+    // #981: reuse the real prune above, then the #980 protected retirement
+    // transition. Only historical identity classification is fixture setup.
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe(`update public.chips_ledger_archive_batches
+      set source_policy_id = 'stage-ledger-auto-retention-30d-v1' where batch_id = $1;`, [batchId]);
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      const format = index === 0 ? "bot-seed-buyin" : "poker:bot-terminal-cashout:v1";
+      await tx.unsafe(`update public.chips_transaction_idempotency
+        set idempotency_key = $2, table_id = $3::uuid, key_format_version = 1, key_format = $4
+        where transaction_id = $1::uuid;`, [transactionIds[index], `${format}:${tableId}:981`, tableId, format]);
+    }
+    await tx.unsafe("delete from public.poker_tables where id = $1::uuid;", [tableId]);
+    await tx.unsafe("set local session_replication_role = 'origin';");
+    await tx.unsafe("select public.chips_set_table_fence_active(true);");
+    const registryHashRows = await tx.unsafe(`select public.chips_archive_text_ids_sha256(
+      array_agg(idempotency_key order by idempotency_key)) as hash
+      from public.chips_transaction_idempotency where archive_batch_id = $1;`, [batchId]);
+    await tx.unsafe(`create temporary table cleanup_registry_fixture on commit drop as
+      select * from public.chips_transaction_idempotency where transaction_id = $1::uuid;`, [transactionIds[0]]);
+    const retired = await tx.unsafe(`select public.chips_retire_missing_table_bot_registry_batch(
+      $1::bigint, 2::bigint, $2, true, $3) as result;`, [batchId, registryHashRows[0].hash, `GO ${batchId}`]);
+    assert.equal(retired[0].result.state, "retired");
+    assert.equal(Number(retired[0].result.remaining_registry_count), 0);
+    for (const execute of [false, true]) {
+      const cleanedRetry = await tx.unsafe(`select public.chips_prune_committed_archive_batch(
+        $1, $2::uuid[], $3::bigint[], $4::boolean) as result;`, [objectPath, transactionIds, entryIds, execute]);
+      assert.deepEqual(cleanedRetry[0].result, { state: "already_pruned", transactions: 2, entries: 4 });
+    }
+    // Deliberately corrupt only disposable savepoint fixtures, bypassing
+    // receipt immutability/CHECKs so the pruner itself must reject bad evidence.
+    const invalidUpdates = [
+      "registry_cleaned_at = null, registry_cleaned_key_count = null, registry_cleaned_keys_sha256 = null",
+      "registry_cleaned_at = null",
+      "registry_cleaned_key_count = null",
+      "registry_cleaned_keys_sha256 = null",
+      "registry_cleaned_key_count = 1",
+      "registry_cleaned_keys_sha256 = 'invalid'",
+      "source_policy_id = null",
+      "source_policy_id = 'stage-ledger-closed-human-table-retention-30d-v1'",
+      "format_version = 2",
+      "project_ref = 'otbqfijerkieoxwpxjnm'",
+    ];
+    for (const [index, update] of invalidUpdates.entries()) {
+      await tx.unsafe(`savepoint cleanup_invalid_${index};`);
+      await tx.unsafe("set local session_replication_role = 'replica';");
+      await tx.unsafe(`alter table public.chips_ledger_archive_batches
+        drop constraint chips_ledger_archive_batches_cleanup_receipt_check,
+        drop constraint chips_ledger_archive_batches_bot_only_evidence_check,
+        drop constraint chips_ledger_archive_batches_bot_only_policy_check;`);
+      await tx.unsafe(`update public.chips_ledger_archive_batches set ${update} where batch_id = $1;`, [batchId]);
+      await tx.unsafe("set local session_replication_role = 'origin';");
+      await expectSavepointError(tx, "invalid_cleanup_retry", () => tx.unsafe(
+        "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], false);",
+        [objectPath, transactionIds, entryIds]), /Archive already-pruned state is inconsistent/);
+      await tx.unsafe(`rollback to savepoint cleanup_invalid_${index};`);
+    }
+    for (const update of [
+      "archive_batch_id = archive_batch_id",
+      "archive_batch_id = null",
+      "archive_batch_id = (select batch_id from public.chips_ledger_archive_batches where object_path = $1)",
+      "transaction_id = '00000000-0000-4000-8000-00000000b499'::uuid",
+    ]) {
+      await tx.unsafe("savepoint cleanup_residual;");
+      await tx.unsafe(`update cleanup_registry_fixture set ${update};`, update.includes("$1") ? [productionObjectPath] : []);
+      await tx.unsafe("set local session_replication_role = 'replica';");
+      await tx.unsafe("insert into public.chips_transaction_idempotency select * from cleanup_registry_fixture;");
+      await tx.unsafe("set local session_replication_role = 'origin';");
+      await expectSavepointError(tx, "residual_cleanup_retry", () => tx.unsafe(
+        "select public.chips_prune_committed_archive_batch($1, $2::uuid[], $3::bigint[], true);",
+        [objectPath, transactionIds, entryIds]), /Archive already-pruned state is inconsistent/);
+      await tx.unsafe("rollback to savepoint cleanup_residual;");
+    }
+    const finalAccounts = await tx`select id, balance, next_entry_seq from public.chips_accounts
+      where system_key in ('GENESIS', ${`POKER_TABLE:${tableId}`}) order by id;`;
+    assert.deepEqual(finalAccounts, accountsBefore, "cleanup retries must preserve balances and sequences");
     throw ROLLBACK;
   }).catch((error) => {
     if (error !== ROLLBACK) throw error;
