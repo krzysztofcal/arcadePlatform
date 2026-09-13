@@ -235,6 +235,61 @@ grant select on public.chips_production_bot_only_retention_policy,
   public.chips_production_escrow_account_retention_policy,
   public.chips_production_retention_control to chips_ledger_archive_pruner;
 
+-- The base archive migration revokes the pruner role from postgres after its
+-- initial grants.  Re-establish the same narrow Stage-equivalent capability
+-- set for the Production functions before any automatic path can run.
+grant chips_ledger_archive_pruner to postgres;
+grant usage on schema public, extensions to chips_ledger_archive_pruner;
+grant select on public.chips_ledger_archive_batches,
+  public.chips_transaction_idempotency,
+  public.chips_transactions,
+  public.chips_entries,
+  public.chips_accounts,
+  public.poker_tables,
+  public.chips_table_fence_control to chips_ledger_archive_pruner;
+grant update (
+  archived_transaction_ids_sha256,
+  archived_entry_ids_sha256,
+  archive_proof_verified_at,
+  pruned_at,
+  pruned_transaction_count,
+  pruned_entry_count,
+  pruned_transaction_ids_sha256,
+  pruned_entry_ids_sha256,
+  bot_only_table_id,
+  bot_only_table_count,
+  bot_only_newest_created_at,
+  bot_only_registry_keys_sha256,
+  bot_only_out_of_scope_keys_sha256,
+  bot_only_identity_count,
+  bot_only_eligible_count,
+  registry_cleaned_at,
+  registry_cleaned_key_count,
+  registry_cleaned_keys_sha256
+) on public.chips_ledger_archive_batches to chips_ledger_archive_pruner;
+grant update (archive_batch_id) on public.chips_transaction_idempotency to chips_ledger_archive_pruner;
+grant delete on public.chips_transaction_idempotency,
+  public.chips_transactions,
+  public.chips_entries to chips_ledger_archive_pruner;
+grant update (bot_only_retention_complete_at, human_retention_complete_at) on public.poker_tables to chips_ledger_archive_pruner;
+drop policy if exists chips_archive_pruner_registry_delete on public.chips_transaction_idempotency;
+create policy chips_archive_pruner_registry_delete
+  on public.chips_transaction_idempotency
+  for delete to chips_ledger_archive_pruner
+  using (true);
+drop policy if exists chips_archive_pruner_tables_marker_update on public.poker_tables;
+create policy chips_archive_pruner_tables_marker_update
+  on public.poker_tables
+  for update to chips_ledger_archive_pruner
+  using (true)
+  with check (has_human_participant is not true and bot_only_retention_complete_at is not null);
+drop policy if exists chips_archive_pruner_human_marker_update on public.poker_tables;
+create policy chips_archive_pruner_human_marker_update
+  on public.poker_tables
+  for update to chips_ledger_archive_pruner
+  using (true)
+  with check (has_human_participant is true and human_retention_complete_at is not null);
+
 create or replace function public.chips_assert_production_retention_control(
   p_policy_id text,
   p_transaction_count bigint,
@@ -639,16 +694,68 @@ revoke all on function public.chips_capture_transaction_idempotency() from publi
 create or replace function public.chips_guard_idempotency_mutations()
 returns trigger language plpgsql set search_path = '' as $$
 begin
-  if tg_op = 'DELETE' then raise exception 'Idempotency registry rows are durable; DELETE is not permitted'; end if;
-  if new.idempotency_key is distinct from old.idempotency_key or new.transaction_id is distinct from old.transaction_id
-    or new.payload_hash is distinct from old.payload_hash or new.tx_type is distinct from old.tx_type
-    or new.user_id is distinct from old.user_id or new.transaction_created_at is distinct from old.transaction_created_at
-    or new.created_at is distinct from old.created_at or new.table_id is distinct from old.table_id
-    or new.key_format_version is distinct from old.key_format_version or new.key_format is distinct from old.key_format then
+  if tg_op = 'DELETE' then
+    if current_user = 'chips_ledger_archive_pruner'
+       and pg_catalog.current_setting('chips.production_bot_registry_cleanup', true) = '1' then
+      return old;
+    end if;
+    raise exception 'Idempotency registry rows are durable; DELETE is not permitted';
+  end if;
+
+  if new.idempotency_key is distinct from old.idempotency_key
+    or new.transaction_id is distinct from old.transaction_id
+    or new.payload_hash is distinct from old.payload_hash
+    or new.tx_type is distinct from old.tx_type
+    or new.user_id is distinct from old.user_id
+    or new.transaction_created_at is distinct from old.transaction_created_at
+    or new.created_at is distinct from old.created_at then
     raise exception 'Idempotency registry identity is immutable';
   end if;
-  if old.archive_batch_id is not null and new.archive_batch_id is distinct from old.archive_batch_id then raise exception 'Idempotency archive mapping cannot be replaced or cleared'; end if;
-  if old.replay_transaction is not null and (new.replay_transaction is distinct from old.replay_transaction or new.replay_entries is distinct from old.replay_entries or new.replay_completed_at is distinct from old.replay_completed_at) then raise exception 'Completed idempotency replay cannot be replaced or cleared'; end if;
+
+  if old.table_id is not null
+     or old.key_format_version is not null
+     or old.key_format is not null then
+    if new.table_id is distinct from old.table_id
+       or new.key_format_version is distinct from old.key_format_version
+       or new.key_format is distinct from old.key_format then
+      raise exception 'Idempotency table binding cannot be replaced or cleared';
+    end if;
+  elsif new.table_id is not null
+     or new.key_format_version is not null
+     or new.key_format is not null then
+    if current_user <> 'postgres' then
+      raise exception 'Historical idempotency table binding may only be backfilled by migration';
+    end if;
+  end if;
+
+  if old.replay_transaction is not null
+    or old.replay_entries is not null
+    or old.replay_completed_at is not null then
+    if new.replay_transaction is distinct from old.replay_transaction
+      or new.replay_entries is distinct from old.replay_entries
+      or new.replay_completed_at is distinct from old.replay_completed_at then
+      raise exception 'Completed idempotency replay cannot be replaced or cleared';
+    end if;
+  elsif not (
+    new.replay_transaction is null
+    and new.replay_entries is null
+    and new.replay_completed_at is null
+  ) and not (
+    new.replay_transaction is not null
+    and new.replay_entries is not null
+    and new.replay_completed_at is not null
+  ) then
+    raise exception 'Idempotency replay must transition from empty to complete';
+  end if;
+
+  if new.archive_batch_id is distinct from old.archive_batch_id then
+    if current_user <> 'chips_ledger_archive_pruner' then
+      raise exception 'Idempotency archive mapping may only be written by the archive pruner';
+    end if;
+    if old.archive_batch_id is not null then
+      raise exception 'Idempotency archive mapping cannot be replaced or cleared';
+    end if;
+  end if;
   return new;
 end;
 $$;
@@ -658,7 +765,6 @@ revoke all on function public.chips_guard_idempotency_mutations() from public, a
 create or replace function public.chips_guard_poker_table_mutations()
 returns trigger language plpgsql set search_path = '' as $$
 begin
-  if tg_op = 'DELETE' then raise exception 'Poker table rows are durable; DELETE is not permitted'; end if;
   if new.id is distinct from old.id or new.created_at is distinct from old.created_at then raise exception 'Poker table identity is immutable'; end if;
   if old.bot_only_proof_eligible and new.bot_only_proof_eligible is distinct from old.bot_only_proof_eligible then raise exception 'Bot eligibility is immutable'; end if;
   if old.bot_only_retention_complete_at is not null and new.bot_only_retention_complete_at is distinct from old.bot_only_retention_complete_at then raise exception 'Bot retention completion is immutable'; end if;
@@ -669,7 +775,10 @@ $$;
 alter function public.chips_guard_poker_table_mutations() owner to postgres;
 revoke all on function public.chips_guard_poker_table_mutations() from public, anon, authenticated, service_role;
 drop trigger if exists poker_tables_production_retention_guard on public.poker_tables;
-create trigger poker_tables_production_retention_guard before update or delete on public.poker_tables for each row execute function public.chips_guard_poker_table_mutations();
+create trigger poker_tables_production_retention_guard
+before update of has_human_participant, bot_only_proof_eligible, bot_only_retention_complete_at
+on public.poker_tables
+for each row execute function public.chips_guard_poker_table_mutations();
 
 CREATE OR REPLACE FUNCTION public.chips_guard_archive_batch_mutations()
  RETURNS trigger
@@ -3600,6 +3709,280 @@ $function$;
 alter function public.chips_authorize_production_escrow_account_retirement_canary(bigint, text, text) owner to postgres;
 revoke all on function public.chips_authorize_production_escrow_account_retirement_canary(bigint, text, text) from public, anon, authenticated, service_role;
 grant execute on function public.chips_authorize_production_escrow_account_retirement_canary(bigint, text, text) to postgres;
+
+create or replace function public.chips_production_bot_only_retention_automatic_active()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select controls.enabled is true
+       and controls.max_transactions in (2, 5000)
+       and policies.enabled is true
+       and policies.canary_batch_id is not null
+       and policies.canary_confirmation = 'GO ' || policies.canary_batch_id::text
+       and policies.activation_go_at is not null
+       and policies.activation_confirmation =
+         'ACTIVATE production-ledger-bot-only-retention-7d-v1 CANARY ' || policies.canary_batch_id::text
+       and policies.activated_at is not null
+      from public.chips_production_retention_control as controls
+      join public.chips_production_bot_only_retention_policy as policies on true
+     where controls.control_id is true
+       and policies.policy_id = 'production-ledger-bot-only-retention-7d-v1'
+  ), false);
+$$;
+alter function public.chips_production_bot_only_retention_automatic_active() owner to postgres;
+revoke all on function public.chips_production_bot_only_retention_automatic_active() from public, anon, authenticated, service_role;
+grant execute on function public.chips_production_bot_only_retention_automatic_active() to postgres, chips_ledger_archive_pruner;
+
+create or replace function public.chips_production_closed_human_retention_automatic_active()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select controls.enabled is true
+       and controls.max_transactions in (2, 5000)
+       and policies.enabled is true
+       and policies.canary_batch_id is not null
+       and policies.canary_confirmation = 'GO ' || policies.canary_batch_id::text
+       and policies.activation_go_at is not null
+       and policies.activation_confirmation =
+         'ACTIVATE production-ledger-closed-human-table-retention-30d-v1 CANARY ' || policies.canary_batch_id::text
+       and policies.activated_at is not null
+      from public.chips_production_retention_control as controls
+      join public.chips_production_closed_human_table_retention_policy as policies on true
+     where controls.control_id is true
+       and policies.policy_id = 'production-ledger-closed-human-table-retention-30d-v1'
+  ), false);
+$$;
+alter function public.chips_production_closed_human_retention_automatic_active() owner to postgres;
+revoke all on function public.chips_production_closed_human_retention_automatic_active() from public, anon, authenticated, service_role;
+grant execute on function public.chips_production_closed_human_retention_automatic_active() to postgres, chips_ledger_archive_pruner;
+
+-- Production keeps the proven automatic Stage boundary: one exact committed
+-- batch is locked, its own GO is written by this SECURITY DEFINER adapter, and
+-- the existing proof/receipt/prune routine remains the only destructive path.
+create or replace function public.chips_auto_prune_and_cleanup_bot_only_archive_batch(
+  p_object_path text,
+  p_transaction_ids uuid[],
+  p_entry_ids bigint[],
+  p_registry_keys text[],
+  p_table_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  batch public.chips_ledger_archive_batches%rowtype;
+  result jsonb;
+begin
+  if not public.chips_production_bot_only_retention_automatic_active() then
+    raise exception using errcode = 'P8954', message = 'Automatic bot-only Production retention is not active';
+  end if;
+  select batches.*
+    into batch
+    from public.chips_ledger_archive_batches as batches
+   where batches.object_path = p_object_path
+   for update;
+  if not found
+     or batch.project_ref <> 'otbqfijerkieoxwpxjnm'
+     or batch.format_version <> 2
+     or batch.source_policy_id <> 'production-ledger-bot-only-retention-7d-v1'
+     or batch.bot_only_table_id is distinct from p_table_id then
+    raise exception using errcode = 'P8955', message = 'Automatic cleanup target is not a canonical Production bot-only batch';
+  end if;
+  perform public.chips_assert_production_retention_control(
+    batch.source_policy_id,
+    batch.transaction_count,
+    true
+  );
+  if batch.destructive_go_at is null and batch.destructive_go_batch_id is not null then
+    raise exception using errcode = 'P8956', message = 'Automatic bot-only batch has a partial GO';
+  elsif batch.destructive_go_at is null then
+    perform pg_catalog.set_config('chips.production_bot_only_go', '1', true);
+    update public.chips_ledger_archive_batches as batches
+       set destructive_go_at = pg_catalog.timezone('utc', pg_catalog.now()),
+           destructive_go_batch_id = batch.batch_id
+     where batches.batch_id = batch.batch_id
+       and batches.destructive_go_at is null;
+    if not found then
+      raise exception using errcode = 'P8956', message = 'Automatic bot-only batch GO transition was not unique';
+    end if;
+  elsif batch.destructive_go_batch_id is distinct from batch.batch_id then
+    raise exception using errcode = 'P8956', message = 'Automatic bot-only batch has a partial or foreign GO';
+  end if;
+  result := public.chips_prune_and_cleanup_bot_only_archive_batch(
+    p_object_path,
+    p_transaction_ids,
+    p_entry_ids,
+    p_registry_keys,
+    p_table_id,
+    true,
+    batch.batch_id
+  );
+  return result || pg_catalog.jsonb_build_object(
+    'automatic_policy', 'production-ledger-bot-only-retention-7d-v1'
+  );
+end;
+$$;
+alter function public.chips_auto_prune_and_cleanup_bot_only_archive_batch(text, uuid[], bigint[], text[], uuid) owner to postgres;
+revoke all on function public.chips_auto_prune_and_cleanup_bot_only_archive_batch(text, uuid[], bigint[], text[], uuid) from public, anon, authenticated, service_role;
+grant execute on function public.chips_auto_prune_and_cleanup_bot_only_archive_batch(text, uuid[], bigint[], text[], uuid) to postgres, chips_ledger_archive_pruner;
+
+create or replace function public.chips_auto_prune_closed_human_table_archive_batch(
+  p_object_path text,
+  p_transaction_ids uuid[],
+  p_entry_ids bigint[],
+  p_table_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  batch public.chips_ledger_archive_batches%rowtype;
+  policy public.chips_production_closed_human_table_retention_policy%rowtype;
+  registry_count bigint;
+  distinct_table_count bigint;
+  null_table_count bigint;
+  receipt_count integer;
+  go_count integer;
+  result jsonb;
+begin
+  if not public.chips_production_closed_human_retention_automatic_active() then
+    raise exception using errcode = 'P9269', message = 'Automatic closed-human Production retention is not active';
+  end if;
+  if p_object_path is null
+     or p_transaction_ids is null
+     or p_entry_ids is null
+     or p_table_id is null
+     or pg_catalog.cardinality(p_transaction_ids) < 1
+     or pg_catalog.cardinality(p_entry_ids) < 1 then
+    raise exception using errcode = 'P9270', message = 'Automatic closed-human exact archive binding is required';
+  end if;
+
+  select policies.*
+    into policy
+    from public.chips_production_closed_human_table_retention_policy as policies
+   where policies.policy_id = 'production-ledger-closed-human-table-retention-30d-v1';
+  if not found
+     or policy.enabled is not true
+     or policy.canary_batch_id is null
+     or policy.canary_confirmation is distinct from ('GO ' || policy.canary_batch_id::text)
+     or policy.activation_confirmation is distinct from
+       ('ACTIVATE production-ledger-closed-human-table-retention-30d-v1 CANARY ' || policy.canary_batch_id::text)
+     or policy.activation_go_at is null
+     or policy.activated_at is null then
+    raise exception using errcode = 'P9270', message = 'Automatic closed-human Production policy binding is invalid';
+  end if;
+
+  select batches.*
+    into batch
+    from public.chips_ledger_archive_batches as batches
+   where batches.object_path = p_object_path
+   for update;
+  if not found
+     or batch.project_ref is distinct from 'otbqfijerkieoxwpxjnm'
+     or batch.format_version is distinct from 1
+     or batch.source_policy_id is distinct from 'production-ledger-closed-human-table-retention-30d-v1'
+     or batch.status is distinct from 'committed'
+     or batch.committed_at is null
+     or batch.object_path is distinct from ('v1/sha256/' || batch.compressed_sha256 || '.jsonl.gz')
+     or batch.batch_id is null
+     or batch.transaction_count is null
+     or batch.entry_count is null
+     or pg_catalog.cardinality(p_transaction_ids) <> batch.transaction_count
+     or pg_catalog.cardinality(p_entry_ids) <> batch.entry_count then
+    raise exception using errcode = 'P9271', message = 'Automatic closed-human target is not one canonical Production batch';
+  end if;
+  perform public.chips_assert_production_retention_control(
+    batch.source_policy_id,
+    batch.transaction_count,
+    true
+  );
+  perform public.chips_assert_archive_prune_target(batch.project_ref, batch.transaction_count);
+
+  receipt_count := pg_catalog.num_nonnulls(
+    batch.pruned_at,
+    batch.pruned_transaction_count,
+    batch.pruned_entry_count,
+    batch.pruned_transaction_ids_sha256,
+    batch.pruned_entry_ids_sha256
+  );
+  if receipt_count not in (0, 5) then
+    raise exception using errcode = 'P9272', message = 'Automatic closed-human prune receipt is partial';
+  end if;
+  go_count := pg_catalog.num_nonnulls(batch.destructive_go_at, batch.destructive_go_batch_id);
+  if go_count not in (0, 2)
+     or (go_count = 2 and batch.destructive_go_batch_id is distinct from batch.batch_id)
+     or (receipt_count = 5 and go_count <> 2) then
+    raise exception using errcode = 'P9272', message = 'Automatic closed-human batch GO is partial or foreign';
+  end if;
+
+  select pg_catalog.count(*),
+         pg_catalog.count(distinct registry.table_id),
+         pg_catalog.count(*) filter (where registry.table_id is null)
+    into registry_count, distinct_table_count, null_table_count
+    from public.chips_transaction_idempotency as registry
+   where registry.transaction_id = any(p_transaction_ids)
+     and registry.archive_batch_id = batch.batch_id;
+  if registry_count <> batch.transaction_count
+     or distinct_table_count <> 1
+     or null_table_count <> 0
+     or not exists (
+       select 1
+         from public.chips_transaction_idempotency as registry
+        where registry.transaction_id = any(p_transaction_ids)
+          and registry.archive_batch_id = batch.batch_id
+          and registry.table_id = p_table_id
+     ) then
+    raise exception using errcode = 'P9273', message = 'Automatic closed-human target registry binding is not exact';
+  end if;
+
+  perform public.chips_assert_closed_human_table_lifecycle_gate(
+    p_table_id, batch.cutoff, batch.batch_id
+  );
+
+  if go_count = 0 then
+    perform pg_catalog.set_config('chips.production_closed_human_go', '1', true);
+    update public.chips_ledger_archive_batches as batches
+       set destructive_go_at = pg_catalog.timezone('utc', pg_catalog.now()),
+           destructive_go_batch_id = batch.batch_id
+     where batches.batch_id = batch.batch_id
+       and batches.destructive_go_at is null
+       and batches.destructive_go_batch_id is null;
+    if not found then
+      raise exception using errcode = 'P9274', message = 'Automatic closed-human batch GO transition was not unique';
+    end if;
+  end if;
+
+  perform pg_catalog.set_config('chips.production_closed_human_automatic', '1', true);
+  result := public.chips_prune_closed_human_table_archive_batch(
+    p_object_path,
+    p_transaction_ids,
+    p_entry_ids,
+    p_table_id,
+    true,
+    batch.batch_id
+  );
+  return result || pg_catalog.jsonb_build_object(
+    'automatic_policy', 'production-ledger-closed-human-table-retention-30d-v1',
+    'batch_id', batch.batch_id,
+    'table_id', p_table_id
+  );
+end;
+$$;
+alter function public.chips_auto_prune_closed_human_table_archive_batch(text, uuid[], bigint[], uuid) owner to postgres;
+revoke all on function public.chips_auto_prune_closed_human_table_archive_batch(text, uuid[], bigint[], uuid) from public, anon, authenticated, service_role;
+grant execute on function public.chips_auto_prune_closed_human_table_archive_batch(text, uuid[], bigint[], uuid) to postgres, chips_ledger_archive_pruner;
 
 create or replace function public.chips_production_retention_automatic_active()
 returns boolean language sql stable security definer set search_path = '' as $$

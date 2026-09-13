@@ -207,6 +207,11 @@ const runProductionEquivalentFixture = async (sql) => {
     "production-ledger-closed-human-table-retention-30d-v1",
     "production-ledger-escrow-account-retention-v1",
   ]);
+  const automaticStateRows = await sql.unsafe(`select
+    public.chips_production_bot_only_retention_automatic_active() as bot_automatic,
+    public.chips_production_closed_human_retention_automatic_active() as human_automatic;`);
+  assert.equal(automaticStateRows[0].bot_automatic, false, "Production bot automatic path must remain dark in E1");
+  assert.equal(automaticStateRows[0].human_automatic, false, "Production closed-human automatic path must remain dark in E1");
 
   await sql.unsafe("set chips.production_fence_confirmation = ''; set chips.production_runtime_evidence_sha256 = '';");
   await assert.rejects(
@@ -246,6 +251,10 @@ const assertProductionRetentionSafetyContracts = async (sql) => {
   const escrowTableId = "00000000-0000-4000-8000-00000000e921";
   const escrowAccountId = "00000000-0000-4000-8000-00000000e922";
   const escrowProofTransactionId = "00000000-0000-4000-8000-00000000e923";
+  const botTableId = "00000000-0000-4000-8000-00000000e931";
+  const botSystemAccountId = "00000000-0000-4000-8000-00000000e932";
+  const botEscrowAccountId = "00000000-0000-4000-8000-00000000e933";
+  const botTransactionId = "00000000-0000-4000-8000-00000000e934";
   const cutoff = "2026-09-10T00:00:00.000Z";
   const createdAt = "2026-09-01T00:00:00.000Z";
   const lockKey = "chips-ledger-production-automation-v1:otbqfijerkieoxwpxjnm";
@@ -255,6 +264,9 @@ const assertProductionRetentionSafetyContracts = async (sql) => {
   let existingEntryIds = [];
   let existingBatchId = null;
   let escrowBatchId = null;
+  let botEntryIds = [];
+  let botBatchId = null;
+  const botRegistryKey = `poker:deferred-leave:v1:${botTableId}:fixture`;
 
   try {
     await sql.begin(async (tx) => {
@@ -345,6 +357,161 @@ const assertProductionRetentionSafetyContracts = async (sql) => {
     assert.equal(Number(existingDryRun.transactions), 1);
     assert.equal(Number(existingDryRun.entries), 2);
     assert.equal(existingDryRun.net, "0");
+
+    await sql.begin(async (tx) => {
+      await tx.unsafe("set local session_replication_role = 'replica';");
+      await tx.unsafe(`insert into public.poker_tables (id, status, has_human_participant, bot_only_proof_eligible)
+        values ($1::uuid, 'CLOSED', false, true);`, [botTableId]);
+      await tx.unsafe(`insert into public.chips_accounts (id, account_type, system_key, status, balance, next_entry_seq)
+        values ($1::uuid, 'SYSTEM', $2, 'active', 0, 1),
+               ($3::uuid, 'ESCROW', $4, 'active', 0, 1);`, [
+        botSystemAccountId,
+        `PROD_TEST_SYSTEM:${botTableId}`,
+        botEscrowAccountId,
+        `POKER_TABLE:${botTableId}`,
+      ]);
+      await tx.unsafe(`insert into public.chips_transactions
+        (id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at)
+        values ($1::uuid, $2, $3::jsonb, $4, $5, 'TABLE_BUY_IN', null, $6::timestamptz);`, [
+        botTransactionId,
+        `table:${botTableId}`,
+        JSON.stringify({ actor: "BOT", tableId: botTableId }),
+        botRegistryKey,
+        "9".repeat(64),
+        createdAt,
+      ]);
+      const entryRows = await tx.unsafe(`insert into public.chips_entries
+        (transaction_id, account_id, entry_seq, amount, metadata, created_at)
+        values ($1::uuid, $2::uuid, 1, -10, '{}'::jsonb, $3::timestamptz),
+               ($1::uuid, $4::uuid, 1, 10, '{}'::jsonb, $3::timestamptz)
+        returning id::text;`, [botTransactionId, botSystemAccountId, createdAt, botEscrowAccountId]);
+      botEntryIds = entryRows.map((row) => row.id);
+      await tx.unsafe(`insert into public.chips_transaction_idempotency
+        (idempotency_key, transaction_id, payload_hash, tx_type, user_id, transaction_created_at, table_id, key_format_version, key_format)
+        values ($1, $2::uuid, $3, 'TABLE_BUY_IN', null, $4::timestamptz, $5::uuid, 1, 'poker:deferred-leave:v1');`, [
+        botRegistryKey,
+        botTransactionId,
+        "9".repeat(64),
+        createdAt,
+        botTableId,
+      ]);
+    });
+    const botRegistryHashRows = await sql.unsafe(
+      "select public.chips_archive_text_ids_sha256($1::text[]) as hash;",
+      [[botRegistryKey]],
+    );
+    const botEmptyScopeHashRows = await sql.unsafe(
+      "select public.chips_archive_text_ids_sha256(ARRAY[]::text[]) as hash;",
+    );
+    const botCompressedSha = "6".repeat(64);
+    const botRawSha = "7".repeat(64);
+    const botObjectPath = `v1/sha256/${botCompressedSha}.jsonl.gz`;
+    const botBatchRows = await sql.begin(async (tx) => {
+      await tx.unsafe("set local session_replication_role = 'replica';");
+      return tx.unsafe(`insert into public.chips_ledger_archive_batches
+        (object_path, project_ref, format_version, cutoff, cursor_end_created_at, cursor_end_id,
+         first_created_at, last_created_at, transaction_count, entry_count, tx_types, raw_bytes,
+         compressed_bytes, raw_sha256, compressed_sha256, credits, debits, net_amount, status,
+         committed_at, source_policy_id, bot_only_table_id, bot_only_table_count,
+         bot_only_newest_created_at, bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256,
+         bot_only_identity_count, bot_only_eligible_count)
+        values ($1, 'otbqfijerkieoxwpxjnm', 2, $2::timestamptz, $3::timestamptz, $4::uuid,
+         $3::timestamptz, $3::timestamptz, 1, 2, '{"TABLE_BUY_IN": 1}'::jsonb, 1, 1,
+         $5, $6, 10, 10, 0, 'committed', $7::timestamptz,
+         'production-ledger-bot-only-retention-7d-v1', $8::uuid, 1, $3::timestamptz,
+         $9, $10, 1, 1)
+        returning batch_id;`, [
+        botObjectPath,
+        cutoff,
+        createdAt,
+        botTransactionId,
+        botRawSha,
+        botCompressedSha,
+        createdAt,
+        botTableId,
+        botRegistryHashRows[0].hash,
+        botEmptyScopeHashRows[0].hash,
+      ]);
+    });
+    botBatchId = botBatchRows[0].batch_id;
+    const botProof = await sql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read;");
+      const rows = await tx.unsafe(`select public.chips_register_bot_only_archive_proof(
+        $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[], $6::text
+      ) as result;`, [
+        botObjectPath,
+        [botTransactionId],
+        botEntryIds,
+        botTableId,
+        [botRegistryKey],
+        botEmptyScopeHashRows[0].hash,
+      ]);
+      return rows[0]?.result;
+    });
+    assert.equal(botProof.state, "proof_registered", "Production bot-only proof must register before cleanup");
+    await sql.begin(async (tx) => {
+      await tx.unsafe("set local session_replication_role = 'replica';");
+      await tx.unsafe(`update public.chips_production_retention_control
+        set enabled = true, max_transactions = 5000,
+            activated_at = $1::timestamptz,
+            activation_confirmation = 'disposable Production automatic contract'
+        where control_id is true;`, [createdAt]);
+      await tx.unsafe(`update public.chips_production_bot_only_retention_policy
+        set enabled = true,
+            canary_batch_id = $1::bigint,
+            canary_confirmation = 'GO ' || $1::text,
+            activation_go_at = $2::timestamptz,
+            activation_confirmation = 'ACTIVATE production-ledger-bot-only-retention-7d-v1 CANARY ' || $1::text,
+            activated_at = $2::timestamptz
+        where policy_id = 'production-ledger-bot-only-retention-7d-v1';`, [botBatchId, createdAt]);
+    });
+    const botCleanup = await sql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level serializable;");
+      const rows = await tx.unsafe(`select public.chips_auto_prune_and_cleanup_bot_only_archive_batch(
+        $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid
+      ) as result;`, [
+        botObjectPath,
+        [botTransactionId],
+        botEntryIds,
+        [botRegistryKey],
+        botTableId,
+      ]);
+      return rows[0]?.result;
+    });
+    assert.equal(botCleanup.state, "cleaned", "Production bot-only cleanup must complete its full path");
+    assert.equal(botCleanup.automatic_policy, "production-ledger-bot-only-retention-7d-v1");
+    const botPostCleanupRows = await sql.unsafe(`select
+      (select count(*)::int from public.chips_transaction_idempotency where table_id = $1::uuid) as registry_count,
+      (select count(*)::int from public.chips_transactions where id = $2::uuid) as transaction_count,
+      (select count(*)::int from public.chips_entries where transaction_id = $2::uuid) as entry_count,
+      (select bot_only_retention_complete_at from public.poker_tables where id = $1::uuid) as lifecycle_marker,
+      (select registry_cleaned_key_count from public.chips_ledger_archive_batches where batch_id = $3::bigint) as cleaned_count;`, [
+      botTableId,
+      botTransactionId,
+      botBatchId,
+    ]);
+    assert.equal(Number(botPostCleanupRows[0].registry_count), 0, "bot-only cleanup must delete the exact registry row");
+    assert.equal(Number(botPostCleanupRows[0].transaction_count), 0, "bot-only cleanup must delete the hot transaction");
+    assert.equal(Number(botPostCleanupRows[0].entry_count), 0, "bot-only cleanup must delete the hot entries");
+    assert.ok(botPostCleanupRows[0].lifecycle_marker, "bot-only cleanup must persist the lifecycle marker");
+    assert.equal(Number(botPostCleanupRows[0].cleaned_count), 1, "bot-only cleanup receipt must count the deleted registry row");
+    await sql.unsafe("delete from public.poker_tables where id = $1::uuid;", [botTableId]);
+    const deletedTableRows = await sql.unsafe(
+      "select count(*)::int as count from public.poker_tables where id = $1::uuid;",
+      [botTableId],
+    );
+    assert.equal(Number(deletedTableRows[0].count), 0, "terminal closed-table cleanup must remain allowed after E1");
+    await sql.begin(async (tx) => {
+      await tx.unsafe("set local session_replication_role = 'replica';");
+      await tx.unsafe(`update public.chips_production_bot_only_retention_policy
+        set enabled = false, canary_batch_id = null, canary_confirmation = null,
+            activation_go_at = null, activation_confirmation = null, activated_at = null
+        where policy_id = 'production-ledger-bot-only-retention-7d-v1';`);
+      await tx.unsafe(`update public.chips_production_retention_control
+        set enabled = false, max_transactions = 2,
+            activated_at = null, activation_confirmation = null
+        where control_id is true;`);
+    });
 
     await sql.begin(async (tx) => {
       await tx.unsafe("set local session_replication_role = 'replica';");
@@ -518,15 +685,27 @@ const assertProductionRetentionSafetyContracts = async (sql) => {
     await sql.begin(async (tx) => {
       await tx.unsafe("set local session_replication_role = 'replica';");
       await tx.unsafe("update public.chips_production_escrow_account_retention_policy set canary_batch_id = null, canary_account_ids_sha256 = null, canary_confirmation = null where policy_id = 'production-ledger-escrow-account-retention-v1';");
+      await tx.unsafe(`update public.chips_production_bot_only_retention_policy
+        set enabled = false, canary_batch_id = null, canary_confirmation = null,
+            activation_go_at = null, activation_confirmation = null, activated_at = null
+        where policy_id = 'production-ledger-bot-only-retention-7d-v1';`);
+      await tx.unsafe(`update public.chips_production_retention_control
+        set enabled = false, max_transactions = 2,
+            activated_at = null, activation_confirmation = null
+        where control_id is true;`);
       if (existingBatchId) await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [existingBatchId]);
       if (escrowBatchId) await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [escrowBatchId]);
+      if (botBatchId) await tx.unsafe("delete from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [botBatchId]);
       await tx.unsafe("delete from public.chips_transaction_idempotency where transaction_id = $1::uuid;", [existingTransactionId]);
       await tx.unsafe("delete from public.chips_entries where transaction_id = $1::uuid;", [existingTransactionId]);
       await tx.unsafe("delete from public.chips_transactions where id = $1::uuid;", [existingTransactionId]);
+      await tx.unsafe("delete from public.chips_transaction_idempotency where transaction_id = $1::uuid;", [botTransactionId]);
+      await tx.unsafe("delete from public.chips_entries where transaction_id = $1::uuid;", [botTransactionId]);
+      await tx.unsafe("delete from public.chips_transactions where id = $1::uuid;", [botTransactionId]);
       await tx.unsafe("delete from public.poker_requests where table_id = $1::uuid;", [humanTableId]);
       await tx.unsafe("delete from public.poker_state where table_id = $1::uuid;", [humanTableId]);
-      await tx.unsafe("delete from public.poker_tables where id in ($1::uuid, $2::uuid, $3::uuid);", [existingTableId, humanTableId, escrowTableId]);
-      await tx.unsafe("delete from public.chips_accounts where id in ($1::uuid, $2::uuid, $3::uuid, $4::uuid);", [existingSystemAccountId, existingEscrowAccountId, humanEscrowAccountId, escrowAccountId]);
+      await tx.unsafe("delete from public.poker_tables where id in ($1::uuid, $2::uuid, $3::uuid, $4::uuid);", [existingTableId, humanTableId, escrowTableId, botTableId]);
+      await tx.unsafe("delete from public.chips_accounts where id in ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid);", [existingSystemAccountId, existingEscrowAccountId, humanEscrowAccountId, escrowAccountId, botSystemAccountId, botEscrowAccountId]);
     });
   }
 };

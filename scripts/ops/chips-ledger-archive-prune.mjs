@@ -1015,6 +1015,15 @@ export function createPruneStore(sql) {
             evidence.entryIds,
             evidence.closedHumanTableId,
           ])
+          : execute && automatic && targetName === "prod"
+            ? await tx.unsafe(`select public.chips_auto_prune_closed_human_table_archive_batch(
+              $1, $2::uuid[], $3::bigint[], $4::uuid
+            ) as result;`, [
+              objectPath,
+              evidence.transactionIds,
+              evidence.entryIds,
+              evidence.closedHumanTableId,
+            ])
           : await tx.unsafe(`select public.chips_prune_closed_human_table_archive_batch(
             $1, $2::uuid[], $3::bigint[], $4::uuid, $5::boolean, $6::bigint
           ) as result;`, [
@@ -1033,9 +1042,6 @@ export function createPruneStore(sql) {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
-        if (execute && targetName === "prod" && !automatic && approvedBatchId != null) {
-          await tx.unsafe("set local chips.production_canary = '1';");
-        }
         const rows = await tx.unsafe(`select public.chips_activate_closed_human_table_retention_policy(
           $1::bigint, $2::text
         ) as result;`, [canaryBatchId, confirmation]);
@@ -1057,6 +1063,16 @@ export function createPruneStore(sql) {
             evidence.registryKeys,
             evidence.tableId,
           ])
+          : automatic && targetName === "prod"
+            ? await tx.unsafe(`select public.chips_auto_prune_and_cleanup_bot_only_archive_batch(
+              $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid
+            ) as result;`, [
+              objectPath,
+              evidence.transactionIds,
+              evidence.entryIds,
+              evidence.registryKeys,
+              evidence.tableId,
+            ])
           : await tx.unsafe(`select public.chips_prune_and_cleanup_bot_only_archive_batch(
             $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid, $6::boolean, $7::bigint
           ) as result;`, [

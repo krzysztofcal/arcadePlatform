@@ -92,7 +92,7 @@ Own review completed: added explicit owner-only existing30d canary GO routine (o
 
 ## PR A implementation evidence
 
-Implementation was performed on `agent/891-production-retention-plan` from main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. The accepted 54/43 inventory and 18/3/22 classification were preserved. E1 and E2 are the only files under `supabase/production-migrations/`; their current SHA-256 values are `26085203da58b52cd95c335de191a63ffe12fe341b2a8cc92ef163ea5647da78` and `f6d8334cf642df7c9c4ac3b633d4898254d5af09290814cdce54e253bc650cab` respectively.
+Implementation was performed on `agent/891-production-retention-plan` from main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. The accepted 54/43 inventory and 18/3/22 classification were preserved. E1 and E2 are the only files under `supabase/production-migrations/`; their current SHA-256 values are `9bcd69c6ed6844d816e780812482afd7f89bd9b347a4dc60656242428aba3311` and `f6d8334cf642df7c9c4ac3b633d4898254d5af09290814cdce54e253bc650cab` respectively.
 
 The missing Production WS column `poker_tables.bot_only_retention_complete_at` is supplied by E1's forward-only schema contract. The TABLE binding implementation was validated against the existing Netlify and WS `postTransaction` adapters on a disposable first54+E1 PostgreSQL fixture with E2's fence active, including valid buy-in/cash-out metadata and rejected substituted/legacy-invalid metadata. A trigger bug found during this test (the transaction trigger function evaluated `old.transaction_id` for `chips_transactions`) was corrected by using a table-safe target transaction ID branch; the regression test then passed.
 

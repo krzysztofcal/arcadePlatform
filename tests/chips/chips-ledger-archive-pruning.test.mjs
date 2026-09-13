@@ -50,6 +50,52 @@ const ESCROW_ID = "00000000-0000-4000-8000-000000000031";
   assert.match(statements[2], /select public\.chips_register_bot_only_archive_proof/);
 }
 
+{
+  const calls = [];
+  const sql = {
+    unsafe: async () => [],
+    begin: async (callback) => callback({
+      unsafe: async (query, params) => {
+        calls.push({ query, params });
+        return [{ result: { state: "adapter-boundary" } }];
+      },
+    }),
+  };
+  const store = createPruneStore(sql);
+  const activated = await store.activateClosedHumanPolicy(
+    17,
+    "ACTIVATE production-ledger-closed-human-table-retention-30d-v1 CANARY 17",
+  );
+  assert.deepEqual(activated, { state: "adapter-boundary" });
+  assert.match(calls[calls.length - 1].query, /chips_activate_closed_human_table_retention_policy/);
+  assert.deepEqual(calls[calls.length - 1].params, [
+    17,
+    "ACTIVATE production-ledger-closed-human-table-retention-30d-v1 CANARY 17",
+  ]);
+
+  calls.length = 0;
+  await store.cleanupClosedHuman(
+    "v1/sha256/closed-human.jsonl.gz",
+    { transactionIds: [TX_A], entryIds: [1], closedHumanTableId: TABLE_ID },
+    true,
+    null,
+    true,
+    "prod",
+  );
+  assert.match(calls[calls.length - 1].query, /chips_auto_prune_closed_human_table_archive_batch/);
+
+  calls.length = 0;
+  await store.cleanupBotOnly(
+    "v1/sha256/bot-only.jsonl.gz",
+    { transactionIds: [TX_A], entryIds: [1], registryKeys: ["registry-key"], tableId: TABLE_ID },
+    true,
+    null,
+    true,
+    "prod",
+  );
+  assert.match(calls[calls.length - 1].query, /chips_auto_prune_and_cleanup_bot_only_archive_batch/);
+}
+
 const ENV = {
   EXPECTED_SUPABASE_STAGE_PROJECT_REF: "krydukthwdvccggbyjfw",
   EXPECTED_SUPABASE_PROD_PROJECT_REF: "otbqfijerkieoxwpxjnm",
