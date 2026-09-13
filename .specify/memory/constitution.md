@@ -54,6 +54,14 @@ Authors MUST prefer extending existing test files. Broad or speculative suites,
 including UI rendering, CSS/layout, JSP views, or simple glue code, are
 prohibited. Heavy test frameworks are prohibited.
 
+Before $speckit-implement, the Constitution Check MUST inspect planned test
+tasks. Specifications, plans, and tasks MUST NOT require prohibited tests.
+TDD/test-first does not override fundamental-tests-only policy. A generated
+Spec Kit task is not authorization to add UI rendering, CSS/layout, JSP-view,
+or simple-glue tests. Conflicting tasks MUST be corrected before implementation.
+Presentation SHOULD be verified through existing preview/E2E or manual preview
+when appropriate.
+
 Plans and specifications MUST name concrete file paths, function names, and
 properties, and MUST stay concise enough to review. Spec Kit plans MUST include
 a Constitution Check, MUST NOT include Git commands, and MUST NOT include full
@@ -63,6 +71,43 @@ or offline fallback context. The live GitHub repository MUST remain the primary
 source of truth for current code; a conflicting snapshot MUST NOT override it.
 
 ## Deployment and Safety Gates
+
+Same-repository pull requests changing supabase/migrations/** can automatically
+trigger DB Stage Apply PR and apply migrations to the shared Stage database.
+This is a shared-environment mutation, NOT a read-only CI check. Agents MAY
+deliberately use this mechanism to apply Stage migrations; ordinary Stage
+migrations do not require a separate manual GO. Before push/PR, the current
+specification, plan, and tasks MUST explicitly record that automatic Stage
+apply is an intended effect. Agents MUST NOT accidentally include migrations
+without accounting for their shared Stage impact. Once applied to shared Stage,
+corrections MUST be forward-only in new migrations; applied migrations MUST
+NOT be edited.
+
+Definition of Done is target-aware. Green CI, mocks, and unit tests do not prove
+runtime configuration or integration. For WS-affecting changes, Codex MUST
+prepare the relevant Deploy Preview and execute the manual WS Preview Deploy
+for the latest runtime-affecting commit, using the exact application SHA; the
+workflow must be verified successful for that SHA. Deploy Preview
+frontend/Netlify calls to WS Preview remain the relevant integration boundary.
+Codex is NOT required to run a full browser/authenticated smoke for every PR.
+The agent may run automated or manual smoke when the user explicitly requests
+it, when it is needed to diagnose a concrete issue, or when the root cause
+cannot otherwise be established. The user may perform the required real-runtime
+smoke manually. When that verification is still outstanding, the handoff MUST
+say "implementation ready, awaiting manual runtime verification" and the PR
+MUST NOT be called READY/merge-ready.
+
+After a successful exact-SHA WS Preview Deploy and confirmed smoke, later
+commits that change only docs, Spec Kit artifacts, tests, or non-runtime
+comments/metadata do not invalidate that runtime evidence. Before reusing the
+evidence, the agent MUST prove by diff that no deployable runtime artifact or
+environment configuration changed. Any later runtime/deployable/configuration
+change requires a new exact-SHA WS Preview Deploy and the relevant manual
+scenario again. Stage smoke may likewise be performed by the user; agents MUST
+NOT run broad or redundant Stage smoke unless the user requests it or it is
+needed for diagnosis. This does not authorize Production, whose rules are
+unchanged. A PR MUST NOT be marked READY/merge-ready while required runtime
+verification is missing or a manual smoke demonstrates a failure.
 
 A pull request that changes ws-server/**, WebSocket runtime dependencies under
 shared/**, or browser/WebSocket protocol behavior MUST use the manual WS Preview
@@ -137,4 +182,4 @@ resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
 not an allowed resolution.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-09-11
+**Version**: 1.1.1 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-09-13

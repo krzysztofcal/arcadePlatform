@@ -201,6 +201,15 @@
     }
   }
 
+  async function fetchPokerProjection(){
+    if (window.ProfileClient && typeof window.ProfileClient.getMe === 'function'){
+      var profile = await window.ProfileClient.getMe(true, { includePoker: true });
+      return profile.poker;
+    }
+    var payload = await authedFetchWithRetry('/.netlify/functions/profile-me?includePoker=1', { method: 'GET' });
+    return payload.data && payload.data.poker;
+  }
+
   async function fetchBalance(){
     var ui = window.UserUiState;
     var uiContext = ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null;
@@ -343,6 +352,7 @@
   }
 
   window.ChipsClient = {
+    fetchPokerProjection: fetchPokerProjection,
     fetchBalance: fetchBalance,
     fetchLedger: fetchLedger,
     postTransaction: postTransaction,

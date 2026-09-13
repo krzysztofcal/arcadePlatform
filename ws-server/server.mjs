@@ -4092,6 +4092,42 @@ async function handleInternalLobbyMaterialize(req, res) {
   res.end(JSON.stringify({ ok: true, tableId }));
 }
 
+async function handleInternalAccountPoker(req, res) {
+  if (req.method !== "GET") {
+    sendInternalJson(res, 405, { error: "method_not_allowed" });
+    return;
+  }
+  if (!internalRuntimeToken) {
+    sendInternalJson(res, 503, { error: "internal_runtime_token_missing" });
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    sendInternalJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+
+  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  const userId = typeof requestUrl.searchParams.get("userId") === "string"
+    ? requestUrl.searchParams.get("userId").trim()
+    : "";
+  if (!userId) {
+    sendInternalJson(res, 400, { error: "invalid_user_id" });
+    return;
+  }
+
+  try {
+    const poker = tableManager.projectUserTables(userId);
+    sendInternalJson(res, 200, { ok: true, userId, poker });
+  } catch (error) {
+    klogSafe("ws_account_poker_projection_failed", {
+      userId,
+      reason: error?.name || "projection_failed"
+    });
+    sendInternalJson(res, 500, { error: "account_poker_projection_failed" });
+  }
+}
+
 async function handleHttpRequest(req, res) {
   if (req.url === "/healthz") {
     res.writeHead(200, {
@@ -4123,6 +4159,10 @@ async function handleHttpRequest(req, res) {
   }
 
   const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  if (requestUrl.pathname === "/internal/account/poker") {
+    await handleInternalAccountPoker(req, res);
+    return;
+  }
   if (requestUrl.pathname === "/internal/admin/vps-metrics") {
     await handleInternalVpsMetrics(req, res);
     return;

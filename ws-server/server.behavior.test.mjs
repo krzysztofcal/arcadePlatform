@@ -3088,13 +3088,19 @@ test("table_leave non-override path does not fabricate accepted success from WS 
     await auth(actor, actorToken, "auth-leave-non-override-actor");
     await auth(other, otherToken, "auth-leave-non-override-other");
 
+    const actorJoinResponses = Promise.all([
+      nextCommandResultForRequest(actor, "join-leave-non-override-actor"),
+      nextMessageOfType(actor, "table_state")
+    ]);
     sendFrame(actor, { version: "1.0", type: "table_join", requestId: "join-leave-non-override-actor", ts: "2026-02-28T00:00:01Z", payload: { tableId } });
-    const actorJoinAck = await nextMessageOfType(actor, "commandResult");
-    await nextMessageOfType(actor, "table_state");
+    const [actorJoinAck] = await actorJoinResponses;
     assert.equal(actorJoinAck.payload.status, "accepted");
+    const otherJoinResponses = Promise.all([
+      nextCommandResultForRequest(other, "join-leave-non-override-other"),
+      nextMessageOfType(other, "table_state")
+    ]);
     sendFrame(other, { version: "1.0", type: "table_join", requestId: "join-leave-non-override-other", ts: "2026-02-28T00:00:02Z", payload: { tableId } });
-    const otherJoinAck = await nextMessageOfType(other, "commandResult");
-    await nextMessageOfType(other, "table_state");
+    const [otherJoinAck] = await otherJoinResponses;
     assert.equal(otherJoinAck.payload.status, "accepted");
 
     sendFrame(actor, {
@@ -4130,6 +4136,64 @@ async function materializeLobbyTableRuntime({ port, token, tableId, maxPlayers =
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true, tableId });
 }
+
+test("WS internal account projection is token protected and preserves the full table id", async () => {
+  const secret = "account-projection-auth-secret";
+  const internalToken = "account-projection-internal-token";
+  const userId = "account-projection-user";
+  const tableId = "table-full-runtime-identifier-4f2a";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: internalToken,
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      SUPABASE_DB_URL: ""
+    }
+  });
+
+  try {
+    await waitForListening(child, 5000);
+    await materializeLobbyTableRuntime({ port, token: internalToken, tableId, buyIn: 500 });
+
+    const missingAuth = await fetch(`http://127.0.0.1:${port}/internal/account/poker?userId=${encodeURIComponent(userId)}`);
+    assert.equal(missingAuth.status, 401);
+    const wrongMethod = await fetch(`http://127.0.0.1:${port}/internal/account/poker?userId=${encodeURIComponent(userId)}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${internalToken}` }
+    });
+    assert.equal(wrongMethod.status, 405);
+
+    const ws = await connectClient(port);
+    await hello(ws);
+    assert.equal((await auth(ws, makeHs256Jwt({ secret, sub: userId }), "auth-account-projection")).type, "authOk");
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "req-account-projection-join",
+      ts: "2026-09-12T00:00:00Z",
+      payload: { tableId, seatNo: 2, buyIn: 500 }
+    });
+    const joinResult = await nextMessageOfType(ws, "commandResult");
+    assert.equal(joinResult.payload.status, "accepted", JSON.stringify(joinResult));
+
+    const response = await fetch(`http://127.0.0.1:${port}/internal/account/poker?userId=${encodeURIComponent(userId)}`, {
+      headers: { authorization: `Bearer ${internalToken}` }
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.userId, userId);
+    assert.equal(body.poker.inPoker, true);
+    assert.equal(body.poker.tables.length, 1);
+    assert.equal(body.poker.tables[0].tableId, tableId);
+    assert.equal(JSON.stringify(body).includes("holeCards"), false);
+    assert.equal(JSON.stringify(body).includes("handSeed"), false);
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
 
 test("WS materialization derives canonical stakes from buy-in instead of client stakes", async () => {
   const secret = "canonical-materialize-secret";
@@ -5694,11 +5758,16 @@ test("human hello gets one bot reply while preflop raise and duplicate request s
     const snapshot = await nextMessageOfType(ws, "stateSnapshot");
     const handId = snapshot.payload.public.hand.handId;
     const helloFrame = { version: "1.0", type: "reaction_send", requestId: "hello-reaction-integration", ts: "2026-08-05T18:00:02Z", payload: { tableId, reactionKey: "hello" } };
+    // Register before sending: the ACK and reactions can share one socket read.
+    const helloResponses = Promise.all([
+      nextCommandResultForRequest(ws, helloFrame.requestId),
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo === 1, 1000),
+      nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo !== 1, 2000)
+    ]);
     sendFrame(ws, helloFrame);
-    assert.equal((await nextCommandResultForRequest(ws, helloFrame.requestId)).payload.status, "accepted");
-    const humanHello = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo === 1, 1000);
+    const [helloAck, humanHello, botHello] = await helloResponses;
+    assert.equal(helloAck.payload.status, "accepted");
     assert.deepEqual(humanHello.payload, { seatNo: 1, reactionKey: "hello" });
-    const botHello = await nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo !== 1, 2000);
     assert.deepEqual(botHello.payload, { seatNo: 2, targetSeatNo: 1, reactionKey: "hello" });
     await assert.rejects(
       nextMessageMatching(ws, (frame) => frame?.type === "table_reaction" && frame?.payload?.reactionKey === "hello", 1300),
@@ -7124,8 +7193,11 @@ test("observer snapshot stays public-state consistent with seated snapshot after
     assert.equal(Array.isArray(seatedPayload.private?.holeCards), true);
     assert.equal(seatedPayload.private.holeCards.length, 2);
 
+    const observerResponse = nextMessageForRequest(observerWs, {
+      type: "stateSnapshot", requestId: "snap-observer-public-observer-final"
+    });
     sendFrame(observerWs, { version: "1.0", type: "table_state_sub", requestId: "snap-observer-public-observer-final", ts: "2026-02-28T01:30:05Z", payload: { tableId, view: "snapshot" } });
-    const observerSnapshot = await nextMessageOfType(observerWs, "stateSnapshot");
+    const observerSnapshot = await observerResponse;
 
     assert.equal(observerSnapshot.payload.stateVersion, seatedPayload.stateVersion);
     assert.deepEqual(observerSnapshot.payload.table, seatedPayload.table);

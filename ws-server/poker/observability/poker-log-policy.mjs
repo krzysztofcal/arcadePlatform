@@ -269,6 +269,7 @@ register("ERROR", "runtime", [
 ]);
 
 register("ERROR", "http", [
+  "ws_account_poker_projection_failed",
   "ws_http_request_failed"
 ]);
 

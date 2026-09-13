@@ -699,15 +699,19 @@
       return;
     }
     tryAttachWithBackoff();
+    try { document.dispatchEvent(new window.Event("ui:visible")); } catch (_) {}
   }
 
   function handleLifecycleTeardown() {
     detach();
   }
 
-  function handlePageShow() {
+  function handlePageShow(event) {
     if (!isDocumentHidden()) {
       tryAttachWithBackoff();
+      if (event && event.persisted) {
+        try { document.dispatchEvent(new window.Event("ui:visible")); } catch (_) {}
+      }
     }
   }
 
