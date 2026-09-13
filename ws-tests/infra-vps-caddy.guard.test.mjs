@@ -17,6 +17,18 @@ function hostBlock(text, host) {
   return nextHostMatch ? text.slice(start, start + 1 + nextHostMatch.index) : text.slice(start);
 }
 
+function assertAccountPokerRoute(block, upstream, host) {
+  const routeIndex = block.indexOf("  @accountPoker path /internal/account/poker");
+  const fallbackIndex = block.indexOf('  handle {\n    respond "OK" 200\n  }');
+  assert.ok(routeIndex >= 0, `${host} must route /internal/account/poker`);
+  assert.ok(routeIndex < fallbackIndex, `${host} account poker route must precede the fallback`);
+  assert.match(
+    block.slice(routeIndex, fallbackIndex),
+    new RegExp(`@accountPoker path /internal/account/poker\\s+handle @accountPoker\\s+\\{\\s+reverse_proxy ${upstream.replaceAll(".", "\\.")}`),
+    `${host} account poker route must proxy to ${upstream}`
+  );
+}
+
 test("infra/vps/Caddyfile is the unified prod+preview WS source of truth", () => {
   const text = caddyfileText();
   const prod = hostBlock(text, "ws.kcswh.pl");
@@ -26,6 +38,7 @@ test("infra/vps/Caddyfile is the unified prod+preview WS source of truth", () =>
   assert.ok(text.includes("ws-preview.kcswh.pl"));
   assert.equal(fs.existsSync(PREVIEW_EXAMPLE_PATH), false);
 
+  assertAccountPokerRoute(prod, "127.0.0.1:3000", "Production");
   assert.match(prod, /@healthz path \/healthz/);
   assert.match(prod, /@ws path \/ws\*/);
   assert.match(prod, /@pokerLogControlAdmin path \/internal\/admin\/poker-log-control/);
@@ -35,6 +48,7 @@ test("infra/vps/Caddyfile is the unified prod+preview WS source of truth", () =>
   assert.match(prod, /reverse_proxy 127\.0\.0\.1:3000/);
   assert.match(prod, /respond "OK" 200/);
 
+  assertAccountPokerRoute(preview, "127.0.0.1:3001", "Preview");
   assert.match(preview, /@healthz path \/healthz/);
   assert.match(preview, /@botReactionAdmin path \/internal\/admin\/bot-reaction/);
   assert.match(preview, /@botClaimsRecoveryAdmin path \/internal\/admin\/bot-claims-recovery/);

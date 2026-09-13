@@ -1,4 +1,9 @@
 ws.kcswh.pl {
+  @accountPoker path /internal/account/poker
+  handle @accountPoker {
+    reverse_proxy 127.0.0.1:3000
+  }
+
   @healthz path /healthz
   handle @healthz {
     reverse_proxy 127.0.0.1:3000
