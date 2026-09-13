@@ -819,7 +819,30 @@ export function verifyRecoveryBundle({
   return { verified, evidence };
 }
 
-function manifestSelectSql() {
+function manifestSelectSql(target = "stage") {
+  const legacyManifestSelect = target === "prod"
+    ? `null::text as legacy_allowlist_sha256,
+    null::text as legacy_batch_table_ids_sha256,
+    null::uuid[] as legacy_master_table_ids,
+    null::text as legacy_master_table_count,
+    null::text as legacy_batch_number,
+    null::text as legacy_batch_table_count,
+    null::text as legacy_source_run,
+    null::text as legacy_query_sha256,
+    null::text as legacy_stage_system_identifier,
+    null::text as legacy_run_id,
+    null::text as legacy_plan_sha256,`
+    : `legacy_allowlist_sha256,
+    legacy_batch_table_ids_sha256,
+    legacy_master_table_ids,
+    legacy_master_table_count::text as legacy_master_table_count,
+    legacy_batch_number::text as legacy_batch_number,
+    legacy_batch_table_count::text as legacy_batch_table_count,
+    legacy_source_run,
+    legacy_query_sha256,
+    legacy_stage_system_identifier,
+    legacy_run_id::text as legacy_run_id,
+    legacy_plan_sha256,`;
   return `select
     object_path, batch_id::text as batch_id, project_ref, format_version::text as format_version,
     cutoff::text as cutoff, cursor_start_created_at::text as cursor_start_created_at,
@@ -854,23 +877,13 @@ function manifestSelectSql() {
     (select tables.bot_only_retention_complete_at::text
        from public.poker_tables tables
       where tables.id = batches.bot_only_table_id) as bot_only_retention_complete_at,
-    legacy_allowlist_sha256,
-    legacy_batch_table_ids_sha256,
-    legacy_master_table_ids,
-    legacy_master_table_count::text as legacy_master_table_count,
-    legacy_batch_number::text as legacy_batch_number,
-    legacy_batch_table_count::text as legacy_batch_table_count,
-    legacy_source_run,
-    legacy_query_sha256,
-    legacy_stage_system_identifier,
-    legacy_run_id::text as legacy_run_id,
-    legacy_plan_sha256,
+    ${legacyManifestSelect}
     destructive_go_at::text as destructive_go_at,
     destructive_go_batch_id::text as destructive_go_batch_id
   from public.chips_ledger_archive_batches batches where batches.object_path = $1;`;
 }
 
-export function createPruneStore(sql) {
+export function createPruneStore(sql, target = "stage") {
   if (!sql || typeof sql.unsafe !== "function" || typeof sql.begin !== "function") fail("PostgreSQL prune adapter is required");
   const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   return {
@@ -879,7 +892,7 @@ export function createPruneStore(sql) {
       return text(rows[0]?.system_identifier);
     },
     async getManifest(objectPath) {
-      const rows = await sql.unsafe(manifestSelectSql(), [objectPath]);
+      const rows = await sql.unsafe(manifestSelectSql(target), [objectPath]);
       return parseManifestRow(rows[0]);
     },
     async registerProof(row, evidence) {
@@ -1876,7 +1889,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     connect_timeout: 10,
     idle_timeout: 30,
   }));
-  const store = deps.pruneStore || createPruneStore(sql);
+  const store = deps.pruneStore || createPruneStore(sql, target.target);
   const storageVerificationContext = deps.storageVerificationContext || null;
   const verifyBucket = deps.verifyBucket
     || ((storageTarget, options = {}) => {

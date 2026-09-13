@@ -508,7 +508,7 @@ async function runProductionArchiveCycle({
   const moduleEnv = env;
   const storageTarget = deps.storageTarget || resolveStorageTarget("prod", moduleEnv, productionTargetOptions());
   const { storageDeps, verifyBucket } = productionStorageDeps(deps, storageTarget);
-  const pruneStore = deps.pruneStore || createPruneStore(sql);
+  const pruneStore = deps.pruneStore || createPruneStore(sql, storageTarget.target);
   const sourcePolicyId = PRODUCTION_POLICIES[policy];
   try {
     if (mode === "automatic") {

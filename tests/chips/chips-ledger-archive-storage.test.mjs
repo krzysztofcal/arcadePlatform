@@ -716,6 +716,34 @@ try {
   assert.deepEqual(sqlCalls[0].values[12], firstStore.row.tx_types);
   assert.deepEqual(sqlCalls[0].values[3], { value: firstStore.row.cutoff, type: 25 });
 
+  const legacyManifestColumns = [
+    "legacy_allowlist_sha256", "legacy_batch_table_ids_sha256", "legacy_master_table_ids",
+    "legacy_master_table_count", "legacy_batch_number", "legacy_batch_table_count", "legacy_source_run",
+    "legacy_query_sha256", "legacy_stage_system_identifier", "legacy_run_id", "legacy_plan_sha256",
+  ];
+  for (const column of legacyManifestColumns) assert.match(sqlCalls[0].query, new RegExp(`\\b${column}\\b`));
+  const stageSelectCalls = [];
+  const stageSelectStore = createManifestStore({
+    unsafe: async (query, values) => { stageSelectCalls.push({ query, values }); return []; },
+  });
+  assert.equal(await stageSelectStore.get(firstStore.row.object_path), null);
+  for (const column of legacyManifestColumns) assert.match(stageSelectCalls[0].query, new RegExp(`\\b${column}\\b`));
+
+  const productionSqlCalls = [];
+  const productionStore = createManifestStore({
+    typed: (value, type) => ({ value, type }),
+    unsafe: async (query, values) => { productionSqlCalls.push({ query, values }); return []; },
+  }, "prod");
+  assert.equal(await productionStore.get(firstStore.row.object_path), null);
+  await productionStore.insertPending(firstStore.row);
+  const productionSelect = productionSqlCalls[0].query.replace(/\bas\s+(legacy_[a-z0-9_]+)/gi, "");
+  for (const column of legacyManifestColumns) {
+    assert.doesNotMatch(productionSelect, new RegExp(`\\b${column}\\b`));
+    assert.match(productionSqlCalls[0].query, new RegExp(`\\bnull::(?:text|uuid\\[\\])\\s+as\\s+${column}\\b`));
+    assert.doesNotMatch(productionSqlCalls[1].query, new RegExp(`\\b${column}\\b`));
+  }
+  assert.equal(productionSqlCalls[1].values.length, 28);
+
   const retryStore = makeStore({ ...firstStore.row, status: "pending" });
   const retry = await storeArchive({
     argv: ["--target", "stage", "--artifact", artifactPath, "--manifest", manifestPath],
