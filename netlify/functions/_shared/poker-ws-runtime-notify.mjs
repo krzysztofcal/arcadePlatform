@@ -63,6 +63,7 @@ export function normalizeAccountPokerProjection(payload, userId) {
     if (typeof table.status !== "string" || !table.status.trim()) return null;
     if (table.seatStatus !== null && typeof table.seatStatus !== "string") return null;
     if (table.handStatus !== null && typeof table.handStatus !== "string") return null;
+    if (table.leaving !== undefined && typeof table.leaving !== "boolean") return null;
 
     let stakes = null;
     if (table.stakes !== null && table.stakes !== undefined) {
@@ -72,7 +73,7 @@ export function normalizeAccountPokerProjection(payload, userId) {
       stakes = { sb, bb };
     }
 
-    tables.push({
+    const normalizedTable = {
       tableId: table.tableId.trim(),
       status: table.status.trim(),
       seatNo,
@@ -82,7 +83,9 @@ export function normalizeAccountPokerProjection(payload, userId) {
       maxPlayers,
       stateVersion,
       handStatus: table.handStatus === null ? null : table.handStatus
-    });
+    };
+    if (table.leaving === true) normalizedTable.leaving = true;
+    tables.push(normalizedTable);
   }
 
   if (poker.inPoker !== (tables.length > 0)) return null;

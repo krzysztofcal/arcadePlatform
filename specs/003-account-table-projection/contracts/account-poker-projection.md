@@ -30,6 +30,10 @@ Authentication and CORS are unchanged from `profile-me`. On success, the body is
 
 If the WS projection is unavailable or invalid, the same authenticated request remains `200` and returns the valid ledger balance with `"poker": null`. A valid zero balance remains `0`; no failure path may invent a balance.
 
+While a leave is deferred during a live hand, the retained table row includes
+`"leaving": true` together with the authoritative seat and stack. The marker
+and row disappear after final detach/cash-out.
+
 Requests without the exact query value `includePoker=1` retain the existing profile-only shape. PATCH remains profile-only.
 
 ## Internal WS route

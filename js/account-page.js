@@ -370,6 +370,7 @@
 
       var details = [];
       if (table.status) details.push(String(table.status));
+      if (table.leaving === true) details.push(t('accountPokerLeaving', 'Leaving; waiting for hand completion and cash-out.'));
       if (table.seatNo !== null && table.seatNo !== undefined && Number.isSafeInteger(Number(table.seatNo))) details.push(tf('accountPokerSeat', { seat: Number(table.seatNo) }, 'Seat {seat}'));
       if (table.stack !== null && table.stack !== undefined && Number.isSafeInteger(Number(table.stack))) details.push(Number(table.stack).toLocaleString() + ' CH');
       if (table.stakes && Number.isSafeInteger(Number(table.stakes.sb)) && Number.isSafeInteger(Number(table.stakes.bb))){

@@ -77,6 +77,32 @@ function normalizeAuthoritativeMembers(table) {
   });
 }
 
+function normalizeAuthoritativePokerSeat(pokerState, userId) {
+  const sourceSeats = Array.isArray(pokerState?.seats) ? pokerState.seats : [];
+  const seatEntry = sourceSeats.find((seat) => (
+    typeof seat?.userId === "string" && seat.userId.trim() === userId
+  ));
+  if (!seatEntry) return null;
+  const rawSeatNo = seatEntry.seatNo ?? seatEntry.seat;
+  const seatNo = Number.isInteger(Number(rawSeatNo)) ? Number(rawSeatNo) : null;
+  if (!Number.isInteger(seatNo)) return null;
+  return {
+    seatNo,
+    status: typeof seatEntry.status === "string" ? seatEntry.status : "ACTIVE",
+    isBot: seatEntry.isBot === true
+  };
+}
+
+function readAuthoritativePokerStack(pokerState, userId) {
+  const stacks = pokerState?.stacks;
+  if (!stacks || typeof stacks !== "object" || Array.isArray(stacks)
+    || !Object.prototype.hasOwnProperty.call(stacks, userId)) {
+    return null;
+  }
+  const stack = Number(stacks[userId]);
+  return Number.isSafeInteger(stack) && stack >= 0 ? stack : null;
+}
+
 function isCoreStateBotUser(coreState, userId) {
   const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
   if (!normalizedUserId) {
@@ -2344,17 +2370,29 @@ export function createTableManager({
         continue;
       }
 
+      const authoritativePokerState = table.coreState?.pokerState;
       const membership = normalizeAuthoritativeMembers(table)
-        .find((member) => member.userId === normalizedUserId && !isCoreStateBotUser(table.coreState, normalizedUserId));
-      if (!membership) {
+        .find((member) => member.userId === normalizedUserId
+          && authoritativePokerState?.leftTableByUserId?.[normalizedUserId] !== true
+          && !isCoreStateBotUser(table.coreState, normalizedUserId));
+      const authoritativePokerSeat = normalizeAuthoritativePokerSeat(authoritativePokerState, normalizedUserId);
+      const authoritativePokerStack = readAuthoritativePokerStack(authoritativePokerState, normalizedUserId);
+      const deferredLeave = Boolean(authoritativePokerSeat
+        && authoritativePokerStack !== null
+        && authoritativePokerState?.leftTableByUserId?.[normalizedUserId] === true
+        && authoritativePokerSeat.isBot !== true
+        && !isCoreStateBotUser(table.coreState, normalizedUserId));
+      if (!membership && !deferredLeave) {
         continue;
       }
 
-      const snapshot = tableSnapshot(tableId, normalizedUserId);
-      const userSeat = Array.isArray(snapshot?.seats)
-        ? snapshot.seats.find((seat) => seat?.userId === normalizedUserId)
-        : null;
-      const stackValue = snapshot?.stacks?.[normalizedUserId];
+      const snapshot = deferredLeave ? null : tableSnapshot(tableId, normalizedUserId);
+      const userSeat = deferredLeave
+        ? authoritativePokerSeat
+        : Array.isArray(snapshot?.seats)
+          ? snapshot.seats.find((seat) => seat?.userId === normalizedUserId)
+          : null;
+      const stackValue = deferredLeave ? authoritativePokerStack : snapshot?.stacks?.[normalizedUserId];
       const stack = stackValue === null || stackValue === undefined
         ? null
         : Number.isSafeInteger(Number(stackValue)) && Number(stackValue) >= 0
@@ -2365,17 +2403,25 @@ export function createTableManager({
         ? { sb: metadata.stakes.sb, bb: metadata.stakes.bb }
         : null;
 
-      projectedTables.push({
+      const projectedTable = {
         tableId,
         status: normalizeTableStatus(table.tableStatus),
-        seatNo: membership.seat,
+        seatNo: deferredLeave ? authoritativePokerSeat.seatNo : membership.seat,
         seatStatus: typeof userSeat?.status === "string" ? userSeat.status : null,
         stack,
         stakes,
         maxPlayers: Number.isInteger(metadata?.maxPlayers) ? metadata.maxPlayers : null,
-        stateVersion: Number.isInteger(snapshot?.stateVersion) ? snapshot.stateVersion : 0,
-        handStatus: typeof snapshot?.hand?.status === "string" ? snapshot.hand.status : null
-      });
+        stateVersion: deferredLeave
+          ? Number.isInteger(table.coreState?.version) ? table.coreState.version : 0
+          : Number.isInteger(snapshot?.stateVersion) ? snapshot.stateVersion : 0,
+        handStatus: deferredLeave
+          ? typeof authoritativePokerState?.phase === "string" ? authoritativePokerState.phase : null
+          : typeof snapshot?.hand?.status === "string" ? snapshot.hand.status : null
+      };
+      if (deferredLeave) {
+        projectedTable.leaving = true;
+      }
+      projectedTables.push(projectedTable);
     }
 
     return {

@@ -58,7 +58,9 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - Netlify deploy previews update the browser app only. The `WS Server Deploy` pull-request check validates the WS package but does **not** deploy it; its deploy job is intentionally skipped on PR events.
 - If a PR changes `ws-server/**`, WS runtime dependencies under `shared/**`, or browser/WS protocol behavior, the agent MUST remind the user that `WS Preview Deploy` is required before end-to-end preview verification.
 - The agent must never describe the PR preview as fully deployed merely because Netlify, `WS PR Checks`, or `WS Server Deploy` validation is green.
-- Use the manual `WS Preview Deploy` workflow with `--ref main` for the workflow definition and `-f ref=<pr-branch-or-sha>` for the application revision. After dispatch, verify that the workflow succeeded for the intended ref before asking the user to retest.
+- Use the manual `WS Preview Deploy` workflow with `--ref main` for the workflow definition and `-f ref=<the-latest-runtime-affecting-sha>` for the application revision. After dispatch, verify that the workflow succeeded for that exact SHA before handing off the manual smoke.
+- Codex does not have to run a full authenticated browser smoke for every PR. The user may perform it manually; agent smoke is optional unless explicitly requested or needed to diagnose the issue. If user verification is pending, report `implementation ready, awaiting manual runtime verification` and do not call the PR merge-ready.
+- A successful exact-SHA deploy plus confirmed smoke remains valid across later docs/spec/test/comment-only commits after a diff proves no runtime/deployable artifact or environment configuration changed. Any runtime/deployable/configuration change requires a new exact-SHA deploy and relevant smoke.
 - The preview WS host is shared. Do not make every PR auto-deploy to `ws-preview.kcswh.pl`; concurrent PRs would overwrite each other's runtime. Keep deployment explicit unless preview infrastructure becomes isolated per PR.
 
 ### WS Runtime Logs
@@ -177,6 +179,6 @@ Task is complete when:
 - WS state and UI are consistent
 - Critical paths are covered with tests
 - Code is simple and readable
-- For WS-affecting work, exact-final-HEAD `WS Preview Deploy` and real preview verification are required. Deploy Preview → WS Preview calls must be exercised between the actual environments; green CI does not prove configuration/integration.
-- Changes depending on Stage DB/runtime require safe Stage smoke/read-only validation or an explicit reason Stage mutation/testing is unnecessary. Verify only relevant targets; not every PR needs all Stage deployments. Production requires separate explicit authorization.
+- For WS-affecting work, deploy the exact latest runtime-affecting SHA with `WS Preview Deploy`; full authenticated smoke may be performed by the user, and pending user verification must be reported explicitly. Deploy Preview → WS Preview calls remain the required manual scenario before calling the PR merge-ready; green CI does not prove configuration/integration.
+- Docs/spec/test/comment-only commits after a verified runtime SHA do not require another WS deploy or smoke when a diff proves no runtime/deployable artifact or environment configuration changed. Runtime/deployable/configuration changes require a new exact-SHA deploy and relevant scenario. Stage smoke may be user-run and should not be broad or redundant unless requested or needed for diagnosis. Production requires separate explicit authorization.
 - Never mark a PR READY/merge-ready with missing required runtime evidence or a failing manual smoke.

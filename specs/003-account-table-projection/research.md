@@ -24,8 +24,8 @@ configuration and did not exercise the actual Netlify → public WS boundary.
 
 - Use a best-effort WS projection: successful WS data becomes `poker`, while transport, timeout, auth, validation, and unavailable failures become `poker: null`.
 - Resolve profile and balance as the required Account response data; resolve the optional WS projection independently and never use the database to reconstruct a second current-table list.
-- Return a compact sanitized table row with `tableId`, lifecycle `status`, `seatNo`, `seatStatus`, public `stack`, `stakes`, `maxPlayers`, `stateVersion`, and public `handStatus`. Omit private cards, decks, hand seeds, and other users' private branches.
-- Treat only an authoritative non-bot member matching the authenticated user as membership. `inPoker` is derived from the returned table rows, not from a UI guess or a database-only seat query.
+- Return a compact sanitized table row with `tableId`, lifecycle `status`, `seatNo`, `seatStatus`, public `stack`, `stakes`, `maxPlayers`, `stateVersion`, public `handStatus`, and an optional `leaving: true` marker. Omit private cards, decks, hand seeds, and other users' private branches.
+- Treat an authoritative non-bot member matching the authenticated user, or a retained non-bot seat/stack marked by `leftTableByUserId` during deferred leave, as current economic exposure. `inPoker` is derived from the returned table rows, not from a UI guess or a database-only seat query.
 - Keep `tableId` unchanged across WS, Netlify, and shared code. Add one Account-page-only display helper for the abbreviated text.
 
 ## Alternatives rejected

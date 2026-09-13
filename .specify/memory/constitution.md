@@ -83,18 +83,31 @@ without accounting for their shared Stage impact. Once applied to shared Stage,
 corrections MUST be forward-only in new migrations; applied migrations MUST
 NOT be edited.
 
-Definition of Done is target-aware. Changes depending on WS Preview, Stage,
-Stage DB, Deploy Preview, or integration between them MUST be verified on the
-relevant real runtime. Green CI, mocks, and unit tests do not prove runtime
-configuration or integration. WS-affecting PRs require a successful exact-final-
-HEAD WS Preview Deploy followed by real preview verification. Deploy Preview
-frontend/Netlify calls to WS Preview MUST be exercised end-to-end between those
-actual environments. Features depending on shared Stage DB/runtime state require
-an appropriate safe Stage smoke/read-only validation, or an explicit explanation
-of why Stage mutation/testing is unnecessary. This does not require every PR to
-deploy everything to Stage and does not authorize Production. A PR MUST NOT be
-marked READY/merge-ready while required runtime verification is missing or a
-manual smoke demonstrates a failure.
+Definition of Done is target-aware. Green CI, mocks, and unit tests do not prove
+runtime configuration or integration. For WS-affecting changes, Codex MUST
+prepare the relevant Deploy Preview and execute the manual WS Preview Deploy
+for the latest runtime-affecting commit, using the exact application SHA; the
+workflow must be verified successful for that SHA. Deploy Preview
+frontend/Netlify calls to WS Preview remain the relevant integration boundary.
+Codex is NOT required to run a full browser/authenticated smoke for every PR.
+The agent may run automated or manual smoke when the user explicitly requests
+it, when it is needed to diagnose a concrete issue, or when the root cause
+cannot otherwise be established. The user may perform the required real-runtime
+smoke manually. When that verification is still outstanding, the handoff MUST
+say "implementation ready, awaiting manual runtime verification" and the PR
+MUST NOT be called READY/merge-ready.
+
+After a successful exact-SHA WS Preview Deploy and confirmed smoke, later
+commits that change only docs, Spec Kit artifacts, tests, or non-runtime
+comments/metadata do not invalidate that runtime evidence. Before reusing the
+evidence, the agent MUST prove by diff that no deployable runtime artifact or
+environment configuration changed. Any later runtime/deployable/configuration
+change requires a new exact-SHA WS Preview Deploy and the relevant manual
+scenario again. Stage smoke may likewise be performed by the user; agents MUST
+NOT run broad or redundant Stage smoke unless the user requests it or it is
+needed for diagnosis. This does not authorize Production, whose rules are
+unchanged. A PR MUST NOT be marked READY/merge-ready while required runtime
+verification is missing or a manual smoke demonstrates a failure.
 
 A pull request that changes ws-server/**, WebSocket runtime dependencies under
 shared/**, or browser/WebSocket protocol behavior MUST use the manual WS Preview
@@ -169,4 +182,4 @@ resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
 not an allowed resolution.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-09-12
+**Version**: 1.1.1 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-09-13

@@ -27,14 +27,16 @@ poker: null | {
   stakes: { sb: integer, bb: integer } | null,
   maxPlayers: positive integer | null,
   stateVersion: non-negative integer,
-  handStatus: string | null
+  handStatus: string | null,
+  leaving: true                    # present while deferred leave awaits cash-out
 }
 ```
 
 Invariants:
 
 - Every row's `tableId` is the full identifier; no layer before Account UI may shorten it.
-- Rows are produced only when the requested user is an authoritative non-bot member of a non-closed materialized runtime table.
+- Rows are produced when the requested user is an authoritative non-bot member of a non-closed materialized runtime table, or when the runtime retains that user's non-bot seat and stack with `leftTableByUserId[userId] === true` while deferred leave awaits final detach/cash-out.
+- `leaving: true` is present only for the retained deferred-leave state; a final detach/cash-out removes the row.
 - `inPoker === (tables.length > 0)`.
 - Missing optional public values are `null`, never fabricated from private state.
 - The projection contains no hole cards, deck, hand seed, private branch, access token, or other user's private fields.

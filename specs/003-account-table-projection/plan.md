@@ -14,7 +14,7 @@ Add an opt-in Account projection to `netlify/functions/profile-me.mjs`. It combi
 
 **Storage**: Existing chips ledger and existing WS runtime/persistence bootstrap. No schema or migration change.
 
-**Testing**: Fundamental backend/WS `node:test` suites, syntax and repository runner; presentation uses real preview smoke, never new UI/VM rendering tests.
+**Testing**: Fundamental backend/WS `node:test` suites, syntax and repository runner; presentation uses manual real-preview smoke when performed by the user, never new UI/VM rendering tests.
 
 **Target Platform**: Netlify deploy-preview/production functions, Ubuntu WS runtime, and existing desktop/mobile Account page.
 
@@ -28,7 +28,7 @@ Add an opt-in Account projection to `netlify/functions/profile-me.mjs`. It combi
 
 Pre-research: PASS. The change extends `profile-me`, `poker-ws-runtime-notify`, `table-manager`, `server.mjs`, `profile-client`, and the existing Account page instead of introducing a parallel table source, database query, dependency, or browser module. WS runtime state remains authoritative; the chips ledger remains the balance authority. Failure is safe (`poker: null`, no fabricated balance), logging uses `klog`, and private state is excluded.
 
-Post-design (revised): PASS. Preview Caddy routing is explicitly required; no schema/ignore/dependency edits are needed. Existing token/timeout patterns and JSP/CSP compatibility are preserved. Fundamental backend/WS tests and exact-HEAD real preview verification are required. No Production action or PR merge is part of the plan.
+Post-design (revised): PASS. Preview Caddy routing is explicitly required; no schema/ignore/dependency edits are needed. Existing token/timeout patterns and JSP/CSP compatibility are preserved. Fundamental backend/WS tests and exact-runtime-SHA WS deployment are required; authenticated smoke may be performed manually by the user. No Production action or PR merge is part of the plan.
 
 ## Project Structure
 
@@ -75,7 +75,7 @@ infra/vps/Caddyfile
 2. Implement `tableManager.projectUserTables(userId)` using authoritative core members, `tableSnapshot`, and `tableMeta`, returning only sanitized fields with the complete `tableId`.
 3. Add the token-protected read-only WS route and the existing shared adapter call. Extend `profile-me` only for exact `includePoker=1`; resolve balance independently and convert WS failure/invalid output to `poker: null`.
 4. Extend the existing ProfileClient request options and Account-page rendering. Keep the full ID in `data-table-id`/navigation values and use a UI-only abbreviation helper for visible text.
-5. Run targeted tests, syntax/full checks, self-review, and the exact-SHA WS Preview Deploy. Only after the deploy succeeds for the implementation SHA run preview E2E verification.
+5. Run targeted tests, syntax/full checks, self-review, and the exact-SHA WS Preview Deploy. Hand off the manual preview checklist to the user; agent-authenticated smoke is optional unless requested or needed for diagnosis.
 
 ## PR #983 correction plan and Constitution Check
 
@@ -89,13 +89,14 @@ listeners remain centralized as required by the repository guards. Wallet remain
 No new script/dependency/ignore file or migration is required; automatic Stage
 migration apply is not an intended effect of this PR. The application smoke does
 intentionally exercise shared Stage buy-in/runtime state through normal APIs.
-Update Constitution/agents guidance, then verify exact-final-HEAD deployed WS and
-real Netlify → public WS calls, including wallet-safe projection failure.
+Update Constitution/agents guidance, then deploy the exact latest
+runtime-affecting WS SHA. Provide the manual Netlify → public WS checklist,
+including wallet-safe projection failure, for the user to run when desired.
 Pre-implementation test-task review: PASS after removing UI/VM rendering test
 requirements; only fundamental backend/WS tests are planned. T014–T017 define the
 remaining work, including real runtime evidence; earlier local E2E is insufficient.
 
-No constitution violations or new abstraction beyond the existing WS internal adapter seam. The only new helper is the small projection method/normalizer required to keep the WS authority and the Netlify response contract explicit.
+No constitution violations or new abstraction beyond the existing WS internal adapter seam. The only new helpers are the small deferred-exposure normalizers required to keep the WS authority and the Netlify response contract explicit.
 
 Verification follow-up: stabilize only the existing fundamental WS tests that
 failed during final validation. Register reaction listeners before sending the

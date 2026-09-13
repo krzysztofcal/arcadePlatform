@@ -3327,6 +3327,92 @@ test("projects full current-user table ids from authoritative runtime membership
   assert.deepEqual(tableManager.projectUserTables("missing-user").tables, []);
 });
 
+test("projects a deferred leave while its authoritative seat and stack await cash-out", () => {
+  const userId = "user-deferred-leave-001";
+  const tableId = "4c5d94ad-72c8-4054-9cf2-ac0220f904d7";
+  const tableManager = createTableManager({ maxSeats: 6 });
+
+  tableManager.restoreTableFromPersisted(tableId, {
+    tableStatus: "OPEN",
+    tableMeta: { maxPlayers: 6, buyIn: 100, stakes: { sb: 1, bb: 2 } },
+    coreState: {
+      version: 42,
+      roomId: tableId,
+      maxSeats: 6,
+      members: [{ userId, seat: 2 }, { userId: "other-user", seat: 3 }],
+      seats: { [userId]: 2, "other-user": 3 },
+      seatDetailsByUserId: {
+        [userId]: { isBot: false },
+        "other-user": { isBot: false }
+      },
+      publicStacks: { [userId]: 100, "other-user": 700 },
+      pokerState: {
+        tableId,
+        phase: "FLOP",
+        seats: [
+          { userId, seatNo: 2, status: "ACTIVE", isBot: false },
+          { userId: "other-user", seatNo: 3, status: "ACTIVE", isBot: false }
+        ],
+        stacks: { [userId]: 100, "other-user": 700 },
+        leftTableByUserId: {}
+      }
+    }
+  });
+
+  const deferredState = {
+    tableId,
+    phase: "FLOP",
+    seats: [
+      { userId, seatNo: 2, status: "ACTIVE", isBot: false },
+      { userId: "other-user", seatNo: 3, status: "ACTIVE", isBot: false }
+    ],
+    stacks: { [userId]: 100, "other-user": 700 },
+    leftTableByUserId: { [userId]: true }
+  };
+  tableManager.syncAuthoritativeLeave({
+    ws: fakeWs("deferred-leave-socket"),
+    userId,
+    tableId,
+    stateVersion: 43,
+    pokerState: deferredState
+  });
+
+  assert.deepEqual(tableManager.projectUserTables(userId), {
+    inPoker: true,
+    tables: [{
+      tableId,
+      status: "OPEN",
+      seatNo: 2,
+      seatStatus: "ACTIVE",
+      stack: 100,
+      stakes: { sb: 1, bb: 2 },
+      maxPlayers: 6,
+      stateVersion: 43,
+      handStatus: "FLOP",
+      leaving: true
+    }]
+  });
+
+  tableManager.syncAuthoritativeLeave({
+    ws: fakeWs("deferred-leave-socket"),
+    userId,
+    tableId,
+    stateVersion: 44,
+    pokerState: {
+      tableId,
+      phase: "HAND_DONE",
+      seats: [{ userId: "other-user", seatNo: 3, status: "ACTIVE", isBot: false }],
+      stacks: { "other-user": 700 },
+      leftTableByUserId: { [userId]: true }
+    }
+  });
+
+  assert.deepEqual(tableManager.projectUserTables(userId), {
+    inPoker: false,
+    tables: []
+  });
+});
+
 test("materialized table keeps its configured buy-in immutable", () => {
   const tableManager = createTableManager({ maxSeats: 6, defaultBuyIn: null });
   const first = tableManager.materializeLobbyTable({

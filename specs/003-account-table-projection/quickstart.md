@@ -25,11 +25,11 @@ Run from the feature worktree.
 
 4. Because `ws-server/**` and browser/WS protocol behavior change, dispatch the manual **WS Preview Deploy** workflow from `main` with the implementation commit SHA as its `ref` input. Verify that the workflow succeeded for that exact SHA and inspect the bounded `ws-server-preview.service` journal before preview E2E.
 
-5. On the real Deploy Preview, sign in with a Stage smoke account, claim the existing welcome bonus if needed, create/join a 100 CH table, wait for buy-in, and promptly navigate to Account without cash-out. Assert the ledger debit, wallet delta, full machine-readable table ID, non-null poker projection, and separate `Poker: <sum of WS stacks> CH` badge. With no active stack, the extra segment is hidden.
+5. On the real Deploy Preview, the user may sign in with a Stage smoke account, claim the existing welcome bonus if needed, create/join a 100 CH table, leave during a live hand, and promptly navigate to Account before cash-out. Verify the ledger debit, correct wallet `CH`, retained table row with `leaving: true`, and separate `Poker: <authoritative stack> CH` badge. After settlement and final cash-out, verify the table row and Poker segment disappear.
 
 6. Verify public `/internal/account/poker` returns token-protected JSON (401 without token, 200 matching-user projection with the configured internal token). Never print tokens. A generic 200 `OK` text response is a routing failure, not successful projection.
 
-7. Exercise a temporary preview proxy 503 scoped only to the smoke user's UUID; verify real Netlify still returns the same wallet and `poker: null`, and the poker badge hides. Restore the route in a finally block and confirm projection recovery. Inspect bounded `journalctl -u ws-server-preview.service --since <smoke-start> --no-pager -n 200`. No Production changes or merge. Local test-server E2E does not substitute for this real runtime smoke.
+7. A full authenticated browser smoke is optional for the agent and may be completed manually by the user. If it is still outstanding, hand off `implementation ready, awaiting manual runtime verification`; do not call the PR merge-ready. A temporary preview proxy 503 may be used for diagnosis or explicit verification of wallet-safe fallback. No Production changes or merge. Local test-server E2E does not substitute for real runtime smoke.
 
 ## Real preview verification — 2026-09-12
 
@@ -69,10 +69,10 @@ Run from the feature worktree.
   reproduced an old broadcast being mistaken for the explicit snapshot reply.
   Existing tests now register reaction/join listeners before sending and correlate
   the requested observer snapshot by request ID, preserving assertions/timeouts.
-- Constitution remains 1.1.0: intentional automatic Stage migration policy,
-  fundamental-test review before implementation, and real target-runtime
-  verification. `agents.md` carries the same three rules. No migration, schema,
-  dependency, new UI-rendering/VM test, or Production change is included.
+- Constitution remains 1.1.1: intentional automatic Stage migration policy,
+  fundamental-test review before implementation, exact runtime-SHA deployment,
+  and user-owned smoke. `agents.md` carries the same policy. No migration,
+  schema, dependency, new UI-rendering/VM test, or Production change is included.
 - Breaking impact: additive opt-in API and topbar segment; existing profile
   GET/PATCH callers remain compatible. Preview proxy application is required
   separately from the WS release. Other environments will keep the existing
@@ -100,7 +100,6 @@ in the existing PR #983 description after the final commit is deployed.
   restoration recovered the table, and a visible-page event refreshed the
   badge. The script asserted byte-for-byte restoration of the entire proxy
   file, including all other hosts. Bounded preview service journal reviewed.
-- The closing documentation commit changes no application/test code. It must
-  still receive its own exact-final-HEAD WS Preview Deploy and repeated real
-  authenticated smoke; that final release evidence is kept in PR #983 so
-  recording the run URL does not change the verified HEAD again.
+- A later documentation/spec/test/comment-only commit changes no deployable
+  runtime artifact. After a diff confirms that boundary, it does not require a
+  new WS Preview Deploy or repeated smoke; any runtime-affecting commit does.

@@ -261,7 +261,7 @@ test("profile-me includePoker returns the full authoritative table projection an
       calls.push(["poker", userId]);
       return {
         inPoker: true,
-        tables: [{ tableId, status: "OPEN", seatNo: 2, seatStatus: "ACTIVE", stack: 980, stakes: { sb: 5, bb: 10 }, maxPlayers: 6, stateVersion: 42, handStatus: "FLOP" }]
+        tables: [{ tableId, status: "OPEN", seatNo: 2, seatStatus: "ACTIVE", stack: 980, stakes: { sb: 5, bb: 10 }, maxPlayers: 6, stateVersion: 42, handStatus: "FLOP", leaving: true }]
       };
     }
   });
@@ -273,6 +273,7 @@ test("profile-me includePoker returns the full authoritative table projection an
   assert.equal(body.balance, 735);
   assert.equal(body.poker.inPoker, true);
   assert.equal(body.poker.tables[0].tableId, tableId);
+  assert.equal(body.poker.tables[0].leaving, true);
   assert.deepEqual(calls, [["balance", USER_ID], ["poker", USER_ID]]);
 });
 
