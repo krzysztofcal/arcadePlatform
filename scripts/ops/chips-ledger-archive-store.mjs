@@ -18,6 +18,9 @@ import {
   maxBatchSizeForTarget,
   parseJsonl,
   STAGE_AUTOMATION_POLICY_ID,
+  PRODUCTION_AUTOMATION_POLICY_ID,
+  PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
+  PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   resolveTarget,
   serializeRecords,
   stringifyJson,
@@ -172,24 +175,32 @@ function parseArgs(argv) {
 }
 
 export function resolveStorageTarget(targetValue, env = process.env, targetOptions = {}) {
-  const target = resolveTarget(targetValue, env, targetOptions);
-  const rawUrl = text(env.SUPABASE_URL);
-  if (!rawUrl) fail("SUPABASE_URL is required");
+  const target = resolveTarget(targetValue, env, {
+    ...targetOptions,
+    singleTarget: targetOptions.singleTarget ?? true,
+  });
+  const urlEnv = target.target === "prod" ? "SUPABASE_PROD_URL" : "SUPABASE_URL";
+  const serviceRoleEnv = target.target === "prod" ? "SUPABASE_PROD_SERVICE_ROLE_KEY" : "SUPABASE_SERVICE_ROLE_KEY";
+  const rawUrl = text(env[urlEnv]);
+  if (!rawUrl) fail(`${urlEnv} is required`);
   let url;
   try {
     url = new URL(rawUrl);
   } catch {
-    fail("SUPABASE_URL is invalid");
+    fail(`${urlEnv} is invalid`);
   }
   if (url.protocol !== "https:" || url.pathname !== "/" || url.search || url.hash || url.username || url.password) {
-    fail("SUPABASE_URL must be an HTTPS Supabase origin");
+    fail(`${urlEnv} must be an HTTPS Supabase origin`);
   }
   const projectMatch = /^([a-z0-9]{20})\.supabase\.co$/i.exec(url.hostname);
-  if (!projectMatch) fail("SUPABASE_URL must expose a supported Supabase project ref");
+  if (!projectMatch) fail(`${urlEnv} must expose a supported Supabase project ref`);
   const apiProjectRef = projectMatch[1].toLowerCase();
-  if (apiProjectRef !== target.projectRef) fail(`SUPABASE_URL does not match the canonical ${target.target} project ref`);
-  const serviceKey = text(env.SUPABASE_SERVICE_ROLE_KEY);
-  if (!serviceKey) fail("SUPABASE_SERVICE_ROLE_KEY is required");
+  if (apiProjectRef !== target.projectRef) fail(`${urlEnv} does not match the canonical ${target.target} project ref`);
+  const serviceKey = text(env[serviceRoleEnv]);
+  if (!serviceKey) fail(`${serviceRoleEnv} is required`);
+  if (target.target === "prod" && (text(env.SUPABASE_URL) || text(env.SUPABASE_SERVICE_ROLE_KEY))) {
+    fail("Production Storage cannot receive generic Supabase credentials");
+  }
   return {
     ...target,
     baseUrl: url.origin,
@@ -215,24 +226,35 @@ function verifyManifestShape(manifest, artifactName, target, expectedLegacyStage
   if (manifest.source_policy_id !== undefined
     && manifest.source_policy_id !== null
     && manifest.source_policy_id !== STAGE_AUTOMATION_POLICY_ID
+    && manifest.source_policy_id !== PRODUCTION_AUTOMATION_POLICY_ID
     && manifest.source_policy_id !== BOT_ONLY_RETENTION_POLICY_ID
+    && manifest.source_policy_id !== PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID
     && manifest.source_policy_id !== CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID
+    && manifest.source_policy_id !== PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID
     && manifest.source_policy_id !== LEGACY_STAGE_ALLOWLIST_POLICY_ID) {
     fail("local manifest source policy is unsupported");
   }
   if (manifest.source_policy_id === STAGE_AUTOMATION_POLICY_ID && target.target !== "stage") {
     fail("Stage automation policy cannot be stored for a non-Stage target");
   }
-  if (manifest.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID
-    && (manifest.schema_version !== EXPORT_SCHEMA_VERSION || target.target !== "stage")) {
-    fail("closed-human-table retention requires a Stage schema-v1 archive");
+  if (manifest.source_policy_id === PRODUCTION_AUTOMATION_POLICY_ID && target.target !== "prod") {
+    fail("Production automation policy cannot be stored for a non-Production target");
+  }
+  if ([CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID].includes(manifest.source_policy_id)
+    && (manifest.schema_version !== EXPORT_SCHEMA_VERSION
+      || (manifest.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID && target.target !== "stage")
+      || (manifest.source_policy_id === PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID && target.target !== "prod"))) {
+    fail("closed-human-table retention requires a target-bound schema-v1 archive");
   }
   if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
-    && (![BOT_ONLY_RETENTION_POLICY_ID, LEGACY_STAGE_ALLOWLIST_POLICY_ID].includes(manifest.source_policy_id)
-      || target.target !== "stage")) {
-    fail("schema-v2 archive requires the Stage bot-only retention policy");
+    && (![BOT_ONLY_RETENTION_POLICY_ID, PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID, LEGACY_STAGE_ALLOWLIST_POLICY_ID].includes(manifest.source_policy_id)
+      || (target.target !== "stage" && target.target !== "prod")
+      || (target.target === "stage" && manifest.source_policy_id === PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID)
+      || (target.target === "prod" && ![PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID].includes(manifest.source_policy_id)))) {
+    fail("schema-v2 archive requires the target-bound bot-only retention policy");
   }
-  if (manifest.source_policy_id === BOT_ONLY_RETENTION_POLICY_ID && manifest.schema_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION) {
+  if ([BOT_ONLY_RETENTION_POLICY_ID, PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID].includes(manifest.source_policy_id)
+    && manifest.schema_version !== BOT_ONLY_EXPORT_SCHEMA_VERSION) {
     fail("bot-only retention policy requires schema-v2 archive evidence");
   }
   if (manifest.source_policy_id === LEGACY_STAGE_ALLOWLIST_POLICY_ID
@@ -258,7 +280,8 @@ function verifyManifestShape(manifest, artifactName, target, expectedLegacyStage
   }
   if (txTypeTotal !== batch.transactions) fail("local manifest tx_types count mismatch");
 
-  if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION && manifest.source_policy_id === BOT_ONLY_RETENTION_POLICY_ID) {
+  if (manifest.schema_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
+    && [BOT_ONLY_RETENTION_POLICY_ID, PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID].includes(manifest.source_policy_id)) {
     const botOnly = manifest.bot_only;
     if (!botOnly || !UUID_RE.test(text(botOnly.table_id)) || botOnly.table_count !== 1
       || !timestampValue(botOnly.newest_created_at)

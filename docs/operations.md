@@ -261,13 +261,16 @@ This applies pending migrations from the selected ref to shared stage and runs s
 After stage testing passes and the PR is merged:
 
 1. Confirm the merged `main` contains the same migration files tested on stage.
-2. Apply production migrations with the production DB connection method used by the owner. Prefer Supabase migration tooling so `supabase_migrations.schema_migrations` is recorded with the schema change, for example:
+2. Apply production migrations with the production DB connection method used by the owner. For the Issue #891 retention rollout, Production intentionally has 54 of the 97 `main` migrations and 43 historical gaps. Do not run the generic `supabase db push` path for that rollout: it would try to replay Stage-only history. Use the reviewed exact `supabase/production-migrations` operator path, which applies only the Production replacement migrations and records their versions in `supabase_migrations.schema_migrations`.
 
 ```bash
-supabase db push --db-url "$SUPABASE_PROD_DB_URL"
+psql "$SUPABASE_PROD_DB_URL" -v ON_ERROR_STOP=1 \
+  -c "set chips.production_project_ref = 'otbqfijerkieoxwpxjnm'" \
+  -f supabase/production-migrations/20260914090000_chips_ledger_production_retention_contract.sql
 ```
 
-Raw `psql -f supabase/migrations/<migration-file>.sql` is only acceptable if the same operation also records the migration version in `supabase_migrations.schema_migrations`; otherwise future automation can treat an already-applied production migration as pending.
+The exact operator command may be wrapped by the owner’s deployment tooling, but it must preserve the checked-in Production manifest, canonical identity gates, and migration history recording. Raw `psql -f supabase/migrations/<migration-file>.sql` and generic `supabase db push` are not valid substitutes for the #891 Production path.
+The `20260914091000` TABLE-fence migration is a separate owner-gated follow-up: apply it only after the required runtime evidence and explicit Production owner GO; it is never part of routine PR A migration promotion.
 
 3. Verify production smoke checks manually:
 

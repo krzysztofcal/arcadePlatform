@@ -41,6 +41,7 @@ import {
   buildLegacyPlan,
   loadFrozenLegacyAllowlist,
 } from "./chips-ledger-legacy-stage-allowlist.mjs";
+import { runWithEscrowRetry } from "./_shared/chips-ledger-escrow-retention.mjs";
 
 export const ESCROW_ACCOUNT_RETENTION_POLICY_ID = "stage-ledger-escrow-account-retention-v1";
 export const ACCOUNT_RECOVERY_SCHEMA_VERSION = 1;
@@ -329,52 +330,15 @@ export async function runWithRetirementRetry({
   onAttempt = null,
   onRetry = null,
 } = {}) {
-  if (typeof execute !== "function") fail("retirement execute callback is required");
-  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) fail("retirement retry limit is invalid");
-  const attemptLimit = Math.min(maxAttempts, MAX_RETIREMENT_EXECUTE_ATTEMPTS);
-  const sqlstates = [];
-  let attempts = 0;
-  let retryCount = 0;
-  for (let attempt = 1; attempt <= attemptLimit; attempt += 1) {
-    attempts = attempt;
-    if (typeof onAttempt === "function") await onAttempt({ attempt, retryCount, sqlstates: [...sqlstates] });
-    try {
-      const result = await execute({ attempt, retryCount, sqlstates: [...sqlstates] });
-      return { result, attempts, retryCount, sqlstates };
-    } catch (error) {
-      const state = sqlStateOf(error);
-      if (state) sqlstates.push(state);
-      Object.assign(error, { executeAttempts: attempts, executeRetryCount: retryCount, executeSqlstates: [...sqlstates] });
-      if (!RETRYABLE_SQLSTATE_SET.has(state) || attempt >= attemptLimit) throw error;
-      retryCount += 1;
-      try {
-        if (typeof onRetry === "function") await onRetry({
-          attempt,
-          nextAttempt: attempt + 1,
-          retryCount,
-          sqlstate: state,
-          sqlstates: [...sqlstates],
-        });
-        if (typeof revalidate === "function") await revalidate({
-          attempt,
-          nextAttempt: attempt + 1,
-          retryCount,
-          sqlstate: state,
-          sqlstates: [...sqlstates],
-        });
-      } catch (revalidationError) {
-        Object.assign(revalidationError, {
-          executeAttempts: attempts,
-          executeRetryCount: retryCount,
-          executeSqlstates: [...sqlstates],
-          retryCauseSqlstate: state,
-          attempt: attempt + 1,
-        });
-        throw revalidationError;
-      }
-    }
-  }
-  fail("retirement retry loop exhausted");
+  return runWithEscrowRetry({
+    execute,
+    revalidate,
+    maxAttempts: Math.min(maxAttempts, MAX_RETIREMENT_EXECUTE_ATTEMPTS),
+    onAttempt,
+    onRetry,
+    getSqlState: sqlStateOf,
+    retryableStates: RETRYABLE_RETIREMENT_SQLSTATES,
+  });
 }
 
 const RETENTION_BATCH_PROJECTION = `

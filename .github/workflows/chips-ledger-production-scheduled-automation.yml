@@ -1,0 +1,123 @@
+name: Chips Ledger Production Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      policy:
+        description: Production retention policy
+        required: true
+        default: existing-30d
+        type: choice
+        options:
+          - existing-30d
+          - bot-only-7d
+          - closed-human-30d
+          - escrow
+      mode:
+        description: Production automation mode
+        required: true
+        default: diagnostic
+        type: choice
+        options:
+          - diagnostic
+          - prepare
+          - canary
+          - automatic
+      batch_id:
+        description: Exact reviewed Production canary batch ID
+        required: false
+        type: string
+      confirmation:
+        description: Exact reviewed GO batch confirmation
+        required: false
+        type: string
+      account_ids_sha256:
+        description: Exact reviewed escrow account-set SHA-256
+        required: false
+        type: string
+      recovery_object_path:
+        description: Exact private escrow recovery object path
+        required: false
+        type: string
+
+concurrency:
+  group: chips-ledger-production-automation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  production-archive:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && ((inputs.mode != 'automatic' && github.actor == github.repository_owner) || (inputs.mode == 'automatic' && vars.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED == '1' && github.actor == vars.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR && vars.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR == 'arcade-production-dispatch')) }}
+    runs-on: ubuntu-latest
+    environment: production-ledger
+    timeout-minutes: 60
+    env:
+      SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+      SUPABASE_PROD_URL: ${{ secrets.SUPABASE_PROD_URL }}
+      SUPABASE_PROD_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
+      EXPECTED_SUPABASE_PROD_PROJECT_REF: otbqfijerkieoxwpxjnm
+      CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: ${{ vars.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED || '0' }}
+      CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR: ${{ vars.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR || '' }}
+      CHIPS_LEDGER_PRODUCTION_CANARY: ${{ inputs.mode == 'canary' && '1' || '' }}
+      CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256: ${{ inputs.account_ids_sha256 || '' }}
+      DEPLOYED_COMMIT_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout exact dispatch SHA
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify exact Production dispatch boundary
+        shell: bash
+        env:
+          PRODUCTION_POLICY: ${{ inputs.policy }}
+          PRODUCTION_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          test "$checked_out_sha" = "$GITHUB_SHA"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
+          test "$PRODUCTION_POLICY" = "existing-30d" || test "$PRODUCTION_POLICY" = "bot-only-7d" || test "$PRODUCTION_POLICY" = "closed-human-30d" || test "$PRODUCTION_POLICY" = "escrow"
+          test "$PRODUCTION_MODE" = "diagnostic" || test "$PRODUCTION_MODE" = "prepare" || test "$PRODUCTION_MODE" = "canary" || test "$PRODUCTION_MODE" = "automatic"
+          if [[ "$PRODUCTION_MODE" == "automatic" ]]; then
+            test "${CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:-0}" = "1"
+            test "$GITHUB_ACTOR" = "${CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR:-}"
+            test "$GITHUB_ACTOR" = "arcade-production-dispatch"
+          else
+            test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
+          fi
+          printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Run bounded Production retention entrypoint
+        env:
+          PRODUCTION_POLICY: ${{ inputs.policy }}
+          PRODUCTION_MODE: ${{ inputs.mode }}
+          PRODUCTION_BATCH_ID: ${{ inputs.batch_id || '' }}
+          PRODUCTION_CONFIRMATION: ${{ inputs.confirmation || '' }}
+          PRODUCTION_RECOVERY_OBJECT_PATH: ${{ inputs.recovery_object_path || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --policy "$PRODUCTION_POLICY"
+            --mode "$PRODUCTION_MODE"
+          )
+          if [[ -n "$PRODUCTION_BATCH_ID" ]]; then args+=(--batch-id "$PRODUCTION_BATCH_ID"); fi
+          if [[ -n "$PRODUCTION_CONFIRMATION" ]]; then args+=(--confirmation "$PRODUCTION_CONFIRMATION"); fi
+          if [[ -n "$CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256" ]]; then args+=(--account-ids-sha256 "$CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256"); fi
+          if [[ -n "$PRODUCTION_RECOVERY_OBJECT_PATH" ]]; then args+=(--recovery-object-path "$PRODUCTION_RECOVERY_OBJECT_PATH"); fi
+          node scripts/ops/chips-ledger-production-automation.mjs "${args[@]}"
