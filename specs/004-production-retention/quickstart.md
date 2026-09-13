@@ -6,7 +6,7 @@ This document describes later execution by another agent and owner. No commands 
 
 The implementation is on branch `agent/891-production-retention-plan`, based on main commit `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. It adds the forward-only Production equivalents and dark/off entry path required by T001–T013:
 
-- E1: `supabase/production-migrations/20260914090000_chips_ledger_production_retention_contract.sql`, SHA-256 `9bcd69c6ed6844d816e780812482afd7f89bd9b347a4dc60656242428aba3311`.
+- E1: `supabase/production-migrations/20260914090000_chips_ledger_production_retention_contract.sql`, SHA-256 `0248679622a99736e92a24058a057b2a51d1af72ff8c4284f1616b9002709e2d`.
 - E2: `supabase/production-migrations/20260914091000_chips_ledger_production_table_fence_activation.sql`, SHA-256 `f6d8334cf642df7c9c4ac3b633d4898254d5af09290814cdce54e253bc650cab`.
 - The manifest still classifies all 97 main migrations as 54 Production baseline entries plus 18 `shared-safe`, 3 `stage-only`, and 22 `needs-production-equivalent`; no Stage rollout history, IDs, credentials, receipts or allowlists were copied into the Production replacements.
 - E1 defaults Production retention and all three Production policy rows to OFF with cap 2 and leaves the TABLE fence OFF. E2 is shipped as a separately owner-gated file and was not applied.

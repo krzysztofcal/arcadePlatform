@@ -1625,7 +1625,7 @@ end;
 $function$;
 alter function public.chips_prune_committed_archive_batch_internal(text, uuid[], bigint[], boolean) owner to chips_ledger_archive_pruner;
 revoke all on function public.chips_prune_committed_archive_batch_internal(text, uuid[], bigint[], boolean) from public, anon, authenticated, service_role;
-grant execute on function public.chips_prune_committed_archive_batch_internal(text, uuid[], bigint[], boolean) to postgres, chips_ledger_archive_pruner;
+grant execute on function public.chips_prune_committed_archive_batch_internal(text, uuid[], bigint[], boolean) to chips_ledger_archive_pruner;
 
 create or replace function public.chips_prune_committed_archive_batch(p_object_path text, p_transaction_ids uuid[], p_entry_ids bigint[], p_execute boolean default false)
 returns jsonb language plpgsql security definer set search_path = '' as $$
@@ -3851,8 +3851,11 @@ declare
   batch public.chips_ledger_archive_batches%rowtype;
   policy public.chips_production_closed_human_table_retention_policy%rowtype;
   registry_count bigint;
+  distinct_transaction_count bigint;
   distinct_table_count bigint;
   null_table_count bigint;
+  exact_table_count bigint;
+  foreign_archive_mapping_count bigint;
   receipt_count integer;
   go_count integer;
   result jsonb;
@@ -3928,22 +3931,24 @@ begin
   end if;
 
   select pg_catalog.count(*),
+         pg_catalog.count(distinct registry.transaction_id),
          pg_catalog.count(distinct registry.table_id),
-         pg_catalog.count(*) filter (where registry.table_id is null)
-    into registry_count, distinct_table_count, null_table_count
+         pg_catalog.count(*) filter (where registry.table_id is null),
+         pg_catalog.count(*) filter (where registry.table_id = p_table_id),
+         pg_catalog.count(*) filter (
+           where registry.archive_batch_id is not null
+             and registry.archive_batch_id <> batch.batch_id
+         )
+    into registry_count, distinct_transaction_count, distinct_table_count,
+         null_table_count, exact_table_count, foreign_archive_mapping_count
     from public.chips_transaction_idempotency as registry
-   where registry.transaction_id = any(p_transaction_ids)
-     and registry.archive_batch_id = batch.batch_id;
+   where registry.transaction_id = any(p_transaction_ids);
   if registry_count <> batch.transaction_count
+     or distinct_transaction_count <> batch.transaction_count
      or distinct_table_count <> 1
      or null_table_count <> 0
-     or not exists (
-       select 1
-         from public.chips_transaction_idempotency as registry
-        where registry.transaction_id = any(p_transaction_ids)
-          and registry.archive_batch_id = batch.batch_id
-          and registry.table_id = p_table_id
-     ) then
+     or exact_table_count <> batch.transaction_count
+     or foreign_archive_mapping_count <> 0 then
     raise exception using errcode = 'P9273', message = 'Automatic closed-human target registry binding is not exact';
   end if;
 
@@ -3983,6 +3988,12 @@ $$;
 alter function public.chips_auto_prune_closed_human_table_archive_batch(text, uuid[], bigint[], uuid) owner to postgres;
 revoke all on function public.chips_auto_prune_closed_human_table_archive_batch(text, uuid[], bigint[], uuid) from public, anon, authenticated, service_role;
 grant execute on function public.chips_auto_prune_closed_human_table_archive_batch(text, uuid[], bigint[], uuid) to postgres, chips_ledger_archive_pruner;
+
+-- The archive pruner role is delegated only for DDL/ownership while this
+-- replacement is installed.  Runtime calls enter through reviewed wrappers;
+-- postgres must not retain membership or a direct internal-prune entry point.
+revoke execute on function public.chips_prune_committed_archive_batch_internal(text, uuid[], bigint[], boolean) from postgres;
+revoke chips_ledger_archive_pruner from postgres;
 
 create or replace function public.chips_production_retention_automatic_active()
 returns boolean language sql stable security definer set search_path = '' as $$

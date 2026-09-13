@@ -238,6 +238,7 @@ const runProductionEquivalentFixture = async (sql) => {
   assert.equal(activatedRows[0].retention_enabled, false, "E2 must not activate cleanup");
   assert.equal(Number(activatedRows[0].max_transactions), 2, "E2 must preserve the cap2 pre-activation contract");
   await assertProductionRetentionSafetyContracts(sql);
+  await assertProductionClosedHumanAutomaticP9273RegistryBinding(sql);
 };
 
 const assertProductionRetentionSafetyContracts = async (sql) => {
@@ -267,6 +268,46 @@ const assertProductionRetentionSafetyContracts = async (sql) => {
   let botEntryIds = [];
   let botBatchId = null;
   const botRegistryKey = `poker:deferred-leave:v1:${botTableId}:fixture`;
+
+  const productionAclRows = await sql.unsafe(`
+    select
+      exists (
+        select 1
+          from pg_catalog.pg_auth_members memberships
+          join pg_catalog.pg_roles granted_role on granted_role.oid = memberships.roleid
+          join pg_catalog.pg_roles member_role on member_role.oid = memberships.member
+         where granted_role.rolname = 'chips_ledger_archive_pruner'
+           and member_role.rolname = 'postgres'
+      ) as postgres_pruner_membership,
+      exists (
+        select 1
+          from pg_catalog.pg_proc procedures
+          cross join lateral pg_catalog.aclexplode(coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))) privileges
+         where procedures.oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure
+           and privileges.grantee = 'postgres'::regrole::oid
+           and privileges.privilege_type = 'EXECUTE'
+      ) as postgres_internal_execute,
+      exists (
+        select 1
+          from pg_catalog.pg_proc procedures
+          cross join lateral pg_catalog.aclexplode(coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))) privileges
+         where procedures.oid = 'public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure
+           and privileges.grantee = 'chips_ledger_archive_pruner'::regrole::oid
+           and privileges.privilege_type = 'EXECUTE'
+      ) as pruner_internal_execute,
+      exists (
+        select 1
+          from pg_catalog.pg_proc procedures
+          cross join lateral pg_catalog.aclexplode(coalesce(procedures.proacl, pg_catalog.acldefault('f', procedures.proowner))) privileges
+         where procedures.oid = 'public.chips_prune_committed_archive_batch(text,uuid[],bigint[],boolean)'::regprocedure
+           and privileges.grantee = 'postgres'::regrole::oid
+           and privileges.privilege_type = 'EXECUTE'
+      ) as postgres_public_execute;
+  `);
+  assert.equal(productionAclRows[0].postgres_pruner_membership, false, "Production E1 must revoke temporary pruner membership from postgres");
+  assert.equal(productionAclRows[0].postgres_internal_execute, false, "postgres must not execute the internal Production prune function");
+  assert.equal(productionAclRows[0].pruner_internal_execute, true, "the pruner owner must retain internal prune execution");
+  assert.equal(productionAclRows[0].postgres_public_execute, true, "postgres must enter Production pruning through the reviewed public wrapper");
 
   try {
     await sql.begin(async (tx) => {
@@ -709,6 +750,228 @@ const assertProductionRetentionSafetyContracts = async (sql) => {
     });
   }
 };
+
+async function assertProductionClosedHumanAutomaticP9273RegistryBinding(sql) {
+  const tableId = "00000000-0000-4000-8000-00000000f951";
+  const userAccountId = "00000000-0000-4000-8000-00000000f952";
+  const escrowAccountId = "00000000-0000-4000-8000-00000000f953";
+  const transactionIds = [
+    "00000000-0000-4000-8000-00000000f954",
+    "00000000-0000-4000-8000-00000000f955",
+  ];
+  const foreignTransactionId = "00000000-0000-4000-8000-00000000f956";
+  const createdAt = ["2026-09-01T00:00:01.000Z", "2026-09-01T00:00:02.000Z"];
+  const cutoff = "2026-09-10T00:00:00.000Z";
+  const ROLLBACK = new Error("production-closed-human-p9273-rollback");
+
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe(`insert into public.poker_tables
+      (id, status, has_human_participant, bot_only_proof_eligible)
+      values ($1::uuid, 'CLOSED', true, false);`, [tableId]);
+    await tx.unsafe(`insert into public.chips_accounts
+      (id, user_id, system_key, account_type, status, balance, next_entry_seq)
+      values ($1::uuid, $2::uuid, null, 'USER', 'active', 100, 1),
+             ($3::uuid, null, $4, 'ESCROW', 'active', 0, 1);`, [
+      userAccountId,
+      primaryUserId,
+      escrowAccountId,
+      "POKER_TABLE:" + tableId,
+    ]);
+    await tx.unsafe(`insert into public.poker_state (table_id, version, state)
+      values ($1::uuid, 1, '{"phase":"HAND_DONE","handId":""}'::jsonb);`, [tableId]);
+
+    const registryKeys = [
+      "join-buyin:" + tableId + ":" + primaryUserId + ":p9273-production",
+      "poker:human-terminal-cashout:v1:" + tableId + ":p9273-production",
+    ];
+    const entryIds = [];
+    for (let index = 0; index < transactionIds.length; index += 1) {
+      const isBuyIn = index === 0;
+      await tx.unsafe(`insert into public.chips_transactions (
+          id, reference, metadata, idempotency_key, payload_hash, tx_type, user_id, created_at
+        ) values ($1::uuid, $2, $3::jsonb, $4, $5, $6, $7::uuid, $8::timestamptz);`, [
+        transactionIds[index],
+        "table:" + tableId,
+        JSON.stringify({ tableId }),
+        registryKeys[index],
+        (isBuyIn ? "a" : "b").repeat(64),
+        isBuyIn ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+        primaryUserId,
+        createdAt[index],
+      ]);
+      const rows = await tx.unsafe(`insert into public.chips_entries
+          (transaction_id, account_id, entry_seq, amount, metadata, created_at)
+        values ($1::uuid, $2::uuid, $3, $4, '{}'::jsonb, $5::timestamptz),
+               ($1::uuid, $6::uuid, $7, $8, '{}'::jsonb, $5::timestamptz)
+        returning id::text;`, [
+        transactionIds[index],
+        userAccountId,
+        index + 1,
+        isBuyIn ? -100 : 100,
+        createdAt[index],
+        escrowAccountId,
+        index + 1,
+        isBuyIn ? 100 : -100,
+      ]);
+      entryIds.push(...rows.map((row) => row.id));
+      await tx.unsafe(`insert into public.chips_transaction_idempotency (
+          idempotency_key, transaction_id, payload_hash, tx_type, user_id,
+          transaction_created_at, table_id, key_format_version, key_format
+        ) values ($1, $2::uuid, $3, $4, $5::uuid, $6::timestamptz,
+          $7::uuid, 1, $8);`, [
+        registryKeys[index],
+        transactionIds[index],
+        (isBuyIn ? "a" : "b").repeat(64),
+        isBuyIn ? "TABLE_BUY_IN" : "TABLE_CASH_OUT",
+        primaryUserId,
+        createdAt[index],
+        tableId,
+        isBuyIn ? "join-buyin" : "poker:human-terminal-cashout:v1",
+      ]);
+    }
+
+    const hashRows = await tx.unsafe(`select
+        public.chips_archive_uuid_ids_sha256($1::uuid[]) as transaction_hash,
+        public.chips_archive_bigint_ids_sha256($2::bigint[]) as entry_hash;`, [
+      transactionIds,
+      entryIds,
+    ]);
+    const transactionHash = hashRows[0].transaction_hash;
+    const entryHash = hashRows[0].entry_hash;
+    const compressedSha = "1".repeat(64);
+    const rawSha = "2".repeat(64);
+    const objectPath = "v1/sha256/" + compressedSha + ".jsonl.gz";
+    const batchRows = await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+        object_path, project_ref, format_version, source_policy_id, cutoff,
+        cursor_end_created_at, cursor_end_id, first_created_at, last_created_at,
+        transaction_count, entry_count, tx_types, raw_bytes, compressed_bytes,
+        raw_sha256, compressed_sha256, credits, debits, net_amount, status,
+        committed_at, archive_proof_verified_at, archived_transaction_ids_sha256,
+        archived_entry_ids_sha256
+      ) values (
+        $1, 'otbqfijerkieoxwpxjnm', 1,
+        'production-ledger-closed-human-table-retention-30d-v1',
+        $2::timestamptz, $3::timestamptz, $4::uuid, $5::timestamptz,
+        $6::timestamptz, 2, 4, '{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":1}'::jsonb,
+        200, 200, $7, $8, 200, 200, 0, 'committed', $9::timestamptz,
+        $9::timestamptz, $10, $11
+      ) returning batch_id;`, [
+      objectPath,
+      cutoff,
+      createdAt[1],
+      transactionIds[1],
+      createdAt[0],
+      createdAt[1],
+      rawSha,
+      compressedSha,
+      createdAt[1],
+      transactionHash,
+      entryHash,
+    ]);
+    const batchId = batchRows[0].batch_id;
+
+    await tx.unsafe(`update public.chips_production_retention_control
+      set enabled = true, max_transactions = 5000,
+          activated_at = $1::timestamptz,
+          activation_confirmation = 'Production P9273 fixture'
+      where control_id is true;`, [createdAt[1]]);
+    await tx.unsafe(`update public.chips_production_closed_human_table_retention_policy
+      set enabled = true,
+          canary_batch_id = $1::bigint,
+          canary_confirmation = 'GO ' || $1::text,
+          activation_go_at = $2::timestamptz,
+          activation_confirmation = 'ACTIVATE production-ledger-closed-human-table-retention-30d-v1 CANARY ' || $1::text,
+          activated_at = $2::timestamptz
+      where policy_id = 'production-ledger-closed-human-table-retention-30d-v1';`, [
+      batchId,
+      createdAt[1],
+    ]);
+    await tx.unsafe("set local session_replication_role = 'origin';");
+    const freshMappingRows = await tx.unsafe(`select
+      count(*) filter (where archive_batch_id is null) as fresh_mappings,
+      count(*) as registry_rows
+      from public.chips_transaction_idempotency
+      where transaction_id = any($1::uuid[]);`, [transactionIds]);
+    assert.equal(Number(freshMappingRows[0].fresh_mappings), 2, "Production fresh fixture must start with NULL archive mappings");
+    assert.equal(Number(freshMappingRows[0].registry_rows), 2, "Production fresh fixture must contain the complete registry identity set");
+
+
+    const executeRows = await tx.unsafe(`select public.chips_auto_prune_closed_human_table_archive_batch(
+      $1, $2::uuid[], $3::bigint[], $4::uuid
+    ) as result;`, [objectPath, transactionIds, entryIds, tableId]);
+    assert.equal(executeRows[0].result.state, "pruned", "Production fresh NULL registry mappings must prune");
+
+    const postExecuteRows = await tx.unsafe(`select
+      (select count(*) from public.chips_transactions where id = any($1::uuid[])) as hot_transactions,
+      (select count(*) from public.chips_entries where transaction_id = any($1::uuid[])) as hot_entries,
+      (select count(*) from public.chips_transaction_idempotency where transaction_id = any($1::uuid[])) as registry_rows,
+      (select count(*) from public.chips_transaction_idempotency
+        where transaction_id = any($1::uuid[]) and archive_batch_id = $2::bigint) as mapped_rows
+      ;`, [transactionIds, batchId]);
+    assert.equal(Number(postExecuteRows[0].hot_transactions), 0);
+    assert.equal(Number(postExecuteRows[0].hot_entries), 0);
+    assert.equal(Number(postExecuteRows[0].registry_rows), 2);
+    assert.equal(Number(postExecuteRows[0].mapped_rows), 2);
+
+    const retryRows = await tx.unsafe(`select public.chips_auto_prune_closed_human_table_archive_batch(
+      $1, $2::uuid[], $3::bigint[], $4::uuid
+    ) as result;`, [objectPath, transactionIds, entryIds, tableId]);
+    assert.equal(retryRows[0].result.state, "already_pruned", "Production retry must be already_pruned");
+
+    const foreignCompressedSha = "3".repeat(64);
+    const foreignObjectPath = "v1/sha256/" + foreignCompressedSha + ".jsonl.gz";
+    await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+        object_path, project_ref, format_version, source_policy_id, cutoff,
+        transaction_count, entry_count, tx_types, raw_bytes, compressed_bytes,
+        raw_sha256, compressed_sha256, credits, debits, net_amount, status,
+        committed_at
+      ) values (
+        $1, 'otbqfijerkieoxwpxjnm', 1,
+        'production-ledger-closed-human-table-retention-30d-v1',
+        $2::timestamptz, 1, 1, '{"TABLE_BUY_IN":1}'::jsonb, 1, 1,
+        $3, $4, 1, 1, 0, 'committed', $5::timestamptz
+      );`, [
+      foreignObjectPath,
+      cutoff,
+      "4".repeat(64),
+      foreignCompressedSha,
+      createdAt[1],
+    ]);
+    await tx.unsafe(`insert into public.chips_transaction_idempotency (
+        idempotency_key, transaction_id, payload_hash, tx_type, user_id,
+        transaction_created_at, archive_batch_id, table_id, key_format_version, key_format
+      ) values (
+        'p9273-production-foreign', $1::uuid, $6, 'TABLE_BUY_IN',
+        $2::uuid, $3::timestamptz, $4::bigint, $5::uuid, 1, 'fixture'
+      );`, [
+      foreignTransactionId,
+      primaryUserId,
+      createdAt[0],
+      batchId,
+      tableId,
+      "5".repeat(64),
+    ]);
+
+    await tx.unsafe("savepoint production_p9273_foreign_mapping;");
+    let caught = null;
+    try {
+      await tx.unsafe(`select public.chips_auto_prune_closed_human_table_archive_batch(
+        $1, $2::uuid[], $3::bigint[], $4::uuid
+      );`, [foreignObjectPath, [foreignTransactionId], ["9999991"], tableId]);
+    } catch (error) {
+      caught = error;
+    }
+    assert.equal(caught?.code, "P9273", "Production foreign registry mapping must be rejected");
+    await tx.unsafe("rollback to savepoint production_p9273_foreign_mapping;");
+    await tx.unsafe("release savepoint production_p9273_foreign_mapping;");
+
+    throw ROLLBACK;
+  }).catch((error) => {
+    if (error !== ROLLBACK) throw error;
+  });
+}
 
 const ensureGenesisFixture = async (sql) => {
   await sql`
