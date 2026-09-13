@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  runExport,
   PRODUCTION_AUTOMATION_POLICY_ID,
   PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
   PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,

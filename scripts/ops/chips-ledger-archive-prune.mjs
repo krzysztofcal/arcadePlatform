@@ -1002,7 +1002,7 @@ export function createPruneStore(sql) {
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
         if (automatic && targetName === "stage") await tx.unsafe("set local chips.closed_human_automatic = '1';");
-        if (automatic && targetName === "prod") await tx.unsafe("set local chips.production_automatic = '1';");
+        if (automatic && targetName === "prod") await tx.unsafe("set local chips.production_closed_human_automatic = '1';");
         if (execute && targetName === "prod" && !automatic && approvedBatchId != null) {
           await tx.unsafe("set local chips.production_canary = '1';");
         }

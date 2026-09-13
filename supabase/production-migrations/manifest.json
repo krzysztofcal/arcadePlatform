@@ -891,7 +891,7 @@
     {
       "file": "20260914090000_chips_ledger_production_retention_contract.sql",
       "purpose": "E1 final Production schema/equivalent contract; dark/off; cap 2",
-      "sha256": "3f191e013e49c887d7b61f25479983d8430d6d336dbc8749cdc37253348302e8"
+      "sha256": "26085203da58b52cd95c335de191a63ffe12fe341b2a8cc92ef163ea5647da78"
     },
     {
       "file": "20260914091000_chips_ledger_production_table_fence_activation.sql",

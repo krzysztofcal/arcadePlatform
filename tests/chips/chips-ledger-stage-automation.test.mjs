@@ -149,6 +149,63 @@ const productionPrepared = await runProductionAutomation({
 assert.equal(productionPrepared.state, "prepared");
 assert.equal(productionPrepared.maxTransactions, 2);
 assert.equal(productionExecuteCalled, false);
+
+// This exercises the real Production prepare -> runProductionArchiveCycle ->
+// buildProductionExportInvocation -> runExport boundary.  A missing runExport
+// dependency here only appears when the default prepare adapter reaches the
+// exporter; an injected prepare stub would not cover that contract.
+const productionExportBoundaryCalls = [];
+const productionExportBoundarySql = {
+  unsafe: async (query, values = []) => {
+    productionExportBoundaryCalls.push({ query, values });
+    if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: "production-export-boundary" }];
+    if (query.includes("pg_advisory_unlock")) return [{ released: true }];
+    if (query.includes("pg_control_system")) return [{ system_identifier: PRODUCTION_SYSTEM_IDENTIFIER }];
+    if (query.includes("from public.chips_ledger_archive_batches")) return [];
+    throw new Error(`unexpected Production export boundary SQL: ${query}`);
+  },
+  begin: async (callback) => callback({
+    unsafe: async (query, values = []) => {
+      productionExportBoundaryCalls.push({ query, values });
+      if (query.includes("from public.chips_transactions")) return [];
+      return [];
+    },
+  }),
+};
+const productionExportBoundaryRoot = fs.mkdtempSync("/tmp/chips-ledger-production-export-boundary-");
+try {
+  const productionExportBoundary = await runProductionAutomation({
+    env: PRODUCTION_ENV,
+    policy: "existing-30d",
+    mode: "prepare",
+    deps: {
+      read: async ({ profile }) => ({
+        projectRef: profile.projectRef,
+        systemIdentifier: profile.systemIdentifier,
+        readOnly: true,
+        control: { enabled: false, max_transactions: 2 },
+        fenceActive: false,
+        policies: [],
+      }),
+      sql: productionExportBoundarySql,
+      tempRoot: productionExportBoundaryRoot,
+      verifyBucket: async () => {},
+    },
+  });
+  assert.equal(productionExportBoundary.state, "no-op");
+  assert.equal(productionExportBoundary.reason, "no_eligible_candidate");
+  assert.ok(
+    productionExportBoundaryCalls.some((call) => call.query.includes("set transaction isolation level repeatable read, read only;")),
+    "Production prepare must reach the export snapshot transaction",
+  );
+  assert.ok(
+    productionExportBoundaryCalls.some((call) => call.query.includes("from public.chips_transactions")),
+    "Production prepare must execute the real exporter candidate selector",
+  );
+} finally {
+  fs.rmSync(productionExportBoundaryRoot, { recursive: true, force: true });
+}
+
 const sharedDisabled = await runRetentionCycle({
   target: "production",
   env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "0" },
