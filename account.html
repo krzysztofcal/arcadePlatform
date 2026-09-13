@@ -318,6 +318,11 @@
               <span class="chip-balance__value" id="chipBalanceValue">—</span>
             </div>
           </div>
+          <section class="xp-card account-bonus" id="pokerAccountPanel" hidden aria-labelledby="pokerAccountTitle">
+            <div class="account-bonus__title" id="pokerAccountTitle" data-i18n="accountPokerTables">Poker tables</div>
+            <p class="account-note" id="pokerAccountStatus" aria-live="polite" hidden></p>
+            <div id="pokerTableList"></div>
+          </section>
           <p class="account-note" id="chipStatus" aria-live="polite"></p>
           <div class="chip-ledger__scroll" id="chipLedgerScroll">
             <div class="chip-ledger__spacer" id="chipLedgerSpacer"></div>
@@ -335,12 +340,6 @@
               <select id="chipLedgerPageSize"><option value="10">10</option><option value="25">25</option><option value="50">50</option></select>
             </label>
           </nav>
-        </section>
-
-        <section class="xp-card account-bonus" id="pokerAccountPanel" hidden aria-labelledby="pokerAccountTitle">
-          <div class="account-bonus__title" id="pokerAccountTitle" data-i18n="accountPokerTables">Poker tables</div>
-          <p class="account-note" id="pokerAccountStatus" aria-live="polite" hidden></p>
-          <div id="pokerTableList"></div>
         </section>
       </article>
     </main>
