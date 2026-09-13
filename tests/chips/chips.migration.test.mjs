@@ -3182,6 +3182,15 @@ async function main() {
   await assertEscrowDryRunReadOnlyConcurrency(sql);
   await runProductionEquivalentFixture(sql);
 
+  // The integration workflow reuses this disposable database for the
+  // following Stage contract jobs. Leave it in the normal main-migration
+  // shape after the isolated Production fixture so Production equivalents
+  // cannot masquerade as Stage schema or function history.
+  await dropAndRecreateSchema(sql);
+  await runMigrations(sql, migrationsWithoutBootstrapSeeds);
+  await runMigration(sql, seedMigration);
+  await runMigration(sql, botBankrollMigration);
+
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");
   if (adminModule?.closeSql) {
