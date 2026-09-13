@@ -1,0 +1,907 @@
+{
+  "manifest_version": 1,
+  "feature": "004-production-retention",
+  "source_main_commit": "f7983d78333b51a393c0e9a6d3dfe48ce1224c74",
+  "source_directory": "supabase/migrations",
+  "production_target": {
+    "project_ref": "otbqfijerkieoxwpxjnm",
+    "system_identifier": "7575202818581710058"
+  },
+  "stage_reference": {
+    "project_ref": "krydukthwdvccggbyjfw",
+    "system_identifier": "7656985631720456337"
+  },
+  "history_policy": {
+    "baseline_applied_count": 54,
+    "missing_count": 43,
+    "history_repair": "forbidden",
+    "apply_directory": "supabase/production-migrations"
+  },
+  "baseline_applied": [
+    {
+      "version": "20251218213520",
+      "file": "20251218213520_chips_ledger.sql",
+      "sha256": "025c8eb48eded79e4eabfaff27f52abef4830b9fdae863b2bbdd9b60910f4da7"
+    },
+    {
+      "version": "20251218230000",
+      "file": "20251218230000_chips_ledger_fixups.sql",
+      "sha256": "4983e815981bbd4dab023e69c3620b25a4450d4b05acfbc98fc7107c8acf9eec"
+    },
+    {
+      "version": "20251218234500",
+      "file": "20251218234500_raise_insufficient_funds.sql",
+      "sha256": "90d66f4b5fe8c237b530aea40637822b7f989da644feb299a6e8e6688268560a"
+    },
+    {
+      "version": "20251219000000",
+      "file": "20251219000000_chips_schema.sql",
+      "sha256": "286d8b385556f6de943c663dbf8070e98e18f06888a85239f1bc06f8b87a0096"
+    },
+    {
+      "version": "20251219000500",
+      "file": "20251219000500_chips_seed_system_accounts.sql",
+      "sha256": "1eca3c1b21294e02fecbaa8ec379e71a3bd0aec6c095fbc55fa285435a68f3ee"
+    },
+    {
+      "version": "20251219001000",
+      "file": "20251219001000_chips_entry_sequence_restore.sql",
+      "sha256": "9b384684eb0ac78208b8d6e0c849b1cf570fc3da2ee0935abea649355b4f684e"
+    },
+    {
+      "version": "20251219002000",
+      "file": "20251219002000_chips_accounts_block_negative_balance.sql",
+      "sha256": "0dce539b8638ab0fcefa32be761c5283411f5282ad182670a1666662a2bd5511"
+    },
+    {
+      "version": "20251219003000",
+      "file": "20251219003000_chips_transactions_idempotency_unique.sql",
+      "sha256": "1b6233dbd6c7d1ea2d8bc69d156773ead970dc19a166857048e40118059360fe"
+    },
+    {
+      "version": "20251220000000",
+      "file": "20251220000000_chips_allow_genesis_overdraft.sql",
+      "sha256": "f62d850b9785ce863cce974dd767801649816f5e8d0250097f8fba820bb8c626"
+    },
+    {
+      "version": "20251221000000",
+      "file": "20251221000000_chips_seed_treasury_genesis.sql",
+      "sha256": "9e65105f5ebc964f3755cf5bd354f7f984e12aa25f602dc82622ff2c3311ad43"
+    },
+    {
+      "version": "20251223000000",
+      "file": "20251223000000_chips_entry_trigger_fix.sql",
+      "sha256": "657f99edcc2f1a5f152c6ae97427b0e72b65365f01ced396d7bd6559e458e6e4"
+    },
+    {
+      "version": "20251224000000",
+      "file": "20251224000000_chips_transactions_user_id.sql",
+      "sha256": "108ceb402af3f9e957db01719088fd13afc3ff6602546c8f244c2400425448e3"
+    },
+    {
+      "version": "20251224213000",
+      "file": "20251224213000_favorites_schema.sql",
+      "sha256": "6e789139848592d02200a24e919bd668686f3df09d587d831f1d8edf3e1d5e57"
+    },
+    {
+      "version": "20260115000000",
+      "file": "20260115000000_fix_security_invoker_v_user_chips_entries.sql",
+      "sha256": "aee5526605cf10393fab599814560a1e233de7e281cc963c6478266742f98062"
+    },
+    {
+      "version": "20260116000000",
+      "file": "20260116000000_poker_chips_tx_types.sql",
+      "sha256": "2e87a0f2f40fdcc25166561a92056f9a0102bf28bbb76d0ed5cb77eb9e306f3e"
+    },
+    {
+      "version": "20260116120000",
+      "file": "20260116120000_poker_tables.sql",
+      "sha256": "6a4b4e8b3650822afb9326fb41333fb82b306fc0719daea2a106ccc0ed9c7504"
+    },
+    {
+      "version": "20260117090000",
+      "file": "20260117090000_poker_phase1_authoritative_seats.sql",
+      "sha256": "b3d1287205d4e5073b007e3215513229b1e9317c09d31314181a578c7b4789c2"
+    },
+    {
+      "version": "20260117100000",
+      "file": "20260117100000_poker_hole_cards.sql",
+      "sha256": "df7677351c62f21cdffcdafb4c7d4f6c1f51e063ffc2b0201073fa94c234aee3"
+    },
+    {
+      "version": "20260117110000",
+      "file": "20260117110000_poker_state_lockdown.sql",
+      "sha256": "7e9833cb925087f34888dc7e9e663dd14731625b1cd39ed1fec7fa9e888abd63"
+    },
+    {
+      "version": "20260117111000",
+      "file": "20260117111000_poker_hole_cards_lockdown.sql",
+      "sha256": "0ab2757f56837090235d70b80fb9ace02fc3b170e2bd1119874aa7dcccd33192"
+    },
+    {
+      "version": "20260117120001",
+      "file": "20260117120001_poker_actions_hand_history.sql",
+      "sha256": "51e03f1961cbe7a3914f8bbfdec6d398d6a8b0e7213496301a32ed6194fa23f5"
+    },
+    {
+      "version": "20260117130000",
+      "file": "20260117130000_enable_poker_rls.sql",
+      "sha256": "011ba08df02cccfb8dddad757c158009dbfb97e32ec2f4b0cc40c7270352f6ec"
+    },
+    {
+      "version": "20260118000000",
+      "file": "20260118000000_poker_requests_idempotency_scope.sql",
+      "sha256": "5f4f941a523a222028332d27df18b7067d3f5a7938ea620c0b2ec37001c82e9b"
+    },
+    {
+      "version": "20260207000000",
+      "file": "20260207000000_chips_entries_ledger_cursor_idx.sql",
+      "sha256": "e8687da6cfa800ff9dc7201aea133579a4efad7786b1cc6eb39222d314da6ab3"
+    },
+    {
+      "version": "20260210000000",
+      "file": "20260210000000_poker_seats_is_bot.sql",
+      "sha256": "9fe8cc0134c5e5b9b0ce07f50e12cfe9d37b0298f99679e41eb5f9e2bd2a72d3"
+    },
+    {
+      "version": "20260212000000",
+      "file": "20260212000000_poker_seats_bot_profile_leave_after_hand.sql",
+      "sha256": "1e396b2dba04d3c674bb5ee422f008683c7a3fabdf783787e99765bd281b4b4a"
+    },
+    {
+      "version": "20260213000000",
+      "file": "20260213000000_poker_hole_cards_drop_auth_users_fk.sql",
+      "sha256": "e39c5fe208a0e358d3dd205480a4aef884b3926a49d15378a11de7ca58e77ecc"
+    },
+    {
+      "version": "20260423160000",
+      "file": "20260423160000_chips_admin_adjust_tx_type.sql",
+      "sha256": "4b9a91b119529a288272a816e765284de789d971a31e1aa64c8cf4e4da1f0b4a"
+    },
+    {
+      "version": "20260702000000",
+      "file": "20260702000000_chips_welcome_bonus_tx_type.sql",
+      "sha256": "4f35140c3401b77a2e150855e32700fd2fc9b14249e08a453185c7444ee40745"
+    },
+    {
+      "version": "20260707090000",
+      "file": "20260707090000_bonus_campaigns.sql",
+      "sha256": "6f93ee96364cd398766226fa02105b43b9a54003a54adf3f601786b373b1f0d0"
+    },
+    {
+      "version": "20260707113000",
+      "file": "20260707113000_bonus_claim_policy.sql",
+      "sha256": "645efd36f9574c0757323a0e9a1cd0e6911d646f98442415f98e7e047a3179b1"
+    },
+    {
+      "version": "20260710130000",
+      "file": "20260710130000_user_profiles.sql",
+      "sha256": "c58eb306868bbbfe046fc05c1205a37395dda75042a249729a91ffaba5c05e86"
+    },
+    {
+      "version": "20260710133000",
+      "file": "20260710133000_user_profiles_reserved_handles.sql",
+      "sha256": "fec04e19dd815b3b887a08179b268e6af71b65fa299ca6b576537dbb5140404a"
+    },
+    {
+      "version": "20260711103000",
+      "file": "20260711103000_profile_avatar_storage.sql",
+      "sha256": "8b17b29a233490d51d27097dcd161c4737031d8d33c386e41b58f03c54808a09"
+    },
+    {
+      "version": "20260713090000",
+      "file": "20260713090000_user_profile_provisioning_visibility.sql",
+      "sha256": "5924ca5ad6af485e7d244a7bc12421385e51ab3880e99c62806a846b6a552973"
+    },
+    {
+      "version": "20260718090000",
+      "file": "20260718090000_poker_requests_action_payload_hash.sql",
+      "sha256": "59b08232f4044366c914f2be9ba17a3a3e7aec6ed086574df413d0476ddba1b0"
+    },
+    {
+      "version": "20260724212000",
+      "file": "20260724212000_poker_actions_audit_uniqueness.sql",
+      "sha256": "d68cd14c91340c88084438eb438c8a8a4ac8cd7db303b3816d7fb9783bb3581f"
+    },
+    {
+      "version": "20260729100000",
+      "file": "20260729100000_poker_managed_table_profiles.sql",
+      "sha256": "9e3661010af105032e99a121389a717acdb369bfbd8d20490b7d3cc99444b392"
+    },
+    {
+      "version": "20260730160000",
+      "file": "20260730160000_poker_tables_has_human_participant.sql",
+      "sha256": "387eac72de8aef44cdba516eab93ab637b69a87d0f37b55b98a6d8950ab4aabe"
+    },
+    {
+      "version": "20260730160001",
+      "file": "20260730160001_poker_actions_hand_settled_cleanup_idx.sql",
+      "sha256": "75c0a46c76de92ca08a1e9a8cbd86fd33d10be8901c5d7b02216ef8cee33e39d"
+    },
+    {
+      "version": "20260731000000",
+      "file": "20260731000000_poker_jsonb_native_types.sql",
+      "sha256": "c9bc91ae22f8095c361ff7c224eaa4e37e3d1c6ca00a79cbf8852544ac2c080e"
+    },
+    {
+      "version": "20260802130000",
+      "file": "20260802130000_poker_managed_table_profiles_desired_count_100.sql",
+      "sha256": "5a1c28b4d7d4b8cc662517209ba4ef366fdc869d97eb21fd74891a93c3acdd78"
+    },
+    {
+      "version": "20260804160000",
+      "file": "20260804160000_poker_managed_table_profiles_enable_rls.sql",
+      "sha256": "112017ada1d951a76b05c489bae6429607942d00ad2daaa9677e74b138b73f88"
+    },
+    {
+      "version": "20260808130000",
+      "file": "20260808130000_poker_table_buy_in.sql",
+      "sha256": "2f221acd8c93328178ddcde507296a8a1541d8988b91c72c2757d6bd7178972a"
+    },
+    {
+      "version": "20260809224000",
+      "file": "20260809224000_poker_managed_table_profiles_canonical_stakes.sql",
+      "sha256": "d4c8194c8ba1ba4e11a24ea20b7aeaff9aa08a0cc673338f974c36808a8f3b7c"
+    },
+    {
+      "version": "20260810100000",
+      "file": "20260810100000_poker_bot_bankroll.sql",
+      "sha256": "b7889f6e6f213b7dab0a05be8cb0e6fe79acdb6ae45e3b9c77e588f6c351e186"
+    },
+    {
+      "version": "20260810120000",
+      "file": "20260810120000_chips_ledger_schema_cleanup.sql",
+      "sha256": "69d029f0279c5d503607cc85650c7f63a4d324302173b1042919cabe2bd536c9"
+    },
+    {
+      "version": "20260811150000",
+      "file": "20260811150000_chips_ledger_archive_storage.sql",
+      "sha256": "976531253456662ef8e57fc1948ea68e93cb0a64a151c9a628afc89f472ec4ae"
+    },
+    {
+      "version": "20260811170000",
+      "file": "20260811170000_chips_transaction_idempotency_registry.sql",
+      "sha256": "de2a01f1b1d8a8f10b8a93840b4bc7aaf97ef0bc7675f188a0a39292b2b3e148"
+    },
+    {
+      "version": "20260811173000",
+      "file": "20260811173000_chips_transaction_idempotency_backfill_gap.sql",
+      "sha256": "13c7e7f3016a3bacae64e2412eb6485a3cda58b4b64c17e90c6c3fc781849790"
+    },
+    {
+      "version": "20260812100000",
+      "file": "20260812100000_chips_ledger_archive_pruning.sql",
+      "sha256": "fc016fbc1ca7129397dc9f08ed85a70fd6ba6346a0e81271b845e31a188c8435"
+    },
+    {
+      "version": "20260812103000",
+      "file": "20260812103000_chips_ledger_archive_pruning_acl_fix.sql",
+      "sha256": "6f906098ae693731b7080eecd2d29070278a19bb89a3241055ad0a8e85ae2482"
+    },
+    {
+      "version": "20260812110000",
+      "file": "20260812110000_chips_ledger_archive_pruning_hardening.sql",
+      "sha256": "4a2cf2ec0ef405d88ebe08021e00987f94f1fe265d858f5286de28ff613e3bf6"
+    },
+    {
+      "version": "20260813090000",
+      "file": "20260813090000_chips_ledger_archive_production_canary.sql",
+      "sha256": "f4f71adb48975ae00798809bd9a45aa6c6e6bec0af9b454857dd20d026aaec80"
+    }
+  ],
+  "missing": [
+    {
+      "version": "20260813120000",
+      "file": "20260813120000_chips_ledger_stage_automation.sql",
+      "sha256": "8cc925eca2745e120360081dca89d76af2674124b7dc62896c5b33653a6a36ea",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260818100000",
+      "file": "20260818100000_chips_ledger_bot_only_retention.sql",
+      "sha256": "d72ea5960db03bec086997370bfca7d4a25cffd34b869b617b1b2f8f6a43024c",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260819220000",
+      "file": "20260819220000_chips_ledger_bot_only_retention_hardening.sql",
+      "sha256": "4aada9e4e5caa5b50f288fc7718afe4ec1c99397a54cdb66a9d400f04e9daa1c",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260823090000",
+      "file": "20260823090000_chips_ledger_table_metadata_fence_hardening.sql",
+      "sha256": "e436e109edb5df20d837443b941b0507692487efe6b14fc991b37e1b41405591",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260824120000",
+      "file": "20260824120000_chips_ledger_legacy_stage_allowlist.sql",
+      "sha256": "254a08d0d829b4acec9ce5143d1400a8447de7fb0291d897211e499846b96936",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260824140000",
+      "file": "20260824140000_chips_ledger_legacy_stage_allowlist_freeze_guard.sql",
+      "sha256": "f4b49770604d653e7e43501e7f9354f4b73602a35ee2bf9c98a6fcbe7cb63905",
+      "category": "stage-only",
+      "status": "omitted",
+      "replacement": null,
+      "required_effects": [],
+      "omitted_effects": [
+        "Stage rollout state, historical canary/allowlist/assertion data"
+      ]
+    },
+    {
+      "version": "20260825100000",
+      "file": "20260825100000_chips_ledger_legacy_stage_allowlist_cleanup_hardening.sql",
+      "sha256": "4cf9f056d654e4a0c1208f4a05f877ab2025cbc5784016d92da112e9f197b49d",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260825120000",
+      "file": "20260825120000_chips_ledger_stage_cleanup_orchestration.sql",
+      "sha256": "da49c105bda0cf865d9480b7b54f68b495bfed3d23cb7727cd30cb39c40d0017",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260826100000",
+      "file": "20260826100000_chips_ledger_bot_only_lifecycle_gate_scope.sql",
+      "sha256": "b93aa14f5ba05b1b1820ffe1b210e0c6e972896d28a701498e18ce39b05ea713",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260828100000",
+      "file": "20260828100000_chips_ledger_bot_only_lifecycle_receipt_hardening.sql",
+      "sha256": "d19a18872d7c09e09e1c43b87206d8117ec7b2f14fdb4bf83dfaa5fa5e4a7e93",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260829100000",
+      "file": "20260829100000_chips_ledger_bot_only_lifecycle_missing_table_hardening.sql",
+      "sha256": "05340e161dc60220f735efaa977980c23df5751cad768a71ac65284a45983fcf",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260831120000",
+      "file": "20260831120000_chips_ledger_legacy_stage_lifecycle_completion.sql",
+      "sha256": "1398ca8ba84650e57cc0c396983dfc741efc3909cc9694cd760e1558f60241a4",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260831130000",
+      "file": "20260831130000_chips_ledger_legacy_stage_lifecycle_stage_assertion.sql",
+      "sha256": "279717fd815679813311c57b93e11e657620ad1a21b45f59b2cf0a9e477e0110",
+      "category": "stage-only",
+      "status": "omitted",
+      "replacement": null,
+      "required_effects": [],
+      "omitted_effects": [
+        "Stage rollout state, historical canary/allowlist/assertion data"
+      ]
+    },
+    {
+      "version": "20260901100000",
+      "file": "20260901100000_chips_ledger_legacy_stage_read_only_dry_run.sql",
+      "sha256": "f064c4574692137a194fa16d3577bf9ceb164aea94632abdb20b40da5f46d26f",
+      "category": "stage-only",
+      "status": "omitted",
+      "replacement": null,
+      "required_effects": [],
+      "omitted_effects": [
+        "Stage rollout state, historical canary/allowlist/assertion data"
+      ]
+    },
+    {
+      "version": "20260902100000",
+      "file": "20260902100000_chips_ledger_escrow_account_retirement.sql",
+      "sha256": "13b22c6aef76c0f01168237303d9b280c46df2eb58eeb02ca41488ad3113901e",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260902110000",
+      "file": "20260902110000_chips_ledger_escrow_account_retention_canary_revalidation.sql",
+      "sha256": "94fee46ce178872c0f9c887b86c62205ccae3dca255ff993d79fbfc6a8bf9d6d",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260903100000",
+      "file": "20260903100000_chips_ledger_bot_only_candidate_selector_index.sql",
+      "sha256": "86ae0b08bcab16186b76258a999249e4d92cf9e1ed6df287329e7ae3bf551661",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260903120000",
+      "file": "20260903120000_chips_ledger_bot_only_candidate_selector_index_rollback.sql",
+      "sha256": "8fa675ec23266d32d4ad5c8ca277fc8f24b2bece22e99eb9b6b9b977b5897a7b",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260904100000",
+      "file": "20260904100000_chips_ledger_closed_human_table_retention.sql",
+      "sha256": "c1471acd9e044ba83bdf8d4683571dc01d0dafbe3c6114d9f26b8c80b8803049",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260904160000",
+      "file": "20260904160000_chips_ledger_closed_human_candidate_access_idx.sql",
+      "sha256": "31f4100d55131ac98220c0d97d6cc28ff1a5e960cb6fc49dd9624ee85bce98ba",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260904170000",
+      "file": "20260904170000_chips_ledger_closed_human_prune_whitelist.sql",
+      "sha256": "e0b5d945dc8af0fe8834d7df9b624435ba3b44f0f094cb4cd0d9de4dc456cc74",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260904180000",
+      "file": "20260904180000_chips_ledger_closed_human_canary_execute.sql",
+      "sha256": "8a9d126296b3a0924ea2cef01261dc560e4ad55a9946a2b12c82d7fea4835db6",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260905100000",
+      "file": "20260905100000_chips_ledger_closed_human_policy_rls_select.sql",
+      "sha256": "99b98a00f30aa5d32e6f1d3cecd0ed5f42b798d47f554379877c5b9cd4dd414f",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260905110000",
+      "file": "20260905110000_chips_ledger_closed_human_lifecycle_completion_owner.sql",
+      "sha256": "6cec333ea2e21372269fdf8c4039cf312b1aa67a40bfd67c77ae9980c5575e93",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260905120000",
+      "file": "20260905120000_chips_ledger_closed_human_lifecycle_marker_rls.sql",
+      "sha256": "caae1a7d1db42a61e2972cb70906d27ebc1f020bcd2917f33c9f877382ec93d2",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260905130000",
+      "file": "20260905130000_chips_ledger_closed_human_lifecycle_completion_acl.sql",
+      "sha256": "05858538d35bda2dd2465bd0020ebc2f762c0f180d2735907b6a9dba9baab0ba",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260905140000",
+      "file": "20260905140000_chips_ledger_closed_human_automatic_activation.sql",
+      "sha256": "341da178c9c52f7ccf35fb4fd9a150b83fe9700d8118da848a8c1cd0ff607e17",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260905150000",
+      "file": "20260905150000_chips_ledger_closed_human_activation_post_prune.sql",
+      "sha256": "7454e76884732bb40b6eeeb564aa39ca4527c25e375cd17bbb71855e8096b5e5",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260905160000",
+      "file": "20260905160000_chips_ledger_bot_only_proof_perf.sql",
+      "sha256": "01002684fcb1ce6a3bb018ee3eae9a25d8b07bc87fcfcb6b0193fcf79adb4da7",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260905161000",
+      "file": "20260905161000_chips_ledger_bot_only_proof_perf_fix.sql",
+      "sha256": "339968c5c92a479da25386b589a9f6e1250c12840dcb8309157c93bef434201c",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260905170000",
+      "file": "20260905170000_chips_ledger_retention_access_paths.sql",
+      "sha256": "eb6bd485215159f7991b4dca22338d65497128083e59b95fc983305c1b536977",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260905171000",
+      "file": "20260905171000_chips_ledger_bot_only_proof_type_access_path.sql",
+      "sha256": "f301d856fae16fde847b3e900a6788fae047b4641d7786a79f36990420c5f431",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260905172000",
+      "file": "20260905172000_chips_ledger_bot_only_proof_seqscan_guard.sql",
+      "sha256": "80f7d8b06fc3dc8748355b6382d5750eab428903dedfba7d515e733b8faff4ef",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260905173000",
+      "file": "20260905173000_chips_ledger_bot_only_proof_remove_seqscan_hint.sql",
+      "sha256": "b090b7903853d7dae0b04dfbd016ed53730d5472190e343f12c0a40745757c82",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260906100000",
+      "file": "20260906100000_chips_ledger_escrow_execute_candidate_access.sql",
+      "sha256": "1de1fb0dc7fa1462f1722b32eebfea946febd5e053094270784263f75ab8737e",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260906110000",
+      "file": "20260906110000_chips_transaction_idempotency_archive_batch_lookup_idx.sql",
+      "sha256": "d40d3ebfa0d4131f813662f63a074fbc8cc257b824817503b3c89b4a62b65ef1",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260906120000",
+      "file": "20260906120000_chips_ledger_bot_only_scoped_cleanup_lifecycle_gate.sql",
+      "sha256": "f51866d6a4aee94743a4c38b435a9df29449f316766bdada53ce376e459ae995",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260906130000",
+      "file": "20260906130000_chips_transaction_idempotency_transaction_id_table_id_idx.sql",
+      "sha256": "1154e3cdd2182062ada577cd5db1b8250d40c18b5bb6bbfcf8018ca155aacbe9",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260907100000",
+      "file": "20260907100000_chips_ledger_bot_only_candidate_query_shape.sql",
+      "sha256": "7cbbe43078c24dfccd84ebf5b486fe8af1d67de8774a1abe79ee74540cc5409b",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260907110000",
+      "file": "20260907110000_chips_accounts_system_key_pattern_idx.sql",
+      "sha256": "3dd1093e221f6f4446f2f724fb0848a3568bb0d16d88819682b21bebffd40369",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260907120000",
+      "file": "20260907120000_chips_ledger_closed_human_automatic_p9273_registry_binding.sql",
+      "sha256": "3bb0c1d88fe3459b6adaa17a6b65be95e7c21114c174f25b07ef145bd1123a44",
+      "category": "shared-safe",
+      "status": "folded-into-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Final shared schema/index/guard semantics"
+      ],
+      "omitted_effects": [
+        "Transient or superseded intermediate patch state"
+      ]
+    },
+    {
+      "version": "20260911100000",
+      "file": "20260911100000_chips_ledger_missing_table_bot_registry_retirement.sql",
+      "sha256": "f6de13b5331c4f2d3164d864c0ae3fb62e44cf96f90baeeb1d1a1bbf4ade3240",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260912083727",
+      "file": "20260912083727_chips_archive_prune_registry_cleaned_retry.sql",
+      "sha256": "650f7b42e65b2520bbf16ad664bd88b39f8b30789001a9b2dce21ca35b2bc4de",
+      "category": "needs-production-equivalent",
+      "status": "replaced-by-e1",
+      "replacement": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "required_effects": [
+        "Production-equivalent final contract under the canonical Production identity"
+      ],
+      "omitted_effects": [
+        "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    }
+  ],
+  "replacement_migrations": [
+    {
+      "file": "20260914090000_chips_ledger_production_retention_contract.sql",
+      "purpose": "E1 final Production schema/equivalent contract; dark/off; cap 2",
+      "sha256": "3f191e013e49c887d7b61f25479983d8430d6d336dbc8749cdc37253348302e8"
+    },
+    {
+      "file": "20260914091000_chips_ledger_production_table_fence_activation.sql",
+      "purpose": "E2 owner-gated TABLE fence activation; never automatic",
+      "sha256": "f6d8334cf642df7c9c4ac3b633d4898254d5af09290814cdce54e253bc650cab"
+    }
+  ],
+  "provenance_rules": [
+    "Source hashes are immutable inventory evidence.",
+    "Only E1/E2 are applied Production versions; omitted source versions are never marked applied.",
+    "Manifest entries classify every current main migration; new unclassified files fail the repository guard."
+  ]
+}

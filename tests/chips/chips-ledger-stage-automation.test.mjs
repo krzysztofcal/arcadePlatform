@@ -50,6 +50,17 @@ import {
   buildRecoveryManifestObjectPath,
 } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 import { buildRecoveryManifest } from "../../scripts/ops/chips-ledger-archive-prune.mjs";
+import {
+  PRODUCTION_PROJECT_REF,
+  PRODUCTION_SYSTEM_IDENTIFIER,
+  resolveRetentionProfile,
+  validateRetentionEnvironment,
+} from "../../scripts/ops/_shared/chips-ledger-retention-profile.mjs";
+import {
+  buildProductionExportInvocation,
+  runProductionAutomation,
+} from "../../scripts/ops/chips-ledger-production-automation.mjs";
+import { runRetentionCycle } from "../../scripts/ops/_shared/chips-ledger-retention-cycle.mjs";
 
 const STAGE_DB_URL = "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres";
 const STAGE_URL = "https://krydukthwdvccggbyjfw.supabase.co";
@@ -64,6 +75,139 @@ const ENV = {
   GITHUB_REPOSITORY_OWNER: "krzysztofcal",
   GITHUB_ACTOR: "krzysztofcal",
 };
+
+const PRODUCTION_ENV = {
+  SUPABASE_PROD_DB_URL: "postgresql://postgres.otbqfijerkieoxwpxjnm@db.otbqfijerkieoxwpxjnm.supabase.co:5432/postgres",
+  SUPABASE_PROD_URL: "https://otbqfijerkieoxwpxjnm.supabase.co",
+  SUPABASE_PROD_SERVICE_ROLE_KEY: "production-test-key",
+  EXPECTED_SUPABASE_PROD_PROJECT_REF: PRODUCTION_PROJECT_REF,
+  DEPLOYED_COMMIT_SHA: "a".repeat(40),
+};
+
+const productionProfile = validateRetentionEnvironment("production", PRODUCTION_ENV, { requireCommitSha: true });
+assert.equal(productionProfile.projectRef, PRODUCTION_PROJECT_REF);
+assert.equal(productionProfile.systemIdentifier, PRODUCTION_SYSTEM_IDENTIFIER);
+assert.equal(productionProfile.maxBatchSize, 2);
+assert.equal(productionProfile.automationEnabled, false);
+assert.throws(
+  () => validateRetentionEnvironment("production", { ...PRODUCTION_ENV, SUPABASE_STAGE_DB_URL: "stage" }),
+  /Production retention cannot receive Stage credentials/,
+);
+assert.throws(
+  () => resolveRetentionProfile("production", { ...PRODUCTION_ENV, SUPABASE_DB_URL: "generic" }),
+  /generic Supabase credentials are not accepted/,
+);
+assert.throws(
+  () => resolveRetentionProfile("production", {
+    ...PRODUCTION_ENV,
+    SUPABASE_PROD_DB_URL: "postgresql://postgres.otbqfijerkieoxwpxjnm@aws-0-eu.pooler.supabase.com:6543/postgres",
+  }),
+  /transaction pooler/,
+);
+const productionDisabled = await runProductionAutomation({
+  env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "0" },
+  policy: "existing-30d",
+  mode: "automatic",
+});
+assert.equal(productionDisabled.state, "disabled");
+assert.equal(productionDisabled.processed, 0);
+const productionDiagnostic = await runProductionAutomation({
+  env: PRODUCTION_ENV,
+  policy: "bot-only-7d",
+  mode: "diagnostic",
+  deps: {
+    read: async ({ profile }) => ({
+      projectRef: profile.projectRef,
+      systemIdentifier: profile.systemIdentifier,
+      readOnly: true,
+      control: { enabled: false, max_transactions: 2 },
+      fenceActive: false,
+      policies: [],
+    }),
+  },
+});
+assert.equal(productionDiagnostic.state, "diagnosed");
+assert.equal(productionDiagnostic.projectRef, PRODUCTION_PROJECT_REF);
+assert.equal(productionDiagnostic.maxTransactions, 2);
+let productionExecuteCalled = false;
+const productionPrepared = await runProductionAutomation({
+  env: PRODUCTION_ENV,
+  policy: "existing-30d",
+  mode: "prepare",
+  deps: {
+    read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true }),
+    prepare: async ({ profile, maxTransactions }) => ({
+      state: "prepared",
+      projectRef: profile.projectRef,
+      maxTransactions,
+      storageWrites: 2,
+      databaseWrites: 2,
+    }),
+    execute: async () => { productionExecuteCalled = true; throw new Error("prepare must not execute"); },
+  },
+});
+assert.equal(productionPrepared.state, "prepared");
+assert.equal(productionPrepared.maxTransactions, 2);
+assert.equal(productionExecuteCalled, false);
+const sharedDisabled = await runRetentionCycle({
+  target: "production",
+  env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "0" },
+  mode: "automatic",
+  policyId: "production-ledger-auto-retention-30d-v1",
+  automatic: true,
+});
+assert.equal(sharedDisabled.state, "disabled");
+assert.throws(
+  () => buildProductionExportInvocation("closed-human-30d", { outputPath: "", manifestPath: "/tmp/private.manifest" }),
+  /Production export requires private output/,
+);
+const productionExport = buildProductionExportInvocation("bot-only-7d", {
+  outputPath: "/tmp/private.archive",
+  manifestPath: "/tmp/private.manifest",
+});
+assert.equal(productionExport.policyId, "production-ledger-bot-only-retention-7d-v1");
+assert.equal(productionExport.schemaVersion, BOT_ONLY_EXPORT_SCHEMA_VERSION);
+const productionEscrowExport = buildProductionExportInvocation("escrow", {
+  outputPath: "/tmp/private-escrow.archive",
+  manifestPath: "/tmp/private-escrow.manifest",
+});
+assert.equal(productionEscrowExport.policyId, "production-ledger-escrow-account-retention-v1");
+assert.equal(productionEscrowExport.archivePolicyId, "production-ledger-bot-only-retention-7d-v1");
+assert.equal(productionEscrowExport.selector, "bot-only-7d-discovery");
+await assert.rejects(
+  runProductionAutomation({ env: PRODUCTION_ENV, policy: "existing-30d", mode: "canary", batchId: "1", confirmation: "GO 1" }),
+  /CHIPS_LEDGER_PRODUCTION_CANARY=1/,
+);
+await assert.rejects(
+  runProductionAutomation({
+    env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1", CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256: "b".repeat(64) },
+    policy: "escrow",
+    mode: "canary",
+    batchId: "1",
+    confirmation: "GO 1",
+    accountIdsSha256: "b".repeat(64),
+  }),
+  /exact recovery object path/,
+);
+const escrowCanaryBoundary = await runProductionAutomation({
+  env: {
+    ...PRODUCTION_ENV,
+    CHIPS_LEDGER_PRODUCTION_CANARY: "1",
+    CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256: "b".repeat(64),
+  },
+  policy: "escrow",
+  mode: "canary",
+  batchId: "1",
+  confirmation: "GO 1",
+  accountIdsSha256: "b".repeat(64),
+  recoveryObjectPath: `account-recovery/v1/sha256/${"c".repeat(64)}.json.gz`,
+  deps: {
+    read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true }),
+    execute: async ({ policyId, mode }) => ({ state: "prepared", policyId, mode }),
+  },
+});
+assert.equal(escrowCanaryBoundary.state, "prepared");
+assert.equal(escrowCanaryBoundary.policy, "escrow");
 
 const stageOrchestratorSource = fs.readFileSync("scripts/ops/chips-ledger-stage-automation.mjs", "utf8");
 assert.match(stageOrchestratorSource, /resumePending[\s\S]*botOnlyExportArgs/);

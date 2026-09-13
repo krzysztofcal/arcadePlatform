@@ -161,6 +161,79 @@ const runMigrations = async (sql, files) => {
   }
 };
 
+const runProductionEquivalentFixture = async (sql) => {
+  const productionBaselineFiles = migrationFiles
+    .slice(0, 54)
+    .filter((file) => file !== seedMigration && file !== botBankrollMigration);
+  const productionMigrationDir = path.join(process.cwd(), "supabase", "production-migrations");
+  const e1File = "20260914090000_chips_ledger_production_retention_contract.sql";
+  const e2File = "20260914091000_chips_ledger_production_table_fence_activation.sql";
+  const canonicalProductionSystemIdentifier = "7575202818581710058";
+
+  await dropAndRecreateSchema(sql);
+  await runMigrations(sql, productionBaselineFiles);
+  const identityRows = await sql.unsafe("select system_identifier::text from pg_catalog.pg_control_system();");
+  const fixtureSystemIdentifier = identityRows[0]?.system_identifier;
+  assert.match(fixtureSystemIdentifier || "", /^[0-9]+$/, "fixture database identity must be readable");
+
+  // The disposable fixture substitutes only the local system identifier. It
+  // never changes the checked-in Production identity or applies anything to a
+  // remote database.
+  const fixtureSql = (file) => fs
+    .readFileSync(path.join(productionMigrationDir, file), "utf8")
+    .replaceAll(canonicalProductionSystemIdentifier, fixtureSystemIdentifier);
+  await sql.unsafe("set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';");
+  await sql.unsafe(fixtureSql(e1File));
+
+  const contractRows = await sql.unsafe(`
+    select
+      (select enabled from public.chips_production_retention_control where control_id is true) as retention_enabled,
+      (select max_transactions from public.chips_production_retention_control where control_id is true) as max_transactions,
+      (select enforcement_active from public.chips_table_fence_control where control_id is true) as fence_active,
+      (select column_name from information_schema.columns where table_schema = 'public' and table_name = 'poker_tables' and column_name = 'bot_only_retention_complete_at') as lifecycle_column;
+  `);
+  assert.equal(contractRows[0].retention_enabled, false, "Production E1 automation must be OFF");
+  assert.equal(Number(contractRows[0].max_transactions), 2, "Production E1 cap must remain 2");
+  assert.equal(contractRows[0].fence_active, false, "Production E1 TABLE fence must remain OFF");
+  assert.equal(contractRows[0].lifecycle_column, "bot_only_retention_complete_at");
+  const policyRows = await sql.unsafe(`
+    select policy_id from public.chips_production_bot_only_retention_policy
+    union all select policy_id from public.chips_production_closed_human_table_retention_policy
+    union all select policy_id from public.chips_production_escrow_account_retention_policy
+    order by policy_id;
+  `);
+  assert.deepEqual(policyRows.map((row) => row.policy_id), [
+    "production-ledger-bot-only-retention-7d-v1",
+    "production-ledger-closed-human-table-retention-30d-v1",
+    "production-ledger-escrow-account-retention-v1",
+  ]);
+
+  await sql.unsafe("set chips.production_fence_confirmation = ''; set chips.production_runtime_evidence_sha256 = '';");
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(e2File)),
+    (error) => error?.code === "P8916",
+    "E2 must reject activation without exact runtime evidence",
+  );
+  await sql.unsafe("rollback;");
+  const evidenceSha = "a".repeat(64);
+  await sql.unsafe(`set chips.production_fence_confirmation = 'ACTIVATE TABLE FENCE otbqfijerkieoxwpxjnm ${evidenceSha}';`);
+  await sql.unsafe(`set chips.production_runtime_evidence_sha256 = '${evidenceSha}';`);
+  await sql.unsafe(fixtureSql(e2File));
+  const activatedRows = await sql.unsafe(`
+    select
+      public.chips_table_fence_is_active() as fence_active,
+      (select bot_only_proof_eligible from public.poker_tables limit 1) as existing_eligibility,
+      (select column_default from information_schema.columns where table_schema = 'public' and table_name = 'poker_tables' and column_name = 'bot_only_proof_eligible') as eligibility_default,
+      (select enabled from public.chips_production_retention_control where control_id is true) as retention_enabled,
+      (select max_transactions from public.chips_production_retention_control where control_id is true) as max_transactions;
+  `);
+  assert.equal(activatedRows[0].fence_active, true, "valid disposable E2 evidence must activate the fixture fence");
+  assert.equal(activatedRows[0].existing_eligibility, null, "empty fixture must not backfill historical eligibility");
+  assert.match(activatedRows[0].eligibility_default || "", /true/i, "E2 must make future bot eligibility default true");
+  assert.equal(activatedRows[0].retention_enabled, false, "E2 must not activate cleanup");
+  assert.equal(Number(activatedRows[0].max_transactions), 2, "E2 must preserve the cap2 pre-activation contract");
+};
+
 const ensureGenesisFixture = async (sql) => {
   await sql`
     insert into public.chips_accounts (account_type, system_key, status, balance, next_entry_seq)
@@ -3107,6 +3180,7 @@ async function main() {
   await assertIdempotencyRegistryParity(sql);
   await assertEscrowAccountRetirementContracts(sql);
   await assertEscrowDryRunReadOnlyConcurrency(sql);
+  await runProductionEquivalentFixture(sql);
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");

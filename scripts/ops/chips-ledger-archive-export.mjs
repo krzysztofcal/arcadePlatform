@@ -6,6 +6,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import postgres from "postgres";
 import { writeExclusiveFiles } from "./_shared/chips-ledger-archive-files.mjs";
 import { assertTableBinding } from "./_shared/chips-table-idempotency.mjs";
+import { RETENTION_TARGETS } from "./_shared/chips-ledger-retention-profile.mjs";
 
 export const EXPORT_SCHEMA_VERSION = 1;
 export const DEFAULT_CUTOFF_DAYS = 30;
@@ -15,6 +16,10 @@ export const PRODUCTION_MAX_BATCH_SIZE = 2;
 export const STAGE_AUTOMATION_POLICY_ID = "stage-ledger-auto-retention-30d-v1";
 export const BOT_ONLY_RETENTION_POLICY_ID = "stage-ledger-bot-only-retention-7d-v1";
 export const CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID = "stage-ledger-closed-human-table-retention-30d-v1";
+export const PRODUCTION_AUTOMATION_POLICY_ID = "production-ledger-auto-retention-30d-v1";
+export const PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID = "production-ledger-bot-only-retention-7d-v1";
+export const PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID = "production-ledger-closed-human-table-retention-30d-v1";
+export const PRODUCTION_ESCROW_RETENTION_POLICY_ID = "production-ledger-escrow-account-retention-v1";
 export const LEGACY_STAGE_ALLOWLIST_POLICY_ID = "legacy_stage_allowlist_v1";
 export const BOT_ONLY_EXPORT_SCHEMA_VERSION = 2;
 export const BOT_ONLY_RETENTION_DAYS = 7;
@@ -63,6 +68,7 @@ const TARGETS = Object.freeze({
     expectedRefEnv: "EXPECTED_SUPABASE_STAGE_PROJECT_REF",
     legacyRefEnv: "SUPABASE_STAGE_PROJECT_REF",
     canonicalRef: "krydukthwdvccggbyjfw",
+    policies: RETENTION_TARGETS.stage.policies,
   }),
   prod: Object.freeze({
     label: "Production",
@@ -70,8 +76,39 @@ const TARGETS = Object.freeze({
     expectedRefEnv: "EXPECTED_SUPABASE_PROD_PROJECT_REF",
     legacyRefEnv: "SUPABASE_PROD_PROJECT_REF",
     canonicalRef: "otbqfijerkieoxwpxjnm",
+    policies: RETENTION_TARGETS.production.policies,
   }),
 });
+
+const TARGET_POLICY_IDS = new Set([
+  STAGE_AUTOMATION_POLICY_ID,
+  BOT_ONLY_RETENTION_POLICY_ID,
+  CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  PRODUCTION_AUTOMATION_POLICY_ID,
+  PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
+  PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  PRODUCTION_ESCROW_RETENTION_POLICY_ID,
+  LEGACY_STAGE_ALLOWLIST_POLICY_ID,
+]);
+
+function assertSourcePolicyForTarget(target, sourcePolicyId) {
+  if (sourcePolicyId == null) return null;
+  if (!TARGET_POLICY_IDS.has(sourcePolicyId)) fail("archive source policy is unsupported");
+  const config = TARGETS[target];
+  const allowed = target === "stage"
+    ? [STAGE_AUTOMATION_POLICY_ID, BOT_ONLY_RETENTION_POLICY_ID, CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, LEGACY_STAGE_ALLOWLIST_POLICY_ID]
+    : [PRODUCTION_AUTOMATION_POLICY_ID, PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID, PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID];
+  if (!allowed.includes(sourcePolicyId)) fail(`${config.label} cannot use the selected archive source policy`);
+  return sourcePolicyId;
+}
+
+function isBotOnlyPolicy(sourcePolicyId) {
+  return sourcePolicyId === BOT_ONLY_RETENTION_POLICY_ID || sourcePolicyId === PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID;
+}
+
+function isClosedHumanPolicy(sourcePolicyId) {
+  return sourcePolicyId === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID || sourcePolicyId === PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID;
+}
 
 const CANDIDATE_SQL = `
 with base as (
@@ -1874,9 +1911,10 @@ function validateLegacyStageAllowlistRecord(candidate, record) {
   if (transaction.tx_type === "TABLE_CASH_OUT" && !(escrowAmount < 0n && systemAmount > 0n)) fail("legacy TABLE_CASH_OUT direction is invalid");
 }
 
-export function validateBatch({ candidates, records, cutoff, schemaVersion = EXPORT_SCHEMA_VERSION, sourcePolicyId = null }) {
+export function validateBatch({ candidates, records, cutoff, schemaVersion = EXPORT_SCHEMA_VERSION, sourcePolicyId = null, target = null }) {
   if (!Array.isArray(candidates) || !Array.isArray(records)) fail("batch must contain arrays");
   if (candidates.length !== records.length) fail("batch transaction count mismatch");
+  if (target != null) assertSourcePolicyForTarget(target, sourcePolicyId);
 
   const candidatesById = new Map();
   for (const candidate of candidates) {
@@ -2061,6 +2099,7 @@ export function assertLegacyStageAllowlistEvidence(actual, expected) {
 }
 
 export function buildManifest({ target, cutoff, batchSize, cursor, records, archive, outputPath, sourcePolicyId = null, schemaVersion = EXPORT_SCHEMA_VERSION, legacyStageAllowlist = null }) {
+  assertSourcePolicyForTarget(target, sourcePolicyId);
   const validation = validateBatch({ candidates: records.map((record) => ({
     id: record.transaction.id,
     created_at: record.transaction.created_at,
@@ -2088,7 +2127,7 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
     legacy_master_table_count: record.table_context?.legacy_stage_allowlist?.master_table_count,
     legacy_batch_number: record.table_context?.legacy_stage_allowlist?.batch_number,
     legacy_batch_table_count: record.table_context?.legacy_stage_allowlist?.batch_table_count,
-  })), records, cutoff: null, schemaVersion, sourcePolicyId });
+  })), records, cutoff: null, schemaVersion, sourcePolicyId, target });
   const first = records[0]?.transaction || null;
   const last = records.at(-1)?.transaction || null;
   const compressionRatio = archive.rawBytes.length === 0
@@ -2105,7 +2144,7 @@ export function buildManifest({ target, cutoff, batchSize, cursor, records, arch
     format: "jsonl.gz",
     target,
     ...(sourcePolicyId == null ? {} : { source_policy_id: sourcePolicyId }),
-    ...(schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION && sourcePolicyId === BOT_ONLY_RETENTION_POLICY_ID ? {
+    ...(schemaVersion === BOT_ONLY_EXPORT_SCHEMA_VERSION && isBotOnlyPolicy(sourcePolicyId) ? {
       bot_only: {
         table_id: records[0]?.table_context?.table_id || null,
         table_count: 1,
@@ -2624,13 +2663,13 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
       entriesByTransaction.get(text(candidate.id)) || [],
       { schemaVersion },
     )));
-    validateBatch({ candidates: snapshot.candidates, records, cutoff: options.cutoff, schemaVersion, sourcePolicyId: deps.sourcePolicyId || null });
+    validateBatch({ candidates: snapshot.candidates, records, cutoff: options.cutoff, schemaVersion, sourcePolicyId: deps.sourcePolicyId || null, target: options.target });
 
     const archive = buildArchiveBytes(records);
     const roundTripRaw = gunzipSync(archive.compressedBytes);
     if (!roundTripRaw.equals(archive.rawBytes)) fail("gzip round-trip verification failed");
     const roundTripRecords = parseJsonl(roundTripRaw.toString("utf8"));
-    validateBatch({ candidates: snapshot.candidates, records: roundTripRecords, cutoff: options.cutoff, schemaVersion, sourcePolicyId: deps.sourcePolicyId || null });
+    validateBatch({ candidates: snapshot.candidates, records: roundTripRecords, cutoff: options.cutoff, schemaVersion, sourcePolicyId: deps.sourcePolicyId || null, target: options.target });
     if (serializeRecords(roundTripRecords) !== archive.rawText) fail("JSONL round-trip verification failed");
 
     const manifest = buildManifest({

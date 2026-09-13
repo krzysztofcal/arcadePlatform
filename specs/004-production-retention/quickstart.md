@@ -1,6 +1,24 @@
 # Handoff / operational sequence (not authorization)
 
-This document describes later execution by another agent and owner. No commands here authorize a Production write. No Production operation has been performed in planning.
+This document describes later execution by another agent and owner. No commands here authorize a Production write. No Production operation has been performed in planning or implementation.
+
+## PR A implementation evidence
+
+The implementation is on branch `agent/891-production-retention-plan`, based on main commit `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. It adds the forward-only Production equivalents and dark/off entry path required by T001–T013:
+
+- E1: `supabase/production-migrations/20260914090000_chips_ledger_production_retention_contract.sql`, SHA-256 `3f191e013e49c887d7b61f25479983d8430d6d336dbc8749cdc37253348302e8`.
+- E2: `supabase/production-migrations/20260914091000_chips_ledger_production_table_fence_activation.sql`, SHA-256 `f6d8334cf642df7c9c4ac3b633d4898254d5af09290814cdce54e253bc650cab`.
+- The manifest still classifies all 97 main migrations as 54 Production baseline entries plus 18 `shared-safe`, 3 `stage-only`, and 22 `needs-production-equivalent`; no Stage rollout history, IDs, credentials, receipts or allowlists were copied into the Production replacements.
+- E1 defaults Production retention and all three Production policy rows to OFF with cap 2 and leaves the TABLE fence OFF. E2 is shipped as a separately owner-gated file and was not applied.
+- The Production workflow is `workflow_dispatch` only, has no scheduler trigger, uses only Production credential names, and cannot run automatic mode while the Production switch is absent or `0`. PR B activation, cap 5000, scheduler files and canaries are not included.
+
+The disposable PostgreSQL fixture applies the first 54 migrations plus E1 with only test-local identity substitution, verifies the missing `bot_only_retention_complete_at` contract and OFF/cap2 defaults, rejects an invalid E2 confirmation, and validates a separately confirmed E2 activation. The TABLE metadata fence suite then exercises the current Netlify and WS `postTransaction` adapters against that disposable schema with the fence active. These checks do not connect to Stage or Production.
+
+T014 verification passed with the WS server runtime dependencies installed as prescribed by the existing CI workflow (`npm ci --prefix ws-server --omit=dev`): `npm test`, `npm run syntax`, `npm run ci:guards`, `npm run check:all`, `npm run check:csp-inline`, `node scripts/check-db-migrations.mjs`, `git diff --check`, the disposable `chips.migration.test.mjs`, the active-fence `chips-ledger-table-metadata-fence.test.mjs`, archive/export/storage/prune suites, Stage automation/escrow suites and the existing workflow guard. The repository-wide test runner reports only its pre-existing opt-in skips for tests without their dedicated database environment; the PR A disposable contract tests were run with `CHIPS_MIGRATIONS_TEST_DB_URL` set and passed.
+
+The existing Stage migration workflow remains unchanged and applies only `supabase/migrations/**`; `supabase/production-migrations/**` is validated by `scripts/check-db-migrations.mjs` but is not automatically applied to Stage. Shared JavaScript extraction is covered by the existing Stage automation/escrow suites. No WS Preview Deploy or authenticated/browser smoke is part of this implementation handoff because no `ws-server/**`, shared runtime dependency, or browser protocol artifact changed and the owner will perform runtime verification.
+
+Current handoff state: **implementation ready, awaiting owner/runtime verification**. T015–T019 require explicit owner authorization after review and merge, and T020+ are PR B.
 
 ## Implementation PR A
 

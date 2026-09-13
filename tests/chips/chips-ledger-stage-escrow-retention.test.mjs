@@ -61,6 +61,11 @@ import {
   runRecoveryVerifier,
   verifyRecoveryObject,
 } from "../../scripts/ops/chips-ledger-stage-escrow-account-recovery.mjs";
+import {
+  buildAccountRecoverySnapshot as buildSharedAccountRecoverySnapshot,
+  serializeAccountRecovery as serializeSharedAccountRecovery,
+  verifyAccountRecoveryBytes as verifySharedAccountRecoveryBytes,
+} from "../../scripts/ops/_shared/chips-ledger-escrow-retention.mjs";
 
 const TABLE_ID = "00000000-0000-4000-8000-000000000001";
 const ACCOUNT_ID = "00000000-0000-4000-8000-000000000101";
@@ -401,6 +406,31 @@ test("account recovery is canonical, content-addressed and restores exact ID/seq
   );
   assert.throws(() => verifyAccountRecoveryBytes({ bytes: Buffer.from("not-gzip"), objectPath: recovery.objectPath }), /gzip|SHA-256/);
   assert.throws(() => verifyAccountRecoveryBytes({ bytes: recovery.compressedBytes, objectPath: recovery.objectPath, expectedSnapshotSha256: "0".repeat(64) }), /SHA-256 differs/);
+});
+
+test("shared escrow recovery binds Production identity and rejects Stage substitution", () => {
+  const profile = {
+    target: "production",
+    label: "Production",
+    projectRef: "otbqfijerkieoxwpxjnm",
+    systemIdentifier: "7575202818581710058",
+    policies: { botOnly7d: "production-ledger-bot-only-retention-7d-v1" },
+  };
+  const batch = completeBatch({
+    project_ref: profile.projectRef,
+    source_policy_id: profile.policies.botOnly7d,
+  });
+  const snapshot = buildSharedAccountRecoverySnapshot({ profile, batch, accounts: [account()], tableIds: [TABLE_ID] });
+  const recovery = serializeSharedAccountRecovery(snapshot);
+  assert.equal(snapshot.target, "prod");
+  assert.equal(snapshot.project_ref, profile.projectRef);
+  assert.equal(snapshot.postgres_system_identifier, profile.systemIdentifier);
+  assert.equal(verifySharedAccountRecoveryBytes({ profile, bytes: recovery.compressedBytes, objectPath: recovery.objectPath, expectedSnapshot: snapshot, expectedSnapshotSha256: recovery.snapshotSha256, expectedAccountIds: [ACCOUNT_ID] }).snapshotSha256, recovery.snapshotSha256);
+  assert.throws(() => verifySharedAccountRecoveryBytes({
+    profile: { ...profile, projectRef: "krydukthwdvccggbyjfw", systemIdentifier: "7656985631720456337", target: "stage", label: "Stage", policies: { botOnly7d: "stage-ledger-bot-only-retention-7d-v1" } },
+    bytes: recovery.compressedBytes,
+    objectPath: recovery.objectPath,
+  }), /target-bound/);
 });
 
 test("recovery verifier accepts a local file and derives its content-addressed object path", async () => {

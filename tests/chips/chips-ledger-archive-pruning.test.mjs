@@ -58,7 +58,12 @@ const ENV = {
   SUPABASE_URL: "https://krydukthwdvccggbyjfw.supabase.co",
   SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
 };
-const PROD_ENV = { ...ENV, SUPABASE_URL: "https://otbqfijerkieoxwpxjnm.supabase.co" };
+const PROD_ENV = {
+  EXPECTED_SUPABASE_PROD_PROJECT_REF: "otbqfijerkieoxwpxjnm",
+  SUPABASE_PROD_DB_URL: ENV.SUPABASE_PROD_DB_URL,
+  SUPABASE_PROD_URL: "https://otbqfijerkieoxwpxjnm.supabase.co",
+  SUPABASE_PROD_SERVICE_ROLE_KEY: "production-test-service-role-key",
+};
 
 {
   const permissionTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-archive-private-dir-"));

@@ -1,7 +1,9 @@
 # Tasks: Production retention (#891)
 
 **Input**: spec.md, research.md, migration-inventory.md, plan.md, data-model.md, quickstart.md in this directory.
-**Status**: All implementation/operational tasks intentionally unchecked. Planning is complete, not implementation.
+**Status**: PR A implementation and T014 repository verification are complete. T015–T019 remain explicit owner gates and T020+ remain PR B.
+
+**Implementation evidence**: T001–T014 are implemented and verified in this branch. The checkbox list below remains the original dependency checklist; T015–T019 are intentionally still owner-gated and T020+ belongs to PR B.
 **Rules**: No merge by agent. Production tasks explicitly labelled OWNER GATE are not authorized by this document. No Production fixtures, cleanup or migration application without separate exact authorization. No blanket db push, migration repair, ignore/dependency cleanup, broad UI/DOM/browser tests.
 
 ## Phase 1 — authoritative refresh and inventory (PR A, US1)

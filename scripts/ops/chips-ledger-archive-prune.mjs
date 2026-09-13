@@ -7,6 +7,8 @@ import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
   CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
+  PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_TABLE_COUNT,
   assertLegacyStageAllowlistEvidence,
@@ -906,15 +908,16 @@ export function createPruneStore(sql) {
         // for the remaining exact evidence predicates; it does not alter
         // proof semantics or replace the SQL scope fix.
         await tx.unsafe("set local enable_nestloop = off;");
-        const rows = await tx.unsafe(`select public.chips_register_bot_only_archive_proof(
-          $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]
-        ) as result;`, [
-          row.object_path,
-          evidence.transactionIds,
-          evidence.entryIds,
-          evidence.tableId,
-          evidence.registryKeys,
-        ]);
+        const production = row.project_ref === "otbqfijerkieoxwpxjnm";
+        const rows = await tx.unsafe(production
+          ? `select public.chips_register_bot_only_archive_proof(
+            $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[], $6::text
+          ) as result;`
+          : `select public.chips_register_bot_only_archive_proof(
+            $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]
+          ) as result;`, production
+          ? [row.object_path, evidence.transactionIds, evidence.entryIds, evidence.tableId, evidence.registryKeys, evidence.outOfScopeKeysSha256]
+          : [row.object_path, evidence.transactionIds, evidence.entryIds, evidence.tableId, evidence.registryKeys]);
         return rows[0]?.result;
       });
     },
@@ -979,24 +982,31 @@ export function createPruneStore(sql) {
         return rows[0]?.result;
       });
     },
-    async prune(objectPath, evidence, execute) {
+    async prune(objectPath, evidence, execute, approvedBatchId = null, automatic = false, targetName = "stage") {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
+        if (execute && targetName === "prod" && !automatic && approvedBatchId != null) {
+          await tx.unsafe("set local chips.production_canary = '1';");
+        }
         const rows = await tx.unsafe(`select public.chips_prune_committed_archive_batch(
           $1, $2::uuid[], $3::bigint[], $4::boolean
         ) as result;`, [objectPath, evidence.transactionIds, evidence.entryIds, execute]);
         return rows[0]?.result;
       });
     },
-    async cleanupClosedHuman(objectPath, evidence, execute, approvedBatchId = null, automatic = false) {
+    async cleanupClosedHuman(objectPath, evidence, execute, approvedBatchId = null, automatic = false, targetName = "stage") {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
-        if (automatic) await tx.unsafe("set local chips.closed_human_automatic = '1';");
-        const rows = execute && automatic
+        if (automatic && targetName === "stage") await tx.unsafe("set local chips.closed_human_automatic = '1';");
+        if (automatic && targetName === "prod") await tx.unsafe("set local chips.production_automatic = '1';");
+        if (execute && targetName === "prod" && !automatic && approvedBatchId != null) {
+          await tx.unsafe("set local chips.production_canary = '1';");
+        }
+        const rows = execute && automatic && targetName === "stage"
           ? await tx.unsafe(`select public.chips_auto_prune_closed_human_table_archive_batch(
             $1, $2::uuid[], $3::bigint[], $4::uuid
           ) as result;`, [
@@ -1023,18 +1033,21 @@ export function createPruneStore(sql) {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
+        if (execute && targetName === "prod" && !automatic && approvedBatchId != null) {
+          await tx.unsafe("set local chips.production_canary = '1';");
+        }
         const rows = await tx.unsafe(`select public.chips_activate_closed_human_table_retention_policy(
           $1::bigint, $2::text
         ) as result;`, [canaryBatchId, confirmation]);
         return rows[0]?.result;
       });
     },
-    async cleanupBotOnly(objectPath, evidence, execute, approvedBatchId = null, automatic = false) {
+    async cleanupBotOnly(objectPath, evidence, execute, approvedBatchId = null, automatic = false, targetName = "stage") {
       return sql.begin(async (tx) => {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
-        const rows = automatic
+        const rows = automatic && targetName === "stage"
           ? await tx.unsafe(`select public.chips_auto_prune_and_cleanup_bot_only_archive_batch(
             $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid
           ) as result;`, [
@@ -1236,6 +1249,7 @@ export async function executeArchivePrune({
   approvedBatchId = null,
   closedHuman = false,
   automatic = false,
+  targetName = "stage",
   row = null,
   beforeAttempt = null,
   beforeRetry = null,
@@ -1270,6 +1284,7 @@ export async function executeArchivePrune({
         execute,
         currentApprovedBatchId,
         automatic,
+        targetName,
       );
       if (typeof onProgress === "function") {
         onProgress({
@@ -1646,6 +1661,7 @@ async function executeBotOnlyCleanupWithRetry({
   approvedBatchId = null,
   execute,
   automatic,
+  targetName = "stage",
   beforeRetry = null,
   onProgress = null,
   waitForRetry = null,
@@ -1730,6 +1746,7 @@ async function executeBotOnlyCleanupWithRetry({
         execute,
         approvedBatchId,
         automatic,
+        targetName,
       );
       reportProgress({ result });
       return {
@@ -1885,21 +1902,29 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
     });
     const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
-    const isClosedHumanPolicy = row.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID;
-    if (isClosedHumanPolicy && target.target !== "stage") {
-      fail("closed-human execution is only valid for canonical Stage");
+    const isClosedHumanPolicy = [CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID].includes(row.source_policy_id);
+    if (isClosedHumanPolicy && row.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID && target.target !== "stage") {
+      fail("Stage closed-human execution is only valid for canonical Stage");
     }
     if (isClosedHumanPolicy && args.execute && text(env.CHIPS_LEDGER_CLOSED_HUMAN_EXECUTE) !== "1") {
-      fail("closed-human execution requires the explicit default-off execution gate");
+      if (!(target.target === "prod"
+        && (text(env.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED) === "1"
+          || text(env.CHIPS_LEDGER_PRODUCTION_CANARY) === "1"))) {
+        fail("closed-human execution requires the explicit default-off execution gate");
+      }
     }
 
     const closedHumanAutomatic = isClosedHumanPolicy
-      && text(env.CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC) === "1";
+      && ((target.target === "stage" && text(env.CHIPS_LEDGER_CLOSED_HUMAN_AUTOMATIC) === "1")
+        || (target.target === "prod" && text(env.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED) === "1"));
+    if (target.target === "prod" && args.automatic && text(env.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED) !== "1") {
+      fail("Production automatic cleanup is disabled");
+    }
     if (args.automatic && !(
       row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
-      && row.source_policy_id === "stage-ledger-bot-only-retention-7d-v1"
-    ) && !(isClosedHumanPolicy && closedHumanAutomatic)) {
-      fail("--automatic is only valid for an enabled Stage automatic policy");
+      && [BOT_ONLY_RETENTION_POLICY_ID, PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID].includes(row.source_policy_id)
+      ) && !(isClosedHumanPolicy && closedHumanAutomatic)) {
+      fail("--automatic is only valid for an enabled target-bound automatic policy");
     }
 
     // Keep an independent, fresh Storage boundary immediately before the
@@ -1991,6 +2016,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
           approvedBatchId: args.approvedBatchId,
           execute: Boolean(args.execute),
           automatic: Boolean(args.automatic),
+          targetName: target.target,
           beforeRetry: deps.beforeExecuteRetry || null,
           onProgress: deps.onExecuteProgress || null,
           waitForRetry: deps.waitForExecuteRetry || null,
@@ -2003,6 +2029,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
         approvedBatchId: args.approvedBatchId,
         closedHuman: isClosedHumanPolicy,
         automatic: Boolean(args.automatic) || closedHumanAutomatic,
+        targetName: target.target,
         row,
         beforeAttempt: recoveryBundle
           ? ({ row: attemptRow = row, evidence: attemptEvidence = evidence } = {}) => verifyRecoveryBundle({ bundle: recoveryBundle, row: attemptRow, target, identity, expectedEvidence: attemptEvidence })

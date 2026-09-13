@@ -405,4 +405,81 @@ assert.match(finalRetentionCheck.if, /always\(\)/);
 assert.equal(finalRetentionCheck['continue-on-error'], undefined);
 assert.doesNotMatch(finalRetentionCheck.run, /GITHUB_ENV|GITHUB_OUTPUT|resource_health/);
 
+const productionWorkflow = fs.readFileSync(
+  ".github/workflows/chips-ledger-production-scheduled-automation.yml",
+  "utf8",
+);
+const parsedProductionWorkflow = YAML.parse(productionWorkflow);
+const productionJob = parsedProductionWorkflow.jobs?.["production-archive"];
+assert.ok(productionJob, "Production automation job must exist");
+assert.equal(productionJob.environment, "production-ledger");
+assert.deepEqual(Object.keys(parsedProductionWorkflow.jobs), ["production-archive"]);
+assert.deepEqual(Object.keys(parsedProductionWorkflow.on?.workflow_dispatch?.inputs || {}).sort(), [
+  "account_ids_sha256",
+  "batch_id",
+  "confirmation",
+  "mode",
+  "policy",
+  "recovery_object_path",
+].sort(), "Production dispatch input set");
+assert.deepEqual(
+  parsedProductionWorkflow.on.workflow_dispatch.inputs.policy.options,
+  ["existing-30d", "bot-only-7d", "closed-human-30d", "escrow"],
+  "Production must expose exactly one fixed policy choice per dispatch",
+);
+assert.deepEqual(
+  parsedProductionWorkflow.on.workflow_dispatch.inputs.mode.options,
+  ["diagnostic", "prepare", "canary", "automatic"],
+  "Production must expose only the bounded automation modes",
+);
+assert.doesNotMatch(productionWorkflow, /^  (push|pull_request|schedule):/m);
+assert.match(productionWorkflow, /^  workflow_dispatch:$/m);
+assert.match(productionWorkflow, /vars\.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED == '1'/);
+assert.match(productionWorkflow, /vars\.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR/);
+assert.match(productionWorkflow, /arcade-production-dispatch/);
+assert.match(productionWorkflow, /github\.ref == 'refs\/heads\/main'/);
+assert.match(productionWorkflow, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
+assert.match(productionWorkflow, /github\.event\.repository\.fork != true/);
+assert.match(productionWorkflow, /group: chips-ledger-production-automation/);
+assert.match(productionWorkflow, /cancel-in-progress: false/);
+assert.match(productionWorkflow, /ref: \$\{\{ github\.sha \}\}/);
+assert.match(productionWorkflow, /test "\$checked_out_sha" = "\$GITHUB_SHA"/);
+assert.match(productionWorkflow, /EXPECTED_SUPABASE_PROD_PROJECT_REF: otbqfijerkieoxwpxjnm/);
+assert.match(productionWorkflow, /SUPABASE_PROD_DB_URL: \$\{\{ secrets\.SUPABASE_PROD_DB_URL \}\}/);
+assert.match(productionWorkflow, /SUPABASE_PROD_URL: \$\{\{ secrets\.SUPABASE_PROD_URL \}\}/);
+assert.match(productionWorkflow, /SUPABASE_PROD_SERVICE_ROLE_KEY: \$\{\{ secrets\.SUPABASE_PROD_SERVICE_ROLE_KEY \}\}/);
+assert.doesNotMatch(productionWorkflow, /SUPABASE_STAGE_|SUPABASE_DB_URL|SUPABASE_URL|SUPABASE_SERVICE_ROLE_KEY/);
+assert.doesNotMatch(productionWorkflow, /5000|7,22,37,52|cron:/);
+assert.doesNotMatch(productionWorkflow, /--target\s+stage|chips-ledger-stage-/);
+const productionJobIf = productionJob.if;
+assert.equal(typeof productionJobIf, "string", "production-archive.if must be a YAML string");
+let productionJobIfParenthesisBalance = 0;
+for (const character of productionJobIf) {
+  if (character === "(") productionJobIfParenthesisBalance += 1;
+  if (character === ")") productionJobIfParenthesisBalance -= 1;
+  assert.ok(productionJobIfParenthesisBalance >= 0, "production-archive.if has an unexpected closing parenthesis");
+}
+assert.equal(productionJobIfParenthesisBalance, 0, "production-archive.if parentheses must balance");
+assert.match(productionJobIf, /inputs\.mode != 'automatic'/);
+assert.match(productionJobIf, /inputs\.mode == 'automatic'/);
+assert.match(productionJobIf, /github\.actor == github\.repository_owner/);
+assert.match(productionJobIf, /github\.actor == vars\.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR/);
+assert.match(productionWorkflow, /test "\$GITHUB_ACTOR" = "arcade-production-dispatch"/);
+assert.match(productionWorkflow, /node scripts\/ops\/chips-ledger-production-automation\.mjs/);
+assert.match(productionWorkflow, /--policy "\$PRODUCTION_POLICY"/);
+assert.match(productionWorkflow, /--mode "\$PRODUCTION_MODE"/);
+
+const productionEnv = productionJob.env;
+assert.deepEqual(Object.keys(productionEnv).sort(), [
+  "CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256",
+  "CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED",
+  "CHIPS_LEDGER_PRODUCTION_CANARY",
+  "CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR",
+  "DEPLOYED_COMMIT_SHA",
+  "EXPECTED_SUPABASE_PROD_PROJECT_REF",
+  "SUPABASE_PROD_DB_URL",
+  "SUPABASE_PROD_SERVICE_ROLE_KEY",
+  "SUPABASE_PROD_URL",
+].sort(), "Production job must expose only target-bound credentials and gates");
+
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");

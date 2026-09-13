@@ -43,6 +43,15 @@ import {
   ensurePrivateDirectory,
   writeExclusiveFiles,
 } from "./_shared/chips-ledger-archive-files.mjs";
+import {
+  RETENTION_TARGETS,
+} from "./_shared/chips-ledger-retention-profile.mjs";
+import {
+  acquireRetentionAdvisoryLock,
+  assertRetentionAdvisoryLock,
+  findOwnCycle as findOwnRetentionCycle,
+  releaseRetentionAdvisoryLock,
+} from "./_shared/chips-ledger-retention-cycle.mjs";
 
 export const STAGE_PROJECT_REF = "krydukthwdvccggbyjfw";
 export const STAGE_SYSTEM_IDENTIFIER = "7656985631720456337";
@@ -547,28 +556,23 @@ export async function initializeStageConnection(createSql, initialize, sleep = (
 }
 
 async function acquireAdvisoryLock(sql) {
-  const rows = await sql.unsafe(
-    "select pg_catalog.pg_backend_pid()::text as backend_pid, pg_catalog.pg_try_advisory_lock(pg_catalog.hashtextextended($1, 0)) as acquired;",
-    [STAGE_AUTOMATION_LOCK_KEY],
-  );
-  if (!(rows[0]?.acquired === true || rows[0]?.acquired === "t")) return null;
-  const backendPid = text(rows[0]?.backend_pid);
+  const lockSession = await acquireRetentionAdvisoryLock(sql, RETENTION_TARGETS.stage);
+  if (!lockSession) return null;
+  const backendPid = text(lockSession.backendPid);
   if (!backendPid) fail("Stage advisory lock session identity is unavailable");
   return { backendPid };
 }
 
 async function assertAdvisoryLock(sql, lockSession) {
-  const rows = await sql.unsafe("select pg_catalog.pg_backend_pid()::text as backend_pid;");
-  if (text(rows[0]?.backend_pid) !== lockSession?.backendPid) {
+  try {
+    await assertRetentionAdvisoryLock(sql, lockSession);
+  } catch {
     fail("Stage advisory lock session was lost; aborting the cycle");
   }
 }
 
 async function releaseAdvisoryLock(sql) {
-  await sql.unsafe(
-    "select pg_catalog.pg_advisory_unlock(pg_catalog.hashtextextended($1, 0));",
-    [STAGE_AUTOMATION_LOCK_KEY],
-  );
+  await releaseRetentionAdvisoryLock(sql, { lockKey: STAGE_AUTOMATION_LOCK_KEY });
 }
 
 async function assertIdentity(sql) {
@@ -1642,6 +1646,15 @@ async function loadExactBatch(sql, approvedBatchId, label = "approved bot-only b
 }
 
 export function findOwnCycle(rows, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
+  let sharedCycle;
+  try {
+    sharedCycle = findOwnRetentionCycle(rows, sourcePolicyId);
+  } catch (error) {
+    if (error?.code === "retention_ambiguous_cycle") {
+      fail("multiple incomplete Stage automation manifests; refusing to choose one");
+    }
+    throw error;
+  }
   const active = rows.filter((row) => row.status === "pending"
     || (row.status === "committed" && receiptFieldCount(row) !== 5));
   if (active.length > 1) fail("multiple incomplete Stage automation manifests; refusing to choose one");
@@ -1656,7 +1669,7 @@ export function findOwnCycle(rows, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) 
     if (proofFieldCount(row) !== 0 && proofFieldCount(row) !== 3) fail("Stage automation proof is partial");
   }
   return {
-    active: active[0] || null,
+    active: sharedCycle.active || active[0] || null,
     latestCompleted: rows.find((row) => row.status === "committed" && receiptFieldCount(row) === 5) || null,
   };
 }
