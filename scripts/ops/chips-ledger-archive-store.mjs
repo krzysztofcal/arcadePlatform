@@ -1306,7 +1306,30 @@ export async function markBatchCommitted(batch, deps = {}) {
   return row;
 }
 
-function selectManifestSql() {
+function selectManifestSql(target = "stage") {
+  const legacyManifestSelect = target === "prod"
+    ? `null::text as legacy_allowlist_sha256,
+    null::text as legacy_batch_table_ids_sha256,
+    null::uuid[] as legacy_master_table_ids,
+    null::text as legacy_master_table_count,
+    null::text as legacy_batch_number,
+    null::text as legacy_batch_table_count,
+    null::text as legacy_source_run,
+    null::text as legacy_query_sha256,
+    null::text as legacy_stage_system_identifier,
+    null::text as legacy_run_id,
+    null::text as legacy_plan_sha256,`
+    : `legacy_allowlist_sha256,
+    legacy_batch_table_ids_sha256,
+    legacy_master_table_ids,
+    legacy_master_table_count::text as legacy_master_table_count,
+    legacy_batch_number::text as legacy_batch_number,
+    legacy_batch_table_count::text as legacy_batch_table_count,
+    legacy_source_run,
+    legacy_query_sha256,
+    legacy_stage_system_identifier,
+    legacy_run_id::text as legacy_run_id,
+    legacy_plan_sha256,`;
   return `select
     object_path,
     project_ref,
@@ -1345,17 +1368,7 @@ function selectManifestSql() {
     bot_only_out_of_scope_keys_sha256,
     bot_only_identity_count::text as bot_only_identity_count,
     bot_only_eligible_count::text as bot_only_eligible_count,
-    legacy_allowlist_sha256,
-    legacy_batch_table_ids_sha256,
-    legacy_master_table_ids,
-    legacy_master_table_count::text as legacy_master_table_count,
-    legacy_batch_number::text as legacy_batch_number,
-    legacy_batch_table_count::text as legacy_batch_table_count,
-    legacy_source_run,
-    legacy_query_sha256,
-    legacy_stage_system_identifier,
-    legacy_run_id::text as legacy_run_id,
-    legacy_plan_sha256,
+    ${legacyManifestSelect}
     registry_cleaned_at::text as registry_cleaned_at,
     registry_cleaned_key_count::text as registry_cleaned_key_count,
     registry_cleaned_keys_sha256,
@@ -1394,13 +1407,20 @@ function normalizeManifestRow(row) {
   };
 }
 
-export function createManifestStore(sql) {
+export function createManifestStore(sql, target = "stage") {
   if (!sql || typeof sql.unsafe !== "function") fail("postgres manifest adapter is required");
   const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   const get = async (objectPath) => {
-    const rows = await sql.unsafe(selectManifestSql(), [objectPath]);
+    const rows = await sql.unsafe(selectManifestSql(target), [objectPath]);
     return normalizeManifestRow(rows[0]);
   };
+  const production = target === "prod";
+  const legacyInsertColumns = production ? "" : `
+         legacy_allowlist_sha256, legacy_batch_table_ids_sha256, legacy_master_table_ids,
+         legacy_master_table_count, legacy_batch_number, legacy_batch_table_count, legacy_source_run, legacy_query_sha256,
+         legacy_stage_system_identifier, legacy_run_id, legacy_plan_sha256,`;
+  const legacyInsertValues = production ? "" : `
+                $29, $30, $31::uuid[], $32::bigint, $33::bigint, $34::bigint, $35, $36, $37, $38::bigint, $39,`;
   return {
     get,
     async insertPending(row) {
@@ -1411,16 +1431,14 @@ export function createManifestStore(sql) {
          credits, debits, net_amount, source_policy_id,
          bot_only_table_id, bot_only_table_count, bot_only_newest_created_at,
          bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256,
-         bot_only_identity_count, bot_only_eligible_count,
-         legacy_allowlist_sha256, legacy_batch_table_ids_sha256, legacy_master_table_ids,
-         legacy_master_table_count, legacy_batch_number, legacy_batch_table_count, legacy_source_run, legacy_query_sha256,
-         legacy_stage_system_identifier, legacy_run_id, legacy_plan_sha256, status)
+         bot_only_identity_count, bot_only_eligible_count,${legacyInsertColumns}
+        status)
         values ($1, $2, $3::integer, $4::timestamptz, $5::timestamptz, $6::uuid,
                 $7::timestamptz, $8::uuid, $9::timestamptz, $10::timestamptz, $11::bigint,
                 $12::bigint, $13::jsonb, $14::bigint, $15::bigint, $16, $17,
                 $18::numeric, $19::numeric, $20::numeric, $21,
-                $22::uuid, $23::bigint, $24::timestamptz, $25, $26, $27::bigint, $28::bigint,
-                $29, $30, $31::uuid[], $32::bigint, $33::bigint, $34::bigint, $35, $36, $37, $38::bigint, $39, 'pending')
+                $22::uuid, $23::bigint, $24::timestamptz, $25, $26, $27::bigint, $28::bigint,${legacyInsertValues}
+                'pending')
         on conflict (object_path) do nothing;`, [
         row.object_path, row.project_ref, row.format_version, timestampParam(row.cutoff), timestampParam(row.cursor_start_created_at), row.cursor_start_id,
         timestampParam(row.cursor_end_created_at), row.cursor_end_id, timestampParam(row.first_created_at), timestampParam(row.last_created_at), row.transaction_count,
@@ -1429,10 +1447,12 @@ export function createManifestStore(sql) {
         row.bot_only_table_id, row.bot_only_table_count, timestampParam(row.bot_only_newest_created_at),
         row.bot_only_registry_keys_sha256, row.bot_only_out_of_scope_keys_sha256,
         row.bot_only_identity_count, row.bot_only_eligible_count,
-        row.legacy_allowlist_sha256, row.legacy_batch_table_ids_sha256, row.legacy_master_table_ids,
-        row.legacy_master_table_count, row.legacy_batch_number, row.legacy_batch_table_count,
-        row.legacy_source_run, row.legacy_query_sha256, row.legacy_stage_system_identifier,
-        row.legacy_run_id, row.legacy_plan_sha256,
+        ...(production ? [] : [
+          row.legacy_allowlist_sha256, row.legacy_batch_table_ids_sha256, row.legacy_master_table_ids,
+          row.legacy_master_table_count, row.legacy_batch_number, row.legacy_batch_table_count,
+          row.legacy_source_run, row.legacy_query_sha256, row.legacy_stage_system_identifier,
+          row.legacy_run_id, row.legacy_plan_sha256,
+        ]),
       ]);
     },
     async markCommitted(objectPath) {
@@ -1491,7 +1511,7 @@ export async function storeArchive({ argv = process.argv.slice(2), env = process
     requireLegacyStageAllowlistPlan: true,
   });
   const sql = deps.sql || (deps.manifestStore ? null : postgres(storageTarget.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 30 }));
-  const manifestStore = deps.manifestStore || createManifestStore(sql);
+  const manifestStore = deps.manifestStore || createManifestStore(sql, storageTarget.target);
   const adapterDeps = { ...deps, manifestStore };
   try {
     const batch = await loadOrCreatePendingBatch(local, storageTarget, adapterDeps);

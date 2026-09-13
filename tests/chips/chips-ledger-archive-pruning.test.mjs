@@ -29,6 +29,60 @@ const TABLE_ID = "00000000-0000-4000-8000-000000000020";
 const SYSTEM_ID = "00000000-0000-4000-8000-000000000030";
 const ESCROW_ID = "00000000-0000-4000-8000-000000000031";
 
+function manifestDatabaseRow(projectRef) {
+  return {
+    object_path: "v1/sha256/archive.jsonl.gz",
+    batch_id: "17",
+    project_ref: projectRef,
+    format_version: "1",
+    transaction_count: "0",
+    entry_count: "0",
+    tx_types: "[]",
+    raw_bytes: "0",
+    compressed_bytes: "0",
+    credits: "0",
+    debits: "0",
+    net_amount: "0",
+  };
+}
+
+{
+  const legacyManifestColumns = [
+    "legacy_allowlist_sha256", "legacy_batch_table_ids_sha256", "legacy_master_table_ids",
+    "legacy_master_table_count", "legacy_batch_number", "legacy_batch_table_count", "legacy_source_run",
+    "legacy_query_sha256", "legacy_stage_system_identifier", "legacy_run_id", "legacy_plan_sha256",
+  ];
+  const stageCalls = [];
+  const stageStore = createPruneStore({
+    unsafe: async (query) => {
+      stageCalls.push(query);
+      return [manifestDatabaseRow("krydukthwdvccggbyjfw")];
+    },
+    begin: async () => { throw new Error("manifest read must not begin a transaction"); },
+  });
+  const stageRow = await stageStore.getManifest("v1/sha256/archive.jsonl.gz");
+  assert.equal(stageRow.batch_id, "17");
+  for (const column of legacyManifestColumns) assert.match(stageCalls[0], new RegExp(`\\b${column}\\b`));
+
+  const productionCalls = [];
+  const productionStore = createPruneStore({
+    unsafe: async (query) => {
+      productionCalls.push(query);
+      return [manifestDatabaseRow("otbqfijerkieoxwpxjnm")];
+    },
+    begin: async () => { throw new Error("manifest read must not begin a transaction"); },
+  }, "prod");
+  const productionRow = await productionStore.getManifest("v1/sha256/archive.jsonl.gz");
+  assert.equal(productionRow.project_ref, "otbqfijerkieoxwpxjnm");
+  assert.equal(productionRow.format_version, 1);
+  assert.equal(productionRow.legacy_master_table_count, null);
+  const productionSelect = productionCalls[0].replace(/\bas\s+(legacy_[a-z0-9_]+)/gi, "");
+  for (const column of legacyManifestColumns) {
+    assert.doesNotMatch(productionSelect, new RegExp(`\\b${column}\\b`));
+    assert.match(productionCalls[0], new RegExp(`\\bnull::(?:text|uuid\\[\\])\\s+as\\s+${column}\\b`));
+  }
+}
+
 {
   const statements = [];
   const sql = {
