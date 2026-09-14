@@ -97,3 +97,26 @@ Implementation was performed on `agent/891-production-retention-plan` from main 
 The missing Production WS column `poker_tables.bot_only_retention_complete_at` is supplied by E1's forward-only schema contract. The TABLE binding implementation was validated against the existing Netlify and WS `postTransaction` adapters on a disposable first54+E1 PostgreSQL fixture with E2's fence active, including valid buy-in/cash-out metadata and rejected substituted/legacy-invalid metadata. A trigger bug found during this test (the transaction trigger function evaluated `old.transaction_id` for `chips_transactions`) was corrected by using a table-safe target transaction ID branch; the regression test then passed.
 
 T014 implementation checks passed: `npm test` (after the existing CI step `npm ci --prefix ws-server --omit=dev`), `npm run syntax`, `npm run ci:guards`, `npm run check:all`, `npm run check:csp-inline`, `node scripts/check-db-migrations.mjs`, `git diff --check`, the disposable migration fixture, the active-fence TABLE metadata fixture, archive/export/storage/prune suites, Stage automation/escrow suites and the existing workflow guard. The repository-wide runner retained only its normal opt-in skips for suites without their dedicated database environment. No Production or Stage connection, migration application, canary, Storage write, workflow dispatch, scheduler installation or cleanup was performed. The final PR HEAD is recorded in the handoff after commit.
+
+
+## Subsequent owner-gated runtime evidence — T017/T018 (2026-09-14)
+
+The following aggregate evidence supersedes the earlier pre-E1/E2 baseline where noted. No user-level data or credentials are recorded.
+
+### T017 existing-30d
+
+- **PASS** on main `75646c7ea78088756880033d2c2fbd5ee911ffc1`.
+- Production batch **2** pruned exactly **2 transactions / 4 entries**.
+- The **2 registry rows were retained and mapped to `archive_batch_id = 2`**, which is the live existing-30d contract. Registry deletion and `registry_cleaned_*` are not required for this policy.
+- Exact replay returned **`already_pruned`** with the committed proof and accounting evidence.
+- Accounting invariants passed: credits `200`, debits `200`, net `0`; account balances and entry sequences were unchanged.
+- Production automation and all retention policies remained **OFF**; the Production cap remained **2**.
+
+### T018 read-only diagnostics
+
+Both selectors were run through the Production diagnostic path with no prepare, authorize, execute, cleanup, export, proof, or Storage write. No naturally qualifying fresh canary exists.
+
+- **`bot-only-7d`: NO ELIGIBLE CANARY YET.** The selector returned zero candidates at the seven-day cutoff. Production currently has five closed tables, but none is both non-human and `bot_only_proof_eligible = true`; the aggregate blocking evidence includes `unknown_table_identity = 133` and `deferred_entry_binding = 86`. No table/transaction set therefore has fenced bot eligibility, complete registry proof, valid age, and a count within the cap of 2.
+- **`closed-human-30d`: NO ELIGIBLE CANARY YET.** The selector returned zero candidates at the thirty-day cutoff. Five closed human tables have lifecycle evidence (`HAND_DONE`, empty `handId`, zero unresolved requests) and active zero-balance escrow, but zero have registry identities; consequently none has a complete table history, an aged transaction set, or a bounded canary set.
+
+The rollout waits for naturally aged, correctly fenced data. Do not backfill, backdate, split tables, add financial fixtures, or increase the cap. T019/T020/T021 remain unimplemented and unauthorized.
