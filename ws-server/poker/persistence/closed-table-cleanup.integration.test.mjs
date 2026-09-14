@@ -39,11 +39,13 @@ async function ensureSchema(db) {
       status text not null default 'OPEN',
       updated_at timestamptz not null default now(),
       has_human_participant boolean not null default true,
+      human_retention_complete_at timestamptz,
       bot_only_retention_complete_at timestamptz
     );
     alter table public.poker_tables
       add column if not exists updated_at timestamptz not null default now(),
       add column if not exists has_human_participant boolean not null default true,
+      add column if not exists human_retention_complete_at timestamptz,
       add column if not exists bot_only_retention_complete_at timestamptz;
     create table if not exists public.poker_state (
       table_id uuid primary key,
@@ -130,7 +132,8 @@ test("closed-table cleanup executes guarded DELETE on PostgreSQL", { skip: !HAS_
       maxSweepRounds: 1,
       env: {
         WS_POKER_CLOSED_TABLE_RETENTION_MS: String(RETENTION_MS),
-        WS_POKER_CLOSED_TABLE_BATCH_SIZE: "100"
+        WS_POKER_CLOSED_TABLE_BATCH_SIZE: "100",
+        SUPABASE_URL: "https://otbqfijerkieoxwpxjnm.supabase.co"
       },
       beginSql: beginSql(db)
     });
@@ -139,8 +142,8 @@ test("closed-table cleanup executes guarded DELETE on PostgreSQL", { skip: !HAS_
     const safeTableId = randomUUID();
     cleanupTableIds.push(safeTableId);
     await db.unsafe(
-      "insert into public.poker_tables (id, status, updated_at) values ($1, 'CLOSED', $2)",
-      [safeTableId, oldDate()]
+      "insert into public.poker_tables (id, status, updated_at, has_human_participant, human_retention_complete_at) values ($1, 'CLOSED', $2, true, $3)",
+      [safeTableId, oldDate(), oldDate()]
     );
     await db.unsafe(
       "insert into public.poker_state (table_id, state) values ($1, $2::jsonb)",
@@ -153,6 +156,26 @@ test("closed-table cleanup executes guarded DELETE on PostgreSQL", { skip: !HAS_
     await db.unsafe(
       "insert into public.poker_requests (table_id, user_id, request_id, kind, result_json, created_at) values ($1, $2, $3, 'ACT', $4::jsonb, $5)",
       [safeTableId, randomUUID(), `req-${randomUUID()}`, JSON.stringify({ ok: true }), oldDate()]
+    );
+
+    // --- protected: identical CLOSED human candidate without completion marker
+    const unmarkedHumanTableId = randomUUID();
+    cleanupTableIds.push(unmarkedHumanTableId);
+    await db.unsafe(
+      "insert into public.poker_tables (id, status, updated_at, has_human_participant, human_retention_complete_at) values ($1, 'CLOSED', $2, true, null)",
+      [unmarkedHumanTableId, oldDate()]
+    );
+    await db.unsafe(
+      "insert into public.poker_state (table_id, state) values ($1, $2::jsonb)",
+      [unmarkedHumanTableId, { phase: "HAND_DONE", handId: "" }]
+    );
+    await db.unsafe(
+      "insert into public.chips_accounts (account_type, status, system_key, balance) values ('ESCROW', 'active', $1, 0)",
+      [`POKER_TABLE:${unmarkedHumanTableId}`]
+    );
+    await db.unsafe(
+      "insert into public.poker_requests (table_id, user_id, request_id, kind, result_json, created_at) values ($1, $2, $3, 'ACT', $4::jsonb, $5)",
+      [unmarkedHumanTableId, randomUUID(), `req-${randomUUID()}`, JSON.stringify({ ok: true }), oldDate()]
     );
 
     // --- protected: OPEN table
@@ -309,7 +332,7 @@ test("closed-table cleanup executes guarded DELETE on PostgreSQL", { skip: !HAS_
     assert.equal(Number(safeRequests[0].rows), 0, "poker_requests should cascade");
 
     // all protected cases remain
-    for (const protectedId of [openTableId, actionsTableId, escrowTableId,
+    for (const protectedId of [unmarkedHumanTableId, openTableId, actionsTableId, escrowTableId,
       unfinishedActTableId, freshRequestTableId, freshTableId, nonTerminalTableId]) {
       assert.ok(remainingIds.includes(protectedId), `protected table ${protectedId} should remain`);
     }

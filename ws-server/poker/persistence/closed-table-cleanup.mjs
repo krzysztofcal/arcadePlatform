@@ -38,11 +38,13 @@ const DELETE_STATEMENT_TIMEOUT_MS = 10_000;
 // WS_POKER_CLOSED_TABLE_RETENTION_MS=0 to disable.
 const DEFAULT_CLOSED_TABLE_RETENTION_MS = 7 * 86_400_000;
 const CANONICAL_STAGE_PROJECT_REF = "krydukthwdvccggbyjfw";
+const CANONICAL_PRODUCTION_PROJECT_REF = "otbqfijerkieoxwpxjnm";
 
-function isCanonicalStage(env) {
+function isCanonicalLifecycleEnvironment(env) {
   try {
-    return new URL(String(env.SUPABASE_URL || "")).hostname
-      === `${CANONICAL_STAGE_PROJECT_REF}.supabase.co`;
+    const hostname = new URL(String(env.SUPABASE_URL || "")).hostname;
+    return hostname === `${CANONICAL_STAGE_PROJECT_REF}.supabase.co`
+      || hostname === `${CANONICAL_PRODUCTION_PROJECT_REF}.supabase.co`;
   } catch {
     return false;
   }
@@ -198,9 +200,10 @@ export function createClosedTableCleanup({
     && maxSweepRounds <= MAX_SWEEP_ROUNDS
     ? maxSweepRounds
     : DEFAULT_MAX_SWEEP_ROUNDS;
-  // #923's human marker exists only on canonical Stage. Until #891 rolls it
-  // out to Production, retain the established human cleanup behavior there.
-  const lifecyclePredicate = isCanonicalStage(env)
+  // Canonical Stage and Production require completion markers from the
+  // corresponding chips-ledger retention lifecycle. Legacy targets retain
+  // the established cleanup behavior.
+  const lifecyclePredicate = isCanonicalLifecycleEnvironment(env)
     ? "(t.has_human_participant is true and t.human_retention_complete_at is not null) or (t.has_human_participant is not true and t.bot_only_retention_complete_at is not null)"
     : "t.has_human_participant is true or t.bot_only_retention_complete_at is not null";
 

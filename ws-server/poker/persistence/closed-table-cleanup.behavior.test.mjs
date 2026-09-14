@@ -169,25 +169,31 @@ test("status exposes retention, batch and last run", async () => {
   assert.equal(status.backlog.eligibleTables, 3);
 });
 
-test("canonical Stage requires the human retention marker", async () => {
-  let backlogSql = "";
-  const cleanup = createClosedTableCleanup({
-    env: { ...envWithRetention(), SUPABASE_URL: "https://krydukthwdvccggbyjfw.supabase.co" },
-    beginSql: async (fn) => fn({
-      unsafe: async (sql) => {
-        if (sql.includes("count(*)::bigint")) backlogSql = sql;
-        return [{ eligible: "0" }];
-      }
-    })
+for (const [environment, projectRef] of [
+  ["canonical Stage", "krydukthwdvccggbyjfw"],
+  ["canonical Production", "otbqfijerkieoxwpxjnm"]
+]) {
+  test(`${environment} requires completion markers`, async () => {
+    let backlogSql = "";
+    const cleanup = createClosedTableCleanup({
+      env: { ...envWithRetention(), SUPABASE_URL: `https://${projectRef}.supabase.co` },
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          if (sql.includes("count(*)::bigint")) backlogSql = sql;
+          return [{ eligible: "0" }];
+        }
+      })
+    });
+    await cleanup.status();
+    assert.match(backlogSql, /t\.has_human_participant is true and t\.human_retention_complete_at is not null/);
+    assert.match(backlogSql, /t\.has_human_participant is not true and t\.bot_only_retention_complete_at is not null/);
   });
-  await cleanup.status();
-  assert.match(backlogSql, /human_retention_complete_at is not null/);
-});
+}
 
-test("non-Stage keeps the existing human cleanup predicate", async () => {
+test("noncanonical target keeps the existing human cleanup predicate", async () => {
   let backlogSql = "";
   const cleanup = createClosedTableCleanup({
-    env: { ...envWithRetention(), SUPABASE_URL: "https://otbqfijerkieoxwpxjnm.supabase.co" },
+    env: { ...envWithRetention(), SUPABASE_URL: "https://legacy-project.supabase.co" },
     beginSql: async (fn) => fn({
       unsafe: async (sql) => {
         if (sql.includes("count(*)::bigint")) backlogSql = sql;
