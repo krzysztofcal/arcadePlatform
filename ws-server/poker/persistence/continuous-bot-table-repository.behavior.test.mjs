@@ -18,6 +18,7 @@ const PROFILE = {
 
 test("setDesiredState persists a bounded profile and keeps configured desired count while disabled", async () => {
   let updatedParams = null;
+  let updateSql = "";
   const repository = createContinuousBotTableRepository({
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     maxDesiredTables: 100,
@@ -25,6 +26,7 @@ test("setDesiredState persists a bounded profile and keeps configured desired co
       unsafe: async (sql, params) => {
         if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
         if (sql.includes("update public.poker_managed_table_profiles")) {
+          updateSql = sql;
           updatedParams = params;
           return [{ ...PROFILE, desired_table_count: 10, updated_at: "2026-08-01T00:00:00.000Z" }];
         }
@@ -42,7 +44,96 @@ test("setDesiredState persists a bounded profile and keeps configured desired co
   assert.equal(result.ok, true);
   assert.equal(result.profile.enabled, false);
   assert.equal(result.profile.desiredTableCount, 10);
+  assert.equal(result.profile.minBotCount, 2);
+  assert.equal(result.profile.targetBotCount, 3);
+  assert.equal(result.profile.maxBotCount, 3);
   assert.deepEqual(updatedParams.slice(1, 4), [false, 10, "00000000-0000-4000-8000-000000000010"]);
+  assert.doesNotMatch(updateSql, /min_bot_count\s*=/);
+  assert.doesNotMatch(updateSql, /target_bot_count\s*=/);
+  assert.doesNotMatch(updateSql, /max_bot_count\s*=/);
+});
+
+test("setDesiredState atomically persists an extended 1/1/1 bot profile", async () => {
+  let updateCount = 0;
+  let updatedParams = null;
+  let updateSql = "";
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    maxDesiredTables: 2,
+    beginSql: async (run) => run({
+      unsafe: async (sql, params) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE, desired_table_count: 0 }];
+        if (sql.includes("update public.poker_managed_table_profiles")) {
+          updateCount += 1;
+          updateSql = sql;
+          updatedParams = params;
+          return [{
+            ...PROFILE,
+            enabled: true,
+            desired_table_count: 1,
+            min_bot_count: 1,
+            target_bot_count: 1,
+            max_bot_count: 1,
+            updated_at: "2026-08-01T00:00:00.000Z"
+          }];
+        }
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.setDesiredState({
+    enabled: true,
+    desiredTableCount: 1,
+    minBotCount: 1,
+    targetBotCount: 1,
+    maxBotCount: 1,
+    updatedBy: "00000000-0000-4000-8000-000000000010"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(updateCount, 1);
+  assert.match(updateSql, /min_bot_count\s*=\s*\$4/);
+  assert.match(updateSql, /target_bot_count\s*=\s*\$5/);
+  assert.match(updateSql, /max_bot_count\s*=\s*\$6/);
+  assert.deepEqual(updatedParams, [
+    "CONTINUOUS_BOT_DEFAULT",
+    true,
+    1,
+    1,
+    1,
+    1,
+    "00000000-0000-4000-8000-000000000010"
+  ]);
+  assert.equal(result.profile.minBotCount, 1);
+  assert.equal(result.profile.targetBotCount, 1);
+  assert.equal(result.profile.maxBotCount, 1);
+});
+
+test("setDesiredState rejects bot-count ordering before the profile UPDATE", async () => {
+  let updateCount = 0;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (run) => run({
+      unsafe: async (sql) => {
+        if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
+        if (sql.includes("update public.poker_managed_table_profiles")) updateCount += 1;
+        return [];
+      }
+    })
+  });
+
+  const result = await repository.setDesiredState({
+    enabled: true,
+    desiredTableCount: 1,
+    minBotCount: 2,
+    targetBotCount: 1,
+    maxBotCount: 1,
+    updatedBy: "00000000-0000-4000-8000-000000000010"
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "invalid_bot_count_order" });
+  assert.equal(updateCount, 0);
 });
 
 test("setDesiredState rejects a desired-count jump larger than the ramp-up step", async () => {

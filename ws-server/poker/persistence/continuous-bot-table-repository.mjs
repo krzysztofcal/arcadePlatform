@@ -28,6 +28,14 @@ function intInRange(value, min, max) {
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : null;
 }
 
+function validateBotCounts({ minBotCount, targetBotCount, maxBotCount }, maxSeats) {
+  const counts = [minBotCount, targetBotCount, maxBotCount];
+  if (!counts.every((count) => Number.isSafeInteger(count) && count >= 0)
+    || maxBotCount >= maxSeats) return "invalid_bot_count";
+  if (minBotCount > targetBotCount || targetBotCount > maxBotCount) return "invalid_bot_count_order";
+  return null;
+}
+
 export function normalizeContinuousBotProfile(row, { maxDesiredTables = DEFAULT_MAX_DESIRED_TABLES } = {}) {
   const desiredTableLimit = Number.isInteger(maxDesiredTables)
     && maxDesiredTables >= DEFAULT_MAX_DESIRED_TABLES
@@ -362,10 +370,22 @@ export function createContinuousBotTableRepository({
     }
   }
 
-  async function setDesiredState({ enabled, desiredTableCount, updatedBy } = {}) {
+  async function setDesiredState({
+    enabled,
+    desiredTableCount,
+    minBotCount,
+    targetBotCount,
+    maxBotCount,
+    updatedBy
+  } = {}) {
     if (typeof enabled !== "boolean") return { ok: false, reason: "invalid_enabled" };
     if (!Number.isInteger(desiredTableCount) || desiredTableCount < 0 || desiredTableCount > desiredTableLimit) {
       return { ok: false, reason: "invalid_desired_table_count" };
+    }
+    const botCountValues = [minBotCount, targetBotCount, maxBotCount];
+    const hasBotCountFields = botCountValues.some((value) => value !== undefined);
+    if (hasBotCountFields && !botCountValues.every((value) => value !== undefined)) {
+      return { ok: false, reason: "invalid_bot_count" };
     }
     const actorUserId = typeof updatedBy === "string" ? updatedBy.trim() : "";
     if (!UUID_RE.test(actorUserId)) return { ok: false, reason: "invalid_updated_by" };
@@ -378,16 +398,33 @@ export function createContinuousBotTableRepository({
         if (desiredTableCount > previous.desiredTableCount + MAX_DESIRED_TABLE_COUNT_INCREASE) {
           throw Object.assign(new Error("invalid_desired_table_count_step"), { code: "invalid_desired_table_count_step" });
         }
+        if (hasBotCountFields) {
+          const botCountError = validateBotCounts({ minBotCount, targetBotCount, maxBotCount }, previous.maxSeats);
+          if (botCountError) throw Object.assign(new Error(botCountError), { code: botCountError });
+        }
+        const updateFields = [
+          "enabled = $2",
+          "desired_table_count = $3"
+        ];
+        const updateParams = [CONTINUOUS_BOT_PROFILE_KEY, enabled, desiredTableCount];
+        if (hasBotCountFields) {
+          updateFields.push(
+            "min_bot_count = $4",
+            "target_bot_count = $5",
+            "max_bot_count = $6"
+          );
+          updateParams.push(minBotCount, targetBotCount, maxBotCount);
+        }
+        const updatedByParam = updateParams.length + 1;
+        updateFields.push("updated_at = now()", `updated_by = $${updatedByParam}::uuid`);
+        updateParams.push(actorUserId);
         const rows = await tx.unsafe(
           `update public.poker_managed_table_profiles
-              set enabled = $2,
-                  desired_table_count = $3,
-                  updated_at = now(),
-                  updated_by = $4::uuid
+              set ${updateFields.join(",\n                  ")}
             where profile_key = $1
             returning profile_key, enabled, desired_table_count, min_bot_count, target_bot_count, max_bot_count,
                       rotation_interval_seconds, postpone_interval_seconds, small_blind, big_blind, max_seats, updated_at;`,
-          [CONTINUOUS_BOT_PROFILE_KEY, enabled, desiredTableCount, actorUserId]
+          updateParams
         );
         const profile = normalizeContinuousBotProfile(rows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
@@ -395,6 +432,9 @@ export function createContinuousBotTableRepository({
           profile,
           profileChanged: previous.enabled !== profile.enabled
             || previous.desiredTableCount !== profile.desiredTableCount
+            || previous.minBotCount !== profile.minBotCount
+            || previous.targetBotCount !== profile.targetBotCount
+            || previous.maxBotCount !== profile.maxBotCount
         };
       }, { env });
       lastKnownProfile = result.profile;

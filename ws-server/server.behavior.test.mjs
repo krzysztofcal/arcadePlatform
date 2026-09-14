@@ -1462,6 +1462,59 @@ test("internal poker maintenance route keeps the Production desired-table cap", 
   }
 });
 
+test("internal poker maintenance route validates the extended bot-count payload before the repository boundary", async () => {
+  const token = "internal-extended-maintenance-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-maintenance`;
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  try {
+    await waitForListening(child, 5000);
+    const accepted = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation: "set_desired_state",
+        enabled: true,
+        desiredTableCount: 1,
+        minBotCount: 1,
+        targetBotCount: 1,
+        maxBotCount: 1,
+        actorUserId: "00000000-0000-4000-8000-000000000010",
+        requestId: "extended-profile-request"
+      })
+    });
+    assert.equal(accepted.status, 400);
+    assert.deepEqual(await accepted.json(), { error: "profile_update_failed" });
+
+    const invalid = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation: "set_desired_state",
+        enabled: true,
+        desiredTableCount: 1,
+        minBotCount: 2,
+        targetBotCount: 1,
+        maxBotCount: 1,
+        actorUserId: "00000000-0000-4000-8000-000000000010",
+        requestId: "invalid-extended-profile-request"
+      })
+    });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await invalid.json(), { error: "invalid_bot_count_order" });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("internal VPS metrics route is token-protected, read-only, and returns runtime context", async () => {
   const token = "internal-vps-metrics-token";
   const { port, child } = await createServer({
