@@ -120,3 +120,44 @@ Both selectors were run through the Production diagnostic path with no prepare, 
 - **`closed-human-30d`: NO ELIGIBLE CANARY YET.** The selector returned zero candidates at the thirty-day cutoff. Five closed human tables have lifecycle evidence (`HAND_DONE`, empty `handId`, zero unresolved requests) and active zero-balance escrow, but zero have registry identities; consequently none has a complete table history, an aged transaction set, or a bounded canary set.
 
 The rollout waits for naturally aged, correctly fenced data. Do not backfill, backdate, split tables, add financial fixtures, or increase the cap. T019/T020/T021 remain unimplemented and unauthorized.
+
+## Subsequent owner-gated T018 candidate-creation evidence (2026-09-14)
+
+The following two fresh Production runtime smokes created bounded, post-E2 candidate tables. These are candidate-creation results only; neither T018 retention prepare nor canary execute was run. Both candidates must age naturally and pass a fresh eligibility diagnostic before any prepare authorization. No backfill, backdate, split, fixture, or cap increase was used.
+
+### Bot-only candidate
+
+- **Smoke PASS; waiting for natural age >7d.**
+- Table: `396a48fd-4b61-4992-8635-0820f3b68c74`; status `CLOSED`.
+- `TABLE_BUY_IN`: `856278b7-ddb3-4c46-af8f-a7fefda7f1c8`.
+- `TABLE_CASH_OUT`: `9e010041-66e0-4d95-9b4a-db95ca1389b2`.
+- Exactly **2 TABLE transactions / 4 entries**.
+- `has_human_participant = false`; `bot_only_proof_eligible = true`.
+- Escrow balance: `0 CH`.
+- Registry identity count: `2`.
+
+### Closed-human candidate
+
+- **Smoke PASS; waiting for natural age >30d from the newest TABLE transaction.**
+- Table: `7f3d73e4-36c5-4b66-afe6-d1d41bea13e2`.
+- Created: `2026-09-14T13:32:20.982Z`.
+- `TABLE_BUY_IN`: `8948e05e-ca00-4fc4-97ec-baff3ce710a1`, `2026-09-14T13:32:21.799Z`.
+- `TABLE_CASH_OUT`: `f9529116-fc6f-419c-a563-90487d6845ef`, `2026-09-14T13:32:28.499Z`.
+- Terminal close: `2026-09-14T13:33:38.361Z`.
+- User: `f70a39da-08b2-4884-b99d-a6bb2b0cd234`; final balance `1100 CH`.
+- Escrow: `04c0ecc8-6325-4258-bedf-25c4c51ceccb`; balance `0 CH`.
+- Status/lifecycle: `CLOSED`, `HAND_DONE`, empty `handId`, zero unresolved requests.
+- Exactly **2 TABLE transactions / 4 entries**.
+- Exactly **2** registry identities, formats `join-buyin` and `poker:leave`, both bound to the exact table.
+- No bots, rebuy, refund, settlement, or replacement.
+
+### Failed no-op first human attempt
+
+The first human-table attempt is retained for audit and is not a canary candidate:
+
+- Table: `c820f012-294c-4701-9368-409f8bcaee71`; status `CLOSED`.
+- TABLE transactions: `0`.
+- Registry identities: `0`.
+- Escrow balance: `0 CH`.
+
+T018 remains open. The actual retention canaries still require natural age, a fresh fenced eligibility diagnostic, prepare, and separately authorized destructive execute for each policy. No T018 task checkbox is marked PASS.
