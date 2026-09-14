@@ -14,8 +14,11 @@ import {
 import {
   acquireRetentionAdvisoryLock,
   assertRetentionAdvisoryLock,
+  assertDurableRecoveryReady,
   assertExactCanaryArgs,
+  assertResumeRecoveryState,
   findOwnCycle,
+  inspectDurableRecovery,
   persistDurableRecovery,
   releaseRetentionAdvisoryLock,
   runRetentionCycle,
@@ -80,6 +83,17 @@ const PRODUCTION_OWN_BATCHES_SQL = `select object_path, source_policy_id, status
   from public.chips_ledger_archive_batches
   where project_ref = $1 and source_policy_id = $2
   order by created_at desc, batch_id desc;`;
+
+const PRODUCTION_EXECUTE_RECEIPT_FIELDS = Object.freeze([
+  "pruned_at",
+  "pruned_transaction_count",
+  "pruned_entry_count",
+  "pruned_transaction_ids_sha256",
+  "pruned_entry_ids_sha256",
+  "registry_cleaned_at",
+  "registry_cleaned_key_count",
+  "registry_cleaned_keys_sha256",
+]);
 
 const PRODUCTION_ESCROW_CANDIDATE_SQL = `select batches.*,
     accounts.id::text as account_id,
@@ -256,6 +270,140 @@ function productionStorageDeps(deps, storageTarget) {
       : storageVerificationContext.verify(target, storageDeps)
   ));
   return { storageDeps, verifyBucket, storageTarget };
+}
+
+function assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicyId }) {
+  if (!row
+    || text(row.batch_id) !== text(batchId)
+    || row.project_ref !== profile.projectRef
+    || row.source_policy_id !== sourcePolicyId
+    || row.status !== "committed"
+    || !row.committed_at
+    || row.pruned_at != null) {
+    fail("active Production batch manifest does not match the exact prepared batch");
+  }
+  if (!row.archive_proof_verified_at
+    || !SHA256_RE.test(text(row.archived_transaction_ids_sha256))
+    || !SHA256_RE.test(text(row.archived_entry_ids_sha256))) {
+    fail("active Production batch is missing its immutable archive proof");
+  }
+  if (PRODUCTION_EXECUTE_RECEIPT_FIELDS.some((field) => row[field] != null)) {
+    fail("active Production batch has a partial cleanup receipt");
+  }
+  if ((row.destructive_go_at == null) !== (row.destructive_go_batch_id == null)
+    || (row.destructive_go_batch_id != null && text(row.destructive_go_batch_id) !== text(batchId))) {
+    fail("active Production batch has a partial or foreign destructive GO");
+  }
+  return row;
+}
+
+async function resumeProductionCanaryBatch({
+  activeRow,
+  profile,
+  env,
+  policy,
+  mode,
+  batchId,
+  confirmation,
+  sql,
+  lockSession,
+  pruneStore,
+  storageTarget,
+  verifyBucket,
+  storageDeps,
+  tempRoot,
+  deps,
+}) {
+  const sourcePolicyId = PRODUCTION_POLICIES[policy];
+  if (mode !== "canary") fail("only Production canary may resume an active batch");
+  if (text(activeRow?.batch_id) !== text(batchId)) {
+    fail("exact active Production batch ID does not match --batch-id");
+  }
+  if (activeRow?.project_ref !== profile.projectRef
+    || activeRow?.source_policy_id !== sourcePolicyId
+    || activeRow?.status !== "committed"
+    || activeRow?.pruned_at != null) {
+    fail("active Production batch summary does not match the exact prepared batch");
+  }
+  let row = await pruneStore.getManifest(activeRow.object_path);
+  assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicyId });
+  await verifyBucket(storageTarget);
+
+  const runPrune = deps.pruneArchive || pruneArchive;
+  const pruneDeps = {
+    ...storageDeps,
+    sql,
+    pruneStore,
+    storageTarget,
+    targetOptions: productionTargetOptions(),
+    verifyBucket,
+    emit: false,
+  };
+  const dry = await runPrune({
+    argv: ["--target", "prod", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256],
+    env,
+    cwd: tempRoot,
+    deps: pruneDeps,
+  });
+  if (dry?.state !== "ready") fail(`active Production canary dry-run did not become ready: ${dry?.state || "unknown"}`);
+  if (!dry.evidence
+    || dry.evidence.transactionIdsSha256 !== row.archived_transaction_ids_sha256
+    || dry.evidence.entryIdsSha256 !== row.archived_entry_ids_sha256) {
+    fail("active Production canary dry-run evidence does not match the committed proof");
+  }
+
+  row = await pruneStore.getManifest(activeRow.object_path);
+  assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicyId });
+  const inspectRecovery = storageDeps.inspectDurableRecovery || inspectDurableRecovery;
+  const durable = await inspectRecovery(storageTarget, row, profile, dry.evidence, storageDeps);
+  assertResumeRecoveryState(row, durable, profile);
+  assertDurableRecoveryReady(durable);
+
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  const authorization = await authorizeProductionBatch({ sql, policy, batchId, confirmation, deps });
+  if (!authorization
+    || text(authorization.state) !== "authorized"
+    || text(authorization.batch_id) !== text(batchId)) {
+    fail("Production canary authorization did not persist the exact batch GO");
+  }
+  row = await pruneStore.getManifest(activeRow.object_path);
+  assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicyId });
+  if (!row.destructive_go_at || text(row.destructive_go_batch_id) !== text(batchId)) {
+    fail("Production canary authorization did not persist the exact destructive GO");
+  }
+
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  const recoveryDir = archiveRecoveryDir(tempRoot);
+  const executed = await runPrune({
+    argv: [
+      "--target", "prod",
+      "--object-path", row.object_path,
+      "--confirm-sha", row.compressed_sha256,
+      "--execute",
+      "--recovery-dir", recoveryDir,
+      "--approved-batch-id", String(batchId),
+    ],
+    env,
+    cwd: tempRoot,
+    deps: {
+      ...pruneDeps,
+      downloadArchive: async () => ({ bytes: durable.archiveBytes, downloadMs: 0 }),
+    },
+  });
+  return {
+    state: executed?.state || "unknown",
+    receipt: executed?.state || "unknown",
+    projectRef: profile.projectRef,
+    systemIdentifier: profile.systemIdentifier,
+    batchId: String(batchId),
+    transactions: dry.evidence.transactionCount,
+    entries: dry.evidence.entryCount,
+    compressedSha256: row.compressed_sha256,
+    recoveryArchiveSha256: durable.recoveryArchive.sha256,
+    recoveryManifestSha256: durable.recoveryManifest.sha256,
+    storageWrites: 0,
+    databaseWrites: 2,
+  };
 }
 
 async function authorizeProductionBatch({ sql, policy, batchId, confirmation, accountIdsSha256: expectedAccountIdsSha256 = null, deps = {} }) {
@@ -534,7 +682,29 @@ async function runProductionArchiveCycle({
     if (text(identityRows[0]?.system_identifier) !== profile.systemIdentifier) fail("database is not canonical Production");
     const ownRows = await sql.unsafe(PRODUCTION_OWN_BATCHES_SQL, [profile.projectRef, sourcePolicyId]);
     const cycle = findOwnCycle(ownRows, sourcePolicyId);
-    if (cycle.active) fail("Production retention has an incomplete active batch; resume it through the reviewed recovery path");
+    if (cycle.active) {
+      if (mode !== "canary") {
+        fail("Production retention has an incomplete active batch; resume it through the reviewed recovery path");
+      }
+      const resumed = await resumeProductionCanaryBatch({
+        activeRow: cycle.active,
+        profile,
+        env: moduleEnv,
+        policy,
+        mode,
+        batchId,
+        confirmation,
+        sql,
+        lockSession,
+        pruneStore,
+        storageTarget,
+        verifyBucket,
+        storageDeps,
+        tempRoot,
+        deps,
+      });
+      return { state: resumed.state, mode, policy, policyId: sourcePolicyId, ...resumed };
+    }
     if (cycle.latestCompleted) {
       const completed = await pruneArchive({
         argv: ["--target", "prod", "--object-path", cycle.latestCompleted.object_path, "--confirm-sha", cycle.latestCompleted.compressed_sha256],

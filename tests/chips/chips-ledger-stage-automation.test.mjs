@@ -206,6 +206,246 @@ try {
   fs.rmSync(productionExportBoundaryRoot, { recursive: true, force: true });
 }
 
+const productionResumeEvidence = {
+  transactionIds: [
+    "00000000-0000-4000-8000-000000000101",
+    "00000000-0000-4000-8000-000000000102",
+  ],
+  entryIds: [1001, 1002, 1003, 1004],
+  transactionIdsSha256: "1".repeat(64),
+  entryIdsSha256: "2".repeat(64),
+  transactionCount: 2,
+  entryCount: 4,
+  txTypes: { TABLE_BUY_IN: 2 },
+  credits: "200",
+  debits: "200",
+  net: "0",
+};
+const productionResumeArchiveBytes = Buffer.from("production prepared canary archive");
+const productionResumeArchiveSha256 = crypto.createHash("sha256").update(productionResumeArchiveBytes).digest("hex");
+function makeProductionResumeRow() {
+  return {
+    object_path: `v1/sha256/${productionResumeArchiveSha256}.jsonl.gz`,
+    project_ref: PRODUCTION_PROJECT_REF,
+    source_policy_id: "production-ledger-auto-retention-30d-v1",
+    status: "committed",
+    batch_id: "2",
+    format_version: 1,
+    cutoff: "2026-08-14T00:00:00.000000Z",
+    cursor_start_created_at: null,
+    cursor_start_id: null,
+    cursor_end_created_at: "2026-07-17T00:00:00.000000Z",
+    cursor_end_id: productionResumeEvidence.transactionIds[1],
+    first_created_at: "2026-07-17T00:00:00.000000Z",
+    last_created_at: "2026-07-17T00:00:00.000000Z",
+    transaction_count: 2,
+    entry_count: 4,
+    tx_types: { TABLE_BUY_IN: 2 },
+    raw_bytes: 100,
+    compressed_bytes: productionResumeArchiveBytes.length,
+    raw_sha256: "3".repeat(64),
+    compressed_sha256: productionResumeArchiveSha256,
+    credits: "200",
+    debits: "200",
+    net_amount: "0",
+    committed_at: "2026-08-15T00:00:00.000000Z",
+    archive_proof_verified_at: "2026-08-15T00:01:00.000000Z",
+    archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256,
+    archived_entry_ids_sha256: productionResumeEvidence.entryIdsSha256,
+    pruned_at: null,
+    pruned_transaction_count: null,
+    pruned_entry_count: null,
+    pruned_transaction_ids_sha256: null,
+    pruned_entry_ids_sha256: null,
+    registry_cleaned_at: null,
+    registry_cleaned_key_count: null,
+    registry_cleaned_keys_sha256: null,
+    destructive_go_at: null,
+    destructive_go_batch_id: null,
+  };
+}
+function makeProductionResumeHarness(row, options = {}) {
+  const { loseLockAfterRecovery = false, loseLockAfterAuthorization = false } = options;
+  const calls = { authorize: 0, execute: 0, export: 0, store: 0, recovery: 0, verifyBucket: 0 };
+  const pruneCalls = [];
+  const activeSummary = {
+    object_path: row.object_path,
+    source_policy_id: row.source_policy_id,
+    status: row.status,
+    batch_id: row.batch_id,
+    project_ref: row.project_ref,
+    transaction_count: row.transaction_count,
+    entry_count: row.entry_count,
+    compressed_sha256: row.compressed_sha256,
+    archive_proof_verified_at: row.archive_proof_verified_at,
+    pruned_at: row.pruned_at,
+  };
+  const durable = {
+    state: "complete",
+    archiveBytes: productionResumeArchiveBytes,
+    manifest: buildRecoveryManifest(row, PRODUCTION_SYSTEM_IDENTIFIER, productionResumeEvidence, { target: "prod" }),
+    projectRef: PRODUCTION_PROJECT_REF,
+    systemIdentifier: PRODUCTION_SYSTEM_IDENTIFIER,
+    sourcePolicyId: row.source_policy_id,
+    batchId: row.batch_id,
+    transactionIdsSha256: productionResumeEvidence.transactionIdsSha256,
+    entryIdsSha256: productionResumeEvidence.entryIdsSha256,
+    archive: { sha256: productionResumeArchiveSha256 },
+    recoveryArchive: { sha256: productionResumeArchiveSha256 },
+    recoveryManifest: { sha256: "4".repeat(64) },
+  };
+  const session = { backendPid: "production-resume-session", lockLost: false };
+  const sql = {
+    unsafe: async (query) => {
+      if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: session.backendPid }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: session.lockLost ? "lost-production-session" : session.backendPid }];
+      if (query.includes("pg_advisory_unlock")) return [{ released: true }];
+      if (query.includes("pg_control_system")) return [{ system_identifier: PRODUCTION_SYSTEM_IDENTIFIER }];
+      if (query.includes("from public.chips_ledger_archive_batches")) {
+        return query.includes("where project_ref") ? [activeSummary] : [row];
+      }
+      throw new Error(`unexpected Production resume SQL: ${query}`);
+    },
+    begin: async (callback) => callback({ unsafe: async (query, values = []) => sql.unsafe(query, values) }),
+  };
+  const deps = {
+    sql,
+    storageTarget: { target: "prod", projectRef: PRODUCTION_PROJECT_REF, baseUrl: PRODUCTION_ENV.SUPABASE_PROD_URL, serviceKey: "production-test-key" },
+    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-production-resume-"),
+    pruneStore: { getManifest: async () => row },
+    verifyBucket: async () => { calls.verifyBucket += 1; },
+    inspectDurableRecovery: async () => {
+      calls.recovery += 1;
+      if (loseLockAfterRecovery) session.lockLost = true;
+      return durable;
+    },
+    exportArchive: async () => { calls.export += 1; throw new Error("active canary must not export"); },
+    ensureArchiveBucket: async () => { calls.store += 1; throw new Error("active canary must not prepare Storage"); },
+    storeArchive: async () => { calls.store += 1; throw new Error("active canary must not store a new manifest"); },
+    authorize: async ({ policy, batchId, confirmation }) => {
+      calls.authorize += 1;
+      assert.equal(policy, "existing-30d");
+      assert.equal(String(batchId), "2");
+      assert.equal(confirmation, "GO 2");
+      if (loseLockAfterAuthorization) session.lockLost = true;
+      row.destructive_go_at = "2026-08-15T00:02:00.000000Z";
+      row.destructive_go_batch_id = "2";
+      return { state: "authorized", batch_id: "2" };
+    },
+    pruneArchive: async ({ argv }) => {
+      pruneCalls.push([...argv]);
+      const execute = argv.includes("--execute");
+      if (!execute) return { state: "ready", evidence: productionResumeEvidence };
+      calls.execute += 1;
+      return { state: "pruned", evidence: productionResumeEvidence };
+    },
+  };
+  return { calls, deps, pruneCalls };
+}
+
+let productionPreparedResumeRow = null;
+const productionPrepareForResume = await runProductionAutomation({
+  env: PRODUCTION_ENV,
+  policy: "existing-30d",
+  mode: "prepare",
+  deps: {
+    read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true }),
+    prepare: async ({ profile, maxTransactions }) => {
+      productionPreparedResumeRow = makeProductionResumeRow();
+      return {
+        state: "prepared",
+        projectRef: profile.projectRef,
+        systemIdentifier: profile.systemIdentifier,
+        batchId: productionPreparedResumeRow.batch_id,
+        maxTransactions,
+      };
+    },
+    execute: async () => { throw new Error("prepare must not execute"); },
+  },
+});
+assert.equal(productionPrepareForResume.state, "prepared");
+assert.equal(productionPreparedResumeRow.status, "committed");
+assert.equal(productionPreparedResumeRow.pruned_at, null);
+const productionResumeHarness = makeProductionResumeHarness(productionPreparedResumeRow);
+const productionResumeResult = await runProductionAutomation({
+  env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1" },
+  policy: "existing-30d",
+  mode: "canary",
+  batchId: "2",
+  confirmation: "GO 2",
+  deps: {
+    ...productionResumeHarness.deps,
+    read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true }),
+  },
+});
+assert.equal(productionResumeResult.state, "pruned");
+assert.equal(productionResumeResult.batchId, "2");
+assert.equal(productionResumeHarness.calls.authorize, 1);
+assert.equal(productionResumeHarness.calls.execute, 1);
+assert.equal(productionResumeHarness.calls.export, 0);
+assert.equal(productionResumeHarness.calls.store, 0);
+assert.equal(productionResumeHarness.calls.recovery, 1);
+assert.equal(productionResumeHarness.pruneCalls.length, 2);
+assert.equal(productionResumeHarness.pruneCalls[0].includes("--execute"), false);
+assert.equal(productionResumeHarness.pruneCalls[1].includes("--execute"), true);
+assert.equal(productionResumeHarness.pruneCalls[1].includes("--approved-batch-id"), true);
+assert.equal(productionResumeHarness.pruneCalls[1].includes("2"), true);
+
+const productionWrongResumeHarness = makeProductionResumeHarness(makeProductionResumeRow());
+await assert.rejects(
+  runProductionAutomation({
+    env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1" },
+    policy: "existing-30d",
+    mode: "canary",
+    batchId: "3",
+    confirmation: "GO 3",
+    deps: {
+      ...productionWrongResumeHarness.deps,
+      read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true }),
+    },
+  }),
+  /exact active Production batch ID/,
+);
+assert.equal(productionWrongResumeHarness.calls.authorize, 0);
+assert.equal(productionWrongResumeHarness.calls.execute, 0);
+assert.equal(productionWrongResumeHarness.calls.export, 0);
+assert.equal(productionWrongResumeHarness.calls.store, 0);
+
+const productionRecoveryLockLossHarness = makeProductionResumeHarness(makeProductionResumeRow(), { loseLockAfterRecovery: true });
+await assert.rejects(
+  runProductionAutomation({
+    env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1" },
+    policy: "existing-30d",
+    mode: "canary",
+    batchId: "2",
+    confirmation: "GO 2",
+    deps: {
+      ...productionRecoveryLockLossHarness.deps,
+      read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true }),
+    },
+  }),
+  /advisory lock session changed/,
+);
+assert.equal(productionRecoveryLockLossHarness.calls.authorize, 0);
+assert.equal(productionRecoveryLockLossHarness.calls.execute, 0);
+
+const productionExecuteLockLossHarness = makeProductionResumeHarness(makeProductionResumeRow(), { loseLockAfterAuthorization: true });
+await assert.rejects(
+  runProductionAutomation({
+    env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1" },
+    policy: "existing-30d",
+    mode: "canary",
+    batchId: "2",
+    confirmation: "GO 2",
+    deps: {
+      ...productionExecuteLockLossHarness.deps,
+      read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true }),
+    },
+  }),
+  /advisory lock session changed/,
+);
+assert.equal(productionExecuteLockLossHarness.calls.authorize, 1);
+assert.equal(productionExecuteLockLossHarness.calls.execute, 0);
 const sharedDisabled = await runRetentionCycle({
   target: "production",
   env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "0" },
