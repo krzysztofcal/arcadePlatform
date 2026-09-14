@@ -9,11 +9,21 @@ const WS_ORIGINS = Object.freeze({
 });
 const DEFAULT_TIMEOUT_MS = 12_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_PROFILE_BOT_COUNT = 5;
+const SET_DESIRED_STATE_KEYS = ["operation", "enabled", "desiredTableCount"];
+const EXTENDED_SET_DESIRED_STATE_KEYS = [
+  ...SET_DESIRED_STATE_KEYS,
+  "minBotCount",
+  "targetBotCount",
+  "maxBotCount",
+];
 const EXPOSED_ERRORS = new Set([
   "invalid_request",
   "invalid_enabled",
   "invalid_desired_table_count",
   "invalid_desired_table_count_step",
+  "invalid_bot_count",
+  "invalid_bot_count_order",
   "invalid_table_id",
   "table_not_found",
   "not_managed_table",
@@ -81,15 +91,34 @@ function exactKeys(value, expected) {
   return keys.length === wanted.length && keys.every((key, index) => key === wanted[index]);
 }
 
+function parseBotCounts(value) {
+  const counts = [value.minBotCount, value.targetBotCount, value.maxBotCount];
+  if (!counts.every((count) => Number.isSafeInteger(count) && count >= 0 && count <= MAX_PROFILE_BOT_COUNT)) {
+    throw controlError("invalid_bot_count");
+  }
+  if (value.minBotCount > value.targetBotCount || value.targetBotCount > value.maxBotCount) {
+    throw controlError("invalid_bot_count_order");
+  }
+  return {
+    minBotCount: value.minBotCount,
+    targetBotCount: value.targetBotCount,
+    maxBotCount: value.maxBotCount,
+  };
+}
+
 function parseBody(body, { maxDesiredTableCount = 2 } = {}) {
   const value = parseJsonObject(body);
   const operation = typeof value.operation === "string" ? value.operation.trim().toLowerCase() : "";
-  if (operation === "set_desired_state" && exactKeys(value, ["operation", "enabled", "desiredTableCount"])) {
+  const isSetDesiredState = operation === "set_desired_state"
+    && (exactKeys(value, SET_DESIRED_STATE_KEYS) || exactKeys(value, EXTENDED_SET_DESIRED_STATE_KEYS));
+  if (isSetDesiredState) {
     if (typeof value.enabled !== "boolean" || !Number.isInteger(value.desiredTableCount)
       || value.desiredTableCount < 0 || value.desiredTableCount > maxDesiredTableCount) {
       throw controlError("invalid_desired_table_count");
     }
-    return { operation, enabled: value.enabled, desiredTableCount: value.desiredTableCount };
+    const result = { operation, enabled: value.enabled, desiredTableCount: value.desiredTableCount };
+    if (exactKeys(value, EXTENDED_SET_DESIRED_STATE_KEYS)) Object.assign(result, parseBotCounts(value));
+    return result;
   }
   if (operation === "request_rotation" && exactKeys(value, ["operation", "tableId"])) {
     if (!UUID_RE.test(String(value.tableId || "").trim())) throw controlError("invalid_table_id");

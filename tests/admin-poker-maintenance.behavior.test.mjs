@@ -61,6 +61,83 @@ test("maintenance parser accepts the 100-table bound and rejects browser actor f
   assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 2, actorUserId: "spoofed" })), { code: "invalid_request" });
   assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 100 })), { code: "invalid_desired_table_count" });
   assert.throws(() => parseBody(JSON.stringify({ operation: "set_desired_state", enabled: true, desiredTableCount: 101 }), { maxDesiredTableCount: 100 }), { code: "invalid_desired_table_count" });
+  assert.deepEqual(parseBody(JSON.stringify({
+    operation: "set_desired_state",
+    enabled: true,
+    desiredTableCount: 1,
+    minBotCount: 1,
+    targetBotCount: 1,
+    maxBotCount: 1,
+  })), {
+    operation: "set_desired_state",
+    enabled: true,
+    desiredTableCount: 1,
+    minBotCount: 1,
+    targetBotCount: 1,
+    maxBotCount: 1,
+  });
+  assert.throws(() => parseBody(JSON.stringify({
+    operation: "set_desired_state",
+    enabled: true,
+    desiredTableCount: 1,
+    minBotCount: 2,
+    targetBotCount: 1,
+    maxBotCount: 1,
+  })), { code: "invalid_bot_count_order" });
+  assert.throws(() => parseBody(JSON.stringify({
+    operation: "set_desired_state",
+    enabled: true,
+    desiredTableCount: 1,
+    minBotCount: 1,
+  })), { code: "invalid_request" });
+});
+
+test("maintenance proxy forwards the extended bot-count payload unchanged", async () => {
+  let forwarded = null;
+  const handler = createAdminPokerMaintenanceHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws-preview.kcswh.pl",
+      POKER_WS_INTERNAL_TOKEN: "preview-token"
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    buildStageIdentity: previewIdentity,
+    fetchImpl: async (_url, options) => {
+      forwarded = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, operation: "set_desired_state", environment: "preview" })
+      };
+    }
+  });
+
+  const response = await handler(event("POST", JSON.stringify({
+    operation: "set_desired_state",
+    enabled: true,
+    desiredTableCount: 1,
+    minBotCount: 1,
+    targetBotCount: 1,
+    maxBotCount: 1,
+  })));
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual({
+    operation: forwarded.operation,
+    enabled: forwarded.enabled,
+    desiredTableCount: forwarded.desiredTableCount,
+    minBotCount: forwarded.minBotCount,
+    targetBotCount: forwarded.targetBotCount,
+    maxBotCount: forwarded.maxBotCount,
+  }, {
+    operation: "set_desired_state",
+    enabled: true,
+    desiredTableCount: 1,
+    minBotCount: 1,
+    targetBotCount: 1,
+    maxBotCount: 1,
+  });
+  assert.equal(forwarded.actorUserId, "00000000-0000-4000-8000-000000000010");
 });
 
 test("maintenance proxy selects verified Preview/Production target and signs actor context internally", async () => {

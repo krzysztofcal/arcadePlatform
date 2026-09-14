@@ -3472,6 +3472,36 @@ function hasExactKeys(payload, allowedKeys) {
   return Object.keys(payload).every((key) => allowed.has(key));
 }
 
+function hasExactKeySet(payload, allowedKeys) {
+  return hasExactKeys(payload, allowedKeys) && Object.keys(payload).length === allowedKeys.length;
+}
+
+const MAX_PROFILE_BOT_COUNT = 5;
+const SET_DESIRED_STATE_KEYS = [
+  "operation",
+  "enabled",
+  "desiredTableCount",
+  "actorUserId",
+  "requestId"
+];
+const EXTENDED_SET_DESIRED_STATE_KEYS = [
+  ...SET_DESIRED_STATE_KEYS,
+  "minBotCount",
+  "targetBotCount",
+  "maxBotCount"
+];
+
+function validateInternalBotCounts(payload) {
+  const counts = [payload.minBotCount, payload.targetBotCount, payload.maxBotCount];
+  if (!counts.every((count) => Number.isSafeInteger(count) && count >= 0 && count <= MAX_PROFILE_BOT_COUNT)) {
+    return "invalid_bot_count";
+  }
+  if (payload.minBotCount > payload.targetBotCount || payload.targetBotCount > payload.maxBotCount) {
+    return "invalid_bot_count_order";
+  }
+  return null;
+}
+
 async function handleInternalBotReactionConfig(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     sendInternalJson(res, 405, { error: "method_not_allowed" });
@@ -3821,9 +3851,12 @@ async function handleInternalPokerMaintenance(req, res) {
       return;
     }
     let result;
+    const isLegacySetDesiredState = operation === "set_desired_state"
+      && hasExactKeySet(payload, SET_DESIRED_STATE_KEYS);
+    const isExtendedSetDesiredState = operation === "set_desired_state"
+      && hasExactKeySet(payload, EXTENDED_SET_DESIRED_STATE_KEYS);
     if (
-      operation === "set_desired_state"
-      && hasExactKeys(payload, ["operation", "enabled", "desiredTableCount", "actorUserId", "requestId"])
+      (isLegacySetDesiredState || isExtendedSetDesiredState)
       && typeof payload.enabled === "boolean"
       && Number.isInteger(payload.desiredTableCount)
     ) {
@@ -3831,9 +3864,24 @@ async function handleInternalPokerMaintenance(req, res) {
         sendInternalJson(res, 400, { error: "invalid_desired_table_count" });
         return;
       }
+      if (isExtendedSetDesiredState) {
+        const botCountError = validateInternalBotCounts(payload);
+        if (botCountError) {
+          sendInternalJson(res, 400, { error: botCountError });
+          return;
+        }
+      }
+      const botCountPayload = isExtendedSetDesiredState
+        ? {
+            minBotCount: payload.minBotCount,
+            targetBotCount: payload.targetBotCount,
+            maxBotCount: payload.maxBotCount
+          }
+        : {};
       const profileResult = await continuousBotTableRepository?.setDesiredState?.({
         enabled: payload.enabled,
         desiredTableCount: payload.desiredTableCount,
+        ...botCountPayload,
         updatedBy: actorUserId
       });
       if (!profileResult?.ok) {
