@@ -237,10 +237,16 @@ jobs:
               const envFile = process.argv[1];
               let fd;
               try {
-                if (typeof fs.constants.O_NOFOLLOW !== "number") {
-                  throw new Error("O_NOFOLLOW is unavailable");
+                if (
+                  typeof fs.constants.O_NOFOLLOW !== "number"
+                  || typeof fs.constants.O_NONBLOCK !== "number"
+                ) {
+                  throw new Error("required open flags are unavailable");
                 }
-                fd = fs.openSync(envFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+                fd = fs.openSync(
+                  envFile,
+                  fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK
+                );
                 const metadata = fs.fstatSync(fd);
                 if (
                   !metadata.isFile()

@@ -81,9 +81,7 @@ test("ws preview deploy remote script rejects non-stage Supabase env", () => {
 
 test("ws preview deploy validates env-file permissions before reading contents", () => {
   const text = workflowText();
-  const descriptorOpen = text.indexOf(
-    "fs.openSync(envFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)"
-  );
+  const descriptorOpen = text.indexOf("fd = fs.openSync(");
   const descriptorMetadata = text.indexOf("const metadata = fs.fstatSync(fd)", descriptorOpen);
   const descriptorRead = text.indexOf(
     'process.stdout.write(fs.readFileSync(fd, "utf8"))',
@@ -93,11 +91,16 @@ test("ws preview deploy validates env-file permissions before reading contents",
   const sourcedContentCheck = text.indexOf('. /dev/stdin <<<"$ENV_CONTENT"');
 
   assert.ok(descriptorOpen >= 0, "preview env must be opened without following symlinks");
+  assert.match(
+    text,
+    /fs\.openSync\(\s*envFile,\s*fs\.constants\.O_RDONLY \| fs\.constants\.O_NOFOLLOW \| fs\.constants\.O_NONBLOCK\s*\)/
+  );
   assert.ok(descriptorMetadata > descriptorOpen, "opened preview env metadata must be checked");
   assert.ok(descriptorRead > descriptorMetadata, "preview env contents must be read after metadata");
   assert.ok(firstContentCheck > descriptorRead, "content checks must follow the permission preflight");
   assert.ok(sourcedContentCheck > descriptorRead, "sourcing must follow the permission preflight");
   assert.match(text, /typeof fs\.constants\.O_NOFOLLOW !== "number"/);
+  assert.match(text, /typeof fs\.constants\.O_NONBLOCK !== "number"/);
   assert.match(text, /metadata\.isFile\(\)/);
   assert.match(text, /metadata\.uid !== 0/);
   assert.match(text, /metadata\.gid !== 0/);
