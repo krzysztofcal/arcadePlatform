@@ -8,9 +8,9 @@ runtime dumps.
 
 | Component | Path | Classification | Source of truth | Recovery action |
 | --- | --- | --- | --- | --- |
-| Unified Caddy config | `/etc/caddy/Caddyfile` | Reproducible repository configuration | `infra/vps/Caddyfile` | Install the file, validate it, then owner-approved Caddy activation; automatic TLS state is recreated or restored only from an approved private source |
+| Unified Caddy config | `/etc/caddy/Caddyfile` | Reproducible repository configuration | `infra/vps/Caddyfile` | Install the file, validate it, then owner-approved Caddy activation; automatic TLS state is recreated and is not part of the Phase C secret artifact |
 | Caddy package service | `/usr/lib/systemd/system/caddy.service` | Package-managed prerequisite | Supported Ubuntu package, current service contract | Install Caddy; do not copy package files into Git |
-| Caddy certificate/account state | `/var/lib/caddy/.local/share/caddy` | Private provider-managed state, safely recreatable after DNS/80/443 readiness | Caddy package/runtime | Optionally restore through encrypted off-host backup; otherwise let Caddy obtain certificates again |
+| Caddy certificate/account state | `/var/lib/caddy/.local/share/caddy` | Private provider-managed state, safely recreatable after DNS/80/443 readiness; excluded from Phase C artifact | Caddy package/runtime | Let Caddy obtain certificates again; any separate ACME-state recovery requires owner approval |
 | Production WS unit | `/etc/systemd/system/ws-server.service` | Configuration that should be versioned | `infra/vps/ws-server.service` | Install unit, preserve `arcade:arcade`, `/opt/ws-server/current`, absolute Node entrypoint, restart policy, hardening and `/opt/ws-server` write boundary |
 | Production WS env drop-in | `/etc/systemd/system/ws-server.service.d/override.conf` | Configuration that should be versioned | `infra/vps/ws-server.service.d/override.conf` | Install drop-in with required `EnvironmentFile=/etc/arcadeplatform/ws-server.env` |
 | Production WS environment | `/etc/arcadeplatform/ws-server.env` | Secret/private state; names only in repo | Encrypted off-host secret backup and the env schema example | Restore exact values out-of-band; current Phase A ownership/mode was `root:root 0600`; never commit or print values |
@@ -28,15 +28,19 @@ runtime dumps.
 | Runtime users/groups | `arcade`, `copilot`, `arcade-stage-runner`, `wslogs` | Reproducible machine prerequisites | Unit/scheduler/runner contracts and bootstrap | Create accounts/groups and required ownership; do not alter current privileged `sudo`/`docker` membership or deploy grants under #994 |
 | UFW/network baseline | UFW defaults plus TCP 22/80/443 and explicit deny TCP 3000, IPv4+IPv6 | Reproducible machine configuration | Phase A `ufw status verbose`, provider IPv6 route, bootstrap | Apply baseline on a fresh host; keep WS ports private and verify IPv6 route for Stage DB runner |
 | Stage DB network dependency | Provider IPv6 address/default route and direct Stage PostgreSQL reachability | External prerequisite, not a database backup | `DB Stage Apply PR` runner label/contract | Verify IPv6 before runner jobs; do not change Supabase or store Stage DB credentials in VPS recovery files |
+| Encrypted WS secret artifact contract | `infra/vps/vps-secrets-backup.sh`, `infra/vps/vps-secrets-restore.sh` | Versioned recovery tooling; no secret values | Repository scripts plus `age` package and manifest format | Backup only the two active env files with `tar → age`; restore only to a new isolated directory with streamed off-host identity and checksum/member verification; live restore is disabled |
+| Local encrypted artifact generation | `manifest.json`, `vps-secrets.tar.age` inside an owner-selected generation directory | Encrypted off-host recovery artifact; manifest is non-secret metadata | Backup script output copied through an existing owner-controlled channel | Retain and rotate outside the VPS; keep at least two verified generations and never store the private identity with the artifact |
 | Journald | `/var/log/journal` and service journal | Disposable operational evidence | Ubuntu/systemd defaults | Recreate defaults and inspect bounded output when troubleshooting; do not include routine logs in recovery backup |
-| Temporary/cache/Docker state | `/tmp`, npm/NVM caches, Docker images/volumes/build cache, stale worktrees/processes | Disposable runtime/build artifacts | Host runtime, not a recovery source | Exclude from backup; bounded cleanup is explicitly outside Phase B and tracked by #996 |
+| Temporary/cache/Docker state | `/tmp`, npm/NVM caches, Docker images/volumes/build cache, stale worktrees/processes | Disposable runtime/build artifacts | Host runtime, not a recovery source | Exclude from backup; bounded cleanup is explicitly outside this recovery contract and tracked by #996 |
 | Supabase data/Storage | External Stage/Production projects | Separate durability domain, outside this VPS recovery scope | Supabase's own backup/retention controls | Do not touch, back up, restore, or mutate through bootstrap or this issue |
 
 ## Recovery boundary
 
-The repository versions non-secret machine configuration. Encrypted off-host
-storage is required for the two active WS env files and owner-managed GitHub
-authentication. The runner credential path
+The repository versions non-secret machine configuration and the scripts for
+the two-file encrypted WS secret artifact. Encrypted off-host storage is
+required for the two active WS env files; owner-managed GitHub authentication
+is restored through a separate external contract and is not included in this
+artifact. The runner credential path
 `/var/lib/arcade-stage-runner/actions-runner/.credentials` and its generated
 variants are excluded. Runner `.credentials` files, secret values, caches,
 deployed source, `node_modules`, temporary release archives, Docker state, and

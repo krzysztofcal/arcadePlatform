@@ -6,9 +6,15 @@ secret-bearing files only from an approved encrypted off-host source. The
 bootstrap script does not deploy application code; `WS Server Deploy` and
 `WS Preview Deploy` remain the application deployment mechanisms.
 
+Every `PRODUCTION MUTATION` requires separate owner approval. Phase C adds a
+local encrypted artifact contract, but this implementation does not read live
+secret values, create a live backup, restore any live path, restart/reload a
+service, dispatch a workflow, or rotate a key. The full fresh-VPS rehearsal was not performed.
+
 The commands below are a runbook for a future recovery. They were not run as
-part of Phase B. Every `PRODUCTION MUTATION` requires separate owner approval;
-the Phase B implementation itself made no VPS or Production mutation.
+part of Phase B or Phase C. Every `PRODUCTION MUTATION` requires separate owner
+approval; the Phase B and Phase C implementations made no VPS or Production
+mutation.
 
 ## 1. Confirm the supported host — READ-ONLY
 
@@ -73,42 +79,128 @@ entrypoint, `Restart=always`, `RestartSec=2`, the existing hardening flags, and
 `ReadWritePaths=/opt/ws-server`. Its drop-in loads
 `/etc/arcadeplatform/ws-server.env` without adding a second runtime path.
 
-## 4. Restore secret environment files — FRESH-VPS MUTATION
+## 4. Secret artifact operations — PRODUCTION MUTATION / FRESH-VPS MUTATION
 
-Retrieve the exact current Production and Preview env files from the approved
-encrypted off-host recovery source. Verify the backup object/file integrity
-before restoring it, and never paste values into a shell command or log.
+### 4a. Create the encrypted artifact — PRODUCTION MUTATION
 
-Restore only the two active files:
+Creating a backup reads the two active live env files and is therefore a
+secret operation requiring separate owner approval. The repository contract is
+deliberately local and provider-neutral: `vps-secrets-backup.sh` accepts only a
+public `age` recipient and writes one generation directory containing
+`manifest.json` and `vps-secrets.tar.age`.
 
-```bash
-sudo install -o root -g root -m 0600 \
-  /path/from/approved-secret-source/ws-server.env \
-  /etc/arcadeplatform/ws-server.env
-sudo install -o arcade -g arcade -m 0664 \
-  /path/from/approved-secret-source/.env.preview \
-  /opt/arcade-ws-preview/.env.preview
+The scope is hardcoded to exactly:
+
+```text
+/etc/arcadeplatform/ws-server.env
+/opt/arcade-ws-preview/.env.preview
 ```
 
-The Production baseline observed in Phase A is `root:root` mode `0600`. The
-current Preview baseline observed in Phase A is `arcade:arcade` mode `0664`,
-and historical plaintext `.env.preview.*` files must not be restored. Preview
-permission hardening and retirement of old plaintext copies belong to #995 and
-are not implemented by this Phase B change. Update this step only after that
-separate owner-approved contract changes.
-
-Compare variable names, never values, with the repository examples:
+On an approved host, choose a private local artifact directory and supply the
+public recipient from the owner-managed recovery-key record:
 
 ```bash
-sudo awk -F= '/^[A-Z][A-Z0-9_]*=/{print $1}' /etc/arcadeplatform/ws-server.env
-sudo awk -F= '/^[A-Z][A-Z0-9_]*=/{print $1}' /opt/arcade-ws-preview/.env.preview
+sudo install -d -o root -g root -m 0700 /var/lib/arcadeplatform/secret-backups
+sudo ./infra/vps/vps-secrets-backup.sh \
+  --output-dir /var/lib/arcadeplatform/secret-backups \
+  --recipient "$AGE_RECIPIENT"
 ```
 
-The off-host backup contract must be encrypted, retained and rotated outside
-the VPS, with integrity verification and a tested restore procedure. It must
-include only the active secret env files and any explicitly approved
-credential-bearing recovery material; it must exclude values from Git,
-comments, logs, tickets, and this repository.
+`AGE_RECIPIENT` is public key material, not a private identity. The script
+computes source sizes and SHA-256 values directly for each bounded streaming
+attempt, streams `tar -> age -> vps-secrets.tar.age`, retries when the
+observable pre/post source checks differ, and creates no plaintext tar/archive
+file. A successful generation contains
+only the encrypted object and a manifest with metadata and checksums; it never
+prints env contents. A failure cannot be reported as success if its temporary
+artifact cleanup fails.
+
+This is a bounded consistency check, not a filesystem snapshot. Do not edit
+either active env file during the operation; if an external writer is active,
+stop and repeat the owner-approved backup procedure after the writer is quiet.
+
+The non-secret manifest fields are `format`, `version`, `timestamp`,
+`encrypted_object`, `encrypted_sha256`, and one entry per required file with
+`source_path`, `filename`, `plaintext_byte_size`, and `plaintext_sha256`.
+
+Do not add any other path to the artifact. In particular, it excludes runner
+`.credentials`, GitHub tokens, Caddy ACME state, release trees,
+`node_modules`, caches, `/tmp`, journald, and Supabase DB/Storage.
+
+### 4b. Copy and retain the artifact off-host — READ-ONLY
+
+After the command succeeds, verify the generation directory contains only
+`manifest.json` and `vps-secrets.tar.age`, and verify the
+`encrypted_sha256` value from the manifest without opening or printing the
+encrypted payload. Copy the
+whole generation directory through an existing owner-controlled off-host
+storage channel. This PR adds no uploader or storage provider integration.
+
+The off-host retention policy must retain at least two independently verified
+generations, must never delete the last known-good generation, and must keep
+the manifest beside its encrypted object. Retention deletion and artifact
+rotation are owner-approved off-host operations; do not use this procedure to
+delete historical env backups on the VPS.
+
+### 4c. Restore and verify into an isolated directory — FRESH-VPS MUTATION
+
+The restore script requires a new, isolated `--restore-dir`; it rejects the
+live Production, Preview, and release roots. It validates the manifest and
+encrypted SHA-256, decrypts with `age`, checks the exact archive member names,
+then compares the two restored filenames, byte sizes, and SHA-256 values
+without printing their contents.
+
+The private identity must be streamed from the owner's off-host key handling
+into stdin. Never copy an identity file to the VPS, put it in an environment
+file, shell history, Git, or the artifact directory. The following is a
+shape-only example; `OWNER_OFF_HOST_IDENTITY_STREAM` must be an external
+owner-controlled producer, not a VPS path:
+
+```bash
+RESTORE_PARENT="$(mktemp -d /var/tmp/arcadeplatform-vps-restore.XXXXXX)"
+RESTORE_DIR="$RESTORE_PARENT/verified-secrets"
+
+OWNER_OFF_HOST_IDENTITY_STREAM \
+  | sudo ./infra/vps/vps-secrets-restore.sh \
+      --artifact-dir /var/lib/arcadeplatform/secret-backups/arcadeplatform-vps-secrets-<UTC> \
+      --restore-dir "$RESTORE_DIR" \
+      --identity-stdin
+```
+
+The script keeps the decrypted archive only in a temporary directory during
+verification and removes that archive and directory before returning success.
+The verified plaintext files remain only in the explicitly isolated
+`RESTORE_DIR` until the operator completes the verification and cleanup:
+
+```bash
+sudo rm -rf -- "$RESTORE_DIR"
+sudo rmdir -- "$RESTORE_PARENT"
+```
+
+Those commands are limited to the newly-created dedicated restore directory;
+never substitute a live path or a broad parent directory. A failed restore
+also attempts to remove the newly-created isolated target and fails closed if
+cleanup cannot be confirmed.
+
+### 4d. Place verified env files on live paths — PRODUCTION MUTATION
+
+This live placement is intentionally not implemented or executed in Phase C.
+After a successful isolated verification and a separate owner approval, the
+owner-controlled recovery procedure may write the verified values to exactly
+`/etc/arcadeplatform/ws-server.env` and
+`/opt/arcade-ws-preview/.env.preview`, preserving the audited ownership/mode
+contract. `vps-secrets-restore.sh` has no live mode and rejects live targets;
+do not bypass that safety boundary in this PR. Never use the repository
+examples as a source of live secret values.
+
+### 4e. Recovery-key handling and rotation — READ-ONLY
+
+The public `age` recipient may be recorded with the non-secret recovery
+contract. The private identity key belongs only in an owner-approved external
+key store. It must not be stored on the VPS, in Git, in runner credentials,
+or in the artifact. If the recipient key is rotated, create a new generation,
+verify its isolated restore, retain the previous known-good generation until
+that verification is complete, and document the owner approval separately.
 
 ## 5. Install and activate Caddy — PRODUCTION MUTATION
 
@@ -123,9 +215,10 @@ sudo systemctl cat caddy
 
 After separate owner approval, enable/start Caddy and verify that DNS points to
 the host and ports 80/443 are reachable. Caddy's certificate/account state is
-provider-managed private state under `/var/lib/caddy/.local/share/caddy`; it
-may be restored only through an approved encrypted/off-host mechanism, or
-recreated after DNS and ports 80/443 are ready. It is not committed here.
+provider-managed private state under `/var/lib/caddy/.local/share/caddy`; it is
+not included in the Phase C artifact. Recreate it after DNS and ports 80/443
+are ready. A separate ACME-state recovery would require a new owner-approved
+scope and is not part of this runbook.
 
 ## 6. Apply Production and Preview systemd units — FRESH-VPS MUTATION / PRODUCTION MUTATION
 
@@ -214,7 +307,7 @@ sudo systemctl start arcade-chips-ledger-dispatch.timer
 ```
 
 Do not manually invoke the dispatcher or dispatch a workflow during this
-Phase B implementation. Verify its unit/timer state and bounded journal output
+Phase C implementation. Verify its unit/timer state and bounded journal output
 read-only after an approved recovery activation.
 
 ## 9. Deploy Production through the existing workflow — PRODUCTION MUTATION
@@ -228,8 +321,8 @@ smoke-check. Do not copy source trees or `node_modules` from a backup and do
 not add an application deployment path to `bootstrap.sh`.
 
 The workflow may be invoked through its existing approved push or
-`workflow_dispatch` path. This runbook records the contract only; Phase B did
-not dispatch it. Any Production deployment, restart, or rollback requires
+`workflow_dispatch` path. This runbook records the contract only; Phase B and
+Phase C did not dispatch it. Any Production deployment, restart, or rollback requires
 separate owner approval.
 
 ## 10. Deploy Preview through the existing workflow — FRESH-VPS MUTATION
