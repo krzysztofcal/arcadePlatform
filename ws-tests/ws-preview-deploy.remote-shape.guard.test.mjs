@@ -79,6 +79,38 @@ test("ws preview deploy remote script rejects non-stage Supabase env", () => {
   assert.match(text, /WS_BOT_REACTION_\(MIN\|MAX\)_MS/);
 });
 
+test("ws preview deploy validates env-file permissions before reading contents", () => {
+  const text = workflowText();
+  const descriptorOpen = text.indexOf(
+    "fs.openSync(envFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)"
+  );
+  const descriptorMetadata = text.indexOf("const metadata = fs.fstatSync(fd)", descriptorOpen);
+  const descriptorRead = text.indexOf(
+    'process.stdout.write(fs.readFileSync(fd, "utf8"))',
+    descriptorMetadata
+  );
+  const firstContentCheck = text.indexOf('grep -Eq "^PORT=3001$" <<<"$ENV_CONTENT"');
+  const sourcedContentCheck = text.indexOf('. /dev/stdin <<<"$ENV_CONTENT"');
+
+  assert.ok(descriptorOpen >= 0, "preview env must be opened without following symlinks");
+  assert.ok(descriptorMetadata > descriptorOpen, "opened preview env metadata must be checked");
+  assert.ok(descriptorRead > descriptorMetadata, "preview env contents must be read after metadata");
+  assert.ok(firstContentCheck > descriptorRead, "content checks must follow the permission preflight");
+  assert.ok(sourcedContentCheck > descriptorRead, "sourcing must follow the permission preflight");
+  assert.match(text, /typeof fs\.constants\.O_NOFOLLOW !== "number"/);
+  assert.match(text, /metadata\.isFile\(\)/);
+  assert.match(text, /metadata\.uid !== 0/);
+  assert.match(text, /metadata\.gid !== 0/);
+  assert.match(text, /metadata\.mode & 0o7777/);
+  assert.match(text, /!== 0o600/);
+  assert.match(text, /regular file owned by root:root with mode 0600/);
+  assert.match(text, /must not be a symlink/);
+  assert.doesNotMatch(text, /fs\.readFileSync\(envFile/);
+  assert.doesNotMatch(text, /grep -Eq [^\n]*\"\$PREVIEW_ENV_FILE\"/);
+  assert.doesNotMatch(text, /\. \"\$PREVIEW_ENV_FILE\"/);
+  assert.doesNotMatch(text, /\b(?:chmod|chown)\b/);
+});
+
 test("ws preview deploy verifies release identity before and after rsync and after restart", () => {
   const text = workflowText();
   const beforeRsync = text.indexOf('verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json"');

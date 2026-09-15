@@ -16,7 +16,8 @@ runtime dumps.
 | Production WS environment | `/etc/arcadeplatform/ws-server.env` | Secret/private state; names only in repo | Encrypted off-host secret backup and the env schema example | Restore exact values out-of-band; current Phase A ownership/mode was `root:root 0600`; never commit or print values |
 | Production release layout | `/opt/ws-server`, `/opt/ws-server/releases`, `/opt/ws-server/current` | Reconstructible application/runtime state | `WS Server Deploy` workflow and unit contract | Create empty layout; deploy approved artifacts through the existing workflow; exclude source trees, `node_modules`, releases and caches from backup |
 | Preview WS unit | `/etc/systemd/system/ws-server-preview.service` | Configuration that should be versioned | `infra/vps/ws-server-preview.service.example` | Install unit with `arcade`, `/opt/arcade-ws-preview/ws-server`, external env path and port 3001 |
-| Preview WS environment | `/opt/arcade-ws-preview/.env.preview` | Secret/private state; names only in repo | Encrypted off-host secret backup and the env schema example | Restore exact Stage-targeted values out-of-band; Phase A observed `arcade:arcade 0664`; hardening/old plaintext backup retirement belongs to #995 |
+| Preview WS environment | `/opt/arcade-ws-preview/.env.preview` | Secret/private state; names only in repo | Encrypted off-host secret backup and the env schema example | Restore exact Stage-targeted values out-of-band; current target is a regular non-symlinked file with `root:root 0600`; Phase A observed `arcade:arcade 0664` as historical context |
+| Historical Preview env backups | `/opt/arcade-ws-preview/.env.preview.*` (excluding active `.env.preview`) | Legacy plaintext state; not a recovery source | None; recovery relies on the encrypted off-host artifact | Never restore; retain or remove only through a separate owner-approved operation after recovery verification |
 | Preview release layout | `/opt/arcade-ws-preview`, `/opt/arcade-ws-preview/ws-server` | Reconstructible application/runtime state | `WS Preview Deploy` workflow and unit contract | Create empty layout; deploy an approved ref through the existing manual workflow; exclude release/build/cache state |
 | Stage scheduler service | `/etc/systemd/system/arcade-chips-ledger-dispatch.service` | Configuration that should be versioned | `infra/vps/arcade-chips-ledger-dispatch.service` | Install as `copilot`, restore GitHub CLI auth externally, and enable only in an owner-approved recovery |
 | Stage scheduler timer | `/etc/systemd/system/arcade-chips-ledger-dispatch.timer` | Configuration that should be versioned | `infra/vps/arcade-chips-ledger-dispatch.timer` | Install the 15-minute and `02:04 UTC` calendar; do not add the future Production retention scheduler from #891 |
@@ -37,14 +38,13 @@ runtime dumps.
 ## Recovery boundary
 
 The repository versions non-secret machine configuration and the scripts for
-the two-file encrypted WS secret artifact. Encrypted off-host storage is
-required for the two active WS env files; owner-managed GitHub authentication
-is restored through a separate external contract and is not included in this
-artifact. The runner credential path
+the two-file encrypted WS secret artifact. The active Preview env file targets
+`root:root 0600`; historical `.env.preview.*` files are not a recovery source.
+Encrypted off-host storage is required for the two active WS env files;
+owner-managed GitHub authentication is restored through a separate external
+contract and is not included in this artifact. The runner credential path
 `/var/lib/arcade-stage-runner/actions-runner/.credentials` and its generated
 variants are excluded. Runner `.credentials` files, secret values, caches,
 deployed source, `node_modules`, temporary release archives, Docker state, and
 routine journald output are excluded. #994 (least-privilege sudo/token
-hardening), #995 (Preview secret permissions/plaintext backups), and #996
-(runtime/disk cleanup) remain separate follow-up work and were not implemented
-here.
+hardening) and #996 (runtime/disk cleanup) remain separate follow-up work.
