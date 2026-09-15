@@ -54,7 +54,11 @@ runner.
 placeholders/defaults only. The two real env files are the only secret-bearing
 files in the Phase C artifact. GitHub CLI authentication and any other
 credential-bearing material use separate owner-managed external contracts and
-are not included in this artifact. Never commit or print their values.
+are not included in this artifact. The active Preview env file must be a
+regular, non-symlinked file owned by `root:root` with mode `0600`. Phase A
+observed the historical `arcade:arcade 0664` Preview baseline; historical
+plaintext `.env.preview.*` files are not a recovery source. Never commit or
+print secret values.
 
 The Phase C secret artifact contract is implemented by
 `vps-secrets-backup.sh` and `vps-secrets-restore.sh`. The backup hardcodes the
@@ -66,9 +70,10 @@ disabled in this contract. Copy the completed artifact directory to approved
 off-host storage using an existing owner-controlled channel.
 
 Do not back up deployed release trees, `node_modules`, temporary archives,
-runner `_work`/`_diag`, npm/NVM caches, Docker caches, `/tmp` state, journald
-output, Caddy ACME state, or Supabase DB/Storage. These are reconstructed or
-disposable; cleanup is outside this recovery contract and belongs to #996.
+historical `.env.preview.*` files, runner `_work`/`_diag`, npm/NVM caches,
+Docker caches, `/tmp` state, journald output, Caddy ACME state, or Supabase
+DB/Storage. These are reconstructed or disposable; cleanup is outside this
+recovery contract and belongs to #996.
 
 The Caddyfile is reproducible from Git. Caddy's certificate/account state under
 `/var/lib/caddy/.local/share/caddy` is private provider-managed state and is not

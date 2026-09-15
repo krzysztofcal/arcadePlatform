@@ -232,22 +232,53 @@ jobs:
             sudo -n systemctl cat "$PREVIEW_SERVICE_NAME" >/dev/null 2>&1 || { echo "missing preview systemd unit: $PREVIEW_SERVICE_NAME"; exit 1; }
             sudo -n test -d "$PREVIEW_BASE_DIR" || { echo "missing preview base dir: $PREVIEW_BASE_DIR"; exit 1; }
             sudo -n test -d "$PREVIEW_APP_DIR" || { echo "missing preview app dir: $PREVIEW_APP_DIR"; exit 1; }
-            sudo -n test -f "$PREVIEW_ENV_FILE" || { echo "missing preview env file: $PREVIEW_ENV_FILE"; exit 1; }
-            sudo -n grep -Eq '^PORT=3001$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define PORT=3001"; exit 1; }
-            sudo -n grep -Eq '^WS_AUTHORITATIVE_JOIN_ENABLED=1$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1"; exit 1; }
-            sudo -n grep -Eq '^SUPABASE_DB_URL=.+$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define SUPABASE_DB_URL"; exit 1; }
-            sudo -n grep -Eq '^SUPABASE_STAGE_PROJECT_REF=.+$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define SUPABASE_STAGE_PROJECT_REF"; exit 1; }
-            sudo -n grep -Eq '^POKER_WS_INTERNAL_TOKEN=.+$' "$PREVIEW_ENV_FILE" || { echo "preview env file must define POKER_WS_INTERNAL_TOKEN"; exit 1; }
-            if sudo -n grep -Eq '^WS_BOT_REACTION_(MIN|MAX)_MS=' "$PREVIEW_ENV_FILE"; then
-              echo "preview env file must not define legacy WS_BOT_REACTION_MIN_MS or WS_BOT_REACTION_MAX_MS"
-              exit 1
-            fi
-            sudo -n bash -c '
+            if ! sudo -n node -e '
+              const fs = require("fs");
+              const envFile = process.argv[1];
+              let fd;
+              try {
+                if (
+                  typeof fs.constants.O_NOFOLLOW !== "number"
+                  || typeof fs.constants.O_NONBLOCK !== "number"
+                ) {
+                  throw new Error("required open flags are unavailable");
+                }
+                fd = fs.openSync(
+                  envFile,
+                  fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK
+                );
+                const metadata = fs.fstatSync(fd);
+                if (
+                  !metadata.isFile()
+                  || metadata.uid !== 0
+                  || metadata.gid !== 0
+                  || (metadata.mode & 0o7777) !== 0o600
+                ) {
+                  throw new Error("preview env file contract");
+                }
+                process.stdout.write(fs.readFileSync(fd, "utf8"));
+              } catch {
+                process.stderr.write("preview env file must be a regular file owned by root:root with mode 0600 and must not be a symlink\n");
+                process.exitCode = 1;
+              } finally {
+                if (fd !== undefined) fs.closeSync(fd);
+              }
+            ' "$PREVIEW_ENV_FILE" | sudo -n bash -c '
               set -Eeuo pipefail
-              env_file="$1"
+              ENV_CONTENT="$(cat)"
+              grep -Eq "^PORT=3001$" <<<"$ENV_CONTENT" || { echo "preview env file must define PORT=3001"; exit 1; }
+              grep -Eq "^WS_AUTHORITATIVE_JOIN_ENABLED=1$" <<<"$ENV_CONTENT" || { echo "preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1"; exit 1; }
+              grep -Eq "^SUPABASE_DB_URL=.+$" <<<"$ENV_CONTENT" || { echo "preview env file must define SUPABASE_DB_URL"; exit 1; }
+              grep -Eq "^SUPABASE_STAGE_PROJECT_REF=.+$" <<<"$ENV_CONTENT" || { echo "preview env file must define SUPABASE_STAGE_PROJECT_REF"; exit 1; }
+              grep -Eq "^POKER_WS_INTERNAL_TOKEN=.+$" <<<"$ENV_CONTENT" || { echo "preview env file must define POKER_WS_INTERNAL_TOKEN"; exit 1; }
+              if grep -Eq "^WS_BOT_REACTION_(MIN|MAX)_MS=" <<<"$ENV_CONTENT"; then
+                echo "preview env file must not define legacy WS_BOT_REACTION_MIN_MS or WS_BOT_REACTION_MAX_MS"
+                exit 1
+              fi
               set -a
-              . "$env_file"
+              . /dev/stdin <<<"$ENV_CONTENT"
               set +a
+              unset ENV_CONTENT
               stage_ref="${SUPABASE_STAGE_PROJECT_REF:-}"
               supabase_url="${SUPABASE_URL:-${SUPABASE_URL_V2:-}}"
               db_url="${SUPABASE_DB_URL:-}"
@@ -263,7 +294,10 @@ jobs:
                 *"postgres.$stage_ref"*|*"//$stage_ref."*|*".$stage_ref."*) ;;
                 *) echo "preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF"; exit 1 ;;
               esac
-            ' bash "$PREVIEW_ENV_FILE"
+            '; then
+              echo "preview env file preflight/content validation failed"
+              exit 1
+            fi
 
             test -f "$TMP_ARCHIVE"
 

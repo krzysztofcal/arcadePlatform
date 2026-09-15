@@ -96,6 +96,13 @@ The scope is hardcoded to exactly:
 /opt/arcade-ws-preview/.env.preview
 ```
 
+The current Preview secret contract is a regular, non-symlinked
+`/opt/arcade-ws-preview/.env.preview` owned by `root:root` with mode `0600`.
+The Phase A audit observed the historical Preview baseline `arcade:arcade 0664`;
+that value is retained as historical context only. Historical plaintext
+`.env.preview.*` files are not a recovery source and must not be restored;
+recovery relies on the encrypted artifact copied to approved off-host storage.
+
 On an approved host, choose a private local artifact directory and supply the
 public recipient from the owner-managed recovery-key record:
 
@@ -124,8 +131,9 @@ The non-secret manifest fields are `format`, `version`, `timestamp`,
 `source_path`, `filename`, `plaintext_byte_size`, and `plaintext_sha256`.
 
 Do not add any other path to the artifact. In particular, it excludes runner
-`.credentials`, GitHub tokens, Caddy ACME state, release trees,
-`node_modules`, caches, `/tmp`, journald, and Supabase DB/Storage.
+`.credentials`, GitHub tokens, historical `.env.preview.*` files, Caddy ACME
+state, release trees, `node_modules`, caches, `/tmp`, journald, and Supabase
+DB/Storage.
 
 ### 4b. Copy and retain the artifact off-host — READ-ONLY
 
@@ -188,10 +196,10 @@ This live placement is intentionally not implemented or executed in Phase C.
 After a successful isolated verification and a separate owner approval, the
 owner-controlled recovery procedure may write the verified values to exactly
 `/etc/arcadeplatform/ws-server.env` and
-`/opt/arcade-ws-preview/.env.preview`, preserving the audited ownership/mode
-contract. `vps-secrets-restore.sh` has no live mode and rejects live targets;
-do not bypass that safety boundary in this PR. Never use the repository
-examples as a source of live secret values.
+`/opt/arcade-ws-preview/.env.preview`, preserving the active `root:root 0600`
+ownership/mode contract. `vps-secrets-restore.sh` has no live mode and rejects
+live targets; do not bypass that safety boundary in this PR. Never use the
+repository examples as a source of live secret values.
 
 ### 4e. Recovery-key handling and rotation — READ-ONLY
 
@@ -329,9 +337,10 @@ separate owner approval.
 
 Use the existing manual **WS Preview Deploy** workflow with the approved
 `ref`. It reconstructs `/opt/arcade-ws-preview/ws-server`, preserves the
-external Preview env file, restarts only `ws-server-preview.service`, and
-checks local/public Preview health. It does not manage Caddy and it is not a
-Production deployment. Do not auto-dispatch it from this recovery bootstrap.
+external Preview env file after its `root:root 0600` regular-file preflight,
+restarts only `ws-server-preview.service`, and checks local/public Preview
+health. It does not manage Caddy and it is not a Production deployment. Do
+not auto-dispatch it from this recovery bootstrap.
 
 ## 11. Check local and public health — READ-ONLY
 
