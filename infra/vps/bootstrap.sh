@@ -12,12 +12,7 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 for existing_marker in \
-  /etc/caddy/Caddyfile \
   /etc/arcadeplatform/ws-server.env \
-  /etc/systemd/system/ws-server.service \
-  /etc/systemd/system/ws-server.service.d/override.conf \
-  /etc/systemd/system/ws-server-preview.service \
-  /etc/systemd/system/arcade-chips-ledger-dispatch.timer \
   /opt/ws-server/current \
   /opt/arcade-ws-preview/.env.preview; do
   if [[ -e "$existing_marker" || -L "$existing_marker" ]]; then

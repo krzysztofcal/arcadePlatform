@@ -142,7 +142,7 @@ test("infra VPS repository versions the audited production WS and Stage schedule
   }
 
   const override = fileText("infra/vps/ws-server.service.d/override.conf");
-  assert.match(override, /^EnvironmentFile=-\/etc\/arcadeplatform\/ws-server\.env$/m);
+  assert.match(override, /^EnvironmentFile=\/etc\/arcadeplatform\/ws-server\.env$/m);
 
   const schedulerService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
   for (const line of [
@@ -232,6 +232,9 @@ test("infra VPS environment examples expose only the audited variable names with
       );
     }
     assert.doesNotMatch(text, /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|-----BEGIN|eyJ[A-Za-z0-9_-]{20,}/);
+    if (path === "infra/vps/ws-production.env.example") {
+      assert.match(text, /^WS_POKER_CLOSED_TABLE_RETENTION_MS=0$/m);
+    }
   }
 });
 
@@ -243,8 +246,19 @@ test("infra VPS bootstrap is shell-valid, fresh-VPS guarded, and cannot dispatch
   const text = fileText(path);
   assert.match(text, /ARCADEPLATFORM_BOOTSTRAP_TARGET.*fresh-vps/);
   assert.match(text, /existing runtime marker/);
-  assert.match(text, /\/etc\/arcadeplatform\/ws-server\.env/);
-  assert.match(text, /\/opt\/ws-server\/current/);
+  const guardStart = text.indexOf("for existing_marker in");
+  const guardEnd = text.indexOf("\ndone", guardStart);
+  assert.notEqual(guardStart, -1);
+  assert.notEqual(guardEnd, -1);
+  const guard = text.slice(guardStart, guardEnd);
+  for (const marker of [
+    "/etc/arcadeplatform/ws-server.env",
+    "/opt/ws-server/current",
+    "/opt/arcade-ws-preview/.env.preview"
+  ]) {
+    assert.ok(guard.includes(marker), `bootstrap guard must protect ${marker}`);
+  }
+  assert.doesNotMatch(guard, /\/etc\/caddy\/Caddyfile|\/etc\/systemd\/system\/|arcade-chips-ledger-dispatch\.timer/);
   assert.match(text, /postgresql-client/);
   assert.match(text, /systemctl daemon-reload/);
   assert.doesNotMatch(text, /gh workflow run|workflow_dispatch/);
