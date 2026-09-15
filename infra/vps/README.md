@@ -11,6 +11,9 @@ deployment workflows.
 - Node.js 20.x at `/usr/bin/node`.
 - Caddy from the supported Ubuntu package source, with the repository
   `Caddyfile` installed at `/etc/caddy/Caddyfile`.
+- Bootstrap runtime-masks `caddy.service` during package installation, then
+  removes the temporary mask and leaves Caddy disabled and unstarted until
+  the owner-approved activation step in the recovery runbook.
 - `curl`, `git`, `gzip`, `postgresql-client`, `rsync`, `tar`, `ufw`, `unzip`,
   `openssh-server`, and the GitHub CLI for the external Stage dispatcher and
   runner prerequisites. The PostgreSQL client is required by `DB Stage Apply

@@ -41,7 +41,9 @@ The bootstrap installs Node.js 20 when needed, Caddy, the deployment/runtime
 utilities including `postgresql-client`, runner libraries, the `arcade`,
 `copilot`, `arcade-stage-runner`, and `wslogs` accounts/groups, the `/opt` and
 runner directories, the IPv6 sysctl baseline, and the UFW baseline. It
-installs but does not enable or
+runtime-masks `caddy.service` during package installation to prevent a package
+auto-start, then removes the temporary mask and disables Caddy without
+starting it. It installs but does not enable or
 start the WS services or Stage scheduler, and it does not register a runner,
 restore secrets, contact Supabase, dispatch a workflow, deploy application
 code, or run cleanup.

@@ -36,6 +36,11 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
+caddy_runtime_masked=0
+trap 'if [[ "$caddy_runtime_masked" -eq 1 ]]; then systemctl unmask caddy.service; fi' EXIT
+systemctl mask --runtime caddy.service
+caddy_runtime_masked=1
+
 apt-get update
 apt-get install -y \
   ca-certificates \
@@ -56,6 +61,11 @@ apt-get install -y \
   ufw \
   unzip \
   zlib1g
+
+systemctl unmask caddy.service
+caddy_runtime_masked=0
+trap - EXIT
+systemctl disable caddy.service >/dev/null 2>&1 || true
 
 node_major=""
 if command -v node >/dev/null 2>&1; then
@@ -136,6 +146,7 @@ systemctl daemon-reload
 cat <<'NOTICE'
 Bootstrap prepared the fresh Ubuntu VPS. It did not restore secret env files,
 register the GitHub runner, enable/start WS services, or enable/start the Stage
-scheduler. Follow docs/vps-disaster-recovery.md for the owner-approved recovery
-sequence.
+scheduler. Caddy was left disabled and unstarted after its package installation;
+follow docs/vps-disaster-recovery.md for the owner-approved activation and
+recovery sequence.
 NOTICE

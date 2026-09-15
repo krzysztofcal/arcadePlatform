@@ -34,9 +34,21 @@ test("infra VPS path filters keep PR validation broad and production apply narro
   const prPaths = text.slice(prStart, pushStart);
   const pushPaths = text.slice(pushStart, dispatchStart);
 
-  assert.ok(prPaths.includes('"infra/vps/**"'));
-  assert.match(pushPaths, /paths:\n\s+- "infra\/vps\/Caddyfile"\n\s+- "\.github\/workflows\/infra-vps\.yml"/);
-  assert.doesNotMatch(pushPaths, /"infra\/vps\/\*\*"/);
+  function pathEntries(section) {
+    const lines = section.split("\n");
+    const pathsIndex = lines.findIndex((line) => line.trim() === "paths:");
+    assert.notEqual(pathsIndex, -1);
+    const entries = [];
+    for (const line of lines.slice(pathsIndex + 1)) {
+      const match = line.match(/^\s+- "([^"]+)"$/);
+      if (!match) break;
+      entries.push(match[1]);
+    }
+    return entries;
+  }
+
+  assert.deepEqual(pathEntries(prPaths), ["infra/vps/**", ".github/workflows/infra-vps.yml"]);
+  assert.deepEqual(pathEntries(pushPaths), ["infra/vps/Caddyfile"]);
 });
 
 test("infra VPS guard coverage includes the unified Caddy contract test", () => {
@@ -260,6 +272,13 @@ test("infra VPS bootstrap is shell-valid, fresh-VPS guarded, and cannot dispatch
   }
   assert.doesNotMatch(guard, /\/etc\/caddy\/Caddyfile|\/etc\/systemd\/system\/|arcade-chips-ledger-dispatch\.timer/);
   assert.match(text, /postgresql-client/);
+  const caddyMaskIndex = text.indexOf("systemctl mask --runtime caddy.service");
+  const caddyInstallIndex = text.indexOf("apt-get install -y");
+  const caddyUnmaskIndex = text.lastIndexOf("systemctl unmask caddy.service");
+  assert.ok(caddyMaskIndex >= 0 && caddyMaskIndex < caddyInstallIndex);
+  assert.ok(caddyUnmaskIndex > caddyInstallIndex);
+  assert.match(text, /systemctl disable caddy.service/);
+  assert.doesNotMatch(text, /systemctl\s+(enable|start|restart|reload).*caddy\.service/);
   assert.match(text, /systemctl daemon-reload/);
   assert.doesNotMatch(text, /gh workflow run|workflow_dispatch/);
   assert.doesNotMatch(text, /supabase/i);
