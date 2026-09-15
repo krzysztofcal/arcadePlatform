@@ -43,6 +43,7 @@ caddy_runtime_masked=1
 
 apt-get update
 apt-get install -y \
+  age \
   ca-certificates \
   caddy \
   curl \

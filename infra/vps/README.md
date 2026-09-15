@@ -14,10 +14,12 @@ deployment workflows.
 - Bootstrap runtime-masks `caddy.service` during package installation, then
   removes the temporary mask and leaves Caddy disabled and unstarted until
   the owner-approved activation step in the recovery runbook.
-- `curl`, `git`, `gzip`, `postgresql-client`, `rsync`, `tar`, `ufw`, `unzip`,
-  `openssh-server`, and the GitHub CLI for the external Stage dispatcher and
-  runner prerequisites. The PostgreSQL client is required by `DB Stage Apply
-  PR` for its direct Stage read-only preflight and migration apply.
+- `age`, `curl`, `git`, `gzip`, `postgresql-client`, `rsync`, `tar`, `ufw`,
+  `unzip`, `openssh-server`, and the GitHub CLI for the external Stage
+  dispatcher and runner prerequisites. `age` is used by the local encrypted
+  VPS secret artifact contract; only its public recipient is supplied to the
+  backup command. The PostgreSQL client is required by `DB Stage Apply PR` for
+  its direct Stage read-only preflight and migration apply.
 - IPv6 enabled with a working provider route. The self-hosted Stage DB runner
   must be able to reach the direct Stage PostgreSQL endpoint over IPv6.
 
@@ -49,19 +51,30 @@ runner.
 ## Secret and disposable state boundary
 
 `ws-production.env.example` and `ws-preview.env.example` contain names plus
-placeholders/defaults only. The real env files, GitHub CLI authentication, and
-any other credential-bearing material must be restored from an encrypted,
-off-host source. Never commit or print their values.
+placeholders/defaults only. The two real env files are the only secret-bearing
+files in the Phase C artifact. GitHub CLI authentication and any other
+credential-bearing material use separate owner-managed external contracts and
+are not included in this artifact. Never commit or print their values.
+
+The Phase C secret artifact contract is implemented by
+`vps-secrets-backup.sh` and `vps-secrets-restore.sh`. The backup hardcodes the
+two active env files, streams `tar` directly into `age`, and writes a
+non-secret `manifest.json` beside the encrypted `vps-secrets.tar.age` object.
+The restore accepts the private age identity only through stdin and writes
+only to a newly-created isolated directory; live restore is intentionally
+disabled in this contract. Copy the completed artifact directory to approved
+off-host storage using an existing owner-controlled channel.
 
 Do not back up deployed release trees, `node_modules`, temporary archives,
-runner `_work`/`_diag`, npm/NVM caches, Docker caches, `/tmp` state, or
-journald output. These are reconstructed or disposable; cleanup is outside
-Phase B and belongs to #996.
+runner `_work`/`_diag`, npm/NVM caches, Docker caches, `/tmp` state, journald
+output, Caddy ACME state, or Supabase DB/Storage. These are reconstructed or
+disposable; cleanup is outside this recovery contract and belongs to #996.
 
 The Caddyfile is reproducible from Git. Caddy's certificate/account state under
-`/var/lib/caddy/.local/share/caddy` is private provider-managed state: retain it
-only through an approved encrypted/off-host mechanism if desired, otherwise
-allow Caddy to re-obtain certificates after DNS and ports 80/443 are ready.
+`/var/lib/caddy/.local/share/caddy` is private provider-managed state and is not
+included in the Phase C secret artifact. Allow Caddy to re-obtain certificates
+after DNS and ports 80/443 are ready; any separate ACME-state recovery needs a
+new owner-approved scope.
 
 ## Runner contract
 

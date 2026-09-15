@@ -250,6 +250,110 @@ test("infra VPS environment examples expose only the audited variable names with
   }
 });
 
+test("infra VPS secret backup is a two-file streaming age artifact with a non-secret manifest", () => {
+  const backupPath = "infra/vps/vps-secrets-backup.sh";
+  const restorePath = "infra/vps/vps-secrets-restore.sh";
+  assert.equal(fs.existsSync(backupPath), true, `${backupPath} must exist`);
+  assert.equal(fs.existsSync(restorePath), true, `${restorePath} must exist`);
+
+  const backup = fileText(backupPath);
+  const restore = fileText(restorePath);
+  const backupContract = backup.replace(/\\\n\s*/g, " ");
+  const restoreContract = restore.replace(/\\\n\s*/g, " ");
+
+  for (const path of [backupPath, restorePath]) {
+    const syntax = spawnSync("bash", ["-n", path], { encoding: "utf8" });
+    assert.equal(syntax.status, 0, `${path}: ${syntax.stderr}`);
+  }
+
+  for (const sourcePath of [
+    "/etc/arcadeplatform/ws-server.env",
+    "/opt/arcade-ws-preview/.env.preview"
+  ]) {
+    assert.ok(backup.includes(sourcePath), `backup must include ${sourcePath}`);
+  }
+  assert.deepEqual(
+    [...backup.matchAll(/^readonly SOURCE_[A-Z]+="([^"]+)"$/gm)].map((match) => match[1]),
+    ["/etc/arcadeplatform/ws-server.env", "/opt/arcade-ws-preview/.env.preview"]
+  );
+  assert.match(backupContract, /tar\b[^\n]*--directory=\/[^\n]*--[^\n]*etc\/arcadeplatform\/ws-server\.env/);
+  assert.match(backupContract, /tar\b[^\n]*\|\s*age\b[^\n]*--encrypt/);
+  assert.match(backup, /readonly ENCRYPTED_OBJECT=\"vps-secrets\.tar\.age\"/);
+  assert.match(backupContract, /--output\s+\"\$encrypted_path\"/);
+  assert.match(backup, /set -o pipefail|set -Eeuo pipefail/);
+  assert.match(backup, /mktemp -d/);
+  assert.match(backup, /trap .*cleanup|trap cleanup/);
+  assert.match(backup, /rmdir/);
+  const outputGuardIndex = backup.indexOf('case "$OUTPUT_ROOT"');
+  const outputCreateIndex = backup.indexOf('mkdir -p -- "$OUTPUT_ROOT"');
+  assert.ok(outputGuardIndex >= 0 && outputGuardIndex < outputCreateIndex);
+  assert.match(backupContract, /--file=-/);
+  assert.match(backup, /mv -T -- \"\$ARTIFACT_STAGE\" \"\$artifact_dir\"/);
+  assert.match(backup, /for attempt in 1 2 3/);
+  assert.match(backup, /source changed during attempt/);
+  assert.doesNotMatch(backupContract, /tar\b[^\n]*(?:-f|--file=)\s*\"\$[^\"]*(?:\.tar|archive)/i);
+  assert.doesNotMatch(backup, /\b(?:cp|install)\b[^\n]*(?:ws-server\.env|\.env\.preview)/);
+  assert.doesNotMatch(backup, /\.credentials|node_modules|journald|supabase|\/tmp/i);
+  assert.match(backup, /sha256sum/);
+  assert.match(backup, /wc -c/);
+  for (const manifestField of [
+    '"format"',
+    '"version"',
+    '"timestamp"',
+    '"source_path"',
+    '"filename"',
+    '"encrypted_object"',
+    '"plaintext_byte_size"',
+    '"plaintext_sha256"',
+    '"encrypted_sha256"'
+  ]) {
+    assert.ok(backup.includes(manifestField), `backup manifest must include ${manifestField}`);
+  }
+  assert.match(backup, /age recipient|recipient/i);
+  assert.doesNotMatch(backup, /--identity|-i\s+[^-\s]/);
+
+  assert.match(restore, /--artifact-dir/);
+  assert.match(restore, /--restore-dir/);
+  assert.match(restore, /--identity-stdin/);
+  assert.match(restoreContract, /--identity\s+-|-i\s+-/);
+  assert.match(restoreContract, /tar\b[^\n]*(?:--list|-t)/);
+  assert.match(restoreContract, /tar\b[^\n]*(?:--extract|-x)/);
+  assert.match(restore, /etc\/arcadeplatform\/ws-server\.env/);
+  assert.match(restore, /opt\/arcade-ws-preview\/\.env\.preview/);
+  assert.match(restore, /sha256sum/);
+  assert.match(restore, /wc -c/);
+  assert.match(restore, /live restore is disabled|live restore.*disabled/i);
+  assert.match(restore, /mktemp -d/);
+  assert.match(restore, /rm -f/);
+  assert.match(restore, /rmdir/);
+  const restoreTrapIndex = restore.indexOf("trap cleanup EXIT");
+  const restoreCreateIndex = restore.indexOf('mkdir -p -- "$RESTORE_DIR"');
+  const restoreOwnershipIndex = restore.indexOf("RESTORE_DIR_CREATED=1");
+  assert.ok(restoreTrapIndex >= 0 && restoreTrapIndex < restoreCreateIndex);
+  assert.ok(restoreOwnershipIndex >= 0 && restoreOwnershipIndex < restoreCreateIndex);
+  assert.match(restore, /Number\.isSafeInteger/);
+  assert.match(restore, /expected_members/);
+  assert.match(restore, /actual_members/);
+  assert.doesNotMatch(restore, /systemctl|journalctl|gh workflow run|supabase/i);
+  assert.doesNotMatch(restore, /\.credentials|node_modules|\/tmp/i);
+  assert.doesNotMatch(restore, /cat\s+[^\n]*(?:ws-server\.env|\.env\.preview)/);
+
+  for (const [path, text] of [[backupPath, backup], [restorePath, restore]]) {
+    assert.match(text, /local operation_status=\$\?/,
+      `${path} must preserve the main operation status before cleanup`);
+    assert.match(text, /local cleanup_failed=0/,
+      `${path} must track cleanup failure separately`);
+    assert.doesNotMatch(text, /local status=\$\?/,
+      `${path} must not reuse the operation status as cleanup status`);
+    assert.match(text, /if \(\( cleanup_failed != 0 \)\); then/,
+      `${path} must report cleanup failure only when cleanup_failed is set`);
+    assert.match(text, /operation_status=1/,
+      `${path} must return non-zero when cleanup fails`);
+    assert.match(text, /exit "\$operation_status"/,
+      `${path} must retain the original operation result when cleanup succeeds`);
+  }
+});
+
 test("infra VPS bootstrap is shell-valid, fresh-VPS guarded, and cannot dispatch or clean up", () => {
   const path = "infra/vps/bootstrap.sh";
   const syntax = spawnSync("bash", ["-n", path], { encoding: "utf8" });
@@ -272,6 +376,7 @@ test("infra VPS bootstrap is shell-valid, fresh-VPS guarded, and cannot dispatch
   }
   assert.doesNotMatch(guard, /\/etc\/caddy\/Caddyfile|\/etc\/systemd\/system\/|arcade-chips-ledger-dispatch\.timer/);
   assert.match(text, /postgresql-client/);
+  assert.match(text, /\bage\b/);
   const caddyMaskIndex = text.indexOf("systemctl mask --runtime caddy.service");
   const caddyInstallIndex = text.indexOf("apt-get install -y");
   const caddyUnmaskIndex = text.lastIndexOf("systemctl unmask caddy.service");
@@ -300,6 +405,19 @@ test("infra VPS recovery docs retain the mutation boundaries and runner contract
     "stage-db-ipv6",
     "Do not restore runner .credentials",
     "Every `PRODUCTION MUTATION` requires separate owner approval"
+  ]) {
+    assert.ok(runbook.includes(phrase), `runbook must include ${phrase}`);
+  }
+
+  for (const phrase of [
+    "vps-secrets-backup.sh",
+    "vps-secrets-restore.sh",
+    "--identity-stdin",
+    "timestamp",
+    "encrypted_sha256",
+    "full fresh-VPS rehearsal was not performed",
+    "retention",
+    "private identity key"
   ]) {
     assert.ok(runbook.includes(phrase), `runbook must include ${phrase}`);
   }
