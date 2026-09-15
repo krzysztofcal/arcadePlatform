@@ -1,0 +1,16 @@
+[Unit]
+Description=Dispatch Chips Ledger Stage automatic fallback to GitHub Actions
+After=network.target
+
+[Service]
+Type=oneshot
+User=copilot
+Environment=HOME=/home/copilot
+Environment=GH_CONFIG_DIR=/home/copilot/.config/gh
+Environment=PATH=/home/copilot/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/arcade-chips-ledger-dispatch.sh
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

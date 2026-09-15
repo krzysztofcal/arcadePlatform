@@ -1,0 +1,11 @@
+[Unit]
+Description=Dispatch Chips Ledger Stage automatic fallback and daily existing-30d wake-up
+
+[Timer]
+OnCalendar=*-*-* *:2,17,32,47:00
+OnCalendar=*-*-* *:3,18,33,48:00
+OnCalendar=*-*-* 02:04:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
