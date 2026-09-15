@@ -46,27 +46,29 @@ file_size() {
 }
 
 cleanup() {
-  local status=$?
+  local operation_status=$?
+  local cleanup_failed=0
   trap - EXIT
 
   if [[ -n "${DECRYPTED_ARCHIVE:-}" && -e "$DECRYPTED_ARCHIVE" ]]; then
-    rm -f -- "$DECRYPTED_ARCHIVE" || status=1
-    [[ ! -e "$DECRYPTED_ARCHIVE" ]] || status=1
+    rm -f -- "$DECRYPTED_ARCHIVE" || cleanup_failed=1
+    [[ ! -e "$DECRYPTED_ARCHIVE" ]] || cleanup_failed=1
   fi
   if [[ -n "${TEMP_DIR:-}" && -d "$TEMP_DIR" ]]; then
-    rmdir -- "$TEMP_DIR" || status=1
-    [[ ! -e "$TEMP_DIR" ]] || status=1
+    rmdir -- "$TEMP_DIR" || cleanup_failed=1
+    [[ ! -e "$TEMP_DIR" ]] || cleanup_failed=1
   fi
 
-  if (( status != 0 && RESTORE_DIR_CREATED == 1 )); then
-    rm -rf -- "$RESTORE_DIR" || status=1
-    [[ ! -e "$RESTORE_DIR" ]] || status=1
+  if (( (operation_status != 0 || cleanup_failed != 0) && RESTORE_DIR_CREATED == 1 )); then
+    rm -rf -- "$RESTORE_DIR" || cleanup_failed=1
+    [[ ! -e "$RESTORE_DIR" ]] || cleanup_failed=1
   fi
 
-  if (( status != 0 )); then
+  if (( cleanup_failed != 0 )); then
     echo "vps-secrets-restore: temporary plaintext cleanup failed" >&2
+    operation_status=1
   fi
-  exit "$status"
+  exit "$operation_status"
 }
 
 verify_restored_file() {

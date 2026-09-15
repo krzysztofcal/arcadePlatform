@@ -56,18 +56,20 @@ source_stable() {
 }
 
 cleanup() {
-  local status=$?
+  local operation_status=$?
+  local cleanup_failed=0
   trap - EXIT
 
   if [[ -n "${ARTIFACT_STAGE:-}" && -d "$ARTIFACT_STAGE" ]]; then
-    rm -f -- "$ARTIFACT_STAGE/$ENCRYPTED_OBJECT" "$ARTIFACT_STAGE/manifest.json" || status=1
-    rmdir -- "$ARTIFACT_STAGE" || status=1
+    rm -f -- "$ARTIFACT_STAGE/$ENCRYPTED_OBJECT" "$ARTIFACT_STAGE/manifest.json" || cleanup_failed=1
+    rmdir -- "$ARTIFACT_STAGE" || cleanup_failed=1
   fi
 
-  if (( status != 0 )); then
+  if (( cleanup_failed != 0 )); then
     echo "vps-secrets-backup: cleanup failed; refusing to report success" >&2
+    operation_status=1
   fi
-  exit "$status"
+  exit "$operation_status"
 }
 
 while (($# > 0)); do

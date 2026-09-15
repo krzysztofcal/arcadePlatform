@@ -337,6 +337,21 @@ test("infra VPS secret backup is a two-file streaming age artifact with a non-se
   assert.doesNotMatch(restore, /systemctl|journalctl|gh workflow run|supabase/i);
   assert.doesNotMatch(restore, /\.credentials|node_modules|\/tmp/i);
   assert.doesNotMatch(restore, /cat\s+[^\n]*(?:ws-server\.env|\.env\.preview)/);
+
+  for (const [path, text] of [[backupPath, backup], [restorePath, restore]]) {
+    assert.match(text, /local operation_status=\$\?/,
+      `${path} must preserve the main operation status before cleanup`);
+    assert.match(text, /local cleanup_failed=0/,
+      `${path} must track cleanup failure separately`);
+    assert.doesNotMatch(text, /local status=\$\?/,
+      `${path} must not reuse the operation status as cleanup status`);
+    assert.match(text, /if \(\( cleanup_failed != 0 \)\); then/,
+      `${path} must report cleanup failure only when cleanup_failed is set`);
+    assert.match(text, /operation_status=1/,
+      `${path} must return non-zero when cleanup fails`);
+    assert.match(text, /exit "\$operation_status"/,
+      `${path} must retain the original operation result when cleanup succeeds`);
+  }
 });
 
 test("infra VPS bootstrap is shell-valid, fresh-VPS guarded, and cannot dispatch or clean up", () => {
