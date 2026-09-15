@@ -4,11 +4,12 @@ on:
   pull_request:
     paths:
       - "infra/vps/**"
+      - ".github/workflows/infra-vps.yml"
   push:
     branches:
       - "main"
     paths:
-      - "infra/vps/**"
+      - "infra/vps/Caddyfile"
   workflow_dispatch:
 
 concurrency:

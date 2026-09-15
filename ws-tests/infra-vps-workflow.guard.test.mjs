@@ -1,11 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
 const WORKFLOW_PATH = ".github/workflows/infra-vps.yml";
 
 function workflowText() {
   return fs.readFileSync(WORKFLOW_PATH, "utf8");
+}
+
+function fileText(path) {
+  return fs.readFileSync(path, "utf8");
 }
 
 function remoteBash(text) {
@@ -16,11 +21,34 @@ function remoteBash(text) {
   return text.slice(start, end);
 }
 
-test("infra VPS workflow keeps infra/vps path filters", () => {
+test("infra VPS path filters keep PR validation broad and production apply narrow", () => {
   const text = workflowText();
-  assert.ok(text.includes("pull_request:"));
-  assert.ok(text.includes("push:"));
-  assert.ok(text.includes('"infra/vps/**"'));
+  const prStart = text.indexOf("  pull_request:");
+  const pushStart = text.indexOf("  push:");
+  const dispatchStart = text.indexOf("  workflow_dispatch:");
+
+  assert.notEqual(prStart, -1);
+  assert.notEqual(pushStart, -1);
+  assert.notEqual(dispatchStart, -1);
+
+  const prPaths = text.slice(prStart, pushStart);
+  const pushPaths = text.slice(pushStart, dispatchStart);
+
+  function pathEntries(section) {
+    const lines = section.split("\n");
+    const pathsIndex = lines.findIndex((line) => line.trim() === "paths:");
+    assert.notEqual(pathsIndex, -1);
+    const entries = [];
+    for (const line of lines.slice(pathsIndex + 1)) {
+      const match = line.match(/^\s+- "([^"]+)"$/);
+      if (!match) break;
+      entries.push(match[1]);
+    }
+    return entries;
+  }
+
+  assert.deepEqual(pathEntries(prPaths), ["infra/vps/**", ".github/workflows/infra-vps.yml"]);
+  assert.deepEqual(pathEntries(pushPaths), ["infra/vps/Caddyfile"]);
 });
 
 test("infra VPS guard coverage includes the unified Caddy contract test", () => {
@@ -103,4 +131,190 @@ test("infra VPS workflow removes remote websocket curl upgrade and adds runner n
   assert.ok(text.includes("- name: Smoke-check ws.kcswh.pl from runner"));
   assert.ok(text.includes("timeout 15s node <<'NODE'"));
   assert.ok(text.includes('"type":"helloAck"'));
+});
+
+test("infra VPS repository versions the audited production WS and Stage scheduler contracts", () => {
+  const production = fileText("infra/vps/ws-server.service");
+  for (const line of [
+    "User=arcade",
+    "Group=arcade",
+    "WorkingDirectory=/opt/ws-server/current",
+    "ExecStart=/usr/bin/env node /opt/ws-server/current/server.mjs",
+    "Restart=always",
+    "RestartSec=2",
+    "Environment=NODE_ENV=production",
+    "Environment=PORT=3000",
+    "NoNewPrivileges=true",
+    "PrivateTmp=true",
+    "ProtectSystem=strict",
+    "ProtectHome=true",
+    "ReadWritePaths=/opt/ws-server"
+  ]) {
+    assert.match(production, new RegExp(`^${line.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}$`, "m"));
+  }
+
+  const override = fileText("infra/vps/ws-server.service.d/override.conf");
+  assert.match(override, /^EnvironmentFile=\/etc\/arcadeplatform\/ws-server\.env$/m);
+
+  const schedulerService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
+  for (const line of [
+    "Type=oneshot",
+    "User=copilot",
+    "Environment=HOME=/home/copilot",
+    "Environment=GH_CONFIG_DIR=/home/copilot/.config/gh",
+    "Environment=PATH=/home/copilot/.local/bin:/usr/local/bin:/usr/bin:/bin",
+    "ExecStart=/usr/local/bin/arcade-chips-ledger-dispatch.sh",
+    "NoNewPrivileges=true",
+    "PrivateTmp=true"
+  ]) {
+    assert.match(schedulerService, new RegExp(`^${line.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}$`, "m"));
+  }
+
+  const schedulerTimer = fileText("infra/vps/arcade-chips-ledger-dispatch.timer");
+  assert.match(schedulerTimer, /^OnCalendar=\*-\*-\* \*:2,17,32,47:00$/m);
+  assert.match(schedulerTimer, /^OnCalendar=\*-\*-\* \*:3,18,33,48:00$/m);
+  assert.match(schedulerTimer, /^OnCalendar=\*-\*-\* 02:04:00$/m);
+  assert.match(schedulerTimer, /^AccuracySec=1s$/m);
+
+  const dispatcher = fileText("infra/vps/arcade-chips-ledger-dispatch.sh");
+  assert.match(dispatcher, /^REPO="krzysztofcal\/arcadePlatform"$/m);
+  assert.match(dispatcher, /^WORKFLOW_ID="349412824"$/m);
+  assert.match(dispatcher, /^RESOURCE_WORKFLOW_ID="353254812"$/m);
+  assert.match(dispatcher, /^DAILY_MODE="external-existing-30d"$/m);
+  assert.match(dispatcher, /^MODE="external-scheduled-automatic"$/m);
+  assert.match(dispatcher, /^WORKFLOW_FILE="\.github\/workflows\/chips-ledger-stage-scheduled-automation\.yml"$/m);
+  assert.doesNotMatch(dispatcher, /SUPABASE_(DB_URL|SERVICE_ROLE_KEY|ACCESS_TOKEN|JWT_SECRET)|gh auth login|--token/i);
+});
+
+test("infra VPS environment examples expose only the audited variable names without live secrets", () => {
+  const expectedProductionKeys = [
+    "WS_AUTH_HS256_SECRET",
+    "SUPABASE_DB_URL",
+    "WS_AUTHORITATIVE_JOIN_ENABLED",
+    "POKER_BOTS_ENABLED",
+    "POKER_BOTS_MAX_PER_TABLE",
+    "POKER_BOT_BUYIN_BB",
+    "POKER_BOT_PROFILE_DEFAULT",
+    "SUPABASE_URL",
+    "POKER_WS_INTERNAL_TOKEN",
+    "WS_POKER_BOT_ACTION_RETENTION_MS",
+    "WS_POKER_BOT_SETTLED_RETENTION_MS",
+    "WS_POKER_HUMAN_ACTION_RETENTION_MS",
+    "WS_POKER_HUMAN_SETTLED_RETENTION_MS",
+    "WS_POKER_ACTION_HISTORY_SWEEP_MS",
+    "WS_POKER_ACTION_HISTORY_BATCH_SIZE",
+    "WS_POKER_CLOSED_TABLE_RETENTION_MS"
+  ];
+  const expectedPreviewKeys = [
+    "NODE_ENV",
+    "HOST",
+    "PORT",
+    "SUPABASE_URL",
+    "SUPABASE_DB_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "WS_AUTH_HS256_SECRET",
+    "WS_AUTHORITATIVE_JOIN_ENABLED",
+    "SUPABASE_JWT_SECRET",
+    "POKER_BOTS_ENABLED",
+    "SUPABASE_STAGE_PROJECT_REF",
+    "POKER_WS_INTERNAL_TOKEN",
+    "WS_POKER_BOT_ACTION_RETENTION_MS",
+    "WS_POKER_BOT_SETTLED_RETENTION_MS",
+    "WS_POKER_HUMAN_ACTION_RETENTION_MS",
+    "WS_POKER_HUMAN_SETTLED_RETENTION_MS",
+    "WS_POKER_ACTION_HISTORY_SWEEP_MS",
+    "WS_POKER_ACTION_HISTORY_BATCH_SIZE"
+  ];
+
+  for (const [path, expectedKeys] of [
+    ["infra/vps/ws-production.env.example", expectedProductionKeys],
+    ["infra/vps/ws-preview.env.example", expectedPreviewKeys]
+  ]) {
+    const text = fileText(path);
+    const actualKeys = text
+      .split("\n")
+      .map((line) => line.match(/^([A-Z][A-Z0-9_]*)=/)?.[1])
+      .filter(Boolean);
+    assert.deepEqual(actualKeys, expectedKeys, `${path} must match the audited env key order`);
+    for (const key of expectedKeys.filter((name) => /SECRET|TOKEN|KEY|DB_URL|SUPABASE_URL/.test(name))) {
+      assert.match(
+        text,
+        new RegExp(`^${key}=(?:replace-with-|https?:\\/\\/replace-with-|postgres(?:ql)?:\\/\\/replace-with-)`, "m"),
+        `${path} must use a placeholder for ${key}`
+      );
+    }
+    assert.doesNotMatch(text, /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|-----BEGIN|eyJ[A-Za-z0-9_-]{20,}/);
+    if (path === "infra/vps/ws-production.env.example") {
+      assert.match(text, /^WS_POKER_CLOSED_TABLE_RETENTION_MS=0$/m);
+    }
+  }
+});
+
+test("infra VPS bootstrap is shell-valid, fresh-VPS guarded, and cannot dispatch or clean up", () => {
+  const path = "infra/vps/bootstrap.sh";
+  const syntax = spawnSync("bash", ["-n", path], { encoding: "utf8" });
+  assert.equal(syntax.status, 0, syntax.stderr);
+
+  const text = fileText(path);
+  assert.match(text, /ARCADEPLATFORM_BOOTSTRAP_TARGET.*fresh-vps/);
+  assert.match(text, /existing runtime marker/);
+  const guardStart = text.indexOf("for existing_marker in");
+  const guardEnd = text.indexOf("\ndone", guardStart);
+  assert.notEqual(guardStart, -1);
+  assert.notEqual(guardEnd, -1);
+  const guard = text.slice(guardStart, guardEnd);
+  for (const marker of [
+    "/etc/arcadeplatform/ws-server.env",
+    "/opt/ws-server/current",
+    "/opt/arcade-ws-preview/.env.preview"
+  ]) {
+    assert.ok(guard.includes(marker), `bootstrap guard must protect ${marker}`);
+  }
+  assert.doesNotMatch(guard, /\/etc\/caddy\/Caddyfile|\/etc\/systemd\/system\/|arcade-chips-ledger-dispatch\.timer/);
+  assert.match(text, /postgresql-client/);
+  const caddyMaskIndex = text.indexOf("systemctl mask --runtime caddy.service");
+  const caddyInstallIndex = text.indexOf("apt-get install -y");
+  const caddyUnmaskIndex = text.lastIndexOf("systemctl unmask caddy.service");
+  assert.ok(caddyMaskIndex >= 0 && caddyMaskIndex < caddyInstallIndex);
+  assert.ok(caddyUnmaskIndex > caddyInstallIndex);
+  assert.match(text, /systemctl disable caddy.service/);
+  assert.doesNotMatch(text, /systemctl\s+(enable|start|restart|reload).*caddy\.service/);
+  assert.match(text, /systemctl daemon-reload/);
+  assert.doesNotMatch(text, /gh workflow run|workflow_dispatch/);
+  assert.doesNotMatch(text, /supabase/i);
+  assert.doesNotMatch(text, /\brm\s+-rf\b/);
+  assert.doesNotMatch(text, /systemctl\s+(enable|start|restart|reload).*arcade-chips-ledger-dispatch/);
+});
+
+test("infra VPS recovery docs retain the mutation boundaries and runner contract", () => {
+  const runbook = fileText("docs/vps-disaster-recovery.md");
+  for (const label of ["READ-ONLY", "FRESH-VPS MUTATION", "PRODUCTION MUTATION"]) {
+    assert.ok(runbook.includes(label), `runbook must include ${label} boundaries`);
+  }
+  for (const phrase of [
+    "WS Server Deploy",
+    "WS Preview Deploy",
+    "self-hosted",
+    "Linux",
+    "X64",
+    "stage-db-ipv6",
+    "Do not restore runner .credentials",
+    "Every `PRODUCTION MUTATION` requires separate owner approval"
+  ]) {
+    assert.ok(runbook.includes(phrase), `runbook must include ${phrase}`);
+  }
+
+  const inventory = fileText("docs/vps-disaster-recovery-inventory.md");
+  for (const phrase of [
+    "Component",
+    "Path",
+    "Classification",
+    "Source of truth",
+    "Recovery action",
+    "/etc/arcadeplatform/ws-server.env",
+    "/var/lib/arcade-stage-runner/actions-runner/.credentials",
+    "disposable"
+  ]) {
+    assert.ok(inventory.includes(phrase), `inventory must include ${phrase}`);
+  }
 });
