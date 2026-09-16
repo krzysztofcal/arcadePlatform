@@ -137,6 +137,8 @@ test("infra VPS bootstrap publishes the Preview-only deploy group, helper and na
   assert.match(bootstrap, /install -o root -g root -m 0644 "\$REPO_ROOT\/infra\/vps\/Caddyfile" \/etc\/caddy\/Caddyfile/);
   assert.doesNotMatch(bootstrap, /-g arcade-deploy -m 0664.*Caddyfile/);
   assert.match(bootstrap, /ws-preview-env-preflight\.mjs/);
+  assert.match(bootstrap, /\[\[ ! -x \/usr\/bin\/node \]\]/);
+  assert.match(bootstrap, /\/usr\/bin\/node --version/);
   assert.match(bootstrap, /visudo -cf/);
   assert.match(bootstrap, /arcade-deploy\.sudoers/);
   assert.match(sudoers, /copilot ALL=\(root\) NOPASSWD:/);

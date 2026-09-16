@@ -98,6 +98,7 @@ test("ws preview deploy workflow keeps preview runtime contract and does not man
   const helper = helperText();
 
   assert.match(text, /ws-preview\.kcswh\.pl/);
+  assert.match(helper, /^#!\/usr\/bin\/node$/m);
   assert.match(text, /\/opt\/arcade-ws-preview\/ws-server/);
   assert.match(helper, /\/opt\/arcade-ws-preview\/\.env\.preview/);
   assert.match(text, /ws-server-preview\.service/);

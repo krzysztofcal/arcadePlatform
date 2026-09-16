@@ -70,17 +70,22 @@ trap - EXIT
 systemctl disable caddy.service >/dev/null 2>&1 || true
 
 node_major=""
-if command -v node >/dev/null 2>&1; then
-  node_major="$(node --version | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')"
+if [[ -x /usr/bin/node ]]; then
+  node_major="$(/usr/bin/node --version | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')"
 fi
 if [[ "$node_major" != "20" ]]; then
   curl --fail --silent --show-error --location https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y nodejs
 fi
 
-node_major="$(node --version | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')"
+if [[ ! -x /usr/bin/node ]]; then
+  echo "required fixed Node interpreter /usr/bin/node is missing" >&2
+  exit 1
+fi
+
+node_major="$(/usr/bin/node --version | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')"
 if [[ "$node_major" != "20" ]]; then
-  echo "Node.js 20 is required; found $(node --version)" >&2
+  echo "Node.js 20 is required; found $(/usr/bin/node --version)" >&2
   exit 1
 fi
 
