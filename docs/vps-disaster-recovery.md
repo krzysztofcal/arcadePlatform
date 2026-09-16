@@ -300,7 +300,7 @@ truth for both `ws.kcswh.pl` and `ws-preview.kcswh.pl`. Bootstrap places it at
 `/etc/caddy/Caddyfile`. Validate it before activation:
 
 ```bash
-sudo -u copilot caddy validate --config /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl cat caddy
 ```
 
@@ -406,12 +406,10 @@ read-only after an approved recovery activation.
 After Caddy, env, directories, and the owner-approved Production service
 activation prerequisites are ready, use the existing **WS Server Deploy**
 workflow for the approved application revision. It builds the artifact,
-performs the atomic release switch under `/opt/ws-server/releases` as
-`copilot` through `arcade-deploy`, uses only the exact
-`/usr/bin/systemctl restart ws-server.service` root operation, and runs its
-local/public health gates and runner WS smoke-check. Do not copy source trees
-or `node_modules` from a backup and do not add an application deployment path
-to `bootstrap.sh`.
+performs the atomic release switch under `/opt/ws-server/releases`, restarts
+the Production unit, and runs its local/public health gates and runner WS
+smoke-check. Do not copy source trees or `node_modules` from a backup and do
+not add an application deployment path to `bootstrap.sh`.
 
 The workflow may be invoked through its existing approved push or
 `workflow_dispatch` path. This runbook records the contract only; Phase B and
