@@ -213,13 +213,13 @@ jobs:
               exit 1
             fi
 
-            if ! sudo -n systemctl cat ws-server.service >/dev/null 2>&1; then
-              echo "configure /etc/sudoers.d/ws-server-deploy"
+            if ! systemctl cat ws-server.service >/dev/null 2>&1; then
+              echo "missing ws-server.service unit"
               exit 1
             fi
 
-            if ! sudo -n test -d "$RELEASES_DIR"; then
-              echo "provision /opt/ws-server/releases first"
+            if ! test -d "$RELEASES_DIR" || ! test -w "$RELEASES_DIR" || ! test -w "$BASE_DIR"; then
+              echo "provision deploy group paths first"
               exit 1
             fi
 
@@ -227,9 +227,9 @@ jobs:
               if [ "$HAVE_SWITCHED" != "1" ] || [ -z "$PREVIOUS_TARGET" ]; then
                 return 0
               fi
-              sudo -n ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
-              sudo -n mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
-              sudo -n systemctl restart ws-server.service || true
+              ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
+              mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+              sudo -n /usr/bin/systemctl restart ws-server.service || true
             }
 
             on_error() {
@@ -246,20 +246,20 @@ jobs:
               PREVIOUS_TARGET="$(readlink -f "$CURRENT_LINK" || true)"
             fi
 
-            sudo -n rm -rf "$NEW_RELEASE_DIR"
-            sudo -n mkdir -p "$NEW_RELEASE_DIR"
-            sudo -n tar -xzf "$TMP_ARCHIVE" -C "$NEW_RELEASE_DIR"
-            sudo -n test -f "$NEW_RELEASE_APP_DIR/server.mjs"
-            sudo -n test -f "$NEW_RELEASE_APP_DIR/observability/vps-metrics.mjs"
-            sudo -n test -f "$NEW_RELEASE_DIR/shared/profile-avatar-projection.mjs"
-            sudo -n test -f "$NEW_RELEASE_DIR/netlify/functions/_shared/chips-ledger.mjs"
-            sudo -n test -d "$NEW_RELEASE_DIR/node_modules/postgres"
+            rm -rf "$NEW_RELEASE_DIR"
+            mkdir -p "$NEW_RELEASE_DIR"
+            tar -xzf "$TMP_ARCHIVE" -C "$NEW_RELEASE_DIR"
+            test -f "$NEW_RELEASE_APP_DIR/server.mjs"
+            test -f "$NEW_RELEASE_APP_DIR/observability/vps-metrics.mjs"
+            test -f "$NEW_RELEASE_DIR/shared/profile-avatar-projection.mjs"
+            test -f "$NEW_RELEASE_DIR/netlify/functions/_shared/chips-ledger.mjs"
+            test -d "$NEW_RELEASE_DIR/node_modules/postgres"
 
-            sudo -n ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
-            sudo -n mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+            ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
+            mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
             HAVE_SWITCHED=1
 
-            sudo -n systemctl restart ws-server.service
+            sudo -n /usr/bin/systemctl restart ws-server.service
 
             LOCAL_HEALTHZ_BODY=""
             for i in $(seq 1 "$HEALTH_RETRIES"); do

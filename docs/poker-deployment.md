@@ -173,7 +173,7 @@ What you’re looking for:
 ## WS preview deploy
 
 The preview WS deploy is manual-only and isolated from the production WS workflows.
-It targets only the preview host, preview filesystem root, preview service, preview env file, and preview health checks.
+It targets only the preview host, preview deployable subtrees, fixed preview-env preflight, preview service, and preview health checks.
 It does not manage Caddy.
 The host is a single shared preview runtime, so automatic deployment from every PR is intentionally disabled: concurrent PRs would overwrite each other and a Netlify preview could silently use another branch's backend.
 
@@ -283,8 +283,24 @@ The preview VPS contract is:
 - Optional transport watchdog timeout: `WS_TRANSPORT_PONG_TIMEOUT_MS=60000` waits for one outstanding WebSocket control-ping acknowledgement before terminating an unresponsive socket through the existing close/reconnect lifecycle. The accepted range is 30–300 seconds.
 
 Preview deploys unpack into a temporary directory under `/tmp/arcadeplatform-ws-preview` and then sync the extracted files into `/opt/arcade-ws-preview/ws-server`.
-The `WS_PREVIEW_USER` SSH account must have passwordless sudo available to non-interactive GitHub Actions sessions. The workflow checks this with `sudo -n bash -c 'true'` before touching preview app contents because it needs elevated access to validate the systemd unit, read the preview env file, sync files into `/opt/arcade-ws-preview`, and restart `ws-server-preview.service`. Do not use `sudo -n -v` as the local smoke check here: it can still require a password when the same user has both normal passworded sudo rules and command-specific `NOPASSWD` rules.
-The workflow fails fast before mutating preview app contents when passwordless sudo, the preview base root, app dir, env file, service, Node.js, `tar`, `rsync`, `curl`, required `PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, non-empty `SUPABASE_DB_URL`, preview-only `POKER_WS_INTERNAL_TOKEN`, or stage Supabase project-ref match is missing. It also rejects retired `WS_BOT_REACTION_MIN_MS` and `WS_BOT_REACTION_MAX_MS` values so runtime changes have one source of truth.
+The `WS_PREVIEW_USER` SSH account is `copilot` and belongs to the system group
+`arcade-deploy`. The workflow performs ordinary file operations as that user
+only in the deployable Preview subtrees: `ws-server`, `shared`, `netlify`, and
+`node_modules`. It never writes `.env.preview`, systemd units, sudoers, or the
+Preview root directory.
+
+The root-owned `/usr/local/sbin/arcade-ws-preview-env-preflight` helper always
+opens exactly `/opt/arcade-ws-preview/.env.preview` with descriptor-pinned
+`O_NOFOLLOW`, requires a regular `root:root` `0600` file, validates the required
+Preview/Stage variables and binding, and prints only `PASS` or a failure reason.
+The only Preview root operations are that fixed helper and the exact command-specific sudo grant for `/usr/bin/systemctl restart ws-server-preview.service`; there is no `sudo bash`, `sudo node`, `sudo rsync`, or filesystem-operation sudo.
+
+The workflow fails fast before mutating Preview app contents when the deploy
+paths, helper, service, Node.js, `tar`, `rsync`, `curl`, required
+`PORT=3001`, `WS_AUTHORITATIVE_JOIN_ENABLED=1`, non-empty
+`SUPABASE_DB_URL`, Preview-only `POKER_WS_INTERNAL_TOKEN`, or Stage Supabase
+project-ref match is missing. It also rejects retired `WS_BOT_REACTION_MIN_MS`
+and `WS_BOT_REACTION_MAX_MS` values so runtime changes have one source of truth.
 Preview routing stays in `infra/vps/Caddyfile`, which must continue to define both the `ws.kcswh.pl -> 127.0.0.1:3000` and `ws-preview.kcswh.pl -> 127.0.0.1:3001` site blocks. Only the preview host exposes the exact `/internal/admin/bot-reaction` reverse-proxy route. Both hosts expose the exact `/internal/admin/poker-log-control` route for the environment-bound authenticated Netlify proxy; no wildcard `/internal/admin/*` route is allowed.
 
 ### WS Preview bot reaction control
@@ -308,19 +324,20 @@ Table DEBUG is the normal diagnostic scope. The selector reuses the authenticate
 
 The control does not read journald, store logs in Supabase, change poker state, or suppress `ERROR`. Disable submits the exact active scope returned by WS. A restart clears all process-local overrides.
 
-Minimal preview sudoers coverage for `WS_PREVIEW_USER` must include the concrete programs used by the workflow: `systemctl`, `test`, `grep`, `bash`, `rm`, `mkdir`, `tar`, and `rsync`. On Ubuntu, verify the actual binary paths with `command -v systemctl test grep bash rm mkdir tar rsync`, then keep `/etc/sudoers.d/ws-preview-deploy` mode `0440`.
+The narrow sudoers contract is versioned in `infra/vps/arcade-deploy.sudoers`.
+It grants `copilot` only the exact Preview restart, Production restart, Caddy
+reload, and fixed env-preflight commands. It grants no shell, interpreter,
+archive, copy, remove, rsync, generic `systemctl`, or wildcard command.
+Keep `/etc/sudoers.d/arcade-deploy` `root:root` mode `0440` and validate it with
+`visudo` before installation.
 
 Quick VPS check for the current `copilot` deploy user:
 
 ```sh
-sudo -u copilot sudo -n systemctl cat ws-server-preview.service >/dev/null && echo systemctl-ok
-sudo -u copilot sudo -n test -d /opt/arcade-ws-preview && echo test-ok
-sudo -u copilot sudo -n grep -Eq '^PORT=3001$' /opt/arcade-ws-preview/.env.preview && echo grep-ok
-sudo -u copilot sudo -n bash -c 'test -f "$1"' bash /opt/arcade-ws-preview/.env.preview && echo bash-ok
-sudo -u copilot sudo -n mkdir -p /tmp/arcadeplatform-ws-preview/sudo-check && echo mkdir-ok
-sudo -u copilot sudo -n rm -rf /tmp/arcadeplatform-ws-preview/sudo-check && echo rm-ok
-sudo -u copilot sudo -n rsync --version >/dev/null && echo rsync-ok
-sudo -u copilot sudo -n tar --version >/dev/null && echo tar-ok
+sudo -u copilot systemctl cat ws-server-preview.service >/dev/null && echo systemctl-read-ok
+sudo -u copilot test -d /opt/arcade-ws-preview/ws-server && echo preview-app-ok
+sudo -l -U copilot
+sudo -u copilot sudo -n /usr/local/sbin/arcade-ws-preview-env-preflight >/dev/null && echo preview-env-preflight-ok
 ```
 
 ### Preview secrets

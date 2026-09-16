@@ -14,17 +14,19 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.match(text, /RELEASES_DIR="\$BASE_DIR\/releases"/);
   assert.match(text, /NEW_RELEASE_DIR="\$RELEASES_DIR\/\$RELEASE_ID"/);
   assert.doesNotMatch(text, /sudo -n true/);
-  assert.match(text, /configure \/etc\/sudoers\.d\/ws-server-deploy/);
-  assert.match(text, /sudo -n systemctl cat ws-server\.service/);
+  assert.match(text, /systemctl cat ws-server\.service/);
+  assert.match(text, /provision deploy group paths first/);
   assert.match(text, /install nodejs/);
   assert.match(text, /provision unit first/);
-  assert.match(text, /provision \/opt\/ws-server\/releases first/);
+  assert.doesNotMatch(text, /provision \/opt\/ws-server\/releases first/);
 
   assert.match(text, /rm -rf "\$NEW_RELEASE_DIR"/);
   assert.match(text, /tar -xzf "\$TMP_ARCHIVE" -C "\$NEW_RELEASE_DIR"/);
   assert.match(text, /mv -Tf "\$CURRENT_LINK\.tmp" "\$CURRENT_LINK"/);
 
   assert.match(text, /systemctl restart ws-server\.service/);
+  assert.match(text, /sudo -n \/usr\/bin\/systemctl restart ws-server\.service/);
+  assert.doesNotMatch(text, /sudo -n (?:cat|test|rm|mkdir|tar|ln|mv|node|bash|rsync)\b/);
   assert.match(text, /curl -fsS http:\/\/127\.0\.0\.1:3000/);
   assert.match(text, /curl -fsS https:\/\/ws\.kcswh\.pl/);
   assert.match(text, /for i in \$\(seq 1 "\$HEALTH_RETRIES"\); do/);
@@ -47,5 +49,5 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
 
   assert.match(text, /rollback\(\)/);
   assert.match(text, /on_error\(\)/);
-  assert.match(text, /systemctl restart ws-server\.service \|\| true/);
+  assert.match(text, /sudo -n \/usr\/bin\/systemctl restart ws-server\.service \|\| true/);
 });

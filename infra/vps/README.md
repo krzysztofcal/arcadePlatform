@@ -35,10 +35,26 @@ The Stage dispatcher runs as `copilot` with `HOME=/home/copilot` and
 dedicated `arcade-stage-runner` account under
 `/var/lib/arcade-stage-runner/actions-runner`.
 
-The current `arcade` membership in privileged `sudo`/`docker` groups and
-command-specific deploy grants are intentionally not changed or redefined
-here; they are tracked separately under #994. No runner `.credentials` file is
-part of the recovery source.
+The fresh-host contract creates the system group `arcade-deploy` and adds only
+`copilot` to it. `arcade` is not added to `arcade-deploy`, `sudo`, or `docker`
+by bootstrap. The deploy group owns only application state:
+
+- Production: `/opt/ws-server` and `/opt/ws-server/releases`,
+  `root:arcade-deploy` mode `2775`;
+- Preview: `/opt/arcade-ws-preview/ws-server`, `shared`, `netlify`, and
+  `node_modules`, each `root:arcade-deploy` mode `2775`;
+- Caddy: `/etc/caddy/Caddyfile`, `root:arcade-deploy` mode `0664`.
+
+The Preview env file and Production env file remain `root:root` mode `0600`.
+Systemd units, `/etc/sudoers*`, and the Preview root directory remain
+root-owned and are not group-writable. The root-owned fixed Preview env helper
+is installed at `/usr/local/sbin/arcade-ws-preview-env-preflight`.
+
+The versioned `/etc/sudoers.d/arcade-deploy` contract gives `copilot` only the
+exact service restart/reload commands and the fixed Preview env preflight. It
+contains no shell, interpreter, archive, file-operation, generic
+`systemctl`, or wildcard grant. No runner `.credentials` file is part of the
+recovery source.
 
 ## Network baseline
 

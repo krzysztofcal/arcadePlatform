@@ -62,7 +62,7 @@ test("infra VPS workflow heredoc boundary is robust and post-heredoc content is 
   const text = workflowText();
   const { bashStartIndex, heredocEndLineStart, heredocEndOffset } = heredocBounds(text);
 
-  const overwriteIndex = text.indexOf('sudo -n cp "$TMP_PATH" "$CADDY_PATH"', bashStartIndex);
+  const overwriteIndex = text.indexOf('cp "$TMP_PATH" "$CADDY_PATH"', bashStartIndex);
   const trapClearIndex = text.indexOf("trap - ERR", bashStartIndex);
 
   assert.notEqual(overwriteIndex, -1);

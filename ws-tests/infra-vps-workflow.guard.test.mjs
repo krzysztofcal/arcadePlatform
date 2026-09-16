@@ -91,10 +91,13 @@ test("infra VPS remote bash keeps rollback safety and non-interactive sudo", () 
   assert.ok(remote.includes("set -Eeuo pipefail"));
   assert.ok(remote.includes("trap 'on_error' ERR"));
   assert.ok(remote.includes("rollback()"));
-  assert.ok(remote.includes("sudo -n cp \"$BACKUP_PATH\" \"$CADDY_PATH\" || true"));
-  assert.ok(remote.includes("sudo -n systemctl reload caddy || true"));
-  assert.ok(remote.includes("sudo -n caddy validate --config /etc/caddy/Caddyfile"));
-  assert.ok(remote.includes("sudo -n systemctl reload caddy"));
+  assert.ok(remote.includes("cp \"$BACKUP_PATH\" \"$CADDY_PATH\" || true"));
+  assert.ok(remote.includes("sudo -n /usr/bin/systemctl reload caddy.service || true"));
+  assert.ok(remote.includes("caddy validate --config /etc/caddy/Caddyfile"));
+  assert.ok(remote.includes("sudo -n /usr/bin/systemctl reload caddy.service"));
+  assert.equal(remote.match(/sudo -n /g)?.length, 2);
+  assert.equal(remote.includes("sudo -n cp"), false);
+  assert.equal(remote.includes("sudo -n caddy"), false);
   assert.equal(remote.includes("sudo caddy validate"), false);
   assert.equal(remote.includes("sudo systemctl reload caddy"), false);
 });
@@ -102,11 +105,11 @@ test("infra VPS remote bash keeps rollback safety and non-interactive sudo", () 
 test("infra VPS remote bash verifies backup before overwrite and validates before reload", () => {
   const remote = remoteBash(workflowText());
 
-  const backupCopyIndex = remote.indexOf('sudo -n cp "$CADDY_PATH" "$BACKUP_PATH"');
-  const backupExistsIndex = remote.indexOf('sudo -n test -f "$BACKUP_PATH"', backupCopyIndex);
-  const applyIndex = remote.indexOf('sudo -n cp "$TMP_PATH" "$CADDY_PATH"', backupExistsIndex);
-  const validateIndex = remote.indexOf("sudo -n caddy validate", applyIndex);
-  const reloadIndex = remote.indexOf("sudo -n systemctl reload caddy", validateIndex);
+  const backupCopyIndex = remote.indexOf('cp "$CADDY_PATH" "$BACKUP_PATH"');
+  const backupExistsIndex = remote.indexOf('test -f "$BACKUP_PATH"', backupCopyIndex);
+  const applyIndex = remote.indexOf('cp "$TMP_PATH" "$CADDY_PATH"', backupExistsIndex);
+  const validateIndex = remote.indexOf("caddy validate --config /etc/caddy/Caddyfile", applyIndex);
+  const reloadIndex = remote.indexOf("sudo -n /usr/bin/systemctl reload caddy.service", validateIndex);
 
   assert.notEqual(backupCopyIndex, -1);
   assert.notEqual(backupExistsIndex, -1);
@@ -117,6 +120,40 @@ test("infra VPS remote bash verifies backup before overwrite and validates befor
   assert.equal(backupExistsIndex < applyIndex, true);
   assert.equal(applyIndex < validateIndex, true);
   assert.equal(validateIndex < reloadIndex, true);
+});
+
+test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers contract", () => {
+  const bootstrap = fileText("infra/vps/bootstrap.sh");
+  const sudoers = fileText("infra/vps/arcade-deploy.sudoers");
+  const helper = fileText("infra/vps/ws-preview-env-preflight.mjs");
+
+  assert.match(bootstrap, /getent group arcade-deploy/);
+  assert.match(bootstrap, /usermod --append --groups arcade-deploy copilot/);
+  assert.match(bootstrap, /gpasswd --delete arcade arcade-deploy/);
+  assert.doesNotMatch(bootstrap, /usermod --append --groups (?:sudo|docker|arcade-deploy) arcade/);
+  assert.doesNotMatch(bootstrap, /arcade ALL=/);
+  assert.match(bootstrap, /\/opt\/ws-server \/opt\/ws-server\/releases/);
+  assert.match(bootstrap, /\/opt\/arcade-ws-preview\/(?:ws-server|shared|netlify|node_modules)/);
+  assert.match(bootstrap, /-g arcade-deploy -m 2775/);
+  assert.match(bootstrap, /\/etc\/caddy\/Caddyfile/);
+  assert.match(bootstrap, /-g arcade-deploy -m 0664/);
+  assert.match(bootstrap, /ws-preview-env-preflight\.mjs/);
+  assert.match(bootstrap, /visudo -cf/);
+  assert.match(bootstrap, /arcade-deploy\.sudoers/);
+  assert.match(sudoers, /copilot ALL=\(root\) NOPASSWD:/);
+  assert.match(sudoers, /restart ws-server\.service/);
+  assert.match(sudoers, /restart ws-server-preview\.service/);
+  assert.match(sudoers, /reload caddy\.service/);
+  assert.match(sudoers, /arcade-ws-preview-env-preflight ""/);
+  assert.doesNotMatch(sudoers, /arcade ALL=/);
+  const sudoersCommands = sudoers.replace(/^#.*$/gm, "");
+  assert.doesNotMatch(sudoersCommands, /(?:^|[ /])(bash|sh|node|python|tar|rsync|cp|mv|rm|install)(?:["\s]|$)/m);
+  assert.doesNotMatch(sudoersCommands, /ALL\s*$/m);
+  assert.match(helper, /\/opt\/arcade-ws-preview\/\.env\.preview/);
+  assert.match(helper, /O_NOFOLLOW/);
+  assert.match(helper, /uid !== 0/);
+  assert.match(helper, /gid !== 0/);
+  assert.match(helper, /0o600/);
 });
 
 test("infra VPS workflow removes remote websocket curl upgrade and adds runner node smoke-check", () => {

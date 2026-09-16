@@ -58,7 +58,6 @@ jobs:
       PREVIEW_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-preview-${{ github.run_id }}-${{ github.run_attempt }}
       PREVIEW_BASE_DIR: /opt/arcade-ws-preview
       PREVIEW_APP_DIR: /opt/arcade-ws-preview/ws-server
-      PREVIEW_ENV_FILE: /opt/arcade-ws-preview/.env.preview
       PREVIEW_HOST: ws-preview.kcswh.pl
       PREVIEW_LOCAL_HEALTHZ_URL: http://127.0.0.1:3001/healthz
       PREVIEW_PUBLIC_HEALTHZ_URL: https://ws-preview.kcswh.pl/healthz
@@ -180,7 +179,6 @@ jobs:
           DEPLOY_REF: ${{ inputs.ref }}
           PREVIEW_BASE_DIR: ${{ env.PREVIEW_BASE_DIR }}
           PREVIEW_APP_DIR: ${{ env.PREVIEW_APP_DIR }}
-          PREVIEW_ENV_FILE: ${{ env.PREVIEW_ENV_FILE }}
           PREVIEW_HOST: ${{ env.PREVIEW_HOST }}
           PREVIEW_LOCAL_HEALTHZ_URL: ${{ env.PREVIEW_LOCAL_HEALTHZ_URL }}
           PREVIEW_PUBLIC_HEALTHZ_URL: ${{ env.PREVIEW_PUBLIC_HEALTHZ_URL }}
@@ -193,7 +191,7 @@ jobs:
           key: ${{ secrets.WS_PREVIEW_SSH_KEY }}
           timeout: 2m
           command_timeout: 20m
-          envs: RELEASE_SHA,DEPLOY_REF,PREVIEW_BASE_DIR,PREVIEW_APP_DIR,PREVIEW_ENV_FILE,PREVIEW_HOST,PREVIEW_LOCAL_HEALTHZ_URL,PREVIEW_PUBLIC_HEALTHZ_URL,PREVIEW_SERVICE_NAME,PREVIEW_REMOTE_TMP_DIR,PREVIEW_PORT
+          envs: RELEASE_SHA,DEPLOY_REF,PREVIEW_BASE_DIR,PREVIEW_APP_DIR,PREVIEW_HOST,PREVIEW_LOCAL_HEALTHZ_URL,PREVIEW_PUBLIC_HEALTHZ_URL,PREVIEW_SERVICE_NAME,PREVIEW_REMOTE_TMP_DIR,PREVIEW_PORT
           script: |
             set -eu
             if ! command -v bash >/dev/null 2>&1; then
@@ -215,9 +213,7 @@ jobs:
             esac
 
             cleanup() {
-              sudo -n rm -rf -- "$PREVIEW_REMOTE_TMP_DIR" >/dev/null 2>&1 \
-                || rm -rf -- "$PREVIEW_REMOTE_TMP_DIR" >/dev/null 2>&1 \
-                || true
+              rm -rf -- "$PREVIEW_REMOTE_TMP_DIR" >/dev/null 2>&1 || true
             }
 
             trap cleanup EXIT
@@ -228,83 +224,17 @@ jobs:
             command -v tar >/dev/null 2>&1 || { echo "preview VPS missing tar"; exit 1; }
             command -v rsync >/dev/null 2>&1 || { echo "preview VPS missing rsync"; exit 1; }
 
-            sudo -n bash -c 'true' >/dev/null 2>&1 || { echo "preview deploy user must be allowed to run sudo -n bash for ws-preview deploy"; exit 1; }
-            sudo -n systemctl cat "$PREVIEW_SERVICE_NAME" >/dev/null 2>&1 || { echo "missing preview systemd unit: $PREVIEW_SERVICE_NAME"; exit 1; }
-            sudo -n test -d "$PREVIEW_BASE_DIR" || { echo "missing preview base dir: $PREVIEW_BASE_DIR"; exit 1; }
-            sudo -n test -d "$PREVIEW_APP_DIR" || { echo "missing preview app dir: $PREVIEW_APP_DIR"; exit 1; }
-            if ! sudo -n node -e '
-              const fs = require("fs");
-              const envFile = process.argv[1];
-              let fd;
-              try {
-                if (
-                  typeof fs.constants.O_NOFOLLOW !== "number"
-                  || typeof fs.constants.O_NONBLOCK !== "number"
-                ) {
-                  throw new Error("required open flags are unavailable");
-                }
-                fd = fs.openSync(
-                  envFile,
-                  fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK
-                );
-                const metadata = fs.fstatSync(fd);
-                if (
-                  !metadata.isFile()
-                  || metadata.uid !== 0
-                  || metadata.gid !== 0
-                  || (metadata.mode & 0o7777) !== 0o600
-                ) {
-                  throw new Error("preview env file contract");
-                }
-                process.stdout.write(fs.readFileSync(fd, "utf8"));
-              } catch {
-                process.stderr.write("preview env file must be a regular file owned by root:root with mode 0600 and must not be a symlink\n");
-                process.exitCode = 1;
-              } finally {
-                if (fd !== undefined) fs.closeSync(fd);
-              }
-            ' "$PREVIEW_ENV_FILE" | sudo -n bash -c '
-              set -Eeuo pipefail
-              ENV_CONTENT="$(cat)"
-              grep -Eq "^PORT=3001$" <<<"$ENV_CONTENT" || { echo "preview env file must define PORT=3001"; exit 1; }
-              grep -Eq "^WS_AUTHORITATIVE_JOIN_ENABLED=1$" <<<"$ENV_CONTENT" || { echo "preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1"; exit 1; }
-              grep -Eq "^SUPABASE_DB_URL=.+$" <<<"$ENV_CONTENT" || { echo "preview env file must define SUPABASE_DB_URL"; exit 1; }
-              grep -Eq "^SUPABASE_STAGE_PROJECT_REF=.+$" <<<"$ENV_CONTENT" || { echo "preview env file must define SUPABASE_STAGE_PROJECT_REF"; exit 1; }
-              grep -Eq "^POKER_WS_INTERNAL_TOKEN=.+$" <<<"$ENV_CONTENT" || { echo "preview env file must define POKER_WS_INTERNAL_TOKEN"; exit 1; }
-              if grep -Eq "^WS_BOT_REACTION_(MIN|MAX)_MS=" <<<"$ENV_CONTENT"; then
-                echo "preview env file must not define legacy WS_BOT_REACTION_MIN_MS or WS_BOT_REACTION_MAX_MS"
-                exit 1
-              fi
-              set -a
-              . /dev/stdin <<<"$ENV_CONTENT"
-              set +a
-              unset ENV_CONTENT
-              stage_ref="${SUPABASE_STAGE_PROJECT_REF:-}"
-              supabase_url="${SUPABASE_URL:-${SUPABASE_URL_V2:-}}"
-              db_url="${SUPABASE_DB_URL:-}"
-              if [ -z "$stage_ref" ] || [ -z "$supabase_url" ] || [ -z "$db_url" ]; then
-                echo "preview env file must define stage Supabase URL and DB URL"
-                exit 1
-              fi
-              case "$supabase_url" in
-                *"://$stage_ref.supabase.co"*) ;;
-                *) echo "preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF"; exit 1 ;;
-              esac
-              case "$db_url" in
-                *"postgres.$stage_ref"*|*"//$stage_ref."*|*".$stage_ref."*) ;;
-                *) echo "preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF"; exit 1 ;;
-              esac
-            '; then
-              echo "preview env file preflight/content validation failed"
-              exit 1
-            fi
+            systemctl cat "$PREVIEW_SERVICE_NAME" >/dev/null 2>&1 || { echo "missing preview systemd unit: $PREVIEW_SERVICE_NAME"; exit 1; }
+            test -d "$PREVIEW_BASE_DIR" || { echo "missing preview base dir: $PREVIEW_BASE_DIR"; exit 1; }
+            test -d "$PREVIEW_APP_DIR" || { echo "missing preview app dir: $PREVIEW_APP_DIR"; exit 1; }
+            sudo -n /usr/local/sbin/arcade-ws-preview-env-preflight
 
             test -f "$TMP_ARCHIVE"
 
             verify_release_metadata() {
               metadata_file="$1"
               verification_stage="$2"
-              sudo -n node -e '
+              node -e '
                 const fs = require("fs");
                 const [
                   metadataFile,
@@ -336,37 +266,37 @@ jobs:
               ' "$metadata_file" "$RELEASE_SHA" "$DEPLOY_REF" preview "$verification_stage"
             }
 
-            sudo -n rm -rf "$TMP_EXTRACT_DIR"
-            sudo -n mkdir -p "$TMP_EXTRACT_DIR"
-            sudo -n tar -xzf "$TMP_ARCHIVE" -C "$TMP_EXTRACT_DIR"
-            sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/server.mjs"
-            sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/observability/vps-metrics.mjs"
-            sudo -n test -f "$TMP_EXTRACT_DIR/shared/poker-domain/join.mjs"
-            sudo -n test -f "$TMP_EXTRACT_DIR/ws-server/shared/poker-domain/inactive-cleanup-deps.mjs"
-            sudo -n test -f "$TMP_EXTRACT_DIR/netlify/functions/_shared/chips-ledger.mjs"
-            sudo -n test -f "$TMP_EXTRACT_DIR/netlify/functions/_generated/deploy-context.mjs"
-            sudo -n test -d "$TMP_EXTRACT_DIR/node_modules/postgres"
+            rm -rf "$TMP_EXTRACT_DIR"
+            mkdir -p "$TMP_EXTRACT_DIR"
+            tar -xzf "$TMP_ARCHIVE" -C "$TMP_EXTRACT_DIR"
+            test -f "$TMP_EXTRACT_DIR/ws-server/server.mjs"
+            test -f "$TMP_EXTRACT_DIR/ws-server/observability/vps-metrics.mjs"
+            test -f "$TMP_EXTRACT_DIR/shared/poker-domain/join.mjs"
+            test -f "$TMP_EXTRACT_DIR/ws-server/shared/poker-domain/inactive-cleanup-deps.mjs"
+            test -f "$TMP_EXTRACT_DIR/netlify/functions/_shared/chips-ledger.mjs"
+            test -f "$TMP_EXTRACT_DIR/netlify/functions/_generated/deploy-context.mjs"
+            test -d "$TMP_EXTRACT_DIR/node_modules/postgres"
 
             verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json" extracted
 
-            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
-            sudo -n mkdir -p "$PREVIEW_BASE_DIR/shared"
-            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/shared/" "$PREVIEW_BASE_DIR/shared"/
-            sudo -n mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_shared"
-            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/netlify/functions/_shared/" "$PREVIEW_BASE_DIR/netlify/functions/_shared"/
-            sudo -n mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_generated"
-            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/netlify/functions/_generated/" "$PREVIEW_BASE_DIR/netlify/functions/_generated"/
-            sudo -n mkdir -p "$PREVIEW_BASE_DIR/node_modules"
-            sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
+            rsync -a --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
+            mkdir -p "$PREVIEW_BASE_DIR/shared"
+            rsync -a --checksum --delete "$TMP_EXTRACT_DIR/shared/" "$PREVIEW_BASE_DIR/shared"/
+            mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_shared"
+            rsync -a --checksum --delete "$TMP_EXTRACT_DIR/netlify/functions/_shared/" "$PREVIEW_BASE_DIR/netlify/functions/_shared"/
+            mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_generated"
+            rsync -a --checksum --delete "$TMP_EXTRACT_DIR/netlify/functions/_generated/" "$PREVIEW_BASE_DIR/netlify/functions/_generated"/
+            mkdir -p "$PREVIEW_BASE_DIR/node_modules"
+            rsync -a --checksum --delete "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
 
             verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json" installed-before-restart
-            sudo -n test -f "$PREVIEW_BASE_DIR/netlify/functions/_generated/deploy-context.mjs"
+            test -f "$PREVIEW_BASE_DIR/netlify/functions/_generated/deploy-context.mjs"
             (
               cd "$PREVIEW_BASE_DIR"
-              sudo -n node --input-type=module -e "await import('./ws-server/shared/poker-domain/inactive-cleanup-deps.mjs')"
+              node --input-type=module -e "await import('./ws-server/shared/poker-domain/inactive-cleanup-deps.mjs')"
             )
 
-            sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"
+            sudo -n /usr/bin/systemctl restart ws-server-preview.service
 
             LOCAL_HEALTHZ_BODY=""
             for i in $(seq 1 "$HEALTH_RETRIES"); do

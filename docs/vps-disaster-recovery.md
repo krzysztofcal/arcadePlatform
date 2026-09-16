@@ -16,6 +16,14 @@ part of Phase B or Phase C. Every `PRODUCTION MUTATION` requires separate owner
 approval; the Phase B and Phase C implementations made no VPS or Production
 mutation.
 
+Before any live privilege cutover, the owner must prove an independent root
+recovery path: either a tested root SSH login using a separately-held key, or a
+working provider console/rescue path that can repair `/etc/sudoers*`, groups,
+ownership, or systemd units. Keep that path available during the cutover and
+test it read-only before removing broad grants. If it cannot be independently
+confirmed, stop; a GitHub deploy key or the `copilot` account is not a root
+recovery path.
+
 ## 1. Confirm the supported host — READ-ONLY
 
 Start with a fresh Ubuntu 24.04 LTS VPS. Verify the image and architecture
@@ -45,8 +53,14 @@ sudo env \
 
 The bootstrap installs Node.js 20 when needed, Caddy, the deployment/runtime
 utilities including `postgresql-client`, runner libraries, the `arcade`,
-`copilot`, `arcade-stage-runner`, and `wslogs` accounts/groups, the `/opt` and
-runner directories, the IPv6 sysctl baseline, and the UFW baseline. It
+`copilot`, `arcade-stage-runner`, `wslogs`, and `arcade-deploy`
+accounts/groups, the `/opt` and runner directories, the IPv6 sysctl baseline,
+and the UFW baseline. `copilot` receives `arcade-deploy`; `arcade` does not.
+The deployable release directories and Caddyfile are group-owned as documented
+in [`infra/vps/README.md`](../infra/vps/README.md), while both env files,
+systemd units, and sudoers remain root-owned and protected. Bootstrap installs
+the fixed Preview env helper and validates the exact sudoers contract with
+`visudo` before installing it. It
 runtime-masks `caddy.service` during package installation to prevent a package
 auto-start, then removes the temporary mask and disables Caddy without
 starting it. It installs but does not enable or
@@ -217,7 +231,7 @@ truth for both `ws.kcswh.pl` and `ws-preview.kcswh.pl`. Bootstrap places it at
 `/etc/caddy/Caddyfile`. Validate it before activation:
 
 ```bash
-sudo caddy validate --config /etc/caddy/Caddyfile
+sudo -u copilot caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl cat caddy
 ```
 
@@ -323,10 +337,12 @@ read-only after an approved recovery activation.
 After Caddy, env, directories, and the owner-approved Production service
 activation prerequisites are ready, use the existing **WS Server Deploy**
 workflow for the approved application revision. It builds the artifact,
-performs the atomic release switch under `/opt/ws-server/releases`, restarts
-the Production unit, and runs its local/public health gates and runner WS
-smoke-check. Do not copy source trees or `node_modules` from a backup and do
-not add an application deployment path to `bootstrap.sh`.
+performs the atomic release switch under `/opt/ws-server/releases` as
+`copilot` through `arcade-deploy`, uses only the exact
+`/usr/bin/systemctl restart ws-server.service` root operation, and runs its
+local/public health gates and runner WS smoke-check. Do not copy source trees
+or `node_modules` from a backup and do not add an application deployment path
+to `bootstrap.sh`.
 
 The workflow may be invoked through its existing approved push or
 `workflow_dispatch` path. This runbook records the contract only; Phase B and
@@ -338,9 +354,11 @@ separate owner approval.
 Use the existing manual **WS Preview Deploy** workflow with the approved
 `ref`. It reconstructs `/opt/arcade-ws-preview/ws-server`, preserves the
 external Preview env file after its `root:root 0600` regular-file preflight,
-restarts only `ws-server-preview.service`, and checks local/public Preview
-health. It does not manage Caddy and it is not a Production deployment. Do
-not auto-dispatch it from this recovery bootstrap.
+performs file operations only in the four `arcade-deploy` Preview subtrees,
+invokes only the fixed root-owned env preflight and exact
+`/usr/bin/systemctl restart ws-server-preview.service`, and checks
+local/public Preview health. It does not manage Caddy and it is not a
+Production deployment. Do not auto-dispatch it from this recovery bootstrap.
 
 ## 11. Check local and public health — READ-ONLY
 
