@@ -24,6 +24,48 @@ test it read-only before removing broad grants. If it cannot be independently
 confirmed, stop; a GitHub deploy key or the `copilot` account is not a root
 recovery path.
 
+## Existing-host least-privilege migration — separate owner gate
+
+The procedure below is for an already-running VPS and is separate from this
+fresh-server recovery. Never run `infra/vps/bootstrap.sh` to migrate an
+existing host. The bootstrap intentionally rejects runtime markers such as
+`/opt/ws-server/current`, the Production env, and `.env.preview`.
+
+Before the migration owner GO, collect a fresh read-only inventory and a
+non-secret rollback manifest. Record per-entry type, symlink target, owner,
+group, mode, ACL/attribute state, and service PID/timestamp baselines. Before
+any Preview ownership change, the manifest must contain every existing entry
+under `ws-server`, `shared`, `netlify`, and `node_modules`, so each original
+ownership and mode can be restored exactly.
+
+The future Task 9 staging is limited to the following sequence:
+
+1. Create `arcade-deploy` if absent and add `copilot`; do not add `arcade`.
+2. Set `/opt/ws-server` and `/opt/ws-server/releases` to
+   `root:arcade-deploy 2775`.
+3. For every directory entry recursively below `/opt/ws-server/releases`
+   (including each legacy release root), set group `arcade-deploy` and group
+   `rwx` only when same-SHA redeploy support is required. Do not follow
+   symlinks; existing Production file and symlink ownership remains
+   unchanged. The recursive directory-only change lets `rm -rf
+   "$NEW_RELEASE_DIR"` remove a legacy tree without changing its file or
+   symlink ownership.
+4. Set `/opt/arcade-ws-preview/ws-server`, `shared`, `netlify`, and
+   `node_modules` to `root:arcade-deploy 2775`.
+5. Set existing descendants of those four Preview subtrees to
+   `copilot:arcade-deploy`, preserving their modes and never following
+   symlinks. Exclude `/opt/arcade-ws-preview/.env.preview`, which remains
+   `root:root 0600`.
+6. Set `/etc/caddy/Caddyfile` to `root:arcade-deploy 0664`.
+7. Install the fixed Preview env helper and exact narrow sudoers contract,
+   validating syntax before and after installation.
+
+All existing broad grants remain during this staging phase. Task 9 performs
+no `daemon-reload`, service restart/reload, application deploy, scheduler
+dispatch, credential rotation, or database/data mutation. Stop on any
+manifest mismatch or runtime-impact ambiguity and use the independent Rescue
+System only through a separate owner-approved recovery action.
+
 ## 1. Confirm the supported host — READ-ONLY
 
 Start with a fresh Ubuntu 24.04 LTS VPS. Verify the image and architecture

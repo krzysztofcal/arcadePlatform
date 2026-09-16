@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -78,6 +78,77 @@ test("ws preview deploy keeps deploy-group file operations and exact root operat
   assert.doesNotMatch(text, /ln -sfn/);
   assert.doesNotMatch(text, /readlink -f/);
   assert.doesNotMatch(text, /\/current/);
+});
+
+test("ws preview artifact roots match the 2775 deploy roots before rsync", () => {
+  const text = workflowText();
+  const modeStart = text.indexOf("for preview_sync_root in");
+  const tarStart = text.indexOf("\n          tar \\", modeStart);
+  assert.ok(modeStart >= 0 && tarStart > modeStart, "artifact root mode normalization must precede tar");
+
+  const modeBlock = text.slice(modeStart, tarStart);
+  for (const root of [
+    "$PREVIEW_STAGE_WS_DIR",
+    "$PREVIEW_STAGE_DIR/shared",
+    "$PREVIEW_STAGE_DIR/netlify/functions/_shared",
+    "$PREVIEW_STAGE_DIR/netlify/functions/_generated",
+    "$PREVIEW_STAGE_DIR/node_modules"
+  ]) {
+    assert.match(modeBlock, new RegExp(`\\"${root.replaceAll("$", "\\$")}\\"`));
+  }
+  assert.match(modeBlock, /test -d "\$preview_sync_root"/);
+  assert.match(modeBlock, /chmod 2775 "\$preview_sync_root"/);
+  assert.equal((modeBlock.match(/chmod 2775/g) ?? []).length, 1);
+});
+
+test("rsync preview contract passes with a root-owned 2775 destination root", () => {
+  const rootUid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const rootGid = typeof process.getgid === "function" ? process.getgid() : undefined;
+  assert.equal(typeof rootGid, "number", "the deterministic filesystem probe requires POSIX groups");
+
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ws-preview-rsync-contract-"));
+  const sourceRoot = path.join(probeRoot, "source");
+  const destinationRoot = path.join(probeRoot, "destination");
+  fs.mkdirSync(sourceRoot, { recursive: true });
+  fs.chmodSync(sourceRoot, 0o2775);
+  fs.writeFileSync(path.join(sourceRoot, "server.mjs"), "export {}\n");
+  fs.symlinkSync("server.mjs", path.join(sourceRoot, "server-link.mjs"));
+  const packageRoot = path.join(sourceRoot, "node_modules", "postgres");
+  fs.mkdirSync(packageRoot, { recursive: true });
+  const packageEntry = path.join(packageRoot, "index.js");
+  fs.writeFileSync(packageEntry, "export {}\n");
+  fs.chmodSync(packageEntry, 0o640);
+  fs.symlinkSync("postgres", path.join(sourceRoot, "node_modules", "postgres-link"));
+
+  const rootCommand = (command, args) => {
+    if (rootUid === 0) {
+      return execFileSync(command, args, { encoding: "utf8" });
+    }
+    return execFileSync("sudo", ["-n", command, ...args], { encoding: "utf8" });
+  };
+
+  try {
+    rootCommand("install", ["-d", "-o", "root", "-g", String(rootGid), "-m", "2775", destinationRoot]);
+    fs.writeFileSync(path.join(destinationRoot, "stale.mjs"), "stale\n");
+
+    const result = spawnSync(
+      "rsync",
+      ["-a", "--no-owner", "--no-group", "--checksum", "--delete", `${sourceRoot}/`, `${destinationRoot}/`],
+      { encoding: "utf8" }
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /code 23|Operation not permitted/);
+
+    const destinationStat = fs.statSync(destinationRoot);
+    assert.equal(destinationStat.uid, 0);
+    assert.equal(destinationStat.mode & 0o7777, 0o2775);
+    assert.equal(fs.existsSync(path.join(destinationRoot, "stale.mjs")), false);
+    assert.equal(fs.readlinkSync(path.join(destinationRoot, "server-link.mjs")), "server.mjs");
+    assert.equal(fs.readlinkSync(path.join(destinationRoot, "node_modules", "postgres-link")), "postgres");
+    assert.equal(fs.statSync(path.join(destinationRoot, "node_modules", "postgres", "index.js")).mode & 0o7777, 0o640);
+  } finally {
+    rootCommand("find", [probeRoot, "-depth", "-delete"]);
+  }
 });
 
 test("ws preview deploy delegates stage env validation to the fixed helper", () => {

@@ -288,10 +288,22 @@ The `WS_PREVIEW_USER` SSH account is `copilot` and belongs to the system group
 only in the deployable Preview subtrees: `ws-server`, `shared`, `netlify`, and
 `node_modules`. It never writes `.env.preview`, systemd units, sudoers, or the
 Preview root directory.
+
+This describes the post-migration contract only. On an existing VPS, do not
+run `infra/vps/bootstrap.sh`; use the separate owner-approved existing-host
+migration in [`docs/vps-disaster-recovery.md`](vps-disaster-recovery.md). That
+migration records a per-entry rollback manifest before changing Preview
+ownership, keeps `.env.preview` as `root:root 0600`, preserves existing
+descendant modes, and retains broad sudo grants until staging validation is
+complete.
+
 Its five scoped syncs use `rsync -a --no-owner --no-group --checksum --delete`:
 archive mode retains recursion, symlinks, permissions, timestamps, and special
-file handling, while the explicit owner/group exclusions prevent the
-unprivileged receiver from attempting metadata changes outside this contract.
+file handling. Before packaging, the workflow sets exactly the five source
+sync roots to mode `2775`, matching the root-owned deploy roots and preventing
+an unprivileged receiver from failing while preserving the top-level mode.
+`--no-owner --no-group` excludes owner/group changes only; it is not a
+replacement for the existing-host Preview descendant ownership migration.
 
 The root-owned `/usr/local/sbin/arcade-ws-preview-env-preflight` helper always
 opens exactly `/opt/arcade-ws-preview/.env.preview` with descriptor-pinned
@@ -465,7 +477,7 @@ Human-readable equivalents:
 - Batch size: **50** (lock limit: **100**)
 - Closed-table retention: **7 days** after terminal close, only when escrow is settled and history is gone
 
-This Preview policy is distinct from code defaults. Action-history retention production defaults remain `0` (disabled) until separately configured; closed-table retention defaults to 7 days but only deletes tables that satisfy every safety guard. The `/opt/arcade-ws-preview/.env.preview` file is **not touched** by the `ws-preview-deploy.yml` workflow — rsync syncs only `ws-server/`, `shared/`, and `netlify/functions/_shared/` directories, so Preview env configuration persists across deploys.
+This Preview policy is distinct from code defaults. Action-history retention production defaults remain `0` (disabled) until separately configured; closed-table retention defaults to 7 days but only deletes tables that satisfy every safety guard. The `/opt/arcade-ws-preview/.env.preview` file is **not touched** by the `ws-preview-deploy.yml` workflow — rsync syncs only the five scoped deployable roots: `ws-server/`, `shared/`, `netlify/functions/_shared/`, `netlify/functions/_generated/`, and `node_modules/`, so Preview env configuration persists across deploys.
 
 ### Required migrations and deployment order
 

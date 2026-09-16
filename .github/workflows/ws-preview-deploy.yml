@@ -153,6 +153,16 @@ jobs:
             node --input-type=module -e "await import('./ws-server/shared/poker-domain/inactive-cleanup-deps.mjs')"
           )
 
+          for preview_sync_root in \
+            "$PREVIEW_STAGE_WS_DIR" \
+            "$PREVIEW_STAGE_DIR/shared" \
+            "$PREVIEW_STAGE_DIR/netlify/functions/_shared" \
+            "$PREVIEW_STAGE_DIR/netlify/functions/_generated" \
+            "$PREVIEW_STAGE_DIR/node_modules"; do
+            test -d "$preview_sync_root"
+            chmod 2775 "$preview_sync_root"
+          done
+
           tar \
             --sort=name \
             --mtime='UTC 1970-01-01' \
