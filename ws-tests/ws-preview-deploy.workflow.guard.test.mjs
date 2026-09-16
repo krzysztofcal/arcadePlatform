@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const WORKFLOW_PATH = ".github/workflows/ws-preview-deploy.yml";
+const HELPER_PATH = "infra/vps/ws-preview-env-preflight.mjs";
 
 function workflowText() {
   return fs.readFileSync(WORKFLOW_PATH, "utf8");
+}
+
+function helperText() {
+  return fs.readFileSync(HELPER_PATH, "utf8");
 }
 
 function stepBlock(section, stepName) {
@@ -17,6 +22,7 @@ function stepBlock(section, stepName) {
 
 test("ws preview deploy workflow keeps the preview-only manual contract", () => {
   const text = workflowText();
+  const helper = helperText();
   const validateSection = text.split(/^  deploy:\n/m)[0];
   const deploySection = text.split(/^  deploy:\n/m)[1] ?? "";
 
@@ -35,13 +41,13 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.match(text, /ws-preview\.kcswh\.pl/);
   assert.match(text, /\/opt\/arcade-ws-preview/);
   assert.match(text, /\/opt\/arcade-ws-preview\/ws-server/);
-  assert.match(text, /\/opt\/arcade-ws-preview\/\.env\.preview/);
+  assert.match(helper, /\/opt\/arcade-ws-preview\/\.env\.preview/);
   assert.match(text, /ws-server-preview\.service/);
   assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
   assert.match(text, /https:\/\/ws-preview\.kcswh\.pl\/healthz/);
-  assert.match(text, /WS_AUTHORITATIVE_JOIN_ENABLED=1/);
-  assert.match(text, /SUPABASE_DB_URL/);
-  assert.match(text, /POKER_WS_INTERNAL_TOKEN/);
+  assert.match(helper, /WS_AUTHORITATIVE_JOIN_ENABLED=1/);
+  assert.match(helper, /SUPABASE_DB_URL/);
+  assert.match(helper, /POKER_WS_INTERNAL_TOKEN/);
   assert.match(text, /node --test ws-tests\/ws-preview-deploy\.workflow\.guard\.test\.mjs/);
   assert.match(text, /node --test ws-tests\/ws-preview-deploy\.remote-shape\.guard\.test\.mjs/);
 
@@ -89,21 +95,24 @@ test("ws preview deploy serializes all refs and uses one run-scoped remote temp 
 
 test("ws preview deploy workflow keeps preview runtime contract and does not manage Caddy", () => {
   const text = workflowText();
+  const helper = helperText();
 
   assert.match(text, /ws-preview\.kcswh\.pl/);
+  assert.match(helper, /^#!\/usr\/bin\/node$/m);
   assert.match(text, /\/opt\/arcade-ws-preview\/ws-server/);
-  assert.match(text, /\/opt\/arcade-ws-preview\/\.env\.preview/);
+  assert.match(helper, /\/opt\/arcade-ws-preview\/\.env\.preview/);
   assert.match(text, /ws-server-preview\.service/);
   assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
-  assert.match(text, /preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1/);
-  assert.match(text, /preview env file must define SUPABASE_DB_URL/);
-  assert.match(text, /preview env file must define SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /preview env file must define POKER_WS_INTERNAL_TOKEN/);
-  assert.match(text, /must not define legacy WS_BOT_REACTION_MIN_MS or WS_BOT_REACTION_MAX_MS/);
-  assert.match(text, /preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /sudo -n bash -c 'true'/);
-  assert.match(text, /preview deploy user must be allowed to run sudo -n bash for ws-preview deploy/);
+  assert.match(helper, /preview env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1/);
+  assert.match(helper, /REQUIRED_NON_EMPTY/);
+  for (const key of ["SUPABASE_DB_URL", "SUPABASE_STAGE_PROJECT_REF", "POKER_WS_INTERNAL_TOKEN"]) {
+    assert.match(helper, new RegExp(key));
+  }
+  assert.match(helper, /must not define legacy WS_BOT_REACTION_MIN_MS or WS_BOT_REACTION_MAX_MS/);
+  assert.match(helper, /preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(helper, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(text, /sudo -n \/usr\/local\/sbin\/arcade-ws-preview-env-preflight/);
+  assert.match(text, /sudo -n \/usr\/bin\/systemctl restart ws-server-preview\.service/);
   assert.doesNotMatch(text, /\/etc\/caddy\/Caddyfile/);
   assert.doesNotMatch(text, /infra\/vps\/Caddyfile/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
@@ -126,23 +135,24 @@ test("ws preview deploy workflow packages and validates shared runtime files", (
   assert.match(text, /cp -R shared "\$PREVIEW_STAGE_DIR"\/shared/);
   assert.match(text, /cp netlify\/functions\/_shared\/chips-ledger\.mjs "\$PREVIEW_STAGE_DIR"\/netlify\/functions\/_shared\//);
   assert.match(text, /node --input-type=module -e "await import\('\.\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs'\)"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/);
+  assert.match(text, /test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/);
+  assert.match(text, /test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/);
   assert.match(text, /test -f "\$PREVIEW_STAGE_WS_DIR\/release-metadata\.json"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
-  assert.match(text, /sudo -n test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
-  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/shared"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
-  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//);
-  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//);
-  assert.match(text, /sudo -n test -f "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
-  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
+  assert.match(text, /test -f "\$TMP_EXTRACT_DIR\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs"/);
+  assert.match(text, /test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/);
+  assert.match(text, /test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
+  assert.match(text, /test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/);
+  assert.match(text, /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
+  assert.match(text, /mkdir -p "\$PREVIEW_BASE_DIR\/shared"/);
+  assert.match(text, /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
+  assert.match(text, /mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"/);
+  assert.match(text, /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//);
+  assert.match(text, /mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"/);
+  assert.match(text, /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//);
+  assert.match(text, /test -f "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
+  assert.match(text, /mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/);
+  assert.match(text, /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
+  assert.doesNotMatch(text, /sudo -n (?:bash|node|rsync|mkdir|rm|test|tar)\b/);
   assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
 });
 
@@ -157,7 +167,7 @@ test("poker deployment doc states the unified preview Caddy ownership model", ()
   assert.match(text, /\/opt\/arcade-ws-preview\/\.env\.preview/);
   assert.match(text, /ws-server-preview\.service/);
   assert.match(text, /http:\/\/127\.0\.0\.1:3001\/healthz/);
-  assert.match(text, /passwordless sudo/);
+  assert.match(text, /exact command-specific sudo/);
   assert.match(text, /WS_AUTHORITATIVE_JOIN_ENABLED=1/);
   assert.match(text, /SUPABASE_DB_URL/);
   assert.match(text, /SUPABASE_STAGE_PROJECT_REF/);

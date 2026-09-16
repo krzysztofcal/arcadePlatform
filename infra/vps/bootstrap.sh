@@ -58,6 +58,7 @@ apt-get install -y \
   openssl \
   postgresql-client \
   rsync \
+  sudo \
   tar \
   ufw \
   unzip \
@@ -69,17 +70,22 @@ trap - EXIT
 systemctl disable caddy.service >/dev/null 2>&1 || true
 
 node_major=""
-if command -v node >/dev/null 2>&1; then
-  node_major="$(node --version | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')"
+if [[ -x /usr/bin/node ]]; then
+  node_major="$(/usr/bin/node --version | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')"
 fi
 if [[ "$node_major" != "20" ]]; then
   curl --fail --silent --show-error --location https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y nodejs
 fi
 
-node_major="$(node --version | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')"
+if [[ ! -x /usr/bin/node ]]; then
+  echo "required fixed Node interpreter /usr/bin/node is missing" >&2
+  exit 1
+fi
+
+node_major="$(/usr/bin/node --version | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')"
 if [[ "$node_major" != "20" ]]; then
-  echo "Node.js 20 is required; found $(node --version)" >&2
+  echo "Node.js 20 is required; found $(/usr/bin/node --version)" >&2
   exit 1
 fi
 
@@ -92,13 +98,21 @@ getent group wslogs >/dev/null || groupadd --system wslogs
 usermod --append --groups wslogs arcade
 usermod --append --groups wslogs copilot
 
+getent group arcade-deploy >/dev/null || groupadd --system arcade-deploy
+usermod --append --groups arcade-deploy copilot
+gpasswd --delete arcade arcade-deploy >/dev/null 2>&1 || true
+
 getent group arcade-stage-runner >/dev/null || groupadd --system arcade-stage-runner
 id arcade-stage-runner >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /var/lib/arcade-stage-runner --shell /usr/sbin/nologin --gid arcade-stage-runner arcade-stage-runner
 
 install -d -o root -g root -m 0755 /etc/arcadeplatform
 install -d -o root -g root -m 0755 /opt/ws-server /opt/ws-server/releases
 install -d -o arcade -g arcade -m 0755 /opt/arcade-ws-preview
-install -d -o root -g root -m 0755 /opt/arcade-ws-preview/ws-server
+install -d -o root -g arcade-deploy -m 2775 \
+  /opt/arcade-ws-preview/ws-server \
+  /opt/arcade-ws-preview/shared \
+  /opt/arcade-ws-preview/netlify \
+  /opt/arcade-ws-preview/node_modules
 install -d -o copilot -g copilot -m 0755 /home/copilot/.local/bin
 install -d -o copilot -g copilot -m 0700 /home/copilot/.config/gh
 install -d -o arcade-stage-runner -g arcade-stage-runner -m 0750 /var/lib/arcade-stage-runner
@@ -111,6 +125,19 @@ fi
 
 install -d -o root -g root -m 0755 /etc/caddy
 install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/Caddyfile" /etc/caddy/Caddyfile
+
+install -D -o root -g root -m 0755 \
+  "$REPO_ROOT/infra/vps/ws-preview-env-preflight.mjs" \
+  /usr/local/sbin/arcade-ws-preview-env-preflight
+
+if ! visudo -cf "$REPO_ROOT/infra/vps/arcade-deploy.sudoers"; then
+  echo "refusing bootstrap: invalid arcade deploy sudoers contract" >&2
+  exit 1
+fi
+install -o root -g root -m 0440 \
+  "$REPO_ROOT/infra/vps/arcade-deploy.sudoers" \
+  /etc/sudoers.d/arcade-deploy
+visudo -c
 
 install -d -o root -g root -m 0755 /etc/sysctl.d
 install -o root -g root -m 0644 /dev/stdin /etc/sysctl.d/99-arcadeplatform-ipv6.conf <<'EOF'

@@ -16,6 +16,81 @@ part of Phase B or Phase C. Every `PRODUCTION MUTATION` requires separate owner
 approval; the Phase B and Phase C implementations made no VPS or Production
 mutation.
 
+Before any live privilege cutover, the owner must prove an independent root
+recovery path: either a tested root SSH login using a separately-held key, or a
+working provider console/rescue path that can repair `/etc/sudoers*`, groups,
+ownership, or systemd units. Keep that path available during the cutover and
+test it read-only before removing broad grants. If it cannot be independently
+confirmed, stop; a GitHub deploy key or the `copilot` account is not a root
+recovery path.
+
+## Existing-host least-privilege migration — separate owner gate
+
+The procedure below is for an already-running VPS and is separate from this
+fresh-server recovery. Never run `infra/vps/bootstrap.sh` to migrate an
+existing host. The bootstrap intentionally rejects runtime markers such as
+`/opt/ws-server/current`, the Production env, and `.env.preview`.
+
+Before the migration owner GO, collect a fresh read-only inventory and a
+non-secret rollback manifest. Record per-entry type, symlink target, owner,
+group, mode, ACL/attribute state, and service PID/timestamp baselines. Before
+any Preview ownership change, the manifest must contain every existing entry
+under `ws-server`, `shared`, `netlify`, and `node_modules`, so each original
+ownership and mode can be restored exactly.
+
+The Phase A Task 9 staging is Preview-only and is limited to the following
+sequence:
+
+1. Create `arcade-deploy` if absent and add `copilot`; do not add `arcade`.
+2. Set `/opt/arcade-ws-preview/ws-server`, `shared`, `netlify`, and
+   `node_modules` to `root:arcade-deploy 2775`.
+3. Set existing descendants of those four Preview subtrees to
+   `copilot:arcade-deploy`, preserving their modes and never following
+   symlinks. Exclude `/opt/arcade-ws-preview/.env.preview`, which remains
+   `root:root 0600`.
+4. Install the fixed Preview env helper and exact Preview-only sudoers contract,
+   validating syntax before and after installation.
+
+Phase A does not change ownership or modes under `/opt/ws-server` or
+`/opt/ws-server/releases`, does not migrate legacy Production release
+directories, and does not change `/etc/caddy/Caddyfile`. Those Production and
+Caddy migrations, together with the Production restart and Caddy reload sudo
+permissions, belong to Phase B and require its separate owner gate.
+
+All existing broad grants remain during this staging phase. Task 9 performs
+no `daemon-reload`, service restart/reload, application deploy, scheduler
+dispatch, credential rotation, or database/data mutation. Stop on any
+manifest mismatch or runtime-impact ambiguity and use the independent Rescue
+System only through a separate owner-approved recovery action.
+
+## #994 rollout split — Preview before Production
+
+The least-privilege implementation is intentionally reviewed and merged in
+two repository phases. Phase A contains only the Preview deploy-group
+contract, fixed Preview env helper, `ws-preview-deploy.yml`, and their docs
+and guards. It does not modify `ws-server-deploy.yml`, `infra-vps.yml`, or
+their Production/Caddy behavior. Because the Preview workflow is
+`workflow_dispatch`-only, merging Phase A does not run a Preview or
+Production deploy; the existing Production and Caddy workflows remain the
+pre-migration implementations until Phase B.
+
+After Phase A is merged, an owner-approved existing-host staging prepares only
+the Preview paths and Preview-only sudoers while retaining the broad grants.
+Only then may the owner run the manual Preview workflow from the Phase A `main`
+definition for the approved exact application SHA. A successful run must
+provide Preview local and public health plus WS smoke evidence. A Netlify
+Deploy Preview is not WS Preview runtime evidence.
+
+Phase B contains the Production WS workflow, Caddy workflow, and the
+Production/Caddy ownership migration, sudo permissions, guard and
+documentation hunks. It must not merge until the Phase A exact-SHA Preview
+evidence is recorded and a fresh read-only host audit confirms the
+Production/Caddy staging prerequisites.
+Merging Phase B can trigger the existing `push`-to-`main` Production WS
+workflow because `.github/workflows/ws-server-deploy.yml` is in its push path
+filter; it therefore needs a separate owner GO and must not be treated as a
+routine documentation merge.
+
 ## 1. Confirm the supported host — READ-ONLY
 
 Start with a fresh Ubuntu 24.04 LTS VPS. Verify the image and architecture
@@ -45,8 +120,15 @@ sudo env \
 
 The bootstrap installs Node.js 20 when needed, Caddy, the deployment/runtime
 utilities including `postgresql-client`, runner libraries, the `arcade`,
-`copilot`, `arcade-stage-runner`, and `wslogs` accounts/groups, the `/opt` and
-runner directories, the IPv6 sysctl baseline, and the UFW baseline. It
+`copilot`, `arcade-stage-runner`, `wslogs`, and `arcade-deploy`
+accounts/groups, the `/opt` and runner directories, the IPv6 sysctl baseline,
+and the UFW baseline. `copilot` receives `arcade-deploy`; `arcade` does not.
+Phase A prepares only the four Preview deployable subtrees for that group; the
+Production release paths and Caddyfile retain their fresh-host root-owned
+baseline until Phase B. Both env files, systemd units, and sudoers remain
+root-owned and protected. Bootstrap installs the fixed Preview env helper and
+validates the Preview-only sudoers contract with `visudo` before installing it.
+It
 runtime-masks `caddy.service` during package installation to prevent a package
 auto-start, then removes the temporary mask and disables Caddy without
 starting it. It installs but does not enable or
@@ -338,9 +420,11 @@ separate owner approval.
 Use the existing manual **WS Preview Deploy** workflow with the approved
 `ref`. It reconstructs `/opt/arcade-ws-preview/ws-server`, preserves the
 external Preview env file after its `root:root 0600` regular-file preflight,
-restarts only `ws-server-preview.service`, and checks local/public Preview
-health. It does not manage Caddy and it is not a Production deployment. Do
-not auto-dispatch it from this recovery bootstrap.
+performs file operations only in the four `arcade-deploy` Preview subtrees,
+invokes only the fixed root-owned env preflight and exact
+`/usr/bin/systemctl restart ws-server-preview.service`, and checks
+local/public Preview health. It does not manage Caddy and it is not a
+Production deployment. Do not auto-dispatch it from this recovery bootstrap.
 
 ## 11. Check local and public health — READ-ONLY
 
