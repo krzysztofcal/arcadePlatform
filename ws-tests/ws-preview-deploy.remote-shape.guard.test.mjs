@@ -43,19 +43,25 @@ test("ws preview deploy keeps deploy-group file operations and exact root operat
     /test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/,
     /test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/,
     /test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/,
-    /rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//,
+    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//,
     /mkdir -p "\$PREVIEW_BASE_DIR\/shared"/,
-    /rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//,
+    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//,
     /mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"/,
-    /rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//,
+    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//,
     /mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"/,
-    /rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//,
+    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//,
     /test -f "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/,
     /node --input-type=module -e "await import\('\.\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs'\)"/,
     /mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/,
-    /rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//
+    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//
   ]) {
     assert.match(text, expression);
+  }
+
+  const rsyncCommands = text.match(/^\s+rsync -a [^\n]+$/gm) ?? [];
+  assert.equal(rsyncCommands.length, 5, "Preview deploy must keep exactly five scoped rsync operations");
+  for (const command of rsyncCommands) {
+    assert.match(command, /--no-owner --no-group/);
   }
 
   assert.doesNotMatch(text, /rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
@@ -126,7 +132,7 @@ test("ws preview env helper validates descriptor metadata before parsing content
 test("ws preview deploy verifies release identity before and after rsync and after restart", () => {
   const text = workflowText();
   const beforeRsync = text.indexOf('verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json"');
-  const firstRsync = text.indexOf('rsync -a --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
+  const firstRsync = text.indexOf('rsync -a --no-owner --no-group --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
   const afterRsync = text.indexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
   const restart = text.indexOf("sudo -n /usr/bin/systemctl restart ws-server-preview.service");
   const finalMetadataCheck = text.lastIndexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');

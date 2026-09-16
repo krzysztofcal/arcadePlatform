@@ -288,6 +288,10 @@ The `WS_PREVIEW_USER` SSH account is `copilot` and belongs to the system group
 only in the deployable Preview subtrees: `ws-server`, `shared`, `netlify`, and
 `node_modules`. It never writes `.env.preview`, systemd units, sudoers, or the
 Preview root directory.
+Its five scoped syncs use `rsync -a --no-owner --no-group --checksum --delete`:
+archive mode retains recursion, symlinks, permissions, timestamps, and special
+file handling, while the explicit owner/group exclusions prevent the
+unprivileged receiver from attempting metadata changes outside this contract.
 
 The root-owned `/usr/local/sbin/arcade-ws-preview-env-preflight` helper always
 opens exactly `/opt/arcade-ws-preview/.env.preview` with descriptor-pinned
