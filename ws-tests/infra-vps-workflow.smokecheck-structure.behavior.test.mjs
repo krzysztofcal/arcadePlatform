@@ -18,10 +18,10 @@ function remoteBash(text) {
 
 test("infra VPS remote bash keeps backup -> apply -> validate -> reload ordering", () => {
   const remote = remoteBash(workflowText());
-  const backupIndex = remote.indexOf('sudo -n cp "$CADDY_PATH" "$BACKUP_PATH"');
-  const applyIndex = remote.indexOf('sudo -n cp "$TMP_PATH" "$CADDY_PATH"', backupIndex);
-  const validateIndex = remote.indexOf("sudo -n caddy validate", applyIndex);
-  const reloadIndex = remote.indexOf("sudo -n systemctl reload caddy", validateIndex);
+  const backupIndex = remote.indexOf('cp "$CADDY_PATH" "$BACKUP_PATH"');
+  const applyIndex = remote.indexOf('cp "$TMP_PATH" "$CADDY_PATH"', backupIndex);
+  const validateIndex = remote.indexOf("caddy validate --config /etc/caddy/Caddyfile", applyIndex);
+  const reloadIndex = remote.indexOf("sudo -n /usr/bin/systemctl reload caddy.service", validateIndex);
 
   assert.notEqual(backupIndex, -1);
   assert.notEqual(applyIndex, -1);

@@ -36,10 +36,22 @@ non-secret rollback manifest. Record per-entry type, symlink target, owner,
 group, mode, ACL/attribute state, and service PID/timestamp baselines. Before
 any Preview ownership change, the manifest must contain every existing entry
 under `ws-server`, `shared`, `netlify`, and `node_modules`, so each original
-ownership and mode can be restored exactly.
+ownership and mode can be restored exactly. For Phase B, include every
+Production release directory entry whose directory metadata will change, and
+record existing Production files and symlinks to prove their ownership remains
+unchanged.
 
-The Phase A Task 9 staging is Preview-only and is limited to the following
-sequence:
+The owner-approved existing-host migration is split into two gates. Phase A
+staging is Preview-only and has already been completed. The separate Phase B
+staging below prepares Production and Caddy while retaining all broad grants.
+
+Before either stage, save a fresh non-secret rollback manifest covering every
+entry that will be changed. For Production releases, include every directory
+under `/opt/ws-server/releases`; for Preview, include every entry under the
+four deployable subtrees. Record type, non-followed symlink target, owner,
+group, mode, ACL/attribute state, and service PID/start timestamp baselines.
+
+The Phase A portion is limited to:
 
 1. Create `arcade-deploy` if absent and add `copilot`; do not add `arcade`.
 2. Set `/opt/arcade-ws-preview/ws-server`, `shared`, `netlify`, and
@@ -57,11 +69,45 @@ directories, and does not change `/etc/caddy/Caddyfile`. Those Production and
 Caddy migrations, together with the Production restart and Caddy reload sudo
 permissions, belong to Phase B and require its separate owner gate.
 
-All existing broad grants remain during this staging phase. Task 9 performs
-no `daemon-reload`, service restart/reload, application deploy, scheduler
-dispatch, credential rotation, or database/data mutation. Stop on any
-manifest mismatch or runtime-impact ambiguity and use the independent Rescue
-System only through a separate owner-approved recovery action.
+The separate owner-approved Phase B staging is:
+
+1. Confirm the independent root recovery path and retain all existing broad
+   grants as a fallback.
+2. Confirm `arcade-deploy` exists, add only `copilot`, and ensure `arcade` is
+   not a member.
+3. Change `/opt/ws-server` and `/opt/ws-server/releases` to
+   `root:arcade-deploy 2775`.
+4. For every real directory recursively below `/opt/ws-server/releases`,
+   including each legacy release root, set group `arcade-deploy` and group
+   `rwx` without changing ownership of existing files or symlinks. Do not
+   follow symlinks. This recursive directory-only change is required so an
+   unprivileged same-SHA `rm -rf "$NEW_RELEASE_DIR"` can remove nested
+   `root:root 0755` directories while preserving the deployed file and
+   symlink ownership.
+5. Re-verify the completed Phase A Preview contract read-only. Do not
+   remigrate the four Preview subtrees or touch `.env.preview`.
+6. Change `/etc/caddy/Caddyfile` to `root:arcade-deploy 0664`; keep the
+   `/etc/caddy` parent root-owned and non-group-writable.
+7. Verify the root-owned Preview helper and install the expanded exact
+   four-command `arcade-deploy` sudoers contract, validating with `visudo`
+   before and after installation.
+
+Before using either Phase B workflow, separately confirm that the owner-managed
+`WS_USER` secret resolves to `copilot` and that its `WS_SSH_KEY` is authorized
+for that account. Do not print or store either secret value. The last known
+Production deploy evidence used `arcade`, which is incompatible with the
+post-cutover filesystem contract.
+
+Task 9 staging performs no `daemon-reload`, service restart/reload, application
+deploy, scheduler dispatch, credential rotation, or database/data mutation.
+Stop on any manifest mismatch or runtime-impact ambiguity and use the
+independent Rescue System only through a separate owner-approved recovery
+action.
+
+Before Task 10, repeat the systemd read-only audit. If `NeedDaemonReload=yes`
+is present, it is a separate owner gate: approve and perform `daemon-reload`
+before service restart, or explicitly document why the pending unit-file
+change is unrelated. Do not silently proceed while the warning remains.
 
 ## #994 rollout split — Preview before Production
 
@@ -83,9 +129,11 @@ Deploy Preview is not WS Preview runtime evidence.
 
 Phase B contains the Production WS workflow, Caddy workflow, and the
 Production/Caddy ownership migration, sudo permissions, guard and
-documentation hunks. It must not merge until the Phase A exact-SHA Preview
-evidence is recorded and a fresh read-only host audit confirms the
-Production/Caddy staging prerequisites.
+documentation hunks. Its fresh-host bootstrap contract prepares the same
+Production/Caddy paths, but `bootstrap.sh` remains guarded for fresh VPS only
+and must never be used as an existing-host migration tool. Phase B must not
+merge until the Phase A exact-SHA Preview evidence is recorded and a fresh
+read-only host audit confirms the Production/Caddy staging prerequisites.
 Merging Phase B can trigger the existing `push`-to-`main` Production WS
 workflow because `.github/workflows/ws-server-deploy.yml` is in its push path
 filter; it therefore needs a separate owner GO and must not be treated as a

@@ -106,7 +106,7 @@ getent group arcade-stage-runner >/dev/null || groupadd --system arcade-stage-ru
 id arcade-stage-runner >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /var/lib/arcade-stage-runner --shell /usr/sbin/nologin --gid arcade-stage-runner arcade-stage-runner
 
 install -d -o root -g root -m 0755 /etc/arcadeplatform
-install -d -o root -g root -m 0755 /opt/ws-server /opt/ws-server/releases
+install -d -o root -g arcade-deploy -m 2775 /opt/ws-server /opt/ws-server/releases
 install -d -o arcade -g arcade -m 0755 /opt/arcade-ws-preview
 install -d -o root -g arcade-deploy -m 2775 \
   /opt/arcade-ws-preview/ws-server \
@@ -124,7 +124,7 @@ if [[ ! -x /home/copilot/.local/bin/gh ]]; then
 fi
 
 install -d -o root -g root -m 0755 /etc/caddy
-install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/Caddyfile" /etc/caddy/Caddyfile
+install -o root -g arcade-deploy -m 0664 "$REPO_ROOT/infra/vps/Caddyfile" /etc/caddy/Caddyfile
 
 install -D -o root -g root -m 0755 \
   "$REPO_ROOT/infra/vps/ws-preview-env-preflight.mjs" \
