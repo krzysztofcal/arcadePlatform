@@ -297,13 +297,16 @@ ownership, keeps `.env.preview` as `root:root 0600`, preserves existing
 descendant modes, and retains broad sudo grants until staging validation is
 complete.
 
-Its five scoped syncs use `rsync -a --no-owner --no-group --checksum --delete`:
-archive mode retains recursion, symlinks, permissions, timestamps, and special
-file handling. Before packaging, the workflow sets exactly the five source
-sync roots to mode `2775`, matching the root-owned deploy roots and preventing
-an unprivileged receiver from failing while preserving the top-level mode.
-`--no-owner --no-group` excludes owner/group changes only; it is not a
-replacement for the existing-host Preview descendant ownership migration.
+Its five scoped syncs use `rsync -a --no-owner --no-group --checksum --delete
+--omit-dir-times`: archive mode retains recursion, symlinks, permissions, file
+timestamps, and special file handling. Before packaging, the workflow sets
+exactly the five source sync roots to mode `2775`, matching the root-owned
+deploy roots. After unprivileged numeric-owner archive extraction, it reapplies
+`2775` to the five extracted roots; `--omit-dir-times` prevents rsync from
+trying to rewrite root-owned directory timestamps while leaving file modes and
+file timestamps active. `--no-owner --no-group` excludes owner/group changes
+only; it is not a replacement for the existing-host Preview descendant
+ownership migration.
 
 The root-owned `/usr/local/sbin/arcade-ws-preview-env-preflight` helper always
 opens exactly `/opt/arcade-ws-preview/.env.preview` with descriptor-pinned

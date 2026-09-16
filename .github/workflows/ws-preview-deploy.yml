@@ -279,6 +279,17 @@ jobs:
             rm -rf "$TMP_EXTRACT_DIR"
             mkdir -p "$TMP_EXTRACT_DIR"
             tar -xzf "$TMP_ARCHIVE" -C "$TMP_EXTRACT_DIR"
+
+            for preview_extract_root in \
+              "$TMP_EXTRACT_DIR/ws-server" \
+              "$TMP_EXTRACT_DIR/shared" \
+              "$TMP_EXTRACT_DIR/netlify/functions/_shared" \
+              "$TMP_EXTRACT_DIR/netlify/functions/_generated" \
+              "$TMP_EXTRACT_DIR/node_modules"; do
+              test -d "$preview_extract_root"
+              chmod 2775 "$preview_extract_root"
+            done
+
             test -f "$TMP_EXTRACT_DIR/ws-server/server.mjs"
             test -f "$TMP_EXTRACT_DIR/ws-server/observability/vps-metrics.mjs"
             test -f "$TMP_EXTRACT_DIR/shared/poker-domain/join.mjs"
@@ -289,15 +300,15 @@ jobs:
 
             verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json" extracted
 
-            rsync -a --no-owner --no-group --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
+            rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
             mkdir -p "$PREVIEW_BASE_DIR/shared"
-            rsync -a --no-owner --no-group --checksum --delete "$TMP_EXTRACT_DIR/shared/" "$PREVIEW_BASE_DIR/shared"/
+            rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/shared/" "$PREVIEW_BASE_DIR/shared"/
             mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_shared"
-            rsync -a --no-owner --no-group --checksum --delete "$TMP_EXTRACT_DIR/netlify/functions/_shared/" "$PREVIEW_BASE_DIR/netlify/functions/_shared"/
+            rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/netlify/functions/_shared/" "$PREVIEW_BASE_DIR/netlify/functions/_shared"/
             mkdir -p "$PREVIEW_BASE_DIR/netlify/functions/_generated"
-            rsync -a --no-owner --no-group --checksum --delete "$TMP_EXTRACT_DIR/netlify/functions/_generated/" "$PREVIEW_BASE_DIR/netlify/functions/_generated"/
+            rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/netlify/functions/_generated/" "$PREVIEW_BASE_DIR/netlify/functions/_generated"/
             mkdir -p "$PREVIEW_BASE_DIR/node_modules"
-            rsync -a --no-owner --no-group --checksum --delete "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
+            rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
 
             verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json" installed-before-restart
             test -f "$PREVIEW_BASE_DIR/netlify/functions/_generated/deploy-context.mjs"

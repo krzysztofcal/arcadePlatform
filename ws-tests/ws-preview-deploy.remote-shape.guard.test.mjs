@@ -43,17 +43,17 @@ test("ws preview deploy keeps deploy-group file operations and exact root operat
     /test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/,
     /test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/,
     /test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/,
-    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//,
     /mkdir -p "\$PREVIEW_BASE_DIR\/shared"/,
-    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//,
     /mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"/,
-    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//,
     /mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"/,
-    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//,
     /test -f "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/,
     /node --input-type=module -e "await import\('\.\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs'\)"/,
     /mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/,
-    /rsync -a --no-owner --no-group --checksum --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//
   ]) {
     assert.match(text, expression);
   }
@@ -99,6 +99,24 @@ test("ws preview artifact roots match the 2775 deploy roots before rsync", () =>
   assert.match(modeBlock, /test -d "\$preview_sync_root"/);
   assert.match(modeBlock, /chmod 2775 "\$preview_sync_root"/);
   assert.equal((modeBlock.match(/chmod 2775/g) ?? []).length, 1);
+
+  const extractModeStart = text.indexOf("for preview_extract_root in", tarStart);
+  const firstRsync = text.indexOf("rsync -a --no-owner --no-group --checksum --delete", extractModeStart);
+  assert.ok(extractModeStart > tarStart && firstRsync > extractModeStart, "extracted root mode normalization must precede rsync");
+
+  const extractModeBlock = text.slice(extractModeStart, firstRsync);
+  for (const root of [
+    "$TMP_EXTRACT_DIR/ws-server",
+    "$TMP_EXTRACT_DIR/shared",
+    "$TMP_EXTRACT_DIR/netlify/functions/_shared",
+    "$TMP_EXTRACT_DIR/netlify/functions/_generated",
+    "$TMP_EXTRACT_DIR/node_modules"
+  ]) {
+    assert.match(extractModeBlock, new RegExp(`\\"${root.replaceAll("$", "\\$")}\\"`));
+  }
+  assert.match(extractModeBlock, /test -d "\$preview_extract_root"/);
+  assert.match(extractModeBlock, /chmod 2775 "\$preview_extract_root"/);
+  assert.equal((extractModeBlock.match(/chmod 2775/g) ?? []).length, 1);
 });
 
 test("rsync preview contract passes with a root-owned 2775 destination root", () => {
@@ -109,6 +127,8 @@ test("rsync preview contract passes with a root-owned 2775 destination root", ()
   const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ws-preview-rsync-contract-"));
   const sourceRoot = path.join(probeRoot, "source");
   const destinationRoot = path.join(probeRoot, "destination");
+  const artifactPath = path.join(probeRoot, "artifact.tgz");
+  const extractRoot = path.join(probeRoot, "extract");
   fs.mkdirSync(sourceRoot, { recursive: true });
   fs.chmodSync(sourceRoot, 0o2775);
   fs.writeFileSync(path.join(sourceRoot, "server.mjs"), "export {}\n");
@@ -128,12 +148,30 @@ test("rsync preview contract passes with a root-owned 2775 destination root", ()
   };
 
   try {
+    fs.mkdirSync(extractRoot);
+    execFileSync("tar", [
+      "--sort=name",
+      "--mtime=UTC 1970-01-01",
+      "--owner=0",
+      "--group=0",
+      "--numeric-owner",
+      "-czf",
+      artifactPath,
+      "-C",
+      probeRoot,
+      "source"
+    ], { encoding: "utf8" });
+    execFileSync("tar", ["-xzf", artifactPath, "-C", extractRoot], { encoding: "utf8" });
+    const extractedSourceRoot = path.join(extractRoot, "source");
+    fs.chmodSync(extractedSourceRoot, 0o2775);
+    assert.equal(fs.statSync(extractedSourceRoot).mode & 0o7777, 0o2775);
+
     rootCommand("install", ["-d", "-o", "root", "-g", String(rootGid), "-m", "2775", destinationRoot]);
     fs.writeFileSync(path.join(destinationRoot, "stale.mjs"), "stale\n");
 
     const result = spawnSync(
       "rsync",
-      ["-a", "--no-owner", "--no-group", "--checksum", "--delete", `${sourceRoot}/`, `${destinationRoot}/`],
+      ["-a", "--no-owner", "--no-group", "--checksum", "--delete", "--omit-dir-times", `${extractedSourceRoot}/`, `${destinationRoot}/`],
       { encoding: "utf8" }
     );
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -145,7 +183,10 @@ test("rsync preview contract passes with a root-owned 2775 destination root", ()
     assert.equal(fs.existsSync(path.join(destinationRoot, "stale.mjs")), false);
     assert.equal(fs.readlinkSync(path.join(destinationRoot, "server-link.mjs")), "server.mjs");
     assert.equal(fs.readlinkSync(path.join(destinationRoot, "node_modules", "postgres-link")), "postgres");
-    assert.equal(fs.statSync(path.join(destinationRoot, "node_modules", "postgres", "index.js")).mode & 0o7777, 0o640);
+    const destinationEntry = fs.statSync(path.join(destinationRoot, "node_modules", "postgres", "index.js"));
+    const extractedEntry = fs.statSync(path.join(extractedSourceRoot, "node_modules", "postgres", "index.js"));
+    assert.equal(destinationEntry.mode & 0o7777, 0o640);
+    assert.equal(destinationEntry.mtimeMs, extractedEntry.mtimeMs);
   } finally {
     rootCommand("find", [probeRoot, "-depth", "-delete"]);
   }
@@ -203,7 +244,7 @@ test("ws preview env helper validates descriptor metadata before parsing content
 test("ws preview deploy verifies release identity before and after rsync and after restart", () => {
   const text = workflowText();
   const beforeRsync = text.indexOf('verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json"');
-  const firstRsync = text.indexOf('rsync -a --no-owner --no-group --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
+  const firstRsync = text.indexOf('rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
   const afterRsync = text.indexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
   const restart = text.indexOf("sudo -n /usr/bin/systemctl restart ws-server-preview.service");
   const finalMetadataCheck = text.lastIndexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
