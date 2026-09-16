@@ -24,9 +24,11 @@ test("artifact path after scp-action untar is supported by remote script", async
   await fs.promises.mkdir(path.dirname(finalPath), { recursive: true });
   await fs.promises.writeFile(finalPath, "fake-archive");
 
-  const simulatedRemoteArchivePath = path.join("/tmp/arcadeplatform-ws", expectedRelative).replaceAll("\\", "/");
+  const remoteTmpDir = "/tmp/arcadeplatform-ws-35125205604-1";
+  const simulatedRemoteArchivePath = path.join(remoteTmpDir, expectedRelative).replaceAll("\\", "/");
 
-  assert.equal(configuredArchivePath, simulatedRemoteArchivePath);
+  assert.equal(configuredArchivePath, "$WS_REMOTE_TMP_DIR/.artifacts/ws-server/ws-server-dist.tgz");
+  assert.equal(configuredArchivePath.replace("$WS_REMOTE_TMP_DIR", remoteTmpDir), simulatedRemoteArchivePath);
   assert.ok(fs.existsSync(finalPath), "simulated SCP output archive should exist");
-  assert.notEqual(configuredArchivePath, "/tmp/arcadeplatform-ws/ws-server-dist.tgz");
+  assert.notEqual(configuredArchivePath, "/tmp/arcadeplatform-ws/.artifacts/ws-server/ws-server-dist.tgz");
 });
