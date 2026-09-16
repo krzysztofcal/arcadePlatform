@@ -344,9 +344,10 @@ Table DEBUG is the normal diagnostic scope. The selector reuses the authenticate
 The control does not read journald, store logs in Supabase, change poker state, or suppress `ERROR`. Disable submits the exact active scope returned by WS. A restart clears all process-local overrides.
 
 The narrow sudoers contract is versioned in `infra/vps/arcade-deploy.sudoers`.
-It grants `copilot` only the exact Preview restart, Production restart, Caddy
-reload, and fixed env-preflight commands. It grants no shell, interpreter,
-archive, copy, remove, rsync, generic `systemctl`, or wildcard command.
+In Phase A it grants `copilot` only the exact Preview restart and fixed
+env-preflight commands. Production restart and Caddy reload permissions are
+deferred to Phase B. It grants no shell, interpreter, archive, copy, remove,
+rsync, generic `systemctl`, or wildcard command.
 Keep `/etc/sudoers.d/arcade-deploy` `root:root` mode `0440` and validate it with
 `visudo` before installation.
 

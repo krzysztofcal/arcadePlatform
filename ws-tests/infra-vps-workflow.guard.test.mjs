@@ -119,7 +119,7 @@ test("infra VPS remote bash verifies backup before overwrite and validates befor
   assert.equal(validateIndex < reloadIndex, true);
 });
 
-test("infra VPS bootstrap publishes the additive deploy group, helper and narrow sudoers contract", () => {
+test("infra VPS bootstrap publishes the Preview-only deploy group, helper and narrow sudoers contract", () => {
   const bootstrap = fileText("infra/vps/bootstrap.sh");
   const sudoers = fileText("infra/vps/arcade-deploy.sudoers");
   const helper = fileText("infra/vps/ws-preview-env-preflight.mjs");
@@ -129,18 +129,20 @@ test("infra VPS bootstrap publishes the additive deploy group, helper and narrow
   assert.match(bootstrap, /gpasswd --delete arcade arcade-deploy/);
   assert.doesNotMatch(bootstrap, /usermod --append --groups (?:sudo|docker|arcade-deploy) arcade/);
   assert.doesNotMatch(bootstrap, /arcade ALL=/);
-  assert.match(bootstrap, /\/opt\/ws-server \/opt\/ws-server\/releases/);
+  assert.match(bootstrap, /install -d -o root -g root -m 0755 \/opt\/ws-server \/opt\/ws-server\/releases/);
+  assert.doesNotMatch(bootstrap, /install -d -o root -g arcade-deploy -m 2775 \/opt\/ws-server/);
+  assert.match(bootstrap, /install -d -o arcade -g arcade -m 0755 \/opt\/arcade-ws-preview/);
   assert.match(bootstrap, /\/opt\/arcade-ws-preview\/(?:ws-server|shared|netlify|node_modules)/);
   assert.match(bootstrap, /-g arcade-deploy -m 2775/);
-  assert.match(bootstrap, /\/etc\/caddy\/Caddyfile/);
-  assert.match(bootstrap, /-g arcade-deploy -m 0664/);
+  assert.match(bootstrap, /install -o root -g root -m 0644 "\$REPO_ROOT\/infra\/vps\/Caddyfile" \/etc\/caddy\/Caddyfile/);
+  assert.doesNotMatch(bootstrap, /-g arcade-deploy -m 0664.*Caddyfile/);
   assert.match(bootstrap, /ws-preview-env-preflight\.mjs/);
   assert.match(bootstrap, /visudo -cf/);
   assert.match(bootstrap, /arcade-deploy\.sudoers/);
   assert.match(sudoers, /copilot ALL=\(root\) NOPASSWD:/);
-  assert.match(sudoers, /restart ws-server\.service/);
   assert.match(sudoers, /restart ws-server-preview\.service/);
-  assert.match(sudoers, /reload caddy\.service/);
+  assert.doesNotMatch(sudoers, /restart ws-server\.service/);
+  assert.doesNotMatch(sudoers, /reload caddy\.service/);
   assert.match(sudoers, /arcade-ws-preview-env-preflight ""/);
   assert.doesNotMatch(sudoers, /arcade ALL=/);
   const sudoersCommands = sudoers.replace(/^#.*$/gm, "");

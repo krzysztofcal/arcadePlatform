@@ -38,27 +38,24 @@ any Preview ownership change, the manifest must contain every existing entry
 under `ws-server`, `shared`, `netlify`, and `node_modules`, so each original
 ownership and mode can be restored exactly.
 
-The future Task 9 staging is limited to the following sequence:
+The Phase A Task 9 staging is Preview-only and is limited to the following
+sequence:
 
 1. Create `arcade-deploy` if absent and add `copilot`; do not add `arcade`.
-2. Set `/opt/ws-server` and `/opt/ws-server/releases` to
-   `root:arcade-deploy 2775`.
-3. For every directory entry recursively below `/opt/ws-server/releases`
-   (including each legacy release root), set group `arcade-deploy` and group
-   `rwx` only when same-SHA redeploy support is required. Do not follow
-   symlinks; existing Production file and symlink ownership remains
-   unchanged. The recursive directory-only change lets `rm -rf
-   "$NEW_RELEASE_DIR"` remove a legacy tree without changing its file or
-   symlink ownership.
-4. Set `/opt/arcade-ws-preview/ws-server`, `shared`, `netlify`, and
+2. Set `/opt/arcade-ws-preview/ws-server`, `shared`, `netlify`, and
    `node_modules` to `root:arcade-deploy 2775`.
-5. Set existing descendants of those four Preview subtrees to
+3. Set existing descendants of those four Preview subtrees to
    `copilot:arcade-deploy`, preserving their modes and never following
    symlinks. Exclude `/opt/arcade-ws-preview/.env.preview`, which remains
    `root:root 0600`.
-6. Set `/etc/caddy/Caddyfile` to `root:arcade-deploy 0664`.
-7. Install the fixed Preview env helper and exact narrow sudoers contract,
+4. Install the fixed Preview env helper and exact Preview-only sudoers contract,
    validating syntax before and after installation.
+
+Phase A does not change ownership or modes under `/opt/ws-server` or
+`/opt/ws-server/releases`, does not migrate legacy Production release
+directories, and does not change `/etc/caddy/Caddyfile`. Those Production and
+Caddy migrations, together with the Production restart and Caddy reload sudo
+permissions, belong to Phase B and require its separate owner gate.
 
 All existing broad grants remain during this staging phase. Task 9 performs
 no `daemon-reload`, service restart/reload, application deploy, scheduler
@@ -69,25 +66,26 @@ System only through a separate owner-approved recovery action.
 ## #994 rollout split — Preview before Production
 
 The least-privilege implementation is intentionally reviewed and merged in
-two repository phases. Phase A contains the additive deploy-group contract,
-fixed Preview env helper, `ws-preview-deploy.yml`, and their docs and guards.
-It does not modify `ws-server-deploy.yml`, `infra-vps.yml`, or their
-Production/Caddy behavior. Because the Preview workflow is
+two repository phases. Phase A contains only the Preview deploy-group
+contract, fixed Preview env helper, `ws-preview-deploy.yml`, and their docs
+and guards. It does not modify `ws-server-deploy.yml`, `infra-vps.yml`, or
+their Production/Caddy behavior. Because the Preview workflow is
 `workflow_dispatch`-only, merging Phase A does not run a Preview or
 Production deploy; the existing Production and Caddy workflows remain the
 pre-migration implementations until Phase B.
 
-After Phase A is merged, an owner-approved existing-host staging prepares the
-additive contract while retaining the broad grants. Only then may the owner
-run the manual Preview workflow from the Phase A `main` definition for the
-approved exact application SHA. A successful run must provide Preview local
-and public health plus WS smoke evidence. A Netlify Deploy Preview is not WS
-Preview runtime evidence.
+After Phase A is merged, an owner-approved existing-host staging prepares only
+the Preview paths and Preview-only sudoers while retaining the broad grants.
+Only then may the owner run the manual Preview workflow from the Phase A `main`
+definition for the approved exact application SHA. A successful run must
+provide Preview local and public health plus WS smoke evidence. A Netlify
+Deploy Preview is not WS Preview runtime evidence.
 
 Phase B contains the Production WS workflow, Caddy workflow, and the
-Production/Caddy-specific guard and documentation hunks. It must not merge
-until the Phase A exact-SHA Preview evidence is recorded and a fresh
-read-only host audit confirms the Production/Caddy staging prerequisites.
+Production/Caddy ownership migration, sudo permissions, guard and
+documentation hunks. It must not merge until the Phase A exact-SHA Preview
+evidence is recorded and a fresh read-only host audit confirms the
+Production/Caddy staging prerequisites.
 Merging Phase B can trigger the existing `push`-to-`main` Production WS
 workflow because `.github/workflows/ws-server-deploy.yml` is in its push path
 filter; it therefore needs a separate owner GO and must not be treated as a
@@ -125,11 +123,12 @@ utilities including `postgresql-client`, runner libraries, the `arcade`,
 `copilot`, `arcade-stage-runner`, `wslogs`, and `arcade-deploy`
 accounts/groups, the `/opt` and runner directories, the IPv6 sysctl baseline,
 and the UFW baseline. `copilot` receives `arcade-deploy`; `arcade` does not.
-The deployable release directories and Caddyfile are group-owned as documented
-in [`infra/vps/README.md`](../infra/vps/README.md), while both env files,
-systemd units, and sudoers remain root-owned and protected. Bootstrap installs
-the fixed Preview env helper and validates the exact sudoers contract with
-`visudo` before installing it. It
+Phase A prepares only the four Preview deployable subtrees for that group; the
+Production release paths and Caddyfile retain their fresh-host root-owned
+baseline until Phase B. Both env files, systemd units, and sudoers remain
+root-owned and protected. Bootstrap installs the fixed Preview env helper and
+validates the Preview-only sudoers contract with `visudo` before installing it.
+It
 runtime-masks `caddy.service` during package installation to prevent a package
 auto-start, then removes the temporary mask and disables Caddy without
 starting it. It installs but does not enable or
