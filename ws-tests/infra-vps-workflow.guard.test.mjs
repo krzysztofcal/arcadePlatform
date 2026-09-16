@@ -79,6 +79,68 @@ test("infra VPS workflow uses WS_* secrets and avoids VPS_* secrets", () => {
   assert.equal(text.includes("secrets.VPS_SSH_KEY"), false);
 });
 
+test("infra VPS upload uses a strict run-scoped temp path and cleans it after rollback", () => {
+  const text = workflowText();
+  const remote = remoteBash(text);
+
+  assert.match(
+    text,
+    /INFRA_REMOTE_TMP_DIR: \/tmp\/arcadeplatform-infra-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/
+  );
+  assert.match(text, /target: \$\{\{ env\.INFRA_REMOTE_TMP_DIR \}\}/);
+  assert.match(text, /INFRA_REMOTE_TMP_DIR: \$\{\{ env\.INFRA_REMOTE_TMP_DIR \}\}/);
+  assert.match(text, /envs: INFRA_REMOTE_TMP_DIR/);
+  assert.match(
+    remote,
+    /if \[\[ ! "\$INFRA_REMOTE_TMP_DIR" =~ \^\/tmp\/arcadeplatform-infra-\[0-9\]\+-\[0-9\]\+\$ \]\]; then[\s\S]*invalid run-scoped infra temp dir/
+  );
+  assert.match(remote, /TMP_PATH="\$INFRA_REMOTE_TMP_DIR\/Caddyfile"/);
+  assert.match(remote, /BACKUP_PATH="\$\{TMP_PATH\}\.bak\.\$\(date/);
+  assert.match(remote, /rm -rf -- "\$INFRA_REMOTE_TMP_DIR"/);
+  assert.match(remote, /trap cleanup EXIT/);
+  assert.equal(text.includes("overwrite: true"), false);
+  assert.doesNotMatch(text, /\/tmp\/arcadeplatform-infra(?:[\/"'\s])/);
+
+  const guardSource = text.match(
+    /if \[\[ ! "\$INFRA_REMOTE_TMP_DIR" =~ [^\n]+[\s\S]*?\n            fi/
+  )?.[0];
+  assert.ok(guardSource, "workflow should contain the run-scoped infra temp path guard");
+
+  for (const value of [
+    "/tmp/arcadeplatform-infra-35129337352-1",
+    "/tmp/arcadeplatform-infra-1-2"
+  ]) {
+    const result = spawnSync("bash", ["-c", guardSource], {
+      env: { ...process.env, INFRA_REMOTE_TMP_DIR: value },
+      encoding: "utf8"
+    });
+    assert.equal(result.status, 0, `expected valid temp path: ${value}`);
+  }
+
+  for (const value of [
+    "/tmp/arcadeplatform-infra-1x-2",
+    "/tmp/arcadeplatform-infra-1-2/../../outside",
+    "/tmp/arcadeplatform-infra-1-"
+  ]) {
+    const result = spawnSync("bash", ["-c", guardSource], {
+      env: { ...process.env, INFRA_REMOTE_TMP_DIR: value },
+      encoding: "utf8"
+    });
+    assert.notEqual(result.status, 0, `expected rejected temp path: ${value}`);
+  }
+
+  const onErrorIndex = remote.indexOf("on_error() {");
+  const rollbackCallIndex = remote.indexOf("  rollback", onErrorIndex);
+  const exitIndex = remote.indexOf('  exit "$rc"', onErrorIndex);
+  const cleanupTrapIndex = remote.indexOf("trap cleanup EXIT");
+  assert.notEqual(onErrorIndex, -1);
+  assert.notEqual(rollbackCallIndex, -1);
+  assert.notEqual(exitIndex, -1);
+  assert.notEqual(cleanupTrapIndex, -1);
+  assert.equal(rollbackCallIndex < exitIndex, true);
+  assert.equal(exitIndex < cleanupTrapIndex, true);
+});
+
 test("infra VPS workflow keeps concurrency guard", () => {
   const text = workflowText();
   assert.ok(text.includes("concurrency:"));

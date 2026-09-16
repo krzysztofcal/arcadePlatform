@@ -34,6 +34,8 @@ jobs:
   apply:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      INFRA_REMOTE_TMP_DIR: /tmp/arcadeplatform-infra-${{ github.run_id }}-${{ github.run_attempt }}
     permissions:
       contents: read
     steps:
@@ -52,17 +54,20 @@ jobs:
           username: ${{ secrets.WS_USER }}
           key: ${{ secrets.WS_SSH_KEY }}
           source: infra/vps/Caddyfile
-          target: /tmp/arcadeplatform-infra
+          target: ${{ env.INFRA_REMOTE_TMP_DIR }}
           strip_components: 2
 
       - name: Backup, validate and reload Caddy config
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          INFRA_REMOTE_TMP_DIR: ${{ env.INFRA_REMOTE_TMP_DIR }}
         with:
           host: ${{ secrets.WS_HOST }}
           username: ${{ secrets.WS_USER }}
           key: ${{ secrets.WS_SSH_KEY }}
           timeout: 2m
           command_timeout: 20m
+          envs: INFRA_REMOTE_TMP_DIR
           script: |
             set -eu
             if ! command -v bash >/dev/null 2>&1; then
@@ -73,11 +78,20 @@ jobs:
             bash <<'BASH'
             set -Eeuo pipefail
             CADDY_PATH="/etc/caddy/Caddyfile"
-            TMP_PATH="/tmp/arcadeplatform-infra/Caddyfile"
+            if [[ ! "$INFRA_REMOTE_TMP_DIR" =~ ^/tmp/arcadeplatform-infra-[0-9]+-[0-9]+$ ]]; then
+              echo "invalid run-scoped infra temp dir: $INFRA_REMOTE_TMP_DIR"
+              exit 1
+            fi
+
+            TMP_PATH="$INFRA_REMOTE_TMP_DIR/Caddyfile"
             BACKUP_PATH="${TMP_PATH}.bak.$(date +%Y%m%d%H%M%S)"
             HAVE_BACKUP=0
             APPLIED=0
             ROLLED_BACK=0
+
+            cleanup() {
+              rm -rf -- "$INFRA_REMOTE_TMP_DIR" >/dev/null 2>&1 || true
+            }
 
             rollback() {
               if [ "$HAVE_BACKUP" != "1" ] || [ "$ROLLED_BACK" = "1" ]; then
@@ -97,6 +111,7 @@ jobs:
             }
 
             trap 'on_error' ERR
+            trap cleanup EXIT
 
             test -f "$TMP_PATH"
             test -w "$CADDY_PATH" || { echo "provision arcade-deploy Caddyfile ownership first"; exit 1; }
