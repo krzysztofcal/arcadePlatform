@@ -1,0 +1,10 @@
+# Exact privileged operations for the copilot deployment account.
+# The deploy group owns only application state and the Caddyfile; it does not
+# grant access to secrets, systemd units, sudoers, shells or interpreters.
+Cmnd_Alias ARCADE_DEPLOY_COMMANDS = \
+    /usr/bin/systemctl restart ws-server.service, \
+    /usr/bin/systemctl restart ws-server-preview.service, \
+    /usr/bin/systemctl reload caddy.service, \
+    /usr/local/sbin/arcade-ws-preview-env-preflight ""
+
+copilot ALL=(root) NOPASSWD: ARCADE_DEPLOY_COMMANDS

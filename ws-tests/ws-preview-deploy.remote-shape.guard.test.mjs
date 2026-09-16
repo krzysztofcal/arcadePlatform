@@ -1,57 +1,73 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const WORKFLOW_PATH = ".github/workflows/ws-preview-deploy.yml";
+const HELPER_PATH = "infra/vps/ws-preview-env-preflight.mjs";
 
 function workflowText() {
   return fs.readFileSync(WORKFLOW_PATH, "utf8");
 }
 
+function helperText() {
+  return fs.readFileSync(HELPER_PATH, "utf8");
+}
+
 function metadataVerifierSource(text) {
   const match = text.match(
-    /verify_release_metadata\(\) \{[\s\S]*?sudo -n node -e '\n([\s\S]*?)\n\s+' "\$metadata_file"/
+    /verify_release_metadata\(\) \{[\s\S]*?node -e '\n([\s\S]*?)\n\s+' "\$metadata_file"/
   );
   assert.ok(match, "missing executable release metadata verifier");
   return match[1];
 }
 
-test("ws preview deploy remote script matches fixed preview app-dir contract", () => {
+test("ws preview deploy keeps deploy-group file operations and exact root operations", () => {
   const text = workflowText();
 
   assert.match(text, /PREVIEW_BASE_DIR: \/opt\/arcade-ws-preview/);
   assert.match(text, /PREVIEW_APP_DIR: \/opt\/arcade-ws-preview\/ws-server/);
-  assert.match(text, /sudo -n bash -c 'true'/);
-  assert.match(text, /preview deploy user must be allowed to run sudo -n bash for ws-preview deploy/);
-  assert.match(text, /sudo -n test -d "\$PREVIEW_APP_DIR"/);
-  assert.match(text, /cp -R ws-server\/shared\/poker-domain "\$PREVIEW_STAGE_WS_DIR"\/shared\/poker-domain/);
-  assert.match(text, /cp -R ws-server\/observability "\$PREVIEW_STAGE_WS_DIR"\/observability/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/observability\/vps-metrics\.mjs"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/);
-  assert.match(text, /sudo -n test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
-  assert.match(text, /sudo -n test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//);
-  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/shared"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//);
-  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//);
-  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//);
-  assert.match(text, /sudo -n test -f "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/);
-  assert.match(text, /sudo -n node --input-type=module -e "await import\('\.\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs'\)"/);
-  assert.match(text, /sudo -n mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/);
-  assert.match(text, /sudo -n rsync -a --checksum --delete "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//);
-  assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
-  assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/node_modules"\/ "\$PREVIEW_BASE_DIR\/node_modules"\//);
-  assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server"\/ "\$PREVIEW_APP_DIR"\//);
-  assert.doesNotMatch(text, /sudo -n rsync -a --delete "\$TMP_EXTRACT_DIR\/shared"\/ "\$PREVIEW_BASE_DIR\/shared"\//);
-  assert.match(text, /sudo -n systemctl restart "\$PREVIEW_SERVICE_NAME"/);
+  assert.match(text, /test -d "\$PREVIEW_APP_DIR"/);
+  assert.match(text, /sudo -n \/usr\/local\/sbin\/arcade-ws-preview-env-preflight/);
+  assert.match(text, /sudo -n \/usr\/bin\/systemctl restart ws-server-preview\.service/);
+  assert.doesNotMatch(text, /sudo -n (?:bash|node|rsync|mkdir|rm|test|tar)\b/);
+  assert.doesNotMatch(text, /sudo -n systemctl restart "\$PREVIEW_SERVICE_NAME"/);
+
+  for (const expression of [
+    /test -f "\$TMP_EXTRACT_DIR\/ws-server\/server\.mjs"/,
+    /test -f "\$TMP_EXTRACT_DIR\/ws-server\/observability\/vps-metrics\.mjs"/,
+    /test -f "\$TMP_EXTRACT_DIR\/shared\/poker-domain\/join\.mjs"/,
+    /test -f "\$TMP_EXTRACT_DIR\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs"/,
+    /test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/chips-ledger\.mjs"/,
+    /test -f "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/,
+    /test -d "\$TMP_EXTRACT_DIR\/node_modules\/postgres"/,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/ws-server\/" "\$PREVIEW_APP_DIR"\//,
+    /mkdir -p "\$PREVIEW_BASE_DIR\/shared"/,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/shared\/" "\$PREVIEW_BASE_DIR\/shared"\//,
+    /mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"/,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/netlify\/functions\/_shared\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_shared"\//,
+    /mkdir -p "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"/,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/netlify\/functions\/_generated\/" "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated"\//,
+    /test -f "\$PREVIEW_BASE_DIR\/netlify\/functions\/_generated\/deploy-context\.mjs"/,
+    /node --input-type=module -e "await import\('\.\/ws-server\/shared\/poker-domain\/inactive-cleanup-deps\.mjs'\)"/,
+    /mkdir -p "\$PREVIEW_BASE_DIR\/node_modules"/,
+    /rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "\$TMP_EXTRACT_DIR\/node_modules\/" "\$PREVIEW_BASE_DIR\/node_modules"\//
+  ]) {
+    assert.match(text, expression);
+  }
+
+  const rsyncCommands = text.match(/^\s+rsync -a [^\n]+$/gm) ?? [];
+  assert.equal(rsyncCommands.length, 5, "Preview deploy must keep exactly five scoped rsync operations");
+  for (const command of rsyncCommands) {
+    assert.match(command, /--no-owner --no-group/);
+  }
+
+  assert.doesNotMatch(text, /rsync -a --delete "\$TMP_EXTRACT_DIR"\/ "\$PREVIEW_BASE_DIR"\//);
+  assert.doesNotMatch(text, /rsync -a --delete "\$TMP_EXTRACT_DIR\/node_modules"\/ "\$PREVIEW_BASE_DIR\/node_modules"\//);
+  assert.doesNotMatch(text, /rsync -a --delete "\$TMP_EXTRACT_DIR\/ws-server"\/ "\$PREVIEW_APP_DIR"\//);
+  assert.doesNotMatch(text, /rsync -a --delete "\$TMP_EXTRACT_DIR\/shared"\/ "\$PREVIEW_BASE_DIR\/shared"\//);
   assert.match(text, /curl -fsS "\$PREVIEW_LOCAL_HEALTHZ_URL"/);
   assert.match(text, /curl -fsS "\$PREVIEW_PUBLIC_HEALTHZ_URL"/);
   assert.doesNotMatch(text, /node --test tests\/ws-preview-deploy/);
@@ -64,41 +80,152 @@ test("ws preview deploy remote script matches fixed preview app-dir contract", (
   assert.doesNotMatch(text, /\/current/);
 });
 
-test("ws preview deploy remote script rejects non-stage Supabase env", () => {
+test("ws preview artifact roots match the 2775 deploy roots before rsync", () => {
   const text = workflowText();
+  const modeStart = text.indexOf("for preview_sync_root in");
+  const tarStart = text.indexOf("\n          tar \\", modeStart);
+  assert.ok(modeStart >= 0 && tarStart > modeStart, "artifact root mode normalization must precede tar");
 
-  assert.match(text, /preview env file must define SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /stage_ref="\$\{SUPABASE_STAGE_PROJECT_REF:-\}"/);
-  assert.match(text, /supabase_url="\$\{SUPABASE_URL:-\$\{SUPABASE_URL_V2:-\}\}"/);
-  assert.match(text, /db_url="\$\{SUPABASE_DB_URL:-\}"/);
-  assert.match(text, /\*":\/\/\$stage_ref\.supabase\.co"\*/);
-  assert.match(text, /preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /\*"postgres\.\$stage_ref"\*\|\*"\/\/\$stage_ref\."\*\|\*"\.\$stage_ref\."\*/);
-  assert.match(text, /preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /preview env file must define POKER_WS_INTERNAL_TOKEN/);
-  assert.match(text, /WS_BOT_REACTION_\(MIN\|MAX\)_MS/);
+  const modeBlock = text.slice(modeStart, tarStart);
+  for (const root of [
+    "$PREVIEW_STAGE_WS_DIR",
+    "$PREVIEW_STAGE_DIR/shared",
+    "$PREVIEW_STAGE_DIR/netlify/functions/_shared",
+    "$PREVIEW_STAGE_DIR/netlify/functions/_generated",
+    "$PREVIEW_STAGE_DIR/node_modules"
+  ]) {
+    assert.match(modeBlock, new RegExp(`\\"${root.replaceAll("$", "\\$")}\\"`));
+  }
+  assert.match(modeBlock, /test -d "\$preview_sync_root"/);
+  assert.match(modeBlock, /chmod 2775 "\$preview_sync_root"/);
+  assert.equal((modeBlock.match(/chmod 2775/g) ?? []).length, 1);
+
+  const extractModeStart = text.indexOf("for preview_extract_root in", tarStart);
+  const firstRsync = text.indexOf("rsync -a --no-owner --no-group --checksum --delete", extractModeStart);
+  assert.ok(extractModeStart > tarStart && firstRsync > extractModeStart, "extracted root mode normalization must precede rsync");
+
+  const extractModeBlock = text.slice(extractModeStart, firstRsync);
+  for (const root of [
+    "$TMP_EXTRACT_DIR/ws-server",
+    "$TMP_EXTRACT_DIR/shared",
+    "$TMP_EXTRACT_DIR/netlify/functions/_shared",
+    "$TMP_EXTRACT_DIR/netlify/functions/_generated",
+    "$TMP_EXTRACT_DIR/node_modules"
+  ]) {
+    assert.match(extractModeBlock, new RegExp(`\\"${root.replaceAll("$", "\\$")}\\"`));
+  }
+  assert.match(extractModeBlock, /test -d "\$preview_extract_root"/);
+  assert.match(extractModeBlock, /chmod 2775 "\$preview_extract_root"/);
+  assert.equal((extractModeBlock.match(/chmod 2775/g) ?? []).length, 1);
 });
 
-test("ws preview deploy validates env-file permissions before reading contents", () => {
+test("rsync preview contract passes with a root-owned 2775 destination root", () => {
+  const rootUid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const rootGid = typeof process.getgid === "function" ? process.getgid() : undefined;
+  assert.equal(typeof rootGid, "number", "the deterministic filesystem probe requires POSIX groups");
+
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ws-preview-rsync-contract-"));
+  const sourceRoot = path.join(probeRoot, "source");
+  const destinationRoot = path.join(probeRoot, "destination");
+  const artifactPath = path.join(probeRoot, "artifact.tgz");
+  const extractRoot = path.join(probeRoot, "extract");
+  fs.mkdirSync(sourceRoot, { recursive: true });
+  fs.chmodSync(sourceRoot, 0o2775);
+  fs.writeFileSync(path.join(sourceRoot, "server.mjs"), "export {}\n");
+  fs.symlinkSync("server.mjs", path.join(sourceRoot, "server-link.mjs"));
+  const packageRoot = path.join(sourceRoot, "node_modules", "postgres");
+  fs.mkdirSync(packageRoot, { recursive: true });
+  const packageEntry = path.join(packageRoot, "index.js");
+  fs.writeFileSync(packageEntry, "export {}\n");
+  fs.chmodSync(packageEntry, 0o640);
+  fs.symlinkSync("postgres", path.join(sourceRoot, "node_modules", "postgres-link"));
+
+  const rootCommand = (command, args) => {
+    if (rootUid === 0) {
+      return execFileSync(command, args, { encoding: "utf8" });
+    }
+    return execFileSync("sudo", ["-n", command, ...args], { encoding: "utf8" });
+  };
+
+  try {
+    fs.mkdirSync(extractRoot);
+    execFileSync("tar", [
+      "--sort=name",
+      "--mtime=UTC 1970-01-01",
+      "--owner=0",
+      "--group=0",
+      "--numeric-owner",
+      "-czf",
+      artifactPath,
+      "-C",
+      probeRoot,
+      "source"
+    ], { encoding: "utf8" });
+    execFileSync("tar", ["-xzf", artifactPath, "-C", extractRoot], { encoding: "utf8" });
+    const extractedSourceRoot = path.join(extractRoot, "source");
+    fs.chmodSync(extractedSourceRoot, 0o2775);
+    assert.equal(fs.statSync(extractedSourceRoot).mode & 0o7777, 0o2775);
+
+    rootCommand("install", ["-d", "-o", "root", "-g", String(rootGid), "-m", "2775", destinationRoot]);
+    fs.writeFileSync(path.join(destinationRoot, "stale.mjs"), "stale\n");
+
+    const result = spawnSync(
+      "rsync",
+      ["-a", "--no-owner", "--no-group", "--checksum", "--delete", "--omit-dir-times", `${extractedSourceRoot}/`, `${destinationRoot}/`],
+      { encoding: "utf8" }
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /code 23|Operation not permitted/);
+
+    const destinationStat = fs.statSync(destinationRoot);
+    assert.equal(destinationStat.uid, 0);
+    assert.equal(destinationStat.mode & 0o7777, 0o2775);
+    assert.equal(fs.existsSync(path.join(destinationRoot, "stale.mjs")), false);
+    assert.equal(fs.readlinkSync(path.join(destinationRoot, "server-link.mjs")), "server.mjs");
+    assert.equal(fs.readlinkSync(path.join(destinationRoot, "node_modules", "postgres-link")), "postgres");
+    const destinationEntry = fs.statSync(path.join(destinationRoot, "node_modules", "postgres", "index.js"));
+    const extractedEntry = fs.statSync(path.join(extractedSourceRoot, "node_modules", "postgres", "index.js"));
+    assert.equal(destinationEntry.mode & 0o7777, 0o640);
+    assert.equal(destinationEntry.mtimeMs, extractedEntry.mtimeMs);
+  } finally {
+    rootCommand("find", [probeRoot, "-depth", "-delete"]);
+  }
+});
+
+test("ws preview deploy delegates stage env validation to the fixed helper", () => {
   const text = workflowText();
+  const helper = helperText();
+
+  assert.match(text, /\/usr\/local\/sbin\/arcade-ws-preview-env-preflight/);
+  assert.match(helper, /SUPABASE_STAGE_PROJECT_REF/);
+  assert.match(helper, /SUPABASE_DB_URL/);
+  assert.match(helper, /POKER_WS_INTERNAL_TOKEN/);
+  assert.match(helper, /WS_BOT_REACTION_MIN_MS/);
+  assert.match(helper, /WS_BOT_REACTION_MAX_MS/);
+  assert.match(helper, /SUPABASE_URL_V2/);
+  assert.match(helper, /target SUPABASE_STAGE_PROJECT_REF/);
+});
+
+test("ws preview env helper validates descriptor metadata before parsing contents", () => {
+  const text = helperText();
   const descriptorOpen = text.indexOf("fd = fs.openSync(");
   const descriptorMetadata = text.indexOf("const metadata = fs.fstatSync(fd)", descriptorOpen);
-  const descriptorRead = text.indexOf(
-    'process.stdout.write(fs.readFileSync(fd, "utf8"))',
-    descriptorMetadata
-  );
-  const firstContentCheck = text.indexOf('grep -Eq "^PORT=3001$" <<<"$ENV_CONTENT"');
-  const sourcedContentCheck = text.indexOf('. /dev/stdin <<<"$ENV_CONTENT"');
+  const descriptorRead = text.indexOf('fs.readFileSync(fd, "utf8")', descriptorMetadata);
+  const firstContentCheck = text.indexOf("PORT", descriptorRead);
+  const parser = text.indexOf("const values = parseEnv");
 
+  assert.match(text, /const ENV_FILE = "\/opt\/arcade-ws-preview\/\.env\.preview"/);
+  assert.match(text, /process\.argv\.length !== 2/);
+  assert.match(text, /unexpected arguments/);
   assert.ok(descriptorOpen >= 0, "preview env must be opened without following symlinks");
   assert.match(
     text,
-    /fs\.openSync\(\s*envFile,\s*fs\.constants\.O_RDONLY \| fs\.constants\.O_NOFOLLOW \| fs\.constants\.O_NONBLOCK\s*\)/
+    /fs\.openSync\(\s*ENV_FILE,\s*fs\.constants\.O_RDONLY \| fs\.constants\.O_NOFOLLOW \| fs\.constants\.O_NONBLOCK\s*\)/
   );
   assert.ok(descriptorMetadata > descriptorOpen, "opened preview env metadata must be checked");
   assert.ok(descriptorRead > descriptorMetadata, "preview env contents must be read after metadata");
   assert.ok(firstContentCheck > descriptorRead, "content checks must follow the permission preflight");
-  assert.ok(sourcedContentCheck > descriptorRead, "sourcing must follow the permission preflight");
+  assert.ok(parser >= 0 && parser < descriptorRead, "env parsing must consume the descriptor contents");
   assert.match(text, /typeof fs\.constants\.O_NOFOLLOW !== "number"/);
   assert.match(text, /typeof fs\.constants\.O_NONBLOCK !== "number"/);
   assert.match(text, /metadata\.isFile\(\)/);
@@ -109,17 +236,17 @@ test("ws preview deploy validates env-file permissions before reading contents",
   assert.match(text, /regular file owned by root:root with mode 0600/);
   assert.match(text, /must not be a symlink/);
   assert.doesNotMatch(text, /fs\.readFileSync\(envFile/);
-  assert.doesNotMatch(text, /grep -Eq [^\n]*\"\$PREVIEW_ENV_FILE\"/);
-  assert.doesNotMatch(text, /\. \"\$PREVIEW_ENV_FILE\"/);
+  assert.doesNotMatch(text, /process\.argv\[1\]/);
+  assert.doesNotMatch(text, /console\.log/);
   assert.doesNotMatch(text, /\b(?:chmod|chown)\b/);
 });
 
 test("ws preview deploy verifies release identity before and after rsync and after restart", () => {
   const text = workflowText();
   const beforeRsync = text.indexOf('verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json"');
-  const firstRsync = text.indexOf('sudo -n rsync -a --checksum --delete "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
+  const firstRsync = text.indexOf('rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/');
   const afterRsync = text.indexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
-  const restart = text.indexOf('sudo -n systemctl restart "$PREVIEW_SERVICE_NAME"');
+  const restart = text.indexOf("sudo -n /usr/bin/systemctl restart ws-server-preview.service");
   const finalMetadataCheck = text.lastIndexOf('verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json"');
 
   assert.ok(beforeRsync > 0 && beforeRsync < firstRsync, "archive metadata must be verified before rsync");
@@ -168,7 +295,7 @@ test("ws preview deploy cleanup is scoped to the current run temp directory and 
   const text = workflowText();
 
   assert.match(text, /trap cleanup EXIT/);
-  assert.match(text, /sudo -n rm -rf -- "\$PREVIEW_REMOTE_TMP_DIR"/);
+  assert.match(text, /rm -rf -- "\$PREVIEW_REMOTE_TMP_DIR"/);
   assert.doesNotMatch(text, /rm -rf --? "\/tmp\/arcadeplatform-ws-preview"/);
   assert.match(text, /curl -fsS "\$PREVIEW_LOCAL_HEALTHZ_URL"/);
   assert.match(text, /curl -fsS "\$PREVIEW_PUBLIC_HEALTHZ_URL"/);

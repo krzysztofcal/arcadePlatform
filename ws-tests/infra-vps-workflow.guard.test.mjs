@@ -119,6 +119,40 @@ test("infra VPS remote bash verifies backup before overwrite and validates befor
   assert.equal(validateIndex < reloadIndex, true);
 });
 
+test("infra VPS bootstrap publishes the additive deploy group, helper and narrow sudoers contract", () => {
+  const bootstrap = fileText("infra/vps/bootstrap.sh");
+  const sudoers = fileText("infra/vps/arcade-deploy.sudoers");
+  const helper = fileText("infra/vps/ws-preview-env-preflight.mjs");
+
+  assert.match(bootstrap, /getent group arcade-deploy/);
+  assert.match(bootstrap, /usermod --append --groups arcade-deploy copilot/);
+  assert.match(bootstrap, /gpasswd --delete arcade arcade-deploy/);
+  assert.doesNotMatch(bootstrap, /usermod --append --groups (?:sudo|docker|arcade-deploy) arcade/);
+  assert.doesNotMatch(bootstrap, /arcade ALL=/);
+  assert.match(bootstrap, /\/opt\/ws-server \/opt\/ws-server\/releases/);
+  assert.match(bootstrap, /\/opt\/arcade-ws-preview\/(?:ws-server|shared|netlify|node_modules)/);
+  assert.match(bootstrap, /-g arcade-deploy -m 2775/);
+  assert.match(bootstrap, /\/etc\/caddy\/Caddyfile/);
+  assert.match(bootstrap, /-g arcade-deploy -m 0664/);
+  assert.match(bootstrap, /ws-preview-env-preflight\.mjs/);
+  assert.match(bootstrap, /visudo -cf/);
+  assert.match(bootstrap, /arcade-deploy\.sudoers/);
+  assert.match(sudoers, /copilot ALL=\(root\) NOPASSWD:/);
+  assert.match(sudoers, /restart ws-server\.service/);
+  assert.match(sudoers, /restart ws-server-preview\.service/);
+  assert.match(sudoers, /reload caddy\.service/);
+  assert.match(sudoers, /arcade-ws-preview-env-preflight ""/);
+  assert.doesNotMatch(sudoers, /arcade ALL=/);
+  const sudoersCommands = sudoers.replace(/^#.*$/gm, "");
+  assert.doesNotMatch(sudoersCommands, /(?:^|[ /])(bash|sh|node|python|tar|rsync|cp|mv|rm|install)(?:["\s]|$)/m);
+  assert.doesNotMatch(sudoersCommands, /ALL\s*$/m);
+  assert.match(helper, /\/opt\/arcade-ws-preview\/\.env\.preview/);
+  assert.match(helper, /O_NOFOLLOW/);
+  assert.match(helper, /uid !== 0/);
+  assert.match(helper, /gid !== 0/);
+  assert.match(helper, /0o600/);
+});
+
 test("infra VPS workflow removes remote websocket curl upgrade and adds runner node smoke-check", () => {
   const text = workflowText();
   const remote = remoteBash(text);

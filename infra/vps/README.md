@@ -35,10 +35,69 @@ The Stage dispatcher runs as `copilot` with `HOME=/home/copilot` and
 dedicated `arcade-stage-runner` account under
 `/var/lib/arcade-stage-runner/actions-runner`.
 
-The current `arcade` membership in privileged `sudo`/`docker` groups and
-command-specific deploy grants are intentionally not changed or redefined
-here; they are tracked separately under #994. No runner `.credentials` file is
-part of the recovery source.
+The fresh-host contract creates the system group `arcade-deploy` and adds only
+`copilot` to it. `arcade` is not added to `arcade-deploy`, `sudo`, or `docker`
+by bootstrap. The deploy group owns only application state:
+
+- Production: `/opt/ws-server` and `/opt/ws-server/releases`,
+  `root:arcade-deploy` mode `2775`;
+- Preview: `/opt/arcade-ws-preview/ws-server`, `shared`, `netlify`, and
+  `node_modules`, each `root:arcade-deploy` mode `2775`;
+- Caddy: `/etc/caddy/Caddyfile`, `root:arcade-deploy` mode `0664`.
+
+The Preview env file and Production env file remain `root:root` mode `0600`.
+Systemd units, `/etc/sudoers*`, and the Preview root directory remain
+root-owned and are not group-writable. The root-owned fixed Preview env helper
+is installed at `/usr/local/sbin/arcade-ws-preview-env-preflight`.
+
+The versioned `/etc/sudoers.d/arcade-deploy` contract gives `copilot` only the
+exact service restart/reload commands and the fixed Preview env preflight. It
+contains no shell, interpreter, archive, file-operation, generic
+`systemctl`, or wildcard grant. No runner `.credentials` file is part of the
+recovery source.
+
+### Existing-host least-privilege migration — separate from bootstrap
+
+This is a future owner-approved migration for an already-running VPS. It is
+not a bootstrap mode. `infra/vps/bootstrap.sh` is guarded for a fresh VPS and
+must not be run against an existing host with runtime markers, active releases,
+or live env files.
+
+Before any migration mutation, perform a fresh read-only inventory and save a
+non-secret rollback manifest. The manifest must record per-entry type,
+symlink target, owner, group, mode, ACL/attribute state, and the service
+identity/PID baseline. Save a per-entry manifest for every existing entry
+under the four Preview deployable subtrees before changing Preview ownership.
+
+The owner-approved Task 9 migration order is:
+
+1. Create `arcade-deploy` if absent and add only `copilot` to it. Do not add
+   `arcade`; retain its existing groups during staging.
+2. Change `/opt/ws-server` and `/opt/ws-server/releases` to
+   `root:arcade-deploy` mode `2775`.
+3. Change every directory entry recursively below
+   `/opt/ws-server/releases` (including each legacy release root) to group
+   `arcade-deploy` with group `rwx`. Do not follow symlinks and do not change
+   ownership of existing Production files or symlinks. This directory-only
+   recursive step is required if redeploying any existing SHA must continue
+   to remove its legacy tree.
+4. Change the four Preview top-level deployable subtrees to
+   `root:arcade-deploy` mode `2775`:
+   `ws-server`, `shared`, `netlify`, and `node_modules`.
+5. Change existing descendants of only those four Preview subtrees to
+   `copilot:arcade-deploy`, preserving their existing modes. Do not follow
+   symlinks and do not include `/opt/arcade-ws-preview/.env.preview`.
+6. Change `/etc/caddy/Caddyfile` to `root:arcade-deploy` mode `0664`.
+7. Install and validate the root-owned Preview env helper and the exact
+   narrow sudoers contract from this repository. Keep both `root:root` and
+   preserve sudoers mode `0440`.
+
+During Task 9 staging, retain all existing broad grants as a recovery
+fallback. Do not run `daemon-reload`, restart or reload a service, or dispatch
+any deploy. If any pre-migration manifest or post-migration validation does
+not match the contract, stop and restore the recorded ownership/modes before
+proceeding. The independent provider Rescue System remains the recovery path
+if SSH or sudo becomes unusable.
 
 ## Network baseline
 
