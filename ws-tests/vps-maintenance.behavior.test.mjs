@@ -9,9 +9,10 @@ const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const script = path.join(repositoryRoot, 'infra/vps/vps-maintenance.sh');
 const NOW = 2_000_000_000;
 
-function bash(functionCall, args = [], prefix = '') {
+function bash(functionCall, args = [], prefix = '', options = {}) {
   return spawnSync('bash', ['-c', `source "$1"; ${prefix}${functionCall}`, 'bash', script, ...args], {
     encoding: 'utf8',
+    ...options,
   });
 }
 
@@ -29,6 +30,21 @@ function release(directory, name, deployedAt) {
   }
   return releaseDirectory;
 }
+
+test('uses only fixed maintenance paths and a guarded dry-run CLI without process-management commands', () => {
+  const source = fs.readFileSync(script, 'utf8');
+
+  assert.match(source, /^readonly APP_ROOT='\/opt\/ws-server'$/m);
+  assert.match(source, /^readonly RELEASES_ROOT='\/opt\/ws-server\/releases'$/m);
+  assert.match(source, /^readonly CURRENT_RELEASE_LINK='\/opt\/ws-server\/current'$/m);
+  assert.match(source, /^readonly TMP_ROOT='\/tmp'$/m);
+  assert.match(source, /^readonly LOCK_FILE='\/opt\/ws-server\/.deploy-maintenance\.lock'$/m);
+  assert.match(source, /if \[\[ "\$\{BASH_SOURCE\[0\]\}" == "\$0" \]\]; then\n  main "\$@"\nfi/);
+  assert.match(source, /\[\[ "\$1" == --dry-run \]\] \|\| return 1/);
+  assert.match(source, /elif \(\( \$# != 0 \)\); then\n    return 1/);
+  assert.doesNotMatch(source, /^\s*(?:systemctl|docker|kill|pkill)\b/m);
+  assert.doesNotMatch(source, /\b(?:prune|cache|runner|postgres)\b/i);
+});
 
 test('uses a valid deployment marker even when the release directory mtime is epoch', (t) => {
   const directory = fixture(t);
@@ -131,7 +147,9 @@ test('fails immediately when another process holds the fd-9 maintenance lock', a
   });
   t.after(() => holder.stdin.end());
 
-  const result = bash('acquire_maintenance_lock "$2"', [lock]);
+  const result = bash('acquire_maintenance_lock "$2"', [lock], '', { timeout: 1000 });
 
   assert.notEqual(result.status, 0);
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.signal, null);
 });
