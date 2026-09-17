@@ -51,3 +51,37 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.match(text, /on_error\(\)/);
   assert.match(text, /sudo -n \/usr\/bin\/systemctl restart ws-server\.service \|\| true/);
 });
+
+test("remote deploy script coordinates release mutations and records canonical deployment time", () => {
+  const text = workflowText();
+
+  assert.match(text, /DEPLOY_MAINTENANCE_LOCK="\/opt\/ws-server\/\.deploy-maintenance\.lock"/);
+  assert.match(text, /\[\[ -f "\$DEPLOY_MAINTENANCE_LOCK" && ! -L "\$DEPLOY_MAINTENANCE_LOCK" \]\]/);
+  assert.match(text, /exec 9<> "\$DEPLOY_MAINTENANCE_LOCK"/);
+  assert.match(text, /flock -n 9/);
+
+  const lockIdx = text.indexOf('flock -n 9');
+  const removeReleaseIdx = text.indexOf('rm -rf "$NEW_RELEASE_DIR"');
+  const switchLinkIdx = text.indexOf('ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"');
+  assert.notEqual(lockIdx, -1);
+  assert.notEqual(removeReleaseIdx, -1);
+  assert.notEqual(switchLinkIdx, -1);
+  assert.ok(lockIdx < removeReleaseIdx, "lock must be acquired before release removal");
+  assert.ok(lockIdx < switchLinkIdx, "lock must be acquired before current symlink switching");
+
+  assert.match(text, /DEPLOYED_AT="\$\(date -u '\+%Y-%m-%dT%H:%M:%SZ'\)"/);
+  assert.match(text, /\[\[ ! "\$DEPLOYED_AT" =~ \^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}T\[0-9\]\{2\}:\[0-9\]\{2\}:\[0-9\]\{2\}Z\$ \]\]/);
+  assert.match(text, /\[\[ \$\(date -u -d "\$DEPLOYED_AT" '\+%Y-%m-%dT%H:%M:%SZ'\) != "\$DEPLOYED_AT" \]\]/);
+  assert.match(text, /printf '%s\\n' "\$DEPLOYED_AT" > "\$NEW_RELEASE_DIR\/\.deployed-at"/);
+  assert.match(text, /chmod 0644 "\$NEW_RELEASE_DIR\/\.deployed-at"/);
+  assert.match(text, /\[\[ \$\(cat "\$NEW_RELEASE_DIR\/\.deployed-at"\) != "\$DEPLOYED_AT" \]\]/);
+
+  const postgresValidationIdx = text.indexOf('test -d "$NEW_RELEASE_DIR/node_modules/postgres"');
+  const markerWriteIdx = text.indexOf('printf \'%s\\n\' "$DEPLOYED_AT" > "$NEW_RELEASE_DIR/.deployed-at"');
+  const temporaryLinkIdx = text.indexOf('ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"');
+  assert.notEqual(postgresValidationIdx, -1);
+  assert.notEqual(markerWriteIdx, -1);
+  assert.notEqual(temporaryLinkIdx, -1);
+  assert.ok(postgresValidationIdx < markerWriteIdx, "marker must follow extracted release validation");
+  assert.ok(markerWriteIdx < temporaryLinkIdx, "marker must precede temporary current symlink installation");
+});
