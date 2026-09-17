@@ -13,11 +13,31 @@ function gitSha(index = 0) {
   return `${Number(index).toString(16).padStart(2, '0')}${'a'.repeat(38)}`;
 }
 
-function bash(functionCall, args = [], prefix = '', options = {}) {
-  return spawnSync('bash', ['-c', `source "$1"; ${prefix}${functionCall}`, 'bash', script, ...args], {
+test('runs maintenance functions through a fixed positional shell driver', () => {
+  const source = fs.readFileSync(import.meta.filename, 'utf8');
+
+  assert.match(source, /const BASH_FUNCTION_DRIVER = 'source "\$1"; shift; "\$@"';/);
+  assert.match(source, /spawnSync\('bash', \['-c', BASH_FUNCTION_DRIVER, 'bash', script, functionName, \.\.\.args\]/);
+  assert.match(source, /function bash\(functionName, args = \[\], options = \{\}\)/);
+  assert.doesNotMatch(source, /\$\{prefix\}\$\{functionCall\}/);
+});
+
+const BASH_FUNCTION_DRIVER = 'source "$1"; shift; "$@"';
+
+function bash(functionName, args = [], options = {}) {
+  return spawnSync('bash', ['-c', BASH_FUNCTION_DRIVER, 'bash', script, functionName, ...args], {
     encoding: 'utf8',
     ...options,
   });
+}
+
+function bashEnv(directory, source, variables = {}) {
+  const envFile = path.join(directory, 'bash-env.sh');
+  fs.writeFileSync(envFile, `${source.trim()}\n`);
+  return {
+    encoding: 'utf8',
+    env: { ...process.env, ...variables, BASH_ENV: envFile },
+  };
 }
 
 function fixture(t) {
@@ -97,7 +117,7 @@ stat() {
     encoding: 'utf8', timeout: 3000,
     env: { ...process.env, BASH_ENV: instrumentation, CALLS: calls, FIXTURE_TMP_ROOT: tmpRoot },
   };
-  return { executable, options, current, app, previous, oldTemp, currentLink, lock, calls, releasesRoot, tmpRoot };
+  return { directory, executable, options, current, app, previous, oldTemp, currentLink, lock, calls, releasesRoot, tmpRoot };
 }
 
 test('uses only fixed maintenance paths and a guarded dry-run CLI without process-management commands', () => {
@@ -127,7 +147,7 @@ test('uses a valid deployment marker even when the release directory mtime is ep
   const target = release(directory, gitSha(10), '2033-05-18T03:33:20Z\n');
   fs.utimesSync(target, 0, 0);
 
-  const result = bash('release_age_epoch "$2" "$3"', [target, String(NOW)]);
+  const result = bash('release_age_epoch', [target, String(NOW)]);
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), '2000000000');
@@ -137,7 +157,7 @@ test('uses a positive birth epoch for a markerless release', (t) => {
   const directory = fixture(t);
   const target = release(directory, gitSha(11));
 
-  const result = bash('release_age_epoch "$2" "$3"', [target, String(NOW)]);
+  const result = bash('release_age_epoch', [target, String(NOW)]);
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout.trim(), /^[1-9][0-9]*$/);
@@ -148,7 +168,7 @@ test('malformed markers abort release cleanup before any release is removed', (t
   const current = release(directory, gitSha(12), '2033-05-18T03:33:19Z\n');
   const old = release(directory, gitSha(13), 'not-a-timestamp\n');
 
-  const result = bash('cleanup_releases "$2" "$3" "$4" false', [directory, current, String(NOW)]);
+  const result = bash('cleanup_releases', [directory, current, String(NOW), 'false']);
 
   assert.notEqual(result.status, 0);
   assert.equal(fs.existsSync(current), true);
@@ -160,11 +180,16 @@ test('an unavailable birth epoch aborts release cleanup before any release is re
   const current = release(directory, gitSha(14), '2033-05-18T03:33:19Z\n');
   const old = release(directory, gitSha(15));
 
-  const result = bash(
-    'cleanup_releases "$2" "$3" "$4" false',
-    [directory, current, String(NOW)],
-    "stat() { if [[ \"$1\" == '-c' && \"$2\" == '%W' ]]; then printf '0\\n'; else command stat \"$@\"; fi; }; ",
-  );
+  const options = bashEnv(directory, `
+stat() {
+  if [[ "$1" == '-c' && "$2" == '%W' ]]; then
+    printf '0\\n'
+  else
+    command stat "$@"
+  fi
+}
+`);
+  const result = bash('cleanup_releases', [directory, current, String(NOW), 'false'], options);
 
   assert.notEqual(result.status, 0);
   assert.equal(fs.existsSync(current), true);
@@ -183,7 +208,7 @@ test('retains current plus five newest previous releases and removes the old six
     [gitSha(22), '2033-05-01T00:00:00Z\n'],
   ].map(([name, marker]) => release(directory, name, marker));
 
-  const result = bash('cleanup_releases "$2" "$3" "$4" false', [directory, current, String(NOW)]);
+  const result = bash('cleanup_releases', [directory, current, String(NOW), 'false']);
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(current), true);
@@ -204,7 +229,7 @@ test('ignores manual non-SHA release directories even with malformed metadata', 
   ].map(([index, marker]) => release(directory, gitSha(index), marker));
   const manual = release(directory, 'manual-release-2026-09-17', 'not-a-timestamp\n');
 
-  const result = bash('cleanup_releases "$2" "$3" "$4" false', [directory, current, String(NOW)]);
+  const result = bash('cleanup_releases', [directory, current, String(NOW), 'false']);
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(manual), true);
@@ -225,19 +250,16 @@ test('removes only old allowlisted temporary directories', (t) => {
   fs.utimesSync(oldOther, new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
   fs.utimesSync(recentAllowed, new Date('2100-01-01T00:00:00Z'), new Date('2100-01-01T00:00:00Z'));
 
-  const ownerMock = `stat() {
+  const options = bashEnv(directory, `
+stat() {
   if [[ "$1" == '-c' && "$2" == '%U' && "$4" == "$TMP_FIXTURE_ROOT/"* ]]; then
     printf 'copilot\\n'
   else
     command stat "$@"
   fi
-}; `;
-  const result = bash(
-    'cleanup_known_tmp_dirs "$2" "$3" false',
-    [directory, String(NOW)],
-    ownerMock,
-    { env: { ...process.env, TMP_FIXTURE_ROOT: directory } },
-  );
+}
+`, { TMP_FIXTURE_ROOT: directory });
+  const result = bash('cleanup_known_tmp_dirs', [directory, String(NOW), 'false'], options);
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(oldAllowed), false);
@@ -256,7 +278,8 @@ test('skips old exact temporary directories not owned by the expected deploy use
     fs.utimesSync(target, new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
   }
 
-  const ownerMock = `stat() {
+  const options = bashEnv(directory, `
+stat() {
   if [[ "$1" == '-c' && "$2" == '%U' ]]; then
     case "$4" in
       "$LEGACY_TMP") printf 'arcade\\n' ;;
@@ -266,13 +289,9 @@ test('skips old exact temporary directories not owned by the expected deploy use
   else
     command stat "$@"
   fi
-}; `;
-  const result = bash(
-    'cleanup_known_tmp_dirs "$2" "$3" false',
-    [directory, String(NOW)],
-    ownerMock,
-    { env: { ...process.env, LEGACY_TMP: legacy, ELIGIBLE_TMP: eligible } },
-  );
+}
+`, { LEGACY_TMP: legacy, ELIGIBLE_TMP: eligible });
+  const result = bash('cleanup_known_tmp_dirs', [directory, String(NOW), 'false'], options);
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(legacy), true);
@@ -293,7 +312,7 @@ test('fails immediately when another process holds the fd-9 maintenance lock', a
   });
   t.after(() => holder.stdin.end());
 
-  const result = bash('acquire_maintenance_lock "$2"', [lock], '', { timeout: 1000 });
+  const result = bash('acquire_maintenance_lock', [lock], { timeout: 1000 });
 
   assert.notEqual(result.status, 0);
   assert.equal(result.error, undefined, result.error?.message);
@@ -330,11 +349,13 @@ test('entrypoint accepts --apply for the Production app symlink and holds the lo
 
 test('failed release enumeration after valid candidates aborts without deletion', (t) => {
   const f = entrypointFixture(t);
-  const result = bash(
-    'cleanup_releases "$2" "$3" "$4" false',
-    [f.releasesRoot, f.current, String(NOW)],
-    'find() { command find "$@"; return 42; }; ',
-  );
+  const options = bashEnv(f.directory, `
+find() {
+  command find "$@"
+  return 42
+}
+`);
+  const result = bash('cleanup_releases', [f.releasesRoot, f.current, String(NOW), 'false'], options);
 
   for (const target of [f.current, ...f.previous]) assert.equal(fs.existsSync(target), true, target);
   assert.notEqual(result.status, 0);
@@ -342,11 +363,13 @@ test('failed release enumeration after valid candidates aborts without deletion'
 
 test('failed temp enumeration after valid candidates aborts without deletion', (t) => {
   const f = entrypointFixture(t);
-  const result = bash(
-    'cleanup_known_tmp_dirs "$2" "$3" false',
-    [f.tmpRoot, String(NOW)],
-    'find() { command find "$@"; return 42; }; ',
-  );
+  const options = bashEnv(f.directory, `
+find() {
+  command find "$@"
+  return 42
+}
+`);
+  const result = bash('cleanup_known_tmp_dirs', [f.tmpRoot, String(NOW), 'false'], options);
 
   assert.equal(fs.existsSync(f.oldTemp), true);
   assert.notEqual(result.status, 0);
