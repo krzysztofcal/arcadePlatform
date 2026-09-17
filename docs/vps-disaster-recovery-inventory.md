@@ -15,6 +15,7 @@ runtime dumps.
 | Production WS env drop-in | `/etc/systemd/system/ws-server.service.d/override.conf` | Configuration that should be versioned | `infra/vps/ws-server.service.d/override.conf` | Install drop-in with required `EnvironmentFile=/etc/arcadeplatform/ws-server.env` |
 | Production WS environment | `/etc/arcadeplatform/ws-server.env` | Secret/private state; names only in repo | Encrypted off-host secret backup and the env schema example | Restore exact values out-of-band; current Phase A ownership/mode was `root:root 0600`; never commit or print values |
 | Production release layout | `/opt/ws-server`, `/opt/ws-server/releases`, `/opt/ws-server/current` | Reconstructible application/runtime state | `WS Server Deploy` workflow and unit contract | Create empty layout; deploy approved artifacts through the existing workflow; exclude source trees, `node_modules`, releases and caches from backup |
+| VPS maintenance unit/timer and shared lock | `/etc/systemd/system/arcadeplatform-vps-maintenance.{service,timer}`, `/usr/local/sbin/arcadeplatform-vps-maintenance.sh`, `/opt/ws-server/.deploy-maintenance.lock` | Versioned fixed-scope cleanup configuration; lock is deploy-group readable | `infra/vps/arcadeplatform-vps-maintenance.*`, `vps-maintenance.sh`, and bootstrap | Install artifacts and `daemon-reload`; do not run cleanup or enable the timer until the owner-approved read-only review |
 | Preview WS unit | `/etc/systemd/system/ws-server-preview.service` | Configuration that should be versioned | `infra/vps/ws-server-preview.service.example` | Install unit with `arcade`, `/opt/arcade-ws-preview/ws-server`, external env path and port 3001 |
 | Preview WS environment | `/opt/arcade-ws-preview/.env.preview` | Secret/private state; names only in repo | Encrypted off-host secret backup and the env schema example | Restore exact Stage-targeted values out-of-band; current target is a regular non-symlinked file with `root:root 0600`; Phase A observed `arcade:arcade 0664` as historical context |
 | Historical Preview env backups | `/opt/arcade-ws-preview/.env.preview.*` (excluding active `.env.preview`) | Legacy plaintext state; not a recovery source | None; recovery relies on the encrypted off-host artifact | Never restore; retain or remove only through a separate owner-approved operation after recovery verification |
@@ -48,3 +49,26 @@ variants are excluded. Runner `.credentials` files, secret values, caches,
 deployed source, `node_modules`, temporary release archives, Docker state, and
 routine journald output are excluded. #994 (least-privilege sudo/token
 hardening) and #996 (runtime/disk cleanup) remain separate follow-up work.
+
+## Deferred maintenance activation and one-time reconciliation
+
+The weekly maintenance unit is not a recovery activation step. Bootstrap
+installs it without executing cleanup or enabling its timer. After an
+owner-approved read-only review, the owner may activate the persistent Sunday
+03:30 UTC timer with `systemctl enable --now
+arcadeplatform-vps-maintenance.timer`.
+
+The maintenance job shares `/opt/ws-server/.deploy-maintenance.lock` with
+Production deployment. It prefers a valid release-root `.deployed-at` marker;
+only markerless legacy releases may use a validated positive birth-time value.
+It retains `current` plus five newest previous releases, removes only eligible
+releases older than 7 days, and limits temporary cleanup to direct
+`/tmp/arcadeplatform-ws-*` and `/tmp/arcadeplatform-infra-*` directories older
+than 48 hours.
+
+Before any separately approved exact cleanup beyond that fixed scope, a
+one-time root-level read-only reconciliation must inventory `docker ps -a`,
+`docker system df -v`, runner state, process/PID state, and local
+Postgres/cache ownership. Broad prune and broad kill are prohibited. Recovery
+backups, secrets, `.env` files, and active services remain outside the cleanup
+boundary. This inventory records neither live values nor secret contents.

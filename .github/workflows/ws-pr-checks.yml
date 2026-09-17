@@ -244,6 +244,12 @@ jobs:
       - name: Run infra VPS workflow guard test
         run: node --test ws-tests/infra-vps-workflow.guard.test.mjs
 
+      - name: Run VPS maintenance behavior test
+        run: node --test ws-tests/vps-maintenance.behavior.test.mjs
+
+      - name: Run VPS maintenance installation guard test
+        run: node --test ws-tests/vps-maintenance.installation.guard.test.mjs
+
       - name: Run infra VPS Caddy guard test
         run: node --test ws-tests/infra-vps-caddy.guard.test.mjs
 

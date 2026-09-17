@@ -1,0 +1,12 @@
+[Unit]
+Description=Arcade Platform VPS maintenance
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/arcadeplatform-vps-maintenance.sh
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=false
+ReadWritePaths=/opt/ws-server /tmp

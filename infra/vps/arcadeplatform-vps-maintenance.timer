@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Arcade Platform VPS maintenance
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00 UTC
+Persistent=true
+Unit=arcadeplatform-vps-maintenance.service
+
+[Install]
+WantedBy=timers.target

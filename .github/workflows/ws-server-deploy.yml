@@ -47,6 +47,8 @@ jobs:
       - name: Run WS server deploy workflow guards
         run: |
           set -euo pipefail
+          node --test ws-tests/vps-maintenance.behavior.test.mjs
+          node --test ws-tests/vps-maintenance.installation.guard.test.mjs
           node --test ws-tests/ws-server-deploy.workflow.guard.test.mjs
           node --test ws-tests/ws-server-deploy.remote-script.behavior.test.mjs
           node --test ws-tests/ws-server-deploy.health-gate-retry.behavior.test.mjs

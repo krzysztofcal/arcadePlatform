@@ -146,6 +146,41 @@ Docker caches, `/tmp` state, journald output, Caddy ACME state, or Supabase
 DB/Storage. These are reconstructed or disposable; cleanup is outside this
 recovery contract and belongs to #996.
 
+## Weekly VPS maintenance
+
+`arcadeplatform-vps-maintenance.service` is a root `oneshot` installed from
+this directory and invoked only through
+`/usr/local/sbin/arcadeplatform-vps-maintenance.sh`. Its persistent weekly
+timer is scheduled for Sunday 03:30 UTC. Bootstrap installs both units, the
+script, and the shared regular lock
+`/opt/ws-server/.deploy-maintenance.lock` (`root:arcade-deploy`, `0660`), then
+runs `systemctl daemon-reload`; it neither runs maintenance nor enables the
+timer.
+
+The Production deploy and maintenance paths use that same lock and fail closed
+if it is unavailable or busy. Release cleanup treats a valid release-root
+`.deployed-at` marker as taking precedence over all filesystem metadata. A
+markerless legacy release is eligible only after its positive birth-time value
+is validated; invalid or unavailable metadata aborts cleanup before deletion.
+The job retains `current` plus the five newest previous releases and considers
+only older releases beyond 7 days. Temporary cleanup is limited to direct
+`/tmp/arcadeplatform-ws-*` and `/tmp/arcadeplatform-infra-*` directories older
+than 48 hours.
+
+An owner must first complete an owner-approved read-only review, then may run:
+
+```bash
+systemctl enable --now arcadeplatform-vps-maintenance.timer
+```
+
+That review is also a prerequisite for any deferred one-time root-level
+reconciliation. It must inventory Docker with `docker ps -a` and
+`docker system df -v`, runner state, process/PID state, and local
+Postgres/cache ownership before any separately approved exact cleanup. Broad
+prune and broad kill commands are prohibited. Recovery backups, secrets,
+`.env` files, and active services remain outside the cleanup boundary; do not
+record live inventory values or secret contents in this repository.
+
 The Caddyfile is reproducible from Git. Caddy's certificate/account state under
 `/var/lib/caddy/.local/share/caddy` is private provider-managed state and is not
 included in the Phase C secret artifact. Allow Caddy to re-obtain certificates
