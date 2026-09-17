@@ -6,6 +6,7 @@ readonly RELEASES_ROOT='/opt/ws-server/releases'
 readonly CURRENT_RELEASE_LINK='/opt/ws-server/current'
 readonly TMP_ROOT='/tmp'
 readonly LOCK_FILE='/opt/ws-server/.deploy-maintenance.lock'
+readonly DEPLOY_USER='copilot'
 readonly RELEASE_RETENTION_SECONDS=604800
 readonly TMP_RETENTION_MINUTES=2880
 
@@ -116,9 +117,10 @@ cleanup_releases() {
 }
 
 cleanup_known_tmp_dirs() {
-  local tmp_root=$1 now_epoch=$2 dry_run=$3 candidate candidate_real candidate_name mtime
+  local tmp_root=$1 now_epoch=$2 dry_run=$3 candidate candidate_real candidate_name candidate_identity owner mtime
+  local current_identity index
   local tmp_real removed_count=0 threshold
-  local -a candidates=() eligible_candidates=()
+  local -a candidates=() eligible_candidates=() eligible_identities=()
 
   is_safe_directory "$tmp_root" || return 1
   is_positive_decimal "$now_epoch" || return 1
@@ -135,16 +137,29 @@ cleanup_known_tmp_dirs() {
     candidate_real=$(realpath -e -- "$candidate") || return 1
     [[ $(dirname -- "$candidate_real") == "$tmp_real" ]] || return 1
     [[ "$candidate_real" == "$tmp_real/$candidate_name" && ! -L "$candidate" ]] || return 1
+    owner=$(stat -c %U -- "$candidate_real") || return 1
+    [[ "$owner" == "$DEPLOY_USER" ]] || continue
+    candidate_identity=$(stat -c '%d:%i' -- "$candidate_real") || return 1
     mtime=$(stat -c %Y -- "$candidate_real") || return 1
     is_nonnegative_decimal "$mtime" && (( mtime < threshold )) || continue
     eligible_candidates+=("$candidate_real")
+    eligible_identities+=("$candidate_identity")
   done
 
-  for candidate_real in "${eligible_candidates[@]}"; do
+  for index in "${!eligible_candidates[@]}"; do
+    candidate_real=${eligible_candidates[index]}
+    candidate_identity=${eligible_identities[index]}
     candidate_name=$(basename -- "$candidate_real")
     is_known_tmp_name "$candidate_name" || return 1
     [[ $(dirname -- "$candidate_real") == "$tmp_real" ]] || return 1
     [[ -d "$tmp_real/$candidate_name" && ! -L "$tmp_real/$candidate_name" ]] || return 1
+    [[ "$candidate_real" == "$tmp_real/$candidate_name" ]] || return 1
+    current_identity=$(stat -c '%d:%i' -- "$candidate_real") || return 1
+    [[ "$current_identity" == "$candidate_identity" ]] || continue
+    owner=$(stat -c %U -- "$candidate_real") || return 1
+    [[ "$owner" == "$DEPLOY_USER" ]] || continue
+    mtime=$(stat -c %Y -- "$candidate_real") || return 1
+    is_nonnegative_decimal "$mtime" && (( mtime < threshold )) || continue
     if [[ "$dry_run" == false ]]; then
       rm -rf -- "$tmp_real/$candidate_name"
     fi
@@ -155,12 +170,22 @@ cleanup_known_tmp_dirs() {
 }
 
 acquire_maintenance_lock() {
-  local lock_file=$1
+  local lock_file=$1 path_identity fd_identity
 
   [[ -f "$lock_file" && ! -L "$lock_file" ]] || return 1
   [[ "$(stat -c '%h' -- "$lock_file")" == 1 ]] || return 1
   exec 9<> "$lock_file" || return 1
-  flock -n 9
+  [[ -f "$lock_file" && ! -L "$lock_file" ]] || return 1
+  path_identity=$(stat -c '%d:%i:%h' -- "$lock_file") || return 1
+  fd_identity=$(stat -Lc '%d:%i:%h' -- "/proc/$$/fd/9") || return 1
+  [[ "$(stat -Lc '%h' -- "/proc/$$/fd/9")" == 1 ]] || return 1
+  [[ "$path_identity" == "$fd_identity" ]] || return 1
+  flock -n 9 || return 1
+  [[ -f "$lock_file" && ! -L "$lock_file" ]] || return 1
+  path_identity=$(stat -c '%d:%i:%h' -- "$lock_file") || return 1
+  fd_identity=$(stat -Lc '%d:%i:%h' -- "/proc/$$/fd/9") || return 1
+  [[ "$(stat -Lc '%h' -- "/proc/$$/fd/9")" == 1 ]] || return 1
+  [[ "$path_identity" == "$fd_identity" ]] || return 1
 }
 
 main() {

@@ -17,6 +17,9 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.doesNotMatch(text, /sudo -n true/);
   assert.match(text, /systemctl cat ws-server\.service/);
   assert.match(text, /provision deploy group paths first/);
+  assert.match(text, /\[\[ "\$\(id -un\)" != "copilot" \]\]/);
+  assert.match(text, /test -L "\$BASE_DIR"/);
+  assert.match(text, /test -L "\$RELEASES_DIR"/);
   assert.match(text, /install nodejs/);
   assert.match(text, /provision unit first/);
   assert.doesNotMatch(text, /provision \/opt\/ws-server\/releases first/);
@@ -59,6 +62,9 @@ test("remote deploy script coordinates release mutations and records canonical d
   assert.match(text, /DEPLOY_MAINTENANCE_LOCK="\/opt\/ws-server\/\.deploy-maintenance\.lock"/);
   assert.match(text, /\[\[ -f "\$DEPLOY_MAINTENANCE_LOCK" && ! -L "\$DEPLOY_MAINTENANCE_LOCK" \]\]/);
   assert.match(text, /exec 9<> "\$DEPLOY_MAINTENANCE_LOCK"/);
+  assert.match(text, /stat -c '%d:%i:%h' -- "\$DEPLOY_MAINTENANCE_LOCK"/);
+  assert.match(text, /stat -Lc '%d:%i:%h' -- "\/proc\/\$\$\/fd\/9"/);
+  assert.match(text, /stat -Lc '%h' -- "\/proc\/\$\$\/fd\/9"/);
   assert.match(text, /flock -w 300 9/);
   assert.doesNotMatch(text, /flock -n 9/);
 
@@ -107,17 +113,21 @@ test("Production deploy pre-stages a missing shared lock before any artifact tra
   assert.match(preStage, /BASE_DIR="\/opt\/ws-server"/);
   assert.match(preStage, /LOCK_FILE="\$BASE_DIR\/\.deploy-maintenance\.lock"/);
   assert.match(preStage, /test -d "\$BASE_DIR"/);
+  assert.match(preStage, /test -L "\$BASE_DIR"/);
   assert.match(preStage, /test -w "\$BASE_DIR"/);
   assert.match(preStage, /test -x "\$BASE_DIR"/);
+  assert.match(preStage, /test -L "\$RELEASES_DIR"/);
   assert.match(preStage, /\[\[ ! -e "\$LOCK_FILE" \]\]/);
   assert.match(preStage, /set -o noclobber/);
   assert.match(preStage, /: > "\$LOCK_FILE"/);
   assert.match(preStage, /\[\[ -f "\$LOCK_FILE" && ! -L "\$LOCK_FILE" \]\]/);
-  assert.match(preStage, /stat -c '%h' -- "\$LOCK_FILE"/);
+  assert.match(preStage, /stat -c '%d:%i:%h' -- "\$LOCK_FILE"/);
+  assert.match(preStage, /stat -Lc '%d:%i:%h' -- "\/proc\/\$\$\/fd\/9"/);
+  assert.match(preStage, /stat -Lc '%h' -- "\/proc\/\$\$\/fd\/9"/);
   assert.match(preStage, /exec 9<> "\$LOCK_FILE"/);
   assert.match(preStage, /flock -w 300 9/);
   assert.match(preStage, /DEPLOY_GROUP="arcade-deploy"/);
-  assert.match(preStage, /chgrp "\$DEPLOY_GROUP" "\$LOCK_FILE"/);
-  assert.match(preStage, /chmod 0660 "\$LOCK_FILE"/);
+  assert.match(preStage, /chgrp "\$DEPLOY_GROUP" "\/proc\/\$\$\/fd\/9"/);
+  assert.match(preStage, /chmod 0660 "\/proc\/\$\$\/fd\/9"/);
   assert.doesNotMatch(preStage, /\b(?:sudo|systemctl|docker|kill|pkill)\b/i);
 });

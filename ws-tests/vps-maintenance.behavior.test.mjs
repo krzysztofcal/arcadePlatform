@@ -85,10 +85,17 @@ find() {
   fi
   command find "$@"
 }
+stat() {
+  if [[ "$1" == '-c' && "$2" == '%U' && "$4" == "$FIXTURE_TMP_ROOT/"* ]]; then
+    printf 'copilot\\n'
+  else
+    command stat "$@"
+  fi
+}
 `);
   const options = {
     encoding: 'utf8', timeout: 3000,
-    env: { ...process.env, BASH_ENV: instrumentation, CALLS: calls },
+    env: { ...process.env, BASH_ENV: instrumentation, CALLS: calls, FIXTURE_TMP_ROOT: tmpRoot },
   };
   return { executable, options, current, app, previous, oldTemp, currentLink, lock, calls, releasesRoot, tmpRoot };
 }
@@ -101,6 +108,7 @@ test('uses only fixed maintenance paths and a guarded dry-run CLI without proces
   assert.match(source, /^readonly CURRENT_RELEASE_LINK='\/opt\/ws-server\/current'$/m);
   assert.match(source, /^readonly TMP_ROOT='\/tmp'$/m);
   assert.match(source, /^readonly LOCK_FILE='\/opt\/ws-server\/.deploy-maintenance\.lock'$/m);
+  assert.match(source, /^readonly DEPLOY_USER='copilot'$/m);
   assert.match(source, /if \[\[ "\$\{BASH_SOURCE\[0\]\}" == "\$0" \]\]; then\n  main "\$@"\nfi/);
   assert.match(source, /\[\[ "\$1" != --dry-run \]\]/);
   assert.match(source, /\[\[ "\$1" == --apply \]\]/);
@@ -109,6 +117,7 @@ test('uses only fixed maintenance paths and a guarded dry-run CLI without proces
   assert.match(source, /elif \(\( \$# != 0 \)\); then\n    return 1/);
   assert.match(source, /arcadeplatform-\(ws\|infra\)-\[0-9\]\+-\[0-9\]\+/);
   assert.match(source, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(source, /owner=\$\(stat -c %U -- "\$candidate_real"\)/);
   assert.doesNotMatch(source, /^\s*(?:systemctl|docker|kill|pkill)\b/m);
   assert.doesNotMatch(source, /\b(?:prune|cache|runner|postgres)\b/i);
 });
@@ -216,7 +225,19 @@ test('removes only old allowlisted temporary directories', (t) => {
   fs.utimesSync(oldOther, new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
   fs.utimesSync(recentAllowed, new Date('2100-01-01T00:00:00Z'), new Date('2100-01-01T00:00:00Z'));
 
-  const result = bash('cleanup_known_tmp_dirs "$2" "$3" false', [directory, String(NOW)]);
+  const ownerMock = `stat() {
+  if [[ "$1" == '-c' && "$2" == '%U' && "$4" == "$TMP_FIXTURE_ROOT/"* ]]; then
+    printf 'copilot\\n'
+  else
+    command stat "$@"
+  fi
+}; `;
+  const result = bash(
+    'cleanup_known_tmp_dirs "$2" "$3" false',
+    [directory, String(NOW)],
+    ownerMock,
+    { env: { ...process.env, TMP_FIXTURE_ROOT: directory } },
+  );
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(oldAllowed), false);
@@ -224,6 +245,38 @@ test('removes only old allowlisted temporary directories', (t) => {
   assert.equal(fs.existsSync(recentAllowed), true);
   assert.equal(fs.existsSync(malformedAllowed), true);
   assert.equal(fs.existsSync(oldOther), true);
+});
+
+test('skips old exact temporary directories not owned by the expected deploy user', (t) => {
+  const directory = fixture(t);
+  const legacy = path.join(directory, 'arcadeplatform-ws-99999-1');
+  const eligible = path.join(directory, 'arcadeplatform-infra-88888-2');
+  for (const target of [legacy, eligible]) {
+    fs.mkdirSync(target);
+    fs.utimesSync(target, new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
+  }
+
+  const ownerMock = `stat() {
+  if [[ "$1" == '-c' && "$2" == '%U' ]]; then
+    case "$4" in
+      "$LEGACY_TMP") printf 'arcade\\n' ;;
+      "$ELIGIBLE_TMP") printf 'copilot\\n' ;;
+      *) return 99 ;;
+    esac
+  else
+    command stat "$@"
+  fi
+}; `;
+  const result = bash(
+    'cleanup_known_tmp_dirs "$2" "$3" false',
+    [directory, String(NOW)],
+    ownerMock,
+    { env: { ...process.env, LEGACY_TMP: legacy, ELIGIBLE_TMP: eligible } },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(legacy), true);
+  assert.equal(fs.existsSync(eligible), false);
 });
 
 test('fails immediately when another process holds the fd-9 maintenance lock', async (t) => {

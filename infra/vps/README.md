@@ -148,7 +148,7 @@ recovery contract and belongs to #996.
 
 ## Weekly VPS maintenance
 
-`arcadeplatform-vps-maintenance.service` is a root `oneshot` installed from
+`arcadeplatform-vps-maintenance.service` is a `copilot` `oneshot` installed from
 this directory and invoked only through
 `/usr/local/sbin/arcadeplatform-vps-maintenance.sh --apply`. Its persistent weekly
 timer is scheduled for Sunday 03:30 UTC. Bootstrap installs both units, the
@@ -161,19 +161,23 @@ The Production deploy and maintenance paths use that same lock and fail closed
 if it is unavailable or busy. Production waits up to 300 seconds for the lock;
 maintenance remains non-blocking and skips a run when the lock is busy. The
 first Production deploy on an existing host performs a bounded, non-restarting
-pre-stage before artifact upload: as `copilot`, it verifies the writable
-Production directories, creates the missing regular lock if necessary, and
-validates/normalizes it to `arcade-deploy` group and mode `0660`. If that
-pre-stage cannot complete safely, the deploy stops before any release or
-service mutation. Fresh-host bootstrap still creates the lock as
-`root:arcade-deploy`.
+pre-stage before artifact upload: it verifies that the SSH session is actually
+`copilot`, rejects symlinked fixed Production directories, creates the missing
+regular lock if necessary, and validates/normalizes it to `arcade-deploy` group
+and mode `0660`. If that pre-stage cannot complete safely, the deploy stops
+before any release or service mutation. Fresh-host bootstrap still creates the
+lock as `root:arcade-deploy`.
 
 The maintenance command is read-only with no arguments or with `--dry-run`;
 only an explicit `--apply` permits deletion, and the systemd service is the
-only scheduled caller using `--apply`. `User=root` is intentional: release
-directories are writable by the deploy group, but `/tmp` is sticky and the
-known workflow directories are owned by `arcade`, so `copilot` cannot safely
-delete them without root. No service restart is part of maintenance.
+only scheduled caller using `--apply`. The service runs as `copilot`: the
+`arcade-deploy` group permits release cleanup, and Production/Preview workflow
+temporary directories are created by the `copilot` deploy user. Automatic
+temporary cleanup additionally requires the exact directory owner to be
+`copilot`, so the current legacy directories owned by `arcade` are skipped.
+After a fresh owner-approved read-only inventory, those legacy directories may
+be handled by a separate one-time root cleanup; they are not part of the
+weekly automation. No service restart is part of maintenance.
 
 Release cleanup treats a valid release-root `.deployed-at` marker as taking
 precedence over all filesystem metadata. A markerless legacy release is

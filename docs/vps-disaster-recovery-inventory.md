@@ -79,10 +79,12 @@ pre-stage aborts before release or service mutation. Fresh-host bootstrap keeps
 the `root:arcade-deploy` lock ownership. The deploy waits up to 300 seconds
 for the shared lock; maintenance remains non-blocking.
 
-The maintenance service runs as `root` because the deploy group is sufficient
-for release cleanup but not for known `/tmp` directories under sticky `/tmp`
-when those directories are owned by `arcade`; `copilot` cannot delete them
-safely without root. Maintenance does not restart Production, Preview, or Caddy.
+The maintenance service runs as `copilot`: the `arcade-deploy` group is
+sufficient for release cleanup, and the automated `/tmp` path additionally
+requires the exact directory owner to be `copilot`. Existing legacy directories
+owned by `arcade` are deliberately not eligible for automation; after a fresh
+owner-approved read-only inventory they may receive a separate one-time root
+cleanup. Maintenance does not restart Production, Preview, or Caddy.
 
 Before any separately approved exact cleanup beyond that fixed scope, a
 one-time root-level read-only reconciliation must inventory `docker ps -a`,
