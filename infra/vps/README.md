@@ -150,7 +150,7 @@ recovery contract and belongs to #996.
 
 `arcadeplatform-vps-maintenance.service` is a root `oneshot` installed from
 this directory and invoked only through
-`/usr/local/sbin/arcadeplatform-vps-maintenance.sh`. Its persistent weekly
+`/usr/local/sbin/arcadeplatform-vps-maintenance.sh --apply`. Its persistent weekly
 timer is scheduled for Sunday 03:30 UTC. Bootstrap installs both units, the
 script, and the shared regular lock
 `/opt/ws-server/.deploy-maintenance.lock` (`root:arcade-deploy`, `0660`), then
@@ -158,14 +158,35 @@ runs `systemctl daemon-reload`; it neither runs maintenance nor enables the
 timer.
 
 The Production deploy and maintenance paths use that same lock and fail closed
-if it is unavailable or busy. Release cleanup treats a valid release-root
-`.deployed-at` marker as taking precedence over all filesystem metadata. A
-markerless legacy release is eligible only after its positive birth-time value
-is validated; invalid or unavailable metadata aborts cleanup before deletion.
-The job retains `current` plus the five newest previous releases and considers
-only older releases beyond 7 days. Temporary cleanup is limited to direct
-`/tmp/arcadeplatform-ws-*` and `/tmp/arcadeplatform-infra-*` directories older
-than 48 hours.
+if it is unavailable or busy. Production waits up to 300 seconds for the lock;
+maintenance remains non-blocking and skips a run when the lock is busy. The
+first Production deploy on an existing host performs a bounded, non-restarting
+pre-stage before artifact upload: as `copilot`, it verifies the writable
+Production directories, creates the missing regular lock if necessary, and
+validates/normalizes it to `arcade-deploy` group and mode `0660`. If that
+pre-stage cannot complete safely, the deploy stops before any release or
+service mutation. Fresh-host bootstrap still creates the lock as
+`root:arcade-deploy`.
+
+The maintenance command is read-only with no arguments or with `--dry-run`;
+only an explicit `--apply` permits deletion, and the systemd service is the
+only scheduled caller using `--apply`. `User=root` is intentional: release
+directories are writable by the deploy group, but `/tmp` is sticky and the
+known workflow directories are owned by `arcade`, so `copilot` cannot safely
+delete them without root. No service restart is part of maintenance.
+
+Release cleanup treats a valid release-root `.deployed-at` marker as taking
+precedence over all filesystem metadata. A markerless legacy release is
+eligible only after its positive birth-time value from `stat %W` is validated;
+invalid or unavailable metadata aborts cleanup before deletion. Automated
+cleanup considers only direct release directories whose complete basename is a
+40-character lowercase Git SHA. Manual/non-SHA releases are left untouched
+and require separate owner-approved cleanup. The job retains `current` plus
+the five newest previous SHA releases and considers only older releases beyond
+7 days. Temporary cleanup is limited to direct `/tmp` directories whose full
+basename matches exactly
+`arcadeplatform-ws-<numeric run_id>-<numeric attempt>` or
+`arcadeplatform-infra-<numeric run_id>-<numeric attempt>`, older than 48 hours.
 
 An owner must first complete an owner-approved read-only review, then may run:
 

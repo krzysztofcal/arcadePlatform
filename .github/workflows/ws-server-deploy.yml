@@ -81,6 +81,82 @@ jobs:
         with:
           node-version: 20
 
+      - name: Pre-stage shared deploy/maintenance lock on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.WS_HOST }}
+          username: ${{ secrets.WS_USER }}
+          key: ${{ secrets.WS_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 10m
+          script: |
+            set -eu
+            if ! command -v bash >/dev/null 2>&1; then
+              echo "bash is required on VPS"
+              exit 1
+            fi
+
+            bash <<'BASH'
+            set -Eeuo pipefail
+
+            BASE_DIR="/opt/ws-server"
+            RELEASES_DIR="$BASE_DIR/releases"
+            LOCK_FILE="$BASE_DIR/.deploy-maintenance.lock"
+            DEPLOY_GROUP="arcade-deploy"
+
+            if ! test -d "$BASE_DIR" || ! test -w "$BASE_DIR" || ! test -x "$BASE_DIR"; then
+              echo "production deploy root is not a writable directory"
+              exit 1
+            fi
+            if ! test -d "$RELEASES_DIR" || ! test -w "$RELEASES_DIR" || ! test -x "$RELEASES_DIR"; then
+              echo "production releases directory is not a writable directory"
+              exit 1
+            fi
+            if [[ -L "$LOCK_FILE" ]]; then
+              echo "deploy maintenance lock is a symlink"
+              exit 1
+            fi
+
+            if [[ ! -e "$LOCK_FILE" ]]; then
+              if ! ( umask 0007; set -o noclobber; : > "$LOCK_FILE" ) 2>/dev/null; then
+                if [[ ! -f "$LOCK_FILE" || -L "$LOCK_FILE" ]]; then
+                  echo "cannot create deploy maintenance lock"
+                  exit 1
+                fi
+              fi
+            fi
+
+            if [[ ! -f "$LOCK_FILE" || -L "$LOCK_FILE" ]]; then
+              echo "missing or unsafe deploy maintenance lock"
+              exit 1
+            fi
+            [[ -f "$LOCK_FILE" && ! -L "$LOCK_FILE" ]]
+            [[ "$(stat -c '%h' -- "$LOCK_FILE")" == 1 ]]
+            if ! exec 9<> "$LOCK_FILE"; then
+              echo "cannot open deploy maintenance lock"
+              exit 1
+            fi
+            if ! flock -w 300 9; then
+              echo "deploy maintenance lock is unavailable or busy"
+              exit 1
+            fi
+
+            lock_owner="$(stat -c '%U' -- "$LOCK_FILE")"
+            if [[ "$lock_owner" != root && "$lock_owner" != copilot ]]; then
+              echo "deploy maintenance lock has an unexpected owner"
+              exit 1
+            fi
+            lock_group="$(stat -c '%G' -- "$LOCK_FILE")"
+            if [[ "$lock_group" != "$DEPLOY_GROUP" ]]; then
+              chgrp "$DEPLOY_GROUP" "$LOCK_FILE"
+            fi
+            if [[ "$(stat -c '%a' -- "$LOCK_FILE")" != 660 ]]; then
+              chmod 0660 "$LOCK_FILE"
+            fi
+            [[ "$(stat -c '%G' -- "$LOCK_FILE")" == "$DEPLOY_GROUP" ]]
+            [[ "$(stat -c '%a' -- "$LOCK_FILE")" == 660 ]]
+            BASH
+
       - name: Build and package ws-server deploy artifact
         env:
           RELEASE_SHA: ${{ github.sha }}
@@ -206,6 +282,10 @@ jobs:
             fi
 
             TMP_ARCHIVE="$WS_REMOTE_TMP_DIR/.artifacts/ws-server/ws-server-dist.tgz"
+            if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "invalid Production release SHA"
+              exit 1
+            fi
             RELEASE_ID="$RELEASE_SHA"
             NEW_RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
             NEW_RELEASE_APP_DIR="$NEW_RELEASE_DIR/ws-server"
@@ -250,7 +330,7 @@ jobs:
               exit 1
             fi
 
-            if ! flock -n 9; then
+            if ! flock -w 300 9; then
               echo "deploy maintenance lock is unavailable or busy"
               exit 1
             fi

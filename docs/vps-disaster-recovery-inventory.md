@@ -62,9 +62,27 @@ The maintenance job shares `/opt/ws-server/.deploy-maintenance.lock` with
 Production deployment. It prefers a valid release-root `.deployed-at` marker;
 only markerless legacy releases may use a validated positive birth-time value.
 It retains `current` plus five newest previous releases, removes only eligible
-releases older than 7 days, and limits temporary cleanup to direct
-`/tmp/arcadeplatform-ws-*` and `/tmp/arcadeplatform-infra-*` directories older
-than 48 hours.
+40-character lowercase Git-SHA release directories older than 7 days, and
+leaves manual/non-SHA releases for separate owner-approved cleanup. Temporary
+cleanup is limited to direct `/tmp` directories whose complete basename is
+exactly `arcadeplatform-ws-<numeric run_id>-<numeric attempt>` or
+`arcadeplatform-infra-<numeric run_id>-<numeric attempt>`, older than 48 hours.
+No-argument and `--dry-run` invocations do not delete; only explicit
+`--apply` is mutating.
+
+On an existing host that predates the shared lock, the first Production deploy
+pre-stages `/opt/ws-server/.deploy-maintenance.lock` before artifact upload.
+This is a bounded, non-restarting operation performed by `copilot`: it creates
+only the regular lock when absent, verifies the writable Production paths, and
+normalizes the lock to the `arcade-deploy` group with mode `0660`. A failed
+pre-stage aborts before release or service mutation. Fresh-host bootstrap keeps
+the `root:arcade-deploy` lock ownership. The deploy waits up to 300 seconds
+for the shared lock; maintenance remains non-blocking.
+
+The maintenance service runs as `root` because the deploy group is sufficient
+for release cleanup but not for known `/tmp` directories under sticky `/tmp`
+when those directories are owned by `arcade`; `copilot` cannot delete them
+safely without root. Maintenance does not restart Production, Preview, or Caddy.
 
 Before any separately approved exact cleanup beyond that fixed scope, a
 one-time root-level read-only reconciliation must inventory `docker ps -a`,

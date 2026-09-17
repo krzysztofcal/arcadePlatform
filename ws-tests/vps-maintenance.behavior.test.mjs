@@ -9,6 +9,10 @@ const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const script = path.join(repositoryRoot, 'infra/vps/vps-maintenance.sh');
 const NOW = 2_000_000_000;
 
+function gitSha(index = 0) {
+  return `${Number(index).toString(16).padStart(2, '0')}${'a'.repeat(38)}`;
+}
+
 function bash(functionCall, args = [], prefix = '', options = {}) {
   return spawnSync('bash', ['-c', `source "$1"; ${prefix}${functionCall}`, 'bash', script, ...args], {
     encoding: 'utf8',
@@ -41,13 +45,13 @@ function entrypointFixture(t) {
   fs.mkdirSync(releasesRoot, { recursive: true });
   fs.mkdirSync(tmpRoot);
   fs.writeFileSync(lock, '');
-  const current = release(releasesRoot, 'current-id', '2000-01-01T00:00:00Z\n');
+  const current = release(releasesRoot, gitSha(0), '2000-01-01T00:00:00Z\n');
   const app = path.join(current, 'ws-server');
   fs.mkdirSync(app);
-  fs.symlinkSync('releases/current-id/ws-server', currentLink);
+  fs.symlinkSync(`releases/${path.basename(current)}/ws-server`, currentLink);
   const previous = Array.from({ length: 6 }, (_, index) =>
-    release(releasesRoot, `previous-${index + 1}`, `2001-01-0${6 - index}T00:00:00Z\n`));
-  const oldTemp = path.join(tmpRoot, 'arcadeplatform-ws-old');
+    release(releasesRoot, gitSha(index + 1), `2001-01-0${6 - index}T00:00:00Z\n`));
+  const oldTemp = path.join(tmpRoot, 'arcadeplatform-ws-12345-1');
   fs.mkdirSync(oldTemp);
   fs.utimesSync(oldTemp, 946684800, 946684800);
 
@@ -98,15 +102,20 @@ test('uses only fixed maintenance paths and a guarded dry-run CLI without proces
   assert.match(source, /^readonly TMP_ROOT='\/tmp'$/m);
   assert.match(source, /^readonly LOCK_FILE='\/opt\/ws-server\/.deploy-maintenance\.lock'$/m);
   assert.match(source, /if \[\[ "\$\{BASH_SOURCE\[0\]\}" == "\$0" \]\]; then\n  main "\$@"\nfi/);
-  assert.match(source, /\[\[ "\$1" == --dry-run \]\] \|\| return 1/);
+  assert.match(source, /\[\[ "\$1" != --dry-run \]\]/);
+  assert.match(source, /\[\[ "\$1" == --apply \]\]/);
+  assert.match(source, /local dry_run=true/);
+  assert.match(source, /dry_run=false/);
   assert.match(source, /elif \(\( \$# != 0 \)\); then\n    return 1/);
+  assert.match(source, /arcadeplatform-\(ws\|infra\)-\[0-9\]\+-\[0-9\]\+/);
+  assert.match(source, /\^\[0-9a-f\]\{40\}\$/);
   assert.doesNotMatch(source, /^\s*(?:systemctl|docker|kill|pkill)\b/m);
   assert.doesNotMatch(source, /\b(?:prune|cache|runner|postgres)\b/i);
 });
 
 test('uses a valid deployment marker even when the release directory mtime is epoch', (t) => {
   const directory = fixture(t);
-  const target = release(directory, 'release-a', '2033-05-18T03:33:20Z\n');
+  const target = release(directory, gitSha(10), '2033-05-18T03:33:20Z\n');
   fs.utimesSync(target, 0, 0);
 
   const result = bash('release_age_epoch "$2" "$3"', [target, String(NOW)]);
@@ -117,7 +126,7 @@ test('uses a valid deployment marker even when the release directory mtime is ep
 
 test('uses a positive birth epoch for a markerless release', (t) => {
   const directory = fixture(t);
-  const target = release(directory, 'release-a');
+  const target = release(directory, gitSha(11));
 
   const result = bash('release_age_epoch "$2" "$3"', [target, String(NOW)]);
 
@@ -127,8 +136,8 @@ test('uses a positive birth epoch for a markerless release', (t) => {
 
 test('malformed markers abort release cleanup before any release is removed', (t) => {
   const directory = fixture(t);
-  const current = release(directory, 'current-release', '2033-05-18T03:33:19Z\n');
-  const old = release(directory, 'old-release', 'not-a-timestamp\n');
+  const current = release(directory, gitSha(12), '2033-05-18T03:33:19Z\n');
+  const old = release(directory, gitSha(13), 'not-a-timestamp\n');
 
   const result = bash('cleanup_releases "$2" "$3" "$4" false', [directory, current, String(NOW)]);
 
@@ -139,8 +148,8 @@ test('malformed markers abort release cleanup before any release is removed', (t
 
 test('an unavailable birth epoch aborts release cleanup before any release is removed', (t) => {
   const directory = fixture(t);
-  const current = release(directory, 'current-release', '2033-05-18T03:33:19Z\n');
-  const old = release(directory, 'old-release');
+  const current = release(directory, gitSha(14), '2033-05-18T03:33:19Z\n');
+  const old = release(directory, gitSha(15));
 
   const result = bash(
     'cleanup_releases "$2" "$3" "$4" false',
@@ -155,14 +164,14 @@ test('an unavailable birth epoch aborts release cleanup before any release is re
 
 test('retains current plus five newest previous releases and removes the old sixth previous release', (t) => {
   const directory = fixture(t);
-  const current = release(directory, 'release-current', '2033-05-18T03:33:19Z\n');
+  const current = release(directory, gitSha(16), '2033-05-18T03:33:19Z\n');
   const previous = [
-    ['release-1', '2033-05-18T03:33:18Z\n'],
-    ['release-2', '2033-05-18T03:33:17Z\n'],
-    ['release-3', '2033-05-18T03:33:16Z\n'],
-    ['release-4', '2033-05-18T03:33:15Z\n'],
-    ['release-5', '2033-05-18T03:33:14Z\n'],
-    ['release-6', '2033-05-01T00:00:00Z\n'],
+    [gitSha(17), '2033-05-18T03:33:18Z\n'],
+    [gitSha(18), '2033-05-18T03:33:17Z\n'],
+    [gitSha(19), '2033-05-18T03:33:16Z\n'],
+    [gitSha(20), '2033-05-18T03:33:15Z\n'],
+    [gitSha(21), '2033-05-18T03:33:14Z\n'],
+    [gitSha(22), '2033-05-01T00:00:00Z\n'],
   ].map(([name, marker]) => release(directory, name, marker));
 
   const result = bash('cleanup_releases "$2" "$3" "$4" false', [directory, current, String(NOW)]);
@@ -173,13 +182,37 @@ test('retains current plus five newest previous releases and removes the old six
   assert.equal(fs.existsSync(previous[5]), false);
 });
 
+test('ignores manual non-SHA release directories even with malformed metadata', (t) => {
+  const directory = fixture(t);
+  const current = release(directory, gitSha(23), '2033-05-18T03:33:19Z\n');
+  const previous = [
+    [24, '2033-05-18T03:33:18Z\n'],
+    [25, '2033-05-05T00:00:00Z\n'],
+    [26, '2033-05-04T00:00:00Z\n'],
+    [27, '2033-05-03T00:00:00Z\n'],
+    [28, '2033-05-02T00:00:00Z\n'],
+    [29, '2033-05-01T00:00:00Z\n'],
+  ].map(([index, marker]) => release(directory, gitSha(index), marker));
+  const manual = release(directory, 'manual-release-2026-09-17', 'not-a-timestamp\n');
+
+  const result = bash('cleanup_releases "$2" "$3" "$4" false', [directory, current, String(NOW)]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(manual), true);
+  assert.equal(fs.existsSync(previous[5]), false);
+});
+
 test('removes only old allowlisted temporary directories', (t) => {
   const directory = fixture(t);
-  const oldAllowed = path.join(directory, 'arcadeplatform-ws-old');
-  const recentAllowed = path.join(directory, 'arcadeplatform-infra-recent');
+  const oldAllowed = path.join(directory, 'arcadeplatform-ws-12345-1');
+  const oldInfraAllowed = path.join(directory, 'arcadeplatform-infra-67890-2');
+  const recentAllowed = path.join(directory, 'arcadeplatform-infra-67890-3');
+  const malformedAllowed = path.join(directory, 'arcadeplatform-ws-12345-1-extra');
   const oldOther = path.join(directory, 'unrelated-old');
-  for (const target of [oldAllowed, recentAllowed, oldOther]) fs.mkdirSync(target);
-  fs.utimesSync(oldAllowed, new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
+  for (const target of [oldAllowed, oldInfraAllowed, recentAllowed, malformedAllowed, oldOther]) fs.mkdirSync(target);
+  for (const target of [oldAllowed, oldInfraAllowed, malformedAllowed, oldOther]) {
+    fs.utimesSync(target, new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
+  }
   fs.utimesSync(oldOther, new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
   fs.utimesSync(recentAllowed, new Date('2100-01-01T00:00:00Z'), new Date('2100-01-01T00:00:00Z'));
 
@@ -187,7 +220,9 @@ test('removes only old allowlisted temporary directories', (t) => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(oldAllowed), false);
+  assert.equal(fs.existsSync(oldInfraAllowed), false);
   assert.equal(fs.existsSync(recentAllowed), true);
+  assert.equal(fs.existsSync(malformedAllowed), true);
   assert.equal(fs.existsSync(oldOther), true);
 });
 
@@ -212,9 +247,22 @@ test('fails immediately when another process holds the fd-9 maintenance lock', a
   assert.equal(result.signal, null);
 });
 
-test('entrypoint accepts the Production app symlink and holds the lock through both reconciliations', (t) => {
+test('entrypoint defaults to dry-run and never deletes without --apply', (t) => {
   const f = entrypointFixture(t);
-  const result = spawnSync('bash', [f.executable], f.options);
+
+  for (const args of [[], ['--dry-run']]) {
+    const result = spawnSync('bash', [f.executable, ...args], f.options);
+
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(f.app), true);
+    for (const target of [f.current, ...f.previous, f.oldTemp]) assert.equal(fs.existsSync(target), true);
+  }
+});
+
+test('entrypoint accepts --apply for the Production app symlink and holds the lock through both reconciliations', (t) => {
+  const f = entrypointFixture(t);
+  const result = spawnSync('bash', [f.executable, '--apply'], f.options);
 
   assert.equal(result.error, undefined, result.error?.message);
   assert.equal(result.status, 0, result.stderr);

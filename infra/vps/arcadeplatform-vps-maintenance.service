@@ -4,7 +4,7 @@ Description=Arcade Platform VPS maintenance
 [Service]
 Type=oneshot
 User=root
-ExecStart=/usr/local/sbin/arcadeplatform-vps-maintenance.sh
+ExecStart=/usr/local/sbin/arcadeplatform-vps-maintenance.sh --apply
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

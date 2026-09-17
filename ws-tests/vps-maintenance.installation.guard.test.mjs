@@ -12,7 +12,7 @@ test('installs the fixed-scope root maintenance service and persistent weekly ti
 
   assert.match(service, /^User=root$/m);
   assert.match(service, /^Type=oneshot$/m);
-  assert.match(service, /^ExecStart=\/usr\/local\/sbin\/arcadeplatform-vps-maintenance\.sh$/m);
+  assert.match(service, /^ExecStart=\/usr\/local\/sbin\/arcadeplatform-vps-maintenance\.sh --apply$/m);
   assert.match(service, /^NoNewPrivileges=true$/m);
   assert.match(service, /^ProtectSystem=strict$/m);
   assert.match(service, /^ProtectHome=true$/m);
@@ -46,6 +46,11 @@ test('maintenance implementation stays out of service, container, process, and c
   assert.match(maintenance, /^readonly CURRENT_RELEASE_LINK='\/opt\/ws-server\/current'$/m);
   assert.match(maintenance, /^readonly TMP_ROOT='\/tmp'$/m);
   assert.match(maintenance, /^readonly LOCK_FILE='\/opt\/ws-server\/\.deploy-maintenance\.lock'$/m);
+  assert.match(maintenance, /\[\[ "\$1" == --apply \]\]/);
+  assert.match(maintenance, /local dry_run=true/);
+  assert.match(maintenance, /flock -n 9/);
+  assert.match(maintenance, /arcadeplatform-\(ws\|infra\)-\[0-9\]\+-\[0-9\]\+/);
+  assert.match(maintenance, /\^\[0-9a-f\]\{40\}\$/);
   assert.doesNotMatch(maintenance, /^\s*(?:systemctl|docker|kill|pkill)\b/m);
   assert.doesNotMatch(maintenance, /\b(?:prune|cache)\b/i);
 });
@@ -57,7 +62,10 @@ test('recovery documentation requires a read-only owner review before separately
   assert.match(documentation, /legacy.*birth(?:-| )time/is);
   assert.match(documentation, /\.deploy-maintenance\.lock/);
   assert.match(documentation, /current.*five.*previous.*7 days/is);
-  assert.match(documentation, /arcadeplatform-ws-.*arcadeplatform-infra-.*48 hours/is);
+  assert.match(documentation, /arcadeplatform-(?:ws|infra)-<numeric run_id>-<numeric attempt>/is);
+  assert.match(documentation, /--dry-run.*(?:does not|do not) delete.*--apply/is);
+  assert.match(documentation, /(?:first Production deploy|Production deploy[\s\S]*first)[\s\S]*pre-stage[\s\S]*lock/is);
+  assert.match(documentation, /sticky.*\/tmp.*copilot.*cannot delete/is);
   assert.match(documentation, /owner-approved read-only review[\s\S]*systemctl enable --now arcadeplatform-vps-maintenance\.timer/);
   assert.match(documentation, /docker ps -a/);
   assert.match(documentation, /docker system df -v/);

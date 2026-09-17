@@ -13,8 +13,16 @@ is_positive_decimal() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
 
-is_safe_component() {
-  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+is_nonnegative_decimal() {
+  [[ "$1" =~ ^[0-9][0-9]*$ ]]
+}
+
+is_git_sha_release_name() {
+  [[ "$1" =~ ^[0-9a-f]{40}$ ]]
+}
+
+is_known_tmp_name() {
+  [[ "$1" =~ ^arcadeplatform-(ws|infra)-[0-9]+-[0-9]+$ ]]
 }
 
 is_safe_directory() {
@@ -36,7 +44,7 @@ release_age_epoch() {
     [[ "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
     [[ $(date -u -d "$timestamp" '+%Y-%m-%dT%H:%M:%SZ') == "$timestamp" ]] || return 1
     epoch=$(date -u -d "$timestamp" '+%s')
-    is_positive_decimal "$epoch" && (( epoch <= now_epoch )) || return 1
+    is_nonnegative_decimal "$epoch" && (( epoch <= now_epoch )) || return 1
     printf '%s\n' "$epoch"
     return 0
   fi
@@ -48,7 +56,7 @@ release_age_epoch() {
 
 cleanup_releases() {
   local releases_dir=$1 current_release_dir=$2 now_epoch=$3 dry_run=$4
-  local releases_real current_real candidate candidate_real candidate_name age threshold
+  local releases_real current_real candidate candidate_real candidate_name age threshold sorted_output
   local -a candidates=() release_rows=() sorted_rows=()
   local protected_count=0 removed_count=0
 
@@ -60,7 +68,7 @@ cleanup_releases() {
   current_real=$(realpath -e -- "$current_release_dir") || return 1
   [[ $(dirname -- "$current_real") == "$releases_real" ]] || return 1
   candidate_name=$(basename -- "$current_real")
-  is_safe_component "$candidate_name" || return 1
+  is_git_sha_release_name "$candidate_name" || return 1
   [[ -d "$releases_real/$candidate_name" && ! -L "$releases_real/$candidate_name" ]] || return 1
 
   # Drain the NUL-delimited inventory, then check its producer before using it.
@@ -69,7 +77,7 @@ cleanup_releases() {
 
   for candidate in "${candidates[@]}"; do
     candidate_name=$(basename -- "$candidate")
-    is_safe_component "$candidate_name" || return 1
+    is_git_sha_release_name "$candidate_name" || continue
     candidate_real=$(realpath -e -- "$candidate") || return 1
     [[ $(dirname -- "$candidate_real") == "$releases_real" ]] || return 1
     [[ "$candidate_real" == "$releases_real/$candidate_name" ]] || return 1
@@ -78,7 +86,8 @@ cleanup_releases() {
   done
 
   (( ${#release_rows[@]} > 0 )) || return 1
-  mapfile -t sorted_rows < <(printf '%s\n' "${release_rows[@]}" | LC_ALL=C sort -t $'\t' -k1,1nr -k2,2)
+  sorted_output=$(printf '%s\n' "${release_rows[@]}" | LC_ALL=C sort -t $'\t' -k1,1nr -k2,2) || return 1
+  mapfile -t sorted_rows <<< "$sorted_output"
   threshold=$((now_epoch - RELEASE_RETENTION_SECONDS))
 
   for candidate in "${sorted_rows[@]}"; do
@@ -93,7 +102,7 @@ cleanup_releases() {
     fi
     if (( age < threshold )); then
       candidate_name=$(basename -- "$candidate_real")
-      is_safe_component "$candidate_name" || return 1
+      is_git_sha_release_name "$candidate_name" || return 1
       [[ $(dirname -- "$candidate_real") == "$releases_real" ]] || return 1
       [[ -d "$releases_real/$candidate_name" && ! -L "$releases_real/$candidate_name" ]] || return 1
       if [[ "$dry_run" == false ]]; then
@@ -109,7 +118,7 @@ cleanup_releases() {
 cleanup_known_tmp_dirs() {
   local tmp_root=$1 now_epoch=$2 dry_run=$3 candidate candidate_real candidate_name mtime
   local tmp_real removed_count=0 threshold
-  local -a candidates=()
+  local -a candidates=() eligible_candidates=()
 
   is_safe_directory "$tmp_root" || return 1
   is_positive_decimal "$now_epoch" || return 1
@@ -122,12 +131,20 @@ cleanup_known_tmp_dirs() {
 
   for candidate in "${candidates[@]}"; do
     candidate_name=$(basename -- "$candidate")
-    [[ "$candidate_name" == arcadeplatform-ws-* || "$candidate_name" == arcadeplatform-infra-* ]] || return 1
+    is_known_tmp_name "$candidate_name" || continue
     candidate_real=$(realpath -e -- "$candidate") || return 1
     [[ $(dirname -- "$candidate_real") == "$tmp_real" ]] || return 1
     [[ "$candidate_real" == "$tmp_real/$candidate_name" && ! -L "$candidate" ]] || return 1
     mtime=$(stat -c %Y -- "$candidate_real") || return 1
-    is_positive_decimal "$mtime" && (( mtime < threshold )) || continue
+    is_nonnegative_decimal "$mtime" && (( mtime < threshold )) || continue
+    eligible_candidates+=("$candidate_real")
+  done
+
+  for candidate_real in "${eligible_candidates[@]}"; do
+    candidate_name=$(basename -- "$candidate_real")
+    is_known_tmp_name "$candidate_name" || return 1
+    [[ $(dirname -- "$candidate_real") == "$tmp_real" ]] || return 1
+    [[ -d "$tmp_real/$candidate_name" && ! -L "$tmp_real/$candidate_name" ]] || return 1
     if [[ "$dry_run" == false ]]; then
       rm -rf -- "$tmp_real/$candidate_name"
     fi
@@ -141,16 +158,20 @@ acquire_maintenance_lock() {
   local lock_file=$1
 
   [[ -f "$lock_file" && ! -L "$lock_file" ]] || return 1
+  [[ "$(stat -c '%h' -- "$lock_file")" == 1 ]] || return 1
   exec 9<> "$lock_file" || return 1
   flock -n 9
 }
 
 main() {
-  local dry_run=false current_app_dir current_release_dir
+  local dry_run=true current_app_dir current_release_dir
 
   if (( $# == 1 )); then
-    [[ "$1" == --dry-run ]] || return 1
-    dry_run=true
+    if [[ "$1" == --apply ]]; then
+      dry_run=false
+    elif [[ "$1" != --dry-run ]]; then
+      return 1
+    fi
   elif (( $# != 0 )); then
     return 1
   fi
