@@ -7,6 +7,9 @@ import test from 'node:test';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const script = path.join(repositoryRoot, 'infra/vps/vps-maintenance.sh');
+const driverPath = path.join(repositoryRoot, 'ws-tests/fixtures/vps-maintenance-function-driver.sh');
+const lockHolderPath = path.join(repositoryRoot, 'ws-tests/fixtures/vps-maintenance-lock-holder.sh');
+const heldLockPath = path.join(repositoryRoot, 'ws-tests/fixtures/vps-maintenance-held-lock.sh');
 const NOW = 2_000_000_000;
 
 function gitSha(index = 0) {
@@ -16,16 +19,19 @@ function gitSha(index = 0) {
 test('runs maintenance functions through a fixed positional shell driver', () => {
   const source = fs.readFileSync(import.meta.filename, 'utf8');
 
-  assert.match(source, /const BASH_FUNCTION_DRIVER = 'source "\$1"; shift; "\$@"';/);
-  assert.match(source, /spawnSync\('bash', \['-c', BASH_FUNCTION_DRIVER, 'bash', script, functionName, \.\.\.args\]/);
-  assert.match(source, /function bash\(functionName, args = \[\], options = \{\}\)/);
-  assert.doesNotMatch(source, /\$\{prefix\}\$\{functionCall\}/);
+  const helperStart = source.lastIndexOf('\nfunction bash(functionName');
+  const helperEnd = source.indexOf('function bashEnv', helperStart);
+  const helper = source.slice(helperStart, helperEnd);
+
+  assert.match(source, /const driverPath = path\.join\(repositoryRoot, 'ws-tests\/fixtures\/vps-maintenance-function-driver\.sh'\);/);
+  assert.match(helper, /spawnSync\('bash', \[driverPath, script, functionName, \.\.\.args\]/);
+  assert.doesNotMatch(helper, /-c/);
+  assert.doesNotMatch(helper, /`/);
+  assert.equal(fs.readFileSync(driverPath, 'utf8'), '#!/usr/bin/env bash\nset -Eeuo pipefail\n\nsource "$1"\nshift\n"$@"\n');
 });
 
-const BASH_FUNCTION_DRIVER = 'source "$1"; shift; "$@"';
-
 function bash(functionName, args = [], options = {}) {
-  return spawnSync('bash', ['-c', BASH_FUNCTION_DRIVER, 'bash', script, functionName, ...args], {
+  return spawnSync('bash', [driverPath, script, functionName, ...args], {
     encoding: 'utf8',
     ...options,
   });
@@ -302,7 +308,7 @@ test('fails immediately when another process holds the fd-9 maintenance lock', a
   const directory = fixture(t);
   const lock = path.join(directory, 'maintenance.lock');
   fs.writeFileSync(lock, '');
-  const holder = spawn('bash', ['-c', 'exec 9>"$1"; flock -n 9; printf ready; read ignored', 'bash', lock], {
+  const holder = spawn('bash', [lockHolderPath, lock], {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   await new Promise((resolve, reject) => {
@@ -378,9 +384,7 @@ find() {
 test('held lock prevents entrypoint current resolution and reconciliation', (t) => {
   const f = entrypointFixture(t);
   // Keep the holder shell alive after its child, preventing a last-command exec.
-  const result = spawnSync('bash', ['-c',
-    'exec 9<> "$1"; flock -n 9 || exit 99; bash "$2"; status=$?; exit "$status"', 'bash', f.lock, f.executable,
-  ], f.options);
+  const result = spawnSync('bash', [heldLockPath, f.lock, f.executable], f.options);
 
   assert.equal(result.error, undefined, result.error?.message);
   assert.equal(result.signal, null);
