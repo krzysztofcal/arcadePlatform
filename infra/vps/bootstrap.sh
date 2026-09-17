@@ -107,6 +107,7 @@ id arcade-stage-runner >/dev/null 2>&1 || useradd --system --no-create-home --ho
 
 install -d -o root -g root -m 0755 /etc/arcadeplatform
 install -d -o root -g arcade-deploy -m 2775 /opt/ws-server /opt/ws-server/releases
+install -o root -g arcade-deploy -m 0660 /dev/null /opt/ws-server/.deploy-maintenance.lock
 install -d -o arcade -g arcade -m 0755 /opt/arcade-ws-preview
 install -d -o root -g arcade-deploy -m 2775 \
   /opt/arcade-ws-preview/ws-server \
@@ -169,12 +170,18 @@ install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server-preview.servi
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.service" /etc/systemd/system/arcade-chips-ledger-dispatch.service
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.timer" /etc/systemd/system/arcade-chips-ledger-dispatch.timer
 install -D -o root -g root -m 0755 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.sh" /usr/local/bin/arcade-chips-ledger-dispatch.sh
+install -D -o root -g root -m 0755 \
+  "$REPO_ROOT/infra/vps/vps-maintenance.sh" \
+  /usr/local/sbin/arcadeplatform-vps-maintenance.sh
+install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcadeplatform-vps-maintenance.service" /etc/systemd/system/arcadeplatform-vps-maintenance.service
+install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcadeplatform-vps-maintenance.timer" /etc/systemd/system/arcadeplatform-vps-maintenance.timer
 systemctl daemon-reload
 
 cat <<'NOTICE'
 Bootstrap prepared the fresh Ubuntu VPS. It did not restore secret env files,
 register the GitHub runner, enable/start WS services, or enable/start the Stage
-scheduler. Caddy was left disabled and unstarted after its package installation;
+scheduler. It did not run VPS maintenance or enable/start its timer. Caddy was
+left disabled and unstarted after its package installation;
 follow docs/vps-disaster-recovery.md for the owner-approved activation and
 recovery sequence.
 NOTICE

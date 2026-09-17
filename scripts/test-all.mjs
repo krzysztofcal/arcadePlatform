@@ -152,6 +152,8 @@ run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
 run("node", ["tests/csp-inline-hashes.behavior.test.mjs"], "csp-inline-hashes-behavior");
 run("node", ["tests/test-all.runner-registration.guard.test.mjs"], "test-all-runner-registration-guard");
+run("node", ["--test", "ws-tests/vps-maintenance.behavior.test.mjs"], "vps-maintenance-behavior");
+run("node", ["--test", "ws-tests/vps-maintenance.installation.guard.test.mjs"], "vps-maintenance-installation-guard");
 run("node", ["tests/poker-runtime-docs.behavior.test.mjs"], "poker-runtime-docs-behavior");
 run("node", ["tests/poker-http-retired-contract.guard.test.mjs"], "poker-http-retired-contract-guard");
 run("node", ["tests/poker-get-table-retired-implementation.guard.test.mjs"], "poker-get-table-retired-implementation-guard");

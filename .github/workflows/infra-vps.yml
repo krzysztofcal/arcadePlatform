@@ -26,10 +26,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Validate infra VPS structure
         run: |
           set -euo pipefail
           test -f infra/vps/Caddyfile
+          node --test ws-tests/vps-maintenance.behavior.test.mjs
+          node --test ws-tests/vps-maintenance.installation.guard.test.mjs
 
   apply:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'

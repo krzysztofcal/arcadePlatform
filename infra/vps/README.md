@@ -146,6 +146,66 @@ Docker caches, `/tmp` state, journald output, Caddy ACME state, or Supabase
 DB/Storage. These are reconstructed or disposable; cleanup is outside this
 recovery contract and belongs to #996.
 
+## Weekly VPS maintenance
+
+`arcadeplatform-vps-maintenance.service` is a `copilot` `oneshot` installed from
+this directory and invoked only through
+`/usr/local/sbin/arcadeplatform-vps-maintenance.sh --apply`. Its persistent weekly
+timer is scheduled for Sunday 03:30 UTC. Bootstrap installs both units, the
+script, and the shared regular lock
+`/opt/ws-server/.deploy-maintenance.lock` (`root:arcade-deploy`, `0660`), then
+runs `systemctl daemon-reload`; it neither runs maintenance nor enables the
+timer.
+
+The Production deploy and maintenance paths use that same lock and fail closed
+if it is unavailable or busy. Production waits up to 300 seconds for the lock;
+maintenance remains non-blocking and skips a run when the lock is busy. The
+first Production deploy on an existing host performs a bounded, non-restarting
+pre-stage before artifact upload: it verifies that the SSH session is actually
+`copilot`, rejects symlinked fixed Production directories, creates the missing
+regular lock if necessary, and validates/normalizes it to `arcade-deploy` group
+and mode `0660`. If that pre-stage cannot complete safely, the deploy stops
+before any release or service mutation. Fresh-host bootstrap still creates the
+lock as `root:arcade-deploy`.
+
+The maintenance command is read-only with no arguments or with `--dry-run`;
+only an explicit `--apply` permits deletion, and the systemd service is the
+only scheduled caller using `--apply`. The service runs as `copilot`: the
+`arcade-deploy` group permits release cleanup, and Production/Preview workflow
+temporary directories are created by the `copilot` deploy user. Automatic
+temporary cleanup additionally requires the exact directory owner to be
+`copilot`, so the current legacy directories owned by `arcade` are skipped.
+After a fresh owner-approved read-only inventory, those legacy directories may
+be handled by a separate one-time root cleanup; they are not part of the
+weekly automation. No service restart is part of maintenance.
+
+Release cleanup treats a valid release-root `.deployed-at` marker as taking
+precedence over all filesystem metadata. A markerless legacy release is
+eligible only after its positive birth-time value from `stat %W` is validated;
+invalid or unavailable metadata aborts cleanup before deletion. Automated
+cleanup considers only direct release directories whose complete basename is a
+40-character lowercase Git SHA. Manual/non-SHA releases are left untouched
+and require separate owner-approved cleanup. The job retains `current` plus
+the five newest previous SHA releases and considers only older releases beyond
+7 days. Temporary cleanup is limited to direct `/tmp` directories whose full
+basename matches exactly
+`arcadeplatform-ws-<numeric run_id>-<numeric attempt>` or
+`arcadeplatform-infra-<numeric run_id>-<numeric attempt>`, older than 48 hours.
+
+An owner must first complete an owner-approved read-only review, then may run:
+
+```bash
+systemctl enable --now arcadeplatform-vps-maintenance.timer
+```
+
+That review is also a prerequisite for any deferred one-time root-level
+reconciliation. It must inventory Docker with `docker ps -a` and
+`docker system df -v`, runner state, process/PID state, and local
+Postgres/cache ownership before any separately approved exact cleanup. Broad
+prune and broad kill commands are prohibited. Recovery backups, secrets,
+`.env` files, and active services remain outside the cleanup boundary; do not
+record live inventory values or secret contents in this repository.
+
 The Caddyfile is reproducible from Git. Caddy's certificate/account state under
 `/var/lib/caddy/.local/share/caddy` is private provider-managed state and is not
 included in the Phase C secret artifact. Allow Caddy to re-obtain certificates
