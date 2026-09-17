@@ -31,6 +31,64 @@ function release(directory, name, deployedAt) {
   return releaseDirectory;
 }
 
+function entrypointFixture(t) {
+  const directory = fixture(t);
+  const appRoot = path.join(directory, 'app');
+  const releasesRoot = path.join(appRoot, 'releases');
+  const tmpRoot = path.join(directory, 'tmp');
+  const currentLink = path.join(appRoot, 'current');
+  const lock = path.join(appRoot, '.deploy-maintenance.lock');
+  fs.mkdirSync(releasesRoot, { recursive: true });
+  fs.mkdirSync(tmpRoot);
+  fs.writeFileSync(lock, '');
+  const current = release(releasesRoot, 'current-id', '2000-01-01T00:00:00Z\n');
+  const app = path.join(current, 'ws-server');
+  fs.mkdirSync(app);
+  fs.symlinkSync('releases/current-id/ws-server', currentLink);
+  const previous = Array.from({ length: 6 }, (_, index) =>
+    release(releasesRoot, `previous-${index + 1}`, `2001-01-0${6 - index}T00:00:00Z\n`));
+  const oldTemp = path.join(tmpRoot, 'arcadeplatform-ws-old');
+  fs.mkdirSync(oldTemp);
+  fs.utimesSync(oldTemp, 946684800, 946684800);
+
+  // Remap only the fixed constants in a fixture copy; execute its real CLI/main.
+  // Production retains fixed paths and gains no test-only path overrides.
+  let source = fs.readFileSync(script, 'utf8');
+  for (const [name, value] of Object.entries({
+    APP_ROOT: appRoot, RELEASES_ROOT: releasesRoot, CURRENT_RELEASE_LINK: currentLink,
+    TMP_ROOT: tmpRoot, LOCK_FILE: lock,
+  })) {
+    assert.match(source, new RegExp(`^readonly ${name}='[^']*'$`, 'm'));
+    source = source.replace(new RegExp(`^readonly ${name}='[^']*'$`, 'm'), `readonly ${name}='${value}'`);
+  }
+  const executable = path.join(directory, 'maintenance.sh');
+  fs.writeFileSync(executable, source);
+  const calls = path.join(directory, 'state-reads');
+  const instrumentation = path.join(directory, 'instrumentation.sh');
+  fs.writeFileSync(instrumentation, `
+date() {
+  if [[ "$*" == '-u +%s' ]]; then printf '%s\\n' '${NOW}'; else command date "$@"; fi
+}
+realpath() {
+  printf 'realpath:%s\\n' "$*" >> "$CALLS";
+  command realpath "$@"
+}
+find() {
+  printf 'find:%s\\n' "$1" >> "$CALLS";
+  if command flock -n "$LOCK_FILE" true; then
+    printf 'enumeration ran without the maintenance lock\\n' >&2
+    return 97
+  fi
+  command find "$@"
+}
+`);
+  const options = {
+    encoding: 'utf8', timeout: 3000,
+    env: { ...process.env, BASH_ENV: instrumentation, CALLS: calls },
+  };
+  return { executable, options, current, app, previous, oldTemp, currentLink, lock, calls, releasesRoot, tmpRoot };
+}
+
 test('uses only fixed maintenance paths and a guarded dry-run CLI without process-management commands', () => {
   const source = fs.readFileSync(script, 'utf8');
 
@@ -152,4 +210,81 @@ test('fails immediately when another process holds the fd-9 maintenance lock', a
   assert.notEqual(result.status, 0);
   assert.equal(result.error, undefined, result.error?.message);
   assert.equal(result.signal, null);
+});
+
+test('entrypoint accepts the Production app symlink and holds the lock through both reconciliations', (t) => {
+  const f = entrypointFixture(t);
+  const result = spawnSync('bash', [f.executable], f.options);
+
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(f.app), true);
+  for (const target of f.previous.slice(0, 5)) assert.equal(fs.existsSync(target), true);
+  assert.equal(fs.existsSync(f.previous[5]), false);
+  assert.equal(fs.existsSync(f.oldTemp), false);
+  const calls = fs.readFileSync(f.calls, 'utf8').split('\n');
+  assert.ok(calls.includes(`find:${f.releasesRoot}`));
+  assert.ok(calls.includes(`find:${f.tmpRoot}`));
+});
+
+test('failed release enumeration after valid candidates aborts without deletion', (t) => {
+  const f = entrypointFixture(t);
+  const result = bash(
+    'cleanup_releases "$2" "$3" "$4" false',
+    [f.releasesRoot, f.current, String(NOW)],
+    'find() { command find "$@"; return 42; }; ',
+  );
+
+  for (const target of [f.current, ...f.previous]) assert.equal(fs.existsSync(target), true, target);
+  assert.notEqual(result.status, 0);
+});
+
+test('failed temp enumeration after valid candidates aborts without deletion', (t) => {
+  const f = entrypointFixture(t);
+  const result = bash(
+    'cleanup_known_tmp_dirs "$2" "$3" false',
+    [f.tmpRoot, String(NOW)],
+    'find() { command find "$@"; return 42; }; ',
+  );
+
+  assert.equal(fs.existsSync(f.oldTemp), true);
+  assert.notEqual(result.status, 0);
+});
+
+test('held lock prevents entrypoint current resolution and reconciliation', (t) => {
+  const f = entrypointFixture(t);
+  // Keep the holder shell alive after its child, preventing a last-command exec.
+  const result = spawnSync('bash', ['-c',
+    'exec 9<> "$1"; flock -n 9 || exit 99; bash "$2"; status=$?; exit "$status"', 'bash', f.lock, f.executable,
+  ], f.options);
+
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.signal, null);
+  assert.equal(result.status, 1);
+  assert.equal(fs.existsSync(f.calls), false, 'must not resolve current or enumerate while lock is held');
+  for (const target of [f.current, ...f.previous, f.oldTemp]) assert.equal(fs.existsSync(target), true);
+});
+
+test('entrypoint rejects current targets outside the direct release ws-server layout', (t) => {
+  for (const layout of ['release-root', 'wrong-app', 'nested-app', 'outside-releases']) {
+    const f = entrypointFixture(t);
+    const target = {
+      'release-root': f.current,
+      'wrong-app': path.join(f.current, 'other-app'),
+      'nested-app': path.join(f.current, 'nested', 'ws-server'),
+      'outside-releases': path.join(f.tmpRoot, 'outside', 'ws-server'),
+    }[layout];
+    fs.mkdirSync(target, { recursive: true });
+    fs.unlinkSync(f.currentLink);
+    fs.symlinkSync(target, f.currentLink);
+
+    const result = spawnSync('bash', [f.executable], f.options);
+
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.notEqual(result.status, 0, layout);
+    for (const retained of [f.current, ...f.previous, f.oldTemp]) {
+      assert.equal(fs.existsSync(retained), true, `${layout}: ${retained}`);
+    }
+    assert.doesNotMatch(fs.readFileSync(f.calls, 'utf8'), /^find:/m, layout);
+  }
 });

@@ -49,7 +49,7 @@ release_age_epoch() {
 cleanup_releases() {
   local releases_dir=$1 current_release_dir=$2 now_epoch=$3 dry_run=$4
   local releases_real current_real candidate candidate_real candidate_name age threshold
-  local -a release_rows=() sorted_rows=()
+  local -a candidates=() release_rows=() sorted_rows=()
   local protected_count=0 removed_count=0
 
   is_safe_directory "$releases_dir" || return 1
@@ -63,7 +63,11 @@ cleanup_releases() {
   is_safe_component "$candidate_name" || return 1
   [[ -d "$releases_real/$candidate_name" && ! -L "$releases_real/$candidate_name" ]] || return 1
 
-  while IFS= read -r -d '' candidate; do
+  # Drain the NUL-delimited inventory, then check its producer before using it.
+  mapfile -d '' -t candidates < <(find "$releases_real" -mindepth 1 -maxdepth 1 -type d -print0) || return 1
+  wait "$!" || return 1
+
+  for candidate in "${candidates[@]}"; do
     candidate_name=$(basename -- "$candidate")
     is_safe_component "$candidate_name" || return 1
     candidate_real=$(realpath -e -- "$candidate") || return 1
@@ -71,7 +75,7 @@ cleanup_releases() {
     [[ "$candidate_real" == "$releases_real/$candidate_name" ]] || return 1
     age=$(release_age_epoch "$candidate_real" "$now_epoch") || return 1
     release_rows+=("$age"$'\t'"$candidate_real")
-  done < <(find "$releases_real" -mindepth 1 -maxdepth 1 -type d -print0)
+  done
 
   (( ${#release_rows[@]} > 0 )) || return 1
   mapfile -t sorted_rows < <(printf '%s\n' "${release_rows[@]}" | LC_ALL=C sort -t $'\t' -k1,1nr -k2,2)
@@ -105,6 +109,7 @@ cleanup_releases() {
 cleanup_known_tmp_dirs() {
   local tmp_root=$1 now_epoch=$2 dry_run=$3 candidate candidate_real candidate_name mtime
   local tmp_real removed_count=0 threshold
+  local -a candidates=()
 
   is_safe_directory "$tmp_root" || return 1
   is_positive_decimal "$now_epoch" || return 1
@@ -112,7 +117,10 @@ cleanup_known_tmp_dirs() {
   tmp_real=$(realpath -e -- "$tmp_root") || return 1
   threshold=$((now_epoch - TMP_RETENTION_MINUTES * 60))
 
-  while IFS= read -r -d '' candidate; do
+  mapfile -d '' -t candidates < <(find "$tmp_real" -mindepth 1 -maxdepth 1 -type d \( -name 'arcadeplatform-ws-*' -o -name 'arcadeplatform-infra-*' \) -mmin +2880 -print0) || return 1
+  wait "$!" || return 1
+
+  for candidate in "${candidates[@]}"; do
     candidate_name=$(basename -- "$candidate")
     [[ "$candidate_name" == arcadeplatform-ws-* || "$candidate_name" == arcadeplatform-infra-* ]] || return 1
     candidate_real=$(realpath -e -- "$candidate") || return 1
@@ -124,7 +132,7 @@ cleanup_known_tmp_dirs() {
       rm -rf -- "$tmp_real/$candidate_name"
     fi
     ((removed_count += 1))
-  done < <(find "$tmp_real" -mindepth 1 -maxdepth 1 -type d \( -name 'arcadeplatform-ws-*' -o -name 'arcadeplatform-infra-*' \) -mmin +2880 -print0)
+  done
 
   printf 'temporary directory removals: %s\n' "$removed_count"
 }
@@ -138,7 +146,7 @@ acquire_maintenance_lock() {
 }
 
 main() {
-  local dry_run=false current_release_dir
+  local dry_run=false current_app_dir current_release_dir
 
   if (( $# == 1 )); then
     [[ "$1" == --dry-run ]] || return 1
@@ -148,10 +156,13 @@ main() {
   fi
 
   is_safe_directory "$APP_ROOT" || return 1
+  acquire_maintenance_lock "$LOCK_FILE" || return 1
   is_safe_directory "$RELEASES_ROOT" || return 1
   [[ -L "$CURRENT_RELEASE_LINK" ]] || return 1
-  current_release_dir=$(realpath -e -- "$CURRENT_RELEASE_LINK") || return 1
-  acquire_maintenance_lock "$LOCK_FILE"
+  current_app_dir=$(realpath -e -- "$CURRENT_RELEASE_LINK") || return 1
+  is_safe_directory "$current_app_dir" || return 1
+  [[ $(basename -- "$current_app_dir") == ws-server ]] || return 1
+  current_release_dir=$(dirname -- "$current_app_dir") || return 1
   cleanup_releases "$RELEASES_ROOT" "$current_release_dir" "$(date -u '+%s')" "$dry_run"
   cleanup_known_tmp_dirs "$TMP_ROOT" "$(date -u '+%s')" "$dry_run"
 }
