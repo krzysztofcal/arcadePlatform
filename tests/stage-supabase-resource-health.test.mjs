@@ -7,12 +7,12 @@ import {
 } from '../scripts/ops/stage-supabase-resource-health.mjs';
 
 const fixture = fs.readFileSync(new URL('./fixtures/stage-resource-metrics.prom', import.meta.url), 'utf8');
-function windowFor(user = 12, iowait = 6) {
+function windowFor(user = 12, iowait = 6, cpuTicks = 60) {
   const first = parseMetrics(fixture);
   const second = parseMetrics(fixture);
   for (const sample of second.values()) {
     sample.value = sample.labels.mode === 'user' ? user : sample.labels.mode === 'iowait' ? iowait
-      : sample.labels.mode === 'idle' ? 60 - user - iowait : sample.labels.device ? 600 : 0;
+      : sample.labels.mode === 'idle' ? cpuTicks - user - iowait : sample.labels.device ? 600 : 0;
   }
   return { first, second, window: measureWindow(first, second, 60) };
 }
@@ -53,6 +53,18 @@ test('real Supabase fixture: CPU/iowait and per-device throughput/IOPS use count
   assert.equal(result.state, 'warning');
   assert.equal(result.capacityPercent, 10);
   assert.equal(result.databaseBytes, GiB);
+});
+
+test('CPU ratios remain valid when counter cadence differs from runner wall time', () => {
+  const shorter = windowFor(12, 6, 30).window;
+  assert.equal(shorter.cpuPercent, 40);
+  assert.equal(shorter.iowaitPercent, 20);
+  assert.notEqual(shorter.measurementReason, 'cpu_ticks_invalid');
+
+  const longer = windowFor(27, 9, 90).window;
+  assert.equal(longer.cpuPercent, 30);
+  assert.equal(longer.iowaitPercent, 10);
+  assert.notEqual(longer.measurementReason, 'cpu_ticks_invalid');
 });
 
 test('critical uses average CPU/iowait over the window; capacity cannot change pressure', () => {
@@ -127,23 +139,13 @@ test('required CPU series changes are diagnosed, while unrelated disk churn is i
   assert.equal(churnWindow.measurementReason, null);
 });
 
-test('incomplete CPU modes and ticks remain unknown without affecting valid disk deltas', () => {
+test('incomplete CPU modes remain unknown without affecting valid disk deltas', () => {
   const modes = windowFor();
   deleteMetric(modes.second, (sample) => sample.name === 'node_cpu_seconds_total' && sample.labels.mode === 'user');
   const incompleteModes = measureWindow(modes.first, modes.second, 60);
   assert.equal(incompleteModes.cpuPercent, null);
   assert.equal(incompleteModes.disks.length, 1);
   assert.equal(incompleteModes.measurementReason, 'cpu_modes_incomplete');
-
-  const ticks = windowFor();
-  deleteMetric(ticks.second, (sample) => sample.name === 'node_cpu_seconds_total' && sample.labels.mode === 'idle');
-  addMetric(ticks.second, 'node_cpu_seconds_total', {
-    supabase_project_ref: 'krydukthwdvccggbyjfw', service_type: 'db', cpu: '0', mode: 'idle',
-  }, 100);
-  const invalidTicks = measureWindow(ticks.first, ticks.second, 60);
-  assert.equal(invalidTicks.cpuPercent, null);
-  assert.equal(invalidTicks.disks.length, 1);
-  assert.equal(invalidTicks.measurementReason, 'cpu_ticks_invalid');
 });
 
 test('incomplete required disk measurement is not converted to zero', () => {

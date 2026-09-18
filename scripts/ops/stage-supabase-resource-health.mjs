@@ -104,7 +104,7 @@ export function measureWindow(first, second, seconds) {
       }
       if (cpuInvalid) break;
       const ticks = Object.values(deltas).reduce((sum, value) => sum + value, 0);
-      if (!Number.isFinite(ticks) || ticks < seconds * 0.8 || ticks > seconds * 1.2) {
+      if (!Number.isFinite(ticks) || ticks <= 0) {
         cpuInvalid = 'cpu_ticks_invalid';
         break;
       }

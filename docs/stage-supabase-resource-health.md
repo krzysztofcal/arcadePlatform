@@ -32,8 +32,11 @@ Only these Management API GET requests are made:
 - `/v1/projects/krydukthwdvccggbyjfw/config/disk/util` (once).
 
 Each request has a 15-second timeout, no retries and no redirects. Two scrapes
-are separated by a 60-second sleep; the actual elapsed window must be 55–75
-seconds. No database connection is held during sampling. The DB URL must name
+are separated by a 60-second sleep; the actual runner observation window must
+be 55–75 seconds. This bound validates the requested observation window only;
+CPU counter ratios do not assume that the Metrics endpoint's effective sample
+interval exactly matches runner wall time. No database connection is held during
+sampling. The DB URL must name
 canonical Stage and the read-only transaction verifies `pg_control_system()`
 against Stage's system identifier before reading capacity. One connection,
 at most 5-second statement timeout (preserving a lower configured limit), 10-second connect timeout, 5-minute job timeout.
@@ -56,9 +59,10 @@ https://github.com/supabase/supabase-grafana/blob/main/docs/metrics.md
 
 - `node_cpu_seconds_total`: delta across all eight documented modes per CPU.
   CPU percent excludes idle and iowait; iowait is reported separately. Guest
-  counters are not added again. Every CPU must have all modes and plausible
-  elapsed CPU time. Missing/non-finite samples, resets, changed series sets and
-  stale samples never become a healthy zero.
+  counters are not added again. Every CPU must have all modes, finite
+  nonnegative deltas and a positive aggregate counter delta. Missing/non-finite
+  samples, resets, changed series sets and stale samples with no positive
+  elapsed counter time never become a healthy zero.
 - `node_disk_read_bytes_total`, `node_disk_written_bytes_total`: bytes/second.
 - `node_disk_reads_completed_total`, `node_disk_writes_completed_total`: IOPS.
   Rates are per device; stacked devices are not summed or compared to a guessed
