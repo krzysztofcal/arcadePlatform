@@ -1066,6 +1066,9 @@ export function createPruneStore(sql, target = "stage") {
         await tx.unsafe("set transaction isolation level serializable;");
         await tx.unsafe("set local lock_timeout = '5s';");
         await tx.unsafe("set local statement_timeout = '120s';");
+        if (execute && targetName === "prod" && !automatic && approvedBatchId != null) {
+          await tx.unsafe("set local chips.production_canary = '1';");
+        }
         const rows = automatic && targetName === "stage"
           ? await tx.unsafe(`select public.chips_auto_prune_and_cleanup_bot_only_archive_batch(
             $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid
