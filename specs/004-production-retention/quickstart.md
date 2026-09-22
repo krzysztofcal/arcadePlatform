@@ -51,3 +51,7 @@ Owner-authorized emergency sequence: workflow variable0, disable Production time
 ## Completion language
 
 Planning READY FOR IMPLEMENTATION means an agent can implement PR A from these decisions. It does not mean Production rollout ready or PR merge-ready. Missing user runtime verification must be reported as `implementation ready, awaiting manual runtime verification`. Production activation cannot be marked ready until fresh canaries and owner authorizations exist.
+
+## Current owner-gated handoff — 2026-09-22
+
+The planning text above is historical. Current evidence is recorded in [research.md](research.md): T017 existing-30d, T018 bot-only-7d and T019 escrow account retirement are PASS; T018 closed-human-30d remains open because the exact 30-day selector currently returns no candidate. The earliest age lower bound for the only currently viable human table is `2026-10-14T13:32:28.499939Z`; this does not guarantee later eligibility. T020/PR B activation remains blocked, and Production global control, policies and scheduler remain OFF.

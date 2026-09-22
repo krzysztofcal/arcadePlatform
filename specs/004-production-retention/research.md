@@ -161,3 +161,45 @@ The first human-table attempt is retained for audit and is not a canary candidat
 - Escrow balance: `0 CH`.
 
 T018 remains open. The actual retention canaries still require natural age, a fresh fenced eligibility diagnostic, prepare, and separately authorized destructive execute for each policy. No T018 task checkbox is marked PASS.
+
+## Current owner-gated evidence — T017/T018/T019 (2026-09-22)
+
+This section supersedes the pre-canary status above. It records aggregate evidence only; private recovery bytes, credentials and secrets are intentionally excluded. No Production policy or global control was activated.
+
+### T017 existing-30d — PASS
+
+- The previously recorded Production batch **2** remains the completed T017 canary: exactly **2 transactions / 4 entries**, complete proof/prune receipt, retained registry mappings and verified replay (`already_pruned`).
+- A fresh read-only run of the unchanged `PRUNABLE_CANDIDATE_SQL` with the 30-day cutoff and manual cap **2** returned **2 rows from 1 table** (`3cf6fd0f-181a-4e5a-9e63-78ba98e436a8`). This is current selection evidence only; it did not create a batch or authorize another canary.
+
+### T018 bot-only-7d — PASS
+
+- Bot-only CANARY batch **3** completed successfully in [Production run #35742627182](https://github.com/krzysztofcal/arcadePlatform/actions/runs/35742627182), after the reviewed PREPARE path on `cf9cb02d7bed661f8a825635fe043edb5f514942`.
+- The cleaned table was `396a48fd-4b61-4992-8635-0820f3b68c74`; the exact archive and ledger receipts remain complete. The current bot-only selector returns **0 new candidates** after that table was removed, which is not a regression and does not reopen the completed canary.
+
+### T018 closed-human-30d — OPEN / NOT PASS
+
+- A fresh exact `CLOSED_HUMAN_TABLE_CANDIDATE_SQL` audit with the unchanged 30-day cutoff and cap **2** returned **0 candidates**.
+- Six closed human tables were observed. Only `7f3d73e4-36c5-4b66-afe6-d1d41bea13e2` currently has the non-age lifecycle and identity prerequisites visible to the audit: `CLOSED`, `HAND_DONE`, empty `handId`, zero pending requests, active zero-balance escrow, **2 identities / 2 hot identities**.
+- Its newest TABLE transaction is `2026-09-14T13:32:28.499939Z`; the earliest possible age threshold is therefore `2026-10-14T13:32:28.499939Z`. This is an age lower bound, **not a guarantee of later selector eligibility**; all entry-shape, identity, lifecycle, escrow and cap checks must be repeated then.
+- The other five closed human tables currently have no durable TABLE identities and cannot be treated as candidates. No prepare, archive, authorization or execute was performed for closed-human.
+
+### T019 escrow account retirement — PASS
+
+- Run: [Production CANARY #35775709976](https://github.com/krzysztofcal/arcadePlatform/actions/runs/35775709976).
+- Checkout SHA: `cf9cb02d7bed661f8a825635fe043edb5f514942`.
+- Batch: `3`; result `state=retired`; `accountCount=1`; one execute attempt; zero retries; `storageWrites=0`.
+- Retired account: `c29325f1-0715-453e-b090-fde88fa2ada7`.
+- `account_ids_sha256`: `c342d5eb1395883fa642c17839a5a251438e59355ee9cba4c7f1fc6dffc0112f`.
+- Recovery path: `account-recovery/v1/sha256/ae887c5e1b3d9441089d53604a7fb49a9fdb33ec9f3a264051db0acff3b6dc87.json.gz`.
+- Recovery object SHA-256: `ae887c5e1b3d9441089d53604a7fb49a9fdb33ec9f3a264051db0acff3b6dc87`.
+- Account snapshot SHA-256: `a35ad9c46440bed7c882a901c26ca18e832ce1ef1b9fff0b0da7ec8447e201ae`.
+- Durable receipt: `account_retirement_at=2026-09-22T19:44:42.167617Z`, account count `1`, exact account hash/path/object hash/snapshot hash above. Batch #3 remains `committed`, with the original **2 transactions / 4 entries**, prune count `2 / 4`, registry cleanup count `2`, archive transaction-ID hash `30998c2ebc5c57f806f3221c0646762ce94b0e35edc91c60fccec1659d222265` and entry-ID hash `03d3abb1b360a614b48081beb0e9cf8fe51aadb79cacb8b6e4a9017d06951a9c`.
+- Read-only post-check found zero rows for the retired account, zero rows for the source table, zero remaining table transactions/registry references, and the recovery object unchanged in the private archive bucket (object metadata size `1057`, HTTP `200`, no overwrite).
+- Accounting controls remained intact: canonical system `7575202818581710058`, TABLE fence active, global Production control `enabled=false` with cap `2`, all three Production policies `enabled=false`, and zero active retention locks/queries. The escrow policy records `canary_batch_id=3` and `GO 3` as historical authorization evidence, but remains OFF.
+
+### Issue #891 / T020 gate status
+
+- **PASS:** T017 existing-30d, T018 bot-only-7d, T019 escrow account retirement.
+- **OPEN:** T018 closed-human-30d; it requires naturally aged data and a fresh diagnostic, then separately authorized PREPARE and CANARY.
+- **BLOCKED:** T020 activation/PR B readiness. The contract requires all four class canaries to PASS; the current closed-human no-candidate result is not PASS. Global control, policies and scheduler must remain OFF.
+- The nearest safe step is to wait until the stated human age lower bound, then run a fresh read-only closed-human qualification. Do not backdate, split, synthesize, increase the cap, or treat a no-op as a canary PASS.
