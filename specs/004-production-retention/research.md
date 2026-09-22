@@ -173,7 +173,8 @@ This section supersedes the pre-canary status above. It records aggregate eviden
 
 ### T018 bot-only-7d — PASS
 
-- Bot-only CANARY batch **3** completed successfully in [Production run #35742627182](https://github.com/krzysztofcal/arcadePlatform/actions/runs/35742627182), after the reviewed PREPARE path on `cf9cb02d7bed661f8a825635fe043edb5f514942`.
+- Bot-only CANARY batch **3** completed successfully in [Production run #35742627182](https://github.com/krzysztofcal/arcadePlatform/actions/runs/35742627182), from checkout SHA `1c8dfabfe393cb81f0091f215d430ddebfccef8b`.
+- This historical bot-only CANARY is distinct from the later T019 escrow PREPARE/CANARY path on `cf9cb02d7bed661f8a825635fe043edb5f514942`; the PASS result and gate status are unchanged.
 - The cleaned table was `396a48fd-4b61-4992-8635-0820f3b68c74`; the exact archive and ledger receipts remain complete. The current bot-only selector returns **0 new candidates** after that table was removed, which is not a regression and does not reopen the completed canary.
 
 ### T018 closed-human-30d — OPEN / NOT PASS
