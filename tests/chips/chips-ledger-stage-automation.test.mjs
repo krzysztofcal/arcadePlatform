@@ -704,7 +704,7 @@ const productionEscrowPrepareSql = {
     if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: "production-escrow-prepare" }];
     if (query.includes("pg_control_system")) return [{ system_identifier: PRODUCTION_SYSTEM_IDENTIFIER }];
     if (query.includes("from public.chips_ledger_archive_batches batches")) {
-      assert.equal(values[2], null, "prepare candidate discovery must keep its optional batch filter explicit");
+      assert.equal(values[2], "3", "escrow PREPARE must pass its requested batch filter");
       return [{
         ...productionEscrowPrepareBatch,
         account_id: productionEscrowPrepareAccount.id,
@@ -800,6 +800,64 @@ try {
   );
 } finally {
   fs.rmSync(productionEscrowPrepareRoot, { recursive: true, force: true });
+}
+let productionEscrowUnavailableReadCalls = 0;
+let productionEscrowUnavailableUploadCalls = 0;
+const productionEscrowUnavailableSql = {
+  unsafe: async (query, values = []) => {
+    if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: "production-escrow-unavailable" }];
+    if (query.includes("pg_control_system")) return [{ system_identifier: PRODUCTION_SYSTEM_IDENTIFIER }];
+    if (query.includes("from public.chips_ledger_archive_batches batches")) {
+      assert.equal(values[2], "404");
+      return [];
+    }
+    if (query.includes("pg_advisory_unlock")) return [{ released: true }];
+    throw new Error(`unexpected unavailable Production escrow SQL: ${query}`);
+  },
+};
+const productionEscrowUnavailableRoot = fs.mkdtempSync("/tmp/chips-ledger-production-escrow-unavailable-");
+try {
+  await assert.rejects(
+    runProductionAutomation({
+      env: PRODUCTION_ENV,
+      policy: "escrow",
+      mode: "prepare",
+      batchId: "404",
+      accountIdsSha256: productionEscrowPrepareAccountIdsSha256,
+      deps: {
+        read: async ({ profile }) => ({
+          projectRef: profile.projectRef,
+          systemIdentifier: profile.systemIdentifier,
+          readOnly: true,
+          control: { enabled: false, max_transactions: 2 },
+          fenceActive: true,
+          policies: [],
+        }),
+        sql: productionEscrowUnavailableSql,
+        tempRoot: productionEscrowUnavailableRoot,
+        storageTarget: {
+          target: "prod",
+          projectRef: PRODUCTION_PROJECT_REF,
+          baseUrl: PRODUCTION_ENV.SUPABASE_PROD_URL,
+          serviceKey: PRODUCTION_ENV.SUPABASE_PROD_SERVICE_ROLE_KEY,
+        },
+        verifyBucket: async () => { throw new Error("unavailable batch must stop before Storage verification"); },
+        readPrivateObject: async () => {
+          productionEscrowUnavailableReadCalls += 1;
+          throw new Error("unavailable batch must not read recovery Storage");
+        },
+        uploadPrivateObject: async () => {
+          productionEscrowUnavailableUploadCalls += 1;
+          throw new Error("unavailable batch must not create recovery Storage");
+        },
+      },
+    }),
+    /exact Production escrow batch 404 is not a current safe candidate/,
+  );
+  assert.equal(productionEscrowUnavailableReadCalls, 0);
+  assert.equal(productionEscrowUnavailableUploadCalls, 0);
+} finally {
+  fs.rmSync(productionEscrowUnavailableRoot, { recursive: true, force: true });
 }
 await assert.rejects(
   runProductionAutomation({ env: PRODUCTION_ENV, policy: "existing-30d", mode: "canary", batchId: "1", confirmation: "GO 1" }),

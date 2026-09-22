@@ -859,6 +859,7 @@ export async function runProductionAutomation({
     env,
     policy: selectedPolicy,
     mode: "prepare",
+    ...(selectedPolicy === "escrow" ? { batchId } : {}),
     deps,
     cwd,
     accountIdsSha256,
