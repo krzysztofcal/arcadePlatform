@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
+  BOT_ONLY_RETENTION_DAYS,
+  DEFAULT_CUTOFF_DAYS,
   runExport,
   PRODUCTION_AUTOMATION_POLICY_ID,
   PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
@@ -220,7 +222,10 @@ function requireAutomaticAuthorization({ env, mode }) {
 }
 
 function productionExportArgs(policy, outputPath, manifestPath) {
-  return ["--target", "prod", "--output", outputPath, "--manifest", manifestPath, "--batch-size", "2"];
+  const cutoffDays = policy === "bot-only-7d" || policy === "escrow"
+    ? BOT_ONLY_RETENTION_DAYS
+    : DEFAULT_CUTOFF_DAYS;
+  return ["--target", "prod", "--output", outputPath, "--manifest", manifestPath, "--cutoff-days", String(cutoffDays), "--batch-size", "2"];
 }
 
 async function readProductionState({ profile, deps = {} } = {}) {
