@@ -127,6 +127,14 @@ function manifestDatabaseRow(projectRef) {
     "ACTIVATE production-ledger-closed-human-table-retention-30d-v1 CANARY 17",
   ]);
 
+  const productionStore = createPruneStore(sql, "prod");
+  const botEvidence = {
+    transactionIds: [TX_A],
+    entryIds: [1],
+    registryKeys: ["registry-key"],
+    tableId: TABLE_ID,
+  };
+
   calls.length = 0;
   await store.cleanupClosedHuman(
     "v1/sha256/closed-human.jsonl.gz",
@@ -139,14 +147,62 @@ function manifestDatabaseRow(projectRef) {
   assert.match(calls[calls.length - 1].query, /chips_auto_prune_closed_human_table_archive_batch/);
 
   calls.length = 0;
-  await store.cleanupBotOnly(
+  await productionStore.cleanupBotOnly(
     "v1/sha256/bot-only.jsonl.gz",
-    { transactionIds: [TX_A], entryIds: [1], registryKeys: ["registry-key"], tableId: TABLE_ID },
+    botEvidence,
+    true,
+    17,
+    false,
+    "prod",
+  );
+  const productionCanaryGucIndex = calls.findIndex(({ query }) => query === "set local chips.production_canary = '1';");
+  const productionCleanupIndex = calls.findIndex(({ query }) => /chips_prune_and_cleanup_bot_only_archive_batch/.test(query));
+  assert.notEqual(productionCanaryGucIndex, -1);
+  assert.ok(productionCanaryGucIndex < productionCleanupIndex);
+  assert.deepEqual(calls[productionCleanupIndex].params, [
+    "v1/sha256/bot-only.jsonl.gz",
+    [TX_A],
+    [1],
+    ["registry-key"],
+    TABLE_ID,
+    true,
+    17,
+  ]);
+
+  calls.length = 0;
+  await store.cleanupBotOnly(
+    "v1/sha256/bot-only-stage.jsonl.gz",
+    botEvidence,
+    true,
+    17,
+    false,
+    "stage",
+  );
+  assert.equal(calls.some(({ query }) => query === "set local chips.production_canary = '1';"), false);
+  assert.match(calls[calls.length - 1].query, /chips_prune_and_cleanup_bot_only_archive_batch/);
+
+  calls.length = 0;
+  await productionStore.cleanupBotOnly(
+    "v1/sha256/bot-only-dry-run.jsonl.gz",
+    botEvidence,
+    false,
+    null,
+    false,
+    "prod",
+  );
+  assert.equal(calls.some(({ query }) => query === "set local chips.production_canary = '1';"), false);
+  assert.match(calls[calls.length - 1].query, /chips_prune_and_cleanup_bot_only_archive_batch/);
+
+  calls.length = 0;
+  await productionStore.cleanupBotOnly(
+    "v1/sha256/bot-only.jsonl.gz",
+    botEvidence,
     true,
     null,
     true,
     "prod",
   );
+  assert.equal(calls.some(({ query }) => query === "set local chips.production_canary = '1';"), false);
   assert.match(calls[calls.length - 1].query, /chips_auto_prune_and_cleanup_bot_only_archive_batch/);
 }
 
