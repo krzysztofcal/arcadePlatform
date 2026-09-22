@@ -459,18 +459,183 @@ assert.throws(
   /Production export requires private output/,
 );
 const productionExport = buildProductionExportInvocation("bot-only-7d", {
-  outputPath: "/tmp/private.archive",
-  manifestPath: "/tmp/private.manifest",
+  outputPath: "private.archive",
+  manifestPath: "private.manifest",
 });
 assert.equal(productionExport.policyId, "production-ledger-bot-only-retention-7d-v1");
 assert.equal(productionExport.schemaVersion, BOT_ONLY_EXPORT_SCHEMA_VERSION);
 const productionEscrowExport = buildProductionExportInvocation("escrow", {
-  outputPath: "/tmp/private-escrow.archive",
-  manifestPath: "/tmp/private-escrow.manifest",
+  outputPath: "private-escrow.archive",
+  manifestPath: "private-escrow.manifest",
 });
 assert.equal(productionEscrowExport.policyId, "production-ledger-escrow-account-retention-v1");
 assert.equal(productionEscrowExport.archivePolicyId, "production-ledger-bot-only-retention-7d-v1");
 assert.equal(productionEscrowExport.selector, "bot-only-7d-discovery");
+
+function cutoffDaysFromProductionInvocation(invocation) {
+  const cutoffIndex = invocation.argv.indexOf("--cutoff-days");
+  assert.notEqual(cutoffIndex, -1, "Production export must pass an explicit cutoff window");
+  return invocation.argv[cutoffIndex + 1];
+}
+
+const productionExistingExport = buildProductionExportInvocation("existing-30d", {
+  outputPath: "private-existing.archive",
+  manifestPath: "private-existing.manifest",
+});
+const productionClosedHumanExport = buildProductionExportInvocation("closed-human-30d", {
+  outputPath: "private-closed-human.archive",
+  manifestPath: "private-closed-human.manifest",
+});
+assert.equal(cutoffDaysFromProductionInvocation(productionExport), "7");
+assert.equal(cutoffDaysFromProductionInvocation(productionEscrowExport), "7");
+assert.equal(cutoffDaysFromProductionInvocation(productionExistingExport), "30");
+assert.equal(cutoffDaysFromProductionInvocation(productionClosedHumanExport), "30");
+
+const PRODUCTION_CUTOFF_TEST_NOW = new Date("2026-09-22T12:00:00.000Z");
+const PRODUCTION_CUTOFF_TEST_TABLE_ID = "396a48fd-4b61-4992-8635-0820f3b68c74";
+const PRODUCTION_CUTOFF_TEST_TRANSACTION_ID = "00000000-0000-4000-8000-000000000701";
+const PRODUCTION_CUTOFF_TEST_ESCROW_ID = "00000000-0000-4000-8000-000000000702";
+const PRODUCTION_CUTOFF_TEST_SYSTEM_ID = "00000000-0000-4000-8000-000000000703";
+const PRODUCTION_CUTOFF_TEST_TRANSACTION = {
+  id: PRODUCTION_CUTOFF_TEST_TRANSACTION_ID,
+  sequence: "701",
+  tx_type: "TABLE_BUY_IN",
+  idempotency_key: `join-buyin:${PRODUCTION_CUTOFF_TEST_TABLE_ID}:cutoff-test`,
+  payload_hash: "cutoff-test-payload",
+  user_id: null,
+  reference: `table:${PRODUCTION_CUTOFF_TEST_TABLE_ID}`,
+  description: "production cutoff test",
+  metadata: { tableId: PRODUCTION_CUTOFF_TEST_TABLE_ID },
+  created_by: null,
+  created_at: "2026-09-12T12:00:00.000Z",
+  table_related: true,
+  table_id: PRODUCTION_CUTOFF_TEST_TABLE_ID,
+  invalid_table_marker: false,
+  table_exists: true,
+  table_status: "CLOSED",
+  escrow_account_id: PRODUCTION_CUTOFF_TEST_ESCROW_ID,
+  escrow_status: "active",
+  escrow_balance: "0",
+  entry_count: "2",
+  has_human_participant: false,
+  bot_only_proof_eligible: true,
+  key_table_id: PRODUCTION_CUTOFF_TEST_TABLE_ID,
+  key_format_version: 1,
+  key_format: "join-buyin",
+  table_newest_created_at: "2026-09-12T12:00:00.000Z",
+  table_identity_count: "1",
+  table_eligible_count: "1",
+  table_out_of_scope_keys_sha256: "0".repeat(64),
+};
+const PRODUCTION_CUTOFF_TEST_ENTRIES = [
+  {
+    id: "7011",
+    transaction_id: PRODUCTION_CUTOFF_TEST_TRANSACTION_ID,
+    account_id: PRODUCTION_CUTOFF_TEST_ESCROW_ID,
+    entry_seq: "1",
+    amount: "100",
+    metadata: {},
+    created_at: "2026-09-12T12:00:00.000Z",
+    account_row_id: PRODUCTION_CUTOFF_TEST_ESCROW_ID,
+    account_type: "ESCROW",
+    account_user_id: null,
+    account_system_key: `POKER_TABLE:${PRODUCTION_CUTOFF_TEST_TABLE_ID}`,
+    account_status: "active",
+    account_label: null,
+  },
+  {
+    id: "7012",
+    transaction_id: PRODUCTION_CUTOFF_TEST_TRANSACTION_ID,
+    account_id: PRODUCTION_CUTOFF_TEST_SYSTEM_ID,
+    entry_seq: "2",
+    amount: "-100",
+    metadata: {},
+    created_at: "2026-09-12T12:00:00.000Z",
+    account_row_id: PRODUCTION_CUTOFF_TEST_SYSTEM_ID,
+    account_type: "SYSTEM",
+    account_user_id: null,
+    account_system_key: "TREASURY",
+    account_status: "active",
+    account_label: null,
+  },
+];
+
+function productionCutoffTestSql({ candidate = null, entries = [], discovery = [] } = {}) {
+  const calls = [];
+  let selectedCandidate = false;
+  const sql = {
+    typed: (value, type) => ({ value, type }),
+    begin: async (callback) => callback({
+      unsafe: async (query, values = []) => {
+        calls.push({ query, values });
+        if (query.includes("from public.chips_entries")) return selectedCandidate ? entries : [];
+        if (query.includes("from public.poker_tables tables") && values.length === 3) return discovery;
+        if (query.includes("from public.chips_transactions") && values.length === 4) {
+          const cutoff = values[0]?.value ?? values[0];
+          selectedCandidate = candidate && new Date(candidate.created_at) < new Date(cutoff);
+          return selectedCandidate ? [candidate] : [];
+        }
+        return [];
+      },
+    }),
+  };
+  return { calls, sql };
+}
+
+async function runProductionCutoffExport(invocation, fixture = {}) {
+  const root = fs.mkdtempSync("/tmp/chips-ledger-production-cutoff-");
+  const { calls, sql } = productionCutoffTestSql(fixture);
+  try {
+    const result = await invocation.run({
+      env: PRODUCTION_ENV,
+      cwd: root,
+      now: PRODUCTION_CUTOFF_TEST_NOW,
+      deps: { sql, noCandidateIfEmpty: true, emit: false },
+    });
+    return { calls, result };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function cutoffFromProductionSelector(calls, parameterCount) {
+  const selectorCall = calls.find(({ query, values }) => (
+    values.length === parameterCount && query.includes("$1::timestamptz")
+  ));
+  assert.ok(selectorCall, `expected a selector call with ${parameterCount} parameters`);
+  const cutoff = selectorCall.values[0];
+  return cutoff?.value ?? cutoff;
+}
+
+const botOnlyCutoffExport = await runProductionCutoffExport(productionExport, {
+  candidate: PRODUCTION_CUTOFF_TEST_TRANSACTION,
+  entries: PRODUCTION_CUTOFF_TEST_ENTRIES,
+});
+assert.equal(botOnlyCutoffExport.result.batch.transactions, 1);
+assert.equal(botOnlyCutoffExport.result.cutoff.created_at, "2026-09-15T12:00:00.000Z");
+assert.equal(cutoffFromProductionSelector(botOnlyCutoffExport.calls, 4), "2026-09-15T12:00:00.000Z");
+assert.ok(
+  botOnlyCutoffExport.result.time_range.first_created_at < botOnlyCutoffExport.result.cutoff.created_at,
+  "a transaction older than seven days must remain eligible",
+);
+assert.ok(
+  PRODUCTION_CUTOFF_TEST_TRANSACTION.created_at > "2026-08-23T12:00:00.000Z",
+  "the fixture must remain younger than the existing thirty-day window",
+);
+
+const existingCutoffExport = await runProductionCutoffExport(productionExistingExport, {
+  candidate: PRODUCTION_CUTOFF_TEST_TRANSACTION,
+  entries: PRODUCTION_CUTOFF_TEST_ENTRIES,
+});
+const closedHumanCutoffExport = await runProductionCutoffExport(productionClosedHumanExport);
+const escrowCutoffExport = await runProductionCutoffExport(productionEscrowExport);
+assert.equal(existingCutoffExport.result.noCandidate, true);
+assert.equal(existingCutoffExport.result.options.cutoff, "2026-08-23T12:00:00.000Z");
+assert.equal(closedHumanCutoffExport.result.options.cutoff, "2026-08-23T12:00:00.000Z");
+assert.equal(escrowCutoffExport.result.options.cutoff, "2026-09-15T12:00:00.000Z");
+assert.equal(cutoffFromProductionSelector(existingCutoffExport.calls, 4), "2026-08-23T12:00:00.000Z");
+assert.equal(cutoffFromProductionSelector(closedHumanCutoffExport.calls, 2), "2026-08-23T12:00:00.000Z");
+assert.equal(cutoffFromProductionSelector(escrowCutoffExport.calls, 3), "2026-09-15T12:00:00.000Z");
 await assert.rejects(
   runProductionAutomation({ env: PRODUCTION_ENV, policy: "existing-30d", mode: "canary", batchId: "1", confirmation: "GO 1" }),
   /CHIPS_LEDGER_PRODUCTION_CANARY=1/,
