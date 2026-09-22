@@ -60,6 +60,11 @@ import {
   buildProductionExportInvocation,
   runProductionAutomation,
 } from "../../scripts/ops/chips-ledger-production-automation.mjs";
+import {
+  accountIdsSha256,
+  buildAccountRecoverySnapshot,
+  serializeAccountRecovery,
+} from "../../scripts/ops/_shared/chips-ledger-escrow-retention.mjs";
 import { runRetentionCycle } from "../../scripts/ops/_shared/chips-ledger-retention-cycle.mjs";
 
 const STAGE_DB_URL = "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres";
@@ -636,6 +641,224 @@ assert.equal(escrowCutoffExport.result.options.cutoff, "2026-09-15T12:00:00.000Z
 assert.equal(cutoffFromProductionSelector(existingCutoffExport.calls, 4), "2026-08-23T12:00:00.000Z");
 assert.equal(cutoffFromProductionSelector(closedHumanCutoffExport.calls, 2), "2026-08-23T12:00:00.000Z");
 assert.equal(cutoffFromProductionSelector(escrowCutoffExport.calls, 3), "2026-09-15T12:00:00.000Z");
+
+const productionEscrowPrepareTableId = "00000000-0000-4000-8000-000000000801";
+const productionEscrowPrepareAccountId = "00000000-0000-4000-8000-000000000802";
+const productionEscrowPrepareBatch = {
+  batch_id: "3",
+  project_ref: PRODUCTION_PROJECT_REF,
+  source_policy_id: "production-ledger-bot-only-retention-7d-v1",
+  format_version: 2,
+  object_path: `v1/sha256/${"b".repeat(64)}.jsonl.gz`,
+  compressed_sha256: "b".repeat(64),
+  raw_sha256: "c".repeat(64),
+  cutoff: "2026-09-15T12:00:00.000Z",
+  transaction_count: "2",
+  entry_count: "4",
+  archived_transaction_ids_sha256: "d".repeat(64),
+  archived_entry_ids_sha256: "e".repeat(64),
+  archive_proof_verified_at: "2026-09-22T12:00:00.000Z",
+  pruned_at: "2026-09-22T12:01:00.000Z",
+  pruned_transaction_count: "2",
+  pruned_entry_count: "4",
+  pruned_transaction_ids_sha256: "d".repeat(64),
+  pruned_entry_ids_sha256: "e".repeat(64),
+  registry_cleaned_at: "2026-09-22T12:02:00.000Z",
+  registry_cleaned_key_count: "2",
+  registry_cleaned_keys_sha256: "f".repeat(64),
+  destructive_go_at: "2026-09-22T12:03:00.000Z",
+  destructive_go_batch_id: "3",
+  bot_only_table_id: productionEscrowPrepareTableId,
+  bot_only_table_count: "1",
+  bot_only_newest_created_at: "2026-09-14T12:00:00.000Z",
+  bot_only_registry_keys_sha256: "f".repeat(64),
+  bot_only_out_of_scope_keys_sha256: "0".repeat(64),
+  bot_only_identity_count: "2",
+  bot_only_eligible_count: "2",
+};
+const productionEscrowPrepareAccount = {
+  id: productionEscrowPrepareAccountId,
+  user_id: null,
+  system_key: `POKER_TABLE:${productionEscrowPrepareTableId}`,
+  account_type: "ESCROW",
+  status: "active",
+  label: null,
+  balance: "0",
+  next_entry_seq: "3",
+  created_at: "2026-09-14T11:00:00.000Z",
+  updated_at: "2026-09-14T12:00:00.000Z",
+};
+const productionEscrowPrepareSnapshot = buildAccountRecoverySnapshot({
+  profile: productionProfile,
+  batch: productionEscrowPrepareBatch,
+  accounts: [productionEscrowPrepareAccount],
+  tableIds: [productionEscrowPrepareTableId],
+});
+const productionEscrowPrepareRecovery = serializeAccountRecovery(productionEscrowPrepareSnapshot);
+const productionEscrowPrepareAccountIdsSha256 = accountIdsSha256([productionEscrowPrepareAccountId]);
+const productionEscrowPrepareSqlCalls = [];
+let productionEscrowPrepareSqlFunctionCalls = 0;
+const productionEscrowPrepareSql = {
+  unsafe: async (query, values = []) => {
+    productionEscrowPrepareSqlCalls.push({ query, values });
+    if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: "production-escrow-prepare" }];
+    if (query.includes("pg_control_system")) return [{ system_identifier: PRODUCTION_SYSTEM_IDENTIFIER }];
+    if (query.includes("from public.chips_ledger_archive_batches batches")) {
+      assert.equal(values[2], "3", "escrow PREPARE must pass its requested batch filter");
+      return [{
+        ...productionEscrowPrepareBatch,
+        account_id: productionEscrowPrepareAccount.id,
+        account_user_id: productionEscrowPrepareAccount.user_id,
+        account_system_key: productionEscrowPrepareAccount.system_key,
+        account_account_type: productionEscrowPrepareAccount.account_type,
+        account_status: productionEscrowPrepareAccount.status,
+        account_label: productionEscrowPrepareAccount.label,
+        account_balance: productionEscrowPrepareAccount.balance,
+        account_next_entry_seq: productionEscrowPrepareAccount.next_entry_seq,
+        account_created_at: productionEscrowPrepareAccount.created_at,
+        account_updated_at: productionEscrowPrepareAccount.updated_at,
+      }];
+    }
+    if (query.includes("pg_advisory_unlock")) return [{ released: true }];
+    throw new Error(`unexpected Production escrow prepare SQL: ${query}`);
+  },
+  begin: async (callback) => callback({
+    unsafe: async (query, values = []) => {
+      productionEscrowPrepareSqlCalls.push({ query, values });
+      if (query.startsWith("set transaction") || query.startsWith("set local")) return [];
+      if (query.includes("chips_retire_production_escrow_accounts")) {
+        productionEscrowPrepareSqlFunctionCalls += 1;
+        assert.equal(values[0], "3");
+        assert.deepEqual(values[1], [productionEscrowPrepareAccountId]);
+        assert.equal(values[5], false, "PREPARE must call the escrow routine with execute=false");
+        assert.equal(values[6], null, "PREPARE dry-run must pass SQL NULL confirmation");
+        return [{ result: { state: "eligible", account_count: 1 } }];
+      }
+      throw new Error(`unexpected Production escrow prepare transaction SQL: ${query}`);
+    },
+  }),
+};
+const productionEscrowPrepareReadPaths = [];
+let productionEscrowPrepareUploadCalls = 0;
+const productionEscrowPrepareRoot = fs.mkdtempSync("/tmp/chips-ledger-production-escrow-prepare-");
+try {
+  const productionEscrowPrepared = await runProductionAutomation({
+    env: PRODUCTION_ENV,
+    policy: "escrow",
+    mode: "prepare",
+    batchId: "3",
+    accountIdsSha256: productionEscrowPrepareAccountIdsSha256,
+    recoveryObjectPath: productionEscrowPrepareRecovery.objectPath,
+    deps: {
+      read: async ({ profile }) => ({
+        projectRef: profile.projectRef,
+        systemIdentifier: profile.systemIdentifier,
+        readOnly: true,
+        control: { enabled: false, max_transactions: 2 },
+        fenceActive: true,
+        policies: [],
+      }),
+      sql: productionEscrowPrepareSql,
+      tempRoot: productionEscrowPrepareRoot,
+      storageTarget: {
+        target: "prod",
+        projectRef: PRODUCTION_PROJECT_REF,
+        baseUrl: PRODUCTION_ENV.SUPABASE_PROD_URL,
+        serviceKey: PRODUCTION_ENV.SUPABASE_PROD_SERVICE_ROLE_KEY,
+      },
+      verifyBucket: async () => {},
+      readPrivateObject: async (_target, objectPath) => {
+        productionEscrowPrepareReadPaths.push(objectPath);
+        return {
+          objectPath,
+          mimeType: "application/gzip",
+          bytes: productionEscrowPrepareRecovery.compressedBytes,
+        };
+      },
+      uploadPrivateObject: async () => {
+        productionEscrowPrepareUploadCalls += 1;
+        throw new Error("PREPARE must not overwrite an identical existing recovery artifact");
+      },
+    },
+  });
+  assert.equal(productionEscrowPrepared.state, "prepared");
+  assert.equal(productionEscrowPrepared.batchId, "3");
+  assert.equal(productionEscrowPrepared.accountIdsSha256, productionEscrowPrepareAccountIdsSha256);
+  assert.equal(productionEscrowPrepared.recoveryObjectPath, productionEscrowPrepareRecovery.objectPath);
+  assert.equal(productionEscrowPrepared.recoveryObjectSha256, productionEscrowPrepareRecovery.compressedSha256);
+  assert.equal(productionEscrowPrepared.snapshotSha256, productionEscrowPrepareRecovery.snapshotSha256);
+  assert.equal(productionEscrowPrepared.receipt, undefined, "PREPARE must not return an account-retirement receipt");
+  assert.equal(productionEscrowPrepared.storageWrites, 0);
+  assert.equal(productionEscrowPrepareReadPaths.length, 2, "existing recovery must be read and verified twice");
+  assert.deepEqual(new Set(productionEscrowPrepareReadPaths), new Set([productionEscrowPrepareRecovery.objectPath]));
+  assert.equal(productionEscrowPrepareUploadCalls, 0);
+  assert.equal(productionEscrowPrepareSqlFunctionCalls, 1);
+  assert.equal(
+    productionEscrowPrepareSqlCalls.some(({ query }) => /chips_authorize|\bdelete\b/i.test(query)),
+    false,
+    "PREPARE must not authorize CANARY or issue account deletion SQL",
+  );
+} finally {
+  fs.rmSync(productionEscrowPrepareRoot, { recursive: true, force: true });
+}
+let productionEscrowUnavailableReadCalls = 0;
+let productionEscrowUnavailableUploadCalls = 0;
+const productionEscrowUnavailableSql = {
+  unsafe: async (query, values = []) => {
+    if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: "production-escrow-unavailable" }];
+    if (query.includes("pg_control_system")) return [{ system_identifier: PRODUCTION_SYSTEM_IDENTIFIER }];
+    if (query.includes("from public.chips_ledger_archive_batches batches")) {
+      assert.equal(values[2], "404");
+      return [];
+    }
+    if (query.includes("pg_advisory_unlock")) return [{ released: true }];
+    throw new Error(`unexpected unavailable Production escrow SQL: ${query}`);
+  },
+};
+const productionEscrowUnavailableRoot = fs.mkdtempSync("/tmp/chips-ledger-production-escrow-unavailable-");
+try {
+  await assert.rejects(
+    runProductionAutomation({
+      env: PRODUCTION_ENV,
+      policy: "escrow",
+      mode: "prepare",
+      batchId: "404",
+      accountIdsSha256: productionEscrowPrepareAccountIdsSha256,
+      deps: {
+        read: async ({ profile }) => ({
+          projectRef: profile.projectRef,
+          systemIdentifier: profile.systemIdentifier,
+          readOnly: true,
+          control: { enabled: false, max_transactions: 2 },
+          fenceActive: true,
+          policies: [],
+        }),
+        sql: productionEscrowUnavailableSql,
+        tempRoot: productionEscrowUnavailableRoot,
+        storageTarget: {
+          target: "prod",
+          projectRef: PRODUCTION_PROJECT_REF,
+          baseUrl: PRODUCTION_ENV.SUPABASE_PROD_URL,
+          serviceKey: PRODUCTION_ENV.SUPABASE_PROD_SERVICE_ROLE_KEY,
+        },
+        verifyBucket: async () => { throw new Error("unavailable batch must stop before Storage verification"); },
+        readPrivateObject: async () => {
+          productionEscrowUnavailableReadCalls += 1;
+          throw new Error("unavailable batch must not read recovery Storage");
+        },
+        uploadPrivateObject: async () => {
+          productionEscrowUnavailableUploadCalls += 1;
+          throw new Error("unavailable batch must not create recovery Storage");
+        },
+      },
+    }),
+    /exact Production escrow batch 404 is not a current safe candidate/,
+  );
+  assert.equal(productionEscrowUnavailableReadCalls, 0);
+  assert.equal(productionEscrowUnavailableUploadCalls, 0);
+} finally {
+  fs.rmSync(productionEscrowUnavailableRoot, { recursive: true, force: true });
+}
 await assert.rejects(
   runProductionAutomation({ env: PRODUCTION_ENV, policy: "existing-30d", mode: "canary", batchId: "1", confirmation: "GO 1" }),
   /CHIPS_LEDGER_PRODUCTION_CANARY=1/,
