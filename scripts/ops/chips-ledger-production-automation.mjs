@@ -561,6 +561,7 @@ async function runProductionEscrowCycle({
       candidate,
       recovery: storedRecovery,
       execute: false,
+      confirmation: null,
     });
     if (dry?.state !== "eligible") fail(`Production escrow dry-run did not become eligible: ${dry?.state || "unknown"}`);
     const prepared = {
