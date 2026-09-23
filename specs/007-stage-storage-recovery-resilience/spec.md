@@ -52,7 +52,9 @@ while preserving the existing safety boundary.
 **Independent Test**: A fixture for an arbitrary positive batch ID enters the
 approved partial state and the repair creates only the missing manifest,
 re-reads both recovery objects, and returns `recovery_repaired`. Repeating with
-a complete pair returns `recovery_already_repaired` and performs no write.
+a complete pair on an otherwise eligible, unpruned and uncleaned row returns
+`recovery_already_repaired` and performs no write. A complete pair on a pruned
+or cleaned row is rejected before the recovery result is returned.
 
 **Acceptance Scenarios**:
 
@@ -65,8 +67,10 @@ a complete pair returns `recovery_already_repaired` and performs no write.
    the repair finishes, **Then** both recovery objects are privately downloaded
    and verified as a complete canonical pair before success is reported.
 3. **Given** any other recovery state, changed row, incomplete proof, cleanup
-   receipt, destructive GO, mismatch, or unavailable object, **When** the repair
-   is attempted, **Then** it stops fail-closed before any Storage write.
+   receipt, destructive GO, pruned/cleaned lifecycle, mismatch, or unavailable
+   object, **When** the repair is attempted, **Then** it stops fail-closed
+   before any Storage inspection that could produce an idempotent result or any
+   Storage write.
 
 ### User Story 3 - Make blocked work diagnosable and hand off safely (Priority: P3)
 
@@ -103,8 +107,11 @@ presence, and an action that keeps cleanup blocked until verification succeeds.
 - The recovery archive may be missing while the manifest exists, or both
   objects may be missing; neither state is repairable by the partial-manifest
   path.
-- A complete recovery pair may be observed after a previous attempt; the
-  repair is read-only and idempotently returns `recovery_already_repaired`.
+- A complete recovery pair on an otherwise eligible, unpruned and uncleaned
+  row may be observed after a previous attempt; the repair is read-only and
+  idempotently returns `recovery_already_repaired`. A row with `pruned_at`, a
+  completed registry cleanup, a destructive GO, or a completed-retention
+  marker is rejected first, even when both recovery objects are complete.
 - Stage identity, fence, advisory lock, current manifest, proof, dry-run, or
   lifecycle may change between reads; the operation fails closed before the
   write.
@@ -182,8 +189,10 @@ presence, and an action that keeps cleanup blocked until verification succeeds.
   `x-upsert:false`, then privately re-read and verify both recovery objects as
   `complete`; it MUST never overwrite or delete an existing archive or manifest.
 - **FR-007**: A complete pair MUST be idempotent and return
-  `recovery_already_repaired` without a Storage write; all other states MUST
-  remain blocked and report their state.
+  `recovery_already_repaired` without a Storage write only when the exact row
+  still satisfies the unpruned, uncleaned, no-GO repair lifecycle. A complete
+  pair on an already-pruned or cleaned row MUST remain a lifecycle rejection;
+  all other states MUST remain blocked and report their state.
 - **FR-008**: Existing GitHub Actions Job Summary reporting MUST expose the
   blocked batch, recovery state, per-object presence/details, and required
   action using the existing summary mechanism.
@@ -197,6 +206,10 @@ presence, and an action that keeps cleanup blocked until verification succeeds.
 - **FR-011**: `docs/chips-ledger-stage-automation.md` MUST document the audit
   findings, evidence limitation, repair contract, operator gate, and the
   separate Stage GO needed before any live repair.
+- **FR-012**: The deployment handoff MUST NOT dispatch repair for the audited,
+  already-cleaned batch `9923`; after merge it MUST observe normal scheduled
+  runs only. The generic owner-gated repair is operationally verified only for
+  a future real incident after a separate owner GO.
 
 ### Key Entities
 
@@ -207,7 +220,8 @@ presence, and an action that keeps cleanup blocked until verification succeeds.
 - **Recovery pair**: Two private `application/gzip` Storage objects derived
   from the committed compressed SHA-256: the byte-identical recovery archive
   and canonical recovery manifest.
-- **Repair outcome**: Read-only `recovery_already_repaired`, one-manifest
+- **Repair outcome**: Read-only `recovery_already_repaired` only for a complete
+  pair on an eligible unpruned/uncleaned row, one-manifest
   `recovery_repaired`, or a fail-closed state (`partial`, `mismatch`,
   `unavailable`, `write_not_visible`, or `blocked`).
 
@@ -245,5 +259,7 @@ presence, and an action that keeps cleanup blocked until verification succeeds.
   series; absence of a 429/5xx log entry is not proof that no transient error
   occurred outside the queried window.
 - The current Stage batch `9923` is already complete and cleaned after the
-  historical repair/normal run; the code change is preventive and the live
-  repair requested by the original incident remains a separate owner GO.
+  historical repair/normal run; the code change is preventive. No repair
+  dispatch is appropriate for `9923`, and after merge the handoff is limited
+  to observing normal scheduled runs. The generic repair is reserved for a
+  future real incident and a separate owner GO.

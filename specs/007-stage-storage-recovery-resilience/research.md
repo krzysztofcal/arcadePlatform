@@ -26,13 +26,17 @@ unsafe assumption and is unnecessary when the actual object can be read.
 **Decision**: Derive recovery paths from the selected committed row and allow the
 owner-gated repair for any positive exact bot-only batch. Its only writable
 state is a verified primary archive plus verified recovery archive with the
-recovery manifest absent. A complete pair returns a read-only idempotent result.
+recovery manifest absent. A complete pair on an otherwise eligible, unpruned
+and uncleaned row returns a read-only idempotent result; a cleaned row is
+rejected before result classification.
 
 **Rationale**: The safety predicates already exist in
 `assertBotOnlyExecuteBatch`, `runPruneStep` dry-run,
 `inspectDurableRecoveryState`, and the archive-store helpers. Generalizing the
 9923 path removes hard-coded incident data without broadening automatic
-cleanup.
+cleanup. A complete pair is idempotent only for an otherwise eligible,
+unpruned and uncleaned row; lifecycle rejection takes precedence, so the
+already-cleaned batch `9923` is not a repair smoke-test target.
 
 **Alternatives considered**:
 

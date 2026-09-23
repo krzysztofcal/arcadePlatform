@@ -30,7 +30,9 @@ The fixtures must cover:
 3. missing, mismatched, unavailable, and not-visible objects failing closed;
 4. no prune execute, GO, cleanup, DB write, archive overwrite, or delete before
    complete recovery verification;
-5. a complete pair returning `recovery_already_repaired` with no write;
+5. a complete pair on an eligible unpruned/uncleaned row returning
+   `recovery_already_repaired` with no write, plus a complete pair on a
+   pruned/cleaned row being rejected before Storage inspection or dry-run;
 6. Job Summary fields naming the blocked batch, recovery state, missing object,
    and required action;
 7. workflow gates retaining owner/main, exact confirmation, Stage-only, and
@@ -54,12 +56,16 @@ Also inspect the final patch for:
 If the broad suite contains an unrelated pre-existing environment failure,
 record the exact failing test and keep the focused suite result separate.
 
-## Live Stage handoff (separate owner GO required)
+## Post-merge Stage handoff (no repair dispatch for 9923)
 
-After review and intentional deployment to `main`, the owner may dispatch the
-generic owner-gated mode with the exact batch and matching
-`REPAIR <batch_id>` confirmation. Before any live dispatch, confirm the
-target is Stage and that no execute/automatic flags are present. After a
-successful repair, independently verify both private recovery objects and
-observe the next normal automation run. Do not dispatch this workflow, run the
-repair CLI, or run cleanup as part of repository validation.
+After review and merge to `main`, observe the next normal scheduled automation
+run. Do not dispatch `bot-only-7d-recovery-repair` for the audited batch
+`9923`: it is already pruned/cleaned and the repair must reject it before
+returning `recovery_already_repaired`. Confirm that the normal run preserves
+`9923` as complete/already cleaned and continues with eligible later bot-only
+batches.
+
+The generic owner-gated mode is reserved for a future real partial-recovery
+incident. It requires read-only diagnosis and a separate owner GO; it must not
+be tested live as part of this repository handoff. Never run manual execute or
+touch Production.

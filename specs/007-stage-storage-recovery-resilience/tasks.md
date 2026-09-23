@@ -50,18 +50,19 @@ recovery manifest after all Stage, DB, proof, dry-run, and archive checks.
 
 **Independent Test**: An arbitrary positive bot-only batch fixture with a matching
 primary/recovery archive and absent manifest reaches `recovery_repaired`;
-complete state reaches `recovery_already_repaired`; all other states make no
-Storage or cleanup mutation.
+an eligible complete state reaches `recovery_already_repaired`; a pruned or
+cleaned complete row is rejected; all other states make no Storage or cleanup
+mutation.
 
 ### Tests for User Story 2
 
-- [x] T007 [US2] Add failing cases in `tests/chips/chips-ledger-stage-automation.test.mjs` for a non-9923 positive batch using the generic repair: partial archive-present/manifest-absent repair, 504/network reconciliation, complete idempotent resume, archive mismatch/unavailable/manifest-only/both-missing rejection, Stage fence rejection, and assertions that no `--execute`, destructive GO, DB DML, archive overwrite, or delete occurs.
+- [x] T007 [US2] Add failing cases in `tests/chips/chips-ledger-stage-automation.test.mjs` for a non-9923 positive batch using the generic repair: partial archive-present/manifest-absent repair, 504/network reconciliation, eligible complete idempotent resume, archive mismatch/unavailable/manifest-only/both-missing rejection, Stage fence rejection, and assertions that no `--execute`, destructive GO, DB DML, archive overwrite, or delete occurs.
 - [x] T008 [P] [US2] Add/update workflow/CLI guard expectations in `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` for positive exact batch IDs, matching `REPAIR <batch_id>`, owner/main gates, empty execute/automatic gates, and absence of a 9923-only allowlist; keep schedule and batch-limit assertions unchanged.
 
 ### Implementation for User Story 2
 
 - [x] T009 [US2] Replace `BOT_ONLY_BATCH_9923_RECOVERY_REPAIR`, `assertKnownBatch9923RecoveryBatch`, `assertBotOnly9923ArchiveCopies`, `uploadOrReconcileBotOnly9923Manifest`, and `runBotOnlyBatch9923RecoveryRepair` in `scripts/ops/chips-ledger-stage-automation.mjs` with generic exact-row/path validation and `runBotOnlyExactRecoveryRepair({ batchId })`; preserve the existing batch-15 corrected-manifest path as a separate legacy contract.
-- [x] T010 [US2] In `runBotOnlyExactRecoveryRepair`, enforce Stage identity, active TABLE fence, advisory lock, exact committed/active manifest, complete immutable proof, ready dry-run, unpruned/un-cleaned/no-GO lifecycle, and primary/recovery byte/SHA equality immediately before the only missing-manifest `x-upsert:false` write; re-inspect both recovery objects as `complete` afterward and return `recovery_repaired` or `recovery_already_repaired`.
+- [x] T010 [US2] In `runBotOnlyExactRecoveryRepair`, enforce Stage identity, active TABLE fence, advisory lock, exact committed/active manifest, complete immutable proof, ready dry-run, unpruned/un-cleaned/no-GO lifecycle, and primary/recovery byte/SHA equality immediately before the only missing-manifest `x-upsert:false` write; re-inspect both recovery objects as `complete` afterward and return `recovery_repaired` or, only for an eligible lifecycle, `recovery_already_repaired`.
 - [x] T011 [US2] Update the CLI dispatch in `scripts/ops/chips-ledger-stage-automation.mjs` to validate one positive bot-only batch ID and invoke the generic repair while retaining the existing supported policies; ensure no manual execute flag, Production credential, migration, or automatic policy enablement is introduced.
 - [x] T012 [US2] Run the focused generic repair tests and `node --check scripts/ops/chips-ledger-stage-automation.mjs`; confirm every fail-closed fixture performs zero writes before the approved manifest POST.
 
@@ -99,7 +100,15 @@ readiness.
 - [x] T018 Run `node --check` on `scripts/ops/chips-ledger-archive-store.mjs` and `scripts/ops/chips-ledger-stage-automation.mjs`, `npm run syntax`, a whitespace/diff integrity check, and the complete focused suite; keep test commands and results in the final report.
 - [x] T019 Run `npm test` and classify any unrelated environment failure separately; verify `package.json`, `package-lock.json`, `supabase/migrations/`, and unrelated workspace paths are unchanged.
 - [x] T020 Perform an independent read-only review of `scripts/ops/chips-ledger-archive-store.mjs`, `scripts/ops/chips-ledger-stage-automation.mjs`, `.github/workflows/chips-ledger-stage-scheduled-automation.yml`, `tests/chips/`, and `docs/chips-ledger-stage-automation.md` against the constitution, issue acceptance scenarios, fail-closed ordering, one-POST rule, `x-upsert:false`, Stage/Production boundaries, schedule/eligibility preservation, and no destructive cleanup; resolve valid findings. Independent review: PASS, 0 findings.
-- [x] T021 Prepare a reviewed draft PR for issue #1014 containing the audit and safety evidence from `specs/007-stage-storage-recovery-resilience/`, changed functions/files from `scripts/ops/`, `.github/workflows/chips-ledger-stage-scheduled-automation.yml`, `tests/chips/`, and `docs/chips-ledger-stage-automation.md`, test/review results, breaking-change assessment, and explicit note that no Stage operation was dispatched; leave it unmerged and report CI status. Draft PR #1015 is open and unmerged; repository CI/Tests/catalog pass, unrelated WS PR Checks fail on two runtime tests.
+- [x] T021 Prepare a reviewed draft PR for issue #1014 containing the audit and safety evidence from `specs/007-stage-storage-recovery-resilience/`, changed functions/files from `scripts/ops/`, `.github/workflows/chips-ledger-stage-scheduled-automation.yml`, `tests/chips/`, and `docs/chips-ledger-stage-automation.md`, test/review results, breaking-change assessment, and explicit note that no Stage operation was dispatched; leave it unmerged and report CI status. Draft PR #1015 is open and unmerged; all repository CI, Tests, WS checks and catalog validation pass.
+
+## Phase 7: Review correction and deployment handoff
+
+**Purpose**: Encode the corrected lifecycle precedence and prevent a live
+repair dispatch for the already-cleaned incident batch.
+
+- [x] T022 [US2] Add a fundamental regression in `tests/chips/chips-ledger-stage-automation.test.mjs` for `runBotOnlyExactRecoveryRepair`: a complete recovery pair whose exact row has `pruned_at` and/or a completed registry cleanup must reject before recovery inspection/result classification, perform no Storage read/write or dry-run, issue no DB DML, and never return `recovery_already_repaired`.
+- [x] T023 Update `spec.md`, `plan.md`, `data-model.md`, `contracts/bot-only-recovery-repair.md`, `quickstart.md`, `docs/chips-ledger-stage-automation.md`, and this task handoff so `recovery_already_repaired` applies only to an eligible unpruned/uncleaned row; state that batch `9923` receives no repair dispatch and that post-merge work is observation of normal scheduled runs, with future live repair reserved for a real incident and separate owner GO.
 
 ## Dependencies & Execution Order
 
@@ -115,6 +124,8 @@ readiness.
 - **User Story 3 (Phase 5)**: Depends on recovery state fields from US1/US2;
   summary and workflow tests precede their implementation.
 - **Polish (Phase 6)**: Depends on all story checkpoints and implementation.
+- **Review correction (Phase 7)**: Depends on the independent review and
+  corrects the lifecycle/result contract before any deployment handoff.
 
 ### User Story Dependencies
 
@@ -151,6 +162,8 @@ readiness.
    enabling unattended repair.
 3. Summary/workflow/docs (US3) make the handoff auditable.
 4. Run Spec Kit analysis, focused/full tests, independent review, and draft PR.
+5. Apply the review correction: test cleaned-row rejection and limit the
+   post-merge handoff to observing normal scheduled runs; do not repair `9923`.
 
 ## Notes
 
@@ -158,3 +171,6 @@ readiness.
 - Tests must be written and observed failing before their implementation task.
 - Spec Kit artifacts contain no Git command instructions.
 - No task dispatches a workflow or changes Stage/Production state.
+- The complete-pair idempotency case is explicitly limited to the eligible
+  unpruned/uncleaned lifecycle; an already-cleaned row is a fail-closed
+  rejection, not a repair smoke-test target.

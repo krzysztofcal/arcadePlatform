@@ -17,6 +17,13 @@ Automatic cleanup remains fail-closed for partial recovery. No automatic repair
 policy, schedule, batch limit, copy count, migration, dependency, Production
 path, manual execute path, or Stage runtime operation is added.
 
+Batch `9923` is already pruned, registry-cleaned and covered by a complete
+recovery pair. It is not an eligible repair target: the generic repair checks
+the lifecycle before recovery inspection and must reject an already-cleaned row
+instead of returning `recovery_already_repaired`. The post-merge handoff for
+this incident is observation of normal scheduled runs only; operational repair
+testing is deferred to a future real incident with a separate owner GO.
+
 ## Technical Context
 
 **Language/Version**: Node.js 20 in Actions; ESM JavaScript; local verification also runs on Node.js 22.
@@ -103,9 +110,13 @@ In `scripts/ops/chips-ledger-stage-automation.mjs`:
   `inspectDurableRecoveryState`, `runPruneStep` in `dry-run` mode,
   `downloadPrivateArchiveObject`, and `readPrivateObjectIfExists`.
 - Permit only `PARTIAL` with recovery archive present and recovery manifest
-  absent, or `COMPLETE` for idempotent read-only resume. Reject both missing,
-  archive-missing, manifest-only, mismatch, unavailable, not-visible, changed
-  DB row, proof/lifecycle failure, and fence/lock failure before POST.
+  absent, or `COMPLETE` for idempotent read-only resume when the exact row is
+  still unpruned, uncleaned, has no destructive GO and has no completed-
+  retention marker. Check lifecycle before recovery inspection; reject an
+  already-pruned or cleaned row even when both objects are complete. Also
+  reject both missing, archive-missing, manifest-only, mismatch, unavailable,
+  not-visible, changed DB row, proof failure, and fence/lock failure before
+  returning an idempotent result or issuing POST.
 - Revalidate exact row/manifest, identity, fence, lock, proof, dry-run, and
   primary/recovery archive equality immediately before the write. Create only
   the manifest through `uploadOrVerifyPrivateObject` (`x-upsert:false`), then
@@ -160,8 +171,10 @@ the dry-run and immediately before the missing-manifest write:
 4. dry-run is `ready` and immutable proof/evidence matches;
 5. primary archive and existing recovery archive are private gzip objects with
    equal verified bytes, sizes, and committed SHA-256;
-6. recovery inspection is exactly `partial` with manifest absent; a complete
-   pair is read-only idempotent and any other state fails closed;
+6. the row passes the unpruned/un-cleaned/no-GO lifecycle before recovery
+   inspection; only then is `partial` with manifest absent repairable, and only
+   then can a complete pair return `recovery_already_repaired`; a cleaned row
+   and every other state fail closed before the repair result;
 7. the only write has `x-upsert:false`, targets the derived missing manifest,
    and is followed by a fresh complete-pair inspection.
 
@@ -171,3 +184,15 @@ No constitution violations. The generic repair removes the one-off `9923`
 allowlist rather than adding a new abstraction or dependency; the legacy batch
 15 correction remains isolated because its known-current/known-corrected
 manifest contract is materially different.
+
+## Deployment and Stage handoff
+
+This repository change does not dispatch a workflow or modify Stage. After the
+PR is merged, the owner should observe the next normal scheduled automation
+run and confirm that `9923` remains in its already-cleaned/complete state and
+that eligible later bot-only batches can proceed. Do not dispatch
+`bot-only-7d-recovery-repair` for `9923`: its lifecycle is intentionally
+ineligible and the repair must fail closed before producing
+`recovery_already_repaired`. Exercise the generic owner-gated repair only for a
+future real partial-recovery incident, after read-only diagnosis and a separate
+owner GO; never use manual execute as part of this handoff.

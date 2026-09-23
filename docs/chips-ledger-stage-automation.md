@@ -189,8 +189,16 @@ batch ID, the generic repair accepts only a committed, verified, unpruned
 bot-only row with no destructive GO, active Stage identity and fence, the
 advisory lock, a matching active manifest, and a ready dry-run. It supports
 only the unambiguous `partial` state in which the derived recovery archive is
-present and the derived recovery manifest is absent; a complete pair is a
-read-only idempotent resume.
+present and the derived recovery manifest is absent. A complete pair is a
+read-only idempotent resume only while the row is still unpruned and
+uncleaned; lifecycle validation happens before recovery inspection.
+
+Batch `9923` is already pruned, registry-cleaned and has a destructive GO with
+both recovery objects present. Do not dispatch the generic repair for `9923`:
+it must reject that row before returning `recovery_already_repaired`. The code
+change is preventive. After merge, the handoff for this incident is limited to
+observing normal scheduled runs and confirming that `9923` remains complete/
+already cleaned while later eligible bot-only batches can proceed.
 
 Before the possible write it re-downloads the primary archive and the
 recovery archive and compares MIME, size, bytes and SHA-256. It creates only
@@ -211,10 +219,12 @@ bot_only_recovery_batch_id: <positive integer>
 bot_only_recovery_confirmation: REPAIR <same batch id>
 ```
 
-Do not run this mode until the owner has reviewed the draft PR and explicitly
-authorizes the Stage write. After a repair, independently verify both private
-recovery objects and observe the next normal bot-only run. No automatic repair
-policy is enabled by this change.
+Do not run this mode for `9923`, and do not use it as a post-merge smoke test.
+The generic repair is operationally verified only for a future real partial-
+recovery incident, after read-only diagnosis and a separate owner GO. For that
+future incident, independently verify both private recovery objects and observe
+the next normal bot-only run. No automatic repair policy is enabled by this
+change.
 
 ## 30-day controlled recovery diagnostic/repair
 
@@ -328,7 +338,12 @@ If the receipt and mappings are complete, the cycle is revalidated through its
 already-completed state. It still requires the complete recovery pair and
 immutable proof. A missing or partial pair is an incident, not a reason to
 create a new batch. Keep the environment fail-closed until the pair is restored
-and passes private download and byte/SHA verification.
+and passes private download and byte/SHA verification. The generic bot-only
+repair is not an idempotent shortcut for a closed lifecycle: a row with
+`pruned_at`, completed registry cleanup, destructive GO, or a completed-
+retention marker is rejected before `recovery_already_repaired` can be
+reported. For batch `9923`, observe normal scheduled runs after merge; do not
+dispatch repair.
 
 ## Resume and locking
 

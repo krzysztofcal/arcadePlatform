@@ -1950,6 +1950,66 @@ assert.equal(alreadyRepaired.recoveryVerified, true);
 assert.equal(alreadyRepaired.storageModified, false);
 assert.equal(alreadyRepairedHarness.storageCalls.filter(({ method }) => method === "POST").length, 0);
 assertBatch9923RepairWasNonDestructive(alreadyRepairedHarness);
+
+const cleanedLifecycleCases = [
+  {
+    label: "prune receipt",
+    overrides: {
+      pruned_at: "2026-09-23T17:03:39.000000Z",
+      pruned_transaction_count: 1,
+      pruned_entry_count: 2,
+      pruned_transaction_ids_sha256: batch9923Evidence.transactionIdsSha256,
+      pruned_entry_ids_sha256: batch9923Evidence.entryIdsSha256,
+      destructive_go_at: "2026-09-23T17:03:39.000000Z",
+      destructive_go_batch_id: "77",
+    },
+  },
+  {
+    label: "completed registry cleanup",
+    overrides: {
+      pruned_at: "2026-09-23T17:03:39.000000Z",
+      pruned_transaction_count: 1,
+      pruned_entry_count: 2,
+      pruned_transaction_ids_sha256: batch9923Evidence.transactionIdsSha256,
+      pruned_entry_ids_sha256: batch9923Evidence.entryIdsSha256,
+      registry_cleaned_at: "2026-09-23T17:03:39.000000Z",
+      registry_cleaned_key_count: 1,
+      registry_cleaned_keys_sha256: batch9923Evidence.registryKeysSha256,
+      destructive_go_at: "2026-09-23T17:03:39.000000Z",
+      destructive_go_batch_id: "77",
+    },
+  },
+];
+for (const { label, overrides } of cleanedLifecycleCases) {
+  const cleanedHarness = makeBatch9923RepairHarness({
+    row: makeBatch9923Row(overrides),
+    includeRecoveryManifest: true,
+  });
+  cleanedHarness.objects.set(
+    batch9923TestTarget.recoveryManifestPath,
+    Buffer.from(batch9923HappyHarness.objects.get(batch9923TestTarget.recoveryManifestPath)),
+  );
+  try {
+    await assert.rejects(
+      runBotOnlyExactRecoveryRepair({
+        env: ENV,
+        deps: cleanedHarness.deps,
+        batchId: "77",
+      }),
+      /unpruned, uncleaned batch/,
+      label,
+    );
+    assert.equal(cleanedHarness.storageCalls.length, 0, `${label} must reject before Storage reads/writes`);
+    assert.equal(cleanedHarness.pruneCalls.length, 0, `${label} must reject before dry-run`);
+    assert.equal(
+      cleanedHarness.sqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)),
+      false,
+      `${label} must not issue database DML`,
+    );
+  } finally {
+    fs.rmSync(cleanedHarness.tempRoot, { recursive: true, force: true });
+  }
+}
 fs.rmSync(alreadyRepairedHarness.tempRoot, { recursive: true, force: true });
 fs.rmSync(batch9923HappyHarness.tempRoot, { recursive: true, force: true });
 

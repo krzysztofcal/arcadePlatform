@@ -40,7 +40,7 @@ Successful result:
 
 | Field | Meaning |
 |---|---|
-| `state` | `recovery_repaired` after one missing-manifest create/reconcile, or `recovery_already_repaired` for a complete pair |
+| `state` | `recovery_repaired` after one missing-manifest create/reconcile, or `recovery_already_repaired` for a complete pair on an otherwise eligible unpruned/uncleaned row |
 | `recoveryState` | `complete` |
 | `initialRecoveryState` | `partial` or `complete` |
 | `recoveryVerified` | `true` only after both recovery objects are freshly verified |
@@ -55,7 +55,10 @@ Failure contract:
   manifest-absent state before the one manifest write.
 - `mismatch`, `unavailable`, `write_not_visible`, `both_missing`, and
   identity/fence/lock/proof/lifecycle failures throw and write the existing
-  aggregate error summary.
+  aggregate error summary. In particular, a row with `pruned_at`, completed
+  registry cleanup, destructive GO, or a completed-retention marker is rejected
+  before recovery inspection/result classification, even when both objects are
+  complete.
 - A failure summary includes the batch, state, per-object presence/details, and
   required action. It never authorizes cleanup.
 

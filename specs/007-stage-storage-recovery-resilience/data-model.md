@@ -43,7 +43,7 @@ create-only request.
 |---|---|---|---|
 | `both_missing` | absent | absent | Block; no write |
 | `partial` | exactly one present | exactly one present | Only repairable when archive is present and manifest absent, and bytes/SHA match |
-| `complete` | present and valid | present and canonical | Read-only idempotent result `recovery_already_repaired` |
+| `complete` | present and valid | present and canonical | Read-only idempotent result `recovery_already_repaired` only after the row passes the unpruned/un-cleaned/no-GO lifecycle |
 | `mismatch` | wrong MIME/size/SHA/JSON/manifest | any | Block; no overwrite/delete |
 | `unavailable` | read error | any | Block; no write |
 | `write_not_visible` | ambiguous write not observed | absent/unknown | Block; no second POST |
@@ -64,8 +64,11 @@ COMPLETE
   recovery manifest: canonical + verified
 ```
 
-A complete pair does not transition and is reported as
-`recovery_already_repaired`. Every other state remains fail-closed.
+A complete pair on an eligible, unpruned and uncleaned row does not transition
+and is reported as `recovery_already_repaired`. Lifecycle is checked before
+recovery inspection: a row with `pruned_at`, completed registry cleanup,
+destructive GO, or a completed-retention marker is `blocked` even when both
+objects are present and valid. Every other state remains fail-closed.
 
 ## Observability shape
 
