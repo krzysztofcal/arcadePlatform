@@ -271,24 +271,29 @@
   var layoutRefreshTimer = null;
   var socialSettingsOpener = null;
   var reactionHistoryPanelOpen = false;
-  var socialPreferencesIdentity = null;
+  var socialPreferencesIdentity;
   var socialPreferences = defaultSocialPreferences();
+  var celebration = null;
+  var celebrationTimer = null;
+  var celebrationCursor = { tableId: null, handId: null, version: -1, consumed: false };
   var els = {};
 
   var REACTION_HISTORY_LIMIT = 25;
   var REACTION_HISTORY_TTL_MS = 10 * 60 * 1000;
   var SOCIAL_PREFERENCES_STORAGE_PREFIX = 'kcswh:poker-social-preferences:v1:';
+  var GUEST_CELEBRATIONS_STORAGE_KEY = 'kcswh:poker-celebrations:guest:v1';
   var AUTO_REBUY_STORAGE_PREFIX = 'kcswh:poker-auto-rebuy:v1:';
 
   function defaultSocialPreferences(){
-    return { reactionBubblesEnabled: true, reactionHistoryEnabled: true, botReactionsEnabled: true };
+    return { reactionBubblesEnabled: true, reactionHistoryEnabled: true, botReactionsEnabled: true, celebrationsEnabled: true };
   }
 
   function normalizeSocialPreferences(raw){
     return {
       reactionBubblesEnabled: raw && raw.reactionBubblesEnabled === false ? false : true,
       reactionHistoryEnabled: raw && raw.reactionHistoryEnabled === false ? false : true,
-      botReactionsEnabled: raw && raw.botReactionsEnabled === false ? false : true
+      botReactionsEnabled: raw && raw.botReactionsEnabled === false ? false : true,
+      celebrationsEnabled: raw && raw.celebrationsEnabled === false ? false : true
     };
   }
 
@@ -299,6 +304,139 @@
   function normalizeSignalCode(value){
     if (typeof value !== 'string') return '';
     return value.trim().toLowerCase();
+  }
+
+  // Cosmetic passenger only: none of these functions owns gameplay or reveal time.
+  function clearCelebration(){
+    if (celebrationTimer != null) window.clearTimeout(celebrationTimer);
+    celebrationTimer = null;
+    celebration = null;
+    if (els.celebration){
+      els.celebration.hidden = true;
+      els.celebration.textContent = '';
+      els.celebration.className = 'poker-celebration';
+    }
+    if (els.celebrationPreviewPanel) els.celebrationPreviewPanel.hidden = true;
+    if (els.celebrationPreviewButton) els.celebrationPreviewButton.setAttribute('aria-expanded', 'false');
+  }
+
+  function startCelebrationExit(){
+    if (!celebration || celebration.exiting) return;
+    if (celebrationTimer != null) window.clearTimeout(celebrationTimer);
+    celebration.exiting = true;
+    // Remove every card, claim and particle synchronously. Only a faint ring survives.
+    els.celebration.textContent = '';
+    els.celebration.className = 'poker-celebration poker-celebration--exit';
+    celebrationTimer = window.setTimeout(clearCelebration, 400);
+  }
+
+  function showCelebration(selection, options){
+    clearCelebration();
+    if (!selection || !els.celebration || !socialPreferences.celebrationsEnabled || prefersReducedMotion() || document.hidden) return;
+    var demo = options && options.demo === true;
+    var duration = demo ? 1800 : options && options.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    celebration = { demo: demo, handId: state.handId, tableId: state.tableId, endsAt: Date.now() + duration, exiting: false };
+    var overlay = els.celebration;
+    overlay.className = 'poker-celebration poker-celebration--' + selection.kind;
+    overlay.style.setProperty('--celebration-duration', duration + 'ms');
+    overlay.hidden = false;
+    var art = document.createElement('div');
+    art.className = 'poker-celebration__art';
+    var hero = document.createElement('div');
+    hero.className = 'poker-celebration__hero';
+    if (selection.kind === 'royal'){
+      var cards = selection.cards || ['10', 'J', 'Q', 'K', 'A'].map(function(rank){ return { r: rank, s: 'S' }; });
+      cards.forEach(function(card, index){
+        var node = document.createElement('span');
+        node.className = 'poker-celebration__card';
+        node.style.setProperty('--fan', (index - 2) * 12 + 'deg');
+        node.style.setProperty('--rise', Math.abs(index - 2) * 4 + 'px');
+        node.textContent = card.r + '\n' + SUIT_SYMBOLS[card.s];
+        hero.appendChild(node);
+      });
+    } else if (selection.kind === 'pot'){
+      for (var c = 0; c < 5; c++){
+        var chip = document.createElement('img');
+        chip.className = 'poker-celebration__chip';
+        chip.src = '/poker/assets/chips/chip-' + (c % 2 ? 'green' : 'yellow') + '-3.png';
+        chip.alt = '';
+        chip.style.setProperty('--fan', (c - 2) * 18 + 'deg');
+        hero.appendChild(chip);
+      }
+    } else {
+      var avatar = document.createElement('span');
+      avatar.className = 'poker-celebration__avatar';
+      avatar.textContent = '×5';
+      hero.appendChild(avatar);
+    }
+    var title = document.createElement('strong');
+    title.className = 'poker-celebration__title';
+    title.textContent = selection.kind === 'royal' ? 'ROYAL FLUSH' : selection.kind === 'pot' ? 'MONSTER POT' : 'WIN STREAK ×5';
+    var caption = document.createElement('span');
+    caption.className = 'poker-celebration__caption';
+    caption.textContent = demo ? 'PREVIEW · VISUAL DEMO' : 'EXCEPTIONAL HAND';
+    art.appendChild(hero);
+    art.appendChild(title);
+    art.appendChild(caption);
+    overlay.appendChild(art);
+    for (var i = 0; i < 14; i++){
+      var spark = document.createElement('i');
+      spark.className = 'poker-celebration__spark';
+      var angle = Math.PI * 2 * i / 14;
+      spark.style.setProperty('--x', Math.round(Math.cos(angle) * 135) + 'px');
+      spark.style.setProperty('--y', Math.round(Math.sin(angle) * 62) + 'px');
+      spark.style.setProperty('--delay', (i % 4) * 45 + 'ms');
+      overlay.appendChild(spark);
+    }
+    celebrationTimer = window.setTimeout(startCelebrationExit, duration);
+  }
+
+  function bindCelebrationPreview(){
+    var build = window.BUILD_INFO;
+    if (!build || build.context !== 'deploy-preview' || build.isPreview !== true) return;
+    var controls = document.createElement('div');
+    controls.className = 'poker-celebration-preview';
+    controls.hidden = true;
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Preview FX';
+    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-controls', 'pokerCelebrationPreviewPanel');
+    var panel = document.createElement('section');
+    panel.id = 'pokerCelebrationPreviewPanel';
+    panel.className = 'poker-celebration-preview__panel';
+    panel.setAttribute('aria-label', 'Celebration preview');
+    panel.hidden = true;
+    [['royal', 'Royal Flush'], ['pot', 'Monster Pot'], ['streak', 'Win Streak ×5'], ['close', 'Close']].forEach(function(entry){
+      var choice = document.createElement('button');
+      choice.type = 'button';
+      choice.textContent = entry[1];
+      choice.addEventListener('click', function(){
+        panel.hidden = true;
+        button.setAttribute('aria-expanded', 'false');
+        button.focus();
+        if (entry[0] === 'close' || !isSeatedAtLiveTable() || !isWsReady() || getActiveWinnerReveal()) return;
+        showCelebration({ kind: entry[0] }, { demo: true });
+      });
+      panel.appendChild(choice);
+    });
+    var hint = document.createElement('small');
+    hint.textContent = 'Visual demo only. Respects Table settings and reduced motion. Live results take priority.';
+    panel.appendChild(hint);
+    button.addEventListener('click', function(){
+      panel.hidden = !panel.hidden;
+      button.setAttribute('aria-expanded', String(!panel.hidden));
+    });
+    controls.addEventListener('keydown', function(event){
+      if (event.key === 'Escape') { panel.hidden = true; button.setAttribute('aria-expanded', 'false'); button.focus(); }
+    });
+    controls.appendChild(button);
+    controls.appendChild(panel);
+    els.screen.appendChild(controls);
+    els.celebrationPreview = controls;
+    els.celebrationPreviewPanel = panel;
+    els.celebrationPreviewButton = button;
   }
 
   function isClosedTableStatus(value){
@@ -512,6 +650,8 @@
   }
 
   function renderSocialPreferences(){
+    if (els.celebrationsPreference) els.celebrationsPreference.checked = socialPreferences.celebrationsEnabled;
+    if (els.celebrationsPreferenceLabel) els.celebrationsPreferenceLabel.textContent = document.documentElement && document.documentElement.lang === 'pl' ? 'Animacje celebracyjne' : 'Celebration animations';
     if (els.reactionBubblesPreference) els.reactionBubblesPreference.checked = socialPreferences.reactionBubblesEnabled;
     if (els.reactionHistoryPreference) els.reactionHistoryPreference.checked = socialPreferences.reactionHistoryEnabled;
     if (els.botReactionsPreference) els.botReactionsPreference.checked = socialPreferences.botReactionsEnabled;
@@ -646,6 +786,7 @@
   function syncSocialPreferencesIdentity(userId){
     var normalizedUserId = typeof userId === 'string' && userId.trim() ? userId.trim() : null;
     if (socialPreferencesIdentity === normalizedUserId) return;
+    clearCelebration();
     socialPreferencesIdentity = normalizedUserId;
     socialPreferences = defaultSocialPreferences();
     if (normalizedUserId){
@@ -655,14 +796,19 @@
       } catch (err){
         klog('poker_social_preferences_read_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
       }
+    } else {
+      try {
+        socialPreferences.celebrationsEnabled = !window.localStorage || window.localStorage.getItem(GUEST_CELEBRATIONS_STORAGE_KEY) !== 'false';
+      } catch (_err){}
     }
     renderSocialPreferences();
   }
 
   function persistSocialPreferences(){
-    if (!socialPreferencesIdentity) return;
     try {
-      if (window.localStorage) window.localStorage.setItem(SOCIAL_PREFERENCES_STORAGE_PREFIX + socialPreferencesIdentity, JSON.stringify(socialPreferences));
+      if (!window.localStorage) return;
+      if (socialPreferencesIdentity) window.localStorage.setItem(SOCIAL_PREFERENCES_STORAGE_PREFIX + socialPreferencesIdentity, JSON.stringify(socialPreferences));
+      else window.localStorage.setItem(GUEST_CELEBRATIONS_STORAGE_KEY, String(socialPreferences.celebrationsEnabled));
     } catch (err){
       klog('poker_social_preferences_write_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
     }
@@ -1560,6 +1706,84 @@
     return revealed;
   }
 
+  function selectCelebrationForSettlement(input){
+    var presentation = input && input.settlementPresentation;
+    if (!input || input.phase !== 'SETTLED' || !input.handId || !input.showdown || !input.handSettlement
+      || input.showdown.handId !== input.handId || input.handSettlement.handId !== input.handId
+      || !presentation || !presentation.valid || presentation.handId !== input.handId) return null;
+    var awards = Object.create(null);
+    presentation.pots.forEach(function(pot){
+      if ((pot.kind !== 'main' && pot.kind !== 'side') || pot.eligibleUserIds.length < 2) return;
+      pot.recipients.forEach(function(recipient){
+        if (recipient.amount > 0) awards[recipient.userId] = (awards[recipient.userId] || 0) + recipient.amount;
+      });
+    });
+    var winners = Object.keys(awards).sort();
+    for (var i = 0; i < winners.length; i++){
+      var userId = winners[i];
+      var revealed = input.revealedShowdownCardsByUserId && input.revealedShowdownCardsByUserId[userId];
+      var cards = (input.communityCards || []).concat(Array.isArray(revealed) ? revealed : []);
+      // Only public board/revealed showdown cards, never opponent private state.
+      var best = cards.length <= 7 ? evaluateViewerBestHand(cards) : null;
+      if (best && best.category === HAND_CATEGORY.STRAIGHT_FLUSH
+        && best.cards.some(function(card){ return normalizeEvalRank(card.r) === 14; })
+        && best.cards.some(function(card){ return normalizeEvalRank(card.r) === 13; })){
+        return { kind: 'royal', userId: userId, cards: best.cards.slice().reverse() };
+      }
+    }
+    var buyIn = input.buyIn;
+    if (!Number.isSafeInteger(buyIn) || buyIn <= 0) return null;
+    for (var j = 0; j < winners.length; j++){
+      if (Number.isSafeInteger(awards[winners[j]]) && awards[winners[j]] >= 5 * buyIn) return { kind: 'pot', userId: winners[j] };
+    }
+    return null;
+  }
+
+  function celebrationDuration(now, deadlines){
+    var valid = deadlines.filter(function(value){ return typeof value === 'number' && Number.isFinite(value); });
+    if (!valid.length || Math.min.apply(Math, valid) - now < 2200) return 0;
+    return 1800;
+  }
+
+  function claimCelebrationTransition(cursor, input, frame, version, transition){
+    if (!input.tableId || !input.handId || !Number.isSafeInteger(version) || version < 0) return false;
+    if (cursor.tableId !== input.tableId){
+      cursor.tableId = input.tableId; cursor.handId = null; cursor.version = -1; cursor.consumed = false;
+    }
+    if (version <= cursor.version) return false;
+    cursor.version = version;
+    if (cursor.handId !== input.handId){ cursor.handId = input.handId; cursor.consumed = false; }
+    if (input.phase !== 'SETTLED') return false;
+    var claimed = !cursor.consumed && transition && !frame.initial && !frame.suppressSettlementAnimation;
+    cursor.consumed = true;
+    return claimed;
+  }
+
+  function celebrateSettlement(frame, incomingVersion, transition){
+    if (!claimCelebrationTransition(celebrationCursor, state, frame || {}, incomingVersion, transition)) return;
+    if (!state.wsReady || state.reconnectGate || state.mode !== 'live' || !getActiveWinnerReveal()) return;
+    var now = Date.now();
+    var settledAt = state.handSettlement && Date.parse(state.handSettlement.settledAt);
+    var duration = celebrationDuration(now, [stickyWinnerReveal.visibleUntilMs, state.settlementRevealDueAtMs,
+      stickyWinnerReveal.authoritativeRevealDueAtMs, Number.isFinite(settledAt) ? settledAt + WINNER_REVEAL_MS : null]);
+    if (duration) showCelebration(selectCelebrationForSettlement(state), { demo: false, duration: duration });
+  }
+
+  function observeCelebrationSnapshot(payload, frame){
+    if (!celebration || celebration.exiting || !payload) return;
+    if (frame.initial || frame.suppressSettlementAnimation){ clearCelebration(); return; }
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    var hand = payload.hand || publicObj.hand || {};
+    var turn = payload.turn || publicObj.turn || {};
+    var nextHand = extractSnapshotHandId(payload);
+    var due = readSnapshotField(payload, publicObj, 'settlementRevealDueAt');
+    var dueAt = normalizeSettlementRevealDueAt(due.value);
+    if ((nextHand && nextHand !== celebration.handId) || (turn.userId && !celebration.demo)
+      || (!celebration.demo && hand.status && hand.status.toUpperCase() !== 'SETTLED')
+      || (celebration.demo && Number(payload.stateVersion) > Number(state.stateVersion))
+      || (dueAt != null && dueAt < celebration.endsAt + 400)) startCelebrationExit();
+  }
+
   function cloneRevealedShowdownCards(source){
     var next = {};
     if (!isObject(source)) return next;
@@ -1651,6 +1875,7 @@
     var remainingMs = Math.max(0, sticky.visibleUntilMs - Date.now());
     revealDismissTimer = window.setTimeout(function(){
       revealDismissTimer = null;
+      startCelebrationExit();
       stickyWinnerReveal.visibleUntilMs = 0;
       if (pendingPostRevealSnapshot){
         var nextFrame = pendingPostRevealSnapshot;
@@ -1857,6 +2082,7 @@
     var settlementPairComplete = !!(state.showdown && state.handSettlement
       && (authoritativeFull || showdownField.present || handSettlementField.present));
     if (state.phase !== 'SETTLED' || handChanged || explicitSettlementClear){
+      if (celebration && (!celebration.demo || handChanged || explicitSettlementClear)) startCelebrationExit();
       state.settlementRevealDueAtMs = null;
       state.settlementPresentation = null;
       if (explicitSettlementClear && stickyWinnerReveal.handId === (state.handId || previousHandId)){
@@ -1890,6 +2116,7 @@
       && previousPhase !== 'SETTLED'
       && state.phase === 'SETTLED';
     syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null, settlementPairComplete);
+    celebrateSettlement(frame, incomingVersion, liveSettlementTransition);
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     // While a snapshot recovery timeout is pending, snapshots must not overwrite a
     // newer status/error raised after the timeout; the recovery gate-open handles it.
@@ -4468,6 +4695,7 @@
   }
 
   function render(){
+    if (els.celebrationPreview) els.celebrationPreview.hidden = !isSeatedAtLiveTable() || !isWsReady();
     if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
     renderCommunityCards();
     renderSeats();
@@ -4858,6 +5086,7 @@
   }
 
   function updateSocialPreference(key, enabled){
+    if (key === 'celebrationsEnabled') clearCelebration();
     socialPreferences[key] = enabled === true;
     if (key === 'reactionBubblesEnabled' && !socialPreferences.reactionBubblesEnabled) clearReactionArtifacts();
     if (key === 'reactionHistoryEnabled' && !socialPreferences.reactionHistoryEnabled) reactionHistoryPanelOpen = false;
@@ -4865,7 +5094,7 @@
       clearReactionArtifacts(function(item){ return item && item.senderIsBot === true; });
       removeBotReactionHistory();
     }
-    persistSocialPreferences();
+    if (socialPreferencesIdentity || key === 'celebrationsEnabled') persistSocialPreferences();
     renderSocialPreferences();
     renderReactionHistory();
   }
@@ -4875,6 +5104,7 @@
   }
 
   function navigateToDestination(destination){
+    clearCelebration();
     cancelClosedTableRedirect();
     clearReactionHistory();
     if (!window || !window.location) return;
@@ -5210,6 +5440,9 @@
     els.reactionBubblesPreference = document.getElementById('pokerReactionBubblesPreference');
     els.reactionHistoryPreference = document.getElementById('pokerReactionHistoryPreference');
     els.botReactionsPreference = document.getElementById('pokerBotReactionsPreference');
+    els.celebrationsPreference = document.getElementById('pokerCelebrationsPreference');
+    els.celebrationsPreferenceLabel = document.getElementById('pokerCelebrationsPreferenceLabel');
+    els.celebration = document.getElementById('pokerCelebration');
     els.autoRebuyPreference = document.getElementById('pokerAutoRebuyPreference');
     els.autoRebuyPreferenceWrap = document.getElementById('pokerAutoRebuyPreferenceWrap');
     els.autoRebuyPreferenceLabel = document.querySelector ? document.querySelector('#pokerAutoRebuyPreferenceWrap label span') : null;
@@ -5335,6 +5568,7 @@
   }
 
   function stopLiveMode(){
+    clearCelebration();
     liveModeGeneration += 1;
     authenticatedPreflightGeneration += 1;
     stopSnapshotRecoveryTimer();
@@ -5468,6 +5702,10 @@
       },
       onStatus: function(status, info){
         if (gen !== liveModeGeneration) return;
+        if (['hello_ack', 'minting_token', 'authenticating', 'reconnecting', 'resync', 'failed', 'error', 'closed'].indexOf(status) !== -1){
+          clearCelebration();
+          if (els.celebrationPreview) els.celebrationPreview.hidden = true;
+        }
         if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;
@@ -5556,6 +5794,7 @@
         var incomingVersion = Number(payload && payload.stateVersion) || 0;
         var appliedVersion = Number(state.stateVersion) || 0;
         if (incomingVersion > 0 && appliedVersion > 0 && incomingVersion < appliedVersion) return;
+        observeCelebrationSnapshot(payload, frame);
         if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
         if (shouldDeferSnapshotUntilRevealEnds(payload)){
           pendingPostRevealSnapshot = frame;
@@ -5601,6 +5840,7 @@
       },
       onProtocolError: function(info){
         if (gen !== liveModeGeneration) return;
+        clearCelebration();
         state.wsReady = false;
         state.statusText = LIVE_STATUS_COPY.error;
         if (info && info.code === 'missing_access_token'){
@@ -5719,6 +5959,13 @@
     shouldAutoJoin = readAutoJoinParam();
     bindMenu();
     bindControls();
+    bindCelebrationPreview();
+    syncSocialPreferencesIdentity(null);
+    if (els.celebrationsPreference) els.celebrationsPreference.addEventListener('change', function(){ updateSocialPreference('celebrationsEnabled', els.celebrationsPreference.checked); });
+    if (window.addEventListener) window.addEventListener('pagehide', clearCelebration);
+    document.addEventListener('visibilitychange', function(){ if (document.hidden) clearCelebration(); });
+    var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (motion && motion.addEventListener) motion.addEventListener('change', clearCelebration);
     renderSocialPreferences();
     document.addEventListener('langchange', function(){ buildReactionMenu(); render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
@@ -5748,7 +5995,10 @@
     window.__POKER_V2_TEST_HOOKS__ = {
       allocatePotRecipients: allocatePotRecipients,
       classifySettlementPot: classifySettlementPot,
-      buildSettlementPresentation: buildSettlementPresentation
+      buildSettlementPresentation: buildSettlementPresentation,
+      selectCelebrationForSettlement: selectCelebrationForSettlement,
+      celebrationDuration: celebrationDuration,
+      claimCelebrationTransition: claimCelebrationTransition
     };
   }
 

@@ -63,6 +63,7 @@
       <label class="poker-social-settings__option"><input type="checkbox" id="pokerReactionBubblesPreference" checked> Reaction bubbles</label>
       <label class="poker-social-settings__option"><input type="checkbox" id="pokerReactionHistoryPreference" checked> Reaction history</label>
       <label class="poker-social-settings__option"><input type="checkbox" id="pokerBotReactionsPreference" checked> Bot reactions</label>
+      <label class="poker-social-settings__option"><input type="checkbox" id="pokerCelebrationsPreference" checked> <span id="pokerCelebrationsPreferenceLabel">Celebration animations</span></label>
       <div class="poker-social-settings__option poker-social-settings__option--stacked" id="pokerAutoRebuyPreferenceWrap">
         <label>
           <input type="checkbox" id="pokerAutoRebuyPreference">
@@ -108,6 +109,8 @@
         <div class="poker-table-felt"></div>
         <div class="poker-table-inner-ring"></div>
       </div>
+
+      <div class="poker-celebration" id="pokerCelebration" aria-hidden="true" hidden></div>
 
       <div class="poker-seat-layer" id="pokerSeatLayer"></div>
       <div class="poker-seat-chip-layer" id="pokerSeatChipLayer"></div>

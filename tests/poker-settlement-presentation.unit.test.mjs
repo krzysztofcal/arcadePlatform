@@ -38,6 +38,80 @@ function project(hooks, showdown, payouts, settledAt = '2026-07-14T12:00:00.000Z
   }));
 }
 
+function celebrationInput(hooks, amount = 500){
+  const showdown = { handId: 'h', reason: 'computed', winners: ['a'], potAwardedTotal: amount,
+    potsAwarded: [{ amount, winners: ['a'], eligibleUserIds: ['a', 'b'] }] };
+  return { handId: 'h', phase: 'SETTLED', buyIn: 100, showdown,
+    handSettlement: { handId: 'h', payouts: { a: amount } },
+    settlementPresentation: project(hooks, showdown, { a: amount }), communityCards: [], revealedShowdownCardsByUserId: {} };
+}
+
+test('celebrations prove a royal from legal cards, prioritize it and reject ordinary straight flushes', () => {
+  const hooks = loadHooks();
+  const input = celebrationInput(hooks, 500);
+  input.communityCards = ['10', 'J', 'Q'].map(r => ({ r, s: 'S' }));
+  input.revealedShowdownCardsByUserId.a = ['K', 'A'].map(r => ({ r, s: 'S' }));
+  assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'royal');
+  input.revealedShowdownCardsByUserId.a = ['K', '9'].map(r => ({ r, s: 'S' }));
+  assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'pot');
+  input.buyIn = null;
+  assert.equal(hooks.selectCelebrationForSettlement(input), null);
+  input.revealedShowdownCardsByUserId.a = [];
+  input.heroCards = ['K', 'A'].map(r => ({ r, s: 'S' }));
+  assert.equal(hooks.selectCelebrationForSettlement(input), null, 'never consult private cards');
+  input.communityCards = ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'H' }));
+  assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'royal', 'board royal is public proof');
+  input.handId = 'other';
+  assert.equal(hooks.selectCelebrationForSettlement(input), null);
+});
+
+test('monster pot uses each contested recipient award, excludes returns and fails closed', () => {
+  const hooks = loadHooks();
+  assert.equal(hooks.selectCelebrationForSettlement(celebrationInput(hooks, 499)), null);
+  assert.equal(hooks.selectCelebrationForSettlement(celebrationInput(hooks, 500)).kind, 'pot');
+  const input = celebrationInput(hooks);
+  input.showdown.potAwardedTotal = 1000;
+  input.showdown.potsAwarded = [{ amount: 600, winners: ['a', 'b'], eligibleUserIds: ['a', 'b'] }, { amount: 400, winners: ['a'], eligibleUserIds: ['a'] }];
+  input.handSettlement.payouts = { a: 700, b: 300 };
+  input.settlementPresentation = project(hooks, input.showdown, input.handSettlement.payouts);
+  assert.equal(hooks.selectCelebrationForSettlement(input), null);
+  input.showdown.potsAwarded[1].eligibleUserIds = ['a', 'c'];
+  input.settlementPresentation = project(hooks, input.showdown, input.handSettlement.payouts);
+  assert.equal(hooks.selectCelebrationForSettlement(input).userId, 'a', 'sum main and side for one winner');
+  input.settlementPresentation.valid = false;
+  assert.equal(hooks.selectCelebrationForSettlement(input), null);
+});
+
+test('celebration deadline uses earliest existing deadline and skips insufficient windows', () => {
+  const { celebrationDuration } = loadHooks();
+  assert.equal(celebrationDuration(1000, [4500, 3400, null]), 1800);
+  assert.equal(celebrationDuration(1000, [4500, 3199]), 0);
+  assert.equal(celebrationDuration(1000, [900]), 0);
+  assert.equal(celebrationDuration(1000, []), 0);
+  assert.equal(celebrationDuration(1000, [3200]), 1800);
+});
+
+test('celebration cursor consumes initial, duplicate, stale and recovery settlements without replay', () => {
+  const { claimCelebrationTransition: claim } = loadHooks();
+  const cursor = { tableId: null, handId: null, version: -1, consumed: false };
+  const input = { tableId: 't', handId: 'h', phase: 'RIVER' };
+  assert.equal(claim(cursor, input, { initial: true }, 1, false), false);
+  input.phase = 'SETTLED';
+  assert.equal(claim(cursor, input, {}, 2, true), true);
+  assert.equal(claim(cursor, input, {}, 2, true), false);
+  assert.equal(claim(cursor, input, {}, 3, true), false);
+  input.handId = 'older';
+  assert.equal(claim(cursor, input, {}, 1, true), false);
+  input.handId = 'new';
+  assert.equal(claim(cursor, input, { initial: true }, 4, false), false);
+  assert.equal(claim(cursor, input, {}, 5, true), false);
+  input.handId = 'recovery'; input.phase = 'RIVER';
+  claim(cursor, input, {}, 6, false);
+  input.phase = 'SETTLED';
+  assert.equal(claim(cursor, input, { suppressSettlementAnimation: true }, 7, true), false);
+  assert.equal(claim(cursor, input, {}, 8, true), false);
+});
+
 test('projects ordered main, side, and returned awards with exact per-seat amounts', () => {
   const hooks = loadHooks();
   const presentation = project(hooks, {
