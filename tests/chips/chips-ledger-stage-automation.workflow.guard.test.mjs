@@ -21,6 +21,7 @@ const RETAINED_MODES = [
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-selector-diagnostic",
   "bot-only-7d-automatic",
+  "bot-only-7d-recovery-repair",
   "closed-human-30d-recovery-diagnostic",
   "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
@@ -70,6 +71,7 @@ const RETAINED_STEPS = [
   "Repair exact existing 30-day durable recovery",
   "Run bot-only 7-day summary diagnostic",
   "Run bot-only 7-day selector diagnostic",
+  "Repair exact bot-only 7-day durable recovery for batch 9923",
   "Diagnose closed human-table 30-day durable recovery",
   "Repair exact closed human-table 30-day durable recovery",
   "Run activated bot-only 7-day Stage automation",
@@ -112,6 +114,8 @@ assert.deepEqual([...inputNames].sort(), [
   "missing_table_retirement_registry_count",
   "missing_table_retirement_registry_sha256",
   "stage_30d_recovery_batch_id",
+  "bot_only_recovery_batch_id",
+  "bot_only_recovery_confirmation",
 ].sort(), "exact retained dispatch inputs");
 
 for (const retired of RETIRED_INPUTS) {
@@ -184,6 +188,7 @@ for (const mode of [
   "bot-only-7d-summary-diagnostic",
   "bot-only-7d-selector-diagnostic",
   "bot-only-7d-automatic",
+  "bot-only-7d-recovery-repair",
   "closed-human-30d-recovery-diagnostic",
   "closed-human-30d-recovery-repair",
   "escrow-retention-audit",
@@ -232,10 +237,12 @@ const stageJobIf = workflow.match(
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
+assert.match(stageJobIf, /inputs\.mode != 'bot-only-7d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'external-existing-30d'/);
 assert.match(stageJobIf, /inputs\.mode == 'closed-human-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode == 'external-existing-30d'/);
+assert.match(stageJobIf, /inputs\.mode == 'bot-only-7d-recovery-repair'/);
 assert.match(
   stageJobIf,
   /\|\| \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'missing-table-bot-retirement-canary' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner\)/,
@@ -321,6 +328,19 @@ assert.match(repairRun, /GITHUB_ACTOR" != "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(repairRun, /stage_30d_recovery_batch_id must be a positive integer/);
 assert.match(repairRun, /--policy stage-ledger-auto-retention-30d-v1 \\\n\s+--repair-recovery \\\n\s+--batch-id "\$STAGE_30D_RECOVERY_BATCH_ID"/);
 assert.doesNotMatch(repairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
+
+const botOnly9923RepairRun = workflow.match(
+  /- name: Repair exact bot-only 7-day durable recovery for batch 9923[\s\S]*?(?=\n\s+- name:|\s*$)/,
+)[0];
+assert.match(botOnly9923RepairRun, /inputs\.mode == 'bot-only-7d-recovery-repair'/);
+assert.match(botOnly9923RepairRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(botOnly9923RepairRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
+assert.match(botOnly9923RepairRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
+assert.match(botOnly9923RepairRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(botOnly9923RepairRun, /test "\$BOT_ONLY_RECOVERY_BATCH_ID" = "9923"/);
+assert.match(botOnly9923RepairRun, /test "\$BOT_ONLY_RECOVERY_CONFIRMATION" = "REPAIR 9923"/);
+assert.match(botOnly9923RepairRun, /--policy bot-only-7d \\\n\s+--repair-recovery \\\n\s+--batch-id "\$BOT_ONLY_RECOVERY_BATCH_ID"/);
+assert.doesNotMatch(botOnly9923RepairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
 
 const closedHumanDiagnosticRun = workflow.match(
   /- name: Diagnose closed human-table 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,

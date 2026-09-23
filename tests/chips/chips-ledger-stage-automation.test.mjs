@@ -22,6 +22,7 @@ import {
   aggregatePayload,
   botOnlyExportArgs,
   botOnlyReport,
+  BOT_ONLY_BATCH_9923_RECOVERY_REPAIR,
   BOT_ONLY_BATCH_15_RECOVERY_REPAIR,
   CLOSED_HUMAN_AUTOMATIC_ACTIVATION,
   CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
@@ -30,6 +31,7 @@ import {
   isClosedHumanManualOnlyPolicy,
   persistDurableRecovery,
   runAutomaticClosedHumanStageAutomation,
+  runBotOnlyBatch9923RecoveryRepair,
   runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
   runClosedHumanPolicyDiagnostic,
@@ -1771,6 +1773,213 @@ await assert.rejects(
 function gzipRecoveryManifestForTest(manifest) {
   return gzipSync(Buffer.from(`${stringifyJson(manifest)}\n`, "utf8"), { level: 9, mtime: 0 });
 }
+
+const batch9923ArchiveBytes = Buffer.from("deterministic batch 9923 archive bytes");
+const batch9923ArchiveSha = crypto.createHash("sha256").update(batch9923ArchiveBytes).digest("hex");
+const batch9923TestTarget = Object.freeze({
+  ...BOT_ONLY_BATCH_9923_RECOVERY_REPAIR,
+  objectPath: `v1/sha256/${batch9923ArchiveSha}.jsonl.gz`,
+  archiveSha256: batch9923ArchiveSha,
+  recoveryArchivePath: buildRecoveryArchiveObjectPath(batch9923ArchiveSha),
+  recoveryManifestPath: buildRecoveryManifestObjectPath(batch9923ArchiveSha),
+});
+const batch9923Evidence = {
+  ...canaryEvidence,
+  distinctTables: 1,
+};
+
+function makeBatch9923Row(overrides = {}) {
+  return {
+    ...makeCanaryRow(),
+    batch_id: "9923",
+    object_path: batch9923TestTarget.objectPath,
+    compressed_bytes: batch9923ArchiveBytes.length,
+    compressed_sha256: batch9923ArchiveSha,
+    bot_only_table_exists: true,
+    bot_only_retention_complete_at: null,
+    ...overrides,
+  };
+}
+
+function makeBatch9923RepairHarness({
+  recoveryArchiveBytes = batch9923ArchiveBytes,
+  includeRecoveryArchive = true,
+  includeRecoveryManifest = false,
+  manifestPostStatus = 200,
+  manifestVisibleAfter504 = true,
+  primaryArchiveBytes = batch9923ArchiveBytes,
+  row = makeBatch9923Row(),
+} = {}) {
+  const objects = new Map();
+  if (includeRecoveryArchive) {
+    objects.set(batch9923TestTarget.recoveryArchivePath, Buffer.from(recoveryArchiveBytes));
+  }
+  if (includeRecoveryManifest) {
+    objects.set(batch9923TestTarget.recoveryManifestPath, gzipRecoveryManifestForTest({ foreign: true }));
+  }
+  const storageCalls = [];
+  const sqlCalls = [];
+  const pruneCalls = [];
+  const session = { backendPid: "batch-9923-recovery-session" };
+  const fetch = async (url, init = {}) => {
+    const requestUrl = new URL(url);
+    const authenticatedPrefix = `/storage/v1/object/authenticated/${ARCHIVE_BUCKET}/`;
+    const uploadPrefix = `/storage/v1/object/${ARCHIVE_BUCKET}/`;
+    const prefix = requestUrl.pathname.startsWith(authenticatedPrefix) ? authenticatedPrefix : uploadPrefix;
+    const objectPath = decodeURIComponent(requestUrl.pathname.slice(prefix.length));
+    const method = init.method || "GET";
+    storageCalls.push({ method, objectPath, headers: new Headers(init.headers || {}) });
+    if (method === "GET") {
+      if (objectPath === row.object_path) return response(primaryArchiveBytes);
+      const object = objects.get(objectPath);
+      return object ? response(object) : response({ message: "not found" }, 404);
+    }
+    if (method === "POST") {
+      assert.equal(objectPath, batch9923TestTarget.recoveryManifestPath);
+      assert.equal(new Headers(init.headers).get("x-upsert"), "false");
+      assert.equal(new Headers(init.headers).get("content-type"), "application/gzip");
+      const body = Buffer.from(init.body);
+      if (manifestPostStatus === 504) {
+        if (manifestVisibleAfter504) objects.set(objectPath, body);
+        return response({ message: "gateway timeout" }, 504);
+      }
+      objects.set(objectPath, body);
+      return response({ ok: true }, manifestPostStatus);
+    }
+    return response({ message: "unexpected Storage method" }, 500);
+  };
+  const exactSqlRow = exactSqlTextRow(row);
+  const sql = {
+    typed: (value, type) => ({ value, type }),
+    unsafe: async (query, values = []) => {
+      sqlCalls.push({ query, values });
+      if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: session.backendPid }];
+      if (query.includes("pg_backend_pid")) return [{ backend_pid: session.backendPid }];
+      if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
+      if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+      if (query.includes("where batch_id = $1")) return [exactSqlRow];
+      throw new Error(`unexpected batch-9923 SQL: ${query}`);
+    },
+    begin: async (callback) => callback({
+      unsafe: async (query, values = []) => {
+        if (query.startsWith("set transaction")) return [];
+        return sql.unsafe(query, values);
+      },
+    }),
+  };
+  const tempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-bot-only-9923-repair-");
+  const deps = {
+    sql,
+    storageTarget,
+    tempRoot,
+    botOnlyRecoveryRepairTarget: batch9923TestTarget,
+    pruneStore: { getManifest: async () => row },
+    verifyBucket: async () => {},
+    fetch,
+    pruneArchive: async ({ argv }) => {
+      pruneCalls.push([...argv]);
+      return { state: "ready", evidence: batch9923Evidence, archiveSha256: batch9923ArchiveSha };
+    },
+    downloadPrivateArchive: async () => ({
+      bytes: Buffer.from(primaryArchiveBytes),
+      sha256: crypto.createHash("sha256").update(primaryArchiveBytes).digest("hex"),
+    }),
+  };
+  return { deps, objects, storageCalls, sqlCalls, pruneCalls, tempRoot, row };
+}
+
+function assertBatch9923RepairWasNonDestructive(harness) {
+  assert.equal(harness.pruneCalls.every((argv) => !argv.includes("--execute")), true);
+  assert.equal(harness.sqlCalls.some(({ query }) => /\b(?:insert|update|delete|truncate)\b/i.test(query)), false);
+  assert.equal(harness.row.destructive_go_at, null);
+  assert.equal(harness.row.destructive_go_batch_id, null);
+  assert.equal(harness.row.pruned_at, null);
+  assert.equal(harness.row.registry_cleaned_at, null);
+}
+
+const batch9923HappyHarness = makeBatch9923RepairHarness();
+const batch9923ArchiveBeforeRepair = Buffer.from(batch9923HappyHarness.objects.get(batch9923TestTarget.recoveryArchivePath));
+const batch9923Happy = await runBotOnlyBatch9923RecoveryRepair({
+  env: ENV,
+  deps: batch9923HappyHarness.deps,
+  batchId: "9923",
+});
+assert.equal(batch9923Happy.state, "recovery_repaired");
+assert.equal(batch9923Happy.batchId, "9923");
+assert.equal(batch9923Happy.initialRecoveryState, "partial");
+assert.equal(batch9923Happy.recoveryState, "complete");
+assert.equal(batch9923Happy.recoveryVerified, true);
+assert.equal(batch9923Happy.storageModified, true);
+assert.equal(
+  batch9923HappyHarness.objects.get(batch9923TestTarget.recoveryArchivePath).equals(batch9923ArchiveBeforeRepair),
+  true,
+  "the surviving recovery archive must remain byte-identical",
+);
+assert.equal(batch9923HappyHarness.objects.has(batch9923TestTarget.recoveryManifestPath), true);
+assert.equal(batch9923HappyHarness.storageCalls.filter(({ method }) => method === "POST").length, 1);
+assert.deepEqual(
+  batch9923HappyHarness.storageCalls.filter(({ method }) => method === "POST").map(({ objectPath }) => objectPath),
+  [batch9923TestTarget.recoveryManifestPath],
+);
+assertBatch9923RepairWasNonDestructive(batch9923HappyHarness);
+fs.rmSync(batch9923HappyHarness.tempRoot, { recursive: true, force: true });
+
+const batch9923Ambiguous504Harness = makeBatch9923RepairHarness({
+  manifestPostStatus: 504,
+  manifestVisibleAfter504: true,
+});
+const batch9923Ambiguous504 = await runBotOnlyBatch9923RecoveryRepair({
+  env: ENV,
+  deps: batch9923Ambiguous504Harness.deps,
+  batchId: "9923",
+});
+assert.equal(batch9923Ambiguous504.state, "recovery_repaired");
+assert.equal(batch9923Ambiguous504.recoveryState, "complete");
+assert.equal(batch9923Ambiguous504.recoveryVerified, true);
+assert.equal(batch9923Ambiguous504.storageModified, true);
+assert.equal(batch9923Ambiguous504Harness.storageCalls.filter(({ method }) => method === "POST").length, 1);
+assert.equal(batch9923Ambiguous504Harness.objects.has(batch9923TestTarget.recoveryManifestPath), true);
+assertBatch9923RepairWasNonDestructive(batch9923Ambiguous504Harness);
+fs.rmSync(batch9923Ambiguous504Harness.tempRoot, { recursive: true, force: true });
+
+const batch9923MismatchHarness = makeBatch9923RepairHarness({
+  recoveryArchiveBytes: Buffer.from("different recovery archive bytes"),
+});
+await assert.rejects(
+  runBotOnlyBatch9923RecoveryRepair({ env: ENV, deps: batch9923MismatchHarness.deps, batchId: "9923" }),
+  /recovery archive.*(?:checksum|bytes|match)/i,
+);
+assert.equal(batch9923MismatchHarness.storageCalls.filter(({ method }) => method === "POST").length, 0);
+assert.equal(batch9923MismatchHarness.pruneCalls.length, 0);
+assertBatch9923RepairWasNonDestructive(batch9923MismatchHarness);
+fs.rmSync(batch9923MismatchHarness.tempRoot, { recursive: true, force: true });
+
+for (const unsupported of [
+  makeBatch9923RepairHarness({ includeRecoveryArchive: false }),
+  makeBatch9923RepairHarness({ includeRecoveryArchive: false, includeRecoveryManifest: true }),
+]) {
+  await assert.rejects(
+    runBotOnlyBatch9923RecoveryRepair({ env: ENV, deps: unsupported.deps, batchId: "9923" }),
+    /recovery state|recovery archive|partial|missing/i,
+  );
+  assert.equal(unsupported.storageCalls.filter(({ method }) => method === "POST").length, 0);
+  assert.equal(unsupported.pruneCalls.length, 0);
+  assertBatch9923RepairWasNonDestructive(unsupported);
+  fs.rmSync(unsupported.tempRoot, { recursive: true, force: true });
+}
+
+const batch9923504AbsentHarness = makeBatch9923RepairHarness({
+  manifestPostStatus: 504,
+  manifestVisibleAfter504: false,
+});
+await assert.rejects(
+  runBotOnlyBatch9923RecoveryRepair({ env: ENV, deps: batch9923504AbsentHarness.deps, batchId: "9923" }),
+  /504|not visible|manifest/i,
+);
+assert.equal(batch9923504AbsentHarness.storageCalls.filter(({ method }) => method === "POST").length, 1);
+assert.equal(batch9923504AbsentHarness.objects.has(batch9923TestTarget.recoveryManifestPath), false);
+assertBatch9923RepairWasNonDestructive(batch9923504AbsentHarness);
+fs.rmSync(batch9923504AbsentHarness.tempRoot, { recursive: true, force: true });
 
 const batch15Evidence = {
   transactionIdsSha256: "0fb56b4c43ef22e40ce5809c4c77cda4647c994e5843836d5c69b109bbd58cad",
