@@ -1114,6 +1114,86 @@ export async function readPrivateObjectIfExists(storageTarget, objectPath, deps 
   };
 }
 
+function ambiguousStorageWriteError(objectPath, response, error = null) {
+  const message = response
+    ? `private recovery object upload returned an ambiguous HTTP ${response.status}: ${objectPath}`
+    : `private recovery object upload returned an ambiguous network error: ${objectPath}`;
+  const ambiguous = new Error(message, { cause: error || undefined });
+  ambiguous.storageWriteStatus = response?.status ?? null;
+  ambiguous.storageWriteError = error ? String(error.message || error) : null;
+  return ambiguous;
+}
+
+async function reconcileAmbiguousPrivateObject({ storageTarget, objectPath, expected, mimeType, deps = {}, cause }) {
+  const readPrivateObject = deps.readPrivateObjectIfExists || readPrivateObjectIfExists;
+  const expectedSha256 = crypto.createHash("sha256").update(expected).digest("hex");
+  let lastObserved = null;
+  for (let attempt = 1; attempt <= STORAGE_GET_MAX_ATTEMPTS; attempt += 1) {
+    let observed;
+    try {
+      observed = await readPrivateObject(storageTarget, objectPath, deps);
+    } catch (error) {
+      const state = /unexpected MIME|invalid size/i.test(String(error?.message || ""))
+        ? "mismatch"
+        : "unavailable";
+      Object.assign(error, {
+        recoveryState: state,
+        storageState: state,
+        storageAttempts: attempt,
+        storageMutation: { recoveryStorageModified: null },
+        ambiguousWrite: cause,
+      });
+      throw error;
+    }
+    lastObserved = observed;
+    if (observed) {
+      if (observed.mimeType !== mimeType
+        || observed.size !== expected.length
+        || observed.sha256 !== expectedSha256
+        || !observed.bytes.equals(expected)) {
+        const mismatch = new Error(
+          `private recovery object after an ambiguous upload differs: ${objectPath}`,
+        );
+        Object.assign(mismatch, {
+          recoveryState: "mismatch",
+          storageState: "mismatch",
+          storageAttempts: attempt,
+          storageMutation: { recoveryStorageModified: null },
+          ambiguousWrite: cause,
+          observed: {
+            mime: observed.mimeType,
+            size: observed.size,
+            sha256: observed.sha256,
+          },
+        });
+        throw mismatch;
+      }
+      return {
+        objectPath,
+        objectExisted: true,
+        uploaded: false,
+        reconciledAfterAmbiguousResponse: true,
+        bytes: observed.size,
+        sha256: observed.sha256,
+      };
+    }
+    if (attempt < STORAGE_GET_MAX_ATTEMPTS) await waitForStorageGetRetry(deps, attempt);
+  }
+
+  const notVisible = new Error(
+    `private recovery object after an ambiguous upload is not visible after ${STORAGE_GET_MAX_ATTEMPTS} reads: ${objectPath}`,
+  );
+  Object.assign(notVisible, {
+    recoveryState: "write_not_visible",
+    storageState: "write_not_visible",
+    storageAttempts: STORAGE_GET_MAX_ATTEMPTS,
+    storageMutation: { recoveryStorageModified: null },
+    ambiguousWrite: cause,
+    observed: lastObserved,
+  });
+  throw notVisible;
+}
+
 export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, bytes, mimeType = ARCHIVE_MIME_TYPE, deps = {} }) {
   const expected = Buffer.from(bytes || []);
   if (expected.length < 1 || expected.length > ARCHIVE_MAX_BYTES) fail("private recovery object has an invalid size");
@@ -1132,14 +1212,32 @@ export async function uploadOrVerifyPrivateObject({ storageTarget, objectPath, b
     if (!downloaded.equals(expected)) fail(`private recovery object differs: ${objectPath}`);
   } else {
     if (!(await isMissingStorageResponse(initial))) storageFailure("private recovery object lookup", initial);
-    const upload = await storageRequest(storageTarget, objectRequestPath(objectPath, ""), {
-      method: "POST",
-      storageOperation: "private recovery object upload",
-      headers: { "content-type": mimeType, "x-upsert": "false" },
-      body: expected,
-    }, deps);
-    if (!upload.ok && upload.status !== 400 && upload.status !== 409) {
-      storageFailure("private recovery object upload", upload);
+    let upload = null;
+    let ambiguousWrite = null;
+    try {
+      upload = await storageRequest(storageTarget, objectRequestPath(objectPath, ""), {
+        method: "POST",
+        storageOperation: "private recovery object upload",
+        headers: { "content-type": mimeType, "x-upsert": "false" },
+        body: expected,
+      }, deps);
+    } catch (error) {
+      if (!isTransientStorageNetworkError(error)) throw error;
+      ambiguousWrite = ambiguousStorageWriteError(objectPath, null, error);
+    }
+    if (upload && !upload.ok && upload.status !== 400 && upload.status !== 409) {
+      if (upload.status !== 504) storageFailure("private recovery object upload", upload);
+      ambiguousWrite = ambiguousStorageWriteError(objectPath, upload);
+    }
+    if (ambiguousWrite) {
+      return reconcileAmbiguousPrivateObject({
+        storageTarget,
+        objectPath,
+        expected,
+        mimeType,
+        deps,
+        cause: ambiguousWrite,
+      });
     }
     uploaded = upload.ok;
     objectExisted = !uploaded;

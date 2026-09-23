@@ -631,6 +631,80 @@ try {
   assert.deepEqual(readAfterWriteCalls.map(({ method }) => method), ["GET", "POST", "GET", "GET"]);
   assert.deepEqual(readAfterWriteSleeps, [250], "read-after-write visibility gets one bounded delay");
 
+  for (const ambiguousOutcome of ["http-504", "network-error"]) {
+    const ambiguousObjectPath = `recovery/v1/sha256/${ambiguousOutcome === "http-504" ? "7" : "8"}${"a".repeat(63)}.jsonl.gz`;
+    const ambiguousCalls = [];
+    let ambiguousObject = null;
+    const ambiguousFetch = async (url, init = {}) => {
+      const method = init.method || "GET";
+      ambiguousCalls.push({ method, path: new URL(url).pathname });
+      if (method === "GET") {
+        return ambiguousObject
+          ? new Response(ambiguousObject, { status: 200, headers: { "content-type": "application/gzip" } })
+          : new Response("missing", { status: 404 });
+      }
+      assert.equal(method, "POST");
+      assert.equal(new Headers(init.headers).get("x-upsert"), "false");
+      ambiguousObject = Buffer.from(init.body);
+      if (ambiguousOutcome === "http-504") return responseJson({ message: "gateway timeout" }, 504);
+      throw Object.assign(new TypeError("temporary network failure after write"), { code: "ECONNRESET" });
+    };
+    const ambiguous = await uploadOrVerifyPrivateObject({
+      storageTarget: resolveStorageTarget("stage", ENV),
+      objectPath: ambiguousObjectPath,
+      bytes: racedBytes,
+      deps: { fetch: ambiguousFetch },
+    });
+    assert.equal(ambiguous.reconciledAfterAmbiguousResponse, true);
+    assert.equal(ambiguous.objectExisted, true);
+    assert.equal(ambiguous.uploaded, false);
+    assert.equal(ambiguous.bytes, racedBytes.length);
+    assert.equal(ambiguous.sha256, crypto.createHash("sha256").update(racedBytes).digest("hex"));
+    assert.deepEqual(ambiguousCalls.map(({ method }) => method), ["GET", "POST", "GET"]);
+  }
+
+  const ambiguousAbsentCalls = [];
+  await assert.rejects(
+    () => uploadOrVerifyPrivateObject({
+      storageTarget: resolveStorageTarget("stage", ENV),
+      objectPath: `recovery/v1/sha256/${"9".repeat(64)}.jsonl.gz`,
+      bytes: racedBytes,
+      deps: {
+        fetch: async (_url, init = {}) => {
+          const method = init.method || "GET";
+          ambiguousAbsentCalls.push(method);
+          if (method === "POST") return responseJson({ message: "gateway timeout" }, 504);
+          return new Response("missing", { status: 404 });
+        },
+        sleep: () => {},
+      },
+    }),
+    (error) => error?.storageState === "write_not_visible",
+  );
+  assert.equal(ambiguousAbsentCalls.filter((method) => method === "POST").length, 1);
+  assert.equal(ambiguousAbsentCalls.includes("PUT"), false);
+
+  const ambiguousMismatchCalls = [];
+  await assert.rejects(
+    () => uploadOrVerifyPrivateObject({
+      storageTarget: resolveStorageTarget("stage", ENV),
+      objectPath: `recovery/v1/sha256/${"0".repeat(64)}.jsonl.gz`,
+      bytes: racedBytes,
+      deps: {
+        fetch: async (_url, init = {}) => {
+          const method = init.method || "GET";
+          ambiguousMismatchCalls.push(method);
+          if (method === "POST") return responseJson({ message: "gateway timeout" }, 504);
+          return method === "GET" && ambiguousMismatchCalls.length > 1
+            ? new Response(Buffer.from("foreign bytes"), { status: 200, headers: { "content-type": "application/gzip" } })
+            : new Response("missing", { status: 404 });
+        },
+      },
+    }),
+    (error) => error?.storageState === "mismatch",
+  );
+  assert.equal(ambiguousMismatchCalls.filter((method) => method === "POST").length, 1);
+
   const notVisibleCalls = [];
   const notVisibleSleeps = [];
   await assert.rejects(

@@ -102,14 +102,6 @@ export const BOT_ONLY_BATCH_15_RECOVERY_REPAIR = Object.freeze({
   currentRecoveryManifestSha256: "028810c3e0706ddb57ab9a850d308eb9f8236ee648114bd8293b378881cc0df5",
   correctedRecoveryManifestSha256: "3e9939bf31359f8e3d48cdd43270441c2bb90e9f7cf4a57ef8e313cadac5495c",
 });
-export const BOT_ONLY_BATCH_9923_RECOVERY_REPAIR = Object.freeze({
-  batchId: "9923",
-  objectPath: "v1/sha256/ce09c2cbe4a9fe6aa23c38e3f695e857454065db2af6ad86f7e0fc5e3e44685f.jsonl.gz",
-  archiveSha256: "ce09c2cbe4a9fe6aa23c38e3f695e857454065db2af6ad86f7e0fc5e3e44685f",
-  recoveryArchivePath: "recovery/v1/sha256/ce09c2cbe4a9fe6aa23c38e3f695e857454065db2af6ad86f7e0fc5e3e44685f.jsonl.gz",
-  recoveryManifestPath: "recovery/v1/sha256/ce09c2cbe4a9fe6aa23c38e3f695e857454065db2af6ad86f7e0fc5e3e44685f.recovery.json.gz",
-});
-
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -164,6 +156,26 @@ export function redactedError(error) {
     .replace(/\b(?:entry|transaction|account|table)[-_ ]?\d+\b/gi, "[redacted-record]");
 }
 
+function aggregateRecoverySummary(source) {
+  const reason = source?.reason;
+  const storage = source?.recoveryStorage || source?.storage || reason?.storage || null;
+  const recoveryState = source?.recoveryState
+    || source?.storageState
+    || reason?.recoveryState
+    || reason?.storageState
+    || storage?.state
+    || null;
+  if (!recoveryState && !storage) return null;
+  return {
+    recovery_state: recoveryState,
+    recovery_archive: storage?.archive || null,
+    recovery_manifest: storage?.manifest || null,
+    required_action: source?.requiredAction
+      || reason?.requiredAction
+      || "Keep cleanup blocked; perform read-only recovery diagnosis and obtain owner-gated approval for the exact batch repair.",
+  };
+}
+
 function aggregateBatchPayload(batch, { automatic = false } = {}) {
   const payload = {
     batch_id: batch.batchId ?? null,
@@ -184,6 +196,8 @@ function aggregateBatchPayload(batch, { automatic = false } = {}) {
     cleanup_receipt: batch.cleanupReceipt || null,
     destructive_go_batch_id: batch.destructiveGoBatchId ?? null,
   };
+  const recovery = aggregateRecoverySummary(batch);
+  if (recovery) Object.assign(payload, recovery);
   if (Object.hasOwn(batch, "recoveryArchivePath")) {
     payload.recovery_archive_path = batch.recoveryArchivePath || null;
   }
@@ -262,6 +276,8 @@ function aggregateAutomaticBatchPayload(batch) {
       ? [...batch.executeSqlstates]
       : [],
   };
+  const recovery = aggregateRecoverySummary(batch);
+  if (recovery) Object.assign(payload, recovery);
   if (batch.automaticActivation === true
     || batch.sourcePolicyId === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID) {
     Object.assign(payload, {
@@ -320,6 +336,7 @@ export function aggregatePayload(result) {
     const sqlstate = result.sqlstate || sqlStateOf(result.reason);
     const automatic = result.mode === "automatic";
     const reason = redactedError(result.reason);
+    const recovery = aggregateRecoverySummary(result);
     return {
       ...base,
       ...(result.mode ? { mode: result.mode } : {}),
@@ -346,6 +363,7 @@ export function aggregatePayload(result) {
           } : {}),
           ...(result.currentBatch ? { current_batch: aggregateBatchPayload(result.currentBatch) } : {}),
         }),
+      ...(recovery || {}),
       reason,
     };
   }
@@ -450,6 +468,10 @@ export function aggregatePayload(result) {
     recovery_manifest_sha256: result.recoveryManifestSha256 || null,
     recovery_archive_path: result.recoveryArchivePath || null,
     recovery_manifest_path: result.recoveryManifestPath || null,
+    ...(Object.hasOwn(result, "recoveryState") ? { recovery_state: result.recoveryState || null } : {}),
+    ...(Object.hasOwn(result, "initialRecoveryState")
+      ? { initial_recovery_state: result.initialRecoveryState || null }
+      : {}),
     dry_run: result.dryRun || null,
     initial_recovery_objects_absent: result.initialRecoveryObjectsAbsent ?? null,
     recovery_verified: result.recoveryVerified ?? null,
@@ -953,6 +975,10 @@ function closedHumanReport({ row, identity, dry, durable, state, mode, deployedC
 }
 
 function automaticRecoveryStorageModified(durable) {
+  if (durable?.recoveryArchive?.reconciledAfterAmbiguousResponse === true
+    || durable?.recoveryManifest?.reconciledAfterAmbiguousResponse === true) {
+    return null;
+  }
   return durable?.recoveryArchive?.uploaded === true
     || durable?.recoveryManifest?.uploaded === true;
 }
@@ -2266,20 +2292,16 @@ function assertKnownBatch15RecoveryRepairTarget(row, durable) {
   return manifestSha256 === expected.currentRecoveryManifestSha256 ? "needs_repair" : "already_repaired";
 }
 
-function assertKnownBatch9923RecoveryBatch(row, expected = BOT_ONLY_BATCH_9923_RECOVERY_REPAIR) {
-  if (expected?.batchId !== "9923"
-    || text(row?.batch_id) !== expected.batchId
-    || text(row?.object_path) !== expected.objectPath
-    || text(row?.compressed_sha256) !== expected.archiveSha256
-    || expected.objectPath !== `v1/sha256/${expected.archiveSha256}.jsonl.gz`
-    || expected.recoveryArchivePath !== buildRecoveryArchiveObjectPath(expected.archiveSha256)
-    || expected.recoveryManifestPath !== buildRecoveryManifestObjectPath(expected.archiveSha256)) {
-    fail("bot-only batch 9923 recovery repair target path or archive SHA is not approved");
+function assertBotOnlyRecoveryRepairBatch(row, batchId) {
+  if (text(row?.batch_id) !== String(batchId)
+    || !SHA256_RE.test(text(row?.compressed_sha256))
+    || text(row?.object_path) !== `v1/sha256/${text(row?.compressed_sha256)}.jsonl.gz`) {
+    fail(`exact bot-only batch ${batchId} recovery repair target path or archive SHA is not derived from the committed row`);
   }
   return true;
 }
 
-function assertBotOnly9923ArchiveCopies(row, main, recovery, batchId = "9923") {
+function assertBotOnlyRecoveryArchiveCopies(row, main, recovery, batchId) {
   if (!Buffer.isBuffer(main?.bytes)) {
     fail(`bot-only batch ${batchId} primary archive download is missing`);
   }
@@ -2301,59 +2323,6 @@ function assertBotOnly9923ArchiveCopies(row, main, recovery, batchId = "9923") {
     fail(`bot-only batch ${batchId} recovery archive bytes, MIME, size, or checksum differs from the primary archive`);
   }
   return mainSha256;
-}
-
-async function uploadOrReconcileBotOnly9923Manifest({ storageTarget, objectPath, bytes, deps = {} }) {
-  const expected = Buffer.from(bytes || []);
-  const expectedSha256 = sha256(expected);
-  try {
-    return await uploadOrVerifyPrivateObject({
-      storageTarget,
-      objectPath,
-      bytes: expected,
-      deps,
-    });
-  } catch (error) {
-    if (!/Storage API private recovery object upload failed with HTTP 504/.test(String(error?.message || ""))) {
-      throw error;
-    }
-
-    let observed;
-    try {
-      observed = await (deps.readPrivateObjectIfExists || readPrivateObjectIfExists)(storageTarget, objectPath, deps);
-    } catch (readError) {
-      readError.recoveryState = DURABLE_RECOVERY_STATES.UNAVAILABLE;
-      readError.storageState = DURABLE_RECOVERY_STATES.UNAVAILABLE;
-      readError.storageMutation = { recoveryStorageModified: null };
-      throw readError;
-    }
-    if (!observed) {
-      error.recoveryState = DURABLE_RECOVERY_STATES.WRITE_NOT_VISIBLE;
-      error.storageState = DURABLE_RECOVERY_STATES.WRITE_NOT_VISIBLE;
-      error.storageMutation = { recoveryStorageModified: null };
-      throw error;
-    }
-    if (observed.mimeType !== "application/gzip"
-      || observed.size !== expected.length
-      || observed.sha256 !== expectedSha256
-      || !observed.bytes.equals(expected)) {
-      const mismatch = new Error(
-        `bot-only batch 9923 recovery manifest after HTTP 504 is not the expected object; observed SHA-256: ${observed.sha256 || "missing"}`,
-      );
-      mismatch.recoveryState = DURABLE_RECOVERY_STATES.MISMATCH;
-      mismatch.storageState = DURABLE_RECOVERY_STATES.MISMATCH;
-      mismatch.storageMutation = { recoveryStorageModified: null };
-      throw mismatch;
-    }
-    return {
-      objectPath,
-      objectExisted: true,
-      uploaded: false,
-      reconciledAfterAmbiguousResponse: true,
-      bytes: observed.size,
-      sha256: observed.sha256,
-    };
-  }
 }
 
 function assertCanonicalBotOnlyRecovery(durable, canonical, batchId) {
@@ -2706,9 +2675,11 @@ export async function runBotOnlyRecoveryRepair({ env = process.env, deps = {}, b
   return result;
 }
 
-export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, deps = {}, batchId = "9923" } = {}) {
-  const exactBatchId = String(batchId);
-  if (exactBatchId !== "9923") fail("bot-only recovery repair is pinned to batch 9923");
+export async function runBotOnlyExactRecoveryRepair({ env = process.env, deps = {}, batchId } = {}) {
+  const exactBatchId = String(batchId ?? "");
+  if (!/^[1-9][0-9]*$/.test(exactBatchId)) {
+    fail("bot-only recovery repair requires one exact positive-integer batch id");
+  }
   if (text(env.CHIPS_LEDGER_BOT_ONLY_EXECUTE) !== ""
     || text(env.CHIPS_LEDGER_BOT_ONLY_AUTOMATIC) !== "") {
     fail("bot-only recovery repair cannot run with execute or automatic gates");
@@ -2727,34 +2698,33 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
     const config = validateStageEnvironment(env, { requireCommitSha: true });
     deployedCommitSha = config.deployedCommitSha;
     const moduleEnv = config.moduleEnv;
-    const expected = deps.botOnlyRecoveryRepairTarget || BOT_ONLY_BATCH_9923_RECOVERY_REPAIR;
-    if (expected?.batchId !== "9923") fail("bot-only batch 9923 recovery repair target is not exact");
     if (deps.sql) sql = deps.sql;
     else {
       sql = postgres(config.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0 });
       ownsSql = true;
     }
-    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-bot-only-9923-repair-"));
+    tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-bot-only-recovery-repair-"));
     ensurePrivateDirectory(tempRoot);
     const storageTarget = deps.storageTarget || resolveStorageTarget("stage", moduleEnv, { singleTarget: true });
     const pruneStore = deps.pruneStore || createPruneStore(sql);
     const { storageDeps, verifyBucket } = createStageStorageDeps(deps);
 
     lockSession = await acquireAdvisoryLock(sql);
-    if (!lockSession) fail("bot-only batch 9923 recovery repair requires the Stage advisory lock");
+    if (!lockSession) fail(`bot-only batch ${exactBatchId} recovery repair requires the Stage advisory lock`);
     const identity = await assertIdentity(sql);
     await assertAdvisoryLock(sql, lockSession);
+    await assertAutomaticStageFence(sql, "bot-only recovery repair");
 
     let exactRow = await loadExactBatch(sql, exactBatchId);
     assertBotOnlyExecuteBatch(exactRow, exactBatchId, identity);
     let row = await pruneStore.getManifest(exactRow.object_path);
-    if (!row) fail("bot-only batch 9923 normalized recovery manifest was not found");
+    if (!row) fail(`bot-only batch ${exactBatchId} normalized recovery manifest was not found`);
     assertBotOnlyActiveManifestMatch(exactRow, row, exactBatchId);
     assertBotOnlyExecuteBatch(row, exactBatchId, identity);
-    assertKnownBatch9923RecoveryBatch(row, expected);
+    assertBotOnlyRecoveryRepairBatch(row, exactBatchId);
     if (row.pruned_at || row.registry_cleaned_at || row.destructive_go_at || row.destructive_go_batch_id
       || row.bot_only_table_exists !== true || row.bot_only_retention_complete_at != null) {
-      fail("bot-only batch 9923 recovery repair requires an unpruned, uncleaned batch without destructive GO");
+      fail(`bot-only batch ${exactBatchId} recovery repair requires an unpruned, uncleaned batch without destructive GO`);
     }
 
     await verifyBucket(storageTarget);
@@ -2763,7 +2733,7 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
     if (initialRecoveryState !== DURABLE_RECOVERY_STATES.PARTIAL
       && initialRecoveryState !== DURABLE_RECOVERY_STATES.COMPLETE) {
       const error = initial.error || new Error(
-        `bot-only batch 9923 recovery repair requires a complete pair or the approved partial state; state is ${initialRecoveryState}`,
+        `bot-only batch ${exactBatchId} recovery repair requires a complete pair or the approved partial state; state is ${initialRecoveryState}`,
       );
       error.recoveryState = initialRecoveryState;
       error.storageState = initialRecoveryState;
@@ -2772,20 +2742,20 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
     }
     if (initialRecoveryState === DURABLE_RECOVERY_STATES.PARTIAL
       && (initial.storage?.archive?.present !== true || initial.storage?.manifest?.present === true)) {
-      fail("bot-only batch 9923 recovery repair requires the recovery archive present and manifest absent");
+      fail(`bot-only batch ${exactBatchId} recovery repair requires the recovery archive present and manifest absent`);
     }
 
     const downloadArchive = deps.downloadPrivateArchive || downloadPrivateArchiveObject;
-    if (initialRecoveryState === DURABLE_RECOVERY_STATES.PARTIAL) {
-      const mainBeforeDry = await downloadArchive(storageTarget, row.object_path, storageDeps);
-      const recoveryBeforeDry = await (storageDeps.readPrivateObjectIfExists || readPrivateObjectIfExists)(
-        storageTarget,
-        expected.recoveryArchivePath,
-        storageDeps,
-      );
-      if (!recoveryBeforeDry) fail("bot-only batch 9923 recovery archive is missing before repair");
-      assertBotOnly9923ArchiveCopies(row, mainBeforeDry, recoveryBeforeDry, exactBatchId);
-    }
+    const recoveryArchivePath = buildRecoveryArchiveObjectPath(row.compressed_sha256);
+    const recoveryManifestPath = buildRecoveryManifestObjectPath(row.compressed_sha256);
+    const mainBeforeDry = await downloadArchive(storageTarget, row.object_path, storageDeps);
+    const recoveryBeforeDry = await (storageDeps.readPrivateObjectIfExists || readPrivateObjectIfExists)(
+      storageTarget,
+      recoveryArchivePath,
+      storageDeps,
+    );
+    if (!recoveryBeforeDry) fail(`bot-only batch ${exactBatchId} recovery archive is missing before repair`);
+    assertBotOnlyRecoveryArchiveCopies(row, mainBeforeDry, recoveryBeforeDry, exactBatchId);
     await assertAdvisoryLock(sql, lockSession);
 
     const dry = await runPruneStep({
@@ -2799,7 +2769,7 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
       verifyBucket,
       storageDeps,
     });
-    if (dry.state !== "ready") fail(`bot-only batch 9923 recovery dry-run did not become ready: ${dry.state}`);
+    if (dry.state !== "ready") fail(`bot-only batch ${exactBatchId} recovery dry-run did not become ready: ${dry.state}`);
     assertAutomaticBotOnlyProofEvidence(row, dry.evidence, exactBatchId);
     assertAutomaticBotOnlyDryRunArchive(row, dry, exactBatchId);
     await assertAdvisoryLock(sql, lockSession);
@@ -2807,18 +2777,24 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
     // Re-load the exact row and active manifest after the dry-run. The row
     // used for the dry-run is never trusted past this point.
     exactRow = await loadExactBatch(sql, exactBatchId);
+    const revalidatedIdentity = await assertIdentity(sql);
+    if (revalidatedIdentity !== identity) {
+      fail(`bot-only batch ${exactBatchId} recovery repair Stage identity changed after the dry-run`);
+    }
     assertBotOnlyExecuteBatch(exactRow, exactBatchId, identity);
     row = await pruneStore.getManifest(exactRow.object_path);
-    if (!row) fail("bot-only batch 9923 normalized recovery manifest disappeared");
+    if (!row) fail(`bot-only batch ${exactBatchId} normalized recovery manifest disappeared`);
     assertBotOnlyActiveManifestMatch(exactRow, row, exactBatchId);
     assertBotOnlyExecuteBatch(row, exactBatchId, identity);
-    assertKnownBatch9923RecoveryBatch(row, expected);
+    assertBotOnlyRecoveryRepairBatch(row, exactBatchId);
     if (row.pruned_at || row.registry_cleaned_at || row.destructive_go_at || row.destructive_go_batch_id
       || row.bot_only_table_exists !== true || row.bot_only_retention_complete_at != null) {
-      fail("bot-only batch 9923 recovery repair lifecycle changed before Storage write");
+      fail(`bot-only batch ${exactBatchId} recovery repair lifecycle changed before Storage write`);
     }
     assertAutomaticBotOnlyProofEvidence(row, dry.evidence, exactBatchId);
     assertAutomaticBotOnlyDryRunArchive(row, dry, exactBatchId);
+    await assertAdvisoryLock(sql, lockSession);
+    await assertAutomaticStageFence(sql, "bot-only recovery repair");
     storageDeps.durableRecoveryContext?.invalidate?.(storageTarget, row);
     const beforeWrite = await inspectDurableRecoveryState(storageTarget, row, storageDeps);
     if (beforeWrite.state === DURABLE_RECOVERY_STATES.COMPLETE) {
@@ -2852,7 +2828,7 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
         || beforeWrite.storage?.archive?.present !== true
         || beforeWrite.storage?.manifest?.present === true) {
         const error = beforeWrite.error || new Error(
-          `bot-only batch 9923 recovery state changed before manifest write; state is ${beforeWrite.state}`,
+          `bot-only batch ${exactBatchId} recovery state changed before manifest write; state is ${beforeWrite.state}`,
         );
         error.recoveryState = beforeWrite.state;
         error.storageState = beforeWrite.state;
@@ -2863,21 +2839,43 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
       const main = await downloadArchive(storageTarget, row.object_path, storageDeps);
       const recoveryArchive = await (storageDeps.readPrivateObjectIfExists || readPrivateObjectIfExists)(
         storageTarget,
-        expected.recoveryArchivePath,
+        recoveryArchivePath,
         storageDeps,
       );
-      if (!recoveryArchive) fail("bot-only batch 9923 recovery archive is missing before manifest write");
-      assertBotOnly9923ArchiveCopies(row, main, recoveryArchive, exactBatchId);
+      if (!recoveryArchive) fail(`bot-only batch ${exactBatchId} recovery archive is missing before manifest write`);
+      assertBotOnlyRecoveryArchiveCopies(row, main, recoveryArchive, exactBatchId);
+      if (!recoveryArchive.bytes.equals(recoveryBeforeDry.bytes)) {
+        fail(`bot-only batch ${exactBatchId} recovery archive changed during repair verification`);
+      }
       const canonical = gzipRecoveryManifest(
         buildCanonicalBotOnlyRecoveryManifest(row, identity, dry.evidence, exactBatchId),
       );
       await assertAdvisoryLock(sql, lockSession);
-      const recoveryManifest = await uploadOrReconcileBotOnly9923Manifest({
-        storageTarget,
-        objectPath: expected.recoveryManifestPath,
-        bytes: canonical.manifestGzipBytes,
-        deps: storageDeps,
-      });
+      await assertAutomaticStageFence(sql, "bot-only recovery repair");
+      let recoveryManifest;
+      try {
+        recoveryManifest = await uploadOrVerifyPrivateObject({
+          storageTarget,
+          objectPath: recoveryManifestPath,
+          bytes: canonical.manifestGzipBytes,
+          deps: storageDeps,
+        });
+      } catch (error) {
+        const observed = error.observed || null;
+        error.storage = {
+          state: error.recoveryState || error.storageState || "unavailable",
+          archive: beforeWrite.storage?.archive || null,
+          manifest: {
+            object_path: recoveryManifestPath,
+            present: Boolean(observed),
+            mime: observed?.mime || observed?.mimeType || null,
+            size: observed?.size ?? null,
+            content_length: observed?.contentLength ?? observed?.size ?? null,
+            sha256: observed?.sha256 || null,
+          },
+        };
+        throw error;
+      }
       await assertAdvisoryLock(sql, lockSession);
       storageDeps.durableRecoveryContext?.invalidate?.(storageTarget, row);
       const durable = await inspectDurableRecovery(storageTarget, row, storageDeps);
@@ -2891,8 +2889,13 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
       if (!durable.archiveBytes.equals(recoveryArchive.bytes)
         || durable.archiveSha256 !== row.compressed_sha256
         || recoveryManifest.sha256 !== durable.manifestSha256) {
-        fail("bot-only batch 9923 recovery verification changed the archive or produced an invalid manifest");
+        fail(`bot-only batch ${exactBatchId} recovery verification changed the archive or produced an invalid manifest`);
       }
+      const storageModified = recoveryManifest.uploaded === true
+        || recoveryManifest.reconciledAfterAmbiguousResponse === true;
+      const recoveryState = storageModified
+        ? "recovery_repaired"
+        : "recovery_already_repaired";
       result = {
         ...botOnlyReport({
           row,
@@ -2903,13 +2906,13 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
           mode: "recovery-repair",
           deployedCommitSha,
         }),
-        state: "recovery_repaired",
-        receipt: "recovery-manifest-repair-only",
+        state: recoveryState,
+        receipt: storageModified ? "recovery-manifest-repair-only" : "recovery-already-repaired-read-only",
         dryRun: dry.state,
         initialRecoveryState,
         recoveryState: DURABLE_RECOVERY_STATES.COMPLETE,
         recoveryVerified: true,
-        storageModified: true,
+        storageModified,
         recoveryManifest,
       };
     }
@@ -2930,7 +2933,7 @@ export async function runBotOnlyBatch9923RecoveryRepair({ env = process.env, dep
     }
   }
   if (failed) {
-    emitAggregateError(failure, { deployedCommitSha, phase: "bot-only-9923-recovery-repair", batchId: exactBatchId });
+    emitAggregateError(failure, { deployedCommitSha, phase: "bot-only-recovery-repair", batchId: exactBatchId });
     throw failure;
   }
   if (result && deployedCommitSha) result = { ...result, deployedCommitSha };
@@ -6459,19 +6462,23 @@ export async function runAutomaticBotOnlyStageAutomation({
                 const recoveryStorageModified = Object.hasOwn(error?.storageMutation || {}, "recoveryStorageModified")
                   ? error.storageMutation.recoveryStorageModified
                   : null;
-                currentBatch = automaticBatchProgress({
-                  row,
-                  identity,
-                  dry,
-                  durable: null,
-                  state: "in_progress",
-                  deployedCommitSha,
-                  archiveStorageModified,
-                  recoveryStorageModified,
-                  dryRunAttempts: dryRunResult.dryRunAttempts,
-                  dryRunRetryCount: dryRunResult.dryRunRetryCount,
-                  dryRunSqlstates: dryRunResult.dryRunSqlstates,
-                });
+                currentBatch = {
+                  ...automaticBatchProgress({
+                    row,
+                    identity,
+                    dry,
+                    durable: null,
+                    state: "in_progress",
+                    deployedCommitSha,
+                    archiveStorageModified,
+                    recoveryStorageModified,
+                    dryRunAttempts: dryRunResult.dryRunAttempts,
+                    dryRunRetryCount: dryRunResult.dryRunRetryCount,
+                    dryRunSqlstates: dryRunResult.dryRunSqlstates,
+                  }),
+                  recoveryState: error.recoveryState || error.storageState || null,
+                  recoveryStorage: error.storage || null,
+                };
                 throw error;
               }
               assertAutomaticBotOnlyDurableRecovery({
@@ -6834,12 +6841,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = 1;
     });
   } else if (argv[0] === "--policy" && argv[1] === "bot-only-7d" && argv[2] === "--repair-recovery") {
-    if (argv.length !== 5 || argv[3] !== "--batch-id" || !["15", "9923"].includes(argv[4])) {
-      throw new Error("--repair-recovery requires --batch-id 15 or 9923");
+    if (argv.length !== 5 || argv[3] !== "--batch-id" || !/^[1-9][0-9]*$/.test(argv[4])) {
+      throw new Error("--repair-recovery requires --batch-id <positive integer>");
     }
     const repair = argv[4] === "15"
       ? runBotOnlyRecoveryRepair({ batchId: "15" })
-      : runBotOnlyBatch9923RecoveryRepair({ batchId: "9923" });
+      : runBotOnlyExactRecoveryRepair({ batchId: argv[4] });
     repair.catch(() => {
       process.exitCode = 1;
     });
@@ -7026,7 +7033,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
     }
   } else {
-    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy stage-ledger-closed-human-table-retention-30d-v1 --diagnose-policy|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id 15|--repair-recovery --batch-id 9923|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--activate --canary-batch-id 334 --activation-confirmation 'ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY 334'|--complete-lifecycle --batch-id <id> --table-id <uuid> --cutoff <timestamp>|--automatic|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]]\n");
+    process.stderr.write("usage: node scripts/ops/chips-ledger-stage-automation.mjs [--policy stage-ledger-auto-retention-30d-v1|stage-ledger-closed-human-table-retention-30d-v1 [--diagnose-recovery [--batch-id <id>]|--repair-recovery --batch-id <id>]|--policy stage-ledger-closed-human-table-retention-30d-v1 --diagnose-policy|--policy bot-only-7d [--prepare-only|--repair-recovery --batch-id <positive integer>|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>'|--automatic]|--policy closed-human-table-30d [--prepare-only|--activate --canary-batch-id 334 --activation-confirmation 'ACTIVATE stage-ledger-closed-human-table-retention-30d-v1 CANARY 334'|--complete-lifecycle --batch-id <id> --table-id <uuid> --cutoff <timestamp>|--automatic|--execute --approved-batch-id <id> --approved-batch-confirmation 'GO <id>']]]\n");
     process.exitCode = 1;
   }
 }

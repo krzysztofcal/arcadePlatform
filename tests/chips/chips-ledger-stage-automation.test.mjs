@@ -22,7 +22,6 @@ import {
   aggregatePayload,
   botOnlyExportArgs,
   botOnlyReport,
-  BOT_ONLY_BATCH_9923_RECOVERY_REPAIR,
   BOT_ONLY_BATCH_15_RECOVERY_REPAIR,
   CLOSED_HUMAN_AUTOMATIC_ACTIVATION,
   CLOSED_HUMAN_AUTOMATIC_MAX_BATCHES_PER_RUN,
@@ -31,7 +30,7 @@ import {
   isClosedHumanManualOnlyPolicy,
   persistDurableRecovery,
   runAutomaticClosedHumanStageAutomation,
-  runBotOnlyBatch9923RecoveryRepair,
+  runBotOnlyExactRecoveryRepair,
   runBotOnlyRecoveryRepair,
   runBotOnlyStageAutomation,
   runClosedHumanPolicyDiagnostic,
@@ -1774,10 +1773,10 @@ function gzipRecoveryManifestForTest(manifest) {
   return gzipSync(Buffer.from(`${stringifyJson(manifest)}\n`, "utf8"), { level: 9, mtime: 0 });
 }
 
-const batch9923ArchiveBytes = Buffer.from("deterministic batch 9923 archive bytes");
+const batch9923ArchiveBytes = Buffer.from("deterministic generic bot-only archive bytes");
 const batch9923ArchiveSha = crypto.createHash("sha256").update(batch9923ArchiveBytes).digest("hex");
 const batch9923TestTarget = Object.freeze({
-  ...BOT_ONLY_BATCH_9923_RECOVERY_REPAIR,
+  batchId: "77",
   objectPath: `v1/sha256/${batch9923ArchiveSha}.jsonl.gz`,
   archiveSha256: batch9923ArchiveSha,
   recoveryArchivePath: buildRecoveryArchiveObjectPath(batch9923ArchiveSha),
@@ -1791,7 +1790,7 @@ const batch9923Evidence = {
 function makeBatch9923Row(overrides = {}) {
   return {
     ...makeCanaryRow(),
-    batch_id: "9923",
+    batch_id: "77",
     object_path: batch9923TestTarget.objectPath,
     compressed_bytes: batch9923ArchiveBytes.length,
     compressed_sha256: batch9923ArchiveSha,
@@ -1808,6 +1807,8 @@ function makeBatch9923RepairHarness({
   manifestPostStatus = 200,
   manifestVisibleAfter504 = true,
   primaryArchiveBytes = batch9923ArchiveBytes,
+  stageFenceActive = true,
+  stageFenceEnforcement = true,
   row = makeBatch9923Row(),
 } = {}) {
   const objects = new Map();
@@ -1857,6 +1858,8 @@ function makeBatch9923RepairHarness({
       if (query.includes("pg_backend_pid")) return [{ backend_pid: session.backendPid }];
       if (query.includes("pg_advisory_unlock")) return [{ pg_advisory_unlock: true }];
       if (query.includes("pg_control_system")) return [{ system_identifier: STAGE_SYSTEM_IDENTIFIER }];
+      if (query.includes("chips_table_fence_is_active")) return [{ active: stageFenceActive }];
+      if (query.includes("chips_table_fence_control")) return [{ enforcement_active: stageFenceEnforcement }];
       if (query.includes("where batch_id = $1")) return [exactSqlRow];
       throw new Error(`unexpected batch-9923 SQL: ${query}`);
     },
@@ -1872,7 +1875,6 @@ function makeBatch9923RepairHarness({
     sql,
     storageTarget,
     tempRoot,
-    botOnlyRecoveryRepairTarget: batch9923TestTarget,
     pruneStore: { getManifest: async () => row },
     verifyBucket: async () => {},
     fetch,
@@ -1899,13 +1901,13 @@ function assertBatch9923RepairWasNonDestructive(harness) {
 
 const batch9923HappyHarness = makeBatch9923RepairHarness();
 const batch9923ArchiveBeforeRepair = Buffer.from(batch9923HappyHarness.objects.get(batch9923TestTarget.recoveryArchivePath));
-const batch9923Happy = await runBotOnlyBatch9923RecoveryRepair({
+const batch9923Happy = await runBotOnlyExactRecoveryRepair({
   env: ENV,
   deps: batch9923HappyHarness.deps,
-  batchId: "9923",
+  batchId: "77",
 });
 assert.equal(batch9923Happy.state, "recovery_repaired");
-assert.equal(batch9923Happy.batchId, "9923");
+assert.equal(batch9923Happy.batchId, "77");
 assert.equal(batch9923Happy.initialRecoveryState, "partial");
 assert.equal(batch9923Happy.recoveryState, "complete");
 assert.equal(batch9923Happy.recoveryVerified, true);
@@ -1922,16 +1924,43 @@ assert.deepEqual(
   [batch9923TestTarget.recoveryManifestPath],
 );
 assertBatch9923RepairWasNonDestructive(batch9923HappyHarness);
+
+const fenceBlockedHarness = makeBatch9923RepairHarness({ stageFenceActive: false });
+await assert.rejects(
+  runBotOnlyExactRecoveryRepair({ env: ENV, deps: fenceBlockedHarness.deps, batchId: "77" }),
+  /active fence and enforcement/,
+);
+assert.equal(fenceBlockedHarness.storageCalls.length, 0, "inactive Stage fence must block before Storage");
+assert.equal(fenceBlockedHarness.pruneCalls.length, 0, "inactive Stage fence must block before dry-run");
+fs.rmSync(fenceBlockedHarness.tempRoot, { recursive: true, force: true });
+
+const alreadyRepairedHarness = makeBatch9923RepairHarness();
+alreadyRepairedHarness.objects.set(
+  batch9923TestTarget.recoveryManifestPath,
+  Buffer.from(batch9923HappyHarness.objects.get(batch9923TestTarget.recoveryManifestPath)),
+);
+const alreadyRepaired = await runBotOnlyExactRecoveryRepair({
+  env: ENV,
+  deps: alreadyRepairedHarness.deps,
+  batchId: "77",
+});
+assert.equal(alreadyRepaired.state, "recovery_already_repaired");
+assert.equal(alreadyRepaired.recoveryState, "complete");
+assert.equal(alreadyRepaired.recoveryVerified, true);
+assert.equal(alreadyRepaired.storageModified, false);
+assert.equal(alreadyRepairedHarness.storageCalls.filter(({ method }) => method === "POST").length, 0);
+assertBatch9923RepairWasNonDestructive(alreadyRepairedHarness);
+fs.rmSync(alreadyRepairedHarness.tempRoot, { recursive: true, force: true });
 fs.rmSync(batch9923HappyHarness.tempRoot, { recursive: true, force: true });
 
 const batch9923Ambiguous504Harness = makeBatch9923RepairHarness({
   manifestPostStatus: 504,
   manifestVisibleAfter504: true,
 });
-const batch9923Ambiguous504 = await runBotOnlyBatch9923RecoveryRepair({
+const batch9923Ambiguous504 = await runBotOnlyExactRecoveryRepair({
   env: ENV,
   deps: batch9923Ambiguous504Harness.deps,
-  batchId: "9923",
+  batchId: "77",
 });
 assert.equal(batch9923Ambiguous504.state, "recovery_repaired");
 assert.equal(batch9923Ambiguous504.recoveryState, "complete");
@@ -1946,7 +1975,7 @@ const batch9923MismatchHarness = makeBatch9923RepairHarness({
   recoveryArchiveBytes: Buffer.from("different recovery archive bytes"),
 });
 await assert.rejects(
-  runBotOnlyBatch9923RecoveryRepair({ env: ENV, deps: batch9923MismatchHarness.deps, batchId: "9923" }),
+  runBotOnlyExactRecoveryRepair({ env: ENV, deps: batch9923MismatchHarness.deps, batchId: "77" }),
   /recovery archive.*(?:checksum|bytes|match)/i,
 );
 assert.equal(batch9923MismatchHarness.storageCalls.filter(({ method }) => method === "POST").length, 0);
@@ -1959,7 +1988,7 @@ for (const unsupported of [
   makeBatch9923RepairHarness({ includeRecoveryArchive: false, includeRecoveryManifest: true }),
 ]) {
   await assert.rejects(
-    runBotOnlyBatch9923RecoveryRepair({ env: ENV, deps: unsupported.deps, batchId: "9923" }),
+    runBotOnlyExactRecoveryRepair({ env: ENV, deps: unsupported.deps, batchId: "77" }),
     /recovery state|recovery archive|partial|missing/i,
   );
   assert.equal(unsupported.storageCalls.filter(({ method }) => method === "POST").length, 0);
@@ -1973,7 +2002,7 @@ const batch9923504AbsentHarness = makeBatch9923RepairHarness({
   manifestVisibleAfter504: false,
 });
 await assert.rejects(
-  runBotOnlyBatch9923RecoveryRepair({ env: ENV, deps: batch9923504AbsentHarness.deps, batchId: "9923" }),
+  runBotOnlyExactRecoveryRepair({ env: ENV, deps: batch9923504AbsentHarness.deps, batchId: "77" }),
   /504|not visible|manifest/i,
 );
 assert.equal(batch9923504AbsentHarness.storageCalls.filter(({ method }) => method === "POST").length, 1);

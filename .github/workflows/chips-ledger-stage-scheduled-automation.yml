@@ -28,11 +28,11 @@ on:
         required: false
         type: string
       bot_only_recovery_batch_id:
-        description: Exact Stage bot-only recovery batch_id (must be 9923 for the incident repair)
+        description: Exact positive-integer Stage bot-only recovery batch_id for owner-gated recovery repair
         required: false
         type: string
       bot_only_recovery_confirmation:
-        description: Exact REPAIR 9923 confirmation for the owner-gated incident repair
+        description: Exact REPAIR <batch_id> confirmation for the owner-gated recovery repair
         required: false
         type: string
       escrow_retention_recovery_object_path:
@@ -280,7 +280,7 @@ jobs:
             --repair-recovery \
             --batch-id "$STAGE_30D_RECOVERY_BATCH_ID"
 
-      - name: Repair exact bot-only 7-day durable recovery for batch 9923
+      - name: Repair exact bot-only 7-day durable recovery
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-recovery-repair' }}
         env:
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
@@ -293,8 +293,11 @@ jobs:
           test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
           test "$GITHUB_REF" = "refs/heads/main"
           test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
-          test "$BOT_ONLY_RECOVERY_BATCH_ID" = "9923"
-          test "$BOT_ONLY_RECOVERY_CONFIRMATION" = "REPAIR 9923"
+          if [[ ! "$BOT_ONLY_RECOVERY_BATCH_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "bot_only_recovery_batch_id must be a positive integer" >&2
+            exit 1
+          fi
+          test "$BOT_ONLY_RECOVERY_CONFIRMATION" = "REPAIR $BOT_ONLY_RECOVERY_BATCH_ID"
           test -z "${CHIPS_LEDGER_BOT_ONLY_EXECUTE:-}"
           test -z "${CHIPS_LEDGER_BOT_ONLY_AUTOMATIC:-}"
           node scripts/ops/chips-ledger-stage-automation.mjs \

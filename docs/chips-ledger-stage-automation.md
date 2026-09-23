@@ -53,7 +53,7 @@ ongoing operations:
 | `bot-only-7d-summary-diagnostic` | Read-only bot-only table identity summary diagnostic |
 | `bot-only-7d-selector-diagnostic` | Read-only discovery and one-table exact revalidation diagnostic for the PR #959 bot-only selectors; allowed while the global automation gate is `0` |
 | `bot-only-7d-automatic` | Run the activated bot-only 7-day automatic cleanup on demand |
-| `bot-only-7d-recovery-repair` | Owner/main-only, exact incident repair for bot-only batch `9923`; creates only its missing recovery manifest |
+| `bot-only-7d-recovery-repair` | Owner/main-only, generic exact-batch recovery repair; creates only an absent recovery manifest after all safety checks |
 | `closed-human-30d-recovery-diagnostic` | Read-only diagnosis of the closed-human 30-day cycle or an exact batch |
 | `closed-human-30d-recovery-repair` | Owner-only, exact-batch recovery repair for a proven/unpruned closed-human batch with missing durable recovery |
 | `escrow-retention-audit` | Read-only Stage escrow retention audit |
@@ -135,13 +135,17 @@ is followed by private download and byte/SHA verification for both objects.
 Execute is refused until both copies match the expected bytes. Restore uses
 these recovery objects and does not require the primary archive object.
 
-Authenticated Storage `GET` requests use at most three total attempts with a
-short backoff, and retry only 5xx responses or transient network failures.
+Authenticated Storage `GET` requests use at most four total attempts with a
+short backoff (and the existing bounded six-attempt 429/SlowDown path), and
+retry only transient 5xx responses or transient network failures.
 Client/auth/not-found responses are not retried during an ordinary read, except
 that a not-found result from the bounded post-create verification read may be
 rechecked for read-after-write visibility. The create-only Storage `POST` is
-never retried. Every successful download still requires the expected MIME type
-and byte/SHA-256 verification.
+never retried. If the recovery-object create returns HTTP 504 or a transient
+network error, the caller performs bounded read reconciliation and accepts the
+write only when the private object exactly matches the expected MIME, size,
+bytes and SHA-256. Every successful download still requires the expected MIME
+type and byte/SHA-256 verification.
 
 Automatic error reports retain completed batches and the current in-progress
 batch. They distinguish `archive_storage_modified` from
@@ -154,62 +158,63 @@ such as `both_missing`, `partial`, `mismatch` or `write_not_visible`.
 The local working bundle remains `0700` with `0600` files. A partial or
 different durable copy is fail-closed.
 
-## Bot-only batch 9923 incident repair
+## Issue #1014 Storage audit and bot-only recovery repair
 
-Run `#1967` (2026-09-23) received HTTP 504 while creating the private
-recovery object for batch `9923`. The subsequent scheduled runs correctly
-reported `durable recovery copy is partial`: the committed primary archive and
-the recovery archive were present, but the recovery manifest was not. The
-batch has verified proof, a ready dry-run, no prune or cleanup receipt, no
-destructive GO, and `execute_attempts: 0`.
+The 2026-09-23 Stage audit was read-only. The private
+`chips-ledger-archive` bucket contains 9,933 primary archives (28,230,759
+bytes), 9,929 recovery archives (27,040,829 bytes), 9,929 recovery manifests
+(10,532,641 bytes), and 10,267 other objects (14,372,846 bytes). The measured
+24-hour growth was 519 primary/recovery archives and 519 manifests. The
+Storage configuration reports a 50 MiB global file limit and the bucket
+reports a 6 MiB object limit; the available project response did not expose a
+plan quota, usage ceiling or saturation metric. In the 24-hour archive-path
+log window there were no HTTP 429 or 5xx responses; the observed counts were
+2,038 successful uploads, 2,814 authenticated object reads, 2,715 bucket
+reads, and the expected authenticated-info responses.
 
-The incident-specific repair is deliberately narrower than the existing
-batch-15 repair. It accepts only the Stage bot-only batch `9923` and only the
-state where the recovery archive is present and the recovery manifest is
-absent. Before the one possible write it revalidates the Stage identity,
-advisory lock, exact committed row, active manifest, immutable proof, and
-unpruned lifecycle. It privately downloads the primary archive and surviving
-recovery archive, checks `application/gzip`, committed size, SHA-256, and
-byte-for-byte equality, and never overwrites the archive.
+The failed run for batch `9923` recorded an ambiguous HTTP 504 and a partial
+recovery state: the primary archive and recovery archive existed, while only
+the recovery manifest was absent. The Storage log window did not contain the
+504 itself, so it cannot prove whether the gateway or the Storage write
+boundary produced the timeout. The audit therefore found no confirmed
+capacity, request-rate or Storage-overload problem and does not change the
+schedule, batch bound, or number of copies. Four old primary-only gaps for
+batches 2–5 are outside this incident and are not repaired automatically.
 
-The repair creates only:
+The reusable owner-gated entry point is
+`runBotOnlyExactRecoveryRepair()` in
+`scripts/ops/chips-ledger-stage-automation.mjs`. The historical batch-15
+known-content compatibility path remains separate. For any positive exact
+batch ID, the generic repair accepts only a committed, verified, unpruned
+bot-only row with no destructive GO, active Stage identity and fence, the
+advisory lock, a matching active manifest, and a ready dry-run. It supports
+only the unambiguous `partial` state in which the derived recovery archive is
+present and the derived recovery manifest is absent; a complete pair is a
+read-only idempotent resume.
 
-```text
-recovery/v1/sha256/ce09c2cbe4a9fe6aa23c38e3f695e857454065db2af6ad86f7e0fc5e3e44685f.recovery.json.gz
-```
+Before the possible write it re-downloads the primary archive and the
+recovery archive and compares MIME, size, bytes and SHA-256. It creates only
+the derived recovery manifest with `application/gzip` and `x-upsert:false`,
+then re-downloads and validates both recovery objects and the canonical
+manifest. Existing, mismatched, unavailable, both-missing, or write-not-visible
+states fail closed. A 504 or transient network error after the create is
+reconciled with bounded GETs; the POST is never blindly repeated. The repair
+never runs prune execute, writes a destructive GO, cleans a registry, deletes
+or overwrites Storage objects, or mutates the database.
 
-The request uses `x-upsert:false`. If that create-only request returns HTTP
-504, the repair does not assume failure and does not issue another POST. It
-privately rereads the manifest and accepts the result only when MIME, size,
-bytes, and SHA-256 exactly match the canonical manifest. An absent, different,
-or unavailable object remains blocked. Afterward both recovery objects are
-read back and verified as a complete canonical pair. The repair invokes no
-cleanup, prune execute, GO, manifest reset, delete, or database mutation.
-
-The owner-gated manual dispatch requires all of the following inputs:
+The workflow remains owner/main-only and is not selected by the schedule. Its
+generic dispatch contract is:
 
 ```text
 mode: bot-only-7d-recovery-repair
-bot_only_recovery_batch_id: 9923
-bot_only_recovery_confirmation: REPAIR 9923
-```
-
-The workflow must run from the canonical repository on `main`, pass the
-read-only Stage fence preflight, and have empty bot-only execute/automatic
-gates. The equivalent CLI is:
-
-```bash
-node scripts/ops/chips-ledger-stage-automation.mjs \
-  --policy bot-only-7d \
-  --repair-recovery \
-  --batch-id 9923
+bot_only_recovery_batch_id: <positive integer>
+bot_only_recovery_confirmation: REPAIR <same batch id>
 ```
 
 Do not run this mode until the owner has reviewed the draft PR and explicitly
-authorizes the Stage write. After the repair, independently confirm both
-private recovery objects and then observe the next normal bot-only automation
-run; the repair itself never performs destructive cleanup and does not alter
-eligibility or the 15-minute schedule.
+authorizes the Stage write. After a repair, independently verify both private
+recovery objects and observe the next normal bot-only run. No automatic repair
+policy is enabled by this change.
 
 ## 30-day controlled recovery diagnostic/repair
 

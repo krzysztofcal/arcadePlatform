@@ -71,7 +71,7 @@ const RETAINED_STEPS = [
   "Repair exact existing 30-day durable recovery",
   "Run bot-only 7-day summary diagnostic",
   "Run bot-only 7-day selector diagnostic",
-  "Repair exact bot-only 7-day durable recovery for batch 9923",
+  "Repair exact bot-only 7-day durable recovery",
   "Diagnose closed human-table 30-day durable recovery",
   "Repair exact closed human-table 30-day durable recovery",
   "Run activated bot-only 7-day Stage automation",
@@ -136,6 +136,9 @@ for (const retired of RETIRED_MODES) {
 }
 
 assert.doesNotMatch(workflow, /Repair exact bot-only 7-day recovery for batch 15/);
+assert.doesNotMatch(workflow, /must be 9923|REPAIR 9923 confirmation/);
+assert.match(workflow, /BOT_ONLY_RECOVERY_BATCH_ID.*positive integer|positive exact Stage bot-only recovery batch_id/i);
+assert.match(workflow, /test "\$BOT_ONLY_RECOVERY_CONFIRMATION" = "REPAIR \$BOT_ONLY_RECOVERY_BATCH_ID"/);
 assert.doesNotMatch(workflow, /bot-only 7-day prepare-only Stage automation/);
 assert.doesNotMatch(workflow, /Execute approved bot-only 7-day Stage canary/);
 assert.doesNotMatch(workflow, /legacy Stage allowlist prepare-only|legacy Stage allowlist orchestrator|Audit legacy Stage allowlist batch 13|Execute approved legacy Stage batch 13/i);
@@ -329,18 +332,18 @@ assert.match(repairRun, /stage_30d_recovery_batch_id must be a positive integer/
 assert.match(repairRun, /--policy stage-ledger-auto-retention-30d-v1 \\\n\s+--repair-recovery \\\n\s+--batch-id "\$STAGE_30D_RECOVERY_BATCH_ID"/);
 assert.doesNotMatch(repairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
 
-const botOnly9923RepairRun = workflow.match(
-  /- name: Repair exact bot-only 7-day durable recovery for batch 9923[\s\S]*?(?=\n\s+- name:|\s*$)/,
+const botOnlyRecoveryRepairRun = workflow.match(
+  /- name: Repair exact bot-only 7-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,
 )[0];
-assert.match(botOnly9923RepairRun, /inputs\.mode == 'bot-only-7d-recovery-repair'/);
-assert.match(botOnly9923RepairRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
-assert.match(botOnly9923RepairRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
-assert.match(botOnly9923RepairRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
-assert.match(botOnly9923RepairRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
-assert.match(botOnly9923RepairRun, /test "\$BOT_ONLY_RECOVERY_BATCH_ID" = "9923"/);
-assert.match(botOnly9923RepairRun, /test "\$BOT_ONLY_RECOVERY_CONFIRMATION" = "REPAIR 9923"/);
-assert.match(botOnly9923RepairRun, /--policy bot-only-7d \\\n\s+--repair-recovery \\\n\s+--batch-id "\$BOT_ONLY_RECOVERY_BATCH_ID"/);
-assert.doesNotMatch(botOnly9923RepairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
+assert.match(botOnlyRecoveryRepairRun, /inputs\.mode == 'bot-only-7d-recovery-repair'/);
+assert.match(botOnlyRecoveryRepairRun, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(botOnlyRecoveryRepairRun, /test "\$GITHUB_REPOSITORY" = "krzysztofcal\/arcadePlatform"/);
+assert.match(botOnlyRecoveryRepairRun, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
+assert.match(botOnlyRecoveryRepairRun, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(botOnlyRecoveryRepairRun, /bot_only_recovery_batch_id must be a positive integer/);
+assert.match(botOnlyRecoveryRepairRun, /test "\$BOT_ONLY_RECOVERY_CONFIRMATION" = "REPAIR \$BOT_ONLY_RECOVERY_BATCH_ID"/);
+assert.match(botOnlyRecoveryRepairRun, /--policy bot-only-7d \\\n\s+--repair-recovery \\\n\s+--batch-id "\$BOT_ONLY_RECOVERY_BATCH_ID"/);
+assert.doesNotMatch(botOnlyRecoveryRepairRun, /--diagnose-recovery|--prepare-only|--execute|--automatic|--register-proof|storeArchive|ensureArchiveBucket/);
 
 const closedHumanDiagnosticRun = workflow.match(
   /- name: Diagnose closed human-table 30-day durable recovery[\s\S]*?(?=\n\s+- name:|\s*$)/,

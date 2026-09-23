@@ -350,6 +350,50 @@ for (const secret of [sampleDbUrl, samplePassword, sampleJwt, sampleSecret]) {
   assert.equal(capturedAutomaticError.summary.includes(secret), false);
 }
 
+const recoverySummaryError = Object.assign(new Error("durable recovery copy is partial"), {
+  recoveryState: "partial",
+  storage: {
+    state: "partial",
+    archive: {
+      object_path: "recovery/v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+      present: true,
+      mime: "application/gzip",
+      size: 1766,
+      content_length: 1766,
+      sha256: "a".repeat(64),
+    },
+    manifest: {
+      object_path: "recovery/v1/sha256/" + "a".repeat(64) + ".recovery.json.gz",
+      present: false,
+      mime: null,
+      size: null,
+      content_length: null,
+      sha256: null,
+    },
+  },
+});
+const recoverySummary = aggregatePayload({
+  state: "error",
+  mode: "automatic",
+  batchId: "77",
+  objectPath: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+  reason: recoverySummaryError,
+});
+assert.equal(recoverySummary.batch_id, "77");
+assert.equal(recoverySummary.recovery_state, "partial");
+assert.equal(recoverySummary.recovery_archive.present, true);
+assert.equal(recoverySummary.recovery_manifest.present, false);
+assert.match(recoverySummary.required_action, /owner-gated|read-only/i);
+const capturedRecoverySummary = captureAggregateSummary({
+  state: "error",
+  mode: "automatic",
+  batchId: "77",
+  objectPath: "v1/sha256/" + "a".repeat(64) + ".jsonl.gz",
+  reason: recoverySummaryError,
+});
+assert.equal(capturedRecoverySummary.report.recovery_manifest.present, false);
+assert.equal(parseSummary(capturedRecoverySummary.summary), capturedRecoverySummary.line);
+
 const automaticProcessedBatch = {
   batchId: "batch-a",
   state: "cleaned",
