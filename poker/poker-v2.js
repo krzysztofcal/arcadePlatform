@@ -1778,6 +1778,7 @@
     var publicObj = isObject(payload.public) ? payload.public : {};
     var hand = payload.hand || publicObj.hand || {};
     var turn = payload.turn || publicObj.turn || {};
+    if (hand.status != null && typeof hand.status !== 'string'){ clearCelebration(); return; }
     var nextHand = extractSnapshotHandId(payload);
     var due = readSnapshotField(payload, publicObj, 'settlementRevealDueAt');
     var dueAt = normalizeSettlementRevealDueAt(due.value);
@@ -5971,7 +5972,7 @@
     if (els.actionBar) els.actionBar.addEventListener('pointerdown', startCelebrationExit);
     document.addEventListener('visibilitychange', function(){ if (document.hidden) clearCelebration(); });
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (motion && motion.addEventListener) motion.addEventListener('change', clearCelebration);
+    if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches) clearCelebration(); });
     renderSocialPreferences();
     document.addEventListener('langchange', function(){ buildReactionMenu(); renderSocialPreferences(); render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;

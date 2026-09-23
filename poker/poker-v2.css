@@ -626,6 +626,21 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 @keyframes poker-celebration-ring{0%{opacity:0;transform:rotate(-18deg) scale(.55);}30%,75%{opacity:.9;}100%{opacity:.25;transform:rotate(6deg) scale(1.06);}}
 @keyframes poker-celebration-spark{0%{opacity:0;transform:translate(0,0) scale(.4);}20%{opacity:.85;}100%{opacity:0;transform:translate(var(--x),var(--y)) scale(.3);}}
 @keyframes poker-celebration-exit{from{opacity:.14;transform:translateX(-50%) scale(1);}to{opacity:0;transform:translateX(-50%) translateY(-5px) scale(1.08);}}
-@media (min-width:720px){.poker-celebration{left:29%;top:35%;width:28%;height:130px;}.poker-celebration-preview{top:124px;}}
-@media (orientation:landscape) and (max-height:600px){.poker-celebration{left:28%;top:29%;height:100px;width:28%;}.poker-celebration__hero{height:46px;}.poker-celebration__card{width:29px;height:40px;font-size:13px;}.poker-celebration__title{font-size:17px;}.poker-celebration__avatar{width:40px;height:40px;font-size:22px;}.poker-celebration__chip{width:43px;height:43px;}.poker-celebration-preview{top:64px;}.poker-celebration-preview__panel{grid-template-columns:1fr 1fr;width:260px;}.poker-celebration-preview__panel small{grid-column:1/-1;}}
-@media (prefers-reduced-motion:reduce){.poker-celebration{display:none!important;}}
+@media (min-width:720px){
+.poker-celebration{left:29%;top:35%;width:28%;height:130px;}
+.poker-celebration-preview{top:124px;}
+}
+@media (orientation:landscape) and (max-height:600px){
+.poker-celebration{left:28%;top:29%;height:100px;width:28%;}
+.poker-celebration__hero{height:46px;}
+.poker-celebration__card{width:29px;height:40px;font-size:13px;}
+.poker-celebration__title{font-size:17px;}
+.poker-celebration__avatar{width:40px;height:40px;font-size:22px;}
+.poker-celebration__chip{width:43px;height:43px;}
+.poker-celebration-preview{top:64px;}
+.poker-celebration-preview__panel{grid-template-columns:1fr 1fr;width:260px;}
+.poker-celebration-preview__panel small{grid-column:1/-1;}
+}
+@media (prefers-reduced-motion:reduce){
+.poker-celebration{display:none!important;}
+}
