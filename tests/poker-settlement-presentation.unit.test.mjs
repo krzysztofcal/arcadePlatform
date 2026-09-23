@@ -61,6 +61,10 @@ test('celebrations prove a royal from legal cards, prioritize it and reject ordi
   assert.equal(hooks.selectCelebrationForSettlement(input), null, 'never consult private cards');
   input.communityCards = ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'H' }));
   assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'royal', 'board royal is public proof');
+  input.showdown.reason = 'all_folded';
+  input.showdown.potsAwarded[0].eligibleUserIds = ['a'];
+  input.settlementPresentation = project(hooks, input.showdown, input.handSettlement.payouts);
+  assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'royal', 'confirmed fold winner can prove a public board royal');
   input.handId = 'other';
   assert.equal(hooks.selectCelebrationForSettlement(input), null);
 });

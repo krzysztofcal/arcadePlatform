@@ -416,7 +416,7 @@
         panel.hidden = true;
         button.setAttribute('aria-expanded', 'false');
         button.focus();
-        if (entry[0] === 'close' || !isSeatedAtLiveTable() || !isWsReady() || getActiveWinnerReveal()) return;
+        if (entry[0] === 'close' || !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate || getActiveWinnerReveal()) return;
         showCelebration({ kind: entry[0] }, { demo: true });
       });
       panel.appendChild(choice);
@@ -1712,13 +1712,16 @@
       || input.showdown.handId !== input.handId || input.handSettlement.handId !== input.handId
       || !presentation || !presentation.valid || presentation.handId !== input.handId) return null;
     var awards = Object.create(null);
+    var confirmedWinners = Object.create(null);
     presentation.pots.forEach(function(pot){
-      if ((pot.kind !== 'main' && pot.kind !== 'side') || pot.eligibleUserIds.length < 2) return;
+      if (pot.kind !== 'main' && pot.kind !== 'side') return;
       pot.recipients.forEach(function(recipient){
-        if (recipient.amount > 0) awards[recipient.userId] = (awards[recipient.userId] || 0) + recipient.amount;
+        if (recipient.amount <= 0) return;
+        confirmedWinners[recipient.userId] = true;
+        if (pot.eligibleUserIds.length >= 2) awards[recipient.userId] = (awards[recipient.userId] || 0) + recipient.amount;
       });
     });
-    var winners = Object.keys(awards).sort();
+    var winners = Object.keys(confirmedWinners).sort();
     for (var i = 0; i < winners.length; i++){
       var userId = winners[i];
       var revealed = input.revealedShowdownCardsByUserId && input.revealedShowdownCardsByUserId[userId];
@@ -2116,6 +2119,7 @@
       && previousPhase !== 'SETTLED'
       && state.phase === 'SETTLED';
     syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null, settlementPairComplete);
+    if (celebration && !celebration.demo && (!state.settlementPresentation || !state.settlementPresentation.valid)) clearCelebration();
     celebrateSettlement(frame, incomingVersion, liveSettlementTransition);
     state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
     // While a snapshot recovery timeout is pending, snapshots must not overwrite a
@@ -4695,7 +4699,7 @@
   }
 
   function render(){
-    if (els.celebrationPreview) els.celebrationPreview.hidden = !isSeatedAtLiveTable() || !isWsReady();
+    if (els.celebrationPreview) els.celebrationPreview.hidden = !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate;
     if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
     renderCommunityCards();
     renderSeats();
@@ -5443,6 +5447,7 @@
     els.celebrationsPreference = document.getElementById('pokerCelebrationsPreference');
     els.celebrationsPreferenceLabel = document.getElementById('pokerCelebrationsPreferenceLabel');
     els.celebration = document.getElementById('pokerCelebration');
+    els.actionBar = document.getElementById('pokerActionBar');
     els.autoRebuyPreference = document.getElementById('pokerAutoRebuyPreference');
     els.autoRebuyPreferenceWrap = document.getElementById('pokerAutoRebuyPreferenceWrap');
     els.autoRebuyPreferenceLabel = document.querySelector ? document.querySelector('#pokerAutoRebuyPreferenceWrap label span') : null;
@@ -5963,11 +5968,12 @@
     syncSocialPreferencesIdentity(null);
     if (els.celebrationsPreference) els.celebrationsPreference.addEventListener('change', function(){ updateSocialPreference('celebrationsEnabled', els.celebrationsPreference.checked); });
     if (window.addEventListener) window.addEventListener('pagehide', clearCelebration);
+    if (els.actionBar) els.actionBar.addEventListener('pointerdown', startCelebrationExit);
     document.addEventListener('visibilitychange', function(){ if (document.hidden) clearCelebration(); });
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motion && motion.addEventListener) motion.addEventListener('change', clearCelebration);
     renderSocialPreferences();
-    document.addEventListener('langchange', function(){ buildReactionMenu(); render(); });
+    document.addEventListener('langchange', function(){ buildReactionMenu(); renderSocialPreferences(); render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
     if (!tableId){
       startDemoMode();
