@@ -18,7 +18,7 @@ test('Mute button toggles aria-pressed and title', async ({ page }) => {
     } catch (_) {}
   });
 
-  await page.goto(fileUrl(gamePath));
+  await page.goto(fileUrl(gamePath), { waitUntil: 'domcontentloaded' });
 
   const mute = page.locator('#btnMute');
   await expect(mute).toBeVisible();
@@ -42,7 +42,7 @@ test('Fullscreen buttons sanity (enter/exit visibility)', async ({ page }) => {
   const gamePath = path.join(__dirname, '..', 'game_cats.html');
   expect(fs.existsSync(gamePath)).toBeTruthy();
 
-  await page.goto(fileUrl(gamePath));
+  await page.goto(fileUrl(gamePath), { waitUntil: 'domcontentloaded' });
 
   const enter = page.locator('#btnEnterFs');
   const exit = page.locator('#btnExitFs');

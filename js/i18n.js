@@ -364,6 +364,7 @@ homeBonusLoadError: { en: 'Could not load available bonuses.', pl: 'Nie udało s
     pokerSettlementComplete: { en: 'Settlement complete', pl: 'Rozliczenie zakończone' },
     pokerSettlementSummaryAria: { en: 'Hand settlement', pl: 'Rozliczenie rozdania' },
     pokerSettlementPlayer: { en: 'Player', pl: 'Gracz' },
+    pokerCelebrationWinAmount: { en: 'WIN {amount} CH', pl: 'WYGRANA {amount} CH' },
     pokerReaction_hello: { en: 'Hello', pl: 'Cześć' },
     pokerReaction_nice_hand: { en: 'Nice hand!', pl: 'Dobre rozdanie!' },
     pokerReaction_well_played: { en: 'Well played!', pl: 'Dobra gra!' },
