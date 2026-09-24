@@ -283,6 +283,7 @@
 
   var REACTION_HISTORY_LIMIT = 25;
   var REACTION_HISTORY_TTL_MS = 10 * 60 * 1000;
+  var CELEBRATION_ANCHOR_LOST_FADE_MS = 140;
   var SOCIAL_PREFERENCES_STORAGE_PREFIX = 'kcswh:poker-social-preferences:v1:';
   var GUEST_CELEBRATIONS_STORAGE_KEY = 'kcswh:poker-celebrations:guest:v1';
   var AUTO_REBUY_STORAGE_PREFIX = 'kcswh:poker-auto-rebuy:v1:';
@@ -340,42 +341,66 @@
     els.celebration.classList.add('poker-celebration--deemphasized');
   }
 
+  function fadeLostCelebrationAnchor(){
+    if (!celebration || !celebration.started || celebration.anchorLost) return false;
+    var remaining = celebration.endsAtMs - Date.now();
+    if (remaining <= 0){ clearCelebration(); return false; }
+    celebration.anchorLost = true;
+    if (celebrationTimer != null) window.clearTimeout(celebrationTimer);
+    els.celebration.classList.add('poker-celebration--anchor-lost');
+    celebrationTimer = window.setTimeout(clearCelebration, Math.min(CELEBRATION_ANCHOR_LOST_FADE_MS, remaining));
+    return false;
+  }
+
   function celebrationSeatRect(userId){
     if (!userId) return null;
     var seats = state.seats.filter(function(seat){ return seat && seat.userId === userId; });
     if (seats.length !== 1) return null;
     var avatar = renderedSeatAvatars[seats[0].seatNo];
-    if (!avatar || avatar.dataset.userId !== userId || !avatar.isConnected || typeof avatar.getBoundingClientRect !== 'function') return null;
+    if (!avatar || avatar.dataset.userId !== userId || !avatar.isConnected || typeof avatar.getBoundingClientRect !== 'function'
+      || !avatar.parentNode || typeof avatar.parentNode.getBoundingClientRect !== 'function') return null;
     var rect = avatar.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0 || rect.left < 0 || rect.top < 0
+    var seat = avatar.parentNode.getBoundingClientRect();
+    if (!rect || !seat || !Number.isFinite(rect.left) || !Number.isFinite(rect.top) || !Number.isFinite(rect.right) || !Number.isFinite(rect.bottom)
+      || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)
+      || !Number.isFinite(seat.left) || !Number.isFinite(seat.right) || !Number.isFinite(seat.width) || !Number.isFinite(seat.height)
+      || rect.width <= 0 || rect.height <= 0 || seat.width <= 0 || seat.height <= 0 || rect.left < 0 || rect.top < 0
       || rect.right > window.innerWidth || rect.bottom > window.innerHeight) return null;
-    return { avatar: rect, seat: avatar.parentNode.getBoundingClientRect(), seatNo: seats[0].seatNo };
+    return { avatar: rect, seat: seat, seatNo: seats[0].seatNo };
   }
 
   function positionCelebration(){
-    if (!celebration || celebration.exiting) return false;
+    if (!celebration || celebration.anchorLost) return false;
     if (celebration.own) return true;
     var targetSeats = state.seats.filter(function(seat){ return seat && seat.userId === celebration.userId; });
     if (targetSeats.length !== 1){ clearCelebration(); return false; }
+    if (targetSeats[0].seatNo !== celebration.targetSeatNo){ clearCelebration(); return false; }
+    var currentAvatar = renderedSeatAvatars[celebration.targetSeatNo];
+    if (currentAvatar && currentAvatar.isConnected && currentAvatar.dataset.userId !== celebration.userId){ clearCelebration(); return false; }
     var anchor = celebrationSeatRect(celebration.userId);
-    if (!anchor) return false;
+    if (!anchor) return celebration.started ? fadeLostCelebrationAnchor() : false;
     if (anchor.seatNo !== celebration.targetSeatNo){ clearCelebration(); return false; }
     // Stay beside the whole seat, leaving its avatar, name and payout readable.
     var rightSpace = window.innerWidth - anchor.seat.right - 16;
     var leftSpace = anchor.seat.left - 16;
     var onRight = rightSpace >= leftSpace;
     var width = Math.min(160, onRight ? rightSpace : leftSpace);
-    if (width < 80) return false;
+    if (width < 80 || !Number.isFinite(window.innerHeight) || window.innerHeight - 108 < 8){
+      return celebration.started ? fadeLostCelebrationAnchor() : false;
+    }
     var left = onRight ? anchor.seat.right + 8 : anchor.seat.left - width - 8;
     var top = Math.max(8, Math.min(window.innerHeight - 108, anchor.avatar.top + anchor.avatar.height / 2 - 50));
     if (els.settlementSummary && !els.settlementSummary.hidden){
       var summary = els.settlementSummary.getBoundingClientRect();
+      if (!summary || !Number.isFinite(summary.left) || !Number.isFinite(summary.right) || !Number.isFinite(summary.top) || !Number.isFinite(summary.bottom)){
+        return celebration.started ? fadeLostCelebrationAnchor() : false;
+      }
       if (left < summary.right && left + width > summary.left && top < summary.bottom && top + 100 > summary.top){
         var above = summary.top - 108;
         var below = summary.bottom + 8;
         var fitsAbove = above >= 8;
         var fitsBelow = below + 100 <= window.innerHeight - 8;
-        if (!fitsAbove && !fitsBelow) return false;
+        if (!fitsAbove && !fitsBelow) return celebration.started ? fadeLostCelebrationAnchor() : false;
         top = fitsAbove && (!fitsBelow || Math.abs(above - top) <= Math.abs(below - top)) ? above : below;
       }
     }
@@ -386,20 +411,54 @@
     return true;
   }
 
-  function celebrationPreviewOpponent(){
-    return state.seats.find(function(seat){
+  function celebrationPreviewOpponents(){
+    return state.seats.filter(function(seat){
       return seat && seat.userId && seat.userId !== state.currentUserId && celebrationSeatRect(seat.userId);
     });
   }
 
+  function celebrationPreviewOpponent(userId){
+    if (!userId) return null;
+    var matches = state.seats.filter(function(seat){ return seat && seat.userId === userId && seat.userId !== state.currentUserId; });
+    return matches.length === 1 && celebrationSeatRect(userId) ? matches[0] : null;
+  }
+
   function refreshCelebrationPreview(){
-    if (!els.celebrationPreviewMode) return;
-    var available = !!celebrationPreviewOpponent();
-    els.celebrationPreviewMode.options[1].disabled = !available;
-    if (!available) els.celebrationPreviewMode.value = 'own';
-    els.celebrationPreviewHint.textContent = available
-      ? 'Visual demo only. Table settings and reduced motion apply. Live play takes priority.'
-      : 'Small preview unavailable: no visible opponent/bot. Join a table with another player.';
+    if (!els.celebrationPreviewMode || !els.celebrationPreviewTarget) return;
+    var targetSelect = els.celebrationPreviewTarget;
+    var selectedUserId = targetSelect.value;
+    var opponents = celebrationPreviewOpponents();
+    var optionKey = JSON.stringify(opponents.map(function(seat){
+      return [seat.userId, getPublicDisplayName(seat), !!seat.isBot, seat.seatNo];
+    }));
+    if (targetSelect.dataset.optionKey !== optionKey){
+      targetSelect.textContent = '';
+      var placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select a visible player/bot';
+      placeholder.disabled = true;
+      targetSelect.appendChild(placeholder);
+      opponents.forEach(function(seat){
+        var option = document.createElement('option');
+        option.value = seat.userId;
+        option.textContent = getPublicDisplayName(seat) + (seat.isBot ? ' · Bot' : ' · Player') + ' · seat ' + (Number(seat.seatNo) + 1);
+        targetSelect.appendChild(option);
+      });
+      targetSelect.dataset.optionKey = optionKey;
+    }
+    var selectedOpponent = opponents.find(function(seat){ return seat.userId === selectedUserId; });
+    targetSelect.value = selectedOpponent ? selectedUserId : '';
+    els.celebrationPreviewMode.options[1].disabled = !opponents.length;
+    targetSelect.disabled = els.celebrationPreviewMode.value !== 'other' || !opponents.length;
+    if (els.celebrationPreviewMode.value !== 'other'){
+      els.celebrationPreviewHint.textContent = 'Visual demo only. Table settings and reduced motion apply. Live play takes priority.';
+    } else if (!opponents.length){
+      els.celebrationPreviewHint.textContent = 'Small preview unavailable: no visible opponent/bot. Join a table with another player.';
+    } else if (!selectedOpponent){
+      els.celebrationPreviewHint.textContent = 'Choose a currently visible opponent/bot for the small preview.';
+    } else {
+      els.celebrationPreviewHint.textContent = 'Visual demo only · ' + getPublicDisplayName(selectedOpponent) + '. Table settings and reduced motion apply.';
+    }
   }
 
   function showCelebration(selection, options){
@@ -415,12 +474,14 @@
     var own = demo ? options.mode !== 'other' : !!state.currentUserId && selection.userId === state.currentUserId;
     var targetAnchor = own ? null : celebrationSeatRect(selection.userId);
     if (!own && !targetAnchor) return;
-    celebration = { demo: demo, own: own, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId, exiting: false };
+    celebration = { demo: demo, own: own, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId,
+      exiting: false, started: false, anchorLost: false, endsAtMs: Date.now() + duration + celebrationExitDuration() };
     var overlay = els.celebration;
     overlay.className = 'poker-celebration poker-celebration--' + selection.kind + (own ? ' poker-celebration--own' : ' poker-celebration--other');
     if (!positionCelebration()){ clearCelebration(); return; }
     overlay.style.setProperty('--celebration-duration', duration + 'ms');
     overlay.hidden = false;
+    celebration.started = true;
     var art = document.createElement('div');
     art.className = 'poker-celebration__art';
     var hero = document.createElement('div');
@@ -498,6 +559,14 @@
       mode.appendChild(option);
     });
     panel.appendChild(mode);
+    var target = document.createElement('select');
+    target.setAttribute('aria-label', 'Small preview player or bot');
+    var targetPlaceholder = document.createElement('option');
+    targetPlaceholder.value = '';
+    targetPlaceholder.textContent = 'Select a visible player/bot';
+    targetPlaceholder.disabled = true;
+    target.appendChild(targetPlaceholder);
+    panel.appendChild(target);
     var streakCount = document.createElement('select');
     streakCount.setAttribute('aria-label', 'Win Streak demo count');
     [5, 6, 7, 8, 12].forEach(function(count){
@@ -520,7 +589,7 @@
         button.setAttribute('aria-expanded', 'false');
         button.focus();
         if (entry[0] === 'close' || !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate || getActiveWinnerReveal()) return;
-        var opponent = mode.value === 'other' ? celebrationPreviewOpponent() : null;
+        var opponent = mode.value === 'other' ? celebrationPreviewOpponent(target.value) : null;
         if (mode.value === 'other' && !opponent) { refreshCelebrationPreview(); return; }
         showCelebration({ kind: entry[0], userId: opponent ? opponent.userId : state.currentUserId,
           amount: entry[0] === 'pot' ? 1250 : undefined, count: entry[0] === 'streak' ? Number(streakCount.value) : undefined },
@@ -536,6 +605,8 @@
       panel.hidden = !panel.hidden;
       button.setAttribute('aria-expanded', String(!panel.hidden));
     });
+    mode.addEventListener('change', refreshCelebrationPreview);
+    target.addEventListener('change', refreshCelebrationPreview);
     controls.addEventListener('keydown', function(event){
       if (event.key === 'Escape') { panel.hidden = true; button.setAttribute('aria-expanded', 'false'); button.focus(); }
     });
@@ -543,6 +614,7 @@
     controls.appendChild(panel);
     els.screen.appendChild(controls);
     els.celebrationPreviewMode = mode;
+    els.celebrationPreviewTarget = target;
     els.celebrationPreviewHint = hint;
     els.celebrationPreview = controls;
     els.celebrationPreviewPanel = panel;

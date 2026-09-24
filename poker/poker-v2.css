@@ -633,6 +633,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-celebration.poker-celebration--exit{background:none;opacity:.14;animation:poker-celebration-exit 400ms ease-out both;}
 .poker-celebration.poker-celebration--exit::before{animation:poker-celebration-exit 400ms ease-out both;box-shadow:none;border-color:#eddaaa;}
 .poker-celebration--exit::after{display:none;}
+.poker-celebration.poker-celebration--anchor-lost{opacity:0!important;transition:opacity 140ms ease-out;}
 .poker-celebration-preview{position:fixed;left:max(10px,env(safe-area-inset-left));top:184px;z-index:29;}
 .poker-celebration-preview[hidden],.poker-celebration-preview__panel[hidden]{display:none!important;}
 .poker-celebration-preview select{width:100%;min-height:44px;grid-column:1/-1;color:#f6e5bc;background:#101a25;border:1px solid #e5c57566;border-radius:8px;font:600 12px system-ui,sans-serif;}

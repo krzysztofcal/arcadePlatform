@@ -1,5 +1,13 @@
 # Validation and handoff
 
+## Current v4 handoff — 2026-09-24
+
+Implementation in progress from confirmed draft PR #1016 HEAD `7245a610923b1ba8a84e42c8b76335971cc70623`. V4 preserves the v3 result classification, winner display, animation timing, settings and both visual sizes. The compact animation stays tied to one verified winner `userId + seatNo`; current layout/render refreshes move it with that visible avatar through the ring-only tail. A changed identity clears immediately; temporary unsafe geometry fades only the compact overlay and cannot extend its original deadline. An invalid starting anchor skips the effect.
+
+PR-only Preview FX retains large self-win and now lets the owner select a specific currently visible opponent/bot for compact Royal Flush, Monster Pot and Win Streak demos. Selection is revalidated for each demo and never silently switches seats. No server, WS, DB, ledger or gameplay change is intended.
+
+Local validation: `node --test tests/poker-settlement-presentation.unit.test.mjs tests/poker-v2-live.behavior.test.mjs` passed **135/135**; `PLAYWRIGHT_BROWSER=chromium npm run test:e2e` passed **66/66** on Chromium; JS syntax and the CSP inline-hash guard passed (52 served documents). Existing project policy excludes new UI/CSS/glue tests; v4 visual behavior will be checked on the PR Deploy and through the PR CI jobs. Final exact SHA, check links, deploy metadata and physical Android status will be appended after validation. The owner will perform Android acceptance; the PR remains draft.
+
 ## Current v3 handoff — 2026-09-24
 
 V3 continues PR #1016 from v2 HEAD `36929e216d3919266a20fe29310ed7bb7f0f4c1d`. This section supersedes earlier v2 pacing and preview-only streak statements below; those are retained as history. The existing large and small effects, Winner display, settings, hand flow, and PR-only preview gate remain.

@@ -13,6 +13,12 @@ Automatic Royal cards must be the exact five verified same-suit cards from the c
 
 PR-only touch Preview FX adds My win (large) / Other player-bot (small near avatar), reused for all three kinds. The latter requires an actual visible nonlocal seat, otherwise disabled with an explanation. No fabricated winner, private cards, network call or game-state mutation. Physical Android and natural rare triggers remain owner acceptance, separately from browser emulation.
 
+## V4 delta — 2026-09-24 (compact anchor safety and explicit preview target)
+
+Continue v3 on the same open draft PR #1016 from its current HEAD. A live compact effect is bound to the verified winner's exact `userId + seatNo` for its complete lifetime, including the ring-only tail. Existing render/layout reposition calls resolve that same seat each time and move the effect with its visible avatar. If identity or seat ownership changes, clear immediately. If the same seat remains but its geometry or safe placement temporarily becomes unavailable, fade the effect promptly and clear it within its original two-second maximum lifetime; never leave visible art at an obsolete position or switch to another avatar. A compact effect with no valid visible anchor at start is skipped. Large self-win behavior is unchanged.
+
+In PR-only Preview FX, retain the large self-win option and add a selector for a specific currently visible opponent/bot when compact mode is selected. Royal Flush, Monster Pot, and Win Streak demos all use exactly that selected seat. Refresh the available options with table/layout rendering while retaining the selection only if the same user remains visible. A missing or stale selection disables/fails the compact demo safely, with no implicit fallback to another seat. All demos remain synthetic and labeled; the preview gate and live gameplay stay unchanged.
+
 ## User Scenarios & Testing
 
 ### US1 — Royal Flush and touch preview (P1)
@@ -39,10 +45,12 @@ Initial/reconnect/resync/stale snapshots, repeated results, missing payout/buy-i
 - FR-004: Preview exists only when build context is deploy-preview AND isPreview is true, fails closed otherwise, has no global debug API and no network/game mutations. All three variants are explicitly labeled previews.
 - FR-005: Extend existing normalized preferences and per-user storage; isolated guest celebration key; changes and session/identity/table loss clear FX immediately.
 - FR-006: Real events dedupe by table and hand; never replay initial or already-consumed results. Track all confirmed local-session wins per table and user, including bots, exactly once. Display the actual consecutive count from ×5 onward; reset all streaks on reconnect/resync/reload/rejoin, identity/seat/table change or uncertain sequence. No history persistence.
+- FR-007: A live compact effect remains bound to the winning `userId + seatNo` through its full lifetime, including the decorative tail. Existing layout/render updates reposition it beside only that seat's current visible avatar. Identity/seat replacement clears immediately; temporary invalid geometry or unsafe placement fades the effect promptly, within the original lifetime, and never falls back to another seat. If the initial anchor is invalid, do not start.
+- FR-008: PR-only Preview FX allows selecting a specific currently visible opponent/bot for every compact Royal Flush, Monster Pot and Win Streak demo. Each activation revalidates that exact selection. A stale/missing selection safely skips the demo without silently changing targets. The large demo, preview-only gate and synthetic labels remain.
 
 ## Key Entities
 
-Transient celebration: visual variant, legally visible royal cards if applicable, table/hand identity, absolute end time, demo flag. Preference: celebration enabled per browser guest or signed-in identity. No persisted gameplay entities.
+Transient celebration: visual variant, legally visible royal cards if applicable, table/hand identity, absolute end time, demo flag, and for compact effects the fixed winner `userId + seatNo`. Preference: celebration enabled per browser guest or signed-in identity. No persisted gameplay entities.
 
 ## Success Criteria
 
@@ -51,6 +59,8 @@ Transient celebration: visual variant, legally visible royal cards if applicable
 - Automatic effects never extend reveal, block actions or obscure next-hand information; decorative residue ends within 500 ms.
 - Invalid/duplicate/reconnect data produces no automatic effect; live royal cards match the actual five-card combination and suit; Monster Pot shows the exact individual award; true streaks advance ×5→×6→×7 and reset correctly.
 - One draft PR and actual working PR deploy delivered for artistic and real-device acceptance; no Production deploy or merge.
+- During the complete compact effect, portrait/landscape reflow follows only the original winner's avatar; temporarily unsafe placement fades within the same lifetime, while a changed seat identity clears safely.
+- Each of the three compact previews anchors at the exact currently selected visible opponent/bot; removing or hiding that selection never redirects a demo to another seat.
 
 ## Assumptions
 

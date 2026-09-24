@@ -47,3 +47,12 @@ V2-02/V2-05 browser implementation/inspection complete; physical Android portrai
 - [x] V3-07 Update this Spec Kit, existing draft PR description and quickstart evidence; verify matching PR Deploy and report pending owner Android smoke.
 
 Rules for V3-05: main/side award recipients win (every split recipient counts); eligible non-recipients and folded seats lose; sit-outs have no result; a return-only payout is not a win. Any incomplete/out-of-order result clears counts. No persisted history, backend changes or replayed initial settlement.
+
+## V4 delta — continue the same draft PR; do not rebuild v1–v3
+
+- [x] V4-01 Update existing Spec Kit requirements, plan, contract, transient data model, tasks and validation handoff for fixed compact winner anchoring, safe loss fade and explicit preview target selection.
+- [x] V4-02 In `poker/poker-v2.js` and `poker/poker-v2.css`, reposition compact FX beside the same `userId + seatNo` on existing layout/render updates through the decorative tail; clear on identity/seat replacement; fade and clean up promptly on temporary unsafe placement without exceeding the original lifetime.
+- [x] V4-03 Extend the existing PR-only preview panel to select an exact currently visible nonlocal player/bot for all three compact demos; preserve a still-valid selection and fail safely without fallback when it goes stale. Keep the large demo and build gate.
+- [ ] V4-04 Run existing relevant deterministic suites, Playwright, syntax/CSP and full PR CI; verify new PR Deploy/metadata and compact reflow/selection behavior; update the same draft PR body and Spec Kit evidence. Report physical Android acceptance pending; do not merge or deploy Production.
+
+V4 checks must not add a separate UI/CSS/layout/simple-glue test suite. Any fade timer is scoped to the current single overlay and bounded by its original expiration; no polling, new queue, server state or gameplay mutation.

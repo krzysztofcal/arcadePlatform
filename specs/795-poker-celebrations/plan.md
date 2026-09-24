@@ -45,6 +45,16 @@ Constitution Check before v3: PASS. Keep the accepted two-size art, settings, `W
 
 V3 validation: `node --test tests/poker-settlement-presentation.unit.test.mjs tests/poker-v2-live.behavior.test.mjs`; the existing Playwright job; `node --check poker/poker-v2.js`; `npm run check:csp-inline`. Browser/CI output and user-only Android smoke must be recorded separately. Pending Android smoke means the draft is awaiting owner verification and is not merge-ready.
 
+## V4 incremental plan — 2026-09-24
+
+Continue from current draft PR #1016 HEAD `7245a610923b1ba8a84e42c8b76335971cc70623`. Preserve the complete v3 behavior and two visual sizes. Client-only change in the existing IIFE and scoped CSS; no new overlay, interval, animation engine, dependency, UI test suite, server/protocol/DB/ledger change or Production effect.
+
+1. In `positionCelebration()`, keep the compact target identity and seat number fixed from `showCelebration()`. Re-read that same seat on every existing render/layout reposition, including the decorative exit; move the effect when its current visible avatar moves. Clear on actual winner/seat replacement. If the identity is unchanged but a fresh measurement, viewport fit or summary-safe placement is unavailable after start, add a scoped short opacity fade and clear with the existing lifecycle timer, capped by the remaining original `duration + celebrationExitDuration()` deadline. Initial invalid anchors still skip. Keep the large self-win path, Winner and all gameplay timing untouched.
+2. In `bindCelebrationPreview()`, populate an accessible native selector with currently visible nonlocal humans/bots. Retain only a still-visible selected `userId`; if it disappears, show an empty choice and explanatory hint rather than selecting a replacement. Each of the three compact demo buttons revalidates the exact selected `userId` immediately before calling the existing overlay. The large demo stays available and all demos remain synthetic and behind existing preview metadata gates.
+3. Update this Spec Kit and PR handoff. Follow `agents.md` testing policy: no UI/CSS/glue test additions; run existing critical settlement/V2 tests, Chromium Playwright, syntax/CSP checks and the complete PR workflows. Verify target selection and reflow/fade on the actual deploy; report that physical Android acceptance remains with the owner.
+
+V4 Constitution Check: reuse the current single overlay and render/layout hooks; preserve pointer-events, control/Winner layering, existing exact live result data, settings, two-second lifetime and game flow. Temporary anchor loss affects only compact FX. No backend/WS deploy is required; the Netlify PR Deploy must match the new PR SHA. Keep #1016 as draft and do not merge or deploy Production.
+
 ## V2 incremental plan — 2026-09-24
 
 Verified existing clean worktree and live PR HEAD equal v1 `f7155980a8176e0caaa6cba0dc05065a797c1dae`. Baseline 127/127 relevant tests pass. The v1 steps above are history, not work to repeat.
