@@ -417,16 +417,37 @@
     });
   }
 
-  function celebrationPreviewOpponent(userId){
-    if (!userId) return null;
-    var matches = state.seats.filter(function(seat){ return seat && seat.userId === userId && seat.userId !== state.currentUserId; });
-    return matches.length === 1 && celebrationSeatRect(userId) ? matches[0] : null;
+  function celebrationPreviewTargetValue(seat){
+    if (!seat || typeof seat.userId !== 'string' || !seat.userId || !Number.isInteger(seat.seatNo)) return '';
+    return JSON.stringify([seat.userId, seat.seatNo]);
+  }
+
+  function resolveCelebrationPreviewTarget(targetValue, seats, currentUserId){
+    if (!targetValue) return null;
+    var identity;
+    try { identity = JSON.parse(targetValue); } catch (_error) { return null; }
+    if (!Array.isArray(identity) || typeof identity[0] !== 'string' || !identity[0] || !Number.isInteger(identity[1])) return null;
+    var matches = (Array.isArray(seats) ? seats : []).filter(function(seat){
+      return seat && seat.userId === identity[0] && seat.seatNo === identity[1] && seat.userId !== currentUserId;
+    });
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function celebrationPreviewOptionLabel(seat){
+    return getPublicDisplayName(seat) + (seat.isBot ? ' · Bot' : ' · Player') + ' · seat ' + Number(seat.seatNo);
+  }
+
+  function celebrationPreviewOpponent(targetValue){
+    var opponent = resolveCelebrationPreviewTarget(targetValue, state.seats, state.currentUserId);
+    if (!opponent) return null;
+    var anchor = celebrationSeatRect(opponent.userId);
+    return anchor && anchor.seatNo === opponent.seatNo ? opponent : null;
   }
 
   function refreshCelebrationPreview(){
     if (!els.celebrationPreviewMode || !els.celebrationPreviewTarget) return;
     var targetSelect = els.celebrationPreviewTarget;
-    var selectedUserId = targetSelect.value;
+    var selectedTargetValue = targetSelect.value;
     var opponents = celebrationPreviewOpponents();
     var optionKey = JSON.stringify(opponents.map(function(seat){
       return [seat.userId, getPublicDisplayName(seat), !!seat.isBot, seat.seatNo];
@@ -440,14 +461,14 @@
       targetSelect.appendChild(placeholder);
       opponents.forEach(function(seat){
         var option = document.createElement('option');
-        option.value = seat.userId;
-        option.textContent = getPublicDisplayName(seat) + (seat.isBot ? ' · Bot' : ' · Player') + ' · seat ' + (Number(seat.seatNo) + 1);
+        option.value = celebrationPreviewTargetValue(seat);
+        option.textContent = celebrationPreviewOptionLabel(seat);
         targetSelect.appendChild(option);
       });
       targetSelect.dataset.optionKey = optionKey;
     }
-    var selectedOpponent = opponents.find(function(seat){ return seat.userId === selectedUserId; });
-    targetSelect.value = selectedOpponent ? selectedUserId : '';
+    var selectedOpponent = resolveCelebrationPreviewTarget(selectedTargetValue, opponents, state.currentUserId);
+    targetSelect.value = selectedOpponent ? celebrationPreviewTargetValue(selectedOpponent) : '';
     els.celebrationPreviewMode.options[1].disabled = !opponents.length;
     targetSelect.disabled = els.celebrationPreviewMode.value !== 'other' || !opponents.length;
     if (els.celebrationPreviewMode.value !== 'other'){
@@ -6412,6 +6433,9 @@
       buildSettlementPresentation: buildSettlementPresentation,
       selectCelebrationForSettlement: selectCelebrationForSettlement,
       resolveCelebrationRoyalCards: resolveCelebrationRoyalCards,
+      celebrationPreviewTargetValue: celebrationPreviewTargetValue,
+      resolveCelebrationPreviewTarget: resolveCelebrationPreviewTarget,
+      celebrationPreviewOptionLabel: celebrationPreviewOptionLabel,
       celebrationDuration: celebrationDuration,
       celebrationExitDuration: celebrationExitDuration,
       newWinStreakCursor: newWinStreakCursor,
