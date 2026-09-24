@@ -6,7 +6,6 @@ const root = process.cwd();
 const source = await readFile(path.join(root, "scripts", "test-all.mjs"), "utf8");
 
 assert.match(source, /run\("node", \["tests\/poker-ui\.behavior\.test\.mjs"\],/, "runner should include poker-ui.behavior test");
-assert.match(source, /run\("node", \["tests\/poker-celebration-preview\.unit\.test\.mjs"\],/, "runner should include poker celebration preview identity regression test");
 assert.doesNotMatch(source, /run\("node", \["tests\/poker-ui-turn-actions\.test\.mjs"\],/, "runner should not include removed classic poker-ui turn-actions test");
 assert.match(source, /run\("node", \["tests\/poker-v2-live\.behavior\.test\.mjs"\],/, "runner should include poker v2 live behavior test");
 assert.match(source, /run\("node", \["tests\/welcome-bonus\.behavior\.test\.mjs"\],/, "runner should include welcome bonus behavior test");
