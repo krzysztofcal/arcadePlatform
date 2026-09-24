@@ -1,5 +1,25 @@
 # Validation and handoff
 
+## Current v3 handoff — 2026-09-24
+
+V3 continues PR #1016 from v2 HEAD `36929e216d3919266a20fe29310ed7bb7f0f4c1d`. This section supersedes earlier v2 pacing and preview-only streak statements below; those are retained as history. The existing large and small effects, Winner display, settings, hand flow, and PR-only preview gate remain.
+
+For the current preview, exercise Royal Flush, Monster Pot and Win Streak ×5/×6/×7/×8/×12 in both size modes. Live Royal art now uses only the exact five verified same-suit cards visible to that player; live Monster Pot shows the player's exact main/side awards and excludes returns. Win Streak increments once per newly observed complete hand result, counts split awards, treats folded/in-pot losers as losses, ignores sit-outs, and resets on reconnect/resync/rejoin, identity/seat/table changes or uncertain hand order. Its state exists only in page memory, so a reconnect or refresh never restores a run.
+
+Each effect runs a 1600 ms hero and a 400 ms decorative exit, about 2 seconds total. A new hand, turn or action dims a running effect and does not cut it short. OFF, reduced motion, navigation and unsafe session/identity changes still clear it immediately. Winner timing and snapshot deferral remain unchanged.
+
+The prior red Playwright step was the existing `e2e-ui.spec.ts` file-URL navigation timing out after 30 seconds while `page.goto()` waited for the full `load` event. Those checks only need the document DOM, so both navigations now use `domcontentloaded`. The separate `libgraphene`/GTK warnings came from `scripts/prepare-playwright.js` installing every browser after CI had already installed Chromium with `--with-deps`; the helper now installs only `PLAYWRIGHT_BROWSER` when supplied. That warning was noisy but was not the timed-out test's cause.
+
+V3 local verification so far: settlement + V2 live behavior suites **135/135 pass**; the existing Chromium Playwright file **2/2 pass**; JS syntax and CSP inline hash guard pass for **52 served documents**. This is local evidence only. Record the exact new PR SHA, GitHub CI, matching successful Netlify PR Deploy and real-device Android outcome below before handoff. The physical Android test is intentionally pending the owner.
+
+### V3 release evidence
+
+- New PR SHA: pending final review/commit.
+- PR Deploy for that exact SHA: pending.
+- GitHub CI for that exact SHA: pending.
+- Android physical-device acceptance: pending owner test.
+- No Production deployment, WS/backend change or merge was performed.
+
 Run `node --test tests/poker-settlement-presentation.unit.test.mjs tests/poker-v2-live.behavior.test.mjs` and `node --check poker/poker-v2.js`.
 
 On the PR deploy, open Poker V2 and join a real guest or signed-in table. Tap Preview FX, then Royal Flush, Monster Pot or Win Streak ×5. Repeat during play and check normal cards, turn, controls, payout, leave and rebuy visibility. A real settlement/turn must immediately dismiss demo hero; at most 400 ms faint ring remains. Use portrait/landscape Android and desktop.

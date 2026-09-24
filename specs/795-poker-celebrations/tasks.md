@@ -35,3 +35,15 @@ Dependencies: T001 → T002 → T003 → T004 → T005 → T006. Shared files re
 - [x] V2-06 Update draft PR #1016; matching new SHA deploy and owner Android handoff.
 
 V2-02/V2-05 browser implementation/inspection complete; physical Android portrait/landscape and natural rare triggers remain explicitly pending owner acceptance.
+
+## V3 delta (continues the existing PR; do not redo T001–T006 or V2-01–V2-06)
+
+- [x] V3-01 Update existing Spec Kit and reconcile v3 against PR #1016 HEAD `36929e216d3919266a20fe29310ed7bb7f0f4c1d`; preserve approved v2 variants, preferences, previews and game flow.
+- [x] V3-02 Complete both FX variants in about 2000 ms total (1600 ms hero + 400 ms exit); remove routine hand/reveal/turn/action interruption and dim rather than hide on resumed gameplay.
+- [x] V3-03 Pass exact verified same-suit Royal cards through selection and renderer; suppress live cards when proof is unavailable; keep synthetic cards preview-only.
+- [x] V3-04 Pass the selected user's exact summed main/side awards to both Monster Pot variants; exclude returns and display localized `WIN {amount} CH`, including all-folded main awards and split shares.
+- [x] V3-05 Implement exact-once page-local Win Streak ×5/×6/×7… from complete newly observed outcomes for each `tableId + userId`; reset on reconnect/resync/reload/rejoin/table/identity change or uncertain sequence; keep demo counts synthetic.
+- [x] V3-06 Resolve the v2 CI failure: scope browser preparation to the requested browser, make the existing UI test wait only for DOM readiness, rerun Playwright and relevant checks, and record the actual root cause/evidence.
+- [ ] V3-07 Update this Spec Kit, existing draft PR description and quickstart evidence; verify matching PR Deploy and report pending owner Android smoke.
+
+Rules for V3-05: main/side award recipients win (every split recipient counts); eligible non-recipients and folded seats lose; sit-outs have no result; a return-only payout is not a win. Any incomplete/out-of-order result clears counts. No persisted history, backend changes or replayed initial settlement.

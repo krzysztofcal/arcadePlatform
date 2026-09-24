@@ -4,14 +4,14 @@
 
 ## Summary and technical context
 
-Extend the existing plain JS IIFE, HTML and scoped CSS in `poker/poker-v2.js`, `poker/table-v2.html`, `poker/poker-v2.css`. No dependency/configuration/backend changes. Reuse `evaluateViewerBestHand`, `buildSettlementPresentation`, `currentTableBuyIn`, existing preference normalization and build metadata. One overlay, one lifecycle timer, ≤18 decorative particles; CSS transforms/opacity. Browser-local storage only.
+Extend the existing plain JS IIFE, HTML and scoped CSS in `poker/poker-v2.js`, `poker/table-v2.html`, `poker/poker-v2.css`. V3 also updates the existing poker unit suite, the localized Win amount strings, the failing E2E navigation wait and Playwright browser preparation. No application dependencies, poker backend, WS, DB or schema changes. Reuse `evaluateViewerBestHand`, `buildSettlementPresentation`, `currentTableBuyIn`, existing preference normalization and build metadata. One overlay, one bounded lifecycle timer, ≤18 decorative particles; CSS transforms/opacity. The Win Streak is page-memory only.
 
 ## Constitution Check — before implementation and post-design: PASS
 
 - Existing-mechanism reuse, JSP IIFE, klog, external JS/CSP and one-line CSS retained.
 - WS owns gameplay; no runtime/protocol/migration change or Stage/Production effect. Netlify PR browser deploy only.
 - No ignore/tooling/dependency/setup cleanup changes. Feature metadata is Spec Kit-local only.
-- Test tasks limited to critical pure classification, monotonic dedupe and deadline contracts in existing `tests/poker-settlement-presentation.unit.test.mjs`. Existing V2 behavior tests protect timing/reconnect. No added UI/CSS/JSP/simple-glue suites; manual browser checks for presentation.
+- Tests stay in existing suites: critical card proof, exact award amount, local result counting/dedupe/reset, and the animation lifetime contract in `tests/poker-settlement-presentation.unit.test.mjs`; the existing `tests/e2e-ui.spec.ts` keeps its button checks while navigation waits only for DOM readiness. No added UI/CSS/JSP/simple-glue suite. Manual/PR-preview checks cover visual behavior.
 - Owner performs final artistic/Android acceptance and merge. Outstanding runtime verification must be disclosed.
 
 ## Source reconciliation
@@ -29,6 +29,21 @@ Baseline current main `f75bacf4`. Issue entrypoints still exist. Current respons
 ## Verification
 
 `node --test tests/poker-settlement-presentation.unit.test.mjs tests/poker-v2-live.behavior.test.mjs`; `node --check poker/poker-v2.js`; existing CSP checks. Inspect actual preview and locally emulate mobile/desktop with existing Playwright if available. Record real vs simulated evidence separately in quickstart. No external interfaces or migrations.
+
+## V3 incremental plan — 2026-09-24
+
+The v1 and v2 implementation steps above are complete history. Continue from the exact v2 PR HEAD `36929e216d3919266a20fe29310ed7bb7f0f4c1d`; do not rebuild either version.
+
+Constitution Check before v3: PASS. Keep the accepted two-size art, settings, `Winner`, settlement/deferred-snapshot schedule, server authority and preview gate. Keep all CSS additions scoped and one selector per line. No WS/backend/DB or Production change. Add only fundamental deterministic cases to the existing settlement unit suite.
+
+1. `poker/poker-v2.js`: render only five verified real royal cards for automatic events; permit fixed spades only behind `demo: true`. Add the recipient's exact safe-integer contested award sum to Monster Pot selection and show a localized `WIN {amount} CH` in both sizes.
+2. `poker/poker-v2.js`: track complete newly observed settled results in memory by `tableId + userId`, dedupe hand IDs, count split awards, reset known losers, and show live ×5, ×6, ×7… after higher-priority selections. Treat folded seats as losses, sit-outs as no result, and returns as non-wins. Reset the cursor and counts on reconnect/resync, identity/seat/table change, rejoin, initial/recovery snapshot, stale/missing result or broken hand sequence. Do not persist/reconstruct history.
+3. `poker/poker-v2.js` and `poker/poker-v2.css`: use one 1600 ms hero plus one 400 ms ring-only exit for a 2000 ms total. Remove routine transition/reveal/action interruption. Dim an active effect as soon as a new hand, live turn or action appears, but let its animation and timer finish. Keep immediate cleanup only for OFF, reduced motion, navigation/unmount, identity/seat change and unsafe session loss. Ordinary state updates never mutate poker behavior.
+4. `bindCelebrationPreview()` and the existing dynamic preview panel: retain both size modes and all effect demos; add synthetic selectable ×5, ×6, ×7, ×8 and ×12 streak counts and a labeled synthetic pot amount. Demo actions never touch live counters or state.
+5. CI root cause: `tests.yml` already installs Chromium with `--with-deps`, while `scripts/test-all.mjs` later invoked `scripts/prepare-playwright.js`, whose bare `playwright install` downloaded Firefox/WebKit too and warned about unused `libgraphene`/GTK libraries. The red check itself was a 30-second timeout waiting for `load` in `tests/e2e-ui.spec.ts`; its controls require the DOM, not remote resource completion. Restrict the helper to `PLAYWRIGHT_BROWSER` when set, and make the existing test wait for `domcontentloaded`. Keep Chromium's `--with-deps` CI install.
+6. Update this Spec Kit, existing PR description and quickstart evidence. Run the existing critical suites and full PR CI; verify the exact new PR Deploy. The owner will perform physical Android acceptance. No WS preview deploy is needed because no WS/protocol runtime changes are made.
+
+V3 validation: `node --test tests/poker-settlement-presentation.unit.test.mjs tests/poker-v2-live.behavior.test.mjs`; the existing Playwright job; `node --check poker/poker-v2.js`; `npm run check:csp-inline`. Browser/CI output and user-only Android smoke must be recorded separately. Pending Android smoke means the draft is awaiting owner verification and is not merge-ready.
 
 ## V2 incremental plan — 2026-09-24
 

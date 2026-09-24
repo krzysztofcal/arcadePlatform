@@ -57,7 +57,12 @@ function shouldAttemptDownload() {
 }
 
 if (shouldAttemptDownload()) {
-  const installResult = spawnSync(process.execPath, [cliPath, 'install'], {
+  const browser = String(process.env.PLAYWRIGHT_BROWSER || '').trim().toLowerCase();
+  const installArgs = [cliPath, 'install'];
+  if (['chromium', 'firefox', 'webkit'].includes(browser)) {
+    installArgs.push(browser);
+  }
+  const installResult = spawnSync(process.execPath, installArgs, {
     stdio: 'inherit',
     env: process.env,
   });
