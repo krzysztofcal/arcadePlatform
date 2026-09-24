@@ -55,6 +55,24 @@ Continue from current draft PR #1016 HEAD `7245a610923b1ba8a84e42c8b76335971cc70
 
 V4 Constitution Check: reuse the current single overlay and render/layout hooks; preserve pointer-events, control/Winner layering, existing exact live result data, settings, two-second lifetime and game flow. Temporary anchor loss affects only compact FX. No backend/WS deploy is required. Verify the automatic Netlify PR Deploy against the new PR SHA; if Netlify fails before build due to dependency installation, record the failure and any isolated draft alias separately, without calling it a successful PR Deploy. Keep #1016 as draft and do not merge or deploy Production.
 
+## V5 incremental plan — same draft PR #1016
+
+Continue from the current v4 PR HEAD `94c90f5a513626fe2cde0a560101a5e4f0baf31d`. Preserve the complete v4 compact identity and explicit-target fixes. Do not change settlement authority, awards, Winner, streak accounting, preferences, hand timing, animation duration or transport.
+
+### Constitution Check — PASS
+
+Extend the existing `tests/poker-settlement-presentation.unit.test.mjs` only for the critical winner/category/card/priority decision. No new test file, runner registration, UI/CSS/layout/JSP or simple-glue suite. Reuse the current IIFE, best-hand evaluator, one celebration overlay, Royal Flush card renderer and Preview FX build gate. No backend, protocol, DB, migration, dependency, CSP or Production change.
+
+### Implementation
+
+1. In `poker/poker-v2.js`, map only evaluated best categories Straight, Flush, Full House, Quads, Straight Flush and Royal Flush to one hand-effect selection. Carry a stable display title and the evaluator's exact five normalized cards. Keep the evaluator's best-category result; do not search for a lower qualifying combination.
+2. In `selectCelebrationForSettlement()`, retain verified positive main/side recipients and viewer-first recipient traversal. Use exactly two viewer hole cards or two publicly revealed opponent cards with the board. Without both cards, allow only a board Royal Flush, the sole category whose exact best five cannot be improved by hidden cards. Unknown/nonqualifying card hands fall through to the unchanged Monster Pot selection and then Win Streak.
+3. In `showCelebration()`, render `kind: hand` through the same card nodes, `poker-celebration--royal` style, viewer-size selection and existing 1600 ms + 400 ms lifecycle. Vary only title and card faces. Leave `poker/poker-v2.css` and game timing unchanged.
+4. Extend the current `bindCelebrationPreview()` button list with legal synthetic five-card examples for all six hand categories. Keep the existing mode selector and exact `userId + seatNo` opponent validation for every button; preserve Monster Pot/Win Streak demos and the build gate.
+5. Update this Spec Kit, PR description and `quickstart.md`. Run the existing settlement/V2 tests, syntax, CSP, Chromium and required PR CI. Verify the matching automatic Netlify PR Deploy metadata. Physical Android visual/runtime acceptance remains with the owner; do not merge or deploy Production.
+
+V5 review risks: newly qualifying hands can take the single effect slot ahead of Monster Pot/Win Streak, reducing the times those effects are seen without changing their calculations. Opponent card art is skipped when the exact best five cannot be established from visible cards. The larger preview panel already has bounded vertical scrolling; inspect it on the current Deploy Preview and retain the exact selected seat through all demo buttons.
+
 ## V2 incremental plan — 2026-09-24
 
 Verified existing clean worktree and live PR HEAD equal v1 `f7155980a8176e0caaa6cba0dc05065a797c1dae`. Baseline 127/127 relevant tests pass. The v1 steps above are history, not work to repeat.

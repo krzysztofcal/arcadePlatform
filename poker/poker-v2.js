@@ -474,7 +474,12 @@
     var demo = options && options.demo === true;
     var duration = celebrationDuration(Date.now(), options && options.duration);
     if (!Number.isFinite(duration) || duration <= 0) return;
-    if (selection.kind === 'royal'){
+    if (selection.kind === 'hand'){
+      if (['STRAIGHT', 'FLUSH', 'FULL HOUSE', 'FOUR OF A KIND', 'STRAIGHT FLUSH', 'ROYAL FLUSH'].indexOf(selection.title) === -1
+        || !Array.isArray(selection.cards) || selection.cards.length !== 5) return;
+      selection.cards = selection.cards.map(normalizeCard);
+      if (!normalizeEvalCards(selection.cards)) return;
+    } else if (selection.kind === 'royal'){
       selection.cards = resolveCelebrationRoyalCards(selection.cards, demo);
       if (!selection.cards) return;
     }
@@ -484,7 +489,8 @@
     celebration = { demo: demo, own: own, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId,
       exiting: false, started: false, anchorLost: false, endsAtMs: Date.now() + duration + celebrationExitDuration() };
     var overlay = els.celebration;
-    overlay.className = 'poker-celebration poker-celebration--' + selection.kind + (own ? ' poker-celebration--own' : ' poker-celebration--other');
+    var visualKind = selection.kind === 'hand' ? 'royal' : selection.kind;
+    overlay.className = 'poker-celebration poker-celebration--' + visualKind + (own ? ' poker-celebration--own' : ' poker-celebration--other');
     if (!positionCelebration()){ clearCelebration(); return; }
     overlay.style.setProperty('--celebration-duration', duration + 'ms');
     overlay.hidden = false;
@@ -493,7 +499,7 @@
     art.className = 'poker-celebration__art';
     var hero = document.createElement('div');
     hero.className = 'poker-celebration__hero';
-    if (selection.kind === 'royal'){
+    if (selection.kind === 'hand' || selection.kind === 'royal'){
       selection.cards.forEach(function(card, index){
         var node = document.createElement('span');
         node.className = 'poker-celebration__card';
@@ -519,7 +525,7 @@
     }
     var title = document.createElement('strong');
     title.className = 'poker-celebration__title';
-    title.textContent = selection.kind === 'royal' ? 'ROYAL FLUSH' : selection.kind === 'pot' ? 'MONSTER POT' : 'WIN STREAK ×' + (Number.isSafeInteger(selection.count) ? selection.count : 5);
+    title.textContent = selection.kind === 'hand' ? selection.title : selection.kind === 'royal' ? 'ROYAL FLUSH' : selection.kind === 'pot' ? 'MONSTER POT' : 'WIN STREAK ×' + (Number.isSafeInteger(selection.count) ? selection.count : 5);
     var caption = document.createElement('span');
     caption.className = 'poker-celebration__caption';
     caption.textContent = demo
@@ -587,19 +593,29 @@
     potAmount.textContent = 'DEMO Monster Pot · ' + formatNumber(1250) + ' CH';
     panel.appendChild(streakCount);
     panel.appendChild(potAmount);
-    [['royal', 'Royal Flush'], ['pot', 'Monster Pot · ' + formatNumber(1250) + ' CH (demo)'], ['streak', 'Win Streak'], ['close', 'Close']].forEach(function(entry){
+    [
+      { kind: 'hand', title: 'STRAIGHT', label: 'Straight', cards: ['2S', '3H', '4D', '5C', '6S'] },
+      { kind: 'hand', title: 'FLUSH', label: 'Flush', cards: ['2S', '5S', '8S', '10S', 'QS'] },
+      { kind: 'hand', title: 'FULL HOUSE', label: 'Full House', cards: ['9S', '9H', '9D', 'KC', 'KH'] },
+      { kind: 'hand', title: 'FOUR OF A KIND', label: 'Four of a Kind', cards: ['7S', '7H', '7D', '7C', 'AH'] },
+      { kind: 'hand', title: 'STRAIGHT FLUSH', label: 'Straight Flush', cards: ['6S', '7S', '8S', '9S', '10S'] },
+      { kind: 'hand', title: 'ROYAL FLUSH', label: 'Royal Flush', cards: ['10S', 'JS', 'QS', 'KS', 'AS'] },
+      { kind: 'pot', label: 'Monster Pot · ' + formatNumber(1250) + ' CH (demo)' },
+      { kind: 'streak', label: 'Win Streak' },
+      { kind: 'close', label: 'Close' }
+    ].forEach(function(entry){
       var choice = document.createElement('button');
       choice.type = 'button';
-      choice.textContent = entry[1];
+      choice.textContent = entry.label;
       choice.addEventListener('click', function(){
         panel.hidden = true;
         button.setAttribute('aria-expanded', 'false');
         button.focus();
-        if (entry[0] === 'close' || !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate || getActiveWinnerReveal()) return;
+        if (entry.kind === 'close' || !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate || getActiveWinnerReveal()) return;
         var opponent = mode.value === 'other' ? celebrationPreviewOpponent(target.value) : null;
         if (mode.value === 'other' && !opponent) { refreshCelebrationPreview(); return; }
-        showCelebration({ kind: entry[0], userId: opponent ? opponent.userId : state.currentUserId,
-          amount: entry[0] === 'pot' ? 1250 : undefined, count: entry[0] === 'streak' ? Number(streakCount.value) : undefined },
+        showCelebration({ kind: entry.kind, title: entry.title, cards: entry.cards, userId: opponent ? opponent.userId : state.currentUserId,
+          amount: entry.kind === 'pot' ? 1250 : undefined, count: entry.kind === 'streak' ? Number(streakCount.value) : undefined },
         { demo: true, mode: mode.value });
       });
       panel.appendChild(choice);
@@ -1918,6 +1934,24 @@
     return normalized.slice().sort(function(a, b){ return normalizeEvalRank(a.r) - normalizeEvalRank(b.r); });
   }
 
+  function resolveCelebrationHand(best){
+    if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
+    var cards = best.cards.map(normalizeCard);
+    var evaluated = normalizeEvalCards(cards);
+    if (!evaluated || evaluated.length !== 5) return null;
+    var title = best.category === HAND_CATEGORY.STRAIGHT ? 'STRAIGHT'
+      : best.category === HAND_CATEGORY.FLUSH ? 'FLUSH'
+      : best.category === HAND_CATEGORY.FULL_HOUSE ? 'FULL HOUSE'
+      : best.category === HAND_CATEGORY.QUADS ? 'FOUR OF A KIND'
+      : best.category === HAND_CATEGORY.STRAIGHT_FLUSH ? 'STRAIGHT FLUSH' : null;
+    if (!title) return null;
+    if (best.category === HAND_CATEGORY.STRAIGHT_FLUSH){
+      var royalCards = resolveCelebrationRoyalCards(cards, false);
+      if (royalCards) return { title: 'ROYAL FLUSH', cards: royalCards };
+    }
+    return { title: title, cards: cards };
+  }
+
   function newWinStreakCursor(){
     return { identityKey: null, lastHandId: null, lastVersion: -1, counts: Object.create(null), processedHandIds: Object.create(null) };
   }
@@ -2058,14 +2092,15 @@
     for (var i = 0; i < winners.length; i++){
       var userId = winners[i];
       var revealed = input.revealedShowdownCardsByUserId && input.revealedShowdownCardsByUserId[userId];
-      var holeCards = Array.isArray(revealed) ? revealed : [];
-      if (!holeCards.length && userId === input.currentUserId && Array.isArray(input.heroCards)) holeCards = input.heroCards;
+      var holeCards = Array.isArray(revealed) && revealed.length === 2 ? revealed : [];
+      if (userId === input.currentUserId && Array.isArray(input.heroCards) && input.heroCards.length === 2) holeCards = input.heroCards;
+      var hasVerifiedHoleCards = holeCards.length === 2;
       var cards = (input.communityCards || []).concat(holeCards);
-      // Opponents use public board/revealed cards only; the viewer's own cards are private but theirs to see.
       var best = cards.length <= 7 ? evaluateViewerBestHand(cards) : null;
-      var royalCards = best && best.category === HAND_CATEGORY.STRAIGHT_FLUSH ? resolveCelebrationRoyalCards(best.cards, false) : null;
-      if (royalCards){
-        return { kind: 'royal', userId: userId, cards: royalCards };
+      var hand = resolveCelebrationHand(best);
+      // Without both hole cards, only a public-board royal proves the exact best five.
+      if (hand && (hasVerifiedHoleCards || hand.title === 'ROYAL FLUSH')){
+        return { kind: 'hand', userId: userId, title: hand.title, cards: hand.cards };
       }
     }
     var buyIn = input.buyIn;
@@ -6419,6 +6454,7 @@
       buildSettlementPresentation: buildSettlementPresentation,
       selectCelebrationForSettlement: selectCelebrationForSettlement,
       resolveCelebrationRoyalCards: resolveCelebrationRoyalCards,
+      resolveCelebrationHand: resolveCelebrationHand,
       celebrationDuration: celebrationDuration,
       celebrationExitDuration: celebrationExitDuration,
       newWinStreakCursor: newWinStreakCursor,

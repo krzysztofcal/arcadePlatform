@@ -46,15 +46,15 @@ function celebrationInput(hooks, amount = 500){
     settlementPresentation: project(hooks, showdown, { a: amount }), communityCards: [], revealedShowdownCardsByUserId: {} };
 }
 
-test('celebrations prove a royal from legal cards, prioritize it and reject ordinary straight flushes', () => {
+test('celebrations prove a royal from legal cards and fail closed when winner proof is insufficient', () => {
   const hooks = loadHooks();
   const input = celebrationInput(hooks, 500);
   input.communityCards = ['10', 'J', 'Q'].map(r => ({ r, s: 'S' }));
   input.revealedShowdownCardsByUserId.a = ['K', 'A'].map(r => ({ r, s: 'S' }));
   assert.deepEqual(plain(hooks.selectCelebrationForSettlement(input)), {
-    kind: 'royal', userId: 'a', cards: ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'S' }))
+    kind: 'hand', userId: 'a', title: 'ROYAL FLUSH', cards: ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'S' }))
   });
-  input.revealedShowdownCardsByUserId.a = ['K', '9'].map(r => ({ r, s: 'S' }));
+  input.revealedShowdownCardsByUserId.a = [{ r: 'K', s: 'H' }, { r: '2', s: 'C' }];
   assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'pot');
   input.buyIn = null;
   assert.equal(hooks.selectCelebrationForSettlement(input), null);
@@ -64,16 +64,16 @@ test('celebrations prove a royal from legal cards, prioritize it and reject ordi
   input.buyIn = 100;
   input.currentUserId = 'a';
   assert.deepEqual(plain(hooks.selectCelebrationForSettlement(input)), {
-    kind: 'royal', userId: 'a', cards: ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'S' }))
+    kind: 'hand', userId: 'a', title: 'ROYAL FLUSH', cards: ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'S' }))
   }, 'the viewer may use their own current-hand cards to prove the winning hand');
   input.currentUserId = 'spectator';
   assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'pot', 'a spectator still cannot inspect the winner private cards');
   input.communityCards = ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'H' }));
-  assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'royal', 'board royal is public proof');
+  assert.equal(hooks.selectCelebrationForSettlement(input).title, 'ROYAL FLUSH', 'board royal is public proof');
   input.showdown.reason = 'all_folded';
   input.showdown.potsAwarded[0].eligibleUserIds = ['a'];
   input.settlementPresentation = project(hooks, input.showdown, input.handSettlement.payouts);
-  assert.equal(hooks.selectCelebrationForSettlement(input).kind, 'royal', 'confirmed fold winner can prove a public board royal');
+  assert.equal(hooks.selectCelebrationForSettlement(input).title, 'ROYAL FLUSH', 'confirmed fold winner can prove a public board royal');
   input.handId = 'other';
   assert.equal(hooks.selectCelebrationForSettlement(input), null);
 });
@@ -84,6 +84,35 @@ test('live royal presentation never invents cards while preview may use an expli
   assert.equal(hooks.resolveCelebrationRoyalCards(['10S', 'JS', 'QH', 'KS', 'AS'], false), null);
   assert.deepEqual(plain(hooks.resolveCelebrationRoyalCards(undefined, true)),
     ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'S' })));
+});
+
+test('verified winning hands select their authentic best five cards before Monster Pot', () => {
+  const hooks = loadHooks();
+  const cases = [
+    { title: 'STRAIGHT', board: ['2S', '3H', '4D', '8C', 'KS'], hole: ['5H', 'AC'], cards: ['2S', '3H', '4D', '5H', 'AC'] },
+    { title: 'FLUSH', board: ['2S', '4S', '6S', '8S', '10S'], hole: ['3H', '5D'], cards: ['2S', '4S', '6S', '8S', '10S'] },
+    { title: 'FULL HOUSE', board: ['2S', '2H', '2D', '9C', 'KD'], hole: ['9S', '4H'], cards: ['2S', '2H', '2D', '9C', '9S'] },
+    { title: 'FOUR OF A KIND', board: ['7S', '7H', '7D', 'KC', '3S'], hole: ['7C', 'AH'], cards: ['7S', '7H', '7D', '7C', 'AH'] },
+    { title: 'STRAIGHT FLUSH', board: ['6S', '7S', '8S', '9S', '2D'], hole: ['10S', 'KH'], cards: ['6S', '7S', '8S', '9S', '10S'] },
+    { title: 'ROYAL FLUSH', board: ['10S', 'JS', 'QS', '2D', '3H'], hole: ['KS', 'AS'], cards: ['10S', 'JS', 'QS', 'KS', 'AS'] }
+  ];
+  for (const hand of cases){
+    const input = celebrationInput(hooks, 500);
+    input.communityCards = hand.board.map(card => ({ r: card.slice(0, -1), s: card.slice(-1) }));
+    input.revealedShowdownCardsByUserId.a = hand.hole.map(card => ({ r: card.slice(0, -1), s: card.slice(-1) }));
+    const selected = hooks.selectCelebrationForSettlement(input);
+    assert.equal(selected.kind, 'hand', hand.title);
+    assert.equal(selected.title, hand.title);
+    assert.equal(selected.userId, 'a');
+    assert.deepEqual(plain(selected.cards).map(card => card.r + card.s).sort(), hand.cards.slice().sort(), hand.title + ' cards');
+  }
+  const hidden = celebrationInput(hooks, 499);
+  hidden.communityCards = ['2S', '3H', '4D', '8C', 'KS'].map(card => ({ r: card.slice(0, -1), s: card.slice(-1) }));
+  assert.equal(hooks.selectCelebrationForSettlement(hidden), null, 'a public non-royal board cannot prove a hidden winner hand');
+  const ordinary = celebrationInput(hooks, 499);
+  ordinary.communityCards = ['2S', '5H', '7D', '9C', 'KC'].map(card => ({ r: card.slice(0, -1), s: card.slice(-1) }));
+  ordinary.revealedShowdownCardsByUserId.a = [{ r: '2', s: 'D' }, { r: 'A', s: 'H' }];
+  assert.equal(hooks.selectCelebrationForSettlement(ordinary), null, 'a pair does not qualify for card art');
 });
 
 test('monster pot uses each contested recipient award, excludes returns and fails closed', () => {

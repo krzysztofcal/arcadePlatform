@@ -58,3 +58,12 @@ Rules for V3-05: main/side award recipients win (every split recipient counts); 
 V4 checks must not add a separate UI/CSS/layout/simple-glue test suite. Any fade timer is scoped to the current single overlay and bounded by its original expiration; no polling, new queue, server state or gameplay mutation.
 
 V4 implementation, browser verification and CI handoff are complete. GitHub CI and the automatic Netlify PR Deploy are green after one dependency-install timeout on an earlier retry. Keep the PR draft until the owner accepts Android behavior.
+
+## V5 delta — extend verified winning-hand art; continue the same draft PR #1016
+
+- [x] V5-01 Reconcile v5 issue scope with the current v4 HEAD; update existing Spec Kit artifacts for six confirmed hand categories, exact card proof, one-effect priority and both preview sizes.
+- [x] V5-02 Extend the existing fundamental settlement test and `selectCelebrationForSettlement()` in `tests/poker-settlement-presentation.unit.test.mjs` and `poker/poker-v2.js` for authentic best-five cards, viewer-first recipients, hidden-card fail-closed behavior, and hand > Monster Pot selection.
+- [x] V5-03 Reuse `showCelebration()` and the same existing card art, ownership sizes and 1600 ms + 400 ms lifecycle in `poker/poker-v2.js`; extend `bindCelebrationPreview()` with synthetic examples for all six hands while preserving Monster Pot, Win Streak and exact selected `userId + seatNo` validation.
+- [ ] V5-04 Run the existing critical suites, syntax/CSP and Chromium checks; review diff; update `specs/795-poker-celebrations/quickstart.md` and the existing draft PR description with exact final SHA, matching Deploy Preview, CI state and Android handoff. Leave #1016 draft; do not merge or deploy Production.
+
+Acceptance/risk notes: no hidden opponent cards reach hand art. Existing Monster Pot/Win Streak calculations and count lifecycle are unchanged, but both can be visually preempted more often by eligible hand FX under the issue's single-slot priority. The owner performs physical Android acceptance of all six demos in both sizes before merge.
