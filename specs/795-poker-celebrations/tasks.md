@@ -44,6 +44,6 @@ V2-02/V2-05 browser implementation/inspection complete; physical Android portrai
 - [x] V3-04 Pass the selected user's exact summed main/side awards to both Monster Pot variants; exclude returns and display localized `WIN {amount} CH`, including all-folded main awards and split shares.
 - [x] V3-05 Implement exact-once page-local Win Streak ×5/×6/×7… from complete newly observed outcomes for each `tableId + userId`; reset on reconnect/resync/reload/rejoin/table/identity change or uncertain sequence; keep demo counts synthetic.
 - [x] V3-06 Resolve the v2 CI failure: scope browser preparation to the requested browser, make the existing UI test wait only for DOM readiness, rerun Playwright and relevant checks, and record the actual root cause/evidence.
-- [ ] V3-07 Update this Spec Kit, existing draft PR description and quickstart evidence; verify matching PR Deploy and report pending owner Android smoke.
+- [x] V3-07 Update this Spec Kit, existing draft PR description and quickstart evidence; verify matching PR Deploy and report pending owner Android smoke.
 
 Rules for V3-05: main/side award recipients win (every split recipient counts); eligible non-recipients and folded seats lose; sit-outs have no result; a return-only payout is not a win. Any incomplete/out-of-order result clears counts. No persisted history, backend changes or replayed initial settlement.

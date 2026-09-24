@@ -14,9 +14,9 @@ V3 local verification so far: settlement + V2 live behavior suites **135/135 pas
 
 ### V3 release evidence
 
-- New PR SHA: pending final review/commit.
-- PR Deploy for that exact SHA: pending.
-- GitHub CI for that exact SHA: pending.
+- V3 runtime implementation SHA: `ee01b6a35c0f6e1a449a82bb3810efb698c371a5`.
+- Working [PR Deploy](https://deploy-preview-1016--playkcswh.netlify.app/poker/) succeeded for that SHA (Netlify deploy `6ab51eca95ae8a0008ada9e5`). Deployed `build-info.js` confirmed the full commit hash, `context: deploy-preview`, `isPreview: true`, and review `1016`.
+- [GitHub Tests workflow](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36002675335) and [CI workflow](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36002675323) succeeded for that SHA. `tests` (including its Playwright step), `verify` (including Playwright), actionlint, JavaScript/Actions analysis, WS harness, chips-retention integration, games catalog validation and CodeQL succeeded. The conditional chips-integration job was skipped; Netlify deploy-preview succeeded. No failing checks remain.
 - Android physical-device acceptance: pending owner test.
 - No Production deployment, WS/backend change or merge was performed.
 
