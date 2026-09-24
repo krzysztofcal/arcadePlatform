@@ -24,3 +24,14 @@
 Implementation/handoff complete; physical Android, final artistic acceptance and rare natural live-trigger acceptance remain owner checks, not claims of completed smoke. See quickstart evidence.
 
 Dependencies: T001 → T002 → T003 → T004 → T005 → T006. Shared files require sequential implementation; independent read-only review/checks can run in parallel. Royal is visual baseline; continue through remaining variants within this issue.
+
+## V2 delta (v1 tasks above remain complete)
+
+- [x] V2-01 Verify exact v1 baseline and update existing Spec Kit; Constitution Check.
+- [x] V2-02 Own-win viewport-centered responsive bumper, same overlay/art.
+- [x] V2-03 Viewer-prioritized classification and compact real-avatar presentation.
+- [x] V2-04 Preserve Winner lifecycle/deadlines and decorative-only exit.
+- [x] V2-05 Both touch preview modes; fundamental checks and browser inspection.
+- [ ] V2-06 Update draft PR #1016; matching new SHA deploy and owner Android handoff.
+
+V2-02/V2-05 browser implementation/inspection complete; physical Android portrait/landscape and natural rare triggers remain explicitly pending owner acceptance.

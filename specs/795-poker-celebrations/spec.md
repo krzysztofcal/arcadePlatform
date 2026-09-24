@@ -3,6 +3,14 @@
 **Feature Branch**: `795-poker-celebrations` | **Created**: 2026-09-23 | **Status**: Implementation brief
 **Input**: https://github.com/krzysztofcal/arcadePlatform/issues/795 (authoritative scope).
 
+## V2 delta — 2026-09-24 (supersedes conflicting v1 presentation below)
+
+Continue draft PR #1016 from confirmed v1 `f7155980a8176e0caaa6cba0dc05065a797c1dae`; retain its art, classification, settings and timing. One overlay and one selected effect per hand: confirmed `selection.userId === state.currentUserId` gets a responsive viewport-centered large bumper; other human/bot winners get compact art beside their actual rendered avatar, skipped if unresolved. Prefer the viewer among winners qualifying for the same kind; Royal still precedes Monster Pot. Live streak stays deferred.
+
+Both sizes sit above scene chips/reactions, below menus/dialogs/action controls. The own-win main phase may cover normal Winner during the existing reveal; Winner retains its single lifecycle and unchanged payout/chip-fly. Existing 1800 ms dramatic phase and 400 ms decorative-only exit remain; late windows skip. Transitions strip artwork/claims immediately; OFF, identity/session/navigation/reduced-motion clear immediately.
+
+PR-only touch Preview FX adds My win (large) / Other player-bot (small near avatar), reused for all three kinds. The latter requires an actual visible nonlocal seat, otherwise disabled with an explanation. No fabricated winner, private cards, network call or game-state mutation. Physical Android and natural rare triggers remain owner acceptance, separately from browser emulation.
+
 ## User Scenarios & Testing
 
 ### US1 — Royal Flush and touch preview (P1)
@@ -25,7 +33,7 @@ Initial/reconnect/resync/stale snapshots, repeated results, missing payout/buy-i
 
 - FR-001: Browser-only disposable decoration; no changes to game timing, snapshots, rules, payouts, WS, DB, ledger, or authoritative state.
 - FR-002: Full automatic hero ends within the earliest existing local/authoritative reveal deadline. Target 2–2.5 seconds total; skip when insufficient time remains. Decorative ring-only exit ≤500 ms; new hand/turn removes text/cards immediately. No queue or new deferral.
-- FR-003: Overlay is noninteractive, below gameplay layers, scoped away from action/turn/result/leave/rebuy areas. Bounded particles; no strobe, shake, sound, 3D runtime, new framework or dependency.
+- FR-003: Overlay is noninteractive, above table gameplay art and below controls/menus/dialogs; own-win overlap of Winner is allowed only within the existing reveal window. Bounded particles; no strobe, shake, sound, 3D runtime, new framework or dependency.
 - FR-004: Preview exists only when build context is deploy-preview AND isPreview is true, fails closed otherwise, has no global debug API and no network/game mutations. All three variants are explicitly labeled previews.
 - FR-005: Extend existing normalized preferences and per-user storage; isolated guest celebration key; changes and session/identity/table loss clear FX immediately.
 - FR-006: Real events dedupe by table and hand; never replay initial or already-consumed results. Live streak deferred.
@@ -38,7 +46,7 @@ Transient celebration: visual variant, legally visible royal cards if applicable
 
 - All three previews can be invoked by touch after joining on Android and desktop, without network mutations.
 - OFF persists across refresh and is isolated from signed-in preferences; reduced motion produces no dynamic celebration.
-- Automatic effects never extend reveal, block actions or obscure required information; decorative residue ends within 500 ms.
+- Automatic effects never extend reveal, block actions or obscure next-hand information; decorative residue ends within 500 ms.
 - Invalid/duplicate/reconnect data produces no automatic effect; correct royal and 5× per-recipient award classify correctly.
 - One draft PR and actual working PR deploy delivered for artistic and real-device acceptance; no Production deploy or merge.
 

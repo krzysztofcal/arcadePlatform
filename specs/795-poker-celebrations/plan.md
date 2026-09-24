@@ -29,3 +29,20 @@ Baseline current main `f75bacf4`. Issue entrypoints still exist. Current respons
 ## Verification
 
 `node --test tests/poker-settlement-presentation.unit.test.mjs tests/poker-v2-live.behavior.test.mjs`; `node --check poker/poker-v2.js`; existing CSP checks. Inspect actual preview and locally emulate mobile/desktop with existing Playwright if available. Record real vs simulated evidence separately in quickstart. No external interfaces or migrations.
+
+## V2 incremental plan — 2026-09-24
+
+Verified existing clean worktree and live PR HEAD equal v1 `f7155980a8176e0caaa6cba0dc05065a797c1dae`. Baseline 127/127 relevant tests pass. The v1 steps above are history, not work to repeat.
+
+Constitution Check before v2 implementation: PASS. Reuse existing IIFE/overlay/assets; no dependencies, configuration, ignores, WS/protocol/DB/Stage/Production effects. Only extend existing deterministic selection test for multi-winner priority; no presentation test suites. Use temporary browser inspection and owner Android acceptance for visual work.
+
+- V2-01: update existing spec/plan/tasks/quickstart, preserve v1 evidence.
+- V2-02: move `#pokerCelebration` to `.poker-table-screen` outside transformed `.poker-scene`; isolate the scene stacking context. Scoped CSS gives FX layer 24, below action bar 25, preview 29, menus 30–32 and dialogs 60+. Large responsive art centered in viewport; retain one overlay.
+- V2-03: `selectCelebrationForSettlement` orders confirmed winners viewer-first, still scans all royals before pots. `showCelebration` compares stable current user ID, resolves compact anchors from `state.seats` and `renderedSeatAvatars`, positions beside the avatar within viewport. Refresh in existing render/layout path; skip/clear missing anchors. Place beside the whole seat; choose the nearest bounded position above/below the central payout summary when necessary, skipping if neither fits.
+- V2-04: preserve duration/claim/observe/Winner functions; retain presentation class during 400 ms empty decorative exit. No timer or render deferral changes.
+- V2-05: `bindCelebrationPreview` adds one native touch mode selector and unavailable-opponent hint, refreshes availability when opening and rendering. Explicit demo flag only, all three kinds. Inspect portrait/landscape/desktop, edge seats, changes in layout, interruption, OFF/reduced motion, build gates and unchanged Winner; rerun existing critical tests, syntax and CSP.
+- V2-06: fresh whole-diff review, publish same draft PR, verify exact new HEAD deploy success and actual build metadata. Record emulator vs real transport vs owner-only physical Android evidence separately.
+
+Shared interfaces: selection.userId feeds presentation size; preview supplies a real nonlocal user ID only for compact anchoring. Render rebuilds avatars, so positioning must resolve fresh nodes, never retain a stale avatar reference. Overlay leaves transformed scene, so coordinates are viewport pixels. Exit retains size/position but strips all art immediately.
+
+Post-implementation Constitution Check: PASS. Eight existing files changed; one critical selection test added. No UI suite, dependency/lockfile/configuration/ignore, runtime, protocol or migration changes. Existing locked root/WS dependencies installed locally only to run the full pre-existing suite.

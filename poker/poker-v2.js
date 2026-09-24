@@ -315,6 +315,7 @@
       els.celebration.hidden = true;
       els.celebration.textContent = '';
       els.celebration.className = 'poker-celebration';
+      els.celebration.removeAttribute('style');
     }
     if (els.celebrationPreviewPanel) els.celebrationPreviewPanel.hidden = true;
     if (els.celebrationPreviewButton) els.celebrationPreviewButton.setAttribute('aria-expanded', 'false');
@@ -326,8 +327,65 @@
     celebration.exiting = true;
     // Remove every card, claim and particle synchronously. Only a faint ring survives.
     els.celebration.textContent = '';
-    els.celebration.className = 'poker-celebration poker-celebration--exit';
+    els.celebration.classList.add('poker-celebration--exit');
     celebrationTimer = window.setTimeout(clearCelebration, 400);
+  }
+
+  function celebrationSeatRect(userId){
+    if (!userId) return null;
+    var seats = state.seats.filter(function(seat){ return seat && seat.userId === userId; });
+    if (seats.length !== 1) return null;
+    var avatar = renderedSeatAvatars[seats[0].seatNo];
+    if (!avatar || avatar.dataset.userId !== userId || !avatar.isConnected || typeof avatar.getBoundingClientRect !== 'function') return null;
+    var rect = avatar.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || rect.left < 0 || rect.top < 0
+      || rect.right > window.innerWidth || rect.bottom > window.innerHeight) return null;
+    return { avatar: rect, seat: avatar.parentNode.getBoundingClientRect() };
+  }
+
+  function positionCelebration(){
+    if (!celebration || celebration.exiting || celebration.own) return;
+    var anchor = celebrationSeatRect(celebration.userId);
+    if (!anchor){ clearCelebration(); return; }
+    // Stay beside the whole seat, leaving its avatar, name and payout readable.
+    var rightSpace = window.innerWidth - anchor.seat.right - 16;
+    var leftSpace = anchor.seat.left - 16;
+    var onRight = rightSpace >= leftSpace;
+    var width = Math.min(160, onRight ? rightSpace : leftSpace);
+    if (width < 80){ clearCelebration(); return; }
+    var left = onRight ? anchor.seat.right + 8 : anchor.seat.left - width - 8;
+    var top = Math.max(8, Math.min(window.innerHeight - 108, anchor.avatar.top + anchor.avatar.height / 2 - 50));
+    if (els.settlementSummary && !els.settlementSummary.hidden){
+      var summary = els.settlementSummary.getBoundingClientRect();
+      if (left < summary.right && left + width > summary.left && top < summary.bottom && top + 100 > summary.top){
+        var above = summary.top - 108;
+        var below = summary.bottom + 8;
+        var fitsAbove = above >= 8;
+        var fitsBelow = below + 100 <= window.innerHeight - 8;
+        if (!fitsAbove && !fitsBelow){ clearCelebration(); return; }
+        top = fitsAbove && (!fitsBelow || Math.abs(above - top) <= Math.abs(below - top)) ? above : below;
+      }
+    }
+    els.celebration.style.left = left + 'px';
+    els.celebration.style.top = top + 'px';
+    els.celebration.style.width = width + 'px';
+    els.celebration.style.setProperty('--compact-font', width / 12 + 'px');
+  }
+
+  function celebrationPreviewOpponent(){
+    return state.seats.find(function(seat){
+      return seat && seat.userId && seat.userId !== state.currentUserId && celebrationSeatRect(seat.userId);
+    });
+  }
+
+  function refreshCelebrationPreview(){
+    if (!els.celebrationPreviewMode) return;
+    var available = !!celebrationPreviewOpponent();
+    els.celebrationPreviewMode.options[1].disabled = !available;
+    if (!available) els.celebrationPreviewMode.value = 'own';
+    els.celebrationPreviewHint.textContent = available
+      ? 'Visual demo only. Table settings and reduced motion apply. Live play takes priority.'
+      : 'Small preview unavailable: no visible opponent/bot. Join a table with another player.';
   }
 
   function showCelebration(selection, options){
@@ -336,9 +394,13 @@
     var demo = options && options.demo === true;
     var duration = demo ? 1800 : options && options.duration;
     if (!Number.isFinite(duration) || duration <= 0) return;
-    celebration = { demo: demo, handId: state.handId, tableId: state.tableId, endsAt: Date.now() + duration, exiting: false };
+    var own = demo ? options.mode !== 'other' : !!state.currentUserId && selection.userId === state.currentUserId;
+    if (!own && !celebrationSeatRect(selection.userId)) return;
+    celebration = { demo: demo, own: own, userId: selection.userId, handId: state.handId, tableId: state.tableId, endsAt: Date.now() + duration, exiting: false };
     var overlay = els.celebration;
-    overlay.className = 'poker-celebration poker-celebration--' + selection.kind;
+    overlay.className = 'poker-celebration poker-celebration--' + selection.kind + (own ? ' poker-celebration--own' : ' poker-celebration--other');
+    positionCelebration();
+    if (!celebration) return;
     overlay.style.setProperty('--celebration-duration', duration + 'ms');
     overlay.hidden = false;
     var art = document.createElement('div');
@@ -408,6 +470,15 @@
     panel.className = 'poker-celebration-preview__panel';
     panel.setAttribute('aria-label', 'Celebration preview');
     panel.hidden = true;
+    var mode = document.createElement('select');
+    mode.setAttribute('aria-label', 'Preview presentation');
+    [['own', 'My win (large)'], ['other', 'Other player/bot (small near avatar)']].forEach(function(entry){
+      var option = document.createElement('option');
+      option.value = entry[0];
+      option.textContent = entry[1];
+      mode.appendChild(option);
+    });
+    panel.appendChild(mode);
     [['royal', 'Royal Flush'], ['pot', 'Monster Pot'], ['streak', 'Win Streak ×5'], ['close', 'Close']].forEach(function(entry){
       var choice = document.createElement('button');
       choice.type = 'button';
@@ -417,7 +488,9 @@
         button.setAttribute('aria-expanded', 'false');
         button.focus();
         if (entry[0] === 'close' || !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate || getActiveWinnerReveal()) return;
-        showCelebration({ kind: entry[0] }, { demo: true });
+        var opponent = mode.value === 'other' ? celebrationPreviewOpponent() : null;
+        if (mode.value === 'other' && !opponent) { refreshCelebrationPreview(); return; }
+        showCelebration({ kind: entry[0], userId: opponent ? opponent.userId : state.currentUserId }, { demo: true, mode: mode.value });
       });
       panel.appendChild(choice);
     });
@@ -425,6 +498,7 @@
     hint.textContent = 'Visual demo only. Respects Table settings and reduced motion. Live results take priority.';
     panel.appendChild(hint);
     button.addEventListener('click', function(){
+      refreshCelebrationPreview();
       panel.hidden = !panel.hidden;
       button.setAttribute('aria-expanded', String(!panel.hidden));
     });
@@ -434,6 +508,8 @@
     controls.appendChild(button);
     controls.appendChild(panel);
     els.screen.appendChild(controls);
+    els.celebrationPreviewMode = mode;
+    els.celebrationPreviewHint = hint;
     els.celebrationPreview = controls;
     els.celebrationPreviewPanel = panel;
     els.celebrationPreviewButton = button;
@@ -1722,6 +1798,8 @@
       });
     });
     var winners = Object.keys(confirmedWinners).sort();
+    var viewerIndex = winners.indexOf(input.currentUserId);
+    if (viewerIndex > 0) winners.unshift(winners.splice(viewerIndex, 1)[0]);
     for (var i = 0; i < winners.length; i++){
       var userId = winners[i];
       var revealed = input.revealedShowdownCardsByUserId && input.revealedShowdownCardsByUserId[userId];
@@ -3437,6 +3515,8 @@
     renderSeatChips();
     renderDealerChip();
     renderReactionBubbles();
+    positionCelebration();
+    refreshCelebrationPreview();
   }
 
   function scheduleLayoutPresentationRefresh(){
@@ -3790,6 +3870,7 @@
 
       var avatar = document.createElement('div');
       avatar.className = 'poker-seat-avatar';
+      avatar.dataset.userId = seat && seat.userId || '';
       renderSeatAvatar(avatar, seat);
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
       if (active) updateSeatTurnClock(avatar, getTurnClockState());
@@ -4715,6 +4796,8 @@
     renderControls();
     renderReactionHistory();
     renderClosedTableNotice();
+    positionCelebration();
+    refreshCelebrationPreview();
   }
 
   function setError(message){
@@ -5968,7 +6051,10 @@
     bindCelebrationPreview();
     syncSocialPreferencesIdentity(null);
     if (els.celebrationsPreference) els.celebrationsPreference.addEventListener('change', function(){ updateSocialPreference('celebrationsEnabled', els.celebrationsPreference.checked); });
-    if (window.addEventListener) window.addEventListener('pagehide', clearCelebration);
+    if (window.addEventListener) {
+      window.addEventListener('pagehide', clearCelebration);
+      window.addEventListener('scroll', positionCelebration, { passive: true });
+    }
     if (els.actionBar) els.actionBar.addEventListener('pointerdown', startCelebrationExit);
     document.addEventListener('visibilitychange', function(){ if (document.hidden) clearCelebration(); });
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');

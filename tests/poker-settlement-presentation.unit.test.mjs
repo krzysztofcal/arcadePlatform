@@ -86,6 +86,31 @@ test('monster pot uses each contested recipient award, excludes returns and fail
   assert.equal(hooks.selectCelebrationForSettlement(input), null);
 });
 
+test('celebrations prefer the local qualifying winner without overriding royal priority', () => {
+  const hooks = loadHooks();
+  const input = celebrationInput(hooks);
+  input.currentUserId = 'b';
+  input.showdown.winners = ['a', 'b'];
+  input.showdown.potAwardedTotal = 1000;
+  input.showdown.potsAwarded = [{ amount: 1000, winners: ['a', 'b'], eligibleUserIds: ['a', 'b'] }];
+  input.handSettlement.payouts = { a: 500, b: 500 };
+  input.settlementPresentation = project(hooks, input.showdown, input.handSettlement.payouts);
+  assert.equal(hooks.selectCelebrationForSettlement(input).userId, 'b', 'split contested awards qualify independently');
+  input.communityCards = ['10', 'J', 'Q', 'K', 'A'].map(r => ({ r, s: 'S' }));
+  assert.equal(hooks.selectCelebrationForSettlement(input).userId, 'b', 'shared board royal prefers viewer');
+  input.communityCards = ['10', 'J', 'Q'].map(r => ({ r, s: 'S' }));
+  input.revealedShowdownCardsByUserId.a = ['K', 'A'].map(r => ({ r, s: 'S' }));
+  assert.deepEqual(plain(hooks.selectCelebrationForSettlement(input)).userId, 'a', 'opponent royal outranks local pot');
+  input.revealedShowdownCardsByUserId = {};
+  input.currentUserId = 'spectator';
+  assert.equal(hooks.selectCelebrationForSettlement(input).userId, 'a', 'unknown viewer never becomes winner');
+  input.currentUserId = 'b';
+  input.showdown.potsAwarded = [{ amount: 1000, winners: ['a'], eligibleUserIds: ['a', 'b'] }];
+  input.handSettlement.payouts = { a: 1000 };
+  input.settlementPresentation = project(hooks, input.showdown, input.handSettlement.payouts);
+  assert.equal(hooks.selectCelebrationForSettlement(input).userId, 'a', 'viewer must actually qualify');
+});
+
 test('celebration deadline uses earliest existing deadline and skips insufficient windows', () => {
   const { celebrationDuration } = loadHooks();
   assert.equal(celebrationDuration(1000, [4500, 3400, null]), 1800);
