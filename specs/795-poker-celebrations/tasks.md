@@ -32,6 +32,6 @@ Dependencies: T001 → T002 → T003 → T004 → T005 → T006. Shared files re
 - [x] V2-03 Viewer-prioritized classification and compact real-avatar presentation.
 - [x] V2-04 Preserve Winner lifecycle/deadlines and decorative-only exit.
 - [x] V2-05 Both touch preview modes; fundamental checks and browser inspection.
-- [ ] V2-06 Update draft PR #1016; matching new SHA deploy and owner Android handoff.
+- [x] V2-06 Update draft PR #1016; matching new SHA deploy and owner Android handoff.
 
 V2-02/V2-05 browser implementation/inspection complete; physical Android portrait/landscape and natural rare triggers remain explicitly pending owner acceptance.

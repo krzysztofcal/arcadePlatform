@@ -42,3 +42,9 @@ Open the updated PR deploy → join a table → Preview FX → My win (large) �
 - Fresh read-only review checked the entire v2 diff. Its edge-overlap hypothesis was reproduced and fixed as above; no deferred code findings. Physical Android, taste/performance and natural rare trigger acceptance remain with the owner. Final deployed SHA/CI/real-transport smoke are recorded in the PR handoff.
 
 V2 risk surfaces: ancestor stacking isolation on untested screens, compact placement on unusual seat layouts, browser viewport changes, identity/preference handoff. No breaking API/schema/protocol or payout change. If safe avatar geometry is unavailable the compact FX is skipped. Win Streak remains preview-only; Monster Pot remains 5× contested awards. Retain draft status; do not merge.
+
+### V2 deployed browser smoke
+
+Runtime revision: `28d7fce457122cf6988362049918c5eb046bb212`. Netlify `netlify/playkcswh/deploy-preview` succeeded for this exact SHA and the served `/js/build-info.js` confirmed it, with `context: deploy-preview`, `isPreview: true`, review 1016. Deploy: https://deploy-preview-1016--playkcswh.netlify.app/poker/ (Netlify deploy ID `6ab4cd34e301eb0008b23944`). Later documentation-only handoff commits do not change these runtime files; final PR HEAD/deploy status is reported in the PR.
+
+Unmodified real transport, Chromium touch landscape 844×390: Play as Guest joined a real bot table; Royal Flush, Monster Pot and Win Streak ×5 each displayed in both large and compact modes. Screenshots verified large art above the table and compact art beside a bot. Guest OFF persisted on actual deploy reload, then preference restored. Left through normal UI. No authenticated wallet/paid chips used. This verifies touch preview availability and integration, not physical Android performance or naturally occurring rare winning hands. No WS deployment was needed/performed.
