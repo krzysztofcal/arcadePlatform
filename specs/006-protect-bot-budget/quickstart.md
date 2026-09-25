@@ -41,6 +41,14 @@ Ostatni plik jest planowany, obecnie nie istnieje. Po wdrożeniu testowego harne
 - REFILL w (t−168 h,t]: tuż przed/na/po lewej granicy, równoczesne klasy/tiery, wspólny global cap; trwałe receipts po restarcie/retention, brak resetu na granicy tygodnia.
 - INITIAL_ALLOCATION: równoczesne/retry żądania dają dokładnie jeden milion GENESIS → POKER_BOT_BANKROLL_100 i 900000/100000; osobny purpose, bez zużycia REFILL cap. Schema alone daje zero CH; brak Production wykonania bez osobnego GO.
 
+## Fundamentalna walidacja D.1 (przyszła)
+
+- Backend lobby: macierz dwóch kont/klas/tierów, pełny/DRAINING/cudzy slow pominięty; własny seat wyłącznie Resume; odświeżenie po zmianie eligibility/capacity/time, stary async snapshot nie przywraca oferty.
+- Quick Seat: zgodny STANDARD z ludźmi przed innym STANDARD, brak kandydata → dokładnie jeden create i final WS join w żądanym tierze/mode; slow owner i HUMAN_ONLY find-or-create bez zmiany trybu. Brak allowance/pool/proof/capability → zero nowych funded stołów.
+- Stale admission: pierwszy cel zajęty/draining, drugi zgodny → automatyczny rematch bez nowego kliknięcia; ≤2 admission attempts/1 create. DIRECT nie przeskakuje. Retry po utracie HTTP odpowiedzi odtwarza tableId; unknown WS commit odzyskuje wynik przed rematch. Dwa połączenia DB/duplikaty kart: bez powielania create, transferu i EXPOSURE.
+- Po porzuconym create pusty INIT odzyskuje istniejący lifecycle z zero escrow; receipt pozostaje. Jeżeli ktoś dołączył, brak usunięcia jego stołu. Rzeczywisty brak środków i backend outage mają uczciwy terminal/wait; brak obietnicy całkowitego wyeliminowania błędów.
+- Wyłącznie ręczna przyszła weryfikacja Preview: brak wierszy Unavailable, odrębne Join/Resume, stan dobierania zamiast pierwszego stale błędu, jawne alternatywy direct/HUMAN_ONLY, brak cichej zmiany tieru/trybu. Nie dodawać testów renderowania UI/CSS/JSP.
+
 ## Przyszły Stage/Preview
 
 1. Przed publikacją PR z migracjami opisać zamierzony automatyczny DB Stage Apply PR na wspólnym Stage. Applied migrations niezmienne; poprawki nowymi migracjami. Schema i jednorazowa alokacja to oddzielne kroki; potwierdzić target i zatwierdzone D3: jednorazowy MINT miliona GENESIS → POKER_BOT_BANKROLL_100, 900000/100000.

@@ -43,12 +43,12 @@ Przejścia: STANDARD active → DRAINING → CLOSED; nigdy z DRAINING z powrotem
 
 ## 3. Nowe `poker_bot_exposure_events` — wspólny append-only dziennik decyzji
 
-Przechowuje typy FUNDING, ADMISSION, EXPOSURE, FAST_EXHAUSTED, DRAIN oraz CLOSE_PROOF; nie jest drugim ledgerem CH. Kwoty rzeczywistych CH pochodzą wyłącznie z chips_entries. Status decyzji COMMITTED/DENIED jest końcowy; brak wiecznych rezerwacji.
+Przechowuje typy FUNDING, ADMISSION, EXPOSURE, FAST_EXHAUSTED, DRAIN, CLOSE_PROOF oraz dwa typy MATCHMAKING opisane niżej; nie jest drugim ledgerem CH. Kwoty rzeczywistych CH pochodzą wyłącznie z chips_entries. Status decyzji COMMITTED/DENIED jest końcowy; brak wiecznych rezerwacji.
 
 | Pola | Ograniczenia |
 |---|---|
 | event_id, event_key, event_kind, payload_hash | trwała unikalna event_key; konflikt payload przy replay oznacza odmowę |
-| table_id, user_id | UUID; user NULL dozwolone dla FUNDING niezależnie od liczby ludzi, DRAIN tabeli i CLOSE_PROOF; dla EXPOSURE user_id zawsze NOT NULL; table NULL tylko dla account FAST_EXHAUSTED |
+| table_id, user_id | UUID; user NULL dozwolone dla FUNDING niezależnie od liczby ludzi, DRAIN tabeli i CLOSE_PROOF; dla EXPOSURE user_id zawsze NOT NULL; table NULL tylko dla account FAST_EXHAUSTED oraz terminalnego no-offer MATCHMAKING_RECOMMENDATION |
 | policy_version, source_account_id, tier, access_class | obowiązkowe dla ekonomicznego dowodu funding/exposure/close; FAST_EXHAUSTED ma konto/okres/czas zamiast jednego tier/source; źródło to istniejące chips_accounts.id |
 | lineage_id, funding_seq, from_state_version, to_state_version | nullable dla account FAST_EXHAUSTED/DRAIN; dla funding/exposure lineage dziedziczona przy replacement z oldStack > 0; przy oldStack=0 lub nowym seed nowa; wersje potwierdzone stanem |
 | exposure_ch, exposure_subunits | dla EXPOSURE bigint ≥0; subunits = CH * (10000/tier); FAST_EXHAUSTED/DRAIN bez kosztu; brak losowego zaokrąglenia |
@@ -68,6 +68,12 @@ D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu 
 Pod blokadą konta odczytać trwałe EXPOSURE z budget_mode=SLOW, result=COMMITTED, consumed_at i kosztem integer. Dostępność jest wyliczana jako 10000 minus suma w oknie, nie przechowywana jako odnawiany grant. DENIED/replay nie zużywa ponownie. Czas UTC t pobierać z DB po uzyskaniu blokady (nie transaction-start sprzed oczekiwania); kontrola cofnięcia zegara ma blokować nowe zużycie. Retry zachowuje pierwotny receipt/czas. nextEligibleAt oznacza najwcześniejsze wygaśnięcie dostatecznej sumy dla konkretnego żądanego kosztu; wygaśnięcie 0,4 nie obiecuje pełnego bota.
 
 Fundamentalny przykład: 0,4 jednostki w t0 i 0,6 w t0+1 h. Tuż przed t0+12 h dostępne 0; dokładnie w t0+12 h dostępne tylko 0,4; pełne 1 dopiero w t0+13 h, o ile nie było nowego zużycia. Dwa równoczesne żądania o pozostałe 0,4 przy różnych tierach mogą łącznie zużyć najwyżej 0,4. Przełączenia fast/slow i sesji nie usuwają drugiego kosztu.
+
+### Trwały receipt matchmakingu D.1 (bez rezerwacji)
+
+W tym samym projektowanym journal dodać `MATCHMAKING_RECOMMENDATION` i `MATCHMAKING_RESULT`. Oba wymagają user_id; recommendation może mieć table_id=NULL wyłącznie dla terminalnego no-offer (bez create). Istniejące ograniczenia FUNDING/EXPOSURE bez zmiany; pola source/tier-funding/lineage/cost nie dotyczą tych faktów, nie tworzą allowance ani transferów. `details`: operation_id, request_hash (stałe user/class/tier/maxPlayers/intent), attempt_no 1..2, requested_class/tier/maxPlayers, candidate_table_id, created_table_id nullable, outcome i reason; matched identity wyznacza serwer. UNIQUE (user_id,operation_id,event_kind,attempt_no), indeks odczytu po user/operation. Dla recommendation result COMMITTED oznacza utrwaloną ofertę, nie przyjęcie gracza; no-offer jest DENIED. MATCHMAKING_RESULT COMMITTED/DENIED oznacza ostateczny wynik admission danej próby, zapisywany atomowo z efektem join/odmową; brak wyniku to pending/unknown, nie pozwolenie na rematch. Dane rekomendacji i wyniku append-only, payload mismatch/replay nie zmieniają faktu.
+
+Pod advisory guard konta/operacji: próba 2 dopiero po trwałym DENIED pierwszej i odświeżeniu uprawnień; najwyżej jeden created_table_id w całej operacji. Sukces, no-offer albo druga odmowa kończą operację; replay odtwarza wynik nawet po zamknięciu/usunięciu stołu. Nie kasować receipt wraz ze stołem, aby retry nie utworzył nowego. Reuse własnego pustego INIT po created_by/class/tier przed create, pod istniejącym guard doboru, obejmuje różne operationId w kilku kartach. Stan nie rezerwuje miejsca, nie zatrzymuje rezerwy SYSTEM i nie daje klientowi prawa do admission. Oczyszczanie pustego INIT przez istniejący lifecycle nie kasuje mapowania operacji.
 
 ## 4. Nowe `poker_bot_exposure_access` — projekcja idempotentnego dostępu
 

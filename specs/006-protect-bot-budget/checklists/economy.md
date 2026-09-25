@@ -79,3 +79,11 @@
 ## Notes
 
 Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: niezależny reviewer przed implementacją. Nie są to testy aplikacji. `$speckit-implement` może czytać stan, nie zmienia markerów. `requirements.md` ma osobny cykl specify/clarify. D1–D3 są zatwierdzone; kryteria nie są automatycznie zaliczone.
+
+## D.1 — jakość wymagań matchmakingu
+
+- [ ] CHK039 Czy kryteria projekcji gracza definiują JOIN/RESUME i całkowite pominięcie niedostępnych wierszy, wraz z odświeżaniem i prywatnością? [Completeness, Spec FR-011, US2/5]
+- [ ] CHK040 Czy preferencja STANDARD z ludźmi, find-or-create każdej klasy i zachowanie tieru/trybu są jednoznaczne? [Clarity, Spec FR-012, US2/6]
+- [ ] CHK041 Czy zwykły MATCH i przypięty DIRECT mają rozłączne zasady stale odmowy i alternatyw? [Consistency, Spec FR-012, US2/7–8]
+- [ ] CHK042 Czy limit 2 prób/1 create, retry po nieznanym wyniku i deduplikacja pustych stołów są mierzalne i spójne z atomowym admission? [Measurability, Spec FR-008, FR-012, contracts D.1]
+- [ ] CHK043 Czy brak allowance/pool/proof/capability wyklucza pozorne funded create, a ograniczenia awarii i ręczna weryfikacja UI są jawne? [Coverage, Spec FR-012, FR-025, FR-030, quickstart D.1]
