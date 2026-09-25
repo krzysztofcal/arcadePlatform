@@ -121,6 +121,8 @@ Warunkowo, **tylko jeżeli Q1 wybierze nową ścieżkę HTTP do WS**: przyszły 
 
 ## T042 — protokół do osobnej akceptacji (nie wykonano)
 
+Eksperyment z maksymalnie 200 syntetycznymi stołami służy do porównania wariantów Q1. Nie dowodzi wydajności przy większej rzeczywistej liczbie stołów i użytkowników. Ostateczne limity operacyjne wymagają późniejszej walidacji przy reprezentatywnym obciążeniu, zgodnie z T038.
+
 **Cel:** porównać koszt istniejących odczytów discovery i najprostszych read-only wariantów zbiorczych, zidentyfikować luki live/persisted. Nie dowodzić jeszcze pełnego admission/ekonomii #869 ani wydajności Production.
 
 **Target proponowany:** jednorazowy lokalny Postgres na loopback w odizolowanym katalogu/instancji, bez Supabase cloud, poświadczeń i danych użytkowników; lokalny Node/harness z istniejącymi zależnościami, bez uruchamiania serwera produkcyjnego lub Netlify handlera. Przed startem zapisać wersję PG/Node, host/port i potwierdzić brak routingu do Stage/Production. Jeśli brak dostępnego izolowanego PG, zatrzymać się; instalacja/usługa/kontener lub zewnętrzny target wymagają osobnej zgody. Nie wykonywać repo migration runner. Zgoda T042 musi obejmować stworzenie i usunięcie wyłącznie lokalnej schemy pomiarowej z minimalnym DDL istniejących tabel/indeksów oraz syntetycznymi fixtures; nie migrację aplikacji, seed CH ani nowe pola feature.
