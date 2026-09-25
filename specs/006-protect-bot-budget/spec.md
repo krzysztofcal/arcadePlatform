@@ -9,15 +9,15 @@
 
 ### Session 2026-09-25
 
-Aktualizacja na podstawie zatwierdzonych odpowiedzi w issue z 2026-09-24 i polecenia właściciela. D1–D3 zamknięte; brak nierozstrzygniętych pytań właściciela. Uwzględniono oba P1: globalne wyczerpanie oraz ułamkowe slow. Wszystkie obszary taxonomy clarify są Clear; przyszłe dowody runtime i osobne zlecenie implementacji pozostają bramkami wykonania, nie lukami wymagań.
+Aktualizacja na podstawie zatwierdzonych odpowiedzi w issue z 2026-09-24 i polecenia właściciela. D1–D3 zamknięte; otwarte S1 (wielostołowość SLOW) i Q1 (architektura/zmierzone granice discovery) do niezależnego review. Uwzględniono oba P1: globalne wyczerpanie oraz ułamkowe slow. Znane luki S1/Q1 są jawne; przyszłe dowody runtime i osobne zlecenie implementacji pozostają bramkami wykonania, nie lukami wymagań.
 
 - D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast.
 - D2 zatwierdzone: limity REFILL liczone w kroczącym (t−168 h, t], z tym samym t dla obu tierów, klas i globalnego cap. Lewa granica wyłączona, prawa włączona. Trwałe receipts i globalna blokada obejmują sumę już zatwierdzonych emisji oraz proponowaną kwotę; brak resetu kalendarzowego.
 - D3 zatwierdzone: jednorazowy idempotentny MINT 1 000 000 CH GENESIS → POKER_BOT_BANKROLL_100, z ochroną 900 000 CH STANDARD i 100 000 CH SLOW. Trwały unikalny purpose INITIAL_ALLOCATION niezależny od czasu, retry i policy_version. Operacja oddzielna od REFILL i schema provisioning; wykonanie na Production wymaga osobnego GO.
 
-Aktualizacja D.1 z issue 2026-09-25: filtrowanie przed prezentacją, find-or-create, ograniczony rematch i jawne granice awarii są zatwierdzone. Clarify: 0 pytań, wszystkie kategorie Clear; limit prób jest decyzją techniczną planu, nie zmianą polityki D1–D3.
+Aktualizacja D.1 z issue 2026-09-25: filtrowanie przed prezentacją, find-or-create, ograniczony rematch i jawne granice awarii są zatwierdzone. Clarify: S1/Q1 wymagają review; limit prób jest decyzją techniczną planu, nie zmianą polityki D1–D3.
 
-Checklist jakości: 16/16; niezależna economy checklist pozostaje do review. Brak `.specify/extensions.yml` i hooków analyze. Nie uruchamiać implementacji.
+Checklist jakości: 14/16; niezależna economy checklist pozostaje do review. Brak `.specify/extensions.yml` i hooków analyze. Nie uruchamiać implementacji.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -38,25 +38,23 @@ Gracz wykorzystuje jeden limit dostępu do nowych stacków botów niezależnie o
 
 ### User Story 2 - Zgodny dobór stołów (Priority: P1)
 
-Zwykli gracze dzielą stoły STANDARD. Gracz z niewystarczającym szybkim limitem wybiera własny SLOW_PRIVATE albo HUMAN_ONLY.
+Gracze FAST dzielą STANDARD, gracze SLOW dzielą SLOW_SHARED; HUMAN_ONLY nie finansuje botów. Lobby jest pasywne i nie ma ręcznego Create. Jeden przycisk Graj teraz automatycznie dobiera i dołącza bez formularza.
 
-**Why this priority**: Ochrona rezerwy nie działa, gdy da się wejść do cudzych finansowanych botów.
+**Why this priority**: Każdy uczestnik musi samodzielnie autoryzować dostęp do wspólnie finansowanych botów.
 **Independent Test**: Serwerowa projekcja JOIN/RESUME, preference humans, find-or-create oraz wyścig rekomendacja/admission z ograniczonym retry; direct link bez cichego rematch. Prezentacja ręcznie na Preview.
 **Acceptance Scenarios**:
 
-1. **Given** wystarczający fast i płynność, **When** dwóch graczy wybiera multiplayer, **Then** może współdzielić STANDARD, także uprzednio bot-only.
-2. **Given** niewystarczający fast, **When** gracz podaje bezpośredni adres STANDARD/CONTINUOUS_BOT lub cudzego SLOW_PRIVATE, **Then** nowe wejście odrzucone bez kary, z alternatywą HUMAN_ONLY/własnego slow.
-3. **Given** jedna jednostka slow i właściwa rezerwa, **When** właściciel zakłada wolny stół, **Then** dostępny jest jeden pełny bot i jeden człowiek; brak finansowania drugiego pełnego bota.
-4. **Given** wyczerpana płynność lub uprawnienie, **When** gracz szuka botów, **Then** otrzymuje informację o oczekiwaniu lub grze z ludźmi, a nie obietnicę finansowanej ręki.
-
-5. **Given** mieszana lista zgodnych, pełnych, DRAINING i cudzych slow stołów, **When** gracz otrzymuje lobby, **Then** zero niedostępnych nowych ofert i zero wierszy Unavailable; własne udowodnione miejsca mają Resume, nie Join.
-6. **Given** dozwolony tier/tryb i pełne środki, **When** Quick Seat, **Then** STANDARD preferuje zgodne stoły z ludźmi, potem inne STANDARD; brak kandydata automatycznie tworzy zgodny stół i kontynuuje WS admission. Własny SLOW_PRIVATE/HUMAN_ONLY analogicznie, bez zmiany tieru/trybu i bez obietnicy przeciwnika HUMAN_ONLY.
-7. **Given** kandydat zajęty/wygaszony przed admission i inny zgodny cel, **When** pierwsza próba MATCH otrzymuje trwałą odmowę, **Then** jeden automatyczny rematch bez ponownego kliknięcia; maksymalnie 2 próby i 1 nowy stół na operację. Retry/reconnect nie powiela stołów, CH ani EXPOSURE.
-8. **Given** realny brak allowance/liquidity/proof/capability, **When** matchmaking lub Create, **Then** zero pozornych nowych funded stołów i brak obietnicy bota; jawna alternatywa HUMAN_ONLY lub obliczalne oczekiwanie. Direct link do niedostępnego stołu oferuje alternatywę bez cichej zmiany celu. Awaria backendu lub wyczerpanie retry może zakończyć się błędem.
-
-9. **Given** seed może wybrać 2 lub 3 boty po 100 CH, pula ma 250 CH, **Then** preflight nie obiecuje dostępu na podstawie mniejszego losowania; bez zmiany warunków RNG nie może spowodować większego kosztu niż sprawdzona granica. Przy 300 CH oba warianty mieszczą się, naliczany tylko faktyczny funding.
-10. **Given** własny pusty INIT maxPlayers=2, **When** żądanie maxPlayers=6 lub niezgodnych stakes, **Then** stół nie jest reuse; dla slow jawny konflikt bez drugiego OPEN stołu i bez zmiany parametrów.
-11. **Given** uwierzytelniony admin z wyczerpanym fast, **When** administracyjna lista ALL/szczegóły, **Then** widzi utrwalone stoły wszystkich klas, także CLOSED i niedostępne mu jako gracz, z class/legacy/unknown oraz osobnym drain i pierwotnym deadline; non-admin odrzucony. Inspekcja nie ujawnia prywatnych kart/allowance, nie mutuje gry i nie przyznaje admission. Live spectator #789 poza zakresem.
+1. Dwóch FAST może współdzielić STANDARD, dwóch niezależnie uprawnionych SLOW może współdzielić SLOW_SHARED. Nowy człowiek autoryzuje pre-funded stack bez powtórnego transferu.
+2. Constrained nie wejdzie nowo do STANDARD/CONTINUOUS_BOT nawet direct URL; SLOW_SHARED nie ma owner-only ani single-human cap. HUMAN_ONLY bez botów pozostaje alternatywą.
+3. Adam i Bartek SLOW100: jeden FUNDING50CH i dwa EXPOSURE0,5; USER bez debitu exposure. Brak allowance nowego gościa odrzuca jego admission, nie legalną rękę obecnych.
+4. Brak puli/allowance/cfg/proof lub błąd SQL/WS daje uczciwy unavailable, zero fikcyjnego create i bez cichej zamiany trybu.
+5. Otwarcie pustego/niepustego lobby, refresh/reconnect: zero create/seat/funding. JOIN tylko zgodne cele wszystkich dostępnych tierów; Resume osobno; Graj teraz zawsze widoczne, bez Create/formularza/Unavailable rows.
+6. Jeden click wybiera pierwszy nadal zgodny widoczny cel i jego faktyczne parametry. Bez oferty: najwyższy rzeczywiście grywalny tier w dozwolonym trybie, canonical stakes/maxPlayers,≤1 create, automatyczne przeniesienie i WS join bez dodatkowego wyboru.
+7. Stale pierwszy cel→ograniczony automatyczny rematch bez click, maks2 admission/1create. Parallel clicks/replay/unknown commit bez duplikatu stołu/CH/EXPOSURE.
+8. Zbiór większy niż zmierzony bounded zakres K: poprawnie ukończony dobór może stworzyć≤1 stół bez global rescan/manual continuation. Timeout/stale/proof failure nie jest completed empty. DIRECT nie zmienia sam celu.
+9. Seed min2/max3 przy pool250/T100: brak oferty niezależnie od RNG; pool300 dopuszcza oba, actual-only debit. WS descriptor obowiązuje także Netlify, brak/mismatch fail-closed.
+10. Własny INIT2 nie jest reuse dla nowego planu6/niezgodnych stakes; brak owner-unique SLOW. Widoczny istniejący stół2 może być wybrany ze swoimi parametrami.
+11. Admin inventory wszystkich persisted stołów pozostaje niezależne od player budget, class/legacy/unknown i drain daty bez zmiany OPEN/CLOSED; brak prywatnych kart/admission bypass. Spectator #789 poza zakresem.
 
 ### User Story 3 - Bezpieczne wygaszanie po wyczerpaniu (Priority: P1)
 
@@ -71,7 +69,7 @@ Gracz już siedzący zachowuje rękę, stack i wypłatę. Stół kończy przyjmo
 3. **Given** żywa ręka w deadline, **When** kończy się jej normalne rozliczenie, **Then** następuje terminal close i wypłaty bez kolejnej ręki.
 4. **Given** brak finansowania w tierze 100 lub 500, **When** dochodzi do rollover, **Then** istniejące rozliczenie/wyjście postępuje bez nieskończonego retry finansowania.
 
-5. **Given** konto siedzi przy A i pre-funded B, **When** A wyczerpuje fast w t0, a B odkrywa to 20 minut później bez nowego fundingu, **Then** oba mają deadline t0+30 min; ręka rozpoczęta wcześniej kończy się i wypłaca poprawnie. HUMAN_ONLY i istniejący SLOW_PRIVATE pozostają bez tego drain.
+5. **Given** konto siedzi przy A i pre-funded B, **When** A wyczerpuje fast w t0, a B odkrywa to 20 minut później bez nowego fundingu, **Then** oba mają deadline t0+30 min; ręka rozpoczęta wcześniej kończy się i wypłaca poprawnie. HUMAN_ONLY i istniejący SLOW_SHARED pozostają bez drain wywołanego FAST.
 
 ### User Story 4 - Ograniczone środki i audyt emisji (Priority: P1)
 
@@ -115,13 +113,13 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 - **FR-007**: Seed, replacement i top-up autoryzować przed widocznością; przy zachowanym residual naliczać wyłącznie nową deltę. Każdy uprawniony człowiek ma niezależną pełną konserwatywną autoryzację; nie dzielić zgadywanych wygranych między ludzi. [C]
 - **FR-008**: Budżet, seat, finansowanie i wersja stanu muszą stanowić atomową decyzję albo idempotentne fail-closed reconciliation. Odwrócenie tylko gdy ekspozycja nigdy nie stała się dostępna; przegrana bota/wygrana gracza nie zwraca limitu. [C]
 - **FR-009**: STANDARD dopuszcza wielu ludzi z wystarczającym fast, również do dostępnego stołu bot-only. Constrained nie może nowo wejść do STANDARD ani bot-only/CONTINUOUS_BOT. [D]
-- **FR-010**: SLOW_PRIVATE ma dokładnie jednego uprawnionego właściciela i jego boty; HUMAN_ONLY dopuszcza zwykły multiplayer bez finansowania botów niezależnie od fast. W slow limit mieści najwyżej jeden pełny buy-in bota naraz. [D]
-- **FR-011**: Serwer filtruje zwykłe lobby gracza per odbiorca przed prezentacją: tylko obecnie dozwolone JOIN według konta/tieru/budżetu/klasy/owner/pojemności/drain oraz odrębne własne legalne RESUME; zero niedostępnych wierszy Unavailable i cudzych slow stołów. Odświeża po zmianach uprawnień, seats, drain, liquidity/proof/capability i granicach czasu. Ta sama polityka w Quick Seat/Create/direct/reconnect/WS, finalna atomowa autoryzacja przy wejściu; discovery nie rezerwuje. Administracyjna lista/szczegóły zachowują autoryzowany dostęp do wszystkich persisted stołów z istniejącymi filtrami/paginacją, bez eligibility admina; pokazują klasę/legacy/unknown, osobny DRAINING i pierwotne daty, bez prywatnych kart/allowance, mutacji lub bypass admission. Live spectator #789 poza zakresem. [D, D.1–D.2]
-- **FR-012**: Zwykły MATCH preferuje zgodny STANDARD z ludźmi, potem inne STANDARD, a brak kandydata prowadzi do automatycznego find-or-create żądanego dozwolonego tieru/klasy; własny slow i HUMAN_ONLY analogicznie. Pierwsza przewidywalna stale odmowa uruchamia ograniczony rematch bez ponownego kliknięcia: maks. 2 próby/1 utworzenie na operację, idempotentne także po timeout. DIRECT nie przenosi bez wyboru. Znany brak allowance/puli/proof/capability blokuje tworzenie pozornego funded stołu, daje neutralne HUMAN_ONLY/wait; brak cichej zmiany trybu/tieru, gwarancji bota ani gwarancji sukcesu przy awarii/wyczerpaniu prób. Preflight sprawdza bezpieczną pełną granicę fundingu zgodną z możliwościami finalnego seed, bez niezależnego tańszego losowania. Reuse wymaga zgodnych maxPlayers i ekonomii oprócz owner/class/tier; niezgodny OPEN slow daje jawny konflikt, nie drugi stół. Pasywne lobby nigdy nie tworzy/finansuje stołu. Zawsze widoczne „Graj teraz” po click wybiera pierwszy nadal zgodny JOIN według listy albo tworzy≤1 stół po zakończonym bounded doborze i preflight. Brak manual search controls i pełnego globalnego rescan; zaakceptowane dodatkowe create, gdy zgodny cel poza zakresem. Timery i reguły gry bez zmian. [B,D,D.1]
-- **FR-013**: Pierwsze wyczerpanie fast utrwalić na koncie z czasem i powiązaniami wszystkich już zajętych STANDARD z botami, także pre-funded i managed. Trigger: dokładne wyczerpanie limitu po legalnej ekspozycji lub pierwsza odmowa wymaganego kosztu. Każdy taki stół jest DRAINING z deadline pierwotny exhausted_at +30 min; nigdy czas późniejszego wykrycia. [E, P1]
+- **FR-010**: SLOW_SHARED dopuszcza wielu niezależnie uprawnionych graczy SLOW i wspólne boty chronionej puli; brak właściciela dostępu/single-human cap/unique open owner. Każdy autoryzuje nowe i pre-funded exposure, jeden FUNDING nie powiela transferu. HUMAN_ONLY to multiplayer bez botów. [D]
+- **FR-011**: Pasywne lobby pokazuje tylko zgodne JOIN ze wszystkich dostępnych graczowi tierów, odrębne własne Resume, bez Create/formularza i Unavailable rows. Otwarcie/refresh/reconnect nie tworzy, nie zajmuje ani nie finansuje. Serwer filtruje progression/allowance/class/seats/drain/proof; końcowa autoryzacja atomowa, discovery nie rezerwuje. Admin inventory/szczegóły wszystkich persisted stołów z dotychczasowymi filtrami i paginacją pozostają niezależne od player eligibility; class/legacy/unknown, oddzielny drain i daty, bez kart/bypass. #789 poza zakresem. [D.1–D.3]
+- **FR-012**: Zawsze widoczne Graj teraz bez wyboru tier/tryb/maxPlayers lub potwierdzenia automatycznie dołącza do pierwszego nadal zgodnego widocznego celu z jego parametrami; brak oferty uruchamia bounded dobór i najwyższy rzeczywiście grywalny tier dozwolonego trybu z parametrami kanonicznymi,≤1 create. Maks2 admission/1create, jeden rematch bez click, trwały replay/cross-tab dedupe, DIRECT przypięty. Brak silent mode switch; brak budget/pool/cfg/proof lub failed/stale reads daje zero create. Wspólna bezpieczna granica seed WS i actual-only debit, reuse zgodnego INIT z maxPlayers/stakes. Brak global rescan/manual continuation; wyjątkowy dodatkowy stół poza prawidłowo ocenionym zakresem dozwolony. Granice discovery po analizie Q1, nie arbitralne100. [D.1,D.3,P1,P2]
+- **FR-013**: Pierwsze wyczerpanie fast utrwalić na koncie z czasem i powiązaniami wszystkich już zajętych STANDARD z botami, także pre-funded i managed. Trigger: dokładne wyczerpanie limitu po legalnej ekspozycji lub pierwsza odmowa wymaganego kosztu. Każdy taki stół jest DRAINING z deadline pierwotny exhausted_at +30 min; nigdy czas późniejszego wykrycia. [E, P1] SLOW_SHARED: pierwsza odmowa wymaganej dodatniej nowej ekspozycji siedzącemu graczowi z powodu jego SLOW utrwala trigger stołu i deadline+30min; samo zero bez kosztu nie wystarcza. Wielostołowość S1 do review, nie marker FAST7dni. [D,E]
 - **FR-014**: DRAINING zakazuje nowych ludzi i wszelkiego nowego finansowania SYSTEM botów. Dotychczasowi ludzie i już finansowane stacki mogą grać w grace; dobrowolne odejście z wypłatą działa. [E]
 - **FR-015**: Od deadline nie zaczynać następnej ręki; żywą dokończyć i rozliczyć, następnie terminal close z legalnym cash-out ludzi, udowodnionymi źródłami zwrotu botów i zerowym escrow. Dopuszczone wcześniejsze bezpieczne zamknięcie po odejściu ludzi. [E]
-- **FR-016**: Sprawdzać globalne zdarzenie i deadline przy admission, przed nowym funding oraz przed każdą kolejną ręką/prepare/commit także bez fundingDelta. Restart, leave, reconnect i reset fast nie usuwają powiązań; HUMAN_ONLY i istniejące SLOW_PRIVATE wyłączone z tego drain. Bez kicka/przerwania ręki; brak finansowania 100/500 nie zapętla rollover. [E, P1]
+- **FR-016**: Sprawdzać globalne zdarzenie i deadline przy admission, przed nowym funding oraz przed każdą kolejną ręką/prepare/commit także bez fundingDelta. Restart, leave, reconnect i reset fast nie usuwają powiązań; HUMAN_ONLY i istniejące SLOW_SHARED wyłączone z tego drain. Bez kicka/przerwania ręki; brak finansowania 100/500 nie zapętla rollover. [E, P1]
 - **FR-017**: Docelowa kapitalizacja każdego tieru 100/500 wynosi 1 000 000 CH. Nowe finansowanie 100 izolowane od TREASURY; istniejący POKER_BOT_BANKROLL 500 zachowany wraz z historycznymi dowodami źródła. Żadnego fallbacku tierów/TREASURY. [F]
 - **FR-018**: D3 zatwierdzone: jednorazowy idempotentny MINT 1 000 000 CH GENESIS → POKER_BOT_BANKROLL_100, z ochroną 900 000 CH STANDARD i 100 000 CH SLOW. Trwały unikalny purpose INITIAL_ALLOCATION niezależny od czasu, retry i policy_version. Operacja oddzielna od REFILL i schema provisioning; wykonanie na Production wymaga osobnego GO. Dowody Stage obowiązkowe przed aktywacją. [F]
 - **FR-019**: Twardy podział dostępnego finansowania i dozwolonego refillu: 90% STANDARD, 10% SLOW. Transakcyjnie izolowane; brak pożyczania między klasami, także gdy środki pozostają niewykorzystane. [F]
@@ -146,7 +144,7 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 
 - **Budżet konta**: trwałe konto, kadencja, zużycie fast w jednostkach i CH, stan slow; to uprawnienie, nie portfel.
 - **Ekspozycja i decyzja**: użytkownik, stół, udowodniony stock/funding, ilość, źródło, wersja i idempotentny wynik.
-- **Klasa stołu**: STANDARD/SLOW_PRIVATE/HUMAN_ONLY, właściciel slow, niezależne sticky wygaszanie.
+- **Klasa stołu**: STANDARD/SLOW_SHARED/HUMAN_ONLY, wspólny slow, niezależne sticky wygaszanie.
 - **Pula tieru/klasy**: źródło SYSTEM, płynne i aktywnie zaangażowane środki, przydział 90/10.
 - **Dowód zamknięcia i emisji**: fundings/returns, strata netto, kompensacja, okres i limity emisji.
 
@@ -155,13 +153,13 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 ### Measurable Outcomes
 
 - **SC-001**: W krytycznych scenariuszach granicznych i współbieżnych zero przekroczeń 100 jednostek i 1 000 000 CH fast; suma slow w każdym kroczącym (t−12 h, t] ≤1, także dla ułamków i równoczesnych żądań.
-- **SC-002**: Każda ścieżka nowego dopuszczenia odrzuca constrained do STANDARD/bot-only i do cudzego slow; zero podwójnych naliczeń tej samej ekspozycji po retry/reconnect. Lobby ma zero niedostępnych JOIN/Unavailable; normalny MATCH z jednym stale kandydatem i dostępnym drugim celem kończy się bez ręcznego ponawiania, ≤2 próby i ≤1 create; realny brak warunków daje zero pozornych create.
+- **SC-002**: Każda ścieżka nowego dopuszczenia odrzuca constrained do STANDARD/bot-only i do slow bez wystarczającego własnego allowance; zero podwójnych naliczeń tej samej ekspozycji po retry/reconnect. Lobby ma zero niedostępnych JOIN/Unavailable; normalny MATCH z jednym stale kandydatem i dostępnym drugim celem kończy się bez ręcznego ponawiania, ≤2 próby i ≤1 create; realny brak warunków daje zero pozornych create.
 - **SC-003**: Zero nowych ludzi/fundingu po DRAINING; zero następnych rąk rozpoczynanych od deadline; każda prawidłowa żywa ręka i wypłata zachowana.
 - **SC-004**: Zero przekroczeń 100 000/500 000/600 000 CH i limitów klas w każdym kroczącym (t−168 h, t]; zero emisji uzasadnionej wyłącznie otwartym escrow; zero finansowania standard ze środków zarezerwowanych slow.
 - **SC-005**: Każdy refill i terminal return ma dokładny audyt źródła i idempotencji; ponowienie nie zmienia kwot; niepełny dowód daje zero refillu.
 - **SC-006**: Przed aktywacją dostępne są przypisane do środowiska dowody Stage oraz exact-SHA WS Preview i potwierdzony smoke. Brak dowodu oznacza status oczekiwania, a nie gotowość do wydania.
 
-- **SC-007**: Fundamentalne scenariusze wykazują: zmiana lobby nie mnoży SQL przez widzów×stoły, idle nie dodaje pollingu; duplicate dirty zdarzenia scalają się, starszy wynik nie przywraca JOIN; 150 kandydatów nie wymaga interaktywnej kontynuacji:100 w pełni ocenionych bez oferty pozwala click/create przy pełnym preflight; pasywne lobby ma zero writes, a click wybiera pierwszy nadal zgodny widoczny JOIN; nieukończony odczyt lub overflow/niekompletność dowodu finansowego daje zero create/mint i recoverable backlog; timeout certyfikatu/pending cofa cały close, recovery nie dubluje CH, final proof korzysta z jednej to_state_version; opcjonalny ciężki proof poza FIFO nie blokuje rozliczenia; błędny WS config daje zero funded ofert. Stage dowodzi zmierzonych RT/rows/bytes/egress/CPU/I/O/WAL/connections/locks/retry/latency i braku materialnego starvation przy zadanym małym obciążeniu; liczby z planu nie są obietnicą niezmierzonego SLO. [FR-033–034]
+- **SC-007**: Fundamentalne scenariusze potwierdzają bounded/coalesced odczyty bez viewer×table, brak create przy failed/stale proof, completed zakres K przy inventory>K bez ręcznej kontynuacji oraz poprawny settlement/recovery bez zależności od refillu. Przyszła bramka Q1/T038 mierzy RT/rows/bytes, CPU/I/O/WAL/locks i latency baseline vs implementacja; bez niezmierzonych SLO. [D.3]
 
 ## Assumptions
 
@@ -175,4 +173,11 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 
 ## Zatwierdzona korekta D.1
 
-Issue updatedAt 2026-09-25T12:38:01Z zastępuje wcześniejszą otwartą kwestię dostępności create; brak nierozstrzygniętych wariantów. Stała akcja „Graj teraz”, pasywny JOIN/Resume i bounded click/create opisane w FR-011/012/034 oraz contracts. Fundamentalne acceptance: browse zero table/seat/funding writes; click pierwszy zgodny; stale pierwszy→drugi; brak oferty→max1 create; race/replay bez duplikatów; missing evidence/DB failure→zero create; >100 kandydatów bez ręcznej kontynuacji. Widoczność przycisku przy pustej i niepustej liście manual Preview.
+Issue updatedAt 2026-09-25T18:17:21Z: obowiązuje bieżące D.1, shared SLOW i pomiarowa bramka discovery. S1/Q1 pozostają jawne do review; wcześniejszy problem ręcznej kontynuacji nie jest otwartą decyzją.
+
+### Otwarte decyzje do niezależnego review
+
+- **S1-A rekomendowany:** pierwsza odmowa dodatniej wymaganej ekspozycji SLOW wygasza dotknięty stół A; zajęty pre-funded B bez nowego kosztu nadal działa i ocenia swój limit przy następnym nowym koszcie. **S1-B:** fanout wszystkich zajętych slow z czasem A; dodatkowa ewidencja/definicja epizodu i koszt, zamknięcie również B bez nowego kosztu. Warianty i atomowy receipt w kontrakcie/planie; brak automatycznego zastosowania markera FAST7dni.
+- **Q1:** wybór najmniejszego dowiedzionego źródła dostępności i zmierzonych granic odczytu. Plan porównuje SQL/batch, registry WS i minimalną projekcję. Brak DB pomiarów podczas tej korekty; niezależne review i przyszła walidacja wymagane przed zamrożeniem rozwiązania.
+
+Acceptance SLOW: dwóch ludzi dostaje po0,5 exposure z jednego FUNDING50CH/T100; zero dodatkowego USER debitu. Gdy siedzący człowiek nie mieści rzeczywiście wymaganego dodatniego kosztu, stół ma jeden pierwszy trigger i sticky+30min. Sam zero limit bez nowego kosztu nie przerywa gry. Po zużyciu0,4+0,6 godzinę później odnowienie0,4 po12h nie usuwa drain; pełna1 po13h. Równoczesne odmowy nie przesuwają czasu, brak partial funding, bieżąca ręka i legalne wypłaty zachowane. Dwa stoły sprawdzić według rozstrzygniętego S1.

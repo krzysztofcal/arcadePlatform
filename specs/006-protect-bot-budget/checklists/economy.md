@@ -20,7 +20,7 @@
 
 - [ ] CHK006 Czy ułamkowe ekspozycje i zachowany residual mają jednoznaczny koszt? [Clarity, Spec FR-002, FR-007]
 - [ ] CHK007 Czy tożsamość ponowienia i nowej ekspozycji rozróżnia powracającego oraz nowego człowieka? [Clarity, Spec FR-006, contracts/bot-budget.md §1]
-- [ ] CHK008 Czy STANDARD/SLOW_PRIVATE/HUMAN_ONLY są odróżnione od lifecycle i stanu wygaszania? [Clarity, Spec FR-009–016]
+- [ ] CHK008 Czy STANDARD/SLOW_SHARED/HUMAN_ONLY są odróżnione od lifecycle i stanu wygaszania? [Clarity, Spec FR-009–016]
 - [ ] CHK009 Czy wspólne kroczące (t−168 h,t] i granice emisji są jednoznaczne? [Clarity, Spec FR-020, D2]
 - [ ] CHK010 Czy jednorazowy MINT miliona GENESIS → POKER_BOT_BANKROLL_100, 900000/100000, jest oddzielony od REFILL i Production GO? [Clarity, Spec FR-018, D3]
 
@@ -70,7 +70,7 @@
 ## Pokrycie zatwierdzonych P1 i granic
 
 - [ ] CHK033 Czy A i pre-funded B otrzymują deadline pierwotnego zdarzenia konta +30 min mimo późnego wykrycia, restartu i resetu fast? [Coverage, FR-013–016, T020–024, T040–041]
-- [ ] CHK034 Czy admission, każdy nowy funding i start/prepare/commit bez funding sprawdzają trwałe powiązania wszystkich zajętych STANDARD, z wyłączeniem HUMAN_ONLY i istniejących SLOW_PRIVATE? [Coverage, FR-011, FR-016]
+- [ ] CHK034 Czy admission, każdy nowy funding i start/prepare/commit bez funding sprawdzają trwałe powiązania wszystkich zajętych STANDARD, z wyłączeniem HUMAN_ONLY i istniejących SLOW_SHARED? [Coverage, FR-011, FR-016]
 - [ ] CHK035 Czy zmiany członkostwa/leave i fanout mają kompletny snapshot bez odwrócenia blokad między stołami? [Consistency, plan globalne wyczerpanie, T040–041]
 - [ ] CHK036 Czy 0,4+0,6 godzinę później uwalnia tylko 0,4 po pierwszych 12 h, także przy race i zmianie tieru/trybu? [Measurability, FR-004, T009, T033]
 - [ ] CHK037 Czy trwałe receipts i guard serializują 168 h klas/tierów/global z poprawnymi granicami i bez starego snapshotu? [Coverage, FR-020, FR-023, T030, T033]
@@ -83,7 +83,7 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 ## D.1 — jakość wymagań matchmakingu
 
 - [ ] CHK039 Czy kryteria projekcji gracza definiują JOIN/RESUME i całkowite pominięcie niedostępnych wierszy, wraz z odświeżaniem i prywatnością? [Completeness, Spec FR-011, US2/5]
-- [ ] CHK040 Czy preferencja STANDARD z ludźmi, find-or-create każdej klasy i zachowanie tieru/trybu są jednoznaczne? [Clarity, Spec FR-012, US2/6]
+- [ ] CHK040 Czy Graj teraz bez formularza używa pierwszego eligible celu z jego parametrami, a bez oferty najwyższego rzeczywiście grywalnego tieru/canonical parameters bez silent mode switch? [FR-012]
 - [ ] CHK041 Czy zwykły MATCH i przypięty DIRECT mają rozłączne zasady stale odmowy i alternatyw? [Consistency, Spec FR-012, US2/7–8]
 - [ ] CHK042 Czy limit 2 prób/1 create, retry po nieznanym wyniku i deduplikacja pustych stołów są mierzalne i spójne z atomowym admission? [Measurability, Spec FR-008, FR-012, contracts D.1]
 - [ ] CHK043 Czy brak allowance/pool/proof/capability wyklucza pozorne funded create, a ograniczenia awarii i ręczna weryfikacja UI są jawne? [Coverage, Spec FR-012, FR-025, FR-030, quickstart D.1]
@@ -91,7 +91,7 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 ## Korekta kosztu seed, reuse i admin inspection
 
 - [ ] CHK044 Czy preflight i finalny seed mają wspólną bezpieczną granicę, actual-only debit i scenariusz puli wystarczającej tylko na mniejszy target? [Consistency, Spec FR-012, US2/9]
-- [ ] CHK045 Czy reuse obejmuje maxPlayers i canonical stakes oraz jawny konflikt pojedynczego OPEN slow? [Completeness, Spec FR-012, US2/10]
+- [ ] CHK045 Czy reuse obejmuje maxPlayers/stakes i nie tworzy owner-only/unique owner reguły SLOW_SHARED? [FR-012, P2]
 - [ ] CHK046 Czy D.2 jasno oddziela pełną administracyjną inspekcję od player filtering, admission, prywatnych danych i przyszłego spectatora #789? [Clarity, Spec FR-011, US2/11]
 - [ ] CHK047 Czy class/legacy/unknown i active/history drain mają mierzalną prezentację bez zmiany OPEN/CLOSED, mutacji GET i rozszerzenia testów UI? [Coverage, contracts D.2, quickstart D.2]
 
@@ -111,4 +111,7 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 - [ ] CHK056 Czy oba rodzaje proof i kompensacja używają tej samej to_state_version oraz jawnej unikalności i relacji pending/final? [Clarity, data-model, T006]
 
 - [ ] CHK057 Czy tylko dwa rodzaje MATCH receipt mają jawne kolumny/unique/replay, a kilka kart odzyskuje in-flight wynik przed drugim create? [data-model §3, T006/T033]
-- [ ] CHK058 Czy completed bounded selection >100 całkowitych kandydatów może click/create, a SQL/timeout/proof failure nigdy nie udaje ukończonego doboru? [FR-012/034, T015/T017]
+- [ ] CHK058 Czy zakres K i inventory>K mają bounded create bez manual continuation, a K/L/B/C/D wynikają z query plans/pomiarów Q1, nie dawnego100? [FR-012/034, T002/T015/T017]
+
+- [ ] CHK059 Czy shared SLOW autoryzuje każdego człowieka i zachowuje jeden FUNDING, a dodatnia wymagana odmowa/zero bez kosztu/rolling fractions/sticky drain mają rozłączne scenariusze? [FR-004/007/010/013, S1]
+- [ ] CHK060 Czy jawnie rozstrzygnięto S1-A vs S1-B i Q1 A/B1/C na podstawie kosztów i dowodów, bez niezatwierdzonego endpointu lub zmyślonych pomiarów? [plan S1/Q1, T001–002/T038]

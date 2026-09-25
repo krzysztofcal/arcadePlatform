@@ -26,7 +26,7 @@ Ostatni plik jest planowany, obecnie nie istnieje. Po wdrożeniu testowego harne
 | Slow pierwsze przejście i 0,4 w t0 +0,6 w t0+1 h | Pierwsza jednostka natychmiast; w t0+12 h dostępne tylko 0,4, pełne 1 dopiero t0+13 h bez nowego zużycia; race/tier/fast-slow nie resetują historii |
 | Prefunded admission, reconnect, dwóch ludzi, replacement residual | Każdy nowy dostęp naliczony raz, fundingDelta niezależnie każdemu; CH transfer tylko raz |
 | Race join/rollover i błąd po fundingu/przed commit | Zero częściowych seats/stacków/CH/used counters; replay po utraconej odpowiedzi nie dubluje |
-| Klasy, direct URL, manual join, WS bootstrap i guest | Taka sama zgodność serwerowa, brak cudzych slow botów; HUMAN_ONLY działa |
+| Klasy, direct URL, manual join, WS bootstrap i guest | Taka sama zgodność serwerowa, brak niezgodnych slow botów; HUMAN_ONLY działa |
 | Exhaustion w live hand, deadline, obecny/nieobecny human, restart | Brak nowego funding/admission, niezmienny deadline; żywa ręka kończy się, kolejna nie startuje |
 | Pusta płynność 100/500, cap, missing proof | Bez nieskończonego funding retry; poprawne settle/exit działa |
 | Terminal legacy/new source, residual/top-up | Zwrot do dowiedzionego konta; zero escrow; certyfikat dokładnie raz |
@@ -36,25 +36,21 @@ Ostatni plik jest planowany, obecnie nie istnieje. Po wdrożeniu testowego harne
 
 ## Dodatkowe fundamentalne scenariusze D2–D3 i P1
 
-- A wyczerpuje fast w t0; zajęty B ma wcześniej sfinansowane boty. Zablokować fanout, odczytać B w +20 min: deadline nadal t0+30 min; po nim zero kolejnych rąk nawet bez fundingu. Recheck admission/funding/prepare/commit i race z leave/deferred leave; restart/reset fast nie usuwa powiązania. HUMAN_ONLY i istniejący SLOW_PRIVATE bez tego drain; live hand i wypłaty zachowane.
+- A wyczerpuje fast w t0; zajęty B ma wcześniej sfinansowane boty. Zablokować fanout, odczytać B w +20 min: deadline nadal t0+30 min; po nim zero kolejnych rąk nawet bez fundingu. Recheck admission/funding/prepare/commit i race z leave/deferred leave; restart/reset fast nie usuwa powiązania. HUMAN_ONLY i istniejący SLOW_SHARED bez tego drain; live hand i wypłaty zachowane.
 - Slow race o 0,4 po pierwszym wygaśnięciu: dwa requesty na różnych tierach łącznie nie przekraczają 0,4. Retry/utrata odpowiedzi nie tworzą nowego kosztu ani nowej jednostki. Granice sprawdzać deterministycznym zegarem.
 - REFILL w (t−168 h,t]: tuż przed/na/po lewej granicy, równoczesne klasy/tiery, wspólny global cap; trwałe receipts po restarcie/retention, brak resetu na granicy tygodnia.
 - INITIAL_ALLOCATION: równoczesne/retry żądania dają dokładnie jeden milion GENESIS → POKER_BOT_BANKROLL_100 i 900000/100000; osobny purpose, bez zużycia REFILL cap. Schema alone daje zero CH; brak Production wykonania bez osobnego GO.
 
 ## Fundamentalna walidacja D.1 (przyszła)
 
-- Backend lobby: macierz dwóch kont/klas/tierów, pełny/DRAINING/cudzy slow pominięty; własny seat wyłącznie Resume; odświeżenie po zmianie eligibility/capacity/time, stary async snapshot nie przywraca oferty.
-- Quick Seat: zgodny STANDARD z ludźmi przed innym STANDARD, po click poprawnie zakończony bounded dobór bez kandydata + świeży preflight → najwyżej jeden create i final WS join w żądanym tierze/mode; slow owner i HUMAN_ONLY find-or-create bez zmiany trybu. Brak allowance/pool/proof/capability → zero nowych funded stołów.
-- Stale admission: pierwszy cel zajęty/draining, drugi zgodny → automatyczny rematch bez nowego kliknięcia; ≤2 admission attempts/1 create. DIRECT nie przeskakuje. Retry po utracie HTTP odpowiedzi odtwarza tableId; unknown WS commit odzyskuje wynik przed rematch. Dwa połączenia DB/duplikaty kart: bez powielania create, transferu i EXPOSURE.
-- Po porzuconym create pusty INIT odzyskuje istniejący lifecycle z zero escrow; receipt pozostaje. Jeżeli ktoś dołączył, brak usunięcia jego stołu. Rzeczywisty brak środków i backend outage mają uczciwy terminal/wait; brak obietnicy całkowitego wyeliminowania błędów.
-- Wyłącznie ręczna przyszła weryfikacja Preview: brak wierszy Unavailable, odrębne Join/Resume, stan dobierania zamiast pierwszego stale błędu, jawne alternatywy direct/HUMAN_ONLY, brak cichej zmiany tieru/trybu. Nie dodawać testów renderowania UI/CSS/JSP.
+Aktualny kontrakt D.1/SLOW_SHARED oraz S1/Q1 w plan.md i contracts/bot-budget.md zastępuje ten wcześniejszy wariant. Bez owner-only/formularza i bez arbitralnego limitu kandydatów; pozostałe reguły ekonomii i P1/P2 zachowane.
 
 ## Przyszły Stage/Preview
 
 1. Przed publikacją PR z migracjami opisać zamierzony automatyczny DB Stage Apply PR na wspólnym Stage. Applied migrations niezmienne; poprawki nowymi migracjami. Schema i jednorazowa alokacja to oddzielne kroki; potwierdzić target i zatwierdzone D3: jednorazowy MINT miliona GENESIS → POKER_BOT_BANKROLL_100, 900000/100000.
 2. Stage preflight: saldo SYSTEM, open committed capital, historyczny seed 500, certyfikaty/archives, 90/10, brak podwójnej alokacji 100. Zatwierdzone pilot caps i źródło bez ekstrapolacji #870.
 3. Po implementacji jawny WS Preview Deploy: workflow definition z main i aplikacja exact latest runtime-affecting SHA; potwierdzić sukces i release metadata tego SHA. Netlify preview/WS PR Checks nie wdrażają WS. Host współdzielony, ustalić wyłączność na czas smoke.
-4. Użytkownik może wykonać manual smoke: dwóch standard ludzi, constrained private slow, human-only z obiema grupami, próba direct URL bot-only/cudzego slow, brak płynności, drain z reconnect i aktywną ręką na deadline, cash-out i źródła. Zwykłego managed rotation nie pomylić z drain.
+4. Użytkownik może wykonać manual smoke: dwóch standard ludzi, kilku constrained przy wspólnym SLOW_SHARED, human-only z obiema grupami, próba direct URL bot-only/slow, brak płynności, drain z reconnect i aktywną ręką na deadline, cash-out i źródła. Zwykłego managed rotation nie pomylić z drain.
 5. Zmierzyć (obserwacja, bez automatycznej zmiany cap): rzeczywisty net outflow, udział zwykłych graczy z dostępnym miejscem, liczbę odmów allowance/liquidity, zużycie każdej klasy/tieru, issuance vs caps; bot-only nie generuje human usage ani inflacji. Zapisać okres obserwacji i liczbę prób — nie twierdzić, że krótkie smoke potwierdza ekonomię długoterminową.
 6. Gdy brak smoke: status „implementation ready, awaiting manual runtime verification”. Przed Production oddzielny jawny GO obejmujący environment, source, seed, politykę i refill; nie wynika z #869 ani zielonego CI. Późniejsze docs/test-only zmiany mogą użyć dowodu po potwierdzeniu braku runtime/config diff.
 
@@ -94,6 +90,19 @@ STOP/odroczenie nowej opcjonalnej pracy przy critical/unknown zdrowiu DB, narast
 
 ## Nowe D.1 — fundamentalna weryfikacja
 
-T015: otwarcie/refresh/reconnect pustego lobby zero table/seat/funding writes; click pierwszy nadal zgodny JOIN w kolejności listy; stale pierwszy→drugi bez kliknięcia; brak oferty po completed bounded selection→≤1 create+final join.150 kandydatów, brak oferty w ocenionych100 (także zgodny poza nimi) pozwala create przy pełnym preflight; brak dalszych stron UI/query-loop. Timeout po50/missing budget/pool/cfg/proof→zero create. T033: równoległe click/operationId/karty i unknown COMMIT odtwarzają jeden cel/seat/CH, in-flight recovery przed drugim create.
+Aktualny kontrakt D.1/SLOW_SHARED oraz S1/Q1 w plan.md i contracts/bot-budget.md zastępuje ten wcześniejszy wariant. Bez owner-only/formularza i bez arbitralnego limitu kandydatów; pozostałe reguły ekonomii i P1/P2 zachowane.
 
 Manual przyszły Preview: Graj teraz zawsze obecne przy pustej i niepustej liście, Resume odrębne, żadnego create podczas oglądania i żadnej ręcznej paginacji; kolejność JOIN zachowana, uczciwe failure/alternatywy. Baseline D.3 porównać oddzielnie pasywne idle zero writes i jawne kliknięcia, w dotychczasowych małych granicach obciążenia. Bez testów renderowania.
+
+
+## Bieżący handoff: SLOW_SHARED, jeden klik i pomiary Q1
+
+Tylko plan. Przed implementacją niezależnie rozstrzygnąć S1-A lokalny trigger vs S1-B globalny slow fanout oraz Q1 A indexed SQL vs B1 bounded registry read (C tylko jeśli pomiary uzasadnią). T002 lokalne plany zapytań i uzasadnienie K/L/B/D/C poprzedza zamrożenie discovery; T038 przyszły jawny Stage/WS Preview baseline vs implementacja, nie wykonywać teraz. Żadnych arbitralnych100/2×50 jako acceptance. Koszty/warianty: plan Q1.
+
+Manual Preview: brak panelu Create/tier/maxPlayers/trybu w zwykłym lobby; przycisk Graj teraz stale widoczny. Browse/refresh/reconnect puste lub niepuste→zero create/seat/funding. Lista wszystkich eligible tierów+oddzielne Resume; click pierwszy nadal właściwy cel używa jego parametrów, stale→drugi bez click. Empty→najwyższy rzeczywiście grywalny tier/canonical6,≤1 create i auto-join. Brak budget/pool/proof/WS/DB→uczciwa alternatywa, zero fake create i silent mode switch. Admin create/inventory nadal autoryzowane.
+
+Fundamentalne backend/runtime/transaction cases T015/T020/T033: inventory>K i kompletny zakres→bounded create bez interactive search, failed/stale→zero; parallel tabs/replay→bez duplikatu. SLOW dwóch ludzi, jeden FUNDING50/tier100, dwa EXPOSURE0,5 bez USER debit; seated positive-cost denial→first receipt+30min, zero/no new cost nie drain. Rolling0,4+0,6, renewal nie usuwa drain, concurrent users/table requests i A/B według zatwierdzonego S1. FAST global A/B nadal oryginalny czas i osobne reguły. Zachować FIFO, full/pending close rollback/unknown-commit recovery i poprawne legalne wypłaty.
+
+Pomiar mały, ograniczony i dopiero w uzgodnionym oknie: idle lobby, więcej viewerów/live+persisted-only stołów, click/rematch, rollover, wspólny slow drain/A-B, terminal/refill/backlog restart. Rejestrować query plans actual rows/loops/buffers, RT/rows/bytes DB i WS, egress osobno od CPU/Disk I/O/WAL, connections/locks/retries oraz lobby/join/settlement/cash-out latency. Porównać baseline i implementację z konkretnym SHA, stop przy critical/unknown lub starvation. Nie obiecywać utrzymania rozliczeń przy całkowitej awarii DB. Nie dodawać UI tests ani telemetry DB.
+
+Breaking: znika manual Create UX i parametry zwykłego Quick Seat; AUTO API/receipt/resolved params, all-tier personalized lista i auto-join; SLOW_SHARED zastępuje projektowaną klasę prywatną oraz owner constraints i zmienia admission/drain. Przyszła addytywna migracja wymaga jawnej klasyfikacji legacy, bez relabel żywych źródeł/escrow; admin i backend auth pozostają. Overload może odroczyć nowe oferty/funding, nie zwalnia finalnych checks ani payout invariants. JSP JS/klog/CSS jeden selector/CSP SHA nadal obowiązują.
