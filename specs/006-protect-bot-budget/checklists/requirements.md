@@ -32,3 +32,7 @@
 ## Notes
 
 16/16 kryteriów jakości specyfikacji spełnionych po aktualizacji 2026-09-25. D1–D3 zatwierdzone; scenariusze kroczących 12/168 h, ułamkowego slow, idempotentnej alokacji i globalnego A/B drain jawne. Jest to ocena kompletności dokumentów, nie niezależne review ani zgoda na implementację. Konstytucja wymaga konkretnych punktów kodu i zasad JSP/CSP.
+
+Aktualizacja D.3: 34 FR i 7 SC; sprawdzono mierzalne granice pracy, descriptor WS oraz przyszłą bramkę baseline/pomiarów. Ocena jakości pozostaje 16/16; niezależne review nadal wymagane.
+
+Ponowne `$speckit-analyze` (2026-09-25): 41/41 wymagań FR/SC ma pokrycie w 41 zadaniach; brak osieroconych zadań i markerów clarification. Usunięto sprzeczność close/proof vs priorytet wypłat, rozjazd timeoutu capability z wall budget, nazwy configRevision i nieaktualne notatki statusu źródła. Po korekcie brak otwartych findingów spójności/konstytucji. Checklist economy zawiera 52 pytania pozostawione do niezależnego review; nie oznaczają wykonanych testów. Ryzyko: limity pracy i przydatność konserwatywnego headroom pozostają do zmierzenia w przyszłej bramce T038, nie są dowodem wydajności.

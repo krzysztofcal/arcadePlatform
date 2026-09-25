@@ -89,6 +89,8 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 5. **Given** emisja sprzed 168 h i równoczesne refille różnych tierów/klas, **Then** uwolnić tylko receipt na wyłączonej lewej granicy; sumy wraz z nowymi emisjami pozostają w cap.
 6. **Given** powtórzona/równoczesna pierwsza alokacja 100, **Then** dokładnie jeden MINT miliona z GENESIS, podział 900000/100000, brak zużycia REFILL cap; Production nadal wymaga osobnego GO.
 
+7. **Given** wiele dirty lobby zdarzeń/odbiorców, **When** scalony refresh lub przeciążenie DB, **Then** ograniczony batch/RT/bytes, zero query viewer×table, stale result odrzucony; niepełne dane nie uprawniają nowej oferty/create. Przy backlog close/refill rozliczenie nie czeka na emisję, overflow proof daje zero mint i pending. Brak samej DB skutkuje recovery.
+
 ### Edge Cases
 
 - Ułamkowe fundingDelta, ostatnia jednostka, zero pozostałego fast oraz suma wielu botów większa od dostępnego limitu.
@@ -137,6 +139,9 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 - **FR-031**: Obecny etap kończy się dokumentacją i analizą; brak implementacji, migracji, zmian środowisk i deploy. Niezależne review oraz osobne zlecenie implementacji są bramką dalszej pracy. Dokumenty bez poleceń Git i pełnego kodu. [Polecenie właściciela]
 - **FR-032**: Przejście ze starych stołów nie może niejawnie zmienić ich klasy ani źródła sfinansowanych stacków. Istniejący uczestnicy zachowują wypłaty; dostęp nowego człowieka wymaga aktualnej polityki i dowodu. Jawnie udokumentować breaking changes matchmakingu, wygaszania, źródeł 100 CH i emisji. [G, Guardrails]
 
+- **FR-033**: Preflight nowego bot funding używa wersjonowanej, wiarygodnie potwierdzonej konfiguracji autorytatywnego WS i wspólnej bezpiecznej granicy; nie lokalnego env Netlify ani samej binary buy-in capability. Brak/niezgodność dowodu wyklucza nową funded ofertę; zmiana revision przed join daje atomową stale odmowę i bounded rematch, bez obejścia finalnych locks. [P1]
+- **FR-034**: D.3: ograniczyć pracę lobby/matchmaking/join/rollover/drain/close/refill/admin według jawnych limitów RT, rows, bytes, czasu, retry i concurrency w planie. Zero DB viewer×table/N+1 admin; brak częstego idle per-user pollingu; scalone refresh, bounded payload, discarded stale async. Niepełne wyszukanie nie uprawnia create, niepełny dowód finansowy nie uprawnia mint. Refill low-priority, bounded i recoverable; accepted settlement/cash-out mają pierwszeństwo przy dostępnej DB, pełna awaria oznacza recovery bez fałszywej gwarancji. Egress mierzyć oddzielnie od CPU/Disk I/O/WAL/locks i wymagać baseline vs implementacja przed aktywacją. [D.3]
+
 ### Key Entities *(include if feature involves data)*
 
 - **Budżet konta**: trwałe konto, kadencja, zużycie fast w jednostkach i CH, stan slow; to uprawnienie, nie portfel.
@@ -156,11 +161,13 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 - **SC-005**: Każdy refill i terminal return ma dokładny audyt źródła i idempotencji; ponowienie nie zmienia kwot; niepełny dowód daje zero refillu.
 - **SC-006**: Przed aktywacją dostępne są przypisane do środowiska dowody Stage oraz exact-SHA WS Preview i potwierdzony smoke. Brak dowodu oznacza status oczekiwania, a nie gotowość do wydania.
 
+- **SC-007**: Fundamentalne scenariusze wykazują: zmiana lobby nie mnoży SQL przez widzów×stoły, idle nie dodaje pollingu; duplicate dirty zdarzenia scalają się, starszy wynik nie przywraca JOIN; overflow/incomplete daje zero create/mint i recoverable backlog; błędny WS config daje zero funded ofert. Stage dowodzi zmierzonych RT/rows/bytes/egress/CPU/I/O/WAL/connections/locks/retry/latency i braku materialnego starvation przy zadanym małym obciążeniu; liczby z planu nie są obietnicą niezmierzonego SLO. [FR-033–034]
+
 ## Assumptions
 
-- D.2 zatwierdzone; #789 OPEN potwierdzone w GitHub 2026-09-25. Wzmianka CLOSED w źródłowym issue jest nieaktualna; spectator to wyłącznie osobna przyszła funkcja. P1 rozstrzygnięto kosztem granicznym bez nowych pól DB; P2 pełną zgodnością parametrów, bez zmiany zasad slow.
+- D.2 zatwierdzone; #789 OPEN potwierdzone w GitHub 2026-09-25. D.2 i D.3 są zatwierdzone; spectator to wyłącznie osobna przyszła funkcja. P1 obejmuje koszt graniczny i wiarygodny descriptor WS zapisany w istniejącym receipt; P2 pełną zgodnością parametrów, bez zmiany zasad slow.
 
 
-- Autorytet wymagań: issue z 2026-09-24; konstytucja 1.1.1; aktualny kod GitHub wskazany w issue-source.md. Podane limity to zatwierdzony pilot, nie prognoza inflacji.
+- Autorytet wymagań: aktualne issue z 2026-09-25 (updatedAt w issue-source.md); konstytucja 1.1.1; aktualny kod GitHub wskazany w issue-source.md. Podane limity to zatwierdzony pilot, nie prognoza inflacji.
 - Konkretny zakres istniejący: `shared/poker-domain/join.mjs::executePokerJoinAuthoritative`, `bots.mjs::seedBotsForJoin`, `table-economy.mjs::getBotFundingSystemKeyForBuyIn`, `terminal-close.mjs::resolveBotFundingSource/executeTerminalPokerCloseInTx`; `ws-server/poker/table/table-manager.mjs::prepareSettledHandRollover/commitSettledHandRollover` i właściwość `allowBotFunding`; writer `writeMutation/writeReplacementFundings/writeManagedBotTopUps`; `poker_tables.rotation_due_at`. Szczegóły techniczne znajdują się w plan.md.
 - Nie zmieniać reguł gry, obliczania wygranych, progresji bankroll użytkownika ani gościnnego trybu bez ekonomii. Nie planować nowych testów UI/CSS/JSP ani nowych frameworków.

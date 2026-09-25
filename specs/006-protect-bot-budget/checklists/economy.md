@@ -94,3 +94,11 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 - [ ] CHK045 Czy reuse obejmuje maxPlayers i canonical stakes oraz jawny konflikt pojedynczego OPEN slow? [Completeness, Spec FR-012, US2/10]
 - [ ] CHK046 Czy D.2 jasno oddziela pełną administracyjną inspekcję od player filtering, admission, prywatnych danych i przyszłego spectatora #789? [Clarity, Spec FR-011, US2/11]
 - [ ] CHK047 Czy class/legacy/unknown i active/history drain mają mierzalną prezentację bez zmiany OPEN/CLOSED, mutacji GET i rozszerzenia testów UI? [Coverage, contracts D.2, quickstart D.2]
+
+## D.3 i autorytatywna konfiguracja
+
+- [ ] CHK048 Czy źródło cfg WS, wersja, freshness i zmiana przed join mają jednoznaczny kontrakt bez lokalnego env/per-candidate fetch? [Clarity, Spec FR-033]
+- [ ] CHK049 Czy model kosztu obejmuje częstotliwość, RT/rows/bytes, concurrency, locks i bounded retry wszystkich ścieżek, bez viewer×table/admin N+1? [Completeness, Spec FR-034, plan D.3]
+- [ ] CHK050 Czy incomplete search/proof i overload oznaczają jawny wait/zero create/mint z zachowaniem priorytetu rozliczeń i granic DB outage? [Consistency, Spec FR-034, SC-007]
+- [ ] CHK051 Czy exact refill i trwały backlog pozostają zgodne z 168h, kapitalizacją i brakiem częściowych dowodów przy granicach pracy? [Coverage, Spec FR-020–024, FR-034]
+- [ ] CHK052 Czy pomiar baseline/Stage oddziela egress od CPU/I/O/WAL/locks, ogranicza obciążenie i nie ogłasza niezmierzonych SLO? [Measurability, quickstart D.3, SC-007]

@@ -68,3 +68,20 @@ Odmowa nowego finansowania nie wyłącza rozliczeń. Awaria po commit: odczytać
 - Reuse: INIT2 vs request6 oraz niezgodne canonical stakes nie mogą zostać zaakceptowane. Slow przy konflikcie parametrów zachowuje jeden OPEN stół i zgłasza jawny konflikt.
 - Admin auth/projection: lista ALL/CLOSED zachowuje pagination i wszystkie utrwalone klasy mimo wyczerpanego fast admina; non-admin 401/403. Policy class/unknown, active drain i pierwotne daty odrębne od OPEN/CLOSED; zero prywatnych kart/allowance i zero mutacji. Admin join nadal zwykła polityka. #789 bez implementacji.
 - Ręczny przyszły Preview: porównać listę gracza z inventory admina, czytelność dat i class/unknown, OPEN+DRAINING oraz CLOSED z historycznymi datami. Bez testów renderowania UI/CSS/JSP i bez Preview w sesji planowania.
+
+## D.3 — przyszła bramka pomiarowa Stage/WS Preview
+
+Nie wykonywać podczas planowania. Po osobnym zleceniu realizacji zebrać baseline obecnego runtime i pomiar implementacji dla tego samego małego zestawu danych, liczby widzów/stołów i czasu. Przed próbą odnotować środowisko, exact SHA, owner okna wspólnego Stage/Preview, istniejące limity połączeń, #962 resource health, limity pracy z planu i warunki STOP. Start od1 operacji/widza; drugi ograniczony krok kilku klientów/stołów wyłącznie jeśli guards zdrowe. Przed startem jawnie zapisać max klientów/stołów/żądań i czas (krótki pojedynczy przebieg, nie ciągły stress); żadnego nieograniczonego ruchu ani obciążania Production.
+
+| Scenariusz | Dowód baseline vs implementacja |
+|---|---|
+| Idle lobby i kilka widzów/stołów | Zero nowego per-user poll; RT nie widzowie×stoły; coalescing, max pending refresh, bounded projection bytes; latency aktualizacji i stale-result discard |
+| Równoległe join/rematch/HTTP replay | Jeden descriptor na operację; niezgodny cfg zero oferty; strony/candidate/proof caps i incomplete bez create; query/tx count, bytes, busy/timeout, join latency, bez double seat/CH |
+| Ręce/prepare/commit oraz multi-table drain | Odczyt konto/stół zamiast full history, lock hold/wait, original deadline mimo backlog; hand settlement i cash-out latency przy opcjonalnym obciążeniu |
+| Równoczesne close/refill | Terminal payout nie czeka na global guard; max1 refill, kompletne capital/caps albo zero; coalescing/cooldown, signed loss i idempotency |
+| Restart/backlog i failure pressure | Bounded fanout/pending replay/backoff; capacity/proof overflow daje zero mint; brak create z incomplete; accepted accounting odzyskiwane idempotentnie, DB outage jawnie recovery |
+| Admin lista max100 | Jeden batch policy/drain strony, brak N+1 i player filtering, czas odpowiedzi i prywatność |
+
+Zapisać per path approximate SQL reads/writes/transactions/RT, zwrócone rows/bytes i WS payload bytes, Supabase egress oddzielnie, DB CPU/Disk I/O/WAL, active/waiting connections, lock wait/duration, serialization retry/timeouts, lobby/join/settlement/cash-out latencies i zaległości cleanup/refill. Użyć obecnych metryk, klog, query plans/EXPLAIN na ograniczonych fixtures; nie uruchamiać ciężkiego profilu bez limitu. Mały wynik agregatu nie ukrywa rows scanned/buffers. Zachować pomiary i wybrany batch/page/concurrency/cooldown w tym dokumencie, z uzasadnieniem względem baseline; przed pomiarem brak numeric SLO ani twierdzenia o pojemności produkcyjnej.
+
+STOP/odroczenie nowej opcjonalnej pracy przy critical/unknown zdrowiu DB, narastającej kolejce połączeń/locków lub pogorszeniu legalnych wypłat; nie zwiększać load aby „dokończyć test”. Nie obchodzić #962. Jeśli nie można uzyskać pełnego proof w bezpiecznych limitach, refill pozostaje zero/pending; nie zwiększać cap ekonomii. Wymagana ocena braku materialnego starvation względem baseline w zadanym małym scenariuszu; dopuszczalne delty określić z obserwacji i jawnego review, nie wymyślone SLO. Green unit/Netlify nie zastępują exact-SHA WS Preview i manual smoke; osobny GO dla Production/seed/refill nadal obowiązuje.
