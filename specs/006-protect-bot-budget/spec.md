@@ -29,7 +29,7 @@ Gracz wykorzystuje jeden limit dostępu do nowych stacków botów niezależnie o
 
 1. **Given** 99 jednostek zużycia, **When** gracz uzyskuje ekspozycję 50 CH przy tierze 100 i 250 CH przy tierze 500, **Then** łączne zużycie wynosi 100 jednostek, a nowe ekspozycje wymagają wolnego dostępu.
 2. **Given** zaakceptowane wejście do finansowanych botów, **When** następuje reconnect, powtórzone żądanie lub kolejna ręka na tych samych środkach, **Then** brak drugiego naliczenia i drugiego buy-in.
-3. **Given** dwaj standardowi gracze, **When** bot otrzymuje nowe 50 CH przy tierze 100, **Then** każdy jest autoryzowany na 0,5 jednostki; rzeczywisty transfer SYSTEM wynosi łącznie 50 CH.
+3. **Given** Adam i Bartek siedzą przy STANDARD 100 CH z wystarczającymi limitami, **When** SYSTEM finansuje bota dodatkowym 50 CH, **Then** powstaje jeden FUNDING (user_id=NULL dozwolone) dla jednego transferu SYSTEM → ESCROW 50 CH oraz dwa EXPOSURE z user_id Adama/Bartka i tą samą trwałą tożsamością finansowania; każdemu nalicza się 0,5 jednostki. Salda USER pozostają bez zmian z tytułu exposure. Retry/reconnect nie powtarza transferu ani żadnego naliczenia.
 4. **Given** granica utrwalonego okresu 7 dni, **When** następuje następne uprawnione użycie, **Then** dostępne jest 100 jednostek bez sumowania nieużytych okresów; istniejący DRAINING pozostaje.
 
 5. **Given** pierwsze przejście w slow, **Then** dostępna od razu 1 jednostka. Po 0,4 w t0 i 0,6 w t0+1 h, w t0+12 h dostępne tylko 0,4; w t0+13 h pełna 1 bez nowego zużycia. Zmiana tieru/fast/slow i równoczesne żądania nie zwiększają sumy.
