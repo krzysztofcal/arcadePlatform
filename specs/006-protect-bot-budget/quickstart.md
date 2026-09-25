@@ -1,3 +1,11 @@
+# Quickstart — aktualna bramka WS-first
+
+Zatwierdzony WS-only inventory i selekcja. T042/T042-U poniżej zachowane jako **historyczne protokoły i wyniki**, T042-U wstrzymane i nieautoryzowane, brak wymogu ich wykonania przed projektem WS. Bieżąca kolejność: projekt T043→niezależne review→osobne zlecenie T001→implementacja→T038. Nie uruchamiać teraz żadnej walidacji.
+
+## HISTORIA — wcześniejsze protokoły i decyzje zastąpione przez WS-first
+
+Poniższe dawne instrukcje wyboru SQL-vs-WS, zgody i zależności T042/T043 są archiwalne, nie aktualne polecenia. Aktualny kontrakt w plan.md/kontrakcie Q1; T042-U nie wykonywać.
+
 # Quickstart walidacji #869 — do przyszłej realizacji
 
 Nie jest poleceniem wykonania w sesji planowania. Najpierw niezależne review, kontrola zgodności z zatwierdzonymi D1–D3 i P1, ponowne analyze i osobne zlecenie implementacji. Żadnych poleceń Git, seeda ani migracji Production w tym dokumencie.
@@ -173,3 +181,7 @@ Oracle i expected IDs zapisać przed odczytami. Syntetyczne SLOW/class/drain/cfg
 - STOP zachowuje poprzednie zasady: target/izolacja nieudowodniona, realne dane/sekrety/zewnętrzne połączenie, jakikolwiek limit, SQL error/timeout/blokada, swap/OOM, memory>80%, CPU>80% przez10s. statement_timeout1s,lock_timeout100ms. Błędy C4 są modelowane w pamięci; nie obchodzić STOP przez rzeczywiste fault injection. Brak automatycznego retry/escalation. Nieoczekiwany rozjazd oracle zatrzymuje zależne przypadki, raport częściowy i review zamiast zwiększania prób.
 
 **Zgoda potrzebna przed wykonaniem:** zaakceptować ten odrębny zakres20 ocen bez DB +6 sekwencji/12 mierzonych SELECT (40 wszystkich top-level), izolowany lokalny DDL/fixtures/cleanup, limity i STOP. Dotychczasowa zgoda72 sekwencji została wyczerpana. Brak tej nowej zgody oznacza tylko dokumentację. Wyniki i niewykonane przypadki trafią do research.md; niezależne review oceni, czy dowody wystarczają do zamknięcia T042. T043, wybór architektury, endpoint/Caddy i implementacja nadal osobno, bez ich wykonywania w uzupełnieniu. Wyniki≤51 stołów nie dowodzą wydajności rzeczywistej skali; późniejsza reprezentatywna walidacja T038 obowiązuje.
+
+## Bieżąca fundamentalna walidacja WS (przyszła)
+
+T015/T018/T033: personalne loaded/ready JOIN bez SQL inventory, persisted-only nie oferta, own Resume osobno; click lobby_match wybiera pierwszy serwerowy cel, stale reselect≤2 admission/1create, unknown COMMIT odzyskuje operację. Bootstrap/incomplete/truncated/stale revision/proof failure→zero create. Own INIT lookup nie jest discovery; create receipt→materializacja→authoritative join→commandResult→nawigacja/rejoin bez drugiego buy-in. Coalescing i proof bytes/limits, brak viewer×table query; legalny settlement niezależny. Ręcznie Preview: usunięty Create, zawsze przycisk, JSP/CSP, HTTP stary klient dostaje WS_MATCH_REQUIRED. Żaden nowy HTTP/Caddy route nie jest częścią wybranego przepływu. T038 potwierdza rzeczywiste koszty i topology/readiness; dotychczasowe SQL wyniki nie dowodzą wydajności WS.

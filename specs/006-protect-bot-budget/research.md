@@ -1,3 +1,11 @@
+# Research — bieżący status Q1
+
+WS-first zatwierdzone issue2026-09-25T21:18:32Z. Konkretny aktualny projekt w plan.md/kontrakcie Q1. Poniższe porównania SQL-vs-WS, T042 i T042-U stanowią **historię**, nie otwarte warianty źródła inventory ani bramkę dalszych benchmarków. T042-U wstrzymane/nieautoryzowane. S1-A bez zmian.
+
+## HISTORIA — wcześniejsze protokoły i decyzje zastąpione przez WS-first
+
+Poniższe dawne instrukcje wyboru SQL-vs-WS, zgody i zależności T042/T043 są archiwalne, nie aktualne polecenia. Aktualny kontrakt w plan.md/kontrakcie Q1; T042-U nie wykonywać.
+
 # Research — issue #869
 
 Data: 2026-09-24. Badanie wyłącznie kodu i źródeł; nie badano ani nie zmieniano żywego Stage/Production. Źródło polityki: [issue-source.md](issue-source.md). GitHub main `93d0f191c3f87006d56f7afb2fb1c4052a7ecb84`; baza bieżącej korekty PR `6478ffe0a61e4f5b3d334780fabf5fc0f65d201a`. Pobrano aktualne repozytorium do katalogu tymczasowego i porównano główne pliki domeny oraz agents.md/skills.md/konstytucję: zgodne. Nie użyto repomix.
@@ -181,3 +189,7 @@ Właściciel zaakceptował raport częściowej próby HEAD4852cbfe1aa86ab2aab535
 Mapa brak→decyzja Q1→minimalny eksperyment→T038 znajduje się w quickstart.md §T042-U. Priorytet C1 no-match,C2 cel51,C3 live/persisted,C4 incomplete/stale oraz C5 porządek/granice; większość semantyki możliwa do oceny bez DB. Tylko6 nowych sekwencji lokalnych potrzebne do wyniku SQL i planu C1/C2/C5; payload bytes zbierane w tych samych odczytach. Broadcast/concurrency, rzeczywisty egress, CPU/I/O/WAL/locks przy docelowej implementacji odłożone do T038, nie uznane za potwierdzone. HTTP/projekcja bez implementacji pozostają niewycenione; jeśli uniemożliwi to wybór, Q1 nadal otwarte.
 
 To wyłącznie propozycja do niezależnego review i osobnej zgody. Nie wykonano żadnej nowej oceny/harness/SQL/DB ani T043, nie wybrano architektury. T042 pozostaje częściowe, S1-A zamknięte. Po zgodzie zachować w raporcie dokładny kształt odczytu, fixture/expected IDs, wynik i liczniki — kontrprzykład nie jest dowodem gotowego matchera.
+
+## Bieżący dowód przepływu WS
+
+server.mjs lobby_subscribe już używa auth session i registry; sendCommand/commandResult w poker-ws-client.js obsługują promise/requestId. Join dispatch używa enqueueTableCommand/handleJoinCommand/loadAuthoritativeJoinExecutor. createPokerTableWithState ma wyłącznie SQL na przekazanym tx i może być współdzielony bez nowego HTTP. To podstawa nowego projektu, nie twierdzenie o istniejącym lobby_match. Nowy protocol/auth allowlist/replay i scoped proof wymagają przyszłej implementacji. Bez pomiarów w tej korekcie.

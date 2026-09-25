@@ -9,7 +9,7 @@
 
 ### Session 2026-09-25
 
-Aktualizacja na podstawie zatwierdzonych odpowiedzi w issue z 2026-09-24 i polecenia właściciela. D1–D3 zamknięte; S1-A zatwierdzone, otwarte Q1 (architektura/zmierzone granice discovery) do niezależnego review. Uwzględniono oba P1: globalne wyczerpanie oraz ułamkowe slow. Znane luki Q1 są jawne; przyszłe dowody runtime i osobne zlecenie implementacji pozostają bramkami wykonania, nie lukami wymagań.
+Aktualizacja na podstawie zatwierdzonych odpowiedzi w issue z 2026-09-24 i polecenia właściciela. D1–D3 zamknięte; S1-A zatwierdzone, Q1 WS-only zatwierdzone; projekt techniczny do niezależnego review. Uwzględniono oba P1: globalne wyczerpanie oraz ułamkowe slow. Znane luki Q1 są jawne; przyszłe dowody runtime i osobne zlecenie implementacji pozostają bramkami wykonania, nie lukami wymagań.
 
 - D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast.
 - D2 zatwierdzone: limity REFILL liczone w kroczącym (t−168 h, t], z tym samym t dla obu tierów, klas i globalnego cap. Lewa granica wyłączona, prawa włączona. Trwałe receipts i globalna blokada obejmują sumę już zatwierdzonych emisji oraz proponowaną kwotę; brak resetu kalendarzowego.
@@ -173,7 +173,7 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 
 ## Zatwierdzona korekta D.1
 
-Issue updatedAt 2026-09-25T18:17:21Z: obowiązuje bieżące D.1, shared SLOW i pomiarowa bramka discovery. Q1 pozostają jawne do review; wcześniejszy problem ręcznej kontynuacji nie jest otwartą decyzją.
+Issue updatedAt2026-09-25T21:18:32Z: obowiązuje WS-only inventory/wybór, shared SLOW; projekt techniczny podlega review bez benchmarków SQL jako bramki; wcześniejszy problem ręcznej kontynuacji nie jest otwartą decyzją.
 
 ### Otwarte decyzje do niezależnego review
 
@@ -185,3 +185,7 @@ Acceptance SLOW: dwóch ludzi dostaje po0,5 exposure z jednego FUNDING50CH/T100;
 ### Doprecyzowanie zatwierdzonego S1-A
 
 Trigger SLOW wymaga rzeczywiście potrzebnego dodatniego **nowego finansowania botów** i odmowy jego indywidualnej autoryzacji siedzącemu graczowi z powodu limitu SLOW. Sam nowy dostęp do wcześniej sfinansowanego stacku nadal wymaga EXPOSURE, lecz bez nowego finansowania nie wyzwala tego drain. A otrzymuje pierwszy trwały receipt i deadline+30min; B bez nowego finansowania działa dalej. B przy własnej potrzebie finansowania sprawdza wspólny rolling12h i przy odmowie otrzymuje swój pierwszy deadline. Zero dostępnego limitu bez potrzeby finansowania nie zatrzymuje gry. Receipt SLOW_EXPOSURE_DENIED zachowuje nazwę i atomowość; jego required cost/plan musi wskazywać dodatnią rzeczywistą fundingDelta. Globalny FAST, wypłaty i pozostałe reguły bez zmian.
+
+## Wiążące Q1 WS-first
+
+FR-011/012/033/034: loaded/ready WS registry jest jedynym źródłem ordinary JOIN i wyboru Graj teraz; klient renderuje, Netlify nie wyszukuje SQL-wide. Persisted-only OPEN nie oferta. WS-only MATCH na istniejącym uwierzytelnionym transporcie; dowody DB bounded/coalesced, final join atomowy. Completed/current/ready scoped empty + pełny finance preflight pozwala≤1 create; bootstrap/stale/niepełna enumeracja/proof/transport error to unknown, zero create. T042-U historyczne, nie wykonywać. S1-A zatwierdzone. SC-002/007 obejmują te rozróżnienia i brak równoległego SQL inventory.

@@ -111,7 +111,7 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 - [ ] CHK056 Czy oba rodzaje proof i kompensacja używają tej samej to_state_version oraz jawnej unikalności i relacji pending/final? [Clarity, data-model, T006]
 
 - [ ] CHK057 Czy tylko dwa rodzaje MATCH receipt mają jawne kolumny/unique/replay, a kilka kart odzyskuje in-flight wynik przed drugim create? [data-model §3, T006/T033]
-- [ ] CHK058 Czy zakres K i inventory>K mają bounded create bez manual continuation, a K/L/B/C/D wynikają z query plans/pomiarów Q1, nie dawnego100? [FR-012/034, T002/T015/T017]
+- [ ] CHK058 Czy complete/current/ready scoped WS no-offer jest odróżnione od bootstrap/truncation/stale/proof failure, bez SQL inventory i create przy unknown? [FR-011/012/034,T015–018]
 
 - [ ] CHK059 Czy shared SLOW autoryzuje każdego człowieka i zachowuje jeden FUNDING, a dodatnia wymagana odmowa/zero bez kosztu/rolling fractions/sticky drain mają rozłączne scenariusze? [FR-004/007/010/013, S1]
-- [ ] CHK060 Czy S1-A jest zamknięte, Q1 nadal otwarte bez preferowania nowego endpointu, a wybór i warunkowe Caddy mają plan dowodów? [plan Q1, T002/T018/T038]
+- [ ] CHK060 Czy WS-first i S1-A zamknięte, a request/result/create/replay, proponowane bounds i runtime topology poddano review bez nowego domyślnego HTTP/Caddy oraz bez T042-U jako bramki? [plan Q1,T043]
