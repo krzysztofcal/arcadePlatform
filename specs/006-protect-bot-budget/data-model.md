@@ -1,10 +1,10 @@
 # Data Model — #869
 
-Projekt, nie migracja. Nowe pola/tabele poniżej oznaczają planowane zmiany; istniejące nazwy z kodu mają jawny prefiks „istniejące”. D1–D3 nie są wypełniane domyślnymi wartościami. Zmiany schema tworzone dopiero po osobnym zleceniu implementacji.
+Projekt, nie migracja. Nowe pola/tabele poniżej oznaczają planowane zmiany; istniejące nazwy z kodu mają jawny prefiks „istniejące”. D1–D3 są zatwierdzone w issue i spec.md. Zmiany schema tworzone dopiero po osobnym zleceniu implementacji.
 
 ## Wspólne ograniczenia
 
-CH i podjednostki są całkowite; wszystkie kwoty nieujemne poza jawnie podpisaną stratą netto. 1 jednostka = 10 000 podjednostek; aktywne tiery 100/500; projektowe przyszłe 1000/5000/10000 dzielą mianownik, ale nie są włączone. Kwoty DB bigint; przed konwersją do JS Number sprawdzić safe integer, bez cichego overflow. Czas UTC timestamptz z jednego czasu transakcji; testy przyjmują kontrolowany zegar. Identyfikatory konta i stołu z sesji/DB, nigdy z niezaufanego owner payload.
+CH i podjednostki są całkowite; wszystkie kwoty nieujemne poza jawnie podpisaną stratą netto. 1 jednostka = 10 000 podjednostek; aktywne tiery 100/500; projektowe przyszłe 1000/5000/10000 dzielą mianownik, ale nie są włączone. Kwoty DB bigint; przed konwersją do JS Number sprawdzić safe integer, bez cichego overflow. Czas UTC timestamptz z jednego czasu decyzji t pobranego po guard lock, nie sprzed oczekiwania; testy przyjmują kontrolowany zegar. Identyfikatory konta i stołu z sesji/DB, nigdy z niezaufanego owner payload.
 
 RLS na wszystkich nowych tabelach w public; brak SELECT/INSERT/UPDATE/DELETE dla anon/authenticated. Backend ma tylko niezbędne uprawnienia; nie tworzyć publicznego SECURITY DEFINER RPC. Nowe rejestry audytu nie są kasowane kaskadowo ze stołem/użytkownikiem — istniejący retention może usunąć operacyjne poker_tables. Identyfikator UUID pozostaje w audycie, brak FK powodującego utratę historii. Dane prezentowane graczowi przez istniejący autoryzowany WS/Netlify.
 
@@ -17,8 +17,9 @@ RLS na wszystkich nowych tabelach w public; brak SELECT/INSERT/UPDATE/DELETE dla
 | fast_period_start | NOT NULL; anchor + n * 7 dni, n ≥ 0 |
 | fast_used_subunits | bigint NOT NULL; 0..1 000 000 |
 | fast_exposure_ch | bigint NOT NULL; 0..1 000 000 w okresie |
-| slow_available_subunits | bigint NOT NULL; 0..10 000 |
-| slow_clock_at / slow_next_at | D1 ustala znaczenie startu/odnowienia; bez przyjętej D1 nie aktywować slow |
+| first_slow_at | nullable do pierwszego przejścia slow, potem niezmienny audit; nie jest kotwicą odnawiania |
+| fast_exhausted_event_id, fast_exhausted_at | nullable razem; projekcja pierwszego zdarzenia bieżącego okresu; historia nieusuwalna |
+| last_decision_at | UTC czas ostatniej decyzji pod guard; cofnięcie zegara blokuje nowe zużycie |
 | version | bigint NOT NULL, rosnąca wersja decyzji |
 | policy_version | NOT NULL; zgodna z aktywną polityką |
 
@@ -31,7 +32,8 @@ Przejścia fast: uninitialized → pierwszy COMMIT → okres anchor; granica →
 | bot_access_class | STANDARD / SLOW_PRIVATE / HUMAN_ONLY; NULL wyłącznie jawne legacy przed klasyfikacją |
 | slow_owner_user_id | UUID wymagany wyłącznie dla SLOW_PRIVATE, NULL dla innych |
 | bot_policy_version | wersja protokołu; brak/nieznana = brak nowych chronionych operacji |
-| bot_draining_started_at | nullable; po ustawieniu niezmienne |
+| bot_draining_started_at | nullable; najwcześniejsze powiązane exhausted_at; może tylko zmaleć po odkryciu wcześniejszego dowodu |
+| bot_draining_source_event_id | identyfikator zdarzenia wyznaczającego najwcześniejszy deadline |
 | bot_draining_deadline_at | nullable razem ze started_at; zawsze started_at + 30 min; sticky |
 | bot_funding_paused_reason | nullable albo jawne LEGACY_CUTOVER / POLICY_UNAVAILABLE; nie udaje wyczerpania allowance |
 
@@ -41,19 +43,31 @@ Przejścia: STANDARD active → DRAINING → CLOSED; nigdy z DRAINING z powrotem
 
 ## 3. Nowe `poker_bot_exposure_events` — wspólny append-only dziennik decyzji
 
-Przechowuje typy FUNDING, ADMISSION, EXPOSURE, DRAIN oraz CLOSE_PROOF; nie jest drugim ledgerem CH. Kwoty rzeczywistych CH pochodzą wyłącznie z chips_entries. Status decyzji COMMITTED/DENIED jest końcowy; brak wiecznych rezerwacji.
+Przechowuje typy FUNDING, ADMISSION, EXPOSURE, FAST_EXHAUSTED, DRAIN oraz CLOSE_PROOF; nie jest drugim ledgerem CH. Kwoty rzeczywistych CH pochodzą wyłącznie z chips_entries. Status decyzji COMMITTED/DENIED jest końcowy; brak wiecznych rezerwacji.
 
 | Pola | Ograniczenia |
 |---|---|
 | event_id, event_key, event_kind, payload_hash | trwała unikalna event_key; konflikt payload przy replay oznacza odmowę |
-| table_id, user_id | UUID; user NULL tylko dla funding bot-only, drain tabeli i close proof |
-| policy_version, source_account_id, tier, access_class | obowiązkowe dla ekonomicznego dowodu, źródło to istniejące chips_accounts.id |
-| lineage_id, funding_seq, from_state_version, to_state_version | lineage dziedziczona przy replacement z oldStack > 0; przy oldStack=0 lub nowym seed nowa; wersje potwierdzone stanem |
-| exposure_ch, exposure_subunits | bigint ≥0; subunits = CH * (10000/tier); brak losowego zaokrąglenia |
+| table_id, user_id | UUID; user NULL tylko dla funding bot-only, drain tabeli i close proof; table NULL tylko dla account FAST_EXHAUSTED |
+| policy_version, source_account_id, tier, access_class | obowiązkowe dla ekonomicznego dowodu funding/exposure/close; FAST_EXHAUSTED ma konto/okres/czas zamiast jednego tier/source; źródło to istniejące chips_accounts.id |
+| lineage_id, funding_seq, from_state_version, to_state_version | nullable dla account FAST_EXHAUSTED/DRAIN; dla funding/exposure lineage dziedziczona przy replacement z oldStack > 0; przy oldStack=0 lub nowym seed nowa; wersje potwierdzone stanem |
+| exposure_ch, exposure_subunits | dla EXPOSURE bigint ≥0; subunits = CH * (10000/tier); FAST_EXHAUSTED/DRAIN bez kosztu; brak losowego zaokrąglenia |
 | funding_transaction_id, receipt_hash | obowiązkowe dla rzeczywistego transferu; admission do istniejących botów referencjonuje dowody, nie udaje nowego transferu |
 | occurred_at, result, details | trwały czas, wynik i minimalne dane rekonsyliacji/replay |
 
-Unique dla EXPOSURE: user_id + authoritative exposure identity; nie tylko requestId i nie policy_version. Zmiana policy_version nie pozwala na ponowne naliczenie tego samego faktu. FUNDING unique z istniejącego funding idempotency/version/seat. DRAIN unique table_id dla pierwszego triggera. CLOSE_PROOF unique table_id + terminal version; zawiera funding/return transaction IDs, aggregate signed result, class, escrow=0 oraz dowód obecności/braku ludzi. Indeksy (table_id,lineage_id,funding_seq), (user_id,table_id), unikalne event_key. Zmiana nazwy/usunięcie konta nie pozwala resetować historii przez samą nową sesję.
+Unique dla EXPOSURE: user_id + authoritative exposure identity; nie tylko requestId i nie policy_version. Zmiana policy_version nie pozwala na ponowne naliczenie tego samego faktu. FUNDING unique z istniejącego funding idempotency/version/seat. FAST_EXHAUSTED unique (user_id,fast_period_start), exhausted_at i reason; DRAIN unique (table_id,source_exhaustion_event_id), bez utraty wcześniejszego źródła. CLOSE_PROOF unique table_id + terminal version; zawiera funding/return transaction IDs, aggregate signed result, class, escrow=0 oraz dowód obecności/braku ludzi. Indeksy (table_id,lineage_id,funding_seq), (user_id,table_id), unikalne event_key. Zmiana nazwy/usunięcie konta nie pozwala resetować historii przez samą nową sesję.
+
+EXPOSURE dodaje budget_mode FAST/SLOW oraz consumed_at NOT NULL dla COMMITTED kosztu; indeks (user_id,budget_mode,consumed_at) z filtrem COMMITTED. Slow availability i nextEligibleAt są wyliczane z trwałej sumy (t−12 h,t], nigdy jako odnawiany saldo/grant. first_slow_at nie resetuje historii. Dowody aktywnego okna pozostają dostępne pod lockiem.
+
+Nowe `poker_bot_exhaustion_tables`: PRIMARY KEY (exhaustion_event_id,table_id), account/admission identity snapshot, projection_applied_at nullable, bez cascade; indeks (table_id,exhaustion_event_id) oraz pending projection. Powiązania zapisane atomowo z FAST_EXHAUSTED, lista wszystkich zajętych STANDARD z botami pod guard konta. Deferred leave nie usuwa powiązania. Fanout/sweep zapisuje projekcję po jednej tabeli; final gate czyta powiązania niezależnie od znacznika applied. Ta mała relacja służy indeksowanemu trwałemu fanout, nie nowemu silnikowi.
+
+### Kroczące slow — D1 i częściowe zużycie P1
+
+D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast.
+
+Pod blokadą konta odczytać trwałe EXPOSURE z budget_mode=SLOW, result=COMMITTED, consumed_at i kosztem integer. Dostępność jest wyliczana jako 10000 minus suma w oknie, nie przechowywana jako odnawiany grant. DENIED/replay nie zużywa ponownie. Czas UTC t pobierać z DB po uzyskaniu blokady (nie transaction-start sprzed oczekiwania); kontrola cofnięcia zegara ma blokować nowe zużycie. Retry zachowuje pierwotny receipt/czas. nextEligibleAt oznacza najwcześniejsze wygaśnięcie dostatecznej sumy dla konkretnego żądanego kosztu; wygaśnięcie 0,4 nie obiecuje pełnego bota.
+
+Fundamentalny przykład: 0,4 jednostki w t0 i 0,6 w t0+1 h. Tuż przed t0+12 h dostępne 0; dokładnie w t0+12 h dostępne tylko 0,4; pełne 1 dopiero w t0+13 h, o ile nie było nowego zużycia. Dwa równoczesne żądania o pozostałe 0,4 przy różnych tierach mogą łącznie zużyć najwyżej 0,4. Przełączenia fast/slow i sesji nie usuwają drugiego kosztu.
 
 ## 4. Nowe `poker_bot_exposure_access` — projekcja idempotentnego dostępu
 
@@ -79,7 +93,7 @@ Podział początkowo dostępnych CH: standard = floor(0,9 * liquid), slow = pozo
 
 ## 6. Nowe `poker_bot_issuance_state` i `poker_bot_issuance_receipts`
 
-`issuance_state`: wiersze scope GLOBAL / TIER_100 / TIER_500, klucz scope; policy_version, window_mode, window_anchor, used_standard_ch, used_slow_ch, version. D2 określa window_mode i kotwicę. Global lock zawsze pierwszy przy refill. Część krocząca, jeżeli wybrana: pod lockiem wyliczenie z receipts w (now−168 h, now], counter jako transakcyjna projekcja, nie jedyne źródło. Stała: jeden wspólny UTC anchor, półotwarty okres [start,end), bez catch-up.
+`issuance_state`: scope GLOBAL / TIER_100 / TIER_500 PRIMARY KEY; policy_version, last_decision_at, used_standard_ch, used_slow_ch, as_of_at, version. Wyłącznie kroczące 168 h: brak window_anchor/window_mode. GLOBAL guard pierwszy, version aktualizowana przez każdą emisję; serializable retry nie może korzystać ze snapshotu sprzed konkurencyjnego COMMIT. Pod lockiem suma REFILL receipts w (t−168 h,t] plus proposed; counters tylko projekcją. Wspólny t i wszystkie global/class/tier caps.
 
 `issuance_receipts`: event_key UNIQUE, ledger_transaction_id UNIQUE, payload_hash, tier, class, amount_ch >0, issued_at NOT NULL, policy_version, proof_event_ids, compensated_amounts, kind REFILL / INITIAL_ALLOCATION / REBALANCE, approval/evidence reference. INITIAL_ALLOCATION ma dodatkowy unikalny klucz celu/purpose niezależny od czasu. Do limitów emisji tygodniowej wchodzi wyłącznie REFILL; każda alokacja początkowa nadal ma osobny audyt wpływu na podaż. Rebalance nie zwiększa żadnego mint counter. Indeks (kind,issued_at,tier,class).
 
@@ -89,4 +103,16 @@ Wszystkie counters i receipts zapisywane razem z ledger credit. Refund/cancel z 
 
 Nowe audit events/issuance receipts i access watermark pozostają trwałe poza prune operacyjnych tabel. CLOSE_PROOF zawiera minimalne nieusuwalne agregaty i identyfikatory/hash oryginalnych dowodów; starsze pełne entries można archiwizować istniejącym mechanizmem dopiero po potwierdzeniu kompletności manifestu i możliwości rekonsyliacji. Brak dowodu nie resetuje limitu ani nie tworzy nowej straty.
 
-Przyszły podział migracji: addytywne tabele/pola/indeksy/ACL i konto 100 bez CH; osobny kontrolowany activation/backfill class/legacy proof; osobna jednorazowa alokacja po D3. Nazwy timestampów generuje CLI dopiero w implementacji. Nie uruchamiać migracji ani seeda podczas planowania. PR migracyjny ma zamierzony automatyczny wpływ na shared Stage, opisany przed publikacją; Production oddzielne GO.
+Przyszły podział migracji: addytywne tabele/pola/indeksy/ACL i konto 100 bez CH; osobny kontrolowany activation/backfill class/legacy proof; osobna jednorazowa alokacja zgodna z zatwierdzonym D3. Nazwy timestampów generuje CLI dopiero w implementacji. Nie uruchamiać migracji ani seeda podczas planowania. PR migracyjny ma zamierzony automatyczny wpływ na shared Stage, opisany przed publikacją; Production oddzielne GO.
+
+### Krocząca emisja i pierwsza alokacja — D2–D3
+
+D2 zatwierdzone: limity REFILL liczone w kroczącym (t−168 h, t], z tym samym t dla obu tierów, klas i globalnego cap. Lewa granica wyłączona, prawa włączona. Trwałe receipts i globalna blokada obejmują sumę już zatwierdzonych emisji oraz proponowaną kwotę; brak resetu kalendarzowego.
+
+D3 zatwierdzone: jednorazowy idempotentny MINT 1 000 000 CH GENESIS → POKER_BOT_BANKROLL_100, z ochroną 900 000 CH STANDARD i 100 000 CH SLOW. Trwały unikalny purpose INITIAL_ALLOCATION niezależny od czasu, retry i policy_version. Operacja oddzielna od REFILL i schema provisioning; wykonanie na Production wymaga osobnego GO.
+
+Global emission guard → pool → receipts/accounts; wszystkie klasy i tiery uczestniczą w tej samej serializacji. Czas UTC t pobierać po blokadzie, przy niekompletnym dowodzie lub cofnięciu zegara odmowa emisji. Serializable snapshot sprzed oczekiwania na guard nie może pominąć konkurencyjnego receipt: zapisywać version globalnego guard w każdej emisji i ponawiać całą transakcję po serialization conflict. Autoryzacja, kompensacja proof, receipt i double-entry MINT commitują razem. Liczniki są projekcją as-of t; suma trwałych REFILL receipts jest źródłem prawdy. Granica issued_at=t−168 h uwalnia dokładnie tę emisję; młodsze pozostają. INITIAL_ALLOCATION ma osobny audyt podaży, nie konsumuje ani nie odnawia cap REFILL. Schema tworzy konto z zerem; alokacja przy jednym kredycie 1 000 000 CH ustawia obie rezerwy atomowo. Powtórzenie lub równoczesne wywołanie zwraca istniejący rezultat bez drugiego kredytu.
+
+Fundamentalne testy: tuż przed/na/po 168 h; równoczesne 100/500 i STANDARD/SLOW przy ostatnim headroom klasy/tieru/global; restart i utracona odpowiedź; proof/receipt retention; brak podwójnej emisji na granicy kalendarzowego tygodnia; INITIAL_ALLOCATION retry i race dają jeden milion oraz dokładne 900000/100000, osobno od REFILL. Żaden test nie wykonuje Production GO.
+
+Retencja zachowuje aktywne 12 h/168 h w indeksowanej dostępnej historii oraz trwałe identity/exhaustion targets i certyfikaty audytu po tych oknach. Archiwizacja nie może zerować licznika ani usuwać możliwości wykrycia wcześniejszego drain; brak kompletnego dowodu blokuje nową operację.

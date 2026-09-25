@@ -1,9 +1,9 @@
 # Implementation Plan: Chroniony budżet botów — #869
 
-**Branch**: identyfikator Spec Kit `006-protect-bot-budget` z feature.json, bez utworzenia gałęzi.
-**Date**: 2026-09-24
+**Branch**: `docs/issue-869-protected-bot-budget-spec`, draft PR #1017.
+**Date**: 2026-09-25
 **Spec**: [spec.md](spec.md)
-**Status**: Plan warunkowy do niezależnego review. D1–D3 wymagają decyzji przed zależną realizacją. Wszystkie prace poniżej są przyszłe; obecna sesja kończy się analyze.
+**Status**: Plan do niezależnego review. Zatwierdzone D1–D3 i oba P1 uwzględnione. Wszystkie prace poniżej są przyszłe; obecna sesja kończy się analyze.
 
 ## Summary
 
@@ -18,7 +18,7 @@ Rozszerzyć istniejący authoritative join i persist-before-commit rollover o tr
 **Target Platform**: Netlify + istniejący WS VPS/systemd, oddzielny Stage/Production.
 **Project Type**: istniejąca platforma real-time.
 **Performance Goals**: nie wprowadzać oczekiwania na refill na ścieżce wypłaty; stałe/indeksowane odczyty per konto/stół, bez skanowania całego ledger przy join; brak nowego niezatwierdzonego SLO.
-**Constraints**: finite issuance, fail-closed, exact arithmetic, atomowość, zachowanie proweniencji; tylko fundamentalne testy. D1–D3 z research pozostają bramkami decyzji.
+**Constraints**: finite issuance, fail-closed, exact arithmetic, atomowość, zachowanie proweniencji; tylko fundamentalne testy. D1–D3 z research są zatwierdzonymi wymaganiami.
 **Scale/Scope**: jeden budżet/konto; dwie aktywne pule tierów i dwie klasy rezerwy na pulę; przyszła konfiguracja jednostek do 10000 nie aktywuje botów.
 
 ## Constitution Check
@@ -31,7 +31,7 @@ Rozszerzyć istniejący authoritative join i persist-before-commit rollover o tr
 | IV — JSP/CSS/CSP/klog | PASS | PASS: minimalna prezentacja; brak browser imports; hash inline w tej samej zmianie |
 | V — testy fundamentalne, konkretne ścieżki | PASS | PASS: tylko krytyczne admission/finanse/lifecycle/runtime; bez UI/CSS/JSP test suites i pełnego kodu |
 | Stage apply / Preview | PASS jako plan | PASS jako wymaganie przyszłej realizacji; dowodów wykonania obecnie brak |
-| Spec Kit: wszystkie decyzje rozwiązane | HOLD D1–D3 | HOLD D1–D3; na polecenie właściciela dokument warunkowy do review, nie execution-ready |
+| Spec Kit: wszystkie decyzje rozwiązane | PASS: D1–D3 zatwierdzone | PASS: brak otwartych decyzji; wykonanie wymaga review i osobnego zlecenia |
 
 Bramki konstytucji oceniają zgodność projektu, nie działającą implementację. D1–D3 nie są wyjątkami od konstytucji. Nie zmieniać konstytucji, ignore files, tooling ani zależności.
 
@@ -47,6 +47,7 @@ Bramki konstytucji oceniają zgodność projektu, nie działającą implementacj
 |---|---|
 | `shared/poker-domain/table-economy.mjs` — getBotFundingSystemKeyForBuyIn, isBotFundingAllowedForBuyIn | Źródło 100 z dedykowanej puli; 500 istniejące; tylko autoryzowana klasa; brak fallbacku |
 | `shared/poker-domain/join.mjs` — executePokerJoinAuthoritative | Lock/rozróżnienie rejoin; obliczenie admission exposure; wszystkie budżety i seat w jednym tx |
+| `shared/poker-domain/leave.mjs` — executePokerLeave i deferred leave finalizer | Wspólny guard członkostwa konta z join/writer/cleanup; trwałe powiązania drain pozostają po leave |
 | `shared/poker-domain/bots.mjs` — seedBotsForJoin, computeTargetBotCount | Planowana liczba botów znana przed autoryzacją; slow target=1; zapis nowych funding identities; bez częściowego ukrycia odmowy |
 | `ws-server/poker/persistence/authoritative-join-adapter.mjs`, `ws-server/poker/handlers/join.mjs` | Propagacja nowych kodów i metadanych; bez odtworzenia gry na podstawie odmówionego join |
 | `netlify/functions/poker-quick-seat.mjs` — selectCandidate, createAndRecommend, handler | Filtrowanie per konto/klasa/tier i wyraźny wybór slow/human-only; ostateczny join w WS |
@@ -70,7 +71,7 @@ Bramki konstytucji oceniają zgodność projektu, nie działającą implementacj
 
 ## Phase 0 — Evidence i zamknięcie decyzji
 
-Research w research.md wskazuje aktualne mechanizmy i pułapki. Zamknąć D1–D3 z właścicielem, dopisać konkretne wartości i scenariusze graniczne. Przed implementacją rewalidować SHA i diff relewantnych plików. Stage preflight ma potwierdzić actual balances, aktywne zobowiązania, archiwalne receipts, istniejącą alokację 500 oraz źródło i cel seeda 100. Nie zakładać miliona płynnej gotówki w istniejącym 500 tylko dlatego, że seed wynosił milion.
+Research w research.md wskazuje aktualne mechanizmy i pułapki. D1–D3 są zatwierdzone; sprawdzić zgodność przyszłej realizacji z opisanymi granicami. Przed implementacją rewalidować SHA i diff relewantnych plików. Stage preflight ma potwierdzić actual balances, aktywne zobowiązania, archiwalne receipts, istniejącą alokację 500 oraz źródło i cel seeda 100. Nie zakładać miliona płynnej gotówki w istniejącym 500 tylko dlatego, że seed wynosił milion.
 
 ## Phase 1 — Design
 
@@ -78,11 +79,19 @@ Research w research.md wskazuje aktualne mechanizmy i pułapki. Zamknąć D1–D
 
 Kontrakt normatywny projektu w contracts/bot-budget.md; pola i ograniczenia w data-model.md. Fast rozliczać dokładnie w podjednostkach, 100 jednostek=1 000 000 podjednostek. Actual exposure CH też kumulować. Kadencja startuje przy pierwszej zatwierdzonej ekspozycji, nie przy otwarciu lobby ani odrzuconym join. Przesunięcie po bezczynności obliczyć względem niezmiennej kotwicy, nie od nowego requestu. Slow nigdy nie dofinansowuje brakującego fast w STANDARD.
 
-Przy admission istniejący authoritative snapshot bot stacks jest podstawą ekspozycji nowego człowieka. Nie używać samej kwoty historycznego seed, bo stack mógł się zmienić. Ten sam uczestnik ma trwały zapis już udostępnionego stocku i watermark finansowania; retry nie polega na nowym requestId. Dla obecnych ludzi nowe fundingDelta autoryzować pełną kwotą dla każdego, obejmując leave_after_hand do momentu faktycznego odejścia. Czyste bot-only zapisuje funding, ale zero user exposure. Replacement zachowuje lineage starego residual; top-up jest nową deltą, nie nowym pełnym seed.
+Przy admission istniejący authoritative snapshot bot stacks jest podstawą ekspozycji nowego człowieka. Nie używać samej kwoty historycznego seed, bo stack mógł się zmienić. Ten sam uczestnik ma trwały zapis już udostępnionego stocku i watermark finansowania; retry nie polega na nowym requestId. Dla obecnych ludzi nowe fundingDelta autoryzować pełną kwotą dla każdego, obejmując leave_after_hand do momentu faktycznego odejścia. Czyste bot-only zapisuje funding, ale zero user exposure. Replacement zachowuje lineage starego residual; managed top-up dodaje nowego bota z pełnym buy-in; replacement z residual nalicza wyłącznie deltę.
 
 Kolejność nowych ścieżek: table row → poker_state/seat rows → budżety ludzi posortowane po userId → pula tieru → źródłowe konta ledger w stałej kolejności. Istniejące cleanup z kolejnością state→table ujednolicić w dotykanych ścieżkach, nie tworzyć odwrotnej zależności. Refiller: global emission guard → pula tieru → liczniki/receipts → konta; nigdy nie blokuje poker_tables ani user budgets. Replay decyzji sprawdzić przed zmianą jakiegokolwiek salda rezerwy; ledger replay nie może ponownie zmniejszyć pool. Po deadlock/serialization retry pełnej transakcji z tą samą tożsamością i ograniczoną liczbą prób; nie publikować kandydata.
 
 Wszystkie sprawdzenia finansowania w writerze są pod lockiem table przed CAS state, nawet gdy decyzja runtime była wcześniej pozytywna. Odmowa dowolnego człowieka wycofuje cały nowy batch. Nie zostawiać buy-in USER z odrzuconym seat. Timeout po commit rozstrzygać z trwałej decyzji, nie kompensacją na ślepo.
+
+### Kroczące slow — D1 i częściowe zużycie P1
+
+D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast.
+
+Pod blokadą konta odczytać trwałe EXPOSURE z budget_mode=SLOW, result=COMMITTED, consumed_at i kosztem integer. Dostępność jest wyliczana jako 10000 minus suma w oknie, nie przechowywana jako odnawiany grant. DENIED/replay nie zużywa ponownie. Czas UTC t pobierać z DB po uzyskaniu blokady (nie transaction-start sprzed oczekiwania); kontrola cofnięcia zegara ma blokować nowe zużycie. Retry zachowuje pierwotny receipt/czas. nextEligibleAt oznacza najwcześniejsze wygaśnięcie dostatecznej sumy dla konkretnego żądanego kosztu; wygaśnięcie 0,4 nie obiecuje pełnego bota.
+
+Fundamentalny przykład: 0,4 jednostki w t0 i 0,6 w t0+1 h. Tuż przed t0+12 h dostępne 0; dokładnie w t0+12 h dostępne tylko 0,4; pełne 1 dopiero w t0+13 h, o ile nie było nowego zużycia. Dwa równoczesne żądania o pozostałe 0,4 przy różnych tierach mogą łącznie zużyć najwyżej 0,4. Przełączenia fast/slow i sesji nie usuwają drugiego kosztu.
 
 ### 2. Matchmaking, powrót i UI
 
@@ -96,11 +105,23 @@ Pokazać osobno stan dostępu i brak płynności; nie używać etykiet „oszust
 
 Wykrywanie: przy każdej decyzji nowej ekspozycji i przed startem/rollover weryfikować, czy istniejący human może pokryć wymaganą deltę. Dokładne zero fast po zaakceptowanym funding też oznacza wyczerpanie w tej samej chwili; nie czekać na kolejny żądany seed. Dla dodatniej reszty brak wymaganego funding oznacza brak nowego triggera; nie wymyślać progu całego buy-in.
 
-Zapis pierwszego started_at/deadline pod lockiem; CAS nie może go przesunąć. Rozdzielić wewnątrz tej samej transakcji wynik DENIED/DRAIN od kandydata rollover: najpierw pod table/state/user locks obliczyć pełny koszt; niewystarczający budżet zapisuje trwałe DENIED + pierwszy DRAIN i commit **bez** nowego finansowania/stacków/used counters. Nie rzucać błędu, który cofnąłby również ten wynik. Jeżeli zapis kandydata był już rozpoczęty, cofnąć go do savepoint sprzed mutacji i zatwierdzić wyłącznie decyzję odmowy/drain przy zachowanych wcześniejszych blokadach. Zewnętrzny błąd/awaria przed commit nie jest zatwierdzoną obserwacją: runtime nie wykonuje nowej ręki/admission i po recovery ponawia decyzję, nigdy nie rekonstruuje dawnego deadline z pamięci procesu. Przy ostatnim dozwolonym batchu wyczerpującym fast do zera jego funding i DRAIN zapisują się razem: jest to ostatnia autoryzowana ekspozycja, kolejne są zakazane. Odnowienie okresu nie usuwa zatwierdzonego triggera. Runtime synchronizuje meta dopiero po commit; niepewny wynik rozstrzyga durable replay, a żywa ręka nadal ma prawo do poprawnego settlement.
+Zapis źródłowego FAST_EXHAUSTED pod lockiem; jego czas niezmienny. Projekcja started_at/deadline nie może być wydłużona; wcześniejsze udowodnione zdarzenie skraca ją zgodnie z regułą minimum. Rozdzielić wewnątrz tej samej transakcji wynik DENIED/DRAIN od kandydata rollover: najpierw pod table/state/user locks obliczyć pełny koszt; niewystarczający budżet zapisuje trwałe DENIED + pierwszy DRAIN i commit **bez** nowego finansowania/stacków/used counters. Nie rzucać błędu, który cofnąłby również ten wynik. Jeżeli zapis kandydata był już rozpoczęty, cofnąć go do savepoint sprzed mutacji i zatwierdzić wyłącznie decyzję odmowy/drain przy zachowanych wcześniejszych blokadach. Zewnętrzny błąd/awaria przed commit nie jest zatwierdzoną obserwacją: runtime nie wykonuje nowej ręki/admission i po recovery ponawia decyzję, nigdy nie rekonstruuje dawnego deadline z pamięci procesu. Przy ostatnim dozwolonym batchu wyczerpującym fast do zera jego funding i DRAIN zapisują się razem: jest to ostatnia autoryzowana ekspozycja, kolejne są zakazane. Odnowienie okresu nie usuwa zatwierdzonego triggera. Runtime synchronizuje meta dopiero po commit; niepewny wynik rozstrzyga durable replay, a żywa ręka nadal ma prawo do poprawnego settlement.
 
 `runSettledRolloverCommand` sprawdza drain przed zwykłą rotacją i przed wymogiem managed profile. `bootstrapHand`, ręczny start_hand oraz commit rollover mają ten sam warunek deadline — zabezpieczenie przed przekroczeniem podczas prepare/persist. Dla żywej ręki timer deadline tylko blokuje kolejną; aktualna ręka kończy się normalnie. Janitor nie zastępuje jej generic stale close z powodu samego deadline. Bezpieczny terminal close przebiega przez istniejący executor z trwałym reason, nie force-close.
 
 DRAINING i brak liquidity/cap/proof dają `allowBotFunding:false`, zero nowych receipts. Sam brak liquidity nie oznacza wyczerpania fast ani automatycznej kary/drain. Fallback obydwu tierów używa istniejących pozostałych stacków lub kontrolowanego oczekiwania/wyjścia; brak nieskończonego ponawiania niemożliwego fundingu. Niedostępne proof/cash-out invariant zachowuje fail-closed i sygnalizuje operatorowi konkretny błąd, nie obiecuje wypłaty bez dowodu.
+
+### Globalne wyczerpanie fast — P1
+
+Pierwszy zatwierdzony FAST_EXHAUSTED jest faktem konta, unikalnym dla (user_id, fast_period_start), z exhausted_at. Powstaje przy dokładnym wyczerpaniu któregokolwiek limitu fast po ostatniej legalnej ekspozycji lub pierwszej odmowie wymaganej ekspozycji z powodu niewystarczającego fast. Nie tworzyć go z powodu braku płynności ani arbitralnego progu pełnego buy-in. Pozostaje constrained do kolejnego okresu fast; nowy okres nie usuwa historycznego zdarzenia ani drenujących stołów.
+
+W tej samej transakcji zapisać trwałe powiązania zdarzenia ze wszystkimi już zajętymi przez konto stołami STANDARD z botami, także pre-funded B bez żądania fundingu; uwzględnić nowy seat, jeśli ostatnia legalna ekspozycja go zatwierdza. Snapshot obejmuje leave_after_hand aż do rzeczywistego opuszczenia. HUMAN_ONLY i istniejące SLOW_PRIVATE są wyłączone. W audycie pozostają table_id i admission identity; późniejsze leave, usunięcie seat lub reset fast nie gubią obowiązku wygaszenia.
+
+Zmiany członkostwa w `shared/poker-domain/join.mjs::executePokerJoinAuthoritative`, `leave.mjs::executePokerLeave` i deferred leave finalizer oraz cleanup/writer muszą użyć tego samego guard konta: table → state/seats → posortowane konta → pool → ledger. Snapshot innych członkostw czytać po uzyskaniu guard w świeżym odczycie READ COMMITTED; nigdy blokować B podczas trzymania A/konta. Każdy zapis/usunięcie członkostwa musi być zinwentaryzowany, także terminal cleanup. Serializacja na guard zapewnia kompletną listę w chwili zdarzenia bez blokad wielu stołów naraz.
+
+Po commit uruchomić istniejące `ws-server/server.mjs::enqueueTableCommand` dla powiązanych stołów, po jednym stole/transakcji. Restart/sweep ponawia nieprzeniesione powiązania. Fanout jest projekcją: autorytatywny DRAINING obowiązuje od exhausted_at nawet przed zapisem lokalnej meta. Każde admission (także przed seated rejoin early return), nowe finansowanie i każdy start_hand/bootstrap/prepare/commit rollover odczytuje trwałe powiązania dla stołu i konta. Recheck w `persisted-state-writer.mjs::writeViaDb` obejmuje również pusty funding plan; sama kolejka per-table ani cache WS nie wystarczą. Final gate blokuje posortowane konta wszystkich obecnych ludzi i utrzymuje guard do commit nowej ręki nawet przy zerowym funding; odczyt po guard widzi konkurencyjny COMMIT FAST_EXHAUSTED. Powiązania historyczne sprawdza również po odejściu konta. Serializacja rozstrzyga race A-exhaustion/B-start: zatwierdzona wcześniej ręka pozostaje żywa, późniejsza podlega oryginalnemu deadline. Brak dowodu blokuje nową rękę/dostęp/funding, zachowując settlement.
+
+Deadline to najwcześniejsze właściwe exhausted_at + 30 min, nigdy czas lokalnego wykrycia. Projekcja może zostać skorygowana wyłącznie do wcześniejszego udowodnionego zdarzenia, nigdy wydłużona; identyfikator źródłowego zdarzenia pozostaje w audycie. A wyczerpane w t0, B wykryte w t0+20 min: B ma deadline t0+30 min; wykryte po nim nie zacznie ręki. Trwająca ręka kończy się normalnie, bez automatycznego kicka, z poprawną wypłatą. Już sfinansowane boty mogą grać tylko w grace, bez dalszego finansowania.
 
 ### 4. Rezerwa i przepływy CH
 
@@ -111,7 +132,7 @@ DRAINING i brak liquidity/cap/proof dają `allowBotFunding:false`, zero nowych r
 | Admission do pre-funded | Żadnego nowego transferu bot CH | Koszt ekspozycji nowego człowieka |
 | Terminal bot return | ESCROW → udowodniony oryginalny SYSTEM | Uzupełnia właściwą klasę; brak zwrotu allowance |
 | Bot refill | GENESIS → dedykowany SYSTEM | Nowa emisja, limity i kompensacja dowodu atomowo |
-| Jednorazowy seed 100 | Źródło D3 → POKER_BOT_BANKROLL_100 | Osobna zatwierdzona alokacja; nie weekly refill |
+| Jednorazowy seed 100 | GENESIS → POKER_BOT_BANKROLL_100, 1 000 000 CH | Osobna zatwierdzona alokacja; nie weekly refill |
 | Wewnętrzny rebalance | SYSTEM→SYSTEM, tylko jawna uprawniona alokacja | Nie emisja, nie fallback na wyczerpanie klasy |
 
 `poker_bot_pool_state` utrzymuje twarde liquid_standard_ch i liquid_slow_ch. Po inicjalizacji rozdysponować dostępne, udowodnione środki 90/10 (reszta z dzielenia CH na korzyść zablokowanej rezerwy slow); nie przeliczać od nowa proporcji po każdej wypłacie, bo pozwoliłoby to kraść niewykorzystaną rezerwę. Debit blokuje pulę i konto, zmniejsza wyłącznie właściwą klasę. Return przywraca klasę pochodzenia; zwroty legacy bez klasy mają osobny udowodniony tor alokacji 90/10, raz. Suma sklasyfikowanej płynności i jawnej kwarantanny nie może przewyższać rzeczywistego salda konta. Nieznany drift blokuje nowe finansowanie/refill, a nie prawidłowy terminal payout do źródła.
@@ -126,17 +147,27 @@ Dla puli klasy utrzymywać **signed** sumę zatwierdzonych closed losses: fundin
 
 Headroom tieru = max(0, 1 000 000 − kapitalizacja udowodniona konserwatywnie). Dla każdego otwartego stołu o znanym tierze/źródle liczyć max(outstanding committed cost, **pełne aktualne saldo jego ESCROW**) jako górną granicę zaangażowanego kapitału; dodać liquid SYSTEM. Pełne escrow zawiera również środki ludzi, więc może zmniejszyć dostępność refillu, ale nie zaniża kapitału przez pominięcie wygranych botów i nie przypisuje właścicieli fungible chips. Nie jest to źródło dowodu straty — dodatni realized loss nadal musi pochodzić z zamkniętych certyfikatów. Dodatkowo headroom klasy przy target 900k/100k według tej samej zasady, bez przenoszenia strat między klasami. Odczyt kont/kompletnego zbioru active funding powiązać z refill w serializable transakcji i obsłużyć pełny retry; nie dokładać odwrotnej blokady poker table przy trzymanym pool lock. Brak kompletnego powiązania active escrow albo spójnego snapshotu daje zero refillu. Legacy active capital wchodzi do tier total; nie dopełniać historycznego 500 do miliona na podstawie brakującego salda. Stage ma zmierzyć wpływ konserwatywnego headroom na zwykły dostęp; ewentualne zmniejszenie granicy wymaga udowodnionej atrybucji, nie domysłu.
 
-Refill minimum z kwalifikowanej straty klasy, headroom klasy/tieru i pozostałych limitów klasy/tieru/global. D2 określi dokładny przedział czasowy. Niezależnie od D2 każde wydanie ma trwały timestamp/receipt i wspólną blokadę globalną, co zabezpiecza równoczesne 100/500. Globalny cap nie może być cache per proces. Operacja `postTransaction` i consumed proof/counters są w jednym tx, przy niekompletności całkowity rollback. Zero kwoty nie wywołuje ledger.
+Refill minimum z kwalifikowanej straty klasy, headroom klasy/tieru i pozostałych limitów klasy/tieru/global. Obowiązuje kroczące (t−168 h, t]. Zgodnie z D2 każde wydanie ma trwały timestamp/receipt i wspólną blokadę globalną, co zabezpiecza równoczesne 100/500. Globalny cap nie może być cache per proces. Operacja `postTransaction` i consumed proof/counters są w jednym tx, przy niekompletności całkowity rollback. Zero kwoty nie wywołuje ledger.
 
 Obecny Netlify validateEntries wymaga USER przy MINT. Rozszerzyć go tylko o wewnętrzną decyzję refillu/alokacji z poprawnym dokładnym debit GENESIS i credit jednej puli, sumą zero oraz lockiem licznika; publiczne chips-tx nie może przekazać tej capability. Nie robić nowej ogólnej ścieżki dowolnego SYSTEM MINT. Nie importować Netlify runtime do WS bez sprawdzenia pakowania — obecny deploy kopiuje shared i zależności; nowy moduł otrzymuje ledger adapter jako zależność, istniejący bootstrap/cleanup zapewnia wiring.
 
 Refill po terminal commit uruchamia istniejący runtime/sweep; przechowywany certyfikat umożliwia odzyskanie po crash i ponowne sprawdzenie po uwolnieniu tygodniowego cap. Nie wykonywać refillu wewnątrz wypłaty. Retention pozostawia certyfikat, idempotency i audyt kompensacji; oryginalne entries mogą być archiwizowane tylko z istniejącymi zweryfikowanymi manifestami/hashami. Stary close bez dowodów nie otrzymuje automatycznego refillu.
 
+### Krocząca emisja i pierwsza alokacja — D2–D3
+
+D2 zatwierdzone: limity REFILL liczone w kroczącym (t−168 h, t], z tym samym t dla obu tierów, klas i globalnego cap. Lewa granica wyłączona, prawa włączona. Trwałe receipts i globalna blokada obejmują sumę już zatwierdzonych emisji oraz proponowaną kwotę; brak resetu kalendarzowego.
+
+D3 zatwierdzone: jednorazowy idempotentny MINT 1 000 000 CH GENESIS → POKER_BOT_BANKROLL_100, z ochroną 900 000 CH STANDARD i 100 000 CH SLOW. Trwały unikalny purpose INITIAL_ALLOCATION niezależny od czasu, retry i policy_version. Operacja oddzielna od REFILL i schema provisioning; wykonanie na Production wymaga osobnego GO.
+
+Global emission guard → pool → receipts/accounts; wszystkie klasy i tiery uczestniczą w tej samej serializacji. Czas UTC t pobierać po blokadzie, przy niekompletnym dowodzie lub cofnięciu zegara odmowa emisji. Serializable snapshot sprzed oczekiwania na guard nie może pominąć konkurencyjnego receipt: zapisywać version globalnego guard w każdej emisji i ponawiać całą transakcję po serialization conflict. Autoryzacja, kompensacja proof, receipt i double-entry MINT commitują razem. Liczniki są projekcją as-of t; suma trwałych REFILL receipts jest źródłem prawdy. Granica issued_at=t−168 h uwalnia dokładnie tę emisję; młodsze pozostają. INITIAL_ALLOCATION ma osobny audyt podaży, nie konsumuje ani nie odnawia cap REFILL. Schema tworzy konto z zerem; alokacja przy jednym kredycie 1 000 000 CH ustawia obie rezerwy atomowo. Powtórzenie lub równoczesne wywołanie zwraca istniejący rezultat bez drugiego kredytu.
+
+Fundamentalne testy: tuż przed/na/po 168 h; równoczesne 100/500 i STANDARD/SLOW przy ostatnim headroom klasy/tieru/global; restart i utracona odpowiedź; proof/receipt retention; brak podwójnej emisji na granicy kalendarzowego tygodnia; INITIAL_ALLOCATION retry i race dają jeden milion oraz dokładne 900000/100000, osobno od REFILL. Żaden test nie wykonuje Production GO.
+
 ### 6. Migracje, cutover i breaking changes
 
 Zmiany DDL opisano w data-model.md. Użyć przyszłych forward-only migracji, bez edycji `20260810100000_poker_bot_bankroll.sql`. Najpierw addytywny schema i capability, z aktywacją chronionego fundingu/refillu domyślnie wyłączoną. Oddzielić schema od jednorazowej emisji/alokacji. Migracje zastosowane na Stage nie są odwracane przez edycję pliku.
 
-**Zamierzony przyszły skutek PR migracji: DB Stage Apply PR zmieni współdzielone Stage.** W opisie spec/plan/tasks i przyszłego PR jawnie wskazać efekt przed publikacją. W tej sesji nie tworzyć migracji, PR ani deploy. Production ma osobny target, zatwierdzoną politykę D1–D3, dowody Stage i osobny GO dla aktywacji/seeda/refillu.
+**Zamierzony przyszły skutek PR migracji: DB Stage Apply PR zmieni współdzielone Stage.** W opisie spec/plan/tasks i przyszłego PR jawnie wskazać efekt przed publikacją. W tej sesji publikować wyłącznie dokumenty w istniejącym draft PR #1017; bez migracji i deploy. Production ma osobny target, zatwierdzoną politykę D1–D3, dowody Stage i osobny GO dla aktywacji/seeda/refillu.
 
 Cutover istniejących stołów: spis pod lockiem, potwierdzenie źródła, odtworzenie aktualnych seated uczestników i admission proof; oznaczyć jawnie legacy, nie zmieniać istniejącego source. Bot-funded legacy otrzymują zakaz nowego fundingu i nowych admission w trakcie kontrolowanego wycofania; utrzymują legalne ręce/wyjścia. Limit budżetowego drain +30 obowiązuje tylko przy udowodnionym wyczerpaniu; nie udawać, że techniczny cutover jest wyczerpaniem. Nowe chronione stoły powstają z właściwą klasą/pulą. Stare bez wyczerpania zamykać istniejącym bezpiecznym lifecycle po odejściu ludzi; nie nakładać na nie nowego uniwersalnego TTL. Ten techniczny plan cutover podlega review jako jawna przejściowa niedostępność nowych admission.
 
@@ -150,7 +181,7 @@ Przyszły WS Preview Deploy: definicja workflow z main, aplikacja exact latest r
 
 ## Risks
 
-- D1–D3 blokują gotowość implementacyjną odpowiednich parametrów i emisji.
+- D1–D3 są zamknięte; niezależne review i osobne zlecenie realizacji pozostają wymagane. Globalne powiązania drain i serializacja członkostw wymagają fundamentalnego dowodu współbieżności.
 - Konserwatywna autoryzacja wielu ludzi zużywa więcej allowance niż jeden rzeczywisty transfer; zmierzyć zwykły dostęp na Stage, nie osłabiać samodzielnie polityki.
 - Niekompletny historyczny audyt/retention i mieszane źródła: możliwe zamrożenie nowych operacji; wymagana jawna rekonsyliacja, bez uznania OPEN escrow za stratę.
 - Różne ledger adaptery, top-up history i blokady state/table wymagają wspólnego testu transakcyjnego, nie tylko mocków.
@@ -160,4 +191,4 @@ Przyszły WS Preview Deploy: definicja workflow z main, aplikacja exact latest r
 
 ## Complexity Tracking
 
-Brak odstępstw od konstytucji. Jedynym odstępstwem od typowej kolejności gotowości Spec Kit jest ukończenie warunkowych dokumentów mimo D1–D3 na jawne polecenie właściciela; nie zmienia to żadnej zatwierdzonej zasady ekonomii.
+Brak odstępstw od konstytucji. Decyzje D1–D3 zamknięte; implementacja nie została rozpoczęta.

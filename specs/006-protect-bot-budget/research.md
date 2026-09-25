@@ -15,7 +15,7 @@ Data: 2026-09-24. Badanie wyłącznie kodu i źródeł; nie badano ani nie zmien
 | Draining | Oddzielne `bot_draining_started_at` i `bot_draining_deadline_at` | `handleContinuousBotRotationAtSettled` przy human postpones. Samo ustawienie rotation_due_at nie spełnia #869. |
 | No funding | Rozszerzyć `allowBotFunding:false` na obydwa tiery i przyczyny odmowy | Obecna ścieżka w server jest ograniczona `buyIn === 500`, writer rozpoznaje tylko HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY. |
 | Rezerwa | Rzeczywiście egzekwowane dwa salda klas w nowym `poker_bot_pool_state`, połączone z jednym istniejącym kontem SYSTEM na tier | Zachować POKER_BOT_BANKROLL dla 500 i nie komplikować terminal source. Podkonta odrzucone jako zbędne dla pilota. Sama kontrola dostępnego salda bez blokady/aktualizacji klas byłaby niewystarczająca. |
-| Nowe 100 | SYSTEM key `POKER_BOT_BANKROLL_100`; provision zero balance w schema, osobna jednorazowa autoryzowana alokacja | Nie zmieniać historycznego seeda 500 ani source aktywnych stacków. Źródło alokacji jest D3. |
+| Nowe 100 | SYSTEM key `POKER_BOT_BANKROLL_100`; provision zero balance w schema, osobna jednorazowa autoryzowana alokacja | Nie zmieniać historycznego seeda 500 ani source aktywnych stacków. D3 zatwierdza GENESIS i jeden milion, osobno od refillu. |
 | Refill | Mały `shared/poker-domain/bot-bankroll.mjs` korzystający z istniejącego ledger `postTransaction`, uruchamiany po udowodnionym close i w istniejącym sweep | Nie ma potrzeby nowego serwisu/cron. Po crash sweep podejmuje pozostawiony dowód. Nigdy MINT w krytycznej transakcji wypłaty. |
 | Audit | Kompaktowy certyfikat każdego zamknięcia i nieusuwalny rejestr kompensacji, podparty istniejącymi ledger/archives | `loadBotFundingRows` czyta hot ledger; ogólne metadata TABLE_CASH_OUT nie dowodzą straty botów. Hot history nie wolno uznać za bezterminowo dostępną. |
 
@@ -31,15 +31,35 @@ Data: 2026-09-24. Badanie wyłącznie kodu i źródeł; nie badano ani nie zmien
 8. `persisted-bootstrap-repository.mjs`, adapter, `table-manager` oraz repozytorium managed muszą przenosić nową klasę i deadline. Samo dodanie kolumn nie zabezpiecza restartu/start_hand.
 9. Globalna lista stołów i istniejące seated bypass w join wymagają rozróżnienia odtworzenia istniejącego seat od NOWEGO dopuszczenia. Grace istniejących ludzi jest jawnym wyjątkiem, nie ogólnym zezwoleniem constrained.
 
-## Otwarte decyzje właściciela — nie są domyślną konfiguracją
+## Zatwierdzone decyzje właściciela — aktualizacja 2026-09-25
 
-| ID | Brak rozstrzygnięcia w issue/kodzie | Propozycja do review | Zależne obszary |
-|---|---|---|---|
-| D1 | Moment pierwszej jednostki slow i proporcjonalne/skokowe odnawianie | Jedna jednostka przy pierwszym wejściu w slow; później skokowo pełna jednostka po 12 h od pierwszego zużycia w cyklu, niewykorzystana reszta znika przy odnowieniu; bez catch-up. Alternatywa: początkowe oczekiwanie lub token bucket. | FR-004; przejścia slow, test granic, retryAt |
-| D2 | Dowolne kroczące 7 dni czy stały wspólny okres emisji oraz kotwica | Dla ścisłego „maks. na 7 dni” preferowane kroczące 168 h; jeśli właściciel wybierze stałe, zapisać wspólną UTC kotwicę, półotwarte okna i jawny efekt styku. | FR-020/023; agregacja trwałych receipts, liczniki i test granicy |
-| D3 | Dokładny debit jednorazowego miliona dla 100 | GENESIS→POKER_BOT_BANKROLL_100 jako jawny MINT, podział ochrony 900k/100k. Alternatywą tylko świadomie zatwierdzony transfer z istniejących środków, ze sprawdzeniem dostępnego salda. | FR-018; seed preflight i odrębny Production GO |
+D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast.
 
-Przed zależną implementacją wymagana odpowiedź i aktualizacja spec/plan/tasks. Nie należy przyjmować propozycji wskutek milczenia. Na prośbę właściciela pełny plan powstaje mimo otwartych decyzji, jako dokument warunkowy; standardowa bramka `$speckit-plan` o rozwiązanych unknowns nie jest oznaczona PASS. Research techniczny zakończony; research nie zastępuje decyzji ekonomicznych.
+D2 zatwierdzone: limity REFILL liczone w kroczącym (t−168 h, t], z tym samym t dla obu tierów, klas i globalnego cap. Lewa granica wyłączona, prawa włączona. Trwałe receipts i globalna blokada obejmują sumę już zatwierdzonych emisji oraz proponowaną kwotę; brak resetu kalendarzowego.
+
+D3 zatwierdzone: jednorazowy idempotentny MINT 1 000 000 CH GENESIS → POKER_BOT_BANKROLL_100, z ochroną 900 000 CH STANDARD i 100 000 CH SLOW. Trwały unikalny purpose INITIAL_ALLOCATION niezależny od czasu, retry i policy_version. Operacja oddzielna od REFILL i schema provisioning; wykonanie na Production wymaga osobnego GO.
+
+Odrzucone warianty: pełny skokowy grant slow na granicy cyklu, proporcjonalny token bucket, stałe tygodnie emisji oraz transfer istniejących środków zamiast GENESIS. Nie są opcjami do wyboru. Brak otwartych decyzji D1–D3.
+
+### Globalne wyczerpanie fast — P1
+
+Pierwszy zatwierdzony FAST_EXHAUSTED jest faktem konta, unikalnym dla (user_id, fast_period_start), z exhausted_at. Powstaje przy dokładnym wyczerpaniu któregokolwiek limitu fast po ostatniej legalnej ekspozycji lub pierwszej odmowie wymaganej ekspozycji z powodu niewystarczającego fast. Nie tworzyć go z powodu braku płynności ani arbitralnego progu pełnego buy-in. Pozostaje constrained do kolejnego okresu fast; nowy okres nie usuwa historycznego zdarzenia ani drenujących stołów.
+
+W tej samej transakcji zapisać trwałe powiązania zdarzenia ze wszystkimi już zajętymi przez konto stołami STANDARD z botami, także pre-funded B bez żądania fundingu; uwzględnić nowy seat, jeśli ostatnia legalna ekspozycja go zatwierdza. Snapshot obejmuje leave_after_hand aż do rzeczywistego opuszczenia. HUMAN_ONLY i istniejące SLOW_PRIVATE są wyłączone. W audycie pozostają table_id i admission identity; późniejsze leave, usunięcie seat lub reset fast nie gubią obowiązku wygaszenia.
+
+Zmiany członkostwa w `shared/poker-domain/join.mjs::executePokerJoinAuthoritative`, `leave.mjs::executePokerLeave` i deferred leave finalizer oraz cleanup/writer muszą użyć tego samego guard konta: table → state/seats → posortowane konta → pool → ledger. Snapshot innych członkostw czytać po uzyskaniu guard w świeżym odczycie READ COMMITTED; nigdy blokować B podczas trzymania A/konta. Każdy zapis/usunięcie członkostwa musi być zinwentaryzowany, także terminal cleanup. Serializacja na guard zapewnia kompletną listę w chwili zdarzenia bez blokad wielu stołów naraz.
+
+Po commit uruchomić istniejące `ws-server/server.mjs::enqueueTableCommand` dla powiązanych stołów, po jednym stole/transakcji. Restart/sweep ponawia nieprzeniesione powiązania. Fanout jest projekcją: autorytatywny DRAINING obowiązuje od exhausted_at nawet przed zapisem lokalnej meta. Każde admission (także przed seated rejoin early return), nowe finansowanie i każdy start_hand/bootstrap/prepare/commit rollover odczytuje trwałe powiązania dla stołu i konta. Recheck w `persisted-state-writer.mjs::writeViaDb` obejmuje również pusty funding plan; sama kolejka per-table ani cache WS nie wystarczą. Final gate blokuje posortowane konta wszystkich obecnych ludzi i utrzymuje guard do commit nowej ręki nawet przy zerowym funding; odczyt po guard widzi konkurencyjny COMMIT FAST_EXHAUSTED. Powiązania historyczne sprawdza również po odejściu konta. Serializacja rozstrzyga race A-exhaustion/B-start: zatwierdzona wcześniej ręka pozostaje żywa, późniejsza podlega oryginalnemu deadline. Brak dowodu blokuje nową rękę/dostęp/funding, zachowując settlement.
+
+Deadline to najwcześniejsze właściwe exhausted_at + 30 min, nigdy czas lokalnego wykrycia. Projekcja może zostać skorygowana wyłącznie do wcześniejszego udowodnionego zdarzenia, nigdy wydłużona; identyfikator źródłowego zdarzenia pozostaje w audycie. A wyczerpane w t0, B wykryte w t0+20 min: B ma deadline t0+30 min; wykryte po nim nie zacznie ręki. Trwająca ręka kończy się normalnie, bez automatycznego kicka, z poprawną wypłatą. Już sfinansowane boty mogą grać tylko w grace, bez dalszego finansowania.
+
+### Kroczące slow — D1 i częściowe zużycie P1
+
+D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast.
+
+Pod blokadą konta odczytać trwałe EXPOSURE z budget_mode=SLOW, result=COMMITTED, consumed_at i kosztem integer. Dostępność jest wyliczana jako 10000 minus suma w oknie, nie przechowywana jako odnawiany grant. DENIED/replay nie zużywa ponownie. Czas UTC t pobierać z DB po uzyskaniu blokady (nie transaction-start sprzed oczekiwania); kontrola cofnięcia zegara ma blokować nowe zużycie. Retry zachowuje pierwotny receipt/czas. nextEligibleAt oznacza najwcześniejsze wygaśnięcie dostatecznej sumy dla konkretnego żądanego kosztu; wygaśnięcie 0,4 nie obiecuje pełnego bota.
+
+Fundamentalny przykład: 0,4 jednostki w t0 i 0,6 w t0+1 h. Tuż przed t0+12 h dostępne 0; dokładnie w t0+12 h dostępne tylko 0,4; pełne 1 dopiero w t0+13 h, o ile nie było nowego zużycia. Dwa równoczesne żądania o pozostałe 0,4 przy różnych tierach mogą łącznie zużyć najwyżej 0,4. Przełączenia fast/slow i sesji nie usuwają drugiego kosztu.
 
 ## Źródła techniczne
 
@@ -51,3 +71,7 @@ Nowe tabele w public wymagają RLS i ograniczonych grantów; konto klienta nie m
 `agents.md`/`skills.md` wspominają historyczną ścieżkę poker/poker-realtime.js, której obecnie nie ma. Rzeczywiste pliki to `poker/poker.js` (lobby quickSeat/createTable), `poker/poker-ws-client.js` (transport) i `poker/poker-v2.js` (fetchTableAccess, joinErrorMessage, isRetryableAutoJoinError). HTML `poker/index.html` i `poker/table-v2.html` potwierdza ładowanie tych plików. Lokalny poker-v2 różni się od aktualnego main (m.in. zmiany celebrations), dlatego odniesienia do V2 zweryfikowano w pobranym aktualnym GitHub main; nie kopiować historycznego pliku przy implementacji. Zasady konstytucji dotyczące WS/JSP obowiązują mimo starej nazwy w mapie, nie wymagają zmiany konstytucji.
 
 Preflight direct URL używa `netlify/functions/poker-progression.mjs::readTableAccess`; jest projekcją dostępu, wymaga wspólnego odczytu klasy/budżetu, ostateczny join nadal WS. `netlify/functions/poker-get-table.mjs` jest retired. Transport `poker/poker-ws-client.js` traktuje obecnie błędy join jako resumable pending; nowe końcowe odmowy polityki muszą zakończyć pending i przekazać neutralną alternatywę zamiast zapętlać retry. Potwierdzić tylko krytyczny transportowy kontrakt, bez testów renderowania.
+
+## Ponowna weryfikacja kodu 2026-09-25
+
+Odczytano bieżące issue i head PR #1017 `f54d5532db76b6095569a80a9dd8cd0330042d4d`; main pozostaje `93d0f191c3f87006d56f7afb2fb1c4052a7ecb84`. Per-table enqueueTableCommand nie serializuje kont między stołami. Join ma wczesny return seated; writer aktualizuje state przed funding; prepare/commit mogą nie potrzebować nowych botów. Dlatego P1 wymaga recheck także przy zerowym funding i przed seated return. Przeczytano aktualne agents.md, skills.md i konstytucję 1.1.1; nie zmieniano ich ani środowisk.

@@ -13,22 +13,22 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
-- [ ] Requirements are testable and unambiguous
+- [x] No unresolved clarification markers remain
+- [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
-- [ ] All acceptance scenarios are defined
+- [x] All acceptance scenarios are defined
 - [x] Edge cases are identified
 - [x] Scope is clearly bounded
 - [x] Dependencies and assumptions identified
 
 ## Feature Readiness
 
-- [ ] All functional requirements have clear acceptance criteria
+- [x] All functional requirements have clear acceptance criteria
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria — pokrycie definicji, nie deklaracja działającej implementacji
 - [x] No implementation details leak into specification — wyjątek: jawne ograniczenia projektu i śledzenie istniejącego kodu wymagane konstytucją
 
 ## Notes
 
-12/16 kryteriów spełnionych. D1–D3: start/odnowienie slow, okno emisji, źródło alokacji 100. Kryteria FR-004/018/020 i odpowiadające im scenariusze czekają na decyzję. Konstytucja wymaga konkretnych punktów kodu i zasad JSP/CSP, dlatego ich obecność w spec nie jest przypadkowym opisem implementacji. Brak zgody na implementację.
+16/16 kryteriów jakości specyfikacji spełnionych po aktualizacji 2026-09-25. D1–D3 zatwierdzone; scenariusze kroczących 12/168 h, ułamkowego slow, idempotentnej alokacji i globalnego A/B drain jawne. Jest to ocena kompletności dokumentów, nie niezależne review ani zgoda na implementację. Konstytucja wymaga konkretnych punktów kodu i zasad JSP/CSP.

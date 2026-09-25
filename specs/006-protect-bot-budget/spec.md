@@ -1,32 +1,21 @@
 # Feature Specification: Chroniony budżet botów — issue #869
 
-**Feature Branch**: bieżący checkout; nie utworzono gałęzi. Katalog funkcji niezależny od gałęzi: `specs/006-protect-bot-budget`.
+**Feature Branch**: `docs/issue-869-protected-bot-budget-spec`; draft PR #1017; katalog `specs/006-protect-bot-budget/`.
 **Created**: 2026-09-24
-**Status**: Draft do niezależnego review; decyzje D1–D3 otwarte; nie jest zgodą na implementację.
+**Status**: Draft do niezależnego review; decyzje D1–D3 zatwierdzone i uwzględnione; nie jest zgodą na implementację.
 **Input**: Wszystkie zatwierdzone wymagania [issue #869](https://github.com/krzysztofcal/arcadePlatform/issues/869), wersja i pełna treść w [issue-source.md](issue-source.md).
 
 ## Clarifications
 
-### Session 2026-09-24
+### Session 2026-09-25
 
-- Wykonano `$speckit-clarify` po `$speckit-specify`; odczytano issue, brak komentarzy, kod i konstytucję. Pytań zadanych/odpowiedzianych: 0/0. Zgodnie z poleceniem właściciela nierozstrzygnięte kwestie wypisano do niezależnego review zamiast zastępować zatwierdzone zasady domysłami. D1–D3 pozostają otwarte, nie są zaakceptowanymi odpowiedziami.
-- Wyjaśnione przez źródła: jednostki wspólne między tierami (nie 100 na każdy); pre-funded admission jest płatną ekspozycją; standard może być multiplayer; slow jest prywatny; 30 min liczone od pierwszego wyczerpania, nie od utworzenia; reset fast nie otwiera draining; allowance nie emituje CH; wyższe tiery poza zakresem.
-- Bramka planowania: dokumenty dalszych etapów są warunkowym projektem do review na wyraźne polecenie właściciela. Nie deklarują rozwiązania D1–D3 ani gotowości do wykonania zależnych zadań. Przed implementacją trzeba zamknąć te decyzje i ponowić analyze.
+Aktualizacja na podstawie zatwierdzonych odpowiedzi w issue z 2026-09-24 i polecenia właściciela. D1–D3 zamknięte; brak nierozstrzygniętych pytań właściciela. Uwzględniono oba P1: globalne wyczerpanie oraz ułamkowe slow. Wszystkie obszary taxonomy clarify są Clear; przyszłe dowody runtime i osobne zlecenie implementacji pozostają bramkami wykonania, nie lukami wymagań.
 
-| Obszar taxonomy | Status | Uzasadnienie |
-|---|---|---|
-| Functional Scope & Behavior | Deferred | D1, D2; reszta potwierdzona issue |
-| Domain & Data Model | Deferred | D3 źródło alokacji; reszta w research/data-model |
-| Interaction & UX Flow | Clear | Standard multiplayer, prywatny slow, neutralna odmowa |
-| Non-Functional Quality Attributes | Clear | Fail-closed, klog, atomowość; brak nowych celów throughput |
-| Integration & External Dependencies | Clear | Istniejący WS/Netlify/ledger i oddzielne środowiska |
-| Edge Cases & Failure Handling | Clear | Replay, restart, funding failure, live hand i brak dowodu |
-| Constraints & Tradeoffs | Clear | Pilot, finite issuance, brak nowych tierów |
-| Terminology & Consistency | Clear | Allowance, kapitalizacja, emisja osobno |
-| Completion Signals | Deferred | D1–D3 i przyszłe dowody Stage/Preview |
-| Misc / Placeholders | Deferred | Trzy jawne markery decyzji właściciela |
+- D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast.
+- D2 zatwierdzone: limity REFILL liczone w kroczącym (t−168 h, t], z tym samym t dla obu tierów, klas i globalnego cap. Lewa granica wyłączona, prawa włączona. Trwałe receipts i globalna blokada obejmują sumę już zatwierdzonych emisji oraz proponowaną kwotę; brak resetu kalendarzowego.
+- D3 zatwierdzone: jednorazowy idempotentny MINT 1 000 000 CH GENESIS → POKER_BOT_BANKROLL_100, z ochroną 900 000 CH STANDARD i 100 000 CH SLOW. Trwały unikalny purpose INITIAL_ALLOCATION niezależny od czasu, retry i policy_version. Operacja oddzielna od REFILL i schema provisioning; wykonanie na Production wymaga osobnego GO.
 
-Spec Quality Checklist po clarify: 12/16 → 12/16, brak zmian checkboxów; cztery otwarte dotyczą D1–D3. Plik `.specify/extensions.yml` nie istnieje: brak hooków before/after dla wszystkich sześciu etapów.
+Checklist jakości: 16/16; niezależna economy checklist pozostaje do review. Brak `.specify/extensions.yml` i hooków analyze. Nie uruchamiać implementacji.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -42,6 +31,8 @@ Gracz wykorzystuje jeden limit dostępu do nowych stacków botów niezależnie o
 2. **Given** zaakceptowane wejście do finansowanych botów, **When** następuje reconnect, powtórzone żądanie lub kolejna ręka na tych samych środkach, **Then** brak drugiego naliczenia i drugiego buy-in.
 3. **Given** dwaj standardowi gracze, **When** bot otrzymuje nowe 50 CH przy tierze 100, **Then** każdy jest autoryzowany na 0,5 jednostki; rzeczywisty transfer SYSTEM wynosi łącznie 50 CH.
 4. **Given** granica utrwalonego okresu 7 dni, **When** następuje następne uprawnione użycie, **Then** dostępne jest 100 jednostek bez sumowania nieużytych okresów; istniejący DRAINING pozostaje.
+
+5. **Given** pierwsze przejście w slow, **Then** dostępna od razu 1 jednostka. Po 0,4 w t0 i 0,6 w t0+1 h, w t0+12 h dostępne tylko 0,4; w t0+13 h pełna 1 bez nowego zużycia. Zmiana tieru/fast/slow i równoczesne żądania nie zwiększają sumy.
 
 ### User Story 2 - Zgodny dobór stołów (Priority: P1)
 
@@ -69,6 +60,8 @@ Gracz już siedzący zachowuje rękę, stack i wypłatę. Stół kończy przyjmo
 3. **Given** żywa ręka w deadline, **When** kończy się jej normalne rozliczenie, **Then** następuje terminal close i wypłaty bez kolejnej ręki.
 4. **Given** brak finansowania w tierze 100 lub 500, **When** dochodzi do rollover, **Then** istniejące rozliczenie/wyjście postępuje bez nieskończonego retry finansowania.
 
+5. **Given** konto siedzi przy A i pre-funded B, **When** A wyczerpuje fast w t0, a B odkrywa to 20 minut później bez nowego fundingu, **Then** oba mają deadline t0+30 min; ręka rozpoczęta wcześniej kończy się i wypłaca poprawnie. HUMAN_ONLY i istniejący SLOW_PRIVATE pozostają bez tego drain.
+
 ### User Story 4 - Ograniczone środki i audyt emisji (Priority: P1)
 
 Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wyłącznie na udowodnioną zrealizowaną stratę.
@@ -81,6 +74,9 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 2. **Given** udowodniona nieskompensowana strata 300 CH, headroom 200 CH, pozostały limit klasy/tieru/globalny 150 CH, **When** refill, **Then** emisja nie przekracza 150 CH; ponowienie nie emituje drugi raz.
 3. **Given** standard wyczerpał własną część, **When** w slow pozostały środki, **Then** standard nie może ich pobrać; analogicznie slow nie korzysta ze standard.
 4. **Given** brakuje audytu/proweniencji lub globalnego limitu, **When** żądanie refillu, **Then** zero emisji, bez blokowania legalnych wypłat.
+
+5. **Given** emisja sprzed 168 h i równoczesne refille różnych tierów/klas, **Then** uwolnić tylko receipt na wyłączonej lewej granicy; sumy wraz z nowymi emisjami pozostają w cap.
+6. **Given** powtórzona/równoczesna pierwsza alokacja 100, **Then** dokładnie jeden MINT miliona z GENESIS, podział 900000/100000, brak zużycia REFILL cap; Production nadal wymaga osobnego GO.
 
 ### Edge Cases
 
@@ -100,7 +96,7 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 - **FR-001**: Rozdzielić niepieniężny limit ekspozycji użytkownika, rzeczywistą płynność SYSTEM i ograniczenie nowej emisji; odnowienie limitu nie obciąża USER i nie tworzy CH. [Issue A]
 - **FR-002**: Jeden fast na trwałe konto: 100 jednostek pełnego bot buy-in na 7 dni, wspólnie dla tierów; delta CH / tier to koszt jednostkowy, osobno rzeczywiste CH ekspozycji; dodatkowy cap 1 000 000 CH/okres w projektowanym zakresie do 10 000 CH. Dokładne ułamki bez utraty najmniejszej delty. [B]
 - **FR-003**: Pierwsze uprawnione użycie rozpoczyna utrwaloną kadencję 7 dni. Granica odnawia do 100, bez rollover/catch-up i bez ciągłego doładowywania fast. Zmiany tieru/sesji/stołu nie resetują kadencji. [B]
-- **FR-004**: Slow wspólny między tierami: tempo najwyżej 1 jednostka/12 h, pojemność 1, bez akumulacji wielu jednostek; niewystarczający fast na kolejną ekspozycję kieruje do slow. Dokładny start i sposób odnowienia wymagają D1. [B]
+- **FR-004**: D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast. Niewystarczający fast kieruje do slow. [B, D1, P1]
 - **FR-005**: Naliczanie obejmuje nowe stacki botów udostępnione graczowi, także już sfinansowane przed jego przyjściem; bot-only bez ludzi nie zużywa budżetu kont. Istniejących CH nie klasyfikować jako nowej emisji. [C]
 - **FR-006**: Trwała tożsamość ekspozycji/finansowania i przyjęcia gwarantuje jedno naliczenie; reconnect/retry/reload/kolejna ręka nie naliczają tego samego ponownie. Nowy użytkownik nie dziedziczy autoryzacji poprzednika. [C]
 - **FR-007**: Seed, replacement i top-up autoryzować przed widocznością; przy zachowanym residual naliczać wyłącznie nową deltę. Każdy uprawniony człowiek ma niezależną pełną konserwatywną autoryzację; nie dzielić zgadywanych wygranych między ludzi. [C]
@@ -109,14 +105,14 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 - **FR-010**: SLOW_PRIVATE ma dokładnie jednego uprawnionego właściciela i jego boty; HUMAN_ONLY dopuszcza zwykły multiplayer bez finansowania botów niezależnie od fast. W slow limit mieści najwyżej jeden pełny buy-in bota naraz. [D]
 - **FR-011**: Serwer egzekwuje zgodność w discovery, Quick Seat, Create Table, manual/direct join, reconnect i WS bootstrap. Wynik discovery nie stanowi rezerwacji. Tożsamość konta/stołu pochodzi z serwera. [D]
 - **FR-012**: Odmowa nowego wejścia ma neutralny powód i zgodne alternatywy. Brak limitu/płynności nie obiecuje finansowanej ręki; szybkość decyzji botów, timery i human-vs-human nie zmieniają się. [B,D]
-- **FR-013**: Przy pierwszej niewystarczalności fast istniejącego człowieka na dalszą wymaganą ekspozycję zapisać sticky DRAINING i deadline +30 min; nie odraczać przez obecność człowieka, reconnect ani reset tygodnia. [E]
+- **FR-013**: Pierwsze wyczerpanie fast utrwalić na koncie z czasem i powiązaniami wszystkich już zajętych STANDARD z botami, także pre-funded i managed. Trigger: dokładne wyczerpanie limitu po legalnej ekspozycji lub pierwsza odmowa wymaganego kosztu. Każdy taki stół jest DRAINING z deadline pierwotny exhausted_at +30 min; nigdy czas późniejszego wykrycia. [E, P1]
 - **FR-014**: DRAINING zakazuje nowych ludzi i wszelkiego nowego finansowania SYSTEM botów. Dotychczasowi ludzie i już finansowane stacki mogą grać w grace; dobrowolne odejście z wypłatą działa. [E]
 - **FR-015**: Od deadline nie zaczynać następnej ręki; żywą dokończyć i rozliczyć, następnie terminal close z legalnym cash-out ludzi, udowodnionymi źródłami zwrotu botów i zerowym escrow. Dopuszczone wcześniejsze bezpieczne zamknięcie po odejściu ludzi. [E]
-- **FR-016**: Deadline dotyczy wszystkich zagrożonych STANDARD, także managed; jest niezależny od odraczalnej rotacji managed i nie stanowi globalnego TTL. Restart/absencja/retry nie znoszą ochrony. Brak finansowania 100 i 500 nie tworzy nieskończonego rollover. [E]
+- **FR-016**: Sprawdzać globalne zdarzenie i deadline przy admission, przed nowym funding oraz przed każdą kolejną ręką/prepare/commit także bez fundingDelta. Restart, leave, reconnect i reset fast nie usuwają powiązań; HUMAN_ONLY i istniejące SLOW_PRIVATE wyłączone z tego drain. Bez kicka/przerwania ręki; brak finansowania 100/500 nie zapętla rollover. [E, P1]
 - **FR-017**: Docelowa kapitalizacja każdego tieru 100/500 wynosi 1 000 000 CH. Nowe finansowanie 100 izolowane od TREASURY; istniejący POKER_BOT_BANKROLL 500 zachowany wraz z historycznymi dowodami źródła. Żadnego fallbacku tierów/TREASURY. [F]
-- **FR-018**: Jednorazowa alokacja 100 CH ma jawne zbilansowane źródło, osobną tożsamość i ochronę przed ponowieniem; nie zużywa limitów tygodniowego refillu. Źródło i wpływ na podaż zatwierdzane w D3/preflight, Stage evidence i odrębny Production GO obowiązkowe. [F]
+- **FR-018**: D3 zatwierdzone: jednorazowy idempotentny MINT 1 000 000 CH GENESIS → POKER_BOT_BANKROLL_100, z ochroną 900 000 CH STANDARD i 100 000 CH SLOW. Trwały unikalny purpose INITIAL_ALLOCATION niezależny od czasu, retry i policy_version. Operacja oddzielna od REFILL i schema provisioning; wykonanie na Production wymaga osobnego GO. Dowody Stage obowiązkowe przed aktywacją. [F]
 - **FR-019**: Twardy podział dostępnego finansowania i dozwolonego refillu: 90% STANDARD, 10% SLOW. Transakcyjnie izolowane; brak pożyczania między klasami, także gdy środki pozostają niewykorzystane. [F]
-- **FR-020**: Nowa emisja na 7 dni: tier 100 ≤100 000 CH (90 000/10 000), tier 500 ≤500 000 (450 000/50 000), globalnie ≤600 000 (540 000/60 000). Szczegół okna emisji wymaga D2. [F]
+- **FR-020**: REFILL w kroczącym oknie (t−168 h, t]: tier 100 ≤100 000 CH (90 000/10 000), tier 500 ≤500 000 (450 000/50 000), globalnie ≤600 000 (540 000/60 000). Wspólny czas i trwałe dowody; atomowe egzekwowanie wszystkich cap dla równoczesnych emisji klas/tierów. [F, D2]
 - **FR-021**: Refill wyłącznie na trwałą udowodnioną nieskompensowaną zrealizowaną stratę netto do ludzi, z committed funding i terminal returns bezpiecznie zamkniętych/reconciled stołów. Wykluczyć otwarte escrow, sam obrót oraz ogólne metadata cash-out jako jedyny dowód. [F]
 - **FR-022**: Kwota refillu to nieujemne minimum: uprawniona strata, headroom kapitalizacji z uwzględnieniem nadal aktywnych środków oraz pozostałe limity klasy, tieru i globalny. Brak dowodu oznacza zero. Nie emitować całego maksimum na początku tygodnia. [F]
 - **FR-023**: Refill stanowi append-only double-entry MINT: GENESIS → dokładny SYSTEM tieru/klasy. Liczniki, purpose/source, tożsamość i idempotency zapisane z kredytem w jednej blokowanej transakcji. Rebalance SYSTEM→SYSTEM nie jest emisją. [F]
@@ -142,10 +138,10 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 
 ### Measurable Outcomes
 
-- **SC-001**: W krytycznych scenariuszach granicznych i współbieżnych zero przekroczeń 100 jednostek i 1 000 000 CH fast; slow nigdy nie ma więcej niż jednej jednostki ani tempa ponad 1/12 h.
+- **SC-001**: W krytycznych scenariuszach granicznych i współbieżnych zero przekroczeń 100 jednostek i 1 000 000 CH fast; suma slow w każdym kroczącym (t−12 h, t] ≤1, także dla ułamków i równoczesnych żądań.
 - **SC-002**: Każda ścieżka nowego dopuszczenia odrzuca constrained do STANDARD/bot-only i do cudzego slow; zero podwójnych naliczeń tej samej ekspozycji po retry/reconnect.
 - **SC-003**: Zero nowych ludzi/fundingu po DRAINING; zero następnych rąk rozpoczynanych od deadline; każda prawidłowa żywa ręka i wypłata zachowana.
-- **SC-004**: Zero przekroczeń 100 000/500 000/600 000 CH i limitów klas; zero emisji uzasadnionej wyłącznie otwartym escrow; zero finansowania standard ze środków zarezerwowanych slow.
+- **SC-004**: Zero przekroczeń 100 000/500 000/600 000 CH i limitów klas w każdym kroczącym (t−168 h, t]; zero emisji uzasadnionej wyłącznie otwartym escrow; zero finansowania standard ze środków zarezerwowanych slow.
 - **SC-005**: Każdy refill i terminal return ma dokładny audyt źródła i idempotencji; ponowienie nie zmienia kwot; niepełny dowód daje zero refillu.
 - **SC-006**: Przed aktywacją dostępne są przypisane do środowiska dowody Stage oraz exact-SHA WS Preview i potwierdzony smoke. Brak dowodu oznacza status oczekiwania, a nie gotowość do wydania.
 
@@ -154,6 +150,3 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 - Autorytet wymagań: issue z 2026-09-24; konstytucja 1.1.1; aktualny kod GitHub wskazany w issue-source.md. Podane limity to zatwierdzony pilot, nie prognoza inflacji.
 - Konkretny zakres istniejący: `shared/poker-domain/join.mjs::executePokerJoinAuthoritative`, `bots.mjs::seedBotsForJoin`, `table-economy.mjs::getBotFundingSystemKeyForBuyIn`, `terminal-close.mjs::resolveBotFundingSource/executeTerminalPokerCloseInTx`; `ws-server/poker/table/table-manager.mjs::prepareSettledHandRollover/commitSettledHandRollover` i właściwość `allowBotFunding`; writer `writeMutation/writeReplacementFundings/writeManagedBotTopUps`; `poker_tables.rotation_due_at`. Szczegóły techniczne znajdują się w plan.md.
 - Nie zmieniać reguł gry, obliczania wygranych, progresji bankroll użytkownika ani gościnnego trybu bez ekonomii. Nie planować nowych testów UI/CSS/JSP ani nowych frameworków.
-- D1: [NEEDS CLARIFICATION: Czy pierwsza jednostka slow dostępna od pierwszego wejścia w slow, czy po 12 h; czy odnowienie jest proporcjonalne, czy skokowe po zużyciu?] W issue zatwierdzono tempo i burst, lecz nie tę granicę.
-- D2: [NEEDS CLARIFICATION: Czy limit emisji obowiązuje w dowolnych kroczących 7 dniach, czy wspólnych stałych oknach i z jaką kotwicą?] Nie wolno zakładać podwójnej emisji na styku okien.
-- D3: [NEEDS CLARIFICATION: Jakie dokładne źródło zbilansowanej jednorazowej alokacji 1 000 000 CH do puli 100 zatwierdza właściciel?] Propozycja do preflight: GENESIS jako jawna emisja, nie automatyczna decyzja. Plan nie przyznaje Production GO.

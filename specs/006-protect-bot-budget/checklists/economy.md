@@ -12,7 +12,7 @@
 
 - [ ] CHK001 Czy limit dostępu, płynność SYSTEM i emisja są rozdzielone bez drugiego obciążenia gracza? [Completeness, Spec FR-001]
 - [ ] CHK002 Czy jeden wspólny fast obejmuje jednostki, CH cap, cadence oraz wszystkie tiery/sesje? [Completeness, Spec FR-002–003]
-- [ ] CHK003 Czy start i dokładne odnawianie slow są rozstrzygnięte przez właściciela? [Gap, Spec FR-004, D1]
+- [ ] CHK003 Czy pierwsza jednostka natychmiast i kroczące 12 h każdego ułamka odpowiadają zatwierdzonemu D1? [Clarity, Spec FR-004, D1]
 - [ ] CHK004 Czy zdefiniowano koszt admission do pre-funded botów i brak user charge przed pierwszym człowiekiem? [Completeness, Spec FR-005–007]
 - [ ] CHK005 Czy rezerwa 90/10 obejmuje zarówno dostępne środki, jak i dozwoloną emisję? [Completeness, Spec FR-019–020]
 
@@ -21,8 +21,8 @@
 - [ ] CHK006 Czy ułamkowe ekspozycje i zachowany residual mają jednoznaczny koszt? [Clarity, Spec FR-002, FR-007]
 - [ ] CHK007 Czy tożsamość ponowienia i nowej ekspozycji rozróżnia powracającego oraz nowego człowieka? [Clarity, Spec FR-006, contracts/bot-budget.md §1]
 - [ ] CHK008 Czy STANDARD/SLOW_PRIVATE/HUMAN_ONLY są odróżnione od lifecycle i stanu wygaszania? [Clarity, Spec FR-009–016]
-- [ ] CHK009 Czy siedmiodniowy przedział emisji i jego granica są zatwierdzone? [Gap, Spec FR-020, D2]
-- [ ] CHK010 Czy dokładne źródło jednorazowego seeda i wpływ na podaż są zatwierdzone? [Gap, Spec FR-018, D3]
+- [ ] CHK009 Czy wspólne kroczące (t−168 h,t] i granice emisji są jednoznaczne? [Clarity, Spec FR-020, D2]
+- [ ] CHK010 Czy jednorazowy MINT miliona GENESIS → POKER_BOT_BANKROLL_100, 900000/100000, jest oddzielony od REFILL i Production GO? [Clarity, Spec FR-018, D3]
 
 ## Requirement Consistency
 
@@ -64,9 +64,18 @@
 
 ## Ambiguities & Conflicts
 
-- [ ] CHK031 Czy D1–D3 pozostają otwarte bez przedstawiania propozycji jako zatwierdzonych zasad? [Ambiguity, Spec Assumptions]
+- [ ] CHK031 Czy wszystkie dokumenty odzwierciedlają zatwierdzone D1–D3 i usuwają stare warianty? [Ambiguity, Spec Assumptions]
 - [ ] CHK032 Czy plan zachowuje wszystkie zatwierdzone liczby i brak fallbacku między klasami/tierami? [Consistency, Spec FR-002–004, FR-017–023]
+
+## Pokrycie zatwierdzonych P1 i granic
+
+- [ ] CHK033 Czy A i pre-funded B otrzymują deadline pierwotnego zdarzenia konta +30 min mimo późnego wykrycia, restartu i resetu fast? [Coverage, FR-013–016, T020–024, T040–041]
+- [ ] CHK034 Czy admission, każdy nowy funding i start/prepare/commit bez funding sprawdzają trwałe powiązania wszystkich zajętych STANDARD, z wyłączeniem HUMAN_ONLY i istniejących SLOW_PRIVATE? [Coverage, FR-011, FR-016]
+- [ ] CHK035 Czy zmiany członkostwa/leave i fanout mają kompletny snapshot bez odwrócenia blokad między stołami? [Consistency, plan globalne wyczerpanie, T040–041]
+- [ ] CHK036 Czy 0,4+0,6 godzinę później uwalnia tylko 0,4 po pierwszych 12 h, także przy race i zmianie tieru/trybu? [Measurability, FR-004, T009, T033]
+- [ ] CHK037 Czy trwałe receipts i guard serializują 168 h klas/tierów/global z poprawnymi granicami i bez starego snapshotu? [Coverage, FR-020, FR-023, T030, T033]
+- [ ] CHK038 Czy idempotentny seed, retencja i fundamentalne testy pozostają wyłącznie planem bez operacji środowiskowych? [Scope, FR-018, FR-030–031]
 
 ## Notes
 
-Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: niezależny reviewer przed implementacją. Nie są to testy aplikacji. `$speckit-implement` może czytać stan, nie zmienia markerów. `requirements.md` ma osobny cykl specify/clarify. D1–D3 wymagają decyzji; kryteria nie są automatycznie zaliczone.
+Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: niezależny reviewer przed implementacją. Nie są to testy aplikacji. `$speckit-implement` może czytać stan, nie zmienia markerów. `requirements.md` ma osobny cykl specify/clarify. D1–D3 są zatwierdzone; kryteria nie są automatycznie zaliczone.

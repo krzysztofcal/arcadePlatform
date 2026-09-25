@@ -1,6 +1,6 @@
 # Kontrakty — admission, funding, drain, refill
 
-Normatywny projekt do review; D1–D3 z spec.md wymagają decyzji. Nazwy nowych pól/kodów są propozycją kontraktu implementacyjnego, nie opisem już istniejącego API. FR-001–032 pozostają autorytetem zakresu.
+Normatywny projekt do review; D1–D3 z spec.md są zatwierdzone. Nazwy nowych pól/kodów są propozycją kontraktu implementacyjnego, nie opisem już istniejącego API. FR-001–032 pozostają autorytetem zakresu.
 
 ## 1. Koszt i tożsamość ekspozycji
 
@@ -23,6 +23,14 @@ EXPOSURE unique: user + stabilna authoritative admission/funding identity; polic
 
 **Przykłady krytyczne**: 100 CH seed w T100 to 10000 podjednostek; 1 CH delta w T500 to 20; replacement 99→100 w T100 to 100; dwóch ludzi i delta 10 CH kosztuje każdemu 1000 podjednostek, lecz tylko 10 CH transferu. Admission do trzech pre-funded botów po 100 wymaga trzech jednostek, więc slow burst 1 nie wystarcza.
 
+### Kroczące slow — D1 i częściowe zużycie P1
+
+D1 zatwierdzone: pierwsza jednostka dostępna od razu przy pierwszym przejściu w slow. Następnie suma COMMITTED kosztów slow w (t−12 h, t] wraz z proponowanym kosztem nie przekracza 10000 podjednostek. Każda część zwalnia się dopiero 12 h po własnym zużyciu; brak stałej granicy odnowienia, ciągłego token bucket i catch-up. Historia wspólna dla tierów, stołów i sesji, zachowana przy fast/slow i nowym okresie fast.
+
+Pod blokadą konta odczytać trwałe EXPOSURE z budget_mode=SLOW, result=COMMITTED, consumed_at i kosztem integer. Dostępność jest wyliczana jako 10000 minus suma w oknie, nie przechowywana jako odnawiany grant. DENIED/replay nie zużywa ponownie. Czas UTC t pobierać z DB po uzyskaniu blokady (nie transaction-start sprzed oczekiwania); kontrola cofnięcia zegara ma blokować nowe zużycie. Retry zachowuje pierwotny receipt/czas. nextEligibleAt oznacza najwcześniejsze wygaśnięcie dostatecznej sumy dla konkretnego żądanego kosztu; wygaśnięcie 0,4 nie obiecuje pełnego bota.
+
+Fundamentalny przykład: 0,4 jednostki w t0 i 0,6 w t0+1 h. Tuż przed t0+12 h dostępne 0; dokładnie w t0+12 h dostępne tylko 0,4; pełne 1 dopiero w t0+13 h, o ile nie było nowego zużycia. Dwa równoczesne żądania o pozostałe 0,4 przy różnych tierach mogą łącznie zużyć najwyżej 0,4. Przełączenia fast/slow i sesji nie usuwają drugiego kosztu.
+
 ## 2. Macierz dopuszczenia
 
 | Kontekst konta | STANDARD, w tym bot-only | SLOW_PRIVATE właściciela | Cudzy SLOW_PRIVATE | HUMAN_ONLY |
@@ -32,7 +40,7 @@ EXPOSURE unique: user + stabilna authoritative admission/funding identity; polic
 | Niewystarczający fast, brak slow/puli | Nie | Brak nowego fundingu; poprawne wznowienie seat/wyjście pozostaje | Nie | Tak |
 | Istniejący seat w DRAINING | Grace istniejącego uczestnika, bez nowego charge/fundingu | Nie dotyczy standard drain | Nie | Normalne reguły |
 
-Fast eligibility jest dla konkretnego wymaganego kosztu, nie trwałą etykietą użytkownika. Gdy właściciel slow odzyska fast, istniejący slow stół nie zostaje przeklasyfikowany i nie otrzymuje fast funding. Może nadal otrzymywać wyłącznie funding w ramach własnego slow allowance i chronionej slow liquidity; nowe wybory stołów mogą użyć fast na STANDARD. Odnowienie fast nie odbiera istniejącego uprawnionego slow funding. D1 nie resetuje tożsamości slow table.
+Przed pierwszym FAST_EXHAUSTED eligibility zależy od konkretnego kosztu. Po zdarzeniu konto pozostaje constrained do kolejnego okresu fast; historyczne powiązania drain pozostają niezależnie od odnowienia. Gdy właściciel slow odzyska fast, istniejący slow stół nie zostaje przeklasyfikowany i nie otrzymuje fast funding. Może nadal otrzymywać wyłącznie funding w ramach własnego slow allowance i chronionej slow liquidity; nowe wybory stołów mogą użyć fast na STANDARD. Odnowienie fast nie odbiera istniejącego uprawnionego slow funding. D1 nie resetuje tożsamości slow table.
 
 Serwerowe ścieżki: Netlify Quick Seat/Create tworzą/rekomendują klasę, WS handler join przeprowadza final admission; ws bootstrap/resume/resync odtwarzają wyłącznie dowiedziony seat. Direct URL nie ma innej ścieżki uprawnień. Lobby projection per user jest informacją, nie gwarancją płynności ani rezerwacją. HUMAN_ONLY nie uruchamia seed nawet przy włączonej konfiguracji botów. Guest economy=none nie może wejść do tych ekonomicznych stołów.
 
@@ -52,6 +60,18 @@ Drain jest trwałym wynikiem odmowy dalszej ekspozycji istniejącego człowieka 
 
 Przed deadline istniejące funded bots mogą grać. Od deadline blokada start_hand/bootstrap/prepare/commit; żywa ręka zachowuje timery i settle. Terminal close dopiero na bezpiecznej granicy (SETTLED/INIT bez żywej ręki i bez nierozliczonych roszczeń), w tej samej ścieżce zero-escrow i source proof. Brak profilu managed/obecny human nie odracza drain. Brak budżetu/puli nie blokuje istniejącego hand settlement.
 
+### Globalne wyczerpanie fast — P1
+
+Pierwszy zatwierdzony FAST_EXHAUSTED jest faktem konta, unikalnym dla (user_id, fast_period_start), z exhausted_at. Powstaje przy dokładnym wyczerpaniu któregokolwiek limitu fast po ostatniej legalnej ekspozycji lub pierwszej odmowie wymaganej ekspozycji z powodu niewystarczającego fast. Nie tworzyć go z powodu braku płynności ani arbitralnego progu pełnego buy-in. Pozostaje constrained do kolejnego okresu fast; nowy okres nie usuwa historycznego zdarzenia ani drenujących stołów.
+
+W tej samej transakcji zapisać trwałe powiązania zdarzenia ze wszystkimi już zajętymi przez konto stołami STANDARD z botami, także pre-funded B bez żądania fundingu; uwzględnić nowy seat, jeśli ostatnia legalna ekspozycja go zatwierdza. Snapshot obejmuje leave_after_hand aż do rzeczywistego opuszczenia. HUMAN_ONLY i istniejące SLOW_PRIVATE są wyłączone. W audycie pozostają table_id i admission identity; późniejsze leave, usunięcie seat lub reset fast nie gubią obowiązku wygaszenia.
+
+Zmiany członkostwa w `shared/poker-domain/join.mjs::executePokerJoinAuthoritative`, `leave.mjs::executePokerLeave` i deferred leave finalizer oraz cleanup/writer muszą użyć tego samego guard konta: table → state/seats → posortowane konta → pool → ledger. Snapshot innych członkostw czytać po uzyskaniu guard w świeżym odczycie READ COMMITTED; nigdy blokować B podczas trzymania A/konta. Każdy zapis/usunięcie członkostwa musi być zinwentaryzowany, także terminal cleanup. Serializacja na guard zapewnia kompletną listę w chwili zdarzenia bez blokad wielu stołów naraz.
+
+Po commit uruchomić istniejące `ws-server/server.mjs::enqueueTableCommand` dla powiązanych stołów, po jednym stole/transakcji. Restart/sweep ponawia nieprzeniesione powiązania. Fanout jest projekcją: autorytatywny DRAINING obowiązuje od exhausted_at nawet przed zapisem lokalnej meta. Każde admission (także przed seated rejoin early return), nowe finansowanie i każdy start_hand/bootstrap/prepare/commit rollover odczytuje trwałe powiązania dla stołu i konta. Recheck w `persisted-state-writer.mjs::writeViaDb` obejmuje również pusty funding plan; sama kolejka per-table ani cache WS nie wystarczą. Final gate blokuje posortowane konta wszystkich obecnych ludzi i utrzymuje guard do commit nowej ręki nawet przy zerowym funding; odczyt po guard widzi konkurencyjny COMMIT FAST_EXHAUSTED. Powiązania historyczne sprawdza również po odejściu konta. Serializacja rozstrzyga race A-exhaustion/B-start: zatwierdzona wcześniej ręka pozostaje żywa, późniejsza podlega oryginalnemu deadline. Brak dowodu blokuje nową rękę/dostęp/funding, zachowując settlement.
+
+Deadline to najwcześniejsze właściwe exhausted_at + 30 min, nigdy czas lokalnego wykrycia. Projekcja może zostać skorygowana wyłącznie do wcześniejszego udowodnionego zdarzenia, nigdy wydłużona; identyfikator źródłowego zdarzenia pozostaje w audycie. A wyczerpane w t0, B wykryte w t0+20 min: B ma deadline t0+30 min; wykryte po nim nie zacznie ręki. Trwająca ręka kończy się normalnie, bez automatycznego kicka, z poprawną wypłatą. Już sfinansowane boty mogą grać tylko w grace, bez dalszego finansowania.
+
 ## 5. Finanse i refill
 
 MINT wywołuje wyłącznie backend po aktywacji polityki. Contract input: tier, class, durable proof identity; **kwotę, źródło, okres i pozostałe limity wylicza backend pod lockiem**, nie przyjmuje autorytatywnie od klienta. Odrzucić źródła poza zatwierdzonymi pulami, dowolny USER credit, brak GENESIS debit, niezerową sumę, brak dowodu/policy lub powtórny proof allocation.
@@ -60,7 +80,17 @@ Netlify ledger potrzebuje wąskiego wewnętrznego kontraktu dla SYSTEM-only MINT
 
 Refill receipt zawiera kind, event_key, timestamp, policy, proof IDs, source/target, amount, ledger transaction/hash i zaktualizowane limity. Powtórzenie zwraca dokładny wcześniejszy wynik. Zyski zamkniętych stołów kompensują straty w signed sum; zgadywana atrybucja indywidualnych winnings jest zakazana. Aktywne commitment pozostaje w kapitalizacji. Headroom używa konserwatywnej górnej granicy max(committed cost, pełne escrow) każdego otwartego stołu, w spójnym serializable odczycie z refill; pełne escrow służy tylko ograniczeniu headroom, nigdy udowodnieniu straty. Brak kompletności = zero; żadnej emisji z samego spadku live liquidity ani obrotu bot-only.
 
-D2 rozstrzyga semantykę 7 dni; wszystkie warianty utrzymują wspólne atomic counters i niezmienny dziennik emisji. D3 dotyczy jednorazowej alokacji, nie samoczynnego refillu do target. Żaden reset allowance nie wywołuje przelewu.
+### Krocząca emisja i pierwsza alokacja — D2–D3
+
+D2 zatwierdzone: limity REFILL liczone w kroczącym (t−168 h, t], z tym samym t dla obu tierów, klas i globalnego cap. Lewa granica wyłączona, prawa włączona. Trwałe receipts i globalna blokada obejmują sumę już zatwierdzonych emisji oraz proponowaną kwotę; brak resetu kalendarzowego.
+
+D3 zatwierdzone: jednorazowy idempotentny MINT 1 000 000 CH GENESIS → POKER_BOT_BANKROLL_100, z ochroną 900 000 CH STANDARD i 100 000 CH SLOW. Trwały unikalny purpose INITIAL_ALLOCATION niezależny od czasu, retry i policy_version. Operacja oddzielna od REFILL i schema provisioning; wykonanie na Production wymaga osobnego GO.
+
+Global emission guard → pool → receipts/accounts; wszystkie klasy i tiery uczestniczą w tej samej serializacji. Czas UTC t pobierać po blokadzie, przy niekompletnym dowodzie lub cofnięciu zegara odmowa emisji. Serializable snapshot sprzed oczekiwania na guard nie może pominąć konkurencyjnego receipt: zapisywać version globalnego guard w każdej emisji i ponawiać całą transakcję po serialization conflict. Autoryzacja, kompensacja proof, receipt i double-entry MINT commitują razem. Liczniki są projekcją as-of t; suma trwałych REFILL receipts jest źródłem prawdy. Granica issued_at=t−168 h uwalnia dokładnie tę emisję; młodsze pozostają. INITIAL_ALLOCATION ma osobny audyt podaży, nie konsumuje ani nie odnawia cap REFILL. Schema tworzy konto z zerem; alokacja przy jednym kredycie 1 000 000 CH ustawia obie rezerwy atomowo. Powtórzenie lub równoczesne wywołanie zwraca istniejący rezultat bez drugiego kredytu.
+
+Fundamentalne testy: tuż przed/na/po 168 h; równoczesne 100/500 i STANDARD/SLOW przy ostatnim headroom klasy/tieru/global; restart i utracona odpowiedź; proof/receipt retention; brak podwójnej emisji na granicy kalendarzowego tygodnia; INITIAL_ALLOCATION retry i race dają jeden milion oraz dokładne 900000/100000, osobno od REFILL. Żaden test nie wykonuje Production GO.
+
+Żaden reset allowance nie wywołuje przelewu.
 
 ## 6. Minimalny audyt
 
