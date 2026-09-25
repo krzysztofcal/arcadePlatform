@@ -87,3 +87,10 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 - [ ] CHK041 Czy zwykły MATCH i przypięty DIRECT mają rozłączne zasady stale odmowy i alternatyw? [Consistency, Spec FR-012, US2/7–8]
 - [ ] CHK042 Czy limit 2 prób/1 create, retry po nieznanym wyniku i deduplikacja pustych stołów są mierzalne i spójne z atomowym admission? [Measurability, Spec FR-008, FR-012, contracts D.1]
 - [ ] CHK043 Czy brak allowance/pool/proof/capability wyklucza pozorne funded create, a ograniczenia awarii i ręczna weryfikacja UI są jawne? [Coverage, Spec FR-012, FR-025, FR-030, quickstart D.1]
+
+## Korekta kosztu seed, reuse i admin inspection
+
+- [ ] CHK044 Czy preflight i finalny seed mają wspólną bezpieczną granicę, actual-only debit i scenariusz puli wystarczającej tylko na mniejszy target? [Consistency, Spec FR-012, US2/9]
+- [ ] CHK045 Czy reuse obejmuje maxPlayers i canonical stakes oraz jawny konflikt pojedynczego OPEN slow? [Completeness, Spec FR-012, US2/10]
+- [ ] CHK046 Czy D.2 jasno oddziela pełną administracyjną inspekcję od player filtering, admission, prywatnych danych i przyszłego spectatora #789? [Clarity, Spec FR-011, US2/11]
+- [ ] CHK047 Czy class/legacy/unknown i active/history drain mają mierzalną prezentację bez zmiany OPEN/CLOSED, mutacji GET i rozszerzenia testów UI? [Coverage, contracts D.2, quickstart D.2]

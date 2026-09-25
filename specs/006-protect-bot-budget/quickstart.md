@@ -61,3 +61,10 @@ Ostatni plik jest planowany, obecnie nie istnieje. Po wdrożeniu testowego harne
 ## Recovery
 
 Odmowa nowego finansowania nie wyłącza rozliczeń. Awaria po commit: odczytać trwałą decyzję; nie refundować na ślepo. Brak dowodu: brak refillu, nie dopisywać GENESIS/TREASURY fallback. Deadline po restarcie zachowany. Niezgodny stary runtime po rollback nie otrzymuje możliwości nowego funding; schemat i historia pozostają, naprawa forward-only. Rozliczenie z niespójnymi dowodami wymaga istniejącej kontrolowanej rekonsyliacji, nie wymuszonego close.
+
+## Dodatkowa przyszła walidacja P1/P2/D.2
+
+- Deterministyczny seed: min2/max3, T100, pula250 — zero rekomendacji/create niezależnie od RNG; pula300 — target2/3 dopuszczalne, tylko actual koszt. Recheck nadal wykrywa realną zmianę warunków.
+- Reuse: INIT2 vs request6 oraz niezgodne canonical stakes nie mogą zostać zaakceptowane. Slow przy konflikcie parametrów zachowuje jeden OPEN stół i zgłasza jawny konflikt.
+- Admin auth/projection: lista ALL/CLOSED zachowuje pagination i wszystkie utrwalone klasy mimo wyczerpanego fast admina; non-admin 401/403. Policy class/unknown, active drain i pierwotne daty odrębne od OPEN/CLOSED; zero prywatnych kart/allowance i zero mutacji. Admin join nadal zwykła polityka. #789 bez implementacji.
+- Ręczny przyszły Preview: porównać listę gracza z inventory admina, czytelność dat i class/unknown, OPEN+DRAINING oraz CLOSED z historycznymi datami. Bez testów renderowania UI/CSS/JSP i bez Preview w sesji planowania.
