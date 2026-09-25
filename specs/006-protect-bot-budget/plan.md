@@ -375,4 +375,4 @@ Kolejność bramek: T002 analiza istniejących mechanizmów bez zmian środowisk
 
 ## Status po T002
 
-T002 wykonane wyłącznie read-only na main93d0f191c3f87006d56f7afb2fb1c4052a7ecb84; wyniki w research.md, konkretny protokół T042 do osobnej akceptacji w quickstart.md. Limity protokołu są wyłącznie granicami eksperymentu, nie decyzją architektury/algorytmu Q1. T042 nie rozpoczęte, Q1 nadal otwarte; S1-A zamknięte.
+T002 wykonane wyłącznie read-only na main93d0f191c3f87006d56f7afb2fb1c4052a7ecb84; wyniki w research.md, konkretny protokół T042 do osobnej akceptacji w quickstart.md. Limity protokołu są wyłącznie granicami eksperymentu, nie decyzją architektury/algorytmu Q1. T042: częściowa próba opisana w research.md, Q1 nadal otwarte; S1-A zamknięte.

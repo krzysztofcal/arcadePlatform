@@ -119,7 +119,7 @@ T042 po analizie T002 i osobnej zgodzie pomiarowej: w przyszłym dozwolonym odiz
 
 Warunkowo, **tylko jeżeli Q1 wybierze nową ścieżkę HTTP do WS**: przyszły zakres obejmie infra/vps/Caddyfile, w obu blokach ws.kcswh.pl (upstream127.0.0.1:3000) i ws-preview.kcswh.pl (3001), z dokładnym matcherem ustalonej ścieżki przed fallback. Obecny fallback odpowiada tekstem OK/200, więc sam HTTP200 nie dowodzi dotarcia do WS. T018 zaplanuje routing i autoryzację bez rozszerzenia publicznego dostępu, T038 zweryfikuje odpowiedź/schema/revision z WS i odrzucenie brakującego tokenu przez proxy na osobno autoryzowanym Preview; Production analogicznie dopiero po osobnym GO. Bez nowej ścieżki zadanie Caddy jest niepotrzebne i nie zmienia pliku. Teraz nie modyfikować Caddy ani deployować.
 
-## T042 — protokół do osobnej akceptacji (nie wykonano)
+## T042 — zatwierdzony protokół (wykonano częściową próbę; wynik w research.md)
 
 Eksperyment z maksymalnie 200 syntetycznymi stołami służy do porównania wariantów Q1. Nie dowodzi wydajności przy większej rzeczywistej liczbie stołów i użytkowników. Ostateczne limity operacyjne wymagają późniejszej walidacji przy reprezentatywnym obciążeniu, zgodnie z T038.
 
@@ -138,3 +138,5 @@ Eksperyment z maksymalnie 200 syntetycznymi stołami służy do porównania wari
 **STOP:** niewłaściwy/nieudowodniony target, dostęp do realnych danych/sekretów, próba zewnętrznego połączenia, przekroczenie któregokolwiek limitu, timeout/błąd SQL, blokada, swap/OOM lub utrata zdrowia hosta. Przy zajętości CPU>80% przez10s albo pamięci hosta>80% przerwać i nie eskalować obciążenia. Zatrzymać kontrolowany eksperyment, zapisać częściowe wyniki; sprzątanie wyłącznie własnej jednoznacznie nazwanej lokalnej schemy/plików, bez systemowego cleanup.
 
 **Wymagana zgoda:** zaakceptować powyższy target lokalny, minimalny DDL i syntetyczne dane tylko w izolowanej schemie, read-only warianty SQL/harness, limity72 sekwencji/1000 SELECT/2 connections/15min/100MiB i warunki STOP oraz usunięcie tych lokalnych artefaktów. Zgoda nie obejmuje instalacji brakującego PG, Stage/Production, migracji repo, feature code, endpointu/Caddy/deployu, CH seeda/refillu ani wyboru Q1. Po T042 raport w research.md; T043 wybór i niezależne review; następnie osobne zlecenie T001.
+
+Stan po próbie:72 sekwencje wykonane, pozostałe przypadki niewykonane; raport i ograniczenia w research.md. Lokalny klaster zatrzymany/usunięty. Ta zgoda nie jest automatyczną zgodą na dodatkowy przebieg lub T043.

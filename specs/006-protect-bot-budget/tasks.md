@@ -112,3 +112,5 @@ Najpierw zatwierdzenie planu przy już zamkniętych D1–D3, potem schema bez ak
 43 zadania: Setup 5, Foundational 5, US1 6, US2 5, US3 8, US4 10, Polish 4. Dwie niezależne pozycje [P]. Wszystkie zadania mają ID/checkbox/ścieżki, zadania historyjek mają etykietę US. Testy UI/CSS/JSP/glue wykluczone. Wykonano wyłącznie T002 read-only;42 pozostałe zadania niewykonane.
 
 T002 dowód: research.md „T002 — wykonana analiza read-only”, main93d0f191c3f87006d56f7afb2fb1c4052a7ecb84; proponowany ograniczony protokół T042 w quickstart.md, oczekuje osobnej zgody. Żadnych pomiarów wykonanych.
+
+T042 status: wykonano ograniczoną próbę72 sekwencji; częściowe dowody w research.md, nieukończone przypadki jawne. Checkbox pozostaje otwarty: brak pełnego wykonania protokołu. Nie uruchamiać T043 ani dalszych pomiarów automatycznie; limit tej próby wyczerpany.
