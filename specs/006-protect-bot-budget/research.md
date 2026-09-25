@@ -127,3 +127,22 @@ Trigger dotyczy wyłącznie odmowy autoryzacji **rzeczywiście potrzebnego dodat
 A ma deadline pierwszego triggeru+30min; B bez nowego finansowania działa dalej i dopiero przy własnej potrzebie sprawdza wspólny rolling limit oraz ewentualnie ustala własny pierwszy deadline. Brak globalnego fanout/7-dniowego markera SLOW i dodatkowej relacji członkostwa. Globalny FAST pozostaje bez zmian. Drain jest sticky po odnowieniu/leave/reconnect/restart: brak nowych ludzi/fundingu, już finansowane stacki tylko w grace; żywa ręka i wypłaty kończą się legalnie, po deadline brak następnej ręki.
 
 Fundamentalne kryteria: Adam+Bartek SLOW100,1 FUNDING50CH i2 EXPOSURE0,5, bez USER debitu exposure; odmowa rzeczywistej nowej delty jednemu seated human daje jeden trigger stołu. Zużycie0,4 w t0 i0,6 w t0+1h: brak nowego finansowania→brak drain; wymagane0,1 przed t0+12h→drain. Odnowione0,4 w t0+12h nie usuwa deadline, pełna1 dopiero t0+13h. Race kont/stołów bez partial funding; A/B lokalnie, nie według globalnego FAST.
+
+## T002 — wykonana analiza read-only, baza do T042
+
+Zweryfikowano przez fetch GitHub main `93d0f191c3f87006d56f7afb2fb1c4052a7ecb84` i docs HEAD `801b161e43ede19420368985622e2b403e94efb2`; odczyt agents.md, skills.md i konstytucji1.1.1. Bez DB, migracji, uruchomienia aplikacji lub pomiarów. Poniżej obserwacje kodu, nie wyniki wydajności.
+
+| Istniejąca ścieżka | Obserwacja i luka względem Graj teraz |
+|---|---|
+| poker-quick-seat.mjs::selectCandidate | OPEN, dokładne maxPlayers, availableBuyIns, ACTIVE count, last_seen_at (domyślnie120s), managed rotation i JSON phase; dwa przebiegi humans/any mogą sprawdzać te same rekordy. ORDER last_activity_at DESC/created_at ASC, bez unikalnego tie-break; LIMIT50 to obecny kod, nie wybrany algorytm. |
+| recommendSeatAtTable/handler | Zapytania o własny ACTIVE seat i wszystkie seat_no per kandydat; ta druga lista nie filtruje ACTIVE, inaczej niż selectCandidate. Sukces aktualizuje activity. Advisory quickseat:maxPlayers serializuje również różne konta tej samej pojemności; nie jest receipt operacji. Nie uruchamiać całego handlera w pomiarze read-only, bo może zapisywać/create. |
+| createAndRecommend/selectExistingActiveSeat | Nowy cel z highestUnlockedBuyIn i parametrów klienta; capability100 pominięte; istniejący seat LIMIT1 bez ORDER. Nie dowodzi najwyższego rzeczywiście grywalnego tieru ani osobnej semantyki Resume. |
+| server.mjs::syncLobbyRegistry/buildLobbySnapshotPayload/sendLobbySnapshot/maybeBroadcastLobbySnapshot | Registry załadowanych live stołów, publiczne seatCount/humanCount/phase/joinable ze snapshotu/meta, wspólny payload bez recipient eligibility; sort tableId. Brak DB per odbiorca w obecnym broadcast. Nie obejmuje automatycznie wszystkich persisted OPEN; DB freshness120s nie dowodzi live miejsc. |
+| poker.js::renderTables/quickSeat | Lista w kolejności payload; obecny formularz maxPlayers i disabled Quick Seat przy braku progression, autoJoin nawigacji. Wymagane D.1 nadal zadaniami przyszłej implementacji, nie T002. |
+| shared/poker-domain/join.mjs::executePokerJoinAuthoritative; bots.mjs | Ostateczna transakcja/locki i WS getBotConfig, target przekazany seederowi. Discovery nie jest rezerwacją; finalnego recheck nie zastąpi wynik T042. |
+
+Istniejące indeksy do odtworzenia w pomiarze: poker_tables(status)/(last_activity_at), seats(table_id)/(table_id,last_seen_at)/(table_id,is_bot), unique(table_id,seat_no)/(table_id,user_id), partial OPEN managed; źródła w migracjach 20260117090000,20260210000000,20260729100000. Obecność indeksu nie dowodzi korzystnego planu; brak danych o actual rows/loops/buffers, egress lub opóźnieniu persystencji. Nie zakładać zastosowanej schema środowisk z samych plików migracji.
+
+Porównanie pozostaje otwarte: A narrow SQL/batch może usunąć per-candidate RT i odrzucać tanie niezgodności wcześniej, ale nie dowodzi live WS; B istniejący registry plus zbiorczy proof konta zachowuje live authority, wymaga rozwiązania świeżego bezpiecznego przekazania faktów matcherowi; dodatkowe HTTP tylko po dowodzie potrzeby. C projekcja/trigger wymaga dowodu przewagi read vs writes/WAL/locks, nie mierzymy hipotetycznej implementacji jako istniejącej. T042 może porównać read-only szkice SQL w izolowanym harness, nie wdraża endpointu/projekcji ani feature schema. Brak odpowiednich pól #869 oznaczyć jako lukę pomiaru, nie fikcyjny dowód gotowości ekonomii.
+
+Konkretny protokół, limity i zgoda: quickstart.md „T042 — protokół do osobnej akceptacji”. Dopiero dowody i T043 pozwolą wybrać architekturę; S1-A pozostaje zamknięte.

@@ -3,7 +3,7 @@
 **Input**: `specs/006-protect-bot-budget/`: spec.md, plan.md, research.md, data-model.md, contracts/bot-budget.md, quickstart.md.
 **Prerequisites**: S1-A i cel Graj teraz zatwierdzone; architektura Q1 otwarta. Rozdzielone bramki przygotowania i implementacji opisano poniżej.
 **Tests**: tylko fundamentalne deterministyczne testy critical backend/runtime/finanse; użytkownik wyraźnie wymaga ich zaplanowania. Obecnie żadnych testów nie uruchomiono.
-**Organization**: fazy według US1–US4. Wszystkie checkboxy oznaczają przyszłe zadania, pozostają otwarte.
+**Organization**: fazy według US1–US4. T002 wykonane jako analiza read-only; pozostałe checkboxy oznaczają przyszłe zadania.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -12,7 +12,7 @@ Każda pozycja zawiera ścieżki od root, zależności („Po”), mapowanie FR/
 ## Phase 1: Setup — decyzje i dowody
 
 - [ ] T001 Po T043 zapisać osobne jawne zlecenie implementacji w `specs/006-protect-bot-budget/quickstart.md`. Gotowe: zatwierdzone dowody/wybór Q1 i niezależne review, osobna autoryzacja realizacji; nie otwierać S1-A ani D1–D3. FR-004, FR-018, FR-020, FR-031.
-- [ ] T002 Analiza przed implementacją: porównać bieżący GitHub, `agents.md`, `skills.md`, `.specify/memory/constitution.md` i istniejące SQL/WS mechanizmy wskazane w `research.md`/`plan.md` Q1. Bez zależności od T001 i bez DB/środowisk. Gotowe: SHA, metody, indeksy, rozjazdy live/persisted, warianty i ograniczony protokół przyszłych pomiarów; brak wybranego endpointu/limitów bez dowodu. FR-028, FR-032–034.
+- [x] T002 Analiza przed implementacją: porównać bieżący GitHub, `agents.md`, `skills.md`, `.specify/memory/constitution.md` i istniejące SQL/WS mechanizmy wskazane w `research.md`/`plan.md` Q1. Bez zależności od T001 i bez DB/środowisk. Gotowe: SHA, metody, indeksy, rozjazdy live/persisted, warianty i ograniczony protokół przyszłych pomiarów; brak wybranego endpointu/limitów bez dowodu. FR-028, FR-032–034.
 - [ ] T003 Przygotować Stage preflight oraz jawny zamiar DB Stage Apply PR w `specs/006-protect-bot-budget/quickstart.md`: saldo/committed każdego źródła, legacy fundings, archiwalne dowody, istniejący seed 500, tożsamość jednorazowego celu 100. Po T001. Gotowe: target Stage i wynik odczytów, brak założenia miliona dostępnego salda; przed przyszłym PR opisane skutki mutacji i osobny Production GO. FR-017–018, FR-024, FR-027, FR-030, FR-032.
 
 ### Przed implementacją — dowody i decyzja Q1
@@ -109,4 +109,6 @@ Najpierw zatwierdzenie planu przy już zamkniętych D1–D3, potem schema bez ak
 
 ## Summary
 
-43 zadania: Setup 5, Foundational 5, US1 6, US2 5, US3 8, US4 10, Polish 4. Dwie niezależne pozycje [P]. Wszystkie zadania mają ID/checkbox/ścieżki, zadania historyjek mają etykietę US. Testy UI/CSS/JSP/glue wykluczone. Żadne zadanie nie jest oznaczone wykonanym.
+43 zadania: Setup 5, Foundational 5, US1 6, US2 5, US3 8, US4 10, Polish 4. Dwie niezależne pozycje [P]. Wszystkie zadania mają ID/checkbox/ścieżki, zadania historyjek mają etykietę US. Testy UI/CSS/JSP/glue wykluczone. Wykonano wyłącznie T002 read-only;42 pozostałe zadania niewykonane.
+
+T002 dowód: research.md „T002 — wykonana analiza read-only”, main93d0f191c3f87006d56f7afb2fb1c4052a7ecb84; proponowany ograniczony protokół T042 w quickstart.md, oczekuje osobnej zgody. Żadnych pomiarów wykonanych.
