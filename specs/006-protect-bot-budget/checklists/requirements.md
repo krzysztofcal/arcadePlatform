@@ -13,8 +13,8 @@
 
 ## Requirement Completeness
 
-- [ ] No unresolved clarification markers remain — otwarte M1
-- [ ] Requirements are testable and unambiguous — wariant dostępności create wymaga decyzji M1
+- [x] No unresolved clarification markers remain
+- [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
@@ -31,6 +31,4 @@
 
 ## Notes
 
-Bieżąca ocena po review HEAD b76e0de: **14/16** kryteriów jakości, **58** pytań economy. Otwarte **HIGH M1**: dostępność create (FR-012 vs bounded D.3) wymaga decyzji właściciela. Poprzednie wyniki 16/16 i brak findingów nie opisują tej rewizji. D1–D3 ekonomii pozostają zatwierdzone; nie zmieniono ich ani FIFO/terminal close.
-
-UNIQUE poprawione przez partial A/B z jawnymi kolumnami i scenariuszem dwóch progress/replay. Pokrycie 41/41 wymagań przez 41 zadań jest mapowaniem, nie zamknięciem M1 ani zgodą na implementację. Dla M1 udokumentowano SQL pushdown, pozostałe ograniczenie, warianty decyzji oraz rzeczywisty wynik scenariusza150; brak nowego mechanizmu i podniesienia limitów. Niezależne review nadal wymagane; przyszłe pomiary i testy nie zostały wykonane.
+Aktualne issue 2026-09-25T12:38:01Z zatwierdza pasywne lobby i stałe Graj teraz; poprzednia kwestia produktowa jest rozstrzygnięta. Jakość16/16; 34 FR +7 SC,41 zadań;58 pytań economy pozostaje do niezależnego review. Usunięto persystencję ręcznego wyszukiwania; zachowano idempotentny MATCH i ekonomiczne/final WS guard. Ukończony bounded dobór nie dowodzi globalnego braku stołów, lecz może uzasadnić click/create po preflight; błąd odczytu lub niepełny proof nie może. Testy i pomiary pozostają przyszłą pracą; brak zgody na implementację.

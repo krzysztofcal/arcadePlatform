@@ -44,7 +44,7 @@ Ostatni plik jest planowany, obecnie nie istnieje. Po wdrożeniu testowego harne
 ## Fundamentalna walidacja D.1 (przyszła)
 
 - Backend lobby: macierz dwóch kont/klas/tierów, pełny/DRAINING/cudzy slow pominięty; własny seat wyłącznie Resume; odświeżenie po zmianie eligibility/capacity/time, stary async snapshot nie przywraca oferty.
-- Quick Seat: zgodny STANDARD z ludźmi przed innym STANDARD, brak kandydata → dokładnie jeden create i final WS join w żądanym tierze/mode; slow owner i HUMAN_ONLY find-or-create bez zmiany trybu. Brak allowance/pool/proof/capability → zero nowych funded stołów.
+- Quick Seat: zgodny STANDARD z ludźmi przed innym STANDARD, po click poprawnie zakończony bounded dobór bez kandydata + świeży preflight → najwyżej jeden create i final WS join w żądanym tierze/mode; slow owner i HUMAN_ONLY find-or-create bez zmiany trybu. Brak allowance/pool/proof/capability → zero nowych funded stołów.
 - Stale admission: pierwszy cel zajęty/draining, drugi zgodny → automatyczny rematch bez nowego kliknięcia; ≤2 admission attempts/1 create. DIRECT nie przeskakuje. Retry po utracie HTTP odpowiedzi odtwarza tableId; unknown WS commit odzyskuje wynik przed rematch. Dwa połączenia DB/duplikaty kart: bez powielania create, transferu i EXPOSURE.
 - Po porzuconym create pusty INIT odzyskuje istniejący lifecycle z zero escrow; receipt pozostaje. Jeżeli ktoś dołączył, brak usunięcia jego stołu. Rzeczywisty brak środków i backend outage mają uczciwy terminal/wait; brak obietnicy całkowitego wyeliminowania błędów.
 - Wyłącznie ręczna przyszła weryfikacja Preview: brak wierszy Unavailable, odrębne Join/Resume, stan dobierania zamiast pierwszego stale błędu, jawne alternatywy direct/HUMAN_ONLY, brak cichej zmiany tieru/trybu. Nie dodawać testów renderowania UI/CSS/JSP.
@@ -76,7 +76,7 @@ Nie wykonywać podczas planowania. Po osobnym zleceniu realizacji zebrać baseli
 | Scenariusz | Dowód baseline vs implementacja |
 |---|---|
 | Idle lobby i kilka widzów/stołów | Zero nowego per-user poll; RT nie widzowie×stoły; coalescing, max pending refresh, bounded projection bytes; latency aktualizacji i stale-result discard |
-| Równoległe join/rematch/HTTP replay | Jeden descriptor na operację; niezgodny cfg zero oferty; strony/candidate/proof caps i incomplete bez create; query/tx count, bytes, busy/timeout, join latency, bez double seat/CH |
+| Równoległe join/rematch/HTTP replay | Jeden descriptor na operację; niezgodny cfg zero oferty; strony/candidate/proof caps i failed/incomplete odczyt bez create; query/tx count, bytes, busy/timeout, join latency, bez double seat/CH |
 | Ręce/prepare/commit oraz multi-table drain | Odczyt konto/stół zamiast full history, lock hold/wait, original deadline mimo backlog; hand settlement i cash-out latency przy opcjonalnym obciążeniu |
 | Równoczesne close/refill | Terminal payout nie czeka na global guard; max1 refill, kompletne capital/caps albo zero; coalescing/cooldown, signed loss i idempotency |
 | Restart/backlog i failure pressure | Bounded fanout/pending replay/backoff; capacity/proof overflow daje zero mint; brak create z incomplete; accepted accounting odzyskiwane idempotentnie, DB outage jawnie recovery |
@@ -86,13 +86,14 @@ Zapisać per path approximate SQL reads/writes/transactions/RT, zwrócone rows/b
 
 STOP/odroczenie nowej opcjonalnej pracy przy critical/unknown zdrowiu DB, narastającej kolejce połączeń/locków lub pogorszeniu legalnych wypłat; nie zwiększać load aby „dokończyć test”. Nie obchodzić #962. Jeśli nie można uzyskać pełnego proof w bezpiecznych limitach, refill pozostaje zero/pending; nie zwiększać cap ekonomii. Wymagana ocena braku materialnego starvation względem baseline w zadanym małym scenariuszu; dopuszczalne delty określić z obserwacji i jawnego review, nie wymyślone SLO. Green unit/Netlify nie zastępują exact-SHA WS Preview i manual smoke; osobny GO dla Production/seed/refill nadal obowiązuje.
 
-## Fundamentalne scenariusze korekty review: continuation/FIFO/close
+## Fundamentalne scenariusze korekty review: Graj teraz/FIFO/close
 
-- T015: 100 odrzuconych kandydatów i zgodny101. Po search_incomplete świadome żądanie z tokenem dociera do101 bez poprzednich stron; duplicate/utrata odpowiedzi odtwarza wynik, obce konto/zmienione parametry odrzucone. Sprawdzić usunięty cursor-id i brak create z końca starego wielożądaniowego skanu. UI tylko ręcznie na przyszłym Preview.
 - T022: deterministycznie zatrzymać ciężkie przygotowanie/refill poza FIFO; istniejące settlement/leave wykonuje się. Finalny funding timeout cofa tx i zwalnia komendę przed następnym settlement; brak natychmiastowej pętli. Nie obiecywać wyprzedzania już zakolejkowanej pracy.
 - T033: realny SQL timeout/conflict przy certyfikacie, następnie pending/counter failure; cała tx zwrotów/CAS/proof rollbackuje, stan nie udaje CLOSED. Kontrolowana nowa tx po recovery daje jeden return; unknown COMMIT/restart/final proof używa tego samego to_state_version i nie kredytuje liquid ponownie. Pending lub niepewny proof daje zero refill. Lokalny odizolowany DB w przyszłej implementacji, bez wykonania teraz.
-- Breaking changes: w obrębie faz Quick Seat stabilny id zastępuje last_activity_at; search_incomplete wymaga świadomej kontynuacji, duży zmienny zbiór może odroczyć create. Nieudany zapis nawet pending odracza close/recovery, zamiast raportować sukces. Ręce i wypłaty zachowują dotychczasowe finansowe invariant; dostępność zależy od DB.
 
-### Korekta UNIQUE i jawna granica create (M1)
 
-Przyszły T033: dwa kolejne SEARCH_PROGRESS step0/1 w tej samej operacji/attempt zapisują się pod partial A/B; duplikat tokenu0 daje step1, bez następnego przesunięcia. T015:150 residual kandydatów bez zgodnego celu, zakończona kontynuacja i brak fresh complete proof w budżecie daje trwały terminal search_capacity_exceeded, zero create, replay bez skanu. Tani SQL filter może zmniejszyć zbiór i umożliwić zwykły complete-empty/create, ale nie daje ogólnej gwarancji. M1 wymaga decyzji przed implementacją/akceptacją planu: ograniczenie D.1 albo osobno zatwierdzony mechanizm kompletności. Nie opisywać potencjalnie trwałej blokady jako przejściowego wait.
+## Nowe D.1 — fundamentalna weryfikacja
+
+T015: otwarcie/refresh/reconnect pustego lobby zero table/seat/funding writes; click pierwszy nadal zgodny JOIN w kolejności listy; stale pierwszy→drugi bez kliknięcia; brak oferty po completed bounded selection→≤1 create+final join.150 kandydatów, brak oferty w ocenionych100 (także zgodny poza nimi) pozwala create przy pełnym preflight; brak dalszych stron UI/query-loop. Timeout po50/missing budget/pool/cfg/proof→zero create. T033: równoległe click/operationId/karty i unknown COMMIT odtwarzają jeden cel/seat/CH, in-flight recovery przed drugim create.
+
+Manual przyszły Preview: Graj teraz zawsze obecne przy pustej i niepustej liście, Resume odrębne, żadnego create podczas oglądania i żadnej ręcznej paginacji; kolejność JOIN zachowana, uczciwe failure/alternatywy. Baseline D.3 porównać oddzielnie pasywne idle zero writes i jawne kliknięcia, w dotychczasowych małych granicach obciążenia. Bez testów renderowania.

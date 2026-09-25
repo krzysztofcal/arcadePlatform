@@ -99,16 +99,16 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 
 - [ ] CHK048 Czy źródło cfg WS, wersja, freshness i zmiana przed join mają jednoznaczny kontrakt bez lokalnego env/per-candidate fetch? [Clarity, Spec FR-033]
 - [ ] CHK049 Czy model kosztu obejmuje częstotliwość, RT/rows/bytes, concurrency, locks i bounded retry wszystkich ścieżek, bez viewer×table/admin N+1? [Completeness, Spec FR-034, plan D.3]
-- [ ] CHK050 Czy incomplete search/proof i overload oznaczają jawny wait/zero create/mint z zachowaniem priorytetu rozliczeń i granic DB outage? [Consistency, Spec FR-034, SC-007]
+- [ ] CHK050 Czy nieukończony/błędny odczyt, niepełny proof i overload oznaczają jawny unavailable/zero create/mint (odmiennie od ukończonego zakresu bez oferty) z zachowaniem priorytetu rozliczeń i granic DB outage? [Consistency, Spec FR-034, SC-007]
 - [ ] CHK051 Czy exact refill i trwały backlog pozostają zgodne z 168h, kapitalizacją i brakiem częściowych dowodów przy granicach pracy? [Coverage, Spec FR-020–024, FR-034]
 - [ ] CHK052 Czy pomiar baseline/Stage oddziela egress od CPU/I/O/WAL/locks, ogranicza obciążenie i nie ogłasza niezmierzonych SLO? [Measurability, quickstart D.3, SC-007]
 
 ## Kontynuacja i błędy transakcyjne — review
 
-- [ ] CHK053 Czy trwały cursor konta/parametrów prowadzi za100 do101 bez powtarzania stron i nie resetuje 2 admission/1 create? [Consistency, FR-012/034, T015/T017]
+- [ ] CHK053 Czy pasywne lobby nie tworzy/finansuje stołu, a stałe Graj teraz wybiera pierwszy nadal zgodny JOIN i obsługuje stale race bez click? [FR-011/012, T015–T019]
 - [ ] CHK054 Czy FIFO nie jest opisywane jako priorytetowe, ciężka praca pozostaje poza nim, a timeout kończy tx przed zwolnieniem komendy? [Correctness, FR-034, T022]
 - [ ] CHK055 Czy błąd pełnego proof/pending/counter cofa cały close, a unknown COMMIT i późniejszy proof nie dublują zwrotu? [Coverage, SC-005/007, T028/T033]
 - [ ] CHK056 Czy oba rodzaje proof i kompensacja używają tej samej to_state_version oraz jawnej unikalności i relacji pending/final? [Clarity, data-model, T006]
 
-- [ ] CHK057 Czy partial UNIQUE A wyklucza SEARCH_PROGRESS, B obejmuje kolejne kroki, a kolumny i details są jednoznaczne oraz potwierdzone scenariuszem dwóch progress/replay? [Consistency, data-model §3, T006/T033]
-- [ ] CHK058 Czy jawne M1 rozstrzyga brak gwarancji create przy150 residual kandydatach, zamiast ukrywać trwałą blokadę za wait? [Gap, FR-012/034, contracts M1, T017]
+- [ ] CHK057 Czy tylko dwa rodzaje MATCH receipt mają jawne kolumny/unique/replay, a kilka kart odzyskuje in-flight wynik przed drugim create? [data-model §3, T006/T033]
+- [ ] CHK058 Czy completed bounded selection >100 całkowitych kandydatów może click/create, a SQL/timeout/proof failure nigdy nie udaje ukończonego doboru? [FR-012/034, T015/T017]
