@@ -109,3 +109,6 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 - [ ] CHK054 Czy FIFO nie jest opisywane jako priorytetowe, ciężka praca pozostaje poza nim, a timeout kończy tx przed zwolnieniem komendy? [Correctness, FR-034, T022]
 - [ ] CHK055 Czy błąd pełnego proof/pending/counter cofa cały close, a unknown COMMIT i późniejszy proof nie dublują zwrotu? [Coverage, SC-005/007, T028/T033]
 - [ ] CHK056 Czy oba rodzaje proof i kompensacja używają tej samej to_state_version oraz jawnej unikalności i relacji pending/final? [Clarity, data-model, T006]
+
+- [ ] CHK057 Czy partial UNIQUE A wyklucza SEARCH_PROGRESS, B obejmuje kolejne kroki, a kolumny i details są jednoznaczne oraz potwierdzone scenariuszem dwóch progress/replay? [Consistency, data-model §3, T006/T033]
+- [ ] CHK058 Czy jawne M1 rozstrzyga brak gwarancji create przy150 residual kandydatach, zamiast ukrywać trwałą blokadę za wait? [Gap, FR-012/034, contracts M1, T017]
