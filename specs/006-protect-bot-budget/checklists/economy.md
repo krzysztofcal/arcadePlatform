@@ -102,3 +102,10 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 - [ ] CHK050 Czy incomplete search/proof i overload oznaczają jawny wait/zero create/mint z zachowaniem priorytetu rozliczeń i granic DB outage? [Consistency, Spec FR-034, SC-007]
 - [ ] CHK051 Czy exact refill i trwały backlog pozostają zgodne z 168h, kapitalizacją i brakiem częściowych dowodów przy granicach pracy? [Coverage, Spec FR-020–024, FR-034]
 - [ ] CHK052 Czy pomiar baseline/Stage oddziela egress od CPU/I/O/WAL/locks, ogranicza obciążenie i nie ogłasza niezmierzonych SLO? [Measurability, quickstart D.3, SC-007]
+
+## Kontynuacja i błędy transakcyjne — review
+
+- [ ] CHK053 Czy trwały cursor konta/parametrów prowadzi za100 do101 bez powtarzania stron i nie resetuje 2 admission/1 create? [Consistency, FR-012/034, T015/T017]
+- [ ] CHK054 Czy FIFO nie jest opisywane jako priorytetowe, ciężka praca pozostaje poza nim, a timeout kończy tx przed zwolnieniem komendy? [Correctness, FR-034, T022]
+- [ ] CHK055 Czy błąd pełnego proof/pending/counter cofa cały close, a unknown COMMIT i późniejszy proof nie dublują zwrotu? [Coverage, SC-005/007, T028/T033]
+- [ ] CHK056 Czy oba rodzaje proof i kompensacja używają tej samej to_state_version oraz jawnej unikalności i relacji pending/final? [Clarity, data-model, T006]
