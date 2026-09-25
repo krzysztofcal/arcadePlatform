@@ -114,4 +114,4 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 - [ ] CHK058 Czy zakres K i inventory>K mają bounded create bez manual continuation, a K/L/B/C/D wynikają z query plans/pomiarów Q1, nie dawnego100? [FR-012/034, T002/T015/T017]
 
 - [ ] CHK059 Czy shared SLOW autoryzuje każdego człowieka i zachowuje jeden FUNDING, a dodatnia wymagana odmowa/zero bez kosztu/rolling fractions/sticky drain mają rozłączne scenariusze? [FR-004/007/010/013, S1]
-- [ ] CHK060 Czy jawnie rozstrzygnięto S1-A vs S1-B i Q1 A/B1/C na podstawie kosztów i dowodów, bez niezatwierdzonego endpointu lub zmyślonych pomiarów? [plan S1/Q1, T001–002/T038]
+- [ ] CHK060 Czy S1-A jest zamknięte, Q1 nadal otwarte bez preferowania nowego endpointu, a wybór i warunkowe Caddy mają plan dowodów? [plan Q1, T002/T018/T038]

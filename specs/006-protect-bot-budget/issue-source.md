@@ -168,3 +168,7 @@ Fund `POKER_BOT_BANKROLL_100` **once** by a purpose-unique, idempotent, auditabl
 ## Related
 
 #788 progression; PR #868 current bankroll model; #783 continuous bot tables; #870 higher-tier bot liquidity after #869. [#789 Poker: Spectator Mode](https://github.com/krzysztofcal/arcadePlatform/issues/789) — separate read-only live spectating concept (OPEN; implementation to verify); #835 spectator reactions (separate follow-up).
+
+## Późniejsza decyzja właściciela w rozmowie
+
+S1-A zatwierdzony: lokalne wygaszanie tylko przy odmowie rzeczywiście wymaganego dodatniego nowego finansowania botów; inne stoły działają do własnej potrzeby. Q1 cel zatwierdzony, architektura otwarta do query plans/pomiarów. Caddy wyłącznie warunkowo po wyborze nowego HTTP; teraz docs-only, bez operacji środowiskowych. Ta decyzja uzupełnia powyższy cytat issue i ma pierwszeństwo nad jego wcześniejszym statusem S1.

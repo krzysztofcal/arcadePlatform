@@ -13,8 +13,8 @@
 
 ## Requirement Completeness
 
-- [ ] No unresolved clarification markers remain — S1/Q1 do review
-- [ ] Requirements are testable and unambiguous — S1/Q1 wymagają zamknięcia
+- [ ] No unresolved clarification markers remain — Q1 do review
+- [ ] Requirements are testable and unambiguous — Q1 wymagają zamknięcia
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
@@ -31,7 +31,7 @@
 
 ## Notes
 
-Aktualne issue 2026-09-25T18:17:21Z: pasywne lobby bez manual Create, all-tier JOIN/Resume, automatyczne Graj teraz, SLOW_SHARED. Jakość14/16;34 FR+7 SC,41 zadań. S1 wielostołowy slow trigger i Q1 architektura/zmierzone granice discovery jawnie otwarte do review; nie implementować przed rozstrzygnięciem. Economy checklist pozostaje własnością reviewera, nie raportem testów.
+Aktualne issue 2026-09-25T18:17:21Z: pasywne lobby bez manual Create, all-tier JOIN/Resume, automatyczne Graj teraz, SLOW_SHARED. Jakość14/16;34 FR+7 SC,41 zadań. S1-A zatwierdzone; Q1 architektura/zmierzone granice discovery jawnie otwarte do review; nie implementować przed rozstrzygnięciem. Economy checklist pozostaje własnością reviewera, nie raportem testów.
 
 ## Ponowny speckit-analyze — 2026-09-25
 
@@ -39,8 +39,7 @@ Analiza read-only po aktualizacji zadań, prerequisites wskazał bieżący katal
 
 | ID | Kategoria / waga | Lokalizacja | Wynik / następny krok |
 |---|---|---|---|
-| S1 | Underspecification / HIGH | spec Otwarte decyzje; plan/kontrakt S1; T001/T020/T022/T033 | Wariant lokalny A rekomendowany; wariant globalny B ma większy koszt/fanout i wymaga definicji epizodu. Decyzja niezależnego review przed implementacją. |
-| Q1 | Evidence / HIGH | plan Q1; T002/T017/T018/T038 | Brak rzeczywistych query plans/pomiarów; proponowany B1 wymaga review względem A/B0/C. Nie zamrażać endpointu/limitów ani twierdzić, że pomiar wykonano. |
+| Q1 | Evidence / HIGH | plan Q1; T002/T017/T018/T038 | Brak rzeczywistych query plans/pomiarów; żaden wariant nie jest wybrany; porównać A/B0/B1/C na podstawie dowodów. Nie zamrażać endpointu/limitów ani twierdzić, że pomiar wykonano. |
 
 | Pokrycie | Zadania |
 |---|---|
@@ -51,4 +50,4 @@ Analiza read-only po aktualizacji zadań, prerequisites wskazał bieżący katal
 | FR-025–032, SC-006 | T001–003/T024/T034–039 |
 | FR-033–034, SC-007 | T002/T013/T015–018/T022/T028–033/T036/T038 |
 
-Metryki:34 FR+7 SC=41 wymagań,41 zadań,100% pokrycia zadaniami (nie dowód wykonania),0 nieprzypisanych zadań,0 CRITICAL,2 jawne HIGH (S1/Q1),0 pozostałych wykrytych sprzeczności,0 blokujących duplikacji. Brak konfliktu z konstytucją; tylko fundamentalne testy, manual Preview prezentacji. Jakość14/16;60 pytań economy pozostaje do review. Następny krok: niezależne review S1/Q1 i tego dokumentacyjnego HEAD. STOP przed implementacją; brak operacji środowiskowych.
+Metryki:34 FR+7 SC=41 wymagań,41 zadań,100% pokrycia zadaniami (nie dowód wykonania),0 nieprzypisanych zadań,0 CRITICAL,1 jawne HIGH (Q1),0 pozostałych wykrytych sprzeczności,0 blokujących duplikacji. Brak konfliktu z konstytucją; tylko fundamentalne testy, manual Preview prezentacji. Jakość14/16;60 pytań economy pozostaje do review. Następny krok: niezależne review Q1 i tego dokumentacyjnego HEAD. STOP przed implementacją; brak operacji środowiskowych.

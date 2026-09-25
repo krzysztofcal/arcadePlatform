@@ -43,7 +43,7 @@ Ostatni plik jest planowany, obecnie nie istnieje. Po wdrożeniu testowego harne
 
 ## Fundamentalna walidacja D.1 (przyszła)
 
-Aktualny kontrakt D.1/SLOW_SHARED oraz S1/Q1 w plan.md i contracts/bot-budget.md zastępuje ten wcześniejszy wariant. Bez owner-only/formularza i bez arbitralnego limitu kandydatów; pozostałe reguły ekonomii i P1/P2 zachowane.
+Aktualny kontrakt D.1/SLOW_SHARED oraz Q1 w plan.md i contracts/bot-budget.md zastępuje ten wcześniejszy wariant. Bez owner-only/formularza i bez arbitralnego limitu kandydatów; pozostałe reguły ekonomii i P1/P2 zachowane.
 
 ## Przyszły Stage/Preview
 
@@ -61,7 +61,7 @@ Odmowa nowego finansowania nie wyłącza rozliczeń. Awaria po commit: odczytać
 ## Dodatkowa przyszła walidacja P1/P2/D.2
 
 - Deterministyczny seed: min2/max3, T100, pula250 — zero rekomendacji/create niezależnie od RNG; pula300 — target2/3 dopuszczalne, tylko actual koszt. Recheck nadal wykrywa realną zmianę warunków.
-- Reuse: INIT2 vs request6 oraz niezgodne canonical stakes nie mogą zostać zaakceptowane. Slow przy konflikcie parametrów zachowuje jeden OPEN stół i zgłasza jawny konflikt.
+- Reuse: INIT2 vs request6 oraz niezgodne canonical stakes nie mogą zostać zaakceptowane. Niezgodny INIT pomija się bez zmiany parametrów; SLOW_SHARED nie ma limitu jednego OPEN stołu na właściciela. Deduplikacja operacji/konta i maks1 create pozostają.
 - Admin auth/projection: lista ALL/CLOSED zachowuje pagination i wszystkie utrwalone klasy mimo wyczerpanego fast admina; non-admin 401/403. Policy class/unknown, active drain i pierwotne daty odrębne od OPEN/CLOSED; zero prywatnych kart/allowance i zero mutacji. Admin join nadal zwykła polityka. #789 bez implementacji.
 - Ręczny przyszły Preview: porównać listę gracza z inventory admina, czytelność dat i class/unknown, OPEN+DRAINING oraz CLOSED z historycznymi datami. Bez testów renderowania UI/CSS/JSP i bez Preview w sesji planowania.
 
@@ -90,19 +90,27 @@ STOP/odroczenie nowej opcjonalnej pracy przy critical/unknown zdrowiu DB, narast
 
 ## Nowe D.1 — fundamentalna weryfikacja
 
-Aktualny kontrakt D.1/SLOW_SHARED oraz S1/Q1 w plan.md i contracts/bot-budget.md zastępuje ten wcześniejszy wariant. Bez owner-only/formularza i bez arbitralnego limitu kandydatów; pozostałe reguły ekonomii i P1/P2 zachowane.
+Aktualny kontrakt D.1/SLOW_SHARED oraz Q1 w plan.md i contracts/bot-budget.md zastępuje ten wcześniejszy wariant. Bez owner-only/formularza i bez arbitralnego limitu kandydatów; pozostałe reguły ekonomii i P1/P2 zachowane.
 
 Manual przyszły Preview: Graj teraz zawsze obecne przy pustej i niepustej liście, Resume odrębne, żadnego create podczas oglądania i żadnej ręcznej paginacji; kolejność JOIN zachowana, uczciwe failure/alternatywy. Baseline D.3 porównać oddzielnie pasywne idle zero writes i jawne kliknięcia, w dotychczasowych małych granicach obciążenia. Bez testów renderowania.
 
 
 ## Bieżący handoff: SLOW_SHARED, jeden klik i pomiary Q1
 
-Tylko plan. Przed implementacją niezależnie rozstrzygnąć S1-A lokalny trigger vs S1-B globalny slow fanout oraz Q1 A indexed SQL vs B1 bounded registry read (C tylko jeśli pomiary uzasadnią). T002 lokalne plany zapytań i uzasadnienie K/L/B/D/C poprzedza zamrożenie discovery; T038 przyszły jawny Stage/WS Preview baseline vs implementacja, nie wykonywać teraz. Żadnych arbitralnych100/2×50 jako acceptance. Koszty/warianty: plan Q1.
+Tylko plan. S1-A zatwierdzone: tylko lokalny trigger rzeczywiście wymaganego dodatniego finansowania. Przed implementacją rozstrzygnąć Q1 A indexed SQL vs B1 bounded registry read (C tylko jeśli pomiary uzasadnią). T002 lokalne plany zapytań i uzasadnienie K/L/B/D/C poprzedza zamrożenie discovery; T038 przyszły jawny Stage/WS Preview baseline vs implementacja, nie wykonywać teraz. Żadnych arbitralnych100/2×50 jako acceptance. Koszty/warianty: plan Q1.
 
 Manual Preview: brak panelu Create/tier/maxPlayers/trybu w zwykłym lobby; przycisk Graj teraz stale widoczny. Browse/refresh/reconnect puste lub niepuste→zero create/seat/funding. Lista wszystkich eligible tierów+oddzielne Resume; click pierwszy nadal właściwy cel używa jego parametrów, stale→drugi bez click. Empty→najwyższy rzeczywiście grywalny tier/canonical6,≤1 create i auto-join. Brak budget/pool/proof/WS/DB→uczciwa alternatywa, zero fake create i silent mode switch. Admin create/inventory nadal autoryzowane.
 
-Fundamentalne backend/runtime/transaction cases T015/T020/T033: inventory>K i kompletny zakres→bounded create bez interactive search, failed/stale→zero; parallel tabs/replay→bez duplikatu. SLOW dwóch ludzi, jeden FUNDING50/tier100, dwa EXPOSURE0,5 bez USER debit; seated positive-cost denial→first receipt+30min, zero/no new cost nie drain. Rolling0,4+0,6, renewal nie usuwa drain, concurrent users/table requests i A/B według zatwierdzonego S1. FAST global A/B nadal oryginalny czas i osobne reguły. Zachować FIFO, full/pending close rollback/unknown-commit recovery i poprawne legalne wypłaty.
+Fundamentalne backend/runtime/transaction cases T015/T020/T033: inventory>K i kompletny zakres→bounded create bez interactive search, failed/stale→zero; parallel tabs/replay→bez duplikatu. SLOW dwóch ludzi, jeden FUNDING50/tier100, dwa EXPOSURE0,5 bez USER debit; seated positive-cost denial→first receipt+30min, zero/no new cost nie drain. Rolling0,4+0,6, renewal nie usuwa drain, concurrent users/table requests i A/B według zatwierdzonego S1-A. FAST global A/B nadal oryginalny czas i osobne reguły. Zachować FIFO, full/pending close rollback/unknown-commit recovery i poprawne legalne wypłaty.
 
 Pomiar mały, ograniczony i dopiero w uzgodnionym oknie: idle lobby, więcej viewerów/live+persisted-only stołów, click/rematch, rollover, wspólny slow drain/A-B, terminal/refill/backlog restart. Rejestrować query plans actual rows/loops/buffers, RT/rows/bytes DB i WS, egress osobno od CPU/Disk I/O/WAL, connections/locks/retries oraz lobby/join/settlement/cash-out latency. Porównać baseline i implementację z konkretnym SHA, stop przy critical/unknown lub starvation. Nie obiecywać utrzymania rozliczeń przy całkowitej awarii DB. Nie dodawać UI tests ani telemetry DB.
 
 Breaking: znika manual Create UX i parametry zwykłego Quick Seat; AUTO API/receipt/resolved params, all-tier personalized lista i auto-join; SLOW_SHARED zastępuje projektowaną klasę prywatną oraz owner constraints i zmienia admission/drain. Przyszła addytywna migracja wymaga jawnej klasyfikacji legacy, bez relabel żywych źródeł/escrow; admin i backend auth pozostają. Overload może odroczyć nowe oferty/funding, nie zwalnia finalnych checks ani payout invariants. JSP JS/klog/CSS jeden selector/CSP SHA nadal obowiązują.
+
+## Q1 — dowód wyboru i warunkowy routing
+
+Cel zatwierdzony: automatycznie znaleźć odpowiedni stół przy małym koszcie DB i ograniczać zbędne tworzenie stołów. Architektura niewybrana. Najpierw porównać obecne selectCandidate/recommendSeatAtTable/handler (SQL OPEN/ACTIVE seats/last_seen_at), publiczne live facts activeLobbyTablesById i istniejące account/proof batch. Ocenić pushdown i istniejące indeksy, rozjazd persisted/live oraz kolejność widoczną w lobby. Sam błąd/niepełny/stary odczyt nie dowodzi pustki. Nie dodawać endpointu ani liczbowego limitu zapytań przed dowodem.
+
+T002: w przyszłym dozwolonym odizolowanym lokalnym DB odtworzyć istniejącą schema i kontrolowane fixtures małego/większego inventory, pełnych/niezgodnych stołów i opóźnionej persystencji. Zebrać plany EXPLAIN (ANALYZE, BUFFERS) wyłącznie bezpiecznych odczytów, actual rows/loops/buffers, RT/bytes i czas. Porównać narrow indexed SQL/batch z wykorzystaniem istniejącego registry bez dodatkowego HTTP; dopiero wykazana luka uzasadnia wariant bounded authenticated HTTP. Minimalną projekcję DB ocenić przez dodatkowe writes/WAL/locks. Zapisać query shape, schema/indexes, cardinality, SHA, wyniki i wybrany wariant/limity; wrócić do review. T038 później kontrolowany baseline/Preview pomiar egress osobno od CPU/I/O/WAL/locks i opóźnień settlement. Teraz brak tych pomiarów i brak operacji DB/Stage/Production; Q1 blokuje zamrożenie implementacji discovery.
+
+Warunkowo, **tylko jeżeli Q1 wybierze nową ścieżkę HTTP do WS**: przyszły zakres obejmie infra/vps/Caddyfile, w obu blokach ws.kcswh.pl (upstream127.0.0.1:3000) i ws-preview.kcswh.pl (3001), z dokładnym matcherem ustalonej ścieżki przed fallback. Obecny fallback odpowiada tekstem OK/200, więc sam HTTP200 nie dowodzi dotarcia do WS. T018 zaplanuje routing i autoryzację bez rozszerzenia publicznego dostępu, T038 zweryfikuje odpowiedź/schema/revision z WS i odrzucenie brakującego tokenu przez proxy na osobno autoryzowanym Preview; Production analogicznie dopiero po osobnym GO. Bez nowej ścieżki zadanie Caddy jest niepotrzebne i nie zmienia pliku. Teraz nie modyfikować Caddy ani deployować.

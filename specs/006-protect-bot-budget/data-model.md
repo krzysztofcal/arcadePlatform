@@ -31,7 +31,7 @@ Przejścia fast: uninitialized → pierwszy COMMIT → okres anchor; granica →
 |---|---|
 | bot_access_class | STANDARD / SLOW_SHARED / HUMAN_ONLY; NULL wyłącznie jawne legacy przed klasyfikacją |
 | bot_policy_version | wersja protokołu; brak/nieznana = brak nowych chronionych operacji |
-| bot_draining_started_at | nullable; najwcześniejszy właściwy FAST exhausted_at albo pierwszy SLOW_EXPOSURE_DENIED tego stołu (S1-A do review); może tylko zmaleć po odkryciu wcześniejszego dowodu |
+| bot_draining_started_at | nullable; najwcześniejszy właściwy FAST exhausted_at albo pierwszy SLOW_EXPOSURE_DENIED tego stołu (S1-A zatwierdzony); może tylko zmaleć po odkryciu wcześniejszego dowodu |
 | bot_draining_source_event_id | identyfikator zdarzenia wyznaczającego najwcześniejszy deadline |
 | bot_draining_deadline_at | nullable razem ze started_at; zawsze started_at + 30 min; sticky |
 | bot_funding_paused_reason | nullable albo jawne LEGACY_CUTOVER / POLICY_UNAVAILABLE; nie udaje wyczerpania allowance |
@@ -136,8 +136,12 @@ CLOSE_PROOF_PENDING i CLOSE_PROOF wymagają istniejącej kolumny to_state_versio
 
 Wybór full/pending przed opcjonalnym SQL; wszystkie returns, liquid/quarantine, terminal CAS/CLOSED i proof lub pending+pending_close_count muszą commitować atomowo. SQL failure dowolnej części cofa cały outer tx; dalszy zapis pending dopiero w nowej tx istniejącego recovery, nigdy w aborted transaction. Final proof, decrement pending i rozliczenie committed/signed loss są atomowe pod pool lock; istniejący final oznacza replay bez ponownego credit/decrement. Unknown COMMIT wymaga odczytu oryginalnej identity przed retry. Szczegółowy przebieg i testy: plan.md „transakcja terminal close i odzyskiwanie dowodu”, T028/T033.
 
-## SLOW_SHARED — pierwszy trigger (S1-A do review)
+## SLOW_SHARED — pierwszy trigger (S1-A zatwierdzony)
 
 Brak nowej tabeli ani kontowego slow_exhausted_at. `SLOW_EXPOSURE_DENIED` używa rzeczywistych kolumn event_kind/event_key/table_id/user_id/occurred_at/from_state_version/policy_version/result oraz details JSONB. Wymagane table_id i user_id (siedzący odrzucony uczestnik), result=DENIED; partial UNIQUE(table_id) WHERE event_kind=SLOW_EXPOSURE_DENIED zapewnia jeden pierwszy trigger. event_key stabilny per table, retry zwraca pierwotny receipt nawet przy późniejszej innej odmowie; to ponowna obserwacja triggeru, nie zmiana jego payload. details: required_exposure_ch/subunits, plan identity i powód limitu; nie są COMMITTED exposure i nie wchodzą do sumy rolling. Rzeczywiste exposure_ch/subunits NULL dla tego rodzaju, bez funding_transaction_id, bez ledger transfer. Zapis trigger+table started/source/deadline jest atomowy; brak możliwości zapisu→rollback nowej decyzji/recovery. DRAIN referencjonuje source_event_id także tego typu (w details, nie nowa kolumna); constraint user NULL dla DRAIN nadal dozwolony. Partial unique DRAIN(table_id, source reference) musi używać tej samej jawnej referencji JSONB dla obu źródeł. S1-A nie dodaje targets do poker_bot_exhaustion_tables (ta relacja tylko FAST). Admin batch czyta bezpośredni slow source oraz FAST targets, minimum dat bez N+1.
 
-S1 i Q1: szczegółowe warianty/koszty w plan.md i kontrakcie. Discovery pozostaje ulotne, brak nowych tabel inventory/trigger bez dowodu. K/L/B i potrzebne indeksy należy ustalić po planach zapytań przed aktywacją; nie utrwalać arbitralnego limitu kandydatów w schema.
+S1 zatwierdzone; Q1 otwarte: szczegółowe warianty/koszty w plan.md i kontrakcie. Discovery pozostaje ulotne, brak nowych tabel inventory/trigger bez dowodu. K/L/B i potrzebne indeksy należy ustalić po planach zapytań przed aktywacją; nie utrwalać arbitralnego limitu kandydatów w schema.
+
+### Doprecyzowanie zatwierdzonego S1-A
+
+Trigger SLOW wymaga rzeczywiście potrzebnego dodatniego **nowego finansowania botów** i odmowy jego indywidualnej autoryzacji siedzącemu graczowi z powodu limitu SLOW. Sam nowy dostęp do wcześniej sfinansowanego stacku nadal wymaga EXPOSURE, lecz bez nowego finansowania nie wyzwala tego drain. A otrzymuje pierwszy trwały receipt i deadline+30min; B bez nowego finansowania działa dalej. B przy własnej potrzebie finansowania sprawdza wspólny rolling12h i przy odmowie otrzymuje swój pierwszy deadline. Zero dostępnego limitu bez potrzeby finansowania nie zatrzymuje gry. Receipt SLOW_EXPOSURE_DENIED zachowuje nazwę i atomowość; jego required cost/plan musi wskazywać dodatnią rzeczywistą fundingDelta. Globalny FAST, wypłaty i pozostałe reguły bez zmian.
