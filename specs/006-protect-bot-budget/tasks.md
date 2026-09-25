@@ -114,3 +114,5 @@ Najpierw zatwierdzenie planu przy już zamkniętych D1–D3, potem schema bez ak
 T002 dowód: research.md „T002 — wykonana analiza read-only”, main93d0f191c3f87006d56f7afb2fb1c4052a7ecb84; proponowany ograniczony protokół T042 w quickstart.md, oczekuje osobnej zgody. Żadnych pomiarów wykonanych.
 
 T042 status: wykonano ograniczoną próbę72 sekwencji; częściowe dowody w research.md, nieukończone przypadki jawne. Checkbox pozostaje otwarty: brak pełnego wykonania protokołu. Nie uruchamiać T043 ani dalszych pomiarów automatycznie; limit tej próby wyczerpany.
+
+T042 uzupełnienie: przed kolejnym wykonaniem niezależne review i osobna zgoda na quickstart.md §T042-U. Nie powtarzać macierzy72; C1–C5 poprawność najpierw (≤20 ocen bez DB), tylko6 sekwencji lokalnych z wynikami/bytes i planami SELECT. Kryterium: jawne expected IDs, completed-no-match vs unknown, cel51, live/persisted i stale/error; brak nowych funkcji Q1. Pozostałe koszty reprezentatywnej implementacji mapowane do T038, nie pozornie zaliczone. T042 checkbox nadal otwarty, T043 nie wykonywać. Nie zwiększa liczby zadań ani nie autoryzuje pomiarów.

@@ -376,3 +376,7 @@ Kolejność bramek: T002 analiza istniejących mechanizmów bez zmian środowisk
 ## Status po T002
 
 T002 wykonane wyłącznie read-only na main93d0f191c3f87006d56f7afb2fb1c4052a7ecb84; wyniki w research.md, konkretny protokół T042 do osobnej akceptacji w quickstart.md. Limity protokołu są wyłącznie granicami eksperymentu, nie decyzją architektury/algorytmu Q1. T042: częściowa próba opisana w research.md, Q1 nadal otwarte; S1-A zamknięte.
+
+## Minimalne uzupełnienie dowodów T042 (propozycja)
+
+Po zaakceptowanej częściowej próbie nie powtarzać macierzy72 sekwencji. quickstart.md §T042-U rozdziela poprawność C1–C5 od kosztów i wskazuje zależność każdego braku od Q1. Proponowane20 ocen w pamięci oraz6 lokalnych sekwencji SQL dla no-match/celu51/granic wymagają nowej zgody; teraz nic nie wykonywać. Koszty rzeczywistego broadcast/concurrency/egress/WAL/lock i większej skali do T038. Nie zastępować brakującego dowodu domysłem: Q1 i T043 pozostają otwarte, architektura niewybrana. S1-A oraz pozostałe zatwierdzone wymagania bez zmian; Caddy nadal tylko warunkowe przyszłe zadanie.
