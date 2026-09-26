@@ -1,47 +1,62 @@
-# Quickstart — przyszła walidacja, nie polecenie wykonania
+# Quickstart: validate NORMAL/SLOW per-tier pools
 
-## STOP / approvals
+## Current gate
 
-Teraz docs-only, bez implementacji, DB, Stage/Production, deployu, seed/refill. Najpierw niezależne review alternatywy #1018 vs #869 i zatwierdzonej polityki demand-driven NORMAL autorefill; potem osobne zlecenie T001. Aktywacja/mint dopiero w osobno autoryzowanym zakresie. Żaden test opisany niżej nie został wykonany.
+Docs-only PR #1019. Live #1018 is the sole requirements source; snapshot synced 2026-09-26, updated_at 2026-09-26T19:21:31Z. T001 verifies no drift, accepted independent review, choice of this alternative and separate implementation instruction. No stale “sync live issue first” blocker remains. No implementation task or runtime test below has been executed by this docs revision.
 
-## Lokalna fundamentalna weryfikacja po zleceniu
+## Prerequisites for later implementation validation
 
-Użyć istniejącego node:test; pojedynczo uruchomić dotknięte shared/poker-domain/join.behavior.test.mjs, poker-progression.behavior.test.mjs, persisted-state-writer.behavior.test.mjs, existing leave/terminal-close/table-manager suites i tests/chips-ledger.test.mjs. Nowy transaction test T017 tylko po potwierdzeniu izolowanego lokalnego PostgreSQL; syntetyczne fixture, nie real accounts. Nie instalować nowego frameworka.
+- Accepted Spec Kit and explicit T001 instruction; local isolated PostgreSQL using existing Node 20/postgres tooling, never Stage/Production for the transaction suite.
+- Later additive migrations intentionally mutate shared Stage if published through DB Stage Apply PR; declare before publication, applied forward-only. No migration in this PR.
+- Local fixtures: four exact pool accounts at zero, valid disabled tier policies, automatic NORMAL/AUTO users, empty STANDARD tables and existing managed table fixture. Enable/fund only explicit local test fixtures; no production values inferred from Stage examples.
+- For integration later: exact runtime-SHA WS Preview and target identity evidence. Production migration, seed, MINT, timer/refill activation require separate explicit authorization.
 
-| Przypadek | Oczekiwany dowód |
-|---|---|
-| threshold−1/=threshold, restart/spadek | sticky class, one first detection; missing USER unknown |
-| deny tier/full/class po detekcji | commit restriction, brak seat/buy-in; jeden przypadek bot-only false→denied zachowuje has_human_participant=false; SQL failure rollback/unknown jawny |
-| RESTRICTED fresh prefunded/CONTINUOUS_BOT ordinary | denied bez seat/buy-in,bez claim |
-| NORMAL vs drugi RESTRICTED na farmer-only | NORMAL denied,RESTRICTED accepted |
-| Ostatni farmer leave/restart | is_farmer_only=true,zero seed/replacement/topup/refill mimo braku ludzi |
-| Durable NORMAL,balance>=threshold,existing Create→JOIN | wspólny classifier commit RESTRICTED+farmer-only INIT/empty ESCROW;następny JOIN succeeds,zero bot CH |
-| seed/managed seed/replacement/topup | zero nowych CH przy restricted; existing stacks bez zmian |
-| mixed active hand, disconnected/pending leave | gra/settlement/cash-out zachowane, gate obejmuje seated człowieka |
-| unfunded rollover | brak inflated candidate commit, restore poprawnej wersji, brak wymuszonego close |
-| source niedobór/pełny,2NORMAL refille,restart/unknown | exact deficit+funding+existing registry atomowe,replay exactly once; RESTRICTED obok nie blokuje NORMAL i nie wywołuje refillu |
-| invalid source/env/client metadata,retention | zero mint/admission bypass, replay po prune |
+## Focused local commands (after corresponding tasks exist)
 
-## Stage i Preview później
+Run from repository root with existing test environment conventions. These commands validate critical backend/runtime behavior; they do not activate a scheduler.
 
-Same-repo migration PR może automatycznie uruchomić DB Stage Apply PR i mutować shared Stage. Ten efekt musi być jawny przed przyszłym push; applied migrations immutable/forward-only. Przed cutover ograniczyć nowe admissions/funding; nie przerywać rąk/wypłat. Schema przed runtime, wszystkie writers aktualne. Rollback nie może uruchamiać starego unrestricted/nieidempotentnego writer; funding pozostaje wyłączone do naprawy.
+```bash
+node --test shared/poker-domain/join.behavior.test.mjs shared/poker-domain/leave.behavior.test.mjs ws-server/poker/table/table-manager.behavior.test.mjs
+node --test tests/poker-create-table.stakes.test.mjs tests/poker-quick-seat.behavior.test.mjs ws-server/poker/handlers/join.behavior.test.mjs
+node --test ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs shared/poker-domain/inactive-cleanup.behavior.test.mjs tests/chips-ledger.test.mjs
+node --test tests/admin-endpoints.behavior.test.mjs tests/admin-users-list.behavior.test.mjs tests/admin-ops-summary.behavior.test.mjs
+node --test tests/chips/chips.migration.test.mjs tests/chips/poker-pool-policy.transaction.test.mjs
+```
 
-WS-affecting implementacja wymaga manual WS Preview Deploy z definicji main i dokładnego latest runtime SHA, potwierdzonego sukcesu. Netlify Preview/WS checks nie dowodzą wdrożenia WS. Osobne okno na shared Preview, bez automatycznego deployu każdego PR. Użytkownik może wykonać manual smoke; bez niego status implementation ready, awaiting manual runtime verification, nigdy merge-ready.
+The planned transaction suite must validate its local target before connecting and reject shared Stage/Production; use two connections and barriers, no sleeps. Do not run it against a remote target. No broad UI/CSS/JSP/glue suite. If future inline script changes, additionally run existing `npm run check:csp-inline` and include required SHA change.
 
-Manual smoke: istniejące lobby/Create/Quick Seat i direct join; neutralna odmowa przeciwnej klasy; dwóch restricted razem; mixed bez kick; CONTINUOUS_BOT no-funding fallback i legalny cash-out. Obserwować mały kontrolowany przebieg (bez load): query count, rows/bytes, locks/retry, latency JOIN/settlement/leave, klog oraz existing registry/manifest dowody. Bez UI/CSS/JSP rendering tests. Nie uruchamiać refillu/mint na środowisku bez osobnego zakresu i zatwierdzonego zakresu operacji. Production zawsze osobny GO; brak merge przez agenta.
+## Critical scenario matrix
 
-## Ograniczenia i breaking impacts
+| Scenario | Expected result | Tasks |
+| --- | --- | --- |
+| Wallet/settled stack threshold−1 and threshold; restart | NORMAL below, sticky automatic SLOW at threshold; no leave required | T004–T007 |
+| FORCE_NORMAL/FORCE_SLOW/AUTO; dynamic threshold | Override precedence; return exposes durable auto; new revision after bounded refresh | T004/T006/T021–T023 |
+| Unchanged settled hand; stale cache | Zero added policy/account/override/tier reads/writes; stale cannot fund/admit, payout legal | T004/T006 |
+| Own safe empty promotion vs other/prefunded/managed | Only SLOW owner accepted final JOIN promotes and can seed SLOW | T004/T005/T013 |
+| Four active, fifth fresh, financed rejoin | Four accepted; fifth zero buy-in/funding; rejoin no slot | T008–T010/T027 |
+| Four pending, fifth direct/fallback Create | Fifth creates no table/state/ESCROW | T008–T010/T027 |
+| Concurrent Create/JOIN; first human pending transfer | Both limits ≤4, pending→active once | T027 |
+| Exact tier/class funding; missing/disabled/empty pool | Correct four pools, no cross-tier/class/TREASURY fallback or runtime MINT | T011–T015 |
+| Mixed live table; UNKNOWN leave; original source return | Sticky known-SLOW, legal payout/rejoin; UNKNOWN no false promotion; provenance retained | T004/T007/T011/T015 |
+| Balance below/equal refill threshold | One configured amount below, zero at/above | T016–T018 |
+| Duplicate/unknown commit/revision edit same bucket | At most one pool refill across revisions, stable original replay | T016/T018/T027 |
+| Nine hours missed; stale queued run | Current bucket only, no backlog or multiple chunks | T016/T018–T020 |
+| Admin unauthorized/conflict/invalid integer | Zero unauthorized mutation; audit actor/time/revision for accepted update | T021/T022 |
+| WS slowOnly inventory / DB Quick Seat / stale recommendation | Existing resume retained; class filter; final JOIN rejects stale class/cap | T024–T026 |
+| Denied classification JOIN | No false has_human_participant or seat/funding | T004/T005 |
 
-Brak automatic unban; bogaci gracze mogą wymagać odrębnego audytowanego review. Leniwy próg nie mierzy escrow/peaków. Farmer poniżej progu nadal działa; shared TREASURY wymaga source lock dla atomic deficit+debit. Brak lifetime limitu; NORMAL farming może powodować dalszą emisję, co jest zatwierdzone. RESTRICTED nie otrzymuje nowych bot CH nawet ze źródła uzupełnionego gdzie indziej. Stale Quick Seat może neutralnie odmówić, bez nowego lobby engine. Timeouty i granice pracy composite fundingu wymagają runtime walidacji, nie są zmierzonym SLO.
+## Later runtime and operational validation
 
-Breaking review table hopping: farmer-only jest trwałe i nie staje się normalnym stołem po leave. Istniejące NORMAL miejsca na mixed converted table zachowują tylko rejoin/akcje/cash-out; nowe NORMAL admissions denied. Brak nowego engine i testów UI.
+Use `.github/workflows/ws-preview-deploy.yml` definition from main with application revision equal to the latest runtime-affecting SHA, verify workflow succeeded for that exact SHA. Netlify preview alone does not deploy WS. Confirm NORMAL/SLOW Create→JOIN, 4+4 rejection, long-staying threshold transition, Admin revision propagation, slowOnly lobby/Quick Seat, managed behavior and cash-out in targeted smoke. User may perform manual runtime smoke; until evidence exists report “implementation ready, awaiting manual runtime verification”.
 
-## Retention review i bramka T001
+Refill worker starts dry-run. An explicitly authorized Stage scenario may enable one provisioned tier and demonstrate one current-bucket refill/retry, including policy edit after commit. Compare ledger pool/bucket/amount and balance; runtime hand funding must create no MINT. Inspect intended repository/ref/actor/environment gates before any future dispatch. VPS timer is only GitHub authenticated wake-up every3h, no DB credentials or SQL. Install disabled and activate separately; no native GitHub cron dependency. Production remains separate authorization.
 
-Przed T001 zsynchronizować live issue #1018 z farmer-only,którego starsza treść issue nie opisuje; adnotacja issue-source nie wystarcza. Potem osobne zlecenie implementacji. Nie modyfikować #869/#1017.
+## Cutover / rollback / breaking review
 
-Przyszłe fundamentalne przypadki: D=0 tylko funding registry; D>0 atomic pair/replay/unknown; typed MINT w7d bot-only i30d closed-human export/prune; unrelated MINT excluded; missing-table cleanup i retry starego key po usunięciu registry→zero emisji; cleanup vs funding race. Weryfikować manifest/hash,table binding i brak permanentnego hot MINT/receipt. Nowa tabela receipts nie jest wymagana. To scenariusze przyszłe,bez DB/testów teraz.
+Pause new admissions/funding while allowing current hands and lawful payouts. Provision only missing exact pool accounts at zero and policies; preserve existing account IDs, balances and provenance, especially the existing 500 bankroll; deploy all class/limit/source writers and metadata readers together. Deliberately enable and, only in authorized target, refill pools before reopening. Existing 500 key and all historical TREASURY/source attribution remain. Never infer enablement from progression catalog.
 
-WS i Netlify Create muszą korzystać z tego samego singletonu threshold/revision i shared helpera,bez independent env override. Missing config odmawia nowych decyzji;nie tworzy ordinary fallback. Trusted managed userId=null nie klasyfikuje człowieka. Nie wykonywać teraz konfiguracji/DB operacji.
+100 new funding moves from TREASURY to its own NORMAL pool; SLOW uses its own tier pool and can run out before the next refill. Sticky tables do not revert under FORCE_NORMAL. 4+4 applies to both classes; Sybil multiplies the allowance and remains accepted. Admin propagation is bounded by the 30s refresh interval, with stale snapshots unable to authorize new operations. Rollback keeps new funding disabled rather than restoring class/limit/fallback bypass; applied migrations stay forward-only.
 
-Wariant istniejącego leave testu: UNKNOWN class+legal cash-out→wypłata poprawna,marker false pozostaje false,zero nowego funding w niepewnej operacji. Known NORMAL też nie zmienia markera; tylko known durable RESTRICTED może false→true,a wcześniejsze true pozostaje. Po usunięciu membership kolejne decyzje stosują zwykły gate; Create/JOIN ponownie klasyfikuje authoritative balance. Unknown nowych admission/funding nadal odmawia.
+## Evidence record to complete later
+
+T028 records actual local command results and simplicity/constitution review here; T029 records exact runtime SHA/workflow result and smoke outcome. Currently no implementation/test/deploy evidence is claimed. STOP before implementation.

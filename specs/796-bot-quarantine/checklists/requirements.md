@@ -1,28 +1,32 @@
-# Specification Quality Checklist — #1018
+# Specification Quality Checklist: NORMAL/SLOW periodic pools
 
-Status: własna kontrola dokumentów; niezależne review nadal wymagane.
+**Purpose**: Validate requirements completeness before implementation review.
+**Created**: 2026-09-26
+**Feature**: [spec.md](../spec.md)
 
-- [x] Osobna alternatywa, bez zmian #869/#1017.
-- [x] User stories i mierzalne scenariusze pokrywają próg, segregation, wszystkie funding paths i refill.
-- [x] Wskazano konkretne istniejące metody, nowe elementy nazwano planowanymi.
-- [x] Trwałość, retry/unknown commit i payout oddzielone od admission.
-- [x] Brak niepotrzebnego lobby/fraud engine i testów UI.
-- [x] Autorefill NORMAL bez lifetime cap jest zatwierdzony; aktywacja nadal osobno.
-- [x] Stage mutation/forward-only i Production GO jawne.
-- [x] Spec/plan/tasks/model/contract zgodne; STOP przed implementacją.
+## Content Quality
 
-## Analyze coverage
+- [x] Focused on economic containment and player/operator outcomes; detailed methods stay in plan/contracts/tasks.
+- [x] All active spec-template mandatory sections completed, with independently testable prioritized user stories.
+- [x] Named fields/platform constraints in spec are explicit live #1018 requirements, not inherited #1019 architecture.
+- [x] Live #1018 alone supplies feature requirements; snapshot refreshed, old source-override annotation removed.
 
-| Requirements | Tasks |
-|---|---|
-| FR-001–003,SC-001 | T002–006,T017 |
-| FR-004–006,SC-002 | T005–012,T017 |
-| FR-007–009,SC-003 | T002–003,T013–017 |
-| FR-010–012 | T007–012,T015,T017–018 |
-| FR-013–014,SC-004 | T001–002,T018–019 |
+## Requirement Completeness
 
-18 wymagań (14FR+4SC),19 zadań,100% mapowania,bez nieprzypisanych zadań. Ponowny speckit-analyze po korekcie UNKNOWN leave/known-only farmer marker:0 CRITICAL,0 HIGH; brak naruszeń konstytucji i luk pokrycia. Exact-deficit composite flow podlega niezależnemu review; dokumentacja nie jest zgodą emisji. Nie oznacza wykonania testów ani implementacji.
+- [x] No unresolved clarification or template placeholders; deterministic acceptance cases and measurable outcomes.
+- [x] NORMAL/SLOW and separate override, dynamic threshold, settled in-memory/cache behavior and UNKNOWN payout handling specified.
+- [x] Sticky marker, safe owner promotion at JOIN, 4+4 limits/shared lock, accepted human marker and rejoin specified.
+- [x] Exact per-tier pools, isolated runtime funding, 3h refill, cross-revision bucket guard and operational scheduler specified.
+- [x] Admin authorization/audit/cache propagation, WS live inventory, DB Quick Seat and managed lifecycle included.
+- [x] Edge cases, accepted Sybil/split-wealth risk, breaking cutover, Stage/Production boundaries and assumptions stated.
 
-Sprawdzono4 fundamentalne scenariusze table hopping w T008/T012/T017; zmiany schema/create/final JOIN/funding/projection w T002/T006–010. Brak nowego testu UI i brak nowej klasy lifecycle.
+## Feature Readiness
 
-Live #1018 pozostaje niesynchronizowane z farmer-only: jawna zewnętrzna bramka przed T001,nie decyzja do ponownego wyboru. Usunięto nową receipt table; T016 obowiązkowo obejmuje typed MINT archive/binding/cleanup.
+- [x] 21 FR + 6 SC mapped to 29 concrete future tasks; all tasks remain unchecked.
+- [x] Existing packages/flows reused; only fundamental deterministic tests, one local transaction suite.
+- [x] No stale sync blocker: live sync completed; T001 verifies no drift and separate implementation authority.
+- [x] Constitution checked before/after design; no runtime, schema migration or deploy in this docs change.
+
+## Notes
+
+This built-in specify checklist records documentation quality, not independent approval or implementation completion. [finance.md](finance.md) is reviewer-owned and stays unchecked until the independent reviewer acts. Spec Kit is prepared for that approval; STOP before T001/implementation. No automatic merge.
