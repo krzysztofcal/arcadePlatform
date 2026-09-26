@@ -10,7 +10,7 @@ Trwała klasa na USER i boolean is_farmer_only na poker_tables, jeden shared acc
 
 JavaScript .mjs Node według istniejących package manifests, obecny postgres client/PostgreSQL ledger, WS na systemd Ubuntu, Netlify adapter. Brak nowych packages/frameworków. Testy node:test oraz istniejące behavior suites; tylko jeden nowy lokalny transaction test do prawdziwych wyścigów. Bez UI testów. Zakres100/500, istniejące CONTINUOUS_BOT.
 
-Performance: batch USER rows tylko bounded członkostwem stołu, brak lobby viewer×table SQL, brak skanów ledger/history/inventory. Jedna dodatkowa batch classification write/read na nową decyzję; fresh source read i opcjonalny mint w istniejącym funding tx,bez pollera. Egress to tylko account IDs/class/balance i receipt, bez historii. Koszt CPU/WAL: detekcja zapisuje raz, receipt raz na rzeczywisty funding, MINT tylko przy niedoborze. Contention: wspólne konta graczy na wielu stołach i source; brak osobnego job i globalnego guard. Brak niezmierzonych SLO; przyszły mały smoke obserwuje locks/retry/latency, nie load test.
+Performance: batch USER rows tylko bounded członkostwem stołu, brak lobby viewer×table SQL, brak skanów ledger/history/inventory. Jedna dodatkowa batch classification write/read na nową decyzję; fresh source read i opcjonalny mint w istniejącym funding tx,bez pollera. Egress to tylko account IDs/class/balance i wynik istniejącego registry, bez historii. Koszt CPU/WAL: detekcja zapisuje raz, existing registry raz na funding (dodatkowy MINT registry tylko D>0), MINT tylko przy niedoborze. Contention: wspólne konta graczy na wielu stołach i source; brak osobnego job i globalnego guard. Brak niezmierzonych SLO; przyszły mały smoke obserwuje locks/retry/latency, nie load test.
 
 ## Constitution Check (przed i po projekcie)
 
@@ -25,7 +25,7 @@ PASS: reuse istniejących plików/ledger/locks; WS authority; fail-closed nowe f
 - ws-server/poker/persistence/persisted-state-writer.mjs::writeViaDb/writeReplacementFundings/writeManagedBotTopUps: gate przed funded CAS/seat/ledger; caller dostaje denied reason, nie fikcyjny receipt.
 - ws-server/server.mjs::runSettledRolloverCommand: rozszerzenie istniejącego bankroll500 no-funding fallback do obu tierów i restriction; table-manager.mjs::prepareSettledHandRollover allowBotFunding:false i restore zamiast niespójnego commit recalculation.
 - ws-server/poker/persistence/continuous-bot-table-repository.mjs: zachować seed/lifecycle/currentProfile, gate no-human i rzeczywisty managed plan; brak specjalnego privileged bypass.
-- shared/poker-domain/table-economy.mjs: istniejące mapping źródeł, nie nowe pule. Planowany shared/poker-domain/bot-refill.mjs: postBotFundingWithRefill,exact deficit+funding+receipt w jednym istniejącym tx; bez nowego schedulera.
+- shared/poker-domain/table-economy.mjs: istniejące mapping źródeł, nie nowe pule. Planowany shared/poker-domain/bot-refill.mjs: postBotFundingWithRefill,exact deficit+funding+existing registry w jednym istniejącym tx; bez nowego schedulera.
 - netlify/functions/_shared/chips-ledger.mjs: wąska walidacja internal demand-authorized SYSTEM→SYSTEM MINT; WS chips-ledger.mjs zachowuje TABLE_BUY_IN; uporządkowane account locks w dotkniętych finansowych ścieżkach obu adapterów, bez szerokiego refaktoru.
 - ws-server/poker/handlers/join.mjs, persistence/authoritative-join-adapter.mjs: neutralne denial; netlify/functions/poker-quick-seat.mjs::recommendSeatAtTable/handler nadal wskazówka, final JOIN authority. Brak nowego discovery/query/lobby engine.
 - shared/poker-domain/leave.mjs i terminal-close.mjs: przegląd i fundamentalne regresje; nie wywoływać gate z cash-out. Leave/deferred finalization jedynie utrwala tabelowy marker już istniejącej restriction przed usunięciem membership, bez nowej przesłanki odmowy wypłaty.
@@ -37,8 +37,8 @@ PASS: reuse istniejących plików/ledger/locks; WS authority; fail-closed nowe f
 3. Wykryć threshold przed debitem i utrwalić jednorazową zmianę. Znane policy denial zwraca structured result przed seat/ledger/CAS, dzięki czemu COMMIT zachowuje detekcję. Jeśli późniejsza finansowa operacja wymaga savepoint, zakładać go po detekcji; przy obsługiwanym błędzie rollback to savepoint, nie w aborted tx bez rollback. Błąd połączenia całej tx→unknown/recovery; nie deklarować detection committed.
 4. W zgodnym JOIN debit i seat/state atomowo. Seed restricted pomija nowe boty bez usuwania istniejących. Payout i rejoin nie wymagają nowej pozytywnej autoryzacji funding.
 Marker has_human_participant przenieść z początku JOIN do zaakceptowanego admission/rejoin; denial commitujący detection nie zmienia false. Wcześniejsze true zachowane.
-5. Writer musi uzyskać table/state lock także dla funded rollover zanim sprawdzi membership, by nie ścigać JOIN; existing accepted action bez finansowania nie musi pobierać classification/receipt rows. Odmowa przed CAS→no-funding fallback; runtime restore potwierdza commit, nie normalny commitPrepared z błędnym planem.
-6. Composite refill: table/state/membership→pełny uporządkowany zbiór USER/source/ESCROW/GENESIS→classification/gate→exact deficit MINT+funding+receipt. Brak oddzielnej emisji i globalnego policy lock. Krótkie timeouty, bounded deltas/retry; odmowa/timeout kończy tx i uruchamia istniejący no-funding fallback. Settlement/cash-out nie wywołują helpera; chwilowego oczekiwania FIFO na trwającą transakcję nie mylić z logiczną zależnością wypłaty od refillu.
+5. Writer musi uzyskać table/state lock także dla funded rollover zanim sprawdzi membership, by nie ścigać JOIN; existing accepted action bez finansowania nie musi pobierać classification/registry rows. Odmowa przed CAS→no-funding fallback; runtime restore potwierdza commit, nie normalny commitPrepared z błędnym planem.
+6. Composite refill: table/state/membership→pełny uporządkowany zbiór USER/source/ESCROW/GENESIS→classification/gate→exact deficit MINT+funding+existing registry. Brak oddzielnej emisji i globalnego policy lock. Krótkie timeouty, bounded deltas/retry; odmowa/timeout kończy tx i uruchamia istniejący no-funding fallback. Settlement/cash-out nie wywołują helpera; chwilowego oczekiwania FIFO na trwającą transakcję nie mylić z logiczną zależnością wypłaty od refillu.
 
 ## Minimalność i breaking impacts
 
@@ -52,7 +52,7 @@ Research i projekt gotowe do niezależnego review, nie implementacja. Następnie
 
 ## Complexity Tracking
 
-Brak uzasadnianych naruszeń konstytucji. Jedna nowa tabela receipt do replay po retention oraz jeden monotoniczny boolean na istniejącym poker_tables; klasyfikacja wykorzystuje istniejący USER row. Usunięto policy/counter lifetime i scheduler refillu. Atomic deficit+funding jest mniejszy niż asynchroniczna emisja z rezerwacją i recheckiem. Pozostaje tylko pojedyncza ścieżka autorytatywna, bez EXPOSURE/drain/lobby rewrite.
+Brak uzasadnianych naruszeń konstytucji. Bez nowej tabeli receipt; existing ledger/registry z cyklem retencji oraz jeden monotoniczny boolean na istniejącym poker_tables; klasyfikacja wykorzystuje istniejący USER row. Usunięto policy/counter lifetime i scheduler refillu. Atomic deficit+funding jest mniejszy niż asynchroniczna emisja z rezerwacją i recheckiem. Pozostaje tylko pojedyncza ścieżka autorytatywna, bez EXPOSURE/drain/lobby rewrite.
 
 ## Table hopping — minimalna korekta
 
@@ -63,3 +63,11 @@ Create: netlify/functions/_shared/poker-table-init.mjs::createPokerTableWithStat
 Projection: ws-server/poker/bootstrap/persisted-bootstrap-repository.mjs SELECT, persisted-bootstrap-db.mjs mapping, persisted-bootstrap-adapter.mjs→tableMeta.isFarmerOnly oraz table-manager.mjs metadata; potrzebne do poprawnego runtime recovery, nie nowe źródło prawdy. Locked JOIN i writer czytają właściwe pole DB nawet jeśli snapshot stary. CONTINUOUS_BOT lifecycle bez nowych typów; farmer nie przechodzi automatycznie do świeżego normalnego managed replacement.
 
 Breaking: RESTRICTED traci możliwość nowego wejścia także na zwykły pusty/bot-only stół; farmer-only nie odzyskuje bot availability po opróżnieniu. Existing mixed table może stać się trwale farmer-only; dotychczasowe legalne ręce/wypłaty zachowane. Brak nowego matchmaking engine,FAST/SLOW,EXPOSURE,90/10 lub drain.
+
+## Retention i replay bez permanentnego receipt
+
+Usunąć projekt poker_bot_refill_receipts. Funding key + existing chips_transaction_idempotency/payload_hash identyfikuje composite tx; D=0 nie dodaje MINT ani dodatkowego registry poza istniejącym fundingiem. D>0 deterministic MINT key powiązany ze starym funding key,kwota/hash zapisane w existing ledger. Replay nie przelicza niedoboru. Przed ponowieniem bez registry wymagać nadal OPEN/non-retired table i aktualnej niezaspokojonej state/seat delty; brak CLOSED/deleted table lub stary plan odrzucić,nie mintować po cleanup.
+
+T016 jest wymagane, nie opcjonalny audit: obecne archive-export SQL,archive-prune ALLOWED_TX_TYPES/ESCROW shape oraz DB table-binding i selectors nie obejmują MINT. Rozszerzyć wyłącznie typed bot-refill parę według research R7/data-model §3:7d bot-only/30d closed-human po existing proof/hold gates,missing-table retirement,paired manifests i complete lifecycle. Bez broad MINT whitelist,nowego archiwizatora i permanentnych tożsamości poza existing lifecycle. Nie obejść existing active/ambiguous gates w imię TTL; pending proof podlega dotychczasowej recovery. Koszt hot wzrasta o MINT+jego registry tylko gdy D>0,ale nowy typ ma kompletną ścieżkę archive/prune,nie permanentny wyjątek.
+
+Przed T001 obowiązkowa synchronizacja live #1018 z zatwierdzonym farmer-only. Review użytkownika jest źródłem korekty,ale issue-source adnotacja nie zastępuje zmiany live issue. Do czasu synchronizacji i osobnego zlecenia STOP implementacji. #869/#1017 bez zmian.

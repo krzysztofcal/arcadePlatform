@@ -46,7 +46,7 @@ Nieznane konto/klasa, niepoprawny threshold, disconnected seated human, pending 
 - **FR-005**: Aktualny mixed table zachowuje ręce, stacki, legalne akcje/leave/cash-out. Brak wymuszonego drain/kick. Wykrycie RESTRICTED wśród już siedzących ludzi utrwala is_farmer_only=true pod table lock; brak nowych bot CH także po naturalnym rozdzieleniu. Istniejące NORMAL miejsca są grandfathered tylko dla rejoin/legalnych akcji i wypłat, nie dla nowego wejścia.
 - **FR-006**: Brak/nieznana klasyfikacja lub niespójne membership daje odmowę nowych admissions/fundingu; denial nie może wycofać już utrwalonego RESTRICTED. Payout nie zależy od dostępności nowego gate/refillu.
 - **FR-007**: Automatyczny refill utrzymuje uprawnioną NORMAL-only grę tierów100/500 przy istniejących źródłach. Brak globalnego lifetime cap. Emisja wyłącznie na dokładny niedobór autoryzowanego dodatniego funding; RESTRICTED stół nie może wywołać ani otrzymać nowego funding/refillu, także z płynności uzupełnionej przez inny stół.
-- **FR-008**: Refill używa jednego istniejącego ledger, atomowego powiązania z fundingiem i trwałego klucza replay; brak podwójnej emisji po retry/restart/unknown commit/retention. Nie finansować botów kosztem salda człowieka.
+- **FR-008**: Refill używa jednego istniejącego ledger, atomowego powiązania z fundingiem i trwałego klucza replay; brak podwójnej emisji po retry/restart/unknown commit/retention. Nie finansować botów kosztem salda człowieka. Bez nowej tabeli receipts: deterministic funding key,payload hash i chips_transaction_idempotency. Nowy typed MINT podlega existing table7d/closed-human30d/missing-table archive+cleanup; po usunięciu registry closed/deleted/retired/stale plan fail-closed,bez ponownego mint.
 - **FR-009**: Nieudany refill degraduje tylko dotkniętą próbę nowego funding do braku nowych bot CH; istniejące legalne wypłaty zachowane. Praca ograniczona faktycznym planem/pojemnością stołu i skończonym retry, bez skanów i pętli mint. Nie dodawać zależności już zaakceptowanego settlement/cash-out od refill.
 - **FR-010**: Zachować CONTINUOUS_BOT, istniejące źródła100/500 i terminal return attribution. Dodać jedynie monotoniczny boolean poker_tables.is_farmer_only, bez pełnych klas stołów ani nowego silnika lobby. Istniejący Create wyznacza marker z trwałej klasy twórcy po stronie serwera, nie z payloadu; nowe farmer-only są puste i bez botów. Nie claimować istniejącego zwykłego stołu. Direct/Quick Seat podlega temu samemu final JOIN.
 - **FR-011**: Neutralna odmowa niezgodnego Quick Seat jest dopuszczona; nie obiecywać automatycznego wyszukania zgodnego celu. Obecne progression tiers/Create UI pozostają.
@@ -56,7 +56,7 @@ Nieznane konto/klasa, niepoprawny threshold, disconnected seated human, pending 
 
 ### Key Entities
 
-USER account z trwałą klasą; poker_tables.is_farmer_only; istniejące state/seat/ledger; receipt łączący emisję z konkretnym fundingiem. Szczegóły w data-model.md są potrzebne do opisania atomowości i retention.
+USER account z trwałą klasą; poker_tables.is_farmer_only; istniejące state/seat/ledger; istniejący registry/hash oraz table binding łączące emisję z fundingiem. Szczegóły w data-model.md są potrzebne do opisania atomowości i retention.
 
 ## Success Criteria
 
@@ -70,3 +70,5 @@ USER account z trwałą klasą; poker_tables.is_farmer_only; istniejące state/s
 Próg1mld wykrywa anomalię, nie dowodzi oszustwa; farmer może rozdzielać środki lub nigdy nie osiągnąć progu. To zaakceptowany zakres. Sticky restriction bez UI unban w V1; ewentualny reset wyłącznie odrębne audytowane zadanie operatora.
 
 Poprzednia propozycja lifetime100k/500k jest zastąpiona decyzją właściciela z2026-09-26. NORMAL może farmić; łączna emisja w czasie nie ma limitu lifetime. Ochrona techniczna wiąże każdą emisję z uprawnionym dodatnim fundingiem, dokładnym niedoborem i trwałym replay. Aktywacja nadal wymaga osobnego zlecenia; to nie zgoda na mint teraz.
+
+Przed T001 wymagana synchronizacja live #1018 z zatwierdzonym farmer-only; obecny starszy zapis empty admission nie jest aktualną polityką. Review użytkownika zatwierdził korektę, ale issue-source nie zastępuje aktualizacji live issue.
