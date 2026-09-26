@@ -12,7 +12,10 @@ Użyć istniejącego node:test; pojedynczo uruchomić dotknięte shared/poker-do
 |---|---|
 | threshold−1/=threshold, restart/spadek | sticky class, one first detection; missing USER unknown |
 | deny tier/full/class po detekcji | commit restriction, brak seat/buy-in; jeden przypadek bot-only false→denied zachowuje has_human_participant=false; SQL failure rollback/unknown jawny |
-| NORMAL vs RESTRICTED jednocześnie empty/bot-only | jeden typ admission pod table lock |
+| RESTRICTED fresh prefunded/CONTINUOUS_BOT ordinary | denied bez seat/buy-in,bez claim |
+| NORMAL vs drugi RESTRICTED na farmer-only | NORMAL denied,RESTRICTED accepted |
+| Ostatni farmer leave/restart | is_farmer_only=true,zero seed/replacement/topup/refill mimo braku ludzi |
+| Pierwszy RESTRICTED existing Create→JOIN | atomic farmer-only INIT/empty ESCROW,zero bot CH; czeka na drugiego |
 | seed/managed seed/replacement/topup | zero nowych CH przy restricted; existing stacks bez zmian |
 | mixed active hand, disconnected/pending leave | gra/settlement/cash-out zachowane, gate obejmuje seated człowieka |
 | unfunded rollover | brak inflated candidate commit, restore poprawnej wersji, brak wymuszonego close |
@@ -30,3 +33,5 @@ Manual smoke: istniejące lobby/Create/Quick Seat i direct join; neutralna odmow
 ## Ograniczenia i breaking impacts
 
 Brak automatic unban; bogaci gracze mogą wymagać odrębnego audytowanego review. Leniwy próg nie mierzy escrow/peaków. Farmer poniżej progu nadal działa; shared TREASURY wymaga source lock dla atomic deficit+debit. Brak lifetime limitu; NORMAL farming może powodować dalszą emisję, co jest zatwierdzone. RESTRICTED nie otrzymuje nowych bot CH nawet ze źródła uzupełnionego gdzie indziej. Stale Quick Seat może neutralnie odmówić, bez nowego lobby engine. Timeouty i granice pracy composite fundingu wymagają runtime walidacji, nie są zmierzonym SLO.
+
+Breaking review table hopping: farmer-only jest trwałe i nie staje się normalnym stołem po leave. Istniejące NORMAL miejsca na mixed converted table zachowują tylko rejoin/akcje/cash-out; nowe NORMAL admissions denied. Brak nowego engine i testów UI.

@@ -1,5 +1,7 @@
 # Źródło #1018
 
+Wiążąca korekta review użytkownika po HEAD a6a21074644126a6cf01b3bbab8ec42a4d429dba: RESTRICTED nowe admission wyłącznie farmer-only; ordinary/prefunded/CONTINUOUS_BOT denied; trwały table marker blokuje funding także po leave. Pierwszy farmer przez existing Create bez funding. Ta korekta zastępuje poniższy starszy zapis o przyjęciu pierwszej dowolnej klasy na pusty/bot-only table. Pełny kontrakt: contracts/bot-quarantine.md.
+
 https://github.com/krzysztofcal/arcadePlatform/issues/1018
 
 Updated: 2026-09-26T08:58:10Z

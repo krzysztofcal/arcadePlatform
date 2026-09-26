@@ -4,8 +4,8 @@ Checkboxy należą do niezależnego reviewera; nie są stanem wykonania implemen
 
 - [ ] CHK001 Czy lazy threshold/sticky state i brak USER są jednoznaczne? [FR-001/002]
 - [ ] CHK002 Czy odmowa JOIN może zatwierdzić restriction bez seat/buy-in i bez fałszywego has_human_participant? [FR-003/006]
-- [ ] CHK003 Czy klasy empty/mixed/Resume i concurrent admissions są jednoznaczne? [FR-003]
-- [ ] CHK004 Czy seed,managed seed,replacement,topup mają wspólny gate wszystkich seated humans? [FR-004]
+- [ ] CHK003 Czy ordinary/prefunded/CONTINUOUS_BOT odmawia RESTRICTED, farmer-only odmawia NORMAL, istniejący rejoin jest zachowany i first farmer ma existing Create? [FR-003]
+- [ ] CHK004 Czy seed,managed seed,replacement,topup/refill mają wspólny gate is_farmer_only=false i wszystkich seated humans,bez resetu po leave/restart? [FR-004]
 - [ ] CHK005 Czy odmowa nie utrwala funded candidate i nie przerywa payout? [FR-005/006/009]
 - [ ] CHK006 Czy NORMAL-only nadal otrzymuje autorefill mimo RESTRICTED gdzie indziej, bez lifetime cap? [FR-007]
 - [ ] CHK007 Czy mint+funding+receipt i retention dają exactly-once oraz rollback całej operacji? [FR-008]

@@ -12,7 +12,7 @@
 Zwykły gracz zachowuje istniejący poker bez liczników ekspozycji. Wykryty RESTRICTED nie może nowo mieszać się z NORMAL. Dlaczego P1: oddzielenie wykrytego farmera przy finalnej autoryzacji. Independent Test: próg, trwałość i wyścig pierwszego wejścia.
 
 1. Saldo USER próg−1 pozostaje NORMAL; saldo równe progowi lub większe przy następnej decyzji pokerowej daje trwałe RESTRICTED. Późniejszy spadek i restart nie usuwają stanu.
-2. Dwa przeciwne konta równocześnie wchodzą na pusty/bot-only stół: wygrywa jedna klasa; drugie nie otrzymuje miejsca ani debitu buy-in. Dwóch RESTRICTED może wejść razem.
+2. Na zwykłym pustym/prefunded/CONTINUOUS_BOT stole nowy RESTRICTED zawsze dostaje odmowę. Farmer-only przyjmuje tylko RESTRICTED (także drugiego), NORMAL odmawia. Pierwszy RESTRICTED korzysta z istniejącego Create tworzącego atomowo pusty farmer-only stół bez bot funding, potem final JOIN.
 3. Odmowa wejścia po wykryciu nie cofa klasyfikacji. Retry i utracona odpowiedź odzyskują trwały stan. Denied JOIN do bot-only table nie ustawia has_human_participant; marker dopiero przy rzeczywiście zaakceptowanym human admission/rejoin.
 4. Resume już finansowanego miejsca nie jest nowym admission; istniejący mixed table nie odcina gracza od akcji i wypłat.
 
@@ -21,9 +21,9 @@ Zwykły gracz zachowuje istniejący poker bez liczników ekspozycji. Wykryty RES
 Dlaczego P1: zamknięcie wszystkich dopływów SYSTEM do botów. Independent Test: seed, replacement, managed top-up i active mixed hand.
 
 1. Dowolny seated human RESTRICTED: zero nowych CH dla botów, bez usuwania istniejących stacków. Gate obejmuje seed zwykły i managed oraz replacement/top-up.
-2. Wykrycie podczas ręki: ręka i payout kończą się poprawnie; mixed table odmawia wszystkim nowym ludziom, dopóki nie stanie się jednorodny lub pusty. Bez kick, TTL i fanout.
+2. Wykrycie podczas ręki: ręka i payout kończą się poprawnie; mixed table odmawia wszystkim nowym ludziom, dopóki pozostają NORMAL miejsca; później tylko RESTRICTED zgodnie z trwałym farmer-only. Bez kick, TTL i fanout.
 3. Brak pewnej klasyfikacji/membership: zero nowego fundingu/admission; legalna już zaakceptowana gra i cash-out nie wywołują nowego gate.
-4. CONTINUOUS_BOT zachowuje lifecycle/rotację. Bez ludzi gate kwarantanny jest pusty, ale obowiązują źródło i rzeczywisty autoryzowany managed plan; po odejściu ostatniego restricted finansowanie może wrócić na kolejnym poprawnym sprawdzeniu.
+4. CONTINUOUS_BOT zachowuje lifecycle/rotację. Pusty zwykły managed stół zachowuje autoryzowany funding, lecz nigdy nie przyjmuje nowego RESTRICTED. Farmer-only pozostaje bez funding po odejściu wszystkich graczy i po restarcie.
 
 ### US3 — Autorefill dla uprawnionej gry (Priority: P1)
 
@@ -41,14 +41,14 @@ Nieznane konto/klasa, niepoprawny threshold, disconnected seated human, pending 
 
 - **FR-001**: Trwałe NORMAL/RESTRICTED; monotoniczne wykrycie przy authoritative USER balance>=server threshold (domyślnie1 000 000 000 CH); brak automatycznego unban.
 - **FR-002**: Leniwe wykrycie przy nowym poker JOIN i przed dodatnim funding wszystkich aktualnych seated humans; brak skanera platformy i pomiaru historycznych peak balances. Odczyt przed debitem buy-in.
-- **FR-003**: Final JOIN atomowo porównuje klasy aktualnych ludzi i kandydata. Pusty/bot-only stół przyjmuje pierwszą klasę; mixed stół odmawia każdego nowego admission. Resume własnego aktywnego miejsca zachowany. Denied JOIN może commitować restriction, lecz nie seat/buy-in ani has_human_participant; marker tylko przy zaakceptowanym admission/rejoin.
-- **FR-004**: Każdy rzeczywisty nowy transfer bot SYSTEM→ESCROW wymaga wspólnego gate bez RESTRICTED humans, także seed/replacement/managed top-up/managed initial seed. Klient, createdBy ani metadata nie stanowią dowodu.
-- **FR-005**: Aktualny mixed table zachowuje ręce, stacki, legalne akcje/leave/cash-out. Brak wymuszonego drain/kick; nowych bot CH nie ma do naturalnego rozdzielenia.
+- **FR-003**: Final JOIN atomowo porównuje klasy aktualnych ludzi i kandydata. Nowy RESTRICTED wchodzi wyłącznie na trwale farmer-only stół; NORMAL wyłącznie na zwykły stół bez RESTRICTED. Pusty/prefunded/CONTINUOUS_BOT zwykły stół odmawia RESTRICTED. Mixed stół odmawia każdego nowego admission. Resume własnego aktywnego miejsca zachowany. Denied JOIN może commitować restriction, lecz nie seat/buy-in ani has_human_participant; marker tylko przy zaakceptowanym admission/rejoin.
+- **FR-004**: Każdy rzeczywisty nowy transfer bot SYSTEM→ESCROW wymaga wspólnego gate is_farmer_only=false oraz bez RESTRICTED humans, także seed/replacement/managed top-up/managed initial seed. Klient, createdBy ani metadata nie stanowią dowodu.
+- **FR-005**: Aktualny mixed table zachowuje ręce, stacki, legalne akcje/leave/cash-out. Brak wymuszonego drain/kick. Wykrycie RESTRICTED wśród już siedzących ludzi utrwala is_farmer_only=true pod table lock; brak nowych bot CH także po naturalnym rozdzieleniu. Istniejące NORMAL miejsca są grandfathered tylko dla rejoin/legalnych akcji i wypłat, nie dla nowego wejścia.
 - **FR-006**: Brak/nieznana klasyfikacja lub niespójne membership daje odmowę nowych admissions/fundingu; denial nie może wycofać już utrwalonego RESTRICTED. Payout nie zależy od dostępności nowego gate/refillu.
 - **FR-007**: Automatyczny refill utrzymuje uprawnioną NORMAL-only grę tierów100/500 przy istniejących źródłach. Brak globalnego lifetime cap. Emisja wyłącznie na dokładny niedobór autoryzowanego dodatniego funding; RESTRICTED stół nie może wywołać ani otrzymać nowego funding/refillu, także z płynności uzupełnionej przez inny stół.
 - **FR-008**: Refill używa jednego istniejącego ledger, atomowego powiązania z fundingiem i trwałego klucza replay; brak podwójnej emisji po retry/restart/unknown commit/retention. Nie finansować botów kosztem salda człowieka.
 - **FR-009**: Nieudany refill degraduje tylko dotkniętą próbę nowego funding do braku nowych bot CH; istniejące legalne wypłaty zachowane. Praca ograniczona faktycznym planem/pojemnością stołu i skończonym retry, bez skanów i pętli mint. Nie dodawać zależności już zaakceptowanego settlement/cash-out od refill.
-- **FR-010**: Zachować CONTINUOUS_BOT, istniejące źródła100/500 i terminal return attribution. Nie dodawać klas stołów ani nowego silnika lobby. Direct/Quick Seat podlega temu samemu final JOIN.
+- **FR-010**: Zachować CONTINUOUS_BOT, istniejące źródła100/500 i terminal return attribution. Dodać jedynie monotoniczny boolean poker_tables.is_farmer_only, bez pełnych klas stołów ani nowego silnika lobby. Istniejący Create wyznacza marker z trwałej klasy twórcy po stronie serwera, nie z payloadu; nowe farmer-only są puste i bez botów. Nie claimować istniejącego zwykłego stołu. Direct/Quick Seat podlega temu samemu final JOIN.
 - **FR-011**: Neutralna odmowa niezgodnego Quick Seat jest dopuszczona; nie obiecywać automatycznego wyszukania zgodnego celu. Obecne progression tiers/Create UI pozostają.
 - **FR-012**: Wymagane tylko fundamentalne deterministic backend/runtime/transaction tests; JSP/global JS, klog, CSS jeden selektor na linię, CSP SHA dla nowego inline script. Nowy skrypt nie jest planowany.
 - **FR-013**: Przyszły same-repo PR z supabase/migrations może automatycznie mutować shared Stage przez DB Stage Apply PR; zamiar musi być jawny przed publikacją, applied migrations immutable/forward-only. Production osobny GO. Teraz tylko dokumentacja.
@@ -56,11 +56,11 @@ Nieznane konto/klasa, niepoprawny threshold, disconnected seated human, pending 
 
 ### Key Entities
 
-USER account z trwałą klasą; istniejące table/state/seat/ledger; receipt łączący emisję z konkretnym fundingiem. Szczegóły w data-model.md są potrzebne do opisania atomowości i retention.
+USER account z trwałą klasą; poker_tables.is_farmer_only; istniejące state/seat/ledger; receipt łączący emisję z konkretnym fundingiem. Szczegóły w data-model.md są potrzebne do opisania atomowości i retention.
 
 ## Success Criteria
 
-- **SC-001**: Wszystkie próby nowego mieszania klas, w tym równoczesne pierwsze JOIN, kończą się bez mixed admission i bez nielegalnego buy-in.
+- **SC-001**: Wszystkie próby nowego mieszania klas, w tym table hopping na świeże prefunded bot-only, trwałość markera po leave i równoczesne JOIN, kończą się bez mixed admission i bez nielegalnego buy-in.
 - **SC-002**: Każda z czterech znalezionych ścieżek fundingu daje zero nowych CH przy restricted; active mixed hand i cash-out kończą się bez podwójnego transferu.
 - **SC-003**: Emisja dla każdej operacji równa jest jej niedoborowi źródła i następuje najwyżej raz; RESTRICTED wywołuje zero emisji/fundingu, NORMAL-only gdzie indziej nadal może otrzymać refill.
 - **SC-004**: Przed aktywacją dostępne są fundamentalne wyniki oraz exact-runtime-SHA WS Preview i manual smoke; docs/review nie są zgodą na implementację/deploy.

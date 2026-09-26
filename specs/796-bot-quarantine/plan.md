@@ -4,7 +4,7 @@
 
 ## Summary
 
-Trwała klasa na USER, jeden shared access gate, istniejący authoritative JOIN i no-funding rollover, dokładny demand-driven autorefill. Farming NORMAL akceptowany; po detekcji brak nowych bot CH przy stole z RESTRICTED. Nowy model i kontrakt są potrzebne do opisania trwałych blokad, retry i gwarancji finansowych. Wszystko poniżej jest przyszłym planem.
+Trwała klasa na USER i boolean is_farmer_only na poker_tables, jeden shared access gate, istniejący authoritative JOIN i no-funding rollover, dokładny demand-driven autorefill. Farming NORMAL akceptowany; po detekcji brak nowych bot CH przy stole z RESTRICTED. Nowy model i kontrakt są potrzebne do opisania trwałych blokad, retry i gwarancji finansowych. Wszystko poniżej jest przyszłym planem.
 
 ## Technical Context
 
@@ -20,7 +20,7 @@ PASS: reuse istniejących plików/ledger/locks; WS authority; fail-closed nowe f
 
 - shared/poker-domain/poker-progression.mjs: zachować pure progression, współdzielić walidację authoritative balance; nie dodać detekcji do publicznego read endpointu.
 - Planowany shared/poker-domain/bot-access.mjs: parser threshold, batch locked USER facts, monotonic classifier, predicate classes/funding. Jeden helper jest uzasadniony trzema funding callers.
-- shared/poker-domain/join.mjs::executePokerJoinAuthoritative: classification przed nowym seat/buy-in; table/state serializują pusty stół, rejoin zachowany.
+- shared/poker-domain/join.mjs::executePokerJoinAuthoritative: classification przed nowym seat/buy-in; table/state serializują marker i membership, zwykły pusty stół nie przyjmuje RESTRICTED, istniejący rejoin zachowany.
 - shared/poker-domain/bots.mjs::seedBotsForJoin: gate przed seed writes, także continuous repository call; nie utracić existing funded bots przy pomijaniu seed.
 - ws-server/poker/persistence/persisted-state-writer.mjs::writeViaDb/writeReplacementFundings/writeManagedBotTopUps: gate przed funded CAS/seat/ledger; caller dostaje denied reason, nie fikcyjny receipt.
 - ws-server/server.mjs::runSettledRolloverCommand: rozszerzenie istniejącego bankroll500 no-funding fallback do obu tierów i restriction; table-manager.mjs::prepareSettledHandRollover allowBotFunding:false i restore zamiast niespójnego commit recalculation.
@@ -28,7 +28,7 @@ PASS: reuse istniejących plików/ledger/locks; WS authority; fail-closed nowe f
 - shared/poker-domain/table-economy.mjs: istniejące mapping źródeł, nie nowe pule. Planowany shared/poker-domain/bot-refill.mjs: postBotFundingWithRefill,exact deficit+funding+receipt w jednym istniejącym tx; bez nowego schedulera.
 - netlify/functions/_shared/chips-ledger.mjs: wąska walidacja internal demand-authorized SYSTEM→SYSTEM MINT; WS chips-ledger.mjs zachowuje TABLE_BUY_IN; uporządkowane account locks w dotkniętych finansowych ścieżkach obu adapterów, bez szerokiego refaktoru.
 - ws-server/poker/handlers/join.mjs, persistence/authoritative-join-adapter.mjs: neutralne denial; netlify/functions/poker-quick-seat.mjs::recommendSeatAtTable/handler nadal wskazówka, final JOIN authority. Brak nowego discovery/query/lobby engine.
-- shared/poker-domain/leave.mjs i terminal-close.mjs: przegląd i fundamentalne regresje; nie wywoływać gate z cash-out.
+- shared/poker-domain/leave.mjs i terminal-close.mjs: przegląd i fundamentalne regresje; nie wywoływać gate z cash-out. Leave/deferred finalization jedynie utrwala tabelowy marker już istniejącej restriction przed usunięciem membership, bez nowej przesłanki odmowy wypłaty.
 
 ## Kolejność transakcyjna
 
@@ -52,4 +52,14 @@ Research i projekt gotowe do niezależnego review, nie implementacja. Następnie
 
 ## Complexity Tracking
 
-Brak uzasadnianych naruszeń konstytucji. Jedna nowa tabela receipt do replay po retention; klasyfikacja wykorzystuje istniejący USER row. Usunięto policy/counter lifetime i scheduler refillu. Atomic deficit+funding jest mniejszy niż asynchroniczna emisja z rezerwacją i recheckiem. Pozostaje tylko pojedyncza ścieżka autorytatywna, bez EXPOSURE/drain/lobby rewrite.
+Brak uzasadnianych naruszeń konstytucji. Jedna nowa tabela receipt do replay po retention oraz jeden monotoniczny boolean na istniejącym poker_tables; klasyfikacja wykorzystuje istniejący USER row. Usunięto policy/counter lifetime i scheduler refillu. Atomic deficit+funding jest mniejszy niż asynchroniczna emisja z rezerwacją i recheckiem. Pozostaje tylko pojedyncza ścieżka autorytatywna, bez EXPOSURE/drain/lobby rewrite.
+
+## Table hopping — minimalna korekta
+
+Spec/kontrakt is_farmer_only obowiązuje wszystkie admissions,seed,replacement,managed top-up i refill; false oraz brak RESTRICTED ludzi są konieczne łącznie. Marker true zostaje po leave i zamknięciu. Utrwalić false→true dla już seated restricted także przy leave/deferred finalization, nie uzależniając legalnego payout od policy success. Unknown marker daje odmowę nowych finansów, nie default false.
+
+Create: netlify/functions/_shared/poker-table-init.mjs::createPokerTableWithState odczytuje trwałą klasę twórcy i wpisuje marker przy INSERT w istniejącej tx,bez seed. poker-create-table.mjs::handler i Quick Seat create korzystają z tego samego helpera; nie przyjmować marker z payload. Bez claim/relabel ordinary existing tables. Final join recheck nadal authority. Pierwszy farmer ma existing Create+JOIN,nie automatyczną grę jednoosobową.
+
+Projection: ws-server/poker/bootstrap/persisted-bootstrap-repository.mjs SELECT, persisted-bootstrap-db.mjs mapping, persisted-bootstrap-adapter.mjs→tableMeta.isFarmerOnly oraz table-manager.mjs metadata; potrzebne do poprawnego runtime recovery, nie nowe źródło prawdy. Locked JOIN i writer czytają właściwe pole DB nawet jeśli snapshot stary. CONTINUOUS_BOT lifecycle bez nowych typów; farmer nie przechodzi automatycznie do świeżego normalnego managed replacement.
+
+Breaking: RESTRICTED traci możliwość nowego wejścia także na zwykły pusty/bot-only stół; farmer-only nie odzyskuje bot availability po opróżnieniu. Existing mixed table może stać się trwale farmer-only; dotychczasowe legalne ręce/wypłaty zachowane. Brak nowego matchmaking engine,FAST/SLOW,EXPOSURE,90/10 lub drain.

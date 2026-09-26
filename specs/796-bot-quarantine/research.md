@@ -24,7 +24,7 @@ Klasyfikacja zaobserwowana staje się authoritative po COMMIT. Znana odmowa poli
 | persisted-state-writer.mjs::writeReplacementFundings | mutacja seat/stack i ledger w tej samej tx co state CAS |
 | persisted-state-writer.mjs::writeManagedBotTopUps | bot insert/topup i ledger w tej samej tx; nie tylko zwykły seed |
 
-Decision: jeden planowany shared/poker-domain/bot-access.mjs helper, używany przez JOIN/seed i writer; argumenty z locked membership i USER rows. Nie nowy silnik. Unknown membership fail-closed, brak query per lobby viewer/table. Odczyt wielu USER w jednym uporządkowanym query, liczba ograniczona pojemnością stołu. Bot-only ma pusty human set, nadal finance guards.
+Decision: jeden planowany shared/poker-domain/bot-access.mjs helper, używany przez JOIN/seed i writer; argumenty z locked membership i USER rows. Nie nowy silnik. Unknown membership fail-closed, brak query per lobby viewer/table. Odczyt wielu USER w jednym uporządkowanym query, liczba ograniczona pojemnością stołu. Bot-only ma pusty human set, ale marker true zawsze zabrania finansowania; nadal finance guards.
 
 ## R3 — mixed i finansowo neutralny rollover
 
@@ -42,7 +42,7 @@ Decision po wiążącej korekcie issue: usunąć lifetime policy/counter i osobn
 
 TREASURY nie wymaga wydzielonej puli100: lock istniejącego źródła od świeżego balance read do jego debitu sprawia, że inny stół/wydatek nie przejmie tej samej uzupełnionej kwoty między mint a funding. Wszystkie funding paths sprawdzają gate również gdy płynność już istnieje. RESTRICTED nie dostaje świeżych CH ze wspólnego source nawet po refillu dla NORMAL; nadal może legalnie wygrać wcześniej finansowany stack. Shared source powoduje contention, ale nie uzasadnia usunięcia autorefillu ani90/10.
 
-Wymagana eligible gra: brak RESTRICTED/unknown we wszystkich seated humans, joining human NORMAL jeśli występuje. Existing managed CONTINUOUS_BOT bot-only init/rollover zachowuje lifecycle: pusty human set przechodzi gate tylko przy rzeczywistym serwerowym managed planie, nie przy dowolnym żądaniu mint. Jest to zachowanie bez RESTRICTED, nie obejście dla twórcy stołu; dołączający RESTRICTED później korzysta wyłącznie ze starych stacków i blokuje każdy kolejny funding. Ordinary no-human bez existing authorized seed/rollover plan nie generuje zapotrzebowania.
+Wymagana eligible gra: is_farmer_only=false i brak RESTRICTED/unknown we wszystkich seated humans, joining human NORMAL jeśli występuje. Existing managed CONTINUOUS_BOT bot-only init/rollover zachowuje lifecycle: pusty human set przechodzi gate tylko przy rzeczywistym serwerowym managed planie, nie przy dowolnym żądaniu mint. Jest to zachowanie bez RESTRICTED, nie obejście dla twórcy stołu; próbujący dołączyć RESTRICTED później otrzymuje odmowę nowego JOIN do tego zwykłego managed stołu. Ordinary no-human bez existing authorized seed/rollover plan nie generuje zapotrzebowania.
 
 Granice techniczne: jeden composite refill na trwały funding_key, D<=F<=buyIn per bot; suma F<=liczba faktycznych deltas*buyIn, deltas<=maxPlayers. Seed/rollover przetwarzają jedną existing decyzję wersji, nie zapętlają kolejnych emisji. Source/GENESIS lock_timeout250ms, łączny deadline nowej operacji funding2s (statement_timeout ograniczony pozostałym budżetem; przekroczenie→rollback całej próby) jako propozycja do przyszłej runtime walidacji, nie zmierzone SLO. Najwyżej jedno kontrolowane ponowienie tej samej tożsamości po rozstrzygniętym rollback; unknown commit najpierw recovery. Brak background refill cykli i tight retry. Nowa próba wymaga aktualnego realnego niezaspokojonego planu, nie tylko nowego operationId. Istniejący runtime scheduler/backoff nie może wielokrotnie wyemitować tej samej delty.
 
@@ -74,3 +74,15 @@ terminal-close.mjs::executeTerminalPokerCloseInTx: table→state→seats→ESCRO
 | pełne WS-first lobby/max32, usunięcie Create | poza zakresem; final JOIN i neutralna odmowa |
 
 Mniejsza liczba stanów i query; ceną jest farming NORMAL poniżej progu i potencjalnie fałszywe restriction bogatych zwykłych kont. Autorefill utrzymuje dostępność NORMAL, z wyjątkiem rzeczywistych awarii/timeoutów. Przyjęcie #1018 nie wdraża ani nie kasuje #869. Użytkownik wybierze alternatywę po review.
+
+## R6 — zamknięcie table hopping (review a6a2107)
+
+Schema sprawdzona: poker_tables ma lifecycle_kind STANDARD/CONTINUOUS_BOT,managed_profile_key i one-way has_human_participant; brak farmer/quarantine pola. Wybrano is_farmer_only boolean NOT NULL DEFAULT false z one-way ochroną true. Nie nowe klasy z #869 i nie replacement lifecycle.
+
+Nie wystarczy dynamiczny human gate: restricted mógł zużyć prefunded stół, odejść i wrócić po refill. Zwykły pusty/prefunded/CONTINUOUS_BOT stół odmawia nowego RESTRICTED zawsze. Farmer-only odmawia NORMAL i każdego bot funding/refillu również pusty. Wykryty już seated człowiek utrwala marker przy następnej authoritative kontroli; jego dotychczasowi NORMAL współgracze zachowują rękę/rejoin/legalne leave, ale nie nowe admission. Leave/deferred finalization utrwala marker istniejącej restriction przed usunięciem membership, bez nowego payout eligibility gate (kontrakt). Nie ma globalnego fanout/drain.
+
+Minimalny start: existing poker-create-table.mjs::handler→_shared/poker-table-init.mjs::createPokerTableWithState tworzy table+INIT+empty ESCROW, bez seed. Helper wyznacza marker z trwałej klasy authenticated twórcy, atomowo przy INSERT. Wszyscy callers współdzielą helper; managed no-human create nie omija późniejszego JOIN gate. Claim istniejącego zwykłego stołu odrzucony: wymagałby dodatkowych dowodów pustki/funding history i grozi przejęciem prefunded inventory. Pierwszy farmer może utworzyć i zająć farmer-only, czeka na drugiego bez finansowanych botów. Istniejące progression/stakes nadal obowiązują.
+
+Runtime projected tableMeta.isFarmerOnly przez bootstrap repository/db/adapter i table-manager jest tylko projekcją; final JOIN/funding sprawdza locked DB marker. Brak nowego lobby engine; błędna rekomendacja może neutralnie odmówić. Zwykłe managed replacement tables pozostają ordinary i odmawiają RESTRICTED; nie przenosić farmer membership automatycznie na nowy normalny stół. Quarantined table nie jest resetowane ani relabel przy rotacji/reuse.
+
+Cztery fundamentalne scenariusze: restricted fresh prefunded/continuous odmowa; leave/restart marker sticky i zero refill; normal farmer-only odmowa/drugi restricted sukces; restricted Create→empty INIT farmer-only→JOIN zero bot CH. Wykorzystać existing join/leave/writer/create behavior tests, bez UI tests. Historyczna zasada empty first-class claim/dynamic funding reset jest zastąpiona tą korektą.
