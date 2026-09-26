@@ -15,7 +15,7 @@ Użyć istniejącego node:test; pojedynczo uruchomić dotknięte shared/poker-do
 | RESTRICTED fresh prefunded/CONTINUOUS_BOT ordinary | denied bez seat/buy-in,bez claim |
 | NORMAL vs drugi RESTRICTED na farmer-only | NORMAL denied,RESTRICTED accepted |
 | Ostatni farmer leave/restart | is_farmer_only=true,zero seed/replacement/topup/refill mimo braku ludzi |
-| Pierwszy RESTRICTED existing Create→JOIN | atomic farmer-only INIT/empty ESCROW,zero bot CH; czeka na drugiego |
+| Durable NORMAL,balance>=threshold,existing Create→JOIN | wspólny classifier commit RESTRICTED+farmer-only INIT/empty ESCROW;następny JOIN succeeds,zero bot CH |
 | seed/managed seed/replacement/topup | zero nowych CH przy restricted; existing stacks bez zmian |
 | mixed active hand, disconnected/pending leave | gra/settlement/cash-out zachowane, gate obejmuje seated człowieka |
 | unfunded rollover | brak inflated candidate commit, restore poprawnej wersji, brak wymuszonego close |
@@ -41,3 +41,5 @@ Breaking review table hopping: farmer-only jest trwałe i nie staje się normaln
 Przed T001 zsynchronizować live issue #1018 z farmer-only,którego starsza treść issue nie opisuje; adnotacja issue-source nie wystarcza. Potem osobne zlecenie implementacji. Nie modyfikować #869/#1017.
 
 Przyszłe fundamentalne przypadki: D=0 tylko funding registry; D>0 atomic pair/replay/unknown; typed MINT w7d bot-only i30d closed-human export/prune; unrelated MINT excluded; missing-table cleanup i retry starego key po usunięciu registry→zero emisji; cleanup vs funding race. Weryfikować manifest/hash,table binding i brak permanentnego hot MINT/receipt. Nowa tabela receipts nie jest wymagana. To scenariusze przyszłe,bez DB/testów teraz.
+
+WS i Netlify Create muszą korzystać z tego samego singletonu threshold/revision i shared helpera,bez independent env override. Missing config odmawia nowych decyzji;nie tworzy ordinary fallback. Trusted managed userId=null nie klasyfikuje człowieka. Nie wykonywać teraz konfiguracji/DB operacji.
