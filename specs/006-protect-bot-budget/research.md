@@ -1,3 +1,9 @@
+# Aktualizacja Q1 — pełny registry
+
+Pełny registry WS, nie prefiks: jeden authoritative WS na środowisko jest potwierdzony. Przejrzeć wszystkie aktualne live entries w pamięci, ustalić eligibility i wspólną kolejność, dopiero potem ograniczyć payload do32 pasujących JOIN. Graj teraz znajduje również cel za32 wpisem. Create wymaga kompletnej oceny całego bieżącego registry, braku pasującego celu i świeżego pełnego preflight. Unknown/incomplete/stale/proof overflow nigdy nie oznacza no-offer. Brak wyjątku create z powodu celu poza sprawdzonym prefiksem.
+
+Wcześniejsze T042/T042-U i scope-prefix propozycje poniżej historyczne, zastąpione tą decyzją. Jeden WS potwierdzony przez właściciela; brak nowych pomiarów. Bieżące scenariusze: cel33 poza pierwszymi niekwalifikującymi32, ponad32 pasujące→32 wyświetlone, pełny no-match vs unknown. Szczegóły plan/kontrakt.
+
 # Research — bieżący status Q1
 
 WS-first zatwierdzone issue2026-09-25T21:18:32Z. Konkretny aktualny projekt w plan.md/kontrakcie Q1. Poniższe porównania SQL-vs-WS, T042 i T042-U stanowią **historię**, nie otwarte warianty źródła inventory ani bramkę dalszych benchmarków. T042-U wstrzymane/nieautoryzowane. S1-A bez zmian.

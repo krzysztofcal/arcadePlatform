@@ -13,8 +13,8 @@
 
 ## Requirement Completeness
 
-- [ ] No unresolved clarification markers remain — Q1 do review
-- [ ] Requirements are testable and unambiguous — Q1 wymagają zamknięcia
+- [x] No unresolved clarification markers remain — kierunek i zakres Q1 zatwierdzone
+- [x] Requirements are testable and unambiguous — projekt nadal podlega niezależnemu review
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
@@ -31,12 +31,9 @@
 
 ## Notes i aktualny speckit-analyze
 
-Issue updatedAt2026-09-25T21:18:32Z zatwierdza WS-only inventory i selekcję. S1-A,D1–D3 zamknięte. SQL pomiary historyczne; T042-U wstrzymane, nie bramka projektu. T043 obejmuje obecny projekt i niezależne review; osobna implementacja nadal wymagana.
+Issue updatedAt2026-09-25T22:11:54Z zatwierdza WS-only inventory i selekcję. S1-A,D1–D3 zamknięte. SQL pomiary historyczne; T042-U wstrzymane, nie bramka projektu. T043 obejmuje obecny projekt i niezależne review; osobna implementacja nadal wymagana.
 
-| ID | Severity | Lokalizacja | Otwarty zakres |
-|---|---|---|---|
-| W1 | HIGH | plan/kontrakt Q1, T043/T038 | Review proponowanych32 entries/32KiB/proof/work bounds; wartości to bezpieczniki propozycji, nie pomiary lub SLO. Przed implementacją zatwierdzić, T038 później waliduje koszty. |
-| W2 | HIGH | plan/kontrakt Q1 | Potwierdzić topologię jednego authoritative runtime lub świadomy zakres lokalnego registry; przy rozłącznych procesach brak bezpiecznie opisanego cross-runtime routing. Nie dodawać usługi bez dowodu. |
+Aktualna decyzja zamyka W1 w zakresie search/display i W2 topologii: pełna ocena registry,≤32 matching JOIN wyświetlane,jeden WS/środowisko. Pozostałe bezpieczniki kosztu to przyszła walidacja T038, nie nierozstrzygnięta polityka create.
 
 | Pokrycie wymagań | Zadania |
 |---|---|
@@ -47,4 +44,4 @@ Issue updatedAt2026-09-25T21:18:32Z zatwierdza WS-only inventory i selekcję. S1
 | FR-025–032, SC-006 | T001–003/T024/T034–039 |
 | FR-033–034, SC-007 | T013/T015–018/T022/T028–033/T036/T038/T043 (T042 tylko historia) |
 
-41 wymagań,43 IDs zadań (T042 historyczne częściowe),100% mapowania,0 nieprzypisanych;0 CRITICAL,2 jawne HIGH W1/W2 do review, bez pozostałych wykrytych sprzeczności. Brak naruszeń konstytucji. Jakość14/16;60 economy pytań własnością reviewera. Sprawdzono brak nowych testów UI/środowisk, WS-only vs DB-proof, receipt, T042-U historyczne i breaking changes. Nie jest to wykonanie testów ani zgoda implementacji. STOP na dokumentach.
+41 wymagań,43 IDs zadań (T042 historyczne częściowe),100% mapowania,0 nieprzypisanych;0 CRITICAL,0 otwartych HIGH po tej korekcie, bez pozostałych wykrytych sprzeczności. Brak naruszeń konstytucji. Jakość16/16;60 economy pytań własnością reviewera. Sprawdzono brak nowych testów UI/środowisk, WS-only vs DB-proof, receipt, T042-U historyczne i breaking changes. Nie jest to wykonanie testów ani zgoda implementacji. STOP na dokumentach.

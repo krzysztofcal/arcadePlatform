@@ -1,3 +1,9 @@
+# Aktualizacja Q1 — pełny registry
+
+Pełny registry WS, nie prefiks: jeden authoritative WS na środowisko jest potwierdzony. Przejrzeć wszystkie aktualne live entries w pamięci, ustalić eligibility i wspólną kolejność, dopiero potem ograniczyć payload do32 pasujących JOIN. Graj teraz znajduje również cel za32 wpisem. Create wymaga kompletnej oceny całego bieżącego registry, braku pasującego celu i świeżego pełnego preflight. Unknown/incomplete/stale/proof overflow nigdy nie oznacza no-offer. Brak wyjątku create z powodu celu poza sprawdzonym prefiksem.
+
+Wcześniejsze T042/T042-U i scope-prefix propozycje poniżej historyczne, zastąpione tą decyzją. Jeden WS potwierdzony przez właściciela; brak nowych pomiarów. Bieżące scenariusze: cel33 poza pierwszymi niekwalifikującymi32, ponad32 pasujące→32 wyświetlone, pełny no-match vs unknown. Szczegóły plan/kontrakt.
+
 # Quickstart — aktualna bramka WS-first
 
 Zatwierdzony WS-only inventory i selekcja. T042/T042-U poniżej zachowane jako **historyczne protokoły i wyniki**, T042-U wstrzymane i nieautoryzowane, brak wymogu ich wykonania przed projektem WS. Bieżąca kolejność: projekt T043→niezależne review→osobne zlecenie T001→implementacja→T038. Nie uruchamiać teraz żadnej walidacji.
@@ -109,7 +115,7 @@ Manual przyszły Preview: Graj teraz zawsze obecne przy pustej i niepustej liśc
 
 ## Bieżący handoff: SLOW_SHARED, jeden klik i pomiary Q1
 
-Tylko plan. S1-A zatwierdzone: tylko lokalny trigger rzeczywiście wymaganego dodatniego finansowania. Przed implementacją rozstrzygnąć Q1 A indexed SQL vs B1 bounded registry read (C tylko jeśli pomiary uzasadnią). T042 osobno autoryzowane lokalne plany zapytań i uzasadnienie K/L/B/D/C poprzedza zamrożenie discovery; T038 przyszły jawny Stage/WS Preview baseline vs implementacja, nie wykonywać teraz. Żadnych arbitralnych100/2×50 jako acceptance. Koszty/warianty: plan Q1.
+Tylko plan. S1-A zatwierdzone. Q1: jeden WS, pełny przegląd live registry w pamięci, do32 pasujących ofert w payload. T042/T042-U są historią, nie bramką projektu. T038 obejmuje przyszłą osobno autoryzowaną walidację kosztów i świeżości; teraz nie wykonywać pomiarów.
 
 Manual Preview: brak panelu Create/tier/maxPlayers/trybu w zwykłym lobby; przycisk Graj teraz stale widoczny. Browse/refresh/reconnect puste lub niepuste→zero create/seat/funding. Lista wszystkich eligible tierów+oddzielne Resume; click pierwszy nadal właściwy cel używa jego parametrów, stale→drugi bez click. Empty→najwyższy rzeczywiście grywalny tier/canonical6,≤1 create i auto-join. Brak budget/pool/proof/WS/DB→uczciwa alternatywa, zero fake create i silent mode switch. Admin create/inventory nadal autoryzowane.
 

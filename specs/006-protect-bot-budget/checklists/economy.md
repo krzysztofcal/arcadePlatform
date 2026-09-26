@@ -111,7 +111,7 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 - [ ] CHK056 Czy oba rodzaje proof i kompensacja używają tej samej to_state_version oraz jawnej unikalności i relacji pending/final? [Clarity, data-model, T006]
 
 - [ ] CHK057 Czy tylko dwa rodzaje MATCH receipt mają jawne kolumny/unique/replay, a kilka kart odzyskuje in-flight wynik przed drugim create? [data-model §3, T006/T033]
-- [ ] CHK058 Czy complete/current/ready scoped WS no-offer jest odróżnione od bootstrap/truncation/stale/proof failure, bez SQL inventory i create przy unknown? [FR-011/012/034,T015–018]
+- [ ] CHK058 Czy pełny registry jest oceniany przed no-offer/create, cel za32 pozostaje osiągalny, a limit32 dotyczy wyłącznie pasujących ofert wyświetlanych? [FR-011/012/034,T015–018]
 
 - [ ] CHK059 Czy shared SLOW autoryzuje każdego człowieka i zachowuje jeden FUNDING, a dodatnia wymagana odmowa/zero bez kosztu/rolling fractions/sticky drain mają rozłączne scenariusze? [FR-004/007/010/013, S1]
-- [ ] CHK060 Czy WS-first i S1-A zamknięte, a request/result/create/replay, proponowane bounds i runtime topology poddano review bez nowego domyślnego HTTP/Caddy oraz bez T042-U jako bramki? [plan Q1,T043]
+- [ ] CHK060 Czy potwierdzony jeden WS, brak SQL inventory i batch/coalescing dowodów zapewniają brak viewer×table query, a niepełny proof/revision oznacza unknown bez create? [plan Q1,T043/T038]
