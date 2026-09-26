@@ -31,7 +31,7 @@
 
 ## Notes i aktualny speckit-analyze
 
-Issue updatedAt2026-09-25T22:11:54Z zatwierdza WS-only inventory i selekcję. S1-A,D1–D3 zamknięte. SQL pomiary historyczne; T042-U wstrzymane, nie bramka projektu. T043 obejmuje obecny projekt i niezależne review; osobna implementacja nadal wymagana.
+Issue updatedAt2026-09-25T22:11:54Z zatwierdza WS-only inventory i selekcję. S1-A,D1–D3 zamknięte. SQL pomiary historyczne; T042-U wstrzymane, nie bramka projektu. T043 zakończone po niezależnym review i usunięciu starego otwartego punktu Q1 w spec.md. Ponowny speckit-analyze:0 CRITICAL/HIGH; osobne zlecenie T001 nadal wymagane.
 
 Aktualna decyzja zamyka W1 w zakresie search/display i W2 topologii: pełna ocena registry,≤32 matching JOIN wyświetlane,jeden WS/środowisko. Pozostałe bezpieczniki kosztu to przyszła walidacja T038, nie nierozstrzygnięta polityka create.
 

@@ -18,7 +18,7 @@ Każda pozycja zawiera ścieżki od root, zależności („Po”), mapowanie FR/
 ### Przed implementacją — dowody i decyzja Q1
 
 - [ ] T042 HISTORYCZNE: częściowa lokalna próba opisana w research.md. T042-U wstrzymane/nieautoryzowane; nie kończyć SQL benchmarków jako bramki WS-first. Dowody pozostają z ograniczeniami. FR-034, SC-007.
-- [ ] T043 DOCS-ONLY: po decyzji WS-first przygotować konkretny przepływ w plan.md/contracts, uzgodnić zadania i poddać niezależnemu review. Projekt zapisany w bieżącej korekcie; checkbox oczekuje review. Bez zależności od zakończenia T042/T042-U. Gotowe: rozstrzygnięty protocol/create/replay/readiness, zaakceptowane bezpieczniki/topologia, analyze; osobne zlecenie T001 nadal wymagane. FR-031/033/034, SC-007.
+- [x] T043 DOCS-ONLY: po decyzji WS-first przygotować konkretny przepływ w plan.md/contracts, uzgodnić zadania i poddać niezależnemu review. Zakończone 2026-09-26: niezależne review HEAD106295c1f918581d7ad7ef09d2287eb028441bca zaakceptowane z korektą starego punktu Q1 w spec.md; korekta wykonana, ponowna analiza bez CRITICAL/HIGH. Bez zależności od zakończenia T042/T042-U. Gotowe: rozstrzygnięty protocol/create/replay/readiness, zaakceptowane bezpieczniki/topologia, analyze; osobne zlecenie T001 nadal wymagane. FR-031/033/034, SC-007.
 
 Kolejność bieżąca: T043 projekt WS-first i review→T001 osobna implementacja. T042/T042-U nie są bramką wyboru inventory; WS zatwierdzony.
 
@@ -113,7 +113,7 @@ Najpierw zatwierdzenie planu przy już zamkniętych D1–D3, potem schema bez ak
 
 T002 dowód: research.md „T002 — wykonana analiza read-only”, main93d0f191c3f87006d56f7afb2fb1c4052a7ecb84; proponowany ograniczony protokół T042 w quickstart.md, oczekuje osobnej zgody. Żadnych pomiarów wykonanych.
 
-T042 status: wykonano ograniczoną próbę72 sekwencji; częściowe dowody w research.md, nieukończone przypadki jawne. Checkbox pozostaje otwarty: brak pełnego wykonania protokołu. Nie uruchamiać T043 ani dalszych pomiarów automatycznie; limit tej próby wyczerpany.
+T042 status: wykonano ograniczoną próbę72 sekwencji; częściowe dowody w research.md, nieukończone przypadki jawne. Checkbox pozostaje otwarty: brak pełnego wykonania protokołu. Historyczny STOP tej próby: limit wyczerpany; dalszych pomiarów nie uruchamiać. T043 zakończono później po zatwierdzeniu WS-first i niezależnym review, bez dodatkowych pomiarów.
 
 T042-U: zachowane historycznie w quickstart, wstrzymane i nieautoryzowane; nie wykonywać i nie blokować projektu WS-first.
 

@@ -6,7 +6,7 @@ Wcześniejsze T042/T042-U i scope-prefix propozycje poniżej historyczne, zastą
 
 # Quickstart — aktualna bramka WS-first
 
-Zatwierdzony WS-only inventory i selekcja. T042/T042-U poniżej zachowane jako **historyczne protokoły i wyniki**, T042-U wstrzymane i nieautoryzowane, brak wymogu ich wykonania przed projektem WS. Bieżąca kolejność: projekt T043→niezależne review→osobne zlecenie T001→implementacja→T038. Nie uruchamiać teraz żadnej walidacji.
+Zatwierdzony WS-only inventory i selekcja. T042/T042-U poniżej zachowane jako **historyczne protokoły i wyniki**, T042-U wstrzymane i nieautoryzowane, brak wymogu ich wykonania przed projektem WS. T043 zakończone po niezależnym review i korekcie Q1. Następna bramka: osobne zlecenie T001→implementacja→T038. Nie uruchamiać teraz żadnej walidacji.
 
 ## HISTORIA — wcześniejsze protokoły i decyzje zastąpione przez WS-first
 

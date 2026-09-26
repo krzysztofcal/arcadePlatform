@@ -31,7 +31,7 @@ Rozszerzyć istniejący authoritative join i persist-before-commit rollover o tr
 | IV — JSP/CSS/CSP/klog | PASS | PASS: minimalna prezentacja; brak browser imports; hash inline w tej samej zmianie |
 | V — testy fundamentalne, konkretne ścieżki | PASS | PASS: tylko krytyczne admission/finanse/lifecycle/runtime; bez UI/CSS/JSP test suites i pełnego kodu |
 | Stage apply / Preview | PASS jako plan | PASS jako wymaganie przyszłej realizacji; dowodów wykonania obecnie brak |
-| Spec Kit: status decyzji | D1–D3,S1-A i WS-first zatwierdzone | T043 docs-only projekt do review; limity/topologia jawne, bez zgody implementacji |
+| Spec Kit: status decyzji | D1–D3,S1-A i WS-first zatwierdzone | T043 zakończone po review i korekcie Q1; koszty do T038, bez zgody implementacji |
 
 Bramki konstytucji oceniają zgodność projektu, nie działającą implementację. D1–D3 nie są wyjątkami od konstytucji. Nie zmieniać konstytucji, ignore files, tooling ani zależności.
 
@@ -358,7 +358,7 @@ Generacja registry i proof musi być zgodna przy publikacji/no-offer. Jeśli zmi
 
 ### Review techniczne i breaking changes
 
-Q1 kierunek i jeden WS na środowisko zatwierdzone; nie projektować cross-runtime routing, endpointu/Caddy ani usługi na hipotetyczną topologię. Pełny registry i limit32 wyświetlania obowiązują. Projekt T043 podlega niezależnemu review bez nowych benchmarków SQL jako bramki. T038 musi potwierdzić rzeczywiste koszty/świeżość/rozliczenia.
+Q1 kierunek i jeden WS na środowisko zatwierdzone; nie projektować cross-runtime routing, endpointu/Caddy ani usługi na hipotetyczną topologię. Pełny registry i limit32 wyświetlania obowiązują. T043 zakończone po niezależnym review i korekcie nieaktualnego punktu Q1; nowe benchmarki SQL nie były bramką. T038 musi potwierdzić rzeczywiste koszty/świeżość/rozliczenia.
 
 Breaking: stary HTTP Quick Seat410, nowy WS command/result i personalny lobby payload; stary klient nie może dostać fallback SQL. Usunięty manual Create, auto-join wykonany przed nawigacją i idempotentne Resume po niej. Po reconnect epoch mismatch odrzuca stare oferty, odzyskuje trwałą operację. SLOW_SHARED/migracje/drain/provenance i admin inventory bez zmian względem zatwierdzonego planu. JSP global/IIFE,klog,CSS jedna linia na selector,CSP SHA ewentualnego inline; tylko fundamentalne backend/runtime/transaction tests, UI ręcznie Preview.
 

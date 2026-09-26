@@ -175,10 +175,10 @@ Operator ma osobne fundusze 100/500, twardą ochronę klas 90/10 oraz emisję wy
 
 Issue updatedAt2026-09-25T22:11:54Z: obowiązuje WS-only inventory/wybór, shared SLOW; projekt techniczny podlega review bez benchmarków SQL jako bramki; wcześniejszy problem ręcznej kontynuacji nie jest otwartą decyzją.
 
-### Otwarte decyzje do niezależnego review
+### Zatwierdzone decyzje i przyszła walidacja
 
 - **S1-A zatwierdzony:** tylko stół A z odmową autoryzacji rzeczywiście potrzebnego dodatniego nowego finansowania botów przechodzi w DRAINING. Inne stoły działają do własnej potrzeby takiego finansowania; zero allowance bez nowego finansowania nie wyzwala drain. Globalny FAST bez zmian.
-- **Q1:** wybór najmniejszego dowiedzionego źródła dostępności i zmierzonych granic odczytu. Plan porównuje SQL/batch, registry WS i minimalną projekcję. Brak DB pomiarów podczas tej korekty; niezależne review i przyszła walidacja wymagane przed zamrożeniem rozwiązania.
+- **Q1 zatwierdzone:** WS-first, pełny aktualny live registry w pamięci, maksymalnie32 pasujące oferty wyłącznie w payloadzie i jeden WS na środowisko. Źródło dostępności nie jest otwartą decyzją architektoniczną. Koszty Supabase i granice operacyjne pozostają do przyszłej walidacji T038; nie wymaga to ponownego wyboru SQL vs WS.
 
 Acceptance SLOW: dwóch ludzi dostaje po0,5 exposure z jednego FUNDING50CH/T100; zero dodatkowego USER debitu. Gdy siedzący człowiek nie mieści rzeczywiście wymaganego dodatniego kosztu, stół ma jeden pierwszy trigger i sticky+30min. Sam zero limit bez nowego kosztu nie przerywa gry. Po zużyciu0,4+0,6 godzinę później odnowienie0,4 po12h nie usuwa drain; pełna1 po13h. Równoczesne odmowy nie przesuwają czasu, brak partial funding, bieżąca ręka i legalne wypłaty zachowane. Dwa stoły sprawdzić według zatwierdzonego S1-A.
 
