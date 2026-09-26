@@ -99,7 +99,7 @@ Poziom: szczegółowy, finanse i authoritative access/lifecycle. Odbiorca: nieza
 
 - [ ] CHK048 Czy źródło cfg WS, wersja, freshness i zmiana przed join mają jednoznaczny kontrakt bez lokalnego env/per-candidate fetch? [Clarity, Spec FR-033]
 - [ ] CHK049 Czy model kosztu obejmuje częstotliwość, RT/rows/bytes, concurrency, locks i bounded retry wszystkich ścieżek, bez viewer×table/admin N+1? [Completeness, Spec FR-034, plan D.3]
-- [ ] CHK050 Czy nieukończony/błędny odczyt, niepełny proof i overload oznaczają jawny unavailable/zero create/mint (odmiennie od ukończonego zakresu bez oferty) z zachowaniem priorytetu rozliczeń i granic DB outage? [Consistency, Spec FR-034, SC-007]
+- [ ] CHK050 Czy nieukończony/błędny odczyt, niepełny proof i overload oznaczają jawny unavailable/zero create/mint (odmiennie od pełnej oceny całego aktualnego loaded/ready live registry WS bez pasującego stołu i z kompletnym preflight) z zachowaniem priorytetu rozliczeń i granic DB outage? [Consistency, Spec FR-034, SC-007]
 - [ ] CHK051 Czy exact refill i trwały backlog pozostają zgodne z 168h, kapitalizacją i brakiem częściowych dowodów przy granicach pracy? [Coverage, Spec FR-020–024, FR-034]
 - [ ] CHK052 Czy pomiar baseline/Stage oddziela egress od CPU/I/O/WAL/locks, ogranicza obciążenie i nie ogłasza niezmierzonych SLO? [Measurability, quickstart D.3, SC-007]
 

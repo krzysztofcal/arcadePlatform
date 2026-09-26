@@ -18,7 +18,7 @@ Każda pozycja zawiera ścieżki od root, zależności („Po”), mapowanie FR/
 ### Przed implementacją — dowody i decyzja Q1
 
 - [ ] T042 HISTORYCZNE: częściowa lokalna próba opisana w research.md. T042-U wstrzymane/nieautoryzowane; nie kończyć SQL benchmarków jako bramki WS-first. Dowody pozostają z ograniczeniami. FR-034, SC-007.
-- [x] T043 DOCS-ONLY: po decyzji WS-first przygotować konkretny przepływ w plan.md/contracts, uzgodnić zadania i poddać niezależnemu review. Zakończone 2026-09-26: niezależne review HEAD106295c1f918581d7ad7ef09d2287eb028441bca zaakceptowane z korektą starego punktu Q1 w spec.md; korekta wykonana, ponowna analiza bez CRITICAL/HIGH. Bez zależności od zakończenia T042/T042-U. Gotowe: rozstrzygnięty protocol/create/replay/readiness, zaakceptowane bezpieczniki/topologia, analyze; osobne zlecenie T001 nadal wymagane. FR-031/033/034, SC-007.
+- [x] T043 DOCS-ONLY: po decyzji WS-first przygotować konkretny przepływ w plan.md/contracts, uzgodnić zadania i poddać niezależnemu review. Zakończone 2026-09-26: niezależne review HEAD106295c1f918581d7ad7ef09d2287eb028441bca zaakceptowane z korektą starego punktu Q1 w spec.md; korekta wykonana; dodatkowo uzgodniono FR-034 i wszystkie aktualne zapisy no-match/create z pełnym registry. Ponowna analiza bez CRITICAL/HIGH; T043 zakończone, STOP przed T001. Bez zależności od zakończenia T042/T042-U. Gotowe: rozstrzygnięty protocol/create/replay/readiness, zaakceptowane bezpieczniki/topologia, analyze; osobne zlecenie T001 nadal wymagane. FR-031/033/034, SC-007.
 
 Kolejność bieżąca: T043 projekt WS-first i review→T001 osobna implementacja. T042/T042-U nie są bramką wyboru inventory; WS zatwierdzony.
 
