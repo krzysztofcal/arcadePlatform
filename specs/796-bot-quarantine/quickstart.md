@@ -2,7 +2,7 @@
 
 ## STOP / approvals
 
-Teraz docs-only, bez implementacji, DB, Stage/Production, deployu, seed/refill. Najpierw niezależne review alternatywy #1018 vs #869 i proponowanych cap lifetime100000/500000; potem osobne zlecenie T001. Refill initial disabled. Żaden test opisany niżej nie został wykonany.
+Teraz docs-only, bez implementacji, DB, Stage/Production, deployu, seed/refill. Najpierw niezależne review alternatywy #1018 vs #869 i zatwierdzonej polityki demand-driven NORMAL autorefill; potem osobne zlecenie T001. Aktywacja/mint dopiero w osobno autoryzowanym zakresie. Żaden test opisany niżej nie został wykonany.
 
 ## Lokalna fundamentalna weryfikacja po zleceniu
 
@@ -11,22 +11,22 @@ Użyć istniejącego node:test; pojedynczo uruchomić dotknięte shared/poker-do
 | Przypadek | Oczekiwany dowód |
 |---|---|
 | threshold−1/=threshold, restart/spadek | sticky class, one first detection; missing USER unknown |
-| deny tier/full/class po detekcji | commit restriction, brak seat/buy-in; SQL failure rollback/unknown jawny |
+| deny tier/full/class po detekcji | commit restriction, brak seat/buy-in; jeden przypadek bot-only false→denied zachowuje has_human_participant=false; SQL failure rollback/unknown jawny |
 | NORMAL vs RESTRICTED jednocześnie empty/bot-only | jeden typ admission pod table lock |
 | seed/managed seed/replacement/topup | zero nowych CH przy restricted; existing stacks bez zmian |
 | mixed active hand, disconnected/pending leave | gra/settlement/cash-out zachowane, gate obejmuje seated człowieka |
 | unfunded rollover | brak inflated candidate commit, restore poprawnej wersji, brak wymuszonego close |
-| remaining cap poniżej/równe buy-in,2refille,restart/unknown | cap/receipt/ledger atomowe, replay exactly once |
+| source niedobór/pełny,2NORMAL refille,restart/unknown | exact deficit+funding+receipt atomowe,replay exactly once; RESTRICTED obok nie blokuje NORMAL i nie wywołuje refillu |
 | invalid source/env/client metadata,retention | zero mint/admission bypass, replay po prune |
 
 ## Stage i Preview później
 
-Same-repo migration PR może automatycznie uruchomić DB Stage Apply PR i mutować shared Stage. Ten efekt musi być jawny przed przyszłym push; applied migrations immutable/forward-only. Przed cutover ograniczyć nowe admissions/funding; nie przerywać rąk/wypłat. Schema przed runtime, wszystkie writers aktualne. Rollback nie może uruchamiać starego uncapped/unrestricted writer; funding pozostaje wyłączone do naprawy.
+Same-repo migration PR może automatycznie uruchomić DB Stage Apply PR i mutować shared Stage. Ten efekt musi być jawny przed przyszłym push; applied migrations immutable/forward-only. Przed cutover ograniczyć nowe admissions/funding; nie przerywać rąk/wypłat. Schema przed runtime, wszystkie writers aktualne. Rollback nie może uruchamiać starego unrestricted/nieidempotentnego writer; funding pozostaje wyłączone do naprawy.
 
 WS-affecting implementacja wymaga manual WS Preview Deploy z definicji main i dokładnego latest runtime SHA, potwierdzonego sukcesu. Netlify Preview/WS checks nie dowodzą wdrożenia WS. Osobne okno na shared Preview, bez automatycznego deployu każdego PR. Użytkownik może wykonać manual smoke; bez niego status implementation ready, awaiting manual runtime verification, nigdy merge-ready.
 
-Manual smoke: istniejące lobby/Create/Quick Seat i direct join; neutralna odmowa przeciwnej klasy; dwóch restricted razem; mixed bez kick; CONTINUOUS_BOT no-funding fallback i legalny cash-out. Obserwować mały kontrolowany przebieg (bez load): query count, rows/bytes, locks/retry, latency JOIN/settlement/leave, klog oraz receipts. Bez UI/CSS/JSP rendering tests. Nie uruchamiać refillu/mint na środowisku bez osobnego zakresu i zatwierdzonego cap. Production zawsze osobny GO; brak merge przez agenta.
+Manual smoke: istniejące lobby/Create/Quick Seat i direct join; neutralna odmowa przeciwnej klasy; dwóch restricted razem; mixed bez kick; CONTINUOUS_BOT no-funding fallback i legalny cash-out. Obserwować mały kontrolowany przebieg (bez load): query count, rows/bytes, locks/retry, latency JOIN/settlement/leave, klog oraz receipts. Bez UI/CSS/JSP rendering tests. Nie uruchamiać refillu/mint na środowisku bez osobnego zakresu i zatwierdzonego zakresu operacji. Production zawsze osobny GO; brak merge przez agenta.
 
 ## Ograniczenia i breaking impacts
 
-Brak automatic unban; bogaci gracze mogą wymagać odrębnego audytowanego review. Leniwy próg nie mierzy escrow/peaków. Farmer poniżej progu nadal działa; shared TREASURY poza poker może otrzymać inne środki, więc cap dotyczy wyłącznie emisji tego refillera. Brak obietnicy bot availability po cap; istniejąca płynność/zwroty nadal legalne. Stale Quick Seat może neutralnie odmówić, bez nowego lobby engine. Parametry pracy refillera wymagają runtime walidacji, nie są zmierzonym SLO.
+Brak automatic unban; bogaci gracze mogą wymagać odrębnego audytowanego review. Leniwy próg nie mierzy escrow/peaków. Farmer poniżej progu nadal działa; shared TREASURY wymaga source lock dla atomic deficit+debit. Brak lifetime limitu; NORMAL farming może powodować dalszą emisję, co jest zatwierdzone. RESTRICTED nie otrzymuje nowych bot CH nawet ze źródła uzupełnionego gdzie indziej. Stale Quick Seat może neutralnie odmówić, bez nowego lobby engine. Timeouty i granice pracy composite fundingu wymagają runtime walidacji, nie są zmierzonym SLO.

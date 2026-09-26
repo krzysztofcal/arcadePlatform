@@ -7,7 +7,7 @@ Status: własna kontrola dokumentów; niezależne review nadal wymagane.
 - [x] Wskazano konkretne istniejące metody, nowe elementy nazwano planowanymi.
 - [x] Trwałość, retry/unknown commit i payout oddzielone od admission.
 - [x] Brak niepotrzebnego lobby/fraud engine i testów UI.
-- [x] Cap wartości są jawną propozycją do review, aktywacja disabled.
+- [x] Autorefill NORMAL bez lifetime cap jest zatwierdzony; aktywacja nadal osobno.
 - [x] Stage mutation/forward-only i Production GO jawne.
 - [x] Spec/plan/tasks/model/contract zgodne; STOP przed implementacją.
 
@@ -21,4 +21,4 @@ Status: własna kontrola dokumentów; niezależne review nadal wymagane.
 | FR-010–012 | T007–012,T015,T017–018 |
 | FR-013–014,SC-004 | T001–002,T018–019 |
 
-18 wymagań (14FR+4SC),19 zadań,100% mapowania,bez nieprzypisanych zadań. Końcowy speckit-analyze przeprowadzony read-only po wygenerowaniu dokumentów:0 CRITICAL,0 HIGH; brak naruszeń konstytucji i luk pokrycia. Proponowane cap/aktywacja pozostają do niezależnego review, nie są zgodą emisji. Nie oznacza wykonania testów ani implementacji.
+18 wymagań (14FR+4SC),19 zadań,100% mapowania,bez nieprzypisanych zadań. Ponowny speckit-analyze po korekcie autorefill i participation marker:0 CRITICAL,0 HIGH; brak naruszeń konstytucji i luk pokrycia. Exact-deficit composite flow podlega niezależnemu review; dokumentacja nie jest zgodą emisji. Nie oznacza wykonania testów ani implementacji.
