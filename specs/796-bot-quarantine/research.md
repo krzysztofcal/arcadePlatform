@@ -110,3 +110,7 @@ Review f166a0b wykazał lukę durable NORMAL mimo balance>=threshold. Zastąpion
 Identical env parser nie dowodzi zgodności env dwóch runtime. Nie znaleziono ogólnego istniejącego autorytatywnego config storage dla tego progu; wybrano jeden ograniczony singleton row zamiast nowego endpointu/handshake/fraud service. Shared bot-access.mjs loader/parser/classifier i config FOR SHARE zapewniają tę samą politykę; independent env overrides odrzucone. To stała liczba1 wiersza,nie powrót permanentnych per-funding receipts. Unknown fail-closed. Kontrakt/data-model podają pola i lock order.
 
 Jedyny nowy/rozszerzony fundamentalny przypadek: persisted NORMAL,balance>=1mld,Create klasyfikuje i atomowo tworzy empty farmer-only; późniejszy JOIN ma sukces bez bot funding przy legalnym tierze i miejscu. Brak renderowania UI i testów glue.
+
+## UNKNOWN przy legalnym leave — korekta review
+
+Tylko known durable RESTRICTED ustawia is_farmer_only=false→true. Known NORMAL i UNKNOWN nie zmieniają markera przy otherwise legal leave/cash-out i nie blokują payout; wcześniejsze true pozostaje sticky. Nie emitować ani finansować botów podczas niepewnej operacji. Po successful membership removal kolejne admission/funding używają normalnego authoritative classifier/gate; powrót przez Create/JOIN ponownie ocenia balance. UNKNOWN w nowym admission/funding nadal fail-closed. Missing class nie oznacza dowodu restriction. To nie obietnica payout przy całkowitej awarii DB; istniejąca transakcyjna poprawność i recovery pozostają.

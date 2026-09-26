@@ -21,7 +21,7 @@ Status: własna kontrola dokumentów; niezależne review nadal wymagane.
 | FR-010–012 | T007–012,T015,T017–018 |
 | FR-013–014,SC-004 | T001–002,T018–019 |
 
-18 wymagań (14FR+4SC),19 zadań,100% mapowania,bez nieprzypisanych zadań. Ponowny speckit-analyze po korekcie authoritative Create/shared threshold:0 CRITICAL,0 HIGH; brak naruszeń konstytucji i luk pokrycia. Exact-deficit composite flow podlega niezależnemu review; dokumentacja nie jest zgodą emisji. Nie oznacza wykonania testów ani implementacji.
+18 wymagań (14FR+4SC),19 zadań,100% mapowania,bez nieprzypisanych zadań. Ponowny speckit-analyze po korekcie UNKNOWN leave/known-only farmer marker:0 CRITICAL,0 HIGH; brak naruszeń konstytucji i luk pokrycia. Exact-deficit composite flow podlega niezależnemu review; dokumentacja nie jest zgodą emisji. Nie oznacza wykonania testów ani implementacji.
 
 Sprawdzono4 fundamentalne scenariusze table hopping w T008/T012/T017; zmiany schema/create/final JOIN/funding/projection w T002/T006–010. Brak nowego testu UI i brak nowej klasy lifecycle.
 

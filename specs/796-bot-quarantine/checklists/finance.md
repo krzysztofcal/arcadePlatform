@@ -19,3 +19,5 @@ Checkboxy należą do niezależnego reviewera; nie są stanem wykonania implemen
 - [ ] CHK014 Czy live issue #1018 zsynchronizowano z farmer-only przed T001,nie tylko issue-source? [Handoff]
 
 - [ ] CHK015 Czy durable NORMAL z balance>=threshold jest klasyfikowany w tej samej Create tx przed marker INSERT,przy wspólnym WS/Netlify config i unknown fail-closed,bez obejścia przez null public user? [FR-001/002/010,T005/T007/T017]
+
+- [ ] CHK016 Czy tylko known durable RESTRICTED ustawia marker,a UNKNOWN/NORMAL legal leave zachowuje marker i payout,bez nowego funding i bez osłabienia przyszłych admission/funding gates? [FR-005/006,T012]
