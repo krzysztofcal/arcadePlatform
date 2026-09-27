@@ -89,6 +89,7 @@ import {
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
+import { persistAuthoritativeSlowOnlyForUser } from "./poker/runtime/poker-access-propagation.mjs";
 import { createActionHistoryCleanup } from "./poker/persistence/action-history-cleanup.mjs";
 import { createClosedTableCleanup } from "./poker/persistence/closed-table-cleanup.mjs";
 import { createVpsMetricsCollector } from "./observability/vps-metrics.mjs";
@@ -837,30 +838,29 @@ function beginPokerAccessMutation(userId, expectedRevision = null, desiredOverri
   if (!normalizedUserId) {
     return { ok: false, invalidated: false, failClosed: false, reason: "invalid_user_id" };
   }
+  if (pendingPokerAccessMutations.has(normalizedUserId)) {
+    return {
+      ok: false,
+      invalidated: false,
+      failClosed: true,
+      pending: true,
+      statusCode: 409,
+      reason: "poker_access_mutation_pending"
+    };
+  }
   const parsedExpectedRevision = Number(expectedRevision);
   const requestedMinimumRevision = Number.isSafeInteger(parsedExpectedRevision) && parsedExpectedRevision > 0
     && parsedExpectedRevision < Number.MAX_SAFE_INTEGER
     ? parsedExpectedRevision + 1
     : null;
   const normalizedOverride = normalizeAccessOverride(desiredOverride);
-  const previous = pendingPokerAccessMutations.get(normalizedUserId);
-  const previousMinimumRevision = Number.isSafeInteger(Number(previous?.minimumRevision))
-    && Number(previous.minimumRevision) > 0
-    ? Number(previous.minimumRevision)
-    : null;
-  const minimumRevision = requestedMinimumRevision === null
-    ? previousMinimumRevision
-    : previousMinimumRevision === null
-      ? requestedMinimumRevision
-      : Math.max(previousMinimumRevision, requestedMinimumRevision);
+  const minimumRevision = requestedMinimumRevision;
   const pending = {
     expectedRevision: Number.isSafeInteger(parsedExpectedRevision) && parsedExpectedRevision > 0
       ? parsedExpectedRevision
-      : (previous?.expectedRevision ?? null),
+      : null,
     minimumRevision,
-    ...(normalizedOverride || previous?.desiredOverride
-      ? { desiredOverride: normalizedOverride || previous.desiredOverride }
-      : {})
+    ...(normalizedOverride ? { desiredOverride: normalizedOverride } : {})
   };
   pendingPokerAccessMutations.set(normalizedUserId, pending);
   const failClosed = typeof tableManager.setPokerAccessMutationFailClosed === "function"
@@ -908,27 +908,11 @@ async function refreshPokerAccessForUser(userId, {
         readPokerAccessPolicy(tx)
       ]);
       if (!snapshot || !policy) return null;
-      let slowOnlyTableIds = [];
-      if (snapshot.schemaBacked === true && snapshot.effectiveClass === "SLOW") {
-        const rows = await tx.unsafe(`
-update public.poker_tables as t
-   set is_slow_only = true
- where t.lifecycle_kind = 'STANDARD'
-   and t.is_slow_only is not true
-   and exists (
-     select 1
-       from public.poker_seats as s
-      where s.table_id = t.id
-        and s.user_id = $1::uuid
-        and s.status = 'ACTIVE'
-        and coalesce(s.is_bot, false) = false
-   )
-returning t.id;
-`, [normalizedUserId]);
-        slowOnlyTableIds = Array.isArray(rows)
-          ? rows.map((row) => typeof row?.id === "string" ? row.id.trim() : "").filter(Boolean)
-          : [];
-      }
+      const slowOnlyTableIds = await persistAuthoritativeSlowOnlyForUser(tx, {
+        userId: normalizedUserId,
+        schemaBacked: snapshot.schemaBacked,
+        effectiveClass: snapshot.effectiveClass
+      });
       return {
         access: { ...snapshot, policy, slowThresholdCh: policy.slowThresholdCh, policyRevision: policy.revision },
         slowOnlyTableIds
@@ -1029,7 +1013,16 @@ async function refreshActivePokerAccess() {
       const funding = await readSettledBotFundingSnapshot(tx, { buyIns });
       const policy = await readPokerAccessPolicy(tx);
       const snapshots = await readPokerAccessSnapshots(tx, { userIds: normalizedUserIds });
-      return { policy, snapshots, funding };
+      const slowOnlyTableIdsByUser = new Map();
+      for (const [userId, snapshot] of snapshots.entries()) {
+        const tableIds = await persistAuthoritativeSlowOnlyForUser(tx, {
+          userId,
+          schemaBacked: snapshot.schemaBacked,
+          effectiveClass: snapshot.effectiveClass
+        });
+        if (tableIds.length > 0) slowOnlyTableIdsByUser.set(userId, tableIds);
+      }
+      return { policy, snapshots, funding, slowOnlyTableIdsByUser };
     });
     settledBotFundingSnapshot = refreshed?.funding || null;
     if (!refreshed?.policy || !(refreshed.snapshots instanceof Map)) return;
@@ -1053,6 +1046,10 @@ async function refreshActivePokerAccess() {
         slowThresholdCh: refreshed.policy.slowThresholdCh,
         policyRevision: refreshed.policy.revision,
       };
+      const slowOnlyTableIds = refreshed.slowOnlyTableIdsByUser instanceof Map
+        ? refreshed.slowOnlyTableIdsByUser.get(userId) || []
+        : [];
+      if (slowOnlyTableIds.length > 0) tableManager.markSlowOnlyTables?.(slowOnlyTableIds);
       tableManager.cachePokerAccessForUser(userId, access, refreshed.policy, Date.now());
       for (const socket of sessionStore.connectionsForUser(userId) || []) {
         const state = socket?.__connState;
@@ -4580,7 +4577,14 @@ async function handleInternalPokerAccessRefresh(req, res) {
           expectedOverride: payload?.override,
           releasePending: payload?.releasePending === true
         });
-    sendInternalJson(res, result.ok === true ? 200 : 503, { ...result, phase, userId });
+    const requestedStatus = Number(result?.statusCode);
+    const statusCode = result.ok === true
+      ? 200
+      : Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus < 500
+        ? requestedStatus
+        : 503;
+    const { statusCode: _statusCode, ...response } = result;
+    sendInternalJson(res, statusCode, { ...response, phase, userId });
   } catch (error) {
     const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "access_refresh_failed");
     sendInternalJson(res, code === "invalid_json" ? 400 : 503, { error: code });
