@@ -98,7 +98,7 @@ Update `docs/poker-bots.md` to document:
 ## 5. Explicit Out of Scope & Deferred Follow-Ups
 
 - **Deferred to Issue #804 ("Poker: Living NPCs")**: Personality-specific reaction weighting and emote behavior (e.g. Cowboy, Professor, Robot, Shark reacting differently). Current architecture keeps `bot_profile` (play style) cleanly decoupled from presentation personas; full persona models belong to #804.
-- **Deferred to Backend Bot Classifiers Follow-Up**: While `bad_beat` is already defined as a reaction key, `ws-server/poker/handlers/reaction.mjs` currently lacks an automated classifier for bad-beat or losing-all-in scenarios. Adding server-side reaction classifiers will be tracked in a dedicated backend follow-up issue, ensuring this V1 remains purely frontend and zero-risk for WS runtime.
+- **Open Backend Scope in #796**: While `bad_beat` is already defined as a reaction key, `ws-server/poker/handlers/reaction.mjs` currently lacks an automated classifier for bad-beat or losing-all-in scenarios. This classifier remains as open backend scope in issue #796 to be addressed in a future backend increment, ensuring this V1 remains purely frontend and zero-risk for WS runtime. PR #1020 does NOT close #796.
 - No new reaction keys or emojis in V1.
 - No new WebSocket messages or protocol fields.
 - No new server-side reaction classifiers or probability changes in V1.

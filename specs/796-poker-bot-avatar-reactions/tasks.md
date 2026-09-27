@@ -67,7 +67,7 @@
 
 **Purpose**: Update documentation, run syntax checks, and validate via quickstart runbook.
 
-- [ ] T013 Update docs/poker-bots.md to document that bot avatar reaction motion is browser-only and ephemeral, noting that persona profiles are deferred to #804 ("Poker: Living NPCs") and missing server reaction classifiers (e.g. bad-beat) are tracked in a dedicated backend follow-up issue
+- [ ] T013 Update docs/poker-bots.md to document that bot avatar reaction motion is browser-only and ephemeral, noting that persona profiles are deferred to #804 ("Poker: Living NPCs") and missing server reaction classifiers (e.g. bad-beat) remain as open backend scope in #796
 - [ ] T014 [P] Run syntax check via `npm run syntax`
 - [ ] T015 [P] Run repository guard checks via `npm run check:all`
 - [ ] T016 Execute manual Deploy Preview smoke test checklist from specs/796-poker-bot-avatar-reactions/quickstart.md

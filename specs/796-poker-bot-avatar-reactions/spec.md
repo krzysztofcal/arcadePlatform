@@ -31,7 +31,7 @@ The remaining V1 scope is deliberately **small, browser-only, and purely cosmeti
 
 ### Explicit Out of Scope & Deferred Follow-Ups
 - **Deferred to Issue #804 ("Poker: Living NPCs")**: Personality-specific reaction profiles and emote frequency weighting (e.g. Cowboy, Professor, Robot, Shark reacting with distinct temperaments). Current repository architecture strictly separates gameplay policy (`bot_profile`) from presentation identity. Persona models will be introduced in #804.
-- **Deferred to Backend Bot Classifiers Follow-Up**: While `bad_beat` exists in the client catalog, `ws-server/poker/handlers/reaction.mjs` does not yet possess an automated classifier for bad beats or losing all-in showdowns. Adding server-side reaction classifiers will be tracked in a dedicated backend follow-up issue to preserve V1's zero-WS-risk boundary.
+- **Open Backend Scope in #796**: While `bad_beat` exists in the client reaction catalog, `ws-server/poker/handlers/reaction.mjs` does not yet possess an automated server-side classifier for bad beats or losing all-in showdowns. This missing classifier remains as open backend scope in issue #796 to be addressed in a subsequent backend increment, ensuring V1 remains purely frontend and free of WebSocket server risk. Draft PR #1020 is planning-only for V1 and does NOT close #796.
 - No new reaction keys or emojis in this V1.
 - No new WebSocket messages or protocol fields.
 - No changes to reaction probabilities or turn timers.

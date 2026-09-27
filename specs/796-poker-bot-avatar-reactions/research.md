@@ -25,9 +25,10 @@ A detailed inspection of the live GitHub `main` branch reveals that significant 
    - Distinct personality-based reactions and emote weighting are deferred to **Issue #804 ("Poker: Living NPCs")**, which governs NPC identities and personality models.
 2. **Missing Server-Side Reaction Classifiers (`bad_beat` / Losing All-In)**:
    - While `bad_beat` exists in the reaction catalog and client reaction keys, `ws-server/poker/handlers/reaction.mjs` currently lacks an automated classifier emitting it when a bot suffers a bad beat or loses an all-in confrontation.
-   - Server-side classifier additions are tracked for a dedicated backend follow-up issue on bot reaction classifiers, ensuring V1 remains strictly client-side without WS runtime risk.
+   - This missing server-side classifier remains as open backend scope directly in issue #796 to be resolved in a subsequent backend increment.
+   - V1 in PR #1020 intentionally bounds itself to browser-only cosmetic avatar reaction motion, ensuring zero WS runtime or deployment risk, and explicitly does NOT close #796.
 
-**Conclusion for V1**: Scope for #796 in PR #1020 is intentionally constrained to browser-only cosmetic avatar reaction motion, providing immediate physical presence to all bot emotes emitted by current and future server classifiers.
+**Conclusion for V1**: Scope for #796 in PR #1020 delivers the client avatar motion foundation, providing immediate physical presence to all bot emotes emitted by current and future server classifiers.
 
 ---
 
