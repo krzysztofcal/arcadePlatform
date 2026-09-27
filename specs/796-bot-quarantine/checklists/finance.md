@@ -8,12 +8,12 @@
 
 ## Classification / admission / limits
 
-- [ ] CHK001 Are automatic NORMAL/SLOW and AUTO/FORCE_NORMAL/FORCE_SLOW separate, sticky and distinct from #869 SLOW? [FR-001]
+- [ ] CHK001 Does FORCE_NORMAL affect only effective class while threshold still persists automatic SLOW, with Return to AUTO immediately using stored SLOW without another threshold check and no is_slow_only reset? Are the states distinct from #869 SLOW? [FR-001]
 - [ ] CHK002 Are JOIN wallet and existing authoritative settled stacks used without global wealth aggregation or per-hand policy/account/override reads? [FR-002/003]
 - [ ] CHK003 Are cache refresh interval/expiry, revision races and Admin propagation explicit, while UNKNOWN cannot block lawful payout or falsely promote? [FR-003/017]
 - [ ] CHK004 Is SLOW owner-only safe promotion at accepted final JOIN, with Create remaining empty/unfunded and is_slow_only sticky? [FR-004/005]
 - [ ] CHK005 Do both classes have max4 distinct active and max4 pending, with rejoin free and fifth requests denied before financial/table mutations? [FR-006/007]
-- [ ] CHK006 Do Create/fallback/JOIN share user-scoped transaction lock, fresh counts and consistent lock ordering across table IDs? [FR-008]
+- [ ] CHK006 Do Create/fallback/JOIN share user-scoped transaction lock, fresh counts and consistent lock ordering across table IDs, plus mandatory user-leading active/creator-leading pending predicate-matched access paths, early limit five and T027 local EXPLAIN proof without global seat/table scans or duplicate indexes? [FR-008]
 - [ ] CHK007 Does first accepted JOIN move pending to active and set has_human_participant only on actual admission/rejoin? [FR-007/018]
 
 ## Pools / refill / operations
@@ -23,7 +23,7 @@
 - [ ] CHK010 Are enabled/four threshold+amount fields/revision/audit dynamically tunable, positive safe integers and backend-authorized? [FR-011/017]
 - [ ] CHK011 Is each current UTC3h pool bucket limited to one configured amount, including policy revision changes, retries and disable/re-enable? [FR-012/013]
 - [ ] CHK012 Does existing ledger/idempotency protect scheduled SYSTEM MINT without new receipts, per-funding identity or table-linked retention? [FR-013]
-- [ ] CHK013 Is VPS/systemd authenticated dispatch the primary wake-up, without DB credentials on VPS, native cron reliance, backlog or automatic Production activation? [FR-014/021]
+- [ ] CHK013 Is VPS/systemd authenticated dispatch the primary wake-up, with bootstrap only for fresh/rebuilt hosts and a separate owner-approved existing-host install? Are installation/activation separate, with no deploy/install auto-enable/start, DB credentials/SQL on VPS, native cron reliance or backlog? [FR-014/021]
 - [ ] CHK014 Before T001, has no drift between live #1018 and this Spec Kit been confirmed, with independent approval and separate implementation instruction? [FR-021]
 
 ## Integration / scope
@@ -32,7 +32,7 @@
 - [ ] CHK016 Does CONTINUOUS_BOT retain lifecycle, no new SLOW lifecycle, no forced hand interruption or rotation bypass? [FR-019]
 - [ ] CHK017 Are Admin Users/Ops reused without generic policy/moderation product, public overrides or unnecessary UI tests? [FR-017/020]
 - [ ] CHK018 Are Sybil, split wealth, below-threshold farming and pool-chunk exhaustion explicitly accepted residual risks? [spec Assumptions]
-- [ ] CHK019 Are breaking 100 source/caps/sticky marker impacts, shared Stage forward-only effects, exact-SHA future preview and separate Production GO explicit? [FR-021]
+- [ ] CHK019 Are breaking impacts and shared Stage forward-only effects explicit? Is required manual exact-SHA WS Preview/workflow verification/smoke separate from a conditional Stage ledger-MINT canary requiring explicit user authorization, whose absence cannot block WS completion, with Production a wholly separate GO? [FR-021]
 - [ ] CHK020 Are tests fundamental, JS JSP/global compatible, logging klog-only, CSS one selector per line and future inline CSP SHA accounted for? [FR-020]
 
 ## Notes

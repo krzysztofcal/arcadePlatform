@@ -9,7 +9,7 @@ Docs-only PR #1019. Live #1018 is the sole requirements source; snapshot synced 
 - Accepted Spec Kit and explicit T001 instruction; local isolated PostgreSQL using existing Node 20/postgres tooling, never Stage/Production for the transaction suite.
 - Later additive migrations intentionally mutate shared Stage if published through DB Stage Apply PR; declare before publication, applied forward-only. No migration in this PR.
 - Local fixtures: four exact pool accounts at zero, valid disabled tier policies, automatic NORMAL/AUTO users, empty STANDARD tables and existing managed table fixture. Enable/fund only explicit local test fixtures; no production values inferred from Stage examples.
-- For integration later: exact runtime-SHA WS Preview and target identity evidence. Production migration, seed, MINT, timer/refill activation require separate explicit authorization.
+- For integration later: exact runtime-SHA WS Preview and target identity evidence. Real Stage refill/MINT canary requires its own explicit user authorization and is not a prerequisite for the WS gate. Production migration, seed, MINT, timer/refill activation require a wholly separate GO.
 
 ## Focused local commands (after corresponding tasks exist)
 
@@ -30,12 +30,13 @@ The planned transaction suite must validate its local target before connecting a
 | Scenario | Expected result | Tasks |
 | --- | --- | --- |
 | Wallet/settled stack threshold−1 and threshold; restart | NORMAL below, sticky automatic SLOW at threshold; no leave required | T004–T007 |
-| FORCE_NORMAL/FORCE_SLOW/AUTO; dynamic threshold | Override precedence; return exposes durable auto; new revision after bounded refresh | T004/T006/T021–T023 |
+| FORCE_NORMAL/FORCE_SLOW/AUTO; dynamic threshold | AUTO/NORMAL→FORCE_NORMAL→wallet or settled stack reaches threshold→automatic SLOW/effective NORMAL→Return to AUTO immediately yields effective SLOW without another threshold check; test both evidence paths. WS revision delivery retains bounded refresh; sticky is_slow_only never resets | T004/T006/T021–T023 |
 | Unchanged settled hand; stale cache | Zero added policy/account/override/tier reads/writes; stale cannot fund/admit, payout legal | T004/T006 |
 | Own safe empty promotion vs other/prefunded/managed | Only SLOW owner accepted final JOIN promotes and can seed SLOW | T004/T005/T013 |
 | Four active, fifth fresh, financed rejoin | Four accepted; fifth zero buy-in/funding; rejoin no slot | T008–T010/T027 |
 | Four pending, fifth direct/fallback Create | Fifth creates no table/state/ESCROW | T008–T010/T027 |
 | Concurrent Create/JOIN; first human pending transfer | Both limits ≤4, pending→active once | T027 |
+| Active/pending query shape and local EXPLAIN | User_id-leading active and created_by-leading pending paths matched to final predicates; early limit five qualifying distinct tables, indexed EXISTS, no global seat/table scan | T002/T009/T027 |
 | Exact tier/class funding; missing/disabled/empty pool | Correct four pools, no cross-tier/class/TREASURY fallback or runtime MINT | T011–T015 |
 | Mixed live table; UNKNOWN leave; original source return | Sticky known-SLOW, legal payout/rejoin; UNKNOWN no false promotion; provenance retained | T004/T007/T011/T015 |
 | Balance below/equal refill threshold | One configured amount below, zero at/above | T016–T018 |
@@ -45,11 +46,23 @@ The planned transaction suite must validate its local target before connecting a
 | WS slowOnly inventory / DB Quick Seat / stale recommendation | Existing resume retained; class filter; final JOIN rejects stale class/cap | T024–T026 |
 | Denied classification JOIN | No false has_human_participant or seat/funding | T004/T005 |
 
-## Later runtime and operational validation
+## Later WS runtime gate — independent of refill canary
 
 Use `.github/workflows/ws-preview-deploy.yml` definition from main with application revision equal to the latest runtime-affecting SHA, verify workflow succeeded for that exact SHA. Netlify preview alone does not deploy WS. Confirm NORMAL/SLOW Create→JOIN, 4+4 rejection, long-staying threshold transition, Admin revision propagation, slowOnly lobby/Quick Seat, managed behavior and cash-out in targeted smoke. User may perform manual runtime smoke; until evidence exists report “implementation ready, awaiting manual runtime verification”.
 
-Refill worker starts dry-run. An explicitly authorized Stage scenario may enable one provisioned tier and demonstrate one current-bucket refill/retry, including policy edit after commit. Compare ledger pool/bucket/amount and balance; runtime hand funding must create no MINT. Inspect intended repository/ref/actor/environment gates before any future dispatch. VPS timer is only GitHub authenticated wake-up every3h, no DB credentials or SQL. Install disabled and activate separately; no native GitHub cron dependency. Production remains separate authorization.
+T029 checkbox covers only this WS gate. Complete it from exact-SHA workflow success and runtime smoke; withholding Stage MINT authorization cannot block or reopen it.
+
+## Conditional Stage refill canary — separate approval
+
+Refill worker starts dry-run. A real Stage canary performs ledger MINT and requires separate explicit user authorization naming the Stage scenario. Only then may it enable one provisioned tier and demonstrate one current-bucket refill/retry, including policy edit after commit. Compare ledger pool/bucket/amount and balance; runtime hand funding must create no MINT. Inspect intended repository/ref/actor/environment gates before any future dispatch. VPS timer is only GitHub authenticated wake-up every3h, no DB credentials or SQL. No native GitHub cron dependency. Record canary status separately as not authorized/not run or authorized with evidence; never conflate it with WS Preview completion. Production remains a wholly separate GO.
+
+## Future scheduler installation — fresh vs existing VPS
+
+`infra/vps/bootstrap.sh` is fresh-VPS only: it may install the new dispatcher/service/timer disabled on future fresh/rebuilt hosts. Never run bootstrap on an existing live VPS or bypass its fresh-vps guard.
+
+For an existing host, follow a separate owner-approved targeted upgrade/install flow consistent with `infra/vps/README.md` and `docs/chips-ledger-stage-automation.md`: first read-only inventory of current units/configuration and a non-secret rollback manifest; review exact new artifacts; install only those dispatcher/units disabled, reload systemd and verify configuration/status without invoking the service or dispatching a workflow. Preserve existing timers/services. This is a future approved operation, not part of the docs task.
+
+Installation and activation are separate steps. Neither code deploy, artifact installation nor bootstrap may automatically enable/start the new timer. Activation needs its own applicable authorization after reviewed target/ref/mode and workflow gates; Stage MINT and Production permissions remain distinct. VPS has GitHub dispatch credentials only, no DB credentials or SQL.
 
 ## Cutover / rollback / breaking review
 
@@ -59,4 +72,4 @@ Pause new admissions/funding while allowing current hands and lawful payouts. Pr
 
 ## Evidence record to complete later
 
-T028 records actual local command results and simplicity/constitution review here; T029 records exact runtime SHA/workflow result and smoke outcome. Currently no implementation/test/deploy evidence is claimed. STOP before implementation.
+T028 records actual local command results, T027 active/pending SQL/index/EXPLAIN evidence and simplicity/constitution review here. T029 records exact runtime SHA/workflow result and smoke outcome for the WS gate. In a separate record, track Stage canary authorization and result (or not authorized/not run); it is not required to finish T029. No future threshold check is required to expose stored automatic SLOW on Return to AUTO. Currently no implementation/test/deploy evidence is claimed. STOP before implementation.

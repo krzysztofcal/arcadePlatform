@@ -14,11 +14,11 @@
 ## Requirement Completeness
 
 - [x] No unresolved clarification or template placeholders; deterministic acceptance cases and measurable outcomes.
-- [x] NORMAL/SLOW and separate override, dynamic threshold, settled in-memory/cache behavior and UNKNOWN payout handling specified.
-- [x] Sticky marker, safe owner promotion at JOIN, 4+4 limits/shared lock, accepted human marker and rejoin specified.
+- [x] NORMAL/SLOW and effective-only FORCE_NORMAL are separate: threshold still persists automatic SLOW under override, Return to AUTO uses it immediately without another check, sticky table never resets. Dynamic threshold, cached settled checks and UNKNOWN payout handling specified.
+- [x] Sticky marker, safe owner promotion at JOIN, 4+4 limits/shared lock, accepted human marker and rejoin specified; user-leading active and creator-leading pending indexed count-to-five access paths mandatory, with T027 local SQL/EXPLAIN evidence and no global seat/table scan.
 - [x] Exact per-tier pools, isolated runtime funding, 3h refill, cross-revision bucket guard and operational scheduler specified.
 - [x] Admin authorization/audit/cache propagation, WS live inventory, DB Quick Seat and managed lifecycle included.
-- [x] Edge cases, accepted Sybil/split-wealth risk, breaking cutover, Stage/Production boundaries and assumptions stated.
+- [x] Edge cases, accepted Sybil/split-wealth risk, breaking cutover and assumptions stated; fresh-only bootstrap separated from owner-approved existing-host install, with no automatic timer start. Required WS runtime gate separated from conditional explicitly authorized Stage MINT canary and Production GO.
 
 ## Feature Readiness
 
