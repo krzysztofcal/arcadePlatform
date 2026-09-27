@@ -1470,6 +1470,48 @@ test("internal poker access invalidate route requires the internal token and est
   }
 });
 
+test("internal poker access invalidate route rejects a second pending mutation for the same user", async () => {
+  const token = "internal-access-conflict-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-access-refresh`;
+  const userId = "00000000-0000-4000-8000-000000000010";
+  try {
+    await waitForListening(child, 5000);
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    const first = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ userId, phase: "invalidate", expectedRevision: 7, override: "FORCE_RESTRICTED" })
+    });
+    assert.equal(first.status, 200);
+    const second = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ userId, phase: "invalidate", expectedRevision: 7, override: "FORCE_SLOW" })
+    });
+    assert.equal(second.status, 409);
+    assert.deepEqual(await second.json(), {
+      ok: false,
+      invalidated: false,
+      failClosed: true,
+      pending: true,
+      reason: "poker_access_mutation_pending",
+      phase: "invalidate",
+      userId
+    });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("internal poker maintenance route rejects an unknown WS environment before GET or POST", async () => {
   const token = "internal-maintenance-environment-token";
   const { port, child } = await createServer({
