@@ -327,11 +327,18 @@ export async function notifyWsPokerAccessMutation({
       signal: controller.signal
     });
     if (!response?.ok) {
+      let errorPayload = null;
+      try { errorPayload = await response.json(); } catch { errorPayload = null; }
       klog("poker_ws_access_refresh_notify_failed", {
         userId: normalizedUserId,
         status: Number.isInteger(response?.status) ? response.status : null
       });
-      return { ok: false, skipped: false, reason: "notify_failed", status: response?.status ?? null };
+      return {
+        ok: false,
+        skipped: false,
+        reason: typeof errorPayload?.reason === "string" ? errorPayload.reason : "notify_failed",
+        status: response?.status ?? null
+      };
     }
     let payload = null;
     try { payload = await response.json(); } catch { payload = null; }
