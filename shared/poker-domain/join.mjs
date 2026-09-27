@@ -10,6 +10,7 @@ import {
   persistAutomaticSlow,
   readPokerAccessPolicy,
   readPokerAccessSnapshot,
+  readPokerAccessSnapshots,
   readPokerPoolProvisioning,
   readPokerTierPolicy,
 } from "./bot-access.mjs";
@@ -887,6 +888,21 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
 
       if (poolSchema) await assertActivePokerTableCapacity(tx, userId);
 
+      let existingHumanAccessAllowsBotFunding = true;
+      if (poolSchema) {
+        const existingHumanUserIds = activeSeatRows(seatRows)
+          .filter((row) => !row?.is_bot)
+          .map((row) => typeof row?.user_id === "string" ? row.user_id.trim().toLowerCase() : "")
+          .filter(Boolean);
+        if (existingHumanUserIds.length > 0) {
+          const existingHumanSnapshots = await readPokerAccessSnapshots(tx, { userIds: existingHumanUserIds });
+          existingHumanAccessAllowsBotFunding = existingHumanUserIds.every((existingHumanUserId) => {
+            const snapshot = existingHumanSnapshots.get(existingHumanUserId);
+            return snapshot?.effectiveClass === "NORMAL" || snapshot?.effectiveClass === "SLOW";
+          });
+        }
+      }
+
       const tiers = resolvePokerBuyInTiers(env);
       const bankroll = bankrollForAccess;
       const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers });
@@ -1007,10 +1023,12 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
 
       const botCfg = getBotConfig(process.env);
       const humanCountAfterJoin = activeSeatRows(seatRows).filter((row) => !row?.is_bot).length + 1;
-      const fundingPoolClass = joinAccess.schemaBacked && joinAccess.effectiveClass !== "RESTRICTED"
+      const botFundingAllowedForTableHumans = joinAccess.effectiveClass !== "RESTRICTED"
+        && existingHumanAccessAllowsBotFunding;
+      const fundingPoolClass = botFundingAllowedForTableHumans && joinAccess.schemaBacked
         ? (tableIsSlowOnly || canPromoteSlowTable ? "SLOW" : "NORMAL")
         : null;
-      const targetBotCount = joinAccess.effectiveClass !== "RESTRICTED"
+      const targetBotCount = botFundingAllowedForTableHumans
         && isBotFundingAllowedForBuyIn(
           authoritativeBuyIn,
           fundingPoolClass ? { poolClass: fundingPoolClass } : {}
@@ -1023,7 +1041,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           maxBots: botCfg.maxPerTable
         })
         : 0;
-      const tierFundingEnabled = joinAccess.effectiveClass !== "RESTRICTED"
+      const tierFundingEnabled = botFundingAllowedForTableHumans
         && (!joinAccess.schemaBacked
           || (joinAccess.tierPolicy?.enabled === true
           && joinAccess.poolProvisioning?.NORMAL === true

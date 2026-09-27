@@ -229,7 +229,14 @@ async function seedBotsForJoin({
   random = Math.random
 }) {
   if (!cfg?.enabled || typeof postTransaction !== "function") return [];
-  if (fundingEnabled !== true || fundingProvisioned !== true) return [];
+  if (fundingEnabled !== true || fundingProvisioned !== true) {
+    if (requireExactTarget) {
+      const error = new Error("managed_bot_table_seed_incomplete");
+      error.code = "managed_bot_table_seed_incomplete";
+      throw error;
+    }
+    return [];
+  }
   const normalizedBuyIn = Number(buyInChips);
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("invalid_bot_buy_in");

@@ -311,6 +311,257 @@ test("fresh FORCE_RESTRICTED own empty STANDARD join accepts with zero bot fundi
   assert.equal(calls.some((entry) => entry?.metadata?.actor === "BOT"), false);
 }));
 
+test("an active RESTRICTED human blocks bot seeding for a later NORMAL join", async () => withBotEnv(async () => {
+  const tableId = "00000000-0000-4000-8000-0000000000c1";
+  const restrictedUserId = "00000000-0000-4000-8000-0000000000c2";
+  const normalUserId = "00000000-0000-4000-8000-0000000000c3";
+  const accessByUser = new Map([
+    [restrictedUserId, { poker_auto_class: "NORMAL", poker_access_override: "FORCE_RESTRICTED", poker_access_revision: 2 }],
+    [normalUserId, { poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 3 }]
+  ]);
+  const store = {
+    table: {
+      id: tableId,
+      status: "OPEN",
+      max_players: 6,
+      buy_in: 100,
+      stakes: calculateCanonicalPokerStakes(100),
+      created_by: restrictedUserId,
+      lifecycle_kind: "STANDARD",
+      has_human_participant: false,
+      is_slow_only: false
+    },
+    seatRows: [],
+    stateRow: { version: 1, state: { tableId, seats: [], stacks: {} } },
+    ledgerCalls: [],
+    accessSnapshotReads: 0
+  };
+  const runJoin = (userId, requestId) => executePokerJoinAuthoritative({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params = []) => {
+        const text = String(sql);
+        if (text.includes("to_regclass")) return [{ available: true }];
+        if (text.includes("from public.poker_tables")) return [store.table];
+        if (text.includes("from public.poker_seats") && text.includes("user_id = $2") && text.includes("limit 1")) {
+          const row = store.seatRows.find((seat) => seat.user_id === params[1] && seat.status === "ACTIVE");
+          return row ? [{ seat_no: row.seat_no, stack: row.stack }] : [];
+        }
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return store.seatRows.map((seat) => ({ ...seat }));
+        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, revision: 1 }];
+        if (text.includes("select poker_auto_class, poker_access_override")) {
+          const access = accessByUser.get(params[0]);
+          return access ? [access] : [];
+        }
+        if (text.includes("select user_id, poker_auto_class, poker_access_override")) {
+          store.accessSnapshotReads += 1;
+          return (params[0] || []).map((id) => ({ user_id: id, ...accessByUser.get(id) })).filter((row) => row.poker_auto_class);
+        }
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
+        if (text.startsWith("insert into public.poker_seats")) {
+          const isBot = text.includes("is_bot");
+          store.seatRows.push({ user_id: params[1], seat_no: params[2], status: "ACTIVE", is_bot: isBot, stack: isBot ? params[4] : 0 });
+          return [{ seat_no: params[2] }];
+        }
+        if (text.startsWith("update public.poker_seats set stack")) {
+          const row = store.seatRows.find((seat) => seat.user_id === params[1] && seat.seat_no === params[2]);
+          if (row) row.stack = params[3];
+          return [];
+        }
+        if (text.includes("select 1 from public.chips_transactions")) return [];
+        if (text.includes("select version, state from public.poker_state")) return [store.stateRow];
+        if (text.includes("update public.poker_state set state")) {
+          store.stateRow.state = params[1];
+          store.stateRow.version += 1;
+          return [{ version: store.stateRow.version }];
+        }
+        if (text.includes("update public.poker_tables")) return [];
+        return [];
+      }
+    }),
+    tableId,
+    userId,
+    requestId,
+    buyIn: 100,
+    postTransactionFn: async (payload) => {
+      store.ledgerCalls.push(payload);
+      return { ok: true };
+    },
+    loadStateForUpdate: async () => ({ ok: true, version: store.stateRow.version, state: store.stateRow.state }),
+    updateStateLocked: async (_tx, { nextState }) => {
+      store.stateRow.state = nextState;
+      store.stateRow.version += 1;
+      return { ok: true, newVersion: store.stateRow.version };
+    },
+    validateStateForStorage: () => true,
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+  });
+
+  const restrictedJoin = await runJoin(restrictedUserId, "restricted-first");
+  assert.equal(restrictedJoin.ok, true);
+  assert.equal(restrictedJoin.seededBots.length, 0);
+  store.table.has_human_participant = true;
+  const normalJoin = await runJoin(normalUserId, "normal-second");
+
+  assert.equal(normalJoin.ok, true);
+  assert.equal(store.seatRows.filter((seat) => !seat.is_bot).length, 2);
+  assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 0);
+  assert.equal(store.ledgerCalls.filter((payload) => payload.metadata?.actor === "BOT").length, 0);
+  assert.equal(store.accessSnapshotReads, 1);
+}));
+
+test("missing existing human access keeps NORMAL JOIN legal but blocks bot funding", async () => withBotEnv(async () => {
+  const tableId = "00000000-0000-4000-8000-0000000000c4";
+  const existingUserId = "00000000-0000-4000-8000-0000000000c5";
+  const joiningUserId = "00000000-0000-4000-8000-0000000000c6";
+  const store = {
+    table: {
+      id: tableId,
+      status: "OPEN",
+      max_players: 6,
+      buy_in: 100,
+      stakes: calculateCanonicalPokerStakes(100),
+      created_by: existingUserId,
+      lifecycle_kind: "STANDARD",
+      has_human_participant: true,
+      is_slow_only: false
+    },
+    seatRows: [{ user_id: existingUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }],
+    stateRow: {
+      version: 2,
+      state: { tableId, seats: [{ userId: existingUserId, seatNo: 1, status: "ACTIVE" }], stacks: { [existingUserId]: 100 } }
+    },
+    ledgerCalls: [],
+    accessSnapshotReads: 0
+  };
+  const result = await executePokerJoinAuthoritative({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params = []) => {
+        const text = String(sql);
+        if (text.includes("to_regclass")) return [{ available: true }];
+        if (text.includes("from public.poker_tables")) return [store.table];
+        if (text.includes("from public.poker_seats") && text.includes("user_id = $2") && text.includes("limit 1")) return [];
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return store.seatRows.map((seat) => ({ ...seat }));
+        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, revision: 1 }];
+        if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 4 }];
+        if (text.includes("select user_id, poker_auto_class, poker_access_override")) {
+          store.accessSnapshotReads += 1;
+          return [];
+        }
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
+        if (text.startsWith("insert into public.poker_seats")) {
+          const isBot = text.includes("is_bot");
+          store.seatRows.push({ user_id: params[1], seat_no: params[2], status: "ACTIVE", is_bot: isBot, stack: isBot ? params[4] : 0 });
+          return [{ seat_no: params[2] }];
+        }
+        if (text.startsWith("update public.poker_seats set stack")) return [];
+        if (text.includes("select version, state from public.poker_state")) return [store.stateRow];
+        if (text.includes("update public.poker_state set state")) {
+          store.stateRow.state = params[1];
+          store.stateRow.version += 1;
+          return [{ version: store.stateRow.version }];
+        }
+        if (text.includes("update public.poker_tables")) return [];
+        return [];
+      }
+    }),
+    tableId,
+    userId: joiningUserId,
+    requestId: "unknown-existing-human-access",
+    buyIn: 100,
+    postTransactionFn: async (payload) => {
+      store.ledgerCalls.push(payload);
+      return { ok: true };
+    },
+    loadStateForUpdate: async () => ({ ok: true, version: store.stateRow.version, state: store.stateRow.state }),
+    updateStateLocked: async (_tx, { nextState }) => {
+      store.stateRow.state = nextState;
+      store.stateRow.version += 1;
+      return { ok: true, newVersion: store.stateRow.version };
+    },
+    validateStateForStorage: () => true,
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(store.seatRows.filter((seat) => !seat.is_bot).length, 2);
+  assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 0);
+  assert.equal(store.ledgerCalls.filter((payload) => payload.metadata?.actor === "BOT").length, 0);
+  assert.equal(store.accessSnapshotReads, 1);
+}));
+
+test("fresh NORMAL JOIN remains fail-soft when the tier policy disables bot funding", async () => withBotEnv(async () => {
+  const tableId = "00000000-0000-4000-8000-0000000000c7";
+  const userId = "00000000-0000-4000-8000-0000000000c8";
+  const ledgerCalls = [];
+  let seatInserted = false;
+  const result = await executePokerJoinAuthoritative({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        const text = String(sql);
+        if (text.includes("to_regclass")) return [{ available: true }];
+        if (text.includes("from public.poker_tables")) return [{
+          id: tableId,
+          status: "OPEN",
+          max_players: 6,
+          buy_in: 100,
+          stakes: calculateCanonicalPokerStakes(100),
+          created_by: userId,
+          lifecycle_kind: "STANDARD",
+          has_human_participant: false,
+          is_slow_only: false
+        }];
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) {
+          return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
+        }
+        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, revision: 1 }];
+        if (text.includes("select poker_auto_class, poker_access_override")) {
+          return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+        }
+        if (text.includes("from public.poker_bot_tier_policy")) return [{
+          buy_in: 100,
+          enabled: false,
+          normal_refill_threshold_ch: 1,
+          normal_refill_amount_ch: 1,
+          slow_refill_threshold_ch: 1,
+          slow_refill_amount_ch: 1,
+          revision: 1
+        }];
+        if (text.includes("system_key = any")) return [];
+        if (text.startsWith("insert into public.poker_seats")) {
+          seatInserted = true;
+          return [{ seat_no: 1 }];
+        }
+        if (text.startsWith("update public.poker_seats set stack")) return [];
+        if (text.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
+        if (text.includes("update public.poker_state set state")) return [{ version: 2 }];
+        if (text.includes("update public.poker_tables")) return [];
+        return [];
+      }
+    }),
+    tableId,
+    userId,
+    requestId: "normal-disabled-tier-fail-soft",
+    buyIn: 100,
+    postTransactionFn: async (payload) => {
+      ledgerCalls.push(payload);
+      return { ok: true };
+    },
+    loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId, seats: [], stacks: {} } }),
+    updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
+    validateStateForStorage: () => true,
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.seededBots, []);
+  assert.equal(ledgerCalls.filter((payload) => payload.metadata?.actor === "BOT").length, 0);
+}));
+
 test("fresh FORCE_RESTRICTED join rejects an active bot table before buy-in", async () => withBotsDisabled(async () => {
   let ledgerCalls = 0;
   await assert.rejects(

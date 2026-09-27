@@ -199,6 +199,74 @@ test("reconcile creates at most two missing tables per sweep", async () => {
   assert.equal(result.remainingTableCount, 98);
 });
 
+test("reconcile rolls back a managed table when exact bot funding is unavailable", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000825";
+  let tableInserted = false;
+  let transactionCommitted = false;
+  let transactionRolledBack = false;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    beginSql: async (run) => {
+      const tx = {
+        unsafe: async (sql) => {
+          const normalizedSql = String(sql).toLowerCase();
+          if (normalizedSql.includes("to_regclass")) return [{ available: true }];
+          if (normalizedSql.includes("from public.poker_managed_table_profiles")) {
+            return [{
+              ...PROFILE,
+              enabled: true,
+              desired_table_count: 1,
+              min_bot_count: 1,
+              target_bot_count: 1,
+              max_bot_count: 1
+            }];
+          }
+          if (normalizedSql.includes("from public.poker_tables") && normalizedSql.includes("for update")) return [];
+          if (normalizedSql.includes("insert into public.poker_tables")) {
+            tableInserted = true;
+            return [{ id: tableId }];
+          }
+          if (normalizedSql.includes("from public.poker_bot_tier_policy")) {
+            return [{
+              buy_in: 100,
+              enabled: false,
+              normal_refill_threshold_ch: 1,
+              normal_refill_amount_ch: 1,
+              slow_refill_threshold_ch: 1,
+              slow_refill_amount_ch: 1,
+              revision: 1
+            }];
+          }
+          if (normalizedSql.includes("from public.chips_accounts") && normalizedSql.includes("system_key = any")) return [];
+          if (normalizedSql.includes("insert into public.chips_accounts")) return [{ id: "escrow-id" }];
+          if (normalizedSql.includes("select state from public.poker_state")) {
+            return [{ state: { tableId, phase: "INIT", seats: [], stacks: {} } }];
+          }
+          if (normalizedSql.includes("update public.poker_state")) return [{ table_id: tableId }];
+          return [];
+        }
+      };
+      try {
+        const result = await run(tx);
+        transactionCommitted = true;
+        return result;
+      } catch (error) {
+        transactionRolledBack = true;
+        throw error;
+      }
+    }
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(tableInserted, true);
+  assert.equal(transactionCommitted, false);
+  assert.equal(transactionRolledBack, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "managed_bot_table_seed_incomplete");
+  assert.deepEqual(result.createdTableIds, []);
+});
+
 test("preview profile with desired count five creates canonical 100 CH tables", async () => {
   const tableIds = [
     "00000000-0000-4000-8000-000000000823",
