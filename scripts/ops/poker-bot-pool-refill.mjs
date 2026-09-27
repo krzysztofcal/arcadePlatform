@@ -43,6 +43,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   const normalizedMode = String(mode || "dry-run").trim().toLowerCase();
   const target = String(env.POKER_BOT_REFILL_TARGET || "stage").trim().toLowerCase();
   const stageCanary = env.POKER_BOT_REFILL_STAGE_CANARY === "1";
+  const requestedPoolClass = String(env.POKER_BOT_REFILL_POOL_CLASS || "").trim().toUpperCase();
   if (repository !== CANONICAL_REPOSITORY) throw fail("refill_repository_mismatch");
   if (!/^refs\/(heads|tags)\/[A-Za-z0-9._\/-]+$/.test(ref) && !/^[0-9a-f]{40}$/.test(ref) && ref !== "main") {
     throw fail("refill_reviewed_ref_required");
@@ -57,6 +58,12 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   }
   if (stageCanary && (target !== "stage" || normalizedMode !== "mutate")) {
     throw fail("refill_stage_canary_scope_invalid");
+  }
+  if (requestedPoolClass && !["NORMAL", "SLOW"].includes(requestedPoolClass)) {
+    throw fail("refill_pool_class_invalid");
+  }
+  if (stageCanary && requestedPoolClass !== "NORMAL") {
+    throw fail("refill_stage_canary_pool_class_invalid");
   }
   const ownerCanaryActor = stageCanary
     && env.GITHUB_REPOSITORY_OWNER === CANONICAL_REPOSITORY.split("/")[0]
@@ -84,6 +91,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
     dryRun: normalizedMode !== "mutate",
     target,
     stageCanary,
+    poolClass: requestedPoolClass || null,
   };
 }
 
@@ -213,7 +221,7 @@ for share;
 `);
     const outcomes = [];
     for (const policy of Array.isArray(policyRows) ? policyRows : []) {
-      for (const poolClass of ["NORMAL", "SLOW"]) {
+      for (const poolClass of authorization.poolClass ? [authorization.poolClass] : ["NORMAL", "SLOW"]) {
         if ((await databaseNow(tx)).getTime() - startedAt.getTime() > 60_000) {
           throw fail("refill_transaction_expired");
         }

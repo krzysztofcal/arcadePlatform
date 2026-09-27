@@ -209,6 +209,7 @@ jobs:
           POKER_BOT_REFILL_CHECKED_SHA: ${{ steps.checkout-sha.outputs.sha }}
           POKER_BOT_REFILL_FEATURE_ENABLED: "1"
           POKER_BOT_REFILL_STAGE_CANARY: "1"
+          POKER_BOT_REFILL_POOL_CLASS: NORMAL
           REVIEWED_SHA_INPUT: ${{ inputs.poker_refill_reviewed_sha }}
           REVIEWED_SHA_CONFIRMATION: ${{ inputs.poker_refill_confirmation }}
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}

@@ -306,6 +306,7 @@ assert.deepEqual(Object.keys(canaryStep.env).sort(), [
   "POKER_BOT_REFILL_CHECKED_SHA",
   "POKER_BOT_REFILL_FEATURE_ENABLED",
   "POKER_BOT_REFILL_MODE",
+  "POKER_BOT_REFILL_POOL_CLASS",
   "POKER_BOT_REFILL_REVIEWED_REF",
   "POKER_BOT_REFILL_STAGE_CANARY",
   "POKER_BOT_REFILL_TARGET",
@@ -314,6 +315,7 @@ assert.deepEqual(Object.keys(canaryStep.env).sort(), [
   "SUPABASE_DB_URL",
 ].sort(), "Stage canary exposes only Stage DB and exact-SHA authority inputs");
 assert.equal(canaryStep.env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_STAGE_DB_URL }}");
+assert.equal(canaryStep.env.POKER_BOT_REFILL_POOL_CLASS, "NORMAL");
 assert.match(canaryStep.run, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(canaryStep.run, /test "\$GITHUB_REF" != "refs\/heads\/main"/);
 assert.ok(canaryStep.run.includes('[[ "$REVIEWED_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]]'));

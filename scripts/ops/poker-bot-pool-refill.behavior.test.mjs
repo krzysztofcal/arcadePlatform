@@ -159,8 +159,10 @@ test("owner-gated Stage canary accepts only the dispatched exact SHA", () => {
     POKER_BOT_REFILL_MODE: "mutate",
     POKER_BOT_REFILL_FEATURE_ENABLED: "1",
     POKER_BOT_REFILL_STAGE_CANARY: "1",
+    POKER_BOT_REFILL_POOL_CLASS: "NORMAL",
   });
   assert.equal(authorized.stageCanary, true);
+  assert.equal(authorized.poolClass, "NORMAL");
   assert.throws(() => resolveRefillAuthorization({
     GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
     GITHUB_REPOSITORY_OWNER: "krzysztofcal",
@@ -174,6 +176,7 @@ test("owner-gated Stage canary accepts only the dispatched exact SHA", () => {
     POKER_BOT_REFILL_MODE: "mutate",
     POKER_BOT_REFILL_FEATURE_ENABLED: "1",
     POKER_BOT_REFILL_STAGE_CANARY: "1",
+    POKER_BOT_REFILL_POOL_CLASS: "NORMAL",
   }), { code: "refill_actor_not_allowed" });
   assert.throws(() => resolveRefillAuthorization({
     GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
@@ -188,8 +191,24 @@ test("owner-gated Stage canary accepts only the dispatched exact SHA", () => {
     POKER_BOT_REFILL_MODE: "mutate",
     POKER_BOT_REFILL_FEATURE_ENABLED: "1",
     POKER_BOT_REFILL_STAGE_CANARY: "1",
+    POKER_BOT_REFILL_POOL_CLASS: "NORMAL",
     POKER_BOT_REFILL_PRODUCTION_GO: "1",
   }), { code: "refill_stage_canary_scope_invalid" });
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: reviewedSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_STAGE_CANARY: "1",
+    POKER_BOT_REFILL_POOL_CLASS: "SLOW",
+  }), { code: "refill_stage_canary_pool_class_invalid" });
 });
 
 test("Production mutation remains main-only and cannot target a PR SHA", () => {
