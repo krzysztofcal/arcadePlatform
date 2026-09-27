@@ -97,6 +97,7 @@ test("Stage mutation requires the exact checked reviewed commit", () => {
     GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
     GITHUB_EVENT_NAME: "workflow_dispatch",
     GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: reviewedSha,
     GITHUB_ACTOR: "arcade-poker-refill-dispatch",
     POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
     POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
@@ -109,6 +110,7 @@ test("Stage mutation requires the exact checked reviewed commit", () => {
     GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
     GITHUB_EVENT_NAME: "workflow_dispatch",
     GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: "fedcba9876543210fedcba9876543210fedcba98",
     GITHUB_ACTOR: "arcade-poker-refill-dispatch",
     POKER_BOT_REFILL_REVIEWED_REF: "refs/heads/docs/issue-1018-bot-quarantine",
     POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
@@ -120,6 +122,7 @@ test("Stage mutation requires the exact checked reviewed commit", () => {
     GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
     GITHUB_EVENT_NAME: "workflow_dispatch",
     GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: reviewedSha,
     GITHUB_ACTOR: "arcade-poker-refill-dispatch",
     POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
     POKER_BOT_REFILL_CHECKED_SHA: "fedcba9876543210fedcba9876543210fedcba98",
@@ -127,6 +130,18 @@ test("Stage mutation requires the exact checked reviewed commit", () => {
     POKER_BOT_REFILL_MODE: "mutate",
     POKER_BOT_REFILL_FEATURE_ENABLED: "1",
   }), { code: "refill_checked_sha_mismatch" });
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: "fedcba9876543210fedcba9876543210fedcba98",
+    GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+  }), { code: "refill_dispatch_sha_mismatch" });
 });
 
 test("Production mutation remains main-only and cannot target a PR SHA", () => {

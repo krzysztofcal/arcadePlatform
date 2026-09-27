@@ -258,6 +258,7 @@ assert.match(refillWorkflow, /Checkout exact dispatch SHA/);
 assert.match(refillWorkflow, /ref: \$\{\{ inputs\.target == 'production' && 'main' \|\| inputs\.reviewed_ref \}\}/);
 assert.match(refillWorkflow, /POKER_BOT_REFILL_REVIEWED_REF: \$\{\{ inputs\.target == 'production' && 'main' \|\| inputs\.reviewed_ref \}\}/);
 assert.match(refillWorkflow, /git rev-parse --verify HEAD/);
+assert.match(refillWorkflow, /test "\$GITHUB_SHA" = "\$reviewed_ref"/);
 assert.match(refillWorkflow, /POKER_BOT_REFILL_CHECKED_SHA=\$checked_sha/);
 assert.match(refillWorkflow, /node scripts\/ops\/poker-bot-pool-refill\.mjs/);
 assert.doesNotMatch(refillWorkflow, /github\.event\.inputs\.mode\s*==\s*'mutate'[^\n]*true/);
@@ -302,6 +303,7 @@ for (const [overrides, allowed] of [
   [{ REVIEWED_REF_INPUT: "main" }, false],
   [{ REVIEWED_REF_INPUT: "refs/heads/docs/issue-1018-bot-quarantine" }, false],
   [{ REVIEWED_REF_INPUT: "f".repeat(40) }, false],
+  [{ GITHUB_SHA: "f".repeat(40) }, false],
   [{ REFILL_TARGET: "production" }, false],
   [{ REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", POKER_BOT_REFILL_PRODUCTION_GO: "1" }, true],
   [{ REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: checkedSha, POKER_BOT_REFILL_PRODUCTION_GO: "1" }, false],

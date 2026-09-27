@@ -82,6 +82,7 @@ jobs:
             test "$checked_sha" = "$GITHUB_SHA"
           elif [[ "$REFILL_MODE" == "mutate" ]]; then
             [[ "$reviewed_ref" =~ ^[0-9a-f]{40}$ ]]
+            test "$GITHUB_SHA" = "$reviewed_ref"
             test "$reviewed_ref" = "$checked_sha"
           else
             test "$REVIEWED_REF_INPUT" = "main" || [[ "$reviewed_ref" =~ ^[0-9a-f]{40}$ ]]

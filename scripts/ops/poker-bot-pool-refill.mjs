@@ -59,6 +59,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   }
   if (normalizedMode === "mutate" && target === "stage") {
     if (!/^[0-9a-f]{40}$/.test(ref)) throw fail("refill_stage_reviewed_sha_required");
+    if (env.GITHUB_SHA !== ref) throw fail("refill_dispatch_sha_mismatch");
     if (env.POKER_BOT_REFILL_CHECKED_SHA !== ref) throw fail("refill_checked_sha_mismatch");
   }
   if (normalizedMode === "mutate" && target === "production") {
