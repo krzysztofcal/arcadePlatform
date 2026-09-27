@@ -255,7 +255,10 @@ assert.match(refillWorkflow, /github\.actor == 'arcade-poker-refill-dispatch'/);
 assert.match(refillWorkflow, /POKER_BOT_REFILL_PRODUCTION_GO/);
 assert.match(refillWorkflow, /production-poker-refill/);
 assert.match(refillWorkflow, /Checkout exact dispatch SHA/);
-assert.match(refillWorkflow, /ref: \$\{\{ github\.sha \}\}/);
+assert.match(refillWorkflow, /ref: \$\{\{ inputs\.target == 'production' && 'main' \|\| inputs\.reviewed_ref \}\}/);
+assert.match(refillWorkflow, /POKER_BOT_REFILL_REVIEWED_REF: \$\{\{ inputs\.target == 'production' && 'main' \|\| inputs\.reviewed_ref \}\}/);
+assert.match(refillWorkflow, /git rev-parse --verify HEAD/);
+assert.match(refillWorkflow, /POKER_BOT_REFILL_CHECKED_SHA=\$checked_sha/);
 assert.match(refillWorkflow, /node scripts\/ops\/poker-bot-pool-refill\.mjs/);
 assert.doesNotMatch(refillWorkflow, /github\.event\.inputs\.mode\s*==\s*'mutate'[^\n]*true/);
 // Dispatch inputs select a target/mode; repository variables and trusted context
@@ -266,31 +269,43 @@ assert.equal(refillJob.environment, "${{ inputs.target == 'production' && 'produ
 assert.equal(refillJob.env.POKER_BOT_REFILL_FEATURE_ENABLED, "${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}");
 assert.equal(refillJob.env.POKER_BOT_REFILL_PRODUCTION_GO, "${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}");
 const refillJobAllowed = new Function("github", "inputs", "vars", `return (${refillJob.if.slice(3, -2)});`);
-const refillGithub = {
+const stageRefillGithub = {
   event_name: "workflow_dispatch", repository: "krzysztofcal/arcadePlatform",
-  event: { repository: { fork: false } }, ref: "refs/heads/main", actor: "arcade-poker-refill-dispatch",
+  event: { repository: { fork: false } }, ref: "refs/heads/docs/issue-1018-bot-quarantine", actor: "arcade-poker-refill-dispatch",
 };
 const refillVars = { POKER_BOT_REFILL_ENABLED: "1", POKER_BOT_REFILL_DISPATCH_ACTOR: "arcade-poker-refill-dispatch" };
-assert.equal(refillJobAllowed(refillGithub, { mode: "mutate" }, refillVars), true);
+assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate" }, refillVars), true);
+const productionRefillGithub = { ...stageRefillGithub, ref: "refs/heads/main" };
+assert.equal(refillJobAllowed(productionRefillGithub, { target: "production", mode: "mutate" }, refillVars), true);
 for (const overrides of [
-  { repository: "other/repo" }, { ref: "refs/heads/other" }, { actor: "owner" },
+  { repository: "other/repo" }, { actor: "owner" },
   { event_name: "push" }, { event: { repository: { fork: true } } },
-]) assert.equal(refillJobAllowed({ ...refillGithub, ...overrides }, { mode: "mutate" }, refillVars), false);
+]) assert.equal(refillJobAllowed({ ...stageRefillGithub, ...overrides }, { target: "stage", mode: "mutate" }, refillVars), false);
+assert.equal(refillJobAllowed({ ...stageRefillGithub, ref: "refs/heads/main" }, { target: "stage", mode: "mutate" }, refillVars), true);
+assert.equal(refillJobAllowed({ ...productionRefillGithub, ref: "refs/heads/release" }, { target: "production", mode: "mutate" }, refillVars), false);
 for (const overrides of [{ POKER_BOT_REFILL_ENABLED: "0" }, { POKER_BOT_REFILL_DISPATCH_ACTOR: "other" }]) {
-  assert.equal(refillJobAllowed(refillGithub, { mode: "mutate" }, { ...refillVars, ...overrides }), false);
+  assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate" }, { ...refillVars, ...overrides }), false);
 }
 const refillBoundary = refillJob.steps.find((step) => step.name === "Verify refill authority boundary");
 const refillBoundaryRun = refillBoundary.run.replace("${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR }}", "arcade-poker-refill-dispatch");
+const checkedSha = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { encoding: "utf8" }).stdout.trim();
+assert.match(checkedSha, /^[0-9a-f]{40}$/);
 const refillBoundaryEnv = {
-  GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform", GITHUB_REF: "refs/heads/main",
+  GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform", GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+  GITHUB_SHA: checkedSha, GITHUB_ENV: "/dev/null",
   GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_ACTOR: "arcade-poker-refill-dispatch",
-  REVIEWED_REF_INPUT: "main", REFILL_TARGET: "stage", REFILL_MODE: "mutate",
+  REVIEWED_REF_INPUT: checkedSha, REFILL_TARGET: "stage", REFILL_MODE: "mutate",
   POKER_BOT_REFILL_FEATURE_ENABLED: "1", POKER_BOT_REFILL_PRODUCTION_GO: "0",
 };
 for (const [overrides, allowed] of [
   [{}, true],
+  [{ REVIEWED_REF_INPUT: "main" }, false],
+  [{ REVIEWED_REF_INPUT: "refs/heads/docs/issue-1018-bot-quarantine" }, false],
+  [{ REVIEWED_REF_INPUT: "f".repeat(40) }, false],
   [{ REFILL_TARGET: "production" }, false],
-  [{ REFILL_TARGET: "production", POKER_BOT_REFILL_PRODUCTION_GO: "1" }, true],
+  [{ REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", POKER_BOT_REFILL_PRODUCTION_GO: "1" }, true],
+  [{ REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: checkedSha, POKER_BOT_REFILL_PRODUCTION_GO: "1" }, false],
+  [{ REFILL_TARGET: "production", POKER_BOT_REFILL_PRODUCTION_GO: "1" }, false],
   [{ POKER_BOT_REFILL_FEATURE_ENABLED: "0" }, false],
   [{ GITHUB_ACTOR: "owner" }, false],
   [{ REFILL_TARGET: "other" }, false],

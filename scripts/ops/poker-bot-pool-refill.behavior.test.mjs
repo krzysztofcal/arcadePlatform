@@ -91,6 +91,75 @@ test("mutation authorization cannot be supplied by arbitrary workflow inputs", (
   }), { code: "refill_feature_disabled" });
 });
 
+test("Stage mutation requires the exact checked reviewed commit", () => {
+  const reviewedSha = "0123456789abcdef0123456789abcdef01234567";
+  const authorized = resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+  });
+  assert.equal(authorized.dryRun, false);
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+    POKER_BOT_REFILL_REVIEWED_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+  }), { code: "refill_stage_reviewed_sha_required" });
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: "fedcba9876543210fedcba9876543210fedcba98",
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+  }), { code: "refill_checked_sha_mismatch" });
+});
+
+test("Production mutation remains main-only and cannot target a PR SHA", () => {
+  const mainSha = "0123456789abcdef0123456789abcdef01234567";
+  const authorized = resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: mainSha,
+    GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_CHECKED_SHA: mainSha,
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_PRODUCTION_GO: "1",
+  });
+  assert.equal(authorized.target, "production");
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: mainSha,
+    GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+    POKER_BOT_REFILL_REVIEWED_REF: mainSha,
+    POKER_BOT_REFILL_CHECKED_SHA: mainSha,
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_PRODUCTION_GO: "1",
+  }), { code: "refill_production_ref_required" });
+});
+
 for (const lock of ["pg_advisory_xact_lock", "system_key = 'genesis'", "system_key = $1"]) {
   test(`refill skips an old bucket after waiting on ${lock}`, async () => {
     let dbNow = "2026-09-27T08:59:59.000Z";

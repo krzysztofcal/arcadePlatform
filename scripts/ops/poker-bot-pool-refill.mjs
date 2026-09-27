@@ -43,7 +43,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   const normalizedMode = String(mode || "dry-run").trim().toLowerCase();
   const target = String(env.POKER_BOT_REFILL_TARGET || "stage").trim().toLowerCase();
   if (repository !== CANONICAL_REPOSITORY) throw fail("refill_repository_mismatch");
-  if (!/^refs\/(heads|tags)\/[A-Za-z0-9._\/-]+$/.test(ref) && !/^[0-9a-f]{40}$/.test(ref)) {
+  if (!/^refs\/(heads|tags)\/[A-Za-z0-9._\/-]+$/.test(ref) && !/^[0-9a-f]{40}$/.test(ref) && ref !== "main") {
     throw fail("refill_reviewed_ref_required");
   }
   if (normalizedMode !== "dry-run" && normalizedMode !== "mutate") throw fail("refill_mode_invalid");
@@ -54,15 +54,20 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   if (normalizedMode === "mutate" && env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
     throw fail("refill_dispatch_required");
   }
-  if (normalizedMode === "mutate" && env.GITHUB_REF !== "refs/heads/main") {
-    throw fail("refill_main_ref_required");
-  }
   if (normalizedMode === "mutate" && env.GITHUB_ACTOR !== "arcade-poker-refill-dispatch") {
     throw fail("refill_actor_not_allowed");
   }
-  if (normalizedMode === "mutate" && target === "production"
-    && env.POKER_BOT_REFILL_PRODUCTION_GO !== "1") {
-    throw fail("refill_production_go_required");
+  if (normalizedMode === "mutate" && target === "stage") {
+    if (!/^[0-9a-f]{40}$/.test(ref)) throw fail("refill_stage_reviewed_sha_required");
+    if (env.POKER_BOT_REFILL_CHECKED_SHA !== ref) throw fail("refill_checked_sha_mismatch");
+  }
+  if (normalizedMode === "mutate" && target === "production") {
+    if (env.GITHUB_REF !== "refs/heads/main") throw fail("refill_main_ref_required");
+    if (ref !== "main") throw fail("refill_production_ref_required");
+    if (env.POKER_BOT_REFILL_CHECKED_SHA && env.POKER_BOT_REFILL_CHECKED_SHA !== env.GITHUB_SHA) {
+      throw fail("refill_checked_sha_mismatch");
+    }
+    if (env.POKER_BOT_REFILL_PRODUCTION_GO !== "1") throw fail("refill_production_go_required");
   }
   return {
     repository,

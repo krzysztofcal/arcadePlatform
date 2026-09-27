@@ -20,7 +20,7 @@ on:
           - dry-run
           - mutate
       reviewed_ref:
-        description: Reviewed branch/tag ref used for this dispatch
+        description: Immutable reviewed ref; Stage mutation requires the exact 40-character PR SHA, Production requires main
         required: true
         default: main
         type: string
@@ -34,13 +34,13 @@ permissions:
 
 jobs:
   refill:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && github.actor == vars.POKER_BOT_REFILL_DISPATCH_ACTOR && github.actor == 'arcade-poker-refill-dispatch')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && (inputs.target == 'stage' || github.ref == 'refs/heads/main') && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && github.actor == vars.POKER_BOT_REFILL_DISPATCH_ACTOR && github.actor == 'arcade-poker-refill-dispatch')) }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.target == 'production' && 'production-poker-refill' || 'stage-poker-refill' }}
     timeout-minutes: 15
     env:
       GITHUB_REPOSITORY: ${{ github.repository }}
-      POKER_BOT_REFILL_REVIEWED_REF: ${{ github.sha }}
+      POKER_BOT_REFILL_REVIEWED_REF: ${{ inputs.target == 'production' && 'main' || inputs.reviewed_ref }}
       POKER_BOT_REFILL_TARGET: ${{ inputs.target }}
       POKER_BOT_REFILL_MODE: ${{ inputs.mode }}
       POKER_BOT_REFILL_FEATURE_ENABLED: ${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}
@@ -50,7 +50,7 @@ jobs:
       - name: Checkout exact dispatch SHA
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.target == 'production' && 'main' || inputs.reviewed_ref }}
           fetch-depth: 1
 
       - name: Setup Node.js
@@ -70,12 +70,22 @@ jobs:
           REVIEWED_REF_INPUT: ${{ inputs.reviewed_ref }}
         run: |
           set -euo pipefail
+          checked_sha="$(git rev-parse --verify HEAD)"
+          reviewed_ref="${REVIEWED_REF_INPUT,,}"
           test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
-          test "$GITHUB_REF" = "refs/heads/main"
           test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
-          test "$REVIEWED_REF_INPUT" = "main" || [[ "$REVIEWED_REF_INPUT" =~ ^[0-9a-f]{40}$ ]]
           test "$REFILL_TARGET" = "stage" || test "$REFILL_TARGET" = "production"
           test "$REFILL_MODE" = "dry-run" || test "$REFILL_MODE" = "mutate"
+          if [[ "$REFILL_TARGET" == "production" ]]; then
+            test "$GITHUB_REF" = "refs/heads/main"
+            test "$REVIEWED_REF_INPUT" = "main"
+            test "$checked_sha" = "$GITHUB_SHA"
+          elif [[ "$REFILL_MODE" == "mutate" ]]; then
+            [[ "$reviewed_ref" =~ ^[0-9a-f]{40}$ ]]
+            test "$reviewed_ref" = "$checked_sha"
+          else
+            test "$REVIEWED_REF_INPUT" = "main" || [[ "$reviewed_ref" =~ ^[0-9a-f]{40}$ ]]
+          fi
           if [[ "$REFILL_MODE" == "mutate" ]]; then
             test "${POKER_BOT_REFILL_FEATURE_ENABLED:-0}" = "1"
             test "$GITHUB_ACTOR" = "${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR }}"
@@ -84,6 +94,7 @@ jobs:
               test "${POKER_BOT_REFILL_PRODUCTION_GO:-0}" = "1"
             fi
           fi
+          echo "POKER_BOT_REFILL_CHECKED_SHA=$checked_sha" >> "$GITHUB_ENV"
 
       - name: Run bounded pool refill worker
         run: node scripts/ops/poker-bot-pool-refill.mjs

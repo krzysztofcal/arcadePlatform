@@ -1,6 +1,6 @@
 # Contracts: NORMAL/SLOW admission and periodic tier pools with manual RESTRICTED
 
-Historical filename retained for the PR link. This contract implements the requirements of [spec.md](../spec.md), sourced solely from the live #1018 snapshot including its manual RESTRICTED amendment. Local T001–T029 evidence remains historical; the final amendment requires T030–T036 and a new exact-SHA WS gate.
+Historical filename retained for the PR link. This contract implements the requirements of [spec.md](../spec.md), sourced solely from the live #1018 snapshot including its manual RESTRICTED amendment. Local T001–T029 evidence remains historical; the final amendment requires T030–T036, a new exact-SHA WS gate and the pre-merge Stage acceptance T037.
 
 ## 1. Effective access and cache
 
@@ -44,7 +44,7 @@ Extend ledger validation with a backend-only scheduled-pool capability: exactly 
 
 VPS contains only GitHub dispatch credential, repo/ref/environment configuration, no DB secret/SQL. Dedicated workflow uses workflow_dispatch only, validated actor/repo/ref and separate Stage/Production environment gates; dry-run/read-only is default. Fresh/rebuilt VPS only: bootstrap.sh may install reviewed new artifacts disabled; never run it on an existing live VPS. Existing hosts use a separate owner-approved targeted upgrade/install flow following infra/vps/README.md and docs/chips-ledger-stage-automation.md, with read-only inventory and rollback manifest before installation. Installation and activation are separate: no code deploy/install/bootstrap automatically enables or starts the new timer or dispatches a workflow.
 
-The WS runtime gate (manual exact-runtime-SHA WS Preview Deploy, verified workflow success and targeted smoke) is independent of a Stage refill canary. The Stage-only canary performs real Stage ledger MINT, is authorized for post-merge execution and remains `AUTHORIZED / NOT RUN`; it is not a failed or blocked WS gate. Production remains a wholly separate GO.
+The WS runtime gate (manual exact-runtime-SHA WS Preview Deploy, verified workflow success and targeted smoke) is independent of the Stage acceptance refill canary. The Stage-only canary performs real Stage ledger MINT and is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / NOT RUN**; it is a separate gate after the WS/Caddy gate and must use the exact reviewed PR SHA. Production remains a wholly separate GO, and VPS timer activation remains separately unauthorized.
 
 ## 6. Admin interfaces
 
