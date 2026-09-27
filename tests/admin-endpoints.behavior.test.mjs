@@ -163,6 +163,48 @@ test("poker access admin refreshes after a failed DB commit to release only an a
   assert.equal(phases[1].releasePending, true);
 });
 
+test("poker access admin rejects a second mutation while the first pending barrier owns the user", async () => {
+  let pending = false;
+  let writes = 0;
+  let releaseFirstUpdate;
+  const firstUpdate = new Promise((resolve) => { releaseFirstUpdate = resolve; });
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    updatePokerAccess: async () => {
+      writes += 1;
+      if (writes === 1) await firstUpdate;
+      return { access: { revision: 9, override: "FORCE_RESTRICTED" } };
+    },
+    notifyWsPokerAccessMutation: async ({ phase }) => {
+      if (phase === "invalidate") {
+        if (pending) return { ok: false, invalidated: false, failClosed: true, skipped: false, reason: "poker_access_mutation_pending" };
+        pending = true;
+        return { ok: true, invalidated: true, failClosed: true, skipped: false };
+      }
+      pending = false;
+      return { ok: true, invalidated: true, refreshed: true, failClosed: false, skipped: false };
+    }
+  });
+  const event = {
+    httpMethod: "PATCH",
+    headers: {},
+    body: JSON.stringify({ userId: "00000000-0000-4000-8000-000000000020", override: "FORCE_RESTRICTED", expectedRevision: 8 })
+  };
+  const first = handler(event);
+  while (writes !== 1) await new Promise((resolve) => setImmediate(resolve));
+  const second = await handler({ ...event, body: JSON.stringify({ ...JSON.parse(event.body), override: "FORCE_SLOW" }) });
+  assert.equal(second.statusCode, 409);
+  assert.equal(JSON.parse(second.body).error, "poker_access_mutation_pending");
+  assert.equal(writes, 1, "the rejected mutation must not reach the DB write");
+  releaseFirstUpdate();
+  assert.equal((await first).statusCode, 200);
+
+  const third = await handler({ ...event, body: JSON.stringify({ ...JSON.parse(event.body), override: "FORCE_SLOW" }) });
+  assert.equal(third.statusCode, 200);
+  assert.equal(writes, 2);
+});
+
 test("poker access admin preserves automatic SLOW while applying an optimistic override revision", async () => {
   const result = await updatePokerAccess({
     userId: "00000000-0000-4000-8000-000000000020",
