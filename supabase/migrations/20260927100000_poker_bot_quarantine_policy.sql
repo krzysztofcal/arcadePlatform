@@ -1,6 +1,6 @@
 -- #1018 NORMAL/SLOW access, table markers, exact bot pools and bounded refill identity.
--- This migration is additive and forward-only.  It is intentionally not applied by
--- local implementation or test commands; publishing it invokes DB Stage Apply PR.
+-- This migration is additive and forward-only.  Local tests may apply it only to
+-- disposable fixtures; publishing it invokes DB Stage Apply PR.
 
 alter table public.chips_accounts
   add column if not exists poker_auto_class text not null default 'NORMAL',
@@ -98,6 +98,7 @@ on conflict (buy_in) do nothing;
 insert into public.chips_accounts (account_type, system_key, status, balance)
 values
   ('SYSTEM', 'POKER_BOT_BANKROLL_100', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL', 'active', 0),
   ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_100', 'active', 0),
   ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_500', 'active', 0)
 on conflict do nothing;
