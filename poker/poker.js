@@ -1928,9 +1928,15 @@
       var tableId = typeof table.tableId === 'string' ? table.tableId : table.id;
       if (Array.isArray(progressionState.rejoinableTableIds) && progressionState.rejoinableTableIds.includes(tableId)) return true;
       var effectiveClass = progressionState.pokerAccess && progressionState.pokerAccess.effectiveClass;
-      if (effectiveClass !== 'NORMAL' && effectiveClass !== 'SLOW') return false;
+      if (effectiveClass !== 'NORMAL' && effectiveClass !== 'SLOW' && effectiveClass !== 'RESTRICTED') return false;
       if (effectiveClass === 'SLOW' && table.slowOnly !== true) return false;
       if (effectiveClass === 'NORMAL' && table.slowOnly === true) return false;
+      var restrictedBotCount = Number(table.botCount);
+      if (effectiveClass === 'RESTRICTED'
+        && (table.slowOnly === true
+          || table.lifecycleKind === 'CONTINUOUS_BOT'
+          || !Number.isInteger(restrictedBotCount)
+          || restrictedBotCount !== 0)) return false;
       var buyIn = Number(table.buyIn);
       var tier = Array.isArray(progressionState.tiers) ? progressionState.tiers.find(function(item){ return Number(item.buyIn) === buyIn; }) : null;
       return !!(tier && isCanonicalTableForTier(table, tier));

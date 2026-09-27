@@ -751,8 +751,14 @@ async function loadBeginSqlWs() {
 function normalizeWsPokerAccessPayload(access) {
   if (!access || typeof access !== "object") return null;
   const automaticClass = access.automaticClass === "SLOW" ? "SLOW" : access.automaticClass === "NORMAL" ? "NORMAL" : null;
-  const override = ["AUTO", "FORCE_NORMAL", "FORCE_SLOW"].includes(access.override) ? access.override : null;
-  const effectiveClass = access.effectiveClass === "SLOW" ? "SLOW" : access.effectiveClass === "NORMAL" ? "NORMAL" : null;
+  const override = ["AUTO", "FORCE_NORMAL", "FORCE_SLOW", "FORCE_RESTRICTED"].includes(access.override) ? access.override : null;
+  const effectiveClass = access.effectiveClass === "SLOW"
+    ? "SLOW"
+    : access.effectiveClass === "NORMAL"
+      ? "NORMAL"
+      : access.effectiveClass === "RESTRICTED"
+        ? "RESTRICTED"
+        : null;
   const revision = Number(access.revision);
   if (!automaticClass || !override || !effectiveClass || !Number.isSafeInteger(revision) || revision <= 0) return null;
   const threshold = Number(access.slowThresholdCh ?? access.policy?.slowThresholdCh);
@@ -832,7 +838,9 @@ function broadcastPokerAccessTransition(userId, transition) {
       ...current,
       automaticClass: "SLOW",
       override: transition.override || current.override || "AUTO",
-      effectiveClass: transition.effectiveClass === "NORMAL" ? "NORMAL" : "SLOW",
+      effectiveClass: ["NORMAL", "SLOW", "RESTRICTED"].includes(transition.effectiveClass)
+        ? transition.effectiveClass
+        : "SLOW",
       revision,
       loadedAtMs: Date.now(),
       expiresAtMs: Date.now() + 30_000
@@ -1480,6 +1488,7 @@ function buildLobbyTableEntry(tableId) {
     return null;
   }
   const humanCount = seats.filter((seat) => seat?.isBot !== true).length;
+  const botCount = seats.filter((seat) => seat?.isBot === true).length;
   return {
     id: tableId,
     tableId,
@@ -1493,6 +1502,8 @@ function buildLobbyTableEntry(tableId) {
     maxPlayers,
     seatCount: seats.length,
     humanCount,
+    botCount,
+    lifecycleKind: tableMeta?.lifecycleKind || null,
     slowOnly: tableMeta?.isSlowOnly === true
   };
 }
@@ -2437,7 +2448,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     nowMs: Date.now(),
     allowManagedBotsOnly: managedContinuousTable,
     managedBotProfile,
-    allowBotFunding: settledAccessStatus.known === true && resolveSettledBotFundingSystemKey(fundingOptions) !== null
+    allowBotFunding: settledAccessStatus.known === true
+      && settledAccessStatus.effectiveRestricted !== true
+      && resolveSettledBotFundingSystemKey({ ...fundingOptions, effectiveRestricted: settledAccessStatus.effectiveRestricted }) !== null
   });
   if (!prepared?.ok || !prepared.changed) {
     return finishSettledRollover(prepared);
@@ -2457,7 +2470,8 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     tableMarkerTransition: prepared.tableMarkerTransition,
     replacementFundingSystemKey: resolveSettledBotFundingSystemKey({
       ...fundingOptions,
-      tableMarkerTransition: prepared.tableMarkerTransition
+      tableMarkerTransition: prepared.tableMarkerTransition,
+      effectiveRestricted: settledAccessStatus.effectiveRestricted
     }),
     deferRuntimeVersionUpdate: true
   });

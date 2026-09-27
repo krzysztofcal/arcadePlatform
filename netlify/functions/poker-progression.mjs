@@ -38,7 +38,7 @@ where t.status = 'OPEN'
 
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
-    `select id, status, buy_in, stakes${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
+    `select id, status, buy_in, stakes, lifecycle_kind${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
     [tableId]
   );
   const table = rows?.[0] || null;
@@ -58,7 +58,9 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
     return { tableId, buyIn: normalizedBuyIn, allowed: true, rejoin: true, reason: "rejoin" };
   }
   if (progression.pokerAccess?.effectiveClass !== "NORMAL" && progression.pokerAccess?.effectiveClass !== "SLOW") {
-    return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "poker_access_unavailable" };
+    if (progression.pokerAccess?.effectiveClass !== "RESTRICTED") {
+      return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "poker_access_unavailable" };
+    }
   }
   if (!normalizedBuyIn || !isConfiguredPokerBuyIn(normalizedBuyIn, progression?.tiers?.map((tier) => tier.buyIn) || [])) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: "invalid_buy_in" };
@@ -74,6 +76,19 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
   }
   if (progression.pokerAccess?.effectiveClass === "SLOW" && table.is_slow_only !== true) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "slow_only_table_required" };
+  }
+  if (progression.pokerAccess?.effectiveClass === "RESTRICTED") {
+    const occupancyRows = await tx.unsafe(
+      `select count(*) filter (where status = 'ACTIVE' and coalesce(is_bot, false) = true)::int as bot_count
+         from public.poker_seats
+        where table_id = $1;`,
+      [tableId]
+    );
+    if (String(table.lifecycle_kind || "STANDARD").toUpperCase() !== "STANDARD"
+      || table.is_slow_only === true
+      || Number(occupancyRows?.[0]?.bot_count || 0) > 0) {
+      return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "restricted_table_required" };
+    }
   }
   return { tableId, buyIn: normalizedBuyIn, allowed: true, rejoin: false, reason: "available" };
 }

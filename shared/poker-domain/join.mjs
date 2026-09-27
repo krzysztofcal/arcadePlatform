@@ -172,6 +172,18 @@ function isSafeSlowOwnerPromotion(table, { userId, seatRows, hasFundingHistory =
     && hasFundingHistory !== true;
 }
 
+async function hasMaterializedBotFunding(tx, tableId) {
+  const rows = await tx.unsafe(
+    `select 1
+       from public.chips_transactions
+      where metadata ->> 'tableId' = $1
+        and metadata ->> 'actor' = 'BOT'
+      limit 1;`,
+    [tableId]
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 function isSeatConflictError(error) {
   const code = typeof error?.code === "string" ? error.code : "";
   if (code === "seat_taken") return true;
@@ -837,7 +849,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const joinAccess = await resolveJoinAccess({ tx, userId, bankroll: bankrollForAccess, buyIn: authoritativeBuyIn });
       const tableIsSlowOnly = table?.is_slow_only === true;
 
-      if (joinAccess.effectiveClass !== "NORMAL" && joinAccess.effectiveClass !== "SLOW") {
+      if (joinAccess.effectiveClass !== "NORMAL"
+        && joinAccess.effectiveClass !== "SLOW"
+        && joinAccess.effectiveClass !== "RESTRICTED") {
         throw makeError("poker_access_unavailable");
       }
 
@@ -848,6 +862,17 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           [tableId]
         );
         hasFundingHistory = Array.isArray(fundingRows) && fundingRows.length > 0;
+      }
+
+      if (joinAccess.effectiveClass === "RESTRICTED") {
+        const activeRows = activeSeatRows(seatRows);
+        const hasActiveBot = activeRows.some((row) => row?.is_bot === true);
+        const hasBotFunding = hasActiveBot || await hasMaterializedBotFunding(tx, tableId);
+        if (String(table.lifecycle_kind || "STANDARD").toUpperCase() !== "STANDARD"
+          || tableIsSlowOnly
+          || hasBotFunding) {
+          throw makeError("restricted_table_required");
+        }
       }
 
       if (joinAccess.effectiveClass === "NORMAL" && tableIsSlowOnly) {
@@ -982,13 +1007,14 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
 
       const botCfg = getBotConfig(process.env);
       const humanCountAfterJoin = activeSeatRows(seatRows).filter((row) => !row?.is_bot).length + 1;
-      const fundingPoolClass = joinAccess.schemaBacked
+      const fundingPoolClass = joinAccess.schemaBacked && joinAccess.effectiveClass !== "RESTRICTED"
         ? (tableIsSlowOnly || canPromoteSlowTable ? "SLOW" : "NORMAL")
         : null;
-      const targetBotCount = isBotFundingAllowedForBuyIn(
-        authoritativeBuyIn,
-        fundingPoolClass ? { poolClass: fundingPoolClass } : {}
-      )
+      const targetBotCount = joinAccess.effectiveClass !== "RESTRICTED"
+        && isBotFundingAllowedForBuyIn(
+          authoritativeBuyIn,
+          fundingPoolClass ? { poolClass: fundingPoolClass } : {}
+        )
         && botCfg.enabled && shouldSeedBotsOnJoin({ humanCount: humanCountAfterJoin })
         ? computeTargetBotCount({
           maxPlayers,
@@ -997,10 +1023,11 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           maxBots: botCfg.maxPerTable
         })
         : 0;
-      const tierFundingEnabled = !joinAccess.schemaBacked
-        || (joinAccess.tierPolicy?.enabled === true
+      const tierFundingEnabled = joinAccess.effectiveClass !== "RESTRICTED"
+        && (!joinAccess.schemaBacked
+          || (joinAccess.tierPolicy?.enabled === true
           && joinAccess.poolProvisioning?.NORMAL === true
-          && joinAccess.poolProvisioning?.SLOW === true);
+          && joinAccess.poolProvisioning?.SLOW === true));
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,

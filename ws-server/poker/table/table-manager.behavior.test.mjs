@@ -118,6 +118,45 @@ test("settled access classification persists automatic SLOW under FORCE_NORMAL a
   }]);
 
   manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL",
+    override: "FORCE_RESTRICTED",
+    effectiveClass: "RESTRICTED",
+    revision: 9,
+    loadedAtMs: 200,
+    expiresAtMs: 30_200
+  }, {
+    slowThresholdCh: 100,
+    revision: 3,
+    loadedAtMs: 200,
+    expiresAtMs: 30_200
+  }, 200);
+  const restricted = manager.classifySettledAccess(tableId, [{ userId, stack: 100 }], { nowMs: 250 });
+  assert.equal(restricted.known, true);
+  assert.equal(restricted.effectiveRestricted, true);
+  assert.deepEqual(restricted.transitions, [{
+    userId,
+    expectedRevision: 9,
+    automaticClass: "SLOW",
+    override: "FORCE_RESTRICTED",
+    effectiveClass: "RESTRICTED"
+  }]);
+
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "SLOW",
+    override: "FORCE_RESTRICTED",
+    effectiveClass: "RESTRICTED",
+    revision: 10,
+    loadedAtMs: 250,
+    expiresAtMs: 30_250
+  }, {
+    slowThresholdCh: 100,
+    revision: 3,
+    loadedAtMs: 250,
+    expiresAtMs: 30_250
+  }, 250);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 300 }).effectiveRestricted, true);
+
+  manager.cachePokerAccess(tableId, userId, {
     automaticClass: "SLOW",
     override: "AUTO",
     effectiveClass: "SLOW",
@@ -487,6 +526,45 @@ test("persistent bot replacement commits runtime only with matching funding rece
     requestId: "join-replacement-receipt",
     nowTs: 1
   }).ok, true);
+
+  tableManager.cachePokerAccess(tableId, humanUserId, {
+    automaticClass: "NORMAL",
+    override: "FORCE_RESTRICTED",
+    effectiveClass: "RESTRICTED",
+    revision: 2,
+    loadedAtMs: 1,
+    expiresAtMs: 30_001
+  }, {
+    slowThresholdCh: 100,
+    revision: 1,
+    loadedAtMs: 1,
+    expiresAtMs: 30_001
+  }, 1);
+  const restrictedAccess = tableManager.settledAccessStatus(tableId, { nowMs: 5_000 });
+  assert.equal(restrictedAccess.known, true);
+  assert.equal(restrictedAccess.effectiveRestricted, true);
+  const restrictedPrepared = tableManager.prepareSettledHandRollover({
+    tableId,
+    nowMs: 5_000,
+    allowBotFunding: restrictedAccess.known === true && restrictedAccess.effectiveRestricted !== true
+  });
+  assert.equal(restrictedPrepared.ok, true);
+  assert.deepEqual(restrictedPrepared.replacementFundings ?? [], []);
+  assert.deepEqual(restrictedPrepared.managedBotTopUps ?? [], []);
+
+  tableManager.cachePokerAccess(tableId, humanUserId, {
+    automaticClass: "NORMAL",
+    override: "AUTO",
+    effectiveClass: "NORMAL",
+    revision: 3,
+    loadedAtMs: 5_000,
+    expiresAtMs: 35_000
+  }, {
+    slowThresholdCh: 1_000,
+    revision: 1,
+    loadedAtMs: 5_000,
+    expiresAtMs: 35_000
+  }, 5_000);
 
   const unfunded = tableManager.prepareSettledHandRollover({ tableId, nowMs: 5_000, allowBotFunding: false });
   assert.equal(unfunded.ok, true);
@@ -3582,6 +3660,7 @@ test("settled funding requires a fresh enabled tier and both provisioned pools, 
     snapshot, buyIn: 100, nowMs: 100, legacySystemKey: "TREASURY", ...changes
   });
   assert.equal(resolve(), "POKER_BOT_BANKROLL_100");
+  assert.equal(resolve({ effectiveRestricted: true }), null);
   assert.equal(resolve({ tableMarkerTransition: true }), "POKER_BOT_SLOW_BANKROLL_100");
   assert.equal(resolve({ isSlowOnly: true }), "POKER_BOT_SLOW_BANKROLL_100");
   assert.equal(resolve({ isSlowOnly: true, tableMarkerTransition: true, lifecycleKind: "CONTINUOUS_BOT" }), "POKER_BOT_BANKROLL_100");

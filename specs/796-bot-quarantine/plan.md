@@ -1,4 +1,4 @@
-# Implementation Plan: NORMAL/SLOW periodic per-tier pools
+# Implementation Plan: NORMAL/SLOW periodic per-tier pools with manual RESTRICTED
 
 **Branch**: `docs/issue-1018-bot-quarantine` | **Date**: 2026-09-26 | **Spec**: [spec.md](spec.md)
 
@@ -6,7 +6,7 @@
 
 ## Summary
 
-Extend existing authoritative JOIN and settled rollover with NORMAL/SLOW plus manual override, sticky SLOW-only table compatibility and shared user-lock 4-active/4-pending limits. Runtime spends exact pre-existing tier/class bankroll funds. A separate three-hour systemd-dispatched job refills each eligible pool once by configured amount. Existing Admin tunes access/refill policy, WS live lobby adds slowOnly, and DB Quick Seat stays DB-backed. This is economic containment; Sybil and split wealth remain accepted. T001–T028 are implemented locally and evidence-reviewed; T029 exact-SHA WS Preview/runtime evidence remains open in dependency order.
+Extend existing authoritative JOIN and settled rollover with NORMAL/SLOW plus manual-only FORCE_RESTRICTED, sticky SLOW-only table compatibility and shared user-lock 4-active/4-pending limits. Runtime spends exact pre-existing tier/class bankroll funds; RESTRICTED has no bankroll or refill policy. A separate three-hour systemd-dispatched job refills each eligible pool once by configured amount. Existing Admin tunes access/refill policy and override, WS live lobby adds only minimal occupancy compatibility, and DB Quick Seat stays DB-backed. This is economic containment; Sybil and split wealth remain accepted. T001–T029 are historical implementation/evidence; T030–T035 implement the final live #1018 amendment and T036 is its new exact-SHA WS Preview/runtime gate.
 
 ## Technical Context
 
@@ -14,7 +14,7 @@ Extend existing authoritative JOIN and settled rollover with NORMAL/SLOW plus ma
 
 **Primary Dependencies**: Existing postgres client, ws, Netlify functions, ledger helpers; no new packages/frameworks.
 
-**Storage**: Existing PostgreSQL/Supabase persistence; additive USER/table fields, two small policy tables, new zero-balance pool accounts (existing balances preserved) and narrow existing-ledger index. No new receipt/counter service.
+**Storage**: Existing PostgreSQL/Supabase persistence; the applied #1018 schema remains immutable and the amendment adds one forward-only CHECK extension migration accepting `FORCE_RESTRICTED`. No new tables, columns, bankrolls, policy rows, receipt/counter service or table marker are introduced for RESTRICTED; existing balances and provenance remain preserved.
 
 **Testing**: Existing node:test behavioral suites, one isolated local PostgreSQL concurrency suite; no UI/CSS/JSP/glue suites. T016/T019/T020 also extend existing `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` and `ws-tests/infra-vps-workflow.guard.test.mjs` with small deterministic security/authority guards, using their existing YAML/source assertion and local stub patterns, without a new framework or broad scheduler suite. Verify refill workflow has only workflow_dispatch, canonical repository/ref and actor/environment/feature mutation gates, dry-run/read-only default and separate Production GO; inputs alone cannot authorize mutation. Verify exact VPS repo/workflow/ref/mode dispatch, GitHub credential only, no Supabase/DB secrets or SQL/ledger writes and timer only waking dispatch. Verify new artifacts install only under fresh/rebuilt bootstrap contract without enable --now/start/dispatch; existing-host targeted install stays separate and installation/deploy cannot activate. Scope bootstrap assertions to new refill artifacts. Include negative unauthorized-input cases on the guarded path; tests perform no real dispatch/systemd/DB actions. These are fundamental financial-authority guards, not rendering/glue tests.
 
@@ -70,14 +70,14 @@ specs/796-bot-quarantine/
 | `shared/poker-domain/table-economy.mjs::getBotFundingSystemKeyForBuyIn`, `bots.mjs::seedBotsForJoin`, `ws-server/poker/persistence/continuous-bot-table-repository.mjs` | Exact tier/class and enabled/provisioned pair, no fallback/MINT |
 | `shared/poker-domain/terminal-close.mjs::normalizeFundingRows`, `leave.mjs`, WS/Netlify chips-ledger adapters | Preserve source attribution/legal payouts; do not replace original source with current table class |
 | `ws-server/poker/bootstrap/persisted-bootstrap-repository.mjs`, `persisted-bootstrap-db.mjs`, `persisted-bootstrap-adapter.mjs::normalizeTableMeta` | Load/map is_slow_only into runtime metadata and recovery |
-| `ws-server/server.mjs::buildLobbyTableEntry/syncLobbyTable/buildLobbySnapshotPayload`, `activeLobbyTablesById` | Shared slowOnly entries, no personalized inventory; authenticated self access snapshot on connect/refresh |
-| `poker/poker.js::canViewLobbyTable`, `poker/poker-ws-client.js` (the repository's realtime client) | Class-aware fresh targets, existing resume, self snapshot handling, final JOIN still authority |
+| `ws-server/server.mjs::buildLobbyTableEntry/syncLobbyTable/buildLobbySnapshotPayload`, `activeLobbyTablesById` | Shared slowOnly plus minimal bot occupancy/lifecycle facts, no personalized inventory; authenticated self access snapshot on connect/refresh |
+| `poker/poker.js::canViewLobbyTable`, `poker/poker-ws-client.js` (the repository's realtime client) | NORMAL/SLOW/RESTRICTED-aware fresh targets, bot-free RESTRICTED filtering, existing resume, self snapshot handling, final JOIN still authority |
 | `netlify/functions/admin-user-details.mjs::loadUserDetails`, `admin-users-list.mjs`, `admin-ops-summary.mjs::loadOpsSummary`, `js/admin-page.js` | Minimal Users/Ops fields/controls, optional existing-path pool balances |
 | `netlify/functions/_shared/admin-auth.mjs::requireAdminUser`, `admin-bonus-campaigns.mjs::createAdminBonusCampaignsHandler` | Reuse authorization/validation patterns; no generic framework |
 | `netlify/functions/_shared/chips-ledger.mjs::validateEntries/postTransaction` | Narrow trusted scheduled SYSTEM MINT capability; existing balanced ledger/idempotency remains |
 | `infra/vps/arcade-chips-ledger-dispatch.sh/.service/.timer`, `infra/vps/bootstrap.sh` | Reuse external dispatch pattern; bootstrap additions only for future fresh/rebuilt VPS. Existing live VPS must use separate owner-approved targeted install, never bootstrap; installation cannot enable/start timer |
 
-New implementation files are `shared/poker-domain/bot-access.mjs`, `shared/poker-domain/table-participation.mjs`, `netlify/functions/admin-user-poker-access.mjs`, `netlify/functions/admin-poker-policy.mjs`, `scripts/ops/poker-bot-pool-refill.mjs`, `.github/workflows/poker-bot-pool-refill.yml`, `infra/vps/arcade-poker-pool-dispatch.sh/.service/.timer`, and `tests/chips/poker-pool-policy.transaction.test.mjs`; additive schema is in `supabase/migrations/20260927100000_poker_bot_quarantine_policy.sql`. The migration was applied to shared Stage by automatic DB Stage Apply PR (36310279719: 97→98, smoke PASS; 36310527312: 98/0, smoke PASS). It is immutable; no new migration is introduced by the review fixes. Production remains separate GO. Existing test files are enumerated in tasks/quickstart.
+New implementation files are `shared/poker-domain/bot-access.mjs`, `shared/poker-domain/table-participation.mjs`, `netlify/functions/admin-user-poker-access.mjs`, `netlify/functions/admin-poker-policy.mjs`, `scripts/ops/poker-bot-pool-refill.mjs`, `.github/workflows/poker-bot-pool-refill.yml`, `infra/vps/arcade-poker-pool-dispatch.sh/.service/.timer`, and `tests/chips/poker-pool-policy.transaction.test.mjs`; the original `supabase/migrations/20260927100000_poker_bot_quarantine_policy.sql` is immutable and the amendment adds only `supabase/migrations/20260927110000_poker_force_restricted.sql` to extend its override CHECK. The original migration was applied to shared Stage by automatic DB Stage Apply PR (36310279719: 97→98, smoke PASS; 36310527312: 98/0, smoke PASS); the new migration intentionally follows the same forward-only DB Stage Apply path. Production remains separate GO. Existing test files are enumerated in tasks/quickstart.
 
 **Structure Decision**: Keep current packages and authority boundaries. Legacy feature/contract filenames are retained so #1019 links remain valid; all contents are rewritten. No dependencies, generic setup files or unrelated cleanup.
 
@@ -108,3 +108,17 @@ Breaking impacts: 100 NORMAL leaves shared TREASURY; every enabled tier has clas
 ## Complexity Tracking
 
 No constitution violations. No new receipt registry, generic policy/moderation service, personalized matchmaking, per-user bot allowance, global wealth aggregator or second settlement path. Final plan review confirms each new helper has multiple concrete callers and each operational artifact has a distinct required responsibility.
+
+## Final live #1018 amendment — manual RESTRICTED sequence
+
+The following sequence is additive to the completed T001–T029 history and is the implementation plan for the current Issue #1018 amendment. It does not introduce a third automatic class: `bot-access.mjs` continues to normalize automatic state to NORMAL/SLOW, while `FORCE_RESTRICTED` derives only the effective state RESTRICTED. Threshold evidence remains durable under every override, including FORCE_RESTRICTED, and Return to AUTO immediately reveals the stored automatic state.
+
+1. **Source/spec sync (T030)** — retain the exact live snapshot in `issue-source.md`, then align spec, research, data model, contracts, quickstart and checklists with the manual-only override, no RESTRICTED funding/table marker, legal financed rejoin/settlement and the new Stage effect.
+2. **Forward-only schema (T031)** — add one migration extending only `chips_accounts_poker_access_override_chk` with `FORCE_RESTRICTED`; update the exhaustive Production manifest/inventory as `needs-production-equivalent`. The already applied `20260927100000...` file remains immutable.
+3. **Access/Admin/cache (T032)** — extend existing normalization, Admin endpoints/select/actions and WS self-cache payload to accept FORCE_RESTRICTED/effective RESTRICTED while automatic normalization remains NORMAL/SLOW; retain `requireAdmin`, revision/audit and legacy capability behavior.
+4. **Admission/discovery (T033)** — update `executePokerJoinAuthoritative`, `poker-quick-seat.mjs`, `buildLobbyTableEntry`/`lobby_snapshot` and `canViewLobbyTable` so fresh RESTRICTED targets are ordinary, STANDARD and bot-free, with `botCount` occupancy compatibility; preserve existing financed resume and final JOIN authority.
+5. **Settled funding (T034)** — use the existing cached settled status and `runSettledRolloverCommand`/prepare/commit flow to allow legal settlement but no new seed, replacement or managed top-up for an effective RESTRICTED human; CONTINUOUS_BOT remains NORMAL and no hand-loop reads are added.
+6. **Focused validation (T035)** — extend only existing fundamental access, Admin, JOIN, Quick Seat, lobby, table-manager and migration contract tests; run migration guard and relevant local PostgreSQL checks without Stage refill/MINT or broad UI/glue tests.
+7. **New runtime gate (T036)** — after CI, deploy the exact latest runtime-affecting SHA to WS Preview, verify matching release/deploy SHA and health, then run the narrow RESTRICTED smoke. The prior T029 run is historical evidence only. Stage refill canary, VPS activation, Production migration/cutover and merge remain separate unauthorized gates.
+
+Production compatibility is a hard constraint through every step: a missing #1018 schema retains pre-migration poker behavior and legacy 100 CH provenance, while unrelated SQL errors propagate. The new migration is the only shared Stage effect in this amendment; no Stage refill or bot-pool funding is part of the plan.

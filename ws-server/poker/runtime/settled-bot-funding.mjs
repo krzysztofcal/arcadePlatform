@@ -27,10 +27,12 @@ export function resolveSettledBotFundingSystemKey({
   isSlowOnly = false,
   tableMarkerTransition = false,
   lifecycleKind = null,
+  effectiveRestricted = false,
   legacySystemKey = "TREASURY",
   nowMs = Date.now()
 } = {}) {
   if (!snapshot || !Number.isFinite(snapshot.expiresAtMs) || nowMs > snapshot.expiresAtMs) return null;
+  if (effectiveRestricted === true) return null;
   if (snapshot.schemaBacked === false) {
     return getBotFundingSystemKeyForBuyIn(buyIn, { legacySystemKey });
   }

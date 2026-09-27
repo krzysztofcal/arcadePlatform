@@ -554,6 +554,49 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
 }
 
 {
+  const restrictedProgression = {
+    availableBuyIns: [100],
+    pokerAccess: {
+      automaticClass: 'SLOW',
+      override: 'FORCE_RESTRICTED',
+      effectiveClass: 'RESTRICTED',
+      revision: 4,
+    },
+    tiers: [{ buyIn: 100, available: true, unlocked: true, stakes: { sb: 1, bb: 2 } }],
+    balance: 100,
+    highestUnlockedBuyIn: 100,
+    highestUnlockedIndex: 0,
+  };
+  const restrictedHarness = loadLobbyHarness({
+    fetchResponse: async (url) => url.includes('poker-progression')
+      ? { ok: true, status: 200, json: async () => restrictedProgression }
+      : { ok: true, status: 200, json: async () => ({ ok: true }) },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  restrictedHarness.getLobbyOptions().onLobbySnapshot({
+    kind: 'lobby_snapshot',
+    initial: true,
+    payload: {
+      tables: [
+        { tableId: 'restricted-empty', status: 'OPEN', buyIn: 100, seatCount: 0, maxPlayers: 6, stakes: { sb: 1, bb: 2 }, lifecycleKind: 'STANDARD', botCount: 0, slowOnly: false },
+        { tableId: 'restricted-bot', status: 'OPEN', buyIn: 100, seatCount: 1, maxPlayers: 6, stakes: { sb: 1, bb: 2 }, lifecycleKind: 'STANDARD', botCount: 1, slowOnly: false },
+        { tableId: 'restricted-slow', status: 'OPEN', buyIn: 100, seatCount: 0, maxPlayers: 6, stakes: { sb: 1, bb: 2 }, lifecycleKind: 'STANDARD', botCount: 0, slowOnly: true },
+        { tableId: 'restricted-continuous', status: 'OPEN', buyIn: 100, seatCount: 0, maxPlayers: 6, stakes: { sb: 1, bb: 2 }, lifecycleKind: 'CONTINUOUS_BOT', botCount: 0, slowOnly: false },
+        { tableId: 'restricted-occupancy-unknown', status: 'OPEN', buyIn: 100, seatCount: 0, maxPlayers: 6, stakes: { sb: 1, bb: 2 }, lifecycleKind: 'STANDARD', slowOnly: false },
+      ],
+    },
+  });
+  const restrictedRows = restrictedHarness.elements.pokerTableList.children;
+  assert.equal(restrictedRows.length, 5, 'restricted lobby should render all snapshot rows before UX filtering');
+  assert.equal(restrictedRows[0].children[5].disabled, false, 'restricted user may view an empty ordinary table');
+  assert.equal(restrictedRows[1].children[5].disabled, true, 'restricted user must not view a bot-populated table');
+  assert.equal(restrictedRows[2].children[5].disabled, true, 'restricted user must not view a SLOW-only table');
+  assert.equal(restrictedRows[3].children[5].disabled, true, 'restricted user must not view a CONTINUOUS_BOT table');
+  assert.equal(restrictedRows[4].children[5].disabled, true, 'restricted user must fail closed when bot occupancy is unknown');
+}
+
+{
   const fallbackHarness = loadLobbyHarness({
     balanceError: true,
     fetchResponse: async (url) => {

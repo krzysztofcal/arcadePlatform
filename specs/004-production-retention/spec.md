@@ -13,7 +13,7 @@ The owner receives an exhaustive migration inventory and an independently verifi
 
 **Independent test**: On disposable PostgreSQL, start at the 54-migration Production baseline and apply PR A's equivalent. Verify columns, constraints, function bodies, owners, ACLs, triggers, RLS and final indexes; assert no Stage policies, receipts or allowlists and no data deletion. Repeat migration-history inspection without writing history.
 
-1. Given the 44 missing versions, every version has one category and explicit final-contract disposition.
+1. Given the 45 missing versions, every version has one category and explicit final-contract disposition.
 2. Given canonical Production and separately authorized application, catch-up installs missing lifecycle columns, TABLE binding protection and retention procedures with fence and automation initially OFF; it preserves balances, historical registry and archive batch 1.
 3. Given Stage, an unknown server, mismatched project/system pair or incomplete inventory, the Production migration aborts before DDL.
 4. Given the Production history afterwards, skipped Stage versions remain absent. New equivalent versions prove the contract; no fictitious “applied” entries are inserted for skipped files.
@@ -63,7 +63,7 @@ Empty/young/oversized table; historical NULL registry table_id; missing table; n
 
 ## Success Criteria
 
-- **SC-001** All 98 source-tree versions reconciled: 54 existing Production, 44 individually classified (including the #1018 feature migration reserved for separate Production equivalence), no unexplained history drift.
+- **SC-001** All 99 source-tree versions reconciled: 54 existing Production, 45 individually classified (including the #1018 feature migrations reserved for separate Production equivalence), no unexplained history drift.
 - **SC-002** Disposable Production-equivalent contract passes and deployed WS no longer reports the missing lifecycle-column error after separately authorized catch-up.
 - **SC-003** All four classes have independent fresh Production canary evidence, with at most 2 transactions per archive and at most 2 escrow accounts; complete recovery verification and accounting invariants PASS.
 - **SC-004** PR B independently gates cap 5000 and scheduled activation; one normal scheduled invocation for each class is evidenced with exact SHA and target, with no concurrent destructive cycle.

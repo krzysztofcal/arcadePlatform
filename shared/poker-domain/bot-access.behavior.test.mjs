@@ -4,6 +4,7 @@ import {
   DEFAULT_SLOW_THRESHOLD_CH,
   deriveAccessState,
   applyAutomaticThresholdEvidence,
+  normalizeAccessClass,
   resolveEffectiveClass,
 } from "./bot-access.mjs";
 
@@ -54,6 +55,26 @@ test("threshold evidence is inclusive and does not downgrade sticky automatic SL
     evidenceCh: 0,
     slowThresholdCh: DEFAULT_SLOW_THRESHOLD_CH,
   }).automaticClass, "SLOW");
+});
+
+test("FORCE_RESTRICTED is effective-only and never an automatic class", () => {
+  assert.equal(normalizeAccessClass("RESTRICTED"), null);
+
+  const forced = deriveAccessState({ automaticClass: "NORMAL", override: "FORCE_RESTRICTED" });
+  assert.equal(forced.automaticClass, "NORMAL");
+  assert.equal(forced.effectiveClass, "RESTRICTED");
+
+  const classified = applyAutomaticThresholdEvidence({
+    automaticClass: forced.automaticClass,
+    override: forced.override,
+    evidenceCh: DEFAULT_SLOW_THRESHOLD_CH,
+    slowThresholdCh: DEFAULT_SLOW_THRESHOLD_CH,
+  });
+  assert.equal(classified.automaticClass, "SLOW");
+  assert.equal(classified.effectiveClass, "RESTRICTED");
+
+  const returnedToAuto = deriveAccessState({ automaticClass: classified.automaticClass, override: "AUTO" });
+  assert.equal(returnedToAuto.effectiveClass, "SLOW");
 });
 
 test("pre-migration capability uses legacy access, rechecks next transaction, and propagates database errors", async () => {

@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 44,
+    "missing_count": 45,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -898,6 +898,20 @@
       ],
       "omitted_effects": [
         "No Production application, activation or runtime mutation is authorized by this Stage migration"
+      ]
+    },
+    {
+      "version": "20260927110000",
+      "file": "20260927110000_poker_force_restricted.sql",
+      "sha256": "3bb727ccfff42bc257c66976052e0a09d08c74d6f7838e37df0889dbd69f9fc4",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": null,
+      "required_effects": [
+        "FORCE_RESTRICTED override constraint accepted by the #1018 schema; Production equivalent remains separately reviewed"
+      ],
+      "omitted_effects": [
+        "No Production migration, activation or runtime mutation is authorized by this Stage migration"
       ]
     }
   ],

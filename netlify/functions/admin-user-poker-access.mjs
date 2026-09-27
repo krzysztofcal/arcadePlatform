@@ -11,6 +11,8 @@ function normalizeAccessRow(row) {
     ? "NORMAL"
     : override === "FORCE_SLOW"
       ? "SLOW"
+      : override === "FORCE_RESTRICTED"
+        ? "RESTRICTED"
       : automaticClass;
   return {
     userId: row.user_id || null,

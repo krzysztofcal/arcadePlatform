@@ -6,7 +6,7 @@
 
 **Tests**: Only requested fundamental deterministic backend/runtime/transaction tests. No UI/CSS/JSP/glue suites or new test framework.
 
-**Organization**: User-story phases follow the active Spec Kit template. T001–T029 are implemented and locally verified in this worktree; T029 is the separate exact-SHA WS Preview/runtime gate recorded in `quickstart.md`. The conditional Stage refill canary is separately authorized and remains unrun. Latest live #1018 supersedes the old 19-task farmer-only plan.
+**Organization**: User-story phases follow the active Spec Kit template. T001–T029 are completed historical implementation/evidence; T029 is the earlier exact-SHA WS Preview/runtime gate recorded in `quickstart.md`. The current live #1018 amendment adds only the manual FORCE_RESTRICTED extension through T030–T036. The conditional Stage refill canary is separately authorized and remains unrun. Latest live #1018 supersedes the old 19-task farmer-only plan.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -22,7 +22,7 @@
 
 **Purpose**: Minimal persistence/policy contracts; blocks all stories.
 
-- [x] T002 After T001, add additive files under `supabase/migrations/` for `data-model.md` §§1–5 and extend `tests/chips/chips.migration.test.mjs`. USER fields: automatic NOT NULL NORMAL/SLOW default NORMAL, override NOT NULL AUTO/FORCE_NORMAL/FORCE_SLOW default AUTO, positive monotonic revision, nullable first-SLOW timestamp and actor/time audit. `poker_tables.is_slow_only boolean NOT NULL DEFAULT false`, enforce false→true only. Access policy `id=1`, slow_threshold_ch 1..9007199254740991 initially 1000000000, positive revision initially 1. Tier policy buy_in positive safe integer PK; enabled NOT NULL default false; four threshold/amount fields positive safe integers; revision/updated_at/updated_by. Provision only missing exact 100/500 NORMAL+SLOW SYSTEM accounts at zero. Preserve every existing pool account ID, balance and provenance, especially the existing 500 POKER_BOT_BANKROLL; never zero/reset it. No MINT or historical relabel. Enable RLS on new public policies, no anon/authenticated read/write access; backend-only access/marker writes. Add narrow typed pool+bucket unique index on existing `chips_transactions` metadata, no receipt table; provide required narrow user_id-leading poker_seats active-membership and created_by-leading poker_tables pending-owner indexes/access paths matched to final status/participation predicates; no broad index. The reviewed table-leading (table_id,user_id) uniqueness is insufficient. Reuse an adequate existing index only with documented final SQL/index/EXPLAIN evidence rather than a duplicate; T027 proves both paths locally. Declare shared Stage effect before publishing, never edit applied migrations. (FR-001/004/006–009/011/013/021)
+- [x] T002 After T001, add additive files under `supabase/migrations/` for the original `data-model.md` §§1–5 and extend `tests/chips/chips.migration.test.mjs`. The applied base migration stores automatic NOT NULL NORMAL/SLOW default NORMAL and override NOT NULL AUTO/FORCE_NORMAL/FORCE_SLOW default AUTO; the additive T031 migration extends that same CHECK with manual FORCE_RESTRICTED. USER fields retain positive monotonic revision, nullable first-SLOW timestamp and actor/time audit. `poker_tables.is_slow_only boolean NOT NULL DEFAULT false`, enforce false→true only. Access policy `id=1`, slow_threshold_ch 1..9007199254740991 initially 1000000000, positive revision initially 1. Tier policy buy_in positive safe integer PK; enabled NOT NULL default false; four threshold/amount fields positive safe integers; revision/updated_at/updated_by. Provision only missing exact 100/500 NORMAL+SLOW SYSTEM accounts at zero. Preserve every existing pool account ID, balance and provenance, especially the existing 500 POKER_BOT_BANKROLL; never zero/reset it. No MINT or historical relabel. Enable RLS on new public policies, no anon/authenticated read/write access; backend-only access/marker writes. Add narrow typed pool+bucket unique index on existing `chips_transactions` metadata, no receipt table; provide required narrow user_id-leading poker_seats active-membership and created_by-leading poker_tables pending-owner indexes/access paths matched to final status/participation predicates; no broad index. The reviewed table-leading (table_id,user_id) uniqueness is insufficient. Reuse an adequate index only with documented final SQL/index/EXPLAIN evidence rather than a duplicate; T027 proves both paths locally. Declare shared Stage effect before publishing, never edit applied migrations. (FR-001/004/006–009/011/013/021)
 - [x] T003 After T002, add small `shared/poker-domain/bot-access.mjs` sharing threshold/override/effective-class validation and policy loaders with existing `poker-progression.mjs` balance validation; define trusted snapshot revision/freshness contract and enabled exact tier/pair mapping inputs. Missing/invalid !=NORMAL; positive safe integers and monotonic revisions, no env/client bypass. No per-hand loader calls, global scans, generic config framework or pool auto-creation. (FR-001–003/009/011/017)
 
 **Checkpoint**: Foundation ready for independently testable stories; no environment activation.
@@ -40,7 +40,7 @@
 ### Implementation for User Story 1
 
 - [x] T005 After T004, extend `shared/poker-domain/join.mjs::executePokerJoinAuthoritative` and `ws-server/poker/persistence/authoritative-join-adapter.mjs`: authoritative wallet threshold before buy-in including automatic SLOW persistence under FORCE_NORMAL, effective override only after automatic classification, durable transition survives structured policy denial, financed rejoin preserved. Locked SLOW owner promotion requires STANDARD/OPEN empty state/no seats/no prior bot funding; promotion commits only with accepted fresh admission. Set `has_human_participant` only in accepted admission/rejoin branches. No Create classifier or runtime MINT. (FR-001/002/004/005/018; SC-001)
-- [x] T006 After T005, extend `ws-server/server.mjs::runSettledRolloverCommand` and `ws-server/poker/table/table-manager.mjs::prepareSettledHandRollover/commitSettledHandRollover`, with `persisted-state-writer.mjs::writeViaDb`, for authoritative settled-stack comparison before next funding plan. Server owns one ≤30s bounded refresh of policy/tier policy plus connected/still-seated access IDs, max age 30s; hydrate JOIN/reconnect, update after confirmed local commit, never refresh from each hand. Persist actual transition/marker in existing transaction/version flow, reconcile revision only on real change, preserve concurrent override without suppressing the automatic transition; FORCE_NORMAL keeps only effective NORMAL and never resets sticky marker. Return to AUTO derives stored automatic SLOW without a new threshold check. Commit/restore only after persistence; unknown rollback/recovery prevents new funding without blocking legal settlement. No second settlement flow or wealth aggregation. (FR-002–004/019; SC-001/005)
+- [x] T006 After T005, extend `ws-server/server.mjs::runSettledRolloverCommand` and `ws-server/poker/table/table-manager.mjs::prepareSettledHandRollover/commitSettledHandRollover`, with `persisted-state-writer.mjs::writeViaDb`, for authoritative settled-stack comparison before next funding plan. Server owns one ≤30s bounded refresh of policy/tier policy plus connected/still-seated access IDs, max age 30s; hydrate JOIN/reconnect, update after confirmed local commit, never refresh from each hand. Persist actual transition/marker in existing transaction/version flow, reconcile revision only on real change, preserve concurrent override without suppressing the automatic transition; FORCE_NORMAL keeps only effective NORMAL and never resets sticky marker, while FORCE_RESTRICTED keeps effective RESTRICTED without suppressing durable automatic SLOW evidence. Return to AUTO derives stored automatic NORMAL/SLOW without a new threshold check. Commit/restore only after persistence; unknown rollback/recovery prevents new funding without blocking legal settlement. No second settlement flow or wealth aggregation. (FR-002–004/019; SC-001/005)
 - [x] T007 After T006, extend `ws-server/poker/bootstrap/persisted-bootstrap-repository.mjs`, `persisted-bootstrap-db.mjs`, `persisted-bootstrap-adapter.mjs::normalizeTableMeta` and `table-manager.mjs` with committed `isSlowOnly`; retain marker through restart/close and occupied managed transition. Review `shared/poker-domain/leave.mjs`/`terminal-close.mjs`: known effective SLOW may persist marker in existing tx, UNKNOWN cannot promote or gate payout. Preserve existing financed NORMAL participation, no kick, no ordinary managed rotation bypass, no new lifecycle. Run T004 focused cases. (FR-003/004/019; SC-001)
 
 **Checkpoint**: US1 locally verifiable; source isolation and caps still required before cutover.
@@ -108,12 +108,12 @@
 
 ### Tests for User Story 5
 
-- [x] T021 After T020, extend `tests/admin-endpoints.behavior.test.mjs`, `tests/admin-users-list.behavior.test.mjs` and `tests/admin-ops-summary.behavior.test.mjs` only for backend access/policy reads/writes: unauthorized zero mutation, enums/positive integers, stale revision conflict, authenticated actor/time, FORCE_NORMAL/FORCE_SLOW/AUTO and pair-before-enable. Reuse T004 cache tests for threshold/override refresh; no Admin rendering tests. (FR-001/011/017/020; SC-005)
+- [x] T021 After T020, extend `tests/admin-endpoints.behavior.test.mjs`, `tests/admin-users-list.behavior.test.mjs` and `tests/admin-ops-summary.behavior.test.mjs` only for backend access/policy reads/writes: unauthorized zero mutation, enums/positive integers, stale revision conflict, authenticated actor/time, AUTO/FORCE_NORMAL/FORCE_SLOW/FORCE_RESTRICTED and pair-before-enable. Reuse T004 cache tests for threshold/override refresh; no Admin rendering tests. (FR-001/011/017/020; SC-005)
 
 ### Implementation for User Story 5
 
 - [x] T022 After T021, add `netlify/functions/admin-user-poker-access.mjs` and `admin-poker-policy.mjs` using `_shared/admin-auth.mjs::requireAdminUser` and existing admin-bonus-campaigns handler patterns. Implement contract §6, row expectedRevision update, access/global/tier fields, exact pool balances via existing data path; integrate `admin-user-details.mjs::loadUserDetails`, `admin-users-list.mjs`, `admin-ops-summary.mjs::loadOpsSummary`. Preserve automatic state on override edits, policy FOR UPDATE serializes with refills, safe-integer balance/amount checks. Return saved revision and 30s propagation interval; klog audit, no generic framework or table-action audit misuse. (FR-001/002/011/017; SC-005)
-- [x] T023 After T022, extend external `js/admin-page.js` Users/Ops controls for automatic/override/effective class, Force NORMAL/Force SLOW/AUTO, SLOW threshold and per-tier enabled/four threshold+amount fields with audit/revision/conflict feedback. Reuse existing markup/styles; JSP/global JS and klog only, CSS selector per line if changed, CSP SHA in `netlify.toml`/existing function headers if an inline script is added. Verify presentation manually in future preview, no UI/glue suite. (FR-017/020; SC-005)
+- [x] T023 After T022, extend external `js/admin-page.js` Users/Ops controls for automatic/override/effective state, AUTO/FORCE_NORMAL/FORCE_SLOW/FORCE_RESTRICTED, SLOW threshold and per-tier enabled/four threshold+amount fields with audit/revision/conflict feedback. Reuse existing markup/styles; JSP/global JS and klog only, CSS selector per line if changed, CSP SHA in `netlify.toml`/existing function headers if an inline script is added. Verify presentation manually in future preview, no UI/glue suite. (FR-017/020; SC-005)
 
 **Checkpoint**: Saved revisions converge under the declared cache bound; no deploy required for tuning.
 
@@ -129,8 +129,8 @@
 
 ### Implementation for User Story 6
 
-- [x] T025 After T024, extend `ws-server/server.mjs::buildLobbyTableEntry/syncLobbyTable/buildLobbySnapshotPayload` from existing `activeLobbyTablesById` with slowOnly; send authenticated self-only `poker_access` on connection/cache refresh/confirmed transition. Update `poker/poker-ws-client.js` (the repository's realtime client; issue wording calls this `poker-realtime.js`) and `poker/poker.js::canViewLobbyTable` compatibility/unknown handling preserving own financed resume. No personalized table inventory, subscriber×table DB reads, SQL live-list replacement or other users' access disclosure. (FR-003/015/020; SC-006)
-- [x] T026 After T025, extend `netlify/functions/poker-quick-seat.mjs::selectExistingActiveSeat/selectCandidate/recommendSeatAtTable/createAndRecommend`: resolve server effective class for fresh predicate, prefer valid existing participation, ordinary vs SLOW-only filter, unchanged DB selection/response and shared limited Create fallback. Final JOIN remains authoritative for class/caps/progression; stale result can deny, no personalized WS offers or automatic bypass. Run T024 tests. (FR-005–008/016; SC-002/006)
+- [x] T025 After T024, extend `ws-server/server.mjs::buildLobbyTableEntry/syncLobbyTable/buildLobbySnapshotPayload` from existing `activeLobbyTablesById` with slowOnly and minimal authoritative `botCount`/lifecycle compatibility; send authenticated self-only `poker_access` on connection/cache refresh/confirmed transition. Update `poker/poker-ws-client.js` (the repository's realtime client; issue wording calls this `poker-realtime.js`) and `poker/poker.js::canViewLobbyTable` compatibility/unknown handling preserving own financed resume and filtering fresh RESTRICTED targets. No personalized table inventory, subscriber×table DB reads, SQL live-list replacement or other users' access disclosure. (FR-003/015/020; SC-006)
+- [x] T026 After T025, extend `netlify/functions/poker-quick-seat.mjs::selectExistingActiveSeat/selectCandidate/recommendSeatAtTable/createAndRecommend`: resolve server effective class for fresh predicate, prefer valid existing participation, ordinary vs SLOW-only vs ordinary bot-free RESTRICTED filter, unchanged DB selection/response and shared limited Create fallback. Final JOIN remains authoritative for class/caps/progression; stale result can deny, no personalized WS offers or automatic bypass. Run T024 tests. (FR-005–008/016; SC-002/006)
 
 **Checkpoint**: Both entry paths use compatibility without acquiring admission authority.
 
@@ -142,11 +142,23 @@
 - [x] T028 After T027, run focused commands in `specs/796-bot-quarantine/quickstart.md`, record evidence and review/refactor only touched plan/implementation for simplicity, breaking impacts, JSP/klog/CSP and no fallback/runtime MINT. Specify cutover pause of new admissions/funding, preserve payouts, provision missing exact pools at zero and policies, preserving existing pool balances, enable only after all writers/readers agree; rollback never restores old TREASURY fallback or class/limit bypass. Re-run Spec Kit consistency against live #1018; no generic cleanup. Focused implementation groups passed; the exact Vitest 12-failure set matches the base checkout and the full admin smoke has the same 16 origin/auth failures on base/current, while the feature-admin cases pass. (FR-020/021; SC-001–006)
 - [x] T029 After T028, complete the future **WS runtime gate**: exact runtime SHA `1d00fa2cd8b3110eb1967b5f577a3c671f5591e3` was verified by [WS Preview workflow run 36327260598](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36327260598) with matching `RELEASE_SHA`/`DEPLOY_REF` and passing Preview health. Targeted smoke passed NORMAL/SLOW Create/JOIN, 4+4 rejection, funded rejoin, Admin/cache propagation, `slowOnly` lobby, DB Quick Seat, cash-out/payout, and the read-only `GET /internal/admin/poker-maintenance` CONTINUOUS_BOT status: HTTP 200, `ok:true`, `environment:"preview"`, repository status available, `desiredTableCount:5`, `supervisorStarted:true`, no active sweep and `lastError:null`. FORCE_NORMAL durable semantics and settled rollover without per-hand policy reads are covered by deterministic T004/T027 evidence; no natural automatic-SLOW Stage account, threshold mutation or ledger funding was used. This checkbox records only the WS Definition-of-Done gate. Track **Stage refill canary separately** in quickstart: it remains conditional operational validation with real Stage ledger MINT via `.github/workflows/poker-bot-pool-refill.yml`, only after separate explicit user authorization; status is `NOT AUTHORIZED / NOT RUN`. Production migration/seed/refill/timer activation and merge remain separately unauthorized. (FR-021; SC-001–003/005/006)
 
+## Phase 10 — Final live #1018 manual RESTRICTED amendment
+
+These tasks are additive to T001–T029. T029 remains historical evidence for `1d00fa2c...`; T036 is the new final runtime gate.
+
+- [x] T030 Synchronize `issue-source.md` to the exact live #1018 body updated `2026-09-27T17:10:33Z`, then update `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/bot-quarantine.md`, `quickstart.md` and relevant checklists. State explicitly that automatic class remains NORMAL/SLOW, overrides include AUTO/FORCE_NORMAL/FORCE_SLOW/FORCE_RESTRICTED, effective state may be RESTRICTED, and RESTRICTED has no automatic classifier, bankroll, refill policy, `is_restricted_only` marker or lifecycle. Preserve the accepted FORCE_NORMAL effective-only semantics and all T001–T029 history. (FR-001/003/004/010/015–019/021; SC-001/006/007)
+- [x] T031 Add only `supabase/migrations/20260927110000_poker_force_restricted.sql` after the immutable 20260927100000 migration. Extend `chips_accounts_poker_access_override_chk` with `FORCE_RESTRICTED`; add no table/column/account/policy object. Extend `tests/chips/chips.migration.test.mjs`, `supabase/production-migrations/manifest.json`, `scripts/check-db-migrations.mjs` and `specs/004-production-retention/migration-inventory.md` so the exhaustive source inventory and `needs-production-equivalent` count are correct. Publishing this migration intentionally allows automatic DB Stage Apply; Production remains separately unauthorized. (FR-001/021; SC-007)
+- [x] T032 Extend `shared/poker-domain/bot-access.mjs` and existing Admin paths `netlify/functions/admin-user-poker-access.mjs`, `admin-user-details.mjs`, `admin-users-list.mjs`, `js/admin-page.js` and WS access payload/cache normalization. Accept FORCE_RESTRICTED only through existing `requireAdmin`, optimistic revision, audit and cache propagation; automatic normalization still accepts only NORMAL/SLOW. Add deterministic tests for unauthorized rejection, automatic threshold persistence under FORCE_RESTRICTED, effective RESTRICTED and Return AUTO. Preserve JSP/global-script/klog rules. (FR-001/017/020; SC-001/005/007)
+- [x] T033 Extend `shared/poker-domain/join.mjs::executePokerJoinAuthoritative`, `ws-server/poker/persistence/authoritative-join-adapter.mjs`, `netlify/functions/poker-progression.mjs` and `netlify/functions/poker-quick-seat.mjs`. Rejoin/resume is evaluated first and stays legal. Fresh RESTRICTED accepts only ordinary bot-free STANDARD, sets targetBotCount=0 and posts no bot funding; reject active/materialized bot funding, SLOW-only and CONTINUOUS_BOT before new buy-in. Reuse Create fallback and the shared 4+4 advisory lock; final JOIN remains authority. Add focused deterministic JOIN/Quick Seat tests. (FR-004–008/010/016/018/019; SC-001/002/006/007)
+- [x] T034 Extend existing WS `buildLobbyTableEntry`/`lobby_snapshot` and `poker/poker.js::canViewLobbyTable` with minimal bot occupancy/lifecycle compatibility, preserving `rejoinableTableIds`. Extend `settledAccessStatus`, `classifySettledAccess`, `runSettledRolloverCommand`, `prepareSettledHandRollover` and `resolveSettledBotFundingSystemKey` so an effective RESTRICTED human permits legal settlement but creates no replacement/top-up/new seed. CONTINUOUS_BOT remains NORMAL; no per-hand policy read, eviction engine, escrow unwind or runtime MINT. Add focused lobby/table-manager/funding tests. (FR-003/010/015/019; SC-001/006/007)
+- [x] T035 Run focused deterministic suites for access/Admin/JOIN/Quick Seat/lobby/table-manager/funding, the migration guard and relevant local PostgreSQL contracts; run `git diff --check` and a no-new-`console.log` review. Confirm pre-migration Production capability fixture, exact manifest/constraint guard, 4+4, no fallback/MINT, no new CSS/inline script/CSP impact and no broad UI/glue tests. Record evidence in `quickstart.md`; do not perform Stage refill/MINT or any operational activation. (FR-020/021; SC-001–007)
+- [ ] T036 After green CI, run `WS Preview Deploy` for the exact latest runtime-affecting SHA and verify matching `RELEASE_SHA`/`DEPLOY_REF` plus Preview health. Targeted smoke only: Admin FORCE_RESTRICTED propagation and AUTO restore; legal financed rejoin; bot-populated/SLOW-only/CONTINUOUS_BOT fresh rejection; lobby/Quick Seat filtering; own empty STANDARD Create→JOIN with zero bot seats/funding; leave/cash-out. Do not create automatic SLOW or enable/fund pools for smoke. Record exact run/evidence in `quickstart.md`. Stage refill canary, VPS timer, Production migration/cutover and merge remain separate unauthorized gates. (FR-021; SC-001/003/005–007)
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
 
-T001→T002→T003. US1 T004–T007→US2 T008–T010→US3 T011–T015→US4 T016–T020→US5 T021–T023→US6 T024–T026→T027→T028→T029. This conservative order avoids overlapping JOIN, writer, server, ledger and Admin changes. Explicit prerequisites in each task are authoritative. The conditional Stage MINT canary noted in T029 is not part of the WS gate dependency chain or checkbox; its authorization/evidence status is recorded independently.
+T001→T002→T003. US1 T004–T007→US2 T008–T010→US3 T011–T015→US4 T016–T020→US5 T021–T023→US6 T024–T026→T027→T028→T029→T030→T031→T032→T033→T034→T035→T036. This conservative order avoids overlapping JOIN, writer, server, ledger and Admin changes. Explicit prerequisites in each task are authoritative. The conditional Stage MINT canary noted in T029/T036 is not part of the WS gate dependency chain or checkbox; its authorization/evidence status is recorded independently.
 
 ### User Story Dependencies
 
@@ -172,7 +184,7 @@ Add caps, isolated funding, scheduled refill, Admin and discovery in that order,
 
 ### Notes
 
-29 tasks: setup1, foundation2, US1=4, US2=3, US3=5, US4=5, US5=3, US6=3, cross-cutting3. T001–T029 are complete in this implementation worktree; T029 exact-SHA WS Preview/runtime evidence is recorded in `quickstart.md`. The conditional Stage refill canary remains a separate authorization gate and is `NOT AUTHORIZED / NOT RUN`. The fixed 19-task count from the earlier cleanup request is superseded by this full rewrite against current live #1018. Automatic DB Stage Apply PR applied the immutable migration to shared Stage (97→98; follow-up 98/0; smoke PASS). No Stage refill/MINT, Production operation, live-VPS scheduler activation or merge was performed; the only runtime deployment evidence is the accepted exact-SHA WS Preview run already recorded for T029.
+36 tasks: setup1, foundation2, US1=4, US2=3, US3=5, US4=5, US5=3, US6=3, cross-cutting3, final manual RESTRICTED amendment7. T001–T035 are complete in this implementation worktree; T029 remains historical exact-SHA evidence and T036 is the new final WS Preview/runtime gate. The conditional Stage refill canary remains a separate authorization gate and is `NOT AUTHORIZED / NOT RUN`. The fixed 19-task count from the earlier cleanup request is superseded by this full rewrite against current live #1018. Automatic DB Stage Apply PR applied the immutable original migration to shared Stage (97→98; follow-up 98/0; smoke PASS); the new CHECK-only migration is intentionally pending its automatic Stage Apply. No Stage refill/MINT, Production operation, live-VPS scheduler activation or merge was performed.
 
 ## Requirement coverage index
 
@@ -180,30 +192,31 @@ The task references below make the complete FR/SC coverage explicit while keepin
 
 | Requirement | Tasks |
 | --- | --- |
-| FR-001 | T002–T006, T021–T022 |
+| FR-001 | T002–T006, T021–T022, T030–T032 |
 | FR-002 | T003–T006 |
-| FR-003 | T003, T006–T007, T014, T025 |
-| FR-004 | T002, T005–T007, T024–T026 |
-| FR-005 | T005, T010, T013, T026 |
+| FR-003 | T003, T006–T007, T014, T025, T030, T034 |
+| FR-004 | T002, T005–T007, T024–T026, T030, T033–T034 |
+| FR-005 | T005, T010, T013, T026, T033 |
 | FR-006 | T008–T010, T027 |
 | FR-007 | T008–T010, T027 |
 | FR-008 | T009–T010, T027 |
 | FR-009 | T002–T003, T011–T013, T021–T022 |
-| FR-010 | T011–T015 |
+| FR-010 | T011–T015, T030, T033–T034 |
 | FR-011 | T002–T003, T016–T018, T021–T022 |
 | FR-012 | T016, T018–T020, T027 |
 | FR-013 | T002, T016–T019, T027 |
 | FR-014 | T016, T019–T020 |
-| FR-015 | T024–T025 |
-| FR-016 | T024–T026 |
-| FR-017 | T003, T021–T023 |
+| FR-015 | T024–T025, T030, T034 |
+| FR-016 | T024–T026, T033 |
+| FR-017 | T003, T021–T023, T030–T032 |
 | FR-018 | T004–T005, T008, T010 |
-| FR-019 | T006–T007, T011, T013–T014 |
-| FR-020 | T004, T011, T016, T021, T023–T024, T027–T028 |
-| FR-021 | T001–T002, T016, T019–T020, T028–T029 |
-| SC-001 | T004–T007, T027–T029 |
+| FR-019 | T006–T007, T011, T013–T014, T030, T033–T034 |
+| FR-020 | T004, T011, T016, T021, T023–T024, T027–T028, T030–T035 |
+| FR-021 | T001–T002, T016, T019–T020, T028–T036 |
+| SC-001 | T004–T007, T027–T029, T030–T036 |
 | SC-002 | T008–T010, T027 |
 | SC-003 | T011–T015, T027 |
 | SC-004 | T016–T020, T027 |
-| SC-005 | T004, T006, T021–T023, T027–T028 |
-| SC-006 | T024–T026, T028–T029 |
+| SC-005 | T004, T006, T021–T023, T027–T028, T030–T036 |
+| SC-006 | T024–T026, T028–T029, T030–T036 |
+| SC-007 | T030–T036 |

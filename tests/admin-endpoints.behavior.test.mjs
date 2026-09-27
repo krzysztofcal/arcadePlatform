@@ -68,7 +68,7 @@ test("poker access admin rejects unauthorized override mutation before any write
   });
   const response = await handler(event("PATCH", {}, JSON.stringify({
     userId: "00000000-0000-4000-8000-000000000020",
-    override: "FORCE_NORMAL",
+    override: "FORCE_RESTRICTED",
     expectedRevision: 1
   })));
   assert.equal(response.statusCode, 403);
@@ -91,6 +91,23 @@ test("poker access admin preserves automatic SLOW while applying an optimistic o
   assert.equal(result.access.override, "FORCE_NORMAL");
   assert.equal(result.access.effectiveClass, "NORMAL");
   assert.equal(result.access.revision, 8);
+});
+
+test("poker access admin accepts FORCE_RESTRICTED without changing automatic class", async () => {
+  const result = await updatePokerAccess({
+    userId: "00000000-0000-4000-8000-000000000020",
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 7,
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({ unsafe: async (sql) => {
+      if (String(sql).includes("select user_id")) return [{ user_id: "00000000-0000-4000-8000-000000000020", poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 7 }];
+      if (String(sql).includes("update public.chips_accounts")) return [{ user_id: "00000000-0000-4000-8000-000000000020", poker_auto_class: "SLOW", poker_access_override: "FORCE_RESTRICTED", poker_access_revision: 8 }];
+      return [];
+    } })
+  });
+  assert.equal(result.access.automaticClass, "SLOW");
+  assert.equal(result.access.override, "FORCE_RESTRICTED");
+  assert.equal(result.access.effectiveClass, "RESTRICTED");
 });
 
 test("poker tier policy cannot enable a tier without both exact NORMAL and SLOW pools", async () => {

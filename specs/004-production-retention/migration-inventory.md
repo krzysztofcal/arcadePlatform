@@ -1,6 +1,6 @@
 # Exhaustive Production migration inventory
 
-Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. A 2026-09-27 source-tree addendum adds the #1018 Stage migration below as the 44th manifest entry; DB Stage Apply PR [#36310279719](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36310279719) applied it to shared Stage, while Production remains at its 54-entry baseline.
+Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. A 2026-09-27 source-tree addendum adds the #1018 Stage migration as the 44th manifest entry; DB Stage Apply PR [#36310279719](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36310279719) applied it to shared Stage, while Production remains at its 54-entry baseline. The manual RESTRICTED extension adds the forward-only 45th missing source migration below and remains pending the separate Production equivalent/GO.
 
 **Classification is not permission to execute.** `shared-safe` means no environment-specific rollout authority in that change, subject to dependencies; final equivalence can supersede a safe transient patch. `stage-only` has no required shared effect. `needs-production-equivalent` includes mixed migrations whose shared changes cannot be omitted merely because the filename mentions Stage. Every required effect is covered by E1's final definitions; E2 activates only TABLE fence; E3 alone activates fresh Production policies/cap. No old missing file is replayed or marked applied by this plan.
 
@@ -55,7 +55,7 @@ The last already-applied Production migration, `20260813090000_chips_ledger_arch
 | `20260912083727_chips_archive_prune_registry_cleaned_retry.sql` | needs-production-equivalent | Receipt-backed already_pruned retry is hardcoded to Stage existing-30d and depends on final human-aware pruner. Carry exact complete-receipt/zero-mappings exception with Production ID; never treat partial receipts as success. |
 | `20260927100000_poker_bot_quarantine_policy.sql` | needs-production-equivalent | Stage #1018 NORMAL/SLOW access policy, sticky table marker, per-tier bot pools and bounded refill indexes. Keep Production unapplied; require a separately reviewed equivalent and explicit Production GO. |
 
-Totals: **23 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (44 missing source files).
+Totals: **24 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (45 missing source files).
 
 ## History and equivalence proof
 
@@ -508,5 +508,15 @@ Source: [SQL](../../supabase/migrations/20260927100000_poker_bot_quarantine_poli
 Objects/references: `chips_accounts` access columns/constraints, `poker_tables.is_slow_only` sticky trigger, `poker_access_policy`, `poker_bot_tier_policy`, exact NORMAL/SLOW bankroll accounts, user-leading active-seat and creator-leading pending-table indexes, poker transaction table/bucket indexes and policy RLS.
 
 Target/policy discriminators: none; this is the Stage #1018 feature migration. Production equivalent and authorization remain separate.
+
+Historical hash/UUID literals: none.
+
+### 20260927110000
+
+Source: [SQL](../../supabase/migrations/20260927110000_poker_force_restricted.sql) · SHA256 `3bb727ccfff42bc257c66976052e0a09d08c74d6f7838e37df0889dbd69f9fc4`.
+
+Objects/references: `chips_accounts_poker_access_override_chk` extended to accept the manual `FORCE_RESTRICTED` override; no tables, columns, bankrolls or policy rows are added.
+
+Target/policy discriminators: none; this is the forward-only manual RESTRICTED Stage extension for #1018. Production equivalent and authorization remain separate.
 
 Historical hash/UUID literals: none.

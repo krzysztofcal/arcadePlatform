@@ -186,6 +186,15 @@ const assertPokerBotQuarantineSchema = async (sql) => {
   assert.equal(requiredColumns.find((row) => row.table_name === "chips_accounts" && row.column_name === "poker_access_override")?.is_nullable, "NO");
   assert.equal(requiredColumns.find((row) => row.table_name === "poker_tables" && row.column_name === "is_slow_only")?.is_nullable, "NO");
 
+  const overrideConstraintRows = await sql`
+    select pg_get_constraintdef(oid) as definition
+    from pg_constraint
+    where conrelid = 'public.chips_accounts'::regclass
+      and conname = 'chips_accounts_poker_access_override_chk';
+  `;
+  assert.equal(overrideConstraintRows.length, 1, "#1018 access override CHECK must exist");
+  assert.match(overrideConstraintRows[0].definition, /FORCE_RESTRICTED/i, "manual RESTRICTED override must be migration-backed");
+
   const indexRows = await sql`
     select indexname, indexdef
     from pg_indexes

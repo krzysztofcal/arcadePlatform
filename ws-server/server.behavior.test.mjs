@@ -4328,6 +4328,7 @@ test("WS lobby_subscribe includes explicit runtime-materialized joinable tables 
     assert.equal(lobbyTable.seatCount, 0);
     assert.equal(lobbyTable.maxPlayers, 6);
     assert.equal(lobbyTable.joinable, true);
+    assert.equal(lobbyTable.botCount, 0);
     assert.deepEqual(lobbyTable.stakes, { sb: 1, bb: 2 });
     lobby.close();
   } finally {

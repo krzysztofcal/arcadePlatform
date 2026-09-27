@@ -182,6 +182,8 @@ limit 12;
         ? "NORMAL"
         : user.poker_access_override === "FORCE_SLOW"
           ? "SLOW"
+          : user.poker_access_override === "FORCE_RESTRICTED"
+            ? "RESTRICTED"
           : user.poker_auto_class || "NORMAL",
       accessRevision: Number(user.poker_access_revision || 1),
       automaticSlowAt: user.poker_auto_slow_at || null,

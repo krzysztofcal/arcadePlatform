@@ -1,7 +1,8 @@
 import { getBotFundingSystemKeyForBuyIn } from "./table-economy.mjs";
 
 export const ACCESS_CLASSES = Object.freeze(["NORMAL", "SLOW"]);
-export const ACCESS_OVERRIDES = Object.freeze(["AUTO", "FORCE_NORMAL", "FORCE_SLOW"]);
+export const ACCESS_EFFECTIVE_STATES = Object.freeze(["NORMAL", "SLOW", "RESTRICTED"]);
+export const ACCESS_OVERRIDES = Object.freeze(["AUTO", "FORCE_NORMAL", "FORCE_SLOW", "FORCE_RESTRICTED"]);
 export const DEFAULT_SLOW_THRESHOLD_CH = 1_000_000_000;
 export const ACCESS_SNAPSHOT_MAX_AGE_MS = 30_000;
 
@@ -40,6 +41,7 @@ export function resolveEffectiveClass(automaticClass, override) {
   if (!automatic || !normalizedOverride) return null;
   if (normalizedOverride === "FORCE_NORMAL") return "NORMAL";
   if (normalizedOverride === "FORCE_SLOW") return "SLOW";
+  if (normalizedOverride === "FORCE_RESTRICTED") return "RESTRICTED";
   return automatic;
 }
 
@@ -130,7 +132,7 @@ export function isFreshAccessSnapshot(snapshot, nowMs = Date.now()) {
   return Boolean(snapshot
     && ACCESS_CLASSES.includes(snapshot.automaticClass)
     && ACCESS_OVERRIDES.includes(snapshot.override)
-    && ACCESS_CLASSES.includes(snapshot.effectiveClass)
+    && ACCESS_EFFECTIVE_STATES.includes(snapshot.effectiveClass)
     && Number.isSafeInteger(Number(snapshot.revision))
     && Number(nowMs) <= Number(snapshot.expiresAtMs));
 }

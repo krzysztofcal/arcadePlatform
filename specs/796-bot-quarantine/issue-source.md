@@ -2,9 +2,9 @@
 
 **Authoritative requirements**: https://github.com/krzysztofcal/arcadePlatform/issues/1018
 
-**Live updated_at**: 2026-09-26T19:21:31Z
+**Live updated_at**: 2026-09-27T17:10:33Z
 
-**Snapshot captured**: 2026-09-26. Exact live issue body below. Live #1018 is the sole feature requirements source; the pre-T001 drift check and implementation selection are recorded in `quickstart.md`. #869/#1017 are separate.
+**Snapshot captured**: 2026-09-27. Exact live issue body below. Live #1018 is the sole feature requirements source; this snapshot is refreshed before the RESTRICTED implementation extension. #869/#1017 remain separate.
 
 # Poker: simplified anti-farming alternative — periodic per-tier bot bankroll refill + SLOW pool
 
@@ -20,9 +20,11 @@ The goal is to keep anti-farming materially simpler than the full FAST/SLOW / pe
 - allowing operator overrides and live policy tuning without deploys;
 - reusing the existing authoritative WS runtime, live lobby, Quick Seat, ledger, Admin and VPS scheduler patterns.
 
-**Planning only.** This issue does not authorize implementation, migrations, Stage/Production writes, Production refill, WS deploy or activation.
+Implementation T001–T029 is now present in PR #1019 and the first #1018 migration is already applied to shared Stage. Before merge, this issue is amended to add the final manual **RESTRICTED** operator state described below.
 
-Draft Spec Kit PR #1019 must be revised to match this design before implementation. #869/#1017 remain separate and unchanged.
+This amendment authorizes implementation of the RESTRICTED extension in PR #1019, including one new ordinary forward-only Stage migration through the repository's existing automatic DB Stage Apply PR flow and a new exact-SHA WS Preview verification. It does **not** authorize Stage refill/MINT, bot-pool funding, live-VPS scheduler activation, Production migration/cutover/refill, or merge. Those remain separate explicit gates.
+
+#869/#1017 remain separate and unchanged.
 
 > Terminology note: **SLOW in #1018 is NOT the rolling-12h SLOW allowance/class from #869.** Here SLOW is only a simple durable access class whose bot play uses a smaller, separately replenished bankroll.
 
@@ -34,13 +36,15 @@ Do **not** mint chips during JOIN, bot seed, replacement or top-up.
 
 Instead:
 
-1. classify users only as NORMAL or SLOW;
+1. automatically classify users only as NORMAL or SLOW, with an additional manual-only RESTRICTED override;
 2. give every bot-enabled tier its own NORMAL bankroll and its own SLOW bankroll;
 3. let poker runtime consume those bankrolls through the existing TABLE_BUY_IN flow;
 4. every 3 hours, check each enabled bankroll;
 5. if a bankroll is below its configured refill threshold, post one configured refill amount for that bucket;
-6. use the existing WS live lobby and existing DB-backed Quick Seat with only NORMAL/SLOW compatibility added;
+6. use the existing WS live lobby and existing DB-backed Quick Seat with NORMAL/SLOW/RESTRICTED compatibility added;
 7. keep all values operator-tunable through small purpose-specific Admin policy controls, not a generic configuration framework.
+
+RESTRICTED is deliberately **not** an automatic class and has no bankroll/refill pool. It is an administrator-only effective state meaning human-only poker: fresh admission must not place the user at a table with bots and the user's presence must not authorize any new bot seed, replacement or managed top-up.
 
 There is no per-user bot budget, no per-funding MINT and no personalized matchmaking engine.
 
@@ -146,31 +150,40 @@ Admin policy/override writes must make the WS cache converge promptly enough for
 
 Keep the automatic durable state separate from a manual override.
 
+Automatic durable values remain only:
+
+- `NORMAL`
+- `SLOW`
+
 Allowed override values:
 
 - `AUTO`
 - `FORCE_NORMAL`
 - `FORCE_SLOW`
+- `FORCE_RESTRICTED`
 
-Effective class:
+Effective state:
 
 - FORCE_NORMAL => NORMAL;
 - FORCE_SLOW => SLOW;
+- FORCE_RESTRICTED => RESTRICTED;
 - AUTO => durable automatic NORMAL/SLOW state.
 
 Rules:
 
-- FORCE_NORMAL suppresses automatic SLOW while active, even if wallet/stack remains above threshold;
-- FORCE_SLOW can slow any user regardless of balance;
-- Return to AUTO restores the durable automatic state;
+- RESTRICTED is **manual-only**. No wallet threshold, settled stack, background job or other automatic classifier may set it.
+- FORCE_NORMAL suppresses automatic SLOW while active, even if wallet/stack remains above threshold.
+- FORCE_SLOW can slow any user regardless of balance.
+- FORCE_RESTRICTED makes fresh poker participation human-only: no fresh join to a bot-populated table and no new bot seed/replacement/top-up while the restricted participant is active.
+- Return to AUTO restores the durable automatic NORMAL/SLOW state; RESTRICTED is not persisted as automatic evidence.
 - public/browser callers cannot set their own override;
 - record minimal audit metadata using existing Admin patterns: who changed it and when.
 
-An override changes future authoritative admission/funding behavior. It does not abort a hand or invalidate lawful settlement/cash-out.
+An override changes future authoritative admission/funding behavior. It does not abort a hand, invalidate lawful settlement/cash-out, or rewrite historical bot funding.
 
-Reuse the existing authenticated Admin Users / `admin-*` patterns. Do not create a generic moderation system.
+If FORCE_RESTRICTED is applied while a user is already seated with already-financed bots, do **not** unwind escrow, kick seats mid-hand or invent a second settlement path. The current legal hand/financed participation may resolve normally, but no new bot seed, replacement or managed top-up may be created while RESTRICTED remains effective. Existing bot seats may age out through the existing lifecycle without replenishment.
 
-A future stronger state such as `RESTRICTED` may later mean no bot funding at all. #1018 deliberately does not use or implement that state.
+Reuse the existing authenticated Admin Users / `admin-*` patterns. Do not create a generic moderation system or third automatic classifier.
 
 ---
 
@@ -191,9 +204,12 @@ Rules:
 Fresh admission:
 
 - effective NORMAL → ordinary table only;
-- effective SLOW → SLOW-only table only.
+- effective SLOW → SLOW-only table only;
+- effective RESTRICTED → ordinary, bot-free STANDARD table only; never SLOW-only or CONTINUOUS_BOT.
 
-Existing financed rejoin remains legal.
+RESTRICTED is a user state, not a persistent table class: do not add `is_restricted_only` or another table marker.
+
+Existing financed rejoin remains legal, including lawful recovery/leave/cash-out of participation that predates an override change.
 
 FORCE_NORMAL does not turn an existing SLOW-only table back into an ordinary table.
 
@@ -207,8 +223,9 @@ Keep Netlify Create simple.
 
 At final authoritative WS JOIN:
 
-- resolve effective NORMAL/SLOW;
+- resolve effective NORMAL/SLOW/RESTRICTED;
 - NORMAL follows ordinary admission;
+- RESTRICTED may join only an ordinary bot-free STANDARD table; the user's own empty Create→JOIN table is valid and must seed zero bots;
 - SLOW may promote the table to `is_slow_only=true` only when it is:
   - created by that user;
   - empty;
@@ -223,6 +240,15 @@ An effective SLOW user must not claim/relabel:
 - a prefunded bot-only table;
 - a normal CONTINUOUS_BOT table.
 
+An effective RESTRICTED user must not freshly join:
+
+- any table with an active bot seat;
+- any table with bot funding already materialized for current participation;
+- any SLOW-only table;
+- any CONTINUOUS_BOT table.
+
+A RESTRICTED fresh JOIN must set bot target funding to zero and must not create TABLE_BUY_IN entries from any bot bankroll/TREASURY source.
+
 ---
 
 ## 6. Per-user table fan-out limits
@@ -232,7 +258,7 @@ Add two hard V1 anti-abuse limits:
 - `max_active_tables_per_user = 4`;
 - `max_pending_tables_per_user = 4`.
 
-These limits apply to NORMAL and SLOW equally.
+These limits apply to NORMAL, SLOW and RESTRICTED equally.
 
 ### Active-table limit
 
@@ -430,7 +456,10 @@ Funding source selection is class + tier aware.
 Conceptually:
 
 - NORMAL + tier T → NORMAL bankroll for T;
-- SLOW + tier T → SLOW bankroll for T.
+- SLOW + tier T → SLOW bankroll for T;
+- RESTRICTED → no bot funding source.
+
+Do not create RESTRICTED bankrolls or refill policy rows.
 
 No fallback:
 
@@ -458,10 +487,12 @@ Minimum changes:
 
 - project `isSlowOnly` into WS runtime/table metadata;
 - add `slowOnly` to lobby table entries;
-- resolve the logged-in user's effective NORMAL/SLOW class;
+- resolve the logged-in user's effective NORMAL/SLOW/RESTRICTED state;
+- expose/reuse the smallest existing lobby bot-occupancy fact needed for filtering (for example `botCount`/equivalent), without a second lobby architecture;
 - `poker.js::canViewLobbyTable()` filters/marks incompatible fresh JOIN targets:
   - NORMAL → ordinary tables;
   - SLOW → SLOW-only tables;
+  - RESTRICTED → ordinary bot-free tables only;
   - own existing RESUME/rejoin remains available;
 - final `executePokerJoinAuthoritative()` always revalidates.
 
@@ -482,12 +513,13 @@ Do not add:
 
 Current `Graj teraz` / `poker-quick-seat.mjs` remains DB-backed.
 
-Add only class compatibility:
+Add only access compatibility:
 
 - effective NORMAL fresh candidate → ordinary table;
 - effective SLOW fresh candidate → SLOW-only table;
+- effective RESTRICTED fresh candidate → ordinary bot-free STANDARD table only;
 - preserve existing valid rejoin/resume preference;
-- Create fallback may create the existing empty STANDARD table;
+- Create fallback may create the existing empty STANDARD table; for RESTRICTED this is the normal human-only fallback and final JOIN seeds zero bots;
 - final WS JOIN may promote the SLOW user's own safe empty/unfunded table to SLOW-only;
 - stale/incompatible recommendation is rejected by final JOIN.
 
@@ -552,11 +584,12 @@ Ordinary CONTINUOUS_BOT tables:
 
 - remain ordinary/NORMAL;
 - use the exact tier's NORMAL bankroll;
-- deny fresh SLOW humans.
+- deny fresh SLOW humans;
+- deny fresh RESTRICTED humans.
 
-Do not create a separate SLOW CONTINUOUS_BOT lifecycle in V1.
+Do not create a separate SLOW or RESTRICTED CONTINUOUS_BOT lifecycle in V1.
 
-SLOW bot play uses the normal Create→final JOIN path.
+SLOW bot play uses the normal Create→final JOIN path. RESTRICTED play is human-only and uses ordinary bot-free STANDARD tables.
 
 ---
 
@@ -569,13 +602,14 @@ Reuse existing Admin Users / Admin Ops and authorization patterns.
 Show:
 
 - durable automatic class;
-- override: AUTO / FORCE_NORMAL / FORCE_SLOW;
-- effective class.
+- override: AUTO / FORCE_NORMAL / FORCE_SLOW / FORCE_RESTRICTED;
+- effective state.
 
 Actions:
 
 - Force NORMAL;
 - Force SLOW;
+- Force RESTRICTED;
 - Return to AUTO.
 
 ### Global access policy
@@ -674,6 +708,14 @@ Plan only deterministic critical tests.
 At minimum:
 
 - wallet threshold−1 => automatic NORMAL; threshold => sticky SLOW;
+- no automatic path can produce RESTRICTED;
+- FORCE_RESTRICTED => effective RESTRICTED while durable automatic NORMAL/SLOW remains unchanged;
+- Return to AUTO from FORCE_RESTRICTED restores the stored automatic NORMAL/SLOW state;
+- RESTRICTED fresh own empty Create→JOIN succeeds with zero bot seed/funding;
+- RESTRICTED fresh JOIN to a bot-populated, SLOW-only or CONTINUOUS_BOT table is rejected before buy-in/bot funding;
+- RESTRICTED Quick Seat returns only valid bot-free ordinary candidate or existing legal rejoin/Create fallback;
+- while a RESTRICTED participant is active, settled replacement/top-up creates zero new bot funding while legal settlement/cash-out remains valid;
+- lobby compatibility excludes bot-populated/SLOW-only fresh targets for RESTRICTED while preserving legal RESUME/rejoin;
 - settled human stack threshold−1 => unchanged; threshold => sticky automatic SLOW without leave/rejoin;
 - changed `slow_threshold_ch` revision is used by subsequent authoritative checks without deploy;
 - FORCE_NORMAL overrides automatic SLOW;
@@ -710,8 +752,9 @@ No broad UI/CSS/JSP or speculative matchmaking suites.
 - Every bot-enabled tier gains isolated NORMAL and SLOW bankroll semantics.
 - Existing 500 NORMAL bankroll naming/provenance remains intact.
 - SLOW users cannot freshly enter ordinary/prefunded/CONTINUOUS_BOT tables but still play with bots on SLOW-only tables.
-- Admin can FORCE_NORMAL/FORCE_SLOW and dynamically change SLOW threshold and per-tier refill settings.
-- SLOW-only is sticky and not reverted by FORCE_NORMAL.
+- Admin can FORCE_NORMAL/FORCE_SLOW/FORCE_RESTRICTED and dynamically change SLOW threshold and per-tier refill settings.
+- RESTRICTED is manual-only, has no dedicated bankroll/refill pool/table marker, and blocks new bot participation/funding for fresh human-only play.
+- SLOW-only is sticky and not reverted by FORCE_NORMAL or FORCE_RESTRICTED.
 - settled-hand processing gains a minimal SLOW-threshold evaluation hook; it must reuse existing authoritative settlement/rollover flow and must not create a second settlement path.
 - Lobby rows gain SLOW compatibility metadata/filtering; current WS live registry remains the live-list authority.
 - Quick Seat remains DB-backed but becomes class-aware and subject to the same authoritative per-user table limits.
@@ -729,13 +772,13 @@ Production migration, bankroll seed, refill scheduler activation and MINT requir
 
 ## 23. Implementation / validation gate
 
-The current draft PR #1019 was written for older variants and must be **reworked**, not implemented as-is.
+PR #1019 already contains the reviewed NORMAL/SLOW implementation and completed T001–T029 evidence. This issue amendment adds one final pre-merge RESTRICTED extension. The existing applied Stage migration `20260927100000_poker_bot_quarantine_policy.sql` is immutable; RESTRICTED schema support must use a **new forward-only migration**.
 
-The revised Spec Kit must:
+The revised Spec Kit/implementation must:
 
 - use live GitHub as source of truth and read `agents.md` / `skills.md`;
-- use NORMAL/SLOW + AUTO/FORCE_NORMAL/FORCE_SLOW;
-- clearly distinguish #1018 SLOW from #869 SLOW;
+- keep automatic classes strictly NORMAL/SLOW and add manual-only AUTO/FORCE_NORMAL/FORCE_SLOW/FORCE_RESTRICTED override semantics;
+- clearly distinguish #1018 SLOW from #869 SLOW and RESTRICTED from automatic classification;
 - include JOIN + settled-hand classification;
 - keep settled-hand classification in-memory on authoritative rollover data with cached policy/access state and no per-hand Supabase reads;
 - make `slow_threshold_ch` Admin-tunable without deploy;
@@ -744,14 +787,17 @@ The revised Spec Kit must:
 - make per-tier refill policy Admin-tunable without deploy;
 - reuse the existing ledger, source attribution, Admin, WS live lobby, Quick Seat and VPS/systemd dispatcher patterns;
 - preserve DB-backed Quick Seat rather than adding #869 matchmaking;
+- make RESTRICTED fresh admission human-only across final JOIN, lobby and Quick Seat, with zero new bot seed/replacement/top-up and no new bankroll/refill/table-class abstraction;
+- preserve existing legal hand/settlement/rejoin/leave/cash-out when an override changes;
 - enforce max 4 active + max 4 pending tables per user with one shared concurrency-safe user lock contract across Create and authoritative JOIN;
 - use VPS/systemd → workflow_dispatch as primary 3-hour scheduler;
 - include only fundamental tests;
-- explicitly declare intended Stage migration effects;
-- require exact-SHA WS Preview Deploy/runtime smoke for WS-affecting implementation;
-- STOP for independent review before implementation.
+- explicitly declare the new forward-only Stage migration effect before publication; automatic DB Stage Apply PR is expected to mutate shared Stage;
+- require a **new exact-SHA WS Preview Deploy/runtime smoke** after the RESTRICTED runtime change; the previous T029 runtime SHA remains historical evidence but is no longer the final merge gate;
+- include only fundamental deterministic RESTRICTED tests by extending existing suites;
+- STOP after green CI + new Preview evidence for independent review before merge.
 
-No Production refill, mint, migration or activation without separate authorization.
+No Stage refill/MINT, bot-pool funding activation, Production refill/mint/migration/cutover, VPS timer activation or merge without separate authorization.
 
 ---
 
@@ -760,3 +806,67 @@ No Production refill, mint, migration or activation without separate authorizati
 - #869 — full FAST/SLOW per-user protected-budget + personalized WS matchmaking design; separate.
 - #1019 — draft Spec Kit; must be rewritten for this simplified per-tier periodic-pool + SLOW design.
 - #870 — future higher-tier bot liquidity; any tier must receive explicit per-tier bankroll/policy before bots are enabled.
+
+
+---
+
+## 24. Final pre-merge amendment — manual RESTRICTED
+
+This section is authoritative where older wording above says access is only NORMAL/SLOW.
+
+### Goal
+
+Add one operator-controlled human-only poker state without expanding automatic anti-farming classification.
+
+- durable automatic class remains only NORMAL/SLOW;
+- add override `FORCE_RESTRICTED`;
+- effective state may therefore be NORMAL, SLOW or RESTRICTED;
+- no automatic condition may set RESTRICTED;
+- no RESTRICTED bankroll, refill policy or table class is created.
+
+### Runtime contract
+
+For a fresh RESTRICTED user:
+
+1. Create remains the existing empty STANDARD table path and still obeys 4 pending.
+2. Final JOIN still obeys the same user advisory lock and 4 active limit.
+3. JOIN is allowed only when the target is ordinary and bot-free; own empty table is valid.
+4. Bot target count is zero and no new bot TABLE_BUY_IN/funding is allowed.
+5. Quick Seat selects an existing legal rejoin first, otherwise only an ordinary bot-free fresh candidate, otherwise the existing empty Create fallback.
+6. Lobby hides bot-populated, SLOW-only and CONTINUOUS_BOT tables as fresh targets while preserving legal resume/rejoin.
+7. While a RESTRICTED participant is active, settled rollover may complete legal settlement but must not create replacement/top-up/new seed funding.
+8. FORCE_RESTRICTED never turns a table SLOW-only and introduces no new persistent table marker.
+9. Applying RESTRICTED to an already-financed live table does not abort/unwind the current hand or historical funding; it only blocks future bot funding/replenishment while active.
+10. Return to AUTO restores the stored automatic NORMAL/SLOW state.
+
+### Minimal implementation shape
+
+Prefer the existing mechanisms and files:
+
+- new forward-only migration under `supabase/migrations/**`: extend only the override CHECK to include `FORCE_RESTRICTED`; do not edit the already-applied migration;
+- `shared/poker-domain/bot-access.mjs`: extend override/effective-state normalization while leaving automatic class and threshold logic NORMAL/SLOW only;
+- `shared/poker-domain/join.mjs`: enforce bot-free RESTRICTED fresh admission and zero bot seed/funding;
+- existing settled funding/cache path (`ws-server/server.mjs`, `ws-server/poker/runtime/settled-bot-funding.mjs`, `table-manager.mjs` only where needed): zero new bot funding while RESTRICTED is active, without per-hand DB reads;
+- `netlify/functions/poker-quick-seat.mjs`: bot-free ordinary candidate filter;
+- existing WS lobby payload + `poker/poker.js`: expose/reuse minimal bot occupancy and filter RESTRICTED fresh targets;
+- `netlify/functions/admin-user-poker-access.mjs` + `js/admin-page.js`: add Force RESTRICTED using the existing revision/audit flow;
+- WS access payload/cache normalization: accept RESTRICTED effective state while automatic class remains NORMAL/SLOW.
+
+Do not create a generic restriction/moderation framework.
+
+### Fundamental verification
+
+Extend existing focused suites only. Prove:
+
+- RESTRICTED cannot arise automatically;
+- Admin-only FORCE_RESTRICTED + AUTO round-trip preserves durable automatic SLOW/NORMAL;
+- fresh restricted own Create→JOIN has zero bots and zero new bot funding;
+- bot-populated/SLOW-only/CONTINUOUS_BOT fresh JOIN is denied;
+- Quick Seat/lobby respect bot-free human-only compatibility;
+- 4+4 limits still apply;
+- legal rejoin/settlement/cash-out are preserved;
+- no new bot replacement/top-up while restricted is active;
+- pre-migration Production compatibility remains intact;
+- migration is forward-only and Stage apply is expected.
+
+After runtime changes, perform a new exact-SHA WS Preview Deploy and manual smoke with FORCE_RESTRICTED before calling PR #1019 merge-ready.

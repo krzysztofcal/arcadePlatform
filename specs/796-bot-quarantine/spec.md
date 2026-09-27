@@ -1,12 +1,12 @@
-# Feature Specification: NORMAL/SLOW per-tier poker pools
+# Feature Specification: NORMAL/SLOW per-tier poker pools with manual RESTRICTED
 
 **Feature Branch**: `docs/issue-1018-bot-quarantine`
 
 **Created**: 2026-09-26
 
-**Status**: Accepted implementation in progress — local code and deterministic tests are authorized from T001; exact-SHA WS Preview/runtime and environment operations remain separate gates.
+**Status**: Accepted implementation extension in progress — T001–T029 are historical implementation/evidence, while the manual RESTRICTED amendment is implemented locally and still requires its own exact-SHA WS Preview/runtime gate.
 
-**Input**: Live [GitHub #1018](https://github.com/krzysztofcal/arcadePlatform/issues/1018), captured in [issue-source.md](issue-source.md). Sole requirements source; supersedes previous #1019 designs. SLOW here is not #869 rolling-12h SLOW.
+**Input**: Live [GitHub #1018](https://github.com/krzysztofcal/arcadePlatform/issues/1018), captured at `2026-09-27T17:10:33Z` in [issue-source.md](issue-source.md). Sole requirements source; supersedes previous #1019 designs and the earlier pre-amendment wording. SLOW here is not #869 rolling-12h SLOW.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -94,9 +94,24 @@ Players use the current live lobby and Quick Seat, with class compatibility and 
 1. **Given** NORMAL/SLOW, **When** viewing live tables, **Then** incompatible fresh targets are filtered/marked and own financed resume remains available; no per-viewer table queries are introduced.
 2. **Given** Quick Seat, **When** choosing a candidate, **Then** valid existing participation is preferred, fresh candidates match class, Create fallback respects pending limits, and final JOIN revalidates stale recommendations.
 
+### User Story 7 - Apply a manual human-only restriction (Priority: P1)
+
+An administrator can make a user effective RESTRICTED without creating a third automatic class or a new table lifecycle.
+
+**Why this priority**: Manual restriction contains bot participation while preserving existing financed poker and settlement rights.
+
+**Independent Test**: FORCE_RESTRICTED/AUTO round-trip, bot-free fresh admission, lobby/Quick Seat filtering and settled no-new-funding behavior.
+
+**Acceptance Scenarios**:
+
+1. **Given** automatic NORMAL or SLOW, **When** an authorized Admin sets FORCE_RESTRICTED, **Then** effective state is RESTRICTED while automatic state remains NORMAL/SLOW; threshold evidence may still persist automatic NORMAL→SLOW, but no automatic path can produce RESTRICTED.
+2. **Given** FORCE_RESTRICTED and a fresh admission, **When** the target is an ordinary bot-free STANDARD table or the user's own empty STANDARD Create fallback, **Then** final JOIN accepts with targetBotCount zero and no new bot funding; SLOW-only, bot-populated and CONTINUOUS_BOT targets reject before buy-in.
+3. **Given** an existing financed seat or a hand with a RESTRICTED human, **When** rejoin, settlement, leave or cash-out occurs, **Then** the legal existing participation completes and no replacement/top-up/seed funding is created.
+4. **Given** FORCE_RESTRICTED, **When** Return to AUTO is accepted, **Then** effective state immediately derives from the stored automatic NORMAL/SLOW state without another threshold check.
+
 ### Edge Cases
 
-- Threshold−1/equal, threshold revision change, FORCE_NORMAL with above-threshold evidence, return to AUTO, cached state unavailable or invalidated.
+- Threshold−1/equal, threshold revision change, FORCE_NORMAL/FORCE_RESTRICTED with above-threshold evidence, return to AUTO, cached state unavailable or invalidated.
 - Multiple tables without global wealth summation; disconnected financed seats count active; concurrent Create/JOIN on distinct tables and another user's first JOIN into an owned pending table.
 - Empty table with historical bot funding is not a safe promotion target; mixed participation, forced NORMAL on a sticky SLOW-only table and UNKNOWN during legal leave.
 - Source exhaustion, unknown COMMIT, policy edit during refill, UTC bucket rollover, clock skew, duplicate dispatch and disabled/unprovisioned tiers.
@@ -105,32 +120,33 @@ Players use the current live lobby and Quick Seat, with class compatibility and 
 
 ### Functional Requirements
 
-- **FR-001**: Durable automatic class MUST be NORMAL or sticky SLOW; override MUST be AUTO/FORCE_NORMAL/FORCE_SLOW, separate from automatic state. FORCE_NORMAL affects only effective class: threshold evidence still persists automatic NORMAL→SLOW while effective remains NORMAL. Override cannot block or clear durable automatic SLOW; Return to AUTO immediately derives effective SLOW from that stored state, without another threshold check. FORCE_NORMAL never reverts sticky is_slow_only. Future RESTRICTED is out of scope.
+- **FR-001**: Durable automatic class MUST remain only NORMAL or sticky SLOW; override MUST be AUTO/FORCE_NORMAL/FORCE_SLOW/FORCE_RESTRICTED, separate from automatic state. Effective state may be NORMAL, SLOW or manual-only RESTRICTED. FORCE_NORMAL and FORCE_RESTRICTED affect only effective state: threshold evidence still persists automatic NORMAL→SLOW while either override is active, and no automatic mechanism may set RESTRICTED. Override cannot block or clear durable automatic SLOW; Return to AUTO immediately derives the stored automatic NORMAL/SLOW state without another threshold check. FORCE_NORMAL/FORCE_RESTRICTED never revert sticky `is_slow_only`.
 - **FR-002**: Final authoritative JOIN MUST evaluate authoritative wallet; existing settled-hand boundary MUST evaluate each active human's authoritative settled stack. Either value at or above dynamic `slow_threshold_ch` (initially 1,000,000,000 CH) establishes automatic SLOW independently of override, including FORCE_NORMAL. No wallet+multi-table wealth aggregation or background account scan.
-- **FR-003**: Settled checks MUST use in-memory settled stacks and cached policy/access/override; zero per-hand reads for wallet/policy/account/override/tier policy, zero additional write below threshold without a real transition. Cache refresh/invalidation occurs outside the hand hot path; new admission/funding fails closed on unknown state, lawful payouts do not.
-- **FR-004**: `poker_tables.is_slow_only` MUST be false by default and one-way true, surviving leave/restart/close. Effective NORMAL fresh admission is ordinary-only, effective SLOW is SLOW-only; existing financed resume remains legal. Known effective SLOW can promote a seated table; UNKNOWN cannot.
+- **FR-003**: Settled checks MUST use in-memory settled stacks and cached policy/access/override; zero per-hand reads for wallet/policy/account/override/tier policy, zero additional write below threshold without a real transition. Cache refresh/invalidation occurs outside the hand hot path; new admission/funding fails closed on unknown state or effective RESTRICTED, while lawful payouts, settlement and leave do not.
+- **FR-004**: `poker_tables.is_slow_only` MUST be false by default and one-way true, surviving leave/restart/close. Effective NORMAL fresh admission is ordinary-only, effective SLOW is SLOW-only, and effective RESTRICTED fresh admission is ordinary bot-free STANDARD-only; existing financed resume remains legal. Known effective SLOW can promote a seated table; RESTRICTED never creates a table marker and UNKNOWN cannot promote.
 - **FR-005**: Create MUST retain empty unfunded STANDARD table/state/ESCROW. Only final authoritative JOIN may promote a SLOW user's own empty table with no human/bot seats and no prior bot funding; never another owner's, populated, prefunded or ordinary managed table.
 - **FR-006**: Active participation MUST be limited to four distinct tables per user across classes; fresh fifth JOIN rejected before buy-in/bot funding, financed rejoin uses no new slot.
 - **FR-007**: Pending empty OPEN STANDARD owned tables with no accepted human participation/bot funding MUST be limited to four; fifth direct/fallback Create rejected before table/state/ESCROW. First accepted JOIN transfers pending to active; closed tables excluded, no historical quota.
 - **FR-008**: Create and final JOIN MUST share a user-scoped transaction advisory-lock contract around authoritative count/decision/mutation, race-safe across different tables and requests. Quick Seat/browser prechecks are not authority. Both counts require narrow user-leading active and creator-leading pending access paths matched to final predicates, bounded to five qualifying tables; fresh JOIN/Create must not scan global seats/tables. T027 must prove query shape/access paths locally; an existing sufficient index needs evidence, not a duplicate.
 - **FR-009**: Every explicitly bot-enabled tier MUST have provisioned NORMAL+SLOW SYSTEM bankrolls and enabled per-tier policy. 100 NORMAL=`POKER_BOT_BANKROLL_100`, 500 NORMAL=`POKER_BOT_BANKROLL`, SLOW=`POKER_BOT_SLOW_BANKROLL_100`/`POKER_BOT_SLOW_BANKROLL_500`. Catalog presence alone must not enable bots.
-- **FR-010**: Runtime seed, replacement and managed top-up MUST consume existing exact tier/class funds only, without runtime MINT or cross-class/cross-tier/TREASURY fallback. Resolve effective seated classes before positive funding; sticky SLOW-only uses SLOW funds. Preserve original source attribution and terminal returns.
+- **FR-010**: Runtime seed, replacement and managed top-up MUST consume existing exact tier/class funds only, without runtime MINT or cross-class/cross-tier/TREASURY fallback. Resolve effective seated classes before positive funding; sticky SLOW-only uses SLOW funds. An effective RESTRICTED human allows legal settlement but authorizes no new bot seed, replacement or managed top-up. Preserve original source attribution and terminal returns.
 - **FR-011**: Per-tier policy MUST expose `buy_in`, `enabled`, `normal_refill_threshold_ch`, `normal_refill_amount_ch`, `slow_refill_threshold_ch`, `slow_refill_amount_ch`, monotonic revision and actor/time metadata. Use threshold terminology consistently.
 - **FR-012**: Every 3h, each enabled exact pool below its threshold MAY receive one configured amount; at most one per pool/current UTC bucket, never refill-until-target, multiple chunks or backlog catch-up. Policy changes cannot reopen an already consumed pool bucket.
 - **FR-013**: Refill MUST use existing balanced ledger/idempotency, GENESIS→exact bankroll; deterministic identity includes bankroll+policy revision+UTC 3h bucket. Retry/unknown COMMIT must not duplicate issuance. No permanent refill receipt table or table-linked refill-MINT retention machinery; retain normal ledger/audit history.
 - **FR-014**: Primary wake-up MUST reuse VPS/systemd→authenticated workflow_dispatch→GitHub-hosted job every 3h. VPS holds no DB credentials or mutation logic; native GitHub cron is not authoritative.
-- **FR-015**: Existing WS `activeLobbyTablesById`/`lobby_snapshot` MUST remain live inventory; add only `slowOnly` compatibility and effective self class for filtering, preserving resume and authoritative JOIN revalidation. No personalized WS matchmaking or per-subscriber×table DB queries.
-- **FR-016**: Existing DB-backed Quick Seat MUST retain resume preference, add NORMAL/SLOW compatibility and constrained Create fallback; final JOIN rejects stale targets. No WS migration of selection.
-- **FR-017**: Admin Users/Ops MUST show automatic/override/effective class, allow authorized override and dynamic access/per-tier policy tuning with audit and cache convergence. No public self-override or generic configuration/moderation framework.
+- **FR-015**: Existing WS `activeLobbyTablesById`/`lobby_snapshot` MUST remain live inventory; add only `slowOnly`, minimal `botCount`/lifecycle compatibility and effective self class for filtering, preserving resume and authoritative JOIN revalidation. RESTRICTED fresh targets require ordinary bot-free occupancy. No personalized WS matchmaking or per-subscriber×table DB queries.
+- **FR-016**: Existing DB-backed Quick Seat MUST retain resume preference, add NORMAL/SLOW/RESTRICTED compatibility and constrained Create fallback; RESTRICTED selects only ordinary bot-free targets and final JOIN rejects stale targets. No WS migration of selection.
+- **FR-017**: Admin Users/Ops MUST show automatic/override/effective state, allow an authorized FORCE_RESTRICTED override in the existing flow, and retain dynamic access/per-tier policy tuning with audit and cache convergence. No public self-override or generic configuration/moderation framework.
 - **FR-018**: `has_human_participant` MUST become true only on accepted human admission/rejoin and never reset. Denied classification does not consume a slot/seat or falsify this marker.
-- **FR-019**: CONTINUOUS_BOT MUST retain existing lifecycle, ordinary exact NORMAL funding and denial of fresh SLOW; no separate SLOW lifecycle. Existing seated transition never kicks/aborts; preserve financed actions, rejoin, settlement, leave/cash-out and future SLOW funding without rotation into an ordinary funded target.
+- **FR-019**: CONTINUOUS_BOT MUST retain existing lifecycle, ordinary exact NORMAL funding and denial of fresh SLOW or RESTRICTED; no separate SLOW/RESTRICTED lifecycle. Existing seated transition never kicks/aborts; preserve financed actions, rejoin, settlement, leave/cash-out and future SLOW funding without rotation into an ordinary funded target.
 - **FR-020**: Only fundamental deterministic backend/runtime/transaction tests are required. Reuse existing packages/methods; JSP/global JS compatibility, `klog` logging, CSS one selector per line, CSP SHA if future inline script is added. No broad UI/CSS/JSP/glue suites.
-- **FR-021**: The implementation MUST not perform Production migration/seed/refill, real Stage ledger MINT, live-VPS scheduler activation or merge. A migration published from this branch intentionally goes through the repository DB Stage Apply PR and is forward-only once applied; its shared-Stage effect must be declared before publication. Exact-SHA WS Preview/runtime verification is a separate Definition-of-Done gate. A real Stage refill canary requires separate explicit user authorization and is not required to finish the WS gate. Production migration/seed/refill/scheduler activation remain a wholly separate GO.
+- **FR-021**: The implementation MUST not perform Production migration/seed/refill, real Stage ledger MINT, live-VPS scheduler activation or merge. Each migration published from this branch intentionally goes through the repository DB Stage Apply PR and is forward-only once applied; its shared-Stage effect must be declared before publication. Exact-SHA WS Preview/runtime verification is a separate Definition-of-Done gate for each runtime-affecting extension. A real Stage refill canary requires separate explicit user authorization and is not required to finish the WS gate. Production migration/seed/refill/scheduler activation remain a wholly separate GO.
 
 ### Key Entities *(include if feature involves data)*
 
 - **User access**: sticky automatic class, override, effective derived class and audit/revision.
 - **Access policy**: dynamic positive SLOW threshold and revision/audit.
+- **Manual restriction**: FORCE_RESTRICTED override with effective RESTRICTED, no automatic classifier, bankroll, refill policy or table marker.
 - **Table participation**: sticky SLOW-only marker, owned pending and financed active membership; limits apply per user, not per class.
 - **Tier pools/policy**: two exact SYSTEM bankrolls per enabled tier, thresholds/amounts/revision; historical funding provenance retained.
 - **Scheduled refill**: one pool/bucket allowance and revision-specific ledger identity using existing audit/idempotency.
@@ -145,10 +161,11 @@ Players use the current live lobby and Quick Seat, with class compatibility and 
 - **SC-004**: Every pool receives zero or one configured refill amount per UTC 3h bucket, including retry/revision races and missed dispatches; no duplicate issuance.
 - **SC-005**: Admin changes become effective without deploy; unauthorized changes produce zero mutations, and below-threshold settled hands add zero classification reads/writes.
 - **SC-006**: Both existing discovery paths preserve resume, expose compatible fresh targets and cannot bypass final class/slot validation.
+- **SC-007**: FORCE_RESTRICTED is Admin-only and manual-only; fresh restricted admission is ordinary bot-free with zero new bot funding, while financed rejoin, settlement, leave and cash-out remain legal.
 
 ## Assumptions
 
 - Economic containment, not fraud detection: below-threshold farming, Sybil/multiple accounts, split wallet/table wealth, and up to four active tables per account remain accepted residual risks. SLOW can exhaust its current chunk before the next refill.
-- FORCE_NORMAL is an intentional effective-class override; automatic SLOW detection and persistence continue independently. Return to AUTO needs no new threshold check; WS delivery still follows the existing bounded cache propagation contract. Technical cache/revision/locking choices are documented in plan/contracts, not additional economic policy.
+- FORCE_NORMAL and FORCE_RESTRICTED are intentional effective-state overrides; automatic SLOW detection and persistence continue independently. Return to AUTO needs no new threshold check; WS delivery still follows the existing bounded cache propagation contract. RESTRICTED is manual-only and never receives a bankroll/refill policy or `is_restricted_only` table marker. Technical cache/revision/locking choices are documented in plan/contracts, not additional economic policy.
 - Issue's 100/500 refill values are initial Stage tuning examples; Production settings/activation require explicit approval. No new tier is enabled merely because progression lists it.
 - #869/#1017 and #870 remain separate. Legacy directory/contract filenames identify this existing PR, not a retained farmer-only architecture.

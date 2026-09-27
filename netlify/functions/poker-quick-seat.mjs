@@ -167,6 +167,23 @@ where t.status = 'OPEN'
   ${await hasPokerPoolSchema(tx) ? `and (
     ($5::text = 'NORMAL' and coalesce(t.is_slow_only, false) = false)
     or ($5::text = 'SLOW' and coalesce(t.is_slow_only, false) = true)
+    or ($5::text = 'RESTRICTED'
+      and t.lifecycle_kind = 'STANDARD'
+      and coalesce(t.is_slow_only, false) = false
+      and not exists (
+        select 1
+        from public.poker_seats restricted_bots
+        where restricted_bots.table_id = t.id
+          and restricted_bots.status = 'ACTIVE'
+          and coalesce(restricted_bots.is_bot, false) = true
+      )
+      and not exists (
+        select 1
+        from public.chips_transactions restricted_funding
+        where restricted_funding.metadata ->> 'tableId' = t.id::text
+          and restricted_funding.metadata ->> 'actor' = 'BOT'
+      )
+    )
   )` : ""}
   and t.buy_in = any($4::int[])
 order by t.last_activity_at desc nulls last, t.created_at asc nulls last
@@ -299,7 +316,9 @@ export async function handler(event) {
 
       const progression = await readPokerProgression(tx, { userId: auth.userId });
       progression.pokerAccess = { effectiveClass: await readQuickSeatEffectiveClass(tx, auth.userId) };
-      if (progression.pokerAccess.effectiveClass !== "NORMAL" && progression.pokerAccess.effectiveClass !== "SLOW") {
+      if (progression.pokerAccess.effectiveClass !== "NORMAL"
+        && progression.pokerAccess.effectiveClass !== "SLOW"
+        && progression.pokerAccess.effectiveClass !== "RESTRICTED") {
         return { kind: "poker_access_unavailable" };
       }
       const createPayload = { userId: auth.userId, maxPlayers, progression, ensureWsBuyInCapability };

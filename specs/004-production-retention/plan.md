@@ -28,7 +28,7 @@ Node.js 20 ESM ops scripts, existing `postgres` package, PostgreSQL 17 Productio
 
 Add exactly this Production migration directory in the implementation PR (not now):
 
-- `supabase/production-migrations/manifest.json`: baseline 54 applied versions, all 44 missing source versions/files/SHA256/category/disposition, E1/E2 order, expected target pair and shared-equivalence object checks. This is inventory metadata, not a second applied-history database.
+- `supabase/production-migrations/manifest.json`: baseline 54 applied versions, all 45 missing source versions/files/SHA256/category/disposition, E1/E2 order, expected target pair and shared-equivalence object checks. This is inventory metadata, not a second applied-history database.
 - **E1** `supabase/production-migrations/20260914090000_chips_ledger_production_retention_contract.sql`.
 - **E2** `supabase/production-migrations/20260914091000_chips_ledger_production_table_fence_activation.sql`.
 
@@ -36,7 +36,7 @@ Reserve these version names; if upstream already uses a reserved version at impl
 
 ### A2. E1: final required schema, safe state
 
-Compose final reviewed SQL bodies from the 98-version source-tree contract; do not execute textual patch chains on Production or regenerate SQL from live Stage at apply time. Preserve the source-to-object provenance in manifest. See data-model.md and per-file inventory.
+Compose final reviewed SQL bodies from the 99-version source-tree contract; do not execute textual patch chains on Production or regenerate SQL from live Stage at apply time. Preserve the source-to-object provenance in manifest. See data-model.md and per-file inventory.
 
 Required groups:
 

@@ -668,14 +668,17 @@ export function createTableManager({
       .filter((member) => !isCoreStateBotUser(table.coreState, member?.userId))
       .map((member) => member?.userId)
       .filter(Boolean);
-    if (humanIds.length === 0) return { known: true, transitions: [] };
+    if (humanIds.length === 0) return { known: true, transitions: [], effectiveRestricted: false };
     if (!isFreshPolicySnapshot(table.pokerAccessPolicy, nowMs)) return { known: false, reason: "access_policy_cache_unknown" };
     for (const userId of humanIds) {
       if (!isFreshAccessSnapshot(table.pokerAccessByUserId.get(userId), nowMs)) {
         return { known: false, reason: "access_snapshot_cache_unknown", userId };
       }
     }
-    return { known: true, transitions: [] };
+    const effectiveRestricted = humanIds.some((userId) =>
+      table.pokerAccessByUserId.get(userId)?.effectiveClass === "RESTRICTED"
+    );
+    return { known: true, transitions: [], effectiveRestricted };
   }
 
   function classifySettledAccess(tableId, humanStackUpdates, { nowMs = Date.now() } = {}) {
@@ -689,6 +692,7 @@ export function createTableManager({
     }
     const transitions = [];
     let effectiveSlow = false;
+    let effectiveRestricted = false;
     for (const update of Array.isArray(humanStackUpdates) ? humanStackUpdates : []) {
       const snapshot = table.pokerAccessByUserId.get(update.userId);
       const result = classifySettledAccessEvidence({
@@ -699,6 +703,7 @@ export function createTableManager({
       });
       if (!result.known) return { known: false, reason: result.reason, transitions: [] };
       if (result.effectiveClass === "SLOW") effectiveSlow = true;
+      if (result.effectiveClass === "RESTRICTED") effectiveRestricted = true;
       if (result.changed) {
         transitions.push({
           userId: update.userId,
@@ -709,7 +714,7 @@ export function createTableManager({
         });
       }
     }
-    return { known: true, transitions, effectiveSlow };
+    return { known: true, transitions, effectiveSlow, effectiveRestricted };
   }
 
   function touchTableActivity(table, nowMs = Date.now()) {
@@ -1548,7 +1553,9 @@ export function createTableManager({
         table.pokerAccessByUserId.set(userId, {
           ...snapshot,
           automaticClass: "SLOW",
-          effectiveClass: transition.effectiveClass === "NORMAL" ? "NORMAL" : "SLOW",
+          effectiveClass: ["NORMAL", "SLOW", "RESTRICTED"].includes(transition.effectiveClass)
+            ? transition.effectiveClass
+            : "SLOW",
           revision: Math.max(Number(snapshot.revision) || 0, nextRevision),
           loadedAtMs: nowMs,
           expiresAtMs: nowMs + 30_000

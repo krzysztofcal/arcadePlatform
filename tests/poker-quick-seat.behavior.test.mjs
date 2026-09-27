@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
+const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", checkWsBuyInCapability = async () => ({ ok: true }) }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -32,7 +32,7 @@ const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], log
           if (text.includes("pg_advisory_xact_lock")) return [];
 
           if (text.includes("select poker_auto_class, poker_access_override")) {
-            return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+            return [{ poker_auto_class: effectiveClass === "RESTRICTED" ? "NORMAL" : effectiveClass, poker_access_override: effectiveClass === "RESTRICTED" ? "FORCE_RESTRICTED" : "AUTO", poker_access_revision: 1 }];
           }
 
           if (text.includes("join public.poker_seats s") && text.includes("s.user_id = $1")) {
@@ -118,6 +118,14 @@ const run = async () => {
     assert.equal(queries.some(({ query }) => query.includes("pending_tables")), false);
   }
 
+  {
+    const queries = [];
+    const handler = makeHandler({ mode: "any_open", queries, effectiveClass: "RESTRICTED" });
+    const response = await callQuickSeat(handler, { maxPlayers: 6 });
+    assert.equal(response.statusCode, 200);
+    assert.ok(queries.some((entry) => entry.query.includes("$5::text = 'RESTRICTED'")), "restricted Quick Seat should use the bot-free candidate predicate");
+    assert.equal(JSON.parse(response.body).kind, undefined);
+  }
   {
     const queries = [];
     const notifications = [];

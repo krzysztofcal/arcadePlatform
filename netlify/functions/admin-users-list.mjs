@@ -155,6 +155,8 @@ limit ${nextParam(pageInfo.limit)};
         ? "NORMAL"
         : row.poker_access_override === "FORCE_SLOW"
           ? "SLOW"
+          : row.poker_access_override === "FORCE_RESTRICTED"
+            ? "RESTRICTED"
           : row.poker_auto_class || "NORMAL",
       accessRevision: Number(row.poker_access_revision || 1),
     })),
