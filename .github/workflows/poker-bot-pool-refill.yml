@@ -1,0 +1,89 @@
+name: Poker Bot Pool Refill
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Ledger target
+        required: true
+        default: stage
+        type: choice
+        options:
+          - stage
+          - production
+      mode:
+        description: Read-only preview or explicitly authorized mutation
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - mutate
+      reviewed_ref:
+        description: Reviewed branch/tag ref used for this dispatch
+        required: true
+        default: main
+        type: string
+
+concurrency:
+  group: poker-bot-pool-refill-${{ inputs.target }}-${{ inputs.mode }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refill:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && github.actor == vars.POKER_BOT_REFILL_DISPATCH_ACTOR && github.actor == 'arcade-poker-refill-dispatch')) }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target == 'production' && 'production-poker-refill' || 'stage-poker-refill' }}
+    timeout-minutes: 15
+    env:
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      POKER_BOT_REFILL_REVIEWED_REF: ${{ github.sha }}
+      POKER_BOT_REFILL_TARGET: ${{ inputs.target }}
+      POKER_BOT_REFILL_MODE: ${{ inputs.mode }}
+      POKER_BOT_REFILL_FEATURE_ENABLED: ${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}
+      POKER_BOT_REFILL_PRODUCTION_GO: ${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}
+      SUPABASE_DB_URL: ${{ inputs.target == 'production' && secrets.SUPABASE_PROD_DB_URL || secrets.SUPABASE_STAGE_DB_URL }}
+    steps:
+      - name: Checkout exact dispatch SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify refill authority boundary
+        shell: bash
+        env:
+          REFILL_TARGET: ${{ inputs.target }}
+          REFILL_MODE: ${{ inputs.mode }}
+          REVIEWED_REF_INPUT: ${{ inputs.reviewed_ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$REVIEWED_REF_INPUT" = "main" || [[ "$REVIEWED_REF_INPUT" =~ ^[0-9a-f]{40}$ ]]
+          test "$REFILL_TARGET" = "stage" || test "$REFILL_TARGET" = "production"
+          test "$REFILL_MODE" = "dry-run" || test "$REFILL_MODE" = "mutate"
+          if [[ "$REFILL_MODE" == "mutate" ]]; then
+            test "${POKER_BOT_REFILL_FEATURE_ENABLED:-0}" = "1"
+            test "$GITHUB_ACTOR" = "${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR }}"
+            test "$GITHUB_ACTOR" = "arcade-poker-refill-dispatch"
+            if [[ "$REFILL_TARGET" == "production" ]]; then
+              test "${POKER_BOT_REFILL_PRODUCTION_GO:-0}" = "1"
+            fi
+          fi
+
+      - name: Run bounded pool refill worker
+        run: node scripts/ops/poker-bot-pool-refill.mjs

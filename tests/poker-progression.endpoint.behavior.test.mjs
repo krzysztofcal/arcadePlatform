@@ -5,6 +5,12 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 const origin = "https://example.test";
 
 function makeHandler({ authResult, progression, calls, unsafe, checkWsBuyInCapability = async () => ({ ok: true }), klog = () => {} }) {
+  const fallbackUnsafe = async (sql) => {
+    if (String(sql).toLowerCase().includes("select poker_auto_class, poker_access_override")) {
+      return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+    }
+    return [];
+  };
   return loadPokerHandler("netlify/functions/poker-progression.mjs", {
     baseHeaders: () => ({ "cache-control": "no-store" }),
     corsHeaders: () => ({ "access-control-allow-origin": origin }),
@@ -14,7 +20,7 @@ function makeHandler({ authResult, progression, calls, unsafe, checkWsBuyInCapab
       return authResult;
     },
     klog,
-    beginSql: async (fn) => fn({ unsafe: unsafe || (async () => []) }),
+    beginSql: async (fn) => fn({ unsafe: unsafe || fallbackUnsafe }),
     readPokerProgression: async (_tx, options) => {
       calls.progression.push(options);
       return progression;
@@ -73,6 +79,13 @@ test("poker progression endpoint reads progression only for the verified user", 
       balance: 550,
       highestUnlockedBuyIn: 500,
       availableBuyIns: [500, 100],
+      pokerAccess: {
+        automaticClass: "NORMAL",
+        override: "AUTO",
+        effectiveClass: "NORMAL",
+        revision: 1,
+        automaticSlowAt: null
+      },
       rejoinableTableIds: [],
       tableAccess: null
     });
@@ -104,6 +117,7 @@ test("poker progression table access allows available tiers, locks historical lo
       checkWsBuyInCapability: async () => ({ ok: true }),
       unsafe: async (sql) => {
         const text = String(sql).toLowerCase();
+        if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
         if (text.includes("select distinct t.id")) return [{ id: tableId }].filter(() => seatRows.length > 0);
         if (text.includes("select id, status, buy_in, stakes")) return [table];
         if (text.includes("select 1 from public.poker_seats")) return seatRows;
@@ -129,6 +143,7 @@ test("poker progression table access allows available tiers, locks historical lo
       checkWsBuyInCapability: async () => ({ ok: false, reason: "buy_in_capability_unavailable" }),
       unsafe: async (sql) => {
         const text = String(sql).toLowerCase();
+        if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
         if (text.includes("select id, status, buy_in, stakes")) return [{ id: "table-5000", status: "OPEN", buy_in: 5000, stakes: { sb: 50, bb: 100 } }];
         return [];
       }

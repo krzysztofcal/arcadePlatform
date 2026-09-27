@@ -161,6 +161,91 @@ const runMigrations = async (sql, files) => {
   }
 };
 
+const assertPokerBotQuarantineSchema = async (sql) => {
+  const requiredColumns = await sql`
+    select table_name, column_name, is_nullable, column_default
+    from information_schema.columns
+    where table_schema = 'public'
+      and ((table_name = 'chips_accounts' and column_name in ('poker_auto_class', 'poker_access_override', 'poker_access_revision', 'poker_auto_slow_at', 'poker_access_updated_at', 'poker_access_updated_by'))
+        or (table_name = 'poker_tables' and column_name = 'is_slow_only'))
+    order by table_name, column_name;
+  `;
+  const columnKeys = new Set(requiredColumns.map((row) => `${row.table_name}.${row.column_name}`));
+  for (const key of [
+    "chips_accounts.poker_auto_class",
+    "chips_accounts.poker_access_override",
+    "chips_accounts.poker_access_revision",
+    "chips_accounts.poker_auto_slow_at",
+    "chips_accounts.poker_access_updated_at",
+    "chips_accounts.poker_access_updated_by",
+    "poker_tables.is_slow_only",
+  ]) {
+    assert.equal(columnKeys.has(key), true, `missing #1018 column ${key}`);
+  }
+  assert.equal(requiredColumns.find((row) => row.table_name === "chips_accounts" && row.column_name === "poker_auto_class")?.is_nullable, "NO");
+  assert.equal(requiredColumns.find((row) => row.table_name === "chips_accounts" && row.column_name === "poker_access_override")?.is_nullable, "NO");
+  assert.equal(requiredColumns.find((row) => row.table_name === "poker_tables" && row.column_name === "is_slow_only")?.is_nullable, "NO");
+
+  const indexRows = await sql`
+    select indexname, indexdef
+    from pg_indexes
+    where schemaname = 'public'
+      and indexname in ('poker_seats_user_id_active_human_idx', 'poker_tables_created_by_pending_standard_idx', 'chips_transactions_poker_pool_bucket_uidx');
+  `;
+  const indexByName = new Map(indexRows.map((row) => [row.indexname, row.indexdef]));
+  assert.match(indexByName.get("poker_seats_user_id_active_human_idx") || "", /\(user_id, table_id\)/i);
+  assert.match(indexByName.get("poker_tables_created_by_pending_standard_idx") || "", /\(created_by, id\)/i);
+  assert.match(indexByName.get("chips_transactions_poker_pool_bucket_uidx") || "", /metadata/i);
+  const tableIdIndexRows = await sql`
+    select indexname, indexdef
+    from pg_indexes
+    where schemaname = 'public' and indexname = 'chips_transactions_poker_table_id_idx';
+  `;
+  assert.match(tableIdIndexRows?.[0]?.indexdef || "", /metadata.*tableId/i);
+
+  const policyRows = await sql`
+    select id, slow_threshold_ch, revision from public.poker_access_policy where id = 1;
+  `;
+  assert.equal(policyRows.length, 1);
+  assert.equal(Number(policyRows[0].slow_threshold_ch), 1_000_000_000);
+  assert.equal(Number(policyRows[0].revision), 1);
+  const tierRows = await sql`
+    select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
+           slow_refill_threshold_ch, slow_refill_amount_ch, revision
+    from public.poker_bot_tier_policy
+    where buy_in in (100, 500)
+    order by buy_in;
+  `;
+  assert.deepEqual(tierRows.map((row) => Number(row.buy_in)), [100, 500]);
+  assert.equal(tierRows.every((row) => row.enabled === false && Number(row.revision) === 1), true);
+  assert.equal(tierRows.every((row) => [row.normal_refill_threshold_ch, row.normal_refill_amount_ch, row.slow_refill_threshold_ch, row.slow_refill_amount_ch].every((value) => Number(value) > 0)), true);
+
+  const accountRows = await sql`
+    select system_key, balance
+    from public.chips_accounts
+    where account_type = 'SYSTEM'
+      and system_key in ('POKER_BOT_BANKROLL_100', 'POKER_BOT_BANKROLL', 'POKER_BOT_SLOW_BANKROLL_100', 'POKER_BOT_SLOW_BANKROLL_500')
+    order by system_key;
+  `;
+  const accountsByKey = new Map(accountRows.map((row) => [row.system_key, row]));
+  for (const key of ["POKER_BOT_BANKROLL_100", "POKER_BOT_BANKROLL", "POKER_BOT_SLOW_BANKROLL_100", "POKER_BOT_SLOW_BANKROLL_500"]) {
+    assert.equal(accountsByKey.has(key), true, `missing exact bot pool ${key}`);
+  }
+  assert.equal(Number(accountsByKey.get("POKER_BOT_BANKROLL").balance) >= 0, true);
+
+  const rlsRows = await sql`
+    select relname, relrowsecurity
+    from pg_class
+    where relnamespace = 'public'::regnamespace
+      and relname in ('poker_access_policy', 'poker_bot_tier_policy')
+    order by relname;
+  `;
+  assert.deepEqual(rlsRows.map((row) => [row.relname, row.relrowsecurity]), [
+    ["poker_access_policy", true],
+    ["poker_bot_tier_policy", true],
+  ]);
+};
+
 const runProductionEquivalentFixture = async (sql) => {
   const productionBaselineFiles = migrationFiles
     .slice(0, 54)
@@ -3853,6 +3938,7 @@ async function main() {
   await dropAndRecreateSchema(sql);
 
   await runMigrations(sql, migrationsWithoutBootstrapSeeds);
+  await assertPokerBotQuarantineSchema(sql);
   await expectFrozenLegacyAllowlistHashGuard(sql);
   await ensureGenesisFixture(sql);
   await assertArchivePrunerRoleContracts(sql);

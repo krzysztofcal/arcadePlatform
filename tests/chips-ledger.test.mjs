@@ -861,6 +861,58 @@ describe("chips ledger idempotency and validation", () => {
     ).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
   });
 
+  it("accepts only the trusted GENESIS to exact pool scheduled refill shape", async () => {
+    const { postTransaction } = await loadLedger();
+    mockDb.accounts.set("genesis-refill", {
+      id: "genesis-refill",
+      account_type: "SYSTEM",
+      system_key: "GENESIS",
+      status: "active",
+      balance: 1_000_000,
+      next_entry_seq: 1,
+    });
+    mockDb.accounts.set("slow-pool-refill", {
+      id: "slow-pool-refill",
+      account_type: "SYSTEM",
+      system_key: "POKER_BOT_SLOW_BANKROLL_100",
+      status: "active",
+      balance: 0,
+      next_entry_seq: 1,
+    });
+    const payload = {
+      userId: null,
+      txType: "MINT",
+      idempotencyKey: "poker-refill-test-1",
+      trustedScheduledRefill: true,
+      metadata: {
+        purpose: "poker_pool_refill",
+        bankrollSystemKey: "POKER_BOT_SLOW_BANKROLL_100",
+        buyIn: 100,
+        poolClass: "SLOW",
+        policyRevision: 2,
+        bucket: "2026-09-27T06:00:00.000Z",
+      },
+      entries: [
+        { accountType: "SYSTEM", systemKey: "GENESIS", amount: -25 },
+        { accountType: "SYSTEM", systemKey: "POKER_BOT_SLOW_BANKROLL_100", amount: 25 },
+      ],
+    };
+    const result = await postTransaction(payload);
+    expect(result.transaction.id).toBeDefined();
+    expect(mockDb.accounts.get("genesis-refill").balance).toBe(999_975);
+    expect(mockDb.accounts.get("slow-pool-refill").balance).toBe(25);
+    await expect(postTransaction({
+      ...payload,
+      idempotencyKey: "poker-refill-test-2",
+      trustedScheduledRefill: false,
+    })).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
+    await expect(postTransaction({
+      ...payload,
+      idempotencyKey: "poker-refill-test-3",
+      metadata: { ...payload.metadata, poolClass: "NORMAL" },
+    })).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
+  });
+
   it("uses explicit USER entry userId when provided", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({

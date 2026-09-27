@@ -1,0 +1,205 @@
+import { beginSql, klog } from "../../netlify/functions/_shared/supabase-admin.mjs";
+import { postTransaction } from "../../netlify/functions/_shared/chips-ledger.mjs";
+import { getBotFundingSystemKeyForBuyIn } from "../../shared/poker-domain/table-economy.mjs";
+import { isValidTierPolicy } from "../../shared/poker-domain/bot-access.mjs";
+
+export const REFILL_BUCKET_MS = 3 * 60 * 60 * 1000;
+export const CANONICAL_REPOSITORY = "krzysztofcal/arcadePlatform";
+export const REFILL_WORKFLOW_FILE = ".github/workflows/poker-bot-pool-refill.yml";
+
+function fail(code, details = {}) {
+  const error = new Error(code);
+  error.code = code;
+  Object.assign(error, details);
+  return error;
+}
+
+function positiveSafeInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function utcBucketStart(value = new Date()) {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (!Number.isFinite(date.getTime())) throw fail("invalid_refill_clock");
+  const hours = date.getUTCHours();
+  date.setUTCMinutes(0, 0, 0);
+  date.setUTCHours(hours - (hours % 3));
+  return date.toISOString();
+}
+
+export function refillIdempotencyKey({ bankrollSystemKey, policyRevision, bucket }) {
+  const pool = typeof bankrollSystemKey === "string" ? bankrollSystemKey.trim() : "";
+  const revision = positiveSafeInteger(policyRevision);
+  if (!pool || !revision || typeof bucket !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/.test(bucket)) {
+    throw fail("invalid_refill_identity");
+  }
+  return `poker-pool-refill:${pool}:${revision}:${bucket}`;
+}
+
+export function resolveRefillAuthorization(env = process.env, { mode = env.POKER_BOT_REFILL_MODE || "dry-run" } = {}) {
+  const repository = String(env.GITHUB_REPOSITORY || CANONICAL_REPOSITORY).trim();
+  const ref = String(env.POKER_BOT_REFILL_REVIEWED_REF || env.GITHUB_REF || "").trim();
+  const normalizedMode = String(mode || "dry-run").trim().toLowerCase();
+  const target = String(env.POKER_BOT_REFILL_TARGET || "stage").trim().toLowerCase();
+  if (repository !== CANONICAL_REPOSITORY) throw fail("refill_repository_mismatch");
+  if (!/^refs\/(heads|tags)\/[A-Za-z0-9._\/-]+$/.test(ref) && !/^[0-9a-f]{40}$/.test(ref)) {
+    throw fail("refill_reviewed_ref_required");
+  }
+  if (normalizedMode !== "dry-run" && normalizedMode !== "mutate") throw fail("refill_mode_invalid");
+  if (target !== "stage" && target !== "production") throw fail("refill_target_invalid");
+  if (normalizedMode === "mutate" && env.POKER_BOT_REFILL_FEATURE_ENABLED !== "1") {
+    throw fail("refill_feature_disabled");
+  }
+  if (normalizedMode === "mutate" && env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
+    throw fail("refill_dispatch_required");
+  }
+  if (normalizedMode === "mutate" && env.GITHUB_REF !== "refs/heads/main") {
+    throw fail("refill_main_ref_required");
+  }
+  if (normalizedMode === "mutate" && env.GITHUB_ACTOR !== "arcade-poker-refill-dispatch") {
+    throw fail("refill_actor_not_allowed");
+  }
+  if (normalizedMode === "mutate" && target === "production"
+    && env.POKER_BOT_REFILL_PRODUCTION_GO !== "1") {
+    throw fail("refill_production_go_required");
+  }
+  return {
+    repository,
+    ref,
+    mode: normalizedMode,
+    dryRun: normalizedMode !== "mutate",
+    target,
+  };
+}
+
+function poolFields(poolClass) {
+  return String(poolClass).toUpperCase() === "SLOW"
+    ? { threshold: "slow_refill_threshold_ch", amount: "slow_refill_amount_ch" }
+    : { threshold: "normal_refill_threshold_ch", amount: "normal_refill_amount_ch" };
+}
+
+function isCurrentBucket(bucket, now = new Date()) {
+  return bucket === utcBucketStart(now);
+}
+
+export async function refillPool({
+  tx,
+  policy,
+  poolClass,
+  now = new Date(),
+  bucket = utcBucketStart(now),
+  dryRun = true,
+  postTransactionFn = postTransaction,
+} = {}) {
+  if (!tx || typeof tx.unsafe !== "function") throw fail("refill_tx_required");
+  if (!isValidTierPolicy(policy) || policy.enabled !== true) return { status: "disabled" };
+  if (!isCurrentBucket(bucket, now)) return { status: "stale_bucket" };
+  const buyIn = positiveSafeInteger(policy.buy_in ?? policy.buyIn);
+  const revision = positiveSafeInteger(policy.revision);
+  const normalizedClass = String(poolClass || "").toUpperCase();
+  const poolKey = getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: normalizedClass });
+  const fields = poolFields(normalizedClass);
+  const threshold = positiveSafeInteger(policy[fields.threshold]);
+  const amount = positiveSafeInteger(policy[fields.amount]);
+  if (!buyIn || !revision || !poolKey || !threshold || !amount) return { status: "unprovisioned" };
+  const idempotencyKey = refillIdempotencyKey({ bankrollSystemKey: poolKey, policyRevision: revision, bucket });
+
+  await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [`poker-pool-refill:${poolKey}:${bucket}`]);
+  const consumedRows = await tx.unsafe(`
+select id, idempotency_key, metadata
+from public.chips_transactions
+where tx_type = 'MINT'
+  and metadata ->> 'purpose' = 'poker_pool_refill'
+  and metadata ->> 'bankrollSystemKey' = $1
+  and metadata ->> 'bucket' = $2
+order by id asc
+limit 1;
+`, [poolKey, bucket]);
+  if (consumedRows?.[0]) return { status: "replay", poolKey, bucket, transaction: consumedRows[0] };
+
+  const accountRows = await tx.unsafe(`
+select id, balance, status
+from public.chips_accounts
+where account_type = 'SYSTEM' and system_key = $1
+for update;
+`, [poolKey]);
+  const account = accountRows?.[0];
+  if (!account || String(account.status).toLowerCase() !== "active") return { status: "unprovisioned", poolKey };
+  const balance = Number(account.balance);
+  if (!Number.isSafeInteger(balance) || balance < 0) throw fail("refill_balance_invalid");
+  if (balance >= threshold) return { status: "no_op", poolKey, balance, threshold };
+  if (dryRun) return { status: "would_refill", poolKey, balance, threshold, amount, idempotencyKey };
+
+  const result = await postTransactionFn({
+    userId: null,
+    tx,
+    txType: "MINT",
+    idempotencyKey,
+    reference: idempotencyKey,
+    description: `Scheduled poker ${normalizedClass} pool refill`,
+    createdBy: null,
+    trustedScheduledRefill: true,
+    metadata: {
+      purpose: "poker_pool_refill",
+      bankrollSystemKey: poolKey,
+      buyIn,
+      poolClass: normalizedClass,
+      policyRevision: revision,
+      bucket,
+    },
+    entries: [
+      { accountType: "SYSTEM", systemKey: "GENESIS", amount: -amount },
+      { accountType: "SYSTEM", systemKey: poolKey, amount },
+    ],
+  });
+  return { status: "refilled", poolKey, amount, idempotencyKey, transaction: result?.transaction || null };
+}
+
+export async function runRefill({
+  env = process.env,
+  now = new Date(),
+  beginSqlFn = beginSql,
+  postTransactionFn = postTransaction,
+} = {}) {
+  const authorization = resolveRefillAuthorization(env);
+  const bucket = utcBucketStart(now);
+  return beginSqlFn(async (tx) => {
+    const policyRows = await tx.unsafe(`
+select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
+       slow_refill_threshold_ch, slow_refill_amount_ch, revision
+from public.poker_bot_tier_policy
+where enabled = true
+order by buy_in asc
+for share;
+`);
+    const outcomes = [];
+    for (const policy of Array.isArray(policyRows) ? policyRows : []) {
+      for (const poolClass of ["NORMAL", "SLOW"]) {
+        outcomes.push(await refillPool({
+          tx,
+          policy,
+          poolClass,
+          now,
+          bucket,
+          dryRun: authorization.dryRun,
+          postTransactionFn,
+        }));
+      }
+    }
+    return { authorization, bucket, outcomes };
+  });
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runRefill()
+    .then((result) => klog("poker_bot_pool_refill_complete", {
+      bucket: result.bucket,
+      mode: result.authorization.mode,
+      outcomes: result.outcomes.map(({ status, poolKey }) => ({ status, poolKey })),
+    }))
+    .catch((error) => {
+      klog("poker_bot_pool_refill_failed", { code: error?.code || "refill_failed" });
+      process.exitCode = 1;
+    });
+}

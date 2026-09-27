@@ -37,7 +37,7 @@ where t.status = 'OPEN'
 
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
-    "select id, status, buy_in, stakes from public.poker_tables where id = $1 limit 1;",
+    "select id, status, buy_in, stakes, is_slow_only from public.poker_tables where id = $1 limit 1;",
     [tableId]
   );
   const table = rows?.[0] || null;
@@ -56,6 +56,9 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
   if (seatRows?.length) {
     return { tableId, buyIn: normalizedBuyIn, allowed: true, rejoin: true, reason: "rejoin" };
   }
+  if (progression.pokerAccess?.effectiveClass !== "NORMAL" && progression.pokerAccess?.effectiveClass !== "SLOW") {
+    return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "poker_access_unavailable" };
+  }
   if (!normalizedBuyIn || !isConfiguredPokerBuyIn(normalizedBuyIn, progression?.tiers?.map((tier) => tier.buyIn) || [])) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: "invalid_buy_in" };
   }
@@ -65,7 +68,44 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
   if (!progression.availableBuyIns.includes(normalizedBuyIn)) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "buy_in_tier_locked" };
   }
+  if (progression.pokerAccess?.effectiveClass === "NORMAL" && table.is_slow_only === true) {
+    return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "normal_table_required" };
+  }
+  if (progression.pokerAccess?.effectiveClass === "SLOW" && table.is_slow_only !== true) {
+    return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "slow_only_table_required" };
+  }
   return { tableId, buyIn: normalizedBuyIn, allowed: true, rejoin: false, reason: "available" };
+}
+
+async function readPokerAccess(tx, userId) {
+  let rows;
+  try {
+    rows = await tx.unsafe(`
+select poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at
+from public.chips_accounts
+where user_id = $1 and account_type = 'USER'
+limit 1;
+`, [userId]);
+  } catch (error) {
+    if (String(error?.code || "") === "42703" || /poker_(?:access|auto)/i.test(String(error?.message || ""))) {
+      return { automaticClass: null, override: null, effectiveClass: "UNKNOWN", revision: null, automaticSlowAt: null };
+    }
+    throw error;
+  }
+  const row = rows?.[0] || null;
+  if (!row || !["NORMAL", "SLOW"].includes(row.poker_auto_class)
+    || !["AUTO", "FORCE_NORMAL", "FORCE_SLOW"].includes(row.poker_access_override)) {
+    return { automaticClass: null, override: null, effectiveClass: "UNKNOWN", revision: null, automaticSlowAt: null };
+  }
+  const automaticClass = row.poker_auto_class;
+  const override = row.poker_access_override;
+  return {
+    automaticClass,
+    override,
+    effectiveClass: override === "FORCE_NORMAL" ? "NORMAL" : override === "FORCE_SLOW" ? "SLOW" : automaticClass,
+    revision: Number(row.poker_access_revision || 1),
+    automaticSlowAt: row.poker_auto_slow_at || null,
+  };
 }
 
 export async function handler(event) {
@@ -94,6 +134,8 @@ export async function handler(event) {
     const tableId = requestedTableId(event);
     const result = await beginSql(async (tx) => {
       const progression = await readPokerProgression(tx, { userId: auth.userId });
+      const pokerAccess = await readPokerAccess(tx, auth.userId);
+      progression.pokerAccess = pokerAccess;
       const rejoinableTableIds = await readRejoinableTableIds(tx, auth.userId);
       const tableAccess = tableId
         ? await readTableAccess(tx, { userId: auth.userId, tableId, progression })

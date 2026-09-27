@@ -95,7 +95,8 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
           last_activity_at: row.last_activity_at ?? null,
           lifecycle_kind: row.lifecycle_kind ?? "STANDARD",
           managed_profile_key: row.managed_profile_key ?? null,
-          rotation_due_at: row.rotation_due_at ?? null
+          rotation_due_at: row.rotation_due_at ?? null,
+          is_slow_only: row.is_slow_only === true
         }];
       }
 

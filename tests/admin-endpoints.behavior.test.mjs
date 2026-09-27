@@ -6,6 +6,8 @@ const { createAdminUserBalanceHandler } = await import("../netlify/functions/adm
 const { createAdminUserLedgerHandler } = await import("../netlify/functions/admin-user-ledger.mjs");
 const { createAdminWsPreviewBotReactionHandler, parseBody: parseBotReactionBody } = await import("../netlify/functions/admin-ws-preview-bot-reaction.mjs");
 const { createAdminPokerLogControlHandler, parseBody: parsePokerLogControlBody } = await import("../netlify/functions/admin-poker-log-control.mjs");
+const { createAdminUserPokerAccessHandler, updatePokerAccess } = await import("../netlify/functions/admin-user-poker-access.mjs");
+const { updatePokerPolicy } = await import("../netlify/functions/admin-poker-policy.mjs");
 
 function event(method, queryStringParameters = {}, body = null) {
   return {
@@ -51,6 +53,69 @@ function pokerLogSnapshot() {
     overrides: [],
   };
 }
+
+test("poker access admin rejects unauthorized override mutation before any write", async () => {
+  let writes = 0;
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => {
+      const error = new Error("admin_required");
+      error.status = 403;
+      error.code = "admin_required";
+      throw error;
+    },
+    updatePokerAccess: async () => { writes += 1; return {}; }
+  });
+  const response = await handler(event("PATCH", {}, JSON.stringify({
+    userId: "00000000-0000-4000-8000-000000000020",
+    override: "FORCE_NORMAL",
+    expectedRevision: 1
+  })));
+  assert.equal(response.statusCode, 403);
+  assert.equal(writes, 0);
+});
+
+test("poker access admin preserves automatic SLOW while applying an optimistic override revision", async () => {
+  const result = await updatePokerAccess({
+    userId: "00000000-0000-4000-8000-000000000020",
+    override: "FORCE_NORMAL",
+    expectedRevision: 7,
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({ unsafe: async (sql) => {
+      if (String(sql).includes("select user_id")) return [{ user_id: "00000000-0000-4000-8000-000000000020", poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 7 }];
+      if (String(sql).includes("update public.chips_accounts")) return [{ user_id: "00000000-0000-4000-8000-000000000020", poker_auto_class: "SLOW", poker_access_override: "FORCE_NORMAL", poker_access_revision: 8 }];
+      return [];
+    } })
+  });
+  assert.equal(result.access.automaticClass, "SLOW");
+  assert.equal(result.access.override, "FORCE_NORMAL");
+  assert.equal(result.access.effectiveClass, "NORMAL");
+  assert.equal(result.access.revision, 8);
+});
+
+test("poker tier policy cannot enable a tier without both exact NORMAL and SLOW pools", async () => {
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: {
+        kind: "tier",
+        buyIn: 100,
+        enabled: true,
+        expectedRevision: 1,
+        normal_refill_threshold_ch: 100,
+        normal_refill_amount_ch: 50,
+        slow_refill_threshold_ch: 100,
+        slow_refill_amount_ch: 50
+      },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn({ unsafe: async (sql) => {
+        if (String(sql).includes("select buy_in, revision")) return [{ buy_in: 100, revision: 1 }];
+        if (String(sql).includes("select system_key")) return [{ system_key: "POKER_BOT_BANKROLL_100" }];
+        return [];
+      } })
+    }),
+    (error) => error?.code === "tier_pools_unprovisioned"
+  );
+});
 
 test("admin-me returns admin payload for an allowlisted caller", async () => {
   const handler = createAdminMeHandler({

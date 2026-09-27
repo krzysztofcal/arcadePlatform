@@ -3,7 +3,6 @@ import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
 import { projectDurableActionResult } from "../idempotency/action-command.mjs";
-import { HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY } from "../../../shared/poker-domain/table-economy.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 2;
@@ -12,6 +11,13 @@ const ACCEPTED_ACTION_TYPES = new Set(["FOLD", "CHECK", "CALL", "BET", "RAISE", 
 const MAX_REPLACEMENT_FUNDINGS = 10;
 const MAX_MANAGED_BOT_TOP_UPS = 6;
 const MAX_HUMAN_STACK_UPDATES = 10;
+const MAX_SETTLED_ACCESS_TRANSITIONS = 10;
+const CONFIGURED_POKER_POOL_KEYS = new Set([
+  "POKER_BOT_BANKROLL_100",
+  "POKER_BOT_BANKROLL",
+  "POKER_BOT_SLOW_BANKROLL_100",
+  "POKER_BOT_SLOW_BANKROLL_500",
+]);
 const DURABLE_ACTION_KIND = "ACT";
 const PAYLOAD_HASH_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -722,6 +728,88 @@ function normalizeHumanStackUpdates({ humanStackUpdates, expectedVersion }) {
   return { ok: true, supplied: true, updates };
 }
 
+function normalizeSettledAccessTransitions({ settledAccessTransitions }) {
+  if (settledAccessTransitions === undefined) return { ok: true, supplied: false, transitions: [] };
+  if (!Array.isArray(settledAccessTransitions) || settledAccessTransitions.length > MAX_SETTLED_ACCESS_TRANSITIONS) {
+    return { ok: false, reason: "invalid_settled_access_transitions" };
+  }
+  const seenUsers = new Set();
+  const transitions = [];
+  for (const value of settledAccessTransitions) {
+    const userId = typeof value?.userId === "string" ? value.userId.trim() : "";
+    const expectedRevision = Number(value?.expectedRevision);
+    if (!userId || seenUsers.has(userId) || !Number.isInteger(expectedRevision) || expectedRevision < 1
+      || value?.automaticClass !== "SLOW") {
+      return { ok: false, reason: "invalid_settled_access_transitions" };
+    }
+    seenUsers.add(userId);
+    transitions.push({ userId, expectedRevision, automaticClass: "SLOW" });
+  }
+  transitions.sort((left, right) => left.userId.localeCompare(right.userId));
+  return { ok: true, supplied: true, transitions };
+}
+
+async function writeSettledAccessTransitions({ tx, transitions }) {
+  const committed = [];
+  for (const transition of transitions) {
+    const rows = await tx.unsafe(
+      `update public.chips_accounts
+          set poker_auto_class = 'SLOW',
+              poker_auto_slow_at = coalesce(poker_auto_slow_at, now()),
+              poker_access_revision = poker_access_revision + 1,
+              poker_access_updated_at = now(),
+              poker_access_updated_by = null
+        where user_id = $1
+          and account_type = 'USER'
+          and poker_auto_class = 'NORMAL'
+          and poker_access_revision = $2
+        returning user_id, poker_access_revision;`,
+      [transition.userId, transition.expectedRevision]
+    );
+    if (Array.isArray(rows) && rows.length === 1) {
+      committed.push({ userId: transition.userId, expectedRevision: transition.expectedRevision, alreadyApplied: false });
+      continue;
+    }
+    const currentRows = await tx.unsafe(
+      `select poker_auto_class, poker_access_revision
+         from public.chips_accounts
+        where user_id = $1 and account_type = 'USER'
+        limit 1;`,
+      [transition.userId]
+    );
+    const current = currentRows?.[0];
+    if (current?.poker_auto_class === "SLOW"
+      && Number(current?.poker_access_revision) > transition.expectedRevision) {
+      committed.push({ userId: transition.userId, expectedRevision: transition.expectedRevision, alreadyApplied: true });
+      continue;
+    }
+    const error = new Error("settled_access_transition_conflict");
+    error.code = "settled_access_transition_conflict";
+    throw error;
+  }
+  return committed;
+}
+
+async function writeTableMarkerTransition({ tx, tableId, requested }) {
+  if (!requested) return false;
+  const rows = await tx.unsafe(
+    `update public.poker_tables
+        set is_slow_only = true
+      where id = $1 and is_slow_only is not true
+      returning id;`,
+    [tableId]
+  );
+  if (Array.isArray(rows) && rows.length === 1) return true;
+  const currentRows = await tx.unsafe(
+    "select is_slow_only from public.poker_tables where id = $1 limit 1;",
+    [tableId]
+  );
+  if (currentRows?.[0]?.is_slow_only === true) return true;
+  const error = new Error("table_marker_transition_conflict");
+  error.code = "table_marker_transition_conflict";
+  throw error;
+}
+
 async function writeHumanStackUpdates({ tx, tableId, updates }) {
   const projectedHumanStacks = [];
   for (const update of updates) {
@@ -911,6 +999,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     replacementFundingPlan,
     managedBotTopUpPlan,
     humanStackUpdatePlan,
+    settledAccessTransitionPlan,
+    tableMarkerTransition,
     botFundingSystemKey = null,
     durableActionPlan
   }) {
@@ -935,6 +1025,15 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const newVersion = Number(rows?.[0]?.version);
       if (Number.isInteger(newVersion) && newVersion >= 0) {
         const projectedHumanStacks = await writeHumanStackUpdates({ tx, tableId, updates: humanStackUpdatePlan.updates });
+        const settledAccessTransitionsCommitted = await writeSettledAccessTransitions({
+          tx,
+          transitions: settledAccessTransitionPlan.transitions
+        });
+        const tableMarkerTransitionCommitted = await writeTableMarkerTransition({
+          tx,
+          tableId,
+          requested: tableMarkerTransition
+        });
         const fundedReplacements = await writeReplacementFundings({
           tx,
           tableId,
@@ -1014,6 +1113,13 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
             expectedVersion,
             humanStackProjectionCommitted: true,
             projectedHumanStacks
+          } : {}),
+          ...(settledAccessTransitionPlan.supplied ? {
+            settledAccessTransitionsCommitted: true,
+            settledAccessTransitionResults: settledAccessTransitionsCommitted
+          } : {}),
+          ...(tableMarkerTransition ? {
+            tableMarkerTransitionCommitted
           } : {})
         };
       }
@@ -1031,6 +1137,15 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const currentState = sanitizePersistedState(currentRow?.state);
       const equalState = stableStringify(currentState) === stableStringify(sanitizePersistedState(nextState));
       if (equalState) {
+        const settledAccessTransitionsCommitted = await writeSettledAccessTransitions({
+          tx,
+          transitions: settledAccessTransitionPlan.transitions
+        });
+        const tableMarkerTransitionCommitted = await writeTableMarkerTransition({
+          tx,
+          tableId,
+          requested: tableMarkerTransition
+        });
         try {
           const holeCardResult = await maybeWriteHoleCards({
             tx,
@@ -1070,7 +1185,16 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
             reason: error?.message || "unknown"
           });
         }
-        return { ok: true, newVersion: Number.isInteger(currentVersion) ? currentVersion : expectedVersion, alreadyApplied: true };
+        return {
+          ok: true,
+          newVersion: Number.isInteger(currentVersion) ? currentVersion : expectedVersion,
+          alreadyApplied: true,
+          ...(settledAccessTransitionPlan.supplied ? {
+            settledAccessTransitionsCommitted: true,
+            settledAccessTransitionResults: settledAccessTransitionsCommitted
+          } : {}),
+          ...(tableMarkerTransition ? { tableMarkerTransitionCommitted } : {})
+        };
       }
       return { ok: false, reason: "conflict", currentVersion: Number.isInteger(currentVersion) ? currentVersion : null };
     }, { env });
@@ -1096,6 +1220,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     replacementFundings = undefined,
     managedBotTopUps = undefined,
     humanStackUpdates = undefined,
+    settledAccessTransitions = undefined,
+    tableMarkerTransition = false,
     botFundingSystemKey = null,
     durableActionRequest = null
   }) {
@@ -1122,6 +1248,9 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     if (!managedBotTopUpPlan.ok) return { ok: false, reason: managedBotTopUpPlan.reason };
     const humanStackUpdatePlan = normalizeHumanStackUpdates({ humanStackUpdates, expectedVersion });
     if (!humanStackUpdatePlan.ok) return { ok: false, reason: humanStackUpdatePlan.reason };
+    const settledAccessTransitionPlan = normalizeSettledAccessTransitions({ settledAccessTransitions });
+    if (!settledAccessTransitionPlan.ok) return { ok: false, reason: settledAccessTransitionPlan.reason };
+    if (typeof tableMarkerTransition !== "boolean") return { ok: false, reason: "invalid_table_marker_transition" };
     const durableActionPlan = normalizeDurableActionRequest(durableActionRequest, { expectedVersion });
     if (!durableActionPlan.ok) return { ok: false, outcome: "invalid", reason: durableActionPlan.reason };
     if (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0) {
@@ -1140,7 +1269,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         if (durableActionPlan.supplied) {
           return { ok: false, outcome: "failure", reason: "durable_action_store_unavailable" };
         }
-        if (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0) {
+        if (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0
+          || settledAccessTransitionPlan.transitions.length > 0 || tableMarkerTransition) {
           return { ok: false, reason: "ledger_unavailable" };
         }
         return writePersistedTableToFile({
@@ -1163,6 +1293,8 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         replacementFundingPlan,
         managedBotTopUpPlan,
         humanStackUpdatePlan,
+        settledAccessTransitionPlan,
+        tableMarkerTransition,
         botFundingSystemKey,
         durableActionPlan
       });
@@ -1176,15 +1308,21 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       });
       const stateConflict = error?.code === "durable_action_state_conflict";
       const replacementSeatProjectionConflict = error?.code === "replacement_seat_projection_conflict";
+      const settledAccessTransitionConflict = error?.code === "settled_access_transition_conflict";
+      const tableMarkerTransitionConflict = error?.code === "table_marker_transition_conflict";
+      const sourceSystemKey = typeof botFundingSystemKey === "string" ? botFundingSystemKey.trim() : "";
       const boundedBankrollExhausted = (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0)
-        && botFundingSystemKey === HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY
+        && CONFIGURED_POKER_POOL_KEYS.has(sourceSystemKey)
         && isInsufficientFundsError(error);
       return {
         ok: false,
         ...(durableActionPlan.supplied ? { outcome: "failure" } : {}),
         reason: boundedBankrollExhausted
           ? "bot_bounded_bankroll_exhausted"
-          : replacementSeatProjectionConflict ? "replacement_seat_projection_conflict" : (stateConflict ? "conflict" : "db_error"),
+          : replacementSeatProjectionConflict ? "replacement_seat_projection_conflict"
+            : settledAccessTransitionConflict ? "settled_access_transition_conflict"
+              : tableMarkerTransitionConflict ? "table_marker_transition_conflict"
+                : (stateConflict ? "conflict" : "db_error"),
         message: error?.message || "unknown"
       };
     }

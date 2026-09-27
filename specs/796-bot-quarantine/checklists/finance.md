@@ -24,7 +24,7 @@
 - [ ] CHK011 Is each current UTC3h pool bucket limited to one configured amount, including policy revision changes, retries and disable/re-enable? [FR-012/013]
 - [ ] CHK012 Does existing ledger/idempotency protect scheduled SYSTEM MINT without new receipts, per-funding identity or table-linked retention? [FR-013]
 - [ ] CHK013 Is VPS/systemd authenticated dispatch the primary wake-up, with bootstrap only for fresh/rebuilt hosts and a separate owner-approved existing-host install? Are installation/activation separate, with no deploy/install auto-enable/start, DB credentials/SQL on VPS, native cron reliance or backlog? [FR-014/021]
-- [ ] CHK014 Before T001, has no drift between live #1018 and this Spec Kit been confirmed, with independent approval and separate implementation instruction? [FR-021]
+- [ ] CHK014 Has no drift between live #1018 and this Spec Kit been confirmed, with the accepted implementation instruction recorded before T001? [FR-021]
 
 ## Integration / scope
 

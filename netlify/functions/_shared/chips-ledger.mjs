@@ -16,6 +16,13 @@ const VALID_TX_TYPES = new Set([
   "PROMO_BONUS",
 ]);
 
+const SCHEDULED_POOL_CONFIG = Object.freeze({
+  POKER_BOT_BANKROLL_100: Object.freeze({ buyIn: 100, poolClass: "NORMAL" }),
+  POKER_BOT_BANKROLL: Object.freeze({ buyIn: 500, poolClass: "NORMAL" }),
+  POKER_BOT_SLOW_BANKROLL_100: Object.freeze({ buyIn: 100, poolClass: "SLOW" }),
+  POKER_BOT_SLOW_BANKROLL_500: Object.freeze({ buyIn: 500, poolClass: "SLOW" }),
+});
+
 // Loose integer parsing for non-sequence fields only (balances, etc.).
 const asLooseInt = (value, fallback = 0) => {
   if (value == null) return fallback;
@@ -793,7 +800,7 @@ select
   return rows?.[0] || null;
 }
 
-function validateEntries(entries, payloadUserId, { txType = null, createdBy = null } = {}) {
+function validateEntries(entries, payloadUserId, { txType = null, createdBy = null, metadata = {}, trustedScheduledRefill = false } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw badRequest("missing_entries", "At least one entry is required");
   }
@@ -862,6 +869,35 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
   }
   const payloadUserIdNormalized = String(payloadUserId == null ? "" : payloadUserId).trim();
   const createdByNormalized = String(createdBy == null ? "" : createdBy).trim();
+  const entryKind = (entry) => entry?.accountType || entry?.kind;
+  const scheduledPoolKey = entries.find((entry) => entryKind(entry) === "SYSTEM" && entry.systemKey !== "GENESIS")?.systemKey || "";
+  const scheduledPoolConfig = SCHEDULED_POOL_CONFIG[scheduledPoolKey] || null;
+  const scheduledGenesisEntries = entries.filter((entry) => entryKind(entry) === "SYSTEM" && entry.systemKey === "GENESIS");
+  const scheduledPoolEntries = entries.filter((entry) => entryKind(entry) === "SYSTEM" && entry.systemKey === scheduledPoolKey);
+  const scheduledAmount = scheduledPoolEntries.length === 1 ? Number(scheduledPoolEntries[0].amount) : null;
+  const scheduledPoolMint = txType === "MINT"
+    && trustedScheduledRefill === true
+    && payloadUserIdNormalized === ""
+    && createdByNormalized === ""
+    && entries.length === 2
+    && entries.every((entry) => entryKind(entry) === "SYSTEM")
+    && scheduledGenesisEntries.length === 1
+    && scheduledPoolEntries.length === 1
+    && Number.isSafeInteger(scheduledAmount)
+    && scheduledAmount > 0
+    && Number(scheduledGenesisEntries[0].amount) === -scheduledAmount
+    && scheduledPoolConfig !== null
+    && metadata?.purpose === "poker_pool_refill"
+    && typeof metadata?.bankrollSystemKey === "string"
+    && metadata.bankrollSystemKey === scheduledPoolKey
+    && Number(metadata?.buyIn) === scheduledPoolConfig.buyIn
+    && metadata?.poolClass === scheduledPoolConfig.poolClass
+    && typeof metadata?.policyRevision === "number"
+    && Number.isSafeInteger(metadata.policyRevision)
+    && metadata.policyRevision > 0
+    && typeof metadata?.bucket === "string"
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/.test(metadata.bucket)
+    && entries.reduce((sum, entry) => sum + entry.amount, 0) === 0;
   const allowEscrowOnlyTableBuyIn =
     !hasUserEntry &&
     txType === "TABLE_BUY_IN" &&
@@ -894,7 +930,10 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
   if (!hasUserEntry && txType === "TABLE_CASH_OUT" && !allowEscrowOnlyTableCashOut) {
     throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_CASH_OUT requires ESCROW(-) and SYSTEM(+) strict shape");
   }
-  if (!hasUserEntry && txType !== "TABLE_BUY_IN" && txType !== "TABLE_CASH_OUT") {
+  if (!hasUserEntry && txType === "MINT" && !scheduledPoolMint) {
+    throw badRequest("missing_user_entry", "Scheduled pool MINT requires trusted worker authority");
+  }
+  if (!hasUserEntry && txType !== "TABLE_BUY_IN" && txType !== "TABLE_CASH_OUT" && txType !== "MINT") {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
   }
   return sanitized;
@@ -910,6 +949,7 @@ async function postTransaction({
   entries = [],
   createdBy = null,
   tx = null,
+  trustedScheduledRefill = false,
 }) {
   if (!VALID_TX_TYPES.has(txType)) {
     throw badRequest("invalid_tx_type", "Invalid transaction type");
@@ -930,7 +970,12 @@ async function postTransaction({
   }
   const payloadUserId = isUuidLike(payloadUserIdRaw) ? payloadUserIdRaw : "";
 
-  const normalizedEntries = validateEntries(entries, payloadUserId, { txType, createdBy });
+  const normalizedEntries = validateEntries(entries, payloadUserId, {
+    txType,
+    createdBy,
+    metadata,
+    trustedScheduledRefill,
+  });
   assertPlainObjectOrNull(metadata, "invalid_metadata");
   const safeMetadata = metadata ?? {};
   let safeMetadataJson = "{}";

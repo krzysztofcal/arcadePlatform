@@ -124,6 +124,8 @@ test("shared join module imports without Netlify adapter dependency at module lo
   const stagedTableBuyIn = path.join(stagedDir, "table-buy-in.mjs");
   const stagedTableEconomy = path.join(stagedDir, "table-economy.mjs");
   const stagedProgression = path.join(stagedDir, "poker-progression.mjs");
+  const stagedBotAccess = path.join(stagedDir, "bot-access.mjs");
+  const stagedTableParticipation = path.join(stagedDir, "table-participation.mjs");
   try {
     await fs.mkdir(stagedDir, { recursive: true });
     await fs.copyFile("shared/poker-domain/join.mjs", stagedJoin);
@@ -131,6 +133,8 @@ test("shared join module imports without Netlify adapter dependency at module lo
     await fs.copyFile("shared/poker-domain/table-buy-in.mjs", stagedTableBuyIn);
     await fs.copyFile("shared/poker-domain/table-economy.mjs", stagedTableEconomy);
     await fs.copyFile("shared/poker-domain/poker-progression.mjs", stagedProgression);
+    await fs.copyFile("shared/poker-domain/bot-access.mjs", stagedBotAccess);
+    await fs.copyFile("shared/poker-domain/table-participation.mjs", stagedTableParticipation);
     const module = await import(pathToFileURL(stagedJoin).href);
     assert.equal(typeof module.executePokerJoinAuthoritative, "function");
   } finally {
@@ -195,6 +199,59 @@ test("fresh join locks the bankroll row before posting the table buy-in", async 
   assert.equal(result.stack, 500);
   assert.match(events[0], /for update/i);
   assert.equal(events.indexOf("postTransaction") > 0, true);
+}));
+
+test("authoritative wallet threshold persists automatic SLOW under FORCE_NORMAL before effective admission", async () => withBotsDisabled(async () => {
+  const userId = "00000000-0000-4000-8000-0000000000f1";
+  const tableId = "00000000-0000-4000-8000-0000000000f2";
+  const calls = [];
+  let seatInserted = false;
+  let automaticUpdateCalls = 0;
+  const result = await executePokerJoinAuthoritative({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params = []) => {
+        const text = String(sql);
+        calls.push({ text, params });
+        if (text.includes("from public.poker_tables")) {
+          return [{ id: tableId, status: "OPEN", max_players: 6, buy_in: 100, stakes: calculateCanonicalPokerStakes(100), created_by: userId, lifecycle_kind: "STANDARD", has_human_participant: false, is_slow_only: false }];
+        }
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
+        if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
+        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 1_000_000_000 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, revision: 4 }];
+        if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "FORCE_NORMAL", poker_access_revision: 7 }];
+        if (text.includes("update public.chips_accounts")) { automaticUpdateCalls += 1; return [{ poker_auto_class: "SLOW", poker_access_override: "FORCE_NORMAL", poker_access_revision: 8, poker_auto_slow_at: "2026-09-27T00:00:00.000Z" }]; }
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
+        if (text.startsWith("insert into public.poker_seats")) { seatInserted = true; return [{ seat_no: 1 }]; }
+        if (text.startsWith("update public.poker_seats set stack")) return [{ ok: true }];
+        if (text.startsWith("update public.poker_state set state")) return [{ version: 2 }];
+        return [];
+      }
+    }),
+    tableId,
+    userId,
+    requestId: "force-normal-threshold",
+    buyIn: 100,
+    postTransactionFn: async () => ({ ok: true }),
+    loadStateForUpdate: async (tx) => {
+      const rows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
+      return { ok: true, version: rows[0].version, state: rows[0].state };
+    },
+    updateStateLocked: async (tx, { nextState }) => {
+      const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, nextState]);
+      return { ok: true, newVersion: rows[0]?.version || 2 };
+    },
+    validateStateForStorage: () => true,
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(automaticUpdateCalls, 1, JSON.stringify(calls));
+  assert.equal(calls.some(({ text }) => text.includes("update public.chips_accounts")), true, calls.map(({ text }) => text).join("\n---\n"));
+  assert.equal(result.access.automaticClass, "SLOW", JSON.stringify(result));
+  assert.equal(result.access.override, "FORCE_NORMAL");
+  assert.equal(result.access.effectiveClass, "NORMAL");
 }));
 
 test("fresh join rejects a 500 CH tier when bankroll is 549 CH", async () => withBotsDisabled(async () => {

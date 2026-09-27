@@ -4,7 +4,7 @@
 
 **Live updated_at**: 2026-09-26T19:21:31Z
 
-**Snapshot captured**: 2026-09-26. Exact live issue body below. Live #1018 is the sole feature requirements source; check for drift before T001. #869/#1017 are separate.
+**Snapshot captured**: 2026-09-26. Exact live issue body below. Live #1018 is the sole feature requirements source; the pre-T001 drift check and implementation selection are recorded in `quickstart.md`. #869/#1017 are separate.
 
 # Poker: simplified anti-farming alternative — periodic per-tier bot bankroll refill + SLOW pool
 

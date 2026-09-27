@@ -1850,6 +1850,12 @@
           setError(errorEl, null);
           renderTables(snapshot && snapshot.payload ? snapshot.payload.tables : []);
         },
+        onAccess: function(access){
+          if (generation !== lobbyWsGeneration || !access || !access.payload) return;
+          if (!progressionState || typeof progressionState !== 'object') progressionState = {};
+          progressionState.pokerAccess = access.payload;
+          renderTables(lobbyTables);
+        },
         onStatus: function(status, data){
           if (generation !== lobbyWsGeneration) return;
           if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
@@ -1921,6 +1927,10 @@
       if (!progressionState || !table) return false;
       var tableId = typeof table.tableId === 'string' ? table.tableId : table.id;
       if (Array.isArray(progressionState.rejoinableTableIds) && progressionState.rejoinableTableIds.includes(tableId)) return true;
+      var effectiveClass = progressionState.pokerAccess && progressionState.pokerAccess.effectiveClass;
+      if (effectiveClass !== 'NORMAL' && effectiveClass !== 'SLOW') return false;
+      if (effectiveClass === 'SLOW' && table.slowOnly !== true) return false;
+      if (effectiveClass === 'NORMAL' && table.slowOnly === true) return false;
       var buyIn = Number(table.buyIn);
       var tier = Array.isArray(progressionState.tiers) ? progressionState.tiers.find(function(item){ return Number(item.buyIn) === buyIn; }) : null;
       return !!(tier && isCanonicalTableForTier(table, tier));
@@ -1957,6 +1967,9 @@
         var statusEl = document.createElement('span');
         statusEl.className = 'status';
         statusEl.textContent = tbl.status || 'OPEN';
+        if (tbl.slowOnly === true){
+          statusEl.textContent += ' · SLOW';
+        }
         var openBtn = document.createElement('button');
         openBtn.className = 'poker-btn';
         openBtn.dataset.open = tableId;

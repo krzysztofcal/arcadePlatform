@@ -3,8 +3,18 @@ export const HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY = "POKER_BOT_BANKROLL";
 export const MAX_POKER_STAKE_CHIPS = 1_000_000;
 export const POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION = "2";
 
-export function getBotFundingSystemKeyForBuyIn(buyIn, { legacySystemKey = "TREASURY" } = {}) {
+export function getBotFundingSystemKeyForBuyIn(buyIn, options = {}) {
   const normalizedBuyIn = Number(buyIn);
+  const hasExplicitPoolClass = Object.prototype.hasOwnProperty.call(options, "poolClass");
+  const poolClass = typeof options.poolClass === "string" ? options.poolClass.trim().toUpperCase() : "";
+  if (hasExplicitPoolClass) {
+    if (poolClass !== "NORMAL" && poolClass !== "SLOW") return null;
+    const keys = poolClass === "SLOW"
+      ? { 100: "POKER_BOT_SLOW_BANKROLL_100", 500: "POKER_BOT_SLOW_BANKROLL_500" }
+      : { 100: "POKER_BOT_BANKROLL_100", 500: HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY };
+    return keys[normalizedBuyIn] || null;
+  }
+  const { legacySystemKey = "TREASURY" } = options;
   if (normalizedBuyIn === DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
     const configuredKey = typeof legacySystemKey === "string" ? legacySystemKey.trim() : "";
     return configuredKey || "TREASURY";
@@ -13,8 +23,8 @@ export function getBotFundingSystemKeyForBuyIn(buyIn, { legacySystemKey = "TREAS
   return null;
 }
 
-export function isBotFundingAllowedForBuyIn(buyIn) {
-  return getBotFundingSystemKeyForBuyIn(buyIn) !== null;
+export function isBotFundingAllowedForBuyIn(buyIn, options = {}) {
+  return getBotFundingSystemKeyForBuyIn(buyIn, options) !== null;
 }
 
 export function calculateCanonicalPokerStakes(buyIn) {

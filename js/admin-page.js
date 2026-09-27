@@ -858,6 +858,14 @@
     html.push('<div class="admin-list__meta admin-mono">' + escapeHtml(user.userId || "—") + "</div>");
     html.push("</div>");
     html.push('<div class="admin-balance"><span class="admin-balance__label">Balance</span><span class="admin-balance__value">' + escapeHtml(formatAmount(detail.balance && detail.balance.balance)) + "</span></div>");
+    html.push('<form class="admin-adjust" id="adminPokerAccessForm">');
+    html.push('<h3 class="admin-section-title">Poker access</h3>');
+    html.push('<div class="admin-kv">' + renderKvRow("Automatic class", user.automaticClass || "NORMAL") + renderKvRow("Effective class", user.effectiveClass || "NORMAL") + renderKvRow("Revision", user.accessRevision || 1) + '</div>');
+    html.push('<label class="admin-field"><span class="admin-field__label">Override</span><select class="admin-input" name="override"><option value="AUTO"' + (user.override === "AUTO" ? " selected" : "") + '>AUTO</option><option value="FORCE_NORMAL"' + (user.override === "FORCE_NORMAL" ? " selected" : "") + '>FORCE_NORMAL</option><option value="FORCE_SLOW"' + (user.override === "FORCE_SLOW" ? " selected" : "") + '>FORCE_SLOW</option></select></label>');
+    html.push('<input type="hidden" name="userId" value="' + escapeHtml(user.userId || "") + '"><input type="hidden" name="expectedRevision" value="' + escapeHtml(user.accessRevision || 1) + '">');
+    html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save poker override</button></div>');
+    html.push('<p class="admin-note" data-poker-access-status aria-live="polite">Changes preserve automatic classification and converge within 30 seconds.</p>');
+    html.push('</form>');
     html.push('<div class="admin-inline-actions">');
     html.push('<button class="admin-btn admin-btn--ghost" type="button" data-copy-text="' + escapeHtml(user.userId || "") + '">Copy userId</button>');
     html.push('<button class="admin-btn admin-btn--ghost" type="button" data-user-action="ledger" data-user-id="' + escapeHtml(user.userId || "") + '">Open ledger mode</button>');
@@ -1469,6 +1477,7 @@
         renderKvRow("Live-hand stale", runtime.janitorConfig ? String(runtime.janitorConfig.liveHandStaleMs) + "ms" : "—"),
         "</div>"
       ].join("");
+      renderPokerBotPolicy();
       }
     }
     if (nodes.opsPokerEscrow){
@@ -1572,6 +1581,78 @@
     }
     if (nodes.opsRunReconciler) nodes.opsRunReconciler.disabled = state.maintenance;
     if (nodes.opsRunStaleSweep) nodes.opsRunStaleSweep.disabled = state.maintenance;
+  }
+
+  function renderPokerBotPolicy(){
+    if (!nodes.opsRuntime) return;
+    var summary = state.ops.summary && state.ops.summary.pokerBotPolicy;
+    if (!summary) return;
+    var existing = nodes.opsRuntime.querySelector("#adminPokerPolicyForm");
+    if (existing) existing.remove();
+    var access = summary.access || {};
+    var tiers = Array.isArray(summary.tiers) ? summary.tiers : [];
+    var pools = Array.isArray(summary.pools) ? summary.pools : [];
+    var html = [];
+    html.push('<form class="admin-adjust" id="adminPokerPolicyForm">');
+    html.push('<h3 class="admin-section-title">Poker access and refill policy</h3>');
+    html.push('<label class="admin-field"><span class="admin-field__label">SLOW threshold (CH)</span><input class="admin-input" name="slowThresholdCh" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(access.slowThresholdCh || "") + '"></label>');
+    html.push('<input type="hidden" name="accessRevision" value="' + escapeHtml(access.revision || 1) + '">');
+    if (pools.length){
+      html.push('<div class="admin-kv">');
+      pools.forEach(function(pool){
+        html.push(renderKvRow(pool.systemKey || "Pool", String(pool.balance == null ? "—" : pool.balance) + " CH (" + String(pool.status || "unknown") + ")"));
+      });
+      html.push('</div>');
+    }
+    tiers.forEach(function(tier){
+      html.push('<fieldset class="admin-surface"><legend>Tier ' + escapeHtml(tier.buyIn) + '</legend>');
+      html.push('<label class="admin-field"><span class="admin-field__label">Enabled</span><input name="enabled-' + escapeHtml(tier.buyIn) + '" type="checkbox"' + (tier.enabled ? " checked" : "") + '></label>');
+      [["normalRefillThresholdCh", "NORMAL threshold"], ["normalRefillAmountCh", "NORMAL amount"], ["slowRefillThresholdCh", "SLOW threshold"], ["slowRefillAmountCh", "SLOW amount"]].forEach(function(pair){
+        html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + '</span><input class="admin-input" name="' + pair[0] + '-' + escapeHtml(tier.buyIn) + '" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(tier[pair[0]] || "") + '"></label>');
+      });
+      html.push('<input type="hidden" name="revision-' + escapeHtml(tier.buyIn) + '" value="' + escapeHtml(tier.revision || 1) + '"></fieldset>');
+    });
+    html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save poker policy</button></div><p class="admin-note" data-poker-policy-status aria-live="polite">Policy changes are revision checked and audited.</p></form>');
+    nodes.opsRuntime.insertAdjacentHTML("beforeend", html.join(""));
+  }
+
+  async function submitPokerAccessForm(event){
+    event.preventDefault();
+    var form = event.target;
+    var status = form.querySelector("[data-poker-access-status]");
+    var data = formToObject(form);
+    try {
+      var result = await apiFetch("/.netlify/functions/admin-user-poker-access", { method: "PATCH", body: JSON.stringify(data) });
+      if (status) status.textContent = "Saved revision " + String(result.access && result.access.revision || "") + ".";
+      await loadUserDetail(data.userId, true);
+    } catch (err){
+      if (status) status.textContent = "Could not save poker override: " + String(err && err.code || "request_failed");
+      klog("admin_poker_access_update_failed", { code: err && err.code ? err.code : "request_failed" });
+    }
+  }
+
+  async function submitPokerPolicyForm(event){
+    event.preventDefault();
+    var form = event.target;
+    var status = form.querySelector("[data-poker-policy-status]");
+    var data = formToObject(form);
+    try {
+      await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({ kind: "access", slowThresholdCh: data.slowThresholdCh, expectedRevision: data.accessRevision }) });
+      var tiers = state.ops.summary && state.ops.summary.pokerBotPolicy && state.ops.summary.pokerBotPolicy.tiers || [];
+      for (var index = 0; index < tiers.length; index += 1){
+        var tier = tiers[index];
+        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({
+          kind: "tier", buyIn: tier.buyIn, enabled: data["enabled-" + tier.buyIn] === "on", expectedRevision: data["revision-" + tier.buyIn],
+          normal_refill_threshold_ch: data["normalRefillThresholdCh-" + tier.buyIn], normal_refill_amount_ch: data["normalRefillAmountCh-" + tier.buyIn],
+          slow_refill_threshold_ch: data["slowRefillThresholdCh-" + tier.buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + tier.buyIn]
+        }) });
+      }
+      if (status) status.textContent = "Poker policy saved; cache propagation is bounded to 30 seconds.";
+      await loadOps();
+    } catch (err){
+      if (status) status.textContent = "Could not save poker policy: " + String(err && err.code || "request_failed");
+      klog("admin_poker_policy_update_failed", { code: err && err.code ? err.code : "request_failed" });
+    }
   }
 
   function formatReactionRange(range){
@@ -3255,6 +3336,12 @@
       var form = event.target;
       if (form && form.id === "adminAdjustForm"){
         submitAdjustForm(event);
+      }
+      if (form && form.id === "adminPokerAccessForm"){
+        submitPokerAccessForm(event);
+      }
+      if (form && form.id === "adminPokerPolicyForm"){
+        submitPokerPolicyForm(event);
       }
       if (form && form.id === "adminOpsMaintenanceForm"){
         submitPokerMaintenance(event);

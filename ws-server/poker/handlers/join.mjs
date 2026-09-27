@@ -96,7 +96,7 @@ function sendRecoverableJoinResult({ sendCommandResult, ws, connState, requestId
 
 import { recoverFromPersistConflict } from "../runtime/persist-conflict-recovery.mjs";
 
-export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, scheduleBotStep = () => {}, klog = () => {}, klogVerbose = () => {}, verboseLogsEnabled = false }) {
+export async function handleJoinCommand({ frame, ws, connState, sessionStore, tableManager, ensureTableLoadedErrorMapper, restoreTableFromPersisted, persistMutatedState, broadcastResyncRequired, broadcastStateSnapshots, broadcastTableState, sendError, sendCommandResult, sendTableState, authoritativeJoinEnabled, observeOnlyJoinEnabled, persistedBootstrapEnabled, loadAuthoritativeJoinExecutor, sendPokerAccess = null, scheduleBotStep = () => {}, klog = () => {}, klogVerbose = () => {}, verboseLogsEnabled = false }) {
   const tableId = frame.__resolvedTableId;
   const authoritativeJoinRequired = authoritativeJoinEnabled && !observeOnlyJoinEnabled;
   const parsedJoinIntent = parseJoinIntent(frame.payload);
@@ -229,6 +229,26 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
         reason: "authoritative_state_invalid"
       });
       return;
+    }
+  }
+
+  if (authoritativeJoinResult?.access && typeof tableManager.cachePokerAccess === "function") {
+    const access = authoritativeJoinResult.access;
+    tableManager.cachePokerAccess(
+      tableId,
+      connState.session.userId,
+      access,
+      Number.isSafeInteger(Number(access.slowThresholdCh))
+        ? {
+            slowThresholdCh: Number(access.slowThresholdCh),
+            revision: Number(access.policyRevision || 1),
+            loadedAtMs: Number(access.loadedAtMs || Date.now()),
+            expiresAtMs: Number(access.expiresAtMs || Date.now() + 30_000)
+          }
+        : null
+    );
+    if (typeof sendPokerAccess === "function") {
+      sendPokerAccess(ws, connState, access, { requestId: frame.requestId ?? null, reason: "join_refresh" });
     }
   }
 

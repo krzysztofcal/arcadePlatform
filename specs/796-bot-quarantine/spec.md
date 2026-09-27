@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-26
 
-**Status**: Draft — documentation only; independent approval and separate implementation instruction required.
+**Status**: Accepted implementation in progress — local code and deterministic tests are authorized from T001; exact-SHA WS Preview/runtime and environment operations remain separate gates.
 
 **Input**: Live [GitHub #1018](https://github.com/krzysztofcal/arcadePlatform/issues/1018), captured in [issue-source.md](issue-source.md). Sole requirements source; supersedes previous #1019 designs. SLOW here is not #869 rolling-12h SLOW.
 
@@ -125,7 +125,7 @@ Players use the current live lobby and Quick Seat, with class compatibility and 
 - **FR-018**: `has_human_participant` MUST become true only on accepted human admission/rejoin and never reset. Denied classification does not consume a slot/seat or falsify this marker.
 - **FR-019**: CONTINUOUS_BOT MUST retain existing lifecycle, ordinary exact NORMAL funding and denial of fresh SLOW; no separate SLOW lifecycle. Existing seated transition never kicks/aborts; preserve financed actions, rejoin, settlement, leave/cash-out and future SLOW funding without rotation into an ordinary funded target.
 - **FR-020**: Only fundamental deterministic backend/runtime/transaction tests are required. Reuse existing packages/methods; JSP/global JS compatibility, `klog` logging, CSS one selector per line, CSP SHA if future inline script is added. No broad UI/CSS/JSP/glue suites.
-- **FR-021**: This PR MUST stay docs-only. Future same-repo migrations intentionally apply shared Stage via DB Stage Apply PR, declared before publication, forward-only once applied; exact-SHA WS Preview/runtime verification required for future runtime work. WS Preview is its own Definition-of-Done gate; real Stage refill canary performs ledger MINT and requires separate explicit user authorization. No Stage MINT consent is needed to finish the WS gate. Production migration/seed/refill/scheduler activation remain a wholly separate GO. STOP before implementation.
+- **FR-021**: The implementation MUST not perform Production migration/seed/refill, real Stage ledger MINT, live-VPS scheduler activation or merge. A migration published from this branch intentionally goes through the repository DB Stage Apply PR and is forward-only once applied; its shared-Stage effect must be declared before publication. Exact-SHA WS Preview/runtime verification is a separate Definition-of-Done gate. A real Stage refill canary requires separate explicit user authorization and is not required to finish the WS gate. Production migration/seed/refill/scheduler activation remain a wholly separate GO.
 
 ### Key Entities *(include if feature involves data)*
 

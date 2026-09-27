@@ -22,11 +22,11 @@
 
 ## Feature Readiness
 
-- [x] 21 FR + 6 SC mapped to 29 concrete future tasks; all tasks remain unchecked.
+- [x] 21 FR + 6 SC mapped to 29 concrete tasks; T001–T026 are checked with local implementation/evidence, while T027–T029 remain explicit gates in dependency order.
 - [x] Existing packages/flows reused; only fundamental deterministic tests, one local transaction suite. T016/T019/T020 require small extensions of the existing workflow/VPS guard files for mutation authorization, dispatch-only wake-up, no VPS DB/SQL and fresh-only installation without activation; no new framework or broad suite.
 - [x] No stale sync blocker: live sync completed; T001 verifies no drift and separate implementation authority.
-- [x] Constitution checked before/after design; no runtime, schema migration or deploy in this docs change.
+- [x] Constitution checked before/after design; implementation remains within the approved scope and no Stage/Production apply, real ledger MINT or deploy has been performed.
 
 ## Notes
 
-This built-in specify checklist records documentation quality, not independent approval or implementation completion. [finance.md](finance.md) is reviewer-owned and stays unchecked until the independent reviewer acts. Spec Kit is prepared for that approval; STOP before T001/implementation. No automatic merge.
+This built-in specify checklist records documentation quality and implementation handoff evidence. [finance.md](finance.md) remains reviewer-owned; its unchecked items are review attestations, not deployment authorization. T027 and T029 remain open. No automatic merge.

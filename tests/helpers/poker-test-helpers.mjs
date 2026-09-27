@@ -44,6 +44,8 @@ import {
   readPokerProgression,
   resolvePokerBuyInTiers
 } from "../../shared/poker-domain/poker-progression.mjs";
+import { lockUserTableSlots } from "../../shared/poker-domain/table-participation.mjs";
+import { readPokerAccessSnapshot } from "../../shared/poker-domain/bot-access.mjs";
 
 const root = process.cwd();
 const sharedLeavePath = path.join(root, "shared/poker-domain/leave.mjs");
@@ -187,6 +189,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "runAdvanceLoop",
     "runBotAutoplayLoop",
     "executePokerLeave",
+    "lockUserTableSlots",
+    "readPokerAccessSnapshot",
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
@@ -249,6 +253,8 @@ return handler;`
       hasParticipatingHumanInHand,
       runAdvanceLoop,
       runBotAutoplayLoop,
+      lockUserTableSlots,
+      readPokerAccessSnapshot,
       deriveRemainingDeck,
       deriveCommunityCards,
       loadHoleCardsByUserId,

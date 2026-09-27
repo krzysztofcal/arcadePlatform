@@ -220,20 +220,26 @@ async function seedBotsForJoin({
   targetBotCount = null,
   allowBotsOnly = false,
   requireExactTarget = false,
+  poolClass = null,
+  fundingEnabled = true,
+  fundingProvisioned = true,
   fundingReason = "BOT_SEED_BUY_IN",
   idempotencyPrefix = "bot-seed-buyin",
   klog = () => {},
   random = Math.random
 }) {
   if (!cfg?.enabled || typeof postTransaction !== "function") return [];
+  if (fundingEnabled !== true || fundingProvisioned !== true) return [];
   const normalizedBuyIn = Number(buyInChips);
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("invalid_bot_buy_in");
   }
   if (!isBotFundingAllowedForBuyIn(normalizedBuyIn)) return [];
-  const fundingSystemKey = getBotFundingSystemKeyForBuyIn(normalizedBuyIn, {
-    legacySystemKey: cfg.bankrollSystemKey
-  });
+  const fundingOptions = {
+    legacySystemKey: cfg.bankrollSystemKey,
+    ...(poolClass ? { poolClass } : {})
+  };
+  const fundingSystemKey = getBotFundingSystemKeyForBuyIn(normalizedBuyIn, fundingOptions);
   if (!fundingSystemKey) return [];
   const stakesParsed = parseStakes(tableStakes);
   if (!stakesParsed.ok) {

@@ -146,6 +146,44 @@ function loadLedgerCapacity(env = process.env, runSql = executeSql) {
   return readLedgerCapacity(env, runSql, klog);
 }
 
+async function loadPokerBotPolicySummary(runSql = executeSql) {
+  try {
+    const [accessRows, tierRows, poolRows] = await Promise.all([
+      runSql("select slow_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
+      runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
+      runSql("select system_key, balance, status from public.chips_accounts where account_type = 'SYSTEM' and system_key in ('POKER_BOT_BANKROLL_100', 'POKER_BOT_BANKROLL', 'POKER_BOT_SLOW_BANKROLL_100', 'POKER_BOT_SLOW_BANKROLL_500') order by system_key;"),
+    ]);
+    return {
+      access: accessRows?.[0] ? {
+        slowThresholdCh: Number(accessRows[0].slow_threshold_ch),
+        revision: Number(accessRows[0].revision),
+        updatedAt: accessRows[0].updated_at || null,
+        updatedBy: accessRows[0].updated_by || null,
+      } : null,
+      tiers: (Array.isArray(tierRows) ? tierRows : []).map((row) => ({
+        buyIn: Number(row.buy_in),
+        enabled: row.enabled === true,
+        normalRefillThresholdCh: Number(row.normal_refill_threshold_ch),
+        normalRefillAmountCh: Number(row.normal_refill_amount_ch),
+        slowRefillThresholdCh: Number(row.slow_refill_threshold_ch),
+        slowRefillAmountCh: Number(row.slow_refill_amount_ch),
+        revision: Number(row.revision),
+        updatedAt: row.updated_at || null,
+        updatedBy: row.updated_by || null,
+      })),
+      pools: (Array.isArray(poolRows) ? poolRows : []).map((row) => ({
+        systemKey: row.system_key || null,
+        balance: Number(row.balance),
+        status: row.status || null,
+      })),
+      propagationMs: 30_000,
+    };
+  } catch (error) {
+    klog("admin_ops_poker_policy_unavailable", { code: error?.code || "query_failed" });
+    return null;
+  }
+}
+
 async function loadOpsSummary(env = process.env) {
   const janitorConfig = resolveJanitorConfig(env);
   const staleSeatCutoffIso = new Date(
@@ -153,7 +191,7 @@ async function loadOpsSummary(env = process.env) {
   ).toISOString();
   const idleThresholdMinutes = 15;
   const idleCutoffIso = new Date(Date.now() - idleThresholdMinutes * 60 * 1000).toISOString();
-  const [openTableRows, statsRows, recentActions, recentCleanupTransactions, wsHealth, pokerEscrowResiduals, ledgerCapacity] = await Promise.all([
+  const [openTableRows, statsRows, recentActions, recentCleanupTransactions, wsHealth, pokerEscrowResiduals, ledgerCapacity, pokerBotPolicy] = await Promise.all([
     executeSql("select id from public.poker_tables where status = 'OPEN' order by updated_at asc, id asc;"),
     executeSql(
       `
@@ -200,6 +238,7 @@ limit 16;
     fetchWsHealth(env),
     loadPokerEscrowResidualSummary(),
     loadLedgerCapacity(env),
+    loadPokerBotPolicySummary(),
   ]);
   const openTableIds = (Array.isArray(openTableRows) ? openTableRows : []).map((row) => row.id).filter(Boolean);
   const snapshots = await loadPersistedTableSnapshots(openTableIds);
@@ -258,6 +297,7 @@ limit 16;
     },
     pokerEscrowResiduals,
     ledgerCapacity,
+    pokerBotPolicy,
   };
 }
 
@@ -296,6 +336,7 @@ export {
   handler,
   loadLedgerCapacity,
   loadPokerEscrowResidualSummary,
+  loadPokerBotPolicySummary,
   loadOpsSummary,
   resolveLedgerDbWarningMb,
 };

@@ -6,7 +6,7 @@
 
 ## Summary
 
-Extend existing authoritative JOIN and settled rollover with NORMAL/SLOW plus manual override, sticky SLOW-only table compatibility and shared user-lock 4-active/4-pending limits. Runtime spends exact pre-existing tier/class bankroll funds. A separate three-hour systemd-dispatched job refills each eligible pool once by configured amount. Existing Admin tunes access/refill policy, WS live lobby adds slowOnly, and DB Quick Seat stays DB-backed. This is economic containment; Sybil and split wealth remain accepted. All described implementation is future work.
+Extend existing authoritative JOIN and settled rollover with NORMAL/SLOW plus manual override, sticky SLOW-only table compatibility and shared user-lock 4-active/4-pending limits. Runtime spends exact pre-existing tier/class bankroll funds. A separate three-hour systemd-dispatched job refills each eligible pool once by configured amount. Existing Admin tunes access/refill policy, WS live lobby adds slowOnly, and DB Quick Seat stays DB-backed. This is economic containment; Sybil and split wealth remain accepted. T001–T026 are implemented locally; T027 local PostgreSQL proof, T028 evidence/refactor review, and T029 exact-SHA WS Preview/runtime evidence remain open in dependency order.
 
 ## Technical Context
 
@@ -34,10 +34,10 @@ Extend existing authoritative JOIN and settled rollover with NORMAL/SLOW plus ma
 
 - **I — PASS**: Extend existing JOIN/Create/rollover/source/ledger/Admin/dispatcher. Only two shared helpers are justified by reuse across adapters (`bot-access`, `table-participation`), two narrow Admin endpoints and one operational job; no generic framework or new game service.
 - **II — PASS**: WS retains game/lifecycle/live inventory authority. Existing DB-backed Quick Seat suggests only; final authoritative JOIN validates. Settled hook stays inside prepare/persist/commit, not a second settlement path.
-- **III — PASS**: Unknown denies new admission/funding/refill; atomic rollback/unknown-commit recovery, payout retains existing legality. No merge or Production authorization. This PR changes only feature documents.
+- **III — PASS**: Unknown denies new admission/funding/refill; atomic rollback/unknown-commit recovery, payout retains existing legality. No merge or Production authorization. Local implementation does not apply Stage/Production, perform real ledger MINT, install/activate live VPS schedulers or merge.
 - **IV — PASS**: External global `js/admin-page.js` and existing poker scripts; klog only. CSS one selector per line; any new inline script requires CSP SHA in the same future change.
 - **V — PASS**: Tests limited to deterministic critical classification, real transaction races, ledger, lifecycle and backend authorization. No UI/glue suite. Concrete paths and functions below/tasks; no full implementation or Git commands.
-- **Deployment — PASS**: Future same-repo `supabase/migrations/**` intentionally mutates shared Stage through DB Stage Apply PR; declare before publication, forward-only once applied. Future WS work requires manual exact runtime SHA WS Preview Deploy, verified workflow success for that SHA and targeted runtime smoke. Real Stage refill canary is a separate conditional ledger-MINT gate requiring explicit user authorization; its absence cannot block completion of the WS gate. Production migration, pool seed, refill/scheduler activation need separate explicit GO. No such actions now.
+- **Deployment — PASS**: Publishing this branch's `supabase/migrations/**` intentionally mutates shared Stage through DB Stage Apply PR; the effect is declared in the feature artifacts and applied migrations are forward-only. WS runtime changes require manual exact runtime SHA WS Preview Deploy, verified workflow success for that SHA and targeted runtime smoke. Real Stage refill canary is a separate conditional ledger-MINT gate requiring explicit user authorization; its absence cannot block completion of the WS gate. Production migration, pool seed, refill/scheduler activation need separate explicit GO. No such environment action has been performed here.
 
 ## Project Structure
 
@@ -71,13 +71,13 @@ specs/796-bot-quarantine/
 | `shared/poker-domain/terminal-close.mjs::normalizeFundingRows`, `leave.mjs`, WS/Netlify chips-ledger adapters | Preserve source attribution/legal payouts; do not replace original source with current table class |
 | `ws-server/poker/bootstrap/persisted-bootstrap-repository.mjs`, `persisted-bootstrap-db.mjs`, `persisted-bootstrap-adapter.mjs::normalizeTableMeta` | Load/map is_slow_only into runtime metadata and recovery |
 | `ws-server/server.mjs::buildLobbyTableEntry/syncLobbyTable/buildLobbySnapshotPayload`, `activeLobbyTablesById` | Shared slowOnly entries, no personalized inventory; authenticated self access snapshot on connect/refresh |
-| `poker/poker.js::canViewLobbyTable`, `poker/poker-realtime.js` | Class-aware fresh targets, existing resume, self snapshot handling, final JOIN still authority |
+| `poker/poker.js::canViewLobbyTable`, `poker/poker-ws-client.js` (the repository's realtime client) | Class-aware fresh targets, existing resume, self snapshot handling, final JOIN still authority |
 | `netlify/functions/admin-user-details.mjs::loadUserDetails`, `admin-users-list.mjs`, `admin-ops-summary.mjs::loadOpsSummary`, `js/admin-page.js` | Minimal Users/Ops fields/controls, optional existing-path pool balances |
 | `netlify/functions/_shared/admin-auth.mjs::requireAdminUser`, `admin-bonus-campaigns.mjs::createAdminBonusCampaignsHandler` | Reuse authorization/validation patterns; no generic framework |
 | `netlify/functions/_shared/chips-ledger.mjs::validateEntries/postTransaction` | Narrow trusted scheduled SYSTEM MINT capability; existing balanced ledger/idempotency remains |
 | `infra/vps/arcade-chips-ledger-dispatch.sh/.service/.timer`, `infra/vps/bootstrap.sh` | Reuse external dispatch pattern; bootstrap additions only for future fresh/rebuilt VPS. Existing live VPS must use separate owner-approved targeted install, never bootstrap; installation cannot enable/start timer |
 
-Planned new files, only in later implementation: `shared/poker-domain/bot-access.mjs`, `shared/poker-domain/table-participation.mjs`, `netlify/functions/admin-user-poker-access.mjs`, `netlify/functions/admin-poker-policy.mjs`, `scripts/ops/poker-bot-pool-refill.mjs`, `.github/workflows/poker-bot-pool-refill.yml`, `infra/vps/arcade-poker-pool-dispatch.sh/.service/.timer`, `tests/chips/poker-pool-policy.transaction.test.mjs`. Additive migrations belong only to later implementation. Existing test files are enumerated in tasks/quickstart.
+New implementation files are `shared/poker-domain/bot-access.mjs`, `shared/poker-domain/table-participation.mjs`, `netlify/functions/admin-user-poker-access.mjs`, `netlify/functions/admin-poker-policy.mjs`, `scripts/ops/poker-bot-pool-refill.mjs`, `.github/workflows/poker-bot-pool-refill.yml`, `infra/vps/arcade-poker-pool-dispatch.sh/.service/.timer`, and `tests/chips/poker-pool-policy.transaction.test.mjs`; additive schema is in `supabase/migrations/20260927100000_poker_bot_quarantine_policy.sql`. The migration is not applied locally; publishing it invokes DB Stage Apply PR/shared Stage mutation under the declared gate. Existing test files are enumerated in tasks/quickstart.
 
 **Structure Decision**: Keep current packages and authority boundaries. Legacy feature/contract filenames are retained so #1019 links remain valid; all contents are rewritten. No dependencies, generic setup files or unrelated cleanup.
 
@@ -99,7 +99,7 @@ Planned new files, only in later implementation: `shared/poker-domain/bot-access
 
 ## Phases / handoff and breaking impacts
 
-Spec→research/design→tasks→read-only analyze→independent approval; T001 requires separate implementation instruction and no drift against live #1018. The old sync blocker is obsolete; snapshot records current live requirements.
+Spec→research/design→tasks→read-only analyze→accepted implementation; T001 records the explicit implementation instruction and no drift against live #1018. The old sync blocker is obsolete; snapshot records current live requirements.
 
 Implementation order: foundation→classification→limits→exact funding→scheduled refill→Admin→discovery→focused integration/cutover. T029 records two independent gates: its checkbox completes the required WS Preview/runtime gate; conditional Stage refill canary is tracked separately as not authorized/not run or explicitly authorized with evidence, and is not a prerequisite for WS gate completion. Production remains separate GO. Each story has an independent local test; do not activate partially migrated old/new funding writers. During authorized cutover, pause new admission/funding, allow legal hands/payouts, provision only missing pools at zero and policies, preserve existing account IDs/balances/provenance, deploy all writers/readers, verify and explicitly enable. Rollback must not restore TREASURY fallback or writers ignoring class/limits; keep affected new funding disabled until repaired. Applied schema is forward-only. Do not rewrite historical ledger or sources.
 

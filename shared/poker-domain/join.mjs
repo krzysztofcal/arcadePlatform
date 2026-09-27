@@ -2,6 +2,19 @@ import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seed
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
 import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
+import {
+  DEFAULT_SLOW_THRESHOLD_CH,
+  applyAutomaticThresholdEvidence,
+  deriveAccessState,
+  normalizePolicySnapshot,
+  normalizeAccessSnapshot,
+  persistAutomaticSlow,
+  readPokerAccessPolicy,
+  readPokerAccessSnapshot,
+  readPokerPoolProvisioning,
+  readPokerTierPolicy,
+} from "./bot-access.mjs";
+import { assertActivePokerTableCapacity, lockUserTableSlots } from "./table-participation.mjs";
 
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
 
@@ -104,6 +117,102 @@ function makeError(code, validationReason = null, details = null) {
     }
   }
   return error;
+}
+
+function isMissingAccessSchemaError(error) {
+  return String(error?.code || "") === "42703" || /poker_(?:access|auto|bot_tier)|normal_refill|is_slow_only/i.test(String(error?.message || ""));
+}
+
+async function resolveJoinAccess({ tx, userId, bankroll, buyIn = null, nowMs = Date.now() }) {
+  let policy = null;
+  let snapshot = null;
+  try {
+    policy = await readPokerAccessPolicy(tx, { nowMs });
+  } catch (error) {
+    if (!isMissingAccessSchemaError(error)) throw error;
+  }
+  try {
+    snapshot = await readPokerAccessSnapshot(tx, { userId, lock: true, nowMs });
+  } catch (error) {
+    if (!isMissingAccessSchemaError(error)) throw error;
+  }
+  const normalizedPolicy = policy || normalizePolicySnapshot({
+    slow_threshold_ch: DEFAULT_SLOW_THRESHOLD_CH,
+    revision: 1,
+    loadedAtMs: nowMs
+  }, { nowMs });
+  const normalizedSnapshot = snapshot || normalizeAccessSnapshot({
+    poker_auto_class: "NORMAL",
+    poker_access_override: "AUTO",
+    poker_access_revision: 1
+  }, { nowMs });
+  if (normalizedSnapshot) normalizedSnapshot.schemaBacked = Boolean(snapshot?.schemaBacked);
+  const schemaBacked = Boolean(snapshot?.schemaBacked || policy);
+  if (schemaBacked && (!snapshot || !policy)) {
+    return {
+      automaticClass: null,
+      override: null,
+      effectiveClass: "UNKNOWN",
+      revision: null,
+      policy: null,
+      persisted: false,
+      automaticChanged: false,
+      schemaBacked: true,
+      tierPolicy: null,
+      poolProvisioning: null
+    };
+  }
+  const classified = applyAutomaticThresholdEvidence({
+    automaticClass: normalizedSnapshot.automaticClass,
+    override: normalizedSnapshot.override,
+    evidenceCh: bankroll,
+    slowThresholdCh: normalizedPolicy?.slowThresholdCh || DEFAULT_SLOW_THRESHOLD_CH
+  });
+  let persisted = null;
+  if (classified.changed && snapshot) {
+    persisted = await persistAutomaticSlow(tx, {
+      userId,
+      expectedRevision: normalizedSnapshot.revision
+    });
+  }
+  const finalSnapshot = persisted?.snapshot || normalizedSnapshot;
+  const finalAccessState = deriveAccessState({
+    automaticClass: finalSnapshot.automaticClass,
+    override: finalSnapshot.override
+  });
+  let tierPolicy = null;
+  let poolProvisioning = null;
+  if (normalizedSnapshot?.schemaBacked) {
+    try {
+      tierPolicy = await readPokerTierPolicy(tx, { buyIn });
+      poolProvisioning = await readPokerPoolProvisioning(tx, { buyIn });
+    } catch (error) {
+      if (!isMissingAccessSchemaError(error)) throw error;
+    }
+  }
+  return {
+    ...finalAccessState,
+    revision: finalSnapshot.revision,
+    policy: normalizedPolicy,
+    persisted: Boolean(persisted?.changed),
+    automaticChanged: classified.changed,
+    schemaBacked: Boolean(finalSnapshot?.schemaBacked),
+    tierPolicy,
+    poolProvisioning,
+  };
+}
+
+function isSafeSlowOwnerPromotion(table, { userId, seatRows, hasFundingHistory = false }) {
+  const status = String(table?.status || "").toUpperCase();
+  const lifecycleKind = String(table?.lifecycle_kind || "STANDARD").toUpperCase();
+  return status === "OPEN"
+    && lifecycleKind === "STANDARD"
+    && table?.created_by === userId
+    && table?.has_human_participant !== true
+    && table?.is_slow_only !== true
+    && Array.isArray(seatRows)
+    && seatRows.length === 0
+    && hasFundingHistory !== true;
 }
 
 function isSeatConflictError(error) {
@@ -664,8 +773,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
   const runPostTransaction = await resolvePostTransactionFn(postTransactionFn);
   return beginSql(async (tx) => {
     try {
+      await lockUserTableSlots(tx, userId);
       const tableRows = await tx.unsafe(
-        "select id, status, max_players, stakes, buy_in from public.poker_tables where id = $1 limit 1 for update;",
+        "select id, status, max_players, stakes, buy_in, created_by, lifecycle_kind, has_human_participant, is_slow_only from public.poker_tables where id = $1 limit 1 for update;",
         [tableId]
       );
       const table = tableRows?.[0] || null;
@@ -677,17 +787,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         throw makeError("invalid_buy_in");
       }
       const resolvedBuyIn = authoritativeBuyIn;
-
-      // Lock the table row before any mutation.  Mark human participation
-      // one-way (false -> true) so that action history retention uses the
-      // correct (long) window for tables with human gameplay.  The flag
-      // rolls back if the join transaction fails.
-      await tx.unsafe(
-        `update public.poker_tables
-            set has_human_participant = true
-          where id = $1 and has_human_participant = false`,
-        [tableId]
-      );
 
       const maxPlayers = Number(table.max_players);
       if (!Number.isInteger(maxPlayers) || maxPlayers < 1) throw makeError("table_not_open");
@@ -713,7 +812,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             throw makeError("authoritative_state_invalid", "rejoin_state_version_invalid");
           }
           const authoritativeStack = Number(stateRow.state?.stacks?.[userId]);
-          await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+          await tx.unsafe("update public.poker_tables set has_human_participant = true, last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
           return {
             ok: true,
             tableId,
@@ -751,7 +850,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         }
         const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
         const snapshotVersion = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updatedState.version });
-        await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+        await tx.unsafe("update public.poker_tables set has_human_participant = true, last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
         return {
           ok: true,
           tableId,
@@ -776,8 +875,37 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         throw makeError("invalid_buy_in");
       }
 
+      const bankrollForAccess = await readPokerBankroll(tx, { userId, lock: true });
+      const joinAccess = await resolveJoinAccess({ tx, userId, bankroll: bankrollForAccess, buyIn: authoritativeBuyIn });
+      const tableIsSlowOnly = table?.is_slow_only === true;
+
+      if (joinAccess.effectiveClass !== "NORMAL" && joinAccess.effectiveClass !== "SLOW") {
+        throw makeError("poker_access_unavailable");
+      }
+
+      let hasFundingHistory = false;
+      if (joinAccess.effectiveClass === "SLOW" && !tableIsSlowOnly && table.created_by === userId) {
+        const fundingRows = await tx.unsafe(
+          "select 1 from public.chips_transactions where metadata ->> 'tableId' = $1 limit 1;",
+          [tableId]
+        );
+        hasFundingHistory = Array.isArray(fundingRows) && fundingRows.length > 0;
+      }
+
+      if (joinAccess.effectiveClass === "NORMAL" && tableIsSlowOnly) {
+        throw makeError("normal_table_required");
+      }
+      const canPromoteSlowTable = joinAccess.effectiveClass === "SLOW"
+        && !tableIsSlowOnly
+        && isSafeSlowOwnerPromotion(table, { userId, seatRows, hasFundingHistory });
+      if (joinAccess.effectiveClass === "SLOW" && !tableIsSlowOnly && !canPromoteSlowTable) {
+        throw makeError("slow_only_table_required");
+      }
+
+      await assertActivePokerTableCapacity(tx, userId);
+
       const tiers = resolvePokerBuyInTiers(env);
-      const bankroll = await readPokerBankroll(tx, { userId, lock: true });
+      const bankroll = bankrollForAccess;
       const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers });
       if (!access.configured) throw makeError("invalid_buy_in");
       if (!access.eligible) {
@@ -896,7 +1024,13 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
 
       const botCfg = getBotConfig(process.env);
       const humanCountAfterJoin = activeSeatRows(seatRows).filter((row) => !row?.is_bot).length + 1;
-      const targetBotCount = isBotFundingAllowedForBuyIn(authoritativeBuyIn)
+      const fundingPoolClass = joinAccess.schemaBacked
+        ? (tableIsSlowOnly || canPromoteSlowTable ? "SLOW" : "NORMAL")
+        : null;
+      const targetBotCount = isBotFundingAllowedForBuyIn(
+        authoritativeBuyIn,
+        fundingPoolClass ? { poolClass: fundingPoolClass } : {}
+      )
         && botCfg.enabled && shouldSeedBotsOnJoin({ humanCount: humanCountAfterJoin })
         ? computeTargetBotCount({
           maxPlayers,
@@ -905,6 +1039,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           maxBots: botCfg.maxPerTable
         })
         : 0;
+      const tierFundingEnabled = !joinAccess.schemaBacked
+        || (joinAccess.tierPolicy?.enabled === true
+          && joinAccess.poolProvisioning?.NORMAL === true
+          && joinAccess.poolProvisioning?.SLOW === true);
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,
@@ -915,6 +1053,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       humanUserId: userId,
       postTransaction: runPostTransaction,
       targetBotCount,
+      poolClass: fundingPoolClass,
+      fundingEnabled: tierFundingEnabled,
+      fundingProvisioned: tierFundingEnabled,
       klog
       });
       const expectedBotCountAfterSeed = seededBots.length;
@@ -933,7 +1074,15 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       targetBotCount: expectedBotCountAfterSeed,
       markFreshJoinWaiting: true
       });
-      await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+      await tx.unsafe(
+        `update public.poker_tables
+            set has_human_participant = true,
+                is_slow_only = case when $2::boolean then true else is_slow_only end,
+                last_activity_at = now(),
+                updated_at = now()
+          where id = $1;`,
+        [tableId, canPromoteSlowTable]
+      );
       return {
         ok: true,
         tableId,
@@ -946,6 +1095,16 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         me: { seated: true },
         joinStatus: updatedStateRow.joinStatus,
         seededBots,
+        access: {
+          automaticClass: joinAccess.automaticClass,
+          override: joinAccess.override,
+          effectiveClass: joinAccess.effectiveClass,
+          revision: joinAccess.revision,
+          slowThresholdCh: joinAccess.policy?.slowThresholdCh,
+          policyRevision: joinAccess.policy?.revision,
+          loadedAtMs: Date.now(),
+          expiresAtMs: Date.now() + 30_000
+        },
         snapshot: buildProjectedSnapshot({
           state: updatedStateRow.state,
           seatRows: updatedStateRow.seatRows,

@@ -1,3 +1,5 @@
+import { assertPendingPokerTableCapacity, lockUserTableSlots } from "../../../shared/poker-domain/table-participation.mjs";
+
 export const createPokerTableWithState = async (tx, {
   userId,
   maxPlayers,
@@ -5,8 +7,13 @@ export const createPokerTableWithState = async (tx, {
   buyIn,
   lifecycleKind = "STANDARD",
   managedProfileKey = null,
-  rotationDueAt = null
+  rotationDueAt = null,
+  userSlotLocked = false
 }) => {
+  if (typeof userId === "string" && userId.trim()) {
+    if (!userSlotLocked) await lockUserTableSlots(tx, userId);
+    await assertPendingPokerTableCapacity(tx, userId);
+  }
   const normalizedBuyIn = Number(buyIn);
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("poker_table_buy_in_invalid");

@@ -1,6 +1,6 @@
 # Contracts: NORMAL/SLOW admission and periodic tier pools
 
-Historical filename only. This contract implements the requirements of [spec.md](../spec.md), sourced solely from live #1018. No implementation exists in this PR.
+Historical filename retained for the PR link. This contract implements the requirements of [spec.md](../spec.md), sourced solely from live #1018. Local implementation follows it; environment gates and T027/T029 evidence remain separate.
 
 ## 1. Effective access and cache
 
@@ -14,13 +14,13 @@ Admin response reports committed revision, `refreshIntervalSeconds=30`; clients 
 
 Shared user-scoped PostgreSQL transaction advisory key: stable derivation of `poker-table-slots:v1` + canonical UUID, identical in Create/fallback/JOIN. Acquire before any count-consuming table/state/account locks; Quick Seat order is user→existing match lock→table/state→ordered accounts. Count query starts after lock acquisition under READ COMMITTED. Both adapters use one helper; no app-only lock or counter. Active lookup requires a narrow user_id-leading poker_seats access path, pending lookup a created_by-leading poker_tables path, each matched to the final status/participation predicate. Stop after five qualifying distinct tables, use selective indexed table-specific EXISTS checks, and never scan global tables/seats per fresh JOIN/Create. T027 records final query shape and local PostgreSQL EXPLAIN; an existing adequate index is reused only with that evidence, otherwise T002 adds the required narrow index.
 
-Create: authenticate owner, count pending as defined in data-model, reject fifth before INSERT table/state/ESCROW. Existing STANDARD empty initialization only, no classifier/seed/MINT. Trusted managed null-owner creation remains a separate existing internal path; public callers cannot impersonate it.
+Create: authenticate owner, count pending as defined in data-model (the four-table cap covers both ordinary and `is_slow_only` `STANDARD` tables), reject fifth before INSERT table/state/ESCROW. Existing STANDARD empty initialization only, no classifier/seed/MINT. Trusted managed null-owner creation remains a separate existing internal path; public callers cannot impersonate it.
 
 JOIN: authenticate identity and existing ownership/membership, lock user then table/state, recognize financed rejoin first. Rejoin consumes no new slot and remains legal despite current class/limit. Fresh JOIN classifies wallet, checks distinct active count <4 and existing tier/capacity/progression rules before buy-in/bot funding. NORMAL→ordinary only. SLOW→SLOW-only, or own STANDARD safely promotable empty table (no human/bot seats, no prior bot funding, safe initial state, not terminal/retired). Another owner's or any prefunded/managed ordinary table is denied. Unknown history is not proof of empty/unfunded.
 
 Accepted fresh promotion, seat/buy-in/state and human marker commit together. Denied JOIN may commit an actual automatic transition, but not promotion, new seat/funding/slot or `has_human_participant`; earlier true stays true. Existing seated effective SLOW may independently require sticky table marker even when a new candidate is denied. First accepted human JOIN removes the pending predicate and adds active participation atomically. Another user joining an owner's pending table decreases only owner's pending count; no second owner lock is needed. Leave/close release slots through existing transactions.
 
-Neutral existing denial shape carries proposed reasons `poker_access_incompatible`, `poker_access_unavailable`, `poker_active_table_limit`, `poker_pending_table_limit`; no other player's balance/override is disclosed. Never report a seat/create success after denial or unknown commit.
+Neutral existing denial shape carries reasons `poker_access_incompatible`, `poker_access_unavailable`, `poker_active_table_limit`, `poker_pending_table_limit`; no other player's balance/override is disclosed. Never report a seat/create success after denial or unknown commit.
 
 ## 3. Settled transition / runtime authority
 
@@ -48,7 +48,7 @@ The WS runtime gate (manual exact-runtime-SHA WS Preview Deploy, verified workfl
 
 ## 6. Admin interfaces
 
-Reuse `requireAdminUser`, normal error/JSON/klog patterns and external admin-page JS. Proposed endpoints:
+Reuse `requireAdminUser`, normal error/JSON/klog patterns and external admin-page JS. Endpoints:
 
 | Endpoint | Request / effect | Validation |
 | --- | --- | --- |
@@ -59,6 +59,6 @@ Reuse existing Admin user detail/list/Ops summary read surfaces where already lo
 
 ## 7. Lobby / Quick Seat interfaces
 
-Keep one shared live inventory `activeLobbyTablesById` and existing `lobby_snapshot` envelope; add boolean `slowOnly` per entry from committed runtime metadata. Publish only the authenticated user's effective class/revision/availability via a small self access message `poker_access` on connection/cache refresh/confirmed transition; no per-subscriber table filtering or DB joins. `poker-realtime.js` handles it; `poker.js::canViewLobbyTable` filters/marks incompatible fresh targets while preserving own financed resume. Unknown self state shows neutral unavailable fresh admission; no guess of NORMAL.
+Keep one shared live inventory `activeLobbyTablesById` and existing `lobby_snapshot` envelope; add boolean `slowOnly` per entry from committed runtime metadata. Publish only the authenticated user's effective class/revision/availability via a small self access message `poker_access` on connection/cache refresh/confirmed transition; no per-subscriber table filtering or DB joins. The repository's `poker/poker-ws-client.js` handles the frame (the issue wording calls this `poker-realtime.js`); `poker.js::canViewLobbyTable` filters/marks incompatible fresh targets while preserving own financed resume. Unknown self state shows neutral unavailable fresh admission; no guess of NORMAL.
 
 DB `selectExistingActiveSeat` preference stays first. Fresh `selectCandidate/recommendSeatAtTable` add ordinary/SLOW-only predicate based on server-resolved class. `createAndRecommend` calls the same pending-limited empty Create helper; final SLOW owner JOIN may promote. Existing Quick Seat response shape remains; no authorization proof. Stale recommendation can fail final JOIN class/active cap. No #869 personalized offers or WS selection migration.

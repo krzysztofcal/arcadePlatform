@@ -1,0 +1,268 @@
+import { getBotFundingSystemKeyForBuyIn } from "./table-economy.mjs";
+
+export const ACCESS_CLASSES = Object.freeze(["NORMAL", "SLOW"]);
+export const ACCESS_OVERRIDES = Object.freeze(["AUTO", "FORCE_NORMAL", "FORCE_SLOW"]);
+export const DEFAULT_SLOW_THRESHOLD_CH = 1_000_000_000;
+export const ACCESS_SNAPSHOT_MAX_AGE_MS = 30_000;
+
+const isSafePositiveInteger = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0;
+
+export function normalizeAccessClass(value, fallback = null) {
+  const normalized = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return ACCESS_CLASSES.includes(normalized) ? normalized : fallback;
+}
+
+export function normalizeAccessOverride(value, fallback = null) {
+  const normalized = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return ACCESS_OVERRIDES.includes(normalized) ? normalized : fallback;
+}
+
+export function resolveEffectiveClass(automaticClass, override) {
+  const automatic = normalizeAccessClass(automaticClass);
+  const normalizedOverride = normalizeAccessOverride(override);
+  if (!automatic || !normalizedOverride) return null;
+  if (normalizedOverride === "FORCE_NORMAL") return "NORMAL";
+  if (normalizedOverride === "FORCE_SLOW") return "SLOW";
+  return automatic;
+}
+
+export function deriveAccessState({ automaticClass = "NORMAL", override = "AUTO" } = {}) {
+  const normalizedAutomatic = normalizeAccessClass(automaticClass, "NORMAL");
+  const normalizedOverride = normalizeAccessOverride(override, "AUTO");
+  const effectiveClass = resolveEffectiveClass(normalizedAutomatic, normalizedOverride);
+  if (!effectiveClass) {
+    const error = new Error("poker_access_state_invalid");
+    error.code = "poker_access_state_invalid";
+    throw error;
+  }
+  return {
+    automaticClass: normalizedAutomatic,
+    override: normalizedOverride,
+    effectiveClass,
+  };
+}
+
+export function applyAutomaticThresholdEvidence({
+  automaticClass = "NORMAL",
+  override = "AUTO",
+  evidenceCh,
+  slowThresholdCh = DEFAULT_SLOW_THRESHOLD_CH,
+} = {}) {
+  const current = deriveAccessState({ automaticClass, override });
+  const threshold = Number(slowThresholdCh);
+  const evidence = Number(evidenceCh);
+  const qualifies = Number.isSafeInteger(threshold)
+    && threshold > 0
+    && Number.isSafeInteger(evidence)
+    && evidence >= threshold;
+  const nextAutomatic = current.automaticClass === "SLOW" || qualifies ? "SLOW" : "NORMAL";
+  return {
+    automaticClass: nextAutomatic,
+    override: current.override,
+    effectiveClass: resolveEffectiveClass(nextAutomatic, current.override),
+    changed: nextAutomatic !== current.automaticClass,
+  };
+}
+
+export function normalizePolicySnapshot(row, { nowMs = Date.now(), maxAgeMs = ACCESS_SNAPSHOT_MAX_AGE_MS } = {}) {
+  const threshold = Number(row?.slow_threshold_ch ?? row?.slowThresholdCh);
+  const revision = Number(row?.revision ?? row?.poker_access_revision);
+  const loadedAtMs = Number(row?.loadedAtMs ?? row?.loaded_at_ms ?? nowMs);
+  if (!Number.isSafeInteger(threshold) || threshold <= 0
+    || !Number.isSafeInteger(revision) || revision <= 0
+    || !Number.isFinite(loadedAtMs)) return null;
+  return {
+    slowThresholdCh: threshold,
+    revision,
+    loadedAtMs,
+    expiresAtMs: loadedAtMs + Math.max(0, Number(maxAgeMs) || ACCESS_SNAPSHOT_MAX_AGE_MS),
+  };
+}
+
+export function isFreshPolicySnapshot(snapshot, nowMs = Date.now()) {
+  return Boolean(snapshot
+    && Number.isSafeInteger(Number(snapshot.slowThresholdCh))
+    && Number.isSafeInteger(Number(snapshot.revision))
+    && Number.isFinite(Number(snapshot.expiresAtMs))
+    && Number(nowMs) <= Number(snapshot.expiresAtMs));
+}
+
+export function normalizeAccessSnapshot(row, { nowMs = Date.now(), maxAgeMs = ACCESS_SNAPSHOT_MAX_AGE_MS } = {}) {
+  const rawAutomaticClass = row?.poker_auto_class ?? row?.automaticClass;
+  const rawOverride = row?.poker_access_override ?? row?.override;
+  const automaticClass = normalizeAccessClass(rawAutomaticClass);
+  const override = normalizeAccessOverride(rawOverride);
+  if (!automaticClass || !override) return null;
+  const state = deriveAccessState({ automaticClass, override });
+  const revision = Number(row?.poker_access_revision ?? row?.revision ?? 1);
+  if (!Number.isSafeInteger(revision) || revision <= 0) return null;
+  const loadedAtMs = Number(row?.loadedAtMs ?? row?.loaded_at_ms ?? nowMs);
+  if (!Number.isFinite(loadedAtMs)) return null;
+  return {
+    ...state,
+    schemaBacked: Object.prototype.hasOwnProperty.call(row || {}, "poker_auto_class")
+      || Object.prototype.hasOwnProperty.call(row || {}, "poker_access_override"),
+    revision,
+    automaticSlowAt: row?.poker_auto_slow_at ?? row?.automaticSlowAt ?? null,
+    loadedAtMs,
+    expiresAtMs: loadedAtMs + Math.max(0, Number(maxAgeMs) || ACCESS_SNAPSHOT_MAX_AGE_MS),
+  };
+}
+
+export function isFreshAccessSnapshot(snapshot, nowMs = Date.now()) {
+  return Boolean(snapshot
+    && ACCESS_CLASSES.includes(snapshot.automaticClass)
+    && ACCESS_OVERRIDES.includes(snapshot.override)
+    && ACCESS_CLASSES.includes(snapshot.effectiveClass)
+    && Number.isSafeInteger(Number(snapshot.revision))
+    && Number(nowMs) <= Number(snapshot.expiresAtMs));
+}
+
+export async function readPokerAccessPolicy(tx, { nowMs = Date.now() } = {}) {
+  if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
+  const rows = await tx.unsafe(
+    "select slow_threshold_ch, revision from public.poker_access_policy where id = 1 limit 1;"
+  );
+  return normalizePolicySnapshot(rows?.[0], { nowMs });
+}
+
+export async function readPokerAccessSnapshot(tx, { userId, lock = false, nowMs = Date.now() } = {}) {
+  if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
+  if (typeof userId !== "string" || !userId.trim()) return null;
+  const rows = await tx.unsafe(`
+select poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at
+from public.chips_accounts
+where user_id = $1 and account_type = 'USER'
+limit 1${lock ? " for update" : ""};
+`, [userId]);
+  return normalizeAccessSnapshot(rows?.[0], { nowMs });
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export async function readPokerAccessSnapshots(tx, { userIds = [], nowMs = Date.now() } = {}) {
+  if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
+  const normalizedUserIds = [...new Set((Array.isArray(userIds) ? userIds : [])
+    .map((userId) => typeof userId === "string" ? userId.trim().toLowerCase() : "")
+    .filter((userId) => UUID_RE.test(userId)))];
+  if (normalizedUserIds.length === 0) return new Map();
+  const rows = await tx.unsafe(`
+select user_id, poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at
+from public.chips_accounts
+where user_id = any($1::uuid[])
+  and account_type = 'USER';
+`, [normalizedUserIds]);
+  const snapshots = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const userId = typeof row?.user_id === "string" ? row.user_id.trim().toLowerCase() : "";
+    const snapshot = normalizeAccessSnapshot(row, { nowMs });
+    if (UUID_RE.test(userId) && snapshot) snapshots.set(userId, snapshot);
+  }
+  return snapshots;
+}
+
+export async function persistAutomaticSlow(tx, { userId, expectedRevision = null, now = null } = {}) {
+  if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
+  if (typeof userId !== "string" || !userId.trim()) return { changed: false, reason: "user_missing" };
+  const params = [userId];
+  const revisionClause = Number.isSafeInteger(Number(expectedRevision)) && Number(expectedRevision) > 0
+    ? " and poker_access_revision = $2"
+    : "";
+  if (revisionClause) params.push(Number(expectedRevision));
+  const timestampValue = now ? `$${params.length + 1}::timestamptz` : "timezone('utc', now())";
+  const nowClause = `poker_auto_slow_at = coalesce(poker_auto_slow_at, ${timestampValue}),`;
+  const updatedAtClause = `poker_access_updated_at = ${timestampValue},`;
+  const rows = await tx.unsafe(`
+update public.chips_accounts
+set poker_auto_class = 'SLOW',
+    ${nowClause}
+    ${updatedAtClause}
+    poker_access_updated_by = null,
+    poker_access_revision = poker_access_revision + 1
+where user_id = $1 and account_type = 'USER'
+  and poker_auto_class = 'NORMAL'${revisionClause}
+returning poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at;
+`, now ? [...params, now] : params);
+  if (rows?.[0]) return { changed: true, snapshot: normalizeAccessSnapshot(rows[0]) };
+  return { changed: false, reason: "already_slow_or_revision_changed" };
+}
+
+export function isValidTierPolicy(policy) {
+  if (!policy || typeof policy !== "object") return false;
+  if (policy.enabled !== true && policy.enabled !== false) return false;
+  return Number.isSafeInteger(Number(policy.revision)) && Number(policy.revision) > 0 && [
+    policy.normal_refill_threshold_ch,
+    policy.normal_refill_amount_ch,
+    policy.slow_refill_threshold_ch,
+    policy.slow_refill_amount_ch,
+  ].every(isSafePositiveInteger);
+}
+
+export function normalizeTierPolicySnapshot(row) {
+  if (!row) return null;
+  const policy = {
+    buyIn: Number(row.buy_in ?? row.buyIn),
+    enabled: row.enabled === true,
+    normal_refill_threshold_ch: Number(row.normal_refill_threshold_ch),
+    normal_refill_amount_ch: Number(row.normal_refill_amount_ch),
+    slow_refill_threshold_ch: Number(row.slow_refill_threshold_ch),
+    slow_refill_amount_ch: Number(row.slow_refill_amount_ch),
+    revision: Number(row.revision),
+  };
+  return Number.isSafeInteger(policy.buyIn) && policy.buyIn > 0 && isValidTierPolicy(policy) ? policy : null;
+}
+
+export async function readPokerTierPolicy(tx, { buyIn } = {}) {
+  if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
+  const normalizedBuyIn = Number(buyIn);
+  if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) return null;
+  const rows = await tx.unsafe(
+    `select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
+            slow_refill_threshold_ch, slow_refill_amount_ch, revision
+       from public.poker_bot_tier_policy
+      where buy_in = $1
+      limit 1;`,
+    [normalizedBuyIn]
+  );
+  return normalizeTierPolicySnapshot(rows?.[0]);
+}
+
+export async function readPokerPoolProvisioning(tx, { buyIn } = {}) {
+  if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
+  const normalKey = getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: "NORMAL" });
+  const slowKey = getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: "SLOW" });
+  if (!normalKey || !slowKey) return { NORMAL: false, SLOW: false };
+  const rows = await tx.unsafe(
+    `select system_key
+       from public.chips_accounts
+      where account_type = 'SYSTEM'
+        and status = 'active'
+        and system_key = any($1::text[]);`,
+    [[normalKey, slowKey]]
+  );
+  const present = new Set((Array.isArray(rows) ? rows : []).map((row) => row?.system_key));
+  return { NORMAL: present.has(normalKey), SLOW: present.has(slowKey) };
+}
+
+export function classifySettledAccessEvidence({
+  snapshot,
+  settledStackCh,
+  policy,
+  nowMs = Date.now(),
+} = {}) {
+  if (!isFreshAccessSnapshot(snapshot, nowMs) || !isFreshPolicySnapshot(policy, nowMs)) {
+    return { known: false, reason: "access_cache_unknown" };
+  }
+  const next = applyAutomaticThresholdEvidence({
+    automaticClass: snapshot.automaticClass,
+    override: snapshot.override,
+    evidenceCh: settledStackCh,
+    slowThresholdCh: policy.slowThresholdCh,
+  });
+  return {
+    known: true,
+    ...next,
+    revision: snapshot.revision,
+    slowThresholdCh: policy.slowThresholdCh,
+  };
+}

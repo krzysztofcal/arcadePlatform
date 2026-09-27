@@ -53,7 +53,7 @@ function normalizeJoinError(error) {
   const validationReason = typeof error?.validationReason === "string" && /^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(error.validationReason)
     ? error.validationReason
     : null;
-  if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "state_missing", "poker_state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "buy_in_tier_locked", "request_pending", "insufficient_funds", "system_account_missing", "chips_apply_failed", "chips_apply_mismatch", "missing_idempotency_key", "invalid_escrow_only_entries", "authoritative_state_invalid"].includes(code)) {
+  if (["table_not_found", "table_closed", "table_not_open", "seat_taken", "table_full", "table_full_bot_leaving", "normal_table_required", "slow_only_table_required", "active_table_limit", "pending_table_limit", "table_slot_limit", "state_missing", "poker_state_missing", "state_invalid", "duplicate_seat", "invalid_seat_no", "invalid_buy_in", "buy_in_tier_locked", "request_pending", "insufficient_funds", "system_account_missing", "chips_apply_failed", "chips_apply_mismatch", "missing_idempotency_key", "invalid_escrow_only_entries", "authoritative_state_invalid"].includes(code)) {
     const result = validationReason ? { ok: false, code, validationReason } : { ok: false, code };
     for (const key of ["buyIn", "requiredBankroll", "balance"]) {
       const value = Number(error?.[key]);
@@ -71,6 +71,11 @@ const EXPECTED_JOIN_REJECTION_CODES = new Set([
   "seat_taken",
   "table_full",
   "table_full_bot_leaving",
+  "normal_table_required",
+  "slow_only_table_required",
+  "active_table_limit",
+  "pending_table_limit",
+  "table_slot_limit",
   "duplicate_seat",
   "invalid_seat_no",
   "invalid_buy_in",

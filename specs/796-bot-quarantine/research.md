@@ -1,10 +1,10 @@
 # Research: #1018 NORMAL/SLOW periodic pools
 
-**Date**: 2026-09-26. Requirements: [live snapshot](issue-source.md), updated 2026-09-26T19:21:31Z. Code inspected against fetched `origin/main` at `93d0f191c3f87006d56f7afb2fb1c4052a7ecb84`; relevant runtime files match this PR base. Read live `agents.md`, `skills.md`, constitution and active Spec Kit skills/templates. All decisions below are proposed implementation choices, not claims of implemented capability.
+**Date**: 2026-09-26. Requirements: [live snapshot](issue-source.md), updated 2026-09-26T19:21:31Z. Code inspected against fetched `origin/main` at `93d0f191c3f87006d56f7afb2fb1c4052a7ecb84`; relevant runtime files match this PR base. Read live `agents.md`, `skills.md`, constitution and active Spec Kit skills/templates. These decisions are the accepted implementation contract; local evidence is recorded in [quickstart.md](quickstart.md), with T027 and the exact-SHA WS gate still open.
 
 ## R1 — Classification and current runtime
 
-**Decision**: Extend `shared/poker-domain/join.mjs::executePokerJoinAuthoritative` and `ws-server/server.mjs::runSettledRolloverCommand`, using `ws-server/poker/table/table-manager.mjs::prepareSettledHandRollover/commitSettledHandRollover`. One planned purpose-specific `shared/poker-domain/bot-access.mjs` shares validation, effective-class and threshold rules between JOIN, runtime and Admin. Runtime cache lifecycle stays in the existing server; no new settlement service.
+**Decision**: Extend `shared/poker-domain/join.mjs::executePokerJoinAuthoritative` and `ws-server/server.mjs::runSettledRolloverCommand`, using `ws-server/poker/table/table-manager.mjs::prepareSettledHandRollover/commitSettledHandRollover`. The purpose-specific `shared/poker-domain/bot-access.mjs` shares validation, effective-class and threshold rules between JOIN, runtime and Admin. Runtime cache lifecycle stays in the existing server; no new settlement service.
 
 **Rationale**: JOIN already reads authoritative wallet and serializes admission. Existing settled stacks close the stay-at-table detection gap without wallet queries each hand. Keep automatic state separate from override; FORCE_NORMAL sets effective NORMAL only; threshold checks still persist automatic NORMAL→SLOW while it is active. Return to AUTO immediately derives effective SLOW from stored state without another threshold check; it never resets a sticky table marker. Known effective SLOW makes the current table sticky; UNKNOWN is not evidence.
 
@@ -38,7 +38,7 @@
 
 ## R5 — Refill ledger and cross-revision bucket guard
 
-**Decision**: Planned `scripts/ops/poker-bot-pool-refill.mjs` evaluates only current UTC bucket. Under exact bankroll serialization and a stable policy revision, check existing committed ledger MINT metadata for pool+bucket across all revisions before posting one amount. Reuse `_shared/chips-ledger.mjs::postTransaction`, payload hash and `chips_transaction_idempotency`; deterministic key `poker-pool-refill:<system-key>:<revision>:<bucket>`. Add a narrow indexed pool/bucket identity on existing `chips_transactions` for this purpose, not a new receipt registry.
+**Decision**: `scripts/ops/poker-bot-pool-refill.mjs` evaluates only the current UTC bucket. Under exact bankroll serialization and a stable policy revision, it checks existing committed ledger MINT metadata for pool+bucket across all revisions before posting one amount. It reuses `_shared/chips-ledger.mjs::postTransaction`, payload hash and `chips_transaction_idempotency`; deterministic key `poker-pool-refill:<system-key>:<revision>:<bucket>`. A narrow indexed pool/bucket identity on existing `chips_transactions` protects this purpose without a new receipt registry.
 
 **Rationale**: Revision in idempotency key alone permits two refills after an edit; pool+bucket guard is additionally required. Current `validateEntries` rejects user-less MINT with `missing_user_entry`, so explicitly extend only backend-authorized scheduled GENESIS→exact provisioned pool MINT, never arbitrary metadata-based public MINT. Existing ledger/audit retains these low-volume system operations; no table binding or 7d/30d refill-MINT extension.
 
@@ -50,7 +50,7 @@
 
 Refill wake-up reuses `infra/vps/arcade-chips-ledger-dispatch.sh/.service/.timer`, `docs/chips-ledger-stage-automation.md` patterns in a small dedicated pool dispatcher/service/timer and dispatch-only workflow. `infra/vps/README.md` and the fresh-vps guard in `infra/vps/bootstrap.sh` restrict bootstrap to future fresh/rebuilt VPS; new files may be installed there only for that case. Never run bootstrap on an existing live VPS. Existing-host installation uses a separate owner-approved targeted upgrade/install flow: read-only inventory, reviewed artifact/rollback manifest, install only the dispatcher/units disabled, reload/verify without dispatch; activation is separately authorized. No code deploy, installation or bootstrap may automatically enable/start this new timer. VPS authenticates GitHub dispatch; GitHub-hosted job holds environment-scoped DB access. Review repo/actor/ref/environment/feature gate as in `.github/workflows/chips-ledger-production-scheduled-automation.yml`.
 
-**Rationale**: Existing Admin authorization and external systemd scheduler already solve these responsibilities. Production dispatch/refill activation remains separately authorized; docs changes activate nothing.
+**Rationale**: Existing Admin authorization and external systemd scheduler already solve these responsibilities. Production dispatch/refill activation remains separately authorized; adding the artifacts does not activate them.
 
 **Alternatives considered**: Generic config framework, native GitHub cron dependency and self-hosted runner are unnecessary. Never place DB credentials or mutation SQL on VPS.
 
@@ -66,6 +66,6 @@ Refill wake-up reuses `infra/vps/arcade-chips-ledger-dispatch.sh/.service/.timer
 
 **Decision**: Extend existing JOIN, table-manager, persisted-state-writer, Quick Seat, Admin and ledger behavioral tests; one small new local PostgreSQL transaction suite verifies real slot/refill races. No UI/CSS/JSP/glue test suite. Use existing Node/postgres tooling, no package/framework additions.
 
-**Rationale**: Pure mocks cannot prove cross-table cap serialization or duplicate-dispatch issuance. Exact-SHA manual WS Preview Deploy, successful workflow verification and targeted smoke form the future WS runtime gate. Stage refill canary is a separate conditional operational validation that performs real ledger MINT only after explicit user authorization; withholding that authorization cannot block WS gate completion. Production remains a separate GO. Shared Stage migration effect must be declared before a future migration PR; applied migration corrections are forward-only.
+**Rationale**: Pure mocks cannot prove cross-table cap serialization or duplicate-dispatch issuance. Exact-SHA manual WS Preview Deploy, successful workflow verification and targeted smoke form the remaining WS runtime gate. Stage refill canary is a separate conditional operational validation that performs real ledger MINT only after explicit user authorization; withholding that authorization cannot block WS gate completion. Production remains a separate GO. The shared Stage migration effect is declared before publication; applied migration corrections are forward-only.
 
 **Alternatives considered**: Broad test rewrites or Stage experiments during this docs task are unnecessary. Accepted risks remain Sybil, split wealth, below-threshold farming and depletion before next refill. Breaking changes are new 100 source, class segregation/sticky tables, 4+4 caps, bounded policy propagation and external periodic refill dependency.

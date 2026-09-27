@@ -72,6 +72,68 @@ test("resolveNextDealerSeatNo skips ineligible seats based on settled continuati
   assert.equal(nextDealer, 3);
 });
 
+test("settled access classification persists automatic SLOW under FORCE_NORMAL and returns from AUTO without a second threshold check", () => {
+  const tableId = "table_settled_access_contract";
+  const userId = "user_settled_access";
+  const manager = createTableManager({ maxSeats: 4 });
+  const restored = manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, isSlowOnly: false },
+    coreState: {
+      version: 4,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId, seat: 1 }, { userId: "bot_a", seat: 2 }],
+      seats: { [userId]: 1, bot_a: 2 },
+      seatDetailsByUserId: {
+        [userId]: { isBot: false },
+        bot_a: { isBot: true }
+      },
+      pokerState: { phase: "SETTLED", stacks: { [userId]: 100, bot_a: 100 } }
+    }
+  });
+  assert.equal(restored.ok, true);
+  const cacheAt = 100;
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL",
+    override: "FORCE_NORMAL",
+    effectiveClass: "NORMAL",
+    revision: 7,
+    loadedAtMs: cacheAt,
+    expiresAtMs: cacheAt + 30_000
+  }, {
+    slowThresholdCh: 100,
+    revision: 3,
+    loadedAtMs: cacheAt,
+    expiresAtMs: cacheAt + 30_000
+  }, cacheAt);
+  const forced = manager.classifySettledAccess(tableId, [{ userId, stack: 100 }], { nowMs: 200 });
+  assert.equal(forced.known, true);
+  assert.deepEqual(forced.transitions, [{
+    userId,
+    expectedRevision: 7,
+    automaticClass: "SLOW",
+    override: "FORCE_NORMAL",
+    effectiveClass: "NORMAL"
+  }]);
+
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "SLOW",
+    override: "AUTO",
+    effectiveClass: "SLOW",
+    revision: 8,
+    loadedAtMs: 200,
+    expiresAtMs: 30_200
+  }, {
+    slowThresholdCh: 100,
+    revision: 3,
+    loadedAtMs: 200,
+    expiresAtMs: 30_200
+  }, 200);
+  const returnedToAuto = manager.classifySettledAccess(tableId, [{ userId, stack: 1 }], { nowMs: 300 });
+  assert.equal(returnedToAuto.known, true);
+  assert.deepEqual(returnedToAuto.transitions, []);
+});
+
 test("bots-only bootstrap requires both trusted managed metadata and explicit internal intent", () => {
   const tableId = "table_managed_bootstrap_gate";
   const manager = createTableManager({ maxSeats: 6 });

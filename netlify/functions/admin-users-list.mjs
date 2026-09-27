@@ -87,7 +87,10 @@ poker_activity as (
 user_accounts as (
   select
     a.user_id,
-    a.balance
+    a.balance,
+    a.poker_auto_class,
+    a.poker_access_override,
+    a.poker_access_revision
   from public.chips_accounts a
   where a.account_type = 'USER'
 ),
@@ -104,6 +107,9 @@ base as (
     u.created_at,
     u.last_sign_in_at,
     coalesce(ua.balance, 0) as balance,
+    coalesce(ua.poker_auto_class, 'NORMAL') as poker_auto_class,
+    coalesce(ua.poker_access_override, 'AUTO') as poker_access_override,
+    coalesce(ua.poker_access_revision, 1) as poker_access_revision,
     coalesce(ase.active_seat_count, 0) as active_seat_count,
     coalesce(ase.active_table_count, 0) as active_table_count,
     greatest(
@@ -143,6 +149,14 @@ limit ${nextParam(pageInfo.limit)};
       balance: Number.isFinite(Number(row.balance)) ? Number(row.balance) : 0,
       activeSeatCount: Number.isInteger(Number(row.active_seat_count)) ? Number(row.active_seat_count) : 0,
       activeTableCount: Number.isInteger(Number(row.active_table_count)) ? Number(row.active_table_count) : 0,
+      automaticClass: row.poker_auto_class || "NORMAL",
+      override: row.poker_access_override || "AUTO",
+      effectiveClass: row.poker_access_override === "FORCE_NORMAL"
+        ? "NORMAL"
+        : row.poker_access_override === "FORCE_SLOW"
+          ? "SLOW"
+          : row.poker_auto_class || "NORMAL",
+      accessRevision: Number(row.poker_access_revision || 1),
     })),
     pagination: buildPagination({ page: pageInfo.page, limit: pageInfo.limit, total }),
   };

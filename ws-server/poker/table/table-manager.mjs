@@ -22,6 +22,7 @@ import {
   DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
   isCanonicalPokerStakes
 } from "../../../shared/poker-domain/table-economy.mjs";
+import { classifySettledAccessEvidence, isFreshAccessSnapshot, isFreshPolicySnapshot } from "../../../shared/poker-domain/bot-access.mjs";
 
 const DEFAULT_PRESENCE_TTL_MS = 10_000;
 const DEFAULT_MAX_SEATS = 10;
@@ -248,6 +249,7 @@ function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = nu
     lastActivityAtMs,
     lifecycleKind,
     managedProfileKey: lifecycleKind === "CONTINUOUS_BOT" ? managedProfileKeyRaw : null,
+    isSlowOnly: value?.isSlowOnly === true || value?.is_slow_only === true,
     rotationDueAtMs: lifecycleKind === "CONTINUOUS_BOT"
       ? normalizeTimestampMs(value?.rotationDueAtMs ?? value?.rotation_due_at ?? value?.rotationDueAt)
       : null
@@ -372,6 +374,12 @@ export function createTableManager({
     if (!table.publicProfilesRefreshPromise || typeof table.publicProfilesRefreshPromise !== "object") {
       table.publicProfilesRefreshPromise = null;
     }
+  }
+
+  function ensureAccessCacheState(table) {
+    if (!table) return;
+    if (!(table.pokerAccessByUserId instanceof Map)) table.pokerAccessByUserId = new Map();
+    if (!table.pokerAccessPolicy || typeof table.pokerAccessPolicy !== "object") table.pokerAccessPolicy = null;
   }
 
   function buildPublicProfileCandidates(table) {
@@ -605,12 +613,100 @@ export function createTableManager({
         publicProfilesLoadedAtMs: null,
         publicProfilesSeatFingerprint: "",
         publicProfilesRefreshPromise: null,
-        publicProfilesRefreshGeneration: 0
+        publicProfilesRefreshGeneration: 0,
+        pokerAccessByUserId: new Map(),
+        pokerAccessPolicy: null
       });
     }
     const table = tables.get(tableId);
     ensurePublicProfileState(table);
+    ensureAccessCacheState(table);
     return table;
+  }
+
+  function cachePokerAccess(tableId, userId, snapshot, policy = null, nowMs = Date.now()) {
+    const table = tables.get(tableId);
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!table || !normalizedUserId || !snapshot || typeof snapshot !== "object") return { ok: false };
+    ensureAccessCacheState(table);
+    table.pokerAccessByUserId.set(normalizedUserId, {
+      ...snapshot,
+      loadedAtMs: Number(snapshot.loadedAtMs || nowMs),
+      expiresAtMs: Number(snapshot.expiresAtMs || nowMs + 30_000)
+    });
+    if (policy && typeof policy === "object") {
+      table.pokerAccessPolicy = {
+        ...policy,
+        loadedAtMs: Number(policy.loadedAtMs || nowMs),
+        expiresAtMs: Number(policy.expiresAtMs || nowMs + 30_000)
+      };
+    }
+    return { ok: true };
+  }
+
+  function cachePokerAccessForUser(userId, snapshot, policy = null, nowMs = Date.now()) {
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!normalizedUserId) return 0;
+    let updated = 0;
+    for (const tableId of listTableIds()) {
+      const table = tables.get(tableId);
+      const member = Array.isArray(table?.coreState?.members)
+        && table.coreState.members.find((entry) => entry?.userId === normalizedUserId);
+      if (!member || isCoreStateBotUser(table.coreState, normalizedUserId)
+        || table.coreState?.pokerState?.leftTableByUserId?.[normalizedUserId] === true) continue;
+      if (cachePokerAccess(tableId, normalizedUserId, snapshot, policy, nowMs).ok) updated += 1;
+    }
+    return updated;
+  }
+
+  function settledAccessStatus(tableId, { nowMs = Date.now() } = {}) {
+    const table = tables.get(tableId);
+    if (!table) return { known: false, reason: "table_not_found" };
+    ensureAccessCacheState(table);
+    const members = Array.isArray(table.coreState?.members) ? table.coreState.members : [];
+    const humanIds = members
+      .filter((member) => !isCoreStateBotUser(table.coreState, member?.userId))
+      .map((member) => member?.userId)
+      .filter(Boolean);
+    if (humanIds.length === 0) return { known: true, transitions: [] };
+    if (!isFreshPolicySnapshot(table.pokerAccessPolicy, nowMs)) return { known: false, reason: "access_policy_cache_unknown" };
+    for (const userId of humanIds) {
+      if (!isFreshAccessSnapshot(table.pokerAccessByUserId.get(userId), nowMs)) {
+        return { known: false, reason: "access_snapshot_cache_unknown", userId };
+      }
+    }
+    return { known: true, transitions: [] };
+  }
+
+  function classifySettledAccess(tableId, humanStackUpdates, { nowMs = Date.now() } = {}) {
+    const table = tables.get(tableId);
+    if (!table) return { known: false, reason: "table_not_found", transitions: [] };
+    ensureAccessCacheState(table);
+    const status = settledAccessStatus(tableId, { nowMs });
+    if (!status.known) return { ...status, transitions: [] };
+    const transitions = [];
+    let effectiveSlow = false;
+    for (const update of Array.isArray(humanStackUpdates) ? humanStackUpdates : []) {
+      const snapshot = table.pokerAccessByUserId.get(update.userId);
+      const result = classifySettledAccessEvidence({
+        snapshot,
+        settledStackCh: update.stack,
+        policy: table.pokerAccessPolicy,
+        nowMs
+      });
+      if (!result.known) return { known: false, reason: result.reason, transitions: [] };
+      if (result.effectiveClass === "SLOW") effectiveSlow = true;
+      if (result.changed) {
+        transitions.push({
+          userId: update.userId,
+          expectedRevision: result.revision,
+          automaticClass: result.automaticClass,
+          override: result.override,
+          effectiveClass: result.effectiveClass
+        });
+      }
+    }
+    return { known: true, transitions, effectiveSlow };
   }
 
   function touchTableActivity(table, nowMs = Date.now()) {
@@ -777,6 +873,7 @@ export function createTableManager({
 
       const loadedTable = loaded.table;
       ensurePublicProfileState(loadedTable);
+      ensureAccessCacheState(loadedTable);
       loadedTable.tableStatus = normalizeTableStatus(loadedTable.tableStatus);
       loadedTable.tableMeta = normalizeTableMeta(loadedTable.tableMeta, loadedTable?.coreState?.maxSeats || maxSeats);
       const loadedVersion = Number(loadedTable?.coreState?.version);
@@ -1212,7 +1309,8 @@ export function createTableManager({
     nowMs = Date.now(),
     allowManagedBotsOnly = false,
     managedBotProfile = null,
-    allowBotFunding = true
+    allowBotFunding = true,
+    settledAccessClassification = null
   } = {}) {
     const table = tables.get(tableId);
     if (!table) {
@@ -1298,6 +1396,11 @@ export function createTableManager({
     if (!humanStackUpdates) {
       return { ok: false, changed: false, reason: "human_stack_ambiguous", stateVersion: table.coreState.version };
     }
+    const accessClassification = settledAccessClassification || classifySettledAccess(tableId, humanStackUpdates, { nowMs });
+    const tableMarkerTransition = table.tableMeta?.isSlowOnly !== true
+      && accessClassification.known === true
+      && (accessClassification.effectiveSlow === true
+        || accessClassification.transitions.some((transition) => transition?.effectiveClass === "SLOW"));
     const projectedPublicStacks = { ...(recycled.coreState.publicStacks || {}) };
     for (const update of humanStackUpdates) projectedPublicStacks[update.userId] = update.stack;
     const nextCoreState = {
@@ -1317,7 +1420,10 @@ export function createTableManager({
       handId: nextCoreState?.pokerState?.handId ?? null,
       replacementFundings: normalizedReplacementFundingShape(recycled.replacementFundings),
       managedBotTopUps: normalizedManagedTopUpShape(toppedUp.topUpFundings),
-      humanStackUpdates
+      humanStackUpdates,
+      settledAccessTransitions: accessClassification.transitions,
+      tableMarkerTransition,
+      allowBotFunding: allowBotFunding !== false
     };
   }
 
@@ -1328,7 +1434,10 @@ export function createTableManager({
     replacementFundings = [],
     managedBotTopUps = [],
     managedBotProfile = null,
+    allowBotFunding = true,
     humanStackUpdates = [],
+    settledAccessTransitions = [],
+    tableMarkerTransition = false,
     persistenceReceipt = null,
     economyMode = null,
     nowMs = Date.now()
@@ -1346,18 +1455,20 @@ export function createTableManager({
       return { ok: false, changed: false, reason: "runtime_version_conflict", stateVersion: currentVersion };
     }
 
-    const recalculated = replaceBrokeBotsForNextHand({
-      coreState: table.coreState,
-      settledState: table.coreState.pokerState,
-      nextVersion,
-      buyIn: Number(table.tableMeta?.buyIn)
-    });
+    const recalculated = allowBotFunding === false
+      ? { ok: true, coreState: table.coreState, settledState: table.coreState.pokerState, replacementFundings: [] }
+      : replaceBrokeBotsForNextHand({
+          coreState: table.coreState,
+          settledState: table.coreState.pokerState,
+          nextVersion,
+          buyIn: Number(table.tableMeta?.buyIn)
+        });
     if (!recalculated?.ok || !replacementFundingPlansEqual(recalculated.replacementFundings, replacementFundings)) {
       return { ok: false, changed: false, reason: "replacement_funding_mismatch", stateVersion: currentVersion };
     }
     const managed = table.tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
       && table.tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
-    const recalculatedTopUp = managed
+    const recalculatedTopUp = managed && allowBotFunding !== false
       ? topUpManagedBotsForNextHand({
           coreState: recalculated.coreState,
           settledState: recalculated.settledState,
@@ -1412,8 +1523,35 @@ export function createTableManager({
     })) {
       return { ok: false, changed: false, reason: "human_stack_projection_unconfirmed", stateVersion: currentVersion };
     }
+    if (settledAccessTransitions.length > 0
+      && persistenceReceipt?.settledAccessTransitionsCommitted !== true) {
+      return { ok: false, changed: false, reason: "settled_access_transition_unconfirmed", stateVersion: currentVersion };
+    }
+    if (tableMarkerTransition && persistenceReceipt?.tableMarkerTransitionCommitted !== true) {
+      return { ok: false, changed: false, reason: "table_marker_unconfirmed", stateVersion: currentVersion };
+    }
 
     table.coreState = nextCoreState;
+    if (tableMarkerTransition) {
+      table.tableMeta = normalizeTableMeta({ ...table.tableMeta, isSlowOnly: true }, table?.coreState?.maxSeats || maxSeats);
+    }
+    if (settledAccessTransitions.length > 0) {
+      ensureAccessCacheState(table);
+      for (const transition of settledAccessTransitions) {
+        const userId = typeof transition?.userId === "string" ? transition.userId.trim() : "";
+        const snapshot = table.pokerAccessByUserId.get(userId);
+        if (!userId || !snapshot) continue;
+        const nextRevision = Number(transition.expectedRevision) + 1;
+        table.pokerAccessByUserId.set(userId, {
+          ...snapshot,
+          automaticClass: "SLOW",
+          effectiveClass: transition.effectiveClass === "NORMAL" ? "NORMAL" : "SLOW",
+          revision: Math.max(Number(snapshot.revision) || 0, nextRevision),
+          loadedAtMs: nowMs,
+          expiresAtMs: nowMs + 30_000
+        });
+      }
+    }
     touchTableActivity(table, nowMs);
     return {
       ok: true,
@@ -2250,6 +2388,7 @@ export function createTableManager({
     }
 
     table.coreState = restoredCoreState;
+    ensureAccessCacheState(table);
     table.tableStatus = normalizeTableStatus(restoredTable?.tableStatus);
     table.tableMeta = normalizeTableMeta(restoredTable?.tableMeta ?? table.tableMeta, restoredCoreState.maxSeats, {
       defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? Date.now(),
@@ -2355,6 +2494,24 @@ export function createTableManager({
 
   function listTableIds() {
     return [...tables.keys()].sort((left, right) => left.localeCompare(right));
+  }
+
+  function activeHumanUserIds({ limit = 512 } = {}) {
+    const boundedLimit = Math.max(1, Math.min(512, Number(limit) || 512));
+    const userIds = new Set();
+    for (const tableId of listTableIds()) {
+      const table = tables.get(tableId);
+      if (!table || normalizeTableStatus(table.tableStatus) === "CLOSED") continue;
+      const leftTableByUserId = table.coreState?.pokerState?.leftTableByUserId;
+      for (const member of Array.isArray(table.coreState?.members) ? table.coreState.members : []) {
+        const userId = typeof member?.userId === "string" ? member.userId.trim() : "";
+        if (!userId || isCoreStateBotUser(table.coreState, userId)
+          || leftTableByUserId?.[userId] === true) continue;
+        userIds.add(userId);
+        if (userIds.size >= boundedLimit) return [...userIds];
+      }
+    }
+    return [...userIds];
   }
 
   function projectUserTables(userId) {
@@ -2555,6 +2712,7 @@ export function createTableManager({
     orderedSubscribers,
     orderedConnectionsForTable,
     listTableIds,
+    activeHumanUserIds,
     projectUserTables,
     beginTableRetirement,
     endTableRetirement,
@@ -2577,7 +2735,11 @@ export function createTableManager({
     isTableClosed,
     isBotUser,
     hasActiveHumanMember,
-    hasConnectedHumanPresence
+    hasConnectedHumanPresence,
+    cachePokerAccess,
+    cachePokerAccessForUser,
+    settledAccessStatus,
+    classifySettledAccess
   };
 
   if (enableDebugCore && nodeEnv !== "production") {

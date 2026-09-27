@@ -2,12 +2,12 @@
 
 ## Current gate
 
-Docs-only PR #1019. Live #1018 is the sole requirements source; snapshot synced 2026-09-26, updated_at 2026-09-26T19:21:31Z. T001 verifies no drift, accepted independent review, choice of this alternative and separate implementation instruction. No stale “sync live issue first” blocker remains. No implementation task or runtime test below has been executed by this docs revision.
+Implementation of the accepted Spec Kit is authorized from T001 onward. Live #1018 remains the requirements source; snapshot synced 2026-09-26, updated_at 2026-09-26T19:21:31Z, and the accepted independent review confirms no design drift. The implementation instruction explicitly selects this alternative instead of #869/#1017. No stale “sync live issue first” blocker remains. Local implementation and deterministic tests are allowed; Stage/Production mutations, real refill MINT, scheduler activation, live-VPS installation and merge remain separately gated.
 
 ## Prerequisites for later implementation validation
 
 - Accepted Spec Kit and explicit T001 instruction; local isolated PostgreSQL using existing Node 20/postgres tooling, never Stage/Production for the transaction suite.
-- Later additive migrations intentionally mutate shared Stage if published through DB Stage Apply PR; declare before publication, applied forward-only. No migration in this PR.
+- This implementation adds `supabase/migrations/20260927100000_poker_bot_quarantine_policy.sql`. It is forward-only and has not been applied here; publishing it invokes the repository DB Stage Apply PR and can mutate shared Stage. Declare that effect before publication. Production remains separate GO.
 - Local fixtures: four exact pool accounts at zero, valid disabled tier policies, automatic NORMAL/AUTO users, empty STANDARD tables and existing managed table fixture. Enable/fund only explicit local test fixtures; no production values inferred from Stage examples.
 - For integration later: exact runtime-SHA WS Preview and target identity evidence. Real Stage refill/MINT canary requires its own explicit user authorization and is not a prerequisite for the WS gate. Production migration, seed, MINT, timer/refill activation require a wholly separate GO.
 
@@ -18,7 +18,8 @@ Run from repository root with existing test environment conventions. These comma
 ```bash
 node --test shared/poker-domain/join.behavior.test.mjs shared/poker-domain/leave.behavior.test.mjs ws-server/poker/table/table-manager.behavior.test.mjs
 node --test tests/poker-create-table.stakes.test.mjs tests/poker-quick-seat.behavior.test.mjs ws-server/poker/handlers/join.behavior.test.mjs
-node --test ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs shared/poker-domain/inactive-cleanup.behavior.test.mjs tests/chips-ledger.test.mjs
+node --test ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs shared/poker-domain/inactive-cleanup.behavior.test.mjs
+npx vitest run tests/chips-ledger.test.mjs
 node --test tests/admin-endpoints.behavior.test.mjs tests/admin-users-list.behavior.test.mjs tests/admin-ops-summary.behavior.test.mjs
 node --test tests/chips/chips.migration.test.mjs tests/chips/poker-pool-policy.transaction.test.mjs
 node --test tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs ws-tests/infra-vps-workflow.guard.test.mjs
@@ -72,8 +73,12 @@ Installation and activation are separate steps. Neither code deploy, artifact in
 
 Pause new admissions/funding while allowing current hands and lawful payouts. Provision only missing exact pool accounts at zero and policies; preserve existing account IDs, balances and provenance, especially the existing 500 bankroll; deploy all class/limit/source writers and metadata readers together. Deliberately enable and, only in authorized target, refill pools before reopening. Existing 500 key and all historical TREASURY/source attribution remain. Never infer enablement from progression catalog.
 
-100 new funding moves from TREASURY to its own NORMAL pool; SLOW uses its own tier pool and can run out before the next refill. Sticky tables do not revert under FORCE_NORMAL. 4+4 applies to both classes; Sybil multiplies the allowance and remains accepted. Admin propagation is bounded by the 30s refresh interval, with stale snapshots unable to authorize new operations. Rollback keeps new funding disabled rather than restoring class/limit/fallback bypass; applied migrations stay forward-only.
+100 new funding moves from TREASURY to its own NORMAL pool; SLOW uses its own tier pool and can run out before the next refill. Sticky tables do not revert under FORCE_NORMAL. 4+4 applies to both classes; Sybil can multiply this per-account containment and remains an accepted residual risk. Admin propagation is bounded by the 30s refresh interval, with stale snapshots unable to authorize new operations. Rollback keeps new funding disabled rather than restoring class/limit/fallback bypass; applied migrations stay forward-only.
 
 ## Evidence record to complete later
 
-T028 records actual local command results, T027 active/pending SQL/index/EXPLAIN evidence and simplicity/constitution review here. T029 records exact runtime SHA/workflow result and smoke outcome for the WS gate. In a separate record, track Stage canary authorization and result (or not authorized/not run); it is not required to finish T029. No future threshold check is required to expose stored automatic SLOW on Return to AUTO. Currently no implementation/test/deploy evidence is claimed. STOP before implementation.
+T028 records the local command results and simplicity/constitution review here. T027 still requires the isolated local PostgreSQL concurrency and active/pending SQL/index/EXPLAIN evidence. T029 records exact runtime SHA/workflow result and smoke outcome for the WS gate. In a separate record, track Stage canary authorization and result (or not authorized/not run); it is not required to finish T029. No future threshold check is required to expose stored automatic SLOW on Return to AUTO. Local implementation and deterministic test evidence is recorded below; STOP before any unapproved environment operation.
+
+## Local implementation evidence
+
+Completed locally: T001–T026. Fundamental deterministic checks passed for access classification, authoritative JOIN/capacity and safe promotion, Quick Seat/Create compatibility, settled rollover persistence, exact pool mapping, refill authority/idempotency, Admin policy/override guards, WS self-access delivery, and workflow/VPS guard contracts. T027 local PostgreSQL concurrency/EXPLAIN evidence is pending because no isolated PostgreSQL fixture was available; its read-only EXPLAIN test skips without `POKER_POLICY_TEST_DB_URL`. T028 evidence/refactor review is prepared in this file but remains dependent on T027. T029 exact-SHA WS Preview/runtime smoke remains pending. No Stage/Production writes, real refill MINT, live-VPS installation/activation or merge was performed.

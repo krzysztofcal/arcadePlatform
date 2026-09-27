@@ -1,0 +1,17 @@
+[Unit]
+Description=Dispatch the poker bot pool refill workflow in read-only mode
+After=network.target
+
+[Service]
+Type=oneshot
+User=copilot
+Environment=HOME=/home/copilot
+Environment=GH_CONFIG_DIR=/home/copilot/.config/gh
+Environment=PATH=/home/copilot/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=POKER_BOT_REFILL_MODE=dry-run
+ExecStart=/usr/local/bin/arcade-poker-pool-dispatch.sh
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

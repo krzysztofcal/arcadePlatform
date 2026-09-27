@@ -238,6 +238,25 @@ const stageJobIf = workflow.match(
   /^    if: .*$/m,
 )[0];
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
+
+const refillWorkflowPath = ".github/workflows/poker-bot-pool-refill.yml";
+const refillWorkflow = fs.readFileSync(refillWorkflowPath, "utf8");
+const parsedRefillWorkflow = YAML.parse(refillWorkflow);
+const refillTriggers = parsedRefillWorkflow.on || parsedRefillWorkflow.true || {};
+assert.deepEqual(Object.keys(refillTriggers).sort(), ["workflow_dispatch"]);
+assert.doesNotMatch(refillWorkflow, /^\s+(schedule|push|pull_request):/m);
+assert.match(refillWorkflow, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
+assert.match(refillWorkflow, /github\.ref == 'refs\/heads\/main'/);
+assert.match(refillWorkflow, /github\.event_name == 'workflow_dispatch'/);
+assert.match(refillWorkflow, /default: dry-run/);
+assert.match(refillWorkflow, /vars\.POKER_BOT_REFILL_ENABLED == '1'/);
+assert.match(refillWorkflow, /github\.actor == 'arcade-poker-refill-dispatch'/);
+assert.match(refillWorkflow, /POKER_BOT_REFILL_PRODUCTION_GO/);
+assert.match(refillWorkflow, /production-poker-refill/);
+assert.match(refillWorkflow, /Checkout exact dispatch SHA/);
+assert.match(refillWorkflow, /ref: \$\{\{ github\.sha \}\}/);
+assert.match(refillWorkflow, /node scripts\/ops\/poker-bot-pool-refill\.mjs/);
+assert.doesNotMatch(refillWorkflow, /github\.event\.inputs\.mode\s*==\s*'mutate'[^\n]*true/);
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'bot-only-7d-recovery-repair'/);

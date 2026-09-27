@@ -287,6 +287,35 @@ test("infra VPS repository versions the audited production WS and Stage schedule
   assert.doesNotMatch(dispatcher, /SUPABASE_(DB_URL|SERVICE_ROLE_KEY|ACCESS_TOKEN|JWT_SECRET)|gh auth login|--token/i);
 });
 
+test("poker refill VPS artifacts dispatch only the guarded workflow without ledger credentials", () => {
+  const dispatcher = fileText("infra/vps/arcade-poker-pool-dispatch.sh");
+  const service = fileText("infra/vps/arcade-poker-pool-dispatch.service");
+  const timer = fileText("infra/vps/arcade-poker-pool-dispatch.timer");
+  const bootstrap = fileText("infra/vps/bootstrap.sh");
+
+  assert.match(dispatcher, /REPO="krzysztofcal\/arcadePlatform"/);
+  assert.match(dispatcher, /WORKFLOW_FILE="\.github\/workflows\/poker-bot-pool-refill\.yml"/);
+  assert.match(dispatcher, /workflow run "\$WORKFLOW_FILE"/);
+  assert.match(dispatcher, /-f "mode=\$MODE"/);
+  assert.match(dispatcher, /MODE="\$\{POKER_BOT_REFILL_MODE:-dry-run\}"/);
+  assert.match(dispatcher, /POKER_BOT_REFILL_MODE.*dry-run/);
+  assert.doesNotMatch(dispatcher, /SUPABASE|DATABASE_URL|psql|sql\s/);
+  assert.doesNotMatch(dispatcher, /--mode mutate|mode=mutate/);
+
+  assert.match(service, /User=copilot/);
+  assert.match(service, /ExecStart=\/usr\/local\/bin\/arcade-poker-pool-dispatch\.sh/);
+  assert.match(service, /Environment=POKER_BOT_REFILL_MODE=dry-run/);
+  assert.doesNotMatch(service, /SUPABASE|DATABASE_URL|psql|SQL/);
+  assert.match(timer, /OnCalendar=.*00\/3/);
+  assert.doesNotMatch(timer, /ExecStart|workflow_dispatch/);
+
+  const pokerInstall = bootstrap.match(/install -D[^\n]+arcade-poker-pool-dispatch[^\n]+/g) || [];
+  assert.equal(pokerInstall.length, 3);
+  assert.doesNotMatch(bootstrap, /enable\s+--now\s+arcade-poker-pool-dispatch|start\s+arcade-poker-pool-dispatch/);
+  assert.match(bootstrap, /fresh-host artifacts only/);
+  assert.match(bootstrap, /existing live hosts require the separate/);
+});
+
 test("infra VPS environment examples expose only the audited variable names without live secrets", () => {
   const expectedProductionKeys = [
     "WS_AUTH_HS256_SECRET",
