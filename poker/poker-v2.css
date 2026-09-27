@@ -66,6 +66,12 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat-avatar[data-avatar-variant="panda-pink"]{background:linear-gradient(145deg,#be185d,#f9a8d4);}
 .poker-seat-avatar__image{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:2;}
 .poker-seat-avatar__initials{position:relative; z-index:1;}
+@keyframes poker-avatar-bounce{0%{transform:translateY(0) scale(1);}40%{transform:translateY(-6px) scale(1.04);}100%{transform:translateY(0) scale(1);}}
+@keyframes poker-avatar-tilt{0%{transform:rotate(0deg);}30%{transform:rotate(-6deg);}70%{transform:rotate(4deg);}100%{transform:rotate(0deg);}}
+@keyframes poker-avatar-shake{0%,100%{transform:translateX(0);}25%{transform:translateX(-4px);}50%{transform:translateX(4px);}75%{transform:translateX(-2px);}}
+.poker-seat-avatar--react-bounce{animation:poker-avatar-bounce 450ms cubic-bezier(0.2,0.8,0.2,1);}
+.poker-seat-avatar--react-tilt{animation:poker-avatar-tilt 450ms ease-in-out;}
+.poker-seat-avatar--react-shake{animation:poker-avatar-shake 450ms ease-in-out;}
 .poker-auto-rebuy-indicator{position:absolute;left:calc(50% + 36px);top:4px;z-index:8;display:flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid rgba(255,223,180,0.34);border-radius:50%;background:rgba(8,16,26,0.9);color:#bcefd8;font-size:0.72rem;font-weight:800;line-height:1;box-shadow:0 4px 9px rgba(0,0,0,0.32);pointer-events:none;}
 .poker-auto-rebuy-toast{border:1px solid rgba(119,224,177,0.46);border-radius:999px;background:linear-gradient(180deg,rgba(12,50,38,0.96),rgba(6,24,20,0.98));box-shadow:0 8px 18px rgba(0,0,0,0.42),inset 0 1px 1px rgba(220,255,237,0.14);color:#d5ffe5;font-size:0.7rem;font-weight:800;line-height:1;white-space:nowrap;pointer-events:none;}
 .poker-auto-rebuy-toast--avatar{position:absolute;left:50%;top:-66px;z-index:40;padding:7px 10px;transform:translateX(-50%);}
@@ -575,7 +581,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 
 @media (max-width:479px){.poker-settlement-summary{width:min(36vw, 135px); max-height:132px; font-size:0.6rem;} .poker-settlement-summary__row{grid-template-columns:1fr; gap:2px;} .poker-settlement-summary__recipients{text-align:left;} .poker-seat-settlement-badge{max-width:112px;}}
 
-@media (prefers-reduced-motion:reduce){.poker-chip-fly,.poker-seat-turn-clock--warning,.poker-seat--active .poker-seat-avatar::before,.poker-seat-reaction-bubble--enter,.poker-seat-reaction-float,.poker-seat-target-reaction-flyout--enter,.poker-action-reaction .poker-reaction-menu{animation:none!important;}}
+@media (prefers-reduced-motion:reduce){.poker-chip-fly,.poker-seat-turn-clock--warning,.poker-seat--active .poker-seat-avatar::before,.poker-seat-reaction-bubble--enter,.poker-seat-reaction-float,.poker-seat-target-reaction-flyout--enter,.poker-action-reaction .poker-reaction-menu,.poker-seat-avatar--react-bounce,.poker-seat-avatar--react-tilt,.poker-seat-avatar--react-shake{animation:none!important;}}
 
 .poker-v2-xp-badge{position:fixed; top:calc(env(safe-area-inset-top) + 14px); right:calc(env(safe-area-inset-right) + 12px); z-index:30; min-width:58px; padding:8px 10px; border-radius:14px; border:1px solid rgba(255,223,180,0.34); background:linear-gradient(180deg, rgba(16,24,37,0.88), rgba(7,10,15,0.96)); color:#e8eefb; text-decoration:none; font-size:0.88rem; font-weight:700; text-align:center; box-shadow:0 9px 17px rgba(0,0,0,0.48), inset 0 1px 1px rgba(255,255,255,0.2);}
 
