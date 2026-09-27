@@ -63,7 +63,7 @@ Empty/young/oversized table; historical NULL registry table_id; missing table; n
 
 ## Success Criteria
 
-- **SC-001** All 98 source-tree versions reconciled: 54 existing Production, 44 individually classified (including any pending Stage feature migration), no unexplained history drift.
+- **SC-001** All 98 source-tree versions reconciled: 54 existing Production, 44 individually classified (including the #1018 feature migration reserved for separate Production equivalence), no unexplained history drift.
 - **SC-002** Disposable Production-equivalent contract passes and deployed WS no longer reports the missing lifecycle-column error after separately authorized catch-up.
 - **SC-003** All four classes have independent fresh Production canary evidence, with at most 2 transactions per archive and at most 2 escrow accounts; complete recovery verification and accounting invariants PASS.
 - **SC-004** PR B independently gates cap 5000 and scheduled activation; one normal scheduled invocation for each class is evidenced with exact SHA and target, with no concurrent destructive cycle.
