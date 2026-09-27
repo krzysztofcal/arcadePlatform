@@ -125,9 +125,13 @@ function createAdminUserPokerAccessHandler(deps = {}) {
           reason: preInvalidation?.reason || "unconfirmed"
         });
         return {
-          statusCode: 503,
+          statusCode: preInvalidation?.reason === "poker_access_mutation_pending" ? 409 : 503,
           headers: cors,
-          body: JSON.stringify({ error: "poker_access_pre_invalidation_failed" })
+          body: JSON.stringify({
+            error: preInvalidation?.reason === "poker_access_mutation_pending"
+              ? "poker_access_mutation_pending"
+              : "poker_access_pre_invalidation_failed"
+          })
         };
       }
 
