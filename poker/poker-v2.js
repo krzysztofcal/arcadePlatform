@@ -3267,10 +3267,6 @@
       var ownerUserId = currentSeatOwnerUserId(Number(seatNo));
       if (!bubble || !ownerUserId || bubble.ownerUserId !== ownerUserId) clearReactionBubble(seatNo);
     });
-    Object.keys(botAvatarReactionTimersBySeatNo).forEach(function(seatNo){
-      var ownerUserId = currentSeatOwnerUserId(Number(seatNo));
-      if (!ownerUserId) clearBotAvatarReaction(seatNo);
-    });
   }
 
   function closeReactionMenu(){
@@ -3388,7 +3384,7 @@
     var motion = resolveBotAvatarReactionMotion(reactionKey);
     if (!motion) return;
     var avatarEl = renderedSeatAvatars[seatNo];
-    if (!avatarEl || !avatarEl.classList) return;
+    if (!avatarEl || !avatarEl.classList || avatarEl.isConnected === false) return;
     clearBotAvatarReaction(seatNo);
     var motionClass = 'poker-seat-avatar--react-' + motion;
     avatarEl.classList.add(motionClass);
@@ -4256,6 +4252,7 @@
     if (els.scene && els.scene.dataset) els.scene.dataset.pokerMaxSeats = String(state.maxSeats);
     clearReactionBubblesWithChangedOwners();
     clearTargetedReactionEffectsWithChangedOwners();
+    clearBotAvatarReactions();
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
