@@ -51,6 +51,21 @@ Poker bots are implemented in the current runtime.
 - Images load from `/poker/assets/avatars/bots/` under the existing same-origin CSP policy. A failed image keeps the selected bot name and falls back to initials derived from that name.
 - Human public-profile avatars, guests, snapshots, poker persistence, and server runtime remain unchanged.
 - Authenticated Poker V2 users can locally hide reaction bubbles, reaction history, or bot reactions. These browser-only preferences are best-effort, user-scoped, and do not alter server reaction generation or gameplay; guest sessions always use in-memory defaults.
+- Bot avatar reaction motion (V1):
+  - In Poker V2, receiving an authoritative `table_reaction` event for an occupied bot seat (`senderIsBot === true`) triggers a short (~450 ms), purely cosmetic CSS animation on the bot's avatar node (`.poker-seat-avatar`).
+  - Motion categories are browser-mapped from the authoritative reaction key:
+    - `bounce` for positive or proud reactions (`hello`, `nice_hand`, `well_played`, `haha`, `wow`, `good_luck`, `thanks`, `cheers`, `gg`, `congrats`, `i_was_bluffing`);
+    - `tilt` for cheeky, puzzled, or thinking reactions (`nice_bluff`, `you_are_bluffing`, `lucky`, `thinking`, and `ambient_*`);
+    - `shake` for frustrated, defensive, or rushed reactions (`bad_beat`, `hurry_up`, `not_this_time`).
+  - Avatar motion is strictly ephemeral, local-only, and browser-scoped:
+    - It does not modify game state, turn deadlines, settlement, autoplay, accounting, or persistence.
+    - Human player avatars are never animated automatically (strict non-human isolation).
+    - Avatar motion respects `@media (prefers-reduced-motion: reduce)` (disabled via `animation: none !important`).
+    - Avatar motion is suppressed when the player disables "Bot reactions" in Table Settings (`botReactionsEnabled === false`).
+    - When "Reaction bubbles" are disabled (`reactionBubblesEnabled === false`), avatar motion still plays cleanly if bot reactions are enabled.
+  - Scope boundaries & follow-ups:
+    - Persona/identity-specific reaction profiles (e.g. Cowboy, Professor, Shark personality styling) are deferred to #804 ("Poker: Living NPCs").
+    - Missing server reaction classifiers (e.g. automated `bad_beat` / losing all-in detection) remain open backend scope in #796.
 
 ## Persisted seat fields used by bot flows
 

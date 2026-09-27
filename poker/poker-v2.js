@@ -254,6 +254,7 @@
   var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
   var reactionBubblesBySeatNo = {};
   var reactionBubbleNodesBySeatNo = {};
+  var botAvatarReactionTimersBySeatNo = {};
   var targetedReactionEffectsById = {};
   var targetedReactionEffectNodesById = {};
   var reactionRenderNodes = [];
@@ -3165,6 +3166,7 @@
     Object.keys(reactionBubbleNodesBySeatNo).forEach(function(seatNo){
       removeReactionBubbleNode(seatNo);
     });
+    clearBotAvatarReactions();
     Object.keys(targetedReactionEffectsById).forEach(function(effectId){
       var effect = targetedReactionEffectsById[effectId];
       if (effect && effect.timer) window.clearTimeout(effect.timer);
@@ -3205,6 +3207,28 @@
     delete reactionBubbleNodesBySeatNo[seatNo];
   }
 
+  function clearBotAvatarReaction(seatNo){
+    if (botAvatarReactionTimersBySeatNo[seatNo]){
+      window.clearTimeout(botAvatarReactionTimersBySeatNo[seatNo]);
+      delete botAvatarReactionTimersBySeatNo[seatNo];
+    }
+    var avatarEl = renderedSeatAvatars[seatNo];
+    if (avatarEl && avatarEl.classList){
+      avatarEl.classList.remove(
+        'poker-seat-avatar--react-bounce',
+        'poker-seat-avatar--react-tilt',
+        'poker-seat-avatar--react-shake'
+      );
+    }
+  }
+
+  function clearBotAvatarReactions(){
+    Object.keys(botAvatarReactionTimersBySeatNo).forEach(function(seatNo){
+      clearBotAvatarReaction(seatNo);
+    });
+    botAvatarReactionTimersBySeatNo = {};
+  }
+
   function clearReactionArtifacts(filter){
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
       var bubble = reactionBubblesBySeatNo[seatNo];
@@ -3242,6 +3266,10 @@
       var bubble = reactionBubblesBySeatNo[seatNo];
       var ownerUserId = currentSeatOwnerUserId(Number(seatNo));
       if (!bubble || !ownerUserId || bubble.ownerUserId !== ownerUserId) clearReactionBubble(seatNo);
+    });
+    Object.keys(botAvatarReactionTimersBySeatNo).forEach(function(seatNo){
+      var ownerUserId = currentSeatOwnerUserId(Number(seatNo));
+      if (!ownerUserId) clearBotAvatarReaction(seatNo);
     });
   }
 
@@ -3324,6 +3352,54 @@
     });
   }
 
+  function resolveBotAvatarReactionMotion(reactionKey){
+    switch (reactionKey){
+      case 'hello':
+      case 'nice_hand':
+      case 'well_played':
+      case 'haha':
+      case 'wow':
+      case 'good_luck':
+      case 'thanks':
+      case 'cheers':
+      case 'gg':
+      case 'congrats':
+      case 'i_was_bluffing':
+        return 'bounce';
+      case 'nice_bluff':
+      case 'you_are_bluffing':
+      case 'lucky':
+      case 'thinking':
+        return 'tilt';
+      case 'bad_beat':
+      case 'hurry_up':
+      case 'not_this_time':
+        return 'shake';
+      default:
+        if (typeof reactionKey === 'string' && reactionKey.indexOf('ambient_') === 0) return 'tilt';
+        return null;
+    }
+  }
+
+  function triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot){
+    if (senderIsBot !== true) return;
+    if (!socialPreferences.botReactionsEnabled) return;
+    if (!Number.isInteger(seatNo) || seatNo < 1) return;
+    var motion = resolveBotAvatarReactionMotion(reactionKey);
+    if (!motion) return;
+    var avatarEl = renderedSeatAvatars[seatNo];
+    if (!avatarEl || !avatarEl.classList) return;
+    clearBotAvatarReaction(seatNo);
+    var motionClass = 'poker-seat-avatar--react-' + motion;
+    avatarEl.classList.add(motionClass);
+    botAvatarReactionTimersBySeatNo[seatNo] = window.setTimeout(function(){
+      delete botAvatarReactionTimersBySeatNo[seatNo];
+      if (avatarEl && avatarEl.classList){
+        avatarEl.classList.remove(motionClass);
+      }
+    }, 450);
+  }
+
   function handleTableReaction(event){
     var payload = event && event.payload && typeof event.payload === 'object' ? event.payload : {};
     var seatNo = Number(payload.seatNo);
@@ -3343,7 +3419,10 @@
     var senderIsBot = !!(senderSeat && senderSeat.isBot === true);
     if (senderIsBot && !socialPreferences.botReactionsEnabled) return;
     appendReactionHistory(seatNo, getPublicDisplayName(senderSeat || { userId: ownerUserId }), reactionKey, ownerUserId, senderIsBot);
-    if (!socialPreferences.reactionBubblesEnabled) return;
+    if (!socialPreferences.reactionBubblesEnabled){
+      triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot);
+      return;
+    }
     if (hasTargetSeatNo && reactionKey === 'nice_hand'){
       var effectId = String(nextTargetedReactionEffectId++);
       var effect = {
@@ -3364,6 +3443,7 @@
       }, TARGETED_REACTION_EFFECT_TTL_MS);
       targetedReactionEffectsById[effectId] = effect;
       renderSeats();
+      triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot);
       return;
     }
     var previous = reactionBubblesBySeatNo[seatNo];
@@ -3376,6 +3456,7 @@
     }, REGULAR_REACTION_TTL_MS);
     reactionBubblesBySeatNo[seatNo] = bubble;
     renderSeats();
+    triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot);
   }
 
   function sendReaction(reactionKey){
@@ -5533,6 +5614,7 @@
     if (key === 'botReactionsEnabled' && !socialPreferences.botReactionsEnabled){
       clearReactionArtifacts(function(item){ return item && item.senderIsBot === true; });
       removeBotReactionHistory();
+      clearBotAvatarReactions();
     }
     if (socialPreferencesIdentity || key === 'celebrationsEnabled') persistSocialPreferences();
     renderSocialPreferences();
@@ -6415,11 +6497,11 @@
     syncSocialPreferencesIdentity(null);
     if (els.celebrationsPreference) els.celebrationsPreference.addEventListener('change', function(){ updateSocialPreference('celebrationsEnabled', els.celebrationsPreference.checked); });
     if (window.addEventListener) {
-      window.addEventListener('pagehide', function(){ clearCelebration(); resetWinStreakSession(); });
+      window.addEventListener('pagehide', function(){ clearCelebration(); resetWinStreakSession(); }); // xp-lifecycle-allow:poker-v2-celebration-pagehide(2027-01-01)
       window.addEventListener('scroll', positionCelebration, { passive: true });
     }
     if (els.actionBar) els.actionBar.addEventListener('pointerdown', deemphasizeCelebration);
-    document.addEventListener('visibilitychange', function(){ if (document.hidden) clearCelebration(); });
+    document.addEventListener('visibilitychange', function(){ if (document.hidden) clearCelebration(); }); // xp-lifecycle-allow:poker-v2-celebration-visibility(2027-01-01)
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches) clearCelebration(); });
     renderSocialPreferences();
