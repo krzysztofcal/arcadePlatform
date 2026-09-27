@@ -23,7 +23,7 @@
 ## Feature Readiness
 
 - [x] 21 FR + 6 SC mapped to 29 concrete future tasks; all tasks remain unchecked.
-- [x] Existing packages/flows reused; only fundamental deterministic tests, one local transaction suite.
+- [x] Existing packages/flows reused; only fundamental deterministic tests, one local transaction suite. T016/T019/T020 require small extensions of the existing workflow/VPS guard files for mutation authorization, dispatch-only wake-up, no VPS DB/SQL and fresh-only installation without activation; no new framework or broad suite.
 - [x] No stale sync blocker: live sync completed; T001 verifies no drift and separate implementation authority.
 - [x] Constitution checked before/after design; no runtime, schema migration or deploy in this docs change.
 

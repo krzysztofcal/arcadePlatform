@@ -35,6 +35,8 @@
 - [ ] CHK019 Are breaking impacts and shared Stage forward-only effects explicit? Is required manual exact-SHA WS Preview/workflow verification/smoke separate from a conditional Stage ledger-MINT canary requiring explicit user authorization, whose absence cannot block WS completion, with Production a wholly separate GO? [FR-021]
 - [ ] CHK020 Are tests fundamental, JS JSP/global compatible, logging klog-only, CSS one selector per line and future inline CSP SHA accounted for? [FR-020]
 
+- [ ] CHK021 Do T016/T019/T020 extend `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` and `ws-tests/infra-vps-workflow.guard.test.mjs` with minimal deterministic guards for workflow_dispatch-only, canonical repo/ref, actor/environment/feature gates, read-only default, separate Production GO and rejection of input-only authorization; exact VPS dispatch with no DB secrets/SQL; fresh-only installation without activation and separate existing-host install? Do tests avoid real dispatch/systemd/DB mutations and new frameworks/broad suites? [FR-014/020/021]
+
 ## Notes
 
 Live sync is complete, not an external blocker. CHK014 is a no-drift/approval check. No checkbox is evidence of executed tests or deployed changes. #869/#1017 remain unchanged; future RESTRICTED is out of scope.
