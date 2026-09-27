@@ -106,19 +106,73 @@ function createAdminUserPokerAccessHandler(deps = {}) {
       }
       const body = parseJsonBody(event.body);
       const userId = parseUuid(body.userId, "invalid_user_id");
-      const result = await updateAccess({
+      const requestedOverride = parseOverride(body.override);
+      const expectedRevision = body.expectedRevision ?? body.expected_revision;
+      const preInvalidation = await notifyAccessMutation({
         userId,
-        override: body.override,
-        expectedRevision: body.expectedRevision ?? body.expected_revision,
-        actorId: admin.userId,
-      });
-      const propagation = await notifyAccessMutation({
-        userId,
-        revision: result?.access?.revision ?? null,
+        override: requestedOverride,
+        expectedRevision,
+        phase: "invalidate",
         env,
         klog
       });
-      if (propagation?.skipped !== true && propagation?.ok !== true) {
+      if (preInvalidation?.skipped === true
+        || preInvalidation?.ok !== true
+        || preInvalidation?.invalidated !== true
+        || preInvalidation?.failClosed !== true) {
+        klog("admin_poker_access_pre_invalidation_failed", {
+          userId,
+          reason: preInvalidation?.reason || "unconfirmed"
+        });
+        return {
+          statusCode: 503,
+          headers: cors,
+          body: JSON.stringify({ error: "poker_access_pre_invalidation_failed" })
+        };
+      }
+
+      let result;
+      try {
+        result = await updateAccess({
+          userId,
+          override: requestedOverride,
+          expectedRevision,
+          actorId: admin.userId,
+        });
+      } catch (error) {
+        // The WS fail-closed marker must not linger after a transaction that
+        // definitely did not commit. If this recovery refresh is unavailable,
+        // the marker remains fail-closed until a later authoritative refresh.
+        try {
+          await notifyAccessMutation({
+            userId,
+            override: requestedOverride,
+            phase: "refresh",
+            releasePending: true,
+            env,
+            klog
+          });
+        } catch (refreshError) {
+          klog("admin_poker_access_failure_refresh_failed", {
+            userId,
+            reason: refreshError?.message || "refresh_failed"
+          });
+        }
+        throw error;
+      }
+      const propagation = await notifyAccessMutation({
+        userId,
+        override: requestedOverride,
+        revision: result?.access?.revision ?? null,
+        expectedRevision,
+        phase: "refresh",
+        env,
+        klog
+      });
+      if (propagation?.skipped === true
+        || propagation?.ok !== true
+        || propagation?.refreshed !== true
+        || propagation?.failClosed === true) {
         klog("admin_poker_access_propagation_failed", {
           userId,
           revision: result?.access?.revision ?? null,

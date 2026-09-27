@@ -81,6 +81,7 @@ import {
 import {
   isFreshAccessSnapshot,
   isFreshPolicySnapshot,
+  normalizeAccessOverride,
   readPokerAccessPolicy,
   readPokerAccessSnapshot,
   readPokerAccessSnapshots
@@ -371,6 +372,7 @@ const TERMINAL_JANITOR_SUPPRESSION_TTL_MS = 10 * 60_000;
 const TERMINAL_JANITOR_SUPPRESSION_MAX = 1_000;
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
 const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
+const pendingPokerAccessMutations = new Map();
 const botReactionOverrideStore = createBotReactionOverrideStore({ env: process.env });
 let openTableJanitorCursor = null;
 
@@ -792,6 +794,10 @@ function sendPokerAccessFrame(ws, connState, access, { requestId = null, reason 
 
 async function refreshConnectionPokerAccess(ws, connState, { requestId = null, force = false, reason = "cache_refresh" } = {}) {
   if (!connState?.session?.userId || connState.session.identityMode === "guest") return null;
+  if (pendingPokerAccessMutations.has(connState.session.userId)
+    || tableManager.isPokerAccessMutationFailClosed?.(connState.session.userId) === true) {
+    return null;
+  }
   const cached = connState.pokerAccess;
   if (!force && cached && isFreshAccessSnapshot(cached) && isFreshPolicySnapshot(cached.policy)) {
     sendPokerAccessFrame(ws, connState, cached, { requestId, reason });
@@ -826,27 +832,136 @@ async function refreshConnectionPokerAccess(ws, connState, { requestId = null, f
   }
 }
 
-async function refreshPokerAccessForUser(userId) {
+function beginPokerAccessMutation(userId, expectedRevision = null, desiredOverride = null) {
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!normalizedUserId) {
+    return { ok: false, invalidated: false, failClosed: false, reason: "invalid_user_id" };
+  }
+  const parsedExpectedRevision = Number(expectedRevision);
+  const requestedMinimumRevision = Number.isSafeInteger(parsedExpectedRevision) && parsedExpectedRevision > 0
+    && parsedExpectedRevision < Number.MAX_SAFE_INTEGER
+    ? parsedExpectedRevision + 1
+    : null;
+  const normalizedOverride = normalizeAccessOverride(desiredOverride);
+  const previous = pendingPokerAccessMutations.get(normalizedUserId);
+  const previousMinimumRevision = Number.isSafeInteger(Number(previous?.minimumRevision))
+    && Number(previous.minimumRevision) > 0
+    ? Number(previous.minimumRevision)
+    : null;
+  const minimumRevision = requestedMinimumRevision === null
+    ? previousMinimumRevision
+    : previousMinimumRevision === null
+      ? requestedMinimumRevision
+      : Math.max(previousMinimumRevision, requestedMinimumRevision);
+  const pending = {
+    expectedRevision: Number.isSafeInteger(parsedExpectedRevision) && parsedExpectedRevision > 0
+      ? parsedExpectedRevision
+      : (previous?.expectedRevision ?? null),
+    minimumRevision,
+    ...(normalizedOverride || previous?.desiredOverride
+      ? { desiredOverride: normalizedOverride || previous.desiredOverride }
+      : {})
+  };
+  pendingPokerAccessMutations.set(normalizedUserId, pending);
+  const failClosed = typeof tableManager.setPokerAccessMutationFailClosed === "function"
+    ? tableManager.setPokerAccessMutationFailClosed(normalizedUserId, true)
+    : { ok: false, invalidated: 0, failClosed: false };
+  if (failClosed?.ok !== true || failClosed.failClosed !== true) {
+    pendingPokerAccessMutations.delete(normalizedUserId);
+    return { ok: false, invalidated: false, failClosed: false, reason: "access_fail_closed_unavailable" };
+  }
+  for (const socket of sessionStore.connectionsForUser(normalizedUserId) || []) {
+    const state = socket?.__connState;
+    if (state && state.session?.identityMode !== "guest") state.pokerAccess = null;
+  }
+  return {
+    ok: true,
+    phase: "invalidate",
+    invalidated: true,
+    invalidatedTables: Number(failClosed.invalidated) || 0,
+    failClosed: true,
+    pending: true,
+    minimumRevision,
+    ...(pending.desiredOverride ? { desiredOverride: pending.desiredOverride } : {})
+  };
+}
+
+async function refreshPokerAccessForUser(userId, {
+  expectedRevision = null,
+  expectedOverride = null,
+  releasePending = false
+} = {}) {
   const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
   if (!normalizedUserId) return { ok: false, refreshed: false, invalidated: false, reason: "invalid_user_id" };
-  const invalidated = typeof tableManager.invalidatePokerAccessForUser === "function"
-    ? tableManager.invalidatePokerAccessForUser(normalizedUserId)
-    : 0;
+  if (!pendingPokerAccessMutations.has(normalizedUserId)) {
+    const invalidation = beginPokerAccessMutation(normalizedUserId, expectedRevision, expectedOverride);
+    if (invalidation.ok !== true) return invalidation;
+  }
   if (!hasSupabaseDbUrl) {
-    return { ok: true, refreshed: false, invalidated: true, failClosed: true, reason: "database_unavailable" };
+    return { ok: true, refreshed: false, invalidated: true, failClosed: true, pending: true, reason: "database_unavailable" };
   }
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    const access = await beginSqlWs(async (tx) => {
+    const loaded = await beginSqlWs(async (tx) => {
       const [snapshot, policy] = await Promise.all([
         readPokerAccessSnapshot(tx, { userId: normalizedUserId }),
         readPokerAccessPolicy(tx)
       ]);
       if (!snapshot || !policy) return null;
-      return { ...snapshot, policy, slowThresholdCh: policy.slowThresholdCh, policyRevision: policy.revision };
+      let slowOnlyTableIds = [];
+      if (snapshot.schemaBacked === true && snapshot.effectiveClass === "SLOW") {
+        const rows = await tx.unsafe(`
+update public.poker_tables as t
+   set is_slow_only = true
+ where t.lifecycle_kind = 'STANDARD'
+   and t.is_slow_only is not true
+   and exists (
+     select 1
+       from public.poker_seats as s
+      where s.table_id = t.id
+        and s.user_id = $1::uuid
+        and s.status = 'ACTIVE'
+        and coalesce(s.is_bot, false) = false
+   )
+returning t.id;
+`, [normalizedUserId]);
+        slowOnlyTableIds = Array.isArray(rows)
+          ? rows.map((row) => typeof row?.id === "string" ? row.id.trim() : "").filter(Boolean)
+          : [];
+      }
+      return {
+        access: { ...snapshot, policy, slowThresholdCh: policy.slowThresholdCh, policyRevision: policy.revision },
+        slowOnlyTableIds
+      };
     });
-    if (!access) {
-      return { ok: true, refreshed: false, invalidated: true, failClosed: true, reason: "access_refresh_unavailable" };
+    if (!loaded?.access) {
+      return { ok: true, refreshed: false, invalidated: true, failClosed: true, pending: true, reason: "access_refresh_unavailable" };
+    }
+    const access = loaded.access;
+    const pending = pendingPokerAccessMutations.get(normalizedUserId);
+    const pendingRevision = Number(pending?.minimumRevision);
+    const pendingExpectedRevision = Number(pending?.expectedRevision);
+    const desiredOverride = pending?.desiredOverride || normalizeAccessOverride(expectedOverride);
+    const committedMutationReady = !pending
+      || pending.minimumRevision === null
+      || (Number(access.revision) === pendingRevision
+        && (!desiredOverride || access.override === desiredOverride));
+    const safeRollbackRelease = releasePending !== true
+      || pending?.expectedRevision === null
+      || Number(access.revision) === pendingExpectedRevision;
+    if ((!releasePending && !committedMutationReady) || (releasePending && !safeRollbackRelease)) {
+      return {
+        ok: true,
+        refreshed: false,
+        invalidated: true,
+        failClosed: true,
+        pending: true,
+        revision: access.revision,
+        reason: releasePending ? "access_revision_changed" : "access_revision_not_ready"
+      };
+    }
+    if (loaded.slowOnlyTableIds.length > 0) {
+      tableManager.markSlowOnlyTables?.(loaded.slowOnlyTableIds);
     }
     tableManager.cachePokerAccessForUser(normalizedUserId, access, access.policy, Date.now());
     for (const socket of sessionStore.connectionsForUser(normalizedUserId) || []) {
@@ -855,10 +970,20 @@ async function refreshPokerAccessForUser(userId) {
       state.pokerAccess = access;
       sendPokerAccessFrame(socket, state, access, { reason: "admin_mutation_refresh" });
     }
-    return { ok: true, refreshed: true, invalidated: invalidated > 0, failClosed: false, revision: access.revision };
+    pendingPokerAccessMutations.delete(normalizedUserId);
+    tableManager.setPokerAccessMutationFailClosed?.(normalizedUserId, false);
+    return {
+      ok: true,
+      refreshed: true,
+      invalidated: true,
+      failClosed: false,
+      pending: false,
+      revision: access.revision,
+      slowOnlyTableIds: loaded.slowOnlyTableIds
+    };
   } catch (error) {
     klogSafe("ws_poker_access_admin_refresh_failed", { code: error?.code || "access_refresh_failed" });
-    return { ok: true, refreshed: false, invalidated: true, failClosed: true, reason: error?.code || "access_refresh_failed" };
+    return { ok: true, refreshed: false, invalidated: true, failClosed: true, pending: true, reason: error?.code || "access_refresh_failed" };
   }
 }
 
@@ -909,6 +1034,19 @@ async function refreshActivePokerAccess() {
     settledBotFundingSnapshot = refreshed?.funding || null;
     if (!refreshed?.policy || !(refreshed.snapshots instanceof Map)) return;
     for (const [userId, snapshot] of refreshed.snapshots.entries()) {
+      const pending = pendingPokerAccessMutations.get(userId);
+      if (pending) {
+        const expectedRevision = Number(pending.expectedRevision);
+        const minimumRevision = Number(pending.minimumRevision);
+        const desiredOverride = pending.desiredOverride || null;
+        const noCommitObserved = pending.expectedRevision === null
+          ? pending.minimumRevision === null
+          : Number(snapshot.revision) === expectedRevision;
+        const committedMutationObserved = pending.minimumRevision !== null
+          && Number(snapshot.revision) === minimumRevision
+          && (!desiredOverride || snapshot.override === desiredOverride);
+        if (!noCommitObserved && !committedMutationObserved) continue;
+      }
       const access = {
         ...snapshot,
         policy: refreshed.policy,
@@ -921,6 +1059,10 @@ async function refreshActivePokerAccess() {
         if (!state || state.session?.identityMode === "guest") continue;
         state.pokerAccess = access;
         sendPokerAccessFrame(socket, state, access, { reason: "interval_refresh" });
+      }
+      if (pending) {
+        pendingPokerAccessMutations.delete(userId);
+        tableManager.setPokerAccessMutationFailClosed?.(userId, false);
       }
     }
   } catch (error) {
@@ -4426,8 +4568,19 @@ async function handleInternalPokerAccessRefresh(req, res) {
       sendInternalJson(res, 400, { error: "invalid_user_id" });
       return;
     }
-    const result = await refreshPokerAccessForUser(userId);
-    sendInternalJson(res, result.ok === true ? 200 : 503, { ...result, userId });
+    const phase = payload?.phase === "invalidate" ? "invalidate" : "refresh";
+    if (payload?.phase !== undefined && payload.phase !== "invalidate" && payload.phase !== "refresh") {
+      sendInternalJson(res, 400, { error: "invalid_phase" });
+      return;
+    }
+    const result = phase === "invalidate"
+      ? beginPokerAccessMutation(userId, payload?.expectedRevision, payload?.override)
+      : await refreshPokerAccessForUser(userId, {
+          expectedRevision: payload?.expectedRevision,
+          expectedOverride: payload?.override,
+          releasePending: payload?.releasePending === true
+        });
+    sendInternalJson(res, result.ok === true ? 200 : 503, { ...result, phase, userId });
   } catch (error) {
     const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "access_refresh_failed");
     sendInternalJson(res, code === "invalid_json" ? 400 : 503, { error: code });

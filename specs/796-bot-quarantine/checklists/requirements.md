@@ -25,7 +25,7 @@
 - [x] 21 FR + 7 SC map the original 29 tasks plus the additive T030–T036 manual RESTRICTED sequence; T001–T029 remain historical evidence and T036 is the new exact-SHA WS gate.
 - [x] Existing packages/flows reused; only fundamental deterministic tests, one local transaction suite. T016/T019/T020 require small extensions of the existing workflow/VPS guard files for mutation authorization, dispatch-only wake-up, no VPS DB/SQL and fresh-only installation without activation; no new framework or broad suite.
 - [x] No stale sync blocker: live sync completed; T001 verifies no drift and separate implementation authority.
-- [x] Constitution checked before/after design; implementation remains within the approved scope. The original Stage migration apply completed (97→98, then 98/0; smoke PASS), and the RESTRICTED CHECK extension is forward-only and classified for a new automatic Stage Apply effect; no Stage refill/MINT or Production operation is authorized.
+- [x] Constitution checked before/after design; implementation remains within the approved scope. The original Stage migration apply completed (97→98, then 98/0; smoke PASS), and the RESTRICTED CHECK extension is forward-only and classified for a new automatic Stage Apply effect; the Stage-only refill/MINT canary is authorized only post-merge and remains unrun, while Production operation is unauthorized.
 
 ## Notes
 
@@ -37,4 +37,4 @@ This built-in specify checklist records documentation quality and implementation
 - [x] Fresh restricted admission is ordinary, bot-free STANDARD-only with zero new bot funding; financed rejoin, settlement, leave and cash-out remain legal.
 - [x] Existing lobby/Quick Seat paths use minimal bot occupancy compatibility; CONTINUOUS_BOT remains NORMAL and is not a fresh restricted target.
 - [x] Applied migration `20260927100000...` is immutable; `20260927110000_poker_force_restricted.sql` is the only forward-only schema extension and is in the exhaustive manifest as `needs-production-equivalent`.
-- [ ] New exact-SHA WS Preview/runtime smoke (T036) is still required after the runtime amendment; Stage refill/MINT, VPS activation, Production and merge remain separate unauthorized gates.
+- [ ] New exact-SHA WS Preview/runtime smoke (T036) is still required after the runtime amendment; Stage refill/MINT is authorized only post-merge and remains unrun, while VPS activation, Production and merge remain separate unauthorized gates.

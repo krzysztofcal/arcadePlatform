@@ -284,12 +284,17 @@ export async function notifyWsLobbyMaterialize({
 export async function notifyWsPokerAccessMutation({
   userId,
   revision = null,
+  phase = "refresh",
+  expectedRevision = null,
+  override = null,
+  releasePending = false,
   env = process.env,
   fetchImpl = globalThis.fetch,
   klog = () => {}
 } = {}) {
   const normalizedUserId = normalizeText(userId);
   if (!normalizedUserId) return { ok: false, skipped: true, reason: "invalid_user_id" };
+  const normalizedPhase = phase === "invalidate" ? "invalidate" : "refresh";
   const baseUrl = resolveBaseUrl(env);
   if (!baseUrl) return { ok: false, skipped: true, reason: "ws_internal_base_url_missing" };
   if (typeof fetchImpl !== "function") {
@@ -307,7 +312,18 @@ export async function notifyWsPokerAccessMutation({
     const response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/internal/admin/poker-access-refresh`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ userId: normalizedUserId, revision }),
+      body: JSON.stringify({
+        userId: normalizedUserId,
+        revision,
+        phase: normalizedPhase,
+        ...(Number.isSafeInteger(Number(expectedRevision)) && Number(expectedRevision) > 0
+          ? { expectedRevision: Number(expectedRevision) }
+          : {}),
+        ...(typeof override === "string" && override.trim()
+          ? { override: override.trim().toUpperCase() }
+          : {}),
+        ...(releasePending === true ? { releasePending: true } : {})
+      }),
       signal: controller.signal
     });
     if (!response?.ok) {
@@ -322,9 +338,13 @@ export async function notifyWsPokerAccessMutation({
     return {
       ok: payload?.ok === true,
       skipped: false,
+      phase: payload?.phase === "invalidate" ? "invalidate" : "refresh",
       invalidated: payload?.invalidated === true,
       refreshed: payload?.refreshed === true,
-      failClosed: payload?.failClosed === true
+      failClosed: payload?.failClosed === true,
+      pending: payload?.pending === true,
+      revision: Number.isSafeInteger(Number(payload?.revision)) ? Number(payload.revision) : null,
+      reason: typeof payload?.reason === "string" ? payload.reason : null
     };
   } catch (error) {
     klog("poker_ws_access_refresh_notify_error", {

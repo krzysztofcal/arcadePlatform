@@ -210,6 +210,77 @@ test("Admin access invalidation makes the next settled rollover fail closed for 
   assert.deepEqual(prepared.managedBotTopUps ?? [], []);
 });
 
+test("Admin FORCE_SLOW propagation makes the ordinary table sticky SLOW-only without resetting on later overrides", () => {
+  const tableId = "table_admin_force_slow_sticky";
+  const userId = "user_admin_force_slow_sticky";
+  const manager = createTableManager({ maxSeats: 4 });
+  assert.equal(manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, buyIn: 100, lifecycleKind: "STANDARD", isSlowOnly: false },
+    coreState: {
+      version: 2,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId, seat: 1 }, { userId: "human_b", seat: 2 }],
+      seats: { [userId]: 1, human_b: 2 },
+      seatDetailsByUserId: {
+        [userId]: { isBot: false },
+        human_b: { isBot: false }
+      },
+      pokerState: { phase: "SETTLED", handId: "hand_force_slow_sticky", stacks: { [userId]: 100, human_b: 100 } }
+    }
+  }).ok, true);
+
+  assert.equal(manager.markSlowOnlyTables([tableId]).marked, 1);
+  assert.equal(manager.tableMeta(tableId).isSlowOnly, true);
+  assert.equal(manager.markSlowOnlyTables([tableId]).marked, 0);
+
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "FORCE_NORMAL", effectiveClass: "NORMAL", revision: 2,
+    loadedAtMs: 100, expiresAtMs: 30_100
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  assert.equal(manager.tableMeta(tableId).isSlowOnly, true);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 3,
+    loadedAtMs: 200, expiresAtMs: 30_200
+  }, null, 200);
+  assert.equal(manager.tableMeta(tableId).isSlowOnly, true);
+});
+
+test("Admin access pre-invalidation keeps settled rollover fail-closed until authoritative refresh", () => {
+  const tableId = "table_admin_access_pending_barrier";
+  const userId = "user_admin_access_pending_barrier";
+  const manager = createTableManager({ maxSeats: 4 });
+  assert.equal(manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, buyIn: 100, isSlowOnly: false },
+    coreState: {
+      version: 2,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId, seat: 1 }, { userId: "bot_pending", seat: 2 }],
+      seats: { [userId]: 1, bot_pending: 2 },
+      seatDetailsByUserId: { [userId]: { isBot: false }, bot_pending: { isBot: true } },
+      pokerState: { phase: "SETTLED", handId: "hand_pending_barrier", stacks: { [userId]: 100, bot_pending: 0 } }
+    }
+  }).ok, true);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 7,
+    loadedAtMs: 100, expiresAtMs: 30_100
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  assert.equal(manager.setPokerAccessMutationFailClosed(userId, true).ok, true);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, false);
+  const prepared = manager.prepareSettledHandRollover({ tableId, nowMs: 200, allowBotFunding: false });
+  assert.deepEqual(prepared.replacementFundings ?? [], []);
+  assert.deepEqual(prepared.managedBotTopUps ?? [], []);
+  manager.setPokerAccessMutationFailClosed(userId, false);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, false);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "FORCE_RESTRICTED", effectiveClass: "RESTRICTED", revision: 8,
+    loadedAtMs: 300, expiresAtMs: 30_300
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: 300, expiresAtMs: 30_300 }, 300);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 300 }).known, true);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 300 }).effectiveRestricted, true);
+});
+
 test("bots-only bootstrap requires both trusted managed metadata and explicit internal intent", () => {
   const tableId = "table_managed_bootstrap_gate";
   const manager = createTableManager({ maxSeats: 6 });

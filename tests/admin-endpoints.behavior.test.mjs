@@ -83,7 +83,9 @@ test("poker access admin requires an acknowledged WS cache refresh after commit"
     updatePokerAccess: async () => ({ access: { revision: 9, override: "FORCE_RESTRICTED" } }),
     notifyWsPokerAccessMutation: async (payload) => {
       notifications.push(payload);
-      return { ok: true, invalidated: true, refreshed: true, skipped: false };
+      return payload.phase === "invalidate"
+        ? { ok: true, invalidated: true, refreshed: false, failClosed: true, skipped: false }
+        : { ok: true, invalidated: true, refreshed: true, failClosed: false, skipped: false };
     }
   });
   const response = await handler({
@@ -92,14 +94,21 @@ test("poker access admin requires an acknowledged WS cache refresh after commit"
     body: JSON.stringify({ userId: "00000000-0000-4000-8000-000000000020", override: "FORCE_RESTRICTED", expectedRevision: 8 })
   });
   assert.equal(response.statusCode, 200);
-  assert.equal(notifications[0].revision, 9);
+  assert.equal(notifications[0].phase, "invalidate");
+  assert.equal(notifications[0].override, "FORCE_RESTRICTED");
+  assert.equal(notifications[0].expectedRevision, 8);
+  assert.equal(notifications[1].phase, "refresh");
+  assert.equal(notifications[1].override, "FORCE_RESTRICTED");
+  assert.equal(notifications[1].revision, 9);
   assert.equal(JSON.parse(response.body).propagation.refreshed, true);
 
   const failedHandler = createAdminUserPokerAccessHandler({
     env: { CHIPS_ENABLED: "1" },
     requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
     updatePokerAccess: async () => ({ access: { revision: 10, override: "AUTO" } }),
-    notifyWsPokerAccessMutation: async () => ({ ok: false, skipped: false, reason: "timeout" })
+    notifyWsPokerAccessMutation: async (payload) => payload.phase === "invalidate"
+      ? { ok: true, invalidated: true, failClosed: true, skipped: false }
+      : { ok: false, skipped: false, reason: "timeout" }
   });
   const failed = await failedHandler({
     httpMethod: "PATCH",
@@ -108,6 +117,50 @@ test("poker access admin requires an acknowledged WS cache refresh after commit"
   });
   assert.equal(failed.statusCode, 503);
   assert.equal(JSON.parse(failed.body).error, "poker_access_propagation_failed");
+});
+
+test("poker access admin refuses to commit when WS pre-invalidation is unavailable", async () => {
+  let writes = 0;
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    updatePokerAccess: async () => { writes += 1; return { access: { revision: 11 } }; },
+    notifyWsPokerAccessMutation: async () => ({ ok: false, skipped: false, reason: "timeout" })
+  });
+  const response = await handler({
+    httpMethod: "PATCH",
+    headers: {},
+    body: JSON.stringify({ userId: "00000000-0000-4000-8000-000000000020", override: "FORCE_RESTRICTED", expectedRevision: 10 })
+  });
+  assert.equal(response.statusCode, 503);
+  assert.equal(JSON.parse(response.body).error, "poker_access_pre_invalidation_failed");
+  assert.equal(writes, 0);
+});
+
+test("poker access admin refreshes after a failed DB commit to release only an authoritative fail-closed barrier", async () => {
+  const phases = [];
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    updatePokerAccess: async () => {
+      const error = new Error("db_unavailable");
+      error.status = 503;
+      error.code = "db_unavailable";
+      throw error;
+    },
+    notifyWsPokerAccessMutation: async (payload) => {
+      phases.push(payload);
+      return { ok: true, invalidated: true, failClosed: payload.phase === "invalidate", refreshed: payload.phase === "refresh", skipped: false };
+    }
+  });
+  const response = await handler({
+    httpMethod: "PATCH",
+    headers: {},
+    body: JSON.stringify({ userId: "00000000-0000-4000-8000-000000000020", override: "FORCE_SLOW", expectedRevision: 10 })
+  });
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(phases.map((payload) => payload.phase), ["invalidate", "refresh"]);
+  assert.equal(phases[1].releasePending, true);
 });
 
 test("poker access admin preserves automatic SLOW while applying an optimistic override revision", async () => {

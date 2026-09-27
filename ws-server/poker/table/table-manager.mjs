@@ -360,6 +360,7 @@ export function createTableManager({
   const pendingBootstrapByTableId = new Map();
   const retiringTableIds = new Set();
   const connStateBySocket = new Map();
+  const pokerAccessFailClosedUserIds = new Set();
 
   function ensurePublicProfileState(table) {
     if (!table) return;
@@ -671,6 +672,41 @@ export function createTableManager({
     return invalidated;
   }
 
+  function setPokerAccessMutationFailClosed(userId, failClosed = true) {
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!normalizedUserId) return { ok: false, invalidated: 0, failClosed: false };
+    if (failClosed === true) {
+      pokerAccessFailClosedUserIds.add(normalizedUserId);
+      return {
+        ok: true,
+        invalidated: invalidatePokerAccessForUser(normalizedUserId),
+        failClosed: true
+      };
+    }
+    pokerAccessFailClosedUserIds.delete(normalizedUserId);
+    return { ok: true, invalidated: 0, failClosed: false };
+  }
+
+  function isPokerAccessMutationFailClosed(userId) {
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    return Boolean(normalizedUserId && pokerAccessFailClosedUserIds.has(normalizedUserId));
+  }
+
+  function markSlowOnlyTables(tableIds = []) {
+    const normalizedTableIds = [...new Set((Array.isArray(tableIds) ? tableIds : [])
+      .map((tableId) => typeof tableId === "string" ? tableId.trim() : "")
+      .filter(Boolean))];
+    let marked = 0;
+    for (const tableId of normalizedTableIds) {
+      const table = tables.get(tableId);
+      if (!table || table.tableMeta?.lifecycleKind !== "STANDARD") continue;
+      if (table.tableMeta?.isSlowOnly === true) continue;
+      table.tableMeta = normalizeTableMeta({ ...table.tableMeta, isSlowOnly: true }, table?.coreState?.maxSeats || maxSeats);
+      marked += 1;
+    }
+    return { ok: true, marked, tableIds: normalizedTableIds };
+  }
+
   function settledAccessStatus(tableId, { nowMs = Date.now() } = {}) {
     const table = tables.get(tableId);
     if (!table) return { known: false, reason: "table_not_found" };
@@ -681,6 +717,8 @@ export function createTableManager({
       .map((member) => member?.userId)
       .filter(Boolean);
     if (humanIds.length === 0) return { known: true, transitions: [], effectiveRestricted: false };
+    const failClosedUserId = humanIds.find((userId) => pokerAccessFailClosedUserIds.has(userId));
+    if (failClosedUserId) return { known: false, reason: "access_mutation_pending", userId: failClosedUserId };
     if (!isFreshPolicySnapshot(table.pokerAccessPolicy, nowMs)) return { known: false, reason: "access_policy_cache_unknown" };
     for (const userId of humanIds) {
       if (!isFreshAccessSnapshot(table.pokerAccessByUserId.get(userId), nowMs)) {
@@ -2761,6 +2799,9 @@ export function createTableManager({
     cachePokerAccess,
     cachePokerAccessForUser,
     invalidatePokerAccessForUser,
+    setPokerAccessMutationFailClosed,
+    isPokerAccessMutationFailClosed,
+    markSlowOnlyTables,
     settledAccessStatus,
     classifySettledAccess
   };

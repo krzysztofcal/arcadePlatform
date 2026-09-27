@@ -44,7 +44,7 @@ Extend ledger validation with a backend-only scheduled-pool capability: exactly 
 
 VPS contains only GitHub dispatch credential, repo/ref/environment configuration, no DB secret/SQL. Dedicated workflow uses workflow_dispatch only, validated actor/repo/ref and separate Stage/Production environment gates; dry-run/read-only is default. Fresh/rebuilt VPS only: bootstrap.sh may install reviewed new artifacts disabled; never run it on an existing live VPS. Existing hosts use a separate owner-approved targeted upgrade/install flow following infra/vps/README.md and docs/chips-ledger-stage-automation.md, with read-only inventory and rollback manifest before installation. Installation and activation are separate: no code deploy/install/bootstrap automatically enables or starts the new timer or dispatches a workflow.
 
-The WS runtime gate (manual exact-runtime-SHA WS Preview Deploy, verified workflow success and targeted smoke) is independent of a Stage refill canary. A canary performs real Stage ledger MINT and is conditional on separate explicit user authorization; no consent means “not authorized / not run”, not a failed or blocked WS gate. Production remains a wholly separate GO.
+The WS runtime gate (manual exact-runtime-SHA WS Preview Deploy, verified workflow success and targeted smoke) is independent of a Stage refill canary. The Stage-only canary performs real Stage ledger MINT, is authorized for post-merge execution and remains `AUTHORIZED / NOT RUN`; it is not a failed or blocked WS gate. Production remains a wholly separate GO.
 
 ## 6. Admin interfaces
 

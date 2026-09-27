@@ -1422,7 +1422,46 @@ test("internal poker access refresh route invalidates fail-closed when the WS da
       refreshed: false,
       invalidated: true,
       failClosed: true,
+      pending: true,
       reason: "database_unavailable",
+      phase: "refresh",
+      userId
+    });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("internal poker access invalidate route requires the internal token and establishes a fail-closed phase", async () => {
+  const token = "internal-access-invalidate-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-access-refresh`;
+  const userId = "00000000-0000-4000-8000-000000000010";
+  try {
+    await waitForListening(child, 5000);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ userId, phase: "invalidate", expectedRevision: 7, override: "FORCE_RESTRICTED" })
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      phase: "invalidate",
+      invalidated: true,
+      invalidatedTables: 0,
+      failClosed: true,
+      pending: true,
+      minimumRevision: 8,
+      desiredOverride: "FORCE_RESTRICTED",
       userId
     });
   } finally {
