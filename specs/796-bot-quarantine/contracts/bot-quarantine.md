@@ -1,6 +1,6 @@
 # Contracts: NORMAL/SLOW admission and periodic tier pools
 
-Historical filename retained for the PR link. This contract implements the requirements of [spec.md](../spec.md), sourced solely from live #1018. Local implementation follows it; environment gates and T027/T029 evidence remain separate.
+Historical filename retained for the PR link. This contract implements the requirements of [spec.md](../spec.md), sourced solely from live #1018. Local implementation follows it; T027/T028 evidence is complete and the exact-SHA WS/environment gates remain separate.
 
 ## 1. Effective access and cache
 
@@ -12,7 +12,7 @@ Admin response reports committed revision, `refreshIntervalSeconds=30`; clients 
 
 ## 2. Create / final JOIN / 4+4 contract
 
-Shared user-scoped PostgreSQL transaction advisory key: stable derivation of `poker-table-slots:v1` + canonical UUID, identical in Create/fallback/JOIN. Acquire before any count-consuming table/state/account locks; Quick Seat order is user→existing match lock→table/state→ordered accounts. Count query starts after lock acquisition under READ COMMITTED. Both adapters use one helper; no app-only lock or counter. Active lookup requires a narrow user_id-leading poker_seats access path, pending lookup a created_by-leading poker_tables path, each matched to the final status/participation predicate. Stop after five qualifying distinct tables, use selective indexed table-specific EXISTS checks, and never scan global tables/seats per fresh JOIN/Create. T027 records final query shape and local PostgreSQL EXPLAIN; an existing adequate index is reused only with that evidence, otherwise T002 adds the required narrow index.
+Shared user-scoped PostgreSQL transaction advisory key: stable derivation of `poker-table-slots:v1` + canonical UUID, identical in Create/fallback/JOIN. Acquire before any count-consuming table/state/account locks; Quick Seat order is user→existing match lock→table/state→ordered accounts. Count query starts after lock acquisition under READ COMMITTED. Both adapters use one helper; no app-only lock or counter. Active lookup requires a narrow user_id-leading poker_seats access path, pending lookup a created_by-leading poker_tables path, each matched to the final status/participation predicate. Stop after five qualifying distinct tables, use selective indexed table-specific EXISTS checks, and never scan global tables/seats per fresh JOIN/Create. T027 recorded the final query shape and local PostgreSQL EXPLAIN on the disposable fixture; an existing adequate index is reused only with that evidence, otherwise T002 adds the required narrow index.
 
 Create: authenticate owner, count pending as defined in data-model (the four-table cap covers both ordinary and `is_slow_only` `STANDARD` tables), reject fifth before INSERT table/state/ESCROW. Existing STANDARD empty initialization only, no classifier/seed/MINT. Trusted managed null-owner creation remains a separate existing internal path; public callers cannot impersonate it.
 

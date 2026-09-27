@@ -1,6 +1,6 @@
 # Data Model: NORMAL/SLOW per-tier pools
 
-This is the accepted schema contract implemented by the local migration in this worktree. Publishing that migration invokes the repository DB Stage Apply PR and may mutate shared Stage; it has not been applied here. [Spec](spec.md) and [contracts](contracts/bot-quarantine.md) define behavior. Use existing USER accounts, tables, seats, state and ledger; no new per-user budget or refill receipt entities.
+This is the accepted schema contract implemented by the local migration in this worktree. T027 applied the migration only inside a disposable local fixture; it has not been applied to Stage/Production or any persistent environment. Publishing that migration invokes the repository DB Stage Apply PR and may mutate shared Stage. [Spec](spec.md) and [contracts](contracts/bot-quarantine.md) define behavior. Use existing USER accounts, tables, seats, state and ledger; no new per-user budget or refill receipt entities.
 
 ## 1. Existing chips_accounts USER access fields
 

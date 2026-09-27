@@ -100,7 +100,7 @@ values
   ('SYSTEM', 'POKER_BOT_BANKROLL_100', 'active', 0),
   ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_100', 'active', 0),
   ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_500', 'active', 0)
-on conflict (system_key) do nothing;
+on conflict do nothing;
 
 create index if not exists poker_seats_user_id_active_human_idx
   on public.poker_seats (user_id, table_id)
