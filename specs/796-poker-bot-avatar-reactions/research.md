@@ -6,9 +6,11 @@
 
 ---
 
-## 1. Baseline Reconciliation Against Current `main`
+## 1. Baseline Reconciliation Against Current `main` & Issue #796 Scope
 
-A detailed inspection of the live GitHub `main` branch reveals that significant parts of issue #796 were already delivered in prior poker updates:
+A detailed inspection of the live GitHub `main` branch reveals that significant parts of issue #796 were already delivered in prior poker updates, while certain broader elements remain intentionally deferred:
+
+### What already exists on `main`:
 - **Server Reactions**: `ws-server/poker/handlers/reaction.mjs` already evaluates contextual bot reactions on raises (`classifyRaiseReaction`), folds, showdown settlements (`classifySettlementReaction`), and ambient chat (`classifyAmbientReaction`).
 - **Protocol**: The `table_reaction` WebSocket message format `{ seatNo, reactionKey, targetSeatNo? }` is already implemented and broadcast to clients.
 - **Client Processing**: `poker/poker-ws-client.js` receives `table_reaction` and calls `onReaction()`, which dispatches to `handleTableReaction(event)` in `poker/poker-v2.js`.
@@ -16,7 +18,16 @@ A detailed inspection of the live GitHub `main` branch reveals that significant 
 - **Preferences**: `socialPreferences.botReactionsEnabled` and `socialPreferences.reactionBubblesEnabled` already exist in Table Settings.
 - **Bot Identity**: `renderedSeatAvatars[seatNo]` already references the avatar DOM node of each active seat.
 
-**Conclusion**: Zero server, protocol, database, or network changes are required for V1. The remaining delta is exclusively client-side: giving the bot's avatar physical motion when it reacts.
+### What is deferred from the broader issue #796:
+1. **Personality-Specific Reactions (Cowboy, Professor, Robot, Shark)**:
+   - Issue #796 proposed that different personas would react differently.
+   - Current repository architecture strictly separates backend play style (`bot_profile`) from presentation personas.
+   - Distinct personality-based reactions and emote weighting are deferred to **Issue #804 ("Poker: Living NPCs")**, which governs NPC identities and personality models.
+2. **Missing Server-Side Reaction Classifiers (`bad_beat` / Losing All-In)**:
+   - While `bad_beat` exists in the reaction catalog and client reaction keys, `ws-server/poker/handlers/reaction.mjs` currently lacks an automated classifier emitting it when a bot suffers a bad beat or loses an all-in confrontation.
+   - Server-side classifier additions are tracked for a dedicated backend follow-up issue on bot reaction classifiers, ensuring V1 remains strictly client-side without WS runtime risk.
+
+**Conclusion for V1**: Scope for #796 in PR #1020 is intentionally constrained to browser-only cosmetic avatar reaction motion, providing immediate physical presence to all bot emotes emitted by current and future server classifiers.
 
 ---
 
@@ -37,7 +48,7 @@ A detailed inspection of the live GitHub `main` branch reveals that significant 
 - **Rationale**: Keeps implementation trivial, avoids building a generic animation framework, and covers all emotional tones with high fidelity.
 - **Alternatives Considered**:
   - *Full character sprite animation*: Rejected as disproportionate; avatars are static WebP images.
-  - *Per-personality custom motions*: Deferred to future identity work; simple motion mapping delivers immediate delight with minimal code.
+  - *Per-personality custom motions*: Deferred to future identity work (#804); simple motion mapping delivers immediate delight with minimal code.
 
 ---
 
@@ -45,13 +56,18 @@ A detailed inspection of the live GitHub `main` branch reveals that significant 
 
 - **Decision**: Implement two concise helper functions inside the existing `poker/poker-v2.js` IIFE:
   - `resolveBotAvatarReactionMotion(reactionKey)`: Pure lookup function returning `'bounce'`, `'tilt'`, `'shake'`, or `null`.
-  - `triggerBotAvatarReaction(seatNo, reactionKey)`:
-    - Verifies avatar element exists in `renderedSeatAvatars[seatNo]`.
-    - Cancels any existing animation timeout for `seatNo`.
+  - `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)`:
+    - Verifies `senderIsBot === true` fail-closed (parameter explicitly passed by caller).
+    - Verifies `socialPreferences.botReactionsEnabled === true`.
+    - Retrieves avatar element from `renderedSeatAvatars[seatNo]`.
+    - Cancels any existing animation timeout for `seatNo` via `clearBotAvatarReaction(seatNo)`.
     - Clears previous motion classes: `.poker-seat-avatar--react-bounce`, `--react-tilt`, `--react-shake`.
-    - Forces reflow (void `el.offsetWidth`) and applies the new class.
-    - Sets a single timeout (e.g. 500 ms) to remove the class and clear tracking state.
-- **Rationale**: Zero timer accumulation, no memory leaks, resilient to node recycling, completely isolated from reaction bubbles and history.
+    - Applies the new motion class.
+    - Sets a single tracked timeout (450 ms) to remove the class and clear tracking state.
+- **Lifecycle & `renderSeats()` Interaction**:
+  - `handleTableReaction(event)` calls `renderSeats()` to display bubbles or targeted effects. Because `renderSeats()` wipes `els.seatLayer.innerHTML = ''` and creates new avatar DOM nodes, `triggerBotAvatarReaction` MUST execute **after** `renderSeats()` has completed. This ensures the animation class is applied to the live, newly attached DOM element rather than an element about to be discarded.
+  - **Handling `reactionBubblesEnabled === false`**: When the user has disabled reaction bubbles, `handleTableReaction` skips bubble creation and does not call `renderSeats()`. In this branch, `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)` is called directly on the existing `renderedSeatAvatars[seatNo]` before returning, guaranteeing that avatar motion continues functioning when only bubbles are disabled.
+- **Rationale**: Clean, single-rendering-path architecture. Zero timer accumulation, no memory leaks, resilient to node recycling, completely isolated from reaction bubbles and history.
 
 ---
 

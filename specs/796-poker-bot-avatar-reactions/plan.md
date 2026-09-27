@@ -43,19 +43,23 @@ Implement two lightweight helper functions inside the `poker-v2.js` closure:
      - `'shake'` (negative/frustrated/impatient): `bad_beat`, `hurry_up`, `not_this_time`.
    - Returns string or `null` if unmapped.
 
-2. **`triggerBotAvatarReaction(seatNo, reactionKey)`**:
-   - Checks `senderIsBot === true` and `socialPreferences.botReactionsEnabled !== false`.
+2. **`triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)`**:
+   - Checks `senderIsBot === true` fail-closed (`if (senderIsBot !== true) return;`) using value passed from caller.
+   - Checks `socialPreferences.botReactionsEnabled !== false`.
    - Locates target element via `renderedSeatAvatars[seatNo]`. If absent or disconnected, returns immediately.
-   - Clears existing animation timer for `seatNo` from `botAvatarReactionTimersBySeatNo[seatNo]`.
+   - Clears existing animation timer for `seatNo` from `botAvatarReactionTimersBySeatNo[seatNo]` via `clearBotAvatarReaction(seatNo)`.
    - Removes any existing motion classes (`.poker-seat-avatar--react-bounce`, `--react-tilt`, `--react-shake`).
-   - Forces reflow (`void avatarEl.offsetWidth`) and applies the resolved motion class.
+   - Applies the resolved motion class.
    - Sets a 450 ms timeout to strip the class and clean up the timer entry.
 
-3. **Integration in `handleTableReaction(event)`**:
-   - Call `triggerBotAvatarReaction(seatNo, reactionKey)` when `senderIsBot === true` and bot reactions are enabled, running alongside the existing speech bubble logic.
+3. **Execution Order & Lifecycle in `handleTableReaction(event)`**:
+   - `renderSeats()` completely empties `els.seatLayer.innerHTML = ''` and instantiates new avatar DOM elements. Therefore, `triggerBotAvatarReaction` MUST execute **after** `renderSeats()` finishes, binding to the live element rather than an element about to be destroyed.
+   - **When `reactionBubblesEnabled === false`**: The handler skips bubble creation and does not call `renderSeats()`. In this branch, `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)` executes directly on the existing `renderedSeatAvatars[seatNo]` node before returning, ensuring avatar motion is not suppressed when only bubbles are turned off.
+   - **Targeted reactions (`nice_hand`)**: Sets targeted effect, calls `renderSeats()`, then immediately calls `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)` and returns.
+   - **Regular reaction bubbles**: Sets bubble, calls `renderSeats()`, then immediately calls `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)`.
 
-4. **Node Recycling Cleanup in `renderSeats()`**:
-   - Clear all active entries in `botAvatarReactionTimersBySeatNo` when rebuilding seat DOM elements.
+4. **Safety & Node Recycling in `renderSeats()`**:
+   - Stale timers from preceding reactions safely validate node references or clean up without error if an unrelated table re-render occurs mid-animation.
 
 ### B. Styling & Animation (`poker/poker-v2.css`)
 
@@ -91,18 +95,18 @@ Update `docs/poker-bots.md` to document:
 
 ---
 
-## 5. Explicit Out of Scope
+## 5. Explicit Out of Scope & Deferred Follow-Ups
 
-- No new reaction keys or emojis.
+- **Deferred to Issue #804 ("Poker: Living NPCs")**: Personality-specific reaction weighting and emote behavior (e.g. Cowboy, Professor, Robot, Shark reacting differently). Current architecture keeps `bot_profile` (play style) cleanly decoupled from presentation personas; full persona models belong to #804.
+- **Deferred to Backend Bot Classifiers Follow-Up**: While `bad_beat` is already defined as a reaction key, `ws-server/poker/handlers/reaction.mjs` currently lacks an automated classifier for bad-beat or losing-all-in scenarios. Adding server-side reaction classifiers will be tracked in a dedicated backend follow-up issue, ensuring this V1 remains purely frontend and zero-risk for WS runtime.
+- No new reaction keys or emojis in V1.
 - No new WebSocket messages or protocol fields.
-- No new server-side reaction classifiers or probability changes.
+- No new server-side reaction classifiers or probability changes in V1.
 - No new Admin controls.
 - No AI or free-form text reactions.
 - No Supabase migrations or database persistence.
 - No changes to ledger, chip accounting, bot autoplay, or turn timers.
 - No generic animation framework.
-- No coupling between `bot_profile` (play style) and presentation identity (name/avatar).
-- Personality-specific reaction weighting (Cowboy/Professor/Robot/Shark) is deferred to a future dedicated project.
 
 ---
 

@@ -29,17 +29,17 @@ The remaining V1 scope is deliberately **small, browser-only, and purely cosmeti
 - Reuse the existing client pipeline: `poker-ws-client.js -> onReaction -> poker-v2.js::handleTableReaction(event)`.
 - Use existing seat and avatar references: `handleTableReaction` already knows `senderIsBot`, `seatNo`, and has access to `renderedSeatAvatars[seatNo]`.
 
-### Explicit Out of Scope
-- No new reaction keys or emojis.
+### Explicit Out of Scope & Deferred Follow-Ups
+- **Deferred to Issue #804 ("Poker: Living NPCs")**: Personality-specific reaction profiles and emote frequency weighting (e.g. Cowboy, Professor, Robot, Shark reacting with distinct temperaments). Current repository architecture strictly separates gameplay policy (`bot_profile`) from presentation identity. Persona models will be introduced in #804.
+- **Deferred to Backend Bot Classifiers Follow-Up**: While `bad_beat` exists in the client catalog, `ws-server/poker/handlers/reaction.mjs` does not yet possess an automated classifier for bad beats or losing all-in showdowns. Adding server-side reaction classifiers will be tracked in a dedicated backend follow-up issue to preserve V1's zero-WS-risk boundary.
+- No new reaction keys or emojis in this V1.
 - No new WebSocket messages or protocol fields.
-- No new server-side reaction classifiers or probability tweaks.
+- No changes to reaction probabilities or turn timers.
 - No new admin controls.
 - No AI or free-form generated text reactions.
 - No Supabase migrations or database persistence.
-- No changes to ledger, chip accounting, bot autoplay, or turn timers.
+- No changes to ledger, chip accounting, or bot autoplay.
 - No generic animation framework.
-- No coupling between `bot_profile` (betting policy) and presentation identity (avatar/name).
-- Personality-specific reaction weighting matrices (e.g. Cowboy, Professor, Robot, Shark) are deferred to a separate future identity project.
 
 ---
 
@@ -93,7 +93,8 @@ As a player using reduced motion or preferring minimal visual effects, I want av
 ## Edge Cases
 
 - **Rapid successive reactions**: Reset animation classes cleanly before re-applying, using a single tracking timer or animationend cleanup.
-- **Seat unmounting / Table re-render**: If `renderSeats()` runs while an avatar motion is active, DOM nodes are replaced; motion state must not hold stale element references or leak timers.
+- **Seat unmounting / Table re-render**: When `renderSeats()` runs, it replaces all avatar DOM elements. Therefore, `triggerBotAvatarReaction` MUST execute **after** `renderSeats()` completes, ensuring the motion class and timer are attached to the fresh live node. If an unrelated table re-render occurs later, in-flight timers safely clean up without modifying detached elements.
+- **Reaction bubbles disabled**: When `socialPreferences.reactionBubblesEnabled === false`, `handleTableReaction` skips bubble creation and does not invoke `renderSeats()`. In this case, `triggerBotAvatarReaction` MUST execute directly on the existing `renderedSeatAvatars[seatNo]` rather than returning early before motion.
 - **Missing avatar element**: If `renderedSeatAvatars[seatNo]` is null or disconnected, the motion trigger fails closed silently.
 - **Table navigation / page unload**: Lifecycle cleanup removes any active animation timers.
 
@@ -103,8 +104,8 @@ As a player using reduced motion or preferring minimal visual effects, I want av
 
 ### Functional Requirements
 
-- **FR-001**: Avatar reaction motion MUST ONLY execute when `senderIsBot === true`. Human player seats MUST NEVER receive automated avatar reaction animations.
-- **FR-002**: Avatar reaction motion MUST be triggered within the existing client handler `handleTableReaction(event)` in `poker/poker-v2.js`, using the existing `renderedSeatAvatars[seatNo]` reference.
+- **FR-001**: Avatar reaction motion MUST ONLY execute when `senderIsBot === true`. The helper `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)` MUST accept `senderIsBot` as an explicit argument and enforce a strict internal fail-closed guard (`if (senderIsBot !== true) return;`). Human player seats MUST NEVER receive automated avatar reaction animations.
+- **FR-002**: Avatar reaction motion MUST be triggered within `handleTableReaction(event)` in `poker/poker-v2.js` **after** `renderSeats()` has executed for bubbles or targeted effects, ensuring classes attach to the live `renderedSeatAvatars[seatNo]` node. When bubbles are disabled (`reactionBubblesEnabled === false`), motion MUST be triggered directly on the existing avatar node before exiting.
 - **FR-003**: The system MUST map existing reaction keys to at most 2–3 motion types:
   - `bounce` (positive/confident): `nice_hand`, `well_played`, `haha`, `wow`, `good_luck`, `thanks`, `cheers`, `gg`, `congrats`, `hello`, `i_was_bluffing`.
   - `tilt` (teasing/playful): `nice_bluff`, `you_are_bluffing`, `lucky`, `thinking`, `ambient_*`.
@@ -112,7 +113,7 @@ As a player using reduced motion or preferring minimal visual effects, I want av
 - **FR-004**: Each animation MUST be short (duration ≤ 600 ms) and purely visual (using CSS `transform`), causing 0 px layout shift, 0 px change in seat dimensions, and 0 px change in avatar size.
 - **FR-005**: All avatar reaction CSS classes in `poker/poker-v2.css` MUST be scoped to `.poker-seat-avatar` and formatted with exactly one selector per line, adhering to repository style.
 - **FR-006**: `@media (prefers-reduced-motion: reduce)` in `poker/poker-v2.css` MUST completely disable avatar reaction animations (`animation: none !important`).
-- **FR-007**: When `socialPreferences.botReactionsEnabled === false`, bot avatar reaction motions MUST NOT be triggered.
+- **FR-007**: When `socialPreferences.botReactionsEnabled === false`, bot avatar reaction motions MUST NOT be triggered. When `socialPreferences.reactionBubblesEnabled === false` while `botReactionsEnabled === true`, bot avatar reaction motion MUST still execute (suppressing bubbles but preserving avatar motion).
 - **FR-008**: Bot avatar reaction motion MUST NOT alter poker engine state, betting turn clocks, showdown timing, pot awards, chip counts, or WebSocket communication.
 
 ---

@@ -10,7 +10,7 @@
 **Purpose**: Review existing reaction structures and establish tracking state in `poker/poker-v2.js`.
 
 - [ ] T001 Initialize `botAvatarReactionTimersBySeatNo` timer tracking map in poker/poker-v2.js
-- [ ] T002 Implement timer cleanup in `renderSeats()` in poker/poker-v2.js to prevent memory leaks during seat re-renders
+- [ ] T002 Implement `clearBotAvatarReaction(seatNo)` and safe timer cleanup in `renderSeats()` in poker/poker-v2.js to prevent memory leaks or manipulating detached nodes during seat re-renders
 
 ---
 
@@ -34,8 +34,8 @@
 
 ### Implementation for User Story 1
 - [ ] T006 [US1] Implement `resolveBotAvatarReactionMotion(reactionKey)` mapping reaction keys to `'bounce'`, `'tilt'`, or `'shake'` in poker/poker-v2.js
-- [ ] T007 [US1] Implement `triggerBotAvatarReaction(seatNo, reactionKey)` with class toggle and timer management in poker/poker-v2.js
-- [ ] T008 [US1] Hook `triggerBotAvatarReaction(seatNo, reactionKey)` into `handleTableReaction(event)` in poker/poker-v2.js
+- [ ] T007 [US1] Implement `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)` with fail-closed guard `senderIsBot === true`, class toggle, and timer management in poker/poker-v2.js
+- [ ] T008 [US1] Hook `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)` into `handleTableReaction(event)` in poker/poker-v2.js **after** `renderSeats()` (for bubbles/targeted effects) and directly within `reactionBubblesEnabled === false` branch before exiting
 
 ---
 
@@ -46,7 +46,7 @@
 **Independent Test**: Send a reaction as a human player; verify speech bubble renders, but the human avatar remains completely still.
 
 ### Implementation for User Story 2
-- [ ] T009 [US2] Enforce strict `senderIsBot === true` guard in `triggerBotAvatarReaction` in poker/poker-v2.js to prevent human avatar motion
+- [ ] T009 [US2] Enforce strict fail-closed `if (senderIsBot !== true) return;` guard inside `triggerBotAvatarReaction` in poker/poker-v2.js
 - [ ] T010 [US2] Add fail-closed guard for missing/unconnected seat elements in `triggerBotAvatarReaction` in poker/poker-v2.js
 
 ---
@@ -55,10 +55,10 @@
 
 **Goal**: Honor Table Settings toggles and reduced motion preferences; ensure zero layout shift.
 
-**Independent Test**: Toggle "Bot reactions" OFF in Table Settings; verify avatar motion is suppressed. Emulate `prefers-reduced-motion`; verify zero transform animations.
+**Independent Test**: Toggle "Bot reactions" OFF in Table Settings; verify avatar motion is suppressed. Toggle "Reaction bubbles" OFF while bot reactions are ON; verify avatar motion still executes without bubbles. Emulate `prefers-reduced-motion`; verify zero transform animations.
 
 ### Implementation for User Story 3
-- [ ] T011 [US3] Verify `socialPreferences.botReactionsEnabled` check gates `triggerBotAvatarReaction` in poker/poker-v2.js
+- [ ] T011 [US3] Verify `socialPreferences.botReactionsEnabled` gates `triggerBotAvatarReaction`, and ensure motion triggers cleanly when `reactionBubblesEnabled === false` in poker/poker-v2.js
 - [ ] T012 [US3] Verify zero layout shift (CLS = 0) and responsive stability across breakpoints in poker/poker-v2.css
 
 ---
@@ -67,7 +67,7 @@
 
 **Purpose**: Update documentation, run syntax checks, and validate via quickstart runbook.
 
-- [ ] T013 Update docs/poker-bots.md to document that bot avatar reaction motion is browser-only, ephemeral, and purely cosmetic
+- [ ] T013 Update docs/poker-bots.md to document that bot avatar reaction motion is browser-only and ephemeral, noting that persona profiles are deferred to #804 ("Poker: Living NPCs") and missing server reaction classifiers (e.g. bad-beat) are tracked in a dedicated backend follow-up issue
 - [ ] T014 [P] Run syntax check via `npm run syntax`
 - [ ] T015 [P] Run repository guard checks via `npm run check:all`
 - [ ] T016 Execute manual Deploy Preview smoke test checklist from specs/796-poker-bot-avatar-reactions/quickstart.md

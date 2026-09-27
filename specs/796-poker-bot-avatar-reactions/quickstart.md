@@ -52,12 +52,19 @@ Open the Netlify Deploy Preview URL generated for the pull request and navigate 
    - The animation restarts cleanly on new reactions without jerky restarts or stuck classes.
    - Inspecting the DOM confirms `.poker-seat-avatar--react-*` is removed after animation completion.
 
-### Scenario 4: User Preference Toggle
+### Scenario 4: User Preference Toggles
 1. Open Table Settings (`#pokerSocialSettingsPanel`).
-2. Uncheck "Bot reactions" (or "Reaction bubbles").
-3. **Verify**:
-   - When bots emit reactions, zero reaction bubbles and zero avatar reaction animations occur on screen.
-   - Re-checking restores normal behavior.
+2. Uncheck "Bot reactions":
+   - **Verify**: When bots emit reactions, zero reaction bubbles and zero avatar reaction animations occur on screen.
+3. Check "Bot reactions", but uncheck "Reaction bubbles":
+   - **Verify**: Bot speech bubbles are suppressed, but bot avatars **still perform** their subtle reaction motions.
+4. Re-checking both restores normal full behavior.
+
+### Scenario 4b: Table Re-render / Gameplay Node Safety
+1. Observe a bot reacting while game actions (e.g. bets, folds, cards dealt) trigger `renderSeats()`.
+2. **Verify**:
+   - The seat layer re-renders smoothly with zero console errors.
+   - Any active animation timers cleanly detach without manipulating deleted nodes or throwing exceptions.
 
 ### Scenario 5: Accessibility (`prefers-reduced-motion`)
 1. In browser DevTools (Rendering tab), emulate `prefers-reduced-motion: reduce`.

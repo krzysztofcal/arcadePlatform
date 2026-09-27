@@ -34,11 +34,15 @@ Tracked inside the `poker/poker-v2.js` closure:
 var botAvatarReactionTimersBySeatNo = {};
 ```
 
-- **Lifecycle**:
-  1. Triggered on valid incoming `table_reaction` where `senderIsBot === true`.
-  2. If an entry exists for `seatNo`, `window.clearTimeout` is called, previous classes are stripped, and the timer is replaced.
-  3. Timeout fires after animation completion (450–500 ms), removes CSS class, and deletes entry from `botAvatarReactionTimersBySeatNo`.
-  4. Reset completely in `renderSeats()` or on table exit.
+- **Lifecycle & Execution Flow**:
+  1. Triggered on valid incoming `table_reaction` via `triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot)`.
+  2. Guard: Immediately returns if `senderIsBot !== true` or `!socialPreferences.botReactionsEnabled`.
+  3. **Timing relative to `renderSeats()`**:
+     - When bubbles or targeted effects are active, `handleTableReaction()` invokes `renderSeats()`, which clears `els.seatLayer.innerHTML` and rebuilds `renderedSeatAvatars`. `triggerBotAvatarReaction` is executed **after** `renderSeats()` completes, ensuring the motion class and timer are bound to the live avatar DOM element.
+     - When `reactionBubblesEnabled === false`, no bubble or targeted effect is created and `renderSeats()` is skipped. `triggerBotAvatarReaction` executes directly on the existing `renderedSeatAvatars[seatNo]` without rebuilding the DOM.
+  4. If an existing timer is active for `seatNo`, `clearBotAvatarReaction(seatNo)` cancels it via `window.clearTimeout`, removes previous motion classes, and resets the slot.
+  5. Timeout fires after animation completion (450 ms), removes CSS class, and deletes entry from `botAvatarReactionTimersBySeatNo`.
+  6. If an unrelated gameplay update triggers `renderSeats()` during in-flight animation, stale timer callbacks safely check node validity or clear active timers.
 
 ---
 
