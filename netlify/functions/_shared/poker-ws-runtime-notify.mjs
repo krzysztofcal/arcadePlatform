@@ -280,3 +280,59 @@ export async function notifyWsLobbyMaterialize({
     clearTimeout(timer);
   }
 }
+
+export async function notifyWsPokerAccessMutation({
+  userId,
+  revision = null,
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+  klog = () => {}
+} = {}) {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) return { ok: false, skipped: true, reason: "invalid_user_id" };
+  const baseUrl = resolveBaseUrl(env);
+  if (!baseUrl) return { ok: false, skipped: true, reason: "ws_internal_base_url_missing" };
+  if (typeof fetchImpl !== "function") {
+    klog("poker_ws_access_refresh_notify_unavailable", { userId: normalizedUserId, reason: "fetch_unavailable" });
+    return { ok: false, skipped: false, reason: "fetch_unavailable" };
+  }
+  const timeoutMs = resolveTimeoutMs(env);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (typeof timer?.unref === "function") timer.unref();
+  const headers = { "content-type": "application/json", accept: "application/json" };
+  const token = resolveToken(env);
+  if (token) headers.authorization = `Bearer ${token}`;
+  try {
+    const response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/internal/admin/poker-access-refresh`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ userId: normalizedUserId, revision }),
+      signal: controller.signal
+    });
+    if (!response?.ok) {
+      klog("poker_ws_access_refresh_notify_failed", {
+        userId: normalizedUserId,
+        status: Number.isInteger(response?.status) ? response.status : null
+      });
+      return { ok: false, skipped: false, reason: "notify_failed", status: response?.status ?? null };
+    }
+    let payload = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    return {
+      ok: payload?.ok === true,
+      skipped: false,
+      invalidated: payload?.invalidated === true,
+      refreshed: payload?.refreshed === true,
+      failClosed: payload?.failClosed === true
+    };
+  } catch (error) {
+    klog("poker_ws_access_refresh_notify_error", {
+      userId: normalizedUserId,
+      reason: error?.name === "AbortError" ? "timeout" : "request_failed"
+    });
+    return { ok: false, skipped: false, reason: error?.name === "AbortError" ? "timeout" : "request_failed" };
+  } finally {
+    clearTimeout(timer);
+  }
+}

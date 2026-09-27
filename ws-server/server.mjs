@@ -826,6 +826,42 @@ async function refreshConnectionPokerAccess(ws, connState, { requestId = null, f
   }
 }
 
+async function refreshPokerAccessForUser(userId) {
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!normalizedUserId) return { ok: false, refreshed: false, invalidated: false, reason: "invalid_user_id" };
+  const invalidated = typeof tableManager.invalidatePokerAccessForUser === "function"
+    ? tableManager.invalidatePokerAccessForUser(normalizedUserId)
+    : 0;
+  if (!hasSupabaseDbUrl) {
+    return { ok: true, refreshed: false, invalidated: true, failClosed: true, reason: "database_unavailable" };
+  }
+  try {
+    const beginSqlWs = await loadBeginSqlWs();
+    const access = await beginSqlWs(async (tx) => {
+      const [snapshot, policy] = await Promise.all([
+        readPokerAccessSnapshot(tx, { userId: normalizedUserId }),
+        readPokerAccessPolicy(tx)
+      ]);
+      if (!snapshot || !policy) return null;
+      return { ...snapshot, policy, slowThresholdCh: policy.slowThresholdCh, policyRevision: policy.revision };
+    });
+    if (!access) {
+      return { ok: true, refreshed: false, invalidated: true, failClosed: true, reason: "access_refresh_unavailable" };
+    }
+    tableManager.cachePokerAccessForUser(normalizedUserId, access, access.policy, Date.now());
+    for (const socket of sessionStore.connectionsForUser(normalizedUserId) || []) {
+      const state = socket?.__connState;
+      if (!state || state.session?.identityMode === "guest") continue;
+      state.pokerAccess = access;
+      sendPokerAccessFrame(socket, state, access, { reason: "admin_mutation_refresh" });
+    }
+    return { ok: true, refreshed: true, invalidated: invalidated > 0, failClosed: false, revision: access.revision };
+  } catch (error) {
+    klogSafe("ws_poker_access_admin_refresh_failed", { code: error?.code || "access_refresh_failed" });
+    return { ok: true, refreshed: false, invalidated: true, failClosed: true, reason: error?.code || "access_refresh_failed" };
+  }
+}
+
 function broadcastPokerAccessTransition(userId, transition) {
   if (typeof userId !== "string" || !userId.trim() || !transition) return;
   const revision = Number(transition.expectedRevision) + 1;
@@ -4369,6 +4405,35 @@ async function handleInternalAccountPoker(req, res) {
   }
 }
 
+async function handleInternalPokerAccessRefresh(req, res) {
+  if (req.method !== "POST") {
+    sendInternalJson(res, 405, { error: "method_not_allowed" });
+    return;
+  }
+  if (!internalRuntimeToken) {
+    sendInternalJson(res, 503, { error: "internal_runtime_token_missing" });
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    sendInternalJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+  try {
+    const payload = await readJsonBody(req, { maxBytes: 2_048 });
+    const userId = typeof payload?.userId === "string" ? payload.userId.trim() : "";
+    if (!isUuid(userId)) {
+      sendInternalJson(res, 400, { error: "invalid_user_id" });
+      return;
+    }
+    const result = await refreshPokerAccessForUser(userId);
+    sendInternalJson(res, result.ok === true ? 200 : 503, { ...result, userId });
+  } catch (error) {
+    const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "access_refresh_failed");
+    sendInternalJson(res, code === "invalid_json" ? 400 : 503, { error: code });
+  }
+}
+
 async function handleHttpRequest(req, res) {
   if (req.url === "/healthz") {
     res.writeHead(200, {
@@ -4402,6 +4467,10 @@ async function handleHttpRequest(req, res) {
   const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
   if (requestUrl.pathname === "/internal/account/poker") {
     await handleInternalAccountPoker(req, res);
+    return;
+  }
+  if (requestUrl.pathname === "/internal/admin/poker-access-refresh") {
+    await handleInternalPokerAccessRefresh(req, res);
     return;
   }
   if (requestUrl.pathname === "/internal/admin/vps-metrics") {

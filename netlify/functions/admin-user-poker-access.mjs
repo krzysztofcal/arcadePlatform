@@ -1,7 +1,8 @@
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
 import { badRequest, conflict, parseJsonBody, parseUuid } from "./_shared/admin-ops.mjs";
 import { baseHeaders, beginSql, corsHeaders, executeSql, klog } from "./_shared/supabase-admin.mjs";
-import { ACCESS_OVERRIDES, normalizeAccessOverride } from "../../shared/poker-domain/bot-access.mjs";
+import { notifyWsPokerAccessMutation } from "./_shared/poker-ws-runtime-notify.mjs";
+import { ACCESS_OVERRIDES, hasPokerPoolSchema, normalizeAccessOverride } from "../../shared/poker-domain/bot-access.mjs";
 
 function normalizeAccessRow(row) {
   if (!row) return null;
@@ -50,6 +51,12 @@ async function updatePokerAccess({ userId, override, expectedRevision, actorId, 
     throw badRequest("invalid_expected_revision", "invalid_expected_revision");
   }
   return runTransaction(async (tx) => {
+    if (!await hasPokerPoolSchema(tx)) {
+      const error = new Error("poker_access_schema_unavailable");
+      error.code = "poker_access_schema_unavailable";
+      error.status = 409;
+      throw error;
+    }
     const rows = await tx.unsafe(`
 select user_id, poker_auto_class, poker_access_override, poker_access_revision,
        poker_auto_slow_at, poker_access_updated_at, poker_access_updated_by
@@ -82,6 +89,7 @@ function createAdminUserPokerAccessHandler(deps = {}) {
   const requireAdmin = deps.requireAdminUser || requireAdminUser;
   const loadAccess = deps.loadPokerAccess || loadPokerAccess;
   const updateAccess = deps.updatePokerAccess || updatePokerAccess;
+  const notifyAccessMutation = deps.notifyWsPokerAccessMutation || notifyWsPokerAccessMutation;
   return async function handler(event) {
     if (env.CHIPS_ENABLED !== "1") return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
     const cors = corsHeaders(event.headers?.origin || event.headers?.Origin);
@@ -104,7 +112,25 @@ function createAdminUserPokerAccessHandler(deps = {}) {
         expectedRevision: body.expectedRevision ?? body.expected_revision,
         actorId: admin.userId,
       });
-      return { statusCode: 200, headers: cors, body: JSON.stringify(result) };
+      const propagation = await notifyAccessMutation({
+        userId,
+        revision: result?.access?.revision ?? null,
+        env,
+        klog
+      });
+      if (propagation?.skipped !== true && propagation?.ok !== true) {
+        klog("admin_poker_access_propagation_failed", {
+          userId,
+          revision: result?.access?.revision ?? null,
+          reason: propagation?.reason || "unconfirmed"
+        });
+        return {
+          statusCode: 503,
+          headers: cors,
+          body: JSON.stringify({ error: "poker_access_propagation_failed", access: result?.access || null })
+        };
+      }
+      return { statusCode: 200, headers: cors, body: JSON.stringify({ ...result, propagation }) };
     } catch (error) {
       if (error?.status === 401 || error?.status === 403) return adminAuthErrorResponse(error, cors);
       if (error?.status === 400 || error?.status === 409) return { statusCode: error.status, headers: cors, body: JSON.stringify({ error: error.code || "invalid_request" }) };

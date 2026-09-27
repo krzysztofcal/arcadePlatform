@@ -181,6 +181,35 @@ test("settled access classification persists automatic SLOW under FORCE_NORMAL a
   });
 });
 
+test("Admin access invalidation makes the next settled rollover fail closed for new funding", () => {
+  const tableId = "table_access_invalidation_funding_gate";
+  const userId = "user_access_invalidation";
+  const manager = createTableManager({ maxSeats: 4 });
+  assert.equal(manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, buyIn: 100, isSlowOnly: false },
+    coreState: {
+      version: 2,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId, seat: 1 }, { userId: "bot_a", seat: 2 }],
+      seats: { [userId]: 1, bot_a: 2 },
+      seatDetailsByUserId: { [userId]: { isBot: false }, bot_a: { isBot: true } },
+      pokerState: { phase: "SETTLED", handId: "hand_access_invalidation", stacks: { [userId]: 100, bot_a: 0 } }
+    }
+  }).ok, true);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 1,
+    loadedAtMs: 100, expiresAtMs: 30_100
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, true);
+  assert.equal(manager.invalidatePokerAccessForUser(userId), 1);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, false);
+  const prepared = manager.prepareSettledHandRollover({ tableId, nowMs: 200, allowBotFunding: false });
+  assert.equal(prepared.ok, true);
+  assert.deepEqual(prepared.replacementFundings ?? [], []);
+  assert.deepEqual(prepared.managedBotTopUps ?? [], []);
+});
+
 test("bots-only bootstrap requires both trusted managed metadata and explicit internal intent", () => {
   const tableId = "table_managed_bootstrap_gate";
   const manager = createTableManager({ maxSeats: 6 });

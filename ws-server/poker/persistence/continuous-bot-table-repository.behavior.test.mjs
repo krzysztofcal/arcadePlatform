@@ -267,6 +267,46 @@ test("reconcile rolls back a managed table when exact bot funding is unavailable
   assert.deepEqual(result.createdTableIds, []);
 });
 
+test("reconcile retires an existing managed table below its minimum bot occupancy", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000826";
+  let retirementUpdate = false;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    beginSql: async (run) => run({
+      unsafe: async (sql) => {
+        const normalizedSql = String(sql).toLowerCase();
+        if (normalizedSql.includes("to_regclass")) return [{ available: true }];
+        if (normalizedSql.includes("from public.poker_managed_table_profiles")) {
+          return [{ ...PROFILE, enabled: true, desired_table_count: 1, min_bot_count: 2, target_bot_count: 3, max_bot_count: 3 }];
+        }
+        if (normalizedSql.includes("from public.poker_tables") && normalizedSql.includes("for update")) {
+          return [{
+            id: tableId,
+            status: "OPEN",
+            max_players: 6,
+            buy_in: 100,
+            stakes: JSON.stringify({ sb: 1, bb: 2 }),
+            managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
+            rotation_due_at: null,
+            created_at: "2026-09-27T19:00:00.000Z",
+            active_bot_count: 0
+          }];
+        }
+        if (normalizedSql.includes("update public.poker_tables set rotation_due_at")) {
+          retirementUpdate = true;
+          return [{ id: tableId }];
+        }
+        return [];
+      }
+    })
+  });
+  const result = await repository.reconcile();
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.retirementTableIds, [tableId]);
+  assert.deepEqual(result.activeTableIds, []);
+  assert.equal(retirementUpdate, true);
+});
+
 test("preview profile with desired count five creates canonical 100 CH tables", async () => {
   const tableIds = [
     "00000000-0000-4000-8000-000000000823",

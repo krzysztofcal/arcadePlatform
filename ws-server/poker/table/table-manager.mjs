@@ -659,6 +659,18 @@ export function createTableManager({
     return updated;
   }
 
+  function invalidatePokerAccessForUser(userId) {
+    const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+    if (!normalizedUserId) return 0;
+    let invalidated = 0;
+    for (const tableId of listTableIds()) {
+      const table = tables.get(tableId);
+      ensureAccessCacheState(table);
+      if (table?.pokerAccessByUserId?.delete(normalizedUserId)) invalidated += 1;
+    }
+    return invalidated;
+  }
+
   function settledAccessStatus(tableId, { nowMs = Date.now() } = {}) {
     const table = tables.get(tableId);
     if (!table) return { known: false, reason: "table_not_found" };
@@ -2748,6 +2760,7 @@ export function createTableManager({
     hasConnectedHumanPresence,
     cachePokerAccess,
     cachePokerAccessForUser,
+    invalidatePokerAccessForUser,
     settledAccessStatus,
     classifySettledAccess
   };

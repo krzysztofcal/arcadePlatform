@@ -164,7 +164,7 @@ limit 1${lock ? " for update" : ""};
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export async function readPokerAccessSnapshots(tx, { userIds = [], nowMs = Date.now() } = {}) {
+export async function readPokerAccessSnapshots(tx, { userIds = [], lock = false, nowMs = Date.now() } = {}) {
   if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
   const normalizedUserIds = [...new Set((Array.isArray(userIds) ? userIds : [])
     .map((userId) => typeof userId === "string" ? userId.trim().toLowerCase() : "")
@@ -175,7 +175,7 @@ export async function readPokerAccessSnapshots(tx, { userIds = [], nowMs = Date.
 select user_id, poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at
 from public.chips_accounts
 where user_id = any($1::uuid[])
-  and account_type = 'USER';
+  and account_type = 'USER'${lock ? "\nfor update" : ""};
 `, [normalizedUserIds]);
   const snapshots = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {

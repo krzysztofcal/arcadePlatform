@@ -13,7 +13,7 @@ async function loadUserDetails(userId) {
   if (!userId) {
     throw badRequest("invalid_user_id", "invalid_user_id");
   }
-  const [userRows, activeSeatRows, pokerRows, balance, recentLedger] = await Promise.all([
+  const [userRows, activeSeatRows, pokerRows, balance, recentLedger, capabilityRows] = await Promise.all([
     executeSql(
       `
 with active_seats as (
@@ -119,6 +119,7 @@ limit 12;
     ),
     getUserBalance(userId),
     listUserLedger(userId, { limit: 12 }),
+    executeSql("select to_regclass('public.poker_access_policy') is not null as available;"),
   ]);
   const user = userRows?.[0];
   if (!user) {
@@ -187,6 +188,7 @@ limit 12;
           : user.poker_auto_class || "NORMAL",
       accessRevision: Number(user.poker_access_revision || 1),
       automaticSlowAt: user.poker_auto_slow_at || null,
+      pokerAccessEditable: capabilityRows?.[0]?.available === true,
     },
     balance: {
       accountId: balance.accountId,
@@ -201,6 +203,7 @@ limit 12;
     },
     activeTables,
     activeSeats,
+    pokerAccessEditable: capabilityRows?.[0]?.available === true,
     recentPokerActivity: (Array.isArray(pokerRows) ? pokerRows : []).map((row) => ({
       tableId: row.table_id || null,
       actionType: row.action_type || null,

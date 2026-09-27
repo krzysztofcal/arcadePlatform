@@ -136,7 +136,11 @@ order by ${SORT_SQL[sort]}
 offset ${nextParam(pageInfo.offset)}
 limit ${nextParam(pageInfo.limit)};
   `;
-  const rows = await executeSql(query, params);
+  const [rows, capabilityRows] = await Promise.all([
+    executeSql(query, params),
+    executeSql("select to_regclass('public.poker_access_policy') is not null as available;")
+  ]);
+  const pokerAccessEditable = capabilityRows?.[0]?.available === true;
   const total = rows?.[0]?.total_count ? Number(rows[0].total_count) : 0;
   return {
     items: (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -159,7 +163,9 @@ limit ${nextParam(pageInfo.limit)};
             ? "RESTRICTED"
           : row.poker_auto_class || "NORMAL",
       accessRevision: Number(row.poker_access_revision || 1),
+      pokerAccessEditable,
     })),
+    pokerAccessEditable,
     pagination: buildPagination({ page: pageInfo.page, limit: pageInfo.limit, total }),
   };
 }

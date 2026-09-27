@@ -876,31 +876,44 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         }
       }
 
-      if (joinAccess.effectiveClass === "NORMAL" && tableIsSlowOnly) {
-        throw makeError("normal_table_required");
-      }
-      const canPromoteSlowTable = joinAccess.effectiveClass === "SLOW"
-        && !tableIsSlowOnly
-        && isSafeSlowOwnerPromotion(table, { userId, seatRows, hasFundingHistory });
-      if (joinAccess.effectiveClass === "SLOW" && !tableIsSlowOnly && !canPromoteSlowTable) {
-        throw makeError("slow_only_table_required");
-      }
-
       if (poolSchema) await assertActivePokerTableCapacity(tx, userId);
 
       let existingHumanAccessAllowsBotFunding = true;
+      let existingHumanHasSlowAccess = false;
       if (poolSchema) {
         const existingHumanUserIds = activeSeatRows(seatRows)
           .filter((row) => !row?.is_bot)
           .map((row) => typeof row?.user_id === "string" ? row.user_id.trim().toLowerCase() : "")
           .filter(Boolean);
         if (existingHumanUserIds.length > 0) {
-          const existingHumanSnapshots = await readPokerAccessSnapshots(tx, { userIds: existingHumanUserIds });
+          // Keep these rows locked through admission, debit and any bot funding
+          // decision. Admin override uses the same row lock, so either JOIN
+          // linearizes before the override or observes the committed override.
+          const existingHumanSnapshots = await readPokerAccessSnapshots(tx, { userIds: existingHumanUserIds, lock: true });
           existingHumanAccessAllowsBotFunding = existingHumanUserIds.every((existingHumanUserId) => {
             const snapshot = existingHumanSnapshots.get(existingHumanUserId);
+            if (snapshot?.effectiveClass === "SLOW") existingHumanHasSlowAccess = true;
             return snapshot?.effectiveClass === "NORMAL" || snapshot?.effectiveClass === "SLOW";
           });
         }
+      }
+
+      // A seated SLOW human makes an ordinary table SLOW-only at this
+      // authoritative control point. The marker is persisted only with a
+      // successful admission, so a rejected NORMAL JOIN has no debit/seed side
+      // effect and the next control point re-evaluates the same state.
+      const slowOnlyAtAdmission = tableIsSlowOnly || existingHumanHasSlowAccess;
+      if (joinAccess.effectiveClass === "NORMAL" && slowOnlyAtAdmission) {
+        throw makeError("normal_table_required");
+      }
+      const canPromoteSlowTable = joinAccess.effectiveClass === "SLOW"
+        && !tableIsSlowOnly
+        && (existingHumanHasSlowAccess || isSafeSlowOwnerPromotion(table, { userId, seatRows, hasFundingHistory }));
+      if (joinAccess.effectiveClass === "SLOW" && !tableIsSlowOnly && !canPromoteSlowTable) {
+        throw makeError("slow_only_table_required");
+      }
+      if (joinAccess.effectiveClass === "RESTRICTED" && slowOnlyAtAdmission) {
+        throw makeError("restricted_table_required");
       }
 
       const tiers = resolvePokerBuyInTiers(env);
@@ -1026,7 +1039,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const botFundingAllowedForTableHumans = joinAccess.effectiveClass !== "RESTRICTED"
         && existingHumanAccessAllowsBotFunding;
       const fundingPoolClass = botFundingAllowedForTableHumans && joinAccess.schemaBacked
-        ? (tableIsSlowOnly || canPromoteSlowTable ? "SLOW" : "NORMAL")
+        ? (slowOnlyAtAdmission || canPromoteSlowTable ? "SLOW" : "NORMAL")
         : null;
       const targetBotCount = botFundingAllowedForTableHumans
         && isBotFundingAllowedForBuyIn(
@@ -1084,7 +1097,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
                 last_activity_at = now(),
                 updated_at = now()
           where id = $1;`,
-        poolSchema ? [tableId, canPromoteSlowTable] : [tableId]
+        poolSchema ? [tableId, slowOnlyAtAdmission || canPromoteSlowTable] : [tableId]
       );
       return {
         ok: true,

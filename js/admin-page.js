@@ -858,14 +858,19 @@
     html.push('<div class="admin-list__meta admin-mono">' + escapeHtml(user.userId || "—") + "</div>");
     html.push("</div>");
     html.push('<div class="admin-balance"><span class="admin-balance__label">Balance</span><span class="admin-balance__value">' + escapeHtml(formatAmount(detail.balance && detail.balance.balance)) + "</span></div>");
-    html.push('<form class="admin-adjust" id="adminPokerAccessForm">');
+    var pokerAccessEditable = user.pokerAccessEditable !== false;
+    html.push(pokerAccessEditable ? '<form class="admin-adjust" id="adminPokerAccessForm">' : '<div class="admin-adjust" id="adminPokerAccessReadOnly">');
     html.push('<h3 class="admin-section-title">Poker access</h3>');
     html.push('<div class="admin-kv">' + renderKvRow("Automatic class", user.automaticClass || "NORMAL") + renderKvRow("Effective class", user.effectiveClass || "NORMAL") + renderKvRow("Revision", user.accessRevision || 1) + '</div>');
-    html.push('<label class="admin-field"><span class="admin-field__label">Override</span><select class="admin-input" name="override"><option value="AUTO"' + (user.override === "AUTO" ? " selected" : "") + '>AUTO</option><option value="FORCE_NORMAL"' + (user.override === "FORCE_NORMAL" ? " selected" : "") + '>FORCE_NORMAL</option><option value="FORCE_SLOW"' + (user.override === "FORCE_SLOW" ? " selected" : "") + '>FORCE_SLOW</option><option value="FORCE_RESTRICTED"' + (user.override === "FORCE_RESTRICTED" ? " selected" : "") + '>FORCE_RESTRICTED</option></select></label>');
-    html.push('<input type="hidden" name="userId" value="' + escapeHtml(user.userId || "") + '"><input type="hidden" name="expectedRevision" value="' + escapeHtml(user.accessRevision || 1) + '">');
-    html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save poker override</button></div>');
-    html.push('<p class="admin-note" data-poker-access-status aria-live="polite">Changes preserve automatic classification and converge within 30 seconds.</p>');
-    html.push('</form>');
+    if (pokerAccessEditable) {
+      html.push('<label class="admin-field"><span class="admin-field__label">Override</span><select class="admin-input" name="override"><option value="AUTO"' + (user.override === "AUTO" ? " selected" : "") + '>AUTO</option><option value="FORCE_NORMAL"' + (user.override === "FORCE_NORMAL" ? " selected" : "") + '>FORCE_NORMAL</option><option value="FORCE_SLOW"' + (user.override === "FORCE_SLOW" ? " selected" : "") + '>FORCE_SLOW</option><option value="FORCE_RESTRICTED"' + (user.override === "FORCE_RESTRICTED" ? " selected" : "") + '>FORCE_RESTRICTED</option></select></label>');
+      html.push('<input type="hidden" name="userId" value="' + escapeHtml(user.userId || "") + '"><input type="hidden" name="expectedRevision" value="' + escapeHtml(user.accessRevision || 1) + '">');
+      html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save poker override</button></div>');
+      html.push('<p class="admin-note" data-poker-access-status aria-live="polite">Changes preserve automatic classification and converge within 30 seconds.</p>');
+      html.push('</form>');
+    } else {
+      html.push('<p class="admin-note">Poker access controls are read-only until the poker access schema is migrated.</p></div>');
+    }
     html.push('<div class="admin-inline-actions">');
     html.push('<button class="admin-btn admin-btn--ghost" type="button" data-copy-text="' + escapeHtml(user.userId || "") + '">Copy userId</button>');
     html.push('<button class="admin-btn admin-btn--ghost" type="button" data-user-action="ledger" data-user-id="' + escapeHtml(user.userId || "") + '">Open ledger mode</button>');
@@ -1587,16 +1592,16 @@
     if (!nodes.opsRuntime) return;
     var summary = state.ops.summary && state.ops.summary.pokerBotPolicy;
     if (!summary) return;
-    var existing = nodes.opsRuntime.querySelector("#adminPokerPolicyForm");
-    if (existing) existing.remove();
+    nodes.opsRuntime.querySelectorAll("#adminPokerAccessPolicyForm, [id^='adminPokerTierPolicyForm-']").forEach(function(existing){ existing.remove(); });
     var access = summary.access || {};
     var tiers = Array.isArray(summary.tiers) ? summary.tiers : [];
     var pools = Array.isArray(summary.pools) ? summary.pools : [];
     var html = [];
-    html.push('<form class="admin-adjust" id="adminPokerPolicyForm">');
     html.push('<h3 class="admin-section-title">Poker access and refill policy</h3>');
+    html.push('<form class="admin-adjust" id="adminPokerAccessPolicyForm">');
     html.push('<label class="admin-field"><span class="admin-field__label">SLOW threshold (CH)</span><input class="admin-input" name="slowThresholdCh" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(access.slowThresholdCh || "") + '"></label>');
     html.push('<input type="hidden" name="accessRevision" value="' + escapeHtml(access.revision || 1) + '">');
+    html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save access policy</button></div><p class="admin-note" data-poker-access-policy-status aria-live="polite">Access policy is revision checked and audited separately.</p></form>');
     if (pools.length){
       html.push('<div class="admin-kv">');
       pools.forEach(function(pool){
@@ -1605,14 +1610,13 @@
       html.push('</div>');
     }
     tiers.forEach(function(tier){
-      html.push('<fieldset class="admin-surface"><legend>Tier ' + escapeHtml(tier.buyIn) + '</legend>');
+      html.push('<form class="admin-adjust admin-surface" id="adminPokerTierPolicyForm-' + escapeHtml(tier.buyIn) + '" data-poker-buy-in="' + escapeHtml(tier.buyIn) + '"><fieldset><legend>Tier ' + escapeHtml(tier.buyIn) + '</legend>');
       html.push('<label class="admin-field"><span class="admin-field__label">Enabled</span><input name="enabled-' + escapeHtml(tier.buyIn) + '" type="checkbox"' + (tier.enabled ? " checked" : "") + '></label>');
       [["normalRefillThresholdCh", "NORMAL threshold"], ["normalRefillAmountCh", "NORMAL amount"], ["slowRefillThresholdCh", "SLOW threshold"], ["slowRefillAmountCh", "SLOW amount"]].forEach(function(pair){
         html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + '</span><input class="admin-input" name="' + pair[0] + '-' + escapeHtml(tier.buyIn) + '" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(tier[pair[0]] || "") + '"></label>');
       });
-      html.push('<input type="hidden" name="revision-' + escapeHtml(tier.buyIn) + '" value="' + escapeHtml(tier.revision || 1) + '"></fieldset>');
+      html.push('<input type="hidden" name="revision-' + escapeHtml(tier.buyIn) + '" value="' + escapeHtml(tier.revision || 1) + '"></fieldset><div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save tier policy</button></div><p class="admin-note" data-poker-tier-policy-status aria-live="polite">Tier changes are independent mutations.</p></form>');
     });
-    html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save poker policy</button></div><p class="admin-note" data-poker-policy-status aria-live="polite">Policy changes are revision checked and audited.</p></form>');
     nodes.opsRuntime.insertAdjacentHTML("beforeend", html.join(""));
   }
 
@@ -1631,27 +1635,38 @@
     }
   }
 
-  async function submitPokerPolicyForm(event){
+  async function submitPokerAccessPolicyForm(event){
     event.preventDefault();
     var form = event.target;
-    var status = form.querySelector("[data-poker-policy-status]");
+    var status = form.querySelector("[data-poker-access-policy-status]");
     var data = formToObject(form);
     try {
       await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({ kind: "access", slowThresholdCh: data.slowThresholdCh, expectedRevision: data.accessRevision }) });
-      var tiers = state.ops.summary && state.ops.summary.pokerBotPolicy && state.ops.summary.pokerBotPolicy.tiers || [];
-      for (var index = 0; index < tiers.length; index += 1){
-        var tier = tiers[index];
-        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({
-          kind: "tier", buyIn: tier.buyIn, enabled: data["enabled-" + tier.buyIn] === "on", expectedRevision: data["revision-" + tier.buyIn],
-          normal_refill_threshold_ch: data["normalRefillThresholdCh-" + tier.buyIn], normal_refill_amount_ch: data["normalRefillAmountCh-" + tier.buyIn],
-          slow_refill_threshold_ch: data["slowRefillThresholdCh-" + tier.buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + tier.buyIn]
-        }) });
-      }
-      if (status) status.textContent = "Poker policy saved; cache propagation is bounded to 30 seconds.";
+      if (status) status.textContent = "Access policy saved.";
       await loadOps();
     } catch (err){
-      if (status) status.textContent = "Could not save poker policy: " + String(err && err.code || "request_failed");
-      klog("admin_poker_policy_update_failed", { code: err && err.code ? err.code : "request_failed" });
+      if (status) status.textContent = "Could not save access policy: " + String(err && err.code || "request_failed");
+      klog("admin_poker_access_policy_update_failed", { code: err && err.code ? err.code : "request_failed" });
+    }
+  }
+
+  async function submitPokerTierPolicyForm(event){
+    event.preventDefault();
+    var form = event.target;
+    var status = form.querySelector("[data-poker-tier-policy-status]");
+    var data = formToObject(form);
+    var buyIn = form.getAttribute("data-poker-buy-in");
+    try {
+      await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({
+        kind: "tier", buyIn: buyIn, enabled: data["enabled-" + buyIn] === "on", expectedRevision: data["revision-" + buyIn],
+        normal_refill_threshold_ch: data["normalRefillThresholdCh-" + buyIn], normal_refill_amount_ch: data["normalRefillAmountCh-" + buyIn],
+        slow_refill_threshold_ch: data["slowRefillThresholdCh-" + buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + buyIn]
+      }) });
+      if (status) status.textContent = "Tier " + buyIn + " policy saved.";
+      await loadOps();
+    } catch (err){
+      if (status) status.textContent = "Could not save tier " + buyIn + " policy: " + String(err && err.code || "request_failed");
+      klog("admin_poker_tier_policy_update_failed", { buyIn: buyIn, code: err && err.code ? err.code : "request_failed" });
     }
   }
 
@@ -3340,8 +3355,11 @@
       if (form && form.id === "adminPokerAccessForm"){
         submitPokerAccessForm(event);
       }
-      if (form && form.id === "adminPokerPolicyForm"){
-        submitPokerPolicyForm(event);
+      if (form && form.id === "adminPokerAccessPolicyForm"){
+        submitPokerAccessPolicyForm(event);
+      }
+      if (form && form.id && form.id.indexOf("adminPokerTierPolicyForm-") === 0){
+        submitPokerTierPolicyForm(event);
       }
       if (form && form.id === "adminOpsMaintenanceForm"){
         submitPokerMaintenance(event);

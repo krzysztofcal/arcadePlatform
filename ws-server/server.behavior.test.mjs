@@ -1396,6 +1396,41 @@ test("internal poker maintenance route is token-protected and does not expose a 
   }
 });
 
+test("internal poker access refresh route invalidates fail-closed when the WS database is unavailable", async () => {
+  const token = "internal-access-refresh-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-access-refresh`;
+  const userId = "00000000-0000-4000-8000-000000000010";
+  try {
+    await waitForListening(child, 5000);
+    assert.equal((await fetch(url, { method: "POST", body: JSON.stringify({ userId }) })).status, 401);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ userId })
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      refreshed: false,
+      invalidated: true,
+      failClosed: true,
+      reason: "database_unavailable",
+      userId
+    });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("internal poker maintenance route rejects an unknown WS environment before GET or POST", async () => {
   const token = "internal-maintenance-environment-token";
   const { port, child } = await createServer({

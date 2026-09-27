@@ -75,6 +75,41 @@ test("poker access admin rejects unauthorized override mutation before any write
   assert.equal(writes, 0);
 });
 
+test("poker access admin requires an acknowledged WS cache refresh after commit", async () => {
+  const notifications = [];
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    updatePokerAccess: async () => ({ access: { revision: 9, override: "FORCE_RESTRICTED" } }),
+    notifyWsPokerAccessMutation: async (payload) => {
+      notifications.push(payload);
+      return { ok: true, invalidated: true, refreshed: true, skipped: false };
+    }
+  });
+  const response = await handler({
+    httpMethod: "PATCH",
+    headers: {},
+    body: JSON.stringify({ userId: "00000000-0000-4000-8000-000000000020", override: "FORCE_RESTRICTED", expectedRevision: 8 })
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(notifications[0].revision, 9);
+  assert.equal(JSON.parse(response.body).propagation.refreshed, true);
+
+  const failedHandler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    updatePokerAccess: async () => ({ access: { revision: 10, override: "AUTO" } }),
+    notifyWsPokerAccessMutation: async () => ({ ok: false, skipped: false, reason: "timeout" })
+  });
+  const failed = await failedHandler({
+    httpMethod: "PATCH",
+    headers: {},
+    body: JSON.stringify({ userId: "00000000-0000-4000-8000-000000000020", override: "AUTO", expectedRevision: 9 })
+  });
+  assert.equal(failed.statusCode, 503);
+  assert.equal(JSON.parse(failed.body).error, "poker_access_propagation_failed");
+});
+
 test("poker access admin preserves automatic SLOW while applying an optimistic override revision", async () => {
   const result = await updatePokerAccess({
     userId: "00000000-0000-4000-8000-000000000020",
@@ -82,6 +117,7 @@ test("poker access admin preserves automatic SLOW while applying an optimistic o
     expectedRevision: 7,
     actorId: "00000000-0000-4000-8000-000000000010",
     runTransaction: async (fn) => fn({ unsafe: async (sql) => {
+      if (String(sql).includes("to_regclass")) return [{ available: true }];
       if (String(sql).includes("select user_id")) return [{ user_id: "00000000-0000-4000-8000-000000000020", poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 7 }];
       if (String(sql).includes("update public.chips_accounts")) return [{ user_id: "00000000-0000-4000-8000-000000000020", poker_auto_class: "SLOW", poker_access_override: "FORCE_NORMAL", poker_access_revision: 8 }];
       return [];
@@ -100,6 +136,7 @@ test("poker access admin accepts FORCE_RESTRICTED without changing automatic cla
     expectedRevision: 7,
     actorId: "00000000-0000-4000-8000-000000000010",
     runTransaction: async (fn) => fn({ unsafe: async (sql) => {
+      if (String(sql).includes("to_regclass")) return [{ available: true }];
       if (String(sql).includes("select user_id")) return [{ user_id: "00000000-0000-4000-8000-000000000020", poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 7 }];
       if (String(sql).includes("update public.chips_accounts")) return [{ user_id: "00000000-0000-4000-8000-000000000020", poker_auto_class: "SLOW", poker_access_override: "FORCE_RESTRICTED", poker_access_revision: 8 }];
       return [];
@@ -108,6 +145,22 @@ test("poker access admin accepts FORCE_RESTRICTED without changing automatic cla
   assert.equal(result.access.automaticClass, "SLOW");
   assert.equal(result.access.override, "FORCE_RESTRICTED");
   assert.equal(result.access.effectiveClass, "RESTRICTED");
+});
+
+test("pre-migration poker access mutation fails with a controlled capability error", async () => {
+  await assert.rejects(
+    () => updatePokerAccess({
+      userId: "00000000-0000-4000-8000-000000000020",
+      override: "FORCE_RESTRICTED",
+      expectedRevision: 7,
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn({ unsafe: async (sql) => {
+        if (String(sql).includes("to_regclass")) return [{ available: false }];
+        return [];
+      } })
+    }),
+    (error) => error?.code === "poker_access_schema_unavailable" && error?.status === 409
+  );
 });
 
 test("poker tier policy cannot enable a tier without both exact NORMAL and SLOW pools", async () => {

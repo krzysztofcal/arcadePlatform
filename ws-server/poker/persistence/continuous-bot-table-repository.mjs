@@ -196,7 +196,11 @@ export function createContinuousBotTableRepository({
         const profile = normalizeContinuousBotProfile(profileRows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
         const tableRows = await tx.unsafe(
-          `select id, status, max_players, buy_in, stakes, managed_profile_key, rotation_due_at, created_at
+          `select id, status, max_players, buy_in, stakes, managed_profile_key, rotation_due_at, created_at,
+                  (select count(*) from public.poker_seats s
+                    where s.table_id = poker_tables.id
+                      and s.status = 'ACTIVE'
+                      and coalesce(s.is_bot, false) = true) as active_bot_count
              from public.poker_tables
             where status = 'OPEN' and lifecycle_kind = 'CONTINUOUS_BOT'
             order by created_at asc, id asc
@@ -206,7 +210,11 @@ export function createContinuousBotTableRepository({
         const desiredCount = profile.enabled ? profile.desiredTableCount : 0;
         const retirementTableIds = [];
         for (const table of openTables) {
-          if (!tableMatchesContinuousBotProfile(table, profile)) {
+          const activeBotCount = Number(table?.active_bot_count);
+          const occupancyInvalid = profile.minBotCount > 0
+            && Number.isInteger(activeBotCount)
+            && activeBotCount < profile.minBotCount;
+          if (!tableMatchesContinuousBotProfile(table, profile) || occupancyInvalid) {
             retirementTableIds.push(table.id);
           }
         }
@@ -470,7 +478,11 @@ export function createContinuousBotTableRepository({
         const [profileRows, tableRows] = await Promise.all([
           tx.unsafe(PROFILE_SELECT, [CONTINUOUS_BOT_PROFILE_KEY]),
           tx.unsafe(
-            `select id, status, lifecycle_kind, managed_profile_key, created_at, rotation_due_at
+            `select id, status, lifecycle_kind, managed_profile_key, created_at, rotation_due_at,
+                    (select count(*) from public.poker_seats s
+                      where s.table_id = poker_tables.id
+                        and s.status = 'ACTIVE'
+                        and coalesce(s.is_bot, false) = true) as active_bot_count
                from public.poker_tables
               where status = 'OPEN'
                 and lifecycle_kind = 'CONTINUOUS_BOT'
@@ -491,7 +503,9 @@ export function createContinuousBotTableRepository({
             lifecycleKind: table.lifecycle_kind || null,
             managedProfileKey: table.managed_profile_key || null,
             createdAt: table.created_at || null,
-            rotationDueAt: table.rotation_due_at || null
+            rotationDueAt: table.rotation_due_at || null,
+            activeBotCount: Number.isInteger(Number(table.active_bot_count)) ? Number(table.active_bot_count) : null,
+            healthy: profile.minBotCount <= 0 || Number(table.active_bot_count) >= profile.minBotCount
           }))
         };
       }, { env });
