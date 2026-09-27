@@ -18,14 +18,14 @@
 - [x] Sticky marker, safe owner promotion at JOIN, 4+4 limits/shared lock, accepted human marker and rejoin specified; user-leading active and creator-leading pending indexed count-to-five access paths mandatory, with T027 local SQL/EXPLAIN evidence and no global seat/table scan.
 - [x] Exact per-tier NORMAL/SLOW pools, isolated runtime funding, 3h refill, cross-revision bucket guard and operational scheduler specified; RESTRICTED has no bankroll/refill policy and disables new bot funding only.
 - [x] Admin authorization/audit/cache propagation, FORCE_RESTRICTED access, WS live inventory with minimal bot occupancy, DB Quick Seat and unchanged managed lifecycle included.
-- [x] Edge cases, accepted Sybil/split-wealth risk, breaking cutover and assumptions stated; fresh-only bootstrap separated from owner-approved existing-host install, with no automatic timer start. Required WS/Caddy runtime gate is separated from the explicitly authorized pre-merge Stage MINT acceptance canary and Production GO.
+- [x] Edge cases, accepted Sybil/split-wealth risk, breaking cutover and assumptions stated; fresh-only bootstrap separated from owner-approved existing-host install, with no automatic timer start. Required WS/Caddy runtime gate is separated from the explicitly authorized pre-merge owner-only `poker-bot-pool-refill-canary` mode in the registered Stage workflow and Production GO; the standalone refill workflow remains the post-merge dispatcher path.
 
 ## Feature Readiness
 
 - [x] 21 FR + 7 SC map the original 29 tasks plus the additive T030–T036 manual RESTRICTED sequence plus T037 pre-merge Stage acceptance; T001–T029 remain historical evidence and T036 is the new exact-SHA WS gate.
 - [x] Existing packages/flows reused; only fundamental deterministic tests, one local transaction suite. T016/T019/T020 require small extensions of the existing workflow/VPS guard files for mutation authorization, dispatch-only wake-up, no VPS DB/SQL and fresh-only installation without activation; no new framework or broad suite.
 - [x] No stale sync blocker: live sync completed; T001 verifies no drift and separate implementation authority.
-- [x] Constitution checked before/after design; implementation remains within the approved scope. The original Stage migration apply completed (97→98, then 98/0; smoke PASS), and the RESTRICTED CHECK extension is forward-only and classified for a new automatic Stage Apply effect; the Stage-only refill/MINT canary is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / NOT RUN**, while Production operation is unauthorized.
+- [x] Constitution checked before/after design; implementation remains within the approved scope. The original Stage migration apply completed (97→98, then 98/0; smoke PASS), and the RESTRICTED CHECK extension is forward-only and classified for a new automatic Stage Apply effect; the registered Stage workflow's owner-only refill/MINT canary is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / NOT RUN**, while the standalone dispatcher, Production operation and VPS activation remain separately gated.
 
 ## Notes
 

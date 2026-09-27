@@ -42,6 +42,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   const ref = String(env.POKER_BOT_REFILL_REVIEWED_REF || env.GITHUB_REF || "").trim();
   const normalizedMode = String(mode || "dry-run").trim().toLowerCase();
   const target = String(env.POKER_BOT_REFILL_TARGET || "stage").trim().toLowerCase();
+  const stageCanary = env.POKER_BOT_REFILL_STAGE_CANARY === "1";
   if (repository !== CANONICAL_REPOSITORY) throw fail("refill_repository_mismatch");
   if (!/^refs\/(heads|tags)\/[A-Za-z0-9._\/-]+$/.test(ref) && !/^[0-9a-f]{40}$/.test(ref) && ref !== "main") {
     throw fail("refill_reviewed_ref_required");
@@ -54,7 +55,13 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   if (normalizedMode === "mutate" && env.GITHUB_EVENT_NAME !== "workflow_dispatch") {
     throw fail("refill_dispatch_required");
   }
-  if (normalizedMode === "mutate" && env.GITHUB_ACTOR !== "arcade-poker-refill-dispatch") {
+  if (stageCanary && (target !== "stage" || normalizedMode !== "mutate")) {
+    throw fail("refill_stage_canary_scope_invalid");
+  }
+  const ownerCanaryActor = stageCanary
+    && env.GITHUB_REPOSITORY_OWNER === CANONICAL_REPOSITORY.split("/")[0]
+    && env.GITHUB_ACTOR === env.GITHUB_REPOSITORY_OWNER;
+  if (normalizedMode === "mutate" && env.GITHUB_ACTOR !== "arcade-poker-refill-dispatch" && !ownerCanaryActor) {
     throw fail("refill_actor_not_allowed");
   }
   if (normalizedMode === "mutate" && target === "stage") {
@@ -76,6 +83,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
     mode: normalizedMode,
     dryRun: normalizedMode !== "mutate",
     target,
+    stageCanary,
   };
 }
 

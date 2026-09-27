@@ -144,6 +144,54 @@ test("Stage mutation requires the exact checked reviewed commit", () => {
   }), { code: "refill_dispatch_sha_mismatch" });
 });
 
+test("owner-gated Stage canary accepts only the dispatched exact SHA", () => {
+  const reviewedSha = "0123456789abcdef0123456789abcdef01234567";
+  const authorized = resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: reviewedSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_STAGE_CANARY: "1",
+  });
+  assert.equal(authorized.stageCanary, true);
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: reviewedSha,
+    GITHUB_ACTOR: "other-user",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_STAGE_CANARY: "1",
+  }), { code: "refill_actor_not_allowed" });
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: reviewedSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_STAGE_CANARY: "1",
+    POKER_BOT_REFILL_PRODUCTION_GO: "1",
+  }), { code: "refill_stage_canary_scope_invalid" });
+});
+
 test("Production mutation remains main-only and cannot target a PR SHA", () => {
   const mainSha = "0123456789abcdef0123456789abcdef01234567";
   const authorized = resolveRefillAuthorization({

@@ -30,6 +30,7 @@ const RETAINED_MODES = [
   "external-existing-30d",
   "external-scheduled-automatic",
   "missing-table-bot-retirement-canary",
+  "poker-bot-pool-refill-canary",
 ];
 
 const RETIRED_MODES = [
@@ -80,6 +81,7 @@ const RETAINED_STEPS = [
   "Run Stage escrow account retention",
   "Audit Stage escrow account retention",
   "Verify Stage escrow account-retention recovery",
+  "Execute exact poker bot pool refill Stage canary",
 ];
 
 const RETIRED_STEPS = [
@@ -114,6 +116,8 @@ assert.deepEqual([...inputNames].sort(), [
   "missing_table_retirement_confirmation",
   "missing_table_retirement_registry_count",
   "missing_table_retirement_registry_sha256",
+  "poker_refill_reviewed_sha",
+  "poker_refill_confirmation",
   "stage_30d_recovery_batch_id",
   "bot_only_recovery_batch_id",
   "bot_only_recovery_confirmation",
@@ -166,8 +170,8 @@ assert.match(workflow, /vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1'/);
 assert.equal((workflow.match(/^    timeout-minutes: 60$/gm) || []).length, 1);
 assert.equal((workflow.match(/^    timeout-minutes: 30$/gm) || []).length, 0);
 assert.match(workflow, /SUPABASE_STAGE_DB_URL: \${{ secrets\.SUPABASE_STAGE_DB_URL }}/);
-assert.match(workflow, /SUPABASE_STAGE_URL: \${{ inputs\.mode != 'missing-table-bot-retirement-canary' && secrets\.SUPABASE_STAGE_URL \|\| '' }}/);
-assert.match(workflow, /SUPABASE_STAGE_SERVICE_ROLE_KEY: \${{ inputs\.mode != 'missing-table-bot-retirement-canary' && secrets\.SUPABASE_STAGE_SERVICE_ROLE_KEY \|\| '' }}/);
+assert.match(workflow, /SUPABASE_STAGE_URL: \${{ inputs\.mode != 'missing-table-bot-retirement-canary' && inputs\.mode != 'poker-bot-pool-refill-canary' && secrets\.SUPABASE_STAGE_URL \|\| '' }}/);
+assert.match(workflow, /SUPABASE_STAGE_SERVICE_ROLE_KEY: \${{ inputs\.mode != 'missing-table-bot-retirement-canary' && inputs\.mode != 'poker-bot-pool-refill-canary' && secrets\.SUPABASE_STAGE_SERVICE_ROLE_KEY \|\| '' }}/);
 assert.doesNotMatch(workflow, /SUPABASE_PROD_|PRODUCTION|--target\s+prod/i);
 
 const checkoutStep = parsedWorkflow.jobs["stage-archive"].steps.find((step) => step.id === "checkout");
@@ -198,6 +202,7 @@ for (const mode of [
   "escrow-retention-audit",
   "escrow-retention-verify",
   "missing-table-bot-retirement-canary",
+  "poker-bot-pool-refill-canary",
 ]) {
   assert.match(preflightStep, new RegExp(`inputs\\.mode == '${mode}'`));
 }
@@ -287,6 +292,43 @@ assert.equal(refillJobAllowed({ ...productionRefillGithub, ref: "refs/heads/rele
 for (const overrides of [{ POKER_BOT_REFILL_ENABLED: "0" }, { POKER_BOT_REFILL_DISPATCH_ACTOR: "other" }]) {
   assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate" }, { ...refillVars, ...overrides }), false);
 }
+
+const canaryStep = parsedWorkflow.jobs["stage-archive"].steps.find(
+  (step) => step.name === "Execute exact poker bot pool refill Stage canary",
+);
+assert.ok(canaryStep, "exact Stage refill canary step must exist");
+assert.equal(
+  canaryStep.if,
+  "${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'poker-bot-pool-refill-canary' }}",
+);
+assert.deepEqual(Object.keys(canaryStep.env).sort(), [
+  "DEPLOYED_COMMIT_SHA",
+  "POKER_BOT_REFILL_CHECKED_SHA",
+  "POKER_BOT_REFILL_FEATURE_ENABLED",
+  "POKER_BOT_REFILL_MODE",
+  "POKER_BOT_REFILL_REVIEWED_REF",
+  "POKER_BOT_REFILL_STAGE_CANARY",
+  "POKER_BOT_REFILL_TARGET",
+  "REVIEWED_SHA_CONFIRMATION",
+  "REVIEWED_SHA_INPUT",
+  "SUPABASE_DB_URL",
+].sort(), "Stage canary exposes only Stage DB and exact-SHA authority inputs");
+assert.equal(canaryStep.env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_STAGE_DB_URL }}");
+assert.match(canaryStep.run, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
+assert.match(canaryStep.run, /test "\$GITHUB_REF" != "refs\/heads\/main"/);
+assert.ok(canaryStep.run.includes('[[ "$REVIEWED_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]]'));
+assert.match(canaryStep.run, /test "\$REVIEWED_SHA_INPUT" = "\$GITHUB_SHA"/);
+assert.match(canaryStep.run, /test "\$DEPLOYED_COMMIT_SHA" = "\$GITHUB_SHA"/);
+assert.match(canaryStep.run, /test "\$POKER_BOT_REFILL_REVIEWED_REF" = "\$GITHUB_SHA"/);
+assert.match(canaryStep.run, /test "\$POKER_BOT_REFILL_CHECKED_SHA" = "\$GITHUB_SHA"/);
+assert.match(canaryStep.run, /test "\$REVIEWED_SHA_CONFIRMATION" = "REFILL \$REVIEWED_SHA_INPUT"/);
+assert.match(canaryStep.run, /test "\$POKER_BOT_REFILL_FEATURE_ENABLED" = "1"/);
+assert.match(canaryStep.run, /test -z "\$\{SUPABASE_STAGE_URL:-\}"/);
+assert.match(canaryStep.run, /test -z "\$\{SUPABASE_STAGE_SERVICE_ROLE_KEY:-\}"/);
+assert.equal((canaryStep.run.match(/node scripts\/ops\/poker-bot-pool-refill\.mjs/g) || []).length, 1);
+assert.doesNotMatch(canaryStep.run, /retry|next[-_ ]run|schedule|storage|SUPABASE_PROD|PRODUCTION/i);
+assert.doesNotMatch(canaryStep.run, /for \(|while \(/);
+
 const refillBoundary = refillJob.steps.find((step) => step.name === "Verify refill authority boundary");
 const refillBoundaryRun = refillBoundary.run.replace("${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR }}", "arcade-poker-refill-dispatch");
 const checkedSha = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { encoding: "utf8" }).stdout.trim();
@@ -331,6 +373,11 @@ assert.match(
   /\|\| \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'missing-table-bot-retirement-canary' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner\)/,
 );
 assert.match(stageJobIf, /inputs\.mode != 'missing-table-bot-retirement-canary'/);
+assert.match(stageJobIf, /inputs\.mode != 'poker-bot-pool-refill-canary'/);
+assert.match(
+  stageJobIf,
+  /\|\| \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'poker-bot-pool-refill-canary' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner && github\.ref != 'refs\/heads\/main'\)/,
+);
 assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(
