@@ -88,9 +88,9 @@ user_accounts as (
   select
     a.user_id,
     a.balance,
-    a.poker_auto_class,
-    a.poker_access_override,
-    a.poker_access_revision
+    to_jsonb(a) ->> 'poker_auto_class' as poker_auto_class,
+    to_jsonb(a) ->> 'poker_access_override' as poker_access_override,
+    (to_jsonb(a) ->> 'poker_access_revision')::bigint as poker_access_revision
   from public.chips_accounts a
   where a.account_type = 'USER'
 ),

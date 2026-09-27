@@ -1,3 +1,4 @@
+import { hasPokerPoolSchema } from "../../../shared/poker-domain/bot-access.mjs";
 import { assertPendingPokerTableCapacity, lockUserTableSlots } from "../../../shared/poker-domain/table-participation.mjs";
 
 export const createPokerTableWithState = async (tx, {
@@ -10,7 +11,7 @@ export const createPokerTableWithState = async (tx, {
   rotationDueAt = null,
   userSlotLocked = false
 }) => {
-  if (typeof userId === "string" && userId.trim()) {
+  if (typeof userId === "string" && userId.trim() && await hasPokerPoolSchema(tx)) {
     if (!userSlotLocked) await lockUserTableSlots(tx, userId);
     await assertPendingPokerTableCapacity(tx, userId);
   }

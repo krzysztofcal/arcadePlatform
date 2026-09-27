@@ -25,7 +25,7 @@
 - [x] 21 FR + 6 SC mapped to 29 concrete tasks; T001–T028 are checked with local implementation/evidence, while T029 remains the explicit exact-SHA WS gate in dependency order.
 - [x] Existing packages/flows reused; only fundamental deterministic tests, one local transaction suite. T016/T019/T020 require small extensions of the existing workflow/VPS guard files for mutation authorization, dispatch-only wake-up, no VPS DB/SQL and fresh-only installation without activation; no new framework or broad suite.
 - [x] No stale sync blocker: live sync completed; T001 verifies no drift and separate implementation authority.
-- [x] Constitution checked before/after design; implementation remains within the approved scope and no Stage/Production apply, real ledger MINT or deploy has been performed.
+- [x] Constitution checked before/after design; implementation remains within the approved scope and automatic Stage migration apply completed (97→98, then 98/0; both smoke PASS); no Stage refill/MINT, Production operation or WS Preview was performed.
 
 ## Notes
 

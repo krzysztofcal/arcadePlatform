@@ -5,6 +5,23 @@ export const ACCESS_OVERRIDES = Object.freeze(["AUTO", "FORCE_NORMAL", "FORCE_SL
 export const DEFAULT_SLOW_THRESHOLD_CH = 1_000_000_000;
 export const ACCESS_SNAPSHOT_MAX_AGE_MS = 30_000;
 
+// Transaction-local only: a later transaction must observe a completed schema cutover.
+const schemaByTransaction = new WeakMap();
+export async function hasPokerPoolSchema(tx) {
+  if (!schemaByTransaction.has(tx)) {
+    schemaByTransaction.set(tx, (async () => {
+      const rows = await tx.unsafe("select to_regclass('public.poker_access_policy') is not null as available;");
+      if (typeof rows?.[0]?.available !== "boolean") throw new Error("poker_schema_capability_unavailable");
+      return rows[0].available;
+    })());
+  }
+  return schemaByTransaction.get(tx);
+}
+
+export function legacyPokerAccessSnapshot(nowMs = Date.now()) {
+  return { ...normalizeAccessSnapshot({ automaticClass: "NORMAL", override: "AUTO", revision: 1 }, { nowMs }), schemaBacked: false };
+}
+
 const isSafePositiveInteger = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0;
 
 export function normalizeAccessClass(value, fallback = null) {
@@ -120,6 +137,10 @@ export function isFreshAccessSnapshot(snapshot, nowMs = Date.now()) {
 
 export async function readPokerAccessPolicy(tx, { nowMs = Date.now() } = {}) {
   if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
+  if (!await hasPokerPoolSchema(tx)) return {
+    ...normalizePolicySnapshot({ slow_threshold_ch: Number.MAX_SAFE_INTEGER, revision: 1 }, { nowMs }),
+    schemaBacked: false,
+  };
   const rows = await tx.unsafe(
     "select slow_threshold_ch, revision from public.poker_access_policy where id = 1 limit 1;"
   );
@@ -129,6 +150,7 @@ export async function readPokerAccessPolicy(tx, { nowMs = Date.now() } = {}) {
 export async function readPokerAccessSnapshot(tx, { userId, lock = false, nowMs = Date.now() } = {}) {
   if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
   if (typeof userId !== "string" || !userId.trim()) return null;
+  if (!await hasPokerPoolSchema(tx)) return legacyPokerAccessSnapshot(nowMs);
   const rows = await tx.unsafe(`
 select poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at
 from public.chips_accounts
@@ -146,6 +168,7 @@ export async function readPokerAccessSnapshots(tx, { userIds = [], nowMs = Date.
     .map((userId) => typeof userId === "string" ? userId.trim().toLowerCase() : "")
     .filter((userId) => UUID_RE.test(userId)))];
   if (normalizedUserIds.length === 0) return new Map();
+  if (!await hasPokerPoolSchema(tx)) return new Map(normalizedUserIds.map((userId) => [userId, legacyPokerAccessSnapshot(nowMs)]));
   const rows = await tx.unsafe(`
 select user_id, poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at
 from public.chips_accounts

@@ -8,7 +8,7 @@ import {
   isCanonicalPokerStakes
 } from "../../shared/poker-domain/table-economy.mjs";
 import { lockUserTableSlots } from "../../shared/poker-domain/table-participation.mjs";
-import { readPokerAccessSnapshot } from "../../shared/poker-domain/bot-access.mjs";
+import { hasPokerPoolSchema, readPokerAccessSnapshot } from "../../shared/poker-domain/bot-access.mjs";
 
 const DEFAULT_MAX_PLAYERS = 6;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -68,16 +68,8 @@ const parseTableStakes = (value) => {
 };
 
 const readQuickSeatEffectiveClass = async (tx, userId) => {
-  try {
-    const snapshot = await readPokerAccessSnapshot(tx, { userId });
-    if (!snapshot?.schemaBacked) return "UNKNOWN";
-    return snapshot.effectiveClass === "NORMAL" || snapshot.effectiveClass === "SLOW"
-      ? snapshot.effectiveClass
-      : "UNKNOWN";
-  } catch (error) {
-    if (String(error?.code || "") === "42703" || /poker_(?:access|auto)/i.test(String(error?.message || ""))) return "UNKNOWN";
-    throw error;
-  }
+  const snapshot = await readPokerAccessSnapshot(tx, { userId });
+  return snapshot?.effectiveClass || "UNKNOWN";
 };
 
 const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability }) => {
@@ -172,15 +164,15 @@ where t.status = 'OPEN'
       and coalesce(hs.is_bot, false) = false
     and coalesce(hs.last_seen_at, to_timestamp(0)) >= $3::timestamptz
   ))
-  and (
+  ${await hasPokerPoolSchema(tx) ? `and (
     ($5::text = 'NORMAL' and coalesce(t.is_slow_only, false) = false)
     or ($5::text = 'SLOW' and coalesce(t.is_slow_only, false) = true)
-  )
+  )` : ""}
   and t.buy_in = any($4::int[])
 order by t.last_activity_at desc nulls last, t.created_at asc nulls last
 limit 50;
     `,
-    [maxPlayers, requireHuman, humanSeatFreshCutoffIso, availableBuyIns, effectiveClass]
+    [maxPlayers, requireHuman, humanSeatFreshCutoffIso, availableBuyIns, ...(await hasPokerPoolSchema(tx) ? [effectiveClass] : [])]
   );
 };
 
@@ -287,7 +279,7 @@ export async function handler(event) {
       const matchKey = `quickseat:${maxPlayers}`;
       const humanSeatFreshCutoffIso = new Date(Date.now() - resolveHumanSeatFreshMs(process.env.POKER_ACTIVE_HUMAN_SEAT_FRESH_MS)).toISOString();
 
-      await lockUserTableSlots(tx, auth.userId);
+      if (await hasPokerPoolSchema(tx)) await lockUserTableSlots(tx, auth.userId);
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
       const existingRows = await selectExistingActiveSeat(tx, { userId: auth.userId });

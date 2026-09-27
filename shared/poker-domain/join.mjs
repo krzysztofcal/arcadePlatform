@@ -3,11 +3,10 @@ import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } f
 import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 import {
-  DEFAULT_SLOW_THRESHOLD_CH,
+  hasPokerPoolSchema,
+  legacyPokerAccessSnapshot,
   applyAutomaticThresholdEvidence,
   deriveAccessState,
-  normalizePolicySnapshot,
-  normalizeAccessSnapshot,
   persistAutomaticSlow,
   readPokerAccessPolicy,
   readPokerAccessSnapshot,
@@ -119,81 +118,39 @@ function makeError(code, validationReason = null, details = null) {
   return error;
 }
 
-function isMissingAccessSchemaError(error) {
-  return String(error?.code || "") === "42703" || /poker_(?:access|auto|bot_tier)|normal_refill|is_slow_only/i.test(String(error?.message || ""));
-}
-
 async function resolveJoinAccess({ tx, userId, bankroll, buyIn = null, nowMs = Date.now() }) {
-  let policy = null;
-  let snapshot = null;
-  try {
-    policy = await readPokerAccessPolicy(tx, { nowMs });
-  } catch (error) {
-    if (!isMissingAccessSchemaError(error)) throw error;
-  }
-  try {
-    snapshot = await readPokerAccessSnapshot(tx, { userId, lock: true, nowMs });
-  } catch (error) {
-    if (!isMissingAccessSchemaError(error)) throw error;
-  }
-  const normalizedPolicy = policy || normalizePolicySnapshot({
-    slow_threshold_ch: DEFAULT_SLOW_THRESHOLD_CH,
-    revision: 1,
-    loadedAtMs: nowMs
-  }, { nowMs });
-  const normalizedSnapshot = snapshot || normalizeAccessSnapshot({
-    poker_auto_class: "NORMAL",
-    poker_access_override: "AUTO",
-    poker_access_revision: 1
-  }, { nowMs });
-  if (normalizedSnapshot) normalizedSnapshot.schemaBacked = Boolean(snapshot?.schemaBacked);
-  const schemaBacked = Boolean(snapshot?.schemaBacked || policy);
-  if (schemaBacked && (!snapshot || !policy)) {
-    return {
-      automaticClass: null,
-      override: null,
-      effectiveClass: "UNKNOWN",
-      revision: null,
-      policy: null,
-      persisted: false,
-      automaticChanged: false,
-      schemaBacked: true,
-      tierPolicy: null,
-      poolProvisioning: null
-    };
-  }
+  if (!await hasPokerPoolSchema(tx)) return { ...legacyPokerAccessSnapshot(nowMs), policy: await readPokerAccessPolicy(tx, { nowMs }), automaticChanged: false };
+  const policy = await readPokerAccessPolicy(tx, { nowMs });
+  const snapshot = await readPokerAccessSnapshot(tx, { userId, lock: true, nowMs });
+  if (!snapshot || !policy) return { effectiveClass: "UNKNOWN", schemaBacked: true };
   const classified = applyAutomaticThresholdEvidence({
-    automaticClass: normalizedSnapshot.automaticClass,
-    override: normalizedSnapshot.override,
+    automaticClass: snapshot.automaticClass,
+    override: snapshot.override,
     evidenceCh: bankroll,
-    slowThresholdCh: normalizedPolicy?.slowThresholdCh || DEFAULT_SLOW_THRESHOLD_CH
+    slowThresholdCh: policy.slowThresholdCh
   });
   let persisted = null;
   if (classified.changed && snapshot) {
     persisted = await persistAutomaticSlow(tx, {
       userId,
-      expectedRevision: normalizedSnapshot.revision
+      expectedRevision: snapshot.revision
     });
   }
-  const finalSnapshot = persisted?.snapshot || normalizedSnapshot;
+  const finalSnapshot = persisted?.snapshot || snapshot;
   const finalAccessState = deriveAccessState({
     automaticClass: finalSnapshot.automaticClass,
     override: finalSnapshot.override
   });
   let tierPolicy = null;
   let poolProvisioning = null;
-  if (normalizedSnapshot?.schemaBacked) {
-    try {
-      tierPolicy = await readPokerTierPolicy(tx, { buyIn });
-      poolProvisioning = await readPokerPoolProvisioning(tx, { buyIn });
-    } catch (error) {
-      if (!isMissingAccessSchemaError(error)) throw error;
-    }
+  if (snapshot?.schemaBacked) {
+    tierPolicy = await readPokerTierPolicy(tx, { buyIn });
+    poolProvisioning = await readPokerPoolProvisioning(tx, { buyIn });
   }
   return {
     ...finalAccessState,
     revision: finalSnapshot.revision,
-    policy: normalizedPolicy,
+    policy: policy,
     persisted: Boolean(persisted?.changed),
     automaticChanged: classified.changed,
     schemaBacked: Boolean(finalSnapshot?.schemaBacked),
@@ -773,9 +730,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
   const runPostTransaction = await resolvePostTransactionFn(postTransactionFn);
   return beginSql(async (tx) => {
     try {
-      await lockUserTableSlots(tx, userId);
+      const poolSchema = await hasPokerPoolSchema(tx);
+      if (poolSchema) await lockUserTableSlots(tx, userId);
       const tableRows = await tx.unsafe(
-        "select id, status, max_players, stakes, buy_in, created_by, lifecycle_kind, has_human_participant, is_slow_only from public.poker_tables where id = $1 limit 1 for update;",
+        `select id, status, max_players, stakes, buy_in, created_by, lifecycle_kind, has_human_participant${poolSchema ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1 for update;`,
         [tableId]
       );
       const table = tableRows?.[0] || null;
@@ -902,7 +860,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         throw makeError("slow_only_table_required");
       }
 
-      await assertActivePokerTableCapacity(tx, userId);
+      if (poolSchema) await assertActivePokerTableCapacity(tx, userId);
 
       const tiers = resolvePokerBuyInTiers(env);
       const bankroll = bankrollForAccess;
@@ -1077,11 +1035,11 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       await tx.unsafe(
         `update public.poker_tables
             set has_human_participant = true,
-                is_slow_only = case when $2::boolean then true else is_slow_only end,
+                ${poolSchema ? "is_slow_only = case when $2::boolean then true else is_slow_only end," : ""}
                 last_activity_at = now(),
                 updated_at = now()
           where id = $1;`,
-        [tableId, canPromoteSlowTable]
+        poolSchema ? [tableId, canPromoteSlowTable] : [tableId]
       );
       return {
         ok: true,
@@ -1096,6 +1054,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         joinStatus: updatedStateRow.joinStatus,
         seededBots,
         access: {
+          schemaBacked: joinAccess.schemaBacked,
           automaticClass: joinAccess.automaticClass,
           override: joinAccess.override,
           effectiveClass: joinAccess.effectiveClass,

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const WORKFLOW_PATH = ".github/workflows/infra-vps.yml";
 
@@ -305,6 +307,7 @@ test("poker refill VPS artifacts dispatch only the guarded workflow without ledg
   assert.match(service, /User=copilot/);
   assert.match(service, /ExecStart=\/usr\/local\/bin\/arcade-poker-pool-dispatch\.sh/);
   assert.match(service, /Environment=POKER_BOT_REFILL_MODE=dry-run/);
+  assert.match(service, /EnvironmentFile=-\/etc\/arcade\/poker-pool-dispatch\.env/);
   assert.doesNotMatch(service, /SUPABASE|DATABASE_URL|psql|SQL/);
   assert.match(timer, /OnCalendar=.*00\/3/);
   assert.doesNotMatch(timer, /ExecStart|workflow_dispatch/);
@@ -314,6 +317,43 @@ test("poker refill VPS artifacts dispatch only the guarded workflow without ledg
   assert.doesNotMatch(bootstrap, /enable\s+--now\s+arcade-poker-pool-dispatch|start\s+arcade-poker-pool-dispatch/);
   assert.match(bootstrap, /fresh-host artifacts only/);
   assert.match(bootstrap, /existing live hosts require the separate/);
+});
+
+test("poker refill dispatcher defaults to preview and accepts only bounded configured mutation", () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "poker-dispatch-"));
+  const gh = path.join(temporary, "gh");
+  fs.writeFileSync(gh, '#!/bin/bash\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+  const dispatch = (overrides = {}) => spawnSync("bash", ["infra/vps/arcade-poker-pool-dispatch.sh"], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, GH_BIN: gh, ...overrides },
+  });
+  try {
+    for (const [overrides, target, mode] of [
+      [{}, "stage", "dry-run"],
+      [{ POKER_BOT_REFILL_MODE: "mutate", POKER_BOT_REFILL_TARGET: "stage" }, "stage", "mutate"],
+      [{ POKER_BOT_REFILL_MODE: "mutate", POKER_BOT_REFILL_TARGET: "production" }, "production", "mutate"],
+    ]) {
+      const result = dispatch(overrides);
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(result.stdout.trim().split("\n").slice(0, -1), [
+        "workflow", "run", ".github/workflows/poker-bot-pool-refill.yml",
+        "--repo", "krzysztofcal/arcadePlatform", "--ref", "main",
+        "-f", `target=${target}`, "-f", `mode=${mode}`, "-f", "reviewed_ref=main",
+      ]);
+      assert.match(result.stdout, new RegExp(`dispatched ${mode} refill`));
+    }
+    for (const overrides of [
+      { POKER_BOT_REFILL_MODE: "automatic" },
+      { POKER_BOT_REFILL_TARGET: "other" },
+      { POKER_BOT_REFILL_REF: "unreviewed-branch" },
+    ]) {
+      const result = dispatch(overrides);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, "", "invalid configuration must never call GitHub");
+    }
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 });
 
 test("infra VPS environment examples expose only the audited variable names without live secrets", () => {

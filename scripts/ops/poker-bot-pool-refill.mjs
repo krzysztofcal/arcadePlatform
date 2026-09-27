@@ -79,22 +79,34 @@ function poolFields(poolClass) {
     : { threshold: "normal_refill_threshold_ch", amount: "normal_refill_amount_ch" };
 }
 
-function isCurrentBucket(bucket, now = new Date()) {
-  return bucket === utcBucketStart(now);
+async function databaseNow(tx) {
+  // now()/CURRENT_TIMESTAMP freeze at transaction start and miss lock waits.
+  const rows = await tx.unsafe("select clock_timestamp() as now;");
+  const now = new Date(rows?.[0]?.now);
+  if (!Number.isFinite(now.getTime())) throw fail("invalid_refill_clock");
+  return now;
+}
+
+async function boundRefillTransaction(tx) {
+  await tx.unsafe("set local lock_timeout = '5s';");
+  await tx.unsafe("set local statement_timeout = '10s';");
+  await tx.unsafe("set local idle_in_transaction_session_timeout = '10s';");
 }
 
 export async function refillPool({
   tx,
   policy,
   poolClass,
-  now = new Date(),
-  bucket = utcBucketStart(now),
+  bucket,
   dryRun = true,
   postTransactionFn = postTransaction,
 } = {}) {
   if (!tx || typeof tx.unsafe !== "function") throw fail("refill_tx_required");
   if (!isValidTierPolicy(policy) || policy.enabled !== true) return { status: "disabled" };
-  if (!isCurrentBucket(bucket, now)) return { status: "stale_bucket" };
+  await boundRefillTransaction(tx);
+  const currentBucket = utcBucketStart(await databaseNow(tx));
+  bucket ??= currentBucket;
+  if (bucket !== currentBucket) return { status: "stale_bucket" };
   const buyIn = positiveSafeInteger(policy.buy_in ?? policy.buyIn);
   const revision = positiveSafeInteger(policy.revision);
   const normalizedClass = String(poolClass || "").toUpperCase();
@@ -105,6 +117,14 @@ export async function refillPool({
   if (!buyIn || !revision || !poolKey || !threshold || !amount) return { status: "unprovisioned" };
   const idempotencyKey = refillIdempotencyKey({ bankrollSystemKey: poolKey, policyRevision: revision, bucket });
 
+  // Acquire the ledger's debit account too: it otherwise waits on GENESIS
+  // after our freshness check. Lock it before bucket locks to avoid deadlocks
+  // between concurrent runs that process several pools in one transaction.
+  await tx.unsafe(`
+select id from public.chips_accounts
+where account_type = 'SYSTEM' and system_key = 'GENESIS'
+for update;
+`);
   await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [`poker-pool-refill:${poolKey}:${bucket}`]);
   const consumedRows = await tx.unsafe(`
 select id, idempotency_key, metadata
@@ -124,6 +144,7 @@ from public.chips_accounts
 where account_type = 'SYSTEM' and system_key = $1
 for update;
 `, [poolKey]);
+  if (bucket !== utcBucketStart(await databaseNow(tx))) return { status: "stale_bucket", poolKey, bucket };
   const account = accountRows?.[0];
   if (!account || String(account.status).toLowerCase() !== "active") return { status: "unprovisioned", poolKey };
   const balance = Number(account.balance);
@@ -153,18 +174,21 @@ for update;
       { accountType: "SYSTEM", systemKey: poolKey, amount },
     ],
   });
+  // A later ledger/trigger/index wait must roll back, never commit an old bucket.
+  if (bucket !== utcBucketStart(await databaseNow(tx))) throw fail("refill_bucket_expired");
   return { status: "refilled", poolKey, amount, idempotencyKey, transaction: result?.transaction || null };
 }
 
 export async function runRefill({
   env = process.env,
-  now = new Date(),
   beginSqlFn = beginSql,
   postTransactionFn = postTransaction,
 } = {}) {
   const authorization = resolveRefillAuthorization(env);
-  const bucket = utcBucketStart(now);
   return beginSqlFn(async (tx) => {
+    await boundRefillTransaction(tx);
+    const startedAt = await databaseNow(tx);
+    const bucket = utcBucketStart(startedAt);
     const policyRows = await tx.unsafe(`
 select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
        slow_refill_threshold_ch, slow_refill_amount_ch, revision
@@ -176,17 +200,22 @@ for share;
     const outcomes = [];
     for (const policy of Array.isArray(policyRows) ? policyRows : []) {
       for (const poolClass of ["NORMAL", "SLOW"]) {
+        if ((await databaseNow(tx)).getTime() - startedAt.getTime() > 60_000) {
+          throw fail("refill_transaction_expired");
+        }
         outcomes.push(await refillPool({
           tx,
           policy,
           poolClass,
-          now,
           bucket,
           dryRun: authorization.dryRun,
           postTransactionFn,
         }));
       }
     }
+    const finishedAt = await databaseNow(tx);
+    if (utcBucketStart(finishedAt) !== bucket) throw fail("refill_bucket_expired");
+    if (finishedAt.getTime() - startedAt.getTime() > 60_000) throw fail("refill_transaction_expired");
     return { authorization, bucket, outcomes };
   });
 }

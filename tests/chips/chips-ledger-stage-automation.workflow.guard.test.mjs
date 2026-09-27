@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-scheduled-automation.yml", "utf8");
@@ -257,6 +258,49 @@ assert.match(refillWorkflow, /Checkout exact dispatch SHA/);
 assert.match(refillWorkflow, /ref: \$\{\{ github\.sha \}\}/);
 assert.match(refillWorkflow, /node scripts\/ops\/poker-bot-pool-refill\.mjs/);
 assert.doesNotMatch(refillWorkflow, /github\.event\.inputs\.mode\s*==\s*'mutate'[^\n]*true/);
+// Dispatch inputs select a target/mode; repository variables and trusted context
+// remain the authority even when the VPS requests mutation.
+const refillJob = parsedRefillWorkflow.jobs.refill;
+assert.deepEqual(Object.keys(refillTriggers.workflow_dispatch.inputs).sort(), ["mode", "reviewed_ref", "target"]);
+assert.equal(refillJob.environment, "${{ inputs.target == 'production' && 'production-poker-refill' || 'stage-poker-refill' }}");
+assert.equal(refillJob.env.POKER_BOT_REFILL_FEATURE_ENABLED, "${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}");
+assert.equal(refillJob.env.POKER_BOT_REFILL_PRODUCTION_GO, "${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}");
+const refillJobAllowed = new Function("github", "inputs", "vars", `return (${refillJob.if.slice(3, -2)});`);
+const refillGithub = {
+  event_name: "workflow_dispatch", repository: "krzysztofcal/arcadePlatform",
+  event: { repository: { fork: false } }, ref: "refs/heads/main", actor: "arcade-poker-refill-dispatch",
+};
+const refillVars = { POKER_BOT_REFILL_ENABLED: "1", POKER_BOT_REFILL_DISPATCH_ACTOR: "arcade-poker-refill-dispatch" };
+assert.equal(refillJobAllowed(refillGithub, { mode: "mutate" }, refillVars), true);
+for (const overrides of [
+  { repository: "other/repo" }, { ref: "refs/heads/other" }, { actor: "owner" },
+  { event_name: "push" }, { event: { repository: { fork: true } } },
+]) assert.equal(refillJobAllowed({ ...refillGithub, ...overrides }, { mode: "mutate" }, refillVars), false);
+for (const overrides of [{ POKER_BOT_REFILL_ENABLED: "0" }, { POKER_BOT_REFILL_DISPATCH_ACTOR: "other" }]) {
+  assert.equal(refillJobAllowed(refillGithub, { mode: "mutate" }, { ...refillVars, ...overrides }), false);
+}
+const refillBoundary = refillJob.steps.find((step) => step.name === "Verify refill authority boundary");
+const refillBoundaryRun = refillBoundary.run.replace("${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR }}", "arcade-poker-refill-dispatch");
+const refillBoundaryEnv = {
+  GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform", GITHUB_REF: "refs/heads/main",
+  GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+  REVIEWED_REF_INPUT: "main", REFILL_TARGET: "stage", REFILL_MODE: "mutate",
+  POKER_BOT_REFILL_FEATURE_ENABLED: "1", POKER_BOT_REFILL_PRODUCTION_GO: "0",
+};
+for (const [overrides, allowed] of [
+  [{}, true],
+  [{ REFILL_TARGET: "production" }, false],
+  [{ REFILL_TARGET: "production", POKER_BOT_REFILL_PRODUCTION_GO: "1" }, true],
+  [{ POKER_BOT_REFILL_FEATURE_ENABLED: "0" }, false],
+  [{ GITHUB_ACTOR: "owner" }, false],
+  [{ REFILL_TARGET: "other" }, false],
+  [{ REFILL_MODE: "automatic" }, false],
+]) {
+  const result = spawnSync("bash", ["-c", refillBoundaryRun], {
+    env: { ...refillBoundaryEnv, ...overrides }, encoding: "utf8",
+  });
+  assert.equal(result.status === 0, allowed, `refill authority boundary: ${JSON.stringify(overrides)}`);
+}
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'bot-only-7d-recovery-repair'/);

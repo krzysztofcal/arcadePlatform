@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "../runtime/settled-bot-funding.mjs";
 import { __testOnly, createTableManager as createRuntimeTableManager } from "./table-manager.mjs";
 
 function createTableManager(options = {}) {
@@ -132,6 +133,13 @@ test("settled access classification persists automatic SLOW under FORCE_NORMAL a
   const returnedToAuto = manager.classifySettledAccess(tableId, [{ userId, stack: 1 }], { nowMs: 300 });
   assert.equal(returnedToAuto.known, true);
   assert.deepEqual(returnedToAuto.transitions, []);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 1,
+    loadedAtMs: 300, expiresAtMs: 30_300
+  }, { schemaBacked: false, slowThresholdCh: 100, revision: 1, loadedAtMs: 300, expiresAtMs: 30_300 }, 300);
+  assert.deepEqual(manager.classifySettledAccess(tableId, [{ userId, stack: Number.MAX_SAFE_INTEGER }], { nowMs: 400 }), {
+    known: true, transitions: [], effectiveSlow: false
+  });
 });
 
 test("bots-only bootstrap requires both trusted managed metadata and explicit internal intent", () => {
@@ -392,6 +400,16 @@ test("managed continuous table rolls the same table into the next bots-only hand
 
   assert.equal(restored.ok, true);
 
+  const noNewFunding = tableManager.prepareSettledHandRollover({
+    tableId, nowMs: 8_000, allowManagedBotsOnly: true, allowBotFunding: false,
+    managedBotProfile: { minBotCount: 4, targetBotCount: 4, maxBotCount: 4 }
+  });
+  assert.equal(noNewFunding.changed, true);
+  assert.deepEqual(noNewFunding.replacementFundings, []);
+  assert.deepEqual(noNewFunding.managedBotTopUps, []);
+  assert.equal(noNewFunding.nextCoreState.members.length, 3);
+  assert.deepEqual(tableManager.persistedPokerState(tableId).handSettlement.payouts, { bot_a: 12 });
+
   const prepared = tableManager.prepareSettledHandRollover({
     tableId,
     nowMs: 8_000,
@@ -469,6 +487,13 @@ test("persistent bot replacement commits runtime only with matching funding rece
     requestId: "join-replacement-receipt",
     nowTs: 1
   }).ok, true);
+
+  const unfunded = tableManager.prepareSettledHandRollover({ tableId, nowMs: 5_000, allowBotFunding: false });
+  assert.equal(unfunded.ok, true);
+  assert.equal(unfunded.changed, false);
+  assert.equal(unfunded.reason, "not_enough_players");
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+  assert.equal(tableManager.persistedPokerState(tableId).stacks[humanUserId], 199);
 
   const prepared = tableManager.prepareSettledHandRollover({ tableId, nowMs: 5_000 });
   assert.equal(prepared.ok, true);
@@ -3546,4 +3571,57 @@ test("beginTableRetirement skips ids with an in-flight persisted bootstrap", asy
 
   releaseBootstrap();
   await bootstrapPromise;
+});
+
+
+test("settled funding requires a fresh enabled tier and both provisioned pools, using the exact resulting class", () => {
+  const snapshot = { schemaBacked: true, expiresAtMs: 30_000, tiers: {
+    100: { enabled: true, provisioned: { NORMAL: true, SLOW: true } }
+  } };
+  const resolve = (changes = {}) => resolveSettledBotFundingSystemKey({
+    snapshot, buyIn: 100, nowMs: 100, legacySystemKey: "TREASURY", ...changes
+  });
+  assert.equal(resolve(), "POKER_BOT_BANKROLL_100");
+  assert.equal(resolve({ tableMarkerTransition: true }), "POKER_BOT_SLOW_BANKROLL_100");
+  assert.equal(resolve({ isSlowOnly: true }), "POKER_BOT_SLOW_BANKROLL_100");
+  assert.equal(resolve({ isSlowOnly: true, tableMarkerTransition: true, lifecycleKind: "CONTINUOUS_BOT" }), "POKER_BOT_BANKROLL_100");
+  snapshot.tiers[100].enabled = false;
+  assert.equal(resolve(), null);
+  snapshot.tiers[100].enabled = true;
+  snapshot.tiers[100].provisioned.SLOW = false;
+  assert.equal(resolve(), null);
+  assert.equal(resolve({ tableMarkerTransition: true }), null);
+  snapshot.tiers[100].provisioned.SLOW = true;
+  assert.equal(resolve({ nowMs: 30_001 }), null);
+  assert.equal(resolve({ snapshot: null }), null);
+  assert.equal(resolve({ snapshot: { schemaBacked: false, expiresAtMs: 30_000 } }), "TREASURY");
+});
+
+test("settled funding snapshot preserves legacy funding only when the catalog confirms the schema is absent", async () => {
+  const queries = [];
+  const snapshot = await readSettledBotFundingSnapshot({ unsafe: async (sql) => {
+    queries.push(sql);
+    return [{ available: false }];
+  } }, { nowMs: 100 });
+  assert.equal(snapshot.schemaBacked, false);
+  assert.equal(queries.length, 1);
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 100, nowMs: 200 }), "TREASURY");
+});
+
+
+test("settled funding snapshot reads enabled state and both actual pool accounts", async () => {
+  const snapshot = await readSettledBotFundingSnapshot({ unsafe: async (sql, params) => {
+    if (sql.includes("to_regclass")) return [{ available: true }];
+    if (sql.includes("poker_bot_tier_policy")) return [{
+      buy_in: params[0], enabled: params[0] === 100, revision: 1,
+      normal_refill_threshold_ch: 1, normal_refill_amount_ch: 10,
+      slow_refill_threshold_ch: 1, slow_refill_amount_ch: 10
+    }];
+    if (sql.includes("system_key")) return params[0].map((system_key) => ({ system_key }));
+    throw new Error("unexpected query");
+  } }, { nowMs: 100 });
+  assert.equal(snapshot.schemaBacked, true);
+  assert.equal(snapshot.expiresAtMs, 30_100);
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 100, nowMs: 200 }), "POKER_BOT_BANKROLL_100");
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 500, nowMs: 200 }), null);
 });

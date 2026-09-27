@@ -9,7 +9,7 @@ import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../../shared/poker-domain/table-economy.mjs";
 import { resolvePokerBuyInTiers } from "../../../shared/poker-domain/poker-progression.mjs";
-import { readPokerPoolProvisioning, readPokerTierPolicy } from "../../../shared/poker-domain/bot-access.mjs";
+import { hasPokerPoolSchema, readPokerPoolProvisioning, readPokerTierPolicy } from "../../../shared/poker-domain/bot-access.mjs";
 
 export const CONTINUOUS_BOT_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
 const DEFAULT_MAX_DESIRED_TABLES = 2;
@@ -124,18 +124,14 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     managedProfileKey: profile.profileKey,
     rotationDueAt
   });
+  const poolSchema = await hasPokerPoolSchema(tx);
   let fundingEnabled = true;
-  try {
+  if (poolSchema) {
     const tierPolicy = await readPokerTierPolicy(tx, { buyIn });
     const provisioning = await readPokerPoolProvisioning(tx, { buyIn });
     fundingEnabled = tierPolicy?.enabled === true
       && provisioning?.NORMAL === true
       && provisioning?.SLOW === true;
-  } catch (error) {
-    const missingSchema = String(error?.code || "") === "42703"
-      || /poker_(?:bot_tier|access)|normal_refill/i.test(String(error?.message || ""));
-    if (!missingSchema) throw error;
-    fundingEnabled = false;
   }
   const seededBots = await seedBotsForJoin({
     tx,
@@ -149,7 +145,7 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     targetBotCount: profile.targetBotCount,
     allowBotsOnly: true,
     requireExactTarget: true,
-    poolClass: "NORMAL",
+    poolClass: poolSchema ? "NORMAL" : null,
     fundingEnabled,
     fundingProvisioned: fundingEnabled,
     fundingReason: "BOT_SEED_BUY_IN",

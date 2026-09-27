@@ -684,6 +684,9 @@ export function createTableManager({
     ensureAccessCacheState(table);
     const status = settledAccessStatus(tableId, { nowMs });
     if (!status.known) return { ...status, transitions: [] };
+    if (table.pokerAccessPolicy?.schemaBacked === false) {
+      return { known: true, transitions: [], effectiveSlow: false };
+    }
     const transitions = [];
     let effectiveSlow = false;
     for (const update of Array.isArray(humanStackUpdates) ? humanStackUpdates : []) {

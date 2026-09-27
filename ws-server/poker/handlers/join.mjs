@@ -240,6 +240,7 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
       access,
       Number.isSafeInteger(Number(access.slowThresholdCh))
         ? {
+            schemaBacked: access.schemaBacked,
             slowThresholdCh: Number(access.slowThresholdCh),
             revision: Number(access.policyRevision || 1),
             loadedAtMs: Number(access.loadedAtMs || Date.now()),

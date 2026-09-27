@@ -1,6 +1,6 @@
 # Data Model: NORMAL/SLOW per-tier pools
 
-This is the accepted schema contract implemented by the local migration in this worktree. T027 applied the migration only inside a disposable local fixture; it has not been applied to Stage/Production or any persistent environment. Publishing that migration invokes the repository DB Stage Apply PR and may mutate shared Stage. [Spec](spec.md) and [contracts](contracts/bot-quarantine.md) define behavior. Use existing USER accounts, tables, seats, state and ledger; no new per-user budget or refill receipt entities.
+This is the accepted schema contract implemented by the immutable migration `20260927100000_poker_bot_quarantine_policy.sql`, now applied on shared Stage by DB Stage Apply PR (36310279719: 97→98 applied; 36310527312: 98 applied / 0 pending; both smoke PASS). T027 uses a separate disposable local fixture. Production is not migrated; no new migration is added by this review. [Spec](spec.md) and [contracts](contracts/bot-quarantine.md) define behavior. Use existing USER accounts, tables, seats, state and ledger; no new per-user budget or refill receipt entities.
 
 ## 1. Existing chips_accounts USER access fields
 
@@ -62,4 +62,4 @@ The scheduler locks policy FOR SHARE, then exact pool serialization, then necess
 
 Automatic NORMAL→SLOW is sticky; override may change freely among its three values. Table false→true follows known effective SLOW and is irreversible in V1; later override or lifecycle changes never undo it. Mixed financed participation is grandfathered; fresh compatibility and new funds follow sticky table class. UNKNOWN has no durable class value and cannot set table marker. It denies new finance/admission only.
 
-Authoritative runtime state remains WS; DB seat/count facts enforce transactional capacity, not a competing poker simulation. Admin server auth and operational environment guards are mandatory. The migration is forward-only once applied; no Stage/Production apply is performed from this worktree. Publication requires the shared-Stage effect declaration and DB Stage Apply PR; Production is separate GO.
+Authoritative runtime state remains WS; DB seat/count facts enforce transactional capacity, not a competing poker simulation. Admin server auth and operational environment guards are mandatory. The migration is forward-only once applied; shared Stage apply completed through the automatic repository workflow above. No Stage refill/MINT occurred. Production is separate GO.

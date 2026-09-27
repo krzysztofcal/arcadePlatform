@@ -12,6 +12,7 @@ import {
   MAX_ACTIVE_POKER_TABLES,
   MAX_PENDING_POKER_TABLES,
 } from "../../shared/poker-domain/table-participation.mjs";
+import { hasPokerPoolSchema } from "../../shared/poker-domain/bot-access.mjs";
 import { refillPool, utcBucketStart } from "../../scripts/ops/poker-bot-pool-refill.mjs";
 
 const dbUrl = process.env.POKER_POLICY_TEST_DB_URL || "";
@@ -148,13 +149,13 @@ async function ensureFixture(sql) {
   `);
 }
 
-async function withFixture(callback) {
+async function withFixture(callback, { initialize = true } = {}) {
   const sql = postgres(dbUrl, { max: 24, idle_timeout: 0, connect_timeout: 5 });
   try {
     const databaseRows = await sql`select current_database() as name;`;
     const databaseName = String(databaseRows?.[0]?.name || "");
     if (!allowNonTestDb) assert.match(databaseName, /(?:^|_)test$/i, "refusing transaction fixture outside a test database");
-    await ensureFixture(sql);
+    if (initialize) await ensureFixture(sql);
     return await callback(sql);
   } finally {
     await sql.end({ timeout: 5 });
@@ -285,6 +286,27 @@ test("poker table slot queries keep bounded user-leading and creator-leading con
   assert.equal((source.match(/MAX_PENDING_POKER_TABLES = 4/g) || []).length, 1);
 });
 
+test("disposable PostgreSQL capability detects legacy schema then the committed migration on the next transaction", { skip: !dbUrl }, async () => {
+  await withFixture(async (sql) => {
+    await sql.unsafe(BASE_SCHEMA);
+    // Permit rerunning this destructive fixture in the same disposable test DB.
+    await sql.unsafe("drop table if exists public.poker_access_policy;");
+    await sql.begin(async (tx) => {
+      assert.equal(await hasPokerPoolSchema(tx), false);
+      assert.equal(await hasPokerPoolSchema(tx), false);
+      assert.equal(Number((await tx`select 1 as usable;`)[0].usable), 1,
+        "capability detection must not leave the legacy transaction aborted");
+    });
+    await sql.begin(async (tx) => tx.unsafe(await migrationSql()));
+    await sql.begin(async (tx) => {
+      assert.equal(await hasPokerPoolSchema(tx), true,
+        "an earlier negative result must not be cached across transactions");
+      const rows = await tx`select slow_threshold_ch from public.poker_access_policy where id = 1;`;
+      assert.equal(Number(rows[0].slow_threshold_ch), 1_000_000_000);
+    });
+  }, { initialize: false });
+});
+
 test("disposable PostgreSQL proves concurrent Create/JOIN 4+4 limits, rejection and funded rejoin", { skip: !dbUrl }, async () => {
   await withFixture(async (sql) => {
     const userId = fixtureUuid(1);
@@ -392,7 +414,7 @@ test("disposable PostgreSQL proves settled automatic SLOW races safely with Admi
 
 test("disposable PostgreSQL proves refill rollback, unknown-commit replay and cross-revision bucket idempotency", { skip: !dbUrl }, async () => {
   await withFixture(async (sql) => {
-    const now = new Date("2026-09-27T08:10:00.000Z");
+    const now = new Date((await sql`select clock_timestamp() as now;`)[0].now);
     const bucket = utcBucketStart(now);
     const policy = (revision) => ({
       buy_in: 100,
@@ -421,7 +443,6 @@ test("disposable PostgreSQL proves refill rollback, unknown-commit replay and cr
         tx,
         policy: policy(1),
         poolClass: "SLOW",
-        now,
         bucket,
         dryRun: false,
         postTransactionFn: async (payload) => {
@@ -444,7 +465,6 @@ test("disposable PostgreSQL proves refill rollback, unknown-commit replay and cr
         tx,
         policy: policy(2),
         poolClass: "SLOW",
-        now,
         bucket,
         dryRun: false,
         postTransactionFn: (payload) => insertRefillFixtureTransaction(payload.tx, { idempotencyKey: payload.idempotencyKey, metadata: payload.metadata, entries: payload.entries }),
@@ -453,7 +473,6 @@ test("disposable PostgreSQL proves refill rollback, unknown-commit replay and cr
         tx,
         policy: policy(3),
         poolClass: "SLOW",
-        now,
         bucket,
         dryRun: false,
         postTransactionFn: (payload) => insertRefillFixtureTransaction(payload.tx, { idempotencyKey: payload.idempotencyKey, metadata: payload.metadata, entries: payload.entries }),
@@ -476,7 +495,6 @@ test("disposable PostgreSQL proves refill rollback, unknown-commit replay and cr
         tx,
         policy: policy(4),
         poolClass: "NORMAL",
-        now,
         bucket,
         dryRun: false,
         postTransactionFn: async (payload) => {
@@ -493,7 +511,6 @@ test("disposable PostgreSQL proves refill rollback, unknown-commit replay and cr
       tx,
       policy: policy(5),
       poolClass: "NORMAL",
-      now,
       bucket,
       dryRun: false,
       postTransactionFn: (payload) => insertRefillFixtureTransaction(payload.tx, { idempotencyKey: payload.idempotencyKey, metadata: { ...normalMetadata, policyRevision: 5 }, entries: normalEntries }),

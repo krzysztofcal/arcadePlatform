@@ -218,3 +218,34 @@ Register the repository runner from the documented recovery procedure with
 exact labels `self-hosted`, `Linux`, `X64`, and `stage-db-ipv6`. The registration
 token is supplied interactively by an owner and is never stored in this repo,
 bootstrap script, or a unit file.
+
+## Poker bot pool refill scheduler
+
+Fresh-host bootstrap installs `arcade-poker-pool-dispatch.{service,timer}` and
+its dispatcher without enabling or starting either unit. Bootstrap remains
+fresh-host-only; updating an existing host requires the separate owner-approved
+artifact installation procedure. Installing artifacts is not activation.
+
+The service defaults to Stage `dry-run`. After owner approval, a root-owned
+`/etc/arcade/poker-pool-dispatch.env` file may override only the dispatch choices:
+
+```ini
+POKER_BOT_REFILL_TARGET=stage
+POKER_BOT_REFILL_MODE=mutate
+```
+
+Use `production` instead of `stage` only for the separately approved Production
+configuration. The workflow ref remains `main`; the dispatcher rejects other
+refs and unknown targets/modes. Keep the configuration directory and file
+writable only by root (for example `0755` and `0600` respectively). The file is
+optional and is never created by bootstrap. The owner must separately approve
+starting/enabling the timer; its three-hour cadence dispatches the configured
+mode on each tick.
+
+The VPS holds only GitHub dispatch authentication; never put database credentials
+or SQL on this scheduler path. A `mutate` request still requires the workflow's
+fixed repository/main-ref checks, dedicated dispatch actor, feature gate, and
+target GitHub environment protections. Production additionally requires
+`POKER_BOT_REFILL_PRODUCTION_GO=1` in the workflow's trusted variables. Dispatch
+inputs cannot supply these approvals. Configuration alone does not activate
+those gates or authorize a refill.

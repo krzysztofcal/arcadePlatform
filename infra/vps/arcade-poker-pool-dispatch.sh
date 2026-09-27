@@ -16,8 +16,12 @@ if [[ "$TARGET" != "stage" && "$TARGET" != "production" ]]; then
   echo "refusing refill dispatch: invalid target" >&2
   exit 1
 fi
-if [[ "$MODE" != "dry-run" ]]; then
-  echo "refusing refill dispatch: VPS may dispatch dry-run only" >&2
+if [[ "$MODE" != "dry-run" && "$MODE" != "mutate" ]]; then
+  echo "refusing refill dispatch: invalid mode" >&2
+  exit 1
+fi
+if [[ "$REF" != "main" ]]; then
+  echo "refusing refill dispatch: workflow must run from main" >&2
   exit 1
 fi
 if [[ ! -x "$GH_BIN" ]]; then
@@ -31,4 +35,4 @@ timeout 30s "$GH_BIN" workflow run "$WORKFLOW_FILE" \
   -f "target=$TARGET" \
   -f "mode=$MODE" \
   -f "reviewed_ref=$REF"
-echo "dispatched dry-run refill on ${REPO}@${REF}"
+echo "dispatched ${MODE} refill for ${TARGET} on ${REPO}@${REF}"

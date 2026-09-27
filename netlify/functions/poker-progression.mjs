@@ -1,3 +1,4 @@
+import { hasPokerPoolSchema, readPokerAccessSnapshot } from "../../shared/poker-domain/bot-access.mjs";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { checkWsBuyInCapability } from "./_shared/poker-ws-runtime-notify.mjs";
 import { isConfiguredPokerBuyIn, readPokerProgression } from "../../shared/poker-domain/poker-progression.mjs";
@@ -37,7 +38,7 @@ where t.status = 'OPEN'
 
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
-    "select id, status, buy_in, stakes, is_slow_only from public.poker_tables where id = $1 limit 1;",
+    `select id, status, buy_in, stakes${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
     [tableId]
   );
   const table = rows?.[0] || null;
@@ -78,34 +79,10 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
 }
 
 async function readPokerAccess(tx, userId) {
-  let rows;
-  try {
-    rows = await tx.unsafe(`
-select poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at
-from public.chips_accounts
-where user_id = $1 and account_type = 'USER'
-limit 1;
-`, [userId]);
-  } catch (error) {
-    if (String(error?.code || "") === "42703" || /poker_(?:access|auto)/i.test(String(error?.message || ""))) {
-      return { automaticClass: null, override: null, effectiveClass: "UNKNOWN", revision: null, automaticSlowAt: null };
-    }
-    throw error;
-  }
-  const row = rows?.[0] || null;
-  if (!row || !["NORMAL", "SLOW"].includes(row.poker_auto_class)
-    || !["AUTO", "FORCE_NORMAL", "FORCE_SLOW"].includes(row.poker_access_override)) {
-    return { automaticClass: null, override: null, effectiveClass: "UNKNOWN", revision: null, automaticSlowAt: null };
-  }
-  const automaticClass = row.poker_auto_class;
-  const override = row.poker_access_override;
-  return {
-    automaticClass,
-    override,
-    effectiveClass: override === "FORCE_NORMAL" ? "NORMAL" : override === "FORCE_SLOW" ? "SLOW" : automaticClass,
-    revision: Number(row.poker_access_revision || 1),
-    automaticSlowAt: row.poker_auto_slow_at || null,
-  };
+  const snapshot = await readPokerAccessSnapshot(tx, { userId });
+  if (!snapshot) return { automaticClass: null, override: null, effectiveClass: "UNKNOWN", revision: null, automaticSlowAt: null };
+  const { automaticClass, override, effectiveClass, revision, automaticSlowAt } = snapshot;
+  return { automaticClass, override, effectiveClass, revision, automaticSlowAt };
 }
 
 export async function handler(event) {

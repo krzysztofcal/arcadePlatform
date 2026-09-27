@@ -64,6 +64,7 @@ import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
+import { readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "./poker/runtime/settled-bot-funding.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { serializePokerLogPayload } from "./poker/observability/poker-log-policy.mjs";
@@ -75,7 +76,6 @@ import { getBotConfig } from "./shared/poker-domain/bots.mjs";
 import {
   calculateCanonicalPokerStakes,
   DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
-  getBotFundingSystemKeyForBuyIn,
   POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION
 } from "../shared/poker-domain/table-economy.mjs";
 import {
@@ -842,6 +842,8 @@ function broadcastPokerAccessTransition(userId, transition) {
   }
 }
 
+let settledBotFundingSnapshot = null;
+
 async function refreshActivePokerAccess() {
   if (!hasSupabaseDbUrl || typeof sessionStore.activeUserIds !== "function") return;
   const userIds = new Set(sessionStore.activeUserIds());
@@ -851,14 +853,16 @@ async function refreshActivePokerAccess() {
   const normalizedUserIds = [...userIds]
     .filter((userId) => typeof userId === "string" && userId.trim())
     .slice(0, 512);
-  if (normalizedUserIds.length === 0) return;
   try {
     const beginSqlWs = await loadBeginSqlWs();
     const refreshed = await beginSqlWs(async (tx) => {
+      const buyIns = [...new Set(tableManager.listTableIds().map((tableId) => tableManager.tableMeta(tableId)?.buyIn))];
+      const funding = await readSettledBotFundingSnapshot(tx, { buyIns });
       const policy = await readPokerAccessPolicy(tx);
       const snapshots = await readPokerAccessSnapshots(tx, { userIds: normalizedUserIds });
-      return { policy, snapshots };
+      return { policy, snapshots, funding };
     });
+    settledBotFundingSnapshot = refreshed?.funding || null;
     if (!refreshed?.policy || !(refreshed.snapshots instanceof Map)) return;
     for (const [userId, snapshot] of refreshed.snapshots.entries()) {
       const access = {
@@ -974,6 +978,7 @@ const pokerAccessRefreshTimer = setInterval(() => {
   });
 }, 25_000);
 pokerAccessRefreshTimer.unref();
+void refreshActivePokerAccess();
 
 function loadReleaseMetadata() {
   const fallback = {
@@ -2421,12 +2426,18 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
   const settledAccessStatus = typeof tableManager.settledAccessStatus === "function"
     ? tableManager.settledAccessStatus(tableId, { nowMs: Date.now() })
     : { known: true };
+  const fundingOptions = {
+    snapshot: settledBotFundingSnapshot,
+    ...tableMeta,
+    legacySystemKey: legacyBotFundingSystemKey,
+    nowMs: Date.now()
+  };
   const prepared = tableManager.prepareSettledHandRollover({
     tableId,
     nowMs: Date.now(),
     allowManagedBotsOnly: managedContinuousTable,
     managedBotProfile,
-    allowBotFunding: settledAccessStatus.known === true
+    allowBotFunding: settledAccessStatus.known === true && resolveSettledBotFundingSystemKey(fundingOptions) !== null
   });
   if (!prepared?.ok || !prepared.changed) {
     return finishSettledRollover(prepared);
@@ -2444,9 +2455,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     humanStackUpdates: prepared.humanStackUpdates,
     settledAccessTransitions: prepared.settledAccessTransitions,
     tableMarkerTransition: prepared.tableMarkerTransition,
-    replacementFundingSystemKey: getBotFundingSystemKeyForBuyIn(tableMeta?.buyIn, {
-      legacySystemKey: legacyBotFundingSystemKey,
-      poolClass: tableMeta?.isSlowOnly === true || prepared.tableMarkerTransition === true ? "SLOW" : "NORMAL"
+    replacementFundingSystemKey: resolveSettledBotFundingSystemKey({
+      ...fundingOptions,
+      tableMarkerTransition: prepared.tableMarkerTransition
     }),
     deferRuntimeVersionUpdate: true
   });

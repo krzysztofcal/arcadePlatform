@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
+const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -26,6 +26,8 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], events = []
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
+          if (text.includes("to_regclass")) return [{ available: poolSchema }];
+          if (!poolSchema) assert.doesNotMatch(text, /is_slow_only|poker_auto_class|poker_access_policy/);
 
           if (text.includes("pg_advisory_xact_lock")) return [];
 
@@ -108,6 +110,14 @@ const assertCanonicalLockKey = (queries, expectedKey) => {
 };
 
 const run = async () => {
+  for (const mode of ["prefer_humans", "already_seated", "create"]) {
+    const queries = [];
+    const handler = makeHandler({ poolSchema: false, mode, queries });
+    const response = await callQuickSeat(handler, { maxPlayers: 6 });
+    assert.equal(response.statusCode, 200, `pre-migration Quick Seat ${mode} remains available`);
+    assert.equal(queries.some(({ query }) => query.includes("pending_tables")), false);
+  }
+
   {
     const queries = [];
     const notifications = [];
@@ -302,6 +312,7 @@ const run = async () => {
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
+          if (text.includes("to_regclass")) return [{ available: true }];
           if (text.includes("pg_advisory_xact_lock")) return [];
           if (text.includes("select poker_auto_class, poker_access_override")) {
             return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
@@ -354,6 +365,7 @@ const run = async () => {
           unsafe: async (query, params) => {
             queries.push({ query: String(query), params });
             const text = String(query).toLowerCase();
+          if (text.includes("to_regclass")) return [{ available: true }];
 
             if (text.includes("pg_advisory_xact_lock")) return [];
             if (text.includes("select poker_auto_class, poker_access_override")) {

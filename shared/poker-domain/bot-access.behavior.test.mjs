@@ -55,3 +55,33 @@ test("threshold evidence is inclusive and does not downgrade sticky automatic SL
     slowThresholdCh: DEFAULT_SLOW_THRESHOLD_CH,
   }).automaticClass, "SLOW");
 });
+
+test("pre-migration capability uses legacy access, rechecks next transaction, and propagates database errors", async () => {
+  const { hasPokerPoolSchema, readPokerAccessSnapshot, readPokerAccessPolicy } = await import("./bot-access.mjs");
+  const queries = [];
+  const legacy = { unsafe: async (query) => {
+    queries.push(query);
+    assert.match(query, /to_regclass/);
+    return [{ available: false }];
+  } };
+  assert.equal(await hasPokerPoolSchema(legacy), false);
+  assert.equal((await readPokerAccessSnapshot(legacy, { userId: "user" })).effectiveClass, "NORMAL");
+  assert.equal((await readPokerAccessPolicy(legacy)).schemaBacked, false);
+  assert.equal(queries.length, 1, "one capability probe per transaction, no absent-column query");
+  assert.equal(await hasPokerPoolSchema({ unsafe: async () => [{ available: true }] }), true);
+  const denied = Object.assign(new Error("permission denied for poker_access_policy"), { code: "42501" });
+  await assert.rejects(hasPokerPoolSchema({ unsafe: async () => { throw denied; } }), (error) => error === denied);
+});
+
+
+test("schema-backed access never turns missing data or unrelated SQL errors into legacy NORMAL", async () => {
+  const { readPokerAccessSnapshot } = await import("./bot-access.mjs");
+  assert.equal(await readPokerAccessSnapshot({ unsafe: async (query) => query.includes("to_regclass") ? [{ available: true }] : [] }, { userId: "user" }), null);
+  for (const code of ["42501", "42703", "08006"]) {
+    const failure = Object.assign(new Error("poker access read failed"), { code });
+    await assert.rejects(readPokerAccessSnapshot({ unsafe: async (query) => {
+      if (query.includes("to_regclass")) return [{ available: true }];
+      throw failure;
+    } }, { userId: "user" }), (error) => error === failure);
+  }
+});

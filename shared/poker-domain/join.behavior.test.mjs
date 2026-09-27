@@ -65,6 +65,8 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
     ? (fn) => originalBeginSql(async (tx) => {
         const wrappedTx = Object.create(tx || null);
         wrappedTx.unsafe = async (sql, params = []) => {
+          if (String(sql).includes("to_regclass")) return [{ available: false }];
+          assert.doesNotMatch(String(sql), /is_slow_only|poker_auto_class|poker_access_policy|poker_bot_tier_policy/, "legacy JOIN never references new schema");
           const rows = await tx.unsafe(sql, params);
           if (String(sql).includes("from public.poker_tables") && Array.isArray(rows)) {
             return rows.map((row) => {
@@ -212,6 +214,7 @@ test("authoritative wallet threshold persists automatic SLOW under FORCE_NORMAL 
       unsafe: async (sql, params = []) => {
         const text = String(sql);
         calls.push({ text, params });
+        if (text.includes("to_regclass")) return [{ available: true }];
         if (text.includes("from public.poker_tables")) {
           return [{ id: tableId, status: "OPEN", max_players: 6, buy_in: 100, stakes: calculateCanonicalPokerStakes(100), created_by: userId, lifecycle_kind: "STANDARD", has_human_participant: false, is_slow_only: false }];
         }
@@ -1308,7 +1311,7 @@ test("authoritative join rejects explicit and preferred seat numbers below 1", a
   );
 });
 
-test("first human authoritative join still seeds and funds bots at the 100 CH table tier", async () => withBotEnv(async () => {
+test("pre-migration first human JOIN preserves historical 100 CH funding provenance", async () => withBotEnv(async () => {
   process.env.POKER_BOTS_MAX_PER_TABLE = "5";
   const originalRandom = Math.random;
   let randomCalls = 0;

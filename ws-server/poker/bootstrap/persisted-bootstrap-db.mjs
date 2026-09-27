@@ -36,6 +36,7 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
   const tx = {
     unsafe: async (query, params = []) => {
       const sql = String(query).toLowerCase();
+      if (sql.includes("to_regclass")) return [{ available: false }];
       const tableId = params?.[0];
       const table = tables?.[tableId] || null;
 
