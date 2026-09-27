@@ -1,6 +1,6 @@
 # Exhaustive Production migration inventory
 
-Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. Main=Stage=97; Production=54; unknown remote versions=0. The following **43** files are the complete missing set, not just retention-named candidates.
+Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. A 2026-09-27 source-tree addendum adds the #1018 Stage migration below as the 44th manifest entry; it remains pending Stage application and does not change the Production baseline.
 
 **Classification is not permission to execute.** `shared-safe` means no environment-specific rollout authority in that change, subject to dependencies; final equivalence can supersede a safe transient patch. `stage-only` has no required shared effect. `needs-production-equivalent` includes mixed migrations whose shared changes cannot be omitted merely because the filename mentions Stage. Every required effect is covered by E1's final definitions; E2 activates only TABLE fence; E3 alone activates fresh Production policies/cap. No old missing file is replayed or marked applied by this plan.
 
@@ -53,8 +53,9 @@ The last already-applied Production migration, `20260813090000_chips_ledger_arch
 | `20260907120000_chips_ledger_closed_human_automatic_p9273_registry_binding.sql` | shared-safe | Closed-human P9273 exact full registry-set binding correction; retain distinct transaction/table and foreign mapping checks. |
 | `20260911100000_chips_ledger_missing_table_bot_registry_retirement.sql` | needs-production-equivalent | Mixed schema-v1 registry-cleaned receipt/archive-guard patch plus Stage-only missing-table retirement routine. Retain effective safe receipt/GO shape; omit Stage-only one-off retirement API. This rollout does not automate missing-table registry retirement. |
 | `20260912083727_chips_archive_prune_registry_cleaned_retry.sql` | needs-production-equivalent | Receipt-backed already_pruned retry is hardcoded to Stage existing-30d and depends on final human-aware pruner. Carry exact complete-receipt/zero-mappings exception with Production ID; never treat partial receipts as success. |
+| `20260927100000_poker_bot_quarantine_policy.sql` | needs-production-equivalent | Stage #1018 NORMAL/SLOW access policy, sticky table marker, per-tier bot pools and bounded refill indexes. Keep Production unapplied; require a separately reviewed equivalent and explicit Production GO. |
 
-Totals: **22 needs-production-equivalent**, **18 shared-safe**, **3 stage-only**.
+Totals: **23 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (44 missing source files).
 
 ## History and equivalence proof
 
@@ -497,5 +498,15 @@ Source: [SQL](../../supabase/migrations/20260912083727_chips_archive_prune_regis
 Objects/references: Dynamic patch of prior function definition; see source signature and exact-match assertions..
 
 Target/policy discriminators: `krydukthwdvccggbyjfw`, `stage-ledger-auto-retention-30d-v1`, `stage-ledger-closed-human-table-retention-30d-v1`.
+
+Historical hash/UUID literals: none.
+
+### 20260927100000
+
+Source: [SQL](../../supabase/migrations/20260927100000_poker_bot_quarantine_policy.sql) · SHA256 `116b6b4de20674cc84c03d89255da17689040428eec2bbf5a96115b8f17ba7f9`.
+
+Objects/references: `chips_accounts` access columns/constraints, `poker_tables.is_slow_only` sticky trigger, `poker_access_policy`, `poker_bot_tier_policy`, exact NORMAL/SLOW bankroll accounts, user-leading active-seat and creator-leading pending-table indexes, poker transaction table/bucket indexes and policy RLS.
+
+Target/policy discriminators: none; this is the Stage #1018 feature migration. Production equivalent and authorization remain separate.
 
 Historical hash/UUID literals: none.

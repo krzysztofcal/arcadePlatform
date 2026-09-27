@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 43,
+    "missing_count": 44,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -884,6 +884,20 @@
       ],
       "omitted_effects": [
         "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
+      ]
+    },
+    {
+      "version": "20260927100000",
+      "file": "20260927100000_poker_bot_quarantine_policy.sql",
+      "sha256": "116b6b4de20674cc84c03d89255da17689040428eec2bbf5a96115b8f17ba7f9",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": null,
+      "required_effects": [
+        "NORMAL/SLOW access policy, sticky table marker, per-tier bot pools and bounded refill indexes under a separately reviewed Production identity"
+      ],
+      "omitted_effects": [
+        "No Production application, activation or runtime mutation is authorized by this Stage migration"
       ]
     }
   ],

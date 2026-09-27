@@ -245,6 +245,8 @@ register("ERROR", "recovery", [
   "ws_deferred_leave_finalization_failed",
   "ws_join_restore_invalid",
   "ws_leave_restore_rejected",
+  "ws_poker_access_refresh_failed",
+  "ws_poker_access_refresh_sweep_failed",
   "ws_persisted_bootstrap_live_hand_rejected",
   "ws_rebuy_runtime_restore_failed",
   "ws_restore_failed",
