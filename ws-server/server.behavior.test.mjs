@@ -1396,7 +1396,7 @@ test("internal poker maintenance route is token-protected and does not expose a 
   }
 });
 
-test("internal poker access refresh route invalidates fail-closed when the WS database is unavailable", async () => {
+test("internal poker access mutation route requires the internal token and rejects unauthorized callers", async () => {
   const token = "internal-access-refresh-token";
   const { port, child } = await createServer({
     env: {
@@ -1411,30 +1411,21 @@ test("internal poker access refresh route invalidates fail-closed when the WS da
   try {
     await waitForListening(child, 5000);
     assert.equal((await fetch(url, { method: "POST", body: JSON.stringify({ userId }) })).status, 401);
-    const response = await fetch(url, {
+    const badUser = await fetch(url, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ userId })
+      body: JSON.stringify({ userId: "not-a-uuid", override: "AUTO", expectedRevision: 1 })
     });
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      ok: true,
-      refreshed: false,
-      invalidated: true,
-      failClosed: true,
-      pending: true,
-      reason: "database_unavailable",
-      phase: "refresh",
-      userId
-    });
+    assert.equal(badUser.status, 400);
+    assert.deepEqual(await badUser.json(), { error: "invalid_user_id", reason: "invalid_user_id" });
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
   }
 });
 
-test("internal poker access invalidate route requires the internal token and establishes a fail-closed phase", async () => {
-  const token = "internal-access-invalidate-token";
+test("internal poker access mutation route returns 503 when the WS database is unavailable", async () => {
+  const token = "internal-access-db-unavailable-token";
   const { port, child } = await createServer({
     env: {
       POKER_WS_INTERNAL_TOKEN: token,
@@ -1450,60 +1441,14 @@ test("internal poker access invalidate route requires the internal token and est
     const response = await fetch(url, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ userId, phase: "invalidate", expectedRevision: 7, override: "FORCE_RESTRICTED" })
+      body: JSON.stringify({ userId, override: "FORCE_RESTRICTED", expectedRevision: 7 })
     });
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 503);
     assert.deepEqual(await response.json(), {
-      ok: true,
-      phase: "invalidate",
-      invalidated: true,
-      invalidatedTables: 0,
-      failClosed: true,
-      pending: true,
-      minimumRevision: 8,
-      desiredOverride: "FORCE_RESTRICTED",
-      userId
-    });
-  } finally {
-    child.kill("SIGTERM");
-    await waitForExit(child);
-  }
-});
-
-test("internal poker access invalidate route rejects a second pending mutation for the same user", async () => {
-  const token = "internal-access-conflict-token";
-  const { port, child } = await createServer({
-    env: {
-      POKER_WS_INTERNAL_TOKEN: token,
-      WS_DEPLOY_ENVIRONMENT: "preview",
-      SUPABASE_DB_URL: "",
-      WS_POKER_LOG_LEVEL: "INFO"
-    }
-  });
-  const url = `http://127.0.0.1:${port}/internal/admin/poker-access-refresh`;
-  const userId = "00000000-0000-4000-8000-000000000010";
-  try {
-    await waitForListening(child, 5000);
-    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
-    const first = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ userId, phase: "invalidate", expectedRevision: 7, override: "FORCE_RESTRICTED" })
-    });
-    assert.equal(first.status, 200);
-    const second = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ userId, phase: "invalidate", expectedRevision: 7, override: "FORCE_SLOW" })
-    });
-    assert.equal(second.status, 409);
-    assert.deepEqual(await second.json(), {
       ok: false,
-      invalidated: false,
-      failClosed: true,
-      pending: true,
-      reason: "poker_access_mutation_pending",
-      phase: "invalidate",
+      reason: "database_unavailable",
+      failClosed: false,
+      phase: "mutate",
       userId
     });
   } finally {

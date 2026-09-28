@@ -81,141 +81,284 @@ async function accessRuntimeFixture() {
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../../server.mjs', import.meta.url), 'utf8');
   const propagation = await import('./poker-access-propagation.mjs');
-  const { normalizeAccessOverride } = await import('../../../shared/poker-domain/bot-access.mjs');
+  const { ACCESS_OVERRIDES, hasPokerPoolSchema, normalizeAccessOverride, normalizeAccessSnapshot } = await import('../../../shared/poker-domain/bot-access.mjs');
   const userId = '00000000-0000-4000-8000-000000000031';
   const manager = createTableManager({ maxSeats: 4 });
-  const pending = new Map();
-  let snapshot = { schemaBacked: true, revision: 8, override: 'AUTO', effectiveClass: 'NORMAL' };
-  let failRead = false;
-  let persisted = false;
-  let candidateIds = [];
-  let readBarrier = null;
+  const activeMutations = new Set();
+  let userRow = {
+    user_id: userId,
+    poker_auto_class: 'NORMAL',
+    poker_access_override: 'AUTO',
+    poker_access_revision: 8,
+    poker_auto_slow_at: null,
+    poker_access_updated_at: '2026-09-28T00:00:00Z',
+    poker_access_updated_by: null
+  };
+  let dbUpdates = 0;
+  let failDb = false;
+  let mutationBarrier = null;
   let activeUsers = [];
+  const isUuid = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
   const deps = {
-    pendingPokerAccessMutations: pending, tableManager: manager,
+    activePokerAccessMutations: activeMutations,
+    tableManager: manager,
     sessionStore: { activeUserIds: () => activeUsers, connectionsForUser: () => [] },
-    hasSupabaseDbUrl: true, normalizeAccessOverride,
+    hasSupabaseDbUrl: true,
+    ACCESS_OVERRIDES,
+    hasPokerPoolSchema,
+    normalizeAccessOverride,
+    normalizeAccessSnapshot,
+    isUuid,
     loadBeginSqlWs: async () => async (fn) => {
-      if (failRead) throw new Error('db_unavailable');
-      return fn({ unsafe: async () => { persisted = true; return []; } });
-    },
-    readPokerAccessSnapshot: async () => {
-      const value = { ...snapshot };
-      const barrier = readBarrier;
-      readBarrier = null;
+      if (failDb) throw new Error('db_unavailable');
+      const barrier = mutationBarrier;
       if (barrier) await barrier;
-      return value;
-    },
-    readPokerAccessSnapshots: async (_tx, { userIds }) => {
-      candidateIds = userIds;
-      return new Map(userIds.map(id => [id, { ...snapshot }]));
+      return fn({
+        unsafe: async (sql, params) => {
+          const str = String(sql);
+          if (str.includes('to_regclass')) {
+            return [{ available: true }];
+          }
+          if (str.includes('for update')) {
+            return userRow ? [{ ...userRow }] : [];
+          }
+          if (str.includes('update public.chips_accounts')) {
+            dbUpdates += 1;
+            userRow = {
+              ...userRow,
+              poker_access_override: params[1],
+              poker_access_revision: Number(userRow.poker_access_revision) + 1,
+              poker_access_updated_by: params[2]
+            };
+            return [{ ...userRow }];
+          }
+          if (str.includes('set is_slow_only = true')) {
+            return [];
+          }
+          return [];
+        }
+      });
     },
     readPokerAccessPolicy: async () => ({ revision: 1, slowThresholdCh: 1000000000 }),
+    readPokerAccessSnapshots: async (_tx, { userIds }) => {
+      const snapshot = normalizeAccessSnapshot(userRow);
+      return new Map(userIds.map(id => [id, snapshot]));
+    },
     readSettledBotFundingSnapshot: async () => null,
     persistAuthoritativeSlowOnlyForUser,
     buildPokerAccessRefreshCandidates: propagation.buildPokerAccessRefreshCandidates,
-    sendPokerAccessFrame: () => {}, klogSafe: () => {}
+    sendPokerAccessFrame: () => {},
+    klogSafe: () => {}
   };
-  const code = source.slice(source.indexOf('function beginPokerAccessMutation('), source.indexOf('function broadcastPokerAccessTransition('))
+  const code = source.slice(source.indexOf('async function mutatePokerAccessForUser('), source.indexOf('function broadcastPokerAccessTransition('))
     + source.slice(source.indexOf('let settledBotFundingSnapshot ='), source.indexOf('function resolvePositiveInt('));
-  const runtime = new Function(...Object.keys(deps), code + '\nreturn { beginPokerAccessMutation, refreshPokerAccessForUser, refreshActivePokerAccess };')(...Object.values(deps));
-  return { ...runtime, manager, pending, userId,
-    setSnapshot: value => { snapshot = { ...snapshot, ...value }; },
-    setReadFailure: value => { failRead = value; },
-    setActive: () => { activeUsers = [userId]; },
-    holdNextRead: () => new Promise(resolve => {
-      readBarrier = new Promise(release => { resolve(release); });
-    }),
-    persisted: () => persisted, candidates: () => candidateIds };
+  const runtime = new Function(...Object.keys(deps), code + '\nreturn { mutatePokerAccessForUser, refreshActivePokerAccess };')(...Object.values(deps));
+  return {
+    ...runtime,
+    manager,
+    activeMutations,
+    userId,
+    getUserRow: () => userRow,
+    setUserRow: (val) => { userRow = val; },
+    getDbUpdates: () => dbUpdates,
+    setFailDb: (val) => { failDb = val; },
+    holdMutation: () => new Promise((resolve) => {
+      mutationBarrier = new Promise((release) => { resolve(release); });
+    })
+  };
 }
 
-test('offline pending-only user recovers committed SLOW and persists before clearing barrier', async () => {
+test('AUTO rev N -> FORCE_RESTRICTED rev N+1 -> immediately AUTO rev N+2 succeeds without periodic refresh', async () => {
   const f = await accessRuntimeFixture();
-  f.beginPokerAccessMutation(f.userId, 8, 'FORCE_SLOW');
-  f.setSnapshot({ revision: 9, override: 'FORCE_SLOW', effectiveClass: 'SLOW' });
-  f.setReadFailure(true);
-  assert.equal((await f.refreshPokerAccessForUser(f.userId)).failClosed, true);
-  assert.equal(f.pending.has(f.userId), true);
-  f.setReadFailure(false);
-  await f.refreshActivePokerAccess();
-  assert.deepEqual(f.candidates(), [f.userId]);
-  assert.equal(f.persisted(), true);
-  assert.equal(f.pending.has(f.userId), false);
+  const first = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+  assert.equal(first.ok, true);
+  assert.equal(first.revision, 9);
+  assert.equal(first.override, 'FORCE_RESTRICTED');
+  assert.equal(first.effectiveClass, 'RESTRICTED');
+  assert.equal(first.failClosed, false);
+  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
+
+  // Immediately save AUTO with rev 9 -> rev 10
+  const second = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'AUTO',
+    expectedRevision: 9
+  });
+  assert.equal(second.ok, true);
+  assert.equal(second.revision, 10);
+  assert.equal(second.override, 'AUTO');
+  assert.equal(second.effectiveClass, 'NORMAL');
+  assert.equal(second.failClosed, false);
+  assert.equal(f.getDbUpdates(), 2);
   assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
 });
 
-test('periodic recovery cannot release a truly concurrent uncommitted Admin barrier', async () => {
+test('exactly one DB update occurs per accepted Admin request', async () => {
   const f = await accessRuntimeFixture();
-  f.setActive();
-  f.beginPokerAccessMutation(f.userId, 8, 'FORCE_RESTRICTED');
-  await f.refreshActivePokerAccess();
-  assert.equal(f.pending.has(f.userId), true);
-  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), true);
+  assert.equal(f.getDbUpdates(), 0);
+  const result = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_SLOW',
+    expectedRevision: 8
+  });
+  assert.equal(result.ok, true);
+  assert.equal(f.getDbUpdates(), 1);
 });
 
-test('authoritative WS ACK contains exact state after barrier release and supports immediate AUTO', async () => {
+test('stale revision performs zero DB update and releases fail-closed immediately', async () => {
   const f = await accessRuntimeFixture();
-  f.beginPokerAccessMutation(f.userId, 8, 'FORCE_RESTRICTED');
-  f.setSnapshot({ revision: 9, override: 'FORCE_RESTRICTED', effectiveClass: 'RESTRICTED' });
-  const ack = await f.refreshPokerAccessForUser(f.userId);
-  assert.equal(ack.revision, 9);
-  assert.equal(ack.override, 'FORCE_RESTRICTED');
-  assert.equal(ack.effectiveClass, 'RESTRICTED');
-  assert.equal(ack.pending, false);
-  assert.equal(ack.failClosed, false);
-  assert.equal(f.pending.has(f.userId), false);
+  const result = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 99
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.statusCode, 409);
+  assert.equal(result.reason, 'stale_revision');
+  assert.equal(result.failClosed, false);
+  assert.equal(f.getDbUpdates(), 0);
   assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
-  assert.equal(f.beginPokerAccessMutation(f.userId, 9, 'AUTO').ok, true);
-  f.setSnapshot({ revision: 10, override: 'AUTO', effectiveClass: 'NORMAL' });
-  const next = await f.refreshPokerAccessForUser(f.userId);
-  assert.equal(next.override, 'AUTO');
-  assert.equal(next.revision, 10);
-  assert.equal(next.pending, false);
+  assert.equal(f.activeMutations.has(f.userId), false);
+
+  // An immediate following request with the correct revision succeeds at once
+  const next = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+  assert.equal(next.ok, true);
+  assert.equal(next.revision, 9);
 });
 
-test('refresh candidates prioritize pending, deduplicate and retain the bound', async () => {
+test('DB transaction failure rolls back, releases guard and fail-closed state, next save succeeds', async () => {
+  const f = await accessRuntimeFixture();
+  f.setFailDb(true);
+  const failed = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.statusCode, 503);
+  assert.equal(f.getDbUpdates(), 0);
+  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
+  assert.equal(f.activeMutations.has(f.userId), false);
+
+  // Immediate retry after DB recovery succeeds
+  f.setFailDb(false);
+  const success = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+  assert.equal(success.ok, true);
+  assert.equal(success.revision, 9);
+  assert.equal(f.getDbUpdates(), 1);
+});
+
+test('two concurrent same-user mutations: second gets fast 409, third succeeds after first completes', async () => {
+  const f = await accessRuntimeFixture();
+  const releaseFirst = await f.holdMutation();
+  const firstPromise = f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+
+  // Second request while first is in-flight gets fast 409
+  const second = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_SLOW',
+    expectedRevision: 8
+  });
+  assert.equal(second.ok, false);
+  assert.equal(second.statusCode, 409);
+  assert.equal(second.reason, 'poker_access_mutation_in_progress');
+
+  // Finish first request
+  releaseFirst();
+  const first = await firstPromise;
+  assert.equal(first.ok, true);
+  assert.equal(first.revision, 9);
+  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
+
+  // Third request starts immediately without waiting
+  const third = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'AUTO',
+    expectedRevision: 9
+  });
+  assert.equal(third.ok, true);
+  assert.equal(third.revision, 10);
+});
+
+test('runtime cache contains committed revision and override before success ACK', async () => {
+  const f = await accessRuntimeFixture();
+  let cachedAtAck = null;
+  const originalCache = f.manager.cachePokerAccessForUser.bind(f.manager);
+  f.manager.cachePokerAccessForUser = (userId, access, policy, nowMs) => {
+    cachedAtAck = { ...access };
+    return originalCache(userId, access, policy, nowMs);
+  };
+  const result = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+  assert.equal(result.ok, true);
+  assert.equal(cachedAtAck?.revision, 9);
+  assert.equal(cachedAtAck?.override, 'FORCE_RESTRICTED');
+  assert.equal(cachedAtAck?.effectiveClass, 'RESTRICTED');
+});
+
+test('FORCE_SLOW / Return AUTO preserves sticky is_slow_only', async () => {
+  const f = await accessRuntimeFixture();
+  const tableId = 'table_sticky_slow_test';
+  f.manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, lifecycleKind: 'STANDARD', isSlowOnly: false },
+    coreState: {
+      version: 2,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId: f.userId, seat: 1 }],
+      seats: { [f.userId]: 1 },
+      seatDetailsByUserId: { [f.userId]: { isBot: false } },
+      pokerState: { phase: 'SETTLED', handId: 'hand_sticky_slow', stacks: { [f.userId]: 100 } }
+    }
+  });
+
+  const slowResult = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_SLOW',
+    expectedRevision: 8
+  });
+  assert.equal(slowResult.ok, true);
+  assert.equal(slowResult.effectiveClass, 'SLOW');
+  assert.equal(slowResult.revision, 9);
+  f.manager.markSlowOnlyTables([tableId]);
+  assert.equal(f.manager.tableMeta(tableId).isSlowOnly, true);
+
+  const autoResult = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'AUTO',
+    expectedRevision: 9
+  });
+  assert.equal(autoResult.ok, true);
+  assert.equal(autoResult.effectiveClass, 'NORMAL');
+  assert.equal(autoResult.revision, 10);
+  assert.equal(f.manager.tableMeta(tableId).isSlowOnly, true);
+});
+
+test('refresh candidates deduplicate and retain the bound', async () => {
   const { buildPokerAccessRefreshCandidates } = await import('./poker-access-propagation.mjs');
   assert.equal(typeof buildPokerAccessRefreshCandidates, 'function');
-  assert.deepEqual(buildPokerAccessRefreshCandidates({ pendingUserIds: ['offline', 'active'],
-    activeUserIds: ['active', 'session', '', null], seatedUserIds: ['seated'], limit: 3 }), ['offline', 'active', 'session']);
-});
-
-
-test('late refresh of an earlier mutation cannot clear a newer pending barrier', async () => {
-  const f = await accessRuntimeFixture();
-  f.beginPokerAccessMutation(f.userId, 8, 'FORCE_RESTRICTED');
-  f.setSnapshot({ revision: 9, override: 'FORCE_RESTRICTED', effectiveClass: 'RESTRICTED' });
-  const release = await f.holdNextRead();
-  const delayed = f.refreshPokerAccessForUser(f.userId);
-  // Let the delayed request reach its DB read, then confirm through another request.
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal((await f.refreshPokerAccessForUser(f.userId)).refreshed, true);
-  assert.equal(f.beginPokerAccessMutation(f.userId, 9, 'AUTO').ok, true);
-  release();
-  assert.equal((await delayed).refreshed, false);
-  assert.equal(f.pending.get(f.userId).desiredOverride, 'AUTO');
-  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), true);
-});
-
-
-test('lost ACK retry after a later confirmed revision does not leave an impossible pending barrier', async () => {
-  const f = await accessRuntimeFixture();
-  f.setSnapshot({ revision: 10, override: 'AUTO', effectiveClass: 'NORMAL' });
-  const ack = await f.refreshPokerAccessForUser(f.userId, { expectedRevision: 8, expectedOverride: 'FORCE_RESTRICTED' });
-  assert.equal(ack.revision, 10, 'Admin must reject this as a mismatch to revision 9');
-  assert.equal(ack.override, 'AUTO');
-  assert.equal(f.pending.has(f.userId), false);
-  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
-});
-
-test('late rollback confirmation cannot release another live mutation', async () => {
-  const f = await accessRuntimeFixture();
-  f.setSnapshot({ revision: 9, override: 'FORCE_RESTRICTED', effectiveClass: 'RESTRICTED' });
-  f.beginPokerAccessMutation(f.userId, 9, 'AUTO');
-  const ack = await f.refreshPokerAccessForUser(f.userId, {
-    expectedRevision: 8, expectedOverride: 'FORCE_RESTRICTED', releasePending: true
-  });
-  assert.equal(ack.refreshed, false);
-  assert.equal(f.pending.get(f.userId).desiredOverride, 'AUTO');
-  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), true);
+  assert.deepEqual(buildPokerAccessRefreshCandidates({
+    activeUserIds: ['active', 'session', '', null],
+    seatedUserIds: ['seated'],
+    limit: 2
+  }), ['active', 'session']);
 });

@@ -283,22 +283,19 @@ export async function notifyWsLobbyMaterialize({
 
 export async function notifyWsPokerAccessMutation({
   userId,
-  revision = null,
-  phase = "refresh",
-  expectedRevision = null,
   override = null,
-  releasePending = false,
+  expectedRevision = null,
+  actorId = null,
   env = process.env,
   fetchImpl = globalThis.fetch,
   klog = () => {}
 } = {}) {
   const normalizedUserId = normalizeText(userId);
   if (!normalizedUserId) return { ok: false, skipped: true, reason: "invalid_user_id" };
-  const normalizedPhase = phase === "invalidate" ? "invalidate" : "refresh";
   const baseUrl = resolveBaseUrl(env);
   if (!baseUrl) return { ok: false, skipped: true, reason: "ws_internal_base_url_missing" };
   if (typeof fetchImpl !== "function") {
-    klog("poker_ws_access_refresh_notify_unavailable", { userId: normalizedUserId, reason: "fetch_unavailable" });
+    klog("poker_ws_access_mutation_notify_unavailable", { userId: normalizedUserId, reason: "fetch_unavailable" });
     return { ok: false, skipped: false, reason: "fetch_unavailable" };
   }
   const timeoutMs = Math.min(resolveTimeoutMs(env), DEFAULT_NOTIFY_TIMEOUT_MS);
@@ -314,30 +311,31 @@ export async function notifyWsPokerAccessMutation({
       headers,
       body: JSON.stringify({
         userId: normalizedUserId,
-        revision,
-        phase: normalizedPhase,
-        ...(Number.isSafeInteger(Number(expectedRevision)) && Number(expectedRevision) > 0
-          ? { expectedRevision: Number(expectedRevision) }
-          : {}),
-        ...(typeof override === "string" && override.trim()
-          ? { override: override.trim().toUpperCase() }
-          : {}),
-        ...(releasePending === true ? { releasePending: true } : {})
+        action: "mutate",
+        phase: "mutate",
+        override: typeof override === "string" ? override.trim().toUpperCase() : null,
+        expectedRevision: Number(expectedRevision),
+        ...(typeof actorId === "string" && actorId.trim() ? { actorId: actorId.trim() } : {})
       }),
       signal: controller.signal
     });
     if (!response?.ok) {
       let errorPayload = null;
       try { errorPayload = await response.json(); } catch { errorPayload = null; }
-      klog("poker_ws_access_refresh_notify_failed", {
+      const reason = typeof errorPayload?.reason === "string"
+        ? errorPayload.reason
+        : (typeof errorPayload?.error === "string" ? errorPayload.error : "notify_failed");
+      klog("poker_ws_access_mutation_notify_failed", {
         userId: normalizedUserId,
-        status: Number.isInteger(response?.status) ? response.status : null
+        status: response?.status ?? null,
+        reason
       });
       return {
         ok: false,
         skipped: false,
-        reason: typeof errorPayload?.reason === "string" ? errorPayload.reason : "notify_failed",
-        status: response?.status ?? null
+        status: response?.status ?? null,
+        reason,
+        failClosed: typeof errorPayload?.failClosed === "boolean" ? errorPayload.failClosed : false
       };
     }
     let payload = null;
@@ -345,22 +343,22 @@ export async function notifyWsPokerAccessMutation({
     return {
       ok: payload?.ok === true,
       skipped: false,
-      phase: payload?.phase === "invalidate" ? "invalidate" : "refresh",
-      invalidated: payload?.invalidated === true,
-      refreshed: payload?.refreshed === true,
-      failClosed: typeof payload?.failClosed === "boolean" ? payload.failClosed : null,
-      pending: typeof payload?.pending === "boolean" ? payload.pending : null,
+      status: response.status,
       revision: Number.isSafeInteger(payload?.revision) && payload.revision > 0 ? payload.revision : null,
       override: typeof payload?.override === "string" ? payload.override : null,
+      automaticClass: typeof payload?.automaticClass === "string" ? payload.automaticClass : null,
       effectiveClass: typeof payload?.effectiveClass === "string" ? payload.effectiveClass : null,
-      reason: typeof payload?.reason === "string" ? payload.reason : null
+      failClosed: false,
+      access: payload?.access || null,
+      slowOnlyTableIds: Array.isArray(payload?.slowOnlyTableIds) ? payload.slowOnlyTableIds : []
     };
   } catch (error) {
-    klog("poker_ws_access_refresh_notify_error", {
+    const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
+    klog("poker_ws_access_mutation_notify_error", {
       userId: normalizedUserId,
-      reason: error?.name === "AbortError" ? "timeout" : "request_failed"
+      reason
     });
-    return { ok: false, skipped: false, reason: error?.name === "AbortError" ? "timeout" : "request_failed" };
+    return { ok: false, skipped: false, reason };
   } finally {
     clearTimeout(timer);
   }

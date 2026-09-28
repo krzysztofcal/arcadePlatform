@@ -866,7 +866,7 @@
       html.push('<label class="admin-field"><span class="admin-field__label">Override</span><select class="admin-input" name="override"><option value="AUTO"' + (user.override === "AUTO" ? " selected" : "") + '>AUTO</option><option value="FORCE_NORMAL"' + (user.override === "FORCE_NORMAL" ? " selected" : "") + '>FORCE_NORMAL</option><option value="FORCE_SLOW"' + (user.override === "FORCE_SLOW" ? " selected" : "") + '>FORCE_SLOW</option><option value="FORCE_RESTRICTED"' + (user.override === "FORCE_RESTRICTED" ? " selected" : "") + '>FORCE_RESTRICTED</option></select></label>');
       html.push('<input type="hidden" name="userId" value="' + escapeHtml(user.userId || "") + '"><input type="hidden" name="expectedRevision" value="' + escapeHtml(user.accessRevision || 1) + '">');
       html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save poker override</button></div>');
-      html.push('<p class="admin-note" data-poker-access-status aria-live="polite">Save confirms the committed revision with WS before reporting success.</p>');
+      html.push('<p class="admin-note" data-poker-access-status aria-live="polite"></p>');
       html.push('</form>');
     } else {
       html.push('<p class="admin-note">Poker access controls are read-only until the poker access schema is migrated.</p></div>');
@@ -1632,16 +1632,22 @@
       var result = await apiFetch("/.netlify/functions/admin-user-poker-access", { method: "PATCH", body: JSON.stringify(data) });
       await loadUserDetail(data.userId, true);
       status = nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]");
-      if (status) status.textContent = "Saved revision " + String(result.access && result.access.revision || "") + " · WS confirmed";
+      var rev = (result && result.access && result.access.revision) || (result && result.revision) || "";
+      if (status) status.textContent = "Saved revision " + String(rev) + " · active in WS";
     } catch (err){
       if (err && err.code === "stale_revision") {
         await loadUserDetail(data.userId, true);
         status = nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]");
         if (status) status.textContent = "Previous change recovered; current access reloaded. Review it before saving again.";
+      } else if (err && err.code === "poker_access_mutation_in_progress") {
+        status = nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]");
+        if (status) status.textContent = "Another access save is currently in progress. This save was not applied.";
+      } else if (err && (err.status === 503 || err.code === "timeout" || err.code === "access_mutation_failed")) {
+        await loadUserDetail(data.userId, true);
+        status = nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]");
+        if (status) status.textContent = "Outcome was not confirmed by WS; current access reloaded. Review it before saving again.";
       } else if (status) {
-        status.textContent = err && err.code === "poker_access_mutation_pending"
-          ? "Another access change is still pending authoritative confirmation. This save was not applied."
-          : "Could not confirm poker override: " + String(err && err.code || "request_failed");
+        status.textContent = "Could not save poker override: " + String(err && err.code || "request_failed");
       }
       klog("admin_poker_access_update_failed", { code: err && err.code ? err.code : "request_failed" });
     } finally {

@@ -1,8 +1,8 @@
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
-import { badRequest, conflict, parseJsonBody, parseUuid } from "./_shared/admin-ops.mjs";
-import { baseHeaders, beginSql, corsHeaders, executeSql, klog } from "./_shared/supabase-admin.mjs";
+import { badRequest, parseJsonBody, parseUuid } from "./_shared/admin-ops.mjs";
+import { baseHeaders, corsHeaders, executeSql, klog } from "./_shared/supabase-admin.mjs";
 import { notifyWsPokerAccessMutation } from "./_shared/poker-ws-runtime-notify.mjs";
-import { ACCESS_OVERRIDES, hasPokerPoolSchema, normalizeAccessOverride } from "../../shared/poker-domain/bot-access.mjs";
+import { ACCESS_OVERRIDES, normalizeAccessOverride } from "../../shared/poker-domain/bot-access.mjs";
 
 function normalizeAccessRow(row) {
   if (!row) return null;
@@ -45,62 +45,10 @@ limit 1;
   return normalizeAccessRow(rows[0]);
 }
 
-async function updatePokerAccess({ userId, override, expectedRevision, actorId, runTransaction = beginSql } = {}) {
-  const normalizedOverride = parseOverride(override);
-  if (!Number.isSafeInteger(Number(expectedRevision)) || Number(expectedRevision) <= 0) {
-    throw badRequest("invalid_expected_revision", "invalid_expected_revision");
-  }
-  return runTransaction(async (tx) => {
-    if (!await hasPokerPoolSchema(tx)) {
-      const error = new Error("poker_access_schema_unavailable");
-      error.code = "poker_access_schema_unavailable";
-      error.status = 409;
-      throw error;
-    }
-    const rows = await tx.unsafe(`
-select user_id, poker_auto_class, poker_access_override, poker_access_revision,
-       poker_auto_slow_at, poker_access_updated_at, poker_access_updated_by
-from public.chips_accounts
-where user_id = $1::uuid and account_type = 'USER'
-for update;
-`, [userId]);
-    if (!rows?.[0]) throw badRequest("user_not_found", "user_not_found");
-    if (Number(rows[0].poker_access_revision) !== Number(expectedRevision)) {
-      throw conflict("stale_revision", "stale_revision");
-    }
-    const updated = await tx.unsafe(`
-update public.chips_accounts
-set poker_access_override = $2,
-    poker_access_revision = poker_access_revision + 1,
-    poker_access_updated_at = timezone('utc', now()),
-    poker_access_updated_by = $3::uuid
-where user_id = $1::uuid and account_type = 'USER'
-returning user_id, poker_auto_class, poker_access_override, poker_access_revision,
-          poker_auto_slow_at, poker_access_updated_at, poker_access_updated_by;
-`, [userId, normalizedOverride, actorId]);
-    const result = normalizeAccessRow(updated?.[0]);
-    klog("admin_poker_access_updated", { userId, actorId, override: normalizedOverride, revision: result?.revision });
-    return { access: result };
-  });
-}
-
-function isConfirmedAccess(propagation, access) {
-  return propagation?.ok === true
-    && propagation?.skipped !== true
-    && propagation?.refreshed === true
-    && propagation?.failClosed === false
-    && propagation?.pending === false
-    && Number.isSafeInteger(access?.revision) && access.revision > 0
-    && propagation.revision === access.revision
-    && ACCESS_OVERRIDES.includes(access.override)
-    && propagation.override === access.override;
-}
-
 function createAdminUserPokerAccessHandler(deps = {}) {
   const env = deps.env || process.env;
   const requireAdmin = deps.requireAdminUser || requireAdminUser;
   const loadAccess = deps.loadPokerAccess || loadPokerAccess;
-  const updateAccess = deps.updatePokerAccess || updatePokerAccess;
   const notifyAccessMutation = deps.notifyWsPokerAccessMutation || notifyWsPokerAccessMutation;
   return async function handler(event) {
     if (env.CHIPS_ENABLED !== "1") return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
@@ -124,118 +72,29 @@ function createAdminUserPokerAccessHandler(deps = {}) {
         || Number(expectedRevision) >= Number.MAX_SAFE_INTEGER) {
         throw badRequest("invalid_expected_revision", "invalid_expected_revision");
       }
-      let preInvalidation = await notifyAccessMutation({
+      const result = await notifyAccessMutation({
         userId,
         override: requestedOverride,
-        expectedRevision,
-        phase: "invalidate",
+        expectedRevision: Number(expectedRevision),
+        actorId: admin.userId,
         env,
         klog
       });
-      if (preInvalidation?.reason === "poker_access_mutation_pending") {
-        // Recover the previous committed mutation, never release an in-flight
-        // write or reuse this caller's stale optimistic revision for a new one.
-        let recovery;
-        try {
-          recovery = await notifyAccessMutation({ userId, phase: "refresh", env, klog });
-        } catch {
-          recovery = null;
-        }
-        if (!isConfirmedAccess(recovery, recovery)) {
-          return { statusCode: 409, headers: cors, body: JSON.stringify({ error: "poker_access_mutation_pending" }) };
-        }
-        const access = await loadAccess(userId);
-        if (access.revision !== Number(expectedRevision)) {
-          return { statusCode: 409, headers: cors, body: JSON.stringify({ error: "stale_revision", access }) };
-        }
-        // The caller already holds this revision. Reserve a fresh barrier;
-        // never silently substitute a newer revision on the caller's behalf.
-        preInvalidation = await notifyAccessMutation({
-          userId, override: requestedOverride, expectedRevision, phase: "invalidate", env, klog
-        });
-        if (preInvalidation?.reason === "poker_access_mutation_pending") {
-          return { statusCode: 409, headers: cors, body: JSON.stringify({ error: "poker_access_mutation_pending" }) };
-        }
-      }
-      if (preInvalidation?.skipped === true
-        || preInvalidation?.ok !== true
-        || preInvalidation?.invalidated !== true
-        || preInvalidation?.failClosed !== true) {
-        klog("admin_poker_access_pre_invalidation_failed", {
-          userId,
-          reason: preInvalidation?.reason || "unconfirmed"
-        });
+      if (result?.ok !== true) {
+        const code = result?.reason || "access_mutation_failed";
+        const statusCode = result?.status || (code === "stale_revision" || code === "poker_access_mutation_in_progress" ? 409 : 503);
+        klog("admin_poker_access_mutation_failed", { userId, code, status: statusCode });
         return {
-          statusCode: 503,
+          statusCode,
           headers: cors,
-          body: JSON.stringify({
-            error: "poker_access_pre_invalidation_failed"
-          })
+          body: JSON.stringify({ error: code, reason: code })
         };
       }
-
-      let result;
-      try {
-        result = await updateAccess({
-          userId,
-          override: requestedOverride,
-          expectedRevision,
-          actorId: admin.userId,
-        });
-      } catch (error) {
-        // The WS fail-closed marker must not linger after a transaction that
-        // definitely did not commit. If this recovery refresh is unavailable,
-        // the marker remains fail-closed until a later authoritative refresh.
-        try {
-          await notifyAccessMutation({
-            userId,
-            override: requestedOverride,
-            phase: "refresh",
-            releasePending: true,
-            expectedRevision,
-            env,
-            klog
-          });
-        } catch (refreshError) {
-          klog("admin_poker_access_failure_refresh_failed", {
-            userId,
-            reason: refreshError?.message || "refresh_failed"
-          });
-        }
-        throw error;
-      }
-      let propagation = null;
-      const committedAccess = { revision: result?.access?.revision, override: requestedOverride };
-      // Retry only the bounded authoritative confirmation, never the DB write.
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          propagation = await notifyAccessMutation({
-            userId,
-            override: requestedOverride,
-            revision: committedAccess.revision,
-            expectedRevision,
-            phase: "refresh",
-            env,
-            klog
-          });
-        } catch {
-          propagation = { ok: false, reason: "confirmation_failed" };
-        }
-        if (isConfirmedAccess(propagation, committedAccess)) break;
-      }
-      if (!isConfirmedAccess(propagation, committedAccess)) {
-        klog("admin_poker_access_propagation_failed", {
-          userId,
-          revision: result?.access?.revision ?? null,
-          reason: propagation?.reason || "unconfirmed"
-        });
-        return {
-          statusCode: 503,
-          headers: cors,
-          body: JSON.stringify({ error: "poker_access_propagation_failed", access: result?.access || null })
-        };
-      }
-      return { statusCode: 200, headers: cors, body: JSON.stringify({ ...result, propagation }) };
+      return {
+        statusCode: 200,
+        headers: cors,
+        body: JSON.stringify(result)
+      };
     } catch (error) {
       if (error?.status === 401 || error?.status === 403) return adminAuthErrorResponse(error, cors);
       if (error?.status === 400 || error?.status === 409) return { statusCode: error.status, headers: cors, body: JSON.stringify({ error: error.code || "invalid_request" }) };
@@ -247,4 +106,4 @@ function createAdminUserPokerAccessHandler(deps = {}) {
 
 const handler = createAdminUserPokerAccessHandler();
 
-export { createAdminUserPokerAccessHandler, handler, loadPokerAccess, updatePokerAccess };
+export { createAdminUserPokerAccessHandler, handler, loadPokerAccess };
