@@ -171,6 +171,7 @@ register("WARN", "recovery", [
 register("WARN", "session", [
   "ws_invalidate_before_close",
   "ws_invalidating_stale_socket",
+  "ws_poker_access_frame_send_failed",
   "ws_stale_session_socket_rejected",
   "ws_transport_watchdog_terminated"
 ]);

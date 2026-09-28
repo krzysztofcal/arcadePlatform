@@ -315,7 +315,7 @@ export async function notifyWsPokerAccessMutation({
         phase: "mutate",
         override: typeof override === "string" ? override.trim().toUpperCase() : null,
         expectedRevision: Number(expectedRevision),
-        ...(typeof actorId === "string" && actorId.trim() ? { actorId: actorId.trim() } : {})
+        actorId: typeof actorId === "string" && actorId.trim() ? actorId.trim() : (actorId ?? null)
       }),
       signal: controller.signal
     });
@@ -340,12 +340,41 @@ export async function notifyWsPokerAccessMutation({
     }
     let payload = null;
     try { payload = await response.json(); } catch { payload = null; }
+
+    const requestedOverrideCanonical = typeof override === "string" ? override.trim().toUpperCase() : null;
+    const expectedTargetRevision = Number(expectedRevision) + 1;
+    const isExactAck = payload?.ok === true
+      && payload?.userId === normalizedUserId
+      && Number(payload?.revision) === expectedTargetRevision
+      && payload?.override === requestedOverrideCanonical
+      && payload?.failClosed === false;
+
+    if (!isExactAck) {
+      klog("poker_ws_access_mutation_confirmation_mismatch", {
+        userId: normalizedUserId,
+        status: response.status,
+        expectedRevision: expectedTargetRevision,
+        actualRevision: payload?.revision,
+        expectedOverride: requestedOverrideCanonical,
+        actualOverride: payload?.override,
+        failClosed: payload?.failClosed
+      });
+      return {
+        ok: false,
+        skipped: false,
+        status: 503,
+        reason: "poker_access_confirmation_mismatch",
+        failClosed: typeof payload?.failClosed === "boolean" ? payload.failClosed : false
+      };
+    }
+
     return {
-      ok: payload?.ok === true,
+      ok: true,
       skipped: false,
-      status: response.status,
-      revision: Number.isSafeInteger(payload?.revision) && payload.revision > 0 ? payload.revision : null,
-      override: typeof payload?.override === "string" ? payload.override : null,
+      status: 200,
+      userId: payload.userId,
+      revision: payload.revision,
+      override: payload.override,
       automaticClass: typeof payload?.automaticClass === "string" ? payload.automaticClass : null,
       effectiveClass: typeof payload?.effectiveClass === "string" ? payload.effectiveClass : null,
       failClosed: false,

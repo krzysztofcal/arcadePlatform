@@ -77,14 +77,16 @@ test("authoritative SLOW persistence is a no-op for legacy or non-SLOW snapshots
 
 // Execute the real server control points without starting sockets or periodic
 // timers; only the authoritative DB and transport boundaries are substituted.
-async function accessRuntimeFixture() {
+async function accessRuntimeFixture(options = {}) {
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../../server.mjs', import.meta.url), 'utf8');
   const propagation = await import('./poker-access-propagation.mjs');
   const { ACCESS_OVERRIDES, hasPokerPoolSchema, normalizeAccessOverride, normalizeAccessSnapshot } = await import('../../../shared/poker-domain/bot-access.mjs');
   const userId = '00000000-0000-4000-8000-000000000031';
+  const defaultActorId = '00000000-0000-4000-8000-000000000001';
   const manager = createTableManager({ maxSeats: 4 });
   const activeMutations = new Set();
+  const generations = new Map();
   let userRow = {
     user_id: userId,
     poker_auto_class: 'NORMAL',
@@ -101,8 +103,12 @@ async function accessRuntimeFixture() {
   const isUuid = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
   const deps = {
     activePokerAccessMutations: activeMutations,
+    pokerAccessMutationGenerationByUser: generations,
     tableManager: manager,
-    sessionStore: { activeUserIds: () => activeUsers, connectionsForUser: () => [] },
+    sessionStore: {
+      activeUserIds: () => activeUsers,
+      connectionsForUser: typeof options.connectionsForUser === 'function' ? options.connectionsForUser : () => []
+    },
     hasSupabaseDbUrl: true,
     ACCESS_OVERRIDES,
     hasPokerPoolSchema,
@@ -141,13 +147,16 @@ async function accessRuntimeFixture() {
     },
     readPokerAccessPolicy: async () => ({ revision: 1, slowThresholdCh: 1000000000 }),
     readPokerAccessSnapshots: async (_tx, { userIds }) => {
+      if (typeof options.onReadSnapshots === 'function') {
+        await options.onReadSnapshots({ userIds });
+      }
       const snapshot = normalizeAccessSnapshot(userRow);
       return new Map(userIds.map(id => [id, snapshot]));
     },
     readSettledBotFundingSnapshot: async () => null,
     persistAuthoritativeSlowOnlyForUser,
     buildPokerAccessRefreshCandidates: propagation.buildPokerAccessRefreshCandidates,
-    sendPokerAccessFrame: () => {},
+    sendPokerAccessFrame: typeof options.onSendFrame === 'function' ? options.onSendFrame : () => {},
     klogSafe: () => {}
   };
   const code = source.slice(source.indexOf('async function mutatePokerAccessForUser('), source.indexOf('function broadcastPokerAccessTransition('))
@@ -155,9 +164,15 @@ async function accessRuntimeFixture() {
   const runtime = new Function(...Object.keys(deps), code + '\nreturn { mutatePokerAccessForUser, refreshActivePokerAccess };')(...Object.values(deps));
   return {
     ...runtime,
+    mutatePokerAccessForUser: (args = {}) => runtime.mutatePokerAccessForUser({
+      actorId: 'actorId' in args ? args.actorId : defaultActorId,
+      ...args
+    }),
     manager,
     activeMutations,
+    generations,
     userId,
+    setActiveUsers: (users) => { activeUsers = users; },
     getUserRow: () => userRow,
     setUserRow: (val) => { userRow = val; },
     getDbUpdates: () => dbUpdates,
@@ -361,4 +376,129 @@ test('refresh candidates deduplicate and retain the bound', async () => {
     seatedUserIds: ['seated'],
     limit: 2
   }), ['active', 'session']);
+});
+
+test('stale periodic refresh cannot overwrite newer mutation revision', async () => {
+  let finishReadHook = null;
+  const readHookPromise = new Promise((resolve) => { finishReadHook = resolve; });
+  let refreshReadStarted = null;
+  const refreshStartedPromise = new Promise((resolve) => { refreshReadStarted = resolve; });
+
+  const connState = {
+    sessionId: 'sess_refresh_test',
+    session: { userId: '00000000-0000-4000-8000-000000000031', identityMode: 'authenticated' },
+    pokerAccess: null
+  };
+  const mockSocket = { __connState: connState };
+
+  const f = await accessRuntimeFixture({
+    connectionsForUser: () => [mockSocket],
+    onReadSnapshots: async () => {
+      refreshReadStarted();
+      await readHookPromise;
+    }
+  });
+
+  f.setActiveUsers([f.userId]);
+
+  const cachedEvents = [];
+  const origCache = f.manager.cachePokerAccessForUser.bind(f.manager);
+  f.manager.cachePokerAccessForUser = (userId, access, policy, nowMs) => {
+    cachedEvents.push({ userId, revision: access.revision, override: access.override });
+    return origCache(userId, access, policy, nowMs);
+  };
+
+  // Start periodic refresh which reads rev 8
+  const refreshPromise = f.refreshActivePokerAccess();
+  await refreshStartedPromise;
+
+  // While refresh is paused waiting for DB snapshots read hook, an Admin mutation runs and commits rev 9
+  const mutationResult = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+  assert.equal(mutationResult.ok, true);
+  assert.equal(mutationResult.revision, 9);
+  assert.equal(mutationResult.override, 'FORCE_RESTRICTED');
+  assert.equal(connState.pokerAccess?.revision, 9);
+  assert.equal(connState.pokerAccess?.override, 'FORCE_RESTRICTED');
+
+  // Now let the stale refresh complete
+  finishReadHook();
+  await refreshPromise;
+
+  // Stale refresh was skipped because generation changed during mutation
+  // Last cached event must be rev 9, NOT rev 8!
+  assert.equal(cachedEvents.length, 1);
+  assert.equal(cachedEvents[0].revision, 9);
+  assert.equal(cachedEvents[0].override, 'FORCE_RESTRICTED');
+
+  // Socket state must still have rev 9
+  assert.equal(connState.pokerAccess?.revision, 9);
+  assert.equal(connState.pokerAccess?.override, 'FORCE_RESTRICTED');
+});
+
+test('socket frame send throw does not fail mutation, returns ok: true, rev N+1, releases fail-closed', async () => {
+  const connState = {
+    sessionId: 'sess_socket_err',
+    session: { userId: '00000000-0000-4000-8000-000000000031', identityMode: 'authenticated' },
+    pokerAccess: null
+  };
+  const mockSocket = { __connState: connState };
+
+  const f = await accessRuntimeFixture({
+    connectionsForUser: () => [mockSocket],
+    onSendFrame: () => {
+      throw new Error('socket_closed_unexpectedly');
+    }
+  });
+
+  const result = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.revision, 9);
+  assert.equal(result.override, 'FORCE_RESTRICTED');
+  assert.equal(result.failClosed, false);
+  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
+  assert.equal(f.activeMutations.has(f.userId), false);
+  assert.equal(f.getDbUpdates(), 1);
+  assert.equal(connState.pokerAccess?.revision, 9);
+  assert.equal(connState.pokerAccess?.override, 'FORCE_RESTRICTED');
+});
+
+test('missing or invalid actorId returns 400 invalid_actor_id without setting fail-closed or writing to DB', async () => {
+  const f = await accessRuntimeFixture();
+
+  const missing = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8,
+    actorId: null
+  });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.statusCode, 400);
+  assert.equal(missing.reason, 'invalid_actor_id');
+  assert.equal(missing.failClosed, false);
+  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
+  assert.equal(f.activeMutations.has(f.userId), false);
+  assert.equal(f.getDbUpdates(), 0);
+
+  const invalid = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8,
+    actorId: 'not-a-uuid'
+  });
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.reason, 'invalid_actor_id');
+  assert.equal(invalid.failClosed, false);
+  assert.equal(f.manager.isPokerAccessMutationFailClosed(f.userId), false);
+  assert.equal(f.activeMutations.has(f.userId), false);
+  assert.equal(f.getDbUpdates(), 0);
 });

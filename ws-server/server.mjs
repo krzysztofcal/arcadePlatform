@@ -377,6 +377,7 @@ const TERMINAL_JANITOR_SUPPRESSION_MAX = 1_000;
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
 const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
 const activePokerAccessMutations = new Set();
+const pokerAccessMutationGenerationByUser = new Map();
 const botReactionOverrideStore = createBotReactionOverrideStore({ env: process.env });
 let openTableJanitorCursor = null;
 
@@ -853,6 +854,9 @@ async function mutatePokerAccessForUser({ userId, override, expectedRevision, ac
     return { ok: false, statusCode: 400, reason: "invalid_expected_revision", failClosed: false };
   }
   const normalizedActorId = typeof actorId === "string" && isUuid(actorId.trim()) ? actorId.trim() : null;
+  if (!normalizedActorId) {
+    return { ok: false, statusCode: 400, reason: "invalid_actor_id", failClosed: false };
+  }
 
   if (activePokerAccessMutations.has(normalizedUserId)) {
     return {
@@ -863,6 +867,10 @@ async function mutatePokerAccessForUser({ userId, override, expectedRevision, ac
     };
   }
 
+  pokerAccessMutationGenerationByUser.set(
+    normalizedUserId,
+    (pokerAccessMutationGenerationByUser.get(normalizedUserId) || 0) + 1
+  );
   activePokerAccessMutations.add(normalizedUserId);
   tableManager.setPokerAccessMutationFailClosed?.(normalizedUserId, true);
   for (const socket of sessionStore.connectionsForUser(normalizedUserId) || []) {
@@ -952,7 +960,14 @@ returning user_id, poker_auto_class, poker_access_override, poker_access_revisio
       const state = socket?.__connState;
       if (!state || state.session?.identityMode === "guest") continue;
       state.pokerAccess = access;
-      sendPokerAccessFrame(socket, state, access, { reason: "admin_mutation" });
+      try {
+        sendPokerAccessFrame(socket, state, access, { reason: "admin_mutation" });
+      } catch (err) {
+        klogSafe("ws_poker_access_frame_send_failed", {
+          userId: normalizedUserId,
+          error: err?.message || "frame_send_failed"
+        });
+      }
     }
 
     tableManager.setPokerAccessMutationFailClosed?.(normalizedUserId, false);
@@ -980,6 +995,10 @@ returning user_id, poker_auto_class, poker_access_override, poker_access_revisio
       failClosed: false
     };
   } finally {
+    pokerAccessMutationGenerationByUser.set(
+      normalizedUserId,
+      (pokerAccessMutationGenerationByUser.get(normalizedUserId) || 0) + 1
+    );
     activePokerAccessMutations.delete(normalizedUserId);
     tableManager.setPokerAccessMutationFailClosed?.(normalizedUserId, false);
   }
@@ -1018,6 +1037,9 @@ async function refreshActivePokerAccess() {
     seatedUserIds: tableManager.activeHumanUserIds?.({ limit: 512 }) || [],
     limit: 512
   });
+  const capturedGenerations = new Map(
+    normalizedUserIds.map((userId) => [userId, pokerAccessMutationGenerationByUser.get(userId) || 0])
+  );
   try {
     const beginSqlWs = await loadBeginSqlWs();
     const refreshed = await beginSqlWs(async (tx) => {
@@ -1040,6 +1062,9 @@ async function refreshActivePokerAccess() {
     if (!refreshed?.policy || !(refreshed.snapshots instanceof Map)) return;
     for (const [userId, snapshot] of refreshed.snapshots.entries()) {
       if (activePokerAccessMutations.has(userId)) continue;
+      if ((pokerAccessMutationGenerationByUser.get(userId) || 0) !== (capturedGenerations.get(userId) || 0)) {
+        continue;
+      }
       const access = {
         ...snapshot,
         policy: refreshed.policy,

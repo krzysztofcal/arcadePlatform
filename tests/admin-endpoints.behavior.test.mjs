@@ -171,6 +171,120 @@ test("Netlify PATCH handles WS timeout with zero replay mutation", async () => {
   assert.deepEqual(JSON.parse(response.body), { error: "timeout", reason: "timeout" });
 });
 
+test("notifyWsPokerAccessMutation rejects WS HTTP 200 with mismatched revision or override", async () => {
+  const userId = "00000000-0000-4000-8000-000000000020";
+
+  // Case 1: Mismatched revision (WS returns rev 12, expected 8 + 1 = 9)
+  const resultMismatchRev = await notifyWsPokerAccessMutation({
+    userId,
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8,
+    actorId: "00000000-0000-4000-8000-000000000010",
+    env: { POKER_WS_INTERNAL_BASE_URL: "https://ws.test", POKER_WS_INTERNAL_TOKEN: "tok" },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        userId,
+        revision: 12,
+        override: "FORCE_RESTRICTED",
+        failClosed: false
+      })
+    })
+  });
+  assert.equal(resultMismatchRev.ok, false);
+  assert.equal(resultMismatchRev.reason, "poker_access_confirmation_mismatch");
+  assert.equal(resultMismatchRev.status, 503);
+
+  // Case 2: Mismatched override (WS returns AUTO, requested FORCE_RESTRICTED)
+  const resultMismatchOverride = await notifyWsPokerAccessMutation({
+    userId,
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8,
+    actorId: "00000000-0000-4000-8000-000000000010",
+    env: { POKER_WS_INTERNAL_BASE_URL: "https://ws.test", POKER_WS_INTERNAL_TOKEN: "tok" },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        userId,
+        revision: 9,
+        override: "AUTO",
+        failClosed: false
+      })
+    })
+  });
+  assert.equal(resultMismatchOverride.ok, false);
+  assert.equal(resultMismatchOverride.reason, "poker_access_confirmation_mismatch");
+  assert.equal(resultMismatchOverride.status, 503);
+
+  // Case 3: failClosed true
+  const resultFailClosed = await notifyWsPokerAccessMutation({
+    userId,
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8,
+    actorId: "00000000-0000-4000-8000-000000000010",
+    env: { POKER_WS_INTERNAL_BASE_URL: "https://ws.test", POKER_WS_INTERNAL_TOKEN: "tok" },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        userId,
+        revision: 9,
+        override: "FORCE_RESTRICTED",
+        failClosed: true
+      })
+    })
+  });
+  assert.equal(resultFailClosed.ok, false);
+  assert.equal(resultFailClosed.reason, "poker_access_confirmation_mismatch");
+  assert.equal(resultFailClosed.status, 503);
+});
+
+test("Netlify PATCH rejects WS HTTP 200 with mismatched revision or override and never returns 200", async () => {
+  const userId = "00000000-0000-4000-8000-000000000020";
+
+  // Handler integration with real notifyWsPokerAccessMutation & mock WS returning 200 + ok:true but wrong revision
+  const handler = createAdminUserPokerAccessHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws.test",
+      POKER_WS_INTERNAL_TOKEN: "tok"
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    notifyWsPokerAccessMutation: (args) => notifyWsPokerAccessMutation({
+      ...args,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          userId,
+          revision: 99,
+          override: "FORCE_RESTRICTED",
+          failClosed: false
+        })
+      })
+    })
+  });
+
+  const response = await handler(event("PATCH", {}, JSON.stringify({
+    userId,
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8
+  })));
+
+  assert.notEqual(response.statusCode, 200);
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(JSON.parse(response.body), {
+    error: "poker_access_confirmation_mismatch",
+    reason: "poker_access_confirmation_mismatch"
+  });
+});
+
 test("Netlify GET poker access returns loaded access without mutation", async () => {
   let loadCalls = 0;
   const current = { userId: "00000000-0000-4000-8000-000000000020", revision: 8, override: "AUTO", effectiveClass: "NORMAL" };

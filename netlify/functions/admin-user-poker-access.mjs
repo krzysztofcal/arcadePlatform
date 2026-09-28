@@ -82,7 +82,9 @@ function createAdminUserPokerAccessHandler(deps = {}) {
       });
       if (result?.ok !== true) {
         const code = result?.reason || "access_mutation_failed";
-        const statusCode = result?.status || (code === "stale_revision" || code === "poker_access_mutation_in_progress" ? 409 : 503);
+        const statusCode = (Number.isInteger(result?.status) && result.status >= 400 && result.status < 600)
+          ? result.status
+          : (code === "stale_revision" || code === "poker_access_mutation_in_progress" ? 409 : 503);
         klog("admin_poker_access_mutation_failed", { userId, code, status: statusCode });
         return {
           statusCode,
