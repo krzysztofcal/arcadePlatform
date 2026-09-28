@@ -12,6 +12,7 @@
 
 Takes the live internal poker state and generates an immutable, detached snapshot specifically for reaction classifiers.
 
+- **Visibility**: Server-internal only. Must **NOT** be exported for tests or external modules.
 - **Preconditions**:
   - `state` is a valid internal poker state object.
 - **Postconditions**:
@@ -19,10 +20,10 @@ Takes the live internal poker state and generates an immutable, detached snapsho
   - Contains `handStartStacksByUserId` as a frozen map of user IDs to integer chip amounts.
   - Contains `contributionsByUserId` as a frozen map of user IDs to integer chip amounts.
   - Does NOT mutate `state`.
-  - Is NOT broadcast over WebSocket or exposed to clients.
+  - Is NOT broadcast over WebSocket or exposed in client snapshots (`handStartStacksByUserId` remains private).
 
 ```javascript
-// Excerpt of expected signature:
+// Internal signature in ws-server/server.mjs (non-exported):
 function buildDetachedReactionContext(state): Readonly<DetachedReactionContext>
 ```
 
@@ -45,7 +46,6 @@ Evaluates settlement context to select at most one bot reaction candidate for th
     {
       "botUserId": "bot_123",
       "botSeatNo": 2,
-      "targetSeatNo": 4,
       "reactionKey": "bad_beat",
       "handId": "hand_abc"
     }
@@ -53,7 +53,9 @@ Evaluates settlement context to select at most one bot reaction candidate for th
 - **Invariants**:
   - **Deterministic selection**: Bots are sorted in ascending `seatNo` order. When multiple bots qualify, the first eligible bot is selected.
   - **Single emission**: Returns at most one candidate per call.
-  - **Fail-closed**: If `reactionSettings.enabled === false`, `state.phase !== 'SETTLED'`, or state is incomplete, returns `null`.
+  - **Fail-closed**: If `reactionSettings.enabled === false`, `state.phase !== 'SETTLED'`, or state/accounting is incomplete/inconsistent (e.g. `contribution > handStartStack`), returns `null`.
+  - **Base Probability**: Evaluated with `samplePasses(random, 1, reactionSettings)`. At `frequencyPercent = 100`, every qualified all-in loss produces a candidate.
+  - **Targeting**: Neither `bad_beat` nor `not_this_time` sets `targetSeatNo`. Client targeting remains exclusively reserved for `nice_hand`.
   - **Priority**:
     1. Fold win (`i_was_bluffing` / `nice_bluff`)
     2. Lost all-in / bad beat (`bad_beat` / `not_this_time`)
@@ -75,7 +77,6 @@ The outgoing WebSocket event remains the authoritative `table_reaction` payload.
   "type": "table_reaction",
   "payload": {
     "seatNo": 2,
-    "targetSeatNo": 4,
     "reactionKey": "bad_beat"
   }
 }
@@ -83,4 +84,4 @@ The outgoing WebSocket event remains the authoritative `table_reaction` payload.
 
 - `seatNo`: Integer, positive seat number of the speaking bot.
 - `reactionKey`: String, matching existing `REACTION_KEYS` (`"bad_beat"` or `"not_this_time"`).
-- `targetSeatNo`: Optional integer, seat number of the recipient (included for `bad_beat` targeting the winning player; omitted for `not_this_time`).
+- `targetSeatNo`: Omitted for `bad_beat` and `not_this_time`.

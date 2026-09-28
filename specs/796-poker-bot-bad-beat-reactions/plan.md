@@ -8,9 +8,9 @@
 
 ## Summary
 
-Implement the remaining backend scope of issue #796 by extending the WebSocket server's settlement reaction classifier (`ws-server/poker/handlers/reaction.mjs` and `ws-server/server.mjs`). The classifier will automatically emit `bad_beat` for heads-up river reversals where a bot lost all-in, and `not_this_time` for other all-in showdown losses.
+Implement the remaining backend scope of issue #796 by extending the WebSocket server's settlement reaction classifier (`ws-server/poker/handlers/reaction.mjs` and `ws-server/server.mjs`). The classifier will automatically emit `bad_beat` for heads-up river reversals where a bot lost all-in, and `not_this_time` for other all-in showdown losses. Both reactions are broadcast without `targetSeatNo`.
 
-All-in evidence is determined strictly from authoritative poker state (`handStartStacksByUserId` and `contributionsByUserId`), failing closed on any ambiguity. The new branch takes precedence over generic congratulations while preserving existing table cooldowns, presentation jitter, frequency controls, and single-evaluation-per-hand lifecycle.
+All-in evidence is determined strictly from authoritative poker state requiring exact equality (`handStartStacksByUserId` and `contributionsByUserId` with `contribution === handStartStack && handStartStack > 0`), failing closed on any discrepancy (including `contribution > handStartStack`). The new branch operates with base probability = 1.0 (`samplePasses(random, 1, reactionSettings)`), taking precedence over generic congratulations while preserving existing table cooldowns, presentation jitter, frequency controls, and single-evaluation-per-hand lifecycle. Helper `buildDetachedReactionContext` remains internal to `server.mjs` and is not exported.
 
 ---
 
@@ -34,7 +34,7 @@ All-in evidence is determined strictly from authoritative poker state (`handStar
 
 ### Principle I: Simplicity and Existing Mechanisms
 - **Check**: Does the solution reuse existing mechanisms without adding unnecessary abstractions?
-- **Result**: **PASS**. Reuses existing `classifySettlementReaction`, `samplePasses`, `buildDetachedReactionContext`, `deriveRiverChangedWinnerUserIds`, and existing reaction keys (`bad_beat`, `not_this_time`). No new scheduler, timer map, or classes.
+- **Result**: **PASS**. Reuses existing `classifySettlementReaction`, `samplePasses`, internal `buildDetachedReactionContext`, `deriveRiverChangedWinnerUserIds`, and existing reaction keys (`bad_beat`, `not_this_time`). No new scheduler, timer map, test-only exports, or classes.
 
 ### Principle II: Authoritative Runtime Boundaries
 - **Check**: Does the WebSocket server maintain authoritative ownership?
@@ -42,7 +42,7 @@ All-in evidence is determined strictly from authoritative poker state (`handStar
 
 ### Principle III: Fail-Closed Safety and Environment Separation
 - **Check**: Do edge cases fail closed without risking funds or state integrity?
-- **Result**: **PASS**. If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, non-integer, or negative, the classifier cleanly aborts without entering the all-in branch. The PR will remain Draft and unmerged.
+- **Result**: **PASS**. If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, non-integer, negative, or show `contribution !== handStartStack`, the classifier cleanly aborts without entering the all-in branch. The PR will remain Draft and unmerged.
 
 ### Principle IV: Platform Compatibility, Logging, and Style
 - **Check**: Is logging clean and code style compliant?
@@ -50,7 +50,7 @@ All-in evidence is determined strictly from authoritative poker state (`handStar
 
 ### Principle V: Fundamental Tests and Concrete Plans
 - **Check**: Are tests strictly deterministic and fundamental, avoiding broad UI/CSS suites?
-- **Result**: **PASS**. Only extends existing backend behavioral suites (`ws-server/poker/handlers/reaction.behavior.test.mjs` and `ws-server/server.behavior.test.mjs`). No speculative UI rendering or CSS test suites added.
+- **Result**: **PASS**. Only extends existing backend behavioral suites (`ws-server/poker/handlers/reaction.behavior.test.mjs` and `ws-server/server.behavior.test.mjs`). No speculative UI rendering or CSS test suites added. Server integration test validates the complete authoritative pipeline without requiring test-only exports.
 
 ### WS Preview Deploy Gate
 - **Check**: Does the plan mandate exact-SHA WS Preview Deploy before merge readiness?
@@ -80,12 +80,12 @@ specs/796-poker-bot-bad-beat-reactions/
 
 ```text
 ws-server/
-├── server.mjs                           # Update buildDetachedReactionContext to preserve accounting maps
+├── server.mjs                           # Update buildDetachedReactionContext to preserve accounting maps (internal)
 ├── poker/
 │   └── handlers/
 │       ├── reaction.mjs                 # Extend classifySettlementReaction with lost all-in & bad beat branch
 │       └── reaction.behavior.test.mjs   # Unit & behavior tests for all-in/bad-beat classification
-└── server.behavior.test.mjs             # Integration test for reaction context preservation
+└── server.behavior.test.mjs             # Integration test for end-to-end pipeline and snapshot isolation
 ```
 
 ---

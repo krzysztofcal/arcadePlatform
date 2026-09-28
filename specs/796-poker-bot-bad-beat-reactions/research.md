@@ -23,7 +23,7 @@
     }), { handId });
   }
   ```
-- Before evaluation, `buildDetachedReactionContext(state)` extracts and freezes the relevant subsets of `state` into an immutable context object.
+- Before evaluation, internal `buildDetachedReactionContext(state)` in `ws-server/server.mjs` extracts and freezes the relevant subsets of `state` into an immutable context object. This helper is **internal** to `server.mjs` and must **not** be exported for tests.
 
 ### Existing Settlement Classifiers (`ws-server/poker/handlers/reaction.mjs`)
 The current settlement classifier executes in a specific waterfall:
@@ -58,7 +58,7 @@ The poker state engine (`ws-server/poker/engine/poker-engine.mjs`, `shared/poker
 2. `contributionsByUserId`: Cumulative chip amount committed by the user across all streets in the hand.
 
 **All-In Validation Invariant**:
-A player $U$ participated as an all-in player if and only if:
+A player $U$ participated as an all-in player if and only if `contribution === startStack`:
 ```javascript
 const startStack = Number(state?.handStartStacksByUserId?.[userId]);
 const contribution = Number(state?.contributionsByUserId?.[userId]);
@@ -66,9 +66,13 @@ const contribution = Number(state?.contributionsByUserId?.[userId]);
 const isAllIn = Number.isInteger(startStack)
   && startStack > 0
   && Number.isInteger(contribution)
-  && contribution >= startStack; // Exactly committed all available starting chips
+  && contribution === startStack;
 ```
-If either map is missing, corrupted, or contains negative/non-integer values, the classifier must **fail closed** by skipping all-in classification.
+**Critical Fail-Closed Rule**:
+- `contribution === startStack`: exact match proves all-in.
+- `contribution < startStack`: player had remaining chips (not all-in).
+- `contribution > startStack`: indicates corrupt or inconsistent accounting data; MUST fail closed and treat player as not all-in.
+- No `>=` comparisons are permitted anywhere in all-in validation.
 
 ---
 
@@ -79,20 +83,23 @@ If either map is missing, corrupted, or contains negative/non-integer values, th
 - In `ws-server/poker/handlers/reaction.mjs`, the helper `deriveRiverChangedWinnerUserIds(state)` already inspects the turn board (cards 1–4) vs final community board (5 cards) and determines which winners only became winners on the river.
 - **Rule**:
   If:
-  1. The bot is an all-in loser (committed 100% of start stack and is not in `showdown.winners`);
+  1. The bot is an all-in loser (`contribution === startStack` and not in `showdown.winners`);
   2. The showdown is strictly **heads-up** (exactly 2 players contested the showdown);
   3. The final winner is in `riverChangedWinnerUserIds`;
-  Then: classify as `bad_beat` targeting the winner (`targetSeatNo: winner.seatNo`).
+  Then: classify as `bad_beat` (broadcast to table, without `targetSeatNo`).
+- **No Client Targeting**:
+  In the Poker V2 browser client, `targetSeatNo` is specially reserved for `nice_hand`. Reactions `bad_beat` and `not_this_time` are table broadcasts; no `targetSeatNo` is emitted.
 
 ### Multiway / Standard All-In Loss (`not_this_time`)
 - In multiway pots (3+ players at showdown), river equity shifts are complex and cannot be unambiguously branded a bad beat without an equity calculator.
-- When an all-in bot loses at showdown without qualifying for the narrow heads-up river reversal, it expresses defeat via `not_this_time`.
+- When an all-in bot loses at showdown without qualifying for the narrow heads-up river reversal, it expresses defeat via `not_this_time` (broadcast to table, without `targetSeatNo`).
 - This reuses the existing `not_this_time` key without creating new protocol entries.
 
 ---
 
-## 4. Classifier Priority Hierarchy
+## 4. Classifier Priority Hierarchy & Base Probability
 
+### Priority Waterfall
 The new branch must be positioned **after** `normalFoldWin` and **before** `luckyWinner`:
 ```text
 1. normalFoldWin (i_was_bluffing / nice_bluff)
@@ -109,10 +116,16 @@ The new branch must be positioned **after** `normalFoldWin` and **before** `luck
 ```
 **Rationale**: When a bot loses all its chips in an all-in confrontation, its emotional state is disappointment or shock. It should not be overridden by a generic `well_played` or `nice_hand` congratulations.
 
+### Base Probability = 1.0
+- Base probability for the lost all-in / bad-beat branch is **1.0** via `samplePasses(random, 1, reactionSettings)`.
+- At default `frequencyPercent = 100`, every qualified all-in loss or bad beat reliably generates a reaction candidate.
+- There are no arbitrary 80% or 75% multipliers applied to this branch.
+
 ---
 
-## 5. Non-Goals & Deferrals
+## 5. Non-Goals & Testing Constraints
 
+- **No Test-Only Exports**: `buildDetachedReactionContext` in `ws-server/server.mjs` remains an internal, non-exported helper. Server behavioral tests verify context preservation and broadcast through the integrated `observeFreshPokerMutation` / `handleSettledState` pipeline.
 - **Personality Archetypes (Cowboy, Professor, Robot, Shark)**: Issue #804 ("Poker: Living NPCs") is the designated owner of persistent NPC identities and custom emote repertoires. This increment treats all poker bots uniformly through standard gameplay reactions.
 - **Client Protocol / Schemas**: No changes to WebSocket message types, client parsing, or database schemas.
 - **Gameplay / Logic Reducers**: No changes to betting rules, turn timers, or rake/accounting logic.

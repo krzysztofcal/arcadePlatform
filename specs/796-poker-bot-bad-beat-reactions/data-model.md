@@ -22,7 +22,7 @@ interface AuthoritativeHandAccounting {
 ```
 
 ### DetachedReactionContext (Server Internal)
-The immutable context created in `ws-server/server.mjs::buildDetachedReactionContext` and supplied to reaction classifiers.
+The immutable context created in `ws-server/server.mjs::buildDetachedReactionContext` and supplied to reaction classifiers. This context is server-internal and not exported.
 
 ```typescript
 interface DetachedReactionContext {
@@ -57,13 +57,13 @@ interface DetachedReactionContext {
 ```
 
 ### SettlementReactionCandidate
-Candidate object returned by `classifySettlementReaction` before cooldown reservation and jitter delay.
+Candidate object returned by `classifySettlementReaction` before cooldown reservation and jitter delay. Note: `targetSeatNo` is never set for `bad_beat` or `not_this_time`.
 
 ```typescript
 interface SettlementReactionCandidate {
   botUserId: string;
   botSeatNo: number;
-  targetSeatNo?: number;
+  targetSeatNo?: number; // Only for nice_bluff / targeted reactions; omitted for bad_beat and not_this_time
   reactionKey: 'bad_beat' | 'not_this_time' | 'i_was_bluffing' | 'nice_bluff' | 'lucky' | 'nice_hand' | 'wow' | 'congrats' | 'well_played';
   handId: string;
   delayMs?: number;
@@ -77,8 +77,8 @@ interface SettlementReactionCandidate {
 | Participant State | Showdown Type | River Reversal? | Selected Key | Target Seat | Base Probability |
 |---|---|---|---|---|---|
 | Fold win (1 winner, all others folded) | Normal folds | N/A | `i_was_bluffing` (winning bot) / `nice_bluff` (losing bot) | Winner seat (for `nice_bluff`) | 75% |
-| **All-in bot loser (`contrib === startStack`)** | **Heads-up (2 players at showdown)** | **Yes (winner in `riverChangedWinnerUserIds`)** | **`bad_beat`** | **Winner seat** | **80%** |
-| **All-in bot loser (`contrib === startStack`)** | **Multiway or non-reversal** | **No / Multiway** | **`not_this_time`** | **None (Broadcast)** | **80%** |
+| **All-in bot loser (`contrib === startStack`)** | **Heads-up (2 players at showdown)** | **Yes (winner in `riverChangedWinnerUserIds`)** | **`bad_beat`** | **None (Broadcast)** | **100% (1.0)** |
+| **All-in bot loser (`contrib === startStack`)** | **Multiway or non-reversal** | **No / Multiway** | **`not_this_time`** | **None (Broadcast)** | **100% (1.0)** |
 | Showdown winner | Any | Yes (close rank or river) | `lucky` | Lucky winner seat | 70% |
 | Showdown winner | Any | No | `nice_hand` (if category >= 4) | Strong winner seat | 90% |
 | Bot winner | Any | No | `wow` (if payout >= 20 BB) | None (Broadcast) | 100% |
@@ -88,14 +88,15 @@ interface SettlementReactionCandidate {
 
 ## 3. Validation & Fail-Closed Invariants
 
-1. **All-In Qualification**:
+1. **All-In Qualification (Exact Equality Only)**:
    ```javascript
    function isPlayerAllIn(userId, handStartStacks, contributions) {
      const start = handStartStacks?.[userId];
      const contrib = contributions?.[userId];
      if (!Number.isInteger(start) || start <= 0) return false;
      if (!Number.isInteger(contrib) || contrib < 0) return false;
-     return contrib >= start;
+     // Exact equality required: contrib > start is corrupt data and fails closed
+     return contrib === start;
    }
    ```
 2. **Heads-Up Showdown Qualification**:

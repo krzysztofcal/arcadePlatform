@@ -68,13 +68,14 @@ Open the Netlify Deploy Preview URL connected to `ws-preview.kcswh.pl` and navig
 3. **Verify**:
    - The losing all-in bot displays a speech bubble with the `not_this_time` text ("Nie tym razem!").
    - The bot avatar executes the `shake` motion.
+   - The reaction is a table broadcast without a target pointer.
 
 ### Scenario 3: River Reversal Bad Beat (`bad_beat`)
 1. Observe a heads-up all-in confrontation where the turn leader is overtaken on the river.
 2. **Verify**:
    - The losing all-in bot emits `bad_beat` (speech bubble: 😢 "Bad beat").
    - The bot avatar executes the `shake` motion.
-   - The speech bubble points towards the winner's seat.
+   - The reaction is a table broadcast without a target pointer (matching normal broadcast reactions).
 
 ### Scenario 4: Admin Frequency & Disable Controls
 1. In Admin → Ops, toggle bot reactions to disabled.
