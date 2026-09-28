@@ -1441,12 +1441,64 @@ test("internal poker access mutation route returns 503 when the WS database is u
     const response = await fetch(url, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ userId, override: "FORCE_RESTRICTED", expectedRevision: 7 })
+      body: JSON.stringify({
+        userId,
+        override: "FORCE_RESTRICTED",
+        expectedRevision: 7,
+        actorId: "00000000-0000-4000-8000-000000000001"
+      })
     });
     assert.equal(response.status, 503);
     assert.deepEqual(await response.json(), {
       ok: false,
       reason: "database_unavailable",
+      failClosed: false,
+      phase: "mutate",
+      userId
+    });
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("internal poker access mutation route rejects missing or invalid actorId with 400", async () => {
+  const token = "internal-access-invalid-actor-token";
+  const { port, child } = await createServer({
+    env: {
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview",
+      SUPABASE_DB_URL: "",
+      WS_POKER_LOG_LEVEL: "INFO"
+    }
+  });
+  const url = `http://127.0.0.1:${port}/internal/admin/poker-access-refresh`;
+  const userId = "00000000-0000-4000-8000-000000000010";
+  try {
+    await waitForListening(child, 5000);
+    const missing = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ userId, override: "FORCE_RESTRICTED", expectedRevision: 7 })
+    });
+    assert.equal(missing.status, 400);
+    assert.deepEqual(await missing.json(), {
+      ok: false,
+      reason: "invalid_actor_id",
+      failClosed: false,
+      phase: "mutate",
+      userId
+    });
+
+    const invalid = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ userId, override: "FORCE_RESTRICTED", expectedRevision: 7, actorId: "not-a-uuid" })
+    });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await invalid.json(), {
+      ok: false,
+      reason: "invalid_actor_id",
       failClosed: false,
       phase: "mutate",
       userId
