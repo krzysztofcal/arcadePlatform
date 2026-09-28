@@ -141,13 +141,27 @@ T036 is **PASS (owner-accepted §25 single-owner deterministic WS mutation)**. T
 
 ### Phase 11 / §26 verification evidence (T047–T052)
 
-Resolves the two remaining P1 blockers:
-1. **Settled rollover retry**: Unknown access or bot funding snapshot triggers `scheduleSettledRolloverRetry()` without advancing state or bypassing funding. Authoritative no-funding retains `allowBotFunding: false` without endless retry.
-2. **Continuous bot table controlled inactivity**: Disabled or unprovisioned tier 100 sets controlled inactive state (`desiredCount = 0`, zero table creation, zero seed, graceful retirement of open tables below minimum occupancy) without rollback/sweep churn.
+Resolves the two remaining P1 blockers and final preflight/order corrections:
+1. **Settled rollover retry**: Unknown access or bot funding snapshot triggers `scheduleSettledRolloverRetry()` without advancing state or bypassing funding. Authoritative no-funding retains `allowBotFunding: false` without endless retry. In `decideSettledBotFunding()`, `effectiveRestricted === true` takes authoritative precedence before snapshot freshness validation, returning `{ known: true, allowed: false, systemKey: null, reason: "restricted" }` even when the funding snapshot is missing or expired.
+2. **Continuous bot table controlled inactivity**: Disabled or unprovisioned tier 100 sets controlled inactive state (`desiredCount = 0`, zero table creation, zero seed, graceful retirement of open tables below minimum occupancy) without rollback/sweep churn. In `createManagedTable()`, schema and tier policy/provisioning validation run as preflight checks before any table mutation (`createPokerTableWithState`).
 
 #### Test Execution Evidence
-- `node --test ws-server/poker/runtime/poker-access-propagation.behavior.test.mjs`: 15/15 pass, including `human and two busted bots retry on unknown funding, then fund replacements and exit SETTLED without duplicates`.
-- `node --test ws-server/poker/persistence/continuous-bot-table-repository.behavior.test.mjs`: 15/15 pass, including `reconcile treats an enabled profile with disabled tier 100 as controlled inactive without table creation churn`.
+- `node --test ws-server/poker/runtime/poker-access-propagation.behavior.test.mjs`: 16/16 pass, including `human and two busted bots retry on unknown funding, then fund replacements and exit SETTLED without duplicates` and `RESTRICTED with missing or expired funding snapshot yields authoritative no-funding without retry`.
+- `node --test ws-server/poker/persistence/continuous-bot-table-repository.behavior.test.mjs`: 16/16 pass, including `reconcile treats an enabled profile with disabled tier 100 as controlled inactive without table creation churn` and `reconcile treats an enabled profile with unprovisioned tier 100 as controlled inactive with zero table INSERT`.
 - `node --test ws-server/server.behavior.test.mjs`: all settled rollover and timeout suites pass with standalone/guest guards.
+- Local CI guards: `npm run ci:guards` PASS, `npm run check:csp-inline` PASS, `git diff --check` PASS (0 errors).
+- GitHub PR CI: All 17 required checks passed on commit `b58651f54c16c573eb33e5b29fcab8b80e1c748a`.
 
-Production, VPS refill timer activation, and PR merge remain strictly NOT AUTHORIZED / NOT RUN. Final owner pre-merge Stage acceptance (T037) follows exact-SHA deployment and verification.
+#### WS Preview Deployment Evidence
+- Exact runtime SHA `b58651f54c16c573eb33e5b29fcab8b80e1c748a` deployed via [WS Preview Deploy run 36479748272](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36479748272).
+- Verification confirmed: `RELEASE_SHA == DEPLOY_REF == b58651f54c16c573eb33e5b29fcab8b80e1c748a`.
+- Local and public health gates: PASS (`https://ws-preview.kcswh.pl/healthz` returns `ok`).
+
+#### Stage Read-Only Invariant Verification
+- `poker_bot_tier_policy`: Tier 100 is `enabled: false` (revision 1), Tier 500 is `enabled: true` (revision 3).
+- `chips_accounts`: `POKER_BOT_BANKROLL_100` = 0, `POKER_BOT_SLOW_BANKROLL_100` = 0, `POKER_BOT_SLOW_BANKROLL_500` = 0, `POKER_BOT_BANKROLL` = 986970.
+- `chips_transactions`: Zero new transactions since 2026-09-28 19:19:38 UTC.
+- `poker_tables`: Zero new tables or supervisor churn. Controlled inactivity holds.
+
+Tasks T051 and T052 are marked complete. Status is **READY FOR OWNER T037 RETEST**.
+Production, VPS refill timer activation, and PR merge remain strictly NOT AUTHORIZED / NOT RUN. Final owner pre-merge Stage acceptance (T037) remains the pending gate.
