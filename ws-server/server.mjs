@@ -952,11 +952,7 @@ returning user_id, poker_auto_class, poker_access_override, poker_access_revisio
       const state = socket?.__connState;
       if (!state || state.session?.identityMode === "guest") continue;
       state.pokerAccess = access;
-      try {
-        sendPokerAccessFrame(socket, state, access, { reason: "admin_mutation" });
-      } catch (frameErr) {
-        klogSafe("ws_poker_access_frame_error", { error: frameErr?.message });
-      }
+      sendPokerAccessFrame(socket, state, access, { reason: "admin_mutation" });
     }
 
     tableManager.setPokerAccessMutationFailClosed?.(normalizedUserId, false);
