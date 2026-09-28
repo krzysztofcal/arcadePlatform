@@ -1,30 +1,35 @@
-# Implementation Plan: Poker: Bot Bad-Beat & Lost All-In Reactions (Backend #796)
+# Implementation Plan: Poker: Bot Bad-Beat & Lost All-In Reactions (Backend + Poker V2 Catalog #796)
 
-**Branch**: `796-poker-bot-bad-beat-reactions` | **Date**: 2026-09-27 | **Spec**: [spec.md](spec.md)
+**Branch**: `796-poker-bot-bad-beat-reactions` | **Date**: 2026-09-27 (Revised 2026-09-28) | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/796-poker-bot-bad-beat-reactions/spec.md`
+**Input**: Feature specification from `specs/796-poker-bot-bad-beat-reactions/spec.md` based on live GitHub issue #796.
 
 ---
 
 ## Summary
 
-Implement the remaining backend scope of issue #796 by extending the WebSocket server's settlement reaction classifier (`ws-server/poker/handlers/reaction.mjs` and `ws-server/server.mjs`). The classifier will automatically emit `bad_beat` for heads-up river reversals where a bot lost all-in, and `not_this_time` for other all-in showdown losses. Both reactions are broadcast without `targetSeatNo`. Heads-up showdown is determined authoritatively by exactly 2 evaluated player hands in `showdown.handsByUserId` (with a single winner), properly accounting for players who left or sat out before showdown.
+Implement the remaining backend & Poker V2 scope of issue #796 by extending the WebSocket server's settlement reaction classifier (`ws-server/poker/handlers/reaction.mjs`, `ws-server/server.mjs`) and the client reaction catalog (`poker/poker-v2.js`).
 
-All-in evidence is determined strictly from authoritative poker state requiring exact equality (`handStartStacksByUserId` and `contributionsByUserId` with `contribution === handStartStack && handStartStack > 0`), absence from `showdown.winners`, and zero payout (`Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`). Uncalled bet returns or any positive payouts strictly disqualify the bot from lost all-in classification. Any accounting discrepancy (including `contribution > handStartStack`) or missing accounting maps fails closed on the all-in branch only, allowing the classifier to cleanly continue down the existing generic settlement waterfall without altering generic reaction behavior. Helper `buildDetachedReactionContext` remains internal to `server.mjs` and is not exported. Server behavioral tests confirm neither accounting map is exposed to clients.
+1. The classifier automatically emits `bad_beat` for narrow heads-up river reversals where a bot lost all-in, and samples uniformly from a new dedicated 5-reaction bot-only pool (`all_in_oh_no`, `all_in_that_hurts`, `all_in_no_way`, `all_in_come_on`, `all_in_censored`) for all other qualifying lost all-in showdowns.
+2. The existing `not_this_time` reaction key remains exclusively reserved for the bot's fold reaction (`FOLD -> not_this_time`) and is NEVER emitted for lost all-in.
+3. In `poker/poker-v2.js`, `REACTION_CATALOG` is extended with the 5 new bot-only keys (`humanSelectable: false`), and each maps to the existing `shake` avatar motion. No new CSS, animation types, or timers are introduced.
+4. All-in evidence is determined strictly from uncoerced integer accounting fields (`handStartStacksByUserId` and `contributionsByUserId` with `contribution === handStartStack && handStartStack > 0`), absence from `showdown.winners`, and zero payout (`Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`). Uncalled bet returns refunded from side pots strictly disqualify the bot from lost all-in classification.
+5. Fail-closed fallthrough: any accounting discrepancy or missing maps skips the all-in branch only, allowing the classifier to cleanly continue down the existing generic settlement waterfall without altering generic reaction behavior.
+6. The new branch operates with base probability = 1.0 (`samplePasses(random, 1, reactionSettings)`). Both `bad_beat` and all-in loss reactions are untargeted table broadcasts (no `targetSeatNo`).
+7. Helper `buildDetachedReactionContext` remains internal to `server.mjs` and is not exported. Server behavioral tests confirm neither accounting map is exposed to clients.
 
 ---
 
 ## Technical Context
 
-**Language/Version**: Node.js (ES Modules, modern LTS)
+**Language/Version**: Node.js (ES Modules for server, JSP-compatible plain JS for client)
 **Primary Dependencies**: None (native Node.js, existing internal poker domain helpers)
 **Storage**: None (ephemeral in-memory reaction evaluation; no database migrations or persistence)
 **Testing**: Native Node.js test runner (`node --test`)
-**Target Platform**: Linux server (Ubuntu systemd `ws-server-preview.service` / `ws-server.service`)
-**Project Type**: Real-time WebSocket game server
+**Target Platform**: Linux server (Ubuntu systemd `ws-server-preview.service`) + browser client
 **Performance Goals**: Sub-millisecond synchronous classification per settled hand
-**Constraints**: Zero layout shift, zero gameplay delays, zero accounting mutations, fail-closed safety
-**Scale/Scope**: ~30–50 LOC diff across 2 runtime files (`ws-server/server.mjs`, `ws-server/poker/handlers/reaction.mjs`) and 2 test files
+**Constraints**: Zero layout shift, zero gameplay delays, zero accounting mutations, fail-closed safety, JSP compatibility
+**Scale/Scope**: ~50–70 LOC diff across 3 runtime files (`ws-server/server.mjs`, `ws-server/poker/handlers/reaction.mjs`, `poker/poker-v2.js`) and 3 test files
 
 ---
 
@@ -34,23 +39,23 @@ All-in evidence is determined strictly from authoritative poker state requiring 
 
 ### Principle I: Simplicity and Existing Mechanisms
 - **Check**: Does the solution reuse existing mechanisms without adding unnecessary abstractions?
-- **Result**: **PASS**. Reuses existing `classifySettlementReaction`, `samplePasses`, internal `buildDetachedReactionContext`, `deriveRiverChangedWinnerUserIds`, and existing reaction keys (`bad_beat`, `not_this_time`). No new scheduler, timer map, test-only exports, or classes.
+- **Result**: **PASS**. Reuses existing `classifySettlementReaction`, `samplePasses`, internal `buildDetachedReactionContext`, `deriveRiverChangedWinnerUserIds`, existing `shake` avatar motion, and existing `table_reaction` protocol. No new scheduler, timer map, test-only exports, or classes.
 
 ### Principle II: Authoritative Runtime Boundaries
 - **Check**: Does the WebSocket server maintain authoritative ownership?
-- **Result**: **PASS**. Real-time settlement classification runs entirely within `ws-server`. No reliance on client reports, Netlify functions, or database queries.
+- **Result**: **PASS**. Real-time settlement classification runs entirely within `ws-server`. The client's role is strictly presentation via `REACTION_CATALOG` and `lookupBotAvatarReactionMotion`.
 
 ### Principle III: Fail-Closed Safety and Environment Separation
 - **Check**: Do edge cases fail closed without risking funds or state integrity?
-- **Result**: **PASS**. If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, non-integer, negative, or show `contribution !== handStartStack`, the all-in branch is cleanly skipped and the classifier proceeds to generic settlement branches without crashing or returning null. If a bot receives an uncalled bet return (`payout > 0`), it is disqualified from lost all-in. The PR will remain Draft and unmerged.
+- **Result**: **PASS**. If accounting maps are missing, non-integer, negative, or show `contribution !== handStartStack`, the all-in branch is cleanly skipped and the classifier proceeds to generic settlement branches without crashing or returning null. If a bot receives an uncalled bet return (`payout > 0`), it is disqualified from lost all-in. The PR will remain Draft and unmerged.
 
 ### Principle IV: Platform Compatibility, Logging, and Style
 - **Check**: Is logging clean and code style compliant?
-- **Result**: **PASS**. Zero `console.log` added; existing `klog` used where applicable. Zero new client scripts or CSP changes required.
+- **Result**: **PASS**. Zero `console.log` added; existing `klog` used where applicable. Browser JS in `poker/poker-v2.js` remains JSP-compatible without module imports. Zero CSP changes required.
 
 ### Principle V: Fundamental Tests and Concrete Plans
 - **Check**: Are tests strictly deterministic and fundamental, avoiding broad UI/CSS suites?
-- **Result**: **PASS**. Only extends existing backend behavioral suites (`ws-server/poker/handlers/reaction.behavior.test.mjs` and `ws-server/server.behavior.test.mjs`). No speculative UI rendering or CSS test suites added. Server integration test validates the complete authoritative pipeline without requiring test-only exports.
+- **Result**: **PASS**. Only extends existing backend behavioral suites (`ws-server/poker/handlers/reaction.behavior.test.mjs`, `ws-server/server.behavior.test.mjs`) and existing live client test (`tests/poker-v2-live.behavior.test.mjs`). No speculative UI rendering or CSS test suites added.
 
 ### WS Preview Deploy Gate
 - **Check**: Does the plan mandate exact-SHA WS Preview Deploy before merge readiness?
@@ -79,17 +84,23 @@ specs/796-poker-bot-bad-beat-reactions/
 ### Source Code Layout (affected files)
 
 ```text
+poker/
+└── poker-v2.js                          # Extend REACTION_CATALOG with 5 bot-only keys and map to 'shake' motion
 ws-server/
 ├── server.mjs                           # Update buildDetachedReactionContext to preserve accounting maps (internal)
 ├── poker/
 │   └── handlers/
-│       ├── reaction.mjs                 # Extend classifySettlementReaction with lost all-in & bad beat branch
-│       └── reaction.behavior.test.mjs   # Unit & behavior tests for all-in/bad-beat classification
+│       ├── reaction.mjs                 # Allowlist 5 keys; extend classifier with bad-beat & all-in pool
+│       └── reaction.behavior.test.mjs   # Unit & behavior tests for all-in pool & bad-beat classification
 └── server.behavior.test.mjs             # Integration test for end-to-end pipeline and dual accounting snapshot isolation
+tests/
+└── poker-v2-live.behavior.test.mjs      # Test client catalog extension, humanSelectable: false, and motion mapping
 ```
 
 ---
 
-## Complexity Tracking
+## Breaking Impact & Compatibility
 
-> No violations of the Arcade Platform Constitution detected. No additional frameworks, external dependencies, or persistence mechanisms introduced.
+- **Semantic Catalog Expansion**: The reaction-key catalog expands by five bot-only keys (`all_in_oh_no`, `all_in_that_hurts`, `all_in_no_way`, `all_in_come_on`, `all_in_censored`).
+- **Protocol Stability**: The WebSocket message format (`type: "table_reaction"`, payload `{ seatNo, reactionKey }`) is completely unchanged. No new payload fields or message types are added.
+- **Human UI Isolation**: All 5 new keys have `humanSelectable: false` and are excluded from `HUMAN_REACTION_KEYS`. Human reaction options and table controls are unaffected.

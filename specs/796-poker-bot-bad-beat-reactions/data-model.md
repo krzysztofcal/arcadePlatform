@@ -1,7 +1,9 @@
-# Data Model: Poker: Bot Bad-Beat & Lost All-In Reactions (Backend #796)
+# Data Model: Poker: Bot Bad-Beat & Lost All-In Reactions (Backend + Poker V2 Catalog #796)
 
 **Feature Branch**: `796-poker-bot-bad-beat-reactions`
-**Date**: 2026-09-27
+
+**Created**: 2026-09-27 | **Revised**: 2026-09-28
+
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 
 ---
@@ -35,7 +37,7 @@ interface DetachedReactionContext {
   sitOutByUserId: Record<string, true>;
   riverChangedWinnerUserIds: ReadonlyArray<string>;
   
-  // Authoritative accounting maps
+  // Authoritative accounting maps (server-internal only)
   handStartStacksByUserId: Record<string, number>;
   contributionsByUserId: Record<string, number>;
 
@@ -56,15 +58,44 @@ interface DetachedReactionContext {
 }
 ```
 
+### AllInLossReactionPool
+The ordered pool of five bot-only reaction keys emitted upon an ordinary all-in loss:
+
+```typescript
+type AllInLossReactionKey =
+  | 'all_in_oh_no'       // 😞 "Oh no..."
+  | 'all_in_that_hurts'  // 😣 "That hurts."
+  | 'all_in_no_way'      // 😠 "No way..."
+  | 'all_in_come_on'     // 😤 "Come on!"
+  | 'all_in_censored';   // 🤬 "******!"
+
+const ALL_IN_LOSS_REACTION_KEYS: ReadonlyArray<AllInLossReactionKey> = Object.freeze([
+  'all_in_oh_no',
+  'all_in_that_hurts',
+  'all_in_no_way',
+  'all_in_come_on',
+  'all_in_censored'
+]);
+```
+
 ### SettlementReactionCandidate
-Candidate object returned by `classifySettlementReaction` before cooldown reservation and jitter delay. Note: `targetSeatNo` is never set for `bad_beat` or `not_this_time`.
+Candidate object returned by `classifySettlementReaction` before cooldown reservation and jitter delay. Note: `targetSeatNo` is never set for `bad_beat` or any all-in loss reaction. `not_this_time` is excluded from settlement (used exclusively for folds).
 
 ```typescript
 interface SettlementReactionCandidate {
   botUserId: string;
   botSeatNo: number;
-  targetSeatNo?: number; // Only for nice_bluff / targeted reactions; omitted for bad_beat and not_this_time
-  reactionKey: 'bad_beat' | 'not_this_time' | 'i_was_bluffing' | 'nice_bluff' | 'lucky' | 'nice_hand' | 'wow' | 'congrats' | 'well_played';
+  targetSeatNo?: number; // Only for nice_bluff / targeted reactions; omitted for bad_beat and all-in loss pool
+  reactionKey:
+    | 'bad_beat'
+    | AllInLossReactionKey
+    | 'i_was_bluffing'
+    | 'nice_bluff'
+    | 'lucky'
+    | 'nice_hand'
+    | 'wow'
+    | 'congrats'
+    | 'well_played';
   handId: string;
   delayMs?: number;
 }
@@ -77,8 +108,8 @@ interface SettlementReactionCandidate {
 | Participant State | Showdown Type | River Reversal? | Selected Key | Target Seat | Base Probability |
 |---|---|---|---|---|---|
 | Fold win (1 winner, all others folded) | Normal folds | N/A | `i_was_bluffing` (winning bot) / `nice_bluff` (losing bot) | Winner seat (for `nice_bluff`) | 75% |
-| **All-in bot loser (`contrib === start`, `payout <= 0`, not in `winners`)** | **Heads-up (2 players at showdown)** | **Yes (winner in `riverChangedWinnerUserIds`)** | **`bad_beat`** | **None (Broadcast)** | **100% (1.0)** |
-| **All-in bot loser (`contrib === start`, `payout <= 0`, not in `winners`)** | **Multiway or non-reversal** | **No / Multiway** | **`not_this_time`** | **None (Broadcast)** | **100% (1.0)** |
+| **All-in bot loser (`contrib === start`, `payout <= 0`, not in `winners`)** | **Heads-up (2 hands in `handsByUserId`)** | **Yes (winner in `riverChangedWinnerUserIds`)** | **`bad_beat`** | **None (Broadcast)** | **100% (1.0)** |
+| **All-in bot loser (`contrib === start`, `payout <= 0`, not in `winners`)** | **Multiway (3+ hands) or non-reversal** | **No / Multiway** | **Uniform sample from `ALL_IN_LOSS_REACTION_KEYS` (5 keys)** | **None (Broadcast)** | **100% (1.0)** |
 | Showdown winner | Any | Yes (close rank or river) | `lucky` | Lucky winner seat | 70% |
 | Showdown winner | Any | No | `nice_hand` (if category >= 4) | Strong winner seat | 90% |
 | Bot winner | Any | No | `wow` (if payout >= 20 BB) | None (Broadcast) | 100% |
@@ -88,17 +119,19 @@ interface SettlementReactionCandidate {
 
 ## 3. Validation & Fail-Closed Invariants
 
-1. **All-In Qualification (Exact Equality Only)**:
+1. **All-In Qualification (Exact Uncoerced Integer Equality)**:
    ```javascript
    function isPlayerAllIn(userId, handStartStacks, contributions) {
      const start = handStartStacks?.[userId];
      const contrib = contributions?.[userId];
-     if (!Number.isInteger(start) || start <= 0) return false;
-     if (!Number.isInteger(contrib) || contrib < 0) return false;
+     // Strictly validate raw types: no coercion from strings or other types
+     if (typeof start !== 'number' || !Number.isInteger(start) || start <= 0) return false;
+     if (typeof contrib !== 'number' || !Number.isInteger(contrib) || contrib < 0) return false;
      // Exact equality required: contrib > start is corrupt data and fails closed
      return contrib === start;
    }
    ```
+
 2. **Lost All-In Candidate Qualification (Excludes Winners & Positive Payouts)**:
    ```javascript
    function isLostAllInCandidate(botUserId, state) {
@@ -113,7 +146,8 @@ interface SettlementReactionCandidate {
      return isPlayerAllIn(botUserId, state?.handStartStacksByUserId, state?.contributionsByUserId);
    }
    ```
-3. **Heads-Up Showdown Qualification (Exactly 2 Actual Showdown Participants)**:
+
+3. **Heads-Up Showdown Qualification (Authoritative `showdown.handsByUserId`)**:
    ```javascript
    function isHeadsUpShowdown(showdown) {
      const comparedHands = showdown?.handsByUserId;
@@ -124,6 +158,16 @@ interface SettlementReactionCandidate {
      return participantCount === 2 && winnerCount === 1;
    }
    ```
-   *Note*: Heads-up is defined by exactly 2 players whose hands were actively evaluated in `showdown.handsByUserId`. This avoids fragile reconstructions from `handSeats` and properly accounts for players who folded, left the table (`leftTableByUserId`), or sat out (`sitOutByUserId`, `pendingAutoSitOutByUserId`).
-4. **Fail-Closed & Fallthrough Guarantee**:
-   If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, or corrupt (`contribution > handStartStack`), `isPlayerAllIn` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.
+
+4. **Uniform All-In Loss Pool Sampling**:
+   ```javascript
+   function sampleAllInLossReactionKey(random = Math.random) {
+     const r = typeof random === 'function' ? random() : Math.random();
+     const clamped = Math.min(Math.max(Number(r) || 0, 0), 0.999999);
+     const index = Math.floor(clamped * ALL_IN_LOSS_REACTION_KEYS.length);
+     return ALL_IN_LOSS_REACTION_KEYS[index] || ALL_IN_LOSS_REACTION_KEYS[0];
+   }
+   ```
+
+5. **Fail-Closed & Fallthrough Guarantee**:
+   If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, non-integer, or corrupt (`contribution > handStartStack`), `isPlayerAllIn` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.
