@@ -813,3 +813,32 @@ test("admin-user-ledger uses the same runtime ledger-version resolver contract",
     "unavailable",
   );
 });
+
+test("Admin can proceed after committed pending recovery when caller already has the current revision", async () => {
+  let invalidations = 0;
+  let writes = 0;
+  let committed = false;
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" }, requireAdminUser: async () => ({ userId: "admin" }),
+    loadPokerAccess: async () => ({ revision: 9, override: "FORCE_RESTRICTED" }),
+    updatePokerAccess: async ({ expectedRevision, override }) => {
+      assert.equal(expectedRevision, 9);
+      assert.equal(override, "AUTO");
+      writes += 1;
+      committed = true;
+      return { access: { revision: 10, override: "AUTO" } };
+    },
+    notifyWsPokerAccessMutation: async ({ phase }) => {
+      if (phase === "invalidate") {
+        invalidations += 1;
+        return invalidations === 1 ? { ok: false, reason: "poker_access_mutation_pending" }
+          : { ok: true, invalidated: true, failClosed: true };
+      }
+      return committed ? { ...exactAccessAck, revision: 10, override: "AUTO", effectiveClass: "NORMAL" } : exactAccessAck;
+    }
+  });
+  const response = await handler(accessPatch("AUTO", 9));
+  assert.equal(response.statusCode, 200);
+  assert.equal(writes, 1);
+  assert.equal(invalidations, 2);
+});

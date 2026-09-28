@@ -124,7 +124,7 @@ function createAdminUserPokerAccessHandler(deps = {}) {
         || Number(expectedRevision) >= Number.MAX_SAFE_INTEGER) {
         throw badRequest("invalid_expected_revision", "invalid_expected_revision");
       }
-      const preInvalidation = await notifyAccessMutation({
+      let preInvalidation = await notifyAccessMutation({
         userId,
         override: requestedOverride,
         expectedRevision,
@@ -141,17 +141,21 @@ function createAdminUserPokerAccessHandler(deps = {}) {
         } catch {
           recovery = null;
         }
-        if (isConfirmedAccess(recovery, recovery)) {
-          const access = await loadAccess(userId);
-          return {
-            statusCode: 409, headers: cors,
-            body: JSON.stringify({
-              error: access.revision !== Number(expectedRevision) ? "stale_revision" : "poker_access_mutation_pending",
-              access
-            })
-          };
+        if (!isConfirmedAccess(recovery, recovery)) {
+          return { statusCode: 409, headers: cors, body: JSON.stringify({ error: "poker_access_mutation_pending" }) };
         }
-        return { statusCode: 409, headers: cors, body: JSON.stringify({ error: "poker_access_mutation_pending" }) };
+        const access = await loadAccess(userId);
+        if (access.revision !== Number(expectedRevision)) {
+          return { statusCode: 409, headers: cors, body: JSON.stringify({ error: "stale_revision", access }) };
+        }
+        // The caller already holds this revision. Reserve a fresh barrier;
+        // never silently substitute a newer revision on the caller's behalf.
+        preInvalidation = await notifyAccessMutation({
+          userId, override: requestedOverride, expectedRevision, phase: "invalidate", env, klog
+        });
+        if (preInvalidation?.reason === "poker_access_mutation_pending") {
+          return { statusCode: 409, headers: cors, body: JSON.stringify({ error: "poker_access_mutation_pending" }) };
+        }
       }
       if (preInvalidation?.skipped === true
         || preInvalidation?.ok !== true
