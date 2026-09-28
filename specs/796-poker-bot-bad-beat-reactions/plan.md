@@ -12,10 +12,10 @@ Implement the remaining backend & Poker V2 scope of issue #796 by extending the 
 
 1. The classifier automatically emits `bad_beat` for narrow heads-up river reversals where a bot lost all-in, and samples uniformly from a new dedicated 5-reaction bot-only pool (`all_in_oh_no`, `all_in_that_hurts`, `all_in_no_way`, `all_in_come_on`, `all_in_censored`) for all other qualifying lost all-in showdowns.
 2. The existing `not_this_time` reaction key remains exclusively reserved for the bot's fold reaction (`FOLD -> not_this_time`) and is NEVER emitted for lost all-in.
-3. In `poker/poker-v2.js`, `REACTION_CATALOG` is extended with the 5 new bot-only keys (`humanSelectable: false`), and each maps to the existing `shake` avatar motion. No new CSS, animation types, or timers are introduced.
+3. In `poker/poker-v2.js`, client `REACTION_CATALOG` is extended with the 5 new bot-only keys (`humanSelectable: false`), and each maps to the existing `shake` avatar motion in existing helper `resolveBotAvatarReactionMotion`. On the server (`ws-server/poker/handlers/reaction.mjs`), the keys are added to `REACTION_KEYS` (automatically populating `REACTION_KEY_SET`) without adding to `HUMAN_REACTION_KEYS`. No new CSS, animation types, or timers are introduced.
 4. All-in evidence is determined strictly from uncoerced integer accounting fields (`handStartStacksByUserId` and `contributionsByUserId` with `contribution === handStartStack && handStartStack > 0`), absence from `showdown.winners`, and zero payout (`Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`). Uncalled bet returns refunded from side pots strictly disqualify the bot from lost all-in classification.
 5. Fail-closed fallthrough: any accounting discrepancy or missing maps skips the all-in branch only, allowing the classifier to cleanly continue down the existing generic settlement waterfall without altering generic reaction behavior.
-6. The new branch operates with base probability = 1.0 (`samplePasses(random, 1, reactionSettings)`). Both `bad_beat` and all-in loss reactions are untargeted table broadcasts (no `targetSeatNo`).
+6. The new branch executes up to two sequential draws using injected `random`: Draw 1 evaluates frequency gate `samplePasses(random, 1, reactionSettings)` (base probability = 1.0); Draw 2 (for ordinary all-in losses) samples uniformly across the 5 keys via `sampleAllInLossReactionKey(random)`. Both `bad_beat` and all-in loss reactions are untargeted table broadcasts (no `targetSeatNo`).
 7. Helper `buildDetachedReactionContext` remains internal to `server.mjs` and is not exported. Server behavioral tests confirm neither accounting map is exposed to clients.
 
 ---
@@ -43,7 +43,7 @@ Implement the remaining backend & Poker V2 scope of issue #796 by extending the 
 
 ### Principle II: Authoritative Runtime Boundaries
 - **Check**: Does the WebSocket server maintain authoritative ownership?
-- **Result**: **PASS**. Real-time settlement classification runs entirely within `ws-server`. The client's role is strictly presentation via `REACTION_CATALOG` and `lookupBotAvatarReactionMotion`.
+- **Result**: **PASS**. Real-time settlement classification runs entirely within `ws-server`. The client's role is strictly presentation via `REACTION_CATALOG` and `resolveBotAvatarReactionMotion`.
 
 ### Principle III: Fail-Closed Safety and Environment Separation
 - **Check**: Do edge cases fail closed without risking funds or state integrity?
@@ -65,7 +65,7 @@ Implement the remaining backend & Poker V2 scope of issue #796 by extending the 
 
 ## Project Structure
 
-### Documentation (this feature)
+### Documentation & Protocol (this feature)
 
 ```text
 specs/796-poker-bot-bad-beat-reactions/
@@ -79,18 +79,21 @@ specs/796-poker-bot-bad-beat-reactions/
 ├── contracts/
 │   └── settlement-reaction-contract.md # API and protocol contracts
 └── tasks.md             # Actionable task list ($speckit-tasks output)
+
+docs/
+└── ws-poker-protocol.md # Minimal protocol update documenting the 5 new bot-only reaction keys
 ```
 
 ### Source Code Layout (affected files)
 
 ```text
 poker/
-└── poker-v2.js                          # Extend REACTION_CATALOG with 5 bot-only keys and map to 'shake' motion
+└── poker-v2.js                          # Extend REACTION_CATALOG with 5 bot-only keys and map to 'shake' in resolveBotAvatarReactionMotion
 ws-server/
 ├── server.mjs                           # Update buildDetachedReactionContext to preserve accounting maps (internal)
 ├── poker/
 │   └── handlers/
-│       ├── reaction.mjs                 # Allowlist 5 keys; extend classifier with bad-beat & all-in pool
+│       ├── reaction.mjs                 # Extend REACTION_KEYS (auto-populating REACTION_KEY_SET); bad-beat & all-in pool
 │       └── reaction.behavior.test.mjs   # Unit & behavior tests for all-in pool & bad-beat classification
 └── server.behavior.test.mjs             # Integration test for end-to-end pipeline and dual accounting snapshot isolation
 tests/
@@ -101,6 +104,6 @@ tests/
 
 ## Breaking Impact & Compatibility
 
-- **Semantic Catalog Expansion**: The reaction-key catalog expands by five bot-only keys (`all_in_oh_no`, `all_in_that_hurts`, `all_in_no_way`, `all_in_come_on`, `all_in_censored`).
-- **Protocol Stability**: The WebSocket message format (`type: "table_reaction"`, payload `{ seatNo, reactionKey }`) is completely unchanged. No new payload fields or message types are added.
+- **Semantic Vocabulary Expansion**: The semantic reactionKey vocabulary expands by five bot-only keys (`all_in_oh_no`, `all_in_that_hurts`, `all_in_no_way`, `all_in_come_on`, `all_in_censored`). `docs/ws-poker-protocol.md` is updated accordingly.
+- **Protocol Stability**: Zero WebSocket message-type / payload-shape changes (`table_reaction` payload shape `{ seatNo, reactionKey }` remains completely identical).
 - **Human UI Isolation**: All 5 new keys have `humanSelectable: false` and are excluded from `HUMAN_REACTION_KEYS`. Human reaction options and table controls are unaffected.

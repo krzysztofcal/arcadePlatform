@@ -61,7 +61,7 @@ Open the Netlify Deploy Preview URL connected to `ws-preview.kcswh.pl` and navig
 1. Join an active table with bots.
 2. Observe a hand where a bot folds.
 3. **Verify**:
-   - The folding bot can emit `not_this_time` ("Nie tym razem!") with avatar `shake`.
+   - The folding bot can emit `not_this_time` ("😌 Not this time.") with avatar `shake`.
    - Normal table gameplay proceeds without errors or console warnings.
 
 ### Scenario 2: Ordinary All-In Showdown Loss (Pool of 5 Reactions)

@@ -31,7 +31,7 @@ The existing `not_this_time` reaction key is strictly reserved for the bot's fol
 **Acceptance Scenarios**:
 1. **Given** an active hand where bot B has `handStartStacksByUserId[B] === 100` and `contributionsByUserId[B] === 100`, **When** the hand settles with player P as the sole winner on a non-reversal runout, **Then** bot B emits one of the five new all-in loss reaction keys (broadcast to table, no `targetSeatNo`), and never `not_this_time`.
 2. **Given** a multiway showdown where bot B loses all-in against two opponents, **When** the hand settles, **Then** bot B is classified with a key from the 5-reaction loss pool, and never `bad_beat` or `not_this_time`.
-3. **Given** injected `random` values spanning the uniform range `[0, 1)`, **When** settlement evaluates ordinary lost all-in, **Then** the selected key deterministically matches the index boundary:
+3. **Given** injected `random` values spanning the uniform range `[0, 1)`, **When** settlement evaluates ordinary lost all-in, **Then** following a successful frequency gate draw (`samplePasses(random, 1, reactionSettings)`), the second draw (`sampleAllInLossReactionKey(random)`) deterministically matches the index boundary:
    - `[0.0, 0.2)` → `all_in_oh_no`
    - `[0.2, 0.4)` → `all_in_that_hurts`
    - `[0.4, 0.6)` → `all_in_no_way`
@@ -103,19 +103,19 @@ The new lost all-in / bad-beat branch must integrate cleanly into the existing s
 
 ### User Story 5 - Client Catalog & Motion Consistency (Poker V2) (Priority: P3)
 
-The browser client (`poker/poker-v2.js`) defines the authoritative reaction catalog `REACTION_CATALOG` and avatar motion lookup.
-- The catalog is extended with the five new bot-only reaction entries:
+The browser client (`poker/poker-v2.js`) defines the reaction catalog `REACTION_CATALOG` and avatar motion lookup helper `resolveBotAvatarReactionMotion`.
+- The client catalog is extended with the five new bot-only reaction entries:
   - `all_in_oh_no`: emoji `😞`, label `Oh no...`, `humanSelectable: false`
   - `all_in_that_hurts`: emoji `😣`, label `That hurts.`, `humanSelectable: false`
   - `all_in_no_way`: emoji `😠`, label `No way...`, `humanSelectable: false`
   - `all_in_come_on`: emoji `😤`, label `Come on!`, `humanSelectable: false`
   - `all_in_censored`: emoji `🤬`, label `******!`, `humanSelectable: false`
-- Each of the five new keys maps to the existing avatar motion `shake`.
+- Each of the five new keys maps to the existing avatar motion `shake` in the existing `resolveBotAvatarReactionMotion` helper (which is extended without creating aliases or secondary helpers).
 - None of the five new keys appear in the human reaction selector/bar (`humanSelectable: false`).
 - Zero new CSS animation keyframes, layout changes, or timer maps are introduced.
 
 **Acceptance Scenarios**:
-1. **Given** an incoming `table_reaction` WebSocket message containing one of the 5 new keys, **When** Poker V2 handles the reaction, **Then** it renders a speech bubble with the exact emoji and label and triggers the `shake` avatar motion on the bot's avatar node.
+1. **Given** an incoming `table_reaction` WebSocket message containing one of the 5 new keys, **When** Poker V2 handles the reaction, **Then** it renders a speech bubble with the exact emoji and label and triggers the `shake` avatar motion on the bot's avatar node via `resolveBotAvatarReactionMotion`.
 2. **Given** a human player opening the reaction menu, **When** options are rendered, **Then** none of the 5 bot-only keys are visible or selectable.
 
 ---
@@ -143,8 +143,8 @@ The browser client (`poker/poker-v2.js`) defines the authoritative reaction cata
 - **FR-007**: System MUST fail closed on the lost all-in / bad-beat branch (skipping the branch and proceeding to standard generic settlement branches) if accounting maps are missing, undefined, inconsistent, non-integer, negative, or show `contribution !== handStartStack`. The classifier MUST NOT return null on accounting discrepancy alone.
 - **FR-008**: System MUST evaluate the lost all-in / bad-beat branch using base probability = 1.0 via `samplePasses(random, 1, reactionSettings)`, ensuring every qualified event produces a candidate at 100% frequency setting.
 - **FR-009**: System MUST enforce the existing 4,000 ms per-sender cooldown and apply 300–1,200 ms presentation jitter to scheduled reaction candidates, emitting at most one settlement reaction candidate per completed hand.
-- **FR-010**: System MUST include the five new keys in the server/bot reaction key allowlist, but MUST NOT include them in `HUMAN_REACTION_KEYS`.
-- **FR-011**: Client (`poker/poker-v2.js`) MUST define the five new keys in `REACTION_CATALOG` with exact emoji/labels and `humanSelectable: false`, and map them to the existing `shake` avatar motion.
+- **FR-010**: System MUST include the five new keys in the server `REACTION_KEYS` array in `ws-server/poker/handlers/reaction.mjs` (automatically accepted by `REACTION_KEY_SET`), but MUST NOT include them in `HUMAN_REACTION_KEYS`.
+- **FR-011**: Client (`poker/poker-v2.js`) MUST define the five new keys in `REACTION_CATALOG` with exact emoji/labels and `humanSelectable: false`, and map them to the existing `shake` avatar motion in `resolveBotAvatarReactionMotion`.
 - **FR-012**: System MUST preserve server-internal isolation: neither `handStartStacksByUserId` nor `contributionsByUserId` may be exposed to clients over WebSocket or public room snapshots.
 - **FR-013**: System MUST NOT modify database schema, Supabase migrations, gameplay state reducers, pot settlement accounting, payouts, or bot decision strategy.
 
@@ -166,14 +166,14 @@ The browser client (`poker/poker-v2.js`) defines the authoritative reaction cata
 - **SC-003**: 0 non-all-in hands or hands with uncalled bet returns trigger all-in loss or bad beat reactions.
 - **SC-004**: 0 human reaction menus display the 5 bot-only keys (`humanSelectable: false` verified).
 - **SC-005**: 100% of the 5 new reaction keys render their exact emoji and label and trigger the `shake` avatar motion in Poker V2 without new CSS.
-- **SC-006**: 0 database migrations, 0 new WebSocket message types, 0 new payload fields, and 0 exposure of accounting maps to clients.
+- **SC-006**: 0 database migrations, 0 WebSocket message-type / payload-shape changes (semantic reactionKey vocabulary expands by five bot-only keys; `docs/ws-poker-protocol.md` updated), and 0 exposure of accounting maps to clients.
 - **SC-007**: Automated unit & behavior tests pass deterministically with 100% success.
 
 ---
 
 ## Assumptions & Boundaries
 
-- **Breaking Impact**: Semantic reaction-key catalog expands by five bot-only keys. The WebSocket message shape (`table_reaction` with payload `{ seatNo, reactionKey }`) and human reaction UI remain completely unchanged.
+- **Breaking Impact**: Zero WebSocket message-type / payload-shape changes (`table_reaction` payload shape `{ seatNo, reactionKey }` remains identical); semantic `reactionKey` vocabulary expands by five bot-only keys (`all_in_oh_no`, `all_in_that_hurts`, `all_in_no_way`, `all_in_come_on`, `all_in_censored`). `docs/ws-poker-protocol.md` documents these 5 bot-only keys and notes they are not accepted from human `reaction_send`.
 - **Personality Deferral**: Distinct personality profiles (Cowboy, Professor, Robot, Shark) belong strictly to issue #804 ("Poker: Living NPCs") and are not implemented in this increment. In #796, pool selection is strictly uniform.
 - **Human Isolation**: Automated reactions are exclusively generated for bots (`isBot === true`); real players never have automated reaction events.
 - **Deployment Requirement**: Because changes affect `ws-server/**`, merge readiness requires an exact-SHA manual `WS Preview Deploy` and runtime verification.

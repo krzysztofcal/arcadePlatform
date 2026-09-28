@@ -26,11 +26,19 @@
   ```
 - Before evaluation, internal `buildDetachedReactionContext(state)` in `ws-server/server.mjs` extracts and freezes the relevant subsets of `state` into an immutable context object. This helper is **internal** to `server.mjs` and must **not** be exported for tests.
 
+### Server Reaction Keys Boundary (`ws-server/poker/handlers/reaction.mjs`)
+- The server does NOT have a `REACTION_CATALOG`.
+- The server maintains:
+  - `REACTION_KEYS`: frozen array of all valid reaction keys on the server;
+  - `REACTION_KEY_SET = new Set(REACTION_KEYS)`: derived set used for lookup and validation;
+  - `HUMAN_REACTION_KEYS`: frozen array of reaction keys permitted for human players.
+- Adding the 5 new bot-only keys to server `REACTION_KEYS` automatically includes them in `REACTION_KEY_SET` through the existing mechanism, while leaving `HUMAN_REACTION_KEYS` untouched.
+
 ### Client Reaction Presentation Boundary (`poker/poker-v2.js`)
 - The browser client defines `REACTION_CATALOG` mapping keys to emojis, labels, and `humanSelectable` flags.
-- Client helper `lookupBotAvatarReactionMotion(reactionKey)` maps keys to avatar motion classes (e.g. `shake`, `nod`).
+- Client helper `resolveBotAvatarReactionMotion(reactionKey)` maps keys to avatar motion classes (e.g. `shake`, `nod`). The implementation will exclusively extend this existing function; no second helper or alias is created.
 - PR #1020 established the V1 avatar motion lifecycle (`renderSeats()`, `clearBotAvatarReactions()`, `triggerBotAvatarReaction()`).
-- Expanding the reaction catalog with 5 new bot-only keys requires updating `poker/poker-v2.js` to define their emojis/labels and map them to `shake`.
+- Expanding client catalog with 5 new bot-only keys requires updating `poker/poker-v2.js` `REACTION_CATALOG` to define their emojis/labels with `humanSelectable: false`, and updating `resolveBotAvatarReactionMotion` to map them to `shake`.
 
 ---
 
@@ -38,7 +46,7 @@
 
 ### Why `not_this_time` is Excluded from Lost All-In
 - In the existing codebase, `not_this_time` is the bot's reaction upon folding (`FOLD -> not_this_time`).
-- Using `not_this_time` for an all-in showdown loss created confusing semantic repetition ("Nie tym razem!" on fold vs. on all-in elimination).
+- Using `not_this_time` for an all-in showdown loss created confusing semantic repetition ("😌 Not this time." on fold vs. on all-in elimination).
 - Live GitHub issue #796 explicitly mandates: **`not_this_time` remains exclusively the bot's reaction on FOLD. It must not be used after a lost all-in.**
 
 ### The Five New Bot-Only Keys
@@ -52,30 +60,38 @@ Issue #796 defines an ordered pool of five distinct reactions for ordinary all-i
 | `all_in_come_on` | 😤 | "Come on!" | `shake` | `false` |
 | `all_in_censored` | 🤬 | "******!" | `shake` | `false` |
 
-### Uniform Selection Algorithm
-- In #796, all bots select uniformly from this pool using the injected `random` function:
-  ```javascript
-  const ALL_IN_LOSS_REACTION_KEYS = Object.freeze([
-    'all_in_oh_no',
-    'all_in_that_hurts',
-    'all_in_no_way',
-    'all_in_come_on',
-    'all_in_censored'
-  ]);
+### Two Sequential Random Draws Contract
+The new branch reuses the existing injected `random` without introducing any new RNG abstractions, executing up to two sequential draws:
 
-  function sampleAllInLossReactionKey(random = Math.random) {
-    const r = typeof random === 'function' ? random() : Math.random();
-    const clamped = Math.min(Math.max(Number(r) || 0, 0), 0.999999);
-    const index = Math.floor(clamped * ALL_IN_LOSS_REACTION_KEYS.length);
-    return ALL_IN_LOSS_REACTION_KEYS[index] || ALL_IN_LOSS_REACTION_KEYS[0];
-  }
-  ```
-- **Boundary Mapping for Tests**:
+1. **Draw 1 (Frequency Gate)**:
+   `samplePasses(random, 1, reactionSettings)` consumes one draw from `random`. At default `frequencyPercent = 100`, any sample `< 1.0` passes.
+2. **Draw 2 (Selection Draw)**:
+   After passing the frequency gate, if the candidate qualifies for ordinary lost all-in (or multiway river reversal), the classifier calls `sampleAllInLossReactionKey(random)`, which consumes a second draw from `random` for uniform selection across `ALL_IN_LOSS_REACTION_KEYS`:
+   ```javascript
+   const ALL_IN_LOSS_REACTION_KEYS = Object.freeze([
+     'all_in_oh_no',
+     'all_in_that_hurts',
+     'all_in_no_way',
+     'all_in_come_on',
+     'all_in_censored'
+   ]);
+
+   function sampleAllInLossReactionKey(random = Math.random) {
+     const r = typeof random === 'function' ? random() : Math.random();
+     const clamped = Math.min(Math.max(Number(r) || 0, 0), 0.999999);
+     const index = Math.floor(clamped * ALL_IN_LOSS_REACTION_KEYS.length);
+     return ALL_IN_LOSS_REACTION_KEYS[index] || ALL_IN_LOSS_REACTION_KEYS[0];
+   }
+   ```
+- **Boundary Mapping for Tests (Selection Draw)**:
+  These uniform boundaries apply strictly to the **second draw (selection draw) after a successful frequency gate**:
   - `[0.0, 0.2)` → `all_in_oh_no`
   - `[0.2, 0.4)` → `all_in_that_hurts`
   - `[0.4, 0.6)` → `all_in_no_way`
   - `[0.6, 0.8)` → `all_in_come_on`
   - `[0.8, 1.0)` → `all_in_censored`
+- For `bad_beat` (heads-up river reversal), only the first draw (`samplePasses`) is consumed because the reaction key is constant (`bad_beat`).
+- Deterministic behavior tests should supply an appropriate sequence of injected random values (e.g. `[0.1, 0.05]`) or directly test `sampleAllInLossReactionKey`.
 - Personality-specific weighting (Cowboy, Professor, Robot, Shark) is strictly deferred to #804.
 
 ---
@@ -161,5 +177,5 @@ If all conditions hold, the classifier emits existing `bad_beat` (😢 "Bad beat
 
 - **No Personality Archetypes**: Cowboy, Professor, Robot, Shark personalities belong strictly to issue #804 ("Poker: Living NPCs").
 - **No Real Profanity**: `all_in_censored` uses literal `******!`.
-- **Breaking Impact**: Semantic reaction-key catalog expands by five bot-only keys; message shape (`table_reaction`) and human reaction UI remain completely unchanged.
+- **Breaking Impact**: Zero WebSocket message-type / payload-shape changes (`table_reaction` payload shape `{ seatNo, reactionKey }` remains identical); semantic `reactionKey` vocabulary expands by five bot-only keys (`all_in_oh_no`, `all_in_that_hurts`, `all_in_no_way`, `all_in_come_on`, `all_in_censored`). `docs/ws-poker-protocol.md` documents these 5 bot-only keys and notes they are not accepted from human `reaction_send`.
 - **Dual Accounting Maps Isolation**: `handStartStacksByUserId` and `contributionsByUserId` are server-internal classifier inputs only and are never exposed in public room snapshots or WebSocket messages.

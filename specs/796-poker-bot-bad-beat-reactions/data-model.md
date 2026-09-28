@@ -159,7 +159,10 @@ interface SettlementReactionCandidate {
    }
    ```
 
-4. **Uniform All-In Loss Pool Sampling**:
+4. **Two Sequential Random Draws & Uniform All-In Loss Pool Sampling**:
+   The classifier performs up to two sequential draws using the injected `random` function:
+   - **Draw 1 (Frequency Gate)**: `samplePasses(random, 1, reactionSettings)` consumes one draw from `random`.
+   - **Draw 2 (Selection Draw)**: If frequency passes and candidate is an ordinary all-in loser (or multiway reversal), `sampleAllInLossReactionKey(random)` consumes the next draw from `random` for uniform selection across `ALL_IN_LOSS_REACTION_KEYS`:
    ```javascript
    function sampleAllInLossReactionKey(random = Math.random) {
      const r = typeof random === 'function' ? random() : Math.random();
@@ -168,6 +171,13 @@ interface SettlementReactionCandidate {
      return ALL_IN_LOSS_REACTION_KEYS[index] || ALL_IN_LOSS_REACTION_KEYS[0];
    }
    ```
+   **Boundary Mapping for Tests (Selection Draw)**:
+   The selection boundaries apply strictly to the second draw after the frequency gate succeeds:
+   - `[0.0, 0.2)` → `all_in_oh_no`
+   - `[0.2, 0.4)` → `all_in_that_hurts`
+   - `[0.4, 0.6)` → `all_in_no_way`
+   - `[0.6, 0.8)` → `all_in_come_on`
+   - `[0.8, 1.0)` → `all_in_censored`
 
 5. **Fail-Closed & Fallthrough Guarantee**:
    If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, non-integer, or corrupt (`contribution > handStartStack`), `isPlayerAllIn` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.
