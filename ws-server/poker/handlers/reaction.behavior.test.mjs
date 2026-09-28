@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  ALL_IN_LOSS_REACTION_KEYS,
   HUMAN_REACTION_KEYS,
   REACTION_KEYS,
   classifyAmbientReaction,
@@ -17,6 +16,14 @@ import {
   isCompleteReactionSettlement,
   tryCreateBotReaction
 } from './reaction.mjs';
+
+const EXPECTED_ALL_IN_LOSS_REACTION_KEYS = Object.freeze([
+  'all_in_oh_no',
+  'all_in_that_hurts',
+  'all_in_no_way',
+  'all_in_come_on',
+  'all_in_censored'
+]);
 
 test('human reactions use the closed allowlist and atomically reserve the sender cooldown', () => {
   const tableId = 'reaction-human-contract';
@@ -60,13 +67,14 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'ambient_lets_play',
     'ambient_thinking'
   ]);
-  assert.deepEqual(ALL_IN_LOSS_REACTION_KEYS, [
+  assert.deepEqual(EXPECTED_ALL_IN_LOSS_REACTION_KEYS, [
     'all_in_oh_no',
     'all_in_that_hurts',
     'all_in_no_way',
     'all_in_come_on',
     'all_in_censored'
   ]);
+  assert.equal(EXPECTED_ALL_IN_LOSS_REACTION_KEYS.every((key) => REACTION_KEYS.includes(key)), true);
   assert.deepEqual(HUMAN_REACTION_KEYS, [
     'hello',
     'nice_hand',
@@ -84,7 +92,7 @@ test('human reactions use the closed allowlist and atomically reserve the sender
   ]);
   assert.equal(HUMAN_REACTION_KEYS.includes('lucky'), false);
   assert.equal(HUMAN_REACTION_KEYS.includes('not_this_time'), false);
-  for (const key of ALL_IN_LOSS_REACTION_KEYS) {
+  for (const key of EXPECTED_ALL_IN_LOSS_REACTION_KEYS) {
     assert.equal(HUMAN_REACTION_KEYS.includes(key), false, `${key} must not be in HUMAN_REACTION_KEYS`);
   }
   assert.deepEqual(evaluateHumanReactionCommand({
@@ -871,7 +879,7 @@ test('authoritative evidence and fail-closed safety for all-in branch', () => {
     random: () => 0
   });
   assert.notEqual(foldedResult?.reactionKey, 'bad_beat', 'folded bot must not trigger bad_beat');
-  assert.equal(ALL_IN_LOSS_REACTION_KEYS.includes(foldedResult?.reactionKey), false, 'folded bot must not trigger all-in loss');
+  assert.equal(EXPECTED_ALL_IN_LOSS_REACTION_KEYS.includes(foldedResult?.reactionKey), false, 'folded bot must not trigger all-in loss');
 });
 
 test('classifier priority and seat ordering for lost all-in reactions', () => {

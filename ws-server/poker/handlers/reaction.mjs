@@ -66,7 +66,7 @@ const BOT_REACTION_KEYS_BY_ACTION = Object.freeze({
   FOLD: Object.freeze(["not_this_time"])
 });
 const BOT_REACTION_PROBABILITY_BY_ACTION = Object.freeze({ BET: 0.6, ALL_IN: 0.6, FOLD: 0.7 });
-export const ALL_IN_LOSS_REACTION_KEYS = Object.freeze([
+const ALL_IN_LOSS_REACTION_KEYS = Object.freeze([
   "all_in_oh_no",
   "all_in_that_hurts",
   "all_in_no_way",
