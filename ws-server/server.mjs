@@ -801,9 +801,10 @@ function sendPokerAccessFrame(ws, connState, access, { requestId = null, reason 
 }
 
 async function refreshConnectionPokerAccess(ws, connState, { requestId = null, force = false, reason = "cache_refresh" } = {}) {
-  if (!connState?.session?.userId || connState.session.identityMode === "guest") return null;
-  if (activePokerAccessMutations.has(connState.session.userId)
-    || tableManager.isPokerAccessMutationFailClosed?.(connState.session.userId) === true) {
+  const userId = connState?.session?.userId;
+  if (!userId || connState.session.identityMode === "guest") return null;
+  if (activePokerAccessMutations.has(userId)
+    || tableManager.isPokerAccessMutationFailClosed?.(userId) === true) {
     return null;
   }
   const cached = connState.pokerAccess;
@@ -812,21 +813,26 @@ async function refreshConnectionPokerAccess(ws, connState, { requestId = null, f
     return cached;
   }
   if (!hasSupabaseDbUrl) return null;
+  const capturedGeneration = pokerAccessMutationGenerationByUser.get(userId) || 0;
   try {
     const beginSqlWs = await loadBeginSqlWs();
     const access = await beginSqlWs(async (tx) => {
       const [snapshot, policy] = [
-        await readPokerAccessSnapshot(tx, { userId: connState.session.userId }),
+        await readPokerAccessSnapshot(tx, { userId }),
         await readPokerAccessPolicy(tx)
       ];
       if (!snapshot || !policy) return null;
       return { ...snapshot, policy, slowThresholdCh: policy.slowThresholdCh, policyRevision: policy.revision };
     });
     if (!access) return null;
+    if (activePokerAccessMutations.has(userId)
+      || (pokerAccessMutationGenerationByUser.get(userId) || 0) !== capturedGeneration) {
+      return null;
+    }
     connState.pokerAccess = access;
     if (typeof tableManager.cachePokerAccessForUser === "function") {
       tableManager.cachePokerAccessForUser(
-        connState.session.userId,
+        userId,
         access,
         access.policy,
         Date.now()

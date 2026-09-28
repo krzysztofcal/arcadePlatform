@@ -81,7 +81,14 @@ async function accessRuntimeFixture(options = {}) {
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../../server.mjs', import.meta.url), 'utf8');
   const propagation = await import('./poker-access-propagation.mjs');
-  const { ACCESS_OVERRIDES, hasPokerPoolSchema, normalizeAccessOverride, normalizeAccessSnapshot } = await import('../../../shared/poker-domain/bot-access.mjs');
+  const {
+    ACCESS_OVERRIDES,
+    hasPokerPoolSchema,
+    isFreshAccessSnapshot,
+    isFreshPolicySnapshot,
+    normalizeAccessOverride,
+    normalizeAccessSnapshot
+  } = await import('../../../shared/poker-domain/bot-access.mjs');
   const userId = '00000000-0000-4000-8000-000000000031';
   const defaultActorId = '00000000-0000-4000-8000-000000000001';
   const manager = createTableManager({ maxSeats: 4 });
@@ -112,6 +119,8 @@ async function accessRuntimeFixture(options = {}) {
     hasSupabaseDbUrl: true,
     ACCESS_OVERRIDES,
     hasPokerPoolSchema,
+    isFreshAccessSnapshot,
+    isFreshPolicySnapshot,
     normalizeAccessOverride,
     normalizeAccessSnapshot,
     isUuid,
@@ -146,11 +155,18 @@ async function accessRuntimeFixture(options = {}) {
       });
     },
     readPokerAccessPolicy: async () => ({ revision: 1, slowThresholdCh: 1000000000 }),
-    readPokerAccessSnapshots: async (_tx, { userIds }) => {
-      if (typeof options.onReadSnapshots === 'function') {
-        await options.onReadSnapshots({ userIds });
+    readPokerAccessSnapshot: async (_tx, { userId: targetUserId }) => {
+      const snapshot = normalizeAccessSnapshot({ ...userRow });
+      if (typeof options.onReadSnapshot === 'function') {
+        await options.onReadSnapshot({ userId: targetUserId, snapshot });
       }
-      const snapshot = normalizeAccessSnapshot(userRow);
+      return snapshot;
+    },
+    readPokerAccessSnapshots: async (_tx, { userIds }) => {
+      const snapshot = normalizeAccessSnapshot({ ...userRow });
+      if (typeof options.onReadSnapshots === 'function') {
+        await options.onReadSnapshots({ userIds, snapshot });
+      }
       return new Map(userIds.map(id => [id, snapshot]));
     },
     readSettledBotFundingSnapshot: async () => null,
@@ -159,11 +175,12 @@ async function accessRuntimeFixture(options = {}) {
     sendPokerAccessFrame: typeof options.onSendFrame === 'function' ? options.onSendFrame : () => {},
     klogSafe: () => {}
   };
-  const code = source.slice(source.indexOf('async function mutatePokerAccessForUser('), source.indexOf('function broadcastPokerAccessTransition('))
+  const code = source.slice(source.indexOf('async function refreshConnectionPokerAccess('), source.indexOf('function broadcastPokerAccessTransition('))
     + source.slice(source.indexOf('let settledBotFundingSnapshot ='), source.indexOf('function resolvePositiveInt('));
-  const runtime = new Function(...Object.keys(deps), code + '\nreturn { mutatePokerAccessForUser, refreshActivePokerAccess };')(...Object.values(deps));
+  const runtime = new Function(...Object.keys(deps), code + '\nreturn { refreshConnectionPokerAccess, mutatePokerAccessForUser, refreshActivePokerAccess };')(...Object.values(deps));
   return {
     ...runtime,
+    refreshConnectionPokerAccess: runtime.refreshConnectionPokerAccess,
     mutatePokerAccessForUser: (args = {}) => runtime.mutatePokerAccessForUser({
       actorId: 'actorId' in args ? args.actorId : defaultActorId,
       ...args
@@ -390,10 +407,12 @@ test('stale periodic refresh cannot overwrite newer mutation revision', async ()
     pokerAccess: null
   };
   const mockSocket = { __connState: connState };
+  let heldStaleSnapshot = null;
 
   const f = await accessRuntimeFixture({
     connectionsForUser: () => [mockSocket],
-    onReadSnapshots: async () => {
+    onReadSnapshots: async ({ snapshot }) => {
+      heldStaleSnapshot = snapshot;
       refreshReadStarted();
       await readHookPromise;
     }
@@ -411,6 +430,10 @@ test('stale periodic refresh cannot overwrite newer mutation revision', async ()
   // Start periodic refresh which reads rev 8
   const refreshPromise = f.refreshActivePokerAccess();
   await refreshStartedPromise;
+
+  // Verify that the periodic refresh captured the stale rev 8 snapshot before mutation
+  assert.equal(heldStaleSnapshot?.revision, 8);
+  assert.equal(heldStaleSnapshot?.override, 'AUTO');
 
   // While refresh is paused waiting for DB snapshots read hook, an Admin mutation runs and commits rev 9
   const mutationResult = await f.mutatePokerAccessForUser({
@@ -437,6 +460,87 @@ test('stale periodic refresh cannot overwrite newer mutation revision', async ()
   // Socket state must still have rev 9
   assert.equal(connState.pokerAccess?.revision, 9);
   assert.equal(connState.pokerAccess?.override, 'FORCE_RESTRICTED');
+});
+
+test('stale connection refresh cannot overwrite newer mutation revision or emit stale frame', async () => {
+  let finishReadHook = null;
+  const readHookPromise = new Promise((resolve) => { finishReadHook = resolve; });
+  let refreshReadStarted = null;
+  const refreshStartedPromise = new Promise((resolve) => { refreshReadStarted = resolve; });
+
+  const connState = {
+    sessionId: 'sess_conn_refresh_race',
+    session: { userId: '00000000-0000-4000-8000-000000000031', identityMode: 'authenticated' },
+    pokerAccess: null
+  };
+  const mockSocket = { __connState: connState };
+
+  const sentFrames = [];
+  let heldStaleSnapshot = null;
+
+  const f = await accessRuntimeFixture({
+    connectionsForUser: () => [mockSocket],
+    onSendFrame: (ws, state, access, opts) => {
+      sentFrames.push({ access, opts });
+    },
+    onReadSnapshot: async ({ snapshot }) => {
+      heldStaleSnapshot = snapshot;
+      refreshReadStarted();
+      await readHookPromise;
+    }
+  });
+
+  const cachedEvents = [];
+  const origCache = f.manager.cachePokerAccessForUser.bind(f.manager);
+  f.manager.cachePokerAccessForUser = (userId, access, policy, nowMs) => {
+    cachedEvents.push({ userId, revision: access.revision, override: access.override });
+    return origCache(userId, access, policy, nowMs);
+  };
+
+  // Start connection refresh which reads rev 8
+  const refreshPromise = f.refreshConnectionPokerAccess(mockSocket, connState, { force: true, reason: 'force_refresh' });
+  await refreshStartedPromise;
+
+  // Verify that the connection refresh captured the stale rev 8 snapshot before mutation
+  assert.equal(heldStaleSnapshot?.revision, 8);
+  assert.equal(heldStaleSnapshot?.override, 'AUTO');
+
+  // While connection refresh is paused inside DB read, an Admin mutation runs and commits rev 9
+  const mutationResult = await f.mutatePokerAccessForUser({
+    userId: f.userId,
+    override: 'FORCE_RESTRICTED',
+    expectedRevision: 8
+  });
+  assert.equal(mutationResult.ok, true);
+  assert.equal(mutationResult.revision, 9);
+  assert.equal(mutationResult.override, 'FORCE_RESTRICTED');
+  assert.equal(connState.pokerAccess?.revision, 9);
+  assert.equal(connState.pokerAccess?.override, 'FORCE_RESTRICTED');
+
+  // Exactly 1 frame sent so far: from admin mutation
+  assert.equal(sentFrames.length, 1);
+  assert.equal(sentFrames[0].access.revision, 9);
+  assert.equal(sentFrames[0].access.override, 'FORCE_RESTRICTED');
+  assert.equal(sentFrames[0].opts?.reason, 'admin_mutation');
+
+  // Now let the stale connection refresh complete
+  finishReadHook();
+  const refreshResult = await refreshPromise;
+
+  // Stale connection refresh returned null because generation changed
+  assert.equal(refreshResult, null);
+
+  // Table cache must still have rev 9, not rev 8
+  assert.equal(cachedEvents.length, 1);
+  assert.equal(cachedEvents[0].revision, 9);
+  assert.equal(cachedEvents[0].override, 'FORCE_RESTRICTED');
+
+  // Socket state must still have rev 9
+  assert.equal(connState.pokerAccess?.revision, 9);
+  assert.equal(connState.pokerAccess?.override, 'FORCE_RESTRICTED');
+
+  // Stale refresh must NOT have emitted any old frame (sentFrames stays length 1)
+  assert.equal(sentFrames.length, 1);
 });
 
 test('socket frame send throw does not fail mutation, returns ok: true, rev N+1, releases fail-closed', async () => {
