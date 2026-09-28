@@ -606,3 +606,283 @@ test('missing or invalid actorId returns 400 invalid_actor_id without setting fa
   assert.equal(f.activeMutations.has(f.userId), false);
   assert.equal(f.getDbUpdates(), 0);
 });
+
+async function settledRolloverRuntimeFixture(options = {}) {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../../server.mjs', import.meta.url), 'utf8');
+  const { decideSettledBotFunding, resolveSettledBotFundingSystemKey } = await import('./settled-bot-funding.mjs');
+  const manager = createTableManager({ maxSeats: 6 });
+  const retries = [];
+  const initialFundingSnapshot = options.initialFundingSnapshot !== undefined ? options.initialFundingSnapshot : null;
+  const persistedFundings = [];
+  const stats = { persistedCount: 0 };
+
+  const deps = {
+    tableManager: manager,
+    initialFundingSnapshot,
+    retries,
+    persistedFundings,
+    stats,
+    FAST_SETTLED_ROLLOVER_RETRY_DELAYS_MS: [50, 100],
+    SLOW_SETTLED_ROLLOVER_RETRY_MS: 1000,
+    settledRolloverTimerByTableId: new Map(),
+    clearSettledRolloverTimer: () => {},
+    klogVerbose: () => {},
+    klogSafe: () => {},
+    enqueueTableCommand: () => {},
+    pokerLogRuntimeControl: { mayBuildDebugPayload: () => false },
+    isGuestTableId: () => false,
+    hasSupabaseDbUrl: true,
+    loadDeferredLeaveFinalizer: async () => async () => ({ ok: true, changed: false }),
+    syncCleanupRuntimeState: async () => ({ ok: true }),
+    applyInactiveCleanupAndBroadcast: async () => ({ ok: true, changed: false }),
+    handleContinuousBotRotationAtSettled: async () => ({ handled: false }),
+    continuousBotTableRepository: { currentProfile: () => null },
+    legacyBotFundingSystemKey: "TREASURY",
+    decideSettledBotFunding,
+    resolveSettledBotFundingSystemKey,
+    settledRolloverGenerationKey: (tableId, pokerState = manager.persistedPokerState(tableId)) => {
+      if (!pokerState || pokerState.phase !== "SETTLED") return null;
+      const version = manager.persistedStateVersion(tableId);
+      const handId = pokerState.handId || "unknown";
+      return `${tableId}:${Number.isInteger(version) ? version : "unknown"}:${handId}`;
+    },
+    scheduleSettledRolloverRetry: (input) => {
+      retries.push(input);
+    },
+    persistMutatedState: async (mutation) => {
+      stats.persistedCount += 1;
+      if (mutation.replacementFundings?.length > 0) {
+        persistedFundings.push(...mutation.replacementFundings);
+      }
+      const nextVersion = mutation.expectedVersion + 1;
+      return {
+        ok: true,
+        tableId: mutation.tableId,
+        expectedVersion: mutation.expectedVersion,
+        newVersion: nextVersion,
+        replacementFundingCommitted: Boolean(mutation.replacementFundings?.length),
+        fundedReplacements: (mutation.replacementFundings || []).map((funding, index) => ({
+          seatNo: funding.seatNo,
+          fundingDelta: funding.fundingDelta,
+          idempotencyKey: `poker:bot-replacement-buyin:v1:${mutation.tableId}:${nextVersion}:${funding.seatNo}`,
+          transactionId: `tx-replacement-${index}`,
+          payloadHash: `hash-replacement-${index}`
+        })),
+        humanStackProjectionCommitted: Boolean(mutation.humanStackUpdates?.length),
+        projectedHumanStacks: (mutation.humanStackUpdates || []).map(({ userId, seatNo, stack }) => ({ userId, seatNo, stack }))
+      };
+    },
+    restoreTableFromPersisted: async () => ({ ok: true }),
+    broadcastStateSnapshots: () => {},
+    scheduleBotStep: () => {},
+    broadcastPokerAccessTransition: () => {}
+  };
+
+  const code = source.slice(
+    source.indexOf('async function runSettledRolloverCommand('),
+    source.indexOf('function maybeScheduleSettledRollover(')
+  );
+
+  const runtime = new Function(
+    ...Object.keys(deps),
+    `let settledBotFundingSnapshot = initialFundingSnapshot;
+${code}
+return {
+  runSettledRolloverCommand,
+  setFundingSnapshot: (s) => { settledBotFundingSnapshot = s; },
+  getFundingSnapshot: () => settledBotFundingSnapshot,
+  getRetries: () => retries,
+  getPersistedFundings: () => persistedFundings,
+  getPersistedCount: () => stats.persistedCount,
+  tableManager,
+  settledRolloverGenerationKey
+};`
+  )(...Object.values(deps));
+
+  return runtime;
+}
+
+test("human and two busted bots retry on unknown funding, then fund replacements and exit SETTLED without duplicates", async () => {
+  const runtime = await settledRolloverRuntimeFixture({ initialFundingSnapshot: null });
+  const tableId = "table_settled_retry_test";
+  const humanUserId = "00000000-0000-4000-8000-000000000031";
+  const bot1Id = "00000000-0000-4000-8000-0000000000b1";
+  const bot2Id = "00000000-0000-4000-8000-0000000000b2";
+
+  const restored = runtime.tableManager.restoreTableFromPersisted(tableId, {
+    tableMeta: {
+      maxPlayers: 6,
+      buyIn: 500,
+      lifecycleKind: "STANDARD",
+      isSlowOnly: false,
+      stakes: { sb: 5, bb: 10 }
+    },
+    coreState: {
+      roomId: tableId,
+      version: 1,
+      maxSeats: 6,
+      members: [
+        { userId: humanUserId, seat: 1 },
+        { userId: bot1Id, seat: 2 },
+        { userId: bot2Id, seat: 3 }
+      ],
+      seats: { [humanUserId]: 1, [bot1Id]: 2, [bot2Id]: 3 },
+      publicStacks: { [humanUserId]: 1500, [bot1Id]: 0, [bot2Id]: 0 },
+      seatDetailsByUserId: {
+        [humanUserId]: { isBot: false, botProfile: null, leaveAfterHand: false },
+        [bot1Id]: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false },
+        [bot2Id]: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: tableId,
+        handId: "hand_settled_retry",
+        phase: "SETTLED",
+        dealerSeatNo: 1,
+        seats: [
+          { userId: humanUserId, seatNo: 1, status: "ACTIVE" },
+          { userId: bot1Id, seatNo: 2, status: "ACTIVE" },
+          { userId: bot2Id, seatNo: 3, status: "ACTIVE" }
+        ],
+        stacks: { [humanUserId]: 1500, [bot1Id]: 0, [bot2Id]: 0 },
+        handSettlement: { handId: "hand_settled_retry", settledAt: "2026-09-28T00:00:00.000Z", payouts: {} }
+      }
+    },
+    presenceByUserId: new Map([
+      [humanUserId, { userId: humanUserId, seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }],
+      [bot1Id, { userId: bot1Id, seat: 2, connected: false, lastSeenAt: 1, expiresAt: null }],
+      [bot2Id, { userId: bot2Id, seat: 3, connected: false, lastSeenAt: 1, expiresAt: null }]
+    ])
+  });
+  assert.equal(restored.ok, true);
+  runtime.tableManager.join({
+    ws: { send: () => {} },
+    userId: humanUserId,
+    tableId,
+    requestId: "join-settled-retry",
+    nowTs: Date.now()
+  });
+
+  const nowMs = Date.now();
+  runtime.tableManager.cachePokerAccess(tableId, humanUserId, {
+    automaticClass: "NORMAL",
+    override: "AUTO",
+    effectiveClass: "NORMAL",
+    revision: 8,
+    loadedAtMs: nowMs,
+    expiresAtMs: nowMs + 30_000
+  }, {
+    slowThresholdCh: 1_000_000_000,
+    revision: 1,
+    loadedAtMs: nowMs,
+    expiresAtMs: nowMs + 30_000
+  }, nowMs);
+
+  const genKey = runtime.settledRolloverGenerationKey(tableId);
+  assert.equal(genKey, `${tableId}:1:hand_settled_retry`);
+
+  // Attempt 0: funding snapshot is UNKNOWN (null) -> must schedule retry, not advance state, not fund bots
+  const res1 = await runtime.runSettledRolloverCommand({ tableId, generationKey: genKey, attempt: 0 });
+  assert.equal(res1.ok, true);
+  assert.equal(res1.changed, false);
+  assert.equal(res1.retryable, true);
+  assert.equal(res1.reason, "missing_snapshot");
+
+  // State remains settled and unadvanced
+  assert.equal(runtime.tableManager.persistedPokerState(tableId).phase, "SETTLED");
+  assert.equal(runtime.tableManager.persistedStateVersion(tableId), 1);
+  assert.equal(runtime.tableManager.persistedPokerState(tableId).stacks[bot1Id], 0);
+  assert.equal(runtime.tableManager.persistedPokerState(tableId).stacks[bot2Id], 0);
+
+  // Exact retry scheduled with attempt + 1
+  const retries = runtime.getRetries();
+  assert.equal(retries.length, 1);
+  assert.deepEqual(retries[0], { tableId, generationKey: genKey, attempt: 1 });
+  assert.equal(runtime.getPersistedCount(), 0);
+  assert.equal(runtime.getPersistedFundings().length, 0);
+
+  // Now funding becomes available and provisioned
+  runtime.setFundingSnapshot({
+    schemaBacked: true,
+    expiresAtMs: Date.now() + 30_000,
+    tiers: {
+      500: { enabled: true, provisioned: { NORMAL: true, SLOW: true } }
+    }
+  });
+
+  // Attempt 1 (retry): funding is now known and allowed -> replaces broke bots and exits SETTLED
+  const res2 = await runtime.runSettledRolloverCommand({ tableId, generationKey: genKey, attempt: 1 });
+  assert.equal(res2.ok, true);
+  assert.equal(res2.changed, true);
+
+  // Table has exited SETTLED and version bumped
+  assert.notEqual(runtime.tableManager.persistedPokerState(tableId).phase, "SETTLED");
+  assert.equal(runtime.tableManager.persistedStateVersion(tableId), 2);
+
+  // Replacement fundings persisted exactly once: 2 bots funded with 500 chips
+  assert.equal(runtime.getPersistedCount(), 1);
+  const fundings = runtime.getPersistedFundings();
+  assert.equal(fundings.length, 2);
+  assert.equal(fundings[0].fundingDelta, 500);
+  assert.equal(fundings[1].fundingDelta, 500);
+
+  // No further retry was scheduled
+  assert.equal(retries.length, 1);
+
+  // Authoritative no-funding check: with disabled tier or RESTRICTED, "not_enough_players" does not retry
+  const tableId2 = "table_settled_disabled_tier";
+  runtime.tableManager.restoreTableFromPersisted(tableId2, {
+    tableMeta: { maxPlayers: 6, buyIn: 500, lifecycleKind: "STANDARD", isSlowOnly: false, stakes: { sb: 5, bb: 10 } },
+    coreState: {
+      roomId: tableId2, version: 1, maxSeats: 6,
+      members: [{ userId: humanUserId, seat: 1 }, { userId: bot1Id, seat: 2 }, { userId: bot2Id, seat: 3 }],
+      seats: { [humanUserId]: 1, [bot1Id]: 2, [bot2Id]: 3 },
+      publicStacks: { [humanUserId]: 1500, [bot1Id]: 0, [bot2Id]: 0 },
+      seatDetailsByUserId: {
+        [humanUserId]: { isBot: false, botProfile: null, leaveAfterHand: false },
+        [bot1Id]: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false },
+        [bot2Id]: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: tableId2, handId: "hand_disabled_tier", phase: "SETTLED", dealerSeatNo: 1,
+        seats: [{ userId: humanUserId, seatNo: 1, status: "ACTIVE" }, { userId: bot1Id, seatNo: 2, status: "ACTIVE" }, { userId: bot2Id, seatNo: 3, status: "ACTIVE" }],
+        stacks: { [humanUserId]: 1500, [bot1Id]: 0, [bot2Id]: 0 },
+        handSettlement: { handId: "hand_disabled_tier", settledAt: "2026-09-28T00:00:00.000Z", payouts: {} }
+      }
+    },
+    presenceByUserId: new Map([
+      [humanUserId, { userId: humanUserId, seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }],
+      [bot1Id, { userId: bot1Id, seat: 2, connected: false, lastSeenAt: 1, expiresAt: null }],
+      [bot2Id, { userId: bot2Id, seat: 3, connected: false, lastSeenAt: 1, expiresAt: null }]
+    ])
+  });
+  runtime.tableManager.join({
+    ws: { send: () => {} },
+    userId: humanUserId,
+    tableId: tableId2,
+    requestId: "join-disabled-tier",
+    nowTs: Date.now()
+  });
+
+  const nowMs2 = Date.now();
+  runtime.tableManager.cachePokerAccess(tableId2, humanUserId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 8,
+    loadedAtMs: nowMs2, expiresAtMs: nowMs2 + 30_000
+  }, { slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: nowMs2, expiresAtMs: nowMs2 + 30_000 }, nowMs2);
+
+  runtime.setFundingSnapshot({
+    schemaBacked: true,
+    expiresAtMs: Date.now() + 30_000,
+    tiers: {
+      500: { enabled: false, provisioned: { NORMAL: true, SLOW: true } }
+    }
+  });
+
+  const genKey2 = runtime.settledRolloverGenerationKey(tableId2);
+  const res3 = await runtime.runSettledRolloverCommand({ tableId: tableId2, generationKey: genKey2, attempt: 0 });
+  assert.equal(res3.ok, true);
+  assert.equal(res3.changed, false);
+  assert.equal(res3.reason, "not_enough_players");
+  // Retry was NOT scheduled because no-funding is authoritative
+  assert.equal(runtime.getRetries().length, 1);
+});

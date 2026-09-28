@@ -123,3 +123,37 @@ The following sequence is additive to the completed T001–T029 history and is t
 8. **Pre-merge Stage acceptance (T037)** — after T036, perform read-only Stage preflight, enable only the minimum supported tier, dispatch the already registered `chips-ledger-stage-scheduled-automation.yml` in its owner-only `poker-bot-pool-refill-canary` mode from the PR ref with the exact reviewed SHA and confirmation, and require dispatched SHA == checkout HEAD == worker reviewed ref before the one Stage worker invocation. The canary pins `POKER_BOT_REFILL_POOL_CLASS=NORMAL` so the NORMAL acceptance does not fund SLOW solely for the test; the standalone scheduler continues to evaluate both classes. Then hand off the narrow manual NORMAL/Play Now acceptance followed by read-only ledger/table verification. Stage refill is `AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / RUN: NO-OP; owner acceptance incomplete`; the standalone `poker-bot-pool-refill.yml` and `arcade-poker-refill-dispatch` remain the post-merge scheduler path, while VPS timer activation and Production migration/cutover remain separate unauthorized gates.
 
 Production compatibility is a hard constraint through every step: a missing #1018 schema retains pre-migration poker behavior and legacy 100 CH provenance, while unrelated SQL errors propagate. The new migration is the only automatic Stage schema effect in this amendment; T037 separately authorizes the official Stage refill/bot-pool funding needed for pre-merge acceptance, while Production and VPS activation remain outside scope.
+
+## §26 Corrective pre-merge amendment — Settled rollover retry and Continuous Bot Table controlled inactivity (T047–T052)
+
+Addresses the two remaining P1 blockers from Issue #1018 following the successful resolution and owner validation of T036 (Admin Save §25 single-owner deterministic WS mutation):
+
+1. **T047 — Funding decision split**:
+   In `ws-server/poker/runtime/settled-bot-funding.mjs`, `decideSettledBotFunding()` explicitly classifies outcomes into:
+   - `unknown`: missing or expired snapshot, unknown tier policy -> `{ known: false, allowed: false, reason }`.
+   - `authoritative no-funding`: RESTRICTED participant, tier disabled, tier unprovisioned, invalid buy-in -> `{ known: true, allowed: false, reason }`.
+   - `allowed`: enabled + provisioned exact class/tier -> `{ known: true, allowed: true, systemKey, poolClass, reason: "funding_allowed" }`.
+   Maintains `resolveSettledBotFundingSystemKey(options)` as a compatibility wrapper.
+
+2. **T048 — Rollover retry without bot-funding bypass**:
+   In `ws-server/server.mjs::runSettledRolloverCommand()`:
+   - When DB state is required (`hasSupabaseDbUrl && !isGuestTableId(tableId)`):
+     - If `settledAccessStatus.known !== true` or `fundingDecision.known !== true`: do NOT call `prepareSettledHandRollover(allowBotFunding: false)` and do NOT advance state; schedule existing `scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 })` and return `{ ok: true, changed: false, retryable: true, reason }`.
+     - If authoritative no-funding: `allowBotFunding = false` remains correct; `prepareSettledHandRollover` evaluates players and returns `not_enough_players` without endless retry.
+   - When standalone / guest (`!hasSupabaseDbUrl || isGuestTableId(tableId)`):
+     - Uses default known access and legacy unbacked funding snapshot (`Number.MAX_SAFE_INTEGER`), avoiding false retries.
+
+3. **T049 — Continuous bot tables controlled inactivity**:
+   In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
+   - In `reconcile()`: verify schema-backed tier 100 policy and provisioning.
+   - If tier 100 is disabled or unprovisioned: supervisor treats the profile as controlled inactive (`desiredCount = 0`, zero table creation, zero seed, graceful retirement of open tables below minimum occupancy), returning `{ ok: true, controlledInactive: true, reason: "tier_disabled" | "tier_unprovisioned", status }` with zero rollback or churn.
+   - In `createManagedTable()`: defense-in-depth preflight throws `tier_disabled` / `tier_unprovisioned` fast.
+
+4. **T050 — SpecKit synchronization**:
+   Update `plan.md`, `tasks.md`, `quickstart.md`, and `contracts/bot-quarantine.md`. T036 marked complete; Phase 11 added for T047–T052. T037 remains blocked on pre-merge acceptance.
+
+5. **T051 — Validation, deployment & read-only Stage verification**:
+   Run full focused behavioral tests, CI guards, push to PR branch, dispatch exact-SHA WS Preview Deploy, verify runtime health, and verify Stage read-only invariant (tier 100 disabled, no supervisor seed errors, chips ledger unchanged).
+
+6. **T052 — Reporting & Handoff**:
+   Document verification results and STOP before owner manual smoke T037.

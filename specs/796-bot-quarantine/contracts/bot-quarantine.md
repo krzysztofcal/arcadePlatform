@@ -74,3 +74,36 @@ The live WS lobby remains one `activeLobbyTablesById`/`lobby_snapshot` stream. E
 Settled rollover consults `settledAccessStatus` and the existing cache. If any seated human is effective RESTRICTED, settlement proceeds with `allowBotFunding=false`: no replacement, managed top-up or new seed is planned, and no mid-hand kick/escrow unwind occurs. Unknown cache uses the existing no-new-funding recovery. This adds no per-hand DB policy read and no runtime MINT.
 
 The immutable `20260927100000_poker_bot_quarantine_policy.sql` is not edited. `20260927110000_poker_force_restricted.sql` is the sole forward-only schema extension and is recorded in the exhaustive Production manifest as `needs-production-equivalent`; automatic DB Stage Apply may move shared Stage from the current 98 applied baseline to 99. Production compatibility continues on the legacy path until separate migration/cutover GO.
+
+## 9. Corrective pre-merge amendment — Settled rollover retry and Continuous Bot Table controlled inactivity (§26)
+
+1. **Settled Bot Funding Decision**:
+`decideSettledBotFunding({ snapshot, buyIn, isSlowOnly, tableMarkerTransition, lifecycleKind, effectiveRestricted, legacySystemKey, nowMs })` explicitly separates:
+- **Unknown** (`missing_snapshot`, `expired_snapshot`, `unknown_tier_policy`): `{ known: false, allowed: false, systemKey: null, reason }`.
+- **Authoritative No-Funding** (`restricted`, `tier_disabled`, `tier_unprovisioned`, `invalid_buy_in`): `{ known: true, allowed: false, systemKey: null, reason }`.
+- **Allowed** (tier enabled + provisioned exact class/tier): `{ known: true, allowed: true, systemKey, poolClass, reason: "funding_allowed" }`.
+`resolveSettledBotFundingSystemKey(options)` wraps `decideSettledBotFunding` returning `systemKey` if `allowed === true`, else `null`.
+
+2. **Settled Rollover Retry Lifecycle**:
+In `ws-server/server.mjs::runSettledRolloverCommand({ tableId, generationKey, attempt })`:
+- When DB state is required (`hasSupabaseDbUrl && !isGuestTableId(tableId)`):
+  - If `settledAccessStatus.known !== true` or `fundingDecision.known !== true`:
+    - Do NOT advance state or call `prepareSettledHandRollover(allowBotFunding: false)`.
+    - Preserve the same settled `generationKey`.
+    - Schedule retry via existing `scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 })`.
+    - Return `{ ok: true, changed: false, retryable: true, reason }`.
+  - If no-funding is authoritative (e.g. `effectiveRestricted`, `tier_disabled`, `tier_unprovisioned`):
+    - `allowBotFunding = false`.
+    - `prepareSettledHandRollover` evaluates players without bot funding. If `not_enough_players`, returns unchanged without retry.
+- When DB state is not required (`!hasSupabaseDbUrl || isGuestTableId(tableId)`):
+  - Treats access as known (`effectiveRestricted: false`), snapshot as `{ schemaBacked: false, expiresAtMs: Number.MAX_SAFE_INTEGER }`.
+  - Rollover runs with legacy / economy-free rules without indefinite retry.
+
+3. **Continuous Bot Table Controlled Inactivity**:
+In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
+- In `reconcile()`: checks schema-backed tier 100 policy and provisioning before creating tables or seeding bots.
+- If tier 100 is disabled or unprovisioned:
+  - Supervisor enters controlled inactive state: `desiredCount = 0`, zero table creation, zero seed, graceful retirement of open continuous tables below minimum occupancy.
+  - Returns `{ ok: true, controlledInactive: true, reason: "tier_disabled" | "tier_unprovisioned", status }`.
+  - Does NOT churn, rollback or spam error logs every sweep.
+- In `createManagedTable()`: defense-in-depth preflight throws `tier_disabled` / `tier_unprovisioned` before any table mutation.

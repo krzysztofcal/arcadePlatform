@@ -129,9 +129,13 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
   if (poolSchema) {
     const tierPolicy = await readPokerTierPolicy(tx, { buyIn });
     const provisioning = await readPokerPoolProvisioning(tx, { buyIn });
-    fundingEnabled = tierPolicy?.enabled === true
-      && provisioning?.NORMAL === true
-      && provisioning?.SLOW === true;
+    if (tierPolicy?.enabled !== true) {
+      throw Object.assign(new Error("tier_disabled"), { code: "tier_disabled" });
+    }
+    if (provisioning?.NORMAL !== true || provisioning?.SLOW !== true) {
+      throw Object.assign(new Error("tier_unprovisioned"), { code: "tier_unprovisioned" });
+    }
+    fundingEnabled = true;
   }
   const seededBots = await seedBotsForJoin({
     tx,
@@ -195,6 +199,21 @@ export function createContinuousBotTableRepository({
         const profileRows = await tx.unsafe(PROFILE_SELECT, [CONTINUOUS_BOT_PROFILE_KEY]);
         const profile = normalizeContinuousBotProfile(profileRows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
+
+        const schemaBacked = await hasPokerPoolSchema(tx);
+        let controlledInactiveReason = null;
+        if (schemaBacked) {
+          const tierPolicy = await readPokerTierPolicy(tx, { buyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS });
+          if (tierPolicy?.enabled !== true) {
+            controlledInactiveReason = "tier_disabled";
+          } else {
+            const provisioning = await readPokerPoolProvisioning(tx, { buyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS });
+            if (provisioning?.NORMAL !== true || provisioning?.SLOW !== true) {
+              controlledInactiveReason = "tier_unprovisioned";
+            }
+          }
+        }
+
         const tableRows = await tx.unsafe(
           `select id, status, max_players, buy_in, stakes, managed_profile_key, rotation_due_at, created_at,
                   (select count(*) from public.poker_seats s
@@ -207,7 +226,7 @@ export function createContinuousBotTableRepository({
             for update;`
         );
         const openTables = Array.isArray(tableRows) ? tableRows : [];
-        const desiredCount = profile.enabled ? profile.desiredTableCount : 0;
+        const desiredCount = (!controlledInactiveReason && profile.enabled) ? profile.desiredTableCount : 0;
         const retirementTableIds = [];
         for (const table of openTables) {
           const activeBotCount = Number(table?.active_bot_count);
@@ -275,7 +294,10 @@ export function createContinuousBotTableRepository({
           rotationDueAtByTableId,
           creationLimitPerReconcile: MAX_TABLES_CREATED_PER_RECONCILE,
           creationLimited: remainingTableCount > 0,
-          remainingTableCount
+          remainingTableCount,
+          controlledInactive: Boolean(controlledInactiveReason),
+          reason: controlledInactiveReason || undefined,
+          status: controlledInactiveReason || undefined
         };
       }, { env });
       lastKnownProfile = result.profile;

@@ -64,7 +64,11 @@ import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
-import { readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "./poker/runtime/settled-bot-funding.mjs";
+import {
+  decideSettledBotFunding,
+  readSettledBotFundingSnapshot,
+  resolveSettledBotFundingSystemKey
+} from "./poker/runtime/settled-bot-funding.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { serializePokerLogPayload } from "./poker/observability/poker-log-policy.mjs";
@@ -2539,7 +2543,7 @@ function scheduleSettledRolloverRetry({ tableId, generationKey, attempt }) {
 async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }) {
   const rolloverStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_settled_rollover_start", { tableId }) ? Date.now() : null;
   const finishSettledRollover = (result) => {
-    klogVerbose("ws_settled_rollover_outcome", () => ({
+    klogSafe("ws_settled_rollover_outcome", {
       tableId,
       attempt,
       ok: result?.ok !== false,
@@ -2547,7 +2551,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       closed: result?.closed === true,
       reason: result?.reason || result?.code || result?.status || (result?.changed === true ? "changed" : "unchanged"),
       durationMs: Math.max(0, Date.now() - rolloverStartedAtMs)
-    }), { tableId });
+    });
     return result;
   };
   let pokerState = tableManager.persistedPokerState(tableId);
@@ -2636,23 +2640,47 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
     return finishSettledRollover({ ok: false, changed: false, reason: "managed_profile_unavailable" });
   }
-  const settledAccessStatus = typeof tableManager.settledAccessStatus === "function"
+  const isGuest = isGuestTableId(tableId);
+  const requiresDbState = Boolean(hasSupabaseDbUrl && !isGuest);
+  const settledAccessStatus = requiresDbState && typeof tableManager.settledAccessStatus === "function"
     ? tableManager.settledAccessStatus(tableId, { nowMs: Date.now() })
-    : { known: true };
+    : { known: true, transitions: [], effectiveRestricted: false };
+  if (settledAccessStatus.known !== true) {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    return finishSettledRollover({
+      ok: true,
+      changed: false,
+      retryable: true,
+      reason: settledAccessStatus.reason || "access_cache_unknown"
+    });
+  }
   const fundingOptions = {
-    snapshot: settledBotFundingSnapshot,
+    snapshot: requiresDbState ? settledBotFundingSnapshot : { schemaBacked: false, expiresAtMs: Number.MAX_SAFE_INTEGER },
     ...tableMeta,
     legacySystemKey: legacyBotFundingSystemKey,
     nowMs: Date.now()
   };
+  const fundingDecision = decideSettledBotFunding({
+    ...fundingOptions,
+    effectiveRestricted: settledAccessStatus.effectiveRestricted
+  });
+  if (fundingDecision.known !== true) {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    return finishSettledRollover({
+      ok: true,
+      changed: false,
+      retryable: true,
+      reason: fundingDecision.reason || "funding_unknown"
+    });
+  }
+  const allowBotFunding = settledAccessStatus.effectiveRestricted !== true
+    && fundingDecision.allowed === true;
   const prepared = tableManager.prepareSettledHandRollover({
     tableId,
     nowMs: Date.now(),
     allowManagedBotsOnly: managedContinuousTable,
     managedBotProfile,
-    allowBotFunding: settledAccessStatus.known === true
-      && settledAccessStatus.effectiveRestricted !== true
-      && resolveSettledBotFundingSystemKey({ ...fundingOptions, effectiveRestricted: settledAccessStatus.effectiveRestricted }) !== null
+    allowBotFunding
   });
   if (!prepared?.ok || !prepared.changed) {
     return finishSettledRollover(prepared);

@@ -137,6 +137,17 @@ Read-only Preview journald inspection found no access-refresh error event in the
 
 Runtime SHA `727f50c38ef04e0bdbd07b4401dc9b4307a5f8fd` passed all GitHub runtime CI workflows (Tests `36425224910`, WS PR Checks `36425224922`, CI `36425224912`). DB Stage Apply `36425224911` confirmed 99 applied / 0 pending and smoke PASS; this fix adds no migration. Exact-SHA [WS Preview Deploy 36425620499](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36425620499) succeeded: `RELEASE_SHA == DEPLOY_REF == 727f50c38ef04e0bdbd07b4401dc9b4307a5f8fd`, installed release metadata checks passed, local/public Preview health PASS. Final local WS server behavior: 138/138. Caddy/config diff is zero; no reapply. This evidence-only update does not change runtime files.
 
-T036 remains **FAIL/BLOCKED (owner-found recovery defect); fix deployed, awaiting owner authenticated retry**. No authenticated owner success is claimed. Read-only Stage before retry: the test account has automatic NORMAL / FORCE_RESTRICTED, revision 10. No Admin mutation was performed by the agent. Open https://deploy-preview-1019--playkcswh.netlify.app/admin.html with the existing Admin session, reload user details, save FORCE_RESTRICTED, require “Saved revision N · WS confirmed”, then immediately save AUTO and require the next exact confirmed revision without waiting for a periodic sweep. If stale_revision occurs, inspect the reloaded revision before saving again; pending or 503 is a failed smoke, not success. Do not change thresholds, tiers or pools. Only after owner PASS proceed to AUTO/NORMAL → 500 CH → Play Now and record the table ID for read-only ledger verification.
+T036 is **PASS (owner-accepted §25 single-owner deterministic WS mutation)**. The subsequent owner smoke confirmed immediate sequential Admin mutations with zero periodic-refresh delay.
 
-The final Stage NORMAL-only canary must use the exact docs HEAD containing this evidence; its authoritative run ID/result and post-run balance/MINT verification are recorded in PR #1019 metadata and the handoff (avoids another evidence commit changing that reviewed SHA). The worker/workflow is unchanged from the approved canary. Expected result is no-op for POKER_BOT_BANKROLL; never force MINT or fund SLOW. Production, VPS refill timer and merge remain NOT AUTHORIZED / NOT RUN. Owner acceptance is not READY until T036 passes.
+### Phase 11 / §26 verification evidence (T047–T052)
+
+Resolves the two remaining P1 blockers:
+1. **Settled rollover retry**: Unknown access or bot funding snapshot triggers `scheduleSettledRolloverRetry()` without advancing state or bypassing funding. Authoritative no-funding retains `allowBotFunding: false` without endless retry.
+2. **Continuous bot table controlled inactivity**: Disabled or unprovisioned tier 100 sets controlled inactive state (`desiredCount = 0`, zero table creation, zero seed, graceful retirement of open tables below minimum occupancy) without rollback/sweep churn.
+
+#### Test Execution Evidence
+- `node --test ws-server/poker/runtime/poker-access-propagation.behavior.test.mjs`: 15/15 pass, including `human and two busted bots retry on unknown funding, then fund replacements and exit SETTLED without duplicates`.
+- `node --test ws-server/poker/persistence/continuous-bot-table-repository.behavior.test.mjs`: 15/15 pass, including `reconcile treats an enabled profile with disabled tier 100 as controlled inactive without table creation churn`.
+- `node --test ws-server/server.behavior.test.mjs`: all settled rollover and timeout suites pass with standalone/guest guards.
+
+Production, VPS refill timer activation, and PR merge remain strictly NOT AUTHORIZED / NOT RUN. Final owner pre-merge Stage acceptance (T037) follows exact-SHA deployment and verification.

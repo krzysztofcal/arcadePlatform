@@ -199,7 +199,7 @@ test("reconcile creates at most two missing tables per sweep", async () => {
   assert.equal(result.remainingTableCount, 98);
 });
 
-test("reconcile rolls back a managed table when exact bot funding is unavailable", async () => {
+test("reconcile treats an enabled profile with disabled tier 100 as controlled inactive without table creation churn", async () => {
   const tableId = "00000000-0000-4000-8000-000000000825";
   let tableInserted = false;
   let transactionCommitted = false;
@@ -259,12 +259,21 @@ test("reconcile rolls back a managed table when exact bot funding is unavailable
 
   const result = await repository.reconcile();
 
-  assert.equal(tableInserted, true);
-  assert.equal(transactionCommitted, false);
-  assert.equal(transactionRolledBack, true);
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "managed_bot_table_seed_incomplete");
+  assert.equal(tableInserted, false);
+  assert.equal(transactionCommitted, true);
+  assert.equal(transactionRolledBack, false);
+  assert.equal(result.ok, true);
+  assert.equal(result.controlledInactive, true);
+  assert.equal(result.reason, "tier_disabled");
   assert.deepEqual(result.createdTableIds, []);
+
+  // kolejne reconcile również nie generuje churnu
+  const secondResult = await repository.reconcile();
+  assert.equal(tableInserted, false);
+  assert.equal(secondResult.ok, true);
+  assert.equal(secondResult.controlledInactive, true);
+  assert.equal(secondResult.reason, "tier_disabled");
+  assert.deepEqual(secondResult.createdTableIds, []);
 });
 
 test("reconcile retires an existing managed table below its minimum bot occupancy", async () => {
