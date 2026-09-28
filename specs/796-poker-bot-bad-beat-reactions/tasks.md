@@ -83,7 +83,7 @@
 
 - [x] T017 Run syntax check (`npm run syntax`) and repository guard checks (`npm run check:all`)
 - [x] T018 [P] Run full reaction behavior suite (`node --test ws-server/poker/handlers/reaction.behavior.test.mjs`), server integration tests (`node --test ws-server/server.behavior.test.mjs`), and client live tests (`node --test tests/poker-v2-live.behavior.test.mjs`)
-- [x] T019 Execute exact-SHA manual `WS Preview Deploy` workflow (`--ref main -f ref=<SHA>`) and perform Netlify Deploy Preview manual smoke per quickstart.md
+- [ ] T019 Execute exact-SHA manual `WS Preview Deploy` workflow (`--ref main -f ref=<SHA>`) and perform Netlify Deploy Preview manual smoke per quickstart.md
 
 ---
 
