@@ -18,7 +18,7 @@ Fields apply to USER rows; no client-write grants. Effective state is derived, n
 
 `id=1` primary key/check; `slow_threshold_ch` positive safe-integer CH (1..9007199254740991), initially 1000000000; `revision` positive bigint initially 1, increases on successful change; `updated_at` non-null and `updated_by` authenticated Admin UUID (initial provisioning backend actor). No independent WS environment threshold override. No generic key/value settings API.
 
-Cache representation: value+revision+loadedAt; user snapshots carry automatic/override/revision. Refresh interval and max age 30 seconds, outside settled-hand hot path; batch only connected/still-seated IDs. Unknown/expired values cannot authorize new admissions/funding. Actual transitions may perform needed persistence; unchanged settled hands add no classification DB access.
+Cache representation: value+revision+loadedAt; user snapshots carry automatic/override/revision. Refresh interval and max age 30 seconds, outside settled-hand hot path; batch pending mutation IDs first, including offline/nonseated users, then connected/still-seated IDs (dedupe, limit 512). Admin access Save requires exact synchronous DB+WS confirmation; background refresh is a safety backstop. Unknown/expired values cannot authorize new admissions/funding. Actual transitions may perform needed persistence; unchanged settled hands add no classification DB access.
 
 ## 3. Existing poker_tables / participation
 

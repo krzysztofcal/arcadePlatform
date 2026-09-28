@@ -89,7 +89,7 @@ import {
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
-import { persistAuthoritativeSlowOnlyForUser } from "./poker/runtime/poker-access-propagation.mjs";
+import { buildPokerAccessRefreshCandidates, persistAuthoritativeSlowOnlyForUser } from "./poker/runtime/poker-access-propagation.mjs";
 import { createActionHistoryCleanup } from "./poker/persistence/action-history-cleanup.mjs";
 import { createClosedTableCleanup } from "./poker/persistence/closed-table-cleanup.mjs";
 import { createVpsMetricsCollector } from "./observability/vps-metrics.mjs";
@@ -894,8 +894,16 @@ async function refreshPokerAccessForUser(userId, {
   const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
   if (!normalizedUserId) return { ok: false, refreshed: false, invalidated: false, reason: "invalid_user_id" };
   if (!pendingPokerAccessMutations.has(normalizedUserId)) {
-    const invalidation = beginPokerAccessMutation(normalizedUserId, expectedRevision, expectedOverride);
+    // A lost ACK can be retried after the original barrier was already released.
+    // This is a read/confirmation, not a reservation for another DB mutation.
+    const invalidation = beginPokerAccessMutation(normalizedUserId);
     if (invalidation.ok !== true) return invalidation;
+  }
+  const pendingAtRead = pendingPokerAccessMutations.get(normalizedUserId);
+  if (pendingAtRead?.minimumRevision !== null && expectedRevision != null
+    && (Number(expectedRevision) !== pendingAtRead?.expectedRevision
+      || (expectedOverride && normalizeAccessOverride(expectedOverride) !== pendingAtRead?.desiredOverride))) {
+    return { ok: true, refreshed: false, failClosed: true, pending: true, reason: "access_mutation_changed" };
   }
   if (!hasSupabaseDbUrl) {
     return { ok: true, refreshed: false, invalidated: true, failClosed: true, pending: true, reason: "database_unavailable" };
@@ -923,6 +931,11 @@ async function refreshPokerAccessForUser(userId, {
     }
     const access = loaded.access;
     const pending = pendingPokerAccessMutations.get(normalizedUserId);
+    // A concurrent refresh may finish and a newer mutation may start while
+    // the DB read is in flight. Never acknowledge or clear that newer barrier.
+    if (pending !== pendingAtRead) {
+      return { ok: true, refreshed: false, failClosed: true, pending: true, reason: "access_mutation_changed" };
+    }
     const pendingRevision = Number(pending?.minimumRevision);
     const pendingExpectedRevision = Number(pending?.expectedRevision);
     const desiredOverride = pending?.desiredOverride || normalizeAccessOverride(expectedOverride);
@@ -963,6 +976,8 @@ async function refreshPokerAccessForUser(userId, {
       failClosed: false,
       pending: false,
       revision: access.revision,
+      override: access.override,
+      effectiveClass: access.effectiveClass,
       slowOnlyTableIds: loaded.slowOnlyTableIds
     };
   } catch (error) {
@@ -998,14 +1013,14 @@ function broadcastPokerAccessTransition(userId, transition) {
 let settledBotFundingSnapshot = null;
 
 async function refreshActivePokerAccess() {
-  if (!hasSupabaseDbUrl || typeof sessionStore.activeUserIds !== "function") return;
-  const userIds = new Set(sessionStore.activeUserIds());
-  if (typeof tableManager.activeHumanUserIds === "function") {
-    for (const userId of tableManager.activeHumanUserIds({ limit: 512 })) userIds.add(userId);
-  }
-  const normalizedUserIds = [...userIds]
-    .filter((userId) => typeof userId === "string" && userId.trim())
-    .slice(0, 512);
+  if (!hasSupabaseDbUrl) return;
+  const pendingAtRead = new Map(pendingPokerAccessMutations);
+  const normalizedUserIds = buildPokerAccessRefreshCandidates({
+    pendingUserIds: pendingAtRead.keys(),
+    activeUserIds: sessionStore.activeUserIds?.() || [],
+    seatedUserIds: tableManager.activeHumanUserIds?.({ limit: 512 }) || [],
+    limit: 512
+  });
   try {
     const beginSqlWs = await loadBeginSqlWs();
     const refreshed = await beginSqlWs(async (tx) => {
@@ -1028,17 +1043,16 @@ async function refreshActivePokerAccess() {
     if (!refreshed?.policy || !(refreshed.snapshots instanceof Map)) return;
     for (const [userId, snapshot] of refreshed.snapshots.entries()) {
       const pending = pendingPokerAccessMutations.get(userId);
+      if (pending !== pendingAtRead.get(userId)) continue;
       if (pending) {
-        const expectedRevision = Number(pending.expectedRevision);
         const minimumRevision = Number(pending.minimumRevision);
         const desiredOverride = pending.desiredOverride || null;
-        const noCommitObserved = pending.expectedRevision === null
-          ? pending.minimumRevision === null
-          : Number(snapshot.revision) === expectedRevision;
-        const committedMutationObserved = pending.minimumRevision !== null
-          && Number(snapshot.revision) === minimumRevision
-          && (!desiredOverride || snapshot.override === desiredOverride);
-        if (!noCommitObserved && !committedMutationObserved) continue;
+        const committedMutationObserved = pending.minimumRevision === null
+          || (Number(snapshot.revision) === minimumRevision
+            && (!desiredOverride || snapshot.override === desiredOverride));
+        // An unchanged revision may still be a live write; only its owner
+        // can explicitly release a rolled-back mutation.
+        if (!committedMutationObserved) continue;
       }
       const access = {
         ...snapshot,

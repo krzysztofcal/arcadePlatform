@@ -80,8 +80,20 @@ returning user_id, poker_auto_class, poker_access_override, poker_access_revisio
 `, [userId, normalizedOverride, actorId]);
     const result = normalizeAccessRow(updated?.[0]);
     klog("admin_poker_access_updated", { userId, actorId, override: normalizedOverride, revision: result?.revision });
-    return { access: result, propagationMs: 30_000 };
+    return { access: result };
   });
+}
+
+function isConfirmedAccess(propagation, access) {
+  return propagation?.ok === true
+    && propagation?.skipped !== true
+    && propagation?.refreshed === true
+    && propagation?.failClosed === false
+    && propagation?.pending === false
+    && Number.isSafeInteger(access?.revision) && access.revision > 0
+    && propagation.revision === access.revision
+    && ACCESS_OVERRIDES.includes(access.override)
+    && propagation.override === access.override;
 }
 
 function createAdminUserPokerAccessHandler(deps = {}) {
@@ -108,6 +120,10 @@ function createAdminUserPokerAccessHandler(deps = {}) {
       const userId = parseUuid(body.userId, "invalid_user_id");
       const requestedOverride = parseOverride(body.override);
       const expectedRevision = body.expectedRevision ?? body.expected_revision;
+      if (!Number.isSafeInteger(Number(expectedRevision)) || Number(expectedRevision) <= 0
+        || Number(expectedRevision) >= Number.MAX_SAFE_INTEGER) {
+        throw badRequest("invalid_expected_revision", "invalid_expected_revision");
+      }
       const preInvalidation = await notifyAccessMutation({
         userId,
         override: requestedOverride,
@@ -116,6 +132,27 @@ function createAdminUserPokerAccessHandler(deps = {}) {
         env,
         klog
       });
+      if (preInvalidation?.reason === "poker_access_mutation_pending") {
+        // Recover the previous committed mutation, never release an in-flight
+        // write or reuse this caller's stale optimistic revision for a new one.
+        let recovery;
+        try {
+          recovery = await notifyAccessMutation({ userId, phase: "refresh", env, klog });
+        } catch {
+          recovery = null;
+        }
+        if (isConfirmedAccess(recovery, recovery)) {
+          const access = await loadAccess(userId);
+          return {
+            statusCode: 409, headers: cors,
+            body: JSON.stringify({
+              error: access.revision !== Number(expectedRevision) ? "stale_revision" : "poker_access_mutation_pending",
+              access
+            })
+          };
+        }
+        return { statusCode: 409, headers: cors, body: JSON.stringify({ error: "poker_access_mutation_pending" }) };
+      }
       if (preInvalidation?.skipped === true
         || preInvalidation?.ok !== true
         || preInvalidation?.invalidated !== true
@@ -125,12 +162,10 @@ function createAdminUserPokerAccessHandler(deps = {}) {
           reason: preInvalidation?.reason || "unconfirmed"
         });
         return {
-          statusCode: preInvalidation?.reason === "poker_access_mutation_pending" ? 409 : 503,
+          statusCode: 503,
           headers: cors,
           body: JSON.stringify({
-            error: preInvalidation?.reason === "poker_access_mutation_pending"
-              ? "poker_access_mutation_pending"
-              : "poker_access_pre_invalidation_failed"
+            error: "poker_access_pre_invalidation_failed"
           })
         };
       }
@@ -153,6 +188,7 @@ function createAdminUserPokerAccessHandler(deps = {}) {
             override: requestedOverride,
             phase: "refresh",
             releasePending: true,
+            expectedRevision,
             env,
             klog
           });
@@ -164,19 +200,26 @@ function createAdminUserPokerAccessHandler(deps = {}) {
         }
         throw error;
       }
-      const propagation = await notifyAccessMutation({
-        userId,
-        override: requestedOverride,
-        revision: result?.access?.revision ?? null,
-        expectedRevision,
-        phase: "refresh",
-        env,
-        klog
-      });
-      if (propagation?.skipped === true
-        || propagation?.ok !== true
-        || propagation?.refreshed !== true
-        || propagation?.failClosed === true) {
+      let propagation = null;
+      const committedAccess = { revision: result?.access?.revision, override: requestedOverride };
+      // Retry only the bounded authoritative confirmation, never the DB write.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          propagation = await notifyAccessMutation({
+            userId,
+            override: requestedOverride,
+            revision: committedAccess.revision,
+            expectedRevision,
+            phase: "refresh",
+            env,
+            klog
+          });
+        } catch {
+          propagation = { ok: false, reason: "confirmation_failed" };
+        }
+        if (isConfirmedAccess(propagation, committedAccess)) break;
+      }
+      if (!isConfirmedAccess(propagation, committedAccess)) {
         klog("admin_poker_access_propagation_failed", {
           userId,
           revision: result?.access?.revision ?? null,

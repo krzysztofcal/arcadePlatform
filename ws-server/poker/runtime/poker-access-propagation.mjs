@@ -36,3 +36,17 @@ returning t.id;
     ? rows.map((row) => typeof row?.id === "string" ? row.id.trim() : "").filter(Boolean)
     : [];
 }
+
+/** Pending offline users take priority over ordinary session/cache refresh. */
+export function buildPokerAccessRefreshCandidates({
+  pendingUserIds = [], activeUserIds = [], seatedUserIds = [], limit = 512
+} = {}) {
+  const ids = new Set();
+  for (const source of [pendingUserIds, activeUserIds, seatedUserIds]) {
+    for (const userId of source) {
+      if (typeof userId === "string" && userId.trim()) ids.add(userId.trim());
+      if (ids.size >= limit) return [...ids];
+    }
+  }
+  return [...ids];
+}

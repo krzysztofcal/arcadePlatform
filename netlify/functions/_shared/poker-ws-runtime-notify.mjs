@@ -301,7 +301,7 @@ export async function notifyWsPokerAccessMutation({
     klog("poker_ws_access_refresh_notify_unavailable", { userId: normalizedUserId, reason: "fetch_unavailable" });
     return { ok: false, skipped: false, reason: "fetch_unavailable" };
   }
-  const timeoutMs = resolveTimeoutMs(env);
+  const timeoutMs = Math.min(resolveTimeoutMs(env), DEFAULT_NOTIFY_TIMEOUT_MS);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   if (typeof timer?.unref === "function") timer.unref();
@@ -348,9 +348,11 @@ export async function notifyWsPokerAccessMutation({
       phase: payload?.phase === "invalidate" ? "invalidate" : "refresh",
       invalidated: payload?.invalidated === true,
       refreshed: payload?.refreshed === true,
-      failClosed: payload?.failClosed === true,
-      pending: payload?.pending === true,
-      revision: Number.isSafeInteger(Number(payload?.revision)) ? Number(payload.revision) : null,
+      failClosed: typeof payload?.failClosed === "boolean" ? payload.failClosed : null,
+      pending: typeof payload?.pending === "boolean" ? payload.pending : null,
+      revision: Number.isSafeInteger(payload?.revision) && payload.revision > 0 ? payload.revision : null,
+      override: typeof payload?.override === "string" ? payload.override : null,
+      effectiveClass: typeof payload?.effectiveClass === "string" ? payload.effectiveClass : null,
       reason: typeof payload?.reason === "string" ? payload.reason : null
     };
   } catch (error) {

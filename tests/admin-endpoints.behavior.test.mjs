@@ -7,6 +7,7 @@ const { createAdminUserLedgerHandler } = await import("../netlify/functions/admi
 const { createAdminWsPreviewBotReactionHandler, parseBody: parseBotReactionBody } = await import("../netlify/functions/admin-ws-preview-bot-reaction.mjs");
 const { createAdminPokerLogControlHandler, parseBody: parsePokerLogControlBody } = await import("../netlify/functions/admin-poker-log-control.mjs");
 const { createAdminUserPokerAccessHandler, updatePokerAccess } = await import("../netlify/functions/admin-user-poker-access.mjs");
+const { notifyWsPokerAccessMutation } = await import("../netlify/functions/_shared/poker-ws-runtime-notify.mjs");
 const { updatePokerPolicy } = await import("../netlify/functions/admin-poker-policy.mjs");
 
 function event(method, queryStringParameters = {}, body = null) {
@@ -85,7 +86,7 @@ test("poker access admin requires an acknowledged WS cache refresh after commit"
       notifications.push(payload);
       return payload.phase === "invalidate"
         ? { ok: true, invalidated: true, refreshed: false, failClosed: true, skipped: false }
-        : { ok: true, invalidated: true, refreshed: true, failClosed: false, skipped: false };
+        : { ok: true, invalidated: true, refreshed: true, failClosed: false, pending: false, revision: 9, override: "FORCE_RESTRICTED", skipped: false };
     }
   });
   const response = await handler({
@@ -166,15 +167,17 @@ test("poker access admin refreshes after a failed DB commit to release only an a
 test("poker access admin rejects a second mutation while the first pending barrier owns the user", async () => {
   let pending = false;
   let writes = 0;
+  let committed = null;
   let releaseFirstUpdate;
   const firstUpdate = new Promise((resolve) => { releaseFirstUpdate = resolve; });
   const handler = createAdminUserPokerAccessHandler({
     env: { CHIPS_ENABLED: "1" },
     requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
-    updatePokerAccess: async () => {
+    updatePokerAccess: async ({ override }) => {
       writes += 1;
       if (writes === 1) await firstUpdate;
-      return { access: { revision: 9, override: "FORCE_RESTRICTED" } };
+      committed = { revision: 8 + writes, override };
+      return { access: committed };
     },
     notifyWsPokerAccessMutation: async ({ phase }) => {
       if (phase === "invalidate") {
@@ -182,8 +185,9 @@ test("poker access admin rejects a second mutation while the first pending barri
         pending = true;
         return { ok: true, invalidated: true, failClosed: true, skipped: false };
       }
+      if (!committed) return { ok: true, refreshed: false, pending: true, failClosed: true };
       pending = false;
-      return { ok: true, invalidated: true, refreshed: true, failClosed: false, skipped: false };
+      return { ok: true, refreshed: true, failClosed: false, pending: false, ...committed };
     }
   });
   const event = {
@@ -203,6 +207,91 @@ test("poker access admin rejects a second mutation while the first pending barri
   const third = await handler({ ...event, body: JSON.stringify({ ...JSON.parse(event.body), override: "FORCE_SLOW" }) });
   assert.equal(third.statusCode, 200);
   assert.equal(writes, 2);
+});
+
+function accessPatch(override = "FORCE_RESTRICTED", expectedRevision = 8) {
+  return { httpMethod: "PATCH", headers: {}, body: JSON.stringify({
+    userId: "00000000-0000-4000-8000-000000000020", override, expectedRevision
+  }) };
+}
+
+const exactAccessAck = { ok: true, refreshed: true, failClosed: false, pending: false,
+  revision: 9, override: "FORCE_RESTRICTED", effectiveClass: "RESTRICTED" };
+
+for (const firstFailure of ["timeout", "throw"]) {
+  test(`Admin retries only WS confirmation after ${firstFailure}, with exactly one DB mutation`, async () => {
+    let writes = 0;
+    let confirmations = 0;
+    const handler = createAdminUserPokerAccessHandler({
+      env: { CHIPS_ENABLED: "1" }, requireAdminUser: async () => ({ userId: "admin" }),
+      updatePokerAccess: async () => { writes += 1; return { access: { revision: 9, override: "FORCE_RESTRICTED" } }; },
+      notifyWsPokerAccessMutation: async (payload) => {
+        if (payload.phase === "invalidate") return { ok: true, invalidated: true, failClosed: true };
+        assert.equal(payload.revision, 9);
+        assert.equal(payload.override, "FORCE_RESTRICTED");
+        confirmations += 1;
+        if (confirmations === 1) {
+          if (firstFailure === "throw") throw new Error("timeout");
+          return { ok: false, reason: "timeout" };
+        }
+        return exactAccessAck;
+      }
+    });
+    const response = await handler(accessPatch());
+    assert.equal(response.statusCode, 200);
+    assert.equal(writes, 1);
+    assert.equal(confirmations, 2);
+    assert.deepEqual(JSON.parse(response.body).propagation, exactAccessAck);
+  });
+}
+
+for (const mismatch of [{ revision: 10 }, { override: "AUTO" }, { pending: true }, { failClosed: true },
+  { pending: undefined }, { failClosed: undefined }, { ok: false, reason: "timeout" }]) {
+  test(`Admin refuses inexact WS confirmation ${JSON.stringify(mismatch)}`, async () => {
+    let writes = 0;
+    let confirmations = 0;
+    const handler = createAdminUserPokerAccessHandler({
+      env: { CHIPS_ENABLED: "1" }, requireAdminUser: async () => ({ userId: "admin" }),
+      updatePokerAccess: async () => { writes += 1; return { access: { revision: 9, override: "FORCE_RESTRICTED" } }; },
+      notifyWsPokerAccessMutation: async ({ phase }) => {
+        if (phase === "invalidate") return { ok: true, invalidated: true, failClosed: true };
+        confirmations += 1;
+        return notifyWsPokerAccessMutation({
+          userId: "00000000-0000-4000-8000-000000000020",
+          env: { POKER_WS_INTERNAL_BASE_URL: "https://ws.test", POKER_WS_INTERNAL_TOKEN: "test-token" },
+          fetchImpl: async () => ({ ok: true, json: async () => ({ ...exactAccessAck, ...mismatch }) })
+        });
+      }
+    });
+    const response = await handler(accessPatch());
+    assert.equal(response.statusCode, 503);
+    assert.equal(JSON.parse(response.body).error, "poker_access_propagation_failed");
+    assert.equal(writes, 1);
+    assert.equal(confirmations, 3);
+  });
+}
+
+test("Admin synchronously recovers committed pending and returns current access for a stale caller without writing", async () => {
+  let writes = 0;
+  const phases = [];
+  const current = { revision: 9, override: "FORCE_RESTRICTED", effectiveClass: "RESTRICTED" };
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" }, requireAdminUser: async () => ({ userId: "admin" }),
+    loadPokerAccess: async () => current,
+    updatePokerAccess: async () => { writes += 1; },
+    notifyWsPokerAccessMutation: async (payload) => {
+      phases.push(payload.phase);
+      if (payload.phase === "invalidate") return { ok: false, reason: "poker_access_mutation_pending" };
+      assert.notEqual(payload.releasePending, true, "recovery cannot release an uncommitted mutation");
+      assert.equal(payload.override, undefined, "recovery uses the previous pending override, not the new AUTO request");
+      return exactAccessAck;
+    }
+  });
+  const response = await handler(accessPatch("AUTO", 8));
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "stale_revision", access: current });
+  assert.equal(writes, 0);
+  assert.deepEqual(phases, ["invalidate", "refresh"]);
 });
 
 test("poker access admin preserves automatic SLOW while applying an optimistic override revision", async () => {
