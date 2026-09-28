@@ -91,7 +91,9 @@ The new branch reuses the existing injected `random` without introducing any new
   - `[0.6, 0.8)` → `all_in_come_on`
   - `[0.8, 1.0)` → `all_in_censored`
 - For `bad_beat` (heads-up river reversal), only the first draw (`samplePasses`) is consumed because the reaction key is constant (`bad_beat`).
-- Deterministic behavior tests should supply an appropriate sequence of injected random values (e.g. `[0.1, 0.05]`) or directly test `sampleAllInLossReactionKey`.
+- **Internal Helper & Test Coverage**: `sampleAllInLossReactionKey` remains a private, non-exported internal helper in `ws-server/poker/handlers/reaction.mjs` (no test-only export). Deterministic behavior test coverage is executed entirely through the public `classifySettlementReaction` entry point using an injected sequence of random values:
+  - Draw 1 = successful frequency gate (e.g. `0.1`);
+  - Draw 2 = expected selection boundary (e.g. `0.05`, `0.25`, `0.45`, `0.65`, `0.85`).
 - Personality-specific weighting (Cowboy, Professor, Robot, Shark) is strictly deferred to #804.
 
 ---
@@ -105,7 +107,7 @@ For #796, `bad_beat` is intentionally a **narrow river-reversal heuristic**, not
 3. Exactly one final winner (`state.showdown?.winners?.length === 1`);
 4. That final winner appears in existing `riverChangedWinnerUserIds`.
 
-If all conditions hold, the classifier emits existing `bad_beat` (😢 "Bad beat" with `shake` avatar motion, table broadcast without `targetSeatNo`) instead of sampling the 5-item loss pool.
+If all conditions hold, the classifier emits existing `bad_beat` (😢 "Bad beat" with `shake` avatar motion, table broadcast omitting `targetSeatNo`) instead of sampling the 5-item loss pool. Existing `targetSeatNo` semantics for all other reactions remain completely unchanged.
 
 ### Why Equity Calculations are Excluded
 - Calculating turn equity requires a Monte Carlo or combinatorial poker-equity engine.
@@ -132,17 +134,20 @@ If all conditions hold, the classifier emits existing `bad_beat` (😢 "Bad beat
 - If `contrib > start`, data is corrupt/inconsistent and fails closed.
 - No `>=` comparisons are permitted in all-in validation.
 
-### Showdown Loser Definition & Uncalled Return Handling
+### Showdown Loser Definition & Fail-Closed Payout Validation
 - A bot qualifies as an all-in loser if and only if:
   1. It is not in `showdown.winners`;
-  2. `Number(state.handSettlement?.payouts?.[botUserId] ?? 0) <= 0`.
-- If an uncalled bet was refunded to the bot's stack via `poker-side-pots.mjs` / `poker-payout.mjs`, `handSettlement.payouts[botUserId] > 0`. This strictly disqualifies the bot from all-in loss reactions and `bad_beat`.
+  2. Payout validation is strictly fail-closed:
+     - Missing entry in `handSettlement.payouts` for a showdown loser is valid and represents 0 chips won.
+     - If a payout entry exists, it MUST be a valid finite, non-negative integer (`typeof val === 'number' && Number.isInteger(val) && val >= 0`).
+     - Any positive payout (`payout > 0`, including uncalled bet returns refunded via `poker-side-pots.mjs` / `poker-payout.mjs` or pot chops) strictly disqualifies the bot from lost all-in reactions and `bad_beat`.
+     - Any malformed, non-finite, negative, or non-numeric payout entry (e.g. `NaN`, string `"abc"`, `-10`) fails closed on the all-in branch only and falls through to generic settlement reactions.
 - The classifier cleanly falls through to existing generic settlement branches (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`).
 - Zero changes are made to the settlement/payout engine.
 
 ### Fail-Closed Fallthrough
-- If accounting maps are missing, undefined, non-integer, or corrupt, the all-in branch is skipped.
-- The classifier DOES NOT return `null` on accounting failure alone; it continues down the existing waterfall.
+- If accounting maps are missing, undefined, non-integer, or corrupt, or if payout is malformed, the all-in branch is skipped.
+- The classifier DOES NOT return `null` on accounting or payout failure alone; it continues down the existing waterfall.
 
 ---
 
@@ -169,7 +174,7 @@ If all conditions hold, the classifier emits existing `bad_beat` (😢 "Bad beat
 - Base probability is **1.0** via `samplePasses(random, 1, reactionSettings)`.
 - At default `frequencyPercent = 100`, every qualified all-in loss or bad beat reliably generates a reaction candidate.
 - Reuses existing 4,000 ms cooldown, 300–1,200 ms jitter, scheduler, and single-evaluation-per-hand lifecycle.
-- Untargeted table broadcast: no `targetSeatNo`.
+- Untargeted table broadcast: `targetSeatNo` is omitted for `bad_beat` and all-in loss pool reactions; existing `targetSeatNo` semantics for all other reactions remain completely unchanged.
 
 ---
 

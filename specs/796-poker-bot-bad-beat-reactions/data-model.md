@@ -79,13 +79,13 @@ const ALL_IN_LOSS_REACTION_KEYS: ReadonlyArray<AllInLossReactionKey> = Object.fr
 ```
 
 ### SettlementReactionCandidate
-Candidate object returned by `classifySettlementReaction` before cooldown reservation and jitter delay. Note: `targetSeatNo` is never set for `bad_beat` or any all-in loss reaction. `not_this_time` is excluded from settlement (used exclusively for folds).
+Candidate object returned by `classifySettlementReaction` before cooldown reservation and jitter delay. Note: `targetSeatNo` MUST be omitted for `bad_beat` and all five all-in loss reactions; existing `targetSeatNo` semantics for all other reactions remain completely unchanged. `not_this_time` is excluded from settlement (used exclusively for folds).
 
 ```typescript
 interface SettlementReactionCandidate {
   botUserId: string;
   botSeatNo: number;
-  targetSeatNo?: number; // Only for nice_bluff / targeted reactions; omitted for bad_beat and all-in loss pool
+  targetSeatNo?: number; // Preserved for existing targeted reactions (nice_bluff, lucky, generic congrats); omitted for bad_beat and all-in loss pool
   reactionKey:
     | 'bad_beat'
     | AllInLossReactionKey
@@ -132,13 +132,22 @@ interface SettlementReactionCandidate {
    }
    ```
 
-2. **Lost All-In Candidate Qualification (Excludes Winners & Positive Payouts)**:
+2. **Lost All-In Candidate Qualification (Excludes Winners & Fail-Closed Payout Validation)**:
    ```javascript
    function isLostAllInCandidate(botUserId, state) {
      if (Array.isArray(state?.showdown?.winners) && state.showdown.winners.includes(botUserId)) {
        return false;
      }
-     const payout = Number(state?.handSettlement?.payouts?.[botUserId] ?? 0);
+     const rawPayout = state?.handSettlement?.payouts?.[botUserId];
+     let payout = 0;
+     if (rawPayout !== undefined && rawPayout !== null) {
+       // If payout exists, strictly validate as a finite non-negative integer
+       if (typeof rawPayout !== 'number' || !Number.isInteger(rawPayout) || rawPayout < 0) {
+         // Malformed, non-finite, negative, or string values fail closed on this branch
+         return false;
+       }
+       payout = rawPayout;
+     }
      if (payout > 0) {
        // Any positive payout, including uncalled bet returns, strictly disqualifies from lost all-in
        return false;
@@ -164,6 +173,7 @@ interface SettlementReactionCandidate {
    - **Draw 1 (Frequency Gate)**: `samplePasses(random, 1, reactionSettings)` consumes one draw from `random`.
    - **Draw 2 (Selection Draw)**: If frequency passes and candidate is an ordinary all-in loser (or multiway reversal), `sampleAllInLossReactionKey(random)` consumes the next draw from `random` for uniform selection across `ALL_IN_LOSS_REACTION_KEYS`:
    ```javascript
+   // Internal, non-exported helper in ws-server/poker/handlers/reaction.mjs
    function sampleAllInLossReactionKey(random = Math.random) {
      const r = typeof random === 'function' ? random() : Math.random();
      const clamped = Math.min(Math.max(Number(r) || 0, 0), 0.999999);
@@ -172,7 +182,7 @@ interface SettlementReactionCandidate {
    }
    ```
    **Boundary Mapping for Tests (Selection Draw)**:
-   The selection boundaries apply strictly to the second draw after the frequency gate succeeds:
+   The selection boundaries apply strictly to the second draw after the frequency gate succeeds. Tests verify this behavior deterministically through the public `classifySettlementReaction` without requiring test-only exports:
    - `[0.0, 0.2)` → `all_in_oh_no`
    - `[0.2, 0.4)` → `all_in_that_hurts`
    - `[0.4, 0.6)` → `all_in_no_way`
@@ -180,4 +190,4 @@ interface SettlementReactionCandidate {
    - `[0.8, 1.0)` → `all_in_censored`
 
 5. **Fail-Closed & Fallthrough Guarantee**:
-   If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, non-integer, or corrupt (`contribution > handStartStack`), `isPlayerAllIn` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.
+   If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, non-integer, or corrupt (`contribution > handStartStack`), or if payout data is malformed/negative/non-finite, `isLostAllInCandidate` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting or payout failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.

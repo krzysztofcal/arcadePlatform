@@ -33,9 +33,9 @@
 
 ### Implementation for User Story 1
 - [ ] T005 [US1] Implement `isPlayerAllIn(userId, handStartStacks, contributions)` validation helper with strict uncoerced integer checks (`typeof val === 'number' && Number.isInteger(val)`, `start > 0`, `contrib >= 0`, `contrib === start`) in ws-server/poker/handlers/reaction.mjs
-- [ ] T006 [US1] Implement `sampleAllInLossReactionKey(random)` uniform sampler across `ALL_IN_LOSS_REACTION_KEYS` in ws-server/poker/handlers/reaction.mjs for the second draw (selection draw) of the two-draw contract
-- [ ] T007 [US1] Add ordinary lost all-in classifier branch in `classifySettlementReaction` implementing the two sequential random draws contract: Draw 1 for frequency gate `samplePasses(random, 1, reactionSettings)`, and Draw 2 for `sampleAllInLossReactionKey(random)` returning a uniformly sampled key from `ALL_IN_LOSS_REACTION_KEYS` (table broadcast, no `targetSeatNo`) for eligible losing all-in bots (requiring bot not in `showdown.winners` and `Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`) in ws-server/poker/handlers/reaction.mjs
-- [ ] T008 [US1] Add deterministic behavior tests in ws-server/poker/handlers/reaction.behavior.test.mjs proving that: (1) qualifying lost all-in selects only from the 5 new keys and never `not_this_time`; (2) existing `FOLD -> not_this_time` remains active without regression; (3) representative injected-random boundaries deterministically map to the 5 keys on the selection draw after a successful frequency gate (`[0.0, 0.2)` → `all_in_oh_no` ... `[0.8, 1.0)` → `all_in_censored`)
+- [ ] T006 [US1] Implement internal helper `sampleAllInLossReactionKey(random)` uniform sampler across `ALL_IN_LOSS_REACTION_KEYS` in ws-server/poker/handlers/reaction.mjs for the second draw (selection draw) of the two-draw contract (non-exported helper; tested through `classifySettlementReaction`)
+- [ ] T007 [US1] Add ordinary lost all-in classifier branch in `classifySettlementReaction` implementing the two sequential random draws contract: Draw 1 for frequency gate `samplePasses(random, 1, reactionSettings)`, and Draw 2 for `sampleAllInLossReactionKey(random)` returning a uniformly sampled key from `ALL_IN_LOSS_REACTION_KEYS` (table broadcast, omitting `targetSeatNo`) for eligible losing all-in bots (requiring bot not in `showdown.winners` and strictly fail-closed zero payout check) in ws-server/poker/handlers/reaction.mjs
+- [ ] T008 [US1] Add deterministic behavior tests in ws-server/poker/handlers/reaction.behavior.test.mjs proving that: (1) qualifying lost all-in selects only from the 5 new keys and never `not_this_time`; (2) existing `FOLD -> not_this_time` remains active without regression; (3) representative injected-random boundaries deterministically map to the 5 keys on the selection draw after a successful frequency gate (`[0.0, 0.2)` → `all_in_oh_no` ... `[0.8, 1.0)` → `all_in_censored`) via `classifySettlementReaction`
 
 ---
 
@@ -46,7 +46,7 @@
 **Independent Test**: Simulate a heads-up showdown where the winner is in `riverChangedWinnerUserIds`; verify reaction key is `bad_beat` (broadcast without `targetSeatNo`).
 
 ### Implementation for User Story 2
-- [ ] T009 [US2] Extend the all-in classifier in `classifySettlementReaction` in ws-server/poker/handlers/reaction.mjs to detect heads-up river reversal (exactly 2 evaluated hands in `showdown.handsByUserId` with a single winner and winner in `riverChangedWinnerUserIds`) and emit `bad_beat` (table broadcast, no `targetSeatNo`) with base probability = 1.0
+- [ ] T009 [US2] Extend the all-in classifier in `classifySettlementReaction` in ws-server/poker/handlers/reaction.mjs to detect heads-up river reversal (exactly 2 evaluated hands in `showdown.handsByUserId` with a single winner and winner in `riverChangedWinnerUserIds`) and emit `bad_beat` (table broadcast, omitting `targetSeatNo`) with base probability = 1.0
 - [ ] T010 [US2] Add deterministic behavior test in ws-server/poker/handlers/reaction.behavior.test.mjs for heads-up all-in river reversal -> `bad_beat` (broadcast without `targetSeatNo`), including a test case where 3 players were in `handSeats` but 1 left the table or sat out, resulting in exactly 2 hands in `showdown.handsByUserId` and proving it correctly qualifies as heads-up
 - [ ] T011 [US2] Add behavior test in ws-server/poker/handlers/reaction.behavior.test.mjs proving multiway showdown (3+ hands in `showdown.handsByUserId`) with river reversal falls back to the ordinary 5-reaction all-in loss pool (not `bad_beat`)
 
@@ -54,13 +54,13 @@
 
 ## Phase 5: User Story 3 - Authoritative Evidence & Fail-Closed Safety (Priority: P2)
 
-**Goal**: Guarantee fail-closed safety on corrupt/missing data, uncalled bet returns, and string coercion attempts.
+**Goal**: Guarantee fail-closed safety on corrupt/missing data, uncalled bet returns, malformed/non-finite payouts, and string coercion attempts.
 
-**Independent Test**: Supply missing/corrupted/string accounting maps (`contribution > handStartStack`) or uncalled bet return; verify classifier cleanly falls through to generic reactions without errors.
+**Independent Test**: Supply missing/corrupted/string accounting maps (`contribution > handStartStack`), uncalled bet return, or malformed payout (`NaN`, string, negative); verify classifier cleanly falls through to generic reactions without errors or false-positive all-in reactions.
 
 ### Implementation for User Story 3
-- [ ] T012 [US3] Enforce strict uncoerced integer checks in `isPlayerAllIn` (raw numbers only, no coercion from strings) and zero payout check (`payouts[botUserId] <= 0`), ensuring positive uncalled returns disqualify the bot from lost all-in in ws-server/poker/handlers/reaction.mjs
-- [ ] T013 [US3] Add behavior tests in ws-server/poker/handlers/reaction.behavior.test.mjs verifying: (1) missing/corrupt/string accounting data (`contribution > handStartStack`, missing maps, string numbers) does NOT emit all-in loss or `bad_beat` reactions but cleanly falls through to trigger applicable generic settlement reactions (e.g. `nice_hand` / `congrats`); (2) a bot committing full starting stack but receiving a positive uncalled return (`payouts[botUserId] > 0`) while losing the contested pot is disqualified from lost all-in / bad-beat and falls through to existing generic branches; (3) non-all-in losers and folded bots are excluded
+- [ ] T012 [US3] Enforce strict uncoerced integer checks in `isPlayerAllIn` (raw numbers only, no coercion from strings) and strictly fail-closed zero payout check in `isLostAllInCandidate` (missing entry is valid zero; present entry must be finite non-negative integer equal to 0; positive payout strictly disqualifies; malformed/negative/non-finite values fail closed on all-in branch) in ws-server/poker/handlers/reaction.mjs
+- [ ] T013 [US3] Add behavior tests in ws-server/poker/handlers/reaction.behavior.test.mjs verifying: (1) missing/corrupt/string accounting data (`contribution > handStartStack`, missing maps, string numbers) does NOT emit all-in loss or `bad_beat` reactions but cleanly falls through to trigger applicable generic settlement reactions (e.g. `nice_hand` / `congrats`); (2) malformed/non-finite/negative payout (e.g. string `"abc"`, `NaN`, `-5`) fails closed on the all-in branch and does NOT produce a false-positive lost all-in reaction, falling through to generic reactions; (3) a bot committing full starting stack but receiving a positive uncalled return (`payouts[botUserId] > 0`) while losing the contested pot is disqualified from lost all-in / bad-beat and falls through to existing generic branches; (4) non-all-in losers and folded bots are excluded
 
 ---
 
@@ -95,8 +95,8 @@
 - **Fail-closed & fallthrough**: Any corrupt or missing accounting evidence (`contribution > handStartStack`, missing maps, string numbers) safely skips the lost all-in branch and falls through to existing generic reactions; does not return null on accounting errors alone.
 - **Uncalled return exclusion**: Any positive payout (`payouts[botUserId] > 0`), including uncalled bet returns, disqualifies bot from lost all-in / bad-beat, falling through to existing generic settlement branches.
 - **Dual accounting maps isolation**: Neither `handStartStacksByUserId` nor `contributionsByUserId` is ever exposed in client snapshots or WebSocket protocol frames.
-- **No client targeting**: `bad_beat` and the 5 all-in loss pool reactions are table broadcasts without `targetSeatNo`. Client targeting remains reserved for `nice_hand`.
-- **No test-only exports**: `buildDetachedReactionContext` is not exported; server tests validate the end-to-end integration flow.
+- **No client targeting for new reactions**: `bad_beat` and all five all-in loss pool reactions MUST omit `targetSeatNo` (table broadcasts); existing `targetSeatNo` semantics for all other reactions remain completely unchanged.
+- **No test-only exports**: Neither `buildDetachedReactionContext` nor `sampleAllInLossReactionKey` is exported; tests validate behavior via public server integration and `classifySettlementReaction`.
 - **Two sequential random draws**: Draw 1 for `samplePasses(random, 1, reactionSettings)` frequency gate; Draw 2 for `sampleAllInLossReactionKey(random)` selection draw from `ALL_IN_LOSS_REACTION_KEYS`.
 - **Protocol docs**: Zero message-type / payload-shape changes; semantic vocabulary expands by 5 bot-only keys, documented in `docs/ws-poker-protocol.md`.
 - **Base probability = 1.0**: Qualified events reliably trigger under 100% frequency setting.

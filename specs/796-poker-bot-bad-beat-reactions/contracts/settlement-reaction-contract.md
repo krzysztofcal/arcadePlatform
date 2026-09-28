@@ -59,16 +59,16 @@ Evaluates settlement context to select at most one bot reaction candidate for th
     - Raw `handStartStacksByUserId[userId]` and `contributionsByUserId[userId]` must be actual uncoerced integers (`typeof val === 'number' && Number.isInteger(val)`).
     - Starting stack > 0, contribution >= 0, and exact `contribution === startingStack`.
     - Bot is not in `showdown.winners`.
-    - Zero payout (`Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`). Uncalled bet returns refunded to stack strictly disqualify from lost all-in.
+    - Payout validation must be strictly fail-closed: a missing entry in `handSettlement.payouts` for a loser is normal and valid (treated as 0 chips). If an entry exists, it MUST be a valid finite, non-negative integer (`typeof val === 'number' && Number.isInteger(val) && val >= 0`). Any positive payout (`val > 0`, including uncalled bet returns refunded to stack) strictly disqualifies the bot from lost all-in. Any malformed, non-finite, negative, or non-numeric payout entry fails closed on this branch.
   - **Narrow Bad-Beat Heuristic vs Pool**:
     - If showdown is heads-up (`Object.keys(showdown.handsByUserId).length === 2`) and the single winner is in `riverChangedWinnerUserIds`, emits `bad_beat`.
     - Otherwise, uniformly samples from `ALL_IN_LOSS_REACTION_KEYS` (`all_in_oh_no`, `all_in_that_hurts`, `all_in_no_way`, `all_in_come_on`, `all_in_censored`) using injected `random`.
     - `not_this_time` is NEVER emitted from settlement (reserved exclusively for fold).
   - **Fail-closed & Fallthrough**:
     - If `reactionSettings.enabled === false` or settlement state is incomplete (`isCompleteReactionSettlement(state) !== true`, `state.phase !== 'SETTLED'`), the function returns `null`.
-    - If all-in accounting maps are missing, invalid, non-integer, or corrupt (`contribution > handStartStack`), the all-in branch is cleanly skipped and the classifier proceeds down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior.
+    - If all-in accounting maps are missing, invalid, non-integer, or corrupt (`contribution > handStartStack`), or if payout is malformed, the all-in branch is cleanly skipped and the classifier proceeds down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior.
   - **Two Sequential Random Draws Contract**:
-    - Evaluated with injected `random` without new RNG abstractions:
+    - Evaluated with injected `random` without new RNG abstractions (helper `sampleAllInLossReactionKey` remains internal and non-exported; deterministic test coverage is verified via `classifySettlementReaction`):
       - **Draw 1 (Frequency Gate)**: `samplePasses(random, 1, reactionSettings)` consumes one draw from `random`. At `frequencyPercent = 100`, every qualified all-in loss produces a candidate.
       - **Draw 2 (Selection Draw)**: If frequency passes and candidate is an ordinary all-in loser (or multiway reversal), `sampleAllInLossReactionKey(random)` consumes the next draw from `random` for uniform selection across `ALL_IN_LOSS_REACTION_KEYS`:
         - `[0.0, 0.2)` → `all_in_oh_no`
@@ -77,7 +77,7 @@ Evaluates settlement context to select at most one bot reaction candidate for th
         - `[0.6, 0.8)` → `all_in_come_on`
         - `[0.8, 1.0)` → `all_in_censored`
       - For `bad_beat` (heads-up river reversal), only Draw 1 is consumed because the reaction key is fixed (`bad_beat`).
-  - **Targeting**: Neither `bad_beat` nor any of the 5 all-in loss pool reactions set `targetSeatNo`. Client targeting remains exclusively reserved for `nice_hand`.
+  - **Targeting**: Both `bad_beat` and all five all-in loss pool reactions MUST omit `targetSeatNo` (they are untargeted table broadcasts); existing `targetSeatNo` semantics for all other reactions remain completely unchanged.
   - **Priority**:
     1. Fold win (`i_was_bluffing` / `nice_bluff`)
     2. Lost all-in / bad beat (`bad_beat` / `ALL_IN_LOSS_REACTION_KEYS`)
