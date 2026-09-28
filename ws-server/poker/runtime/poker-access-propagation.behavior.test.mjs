@@ -696,7 +696,8 @@ return {
   getPersistedFundings: () => persistedFundings,
   getPersistedCount: () => stats.persistedCount,
   tableManager,
-  settledRolloverGenerationKey
+  settledRolloverGenerationKey,
+  decideSettledBotFunding
 };`
   )(...Object.values(deps));
 
@@ -885,4 +886,78 @@ test("human and two busted bots retry on unknown funding, then fund replacements
   assert.equal(res3.reason, "not_enough_players");
   // Retry was NOT scheduled because no-funding is authoritative
   assert.equal(runtime.getRetries().length, 1);
+});
+
+test("RESTRICTED with missing or expired funding snapshot yields authoritative no-funding without retry", async () => {
+  const runtime = await settledRolloverRuntimeFixture({ initialFundingSnapshot: null });
+  const tableId = "table_settled_restricted_missing_snapshot";
+  const humanUserId = "00000000-0000-4000-8000-000000000099";
+  const bot1Id = "00000000-0000-4000-8000-0000000000b1";
+  const bot2Id = "00000000-0000-4000-8000-0000000000b2";
+
+  runtime.tableManager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 6, buyIn: 500, lifecycleKind: "STANDARD", isSlowOnly: false, stakes: { sb: 5, bb: 10 } },
+    coreState: {
+      roomId: tableId, version: 1, maxSeats: 6,
+      members: [{ userId: humanUserId, seat: 1 }, { userId: bot1Id, seat: 2 }, { userId: bot2Id, seat: 3 }],
+      seats: { [humanUserId]: 1, [bot1Id]: 2, [bot2Id]: 3 },
+      publicStacks: { [humanUserId]: 1500, [bot1Id]: 0, [bot2Id]: 0 },
+      seatDetailsByUserId: {
+        [humanUserId]: { isBot: false, botProfile: null, leaveAfterHand: false },
+        [bot1Id]: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false },
+        [bot2Id]: { isBot: true, botProfile: "NORMAL", leaveAfterHand: false }
+      },
+      pokerState: {
+        roomId: tableId, handId: "hand_restricted_missing_snapshot", phase: "SETTLED", dealerSeatNo: 1,
+        seats: [{ userId: humanUserId, seatNo: 1, status: "ACTIVE" }, { userId: bot1Id, seatNo: 2, status: "ACTIVE" }, { userId: bot2Id, seatNo: 3, status: "ACTIVE" }],
+        stacks: { [humanUserId]: 1500, [bot1Id]: 0, [bot2Id]: 0 },
+        handSettlement: { handId: "hand_restricted_missing_snapshot", settledAt: "2026-09-28T00:00:00.000Z", payouts: {} }
+      }
+    },
+    presenceByUserId: new Map([
+      [humanUserId, { userId: humanUserId, seat: 1, connected: true, lastSeenAt: 1, expiresAt: null }],
+      [bot1Id, { userId: bot1Id, seat: 2, connected: false, lastSeenAt: 1, expiresAt: null }],
+      [bot2Id, { userId: bot2Id, seat: 3, connected: false, lastSeenAt: 1, expiresAt: null }]
+    ])
+  });
+  runtime.tableManager.join({
+    ws: { send: () => {} },
+    userId: humanUserId,
+    tableId,
+    requestId: "join-restricted-missing-snapshot",
+    nowTs: Date.now()
+  });
+
+  const nowMs = Date.now();
+  // Seated human has effectiveClass: RESTRICTED
+  runtime.tableManager.cachePokerAccess(tableId, humanUserId, {
+    automaticClass: "NORMAL", override: "FORCE_RESTRICTED", effectiveClass: "RESTRICTED", revision: 12,
+    loadedAtMs: nowMs, expiresAtMs: nowMs + 30_000
+  }, { slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: nowMs, expiresAtMs: nowMs + 30_000 }, nowMs);
+
+  // Funding snapshot is missing (null) or expired
+  runtime.setFundingSnapshot(null);
+
+  // Directly verify decideSettledBotFunding contract: RESTRICTED takes precedence over missing snapshot
+  const decision = runtime.decideSettledBotFunding({
+    snapshot: null,
+    buyIn: 500,
+    effectiveRestricted: true,
+    nowMs
+  });
+  assert.equal(decision.known, true);
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.systemKey, null);
+  assert.equal(decision.reason, "restricted");
+
+  const genKey = runtime.settledRolloverGenerationKey(tableId);
+  const result = await runtime.runSettledRolloverCommand({ tableId, generationKey: genKey, attempt: 0 });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, false);
+  assert.equal(result.reason, "not_enough_players");
+  // Zero funding persisted
+  assert.equal(runtime.getPersistedFundings().length, 0);
+  assert.equal(runtime.getPersistedCount(), 0);
+  // Zero retries scheduled because RESTRICTED is authoritative no-funding, not UNKNOWN
+  assert.equal(runtime.getRetries().length, 0);
 });

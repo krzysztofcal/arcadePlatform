@@ -31,20 +31,20 @@ export function decideSettledBotFunding({
   legacySystemKey = "TREASURY",
   nowMs = Date.now()
 } = {}) {
-  if (!snapshot || !Number.isFinite(snapshot.expiresAtMs) || nowMs > snapshot.expiresAtMs) {
-    return {
-      known: false,
-      allowed: false,
-      systemKey: null,
-      reason: !snapshot ? "missing_snapshot" : "expired_snapshot"
-    };
-  }
   if (effectiveRestricted === true) {
     return {
       known: true,
       allowed: false,
       systemKey: null,
       reason: "restricted"
+    };
+  }
+  if (!snapshot || !Number.isFinite(snapshot.expiresAtMs) || nowMs > snapshot.expiresAtMs) {
+    return {
+      known: false,
+      allowed: false,
+      systemKey: null,
+      reason: !snapshot ? "missing_snapshot" : "expired_snapshot"
     };
   }
   if (snapshot.schemaBacked === false) {

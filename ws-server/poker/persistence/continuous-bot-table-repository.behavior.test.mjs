@@ -604,3 +604,58 @@ test("reconcile includes a newly created table in rotationScheduledTableIds", as
     "rotationDueAtByTableId entry must be a valid ISO timestamp"
   );
 });
+
+test("reconcile treats an enabled profile with unprovisioned tier 100 as controlled inactive with zero table INSERT", async () => {
+  let tableInserted = false;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    beginSql: async (run) => {
+      const tx = {
+        unsafe: async (sql) => {
+          const normalizedSql = String(sql).toLowerCase();
+          if (normalizedSql.includes("to_regclass")) return [{ available: true }];
+          if (normalizedSql.includes("from public.poker_managed_table_profiles")) {
+            return [{
+              ...PROFILE,
+              enabled: true,
+              desired_table_count: 1,
+              min_bot_count: 1,
+              target_bot_count: 1,
+              max_bot_count: 1
+            }];
+          }
+          if (normalizedSql.includes("from public.poker_tables") && normalizedSql.includes("for update")) return [];
+          if (normalizedSql.includes("from public.poker_bot_tier_policy")) {
+            return [{
+              buy_in: 100,
+              enabled: true,
+              normal_refill_threshold_ch: 1,
+              normal_refill_amount_ch: 1,
+              slow_refill_threshold_ch: 1,
+              slow_refill_amount_ch: 1,
+              revision: 1
+            }];
+          }
+          // Provisioning check: only NORMAL is provisioned, SLOW is missing
+          if (normalizedSql.includes("from public.chips_accounts") && normalizedSql.includes("system_key = any")) {
+            return [{ system_key: "POKER_BOT_BANKROLL_100", status: "ACTIVE" }];
+          }
+          if (normalizedSql.includes("insert into public.poker_tables")) {
+            tableInserted = true;
+            return [{ id: "unwanted-table-id" }];
+          }
+          return [];
+        }
+      };
+      return run(tx);
+    }
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(tableInserted, false);
+  assert.equal(result.ok, true);
+  assert.equal(result.controlledInactive, true);
+  assert.equal(result.reason, "tier_unprovisioned");
+  assert.deepEqual(result.createdTableIds, []);
+});

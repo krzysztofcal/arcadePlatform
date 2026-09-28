@@ -113,17 +113,6 @@ export function tableMatchesContinuousBotProfile(table, profile) {
 
 async function createManagedTable(tx, { profile, botConfig, klog }) {
   const buyIn = DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
-  const stakes = calculateCanonicalPokerStakes(buyIn);
-  const rotationDueAt = new Date(Date.now() + profile.rotationIntervalSeconds * 1_000).toISOString();
-  const created = await createPokerTableWithState(tx, {
-    userId: null,
-    maxPlayers: profile.maxSeats,
-    stakesJson: JSON.stringify(stakes),
-    buyIn,
-    lifecycleKind: "CONTINUOUS_BOT",
-    managedProfileKey: profile.profileKey,
-    rotationDueAt
-  });
   const poolSchema = await hasPokerPoolSchema(tx);
   let fundingEnabled = true;
   if (poolSchema) {
@@ -137,6 +126,17 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     }
     fundingEnabled = true;
   }
+  const stakes = calculateCanonicalPokerStakes(buyIn);
+  const rotationDueAt = new Date(Date.now() + profile.rotationIntervalSeconds * 1_000).toISOString();
+  const created = await createPokerTableWithState(tx, {
+    userId: null,
+    maxPlayers: profile.maxSeats,
+    stakesJson: JSON.stringify(stakes),
+    buyIn,
+    lifecycleKind: "CONTINUOUS_BOT",
+    managedProfileKey: profile.profileKey,
+    rotationDueAt
+  });
   const seededBots = await seedBotsForJoin({
     tx,
     tableId: created.tableId,
