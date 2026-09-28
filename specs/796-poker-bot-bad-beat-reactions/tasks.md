@@ -83,7 +83,7 @@
 
 - [x] T017 Run syntax check (`npm run syntax`) and repository guard checks (`npm run check:all`)
 - [x] T018 [P] Run full reaction behavior suite (`node --test ws-server/poker/handlers/reaction.behavior.test.mjs`), server integration tests (`node --test ws-server/server.behavior.test.mjs`), and client live tests (`node --test tests/poker-v2-live.behavior.test.mjs`)
-- [ ] T019 Execute exact-SHA manual `WS Preview Deploy` workflow (`--ref main -f ref=<SHA>`) and perform Netlify Deploy Preview manual smoke per quickstart.md
+- [x] T019 Execute exact-SHA manual `WS Preview Deploy` workflow (`--ref main -f ref=f39fbfdb3abc1e48fe828d0faa092f12a6ab1124`, Run `36415675935`), verify mandatory Netlify Deploy Preview manual smoke for Scenarios 1, 4, and 5 (table health & fold reaction, human menu isolation, admin disable controls), and confirm mandatory deterministic automated verification for card-dependent Scenarios 2 and 3 per quickstart.md
 
 ---
 
