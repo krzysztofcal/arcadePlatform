@@ -20,7 +20,7 @@ Takes the live internal poker state and generates an immutable, detached snapsho
   - Contains `handStartStacksByUserId` as a frozen map of user IDs to integer chip amounts.
   - Contains `contributionsByUserId` as a frozen map of user IDs to integer chip amounts.
   - Does NOT mutate `state`.
-  - Is NOT broadcast over WebSocket or exposed in client snapshots (`handStartStacksByUserId` remains private).
+  - Is NOT broadcast over WebSocket or exposed in client snapshots (neither `handStartStacksByUserId` nor `contributionsByUserId` is ever exposed).
 
 ```javascript
 // Internal signature in ws-server/server.mjs (non-exported):
@@ -53,7 +53,10 @@ Evaluates settlement context to select at most one bot reaction candidate for th
 - **Invariants**:
   - **Deterministic selection**: Bots are sorted in ascending `seatNo` order. When multiple bots qualify, the first eligible bot is selected.
   - **Single emission**: Returns at most one candidate per call.
-  - **Fail-closed**: If `reactionSettings.enabled === false`, `state.phase !== 'SETTLED'`, or state/accounting is incomplete/inconsistent (e.g. `contribution > handStartStack`), returns `null`.
+  - **Fail-closed & Fallthrough**:
+    - If `reactionSettings.enabled === false` or settlement state is incomplete (`isCompleteReactionSettlement(state) !== true`, `state.phase !== 'SETTLED'`), the function returns `null`.
+    - If all-in accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, or corrupt (`contribution > handStartStack`), the all-in branch is cleanly skipped and the classifier proceeds down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior.
+    - A positive payout (`Number(handSettlement.payouts?.[botUserId] ?? 0) > 0`), including uncalled bet returns, strictly disqualifies the bot from the lost all-in branch, falling through to subsequent settlement branches.
   - **Base Probability**: Evaluated with `samplePasses(random, 1, reactionSettings)`. At `frequencyPercent = 100`, every qualified all-in loss produces a candidate.
   - **Targeting**: Neither `bad_beat` nor `not_this_time` sets `targetSeatNo`. Client targeting remains exclusively reserved for `nice_hand`.
   - **Priority**:

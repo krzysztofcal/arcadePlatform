@@ -22,7 +22,7 @@ interface AuthoritativeHandAccounting {
 ```
 
 ### DetachedReactionContext (Server Internal)
-The immutable context created in `ws-server/server.mjs::buildDetachedReactionContext` and supplied to reaction classifiers. This context is server-internal and not exported.
+The immutable context created in `ws-server/server.mjs::buildDetachedReactionContext` and supplied to reaction classifiers. This context is server-internal and not exported. Neither `handStartStacksByUserId` nor `contributionsByUserId` is ever exposed in client snapshots or WebSocket protocol messages.
 
 ```typescript
 interface DetachedReactionContext {
@@ -77,8 +77,8 @@ interface SettlementReactionCandidate {
 | Participant State | Showdown Type | River Reversal? | Selected Key | Target Seat | Base Probability |
 |---|---|---|---|---|---|
 | Fold win (1 winner, all others folded) | Normal folds | N/A | `i_was_bluffing` (winning bot) / `nice_bluff` (losing bot) | Winner seat (for `nice_bluff`) | 75% |
-| **All-in bot loser (`contrib === startStack`)** | **Heads-up (2 players at showdown)** | **Yes (winner in `riverChangedWinnerUserIds`)** | **`bad_beat`** | **None (Broadcast)** | **100% (1.0)** |
-| **All-in bot loser (`contrib === startStack`)** | **Multiway or non-reversal** | **No / Multiway** | **`not_this_time`** | **None (Broadcast)** | **100% (1.0)** |
+| **All-in bot loser (`contrib === start`, `payout <= 0`, not in `winners`)** | **Heads-up (2 players at showdown)** | **Yes (winner in `riverChangedWinnerUserIds`)** | **`bad_beat`** | **None (Broadcast)** | **100% (1.0)** |
+| **All-in bot loser (`contrib === start`, `payout <= 0`, not in `winners`)** | **Multiway or non-reversal** | **No / Multiway** | **`not_this_time`** | **None (Broadcast)** | **100% (1.0)** |
 | Showdown winner | Any | Yes (close rank or river) | `lucky` | Lucky winner seat | 70% |
 | Showdown winner | Any | No | `nice_hand` (if category >= 4) | Strong winner seat | 90% |
 | Bot winner | Any | No | `wow` (if payout >= 20 BB) | None (Broadcast) | 100% |
@@ -99,7 +99,21 @@ interface SettlementReactionCandidate {
      return contrib === start;
    }
    ```
-2. **Heads-Up Showdown Qualification**:
+2. **Lost All-In Candidate Qualification (Excludes Winners & Positive Payouts)**:
+   ```javascript
+   function isLostAllInCandidate(botUserId, state) {
+     if (Array.isArray(state?.showdown?.winners) && state.showdown.winners.includes(botUserId)) {
+       return false;
+     }
+     const payout = Number(state?.handSettlement?.payouts?.[botUserId] ?? 0);
+     if (payout > 0) {
+       // Any positive payout, including uncalled bet returns, strictly disqualifies from lost all-in
+       return false;
+     }
+     return isPlayerAllIn(botUserId, state?.handStartStacksByUserId, state?.contributionsByUserId);
+   }
+   ```
+3. **Heads-Up Showdown Qualification**:
    ```javascript
    function isHeadsUpShowdown(handSeats, foldedByUserId, showdown) {
      const nonFolded = handSeats.filter((s) => foldedByUserId[s.userId] !== true);
@@ -107,5 +121,5 @@ interface SettlementReactionCandidate {
      return nonFolded.length === 2 && winnerCount === 1;
    }
    ```
-3. **Fail-Closed Guarantee**:
-   If any input property is missing, `isPlayerAllIn` evaluates to `false`. The classifier never throws and cleanly falls through to lower-priority settlement branches or returns `null`.
+4. **Fail-Closed & Fallthrough Guarantee**:
+   If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, or corrupt (`contribution > handStartStack`), `isPlayerAllIn` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.

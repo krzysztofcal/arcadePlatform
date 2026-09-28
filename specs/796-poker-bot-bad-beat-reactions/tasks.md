@@ -20,7 +20,7 @@
 **⚠️ CRITICAL**: Must be completed before wiring the all-in classifier.
 
 - [ ] T002 Update internal `buildDetachedReactionContext(state)` in ws-server/server.mjs to copy and freeze `handStartStacksByUserId` and `contributionsByUserId` (keeping the helper internal and non-exported)
-- [ ] T003 [P] Add focused end-to-end server behavior test in ws-server/server.behavior.test.mjs covering authoritative settlement state -> detached context -> classifier -> existing scheduler/broadcast flow (without exporting buildDetachedReactionContext), and verify handStartStacksByUserId is not exposed in public room snapshots
+- [ ] T003 [P] Add focused end-to-end server behavior test in ws-server/server.behavior.test.mjs covering authoritative settlement state -> detached context -> classifier -> existing scheduler/broadcast flow (without exporting buildDetachedReactionContext), and verify neither handStartStacksByUserId nor contributionsByUserId is exposed in public room snapshots or WebSocket protocol
 
 ---
 
@@ -32,7 +32,7 @@
 
 ### Implementation for User Story 1
 - [ ] T004 [US1] Implement `isAllInParticipant(userId, handStartStacks, contributions)` validation helper requiring exact `contribution === handStartStack && handStartStack > 0` in ws-server/poker/handlers/reaction.mjs
-- [ ] T005 [US1] Add lost all-in classifier branch in `classifySettlementReaction` returning `not_this_time` (table broadcast, no `targetSeatNo`) with base probability = 1.0 (`samplePasses(random, 1, reactionSettings)`) for eligible losing all-in bots in ws-server/poker/handlers/reaction.mjs
+- [ ] T005 [US1] Add lost all-in classifier branch in `classifySettlementReaction` returning `not_this_time` (table broadcast, no `targetSeatNo`) with base probability = 1.0 (`samplePasses(random, 1, reactionSettings)`) for eligible losing all-in bots (requiring bot not in `showdown.winners` and `Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`) in ws-server/poker/handlers/reaction.mjs
 - [ ] T006 [US1] Add deterministic behavior test in ws-server/poker/handlers/reaction.behavior.test.mjs proving that a losing all-in bot emits `not_this_time` (broadcast without `targetSeatNo`)
 
 ---
@@ -54,11 +54,11 @@
 
 **Goal**: Guarantee fail-closed safety on corrupt/missing data and prevent false positive classifications.
 
-**Independent Test**: Supply missing/corrupted accounting maps (`contribution > handStartStack` or `contribution < handStartStack`); verify classifier cleanly falls through without errors.
+**Independent Test**: Supply missing/corrupted accounting maps (`contribution > handStartStack` or `contribution < handStartStack`) or uncalled bet return; verify classifier cleanly falls through to generic reactions without errors.
 
 ### Implementation for User Story 3
-- [ ] T010 [US3] Enforce strict fail-closed checks in `isAllInParticipant` (positive integer start stack, non-negative contribution, exact equality `contribution === handStartStack`; `contribution > handStartStack` fails closed) in ws-server/poker/handlers/reaction.mjs
-- [ ] T011 [US3] Add behavior tests in ws-server/poker/handlers/reaction.behavior.test.mjs verifying non-all-in losers, folded bots, and corrupt accounting data (`contribution > handStartStack`, missing maps) fail closed and skip the all-in branch
+- [ ] T010 [US3] Enforce strict fail-closed checks in `isAllInParticipant` (positive integer start stack, non-negative contribution, exact equality `contribution === handStartStack`; `contribution > handStartStack` fails closed) and verify zero payout (`payouts[botUserId] <= 0`), ensuring positive uncalled returns disqualify the bot from lost all-in in ws-server/poker/handlers/reaction.mjs
+- [ ] T011 [US3] Add behavior tests in ws-server/poker/handlers/reaction.behavior.test.mjs verifying: (1) missing/corrupt accounting data (`contribution > handStartStack`, missing maps) does NOT emit `bad_beat`/`not_this_time` but cleanly falls through to trigger applicable generic settlement reactions (e.g. `nice_hand` / `congrats`); (2) a bot committing full starting stack but receiving a positive uncalled return (`payouts[botUserId] > 0`) while losing the contested pot is disqualified from lost all-in / bad-beat and falls through to existing generic branches; (3) non-all-in losers and folded bots are excluded
 
 ---
 
@@ -88,7 +88,9 @@
 
 - **Authoritative boundary**: Real-time reaction classification runs strictly within `ws-server`.
 - **Zero DB/protocol mutations**: No new tables, migrations, WebSocket event names, or reaction keys.
-- **Fail-closed**: Any corrupt or missing accounting evidence (`contribution > handStartStack` or non-integer) safely skips all-in evaluation.
+- **Fail-closed & fallthrough**: Any corrupt or missing accounting evidence (`contribution > handStartStack`, missing maps) safely skips the lost all-in branch and falls through to existing generic reactions; does not return null on accounting errors alone.
+- **Uncalled return exclusion**: Any positive payout (`payouts[botUserId] > 0`), including uncalled bet returns, disqualifies bot from lost all-in / bad-beat, falling through to existing generic settlement branches.
+- **Dual accounting maps isolation**: Neither `handStartStacksByUserId` nor `contributionsByUserId` is ever exposed in client snapshots or WebSocket protocol frames.
 - **No client targeting**: `bad_beat` and `not_this_time` are table broadcasts without `targetSeatNo`. Client targeting remains reserved for `nice_hand`.
 - **No test-only exports**: `buildDetachedReactionContext` is not exported; server tests validate the end-to-end integration flow.
 - **Base probability = 1.0**: Qualified events reliably trigger under 100% frequency setting.

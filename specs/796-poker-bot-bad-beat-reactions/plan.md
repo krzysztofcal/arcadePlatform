@@ -10,7 +10,7 @@
 
 Implement the remaining backend scope of issue #796 by extending the WebSocket server's settlement reaction classifier (`ws-server/poker/handlers/reaction.mjs` and `ws-server/server.mjs`). The classifier will automatically emit `bad_beat` for heads-up river reversals where a bot lost all-in, and `not_this_time` for other all-in showdown losses. Both reactions are broadcast without `targetSeatNo`.
 
-All-in evidence is determined strictly from authoritative poker state requiring exact equality (`handStartStacksByUserId` and `contributionsByUserId` with `contribution === handStartStack && handStartStack > 0`), failing closed on any discrepancy (including `contribution > handStartStack`). The new branch operates with base probability = 1.0 (`samplePasses(random, 1, reactionSettings)`), taking precedence over generic congratulations while preserving existing table cooldowns, presentation jitter, frequency controls, and single-evaluation-per-hand lifecycle. Helper `buildDetachedReactionContext` remains internal to `server.mjs` and is not exported.
+All-in evidence is determined strictly from authoritative poker state requiring exact equality (`handStartStacksByUserId` and `contributionsByUserId` with `contribution === handStartStack && handStartStack > 0`), absence from `showdown.winners`, and zero payout (`Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`). Uncalled bet returns or any positive payouts strictly disqualify the bot from lost all-in classification. Any accounting discrepancy (including `contribution > handStartStack`) or missing accounting maps fails closed on the all-in branch only, allowing the classifier to cleanly continue down the existing generic settlement waterfall without altering generic reaction behavior. Helper `buildDetachedReactionContext` remains internal to `server.mjs` and is not exported. Server behavioral tests confirm neither accounting map is exposed to clients.
 
 ---
 
@@ -42,7 +42,7 @@ All-in evidence is determined strictly from authoritative poker state requiring 
 
 ### Principle III: Fail-Closed Safety and Environment Separation
 - **Check**: Do edge cases fail closed without risking funds or state integrity?
-- **Result**: **PASS**. If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, non-integer, negative, or show `contribution !== handStartStack`, the classifier cleanly aborts without entering the all-in branch. The PR will remain Draft and unmerged.
+- **Result**: **PASS**. If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, non-integer, negative, or show `contribution !== handStartStack`, the all-in branch is cleanly skipped and the classifier proceeds to generic settlement branches without crashing or returning null. If a bot receives an uncalled bet return (`payout > 0`), it is disqualified from lost all-in. The PR will remain Draft and unmerged.
 
 ### Principle IV: Platform Compatibility, Logging, and Style
 - **Check**: Is logging clean and code style compliant?
@@ -85,7 +85,7 @@ ws-server/
 │   └── handlers/
 │       ├── reaction.mjs                 # Extend classifySettlementReaction with lost all-in & bad beat branch
 │       └── reaction.behavior.test.mjs   # Unit & behavior tests for all-in/bad-beat classification
-└── server.behavior.test.mjs             # Integration test for end-to-end pipeline and snapshot isolation
+└── server.behavior.test.mjs             # Integration test for end-to-end pipeline and dual accounting snapshot isolation
 ```
 
 ---

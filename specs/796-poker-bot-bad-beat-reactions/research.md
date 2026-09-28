@@ -73,17 +73,27 @@ const isAllIn = Number.isInteger(startStack)
 - `contribution < startStack`: player had remaining chips (not all-in).
 - `contribution > startStack`: indicates corrupt or inconsistent accounting data; MUST fail closed and treat player as not all-in.
 - No `>=` comparisons are permitted anywhere in all-in validation.
+- **Fail-Closed Scope**: Failing closed on corrupt or missing accounting data means skipping the lost all-in branch ONLY. The classifier does not abort the settlement or return null; it continues down the existing waterfall (e.g. evaluating `lucky`, `nice_hand`, `wow`, `congrats`/`well_played`).
 
 ---
 
 ## 3. Bad Beat vs Lost All-In Classification
+
+### Showdown Loser Definition & Uncalled Return Handling
+- The poker settlement engine (`poker-side-pots.mjs`, `poker-payout.mjs`) handles uncalled all-in bet returns (`returnUserId`) by refunding the uncalled portion directly to the player's stack via `handSettlement.payouts[userId]`, without adding the player to `showdown.winners`.
+- Therefore, simply checking `!showdown.winners.includes(botUserId)` is insufficient.
+- **Rule**: A bot qualifies as an all-in loser if and only if:
+  1. It is not in `showdown.winners`;
+  2. `Number(state.handSettlement?.payouts?.[botUserId] ?? 0) <= 0`.
+- Any positive payout (including uncalled bet returns or split pots) strictly disqualifies the bot from the lost-all-in / bad-beat branch. The classifier then cleanly falls through to existing generic settlement branches (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`).
+- **No Engine Mutations**: This logic lives strictly in `reaction.mjs` classifier conditions; zero changes to `poker-side-pots.mjs` or `poker-payout.mjs`.
 
 ### Heads-Up River Reversal (`bad_beat`)
 - A "bad beat" in poker occurs when a player gets their money in with a commanding lead, only to be overtaken on the final card.
 - In `ws-server/poker/handlers/reaction.mjs`, the helper `deriveRiverChangedWinnerUserIds(state)` already inspects the turn board (cards 1–4) vs final community board (5 cards) and determines which winners only became winners on the river.
 - **Rule**:
   If:
-  1. The bot is an all-in loser (`contribution === startStack` and not in `showdown.winners`);
+  1. The bot is an all-in loser (`contribution === startStack`, `Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`, and not in `showdown.winners`);
   2. The showdown is strictly **heads-up** (exactly 2 players contested the showdown);
   3. The final winner is in `riverChangedWinnerUserIds`;
   Then: classify as `bad_beat` (broadcast to table, without `targetSeatNo`).
@@ -126,6 +136,7 @@ The new branch must be positioned **after** `normalFoldWin` and **before** `luck
 ## 5. Non-Goals & Testing Constraints
 
 - **No Test-Only Exports**: `buildDetachedReactionContext` in `ws-server/server.mjs` remains an internal, non-exported helper. Server behavioral tests verify context preservation and broadcast through the integrated `observeFreshPokerMutation` / `handleSettledState` pipeline.
+- **Dual Accounting Maps Isolation**: Both `handStartStacksByUserId` and `contributionsByUserId` remain private to ws-server and are never exposed to clients over WebSocket or public room snapshots.
 - **Personality Archetypes (Cowboy, Professor, Robot, Shark)**: Issue #804 ("Poker: Living NPCs") is the designated owner of persistent NPC identities and custom emote repertoires. This increment treats all poker bots uniformly through standard gameplay reactions.
 - **Client Protocol / Schemas**: No changes to WebSocket message types, client parsing, or database schemas.
 - **Gameplay / Logic Reducers**: No changes to betting rules, turn timers, or rake/accounting logic.

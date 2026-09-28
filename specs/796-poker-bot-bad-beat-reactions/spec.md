@@ -42,15 +42,16 @@ When a bot is heads-up in an all-in confrontation, held the winning hand on the 
 
 ### User Story 3 - Authoritative Evidence & Fail-Closed Safety (Priority: P2)
 
-The reaction classifier must determine all-in status solely from authoritative ledger/engine state: `handStartStacksByUserId` and `contributionsByUserId`. It must strictly require `contribution === handStartStack` with `handStartStack > 0`. Any discrepancy (including `contribution > handStartStack`), missing values, or non-integer amounts must fail closed.
+The reaction classifier must determine all-in status solely from authoritative ledger/engine state: `handStartStacksByUserId` and `contributionsByUserId`. It must strictly require `contribution === handStartStack` with `handStartStack > 0`, absence from `showdown.winners`, and zero payout (`Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`). Any discrepancy (including `contribution > handStartStack`), missing values, or non-integer amounts must fail closed for the all-in branch without aborting subsequent generic settlement reactions.
 
-**Why this priority**: Guarantees funds safety, auditability, and deterministic behavior. Prevents false positive all-in classifications due to temporary client side-effects or partial state resets.
+**Why this priority**: Guarantees funds safety, auditability, and deterministic behavior. Prevents false positive all-in classifications due to temporary client side-effects, uncalled bet returns, or partial state resets.
 
-**Independent Test**: Supply corrupt, negative, non-integer, missing, or mismatched accounting fields (`contribution > handStartStack` or `contribution < handStartStack`); verify the classifier safely fails closed (returns null / skips all-in evaluation without throwing).
+**Independent Test**: Supply corrupt, negative, non-integer, missing, or mismatched accounting fields (`contribution > handStartStack` or `contribution < handStartStack`), or simulate uncalled bet return; verify the classifier safely skips all-in evaluation and falls through to generic settlement branches without throwing or returning null.
 
 **Acceptance Scenarios**:
-1. **Given** a settled hand where `handStartStacksByUserId` or `contributionsByUserId` is missing, undefined, has negative/non-integer values, or has `contribution > handStartStack`, **When** `classifySettlementReaction` runs, **Then** the lost all-in branch is skipped and the classifier proceeds to standard fallback paths.
+1. **Given** a settled hand where `handStartStacksByUserId` or `contributionsByUserId` is missing, undefined, has negative/non-integer values, or has `contribution > handStartStack`, **When** `classifySettlementReaction` runs, **Then** the lost all-in branch is skipped and the classifier proceeds down the standard settlement waterfall (e.g. `lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without returning null or crashing.
 2. **Given** a bot that lost a showdown pot but had `contribution < handStartStack` (non-all-in loss), **When** settlement occurs, **Then** the bot is NOT classified for lost all-in or bad beat.
+3. **Given** a bot that committed its full starting stack (`contribution === handStartStack`) but received a positive uncalled bet return (`handSettlement.payouts[botUserId] > 0`) while losing the contested pot, **When** settlement occurs, **Then** the bot is NOT classified for lost all-in or bad beat, and the classifier falls through to existing generic settlement branches.
 
 ---
 
@@ -72,7 +73,7 @@ The new lost all-in / bad-beat branch must integrate cleanly into the existing s
 
 ### Edge Cases
 
-- **Split pot / partial chop**: If a bot receives any share of the main or side pot (listed in `showdown.winners` or positive payout), the bot is not a loser and MUST NOT emit a lost all-in or bad beat reaction.
+- **Split pot / partial chop / uncalled bet return**: If a bot receives any share of the pot or an uncalled bet return (`Number(handSettlement.payouts?.[botUserId] ?? 0) > 0`), the bot is not a lost all-in loser and MUST NOT emit `bad_beat` or `not_this_time`. Even if absent from `showdown.winners`, any positive payout strictly disqualifies the bot from the lost all-in branch.
 - **Bot folded earlier in hand**: If the bot folded on preflop, flop, or turn, its fold was already processed (emitting `not_this_time` on fold if rolled). At settlement, `state.foldedByUserId[bot.userId] === true` excludes it from showdown settlement reactions.
 - **Bot left table or sat out**: If `state.leftTableByUserId[bot.userId] === true` or `state.sitOutByUserId[bot.userId] === true`, the bot cannot speak at settlement.
 - **Multiway river reversal**: If 3 or more players are involved at showdown, river suckouts are complex multiway equity shifts. To keep behavior predictable without an equity engine, `bad_beat` is restricted to heads-up showdowns; multiway all-in losers receive `not_this_time`.
@@ -84,15 +85,15 @@ The new lost all-in / bad-beat branch must integrate cleanly into the existing s
 
 ### Functional Requirements
 
-- **FR-001**: System MUST determine bot all-in participation exclusively from `handStartStacksByUserId` and `contributionsByUserId` requiring exact equality (`contribution === handStartStack && handStartStack > 0`). If `contribution > handStartStack` or values are non-integer/negative, system MUST treat this as corrupt/inconsistent evidence and fail closed.
+- **FR-001**: System MUST determine bot all-in participation exclusively from `handStartStacksByUserId` and `contributionsByUserId` requiring exact equality (`contribution === handStartStack && handStartStack > 0`), and MUST require `Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0` and absence from `showdown.winners`. If `contribution > handStartStack`, values are non-integer/negative, or payout is positive (including uncalled bet returns), system MUST treat this as not qualifying for lost all-in.
 - **FR-002**: System MUST classify an eligible losing all-in bot as `bad_beat` (broadcast to table, without `targetSeatNo`) when the showdown is heads-up and the winner is present in `riverChangedWinnerUserIds`.
 - **FR-003**: System MUST classify an eligible losing all-in bot not meeting the heads-up river reversal condition as `not_this_time` (broadcast to table, without `targetSeatNo`).
 - **FR-004**: System MUST position the lost all-in / bad-beat classifier in `classifySettlementReaction` after the normal fold-win branch, but before generic `lucky`, `nice_hand`, `well_played`, and `congrats` branches.
-- **FR-005**: System MUST fail closed (skipping the lost all-in branch) if accounting maps are missing, undefined, inconsistent, non-integer, negative, or show `contribution !== handStartStack`.
+- **FR-005**: System MUST fail closed on the lost all-in / bad-beat branch (skipping the branch and proceeding to standard generic settlement branches) if accounting maps are missing, undefined, inconsistent, non-integer, negative, or show `contribution !== handStartStack`. The classifier MUST NOT return null on accounting discrepancy alone, preserving existing generic reaction waterfall.
 - **FR-006**: System MUST evaluate the lost all-in / bad-beat branch using base probability = 1.0 via `samplePasses(random, 1, reactionSettings)`, ensuring every qualified event produces a candidate at 100% frequency setting.
 - **FR-007**: System MUST enforce the existing 4,000 ms per-sender cooldown and apply 300–1,200 ms presentation jitter to scheduled reaction candidates.
 - **FR-008**: System MUST preserve single-evaluation-per-hand lifecycle in `ws-server/server.mjs`, scheduling at most one settlement reaction candidate per completed hand.
-- **FR-009**: System MUST preserve server-internal isolation: `handStartStacksByUserId` and `contributionsByUserId` are classifier inputs only and MUST NOT be exposed to clients over WebSocket or API responses.
+- **FR-009**: System MUST preserve server-internal isolation: neither `handStartStacksByUserId` nor `contributionsByUserId` may be exposed to clients over WebSocket or public room snapshots.
 - **FR-010**: System MUST NOT modify database schema, Supabase migrations, gameplay state reducers, pot settlement accounting, payouts, or bot decision strategy.
 
 ### Key Entities
