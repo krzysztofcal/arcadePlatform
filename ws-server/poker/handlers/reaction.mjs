@@ -22,6 +22,11 @@ export const REACTION_KEYS = Object.freeze([
   "lucky",
   "congrats",
   "not_this_time",
+  "all_in_oh_no",
+  "all_in_that_hurts",
+  "all_in_no_way",
+  "all_in_come_on",
+  "all_in_censored",
   "ambient_hmm",
   "ambient_interesting",
   "ambient_lets_see",
@@ -61,6 +66,13 @@ const BOT_REACTION_KEYS_BY_ACTION = Object.freeze({
   FOLD: Object.freeze(["not_this_time"])
 });
 const BOT_REACTION_PROBABILITY_BY_ACTION = Object.freeze({ BET: 0.6, ALL_IN: 0.6, FOLD: 0.7 });
+export const ALL_IN_LOSS_REACTION_KEYS = Object.freeze([
+  "all_in_oh_no",
+  "all_in_that_hurts",
+  "all_in_no_way",
+  "all_in_come_on",
+  "all_in_censored"
+]);
 export const AMBIENT_REACTION_KEYS = Object.freeze([
   "ambient_hmm",
   "ambient_interesting",
@@ -508,6 +520,49 @@ export function classifyAmbientReaction({ botSeats, reactionSettings, random = M
   return { botUserId: bot.userId, botSeatNo: bot.seatNo, reactionKey: AMBIENT_REACTION_KEYS[keyIndex] || AMBIENT_REACTION_KEYS[0] };
 }
 
+function isPlayerAllIn(userId, handStartStacks, contributions) {
+  const start = handStartStacks?.[userId];
+  const contrib = contributions?.[userId];
+  if (typeof start !== "number" || !Number.isInteger(start) || start <= 0) return false;
+  if (typeof contrib !== "number" || !Number.isInteger(contrib) || contrib < 0) return false;
+  return contrib === start;
+}
+
+function isLostAllInCandidate(botUserId, state) {
+  if (!state?.showdown?.handsByUserId || typeof state.showdown.handsByUserId !== "object" || !state.showdown.handsByUserId[botUserId]) {
+    return false;
+  }
+  if (state?.foldedByUserId?.[botUserId] === true || state?.leftTableByUserId?.[botUserId] === true || state?.sitOutByUserId?.[botUserId] === true) {
+    return false;
+  }
+  if (Array.isArray(state?.showdown?.winners) && state.showdown.winners.includes(botUserId)) {
+    return false;
+  }
+  const payouts = state?.handSettlement?.payouts;
+  if (!payouts || typeof payouts !== "object") {
+    return false;
+  }
+  let payout = 0;
+  if (Object.hasOwn(payouts, botUserId)) {
+    const rawPayout = payouts[botUserId];
+    if (typeof rawPayout !== "number" || !Number.isInteger(rawPayout) || rawPayout < 0) {
+      return false;
+    }
+    payout = rawPayout;
+  }
+  if (payout > 0) {
+    return false;
+  }
+  return isPlayerAllIn(botUserId, state?.handStartStacksByUserId, state?.contributionsByUserId);
+}
+
+function sampleAllInLossReactionKey(random = Math.random) {
+  const r = typeof random === "function" ? random() : Math.random();
+  const clamped = Math.min(Math.max(Number(r) || 0, 0), 0.999999);
+  const index = Math.floor(clamped * ALL_IN_LOSS_REACTION_KEYS.length);
+  return ALL_IN_LOSS_REACTION_KEYS[index] || ALL_IN_LOSS_REACTION_KEYS[0];
+}
+
 export function classifySettlementReaction({ state, botSeats, reactionSettings, random = Math.random } = {}) {
   if (reactionSettings?.enabled === false || !isCompleteReactionSettlement(state)) return null;
   const handId = normalizeString(state.handId);
@@ -525,6 +580,30 @@ export function classifySettlementReaction({ state, botSeats, reactionSettings, 
     if (reactor && samplePasses(random, 0.75, reactionSettings)) {
       return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: winner.seatNo, reactionKey: "nice_bluff", handId };
     }
+  }
+  const lostAllInBot = bots.find((bot) => canBotSpeakAfterSettlement(state, handSeats, bot) && isLostAllInCandidate(bot.userId, state));
+  if (lostAllInBot && samplePasses(random, 1, reactionSettings)) {
+    const hands = state?.showdown?.handsByUserId;
+    const isHeadsUp = Boolean(hands && typeof hands === "object" && Object.keys(hands).length === 2);
+    const winnersList = state?.showdown?.winners;
+    const singleWinner = Array.isArray(winnersList) && winnersList.length === 1 ? winnersList[0] : null;
+    const isRiverReversal = Boolean(singleWinner && Array.isArray(state?.riverChangedWinnerUserIds) && state.riverChangedWinnerUserIds.includes(singleWinner));
+
+    if (isHeadsUp && singleWinner && isRiverReversal) {
+      return {
+        botUserId: lostAllInBot.userId,
+        botSeatNo: lostAllInBot.seatNo,
+        reactionKey: "bad_beat",
+        handId
+      };
+    }
+
+    return {
+      botUserId: lostAllInBot.userId,
+      botSeatNo: lostAllInBot.seatNo,
+      reactionKey: sampleAllInLossReactionKey(random),
+      handId
+    };
   }
   const comparedHands = state?.showdown?.handsByUserId;
   const luckyTarget = luckyWinner(state, handSeats, winners);

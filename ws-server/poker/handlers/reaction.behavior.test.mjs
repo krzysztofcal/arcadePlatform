@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  ALL_IN_LOSS_REACTION_KEYS,
   HUMAN_REACTION_KEYS,
   REACTION_KEYS,
   classifyAmbientReaction,
@@ -40,6 +41,11 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'lucky',
     'congrats',
     'not_this_time',
+    'all_in_oh_no',
+    'all_in_that_hurts',
+    'all_in_no_way',
+    'all_in_come_on',
+    'all_in_censored',
     'ambient_hmm',
     'ambient_interesting',
     'ambient_lets_see',
@@ -53,6 +59,13 @@ test('human reactions use the closed allowlist and atomically reserve the sender
     'ambient_your_move',
     'ambient_lets_play',
     'ambient_thinking'
+  ]);
+  assert.deepEqual(ALL_IN_LOSS_REACTION_KEYS, [
+    'all_in_oh_no',
+    'all_in_that_hurts',
+    'all_in_no_way',
+    'all_in_come_on',
+    'all_in_censored'
   ]);
   assert.deepEqual(HUMAN_REACTION_KEYS, [
     'hello',
@@ -71,6 +84,9 @@ test('human reactions use the closed allowlist and atomically reserve the sender
   ]);
   assert.equal(HUMAN_REACTION_KEYS.includes('lucky'), false);
   assert.equal(HUMAN_REACTION_KEYS.includes('not_this_time'), false);
+  for (const key of ALL_IN_LOSS_REACTION_KEYS) {
+    assert.equal(HUMAN_REACTION_KEYS.includes(key), false, `${key} must not be in HUMAN_REACTION_KEYS`);
+  }
   assert.deepEqual(evaluateHumanReactionCommand({
     tableId,
     senderUserId: 'human-hurry',
@@ -602,5 +618,300 @@ test('ambient table talk uses one scaled roll and then selects one bot and messa
     botSeats: [{ userId: 'bot-2', seatNo: 2 }],
     reactionSettings: { enabled: false, frequencyPercent: 100 },
     random: () => 0
+  }), null);
+});
+
+test('ordinary lost all-in bot selects uniformly from the 5-item loss pool and never not_this_time', () => {
+  const baseAllInLossState = {
+    phase: 'SETTLED',
+    handId: 'hand-all-in-loss',
+    bigBlind: 10,
+    handStartStacksByUserId: { 'bot-lost': 100, human: 100 },
+    contributionsByUserId: { 'bot-lost': 100, human: 100 },
+    handSettlement: { handId: 'hand-all-in-loss', payouts: { human: 200 } },
+    showdown: {
+      handId: 'hand-all-in-loss',
+      winners: ['human'],
+      handsByUserId: { 'bot-lost': { category: 1 }, human: { category: 2 } }
+    },
+    handSeats: [{ userId: 'bot-lost', seatNo: 2 }, { userId: 'human', seatNo: 1 }],
+    foldedByUserId: {},
+    leftTableByUserId: {},
+    sitOutByUserId: {},
+    riverChangedWinnerUserIds: []
+  };
+
+  const testCases = [
+    { randomVal: 0.05, expectedKey: 'all_in_oh_no' },
+    { randomVal: 0.25, expectedKey: 'all_in_that_hurts' },
+    { randomVal: 0.45, expectedKey: 'all_in_no_way' },
+    { randomVal: 0.65, expectedKey: 'all_in_come_on' },
+    { randomVal: 0.85, expectedKey: 'all_in_censored' }
+  ];
+
+  for (const { randomVal, expectedKey } of testCases) {
+    const draws = [0.1, randomVal];
+    const result = classifySettlementReaction({
+      state: baseAllInLossState,
+      botSeats: [{ userId: 'bot-lost', seatNo: 2 }],
+      random: () => draws.shift()
+    });
+    assert.ok(result, `must produce candidate for randomVal ${randomVal}`);
+    assert.equal(result.reactionKey, expectedKey);
+    assert.notEqual(result.reactionKey, 'not_this_time', 'must never emit not_this_time on lost all-in');
+    assert.equal(result.botUserId, 'bot-lost');
+    assert.equal(result.botSeatNo, 2);
+    assert.equal(result.targetSeatNo, undefined, 'lost all-in reactions must omit targetSeatNo');
+  }
+});
+
+test('heads-up all-in river reversal triggers bad_beat broadcast and multiway falls back to loss pool', () => {
+  const headsUpBadBeatState = {
+    phase: 'SETTLED',
+    handId: 'hand-bad-beat',
+    bigBlind: 10,
+    handStartStacksByUserId: { 'bot-bb': 200, human: 200 },
+    contributionsByUserId: { 'bot-bb': 200, human: 200 },
+    handSettlement: { handId: 'hand-bad-beat', payouts: { human: 400 } },
+    showdown: {
+      handId: 'hand-bad-beat',
+      winners: ['human'],
+      handsByUserId: { 'bot-bb': { category: 2 }, human: { category: 3 } }
+    },
+    handSeats: [{ userId: 'bot-bb', seatNo: 3 }, { userId: 'human', seatNo: 1 }],
+    foldedByUserId: {},
+    leftTableByUserId: {},
+    sitOutByUserId: {},
+    riverChangedWinnerUserIds: ['human']
+  };
+
+  const result = classifySettlementReaction({
+    state: headsUpBadBeatState,
+    botSeats: [{ userId: 'bot-bb', seatNo: 3 }],
+    random: () => 0.1
+  });
+  assert.deepEqual(result, {
+    botUserId: 'bot-bb',
+    botSeatNo: 3,
+    reactionKey: 'bad_beat',
+    handId: 'hand-bad-beat'
+  });
+  assert.equal(result.targetSeatNo, undefined, 'bad_beat must omit targetSeatNo');
+
+  const threeSeatsHeadsUpState = {
+    ...headsUpBadBeatState,
+    handSeats: [
+      { userId: 'bot-bb', seatNo: 3 },
+      { userId: 'human', seatNo: 1 },
+      { userId: 'left-player', seatNo: 5 }
+    ],
+    leftTableByUserId: { 'left-player': true }
+  };
+  const threeSeatsResult = classifySettlementReaction({
+    state: threeSeatsHeadsUpState,
+    botSeats: [{ userId: 'bot-bb', seatNo: 3 }],
+    random: () => 0.1
+  });
+  assert.equal(threeSeatsResult.reactionKey, 'bad_beat', '3 handSeats with 2 evaluated hands must qualify as heads-up');
+
+  const multiwayState = {
+    ...headsUpBadBeatState,
+    showdown: {
+      handId: 'hand-bad-beat',
+      winners: ['human'],
+      handsByUserId: {
+        'bot-bb': { category: 2 },
+        human: { category: 3 },
+        other: { category: 1 }
+      }
+    },
+    handSeats: [
+      { userId: 'bot-bb', seatNo: 3 },
+      { userId: 'human', seatNo: 1 },
+      { userId: 'other', seatNo: 5 }
+    ]
+  };
+  const multiwayDraws = [0.1, 0.45];
+  const multiwayResult = classifySettlementReaction({
+    state: multiwayState,
+    botSeats: [{ userId: 'bot-bb', seatNo: 3 }],
+    random: () => multiwayDraws.shift()
+  });
+  assert.notEqual(multiwayResult.reactionKey, 'bad_beat', 'multiway showdown must not trigger bad_beat');
+  assert.equal(multiwayResult.reactionKey, 'all_in_no_way', 'multiway must fall back to 5-reaction pool');
+});
+
+test('authoritative evidence and fail-closed safety for all-in branch', () => {
+  const baseState = {
+    phase: 'SETTLED',
+    handId: 'hand-safety',
+    bigBlind: 10,
+    handStartStacksByUserId: { bot: 100, human: 100 },
+    contributionsByUserId: { bot: 100, human: 100 },
+    handSettlement: { handId: 'hand-safety', payouts: { human: 200 } },
+    showdown: {
+      handId: 'hand-safety',
+      winners: ['human'],
+      handsByUserId: { bot: { category: 1 }, human: { category: 4 } }
+    },
+    handSeats: [{ userId: 'bot', seatNo: 2 }, { userId: 'human', seatNo: 1 }],
+    foldedByUserId: {},
+    leftTableByUserId: {},
+    sitOutByUserId: {},
+    riverChangedWinnerUserIds: []
+  };
+
+  const corruptContribState = {
+    ...baseState,
+    contributionsByUserId: { bot: 150, human: 100 }
+  };
+  const corruptResult = classifySettlementReaction({
+    state: corruptContribState,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0
+  });
+  assert.equal(corruptResult.reactionKey, 'nice_hand', 'corrupt accounting must cleanly fall through to generic waterfall');
+
+  const missingAccountingState = {
+    ...baseState,
+    handStartStacksByUserId: undefined,
+    contributionsByUserId: undefined
+  };
+  const missingResult = classifySettlementReaction({
+    state: missingAccountingState,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0
+  });
+  assert.equal(missingResult.reactionKey, 'nice_hand', 'missing accounting maps must fall through to generic waterfall');
+
+  const stringAccountingState = {
+    ...baseState,
+    handStartStacksByUserId: { bot: '100', human: 100 },
+    contributionsByUserId: { bot: '100', human: 100 }
+  };
+  const stringResult = classifySettlementReaction({
+    state: stringAccountingState,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0
+  });
+  assert.equal(stringResult.reactionKey, 'nice_hand', 'string accounting values must not be coerced and must fall through');
+
+  const notEvaluatedState = {
+    ...baseState,
+    handSeats: [{ userId: 'bot', seatNo: 2 }, { userId: 'human', seatNo: 1 }, { userId: 'third_player', seatNo: 3 }],
+    showdown: {
+      handId: 'hand-safety',
+      winners: ['human'],
+      handsByUserId: { human: { category: 4 }, third_player: { category: 1 } }
+    }
+  };
+  const notEvaluatedResult = classifySettlementReaction({
+    state: notEvaluatedState,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0
+  });
+  assert.equal(notEvaluatedResult.reactionKey, 'nice_hand', 'bot omitted from evaluated showdown hands must fall through');
+
+  const missingPayoutKeyState = {
+    ...baseState,
+    handSettlement: { handId: 'hand-safety', payouts: { human: 200 } }
+  };
+  const missingKeyDraws = [0.1, 0.05];
+  const missingKeyResult = classifySettlementReaction({
+    state: missingPayoutKeyState,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => missingKeyDraws.shift()
+  });
+  assert.equal(missingKeyResult.reactionKey, 'all_in_oh_no', 'missing bot key in payouts is valid 0 chips and qualifies for all-in loss');
+
+  const malformedPayoutCases = [null, undefined, 'abc', NaN, 12.5, -5];
+  for (const badPayout of malformedPayoutCases) {
+    const malformedState = {
+      ...baseState,
+      handSettlement: { handId: 'hand-safety', payouts: { human: 200, bot: badPayout } }
+    };
+    const malformedResult = classifySettlementReaction({
+      state: malformedState,
+      botSeats: [{ userId: 'bot', seatNo: 2 }],
+      random: () => 0
+    });
+    assert.equal(malformedResult.reactionKey, 'nice_hand', `malformed payout (${badPayout}) must fail closed and fall through`);
+  }
+
+  const uncalledReturnState = {
+    ...baseState,
+    handSettlement: { handId: 'hand-safety', payouts: { human: 180, bot: 20 } }
+  };
+  const uncalledResult = classifySettlementReaction({
+    state: uncalledReturnState,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0
+  });
+  assert.equal(uncalledResult.reactionKey, 'nice_hand', 'positive payout must disqualify from all-in and fall through');
+
+  const nonAllInState = {
+    ...baseState,
+    handStartStacksByUserId: { bot: 100, human: 100 },
+    contributionsByUserId: { bot: 50, human: 100 }
+  };
+  const nonAllResult = classifySettlementReaction({
+    state: nonAllInState,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0
+  });
+  assert.equal(nonAllResult.reactionKey, 'nice_hand', 'non-all-in loser must fall through to generic reaction');
+
+  const foldedState = {
+    ...baseState,
+    foldedByUserId: { bot: true }
+  };
+  const foldedResult = classifySettlementReaction({
+    state: foldedState,
+    botSeats: [{ userId: 'bot', seatNo: 2 }],
+    random: () => 0
+  });
+  assert.notEqual(foldedResult?.reactionKey, 'bad_beat', 'folded bot must not trigger bad_beat');
+  assert.equal(ALL_IN_LOSS_REACTION_KEYS.includes(foldedResult?.reactionKey), false, 'folded bot must not trigger all-in loss');
+});
+
+test('classifier priority and seat ordering for lost all-in reactions', () => {
+  const multiBotState = {
+    phase: 'SETTLED',
+    handId: 'hand-priority',
+    bigBlind: 10,
+    handStartStacksByUserId: { 'bot-4': 100, 'bot-2': 100, human: 100 },
+    contributionsByUserId: { 'bot-4': 100, 'bot-2': 100, human: 100 },
+    handSettlement: { handId: 'hand-priority', payouts: { human: 300 } },
+    showdown: {
+      handId: 'hand-priority',
+      winners: ['human'],
+      handsByUserId: { 'bot-4': { category: 1 }, 'bot-2': { category: 1 }, human: { category: 4 } }
+    },
+    handSeats: [
+      { userId: 'bot-4', seatNo: 4 },
+      { userId: 'bot-2', seatNo: 2 },
+      { userId: 'human', seatNo: 1 }
+    ],
+    foldedByUserId: {},
+    leftTableByUserId: {},
+    sitOutByUserId: {},
+    riverChangedWinnerUserIds: []
+  };
+
+  const draws = [0.1, 0.05];
+  const result = classifySettlementReaction({
+    state: multiBotState,
+    botSeats: [{ userId: 'bot-4', seatNo: 4 }, { userId: 'bot-2', seatNo: 2 }],
+    random: () => draws.shift()
+  });
+  assert.equal(result.botUserId, 'bot-2');
+  assert.equal(result.botSeatNo, 2);
+  assert.equal(result.reactionKey, 'all_in_oh_no');
+
+  assert.equal(classifySettlementReaction({
+    state: multiBotState,
+    botSeats: [{ userId: 'bot-2', seatNo: 2 }],
+    reactionSettings: { enabled: false },
+    random: () => 0.05
   }), null);
 });
