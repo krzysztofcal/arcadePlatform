@@ -134,20 +134,28 @@ If all conditions hold, the classifier emits existing `bad_beat` (😢 "Bad beat
 - If `contrib > start`, data is corrupt/inconsistent and fails closed.
 - No `>=` comparisons are permitted in all-in validation.
 
-### Showdown Loser Definition & Fail-Closed Payout Validation
+### Authoritative Showdown Participation Invariant
+- In the settlement engine (`ws-server/poker/logic/poker-settlement.mjs`), players with `pendingAutoSitOutByUserId`, players who folded, or players who left/sat out are excluded before hands are evaluated for showdown.
+- To ensure a bot actually competed and lost in showdown without polluting the detached reaction context with transient maps like `pendingAutoSitOutByUserId`, the authoritative guard is:
+  `Boolean(state?.showdown?.handsByUserId?.[botUserId])`.
+- The bot must actually have its hand evaluated in `showdown.handsByUserId`.
+- The bot must also pass existing participant guards: `foldedByUserId`, `leftTableByUserId`, and `sitOutByUserId` are not true.
+
+### Showdown Loser Definition & Truly Fail-Closed Payout Validation
 - A bot qualifies as an all-in loser if and only if:
-  1. It is not in `showdown.winners`;
-  2. Payout validation is strictly fail-closed:
-     - Missing entry in `handSettlement.payouts` for a showdown loser is valid and represents 0 chips won.
-     - If a payout entry exists, it MUST be a valid finite, non-negative integer (`typeof val === 'number' && Number.isInteger(val) && val >= 0`).
+  1. Its hand was evaluated in `showdown.handsByUserId` (`Boolean(state?.showdown?.handsByUserId?.[botUserId])`);
+  2. It is not in `showdown.winners`;
+  3. Payout validation is truly fail-closed using `Object.hasOwn(payouts, botUserId)`:
+     - Missing entry in `handSettlement.payouts` (`!Object.hasOwn(payouts, botUserId)`) for a showdown loser is normal and represents 0 chips won.
+     - If a payout entry exists, it MUST be a valid finite, non-negative integer (`typeof rawPayout === 'number' && Number.isInteger(rawPayout) && rawPayout >= 0`).
      - Any positive payout (`payout > 0`, including uncalled bet returns refunded via `poker-side-pots.mjs` / `poker-payout.mjs` or pot chops) strictly disqualifies the bot from lost all-in reactions and `bad_beat`.
-     - Any malformed, non-finite, negative, or non-numeric payout entry (e.g. `NaN`, string `"abc"`, `-10`) fails closed on the all-in branch only and falls through to generic settlement reactions.
+     - Any malformed, non-finite, negative, or non-numeric payout entry (e.g. `null`, explicit `undefined`, `NaN`, string `"abc"`, float, negative `-10`) fails closed on the all-in branch only and falls through to generic settlement reactions.
 - The classifier cleanly falls through to existing generic settlement branches (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`).
 - Zero changes are made to the settlement/payout engine.
 
 ### Fail-Closed Fallthrough
-- If accounting maps are missing, undefined, non-integer, or corrupt, or if payout is malformed, the all-in branch is skipped.
-- The classifier DOES NOT return `null` on accounting or payout failure alone; it continues down the existing waterfall.
+- If accounting maps are missing, undefined, non-integer, or corrupt, or if the bot was not evaluated in `showdown.handsByUserId`, or if payout is malformed, the all-in branch is skipped.
+- The classifier DOES NOT return `null` on accounting, participation, or payout failure alone; it continues down the existing waterfall.
 
 ---
 

@@ -108,8 +108,8 @@ interface SettlementReactionCandidate {
 | Participant State | Showdown Type | River Reversal? | Selected Key | Target Seat | Base Probability |
 |---|---|---|---|---|---|
 | Fold win (1 winner, all others folded) | Normal folds | N/A | `i_was_bluffing` (winning bot) / `nice_bluff` (losing bot) | Winner seat (for `nice_bluff`) | 75% |
-| **All-in bot loser (`contrib === start`, `payout <= 0`, not in `winners`)** | **Heads-up (2 hands in `handsByUserId`)** | **Yes (winner in `riverChangedWinnerUserIds`)** | **`bad_beat`** | **None (Broadcast)** | **100% (1.0)** |
-| **All-in bot loser (`contrib === start`, `payout <= 0`, not in `winners`)** | **Multiway (3+ hands) or non-reversal** | **No / Multiway** | **Uniform sample from `ALL_IN_LOSS_REACTION_KEYS` (5 keys)** | **None (Broadcast)** | **100% (1.0)** |
+| **All-in bot loser (`contrib === start`, in `showdown.handsByUserId`, `payout === 0`, not in `winners`)** | **Heads-up (2 hands in `handsByUserId`)** | **Yes (winner in `riverChangedWinnerUserIds`)** | **`bad_beat`** | **None (Broadcast)** | **100% (1.0)** |
+| **All-in bot loser (`contrib === start`, in `showdown.handsByUserId`, `payout === 0`, not in `winners`)** | **Multiway (3+ hands) or non-reversal** | **No / Multiway** | **Uniform sample from `ALL_IN_LOSS_REACTION_KEYS` (5 keys)** | **None (Broadcast)** | **100% (1.0)** |
 | Showdown winner | Any | Yes (close rank or river) | `lucky` | Lucky winner seat | 70% |
 | Showdown winner | Any | No | `nice_hand` (if category >= 4) | Strong winner seat | 90% |
 | Bot winner | Any | No | `wow` (if payout >= 20 BB) | None (Broadcast) | 100% |
@@ -132,26 +132,48 @@ interface SettlementReactionCandidate {
    }
    ```
 
-2. **Lost All-In Candidate Qualification (Excludes Winners & Fail-Closed Payout Validation)**:
+2. **Lost All-In Candidate Qualification (Showdown Participation & Fail-Closed Payout Validation)**:
    ```javascript
    function isLostAllInCandidate(botUserId, state) {
+     // 1. Authoritative showdown participation guard:
+     // Bot must actually have its hand evaluated in showdown (excludes pendingAutoSitOut, uncalled hands)
+     if (!state?.showdown?.handsByUserId || typeof state.showdown.handsByUserId !== 'object' || !state.showdown.handsByUserId[botUserId]) {
+       return false;
+     }
+
+     // 2. Existing participant state guards:
+     if (state?.foldedByUserId?.[botUserId] === true || state?.leftTableByUserId?.[botUserId] === true || state?.sitOutByUserId?.[botUserId] === true) {
+       return false;
+     }
+
+     // 3. Loser requirement:
      if (Array.isArray(state?.showdown?.winners) && state.showdown.winners.includes(botUserId)) {
        return false;
      }
-     const rawPayout = state?.handSettlement?.payouts?.[botUserId];
+
+     // 4. Truly fail-closed payout validation (distinguishing missing key from malformed value):
+     const payouts = state?.handSettlement?.payouts;
+     if (!payouts || typeof payouts !== 'object') {
+       return false;
+     }
      let payout = 0;
-     if (rawPayout !== undefined && rawPayout !== null) {
-       // If payout exists, strictly validate as a finite non-negative integer
+     if (Object.hasOwn(payouts, botUserId)) {
+       const rawPayout = payouts[botUserId];
+       // Existing key MUST be a valid finite non-negative integer
        if (typeof rawPayout !== 'number' || !Number.isInteger(rawPayout) || rawPayout < 0) {
-         // Malformed, non-finite, negative, or string values fail closed on this branch
+         // null, explicit undefined, string, NaN, float, negative -> fail-closed
          return false;
        }
        payout = rawPayout;
      }
+     // Missing key in payouts evaluates cleanly to payout = 0
+
+     // Positive payout (including uncalled bet returns or chops) strictly disqualifies
      if (payout > 0) {
-       // Any positive payout, including uncalled bet returns, strictly disqualifies from lost all-in
        return false;
      }
+
+     // 5. Authoritative all-in ledger evidence:
      return isPlayerAllIn(botUserId, state?.handStartStacksByUserId, state?.contributionsByUserId);
    }
    ```
@@ -190,4 +212,4 @@ interface SettlementReactionCandidate {
    - `[0.8, 1.0)` → `all_in_censored`
 
 5. **Fail-Closed & Fallthrough Guarantee**:
-   If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, non-integer, or corrupt (`contribution > handStartStack`), or if payout data is malformed/negative/non-finite, `isLostAllInCandidate` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting or payout failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.
+   If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, non-integer, or corrupt (`contribution > handStartStack`), or if the bot's hand was not evaluated in `showdown.handsByUserId`, or if payout data is malformed/negative/non-finite, `isLostAllInCandidate` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting, participation, or payout failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.
