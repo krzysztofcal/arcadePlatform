@@ -57,6 +57,7 @@ Evaluates settlement context to select at most one bot reaction candidate for th
     - If `reactionSettings.enabled === false` or settlement state is incomplete (`isCompleteReactionSettlement(state) !== true`, `state.phase !== 'SETTLED'`), the function returns `null`.
     - If all-in accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, or corrupt (`contribution > handStartStack`), the all-in branch is cleanly skipped and the classifier proceeds down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior.
     - A positive payout (`Number(handSettlement.payouts?.[botUserId] ?? 0) > 0`), including uncalled bet returns, strictly disqualifies the bot from the lost all-in branch, falling through to subsequent settlement branches.
+  - **Heads-Up Showdown Qualification**: `bad_beat` is evaluated only when `showdown.handsByUserId` contains exactly 2 evaluated player hands and `showdown.winners` contains exactly 1 winner. If 3 or more hands were evaluated in `showdown.handsByUserId`, the losing all-in bot falls back to `not_this_time`.
   - **Base Probability**: Evaluated with `samplePasses(random, 1, reactionSettings)`. At `frequencyPercent = 100`, every qualified all-in loss produces a candidate.
   - **Targeting**: Neither `bad_beat` nor `not_this_time` sets `targetSeatNo`. Client targeting remains exclusively reserved for `nice_hand`.
   - **Priority**:

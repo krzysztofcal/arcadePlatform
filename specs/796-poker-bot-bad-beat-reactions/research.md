@@ -94,9 +94,11 @@ const isAllIn = Number.isInteger(startStack)
 - **Rule**:
   If:
   1. The bot is an all-in loser (`contribution === startStack`, `Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0`, and not in `showdown.winners`);
-  2. The showdown is strictly **heads-up** (exactly 2 players contested the showdown);
+  2. The showdown is strictly **heads-up**: exactly 2 actual showdown participants whose hands were evaluated at showdown, derived authoritatively from `Object.keys(state.showdown?.handsByUserId || {}).length === 2` and `showdown.winners.length === 1`;
   3. The final winner is in `riverChangedWinnerUserIds`;
   Then: classify as `bad_beat` (broadcast to table, without `targetSeatNo`).
+- **Authoritative Heads-Up via `showdown.handsByUserId`**:
+  Reconstructing participants from `handSeats` minus `foldedByUserId` is inaccurate because the settlement engine also excludes players who left the table (`leftTableByUserId`) or sat out (`sitOutByUserId`, `pendingAutoSitOutByUserId`). Using `showdown.handsByUserId` directly provides the authoritative count of evaluated showdown hands without requiring parallel state tracking. For example, if 3 players were dealt in `handSeats` but 1 sat out or left before showdown, exactly 2 hands are evaluated at showdown, which correctly qualifies as heads-up.
 - **No Client Targeting**:
   In the Poker V2 browser client, `targetSeatNo` is specially reserved for `nice_hand`. Reactions `bad_beat` and `not_this_time` are table broadcasts; no `targetSeatNo` is emitted.
 

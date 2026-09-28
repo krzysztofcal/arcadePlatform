@@ -36,7 +36,8 @@ When a bot is heads-up in an all-in confrontation, held the winning hand on the 
 
 **Acceptance Scenarios**:
 1. **Given** a heads-up all-in showdown between bot B and player P where B loses, **When** P is verified in `riverChangedWinnerUserIds`, **Then** bot B is classified with reaction key `bad_beat` (broadcast to table, no `targetSeatNo`).
-2. **Given** a multiway pot (3+ players at showdown) where the winner caught a river card, **When** bot B loses all-in, **Then** bot B is NOT classified as `bad_beat` (to avoid speculative equity inference); it falls back to `not_this_time`.
+2. **Given** a hand with 3 players in `handSeats`, where 1 player left the table or sat out before showdown, leaving exactly 2 players with hands evaluated in `showdown.handsByUserId`, **When** bot B loses all-in on river reversal, **Then** bot B is correctly recognized as heads-up and classified with reaction key `bad_beat` (broadcast to table, no `targetSeatNo`).
+3. **Given** a multiway showdown (3+ players evaluated in `showdown.handsByUserId`) where the winner caught a river card, **When** bot B loses all-in, **Then** bot B is NOT classified as `bad_beat` (to avoid speculative equity inference); it falls back to `not_this_time`.
 
 ---
 
@@ -76,7 +77,7 @@ The new lost all-in / bad-beat branch must integrate cleanly into the existing s
 - **Split pot / partial chop / uncalled bet return**: If a bot receives any share of the pot or an uncalled bet return (`Number(handSettlement.payouts?.[botUserId] ?? 0) > 0`), the bot is not a lost all-in loser and MUST NOT emit `bad_beat` or `not_this_time`. Even if absent from `showdown.winners`, any positive payout strictly disqualifies the bot from the lost all-in branch.
 - **Bot folded earlier in hand**: If the bot folded on preflop, flop, or turn, its fold was already processed (emitting `not_this_time` on fold if rolled). At settlement, `state.foldedByUserId[bot.userId] === true` excludes it from showdown settlement reactions.
 - **Bot left table or sat out**: If `state.leftTableByUserId[bot.userId] === true` or `state.sitOutByUserId[bot.userId] === true`, the bot cannot speak at settlement.
-- **Multiway river reversal**: If 3 or more players are involved at showdown, river suckouts are complex multiway equity shifts. To keep behavior predictable without an equity engine, `bad_beat` is restricted to heads-up showdowns; multiway all-in losers receive `not_this_time`.
+- **Multiway river reversal**: If 3 or more players have evaluated hands in `showdown.handsByUserId`, river suckouts are complex multiway equity shifts. To keep behavior predictable without an equity engine, `bad_beat` is restricted to heads-up showdowns (`Object.keys(showdown.handsByUserId).length === 2`); multiway all-in losers receive `not_this_time`.
 - **Zero starting stack or corrupt contribution**: If `handStartStack === 0` or `contribution > handStartStack`, all-in validation fails closed (must have `handStartStack > 0 && contribution === handStartStack`).
 
 ---
@@ -86,7 +87,7 @@ The new lost all-in / bad-beat branch must integrate cleanly into the existing s
 ### Functional Requirements
 
 - **FR-001**: System MUST determine bot all-in participation exclusively from `handStartStacksByUserId` and `contributionsByUserId` requiring exact equality (`contribution === handStartStack && handStartStack > 0`), and MUST require `Number(handSettlement.payouts?.[botUserId] ?? 0) <= 0` and absence from `showdown.winners`. If `contribution > handStartStack`, values are non-integer/negative, or payout is positive (including uncalled bet returns), system MUST treat this as not qualifying for lost all-in.
-- **FR-002**: System MUST classify an eligible losing all-in bot as `bad_beat` (broadcast to table, without `targetSeatNo`) when the showdown is heads-up and the winner is present in `riverChangedWinnerUserIds`.
+- **FR-002**: System MUST classify an eligible losing all-in bot as `bad_beat` (broadcast to table, without `targetSeatNo`) when the showdown is heads-up (exactly 2 actual showdown participants evaluated in `showdown.handsByUserId`) and the winner is present in `riverChangedWinnerUserIds`.
 - **FR-003**: System MUST classify an eligible losing all-in bot not meeting the heads-up river reversal condition as `not_this_time` (broadcast to table, without `targetSeatNo`).
 - **FR-004**: System MUST position the lost all-in / bad-beat classifier in `classifySettlementReaction` after the normal fold-win branch, but before generic `lucky`, `nice_hand`, `well_played`, and `congrats` branches.
 - **FR-005**: System MUST fail closed on the lost all-in / bad-beat branch (skipping the branch and proceeding to standard generic settlement branches) if accounting maps are missing, undefined, inconsistent, non-integer, negative, or show `contribution !== handStartStack`. The classifier MUST NOT return null on accounting discrepancy alone, preserving existing generic reaction waterfall.

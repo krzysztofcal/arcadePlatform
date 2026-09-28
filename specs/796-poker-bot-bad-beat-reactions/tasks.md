@@ -44,9 +44,9 @@
 **Independent Test**: Simulate a heads-up showdown where the winner is in `riverChangedWinnerUserIds`; verify reaction key is `bad_beat` (broadcast without `targetSeatNo`).
 
 ### Implementation for User Story 2
-- [ ] T007 [US2] Extend the all-in classifier in `classifySettlementReaction` in ws-server/poker/handlers/reaction.mjs to detect heads-up showdown with winner in `riverChangedWinnerUserIds` and emit `bad_beat` (table broadcast, no `targetSeatNo`) with base probability = 1.0
-- [ ] T008 [US2] Add deterministic behavior test in ws-server/poker/handlers/reaction.behavior.test.mjs for heads-up all-in river reversal -> `bad_beat` (broadcast without `targetSeatNo`)
-- [ ] T009 [US2] Add behavior test in ws-server/poker/handlers/reaction.behavior.test.mjs proving multiway river reversal falls back to `not_this_time`
+- [ ] T007 [US2] Extend the all-in classifier in `classifySettlementReaction` in ws-server/poker/handlers/reaction.mjs to detect heads-up showdown (exactly 2 evaluated hands in `showdown.handsByUserId` with a single winner) with winner in `riverChangedWinnerUserIds` and emit `bad_beat` (table broadcast, no `targetSeatNo`) with base probability = 1.0
+- [ ] T008 [US2] Add deterministic behavior test in ws-server/poker/handlers/reaction.behavior.test.mjs for heads-up all-in river reversal -> `bad_beat` (broadcast without `targetSeatNo`), including a test case where 3 players were in `handSeats` but 1 left the table or sat out, resulting in exactly 2 hands in `showdown.handsByUserId` and proving it correctly qualifies as heads-up
+- [ ] T009 [US2] Add behavior test in ws-server/poker/handlers/reaction.behavior.test.mjs proving multiway showdown (3+ hands in `showdown.handsByUserId`) with river reversal falls back to `not_this_time`
 
 ---
 
@@ -90,6 +90,7 @@
 - **Zero DB/protocol mutations**: No new tables, migrations, WebSocket event names, or reaction keys.
 - **Fail-closed & fallthrough**: Any corrupt or missing accounting evidence (`contribution > handStartStack`, missing maps) safely skips the lost all-in branch and falls through to existing generic reactions; does not return null on accounting errors alone.
 - **Uncalled return exclusion**: Any positive payout (`payouts[botUserId] > 0`), including uncalled bet returns, disqualifies bot from lost all-in / bad-beat, falling through to existing generic settlement branches.
+- **Heads-up showdown**: Evaluated authoritatively as exactly 2 evaluated hands in `showdown.handsByUserId` (with a single winner).
 - **Dual accounting maps isolation**: Neither `handStartStacksByUserId` nor `contributionsByUserId` is ever exposed in client snapshots or WebSocket protocol frames.
 - **No client targeting**: `bad_beat` and `not_this_time` are table broadcasts without `targetSeatNo`. Client targeting remains reserved for `nice_hand`.
 - **No test-only exports**: `buildDetachedReactionContext` is not exported; server tests validate the end-to-end integration flow.

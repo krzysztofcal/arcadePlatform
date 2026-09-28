@@ -113,13 +113,17 @@ interface SettlementReactionCandidate {
      return isPlayerAllIn(botUserId, state?.handStartStacksByUserId, state?.contributionsByUserId);
    }
    ```
-3. **Heads-Up Showdown Qualification**:
+3. **Heads-Up Showdown Qualification (Exactly 2 Actual Showdown Participants)**:
    ```javascript
-   function isHeadsUpShowdown(handSeats, foldedByUserId, showdown) {
-     const nonFolded = handSeats.filter((s) => foldedByUserId[s.userId] !== true);
+   function isHeadsUpShowdown(showdown) {
+     const comparedHands = showdown?.handsByUserId;
+     const participantCount = comparedHands && typeof comparedHands === 'object'
+       ? Object.keys(comparedHands).length
+       : 0;
      const winnerCount = Array.isArray(showdown?.winners) ? showdown.winners.length : 0;
-     return nonFolded.length === 2 && winnerCount === 1;
+     return participantCount === 2 && winnerCount === 1;
    }
    ```
+   *Note*: Heads-up is defined by exactly 2 players whose hands were actively evaluated in `showdown.handsByUserId`. This avoids fragile reconstructions from `handSeats` and properly accounts for players who folded, left the table (`leftTableByUserId`), or sat out (`sitOutByUserId`, `pendingAutoSitOutByUserId`).
 4. **Fail-Closed & Fallthrough Guarantee**:
    If accounting maps (`handStartStacksByUserId`, `contributionsByUserId`) are missing, invalid, or corrupt (`contribution > handStartStack`), `isPlayerAllIn` evaluates to `false`. The lost all-in / bad-beat branch is skipped, and the classifier cleanly continues down the existing waterfall (`lucky`, `nice_hand`, `wow`, `congrats`/`well_played`) without altering existing generic behavior or returning `null` on accounting failure alone. If `reactionSettings.enabled === false` or `isCompleteReactionSettlement` fails, returns `null` as before.
