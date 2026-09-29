@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 46,
+    "missing_count": 47,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -923,6 +923,20 @@
       "replacement": null,
       "required_effects": [
         "slow_recovery_threshold_ch added to poker_access_policy with positive safe range and recovery < entry threshold check; Production equivalent remains separately reviewed"
+      ],
+      "omitted_effects": [
+        "No Production migration, activation or runtime mutation is authorized by this Stage migration"
+      ]
+    },
+    {
+      "version": "20260929163000",
+      "file": "20260929163000_poker_access_policy_hysteresis_bps.sql",
+      "sha256": "bef0b1acbac59a802222737286f03322f153467be910461cc13094e83a55c330",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": null,
+      "required_effects": [
+        "slow_hysteresis_bps added to poker_access_policy with range [100, 5000] and consistency check against derived recovery threshold; Production equivalent remains separately reviewed"
       ],
       "omitted_effects": [
         "No Production migration, activation or runtime mutation is authorized by this Stage migration"
