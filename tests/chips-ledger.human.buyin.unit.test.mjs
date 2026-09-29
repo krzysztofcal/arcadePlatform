@@ -141,7 +141,255 @@ const run = async () => {
   assert.equal(state.userAccountsCreated, 1);
 };
 
-run().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+const runSavepointIsolationTests = async () => {
+  const { postTransaction: wsPostTransaction } = await import("../ws-server/poker/persistence/chips-ledger.mjs");
+  const netlifyPostTransaction = loadPostTransaction({
+    beginSql: async (fn) => fn({}),
+    executeSql: async () => [],
+    klog: () => {}
+  });
+
+  const createScopeHarness = () => {
+    let nextTxId = 1;
+    let savepoints = 0;
+    const accounts = new Map([
+      ["acct-human", { id: "acct-human", user_id: "00000000-0000-4000-8000-000000000999", account_type: "USER", status: "active", balance: 500, next_entry_seq: 1 }],
+      ["acct-escrow", { id: "acct-escrow", system_key: "POKER_TABLE:sp-test", account_type: "ESCROW", status: "active", balance: 0, next_entry_seq: 1 }],
+      ["acct-slow-bankroll", { id: "acct-slow-bankroll", system_key: "POKER_BOT_SLOW_BANKROLL_500", account_type: "SYSTEM", status: "active", balance: 0, next_entry_seq: 1 }],
+    ]);
+    const registry = new Map();
+
+    const makeScope = (name) => {
+      let scopeUncaughtError = null;
+      const scopeSql = async (strings, ...values) => {
+        const text = String(strings).toLowerCase();
+        if (text.includes("insert into public.chips_transactions")) {
+          const row = {
+            id: `tx-${nextTxId++}`,
+            tx_type: values[5],
+            user_id: values[6],
+            idempotency_key: values[3],
+            payload_hash: values[4],
+          };
+          registry.set(row.idempotency_key, {
+            idempotency_key: row.idempotency_key,
+            transaction_id: row.id,
+            payload_hash: row.payload_hash,
+            tx_type: row.tx_type,
+            user_id: row.user_id,
+          });
+          return [row];
+        }
+        if (text.includes("where id =")) {
+          const account = accounts.get(values[0]);
+          return account ? [{ id: account.id, balance: account.balance, next_entry_seq: 1 }] : [];
+        }
+        throw new Error(`Unhandled scopeSql template: ${text}`);
+      };
+
+      scopeSql.unsafe = async (query, params = []) => {
+        const text = String(query).toLowerCase();
+        if (text.startsWith("savepoint") || text.startsWith("release savepoint") || text.startsWith("rollback to savepoint")) return [];
+        if (text.includes("system_key = any")) {
+          const keys = params[0] || [];
+          return [...accounts.values()].filter((a) => keys.includes(a.system_key));
+        }
+        if (text.includes("account_type = 'user'") && text.includes("for update")) {
+          return [{ account: accounts.get("acct-human") }];
+        }
+        if (text.includes("insert into public.chips_transactions")) {
+          const row = {
+            id: `tx-${nextTxId++}`,
+            tx_type: params[5],
+            user_id: params[6],
+            idempotency_key: params[3],
+            payload_hash: params[4],
+          };
+          registry.set(row.idempotency_key, {
+            idempotency_key: row.idempotency_key,
+            transaction_id: row.id,
+            payload_hash: row.payload_hash,
+            tx_type: row.tx_type,
+            user_id: row.user_id,
+          });
+          return [row];
+        }
+        if (text.includes("apply_balance")) {
+          const records = JSON.parse(params[0]);
+          for (const rec of records) {
+            const account = accounts.get(rec.account_id);
+            if (account && account.balance + Number(rec.amount) < 0) {
+              const err = new Error("insufficient_funds");
+              err.code = "P0001";
+              scopeUncaughtError = scopeUncaughtError || err;
+              throw err;
+            }
+          }
+          for (const rec of records) {
+            const account = accounts.get(rec.account_id);
+            if (account) account.balance += Number(rec.amount);
+          }
+          return [{ updated_accounts: records.length, expected_accounts: records.length, guard_ok: true, guard_check: true }];
+        }
+        if (text.includes("insert into public.chips_entries")) {
+          const payload = params[1] || params[0];
+          const inserted = JSON.parse(payload).map((rec, index) => ({ account_id: rec.account_id, amount: rec.amount, entry_seq: index + 1 }));
+          return [{ entries: inserted }];
+        }
+        if (text.includes("from public.chips_transaction_idempotency")) {
+          const record = registry.get(params[0]);
+          return record ? [record] : [];
+        }
+        if (text.includes("where user_id =") && text.includes("chips_accounts")) {
+          const account = [...accounts.values()].find((entry) => entry.user_id === params[0]);
+          return account ? [{ id: account.id, balance: account.balance, next_entry_seq: 1 }] : [];
+        }
+        if (text.includes("where id =") && text.includes("chips_accounts")) {
+          const account = accounts.get(params[0]);
+          return account ? [{ id: account.id, balance: account.balance, next_entry_seq: 1 }] : [];
+        }
+        if (text.includes("dummy_query_after_recovery")) {
+          return [{ ok: true }];
+        }
+        throw new Error(`Unhandled scopeSql.unsafe: ${text}`);
+      };
+
+      scopeSql.savepoint = async (spName, fn) => {
+        const childScope = makeScope("s" + savepoints++ + "_" + (spName || "sp"));
+        return await childScope.execute(fn);
+      };
+
+      return {
+        sql: scopeSql,
+        execute: async (fn) => {
+          let outcome;
+          try {
+            outcome = await fn(scopeSql);
+            if (scopeUncaughtError) throw scopeUncaughtError;
+          } catch (e) {
+            throw e;
+          }
+          return outcome;
+        },
+        hasUncaughtError: () => Boolean(scopeUncaughtError)
+      };
+    };
+
+    return {
+      root: makeScope("root"),
+      accounts,
+      registry
+    };
+  };
+
+  // Test 1: ws-server postTransaction savepoint isolation
+  {
+    const harness = createScopeHarness();
+    let caughtError = null;
+
+    const txResult = await harness.root.execute(async (tx) => {
+      // 1. Human TABLE_BUY_IN succeeds
+      await wsPostTransaction({
+        userId: "00000000-0000-4000-8000-000000000999",
+        txType: "TABLE_BUY_IN",
+        idempotencyKey: "sp-human-buyin",
+        entries: [
+          { accountType: "USER", userId: "00000000-0000-4000-8000-000000000999", amount: -500 },
+          { accountType: "ESCROW", systemKey: "POKER_TABLE:sp-test", amount: 500 }
+        ],
+        tx
+      });
+
+      // 2. Bot funding fails with insufficient_funds inside caller-owned savepoint
+      try {
+        await tx.savepoint("bot_funding_sp", async (spTx) => {
+          await wsPostTransaction({
+            userId: null,
+            txType: "TABLE_BUY_IN",
+            idempotencyKey: "sp-bot-buyin-fail",
+            createdBy: "00000000-0000-4000-8000-000000000999",
+            entries: [
+              { accountType: "SYSTEM", systemKey: "POKER_BOT_SLOW_BANKROLL_500", amount: -500 },
+              { accountType: "ESCROW", systemKey: "POKER_TABLE:sp-test", amount: 500 }
+            ],
+            tx: spTx
+          });
+        });
+      } catch (err) {
+        caughtError = err;
+      }
+
+      // 3. Caller continues on outer transaction after recovering from bot failure
+      const subsequent = await tx.unsafe("select 1 as dummy_query_after_recovery;");
+      assert.equal(subsequent?.[0]?.ok, true);
+
+      return { ok: true };
+    });
+
+    assert.equal(txResult.ok, true);
+    assert.equal(caughtError?.message?.includes("insufficient_funds"), true);
+    assert.equal(harness.root.hasUncaughtError(), false, "root transaction scope has zero uncaughtError");
+    assert.equal(harness.accounts.get("acct-human").balance, 0, "human balance correctly debited");
+    assert.equal(harness.accounts.get("acct-escrow").balance, 500, "escrow balance correctly credited");
+    assert.equal(harness.accounts.get("acct-slow-bankroll").balance, 0, "depleted bankroll remains 0");
+  }
+
+  // Test 2: netlify postTransaction savepoint isolation
+  {
+    const harness = createScopeHarness();
+    let caughtError = null;
+
+    const txResult = await harness.root.execute(async (tx) => {
+      // 1. Human TABLE_BUY_IN succeeds
+      await netlifyPostTransaction({
+        userId: "00000000-0000-4000-8000-000000000999",
+        txType: "TABLE_BUY_IN",
+        idempotencyKey: "sp-netlify-human-buyin",
+        entries: [
+          { accountType: "USER", userId: "00000000-0000-4000-8000-000000000999", amount: -500 },
+          { accountType: "ESCROW", systemKey: "POKER_TABLE:sp-test", amount: 500 }
+        ],
+        tx
+      });
+
+      // 2. Bot funding fails with insufficient_funds inside caller-owned savepoint
+      try {
+        await tx.savepoint("bot_funding_sp", async (spTx) => {
+          await netlifyPostTransaction({
+            userId: null,
+            txType: "TABLE_BUY_IN",
+            idempotencyKey: "sp-netlify-bot-buyin-fail",
+            createdBy: "00000000-0000-4000-8000-000000000999",
+            entries: [
+              { accountType: "SYSTEM", systemKey: "POKER_BOT_SLOW_BANKROLL_500", amount: -500 },
+              { accountType: "ESCROW", systemKey: "POKER_TABLE:sp-test", amount: 500 }
+            ],
+            tx: spTx
+          });
+        });
+      } catch (err) {
+        caughtError = err;
+      }
+
+      // 3. Caller continues on outer transaction after recovering from bot failure
+      const subsequent = await tx.unsafe("select 1 as dummy_query_after_recovery;");
+      assert.equal(subsequent?.[0]?.ok, true);
+
+      return { ok: true };
+    });
+
+    assert.equal(txResult.ok, true);
+    assert.equal(caughtError?.message?.includes("insufficient_funds"), true);
+    assert.equal(harness.root.hasUncaughtError(), false, "root transaction scope has zero uncaughtError");
+    assert.equal(harness.accounts.get("acct-human").balance, 0, "human balance correctly debited");
+    assert.equal(harness.accounts.get("acct-escrow").balance, 500, "escrow balance correctly credited");
+    assert.equal(harness.accounts.get("acct-slow-bankroll").balance, 0, "depleted bankroll remains 0");
+  }
+};
+
+run()
+  .then(() => runSavepointIsolationTests())
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

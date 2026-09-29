@@ -1038,7 +1038,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         );
       }
 
-      const botCfg = getBotConfig(process.env);
+      const botCfg = getBotConfig({ ...process.env, ...(env || {}) });
       const humanCountAfterJoin = activeSeatRows(seatRows).filter((row) => !row?.is_bot).length + 1;
       const botFundingAllowedForTableHumans = joinAccess.effectiveClass !== "RESTRICTED"
         && existingHumanAccessAllowsBotFunding;

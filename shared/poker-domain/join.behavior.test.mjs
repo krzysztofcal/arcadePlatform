@@ -2518,3 +2518,310 @@ test("fresh authoritative join starting from version 0 returns the persisted pos
   assert.equal(result.snapshot.stateVersion, store.updateVersions.at(-1));
   assert.notEqual(result.snapshot.stateVersion, 0);
 }));
+
+test("T071/T072/T074: first AUTO/SLOW human joins empty table with depleted SLOW bot pool; bot fails with insufficient_funds; human JOIN commits with seededBots=[]; table is_slow_only=true; second SLOW human joins without bot funding; NORMAL human rejected", async () => withBotEnv(async () => {
+  const tableId = "00000000-0000-4000-8000-000000000501";
+  const ownerId = "00000000-0000-4000-8000-000000000502";
+  const secondSlowUserId = "00000000-0000-4000-8000-000000000503";
+  const normalUserId = "00000000-0000-4000-8000-000000000504";
+
+  const table = {
+    id: tableId,
+    status: "OPEN",
+    max_players: 6,
+    buy_in: 500,
+    stakes: calculateCanonicalPokerStakes(500),
+    created_by: ownerId,
+    lifecycle_kind: "STANDARD",
+    has_human_participant: false,
+    is_slow_only: false,
+  };
+
+  const users = new Map([
+    [ownerId, { bankroll: 3375, autoClass: "NORMAL", override: "AUTO", revision: 1 }],
+    [secondSlowUserId, { bankroll: 2500, autoClass: "SLOW", override: "AUTO", revision: 1 }],
+    [normalUserId, { bankroll: 1000, autoClass: "NORMAL", override: "AUTO", revision: 1 }],
+  ]);
+
+  let tableSeats = [];
+  let tableState = {
+    version: 1,
+    state: { tableId, seats: [], stacks: {} },
+  };
+
+  const ledgerCalls = [];
+  const systemAccountCalls = [];
+
+  const createScopeHarness = () => {
+    let savepoints = 0;
+
+    const makeScope = (name, parentScope = null) => {
+      let scopeUncaughtError = null;
+      let snapshotSeats = [...tableSeats];
+      let snapshotTable = { ...table };
+
+      const scopeSql = {
+        savepoint: async (spName, fn) => {
+          const childScope = makeScope("s" + savepoints++ + "_" + (spName || "sp"), scopeSql);
+          try {
+            return await childScope.execute(fn);
+          } catch (childErr) {
+            // Roll back snapshot on savepoint failure
+            throw childErr;
+          }
+        },
+        unsafe: async (sql, params = []) => {
+          const text = String(sql);
+
+          if (text.includes("to_regclass")) {
+            return [{ available: true }];
+          }
+          if (text.includes("from public.poker_tables") && text.includes("for update")) {
+            return [{ ...table }];
+          }
+          if (text.includes("from public.poker_tables")) {
+            return [{ ...table }];
+          }
+          if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) {
+            return tableSeats.map((s) => ({ ...s }));
+          }
+          if (text.includes("from public.poker_access_policy")) {
+            return [{
+              slow_threshold_ch: 2000,
+              slow_hysteresis_bps: 500,
+              slow_recovery_threshold_ch: 1900,
+              revision: 1
+            }];
+          }
+          if (text.includes("from public.poker_bot_tier_policy")) {
+            return [{
+              buy_in: 500,
+              enabled: true,
+              normal_refill_threshold_ch: 1000,
+              normal_refill_amount_ch: 1000,
+              slow_refill_threshold_ch: 1000,
+              slow_refill_amount_ch: 1000,
+              revision: 1
+            }];
+          }
+          if (text.includes("from public.chips_accounts") && text.includes("account_type = 'SYSTEM'")) {
+            return [
+              { system_key: "POKER_BOT_BANKROLL" },
+              { system_key: "POKER_BOT_SLOW_BANKROLL_500" }
+            ];
+          }
+          if (text.includes("from public.chips_accounts") && text.includes("account_type = 'USER'")) {
+            const user = users.get(params[0]);
+            return [{
+              balance: user?.bankroll ?? 1000,
+              poker_auto_class: user?.autoClass ?? "NORMAL",
+              poker_access_override: user?.override ?? "AUTO",
+              poker_access_revision: user?.revision ?? 1,
+            }];
+          }
+          if (text.includes("update public.chips_accounts") && text.includes("poker_auto_class")) {
+            const user = users.get(params[0]);
+            if (user) {
+              const match = text.match(/poker_auto_class\s*=\s*'([^']+)'/);
+              if (match) user.autoClass = match[1];
+              user.revision += 1;
+            }
+            return [{
+              user_id: params[0],
+              poker_auto_class: user?.autoClass,
+              poker_access_override: user?.override,
+              poker_access_revision: user?.revision,
+            }];
+          }
+          if (text.includes("insert into public.poker_seats")) {
+            const isBot = text.includes("is_bot") || params[3] !== undefined;
+            const newSeat = {
+              table_id: params[0],
+              user_id: params[1],
+              seat_no: params[2],
+              status: "ACTIVE",
+              is_bot: isBot,
+              bot_profile: isBot ? (params[3] || "NORMAL") : null,
+              stack: isBot ? (params[4] || 500) : 0,
+            };
+            tableSeats.push(newSeat);
+            return [{ seat_no: params[2] }];
+          }
+          if (text.includes("update public.poker_seats set stack")) {
+            const seat = tableSeats.find((s) => s.table_id === params[0] && s.user_id === params[1] && s.seat_no === params[2]);
+            if (seat) seat.stack = params[3];
+            return [];
+          }
+          if (text.includes("delete from public.poker_seats")) {
+            tableSeats = tableSeats.filter((s) => !(s.table_id === params[0] && s.user_id === params[1] && s.seat_no === params[2]));
+            return [];
+          }
+          if (text.includes("update public.poker_tables")) {
+            if (text.includes("is_slow_only = case when $2::boolean then true")) {
+              if (params[1] === true) table.is_slow_only = true;
+            }
+            table.has_human_participant = true;
+            return [];
+          }
+          if (text.includes("select 1 from public.chips_transactions")) {
+            return [];
+          }
+          return [];
+        }
+      };
+
+      return {
+        sql: scopeSql,
+        execute: async (fn) => {
+          let outcome;
+          try {
+            outcome = await fn(scopeSql);
+            if (scopeUncaughtError) throw scopeUncaughtError;
+          } catch (err) {
+            // Restore snapshot on error
+            tableSeats = snapshotSeats;
+            table.is_slow_only = snapshotTable.is_slow_only;
+            table.has_human_participant = snapshotTable.has_human_participant;
+            throw err;
+          }
+          return outcome;
+        },
+        hasUncaughtError: () => Boolean(scopeUncaughtError)
+      };
+    };
+
+    return makeScope("root");
+  };
+
+  const sharedPostTransaction = async (payload) => {
+    ledgerCalls.push(payload);
+    for (const entry of payload.entries || []) {
+      if (entry.accountType === "SYSTEM" || entry.kind === "SYSTEM") {
+        systemAccountCalls.push(entry.systemKey);
+        if (entry.systemKey === "POKER_BOT_SLOW_BANKROLL_500") {
+          // Depleted SLOW pool: raise real reason-equivalent insufficient_funds!
+          const error = new Error("insufficient_funds");
+          error.code = "P0001";
+          throw error;
+        }
+      }
+    }
+    return {
+      transaction: { id: `tx-${ledgerCalls.length}`, user_id: payload.userId },
+      entries: payload.entries,
+      account: { balance: 0 }
+    };
+  };
+
+  // STEP 1: First AUTO/SLOW human (owner) joins empty ordinary table with depleted SLOW pool
+  const harness1 = createScopeHarness();
+  const result1 = await executePokerJoinAuthoritative({
+    beginSql: async (fn) => harness1.execute(fn),
+    tableId,
+    userId: ownerId,
+    requestId: "join-step-1-owner-slow",
+    buyIn: 500,
+    postTransactionFn: sharedPostTransaction,
+    loadStateForUpdate: async () => ({ ok: true, version: tableState.version, state: tableState.state }),
+    updateStateLocked: async (tx, { nextState }) => {
+      tableState.state = nextState;
+      tableState.version += 1;
+      return { ok: true, newVersion: tableState.version };
+    },
+    validateStateForStorage: isStateStorageValid,
+    env: {
+      POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 200, 500]),
+      POKER_BOTS_ENABLED: "1",
+      POKER_BOTS_MIN_PER_TABLE: "2",
+      POKER_BOTS_MAX_PER_TABLE: "2",
+      POKER_BOT_SLOW_BANKROLL_500: "0",
+    }
+  });
+
+  // Verify Step 1 outcomes:
+  assert.equal(result1.ok, true, "human join accepted even with depleted SLOW bot pool");
+  assert.deepEqual(result1.seededBots, [], "seededBots is empty array on depleted pool");
+  assert.equal(result1.access.effectiveClass, "SLOW", "owner classified as SLOW");
+  assert.equal(result1.seatNo, 1, "owner seated at seat 1");
+  assert.equal(result1.stack, 500, "owner funded stack is 500");
+  assert.equal(table.is_slow_only, true, "table becomes is_slow_only=true");
+  assert.equal(tableSeats.length, 1, "only 1 seat persists in tableSeats");
+  assert.equal(tableSeats[0].user_id, ownerId, "only owner is seated");
+  assert.equal(tableSeats[0].is_bot, false, "seated player is not a bot");
+  assert.equal(tableSeats.filter((s) => s.is_bot).length, 0, "failed bot seat was rolled back");
+  assert.equal(result1.snapshot.seats.length, 1, "snapshot has exactly 1 seat");
+  assert.equal(result1.snapshot.seats[0].userId, ownerId, "snapshot has owner");
+  assert.equal(result1.snapshot.stacks[ownerId], 500, "snapshot has owner stack 500");
+
+  // Verify economic boundaries:
+  assert.equal(systemAccountCalls.includes("POKER_BOT_SLOW_BANKROLL_500"), true, "attempted bot funding from SLOW pool");
+  assert.equal(systemAccountCalls.includes("POKER_BOT_BANKROLL"), false, "never fell back to NORMAL bot pool");
+  assert.equal(systemAccountCalls.includes("TREASURY"), false, "never fell back to TREASURY");
+  assert.equal(systemAccountCalls.includes("GENESIS"), false, "never fell back to GENESIS");
+  assert.equal(ledgerCalls.filter((c) => c.txType === "MINT").length, 0, "zero JOIN-time MINT/refill");
+
+  // STEP 2: Second effective SLOW human joins the human-only SLOW table while pool is still depleted
+  const harness2 = createScopeHarness();
+  const botFundingBeforeStep2 = systemAccountCalls.length;
+  const result2 = await executePokerJoinAuthoritative({
+    beginSql: async (fn) => harness2.execute(fn),
+    tableId,
+    userId: secondSlowUserId,
+    requestId: "join-step-2-second-slow",
+    buyIn: 500,
+    postTransactionFn: sharedPostTransaction,
+    loadStateForUpdate: async () => ({ ok: true, version: tableState.version, state: tableState.state }),
+    updateStateLocked: async (tx, { nextState }) => {
+      tableState.state = nextState;
+      tableState.version += 1;
+      return { ok: true, newVersion: tableState.version };
+    },
+    validateStateForStorage: isStateStorageValid,
+    env: {
+      POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 200, 500]),
+      POKER_BOTS_ENABLED: "1",
+      POKER_BOTS_MIN_PER_TABLE: "2",
+      POKER_BOTS_MAX_PER_TABLE: "2",
+      POKER_BOT_SLOW_BANKROLL_500: "0",
+    }
+  });
+
+  // Verify Step 2 outcomes:
+  assert.equal(result2.ok, true, "second SLOW human join succeeds on human-only SLOW table");
+  assert.equal(result2.seatNo, 2, "second human seated at seat 2");
+  assert.equal(result2.stack, 500, "second human stack is 500");
+  assert.deepEqual(result2.seededBots, [], "zero bots seeded for second human");
+  assert.equal(systemAccountCalls.length, botFundingBeforeStep2, "no bot funding attempted or required for second human");
+  assert.equal(tableSeats.length, 2, "table has 2 humans seated");
+  assert.equal(tableSeats.every((s) => !s.is_bot), true, "all seated players are human");
+  assert.equal(result2.snapshot.seats.length, 2, "snapshot has 2 seats");
+  assert.equal(result2.snapshot.stacks[secondSlowUserId], 500, "second human stack in snapshot is 500");
+
+  // STEP 3: Fresh effective NORMAL human is rejected from the SLOW-only table
+  const harness3 = createScopeHarness();
+  const ledgerCallsBeforeStep3 = ledgerCalls.length;
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => harness3.execute(fn),
+      tableId,
+      userId: normalUserId,
+      requestId: "join-step-3-normal-rejected",
+      buyIn: 500,
+      postTransactionFn: sharedPostTransaction,
+      loadStateForUpdate: async () => ({ ok: true, version: tableState.version, state: tableState.state }),
+      updateStateLocked: async () => ({ ok: true, newVersion: tableState.version }),
+      validateStateForStorage: isStateStorageValid,
+      env: {
+        POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 200, 500]),
+      }
+    }),
+    (error) => {
+      assert.equal(error?.code, "normal_table_required", "NORMAL user rejected from SLOW-only table");
+      return true;
+    }
+  );
+
+  // Verify Step 3 zero financial mutations:
+  assert.equal(ledgerCalls.length, ledgerCallsBeforeStep3, "zero ledger mutation for rejected normal user");
+  assert.equal(tableSeats.length, 2, "seats remain untouched");
+}));
