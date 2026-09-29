@@ -776,6 +776,7 @@ function normalizeWsPokerAccessPayload(access) {
   const revision = Number(access.revision);
   if (!automaticClass || !override || !effectiveClass || !Number.isSafeInteger(revision) || revision <= 0) return null;
   const threshold = Number(access.slowThresholdCh ?? access.policy?.slowThresholdCh);
+  const recoveryThreshold = Number(access.slowRecoveryThresholdCh ?? access.policy?.slowRecoveryThresholdCh);
   const policyRevision = Number(access.policyRevision ?? access.policy?.revision);
   return {
     automaticClass,
@@ -783,6 +784,7 @@ function normalizeWsPokerAccessPayload(access) {
     effectiveClass,
     revision,
     ...(Number.isSafeInteger(threshold) && threshold > 0 ? { slowThresholdCh: threshold } : {}),
+    ...(Number.isSafeInteger(recoveryThreshold) && recoveryThreshold > 0 ? { slowRecoveryThresholdCh: recoveryThreshold } : {}),
     ...(Number.isSafeInteger(policyRevision) && policyRevision > 0 ? { policyRevision } : {}),
     ...(access.automaticSlowAt ? { automaticSlowAt: access.automaticSlowAt } : {})
   };
@@ -826,7 +828,13 @@ async function refreshConnectionPokerAccess(ws, connState, { requestId = null, f
         await readPokerAccessPolicy(tx)
       ];
       if (!snapshot || !policy) return null;
-      return { ...snapshot, policy, slowThresholdCh: policy.slowThresholdCh, policyRevision: policy.revision };
+      return {
+        ...snapshot,
+        policy,
+        slowThresholdCh: policy.slowThresholdCh,
+        slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
+        policyRevision: policy.revision
+      };
     });
     if (!access) return null;
     if (activePokerAccessMutations.has(userId)
@@ -947,6 +955,7 @@ returning user_id, poker_auto_class, poker_access_override, poker_access_revisio
         ...snapshot,
         policy,
         slowThresholdCh: policy.slowThresholdCh,
+        slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
         policyRevision: policy.revision
       };
       let slowOnlyTableIds = [];
@@ -1079,6 +1088,7 @@ async function refreshActivePokerAccess() {
         ...snapshot,
         policy: refreshed.policy,
         slowThresholdCh: refreshed.policy.slowThresholdCh,
+        slowRecoveryThresholdCh: refreshed.policy.slowRecoveryThresholdCh,
         policyRevision: refreshed.policy.revision,
       };
       const slowOnlyTableIds = refreshed.slowOnlyTableIdsByUser instanceof Map

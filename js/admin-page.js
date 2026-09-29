@@ -1621,6 +1621,7 @@
     html.push('<h3 class="admin-section-title">Poker access and refill policy</h3>');
     html.push('<form class="admin-adjust" id="adminPokerAccessPolicyForm">');
     html.push('<label class="admin-field"><span class="admin-field__label">SLOW threshold (CH)</span><input class="admin-input" name="slowThresholdCh" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(access.slowThresholdCh || "") + '"></label>');
+    html.push('<label class="admin-field"><span class="admin-field__label">SLOW recovery threshold (CH)</span><input class="admin-input" name="slowRecoveryThresholdCh" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(access.slowRecoveryThresholdCh || "") + '"></label>');
     html.push('<input type="hidden" name="accessRevision" value="' + escapeHtml(access.revision || 1) + '">');
     html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save access policy</button></div><p class="admin-note" data-poker-access-policy-status aria-live="polite">Access policy is revision checked and audited separately.</p></form>');
     if (pools.length){
@@ -1722,7 +1723,15 @@
     if (status) status.textContent = "Saving…";
     try {
       try {
-        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({ kind: "access", slowThresholdCh: data.slowThresholdCh, expectedRevision: data.accessRevision }) });
+        await apiFetch("/.netlify/functions/admin-poker-policy", {
+          method: "PATCH",
+          body: JSON.stringify({
+            kind: "access",
+            slowThresholdCh: data.slowThresholdCh,
+            slowRecoveryThresholdCh: data.slowRecoveryThresholdCh,
+            expectedRevision: data.accessRevision
+          })
+        });
       } catch (err){
         if (err && err.code === "stale_revision"){
           var reloadOk = true;
@@ -1741,6 +1750,10 @@
             setStatus("Access policy revision conflict. Refresh failed — reload current state before saving.", "warning");
           }
           klog("admin_poker_access_policy_stale_revision", { code: "stale_revision" });
+        } else if (err && err.code === "invalid_threshold_relationship") {
+          if (status) status.textContent = "Could not save access policy: recovery threshold must be less than entry threshold.";
+          handleApiError(err, "Recovery threshold must be less than entry threshold.");
+          klog("admin_poker_access_policy_update_failed", { code: "invalid_threshold_relationship" });
         } else {
           if (status) status.textContent = "Could not save access policy: " + String(err && err.code || "request_failed");
           handleApiError(err, "Could not save access policy.");

@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 45,
+    "missing_count": 46,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -909,6 +909,20 @@
       "replacement": null,
       "required_effects": [
         "FORCE_RESTRICTED override constraint accepted by the #1018 schema; Production equivalent remains separately reviewed"
+      ],
+      "omitted_effects": [
+        "No Production migration, activation or runtime mutation is authorized by this Stage migration"
+      ]
+    },
+    {
+      "version": "20260929130000",
+      "file": "20260929130000_poker_access_policy_recovery_threshold.sql",
+      "sha256": "027368577288d95ccda16fc921c39dc57c717d74e648c517d68c2ac4a81addc3",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": null,
+      "required_effects": [
+        "slow_recovery_threshold_ch added to poker_access_policy with positive safe range and recovery < entry threshold check; Production equivalent remains separately reviewed"
       ],
       "omitted_effects": [
         "No Production migration, activation or runtime mutation is authorized by this Stage migration"

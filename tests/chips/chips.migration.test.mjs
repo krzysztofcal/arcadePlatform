@@ -213,10 +213,11 @@ const assertPokerBotQuarantineSchema = async (sql) => {
   assert.match(tableIdIndexRows?.[0]?.indexdef || "", /metadata.*tableId/i);
 
   const policyRows = await sql`
-    select id, slow_threshold_ch, revision from public.poker_access_policy where id = 1;
+    select id, slow_threshold_ch, slow_recovery_threshold_ch, revision from public.poker_access_policy where id = 1;
   `;
   assert.equal(policyRows.length, 1);
   assert.equal(Number(policyRows[0].slow_threshold_ch), 1_000_000_000);
+  assert.equal(Number(policyRows[0].slow_recovery_threshold_ch), 900_000_000);
   assert.equal(Number(policyRows[0].revision), 1);
   const tierRows = await sql`
     select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,

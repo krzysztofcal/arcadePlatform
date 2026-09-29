@@ -149,13 +149,14 @@ function loadLedgerCapacity(env = process.env, runSql = executeSql) {
 async function loadPokerBotPolicySummary(runSql = executeSql) {
   try {
     const [accessRows, tierRows, poolRows] = await Promise.all([
-      runSql("select slow_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
+      runSql("select slow_threshold_ch, slow_recovery_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
       runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
       runSql("select system_key, balance, status from public.chips_accounts where account_type = 'SYSTEM' and system_key in ('POKER_BOT_BANKROLL_100', 'POKER_BOT_BANKROLL', 'POKER_BOT_SLOW_BANKROLL_100', 'POKER_BOT_SLOW_BANKROLL_500') order by system_key;"),
     ]);
     return {
       access: accessRows?.[0] ? {
         slowThresholdCh: Number(accessRows[0].slow_threshold_ch),
+        slowRecoveryThresholdCh: Number(accessRows[0].slow_recovery_threshold_ch),
         revision: Number(accessRows[0].revision),
         updatedAt: accessRows[0].updated_at || null,
         updatedBy: accessRows[0].updated_by || null,

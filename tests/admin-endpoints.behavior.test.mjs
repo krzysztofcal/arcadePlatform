@@ -328,6 +328,110 @@ test("poker tier policy cannot enable a tier without both exact NORMAL and SLOW 
   );
 });
 
+test("poker access policy atomic save updates both thresholds and bumps revision once (T061)", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowRecoveryThresholdCh: 1500,
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_recovery_threshold_ch: params[1],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[2],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  assert.equal(result.access.slowThresholdCh, 2000);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1500);
+  assert.equal(result.access.revision, 2);
+  assert.match(executedUpdate.sql, /slow_threshold_ch = \$1, slow_recovery_threshold_ch = \$2, revision = revision \+ 1/);
+  assert.equal(executedUpdate.params[0], 2000);
+  assert.equal(executedUpdate.params[1], 1500);
+});
+
+test("poker access policy rejects invalid recovery/entry relationship with zero mutation (T061)", async () => {
+  let updateCalled = false;
+  const mockTx = {
+    unsafe: async (sql) => {
+      if (String(sql).includes("update public.poker_access_policy")) {
+        updateCalled = true;
+      }
+      return [{ revision: 1 }];
+    }
+  };
+
+  // recovery == entry
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 1000, slowRecoveryThresholdCh: 1000, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_threshold_relationship"
+  );
+
+  // recovery > entry
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 1000, slowRecoveryThresholdCh: 1500, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_threshold_relationship"
+  );
+
+  // non-positive / negative recovery
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 1000, slowRecoveryThresholdCh: 0, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_slow_recovery_threshold_ch"
+  );
+
+  assert.equal(updateCalled, false, "zero DB update on invalid threshold relationship");
+});
+
+test("poker access policy rejects stale revision with zero mutation (T061)", async () => {
+  let updateCalled = false;
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, slowRecoveryThresholdCh: 1500, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn({
+        unsafe: async (sql) => {
+          if (String(sql).includes("select revision from public.poker_access_policy")) {
+            return [{ revision: 2 }];
+          }
+          if (String(sql).includes("update public.poker_access_policy")) {
+            updateCalled = true;
+          }
+          return [];
+        }
+      }),
+    }),
+    (error) => error?.code === "stale_revision"
+  );
+  assert.equal(updateCalled, false, "zero DB update on stale revision");
+});
+
 test("admin-me returns admin payload for an allowlisted caller", async () => {
   const handler = createAdminMeHandler({
     env: { CHIPS_ENABLED: "1" },

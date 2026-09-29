@@ -8,6 +8,7 @@ import {
   applyAutomaticThresholdEvidence,
   deriveAccessState,
   persistAutomaticSlow,
+  persistAutomaticTransition,
   readPokerAccessPolicy,
   readPokerAccessSnapshot,
   readPokerAccessSnapshots,
@@ -128,13 +129,16 @@ async function resolveJoinAccess({ tx, userId, bankroll, buyIn = null, nowMs = D
     automaticClass: snapshot.automaticClass,
     override: snapshot.override,
     evidenceCh: bankroll,
-    slowThresholdCh: policy.slowThresholdCh
+    slowThresholdCh: policy.slowThresholdCh,
+    slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
+    allowRecovery: true,
   });
   let persisted = null;
   if (classified.changed && snapshot) {
-    persisted = await persistAutomaticSlow(tx, {
+    persisted = await persistAutomaticTransition(tx, {
       userId,
-      expectedRevision: snapshot.revision
+      targetClass: classified.automaticClass,
+      expectedRevision: snapshot.revision,
     });
   }
   const finalSnapshot = persisted?.snapshot || snapshot;

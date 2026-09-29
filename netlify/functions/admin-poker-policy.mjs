@@ -37,13 +37,14 @@ function normalizePolicy(row) {
 
 async function loadPokerPolicy(runSql = executeSql) {
   const [accessRows, tierRows, poolRows] = await Promise.all([
-    runSql("select slow_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
+    runSql("select slow_threshold_ch, slow_recovery_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
     runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
     runSql("select system_key, balance, status from public.chips_accounts where account_type = 'SYSTEM' and system_key = any($1::text[]) order by system_key;", [POOL_KEYS]),
   ]);
   return {
     access: accessRows?.[0] ? {
       slowThresholdCh: Number(accessRows[0].slow_threshold_ch),
+      slowRecoveryThresholdCh: Number(accessRows[0].slow_recovery_threshold_ch),
       revision: Number(accessRows[0].revision),
       updatedAt: accessRows[0].updated_at || null,
       updatedBy: accessRows[0].updated_by || null,
@@ -72,18 +73,21 @@ async function updatePokerPolicy({ body, actorId, runTransaction = beginSql } = 
     const kind = String(body.kind || body.scope || "").trim().toLowerCase();
     if (kind === "access") {
       const threshold = positiveSafe(body.slowThresholdCh ?? body.slow_threshold_ch, "invalid_slow_threshold_ch");
+      const recoveryThreshold = positiveSafe(body.slowRecoveryThresholdCh ?? body.slow_recovery_threshold_ch, "invalid_slow_recovery_threshold_ch");
       const expectedRevision = positiveSafe(body.expectedRevision ?? body.expected_revision, "invalid_expected_revision");
       if (threshold > MAX_SAFE) throw badRequest("invalid_slow_threshold_ch", "invalid_slow_threshold_ch");
+      if (recoveryThreshold > MAX_SAFE) throw badRequest("invalid_slow_recovery_threshold_ch", "invalid_slow_recovery_threshold_ch");
+      if (recoveryThreshold >= threshold) throw badRequest("invalid_threshold_relationship", "invalid_threshold_relationship");
       const rows = await tx.unsafe("select revision from public.poker_access_policy where id = 1 for update;");
       if (!rows?.[0]) throw badRequest("policy_missing", "policy_missing");
       if (Number(rows[0].revision) !== expectedRevision) throw conflict("stale_revision", "stale_revision");
       const updated = await tx.unsafe(`
 update public.poker_access_policy
-set slow_threshold_ch = $1, revision = revision + 1,
-    updated_at = timezone('utc', now()), updated_by = $2::uuid
+set slow_threshold_ch = $1, slow_recovery_threshold_ch = $2, revision = revision + 1,
+    updated_at = timezone('utc', now()), updated_by = $3::uuid
 where id = 1
-returning slow_threshold_ch, revision, updated_at, updated_by;
-`, [threshold, actorId]);
+returning slow_threshold_ch, slow_recovery_threshold_ch, revision, updated_at, updated_by;
+`, [threshold, recoveryThreshold, actorId]);
       klog("admin_poker_access_policy_updated", { actorId, revision: updated?.[0]?.revision });
       return { access: loadPokerPolicyRow(updated?.[0]), propagationMs: 30_000 };
     }
@@ -123,6 +127,7 @@ returning buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
 function loadPokerPolicyRow(row) {
   return {
     slowThresholdCh: Number(row?.slow_threshold_ch),
+    slowRecoveryThresholdCh: Number(row?.slow_recovery_threshold_ch),
     revision: Number(row?.revision),
     updatedAt: row?.updated_at || null,
     updatedBy: row?.updated_by || null,

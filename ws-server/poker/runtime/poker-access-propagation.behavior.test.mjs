@@ -154,7 +154,7 @@ async function accessRuntimeFixture(options = {}) {
         }
       });
     },
-    readPokerAccessPolicy: async () => ({ revision: 1, slowThresholdCh: 1000000000 }),
+    readPokerAccessPolicy: async () => ({ revision: 1, slowThresholdCh: 1000000000, slowRecoveryThresholdCh: 900000000 }),
     readPokerAccessSnapshot: async (_tx, { userId: targetUserId }) => {
       const snapshot = normalizeAccessSnapshot({ ...userRow });
       if (typeof options.onReadSnapshot === 'function') {
@@ -960,4 +960,26 @@ test("RESTRICTED with missing or expired funding snapshot yields authoritative n
   assert.equal(runtime.getPersistedCount(), 0);
   // Zero retries scheduled because RESTRICTED is authoritative no-funding, not UNKNOWN
   assert.equal(runtime.getRetries().length, 0);
+});
+
+test("normalizeWsPokerAccessPayload includes slowThresholdCh and slowRecoveryThresholdCh (T061)", async () => {
+  const { readFile } = await import('node:fs/promises');
+  const code = await readFile(new URL('../../server.mjs', import.meta.url), 'utf8');
+  const extractFn = new Function(code.slice(code.indexOf('function normalizeWsPokerAccessPayload('), code.indexOf('function sendPokerAccessFrame(')) + '\nreturn normalizeWsPokerAccessPayload;');
+  const normalize = extractFn();
+  const payload = normalize({
+    automaticClass: "NORMAL",
+    override: "AUTO",
+    effectiveClass: "NORMAL",
+    revision: 3,
+    slowThresholdCh: 2000,
+    slowRecoveryThresholdCh: 1500,
+    policyRevision: 2,
+  });
+  assert.equal(payload.slowThresholdCh, 2000);
+  assert.equal(payload.slowRecoveryThresholdCh, 1500);
+  assert.equal(payload.policyRevision, 2);
+  assert.equal(payload.automaticClass, "NORMAL");
+  assert.equal(payload.override, "AUTO");
+  assert.equal(payload.effectiveClass, "NORMAL");
 });

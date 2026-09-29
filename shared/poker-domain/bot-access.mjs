@@ -4,6 +4,7 @@ export const ACCESS_CLASSES = Object.freeze(["NORMAL", "SLOW"]);
 export const ACCESS_EFFECTIVE_STATES = Object.freeze(["NORMAL", "SLOW", "RESTRICTED"]);
 export const ACCESS_OVERRIDES = Object.freeze(["AUTO", "FORCE_NORMAL", "FORCE_SLOW", "FORCE_RESTRICTED"]);
 export const DEFAULT_SLOW_THRESHOLD_CH = 1_000_000_000;
+export const DEFAULT_SLOW_RECOVERY_THRESHOLD_CH = 900_000_000;
 export const ACCESS_SNAPSHOT_MAX_AGE_MS = 30_000;
 
 // Transaction-local only: a later transaction must observe a completed schema cutover.
@@ -66,15 +67,33 @@ export function applyAutomaticThresholdEvidence({
   override = "AUTO",
   evidenceCh,
   slowThresholdCh = DEFAULT_SLOW_THRESHOLD_CH,
+  slowRecoveryThresholdCh = DEFAULT_SLOW_RECOVERY_THRESHOLD_CH,
+  allowRecovery = true,
 } = {}) {
   const current = deriveAccessState({ automaticClass, override });
-  const threshold = Number(slowThresholdCh);
+  const entryThreshold = Number(slowThresholdCh);
+  const recoveryThreshold = Number(slowRecoveryThresholdCh);
   const evidence = Number(evidenceCh);
-  const qualifies = Number.isSafeInteger(threshold)
-    && threshold > 0
-    && Number.isSafeInteger(evidence)
-    && evidence >= threshold;
-  const nextAutomatic = current.automaticClass === "SLOW" || qualifies ? "SLOW" : "NORMAL";
+
+  const validEntry = Number.isSafeInteger(entryThreshold) && entryThreshold > 0;
+  const validRecovery = Number.isSafeInteger(recoveryThreshold) && recoveryThreshold > 0;
+  const validThresholds = validEntry && validRecovery && recoveryThreshold < entryThreshold;
+  const validEvidence = Number.isSafeInteger(evidence) && evidence >= 0;
+
+  let nextAutomatic = current.automaticClass;
+
+  if (validThresholds && validEvidence) {
+    if (current.automaticClass === "NORMAL") {
+      if (evidence >= entryThreshold) {
+        nextAutomatic = "SLOW";
+      }
+    } else if (current.automaticClass === "SLOW") {
+      if (allowRecovery && evidence < recoveryThreshold) {
+        nextAutomatic = "NORMAL";
+      }
+    }
+  }
+
   return {
     automaticClass: nextAutomatic,
     override: current.override,
@@ -84,14 +103,25 @@ export function applyAutomaticThresholdEvidence({
 }
 
 export function normalizePolicySnapshot(row, { nowMs = Date.now(), maxAgeMs = ACCESS_SNAPSHOT_MAX_AGE_MS } = {}) {
-  const threshold = Number(row?.slow_threshold_ch ?? row?.slowThresholdCh);
+  const slowThresholdCh = Number(row?.slow_threshold_ch ?? row?.slowThresholdCh);
+  const rawRecovery = row?.slow_recovery_threshold_ch ?? row?.slowRecoveryThresholdCh;
+  const slowRecoveryThresholdCh = rawRecovery != null
+    ? Number(rawRecovery)
+    : (Number.isSafeInteger(slowThresholdCh) && slowThresholdCh > 0
+        ? (slowThresholdCh === DEFAULT_SLOW_THRESHOLD_CH
+            ? DEFAULT_SLOW_RECOVERY_THRESHOLD_CH
+            : Math.max(1, Math.min(DEFAULT_SLOW_RECOVERY_THRESHOLD_CH, slowThresholdCh - 1)))
+        : DEFAULT_SLOW_RECOVERY_THRESHOLD_CH);
   const revision = Number(row?.revision ?? row?.poker_access_revision);
   const loadedAtMs = Number(row?.loadedAtMs ?? row?.loaded_at_ms ?? nowMs);
-  if (!Number.isSafeInteger(threshold) || threshold <= 0
+  if (!Number.isSafeInteger(slowThresholdCh) || slowThresholdCh <= 0
+    || !Number.isSafeInteger(slowRecoveryThresholdCh) || slowRecoveryThresholdCh <= 0
+    || slowRecoveryThresholdCh >= slowThresholdCh
     || !Number.isSafeInteger(revision) || revision <= 0
     || !Number.isFinite(loadedAtMs)) return null;
   return {
-    slowThresholdCh: threshold,
+    slowThresholdCh,
+    slowRecoveryThresholdCh,
     revision,
     loadedAtMs,
     expiresAtMs: loadedAtMs + Math.max(0, Number(maxAgeMs) || ACCESS_SNAPSHOT_MAX_AGE_MS),
@@ -99,8 +129,19 @@ export function normalizePolicySnapshot(row, { nowMs = Date.now(), maxAgeMs = AC
 }
 
 export function isFreshPolicySnapshot(snapshot, nowMs = Date.now()) {
+  const slowThresholdCh = Number(snapshot?.slowThresholdCh);
+  const rawRecovery = snapshot?.slowRecoveryThresholdCh;
+  const slowRecoveryThresholdCh = rawRecovery != null
+    ? Number(rawRecovery)
+    : (Number.isSafeInteger(slowThresholdCh) && slowThresholdCh > 0
+        ? (slowThresholdCh === DEFAULT_SLOW_THRESHOLD_CH
+            ? DEFAULT_SLOW_RECOVERY_THRESHOLD_CH
+            : Math.max(1, Math.min(DEFAULT_SLOW_RECOVERY_THRESHOLD_CH, slowThresholdCh - 1)))
+        : null);
   return Boolean(snapshot
-    && Number.isSafeInteger(Number(snapshot.slowThresholdCh))
+    && Number.isSafeInteger(slowThresholdCh)
+    && Number.isSafeInteger(slowRecoveryThresholdCh)
+    && slowRecoveryThresholdCh < slowThresholdCh
     && Number.isSafeInteger(Number(snapshot.revision))
     && Number.isFinite(Number(snapshot.expiresAtMs))
     && Number(nowMs) <= Number(snapshot.expiresAtMs));
@@ -140,11 +181,15 @@ export function isFreshAccessSnapshot(snapshot, nowMs = Date.now()) {
 export async function readPokerAccessPolicy(tx, { nowMs = Date.now() } = {}) {
   if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
   if (!await hasPokerPoolSchema(tx)) return {
-    ...normalizePolicySnapshot({ slow_threshold_ch: Number.MAX_SAFE_INTEGER, revision: 1 }, { nowMs }),
+    ...normalizePolicySnapshot({
+      slow_threshold_ch: Number.MAX_SAFE_INTEGER,
+      slow_recovery_threshold_ch: Number.MAX_SAFE_INTEGER - 1,
+      revision: 1,
+    }, { nowMs }),
     schemaBacked: false,
   };
   const rows = await tx.unsafe(
-    "select slow_threshold_ch, revision from public.poker_access_policy where id = 1 limit 1;"
+    "select slow_threshold_ch, slow_recovery_threshold_ch, revision from public.poker_access_policy where id = 1 limit 1;"
   );
   return normalizePolicySnapshot(rows?.[0], { nowMs });
 }
@@ -186,30 +231,43 @@ where user_id = any($1::uuid[])
   return snapshots;
 }
 
-export async function persistAutomaticSlow(tx, { userId, expectedRevision = null, now = null } = {}) {
+export async function persistAutomaticTransition(tx, { userId, targetClass, expectedRevision = null, now = null } = {}) {
   if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
   if (typeof userId !== "string" || !userId.trim()) return { changed: false, reason: "user_missing" };
+  const normalizedTarget = normalizeAccessClass(targetClass);
+  if (!normalizedTarget) return { changed: false, reason: "invalid_target_class" };
+
+  const fromClass = normalizedTarget === "SLOW" ? "NORMAL" : "SLOW";
   const params = [userId];
   const revisionClause = Number.isSafeInteger(Number(expectedRevision)) && Number(expectedRevision) > 0
-    ? " and poker_access_revision = $2"
+    ? ` and poker_access_revision = $${params.length + 1}`
     : "";
   if (revisionClause) params.push(Number(expectedRevision));
+
   const timestampValue = now ? `$${params.length + 1}::timestamptz` : "timezone('utc', now())";
-  const nowClause = `poker_auto_slow_at = coalesce(poker_auto_slow_at, ${timestampValue}),`;
+  const slowAtClause = normalizedTarget === "SLOW"
+    ? `poker_auto_slow_at = coalesce(poker_auto_slow_at, ${timestampValue}),\n    `
+    : "";
   const updatedAtClause = `poker_access_updated_at = ${timestampValue},`;
+
+  const queryParams = now ? [...params, now] : params;
   const rows = await tx.unsafe(`
 update public.chips_accounts
-set poker_auto_class = 'SLOW',
-    ${nowClause}
-    ${updatedAtClause}
+set poker_auto_class = '${normalizedTarget}',
+    ${slowAtClause}${updatedAtClause}
     poker_access_updated_by = null,
     poker_access_revision = poker_access_revision + 1
 where user_id = $1 and account_type = 'USER'
-  and poker_auto_class = 'NORMAL'${revisionClause}
+  and poker_auto_class = '${fromClass}'${revisionClause}
 returning poker_auto_class, poker_access_override, poker_access_revision, poker_auto_slow_at;
-`, now ? [...params, now] : params);
+`, queryParams);
+
   if (rows?.[0]) return { changed: true, snapshot: normalizeAccessSnapshot(rows[0]) };
-  return { changed: false, reason: "already_slow_or_revision_changed" };
+  return { changed: false, reason: "already_target_class_or_revision_changed" };
+}
+
+export async function persistAutomaticSlow(tx, { userId, expectedRevision = null, now = null } = {}) {
+  return persistAutomaticTransition(tx, { userId, targetClass: "SLOW", expectedRevision, now });
 }
 
 export function isValidTierPolicy(policy) {
@@ -283,11 +341,14 @@ export function classifySettledAccessEvidence({
     override: snapshot.override,
     evidenceCh: settledStackCh,
     slowThresholdCh: policy.slowThresholdCh,
+    slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
+    allowRecovery: false,
   });
   return {
     known: true,
     ...next,
     revision: snapshot.revision,
     slowThresholdCh: policy.slowThresholdCh,
+    slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
   };
 }

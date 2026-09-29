@@ -257,6 +257,158 @@ test("authoritative wallet threshold persists automatic SLOW under FORCE_NORMAL 
   assert.equal(result.access.effectiveClass, "NORMAL");
 }));
 
+test("fresh join with wallet < recovery threshold transitions SLOW->NORMAL and bumps revision (T059, T062)", async () => withBotsDisabled(async () => {
+  const userId = "00000000-0000-4000-8000-0000000000a1";
+  const tableId = "00000000-0000-4000-8000-0000000000a2";
+  const calls = [];
+  let seatInserted = false;
+  let automaticUpdateCalls = 0;
+  const result = await executePokerJoinAuthoritative({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql, params = []) => {
+        const text = String(sql);
+        calls.push({ text, params });
+        if (text.includes("to_regclass")) return [{ available: true }];
+        if (text.includes("from public.poker_tables")) {
+          return [{ id: tableId, status: "OPEN", max_players: 6, buy_in: 100, stakes: calculateCanonicalPokerStakes(100), created_by: userId, lifecycle_kind: "STANDARD", has_human_participant: false, is_slow_only: false }];
+        }
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
+        if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
+        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 500_000_000 }]; // < 900_000_000 recovery threshold
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 5 }];
+        if (text.includes("update public.chips_accounts") && text.includes("set poker_auto_class = 'NORMAL'")) {
+          automaticUpdateCalls += 1;
+          return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 6, poker_auto_slow_at: "2026-09-27T00:00:00.000Z" }];
+        }
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
+        if (text.startsWith("insert into public.poker_seats")) { seatInserted = true; return [{ seat_no: 1 }]; }
+        if (text.startsWith("update public.poker_seats set stack")) return [{ ok: true }];
+        if (text.startsWith("update public.poker_state set state")) return [{ version: 2 }];
+        return [];
+      }
+    }),
+    tableId,
+    userId,
+    requestId: "recovery-join",
+    buyIn: 100,
+    postTransactionFn: async () => ({ ok: true }),
+    loadStateForUpdate: async (tx) => {
+      const rows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
+      return { ok: true, version: rows[0].version, state: rows[0].state };
+    },
+    updateStateLocked: async (tx, { nextState }) => {
+      const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, nextState]);
+      return { ok: true, newVersion: rows[0]?.version || 2 };
+    },
+    validateStateForStorage: () => true,
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(automaticUpdateCalls, 1);
+  assert.equal(result.access.automaticClass, "NORMAL");
+  assert.equal(result.access.effectiveClass, "NORMAL");
+  assert.equal(result.access.revision, 6);
+}));
+
+test("fresh join with wallet in hysteresis band retains previous class with zero mutation (T059, T062)", async () => withBotsDisabled(async () => {
+  const userId = "00000000-0000-4000-8000-0000000000b1";
+  const tableId = "00000000-0000-4000-8000-0000000000b2";
+  let automaticUpdateCalls = 0;
+  let seatInserted = false;
+  const result = await executePokerJoinAuthoritative({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        const text = String(sql);
+        if (text.includes("to_regclass")) return [{ available: true }];
+        if (text.includes("from public.poker_tables")) {
+          return [{ id: tableId, status: "OPEN", max_players: 6, buy_in: 100, stakes: calculateCanonicalPokerStakes(100), created_by: userId, lifecycle_kind: "STANDARD", has_human_participant: false, is_slow_only: false }];
+        }
+        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
+        if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
+        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 950_000_000 }]; // Inside [900m, 1b)
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 3 }];
+        if (text.includes("update public.chips_accounts")) {
+          automaticUpdateCalls += 1;
+          return [];
+        }
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
+        if (text.startsWith("insert into public.poker_seats")) { seatInserted = true; return [{ seat_no: 1 }]; }
+        if (text.startsWith("update public.poker_seats set stack")) return [{ ok: true }];
+        if (text.startsWith("update public.poker_state set state")) return [{ version: 2 }];
+        return [];
+      }
+    }),
+    tableId,
+    userId,
+    requestId: "hysteresis-band-join",
+    buyIn: 100,
+    postTransactionFn: async () => ({ ok: true }),
+    loadStateForUpdate: async (tx) => {
+      const rows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
+      return { ok: true, version: rows[0].version, state: rows[0].state };
+    },
+    updateStateLocked: async (tx, { nextState }) => {
+      const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, nextState]);
+      return { ok: true, newVersion: rows[0]?.version || 2 };
+    },
+    validateStateForStorage: () => true,
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(automaticUpdateCalls, 0, "must perform zero DB update when within hysteresis band");
+  assert.equal(result.access.automaticClass, "SLOW");
+  assert.equal(result.access.effectiveClass, "SLOW");
+  assert.equal(result.access.revision, 3);
+}));
+
+test("is_slow_only remains one-way: recovered NORMAL user cannot fresh-join an existing SLOW-only table (T063)", async () => withBotsDisabled(async () => {
+  const userId = "00000000-0000-4000-8000-0000000000c1";
+  const tableId = "00000000-0000-4000-8000-0000000000c2";
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("from public.poker_tables")) {
+            // Table was marked SLOW-only previously
+            return [{ id: tableId, status: "OPEN", max_players: 6, buy_in: 100, stakes: calculateCanonicalPokerStakes(100), created_by: "someone-else", lifecycle_kind: "STANDARD", has_human_participant: true, is_slow_only: true }];
+          }
+          if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return [];
+          if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
+          if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 1000 }];
+          if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+          // User is NORMAL (e.g. recovered or always NORMAL)
+          if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 2 }];
+          return [];
+        }
+      }),
+      tableId,
+      userId,
+      requestId: "slow-only-one-way-join",
+      buyIn: 100,
+      postTransactionFn: async () => ({ ok: true }),
+      loadStateForUpdate: async (tx) => {
+        const rows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
+        return { ok: true, version: rows[0].version, state: rows[0].state };
+      },
+      updateStateLocked: async (tx, { nextState }) => {
+        const rows = await tx.unsafe("update public.poker_state set state = $2::jsonb where table_id = $1;", [tableId, nextState]);
+        return { ok: true, newVersion: rows[0]?.version || 2 };
+      },
+      validateStateForStorage: () => true,
+      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    }),
+    (error) => error?.message === "normal_table_required" || error?.validationReason === "normal_table_required"
+  );
+}));
+
 test("fresh FORCE_RESTRICTED own empty STANDARD join accepts with zero bot funding", async () => withBotEnv(async () => {
   const tableId = "00000000-0000-4000-8000-0000000000f3";
   const userId = "00000000-0000-4000-8000-0000000000f4";
