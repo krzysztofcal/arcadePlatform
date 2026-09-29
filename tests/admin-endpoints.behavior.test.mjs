@@ -448,6 +448,162 @@ test("poker access policy rejects invalid hysteresis bps with zero mutation (T06
   assert.equal(updateCalled, false, "zero DB update on invalid hysteresis bps");
 });
 
+test("poker access policy rejects missing hysteresis in update request with zero mutation", async () => {
+  let updateCalled = false;
+  const mockTx = {
+    unsafe: async (sql) => {
+      if (String(sql).includes("update public.poker_access_policy")) {
+        updateCalled = true;
+      }
+      return [{ revision: 1 }];
+    }
+  };
+
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
+  );
+
+  assert.equal(updateCalled, false, "zero DB update when hysteresis is omitted from update request");
+});
+
+test("poker access policy accepts explicit slowHysteresisBps = 1500 and updates derived recovery correctly", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisBps: 1500,
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  assert.equal(result.access.slowThresholdCh, 2000);
+  assert.equal(result.access.slowHysteresisBps, 1500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1700);
+  assert.equal(result.access.revision, 2);
+  assert.equal(executedUpdate.params[1], 1500);
+  assert.equal(executedUpdate.params[2], 1700);
+});
+
+test("poker access policy accepts slowHysteresisPercent = 15 and converts to 1500 bps", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisPercent: 15,
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  assert.equal(result.access.slowHysteresisBps, 1500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1700);
+  assert.equal(executedUpdate.params[1], 1500);
+  assert.equal(executedUpdate.params[2], 1700);
+});
+
+test("poker access policy accepts slowHysteresisPercent = 5.25 and converts to 525 bps", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisPercent: 5.25,
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  assert.equal(result.access.slowHysteresisBps, 525);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1895);
+  assert.equal(executedUpdate.params[1], 525);
+  assert.equal(executedUpdate.params[2], 1895);
+});
+
+test("poker access policy rejects unrepresentable slowHysteresisPercent (5.255) with zero mutation", async () => {
+  let updateCalled = false;
+  const mockTx = {
+    unsafe: async (sql) => {
+      if (String(sql).includes("update public.poker_access_policy")) {
+        updateCalled = true;
+      }
+      return [{ revision: 1 }];
+    }
+  };
+
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisPercent: 5.255, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
+  );
+
+  assert.equal(updateCalled, false, "zero DB update on unrepresentable percentage");
+});
+
 test("poker access policy rejects threshold too small to produce positive recovery with zero mutation (T068)", async () => {
   let updateCalled = false;
   const mockTx = {

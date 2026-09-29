@@ -1625,7 +1625,7 @@
     html.push('<h3 class="admin-section-title">Poker access and refill policy</h3>');
     html.push('<form class="admin-adjust" id="adminPokerAccessPolicyForm">');
     html.push('<label class="admin-field"><span class="admin-field__label">SLOW threshold (CH)</span><input class="admin-input" name="slowThresholdCh" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(threshold) + '"></label>');
-    html.push('<label class="admin-field"><span class="admin-field__label">SLOW hysteresis (%)</span><input class="admin-input" name="slowHysteresisPercent" type="number" min="1" max="50" step="any" value="' + escapeHtml(hysteresisPercent) + '"></label>');
+    html.push('<label class="admin-field"><span class="admin-field__label">SLOW hysteresis (%)</span><input class="admin-input" name="slowHysteresisPercent" type="number" min="1" max="50" step="0.01" value="' + escapeHtml(hysteresisPercent) + '"></label>');
     html.push('<label class="admin-field"><span class="admin-field__label">Recovery threshold (CH)</span><input class="admin-input" name="slowRecoveryThresholdCh" type="text" readonly value="' + escapeHtml(recovery) + '"></label>');
     html.push('<input type="hidden" name="accessRevision" value="' + escapeHtml(access.revision || 1) + '">');
     html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save access policy</button></div><p class="admin-note" data-poker-access-policy-status aria-live="polite">Access policy is revision checked and audited separately.</p></form>');
@@ -1725,17 +1725,23 @@
     var recoveryInput = form.querySelector('[name="slowRecoveryThresholdCh"]');
     if (!thresholdInput || !hysteresisInput || !recoveryInput) return;
     var threshold = Number(thresholdInput.value);
-    var percent = Number(hysteresisInput.value);
-    if (Number.isSafeInteger(threshold) && threshold > 0 && Number.isFinite(percent) && percent >= 1 && percent <= 50){
-      var bps = Math.round(percent * 100);
-      try {
-        var derivedBig = (BigInt(threshold) * BigInt(10000 - bps)) / 10000n;
-        var derived = Number(derivedBig);
-        if (Number.isSafeInteger(derived) && derived > 0 && derived < threshold){
-          recoveryInput.value = String(derived);
-          return;
-        }
-      } catch (_e){}
+    var percentStr = String(hysteresisInput.value || "").trim();
+    var match = percentStr.match(/^(\d+)(?:\.(\d+))?$/);
+    if (match && (!match[2] || match[2].replace(/0+$/, "").length <= 2)){
+      var percent = Number(percentStr);
+      if (Number.isSafeInteger(threshold) && threshold > 0 && Number.isFinite(percent) && percent >= 1 && percent <= 50){
+        var whole = Number(match[1]);
+        var frac = ((match[2] || "").slice(0, 2)).padEnd(2, "0");
+        var bps = whole * 100 + Number(frac);
+        try {
+          var derivedBig = (BigInt(threshold) * BigInt(10000 - bps)) / 10000n;
+          var derived = Number(derivedBig);
+          if (Number.isSafeInteger(derived) && derived > 0 && derived < threshold){
+            recoveryInput.value = String(derived);
+            return;
+          }
+        } catch (_e){}
+      }
     }
     recoveryInput.value = "—";
   }
@@ -1752,13 +1758,12 @@
       try {
         var threshold = Number(data.slowThresholdCh);
         var percent = Number(data.slowHysteresisPercent);
-        var bps = Math.round(percent * 100);
         await apiFetch("/.netlify/functions/admin-poker-policy", {
           method: "PATCH",
           body: JSON.stringify({
             kind: "access",
             slowThresholdCh: threshold,
-            slowHysteresisBps: bps,
+            slowHysteresisPercent: percent,
             expectedRevision: data.accessRevision
           })
         });

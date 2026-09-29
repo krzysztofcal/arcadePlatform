@@ -27,6 +27,28 @@ function positiveSafe(value, code = "invalid_amount") {
   return parsed;
 }
 
+function parseHysteresisBps(value) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  const num = Number(value);
+  if (!Number.isSafeInteger(num)) return null;
+  if (typeof value === "string" && !/^\s*\d+\s*$/.test(value)) return null;
+  return num;
+}
+
+function parseHysteresisPercent(rawPercent) {
+  if (rawPercent === null || rawPercent === undefined || typeof rawPercent === "boolean") return null;
+  const str = String(rawPercent).trim();
+  const match = str.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match) return null;
+  const decimals = match[2] || "";
+  const sigDecimals = decimals.replace(/0+$/, "");
+  if (sigDecimals.length > 2) return null;
+  const whole = Number(match[1]);
+  const frac = (decimals.slice(0, 2)).padEnd(2, "0");
+  const bps = whole * 100 + Number(frac);
+  return Number.isSafeInteger(bps) ? bps : null;
+}
+
 function normalizePolicy(row) {
   return {
     buyIn: Number(row.buy_in),
@@ -80,11 +102,35 @@ async function updatePokerPolicy({ body, actorId, runTransaction = beginSql } = 
     const kind = String(body.kind || body.scope || "").trim().toLowerCase();
     if (kind === "access") {
       const threshold = positiveSafe(body.slowThresholdCh ?? body.slow_threshold_ch, "invalid_slow_threshold_ch");
-      const rawBps = body.slowHysteresisBps ?? body.slow_hysteresis_bps ?? (body.slowHysteresisPercent != null ? Math.round(Number(body.slowHysteresisPercent) * 100) : null) ?? DEFAULT_SLOW_HYSTERESIS_BPS;
-      const hysteresisBps = Number(rawBps);
-      if (!Number.isSafeInteger(hysteresisBps) || hysteresisBps < MIN_SLOW_HYSTERESIS_BPS || hysteresisBps > MAX_SLOW_HYSTERESIS_BPS) {
+
+      const hasBps = (body.slowHysteresisBps !== undefined) || (body.slow_hysteresis_bps !== undefined);
+      const hasPercent = body.slowHysteresisPercent !== undefined;
+      if (!hasBps && !hasPercent) {
         throw badRequest("invalid_slow_hysteresis_bps", "invalid_slow_hysteresis_bps");
       }
+
+      let hysteresisBps = null;
+      if (hasBps) {
+        const rawBps = body.slowHysteresisBps !== undefined ? body.slowHysteresisBps : body.slow_hysteresis_bps;
+        const parsedBps = parseHysteresisBps(rawBps);
+        if (parsedBps === null || parsedBps < MIN_SLOW_HYSTERESIS_BPS || parsedBps > MAX_SLOW_HYSTERESIS_BPS) {
+          throw badRequest("invalid_slow_hysteresis_bps", "invalid_slow_hysteresis_bps");
+        }
+        if (hasPercent) {
+          const parsedPercentBps = parseHysteresisPercent(body.slowHysteresisPercent);
+          if (parsedPercentBps !== parsedBps) {
+            throw badRequest("invalid_slow_hysteresis_bps", "invalid_slow_hysteresis_bps");
+          }
+        }
+        hysteresisBps = parsedBps;
+      } else {
+        const parsedPercentBps = parseHysteresisPercent(body.slowHysteresisPercent);
+        if (parsedPercentBps === null || parsedPercentBps < MIN_SLOW_HYSTERESIS_BPS || parsedPercentBps > MAX_SLOW_HYSTERESIS_BPS) {
+          throw badRequest("invalid_slow_hysteresis_bps", "invalid_slow_hysteresis_bps");
+        }
+        hysteresisBps = parsedPercentBps;
+      }
+
       const expectedRevision = positiveSafe(body.expectedRevision ?? body.expected_revision, "invalid_expected_revision");
       if (threshold > MAX_SAFE) throw badRequest("invalid_slow_threshold_ch", "invalid_slow_threshold_ch");
 
