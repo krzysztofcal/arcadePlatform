@@ -67,12 +67,19 @@ export function applyAutomaticThresholdEvidence({
   override = "AUTO",
   evidenceCh,
   slowThresholdCh = DEFAULT_SLOW_THRESHOLD_CH,
-  slowRecoveryThresholdCh = DEFAULT_SLOW_RECOVERY_THRESHOLD_CH,
+  slowRecoveryThresholdCh = null,
   allowRecovery = true,
 } = {}) {
   const current = deriveAccessState({ automaticClass, override });
   const entryThreshold = Number(slowThresholdCh);
-  const recoveryThreshold = Number(slowRecoveryThresholdCh);
+  const defaultRecovery = Number.isSafeInteger(entryThreshold) && entryThreshold > 0
+    ? (entryThreshold === DEFAULT_SLOW_THRESHOLD_CH
+        ? DEFAULT_SLOW_RECOVERY_THRESHOLD_CH
+        : Math.max(1, Math.min(DEFAULT_SLOW_RECOVERY_THRESHOLD_CH, entryThreshold - 1)))
+    : DEFAULT_SLOW_RECOVERY_THRESHOLD_CH;
+  const recoveryThreshold = slowRecoveryThresholdCh != null
+    ? Number(slowRecoveryThresholdCh)
+    : defaultRecovery;
   const evidence = Number(evidenceCh);
 
   const validEntry = Number.isSafeInteger(entryThreshold) && entryThreshold > 0;
@@ -336,19 +343,28 @@ export function classifySettledAccessEvidence({
   if (!isFreshAccessSnapshot(snapshot, nowMs) || !isFreshPolicySnapshot(policy, nowMs)) {
     return { known: false, reason: "access_cache_unknown" };
   }
+  const slowThresholdCh = Number(policy?.slowThresholdCh);
+  const rawRecovery = policy?.slowRecoveryThresholdCh;
+  const slowRecoveryThresholdCh = rawRecovery != null
+    ? Number(rawRecovery)
+    : (Number.isSafeInteger(slowThresholdCh) && slowThresholdCh > 0
+        ? (slowThresholdCh === DEFAULT_SLOW_THRESHOLD_CH
+            ? DEFAULT_SLOW_RECOVERY_THRESHOLD_CH
+            : Math.max(1, Math.min(DEFAULT_SLOW_RECOVERY_THRESHOLD_CH, slowThresholdCh - 1)))
+        : null);
   const next = applyAutomaticThresholdEvidence({
     automaticClass: snapshot.automaticClass,
     override: snapshot.override,
     evidenceCh: settledStackCh,
-    slowThresholdCh: policy.slowThresholdCh,
-    slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
+    slowThresholdCh,
+    slowRecoveryThresholdCh,
     allowRecovery: false,
   });
   return {
     known: true,
     ...next,
     revision: snapshot.revision,
-    slowThresholdCh: policy.slowThresholdCh,
-    slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
+    slowThresholdCh,
+    slowRecoveryThresholdCh,
   };
 }
