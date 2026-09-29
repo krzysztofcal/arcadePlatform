@@ -212,20 +212,13 @@ Preview rollout:
    continuous-table reconciliation.
 2. Deploy the exact PR SHA with manual `WS Preview Deploy`.
 3. Verify release metadata, `ws_artifact_start`, local/public `/healthz` and no supervisor failure.
-4. Confirm `CONTINUOUS_BOT_DEFAULT` has canonical `small_blind = 1`,
-   `big_blind = 2`; set Preview to `enabled = true`,
-   `desired_table_count = 5` through the existing maintenance operation.
-5. Verify exactly five `CONTINUOUS_BOT` tables, each with `buy_in = 100`,
-   `1/2` stakes, three initial bots, one escrow account, three seed funding
-   transactions and a playable persisted hand. Production remains capped at two.
-6. Join as a real player through normal quick-seat/direct join; verify actions, settlement, reconnect, rebuy and leave.
-7. Verify settled rollover, bot replacement/top-up idempotency and absence of accounting/persistence failures.
-8. **Rollback only:** if the preview service must be disabled, set the valid profile to
-   `enabled = false`, `desired_table_count = 0`; verify the tables wait for
-   `SETTLED`, never remove a human, then close once through terminal accounting
-   with escrow `0`. A completed rollout must leave the profile
-   `enabled = true`, `desired_table_count = 5`; do not execute this rollback step
-   as part of normal Preview operation.
+4. Confirm `CONTINUOUS_BOT_DEFAULT` has canonical `small_blind = 1`, `big_blind = 2` and keep managed inventory disabled (`enabled = false`, `desired_table_count = 0`) while #1018 tier-100 funding is prepared.
+5. Verify the exact 100 CH accounts `POKER_BOT_BANKROLL_100` and `POKER_BOT_SLOW_BANKROLL_100` are active. With admissions/new bot funding paused and the managed profile still disabled, enable the 100 CH tier only for the separately authorized seed/refill operation, fund both pools through the approved ledger/workflow path, and verify positive balances plus balanced/idempotent ledger evidence before reopening managed inventory.
+6. Restore Preview through the existing maintenance operation to `enabled = true`, `desired_table_count = 5`. The supervisor creates at most two tables per reconcile; allow it to converge naturally and do not insert managed tables directly.
+7. Verify exactly five OPEN `CONTINUOUS_BOT` tables, each with `buy_in = 100`, `1/2` stakes, three initial bots, one escrow account, NORMAL seed/replacement funding from `POKER_BOT_BANKROLL_100`, and a playable persisted hand. The SLOW 100 pool must not fund `CONTINUOUS_BOT`. Production remains capped at two and must not copy Preview's target of five.
+8. Join as a real player through normal quick-seat/direct join; verify actions, settlement, reconnect, rebuy and leave.
+9. Verify settled rollover, bot replacement/top-up idempotency, no `ws_continuous_bot_table_supervisor_failed`/seed-failure churn, and no repeated create→rollback loop.
+10. **Rollback only:** disable tier 100 and set the valid managed profile to `enabled = false`, `desired_table_count = 0`; verify the tables wait for `SETTLED`, never remove a human, then close once through terminal accounting with escrow `0`. Keep new funding disabled until repaired; do not restore TREASURY fallback or force table state/funds with direct SQL. A completed Preview rollout must leave the profile `enabled = true`, `desired_table_count = 5`; do not execute this rollback step as part of normal Preview operation.
 
 Do not change stakes or `max_seats` on an active production profile without
 expecting graceful retirement. Existing tables keep their persisted stakes and
