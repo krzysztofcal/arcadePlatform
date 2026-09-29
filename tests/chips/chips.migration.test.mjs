@@ -1092,6 +1092,17 @@ async function assertProductionQuarantineContract(sql, {
     on conflict (id) do nothing;
   `);
 
+  // Ensure supabase_migrations exists with E1 and E2 versions present
+  await sql.unsafe(`
+    create schema if not exists supabase_migrations;
+    create table if not exists supabase_migrations.schema_migrations (
+      version text primary key,
+      inserted_at timestamptz not null default now()
+    );
+    insert into supabase_migrations.schema_migrations (version) values ('20260914090000'), ('20260914091000')
+    on conflict do nothing;
+  `);
+
   // 1. Missing POKER_BOT_BANKROLL prerequisite must fail closed before DDL
   await assert.rejects(
     () => sql.unsafe(fixtureSql(p1File)),
@@ -1227,7 +1238,6 @@ async function assertProductionQuarantineContract(sql, {
     (err) => err?.code === "23514",
     "Invalid poker_access_override must fail CHECK constraint",
   );
-  await sql.unsafe("rollback;");
 
   // 12. Sticky is_slow_only cannot revert true -> false
   const testTableId = "00000000-0000-4000-8000-00000000e993";
@@ -1244,7 +1254,6 @@ async function assertProductionQuarantineContract(sql, {
     (err) => err?.code === "P1018" && /is_slow_only is one-way/i.test(err?.message || ""),
     "Reverting is_slow_only from true to false must fail with P1018",
   );
-  await sql.unsafe("rollback;");
   await sql.unsafe(`delete from public.poker_tables where id = '${testTableId}';`);
 
   // 13. Required indexes and RLS
@@ -1285,8 +1294,9 @@ async function assertProductionQuarantineContract(sql, {
   assert.equal(recordedVersions.has("20260929130000"), false, "Stage version 20260929130000 must not be recorded");
   assert.equal(recordedVersions.has("20260929163000"), false, "Stage version 20260929163000 must not be recorded");
 
-  // Clean up fixture-only rows
+  // Clean up fixture-only rows and history schema
   await sql.unsafe(`delete from public.chips_accounts where id in ('${existingUserAccountId}', '${existingBotBankrollId}');`);
+  await sql.unsafe("drop schema if exists supabase_migrations cascade;");
 }
 
 const ensureGenesisFixture = async (sql) => {
