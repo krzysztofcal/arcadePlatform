@@ -44,7 +44,7 @@ test("recovery persists authoritative SLOW-only marker before releasing the fail
   manager.cachePokerAccess(tableId, userId, {
     automaticClass: "SLOW", override: "FORCE_SLOW", effectiveClass: "SLOW", revision: 9,
     loadedAtMs: 100, expiresAtMs: 30_100
-  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
   assert.equal(manager.settledAccessStatus(tableId, { nowMs: 100 }).known, true);
 
   manager.cachePokerAccess(tableId, userId, {
@@ -774,6 +774,7 @@ test("human and two busted bots retry on unknown funding, then fund replacements
     expiresAtMs: nowMs + 30_000
   }, {
     slowThresholdCh: 1_000_000_000,
+    slowRecoveryThresholdCh: 900_000_000,
     revision: 1,
     loadedAtMs: nowMs,
     expiresAtMs: nowMs + 30_000
@@ -869,7 +870,7 @@ test("human and two busted bots retry on unknown funding, then fund replacements
   runtime.tableManager.cachePokerAccess(tableId2, humanUserId, {
     automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 8,
     loadedAtMs: nowMs2, expiresAtMs: nowMs2 + 30_000
-  }, { slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: nowMs2, expiresAtMs: nowMs2 + 30_000 }, nowMs2);
+  }, { slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: nowMs2, expiresAtMs: nowMs2 + 30_000 }, nowMs2);
 
   runtime.setFundingSnapshot({
     schemaBacked: true,
@@ -933,7 +934,7 @@ test("RESTRICTED with missing or expired funding snapshot yields authoritative n
   runtime.tableManager.cachePokerAccess(tableId, humanUserId, {
     automaticClass: "NORMAL", override: "FORCE_RESTRICTED", effectiveClass: "RESTRICTED", revision: 12,
     loadedAtMs: nowMs, expiresAtMs: nowMs + 30_000
-  }, { slowThresholdCh: 1_000_000_000, revision: 1, loadedAtMs: nowMs, expiresAtMs: nowMs + 30_000 }, nowMs);
+  }, { slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: nowMs, expiresAtMs: nowMs + 30_000 }, nowMs);
 
   // Funding snapshot is missing (null) or expired
   runtime.setFundingSnapshot(null);

@@ -1122,6 +1122,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           effectiveClass: joinAccess.effectiveClass,
           revision: joinAccess.revision,
           slowThresholdCh: joinAccess.policy?.slowThresholdCh,
+          slowRecoveryThresholdCh: joinAccess.policy?.slowRecoveryThresholdCh,
           policyRevision: joinAccess.policy?.revision,
           loadedAtMs: Date.now(),
           expiresAtMs: Date.now() + 30_000

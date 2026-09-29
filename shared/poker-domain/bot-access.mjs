@@ -67,19 +67,12 @@ export function applyAutomaticThresholdEvidence({
   override = "AUTO",
   evidenceCh,
   slowThresholdCh = DEFAULT_SLOW_THRESHOLD_CH,
-  slowRecoveryThresholdCh = null,
+  slowRecoveryThresholdCh = DEFAULT_SLOW_RECOVERY_THRESHOLD_CH,
   allowRecovery = true,
 } = {}) {
   const current = deriveAccessState({ automaticClass, override });
   const entryThreshold = Number(slowThresholdCh);
-  const defaultRecovery = Number.isSafeInteger(entryThreshold) && entryThreshold > 0
-    ? (entryThreshold === DEFAULT_SLOW_THRESHOLD_CH
-        ? DEFAULT_SLOW_RECOVERY_THRESHOLD_CH
-        : Math.max(1, Math.min(DEFAULT_SLOW_RECOVERY_THRESHOLD_CH, entryThreshold - 1)))
-    : DEFAULT_SLOW_RECOVERY_THRESHOLD_CH;
-  const recoveryThreshold = slowRecoveryThresholdCh != null
-    ? Number(slowRecoveryThresholdCh)
-    : defaultRecovery;
+  const recoveryThreshold = Number(slowRecoveryThresholdCh);
   const evidence = Number(evidenceCh);
 
   const validEntry = Number.isSafeInteger(entryThreshold) && entryThreshold > 0;
@@ -89,7 +82,7 @@ export function applyAutomaticThresholdEvidence({
 
   let nextAutomatic = current.automaticClass;
 
-  if (validThresholds && validEvidence) {
+  if (current.override === "AUTO" && validThresholds && validEvidence) {
     if (current.automaticClass === "NORMAL") {
       if (evidence >= entryThreshold) {
         nextAutomatic = "SLOW";
@@ -111,14 +104,7 @@ export function applyAutomaticThresholdEvidence({
 
 export function normalizePolicySnapshot(row, { nowMs = Date.now(), maxAgeMs = ACCESS_SNAPSHOT_MAX_AGE_MS } = {}) {
   const slowThresholdCh = Number(row?.slow_threshold_ch ?? row?.slowThresholdCh);
-  const rawRecovery = row?.slow_recovery_threshold_ch ?? row?.slowRecoveryThresholdCh;
-  const slowRecoveryThresholdCh = rawRecovery != null
-    ? Number(rawRecovery)
-    : (Number.isSafeInteger(slowThresholdCh) && slowThresholdCh > 0
-        ? (slowThresholdCh === DEFAULT_SLOW_THRESHOLD_CH
-            ? DEFAULT_SLOW_RECOVERY_THRESHOLD_CH
-            : Math.max(1, Math.min(DEFAULT_SLOW_RECOVERY_THRESHOLD_CH, slowThresholdCh - 1)))
-        : DEFAULT_SLOW_RECOVERY_THRESHOLD_CH);
+  const slowRecoveryThresholdCh = Number(row?.slow_recovery_threshold_ch ?? row?.slowRecoveryThresholdCh);
   const revision = Number(row?.revision ?? row?.poker_access_revision);
   const loadedAtMs = Number(row?.loadedAtMs ?? row?.loaded_at_ms ?? nowMs);
   if (!Number.isSafeInteger(slowThresholdCh) || slowThresholdCh <= 0
@@ -137,19 +123,15 @@ export function normalizePolicySnapshot(row, { nowMs = Date.now(), maxAgeMs = AC
 
 export function isFreshPolicySnapshot(snapshot, nowMs = Date.now()) {
   const slowThresholdCh = Number(snapshot?.slowThresholdCh);
-  const rawRecovery = snapshot?.slowRecoveryThresholdCh;
-  const slowRecoveryThresholdCh = rawRecovery != null
-    ? Number(rawRecovery)
-    : (Number.isSafeInteger(slowThresholdCh) && slowThresholdCh > 0
-        ? (slowThresholdCh === DEFAULT_SLOW_THRESHOLD_CH
-            ? DEFAULT_SLOW_RECOVERY_THRESHOLD_CH
-            : Math.max(1, Math.min(DEFAULT_SLOW_RECOVERY_THRESHOLD_CH, slowThresholdCh - 1)))
-        : null);
+  const slowRecoveryThresholdCh = Number(snapshot?.slowRecoveryThresholdCh);
   return Boolean(snapshot
     && Number.isSafeInteger(slowThresholdCh)
+    && slowThresholdCh > 0
     && Number.isSafeInteger(slowRecoveryThresholdCh)
+    && slowRecoveryThresholdCh > 0
     && slowRecoveryThresholdCh < slowThresholdCh
     && Number.isSafeInteger(Number(snapshot.revision))
+    && Number(snapshot.revision) > 0
     && Number.isFinite(Number(snapshot.expiresAtMs))
     && Number(nowMs) <= Number(snapshot.expiresAtMs));
 }
@@ -343,28 +325,19 @@ export function classifySettledAccessEvidence({
   if (!isFreshAccessSnapshot(snapshot, nowMs) || !isFreshPolicySnapshot(policy, nowMs)) {
     return { known: false, reason: "access_cache_unknown" };
   }
-  const slowThresholdCh = Number(policy?.slowThresholdCh);
-  const rawRecovery = policy?.slowRecoveryThresholdCh;
-  const slowRecoveryThresholdCh = rawRecovery != null
-    ? Number(rawRecovery)
-    : (Number.isSafeInteger(slowThresholdCh) && slowThresholdCh > 0
-        ? (slowThresholdCh === DEFAULT_SLOW_THRESHOLD_CH
-            ? DEFAULT_SLOW_RECOVERY_THRESHOLD_CH
-            : Math.max(1, Math.min(DEFAULT_SLOW_RECOVERY_THRESHOLD_CH, slowThresholdCh - 1)))
-        : null);
   const next = applyAutomaticThresholdEvidence({
     automaticClass: snapshot.automaticClass,
     override: snapshot.override,
     evidenceCh: settledStackCh,
-    slowThresholdCh,
-    slowRecoveryThresholdCh,
+    slowThresholdCh: policy.slowThresholdCh,
+    slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
     allowRecovery: false,
   });
   return {
     known: true,
     ...next,
     revision: snapshot.revision,
-    slowThresholdCh,
-    slowRecoveryThresholdCh,
+    slowThresholdCh: policy.slowThresholdCh,
+    slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
   };
 }

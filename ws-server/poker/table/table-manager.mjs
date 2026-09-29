@@ -719,6 +719,9 @@ export function createTableManager({
     if (humanIds.length === 0) return { known: true, transitions: [], effectiveRestricted: false };
     const failClosedUserId = humanIds.find((userId) => pokerAccessFailClosedUserIds.has(userId));
     if (failClosedUserId) return { known: false, reason: "access_mutation_pending", userId: failClosedUserId };
+    if (table.pokerAccessPolicy?.schemaBacked === false) {
+      return { known: true, transitions: [], effectiveRestricted: false };
+    }
     if (!isFreshPolicySnapshot(table.pokerAccessPolicy, nowMs)) return { known: false, reason: "access_policy_cache_unknown" };
     for (const userId of humanIds) {
       if (!isFreshAccessSnapshot(table.pokerAccessByUserId.get(userId), nowMs)) {

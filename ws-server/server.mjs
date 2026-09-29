@@ -5215,6 +5215,9 @@ wss.on("connection", (ws) => {
               policy: Number.isSafeInteger(Number(access?.slowThresholdCh))
                 ? {
                     slowThresholdCh: Number(access.slowThresholdCh),
+                    ...(Number.isSafeInteger(Number(access?.slowRecoveryThresholdCh))
+                      ? { slowRecoveryThresholdCh: Number(access.slowRecoveryThresholdCh) }
+                      : {}),
                     revision: Number(access.policyRevision || 1),
                     loadedAtMs: Number(access.loadedAtMs || Date.now()),
                     expiresAtMs: Number(access.expiresAtMs || Date.now() + 30_000)
