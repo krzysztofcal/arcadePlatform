@@ -44,7 +44,7 @@ test("recovery persists authoritative SLOW-only marker before releasing the fail
   manager.cachePokerAccess(tableId, userId, {
     automaticClass: "SLOW", override: "FORCE_SLOW", effectiveClass: "SLOW", revision: 9,
     loadedAtMs: 100, expiresAtMs: 30_100
-  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
   assert.equal(manager.settledAccessStatus(tableId, { nowMs: 100 }).known, true);
 
   manager.cachePokerAccess(tableId, userId, {
@@ -154,7 +154,7 @@ async function accessRuntimeFixture(options = {}) {
         }
       });
     },
-    readPokerAccessPolicy: async () => ({ revision: 1, slowThresholdCh: 1000000000, slowRecoveryThresholdCh: 900000000 }),
+    readPokerAccessPolicy: async () => ({ revision: 1, slowThresholdCh: 1000000000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950000000 }),
     readPokerAccessSnapshot: async (_tx, { userId: targetUserId }) => {
       const snapshot = normalizeAccessSnapshot({ ...userRow });
       if (typeof options.onReadSnapshot === 'function') {
@@ -774,7 +774,8 @@ test("human and two busted bots retry on unknown funding, then fund replacements
     expiresAtMs: nowMs + 30_000
   }, {
     slowThresholdCh: 1_000_000_000,
-    slowRecoveryThresholdCh: 900_000_000,
+    slowHysteresisBps: 500,
+    slowRecoveryThresholdCh: 950_000_000,
     revision: 1,
     loadedAtMs: nowMs,
     expiresAtMs: nowMs + 30_000
@@ -870,7 +871,7 @@ test("human and two busted bots retry on unknown funding, then fund replacements
   runtime.tableManager.cachePokerAccess(tableId2, humanUserId, {
     automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 8,
     loadedAtMs: nowMs2, expiresAtMs: nowMs2 + 30_000
-  }, { slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: nowMs2, expiresAtMs: nowMs2 + 30_000 }, nowMs2);
+  }, { slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: nowMs2, expiresAtMs: nowMs2 + 30_000 }, nowMs2);
 
   runtime.setFundingSnapshot({
     schemaBacked: true,
@@ -934,7 +935,7 @@ test("RESTRICTED with missing or expired funding snapshot yields authoritative n
   runtime.tableManager.cachePokerAccess(tableId, humanUserId, {
     automaticClass: "NORMAL", override: "FORCE_RESTRICTED", effectiveClass: "RESTRICTED", revision: 12,
     loadedAtMs: nowMs, expiresAtMs: nowMs + 30_000
-  }, { slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: nowMs, expiresAtMs: nowMs + 30_000 }, nowMs);
+  }, { slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: nowMs, expiresAtMs: nowMs + 30_000 }, nowMs);
 
   // Funding snapshot is missing (null) or expired
   runtime.setFundingSnapshot(null);
@@ -963,7 +964,7 @@ test("RESTRICTED with missing or expired funding snapshot yields authoritative n
   assert.equal(runtime.getRetries().length, 0);
 });
 
-test("normalizeWsPokerAccessPayload includes slowThresholdCh and slowRecoveryThresholdCh (T061)", async () => {
+test("normalizeWsPokerAccessPayload includes slowThresholdCh, slowHysteresisBps, and slowRecoveryThresholdCh (T061/T068)", async () => {
   const { readFile } = await import('node:fs/promises');
   const code = await readFile(new URL('../../server.mjs', import.meta.url), 'utf8');
   const extractFn = new Function(code.slice(code.indexOf('function normalizeWsPokerAccessPayload('), code.indexOf('function sendPokerAccessFrame(')) + '\nreturn normalizeWsPokerAccessPayload;');
@@ -974,10 +975,12 @@ test("normalizeWsPokerAccessPayload includes slowThresholdCh and slowRecoveryThr
     effectiveClass: "NORMAL",
     revision: 3,
     slowThresholdCh: 2000,
+    slowHysteresisBps: 2500,
     slowRecoveryThresholdCh: 1500,
     policyRevision: 2,
   });
   assert.equal(payload.slowThresholdCh, 2000);
+  assert.equal(payload.slowHysteresisBps, 2500);
   assert.equal(payload.slowRecoveryThresholdCh, 1500);
   assert.equal(payload.policyRevision, 2);
   assert.equal(payload.automaticClass, "NORMAL");

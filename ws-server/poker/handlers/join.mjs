@@ -242,6 +242,9 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
         ? {
             schemaBacked: access.schemaBacked,
             slowThresholdCh: Number(access.slowThresholdCh),
+            ...(Number.isSafeInteger(Number(access.slowHysteresisBps))
+              ? { slowHysteresisBps: Number(access.slowHysteresisBps) }
+              : {}),
             ...(Number.isSafeInteger(Number(access.slowRecoveryThresholdCh))
               ? { slowRecoveryThresholdCh: Number(access.slowRecoveryThresholdCh) }
               : {}),

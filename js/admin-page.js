@@ -1617,11 +1617,16 @@
     var access = summary.access || {};
     var tiers = Array.isArray(summary.tiers) ? summary.tiers : [];
     var pools = Array.isArray(summary.pools) ? summary.pools : [];
+    var threshold = access.slowThresholdCh != null ? access.slowThresholdCh : "";
+    var hysteresisBps = access.slowHysteresisBps != null ? access.slowHysteresisBps : 500;
+    var hysteresisPercent = Number(hysteresisBps) / 100;
+    var recovery = access.slowRecoveryThresholdCh != null ? access.slowRecoveryThresholdCh : "";
     var html = [];
     html.push('<h3 class="admin-section-title">Poker access and refill policy</h3>');
     html.push('<form class="admin-adjust" id="adminPokerAccessPolicyForm">');
-    html.push('<label class="admin-field"><span class="admin-field__label">SLOW threshold (CH)</span><input class="admin-input" name="slowThresholdCh" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(access.slowThresholdCh || "") + '"></label>');
-    html.push('<label class="admin-field"><span class="admin-field__label">SLOW recovery threshold (CH)</span><input class="admin-input" name="slowRecoveryThresholdCh" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(access.slowRecoveryThresholdCh || "") + '"></label>');
+    html.push('<label class="admin-field"><span class="admin-field__label">SLOW threshold (CH)</span><input class="admin-input" name="slowThresholdCh" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(threshold) + '"></label>');
+    html.push('<label class="admin-field"><span class="admin-field__label">SLOW hysteresis (%)</span><input class="admin-input" name="slowHysteresisPercent" type="number" min="1" max="50" step="any" value="' + escapeHtml(hysteresisPercent) + '"></label>');
+    html.push('<label class="admin-field"><span class="admin-field__label">Recovery threshold (CH)</span><input class="admin-input" name="slowRecoveryThresholdCh" type="text" readonly value="' + escapeHtml(recovery) + '"></label>');
     html.push('<input type="hidden" name="accessRevision" value="' + escapeHtml(access.revision || 1) + '">');
     html.push('<div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save access policy</button></div><p class="admin-note" data-poker-access-policy-status aria-live="polite">Access policy is revision checked and audited separately.</p></form>');
     if (pools.length){
@@ -1713,6 +1718,28 @@
     }
   }
 
+  function updatePokerAccessRecoveryPreview(form){
+    if (!form) return;
+    var thresholdInput = form.querySelector('[name="slowThresholdCh"]');
+    var hysteresisInput = form.querySelector('[name="slowHysteresisPercent"]');
+    var recoveryInput = form.querySelector('[name="slowRecoveryThresholdCh"]');
+    if (!thresholdInput || !hysteresisInput || !recoveryInput) return;
+    var threshold = Number(thresholdInput.value);
+    var percent = Number(hysteresisInput.value);
+    if (Number.isSafeInteger(threshold) && threshold > 0 && Number.isFinite(percent) && percent >= 1 && percent <= 50){
+      var bps = Math.round(percent * 100);
+      try {
+        var derivedBig = (BigInt(threshold) * BigInt(10000 - bps)) / 10000n;
+        var derived = Number(derivedBig);
+        if (Number.isSafeInteger(derived) && derived > 0 && derived < threshold){
+          recoveryInput.value = String(derived);
+          return;
+        }
+      } catch (_e){}
+    }
+    recoveryInput.value = "—";
+  }
+
   async function submitPokerAccessPolicyForm(event){
     event.preventDefault();
     var form = event.target;
@@ -1723,12 +1750,15 @@
     if (status) status.textContent = "Saving…";
     try {
       try {
+        var threshold = Number(data.slowThresholdCh);
+        var percent = Number(data.slowHysteresisPercent);
+        var bps = Math.round(percent * 100);
         await apiFetch("/.netlify/functions/admin-poker-policy", {
           method: "PATCH",
           body: JSON.stringify({
             kind: "access",
-            slowThresholdCh: data.slowThresholdCh,
-            slowRecoveryThresholdCh: data.slowRecoveryThresholdCh,
+            slowThresholdCh: threshold,
+            slowHysteresisBps: bps,
             expectedRevision: data.accessRevision
           })
         });
@@ -1750,9 +1780,13 @@
             setStatus("Access policy revision conflict. Refresh failed — reload current state before saving.", "warning");
           }
           klog("admin_poker_access_policy_stale_revision", { code: "stale_revision" });
+        } else if (err && err.code === "invalid_slow_hysteresis_bps") {
+          if (status) status.textContent = "Could not save access policy: hysteresis percentage must be between 1% and 50%.";
+          handleApiError(err, "Hysteresis percentage must be between 1% and 50%.");
+          klog("admin_poker_access_policy_update_failed", { code: "invalid_slow_hysteresis_bps" });
         } else if (err && err.code === "invalid_threshold_relationship") {
-          if (status) status.textContent = "Could not save access policy: recovery threshold must be less than entry threshold.";
-          handleApiError(err, "Recovery threshold must be less than entry threshold.");
+          if (status) status.textContent = "Could not save access policy: threshold too small or invalid recovery derivation.";
+          handleApiError(err, "Threshold too small or invalid recovery derivation.");
           klog("admin_poker_access_policy_update_failed", { code: "invalid_threshold_relationship" });
         } else {
           if (status) status.textContent = "Could not save access policy: " + String(err && err.code || "request_failed");
@@ -3733,6 +3767,9 @@
             preview.textContent = "Preview: enter amount and reason to generate a ledger adjustment.";
           }
         }
+      }
+      if (target && target.closest && target.closest("#adminPokerAccessPolicyForm")){
+        updatePokerAccessRecoveryPreview(target.closest("#adminPokerAccessPolicyForm"));
       }
     });
   }

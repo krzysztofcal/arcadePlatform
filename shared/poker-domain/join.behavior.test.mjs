@@ -221,7 +221,7 @@ test("authoritative wallet threshold does not mutate automatic class under FORCE
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
         if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
         if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 1_000_000_000 }];
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 4 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 4 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "FORCE_NORMAL", poker_access_revision: 7 }];
         if (text.includes("update public.chips_accounts")) { automaticUpdateCalls += 1; return [{ poker_auto_class: "SLOW", poker_access_override: "FORCE_NORMAL", poker_access_revision: 8, poker_auto_slow_at: "2026-09-27T00:00:00.000Z" }]; }
         if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
@@ -257,7 +257,8 @@ test("authoritative wallet threshold does not mutate automatic class under FORCE
   assert.equal(result.access.effectiveClass, "NORMAL");
   assert.equal(result.access.revision, 7);
   assert.equal(result.access.slowThresholdCh, 1_000_000_000);
-  assert.equal(result.access.slowRecoveryThresholdCh, 900_000_000);
+  assert.equal(result.access.slowHysteresisBps, 500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 950_000_000);
 }));
 
 test("fresh join with wallet < recovery threshold transitions SLOW->NORMAL and bumps revision (T059, T062)", async () => withBotsDisabled(async () => {
@@ -277,8 +278,8 @@ test("fresh join with wallet < recovery threshold transitions SLOW->NORMAL and b
         }
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
         if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
-        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 500_000_000 }]; // < 900_000_000 recovery threshold
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 500_000_000 }]; // < 950_000_000 recovery threshold
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 5 }];
         if (text.includes("update public.chips_accounts") && text.includes("set poker_auto_class = 'NORMAL'")) {
           automaticUpdateCalls += 1;
@@ -315,7 +316,8 @@ test("fresh join with wallet < recovery threshold transitions SLOW->NORMAL and b
   assert.equal(result.access.effectiveClass, "NORMAL");
   assert.equal(result.access.revision, 6);
   assert.equal(result.access.slowThresholdCh, 1_000_000_000);
-  assert.equal(result.access.slowRecoveryThresholdCh, 900_000_000);
+  assert.equal(result.access.slowHysteresisBps, 500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 950_000_000);
 }));
 
 test("fresh join with wallet in hysteresis band retains previous class with zero mutation (T059, T062)", async () => withBotsDisabled(async () => {
@@ -333,8 +335,8 @@ test("fresh join with wallet in hysteresis band retains previous class with zero
         }
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
         if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
-        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 950_000_000 }]; // Inside [900m, 1b)
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 960_000_000 }]; // Inside [950m, 1b)
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 3 }];
         if (text.includes("update public.chips_accounts")) {
           automaticUpdateCalls += 1;
@@ -371,7 +373,8 @@ test("fresh join with wallet in hysteresis band retains previous class with zero
   assert.equal(result.access.effectiveClass, "SLOW");
   assert.equal(result.access.revision, 3);
   assert.equal(result.access.slowThresholdCh, 1_000_000_000);
-  assert.equal(result.access.slowRecoveryThresholdCh, 900_000_000);
+  assert.equal(result.access.slowHysteresisBps, 500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 950_000_000);
 }));
 
 test("fresh join with custom policy thresholds entry=2000 and recovery=1500 returns exact thresholds (Finding 2)", async () => withBotsDisabled(async () => {
@@ -389,7 +392,7 @@ test("fresh join with custom policy thresholds entry=2000 and recovery=1500 retu
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
         if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
         if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 1800 }]; // In hysteresis band [1500, 2000)
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 2000, slow_recovery_threshold_ch: 1500, revision: 4 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 2000, slow_hysteresis_bps: 2500, slow_recovery_threshold_ch: 1500, revision: 4 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 2 }];
         if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
         if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
@@ -418,6 +421,7 @@ test("fresh join with custom policy thresholds entry=2000 and recovery=1500 retu
 
   assert.equal(result.ok, true);
   assert.equal(result.access.slowThresholdCh, 2000);
+  assert.equal(result.access.slowHysteresisBps, 2500);
   assert.equal(result.access.slowRecoveryThresholdCh, 1500);
   assert.equal(result.access.policyRevision, 4);
   assert.equal(result.access.automaticClass, "NORMAL");
@@ -440,7 +444,7 @@ test("is_slow_only remains one-way: recovered NORMAL user cannot fresh-join an e
           if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return [];
           if (text.includes("from public.poker_state")) return [{ version: 1, state: { tableId, seats: [], stacks: {} } }];
           if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 1000 }];
-          if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+          if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
           // User is NORMAL (e.g. recovered or always NORMAL)
           if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 2 }];
           return [];
@@ -485,7 +489,7 @@ test("fresh FORCE_RESTRICTED own empty STANDARD join accepts with zero bot fundi
         return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
       }
       if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-      if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+      if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
       if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "FORCE_RESTRICTED", poker_access_revision: 4 }];
       if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
       if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
@@ -557,7 +561,7 @@ test("an active RESTRICTED human blocks bot seeding for a later NORMAL join", as
         }
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return store.seatRows.map((seat) => ({ ...seat }));
         if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
         if (text.includes("select poker_auto_class, poker_access_override")) {
           const access = accessByUser.get(params[0]);
           return access ? [access] : [];
@@ -653,7 +657,7 @@ test("missing existing human access keeps NORMAL JOIN legal but blocks bot fundi
         if (text.includes("from public.poker_seats") && text.includes("user_id = $2") && text.includes("limit 1")) return [];
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return store.seatRows.map((seat) => ({ ...seat }));
         if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 4 }];
         if (text.includes("select user_id, poker_auto_class, poker_access_override")) {
           store.accessSnapshotReads += 1;
@@ -727,7 +731,7 @@ test("fresh NORMAL JOIN remains fail-soft when the tier policy disables bot fund
           return seatInserted ? [{ user_id: userId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }] : [];
         }
         if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
         if (text.includes("select poker_auto_class, poker_access_override")) {
           return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
         }
@@ -786,7 +790,7 @@ test("fresh FORCE_RESTRICTED join rejects an active bot table before buy-in", as
           }];
           if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return [{ user_id: "bot:existing", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 100 }];
           if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-          if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+          if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
           if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "FORCE_RESTRICTED", poker_access_revision: 4 }];
           return [];
         }
@@ -875,7 +879,7 @@ test("fresh FORCE_RESTRICTED join rejects SLOW-only and CONTINUOUS_BOT targets b
             }];
             if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return [];
             if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-            if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+            if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
             if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "FORCE_RESTRICTED", poker_access_revision: 4 }];
             return [];
           }
@@ -919,7 +923,7 @@ test("existing SLOW human makes an ordinary table reject a fresh NORMAL join bef
             return [{ user_id: slowUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }];
           }
           if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-          if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+          if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
           if (text.includes("select poker_auto_class, poker_access_override")) {
             return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 2 }];
           }
@@ -968,7 +972,7 @@ test("existing SLOW human permits a SLOW join and selects sticky SLOW funding", 
         }];
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatRows.map((row) => ({ ...row }));
         if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 4 }];
         if (text.includes("select user_id, poker_auto_class, poker_access_override")) return [{ user_id: slowUserId, poker_auto_class: "SLOW", poker_access_override: "AUTO", poker_access_revision: 5 }];
         if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
@@ -1027,7 +1031,7 @@ test("fresh JOIN serializes with a committed FORCE_RESTRICTED override before bo
         }];
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc")) return seatRows.map((row) => ({ ...row }));
         if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 100 }];
-        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_recovery_threshold_ch: 900_000_000, revision: 1 }];
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
         if (text.includes("select user_id, poker_auto_class, poker_access_override")) {
           sawAccessRowLock = /for update/i.test(text);

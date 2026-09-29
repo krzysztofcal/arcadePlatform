@@ -328,13 +328,13 @@ test("poker tier policy cannot enable a tier without both exact NORMAL and SLOW 
   );
 });
 
-test("poker access policy atomic save updates both thresholds and bumps revision once (T061)", async () => {
+test("poker access policy atomic save derives recovery from threshold + hysteresis bps and bumps revision once (T068)", async () => {
   let executedUpdate = null;
   const result = await updatePokerPolicy({
     body: {
       kind: "access",
       slowThresholdCh: 2000,
-      slowRecoveryThresholdCh: 1500,
+      slowHysteresisBps: 500,
       expectedRevision: 1,
     },
     actorId: "00000000-0000-4000-8000-000000000010",
@@ -347,10 +347,11 @@ test("poker access policy atomic save updates both thresholds and bumps revision
           executedUpdate = { sql, params };
           return [{
             slow_threshold_ch: params[0],
-            slow_recovery_threshold_ch: params[1],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
             revision: 2,
             updated_at: "2026-09-29T12:00:00.000Z",
-            updated_by: params[2],
+            updated_by: params[3],
           }];
         }
         return [];
@@ -358,14 +359,52 @@ test("poker access policy atomic save updates both thresholds and bumps revision
     })
   });
   assert.equal(result.access.slowThresholdCh, 2000);
-  assert.equal(result.access.slowRecoveryThresholdCh, 1500);
+  assert.equal(result.access.slowHysteresisBps, 500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1900);
   assert.equal(result.access.revision, 2);
-  assert.match(executedUpdate.sql, /slow_threshold_ch = \$1, slow_recovery_threshold_ch = \$2, revision = revision \+ 1/);
+  assert.match(executedUpdate.sql, /slow_threshold_ch = \$1, slow_hysteresis_bps = \$2, slow_recovery_threshold_ch = \$3, revision = revision \+ 1/);
   assert.equal(executedUpdate.params[0], 2000);
-  assert.equal(executedUpdate.params[1], 1500);
+  assert.equal(executedUpdate.params[1], 500);
+  assert.equal(executedUpdate.params[2], 1900);
 });
 
-test("poker access policy rejects invalid recovery/entry relationship with zero mutation (T061)", async () => {
+test("poker access policy cannot be overridden by client-supplied recovery threshold (T068)", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisBps: 500,
+      slowRecoveryThresholdCh: 9999, // untrusted client attempt
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  // Must authoritatively derive 1900, not 9999
+  assert.equal(result.access.slowRecoveryThresholdCh, 1900);
+  assert.equal(executedUpdate.params[2], 1900);
+});
+
+test("poker access policy rejects invalid hysteresis bps with zero mutation (T068)", async () => {
   let updateCalled = false;
   const mockTx = {
     unsafe: async (sql) => {
@@ -376,44 +415,68 @@ test("poker access policy rejects invalid recovery/entry relationship with zero 
     }
   };
 
-  // recovery == entry
+  // bps < 100 (below 1%)
   await assert.rejects(
     () => updatePokerPolicy({
-      body: { kind: "access", slowThresholdCh: 1000, slowRecoveryThresholdCh: 1000, expectedRevision: 1 },
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisBps: 50, expectedRevision: 1 },
       actorId: "00000000-0000-4000-8000-000000000010",
       runTransaction: async (fn) => fn(mockTx),
     }),
-    (error) => error?.code === "invalid_threshold_relationship"
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
   );
 
-  // recovery > entry
+  // bps > 5000 (above 50%)
   await assert.rejects(
     () => updatePokerPolicy({
-      body: { kind: "access", slowThresholdCh: 1000, slowRecoveryThresholdCh: 1500, expectedRevision: 1 },
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisBps: 5001, expectedRevision: 1 },
       actorId: "00000000-0000-4000-8000-000000000010",
       runTransaction: async (fn) => fn(mockTx),
     }),
-    (error) => error?.code === "invalid_threshold_relationship"
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
   );
 
-  // non-positive / negative recovery
+  // non-integer bps
   await assert.rejects(
     () => updatePokerPolicy({
-      body: { kind: "access", slowThresholdCh: 1000, slowRecoveryThresholdCh: 0, expectedRevision: 1 },
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisBps: "invalid", expectedRevision: 1 },
       actorId: "00000000-0000-4000-8000-000000000010",
       runTransaction: async (fn) => fn(mockTx),
     }),
-    (error) => error?.code === "invalid_slow_recovery_threshold_ch"
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
   );
 
-  assert.equal(updateCalled, false, "zero DB update on invalid threshold relationship");
+  assert.equal(updateCalled, false, "zero DB update on invalid hysteresis bps");
 });
 
-test("poker access policy rejects stale revision with zero mutation (T061)", async () => {
+test("poker access policy rejects threshold too small to produce positive recovery with zero mutation (T068)", async () => {
+  let updateCalled = false;
+  const mockTx = {
+    unsafe: async (sql) => {
+      if (String(sql).includes("update public.poker_access_policy")) {
+        updateCalled = true;
+      }
+      return [{ revision: 1 }];
+    }
+  };
+
+  // entry = 1 with 5% hysteresis produces floor(1 * 9500 / 10000) = 0 -> recovery <= 0
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 1, slowHysteresisBps: 500, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_threshold_relationship"
+  );
+
+  assert.equal(updateCalled, false, "zero DB update on non-positive derived recovery");
+});
+
+test("poker access policy rejects stale revision with zero mutation (T068)", async () => {
   let updateCalled = false;
   await assert.rejects(
     () => updatePokerPolicy({
-      body: { kind: "access", slowThresholdCh: 2000, slowRecoveryThresholdCh: 1500, expectedRevision: 1 },
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisBps: 500, expectedRevision: 1 },
       actorId: "00000000-0000-4000-8000-000000000010",
       runTransaction: async (fn) => fn({
         unsafe: async (sql) => {

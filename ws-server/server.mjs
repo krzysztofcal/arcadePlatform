@@ -776,6 +776,7 @@ function normalizeWsPokerAccessPayload(access) {
   const revision = Number(access.revision);
   if (!automaticClass || !override || !effectiveClass || !Number.isSafeInteger(revision) || revision <= 0) return null;
   const threshold = Number(access.slowThresholdCh ?? access.policy?.slowThresholdCh);
+  const hysteresisBps = Number(access.slowHysteresisBps ?? access.policy?.slowHysteresisBps);
   const recoveryThreshold = Number(access.slowRecoveryThresholdCh ?? access.policy?.slowRecoveryThresholdCh);
   const policyRevision = Number(access.policyRevision ?? access.policy?.revision);
   return {
@@ -784,6 +785,7 @@ function normalizeWsPokerAccessPayload(access) {
     effectiveClass,
     revision,
     ...(Number.isSafeInteger(threshold) && threshold > 0 ? { slowThresholdCh: threshold } : {}),
+    ...(Number.isSafeInteger(hysteresisBps) && hysteresisBps >= 100 && hysteresisBps <= 5000 ? { slowHysteresisBps: hysteresisBps } : {}),
     ...(Number.isSafeInteger(recoveryThreshold) && recoveryThreshold > 0 ? { slowRecoveryThresholdCh: recoveryThreshold } : {}),
     ...(Number.isSafeInteger(policyRevision) && policyRevision > 0 ? { policyRevision } : {}),
     ...(access.automaticSlowAt ? { automaticSlowAt: access.automaticSlowAt } : {})
@@ -832,6 +834,7 @@ async function refreshConnectionPokerAccess(ws, connState, { requestId = null, f
         ...snapshot,
         policy,
         slowThresholdCh: policy.slowThresholdCh,
+        slowHysteresisBps: policy.slowHysteresisBps,
         slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
         policyRevision: policy.revision
       };
@@ -955,6 +958,7 @@ returning user_id, poker_auto_class, poker_access_override, poker_access_revisio
         ...snapshot,
         policy,
         slowThresholdCh: policy.slowThresholdCh,
+        slowHysteresisBps: policy.slowHysteresisBps,
         slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
         policyRevision: policy.revision
       };
@@ -1088,6 +1092,7 @@ async function refreshActivePokerAccess() {
         ...snapshot,
         policy: refreshed.policy,
         slowThresholdCh: refreshed.policy.slowThresholdCh,
+        slowHysteresisBps: refreshed.policy.slowHysteresisBps,
         slowRecoveryThresholdCh: refreshed.policy.slowRecoveryThresholdCh,
         policyRevision: refreshed.policy.revision,
       };
@@ -5215,6 +5220,9 @@ wss.on("connection", (ws) => {
               policy: Number.isSafeInteger(Number(access?.slowThresholdCh))
                 ? {
                     slowThresholdCh: Number(access.slowThresholdCh),
+                    ...(Number.isSafeInteger(Number(access?.slowHysteresisBps))
+                      ? { slowHysteresisBps: Number(access.slowHysteresisBps) }
+                      : {}),
                     ...(Number.isSafeInteger(Number(access?.slowRecoveryThresholdCh))
                       ? { slowRecoveryThresholdCh: Number(access.slowRecoveryThresholdCh) }
                       : {}),

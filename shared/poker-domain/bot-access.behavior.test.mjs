@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_SLOW_THRESHOLD_CH,
+  DEFAULT_SLOW_HYSTERESIS_BPS,
+  MIN_SLOW_HYSTERESIS_BPS,
+  MAX_SLOW_HYSTERESIS_BPS,
   DEFAULT_SLOW_RECOVERY_THRESHOLD_CH,
+  deriveSlowRecoveryThresholdCh,
   deriveAccessState,
   applyAutomaticThresholdEvidence,
   normalizeAccessClass,
@@ -14,7 +18,7 @@ import {
 
 test("FORCE_* overrides prevent automatic threshold mutations to durable class (Finding 1)", () => {
   const entry = DEFAULT_SLOW_THRESHOLD_CH; // 1_000_000_000
-  const recovery = DEFAULT_SLOW_RECOVERY_THRESHOLD_CH; // 900_000_000
+  const recovery = DEFAULT_SLOW_RECOVERY_THRESHOLD_CH; // 950_000_000
 
   // 1. FORCE_NORMAL + evidence above entry:
   // - automatic class unchanged (NORMAL)
@@ -174,7 +178,8 @@ test("settled table stack can promote NORMAL->SLOW but cannot downgrade SLOW->NO
   const { classifySettledAccessEvidence } = await import("./bot-access.mjs");
   const policy = {
     slowThresholdCh: 1_000_000_000,
-    slowRecoveryThresholdCh: 900_000_000,
+    slowHysteresisBps: 500,
+    slowRecoveryThresholdCh: 950_000_000,
     revision: 1,
     loadedAtMs: Date.now(),
     expiresAtMs: Date.now() + 30_000,
@@ -363,6 +368,7 @@ test("classifySettledAccessEvidence performs pure in-memory calculation with zer
     settledStackCh: 50,
     policy: {
       slowThresholdCh: 1000,
+      slowHysteresisBps: 2000,
       slowRecoveryThresholdCh: 800,
       revision: 2,
       loadedAtMs: 1000,
@@ -375,8 +381,8 @@ test("classifySettledAccessEvidence performs pure in-memory calculation with zer
   assert.equal(res.changed, false);
 });
 
-test("schema-backed policy missing slowRecoveryThresholdCh is rejected / treated unknown rather than synthesized (T061)", () => {
-  // normalizePolicySnapshot returns null if slowRecoveryThresholdCh is missing
+test("schema-backed policy missing slowRecoveryThresholdCh or slowHysteresisBps is rejected / treated unknown rather than synthesized (T061/T066)", () => {
+  // normalizePolicySnapshot returns null if slowRecoveryThresholdCh or slowHysteresisBps is missing
   assert.equal(normalizePolicySnapshot({
     slow_threshold_ch: 1_000_000_000,
     revision: 1,
@@ -385,13 +391,28 @@ test("schema-backed policy missing slowRecoveryThresholdCh is rejected / treated
 
   assert.equal(normalizePolicySnapshot({
     slowThresholdCh: 2000,
+    slowRecoveryThresholdCh: 1900,
     revision: 1,
     loadedAtMs: 1000,
   }), null);
 
-  // isFreshPolicySnapshot returns false if slowRecoveryThresholdCh is missing
+  assert.equal(normalizePolicySnapshot({
+    slowThresholdCh: 2000,
+    slowHysteresisBps: 500,
+    revision: 1,
+    loadedAtMs: 1000,
+  }), null);
+
+  // isFreshPolicySnapshot returns false if slowRecoveryThresholdCh or slowHysteresisBps is missing
   assert.equal(isFreshPolicySnapshot({
     slowThresholdCh: 1_000_000_000,
+    revision: 1,
+    expiresAtMs: Date.now() + 30_000,
+  }), false);
+
+  assert.equal(isFreshPolicySnapshot({
+    slowThresholdCh: 1_000_000_000,
+    slowRecoveryThresholdCh: 950_000_000,
     revision: 1,
     expiresAtMs: Date.now() + 30_000,
   }), false);
@@ -417,14 +438,16 @@ test("schema-backed policy missing slowRecoveryThresholdCh is rejected / treated
   assert.equal(res.reason, "access_cache_unknown");
 });
 
-test("custom thresholds entry=2000 and recovery=1500 normalize and classify without synthesizing (T061)", () => {
+test("custom thresholds entry=2000 and bps=2500 (25%) derive recovery=1500 and normalize without synthesizing (T061/T066)", () => {
   const normalized = normalizePolicySnapshot({
     slow_threshold_ch: 2000,
+    slow_hysteresis_bps: 2500,
     slow_recovery_threshold_ch: 1500,
     revision: 3,
     loadedAtMs: 100,
   });
   assert.equal(normalized.slowThresholdCh, 2000);
+  assert.equal(normalized.slowHysteresisBps, 2500);
   assert.equal(normalized.slowRecoveryThresholdCh, 1500);
 
   assert.equal(isFreshPolicySnapshot(normalized, 100), true);
@@ -443,8 +466,133 @@ test("custom thresholds entry=2000 and recovery=1500 normalize and classify with
   });
   assert.equal(res.known, true);
   assert.equal(res.slowThresholdCh, 2000);
+  assert.equal(res.slowHysteresisBps, 2500);
   assert.equal(res.slowRecoveryThresholdCh, 1500);
   assert.equal(res.automaticClass, "SLOW");
   assert.equal(res.changed, true);
+});
+
+test("deriveSlowRecoveryThresholdCh adheres strictly to deterministic integer derivation contract (T066)", () => {
+  // Required examples from specification
+  assert.equal(deriveSlowRecoveryThresholdCh(1_000_000_000, 500), 950_000_000);
+  assert.equal(deriveSlowRecoveryThresholdCh(2000, 500), 1900);
+  assert.equal(deriveSlowRecoveryThresholdCh(10000, 500), 9500);
+
+  // Boundary bps: 100 bps (1%) and 5000 bps (50%)
+  assert.equal(deriveSlowRecoveryThresholdCh(10000, 100), 9900);
+  assert.equal(deriveSlowRecoveryThresholdCh(10000, 5000), 5000);
+
+  // Fractional floor check
+  // 1999 * (10000 - 500) / 10000 = 1999 * 9500 / 10000 = 18990500 / 10000 = 1899.05 -> floor 1899
+  assert.equal(deriveSlowRecoveryThresholdCh(1999, 500), 1899);
+
+  // Out of range bps
+  assert.equal(deriveSlowRecoveryThresholdCh(10000, 99), null);
+  assert.equal(deriveSlowRecoveryThresholdCh(10000, 5001), null);
+  assert.equal(deriveSlowRecoveryThresholdCh(10000, 0), null);
+  assert.equal(deriveSlowRecoveryThresholdCh(10000, -500), null);
+  assert.equal(deriveSlowRecoveryThresholdCh(10000, 500.5), null);
+
+  // Invalid / non-positive entry thresholds
+  assert.equal(deriveSlowRecoveryThresholdCh(0, 500), null);
+  assert.equal(deriveSlowRecoveryThresholdCh(-100, 500), null);
+  assert.equal(deriveSlowRecoveryThresholdCh(null, 500), null);
+  assert.equal(deriveSlowRecoveryThresholdCh(undefined, 500), null);
+  assert.equal(deriveSlowRecoveryThresholdCh("1000", 500), null);
+  assert.equal(deriveSlowRecoveryThresholdCh(1000.5, 500), null);
+
+  // Derived recovery <= 0 (e.g. entry = 1 with 5000 bps -> floor(1 * 5000 / 10000) = 0)
+  assert.equal(deriveSlowRecoveryThresholdCh(1, 5000), null);
+
+  // Safe integer bounds
+  assert.equal(deriveSlowRecoveryThresholdCh(Number.MAX_SAFE_INTEGER + 1, 500), null);
+});
+
+test("schema-backed inconsistent entry/bps/recovery tuple treated UNKNOWN / fail-closed (T067)", () => {
+  // Inconsistent recovery (900M when 1B with 500 bps should be 950M)
+  const inconsistentRow = {
+    slow_threshold_ch: 1_000_000_000,
+    slow_hysteresis_bps: 500,
+    slow_recovery_threshold_ch: 900_000_000,
+    revision: 1,
+    loadedAtMs: 100,
+  };
+  assert.equal(normalizePolicySnapshot(inconsistentRow), null);
+
+  const inconsistentSnapshot = {
+    slowThresholdCh: 1_000_000_000,
+    slowHysteresisBps: 500,
+    slowRecoveryThresholdCh: 900_000_000,
+    revision: 1,
+    expiresAtMs: Date.now() + 60_000,
+  };
+  assert.equal(isFreshPolicySnapshot(inconsistentSnapshot), false);
+
+  const res = classifySettledAccessEvidence({
+    snapshot: {
+      automaticClass: "NORMAL",
+      override: "AUTO",
+      effectiveClass: "NORMAL",
+      revision: 1,
+      expiresAtMs: Date.now() + 60_000,
+    },
+    settledStackCh: 500,
+    policy: inconsistentSnapshot,
+    nowMs: Date.now(),
+  });
+  assert.equal(res.known, false);
+  assert.equal(res.reason, "access_cache_unknown");
+});
+
+test("AUTO/SLOW user under low threshold recovers to AUTO/NORMAL on next fresh wallet JOIN check when operator raises entry threshold without manual user repair (T070)", () => {
+  // 1. Initial operator configuration: entry = 2000, hysteresis = 5% (500 bps) -> recovery = 1900
+  const initialPolicy = normalizePolicySnapshot({
+    slow_threshold_ch: 2000,
+    slow_hysteresis_bps: 500,
+    slow_recovery_threshold_ch: 1900,
+    revision: 1,
+    loadedAtMs: 1000,
+  });
+  assert.notEqual(initialPolicy, null);
+  assert.equal(initialPolicy.slowRecoveryThresholdCh, 1900);
+
+  // User has wallet balance 5000 CH (>= 2000 entry) -> classified SLOW
+  const userInitial = applyAutomaticThresholdEvidence({
+    automaticClass: "NORMAL",
+    override: "AUTO",
+    evidenceCh: 5000,
+    slowThresholdCh: initialPolicy.slowThresholdCh,
+    slowRecoveryThresholdCh: initialPolicy.slowRecoveryThresholdCh,
+    allowRecovery: true,
+  });
+  assert.equal(userInitial.automaticClass, "SLOW");
+  assert.equal(userInitial.effectiveClass, "SLOW");
+  assert.equal(userInitial.changed, true);
+
+  // 2. Operator raises entry threshold: entry = 10000, hysteresis = 5% (500 bps) -> recovery = 9500
+  const updatedPolicy = normalizePolicySnapshot({
+    slow_threshold_ch: 10000,
+    slow_hysteresis_bps: 500,
+    slow_recovery_threshold_ch: 9500,
+    revision: 2,
+    loadedAtMs: 2000,
+  });
+  assert.notEqual(updatedPolicy, null);
+  assert.equal(updatedPolicy.slowRecoveryThresholdCh, 9500);
+
+  // 3. User joins table next time with fresh authoritative wallet balance = 5000 CH
+  // Under updated policy: 5000 < 9500 (derived recovery threshold)
+  // User automatically recovers from SLOW -> NORMAL without any manual user repair!
+  const userRecovered = applyAutomaticThresholdEvidence({
+    automaticClass: userInitial.automaticClass, // currently SLOW
+    override: "AUTO",
+    evidenceCh: 5000,
+    slowThresholdCh: updatedPolicy.slowThresholdCh,
+    slowRecoveryThresholdCh: updatedPolicy.slowRecoveryThresholdCh,
+    allowRecovery: true,
+  });
+  assert.equal(userRecovered.automaticClass, "NORMAL");
+  assert.equal(userRecovered.effectiveClass, "NORMAL");
+  assert.equal(userRecovered.changed, true);
 });
 

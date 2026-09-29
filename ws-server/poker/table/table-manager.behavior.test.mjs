@@ -103,6 +103,7 @@ test("settled access classification does not mutate automatic class under FORCE_
     expiresAtMs: cacheAt + 30_000
   }, {
     slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
     slowRecoveryThresholdCh: 90,
     revision: 3,
     loadedAtMs: cacheAt,
@@ -124,6 +125,7 @@ test("settled access classification does not mutate automatic class under FORCE_
     expiresAtMs: 30_200
   }, {
     slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
     slowRecoveryThresholdCh: 90,
     revision: 3,
     loadedAtMs: 200,
@@ -144,6 +146,7 @@ test("settled access classification does not mutate automatic class under FORCE_
     expiresAtMs: 30_250
   }, {
     slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
     slowRecoveryThresholdCh: 90,
     revision: 3,
     loadedAtMs: 250,
@@ -161,6 +164,7 @@ test("settled access classification does not mutate automatic class under FORCE_
     expiresAtMs: 30_300
   }, {
     slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
     slowRecoveryThresholdCh: 90,
     revision: 3,
     loadedAtMs: 300,
@@ -204,7 +208,7 @@ test("Admin access invalidation makes the next settled rollover fail closed for 
   manager.cachePokerAccess(tableId, userId, {
     automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 1,
     loadedAtMs: 100, expiresAtMs: 30_100
-  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
   assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, true);
   assert.equal(manager.invalidatePokerAccessForUser(userId), 1);
   assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, false);
@@ -241,7 +245,7 @@ test("Admin FORCE_SLOW propagation makes the ordinary table sticky SLOW-only wit
   manager.cachePokerAccess(tableId, userId, {
     automaticClass: "NORMAL", override: "FORCE_NORMAL", effectiveClass: "NORMAL", revision: 2,
     loadedAtMs: 100, expiresAtMs: 30_100
-  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
   assert.equal(manager.tableMeta(tableId).isSlowOnly, true);
   manager.cachePokerAccess(tableId, userId, {
     automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 3,
@@ -269,7 +273,7 @@ test("Admin access pre-invalidation keeps settled rollover fail-closed until aut
   manager.cachePokerAccess(tableId, userId, {
     automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 7,
     loadedAtMs: 100, expiresAtMs: 30_100
-  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
   assert.equal(manager.setPokerAccessMutationFailClosed(userId, true).ok, true);
   assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, false);
   const prepared = manager.prepareSettledHandRollover({ tableId, nowMs: 200, allowBotFunding: false });
@@ -280,7 +284,7 @@ test("Admin access pre-invalidation keeps settled rollover fail-closed until aut
   manager.cachePokerAccess(tableId, userId, {
     automaticClass: "NORMAL", override: "FORCE_RESTRICTED", effectiveClass: "RESTRICTED", revision: 8,
     loadedAtMs: 300, expiresAtMs: 30_300
-  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowRecoveryThresholdCh: 900_000_000, revision: 1, loadedAtMs: 300, expiresAtMs: 30_300 }, 300);
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 300, expiresAtMs: 30_300 }, 300);
   assert.equal(manager.settledAccessStatus(tableId, { nowMs: 300 }).known, true);
   assert.equal(manager.settledAccessStatus(tableId, { nowMs: 300 }).effectiveRestricted, true);
 });
@@ -640,6 +644,7 @@ test("persistent bot replacement commits runtime only with matching funding rece
     expiresAtMs: 30_001
   }, {
     slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
     slowRecoveryThresholdCh: 90,
     revision: 1,
     loadedAtMs: 1,
@@ -666,6 +671,7 @@ test("persistent bot replacement commits runtime only with matching funding rece
     expiresAtMs: 35_000
   }, {
     slowThresholdCh: 1_000,
+    slowHysteresisBps: 1000,
     slowRecoveryThresholdCh: 900,
     revision: 1,
     loadedAtMs: 5_000,

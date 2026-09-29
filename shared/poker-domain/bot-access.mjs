@@ -4,8 +4,21 @@ export const ACCESS_CLASSES = Object.freeze(["NORMAL", "SLOW"]);
 export const ACCESS_EFFECTIVE_STATES = Object.freeze(["NORMAL", "SLOW", "RESTRICTED"]);
 export const ACCESS_OVERRIDES = Object.freeze(["AUTO", "FORCE_NORMAL", "FORCE_SLOW", "FORCE_RESTRICTED"]);
 export const DEFAULT_SLOW_THRESHOLD_CH = 1_000_000_000;
-export const DEFAULT_SLOW_RECOVERY_THRESHOLD_CH = 900_000_000;
+export const DEFAULT_SLOW_HYSTERESIS_BPS = 500;
+export const MIN_SLOW_HYSTERESIS_BPS = 100;
+export const MAX_SLOW_HYSTERESIS_BPS = 5000;
+export const DEFAULT_SLOW_RECOVERY_THRESHOLD_CH = 950_000_000;
 export const ACCESS_SNAPSHOT_MAX_AGE_MS = 30_000;
+
+export function deriveSlowRecoveryThresholdCh(entryThresholdCh, hysteresisBps = DEFAULT_SLOW_HYSTERESIS_BPS) {
+  if (typeof entryThresholdCh !== "number" || typeof hysteresisBps !== "number") return null;
+  if (!Number.isSafeInteger(entryThresholdCh) || entryThresholdCh <= 0) return null;
+  if (!Number.isSafeInteger(hysteresisBps) || hysteresisBps < MIN_SLOW_HYSTERESIS_BPS || hysteresisBps > MAX_SLOW_HYSTERESIS_BPS) return null;
+  const derivedBigInt = (BigInt(entryThresholdCh) * BigInt(10000 - hysteresisBps)) / 10000n;
+  const derived = Number(derivedBigInt);
+  if (!Number.isSafeInteger(derived) || derived <= 0 || derived >= entryThresholdCh) return null;
+  return derived;
+}
 
 // Transaction-local only: a later transaction must observe a completed schema cutover.
 const schemaByTransaction = new WeakMap();
@@ -104,16 +117,25 @@ export function applyAutomaticThresholdEvidence({
 
 export function normalizePolicySnapshot(row, { nowMs = Date.now(), maxAgeMs = ACCESS_SNAPSHOT_MAX_AGE_MS } = {}) {
   const slowThresholdCh = Number(row?.slow_threshold_ch ?? row?.slowThresholdCh);
+  const slowHysteresisBps = Number(row?.slow_hysteresis_bps ?? row?.slowHysteresisBps);
   const slowRecoveryThresholdCh = Number(row?.slow_recovery_threshold_ch ?? row?.slowRecoveryThresholdCh);
   const revision = Number(row?.revision ?? row?.poker_access_revision);
   const loadedAtMs = Number(row?.loadedAtMs ?? row?.loaded_at_ms ?? nowMs);
   if (!Number.isSafeInteger(slowThresholdCh) || slowThresholdCh <= 0
+    || !Number.isSafeInteger(slowHysteresisBps) || slowHysteresisBps < MIN_SLOW_HYSTERESIS_BPS || slowHysteresisBps > MAX_SLOW_HYSTERESIS_BPS
     || !Number.isSafeInteger(slowRecoveryThresholdCh) || slowRecoveryThresholdCh <= 0
     || slowRecoveryThresholdCh >= slowThresholdCh
     || !Number.isSafeInteger(revision) || revision <= 0
     || !Number.isFinite(loadedAtMs)) return null;
+
+  const expectedRecovery = deriveSlowRecoveryThresholdCh(slowThresholdCh, slowHysteresisBps);
+  if (expectedRecovery === null || slowRecoveryThresholdCh !== expectedRecovery) {
+    return null;
+  }
+
   return {
     slowThresholdCh,
+    slowHysteresisBps,
     slowRecoveryThresholdCh,
     revision,
     loadedAtMs,
@@ -123,17 +145,21 @@ export function normalizePolicySnapshot(row, { nowMs = Date.now(), maxAgeMs = AC
 
 export function isFreshPolicySnapshot(snapshot, nowMs = Date.now()) {
   const slowThresholdCh = Number(snapshot?.slowThresholdCh);
+  const slowHysteresisBps = Number(snapshot?.slowHysteresisBps);
   const slowRecoveryThresholdCh = Number(snapshot?.slowRecoveryThresholdCh);
-  return Boolean(snapshot
-    && Number.isSafeInteger(slowThresholdCh)
-    && slowThresholdCh > 0
-    && Number.isSafeInteger(slowRecoveryThresholdCh)
-    && slowRecoveryThresholdCh > 0
-    && slowRecoveryThresholdCh < slowThresholdCh
-    && Number.isSafeInteger(Number(snapshot.revision))
-    && Number(snapshot.revision) > 0
-    && Number.isFinite(Number(snapshot.expiresAtMs))
-    && Number(nowMs) <= Number(snapshot.expiresAtMs));
+  if (!snapshot
+    || !Number.isSafeInteger(slowThresholdCh) || slowThresholdCh <= 0
+    || !Number.isSafeInteger(slowHysteresisBps) || slowHysteresisBps < MIN_SLOW_HYSTERESIS_BPS || slowHysteresisBps > MAX_SLOW_HYSTERESIS_BPS
+    || !Number.isSafeInteger(slowRecoveryThresholdCh) || slowRecoveryThresholdCh <= 0
+    || slowRecoveryThresholdCh >= slowThresholdCh
+    || !Number.isSafeInteger(Number(snapshot.revision))
+    || Number(snapshot.revision) <= 0
+    || !Number.isFinite(Number(snapshot.expiresAtMs))
+    || Number(nowMs) > Number(snapshot.expiresAtMs)) {
+    return false;
+  }
+  const expectedRecovery = deriveSlowRecoveryThresholdCh(slowThresholdCh, slowHysteresisBps);
+  return expectedRecovery !== null && slowRecoveryThresholdCh === expectedRecovery;
 }
 
 export function normalizeAccessSnapshot(row, { nowMs = Date.now(), maxAgeMs = ACCESS_SNAPSHOT_MAX_AGE_MS } = {}) {
@@ -172,13 +198,14 @@ export async function readPokerAccessPolicy(tx, { nowMs = Date.now() } = {}) {
   if (!await hasPokerPoolSchema(tx)) return {
     ...normalizePolicySnapshot({
       slow_threshold_ch: Number.MAX_SAFE_INTEGER,
-      slow_recovery_threshold_ch: Number.MAX_SAFE_INTEGER - 1,
+      slow_hysteresis_bps: DEFAULT_SLOW_HYSTERESIS_BPS,
+      slow_recovery_threshold_ch: deriveSlowRecoveryThresholdCh(Number.MAX_SAFE_INTEGER, DEFAULT_SLOW_HYSTERESIS_BPS),
       revision: 1,
     }, { nowMs }),
     schemaBacked: false,
   };
   const rows = await tx.unsafe(
-    "select slow_threshold_ch, slow_recovery_threshold_ch, revision from public.poker_access_policy where id = 1 limit 1;"
+    "select slow_threshold_ch, slow_hysteresis_bps, slow_recovery_threshold_ch, revision from public.poker_access_policy where id = 1 limit 1;"
   );
   return normalizePolicySnapshot(rows?.[0], { nowMs });
 }
@@ -338,6 +365,7 @@ export function classifySettledAccessEvidence({
     ...next,
     revision: snapshot.revision,
     slowThresholdCh: policy.slowThresholdCh,
+    slowHysteresisBps: policy.slowHysteresisBps,
     slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
   };
 }
