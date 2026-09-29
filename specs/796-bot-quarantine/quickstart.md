@@ -204,18 +204,21 @@ Resolves the issue where an Admin mutation commits successfully on the backend, 
    - Helper `safePostMutationRefresh(refreshFn, successMessage, failureMessage)` standardizes best-effort refresh after confirmed POST/PATCH mutations.
    - All 10 mutation handlers (`submitPokerAccessForm`, `submitPokerAccessPolicyForm`, `submitPokerTierPolicyForm`, `saveBonusCampaignDraft`, `setBonusCampaignStatus`, `submitAdjustForm`, `runTableAction`, `executeBotRecovery`, `runOpsAction`, `runPokerMaintenance`) separate the mutation call from the status refresh.
    - If the mutation succeeds and refresh fails, the UI renders a warning: e.g. `Saved. Refresh failed — reload current state before another action.` with `warning` tone instead of false "Could not save". No automatic mutation retry is performed.
-2. **Stale revision conflict handling**:
-   - In `submitPokerAccessPolicyForm` and `submitPokerTierPolicyForm`, a 409 `stale_revision` silently reloads current ops state via `loadOps({ silent: true })`, updates the re-rendered form note to `Stale revision; current tier <buyIn> policy reloaded. Review before saving again.`, and displays a global warning. Zero duplicate mutation is sent.
-   - In `submitPokerAccessForm`, `stale_revision` silently reloads user details, preserving existing review feedback.
-3. **Maintenance outcome decoupling**:
+2. **Stale revision conflict and timeout reload truthfulness**:
+   - In `submitPokerAccessPolicyForm` and `submitPokerTierPolicyForm`, a 409 `stale_revision` attempts reload via `loadOps({ silent: true, throwOnError: true })` and truthfully checks outcome: if reload succeeds, informs operator `current <type> policy reloaded. Review before saving again.`; if reload fails, informs operator `Refresh failed — reload current state before saving again.`. Zero duplicate mutation is sent.
+   - In `submitPokerAccessForm`, `stale_revision` and timeout/unconfirmed outcomes distinguish reload success (`...current access reloaded. Review it before saving again.`) from reload failure (`Refresh failed — reload user details manually before saving/another action.`) without swallowing reload failures when messaging the operator.
+3. **Maintenance outcome decoupling & error preservation**:
    - In `runPokerMaintenance(operation, extra, button)`:
-     - Confirmed POST + failed refresh: sets `Poker maintenance action completed. Refresh failed — reload current state before another action.` with warning tone, keeping `state.ops.pokerMaintenanceError = null`.
-     - Timeout-like failure (`ws_maintenance_timeout`, `timeout`, 504, 503): silently reloads current status, sets `state.ops.pokerMaintenanceError = "Request timed out or unconfirmed; reloaded current status. Review before trying again."`, and warns the operator without auto-replay.
-     - Cleanup phase failures preserve phase breakdown and best-effort reload.
-4. **Loader silent mode support**:
-   - `loadOps`, `loadUserDetail`, `loadTableDetail`, `loadTables`, `loadBonusCampaigns`, `loadLedger`, `loadUsers` now accept a `silent` option (boolean or `{ silent: true }`).
-   - When silent: loaders do not display "Loading...", do not clobber active status messages to `""` on success, log failures via `klog`, and rethrow errors so caller refresh wrappers detect failures accurately.
-5. **Quality & compatibility invariants**:
+     - Confirmed POST + post-mutation refresh: refresh runs `loadOps({ silent: true, throwOnError: true })` and explicitly checks whether `state.ops.pokerMaintenanceError` was set (preventing `loadOps` internal `Promise.allSettled` from masking an `admin-poker-maintenance` endpoint failure as a false success).
+     - If maintenance snapshot load fails, `safePostMutationRefresh` sets warning `Poker maintenance action completed. Refresh failed — reload current state before another action.`, and `state.ops.pokerMaintenanceError` is preserved rather than wiped.
+     - Timeout-like failure (`ws_maintenance_timeout`, `timeout`, 504, 503): attempts reload and distinguishes reload success (`Current status reloaded — review before trying again.`) from reload failure (`Refresh failed — reload current state before trying again.`).
+     - Cleanup phase failures preserve phase breakdown and completed counts.
+4. **Loader silent mode and explicit throwOnError contract**:
+   - `loadOps`, `loadUserDetail`, `loadTableDetail`, `loadTables`, `loadBonusCampaigns`, `loadLedger`, `loadUsers` support both boolean `silent` and options `{ silent: true, throwOnError: true }`.
+   - Backward-compatible non-throwing behavior is preserved for callers using `silent: true` without awaiting or catching (e.g. unawaited `loadUserDetail(..., true)` or `evaluateTable()` unawaited background loads), preventing unhandled promise rejections.
+   - Callers requiring error propagation (such as `safePostMutationRefresh` and reload guards) explicitly specify `throwOnError: true`.
+5. **Quality, styling, and compatibility invariants**:
+   - Added `.admin-status[data-tone="warning"] { color:#fde047; background:rgba(234, 179, 8, 0.14); }` (one selector per line) to `css/admin.css`.
    - JSP-compatible JavaScript (no unsupported syntax).
    - Zero `console.log` added (all logging through `klog`).
    - No backend, WS runtime, database migration, or endpoint contract changes.

@@ -1655,19 +1655,39 @@
         mutationResult = await apiFetch("/.netlify/functions/admin-user-poker-access", { method: "PATCH", body: JSON.stringify(data) });
       } catch (err){
         if (err && err.code === "stale_revision") {
-          try { await loadUserDetail(data.userId, true); } catch (_e) {}
+          var reloadOk = true;
+          try {
+            await loadUserDetail(data.userId, { silent: true, throwOnError: true });
+          } catch (_e) {
+            reloadOk = false;
+          }
           status = (nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]")) || form.querySelector("[data-poker-access-status]");
-          if (status) status.textContent = "Previous change recovered; current access reloaded. Review it before saving again.";
-          setStatus("Poker access revision conflict. Current access reloaded — review before saving.", "warning");
+          if (reloadOk){
+            if (status) status.textContent = "Previous change recovered; current access reloaded. Review it before saving again.";
+            setStatus("Poker access revision conflict. Current access reloaded — review before saving.", "warning");
+          } else {
+            if (status) status.textContent = "Previous change recovered. Refresh failed — reload user details manually before saving again.";
+            setStatus("Poker access revision conflict. Refresh failed — reload user details manually before saving.", "warning");
+          }
         } else if (err && err.code === "poker_access_mutation_in_progress") {
           status = (nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]")) || form.querySelector("[data-poker-access-status]");
           if (status) status.textContent = "Another access save is currently in progress. This save was not applied.";
           setStatus("Another access save is currently in progress. This save was not applied.", "warning");
         } else if (err && (err.status === 503 || err.code === "timeout" || err.code === "access_mutation_failed")) {
-          try { await loadUserDetail(data.userId, true); } catch (_e) {}
+          var timeoutReloadOk = true;
+          try {
+            await loadUserDetail(data.userId, { silent: true, throwOnError: true });
+          } catch (_e) {
+            timeoutReloadOk = false;
+          }
           status = (nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]")) || form.querySelector("[data-poker-access-status]");
-          if (status) status.textContent = "Outcome was not confirmed by WS; current access reloaded. Review it before saving again.";
-          setStatus("Outcome was not confirmed by WS; current access reloaded. Review it before saving again.", "warning");
+          if (timeoutReloadOk){
+            if (status) status.textContent = "Outcome was not confirmed by WS; current access reloaded. Review it before saving again.";
+            setStatus("Outcome was not confirmed by WS; current access reloaded. Review it before saving again.", "warning");
+          } else {
+            if (status) status.textContent = "Outcome was not confirmed by WS. Refresh failed — reload user details manually before another action.";
+            setStatus("Outcome was not confirmed by WS. Refresh failed — reload user details manually before another action.", "warning");
+          }
         } else {
           if (status) status.textContent = "Could not save poker override: " + String(err && err.code || "request_failed");
           handleApiError(err, "Could not save poker override.");
@@ -1677,7 +1697,7 @@
       }
       var rev = (mutationResult && mutationResult.access && mutationResult.access.revision) || (mutationResult && mutationResult.revision) || "";
       var refreshOk = await safePostMutationRefresh(
-        function(){ return loadUserDetail(data.userId, true); },
+        function(){ return loadUserDetail(data.userId, { silent: true, throwOnError: true }); },
         "Poker override saved (rev " + String(rev) + ").",
         "Saved revision " + String(rev) + ". Refresh failed — reload current state before another action."
       );
@@ -1705,11 +1725,21 @@
         await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({ kind: "access", slowThresholdCh: data.slowThresholdCh, expectedRevision: data.accessRevision }) });
       } catch (err){
         if (err && err.code === "stale_revision"){
-          try { await loadOps({ silent: true }); } catch (_e) {}
+          var reloadOk = true;
+          try {
+            await loadOps({ silent: true, throwOnError: true });
+          } catch (_e) {
+            reloadOk = false;
+          }
           var reloadedForm = doc.getElementById("adminPokerAccessPolicyForm");
           var reloadedStatus = reloadedForm && reloadedForm.querySelector("[data-poker-access-policy-status]");
-          if (reloadedStatus) reloadedStatus.textContent = "Stale revision; current access policy reloaded. Review before saving again.";
-          setStatus("Access policy revision conflict. Current state reloaded — review before saving.", "warning");
+          if (reloadOk){
+            if (reloadedStatus) reloadedStatus.textContent = "Stale revision; current access policy reloaded. Review before saving again.";
+            setStatus("Access policy revision conflict. Current state reloaded — review before saving.", "warning");
+          } else {
+            if (reloadedStatus) reloadedStatus.textContent = "Stale revision. Refresh failed — reload current state before saving again.";
+            setStatus("Access policy revision conflict. Refresh failed — reload current state before saving.", "warning");
+          }
           klog("admin_poker_access_policy_stale_revision", { code: "stale_revision" });
         } else {
           if (status) status.textContent = "Could not save access policy: " + String(err && err.code || "request_failed");
@@ -1719,7 +1749,7 @@
         return;
       }
       var refreshOk = await safePostMutationRefresh(
-        function(){ return loadOps({ silent: true }); },
+        function(){ return loadOps({ silent: true, throwOnError: true }); },
         "Access policy saved.",
         "Access policy saved. Refresh failed — reload current state before another action."
       );
@@ -1753,11 +1783,21 @@
         }) });
       } catch (err){
         if (err && err.code === "stale_revision"){
-          try { await loadOps({ silent: true }); } catch (_e) {}
+          var reloadOk = true;
+          try {
+            await loadOps({ silent: true, throwOnError: true });
+          } catch (_e) {
+            reloadOk = false;
+          }
           var reloadedForm = doc.getElementById("adminPokerTierPolicyForm-" + buyIn);
           var reloadedStatus = reloadedForm && reloadedForm.querySelector("[data-poker-tier-policy-status]");
-          if (reloadedStatus) reloadedStatus.textContent = "Stale revision; current tier " + buyIn + " policy reloaded. Review before saving again.";
-          setStatus("Tier " + buyIn + " policy revision conflict. Current state reloaded — review before saving.", "warning");
+          if (reloadOk){
+            if (reloadedStatus) reloadedStatus.textContent = "Stale revision; current tier " + buyIn + " policy reloaded. Review before saving again.";
+            setStatus("Tier " + buyIn + " policy revision conflict. Current state reloaded — review before saving.", "warning");
+          } else {
+            if (reloadedStatus) reloadedStatus.textContent = "Stale revision. Refresh failed — reload current state before saving again.";
+            setStatus("Tier " + buyIn + " policy revision conflict. Refresh failed — reload current state before saving.", "warning");
+          }
           klog("admin_poker_tier_policy_stale_revision", { buyIn: buyIn, code: "stale_revision" });
         } else {
           if (status) status.textContent = "Could not save tier " + buyIn + " policy: " + String(err && err.code || "request_failed");
@@ -1767,7 +1807,7 @@
         return;
       }
       var refreshOk = await safePostMutationRefresh(
-        function(){ return loadOps({ silent: true }); },
+        function(){ return loadOps({ silent: true, throwOnError: true }); },
         "Tier " + buyIn + " policy saved.",
         "Tier " + buyIn + " policy saved. Refresh failed — reload current state before another action."
       );
@@ -2245,6 +2285,7 @@
     }
     var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
     var silent = Boolean(opts.silent);
+    var throwOnError = Boolean(opts.throwOnError);
     if (page) state.users.page = page;
     if (!silent){
       setStatus(t("loading", "Loading..."), "info");
@@ -2268,7 +2309,8 @@
     } catch (err){
       if (silent){
         klog("admin_users_load_failed", { code: err && err.code ? err.code : "request_failed" });
-        throw err;
+        if (throwOnError) throw err;
+        return;
       }
       handleApiError(err, "Could not load users.");
     }
@@ -2281,6 +2323,7 @@
     }
     var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
     var silent = Boolean(opts.silent);
+    var throwOnError = Boolean(opts.throwOnError);
     if (page) state.bonusCampaigns.page = page;
     if (!silent){
       setStatus(t("loading", "Loading..."), "info");
@@ -2301,7 +2344,8 @@
     } catch (err){
       if (silent){
         klog("admin_bonus_campaigns_load_failed", { code: err && err.code ? err.code : "request_failed" });
-        throw err;
+        if (throwOnError) throw err;
+        return;
       }
       handleApiError(err, "Could not load bonus campaigns.");
     }
@@ -2351,7 +2395,7 @@
       fillBonusCampaignForm(null);
       state.bonusCampaigns.page = 1;
       await safePostMutationRefresh(
-        function(){ return loadBonusCampaigns(1, { silent: true }); },
+        function(){ return loadBonusCampaigns(1, { silent: true, throwOnError: true }); },
         successMsg,
         successMsg + " Refresh failed — reload current state before another action."
       );
@@ -2388,7 +2432,7 @@
         return;
       }
       await safePostMutationRefresh(
-        function(){ return loadBonusCampaigns(state.bonusCampaigns.page, { silent: true }); },
+        function(){ return loadBonusCampaigns(state.bonusCampaigns.page, { silent: true, throwOnError: true }); },
         "Bonus campaign status updated.",
         "Bonus campaign status updated. Refresh failed — reload current state before another action."
       );
@@ -2401,10 +2445,12 @@
     return (state.users.items || []).find(function(item){ return item.userId === userId; }) || null;
   }
 
-  async function loadUserDetail(userId, silent){
+  async function loadUserDetail(userId, options){
     if (!userId) return;
     state.users.selectedUserId = userId;
-    var isSilent = (typeof silent === "object" && silent !== null) ? Boolean(silent.silent) : Boolean(silent);
+    var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
+    var isSilent = Boolean(opts.silent);
+    var throwOnError = Boolean(opts.throwOnError);
     if (!isSilent){
       setStatus(t("loading", "Loading..."), "info");
     }
@@ -2418,7 +2464,8 @@
     } catch (err){
       if (isSilent){
         klog("admin_user_detail_load_failed", { userId: userId, code: err && err.code ? err.code : "request_failed" });
-        throw err;
+        if (throwOnError) throw err;
+        return;
       }
       handleApiError(err, "Could not load user details.");
     }
@@ -2431,6 +2478,7 @@
     }
     var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
     var silent = Boolean(opts.silent);
+    var throwOnError = Boolean(opts.throwOnError);
     if (page) state.tables.page = page;
     if (!silent){
       setStatus(t("loading", "Loading..."), "info");
@@ -2451,16 +2499,19 @@
     } catch (err){
       if (silent){
         klog("admin_tables_load_failed", { code: err && err.code ? err.code : "request_failed" });
-        throw err;
+        if (throwOnError) throw err;
+        return;
       }
       handleApiError(err, "Could not load tables.");
     }
   }
 
-  async function loadTableDetail(tableId, silent){
+  async function loadTableDetail(tableId, options){
     if (!tableId) return;
     state.tables.selectedTableId = tableId;
-    var isSilent = (typeof silent === "object" && silent !== null) ? Boolean(silent.silent) : Boolean(silent);
+    var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
+    var isSilent = Boolean(opts.silent);
+    var throwOnError = Boolean(opts.throwOnError);
     if (!isSilent){
       setStatus(t("loading", "Loading..."), "info");
     }
@@ -2477,7 +2528,8 @@
     } catch (err){
       if (isSilent){
         klog("admin_table_detail_load_failed", { tableId: tableId, code: err && err.code ? err.code : "request_failed" });
-        throw err;
+        if (throwOnError) throw err;
+        return;
       }
       handleApiError(err, "Could not load table details.");
     }
@@ -2553,9 +2605,9 @@
       await safePostMutationRefresh(
         async function(){
           await Promise.all([
-            loadTables(state.tables.page, { silent: true }),
-            loadTableDetail(tableId, true),
-            loadOps({ silent: true })
+            loadTables(state.tables.page, { silent: true, throwOnError: true }),
+            loadTableDetail(tableId, { silent: true, throwOnError: true }),
+            loadOps({ silent: true, throwOnError: true })
           ]);
         },
         "Table action completed.",
@@ -2642,9 +2694,9 @@
       await safePostMutationRefresh(
         async function(){
           await Promise.all([
-            loadTableDetail(tableId, true),
-            loadTables(state.tables.page, { silent: true }),
-            loadOps({ silent: true })
+            loadTableDetail(tableId, { silent: true, throwOnError: true }),
+            loadTables(state.tables.page, { silent: true, throwOnError: true }),
+            loadOps({ silent: true, throwOnError: true })
           ]);
         },
         "Bot claims repaired and table closed.",
@@ -2662,6 +2714,7 @@
     }
     var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
     var silent = Boolean(opts.silent);
+    var throwOnError = Boolean(opts.throwOnError);
     if (page) state.ledger.page = page;
     if (!silent){
       setStatus(t("loading", "Loading..."), "info");
@@ -2682,7 +2735,8 @@
     } catch (err){
       if (silent){
         klog("admin_ledger_load_failed", { code: err && err.code ? err.code : "request_failed" });
-        throw err;
+        if (throwOnError) throw err;
+        return;
       }
       handleApiError(err, "Could not load ledger.");
     }
@@ -2784,9 +2838,9 @@
       var targetUserId = state.users.detail.user.userId;
       await safePostMutationRefresh(
         async function(){
-          await loadUserDetail(targetUserId, true);
+          await loadUserDetail(targetUserId, { silent: true, throwOnError: true });
           if (state.ledger.loaded){
-            await loadLedger(state.ledger.page, { silent: true });
+            await loadLedger(state.ledger.page, { silent: true, throwOnError: true });
           }
         },
         "Adjustment saved.",
@@ -2920,6 +2974,7 @@
   async function loadOps(options){
     var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
     var silent = Boolean(opts.silent);
+    var throwOnError = Boolean(opts.throwOnError);
     if (!silent){
       setStatus(t("loading", "Loading..."), "info");
     }
@@ -2999,7 +3054,8 @@
     } catch (err){
       if (silent){
         klog("admin_ops_load_failed", { code: err && err.code ? err.code : "request_failed" });
-        throw err;
+        if (throwOnError) throw err;
+        return;
       }
       handleApiError(err, "Could not load ops summary.");
     }
@@ -3152,8 +3208,8 @@
       await safePostMutationRefresh(
         async function(){
           await Promise.all([
-            loadOps({ silent: true }),
-            loadTables(state.tables.page, { silent: true })
+            loadOps({ silent: true, throwOnError: true }),
+            loadTables(state.tables.page, { silent: true, throwOnError: true })
           ]);
         },
         "Ops action completed.",
@@ -3193,9 +3249,20 @@
         var errorCode = err && err.code ? err.code : "request_failed";
         var isTimeout = errorCode === "ws_maintenance_timeout" || errorCode === "timeout" || (err && (err.status === 503 || err.status === 504));
         if (isTimeout){
-          try { await loadOps({ silent: true }); } catch (_refreshErr) {}
-          state.ops.pokerMaintenanceError = "Request timed out or unconfirmed; reloaded current status. Review before trying again.";
-          setStatus("Maintenance outcome unconfirmed. Current status reloaded — review before trying again.", "warning");
+          var reloadOk = true;
+          try {
+            await loadOps({ silent: true, throwOnError: true });
+            if (state.ops.pokerMaintenanceError) reloadOk = false;
+          } catch (_refreshErr) {
+            reloadOk = false;
+          }
+          if (reloadOk){
+            state.ops.pokerMaintenanceError = "Request timed out or unconfirmed; reloaded current status. Review before trying again.";
+            setStatus("Maintenance outcome unconfirmed. Current status reloaded — review before trying again.", "warning");
+          } else {
+            state.ops.pokerMaintenanceError = "Request timed out or unconfirmed. Refresh failed — reload current state before trying again.";
+            setStatus("Maintenance outcome unconfirmed. Refresh failed — reload current state before trying again.", "warning");
+          }
         } else if (operation === "cleanup" && err && err.payload && Array.isArray(err.payload.failedPhases)){
           try { await loadOps({ silent: true }); } catch (_refreshError) {}
           state.ops.pokerMaintenanceError = "cleanup_failed";
@@ -3207,12 +3274,21 @@
       }
 
       if (mutationSucceeded){
-        await safePostMutationRefresh(
-          function(){ return loadOps({ silent: true }); },
+        var refreshOk = await safePostMutationRefresh(
+          async function(){
+            await loadOps({ silent: true, throwOnError: true });
+            if (state.ops.pokerMaintenanceError){
+              var maintenanceErr = new Error(state.ops.pokerMaintenanceError);
+              maintenanceErr.code = state.ops.pokerMaintenanceError;
+              throw maintenanceErr;
+            }
+          },
           "Poker maintenance action completed.",
           "Poker maintenance action completed. Refresh failed — reload current state before another action."
         );
-        state.ops.pokerMaintenanceError = null;
+        if (refreshOk){
+          state.ops.pokerMaintenanceError = null;
+        }
       }
     } finally {
       pending();
