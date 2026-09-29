@@ -196,6 +196,31 @@ T037 is **PASS — final pre-merge Stage acceptance complete.**
    - Progression: Next hand `..._549_3` started and successfully reached subsequent settlement.
    - Outcome: **T037 manual smoke PASS**.
 
-Status is **READY FOR FINAL PR REVIEW**.
+### Phase 12 / §26 verification evidence (T053–T058): Truthful Admin mutation vs refresh contract
+
+Resolves the issue where an Admin mutation commits successfully on the backend, but a subsequent read-only refresh throws, fails, or clears the status banner, falsely displaying "Could not save/update" and risking duplicate mutations by operators:
+
+1. **Decoupled mutation vs refresh execution**:
+   - Helper `safePostMutationRefresh(refreshFn, successMessage, failureMessage)` standardizes best-effort refresh after confirmed POST/PATCH mutations.
+   - All 10 mutation handlers (`submitPokerAccessForm`, `submitPokerAccessPolicyForm`, `submitPokerTierPolicyForm`, `saveBonusCampaignDraft`, `setBonusCampaignStatus`, `submitAdjustForm`, `runTableAction`, `executeBotRecovery`, `runOpsAction`, `runPokerMaintenance`) separate the mutation call from the status refresh.
+   - If the mutation succeeds and refresh fails, the UI renders a warning: e.g. `Saved. Refresh failed — reload current state before another action.` with `warning` tone instead of false "Could not save". No automatic mutation retry is performed.
+2. **Stale revision conflict handling**:
+   - In `submitPokerAccessPolicyForm` and `submitPokerTierPolicyForm`, a 409 `stale_revision` silently reloads current ops state via `loadOps({ silent: true })`, updates the re-rendered form note to `Stale revision; current tier <buyIn> policy reloaded. Review before saving again.`, and displays a global warning. Zero duplicate mutation is sent.
+   - In `submitPokerAccessForm`, `stale_revision` silently reloads user details, preserving existing review feedback.
+3. **Maintenance outcome decoupling**:
+   - In `runPokerMaintenance(operation, extra, button)`:
+     - Confirmed POST + failed refresh: sets `Poker maintenance action completed. Refresh failed — reload current state before another action.` with warning tone, keeping `state.ops.pokerMaintenanceError = null`.
+     - Timeout-like failure (`ws_maintenance_timeout`, `timeout`, 504, 503): silently reloads current status, sets `state.ops.pokerMaintenanceError = "Request timed out or unconfirmed; reloaded current status. Review before trying again."`, and warns the operator without auto-replay.
+     - Cleanup phase failures preserve phase breakdown and best-effort reload.
+4. **Loader silent mode support**:
+   - `loadOps`, `loadUserDetail`, `loadTableDetail`, `loadTables`, `loadBonusCampaigns`, `loadLedger`, `loadUsers` now accept a `silent` option (boolean or `{ silent: true }`).
+   - When silent: loaders do not display "Loading...", do not clobber active status messages to `""` on success, log failures via `klog`, and rethrow errors so caller refresh wrappers detect failures accurately.
+5. **Quality & compatibility invariants**:
+   - JSP-compatible JavaScript (no unsupported syntax).
+   - Zero `console.log` added (all logging through `klog`).
+   - No backend, WS runtime, database migration, or endpoint contract changes.
+   - CI guards and inline CSP hash checks pass.
+
+Status is **READY FOR MANUAL PR-DEPLOY SMOKE**.
 Production migration, seed, refill, cutover, and VPS refill timer activation remain strictly **NOT AUTHORIZED / NOT RUN**.
 GitHub PR merge remains unauthorized (requires separate owner decision).

@@ -167,11 +167,22 @@ These tasks resolve the two remaining P1 blockers from Issue #1018 (§26): trans
 
 - [x] T037 **T037 PASS — final pre-merge Stage acceptance complete.** Stage-only NORMAL refill canary [36545904983](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36545904983) passed on PR HEAD `4af8c80e2e73de05f1bfa3bab856df0b7ba4949f` (`POKER_BOT_REFILL_REVIEWED_REF == POKER_BOT_REFILL_CHECKED_SHA == DEPLOYED_COMMIT_SHA == 4af8c80e2e73de05f1bfa3bab856df0b7ba4949f`), returning `outcomes: [{"status":"no_op","poolKey":"POKER_BOT_BANKROLL"}]` with zero MINT and unchanged balance. Manual owner smoke passed on Stage table `a008c0a1-a85e-4727-b8e2-4d7f649191da` (500 CH STANDARD, owner `AUTO / NORMAL`): both bots busted simultaneously, rollover advanced `548 → 549`, two replacement bots funded at 500 CH each from `POKER_BOT_BANKROLL` (`ESCROW +500 / SYSTEM -500`), zero duplicate funding, and next hand `..._549_3` started and successfully reached settlement. Tier 100 remains disabled; Production migration, VPS timer activation and PR merge remain strictly separate unauthorized gates. (FR-011–014/020/021; SC-004–007)
 
+## Phase 12 — Truthful Admin mutation vs refresh outcome contract (§26, T053–T058)
+
+These tasks resolve the Admin UI issue where a mutation succeeds on the backend but subsequent read-only refresh fails or clobbers UI status, falsely displaying "Could not save/update" and risking duplicate mutations.
+
+- [x] T053 Audit all Admin POST/PATCH handlers in `js/admin-page.js` to distinguish mutation outcome from best-effort refresh outcome.
+- [x] T054 Update Admin mutation handlers in `js/admin-page.js` (`submitPokerAccessForm`, `submitPokerAccessPolicyForm`, `submitPokerTierPolicyForm`, `saveBonusCampaignDraft`, `setBonusCampaignStatus`, `submitAdjustForm`, `runTableAction`, `executeBotRecovery`, `runOpsAction`, `runPokerMaintenance`) so confirmed mutations are not overwritten by refresh failures; failed refresh displays a warning e.g. "Saved. Refresh failed — reload current state before another action." without automatic mutation retry. (FR-017/020; SC-005)
+- [x] T055 Handle `stale_revision` on policy/access forms by silently reloading current state and prompting operator review before saving again, without automatic mutation replay. (FR-017/020; SC-005)
+- [x] T056 Decouple `runPokerMaintenance` outcome from status refresh: confirmed mutation + failed refresh yields warning status with `pokerMaintenanceError = null`; timeout/unconfirmed yields warning with reloaded current status; cleanup phase failure messaging preserved. (FR-017/020; SC-005)
+- [x] T057 Update Admin loaders (`loadOps`, `loadUserDetail`, `loadTableDetail`, `loadTables`, `loadBonusCampaigns`, `loadLedger`, `loadUsers`) to support silent / post-mutation mode (`{ silent: true }`) without wiping or clobbering active status messages, propagating errors to callers when silent. (FR-017/020; SC-005)
+- [x] T058 Synchronize SpecKit documentation (`tasks.md`, `quickstart.md`), perform local verification (syntax check, `npm run ci:guards`, `npm run check:csp-inline`), push to PR branch, and confirm PR is ready for manual PR-deploy smoke. (FR-021; SC-005)
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
 
-T001→T002→T003. US1 T004–T007→US2 T008–T010→US3 T011–T015→US4 T016–T020→US5 T021–T023→US6 T024–T026→T027→T028→T029→T030→T031→T032→T033→T034→T035→T036→Phase 11 (T047→T048→T049→T050→T051→T052)→T037. Explicit prerequisites in each task are authoritative. T037 is the required pre-merge Stage acceptance after T051/T052; Production and VPS activation remain separate unauthorized gates.
+T001→T002→T003. US1 T004–T007→US2 T008–T010→US3 T011–T015→US4 T016–T020→US5 T021–T023→US6 T024–T026→T027→T028→T029→T030→T031→T032→T033→T034→T035→T036→Phase 11 (T047→T048→T049→T050→T051→T052)→T037→Phase 12 (T053→T054→T055→T056→T057→T058). Explicit prerequisites in each task are authoritative. T037 is the pre-merge Stage acceptance gate; Phase 12 completes the truthful Admin UI contract. Production and VPS activation remain separate unauthorized gates.
 
 ### User Story Dependencies
 
@@ -197,7 +208,7 @@ Add caps, isolated funding, scheduled refill, Admin and discovery in that order,
 
 ### Notes
 
-37 tasks: setup1, foundation2, US1=4, US2=3, US3=5, US4=5, US5=3, US6=3, cross-cutting3, final manual RESTRICTED amendment7, pre-merge Stage acceptance1. T001–T035 are complete in this implementation worktree; T029 remains historical exact-SHA evidence, T036 is the final amendment WS Preview/runtime gate, and T037 is the pre-merge Stage acceptance gate. The Stage refill canary is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / RUN: NO-OP**; acceptance is complete (T037 PASS). The fixed 19-task count from the earlier cleanup request is superseded by this full rewrite against current live #1018. The immutable original migration and the CHECK-only FORCE_RESTRICTED migration are both applied; Stage currently reports 99 applied / 0 pending. No Stage refill/MINT, Production operation, live-VPS scheduler activation or merge was performed.
+43 tasks: setup1, foundation2, US1=4, US2=3, US3=5, US4=5, US5=3, US6=3, cross-cutting3, final manual RESTRICTED amendment7, Phase 11 rollover/controlled-inactivity6, pre-merge Stage acceptance1, Phase 12 admin contract6. T001–T035 and Phase 11/12 are complete in this implementation worktree; T029 remains historical exact-SHA evidence, T036 is the final amendment WS Preview/runtime gate, and T037 is the pre-merge Stage acceptance gate. The Stage refill canary is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / RUN: NO-OP**; acceptance is complete (T037 PASS). The immutable original migration and the CHECK-only FORCE_RESTRICTED migration are both applied; Stage currently reports 99 applied / 0 pending. No Stage refill/MINT, Production operation, live-VPS scheduler activation or merge was performed.
 
 ## Requirement coverage index
 

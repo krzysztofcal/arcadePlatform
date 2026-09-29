@@ -330,6 +330,27 @@
     };
   }
 
+  async function safePostMutationRefresh(refreshFn, successMessage, failureMessage){
+    var refreshOk = true;
+    try {
+      if (typeof refreshFn === "function"){
+        await refreshFn();
+      }
+    } catch (refreshErr){
+      refreshOk = false;
+      klog("admin_post_mutation_refresh_failed", {
+        error: (refreshErr && refreshErr.code) || (refreshErr && refreshErr.message) || String(refreshErr)
+      });
+    }
+    if (refreshOk){
+      if (successMessage) setStatus(successMessage, "success");
+    } else {
+      var failMsg = failureMessage || ((successMessage ? successMessage + " " : "") + "Refresh failed — reload current state before another action.");
+      setStatus(failMsg, "warning");
+    }
+    return refreshOk;
+  }
+
   function getPokerMaintenanceActionKey(operation, extra){
     var options = extra || {};
     if (operation === "set_desired_state" || operation === "reconcile") return "poker-maintenance-supervisor";
@@ -1629,27 +1650,43 @@
     var status = form.querySelector("[data-poker-access-status]");
     if (status) status.textContent = "Saving…";
     try {
-      var result = await apiFetch("/.netlify/functions/admin-user-poker-access", { method: "PATCH", body: JSON.stringify(data) });
-      await loadUserDetail(data.userId, true);
-      status = nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]");
-      var rev = (result && result.access && result.access.revision) || (result && result.revision) || "";
-      if (status) status.textContent = "Saved revision " + String(rev) + " · active in WS";
-    } catch (err){
-      if (err && err.code === "stale_revision") {
-        await loadUserDetail(data.userId, true);
-        status = nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]");
-        if (status) status.textContent = "Previous change recovered; current access reloaded. Review it before saving again.";
-      } else if (err && err.code === "poker_access_mutation_in_progress") {
-        status = nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]");
-        if (status) status.textContent = "Another access save is currently in progress. This save was not applied.";
-      } else if (err && (err.status === 503 || err.code === "timeout" || err.code === "access_mutation_failed")) {
-        await loadUserDetail(data.userId, true);
-        status = nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]");
-        if (status) status.textContent = "Outcome was not confirmed by WS; current access reloaded. Review it before saving again.";
-      } else if (status) {
-        status.textContent = "Could not save poker override: " + String(err && err.code || "request_failed");
+      var mutationResult;
+      try {
+        mutationResult = await apiFetch("/.netlify/functions/admin-user-poker-access", { method: "PATCH", body: JSON.stringify(data) });
+      } catch (err){
+        if (err && err.code === "stale_revision") {
+          try { await loadUserDetail(data.userId, true); } catch (_e) {}
+          status = (nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]")) || form.querySelector("[data-poker-access-status]");
+          if (status) status.textContent = "Previous change recovered; current access reloaded. Review it before saving again.";
+          setStatus("Poker access revision conflict. Current access reloaded — review before saving.", "warning");
+        } else if (err && err.code === "poker_access_mutation_in_progress") {
+          status = (nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]")) || form.querySelector("[data-poker-access-status]");
+          if (status) status.textContent = "Another access save is currently in progress. This save was not applied.";
+          setStatus("Another access save is currently in progress. This save was not applied.", "warning");
+        } else if (err && (err.status === 503 || err.code === "timeout" || err.code === "access_mutation_failed")) {
+          try { await loadUserDetail(data.userId, true); } catch (_e) {}
+          status = (nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]")) || form.querySelector("[data-poker-access-status]");
+          if (status) status.textContent = "Outcome was not confirmed by WS; current access reloaded. Review it before saving again.";
+          setStatus("Outcome was not confirmed by WS; current access reloaded. Review it before saving again.", "warning");
+        } else {
+          if (status) status.textContent = "Could not save poker override: " + String(err && err.code || "request_failed");
+          handleApiError(err, "Could not save poker override.");
+        }
+        klog("admin_poker_access_update_failed", { code: err && err.code ? err.code : "request_failed" });
+        return;
       }
-      klog("admin_poker_access_update_failed", { code: err && err.code ? err.code : "request_failed" });
+      var rev = (mutationResult && mutationResult.access && mutationResult.access.revision) || (mutationResult && mutationResult.revision) || "";
+      var refreshOk = await safePostMutationRefresh(
+        function(){ return loadUserDetail(data.userId, true); },
+        "Poker override saved (rev " + String(rev) + ").",
+        "Saved revision " + String(rev) + ". Refresh failed — reload current state before another action."
+      );
+      status = (nodes.userDetail && nodes.userDetail.querySelector("[data-poker-access-status]")) || form.querySelector("[data-poker-access-status]");
+      if (status){
+        status.textContent = refreshOk
+          ? "Saved revision " + String(rev) + " · active in WS"
+          : "Saved revision " + String(rev) + ". Refresh failed — reload current state before another action.";
+      }
     } finally {
       finish();
     }
@@ -1660,13 +1697,41 @@
     var form = event.target;
     var status = form.querySelector("[data-poker-access-policy-status]");
     var data = formToObject(form);
+    var finish = beginPendingAction("poker-access-policy", form.querySelector('button[type="submit"]'), "Saving…");
+    if (!finish) return;
+    if (status) status.textContent = "Saving…";
     try {
-      await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({ kind: "access", slowThresholdCh: data.slowThresholdCh, expectedRevision: data.accessRevision }) });
-      if (status) status.textContent = "Access policy saved.";
-      await loadOps();
-    } catch (err){
-      if (status) status.textContent = "Could not save access policy: " + String(err && err.code || "request_failed");
-      klog("admin_poker_access_policy_update_failed", { code: err && err.code ? err.code : "request_failed" });
+      try {
+        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({ kind: "access", slowThresholdCh: data.slowThresholdCh, expectedRevision: data.accessRevision }) });
+      } catch (err){
+        if (err && err.code === "stale_revision"){
+          try { await loadOps({ silent: true }); } catch (_e) {}
+          var reloadedForm = doc.getElementById("adminPokerAccessPolicyForm");
+          var reloadedStatus = reloadedForm && reloadedForm.querySelector("[data-poker-access-policy-status]");
+          if (reloadedStatus) reloadedStatus.textContent = "Stale revision; current access policy reloaded. Review before saving again.";
+          setStatus("Access policy revision conflict. Current state reloaded — review before saving.", "warning");
+          klog("admin_poker_access_policy_stale_revision", { code: "stale_revision" });
+        } else {
+          if (status) status.textContent = "Could not save access policy: " + String(err && err.code || "request_failed");
+          handleApiError(err, "Could not save access policy.");
+          klog("admin_poker_access_policy_update_failed", { code: err && err.code ? err.code : "request_failed" });
+        }
+        return;
+      }
+      var refreshOk = await safePostMutationRefresh(
+        function(){ return loadOps({ silent: true }); },
+        "Access policy saved.",
+        "Access policy saved. Refresh failed — reload current state before another action."
+      );
+      var currentForm = doc.getElementById("adminPokerAccessPolicyForm");
+      var currentStatus = currentForm && currentForm.querySelector("[data-poker-access-policy-status]");
+      if (currentStatus){
+        currentStatus.textContent = refreshOk
+          ? "Access policy saved."
+          : "Access policy saved. Refresh failed — reload current state before another action.";
+      }
+    } finally {
+      finish();
     }
   }
 
@@ -1676,17 +1741,45 @@
     var status = form.querySelector("[data-poker-tier-policy-status]");
     var data = formToObject(form);
     var buyIn = form.getAttribute("data-poker-buy-in");
+    var finish = beginPendingAction("poker-tier-policy-" + buyIn, form.querySelector('button[type="submit"]'), "Saving…");
+    if (!finish) return;
+    if (status) status.textContent = "Saving…";
     try {
-      await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({
-        kind: "tier", buyIn: buyIn, enabled: data["enabled-" + buyIn] === "on", expectedRevision: data["revision-" + buyIn],
-        normal_refill_threshold_ch: data["normalRefillThresholdCh-" + buyIn], normal_refill_amount_ch: data["normalRefillAmountCh-" + buyIn],
-        slow_refill_threshold_ch: data["slowRefillThresholdCh-" + buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + buyIn]
-      }) });
-      if (status) status.textContent = "Tier " + buyIn + " policy saved.";
-      await loadOps();
-    } catch (err){
-      if (status) status.textContent = "Could not save tier " + buyIn + " policy: " + String(err && err.code || "request_failed");
-      klog("admin_poker_tier_policy_update_failed", { buyIn: buyIn, code: err && err.code ? err.code : "request_failed" });
+      try {
+        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({
+          kind: "tier", buyIn: buyIn, enabled: data["enabled-" + buyIn] === "on", expectedRevision: data["revision-" + buyIn],
+          normal_refill_threshold_ch: data["normalRefillThresholdCh-" + buyIn], normal_refill_amount_ch: data["normalRefillAmountCh-" + buyIn],
+          slow_refill_threshold_ch: data["slowRefillThresholdCh-" + buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + buyIn]
+        }) });
+      } catch (err){
+        if (err && err.code === "stale_revision"){
+          try { await loadOps({ silent: true }); } catch (_e) {}
+          var reloadedForm = doc.getElementById("adminPokerTierPolicyForm-" + buyIn);
+          var reloadedStatus = reloadedForm && reloadedForm.querySelector("[data-poker-tier-policy-status]");
+          if (reloadedStatus) reloadedStatus.textContent = "Stale revision; current tier " + buyIn + " policy reloaded. Review before saving again.";
+          setStatus("Tier " + buyIn + " policy revision conflict. Current state reloaded — review before saving.", "warning");
+          klog("admin_poker_tier_policy_stale_revision", { buyIn: buyIn, code: "stale_revision" });
+        } else {
+          if (status) status.textContent = "Could not save tier " + buyIn + " policy: " + String(err && err.code || "request_failed");
+          handleApiError(err, "Could not save tier " + buyIn + " policy.");
+          klog("admin_poker_tier_policy_update_failed", { buyIn: buyIn, code: err && err.code ? err.code : "request_failed" });
+        }
+        return;
+      }
+      var refreshOk = await safePostMutationRefresh(
+        function(){ return loadOps({ silent: true }); },
+        "Tier " + buyIn + " policy saved.",
+        "Tier " + buyIn + " policy saved. Refresh failed — reload current state before another action."
+      );
+      var currentForm = doc.getElementById("adminPokerTierPolicyForm-" + buyIn);
+      var currentStatus = currentForm && currentForm.querySelector("[data-poker-tier-policy-status]");
+      if (currentStatus){
+        currentStatus.textContent = refreshOk
+          ? "Tier " + buyIn + " policy saved."
+          : "Tier " + buyIn + " policy saved. Refresh failed — reload current state before another action.";
+      }
+    } finally {
+      finish();
     }
   }
 
@@ -2145,9 +2238,17 @@
     }
   }
 
-  async function loadUsers(page){
+  async function loadUsers(page, options){
+    if (typeof page === "object" && page !== null){
+      options = page;
+      page = undefined;
+    }
+    var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
+    var silent = Boolean(opts.silent);
     if (page) state.users.page = page;
-    setStatus(t("loading", "Loading..."), "info");
+    if (!silent){
+      setStatus(t("loading", "Loading..."), "info");
+    }
     try {
       var params = Object.assign({}, state.users.filters, {
         page: state.users.page,
@@ -2158,18 +2259,32 @@
       state.users.pagination = payload.pagination || null;
       state.users.loaded = true;
       renderUsers();
-      setStatus("", "");
+      if (!silent){
+        setStatus("", "");
+      }
       if (state.users.selectedUserId && !state.users.detail){
         loadUserDetail(state.users.selectedUserId, true);
       }
     } catch (err){
+      if (silent){
+        klog("admin_users_load_failed", { code: err && err.code ? err.code : "request_failed" });
+        throw err;
+      }
       handleApiError(err, "Could not load users.");
     }
   }
 
-  async function loadBonusCampaigns(page){
+  async function loadBonusCampaigns(page, options){
+    if (typeof page === "object" && page !== null){
+      options = page;
+      page = undefined;
+    }
+    var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
+    var silent = Boolean(opts.silent);
     if (page) state.bonusCampaigns.page = page;
-    setStatus(t("loading", "Loading..."), "info");
+    if (!silent){
+      setStatus(t("loading", "Loading..."), "info");
+    }
     try {
       var params = Object.assign({}, state.bonusCampaigns.filters, {
         page: state.bonusCampaigns.page,
@@ -2180,14 +2295,21 @@
       state.bonusCampaigns.pagination = payload.pagination || null;
       state.bonusCampaigns.loaded = true;
       renderBonusCampaigns();
-      setStatus("", "");
+      if (!silent){
+        setStatus("", "");
+      }
     } catch (err){
+      if (silent){
+        klog("admin_bonus_campaigns_load_failed", { code: err && err.code ? err.code : "request_failed" });
+        throw err;
+      }
       handleApiError(err, "Could not load bonus campaigns.");
     }
   }
 
   async function saveBonusCampaignDraft(event){
     if (event && typeof event.preventDefault === "function") event.preventDefault();
+    var pending;
     try {
       var data = readBonusCampaignForm();
       var validationCode = validateBonusCampaignForm(data);
@@ -2210,20 +2332,29 @@
         maxTotalClaims: data.maxTotalClaims,
       };
       if (!isUpdate) campaign.code = data.code;
-      var pending = beginPendingAction("bonus-campaign-save", resolveActionButton(event, event && event.target), "Saving…");
+      pending = beginPendingAction("bonus-campaign-save", resolveActionButton(event, event && event.target), "Saving…");
       if (!pending) return;
-      await apiFetch("/.netlify/functions/admin-bonus-campaigns", {
-        method: "POST",
-        body: JSON.stringify({
-          action: isUpdate ? "update" : "create",
-          campaignId: data.campaignId || undefined,
-          campaign: campaign,
-        }),
-      });
-      setStatus(isUpdate ? "Bonus campaign updated." : "Bonus campaign draft created.", "success");
+      try {
+        await apiFetch("/.netlify/functions/admin-bonus-campaigns", {
+          method: "POST",
+          body: JSON.stringify({
+            action: isUpdate ? "update" : "create",
+            campaignId: data.campaignId || undefined,
+            campaign: campaign,
+          }),
+        });
+      } catch (err){
+        handleApiError(err, bonusCampaignValidationMessage(err && err.code));
+        return;
+      }
+      var successMsg = isUpdate ? "Bonus campaign updated." : "Bonus campaign draft created.";
       fillBonusCampaignForm(null);
       state.bonusCampaigns.page = 1;
-      await loadBonusCampaigns(1);
+      await safePostMutationRefresh(
+        function(){ return loadBonusCampaigns(1, { silent: true }); },
+        successMsg,
+        successMsg + " Refresh failed — reload current state before another action."
+      );
     } catch (err){
       handleApiError(err, bonusCampaignValidationMessage(err && err.code));
     } finally {
@@ -2243,18 +2374,24 @@
     if (!pending) return;
     setStatus("Updating bonus campaign...", "info");
     try {
-      await apiFetch("/.netlify/functions/admin-bonus-campaigns", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "set_status",
-          campaignId: campaignId,
-          status: status,
-        }),
-      });
-      setStatus("Bonus campaign status updated.", "success");
-      await loadBonusCampaigns();
-    } catch (err){
-      handleApiError(err, "Could not update bonus campaign status.");
+      try {
+        await apiFetch("/.netlify/functions/admin-bonus-campaigns", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "set_status",
+            campaignId: campaignId,
+            status: status,
+          }),
+        });
+      } catch (err){
+        handleApiError(err, "Could not update bonus campaign status.");
+        return;
+      }
+      await safePostMutationRefresh(
+        function(){ return loadBonusCampaigns(state.bonusCampaigns.page, { silent: true }); },
+        "Bonus campaign status updated.",
+        "Bonus campaign status updated. Refresh failed — reload current state before another action."
+      );
     } finally {
       pending();
     }
@@ -2267,22 +2404,37 @@
   async function loadUserDetail(userId, silent){
     if (!userId) return;
     state.users.selectedUserId = userId;
-    if (!silent){
+    var isSilent = (typeof silent === "object" && silent !== null) ? Boolean(silent.silent) : Boolean(silent);
+    if (!isSilent){
       setStatus(t("loading", "Loading..."), "info");
     }
     try {
       var payload = await apiFetch("/.netlify/functions/admin-user-details?userId=" + encodeURIComponent(userId), { method: "GET" });
       state.users.detail = payload;
       renderUserDetail();
-      setStatus("", "");
+      if (!isSilent){
+        setStatus("", "");
+      }
     } catch (err){
+      if (isSilent){
+        klog("admin_user_detail_load_failed", { userId: userId, code: err && err.code ? err.code : "request_failed" });
+        throw err;
+      }
       handleApiError(err, "Could not load user details.");
     }
   }
 
-  async function loadTables(page){
+  async function loadTables(page, options){
+    if (typeof page === "object" && page !== null){
+      options = page;
+      page = undefined;
+    }
+    var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
+    var silent = Boolean(opts.silent);
     if (page) state.tables.page = page;
-    setStatus(t("loading", "Loading..."), "info");
+    if (!silent){
+      setStatus(t("loading", "Loading..."), "info");
+    }
     try {
       var params = Object.assign({}, state.tables.filters, {
         page: state.tables.page,
@@ -2293,8 +2445,14 @@
       state.tables.pagination = payload.pagination || null;
       state.tables.loaded = true;
       renderTables();
-      setStatus("", "");
+      if (!silent){
+        setStatus("", "");
+      }
     } catch (err){
+      if (silent){
+        klog("admin_tables_load_failed", { code: err && err.code ? err.code : "request_failed" });
+        throw err;
+      }
       handleApiError(err, "Could not load tables.");
     }
   }
@@ -2302,7 +2460,8 @@
   async function loadTableDetail(tableId, silent){
     if (!tableId) return;
     state.tables.selectedTableId = tableId;
-    if (!silent){
+    var isSilent = (typeof silent === "object" && silent !== null) ? Boolean(silent.silent) : Boolean(silent);
+    if (!isSilent){
       setStatus(t("loading", "Loading..."), "info");
     }
     try {
@@ -2312,8 +2471,14 @@
         state.tables.recovery = null;
       }
       renderTableDetail();
-      setStatus("", "");
+      if (!isSilent){
+        setStatus("", "");
+      }
     } catch (err){
+      if (isSilent){
+        klog("admin_table_detail_load_failed", { tableId: tableId, code: err && err.code ? err.code : "request_failed" });
+        throw err;
+      }
       handleApiError(err, "Could not load table details.");
     }
   }
@@ -2324,7 +2489,7 @@
       var payload = await apiFetch("/.netlify/functions/admin-table-evaluate?tableId=" + encodeURIComponent(tableId), { method: "GET" });
       setStatus("Janitor: " + (payload.janitor && payload.janitor.reasonCode ? payload.janitor.reasonCode : payload.janitor && payload.janitor.classification ? payload.janitor.classification : "ok"), payload.janitor && payload.janitor.healthy === false ? "error" : "success");
       loadTableDetail(tableId, true);
-      loadTables();
+      loadTables(state.tables.page, { silent: true });
     } catch (err){
       handleApiError(err, "Could not evaluate table.");
     }
@@ -2356,36 +2521,46 @@
     if (!pending) return;
     setStatus(t("loading", "Loading..."), "info");
     try {
-      if (action === "force_close"){
-        await apiFetch("/.netlify/functions/admin-table-force-close", {
-          method: "POST",
-          body: JSON.stringify({
-            tableId: tableId,
-            reason: reason,
-            idempotencyKey: getDraftIdempotencyKey("table-force-" + tableId),
-            confirmAction: "force_close",
-            confirmationToken: "force-close:" + tableId
-          }),
-        });
-        resetDraftIdempotencyKey("table-force-" + tableId);
-      } else {
-        await apiFetch("/.netlify/functions/admin-table-cleanup", {
-          method: "POST",
-          body: JSON.stringify({
-            tableId: tableId,
-            action: action,
-            reason: reason,
-            idempotencyKey: getDraftIdempotencyKey("table-" + action + "-" + tableId),
-          }),
-        });
-        resetDraftIdempotencyKey("table-" + action + "-" + tableId);
+      try {
+        if (action === "force_close"){
+          await apiFetch("/.netlify/functions/admin-table-force-close", {
+            method: "POST",
+            body: JSON.stringify({
+              tableId: tableId,
+              reason: reason,
+              idempotencyKey: getDraftIdempotencyKey("table-force-" + tableId),
+              confirmAction: "force_close",
+              confirmationToken: "force-close:" + tableId
+            }),
+          });
+          resetDraftIdempotencyKey("table-force-" + tableId);
+        } else {
+          await apiFetch("/.netlify/functions/admin-table-cleanup", {
+            method: "POST",
+            body: JSON.stringify({
+              tableId: tableId,
+              action: action,
+              reason: reason,
+              idempotencyKey: getDraftIdempotencyKey("table-" + action + "-" + tableId),
+            }),
+          });
+          resetDraftIdempotencyKey("table-" + action + "-" + tableId);
+        }
+      } catch (err){
+        handleApiError(err, "Could not run table action.");
+        return;
       }
-      setStatus("Table action completed.", "success");
-      loadTables();
-      loadTableDetail(tableId, true);
-      loadOps();
-    } catch (err){
-      handleApiError(err, "Could not run table action.");
+      await safePostMutationRefresh(
+        async function(){
+          await Promise.all([
+            loadTables(state.tables.page, { silent: true }),
+            loadTableDetail(tableId, true),
+            loadOps({ silent: true })
+          ]);
+        },
+        "Table action completed.",
+        "Table action completed. Refresh failed — reload current state before another action."
+      );
     } finally {
       pending();
     }
@@ -2433,46 +2608,64 @@
     setStatus(t("loading", "Loading..."), "info");
     try {
       var keyScope = actionKey;
-      var result = await apiFetch("/.netlify/functions/admin-table-bot-claims-recovery", {
-        method: "POST",
-        body: JSON.stringify({
-          mode: "execute",
-          tableId: tableId,
-          expectedStateVersion: recovery.stateVersion,
-          expectedInputHash: recovery.inputHash,
-          idempotencyKey: getDraftIdempotencyKey(keyScope),
-          confirmation: "REPAIR BOT CLAIMS AND CLOSE",
-          reason: reason,
-        }),
-      });
-      if (!result || result.ok !== true || result.changed !== true || result.closed !== true){
-        var outcomeError = new Error(result && result.reason ? String(result.reason) : "recovery_not_completed");
-        outcomeError.status = 409;
-        outcomeError.code = result && result.reason ? result.reason : "recovery_not_completed";
-        throw outcomeError;
-      }
-      resetDraftIdempotencyKey(keyScope);
-      state.tables.recovery = null;
-      setStatus("Bot claims repaired and table closed.", "success");
-      await loadTableDetail(tableId, true);
-      await loadTables();
-      await loadOps();
-    } catch (err){
-      if (err && (err.code === "state_version_changed" || err.code === "recovery_input_changed")){
+      try {
+        var result = await apiFetch("/.netlify/functions/admin-table-bot-claims-recovery", {
+          method: "POST",
+          body: JSON.stringify({
+            mode: "execute",
+            tableId: tableId,
+            expectedStateVersion: recovery.stateVersion,
+            expectedInputHash: recovery.inputHash,
+            idempotencyKey: getDraftIdempotencyKey(keyScope),
+            confirmation: "REPAIR BOT CLAIMS AND CLOSE",
+            reason: reason,
+          }),
+        });
+        if (!result || result.ok !== true || result.changed !== true || result.closed !== true){
+          var outcomeError = new Error(result && result.reason ? String(result.reason) : "recovery_not_completed");
+          outcomeError.status = 409;
+          outcomeError.code = result && result.reason ? result.reason : "recovery_not_completed";
+          throw outcomeError;
+        }
+        resetDraftIdempotencyKey(keyScope);
         state.tables.recovery = null;
-        renderTableDetail();
-        handleApiError(err, "Table changed. Analyze bot recovery again.");
+      } catch (err){
+        if (err && (err.code === "state_version_changed" || err.code === "recovery_input_changed")){
+          state.tables.recovery = null;
+          renderTableDetail();
+          handleApiError(err, "Table changed. Analyze bot recovery again.");
+          return;
+        }
+        handleApiError(err, "Could not repair bot claims.");
         return;
       }
-      handleApiError(err, "Could not repair bot claims.");
+      await safePostMutationRefresh(
+        async function(){
+          await Promise.all([
+            loadTableDetail(tableId, true),
+            loadTables(state.tables.page, { silent: true }),
+            loadOps({ silent: true })
+          ]);
+        },
+        "Bot claims repaired and table closed.",
+        "Bot claims repaired and table closed. Refresh failed — reload current state before another action."
+      );
     } finally {
       pending();
     }
   }
 
-  async function loadLedger(page){
+  async function loadLedger(page, options){
+    if (typeof page === "object" && page !== null){
+      options = page;
+      page = undefined;
+    }
+    var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
+    var silent = Boolean(opts.silent);
     if (page) state.ledger.page = page;
-    setStatus(t("loading", "Loading..."), "info");
+    if (!silent){
+      setStatus(t("loading", "Loading..."), "info");
+    }
     try {
       var params = Object.assign({}, state.ledger.filters, {
         page: state.ledger.page,
@@ -2483,8 +2676,14 @@
       state.ledger.pagination = payload.pagination || null;
       state.ledger.loaded = true;
       renderLedger();
-      setStatus("", "");
+      if (!silent){
+        setStatus("", "");
+      }
     } catch (err){
+      if (silent){
+        klog("admin_ledger_load_failed", { code: err && err.code ? err.code : "request_failed" });
+        throw err;
+      }
       handleApiError(err, "Could not load ledger.");
     }
   }
@@ -2565,25 +2764,34 @@
     if (!pending) return;
     setStatus(t("loading", "Loading..."), "info");
     try {
-      await apiFetch("/.netlify/functions/admin-ledger-adjust", {
-        method: "POST",
-        body: JSON.stringify({
-          userId: state.users.detail.user.userId,
-          amount: amount,
-          reason: reason,
-          idempotencyKey: getDraftIdempotencyKey(actionKey),
-        }),
-      });
-      resetDraftIdempotencyKey(actionKey);
+      try {
+        await apiFetch("/.netlify/functions/admin-ledger-adjust", {
+          method: "POST",
+          body: JSON.stringify({
+            userId: state.users.detail.user.userId,
+            amount: amount,
+            reason: reason,
+            idempotencyKey: getDraftIdempotencyKey(actionKey),
+          }),
+        });
+        resetDraftIdempotencyKey(actionKey);
+      } catch (err){
+        handleApiError(err, "Could not save the adjustment.");
+        return;
+      }
       if (amountInput) amountInput.value = "";
       if (reasonInput) reasonInput.value = "";
-      setStatus("Adjustment saved.", "success");
-      loadUserDetail(state.users.detail.user.userId, true);
-      if (state.ledger.loaded){
-        loadLedger();
-      }
-    } catch (err){
-      handleApiError(err, "Could not save the adjustment.");
+      var targetUserId = state.users.detail.user.userId;
+      await safePostMutationRefresh(
+        async function(){
+          await loadUserDetail(targetUserId, true);
+          if (state.ledger.loaded){
+            await loadLedger(state.ledger.page, { silent: true });
+          }
+        },
+        "Adjustment saved.",
+        "Adjustment saved. Refresh failed — reload current state before another action."
+      );
     } finally {
       pending();
     }
@@ -2709,8 +2917,12 @@
     }
   }
 
-  async function loadOps(){
-    setStatus(t("loading", "Loading..."), "info");
+  async function loadOps(options){
+    var opts = (typeof options === "boolean") ? { silent: options } : (options || {});
+    var silent = Boolean(opts.silent);
+    if (!silent){
+      setStatus(t("loading", "Loading..."), "info");
+    }
     try {
       var results = await Promise.allSettled([
         apiFetch("/.netlify/functions/admin-stage-identity", { method: "GET" }),
@@ -2781,8 +2993,14 @@
       }
       state.ops.loaded = true;
       renderOps();
-      setStatus("", "");
+      if (!silent){
+        setStatus("", "");
+      }
     } catch (err){
+      if (silent){
+        klog("admin_ops_load_failed", { code: err && err.code ? err.code : "request_failed" });
+        throw err;
+      }
       handleApiError(err, "Could not load ops summary.");
     }
   }
@@ -2913,23 +3131,34 @@
     if (!pending) return;
     setStatus(t("loading", "Loading..."), "info");
     try {
-      var payload = await apiFetch("/.netlify/functions/admin-ops-actions", {
-        method: "POST",
-        body: JSON.stringify({
-          action: action,
-          idempotencyKey: getDraftIdempotencyKey(actionKey),
-          reason: "manual " + action,
-        }),
-      });
-      resetDraftIdempotencyKey(actionKey);
+      var payload;
+      try {
+        payload = await apiFetch("/.netlify/functions/admin-ops-actions", {
+          method: "POST",
+          body: JSON.stringify({
+            action: action,
+            idempotencyKey: getDraftIdempotencyKey(actionKey),
+            reason: "manual " + action,
+          }),
+        });
+        resetDraftIdempotencyKey(actionKey);
+      } catch (err){
+        handleApiError(err, "Could not run ops action.");
+        return;
+      }
       if (nodes.opsActionResult){
         nodes.opsActionResult.innerHTML = '<div class="admin-surface"><div class="admin-list__title"><span>' + escapeHtml(action) + '</span>' + pill(payload.changedCount > 0 ? "changed" : "noop", payload.changedCount > 0 ? "success" : "info") + '</div><div class="admin-list__meta">Processed ' + escapeHtml(payload.processed) + " tables, changed " + escapeHtml(payload.changedCount) + ".</div></div>";
       }
-      setStatus("Ops action completed.", "success");
-      loadOps();
-      loadTables();
-    } catch (err){
-      handleApiError(err, "Could not run ops action.");
+      await safePostMutationRefresh(
+        async function(){
+          await Promise.all([
+            loadOps({ silent: true }),
+            loadTables(state.tables.page, { silent: true })
+          ]);
+        },
+        "Ops action completed.",
+        "Ops action completed. Refresh failed — reload current state before another action."
+      );
     } finally {
       pending();
     }
@@ -2952,24 +3181,38 @@
     state.ops.pokerMaintenanceError = null;
     renderPokerMaintenance();
     try {
-      await apiFetch("/.netlify/functions/admin-poker-maintenance", {
-        method: "POST",
-        body: JSON.stringify(Object.assign({ operation: operation }, extra || {}))
-      });
-      state.ops.pokerMaintenanceError = null;
-      await loadOps();
-      setStatus("Poker maintenance action completed.", "success");
-    } catch (err){
-      state.ops.pokerMaintenanceError = err && err.code ? err.code : "request_failed";
-      if (state.ops.pokerMaintenanceError === "ws_maintenance_timeout"){
-        await loadOps();
-        state.ops.pokerMaintenanceError = "Request timed out; refreshing status to show the current result.";
-      } else if (operation === "cleanup" && err && err.payload && Array.isArray(err.payload.failedPhases)) {
-        try { await loadOps(); } catch (_refreshError) {}
-        state.ops.pokerMaintenanceError = "cleanup_failed";
-        setStatus("Cleanup failed in one or more phases; completed phase counts were preserved.", "error");
-      } else {
-        handleApiError(err, "Could not update poker maintenance.");
+      var mutationSucceeded = false;
+      try {
+        await apiFetch("/.netlify/functions/admin-poker-maintenance", {
+          method: "POST",
+          body: JSON.stringify(Object.assign({ operation: operation }, extra || {}))
+        });
+        mutationSucceeded = true;
+        state.ops.pokerMaintenanceError = null;
+      } catch (err){
+        var errorCode = err && err.code ? err.code : "request_failed";
+        var isTimeout = errorCode === "ws_maintenance_timeout" || errorCode === "timeout" || (err && (err.status === 503 || err.status === 504));
+        if (isTimeout){
+          try { await loadOps({ silent: true }); } catch (_refreshErr) {}
+          state.ops.pokerMaintenanceError = "Request timed out or unconfirmed; reloaded current status. Review before trying again.";
+          setStatus("Maintenance outcome unconfirmed. Current status reloaded — review before trying again.", "warning");
+        } else if (operation === "cleanup" && err && err.payload && Array.isArray(err.payload.failedPhases)){
+          try { await loadOps({ silent: true }); } catch (_refreshError) {}
+          state.ops.pokerMaintenanceError = "cleanup_failed";
+          setStatus("Cleanup failed in one or more phases; completed phase counts were preserved.", "error");
+        } else {
+          state.ops.pokerMaintenanceError = errorCode;
+          handleApiError(err, "Could not update poker maintenance.");
+        }
+      }
+
+      if (mutationSucceeded){
+        await safePostMutationRefresh(
+          function(){ return loadOps({ silent: true }); },
+          "Poker maintenance action completed.",
+          "Poker maintenance action completed. Refresh failed — reload current state before another action."
+        );
+        state.ops.pokerMaintenanceError = null;
       }
     } finally {
       pending();
