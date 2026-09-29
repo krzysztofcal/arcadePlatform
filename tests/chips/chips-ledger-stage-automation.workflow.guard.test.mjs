@@ -116,6 +116,8 @@ assert.deepEqual([...inputNames].sort(), [
   "missing_table_retirement_confirmation",
   "missing_table_retirement_registry_count",
   "missing_table_retirement_registry_sha256",
+  "poker_refill_buy_in",
+  "poker_refill_pool_class",
   "poker_refill_reviewed_sha",
   "poker_refill_confirmation",
   "stage_30d_recovery_batch_id",
@@ -303,6 +305,7 @@ assert.equal(
 );
 assert.deepEqual(Object.keys(canaryStep.env).sort(), [
   "DEPLOYED_COMMIT_SHA",
+  "POKER_BOT_REFILL_BUY_IN",
   "POKER_BOT_REFILL_CHECKED_SHA",
   "POKER_BOT_REFILL_FEATURE_ENABLED",
   "POKER_BOT_REFILL_MODE",
@@ -315,7 +318,8 @@ assert.deepEqual(Object.keys(canaryStep.env).sort(), [
   "SUPABASE_DB_URL",
 ].sort(), "Stage canary exposes only Stage DB and exact-SHA authority inputs");
 assert.equal(canaryStep.env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_STAGE_DB_URL }}");
-assert.equal(canaryStep.env.POKER_BOT_REFILL_POOL_CLASS, "NORMAL");
+assert.equal(canaryStep.env.POKER_BOT_REFILL_POOL_CLASS, "${{ inputs.poker_refill_pool_class || 'NORMAL' }}");
+assert.equal(canaryStep.env.POKER_BOT_REFILL_BUY_IN, "${{ inputs.poker_refill_buy_in || '' }}");
 assert.match(canaryStep.run, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(canaryStep.run, /test "\$GITHUB_REF" != "refs\/heads\/main"/);
 assert.ok(canaryStep.run.includes('[[ "$REVIEWED_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]]'));

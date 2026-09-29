@@ -29,7 +29,19 @@ on:
         required: false
         type: string
       poker_refill_confirmation:
-        description: Exact REFILL <reviewed_sha> confirmation for the owner-gated Stage refill canary
+        description: Exact REFILL <reviewed_sha> or REFILL SLOW [buy_in] <reviewed_sha> confirmation for the owner-gated Stage refill canary
+        required: false
+        type: string
+      poker_refill_pool_class:
+        description: Exact pool class for the Stage refill canary (NORMAL or SLOW)
+        required: false
+        default: NORMAL
+        type: choice
+        options:
+          - NORMAL
+          - SLOW
+      poker_refill_buy_in:
+        description: Exact tier buy-in for the Stage refill canary (optional 100 or 500)
         required: false
         type: string
       stage_30d_recovery_batch_id:
@@ -209,7 +221,8 @@ jobs:
           POKER_BOT_REFILL_CHECKED_SHA: ${{ steps.checkout-sha.outputs.sha }}
           POKER_BOT_REFILL_FEATURE_ENABLED: "1"
           POKER_BOT_REFILL_STAGE_CANARY: "1"
-          POKER_BOT_REFILL_POOL_CLASS: NORMAL
+          POKER_BOT_REFILL_POOL_CLASS: ${{ inputs.poker_refill_pool_class || 'NORMAL' }}
+          POKER_BOT_REFILL_BUY_IN: ${{ inputs.poker_refill_buy_in || '' }}
           REVIEWED_SHA_INPUT: ${{ inputs.poker_refill_reviewed_sha }}
           REVIEWED_SHA_CONFIRMATION: ${{ inputs.poker_refill_confirmation }}
           DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
@@ -225,8 +238,23 @@ jobs:
           test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
           test "$POKER_BOT_REFILL_REVIEWED_REF" = "$GITHUB_SHA"
           test "$POKER_BOT_REFILL_CHECKED_SHA" = "$GITHUB_SHA"
-          test "$REVIEWED_SHA_CONFIRMATION" = "REFILL $REVIEWED_SHA_INPUT"
+          if [[ "$REVIEWED_SHA_CONFIRMATION" =~ ^REFILL\ (NORMAL|SLOW)\ (100|500)\ ([0-9a-f]{40})$ ]]; then
+            export POKER_BOT_REFILL_POOL_CLASS="${BASH_REMATCH[1]}"
+            export POKER_BOT_REFILL_BUY_IN="${BASH_REMATCH[2]}"
+            test "${BASH_REMATCH[3]}" = "$REVIEWED_SHA_INPUT"
+          elif [[ "$REVIEWED_SHA_CONFIRMATION" =~ ^REFILL\ (NORMAL|SLOW)\ ([0-9a-f]{40})$ ]]; then
+            export POKER_BOT_REFILL_POOL_CLASS="${BASH_REMATCH[1]}"
+            test "${BASH_REMATCH[2]}" = "$REVIEWED_SHA_INPUT"
+          elif [ "$POKER_BOT_REFILL_POOL_CLASS" = "SLOW" ]; then
+            test "$REVIEWED_SHA_CONFIRMATION" = "REFILL SLOW $REVIEWED_SHA_INPUT" || test "$REVIEWED_SHA_CONFIRMATION" = "REFILL $REVIEWED_SHA_INPUT"
+          else
+            test "$REVIEWED_SHA_CONFIRMATION" = "REFILL $REVIEWED_SHA_INPUT"
+          fi
           test "$POKER_BOT_REFILL_FEATURE_ENABLED" = "1"
+          test "$POKER_BOT_REFILL_POOL_CLASS" = "NORMAL" || test "$POKER_BOT_REFILL_POOL_CLASS" = "SLOW"
+          if [ -n "${POKER_BOT_REFILL_BUY_IN:-}" ]; then
+            test "$POKER_BOT_REFILL_BUY_IN" = "100" || test "$POKER_BOT_REFILL_BUY_IN" = "500"
+          fi
           test -n "$SUPABASE_DB_URL"
           test -z "${SUPABASE_STAGE_URL:-}"
           test -z "${SUPABASE_STAGE_SERVICE_ROLE_KEY:-}"

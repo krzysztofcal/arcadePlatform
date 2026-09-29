@@ -194,6 +194,58 @@ test("owner-gated Stage canary accepts only the dispatched exact SHA", () => {
     POKER_BOT_REFILL_POOL_CLASS: "NORMAL",
     POKER_BOT_REFILL_PRODUCTION_GO: "1",
   }), { code: "refill_stage_canary_scope_invalid" });
+  const authorizedSlow = resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: reviewedSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_STAGE_CANARY: "1",
+    POKER_BOT_REFILL_POOL_CLASS: "SLOW",
+    POKER_BOT_REFILL_BUY_IN: "500",
+  });
+  assert.equal(authorizedSlow.stageCanary, true);
+  assert.equal(authorizedSlow.poolClass, "SLOW");
+  assert.equal(authorizedSlow.buyIn, 500);
+
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: reviewedSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_STAGE_CANARY: "1",
+    POKER_BOT_REFILL_POOL_CLASS: "OTHER",
+  }), { code: "refill_pool_class_invalid" });
+
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+    GITHUB_SHA: reviewedSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: reviewedSha,
+    POKER_BOT_REFILL_CHECKED_SHA: reviewedSha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_STAGE_CANARY: "1",
+    POKER_BOT_REFILL_POOL_CLASS: "",
+  }), { code: "refill_stage_canary_pool_class_invalid" });
+
   assert.throws(() => resolveRefillAuthorization({
     GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
     GITHUB_REPOSITORY_OWNER: "krzysztofcal",
@@ -208,7 +260,8 @@ test("owner-gated Stage canary accepts only the dispatched exact SHA", () => {
     POKER_BOT_REFILL_FEATURE_ENABLED: "1",
     POKER_BOT_REFILL_STAGE_CANARY: "1",
     POKER_BOT_REFILL_POOL_CLASS: "SLOW",
-  }), { code: "refill_stage_canary_pool_class_invalid" });
+    POKER_BOT_REFILL_BUY_IN: "250",
+  }), { code: "refill_buy_in_invalid" });
 });
 
 test("Production mutation remains main-only and cannot target a PR SHA", () => {
@@ -299,4 +352,38 @@ test("runRefill rolls back a bucket that expires while acquiring policy locks", 
     postTransactionFn: async () => { posts += 1; },
   }), { code: "refill_bucket_expired" });
   assert.equal(posts, 0);
+});
+
+test("runRefill filters by buyIn when configured", async () => {
+  const policies = [
+    { buy_in: 100, enabled: true, normal_refill_threshold_ch: 100, normal_refill_amount_ch: 50, slow_refill_threshold_ch: 80, slow_refill_amount_ch: 25, revision: 1 },
+    { buy_in: 500, enabled: true, normal_refill_threshold_ch: 500, normal_refill_amount_ch: 250, slow_refill_threshold_ch: 400, slow_refill_amount_ch: 200, revision: 1 }
+  ];
+  const tx = {
+    async unsafe(query, params = []) {
+      const text = String(query).toLowerCase();
+      if (text.includes("clock_timestamp()")) return [{ now: "2026-09-27T07:00:00.000Z" }];
+      if (text.includes("poker_bot_tier_policy")) return policies;
+      if (text.includes("chips_transactions") && text.includes("poker_pool_refill")) return [];
+      if (text.includes("chips_accounts") && text.includes("system_key = $1")) return [{ id: "pool", balance: 0, status: "active" }];
+      return [];
+    }
+  };
+  const processedBuyIns = [];
+  const result = await runRefill({
+    env: {
+      POKER_BOT_REFILL_REVIEWED_REF: "refs/heads/main",
+      POKER_BOT_REFILL_POOL_CLASS: "SLOW",
+      POKER_BOT_REFILL_BUY_IN: "500"
+    },
+    beginSqlFn: async (callback) => callback(tx),
+    postTransactionFn: async (payload) => {
+      processedBuyIns.push(payload.metadata.buyIn);
+      return { transaction: { id: "tx-buyin" } };
+    }
+  });
+  assert.equal(result.authorization.buyIn, 500);
+  assert.equal(result.outcomes.length, 1);
+  assert.equal(result.outcomes[0].poolKey, "POKER_BOT_SLOW_BANKROLL_500");
+  assert.equal(result.outcomes[0].status, "would_refill");
 });

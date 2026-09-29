@@ -44,6 +44,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   const target = String(env.POKER_BOT_REFILL_TARGET || "stage").trim().toLowerCase();
   const stageCanary = env.POKER_BOT_REFILL_STAGE_CANARY === "1";
   const requestedPoolClass = String(env.POKER_BOT_REFILL_POOL_CLASS || "").trim().toUpperCase();
+  const requestedBuyIn = positiveSafeInteger(env.POKER_BOT_REFILL_BUY_IN);
   if (repository !== CANONICAL_REPOSITORY) throw fail("refill_repository_mismatch");
   if (!/^refs\/(heads|tags)\/[A-Za-z0-9._\/-]+$/.test(ref) && !/^[0-9a-f]{40}$/.test(ref) && ref !== "main") {
     throw fail("refill_reviewed_ref_required");
@@ -62,7 +63,10 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   if (requestedPoolClass && !["NORMAL", "SLOW"].includes(requestedPoolClass)) {
     throw fail("refill_pool_class_invalid");
   }
-  if (stageCanary && requestedPoolClass !== "NORMAL") {
+  if (requestedBuyIn && ![100, 500].includes(requestedBuyIn)) {
+    throw fail("refill_buy_in_invalid");
+  }
+  if (stageCanary && requestedPoolClass !== "NORMAL" && requestedPoolClass !== "SLOW") {
     throw fail("refill_stage_canary_pool_class_invalid");
   }
   const ownerCanaryActor = stageCanary
@@ -92,6 +96,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
     target,
     stageCanary,
     poolClass: requestedPoolClass || null,
+    buyIn: requestedBuyIn || null,
   };
 }
 
@@ -221,6 +226,7 @@ for share;
 `);
     const outcomes = [];
     for (const policy of Array.isArray(policyRows) ? policyRows : []) {
+      if (authorization.buyIn && Number(policy.buy_in) !== authorization.buyIn) continue;
       for (const poolClass of authorization.poolClass ? [authorization.poolClass] : ["NORMAL", "SLOW"]) {
         if ((await databaseNow(tx)).getTime() - startedAt.getTime() > 60_000) {
           throw fail("refill_transaction_expired");
@@ -247,10 +253,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     .then((result) => klog("poker_bot_pool_refill_complete", {
       bucket: result.bucket,
       mode: result.authorization.mode,
-      outcomes: result.outcomes.map(({ status, poolKey }) => ({ status, poolKey })),
+      poolClass: result.authorization.poolClass,
+      buyIn: result.authorization.buyIn,
+      outcomes: result.outcomes.map(({ status, poolKey, amount, transaction }) => ({
+        status,
+        poolKey,
+        amount: amount || null,
+        transactionId: transaction?.id || null,
+        transactionReference: transaction?.reference || null,
+      })),
     }))
     .catch((error) => {
-      klog("poker_bot_pool_refill_failed", { code: error?.code || "refill_failed" });
+      klog("poker_bot_pool_refill_failed", { code: error?.code || "refill_failed", message: error?.message });
       process.exitCode = 1;
     });
 }
