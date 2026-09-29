@@ -163,5 +163,30 @@ Resolves the two remaining P1 blockers and final preflight/order corrections:
 - `chips_transactions`: Zero new transactions since 2026-09-28 19:19:38 UTC.
 - `poker_tables`: Zero new tables or supervisor churn. Controlled inactivity holds.
 
-Tasks T051 and T052 are marked complete. Status is **READY FOR OWNER T037 RETEST**.
-Production, VPS refill timer activation, and PR merge remain strictly NOT AUTHORIZED / NOT RUN. Final owner pre-merge Stage acceptance (T037) remains the pending gate.
+Tasks T051 and T052 are marked complete.
+
+### T037 Final Pre-Merge Stage Acceptance Evidence
+
+T037 is **PASS — final pre-merge Stage acceptance complete.**
+
+1. **Owner-gated Stage NORMAL refill canary**:
+   - Dispatched and passed on PR HEAD `4af8c80e2e73de05f1bfa3bab856df0b7ba4949f` via [Chips Ledger Stage Automation run 36545904983](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36545904983).
+   - Exact lowercase reviewed SHA checks passed:
+     `POKER_BOT_REFILL_REVIEWED_REF == POKER_BOT_REFILL_CHECKED_SHA == DEPLOYED_COMMIT_SHA == 4af8c80e2e73de05f1bfa3bab856df0b7ba4949f`.
+   - Worker outcome: `[{"status":"no_op","poolKey":"POKER_BOT_BANKROLL"}]`.
+   - Zero MINT executed, balances unchanged (`POKER_BOT_BANKROLL` = 986970 CH), tier 100 remains `enabled: false`.
+
+2. **Manual owner smoke (Stage table `a008c0a1-a85e-4727-b8e2-4d7f649191da`)**:
+   - Table: `a008c0a1-a85e-4727-b8e2-4d7f649191da` (500 CH STANDARD).
+   - Owner access: `AUTO / NORMAL`.
+   - Scenario: Both bots bust simultaneously.
+   - Rollover: Successfully advanced `548 → 549`.
+   - Replacement funding: Two replacements of 500 CH each funded from `POKER_BOT_BANKROLL`.
+   - Ledger: Exactly `ESCROW +500 / SYSTEM -500` per replacement.
+   - Idempotency & deduplication: Zero duplicate funding.
+   - Progression: Next hand `..._549_3` started and successfully reached subsequent settlement.
+   - Outcome: **T037 manual smoke PASS**.
+
+Status is **READY FOR FINAL PR REVIEW**.
+Production migration, seed, refill, cutover, and VPS refill timer activation remain strictly **NOT AUTHORIZED / NOT RUN**.
+GitHub PR merge remains unauthorized (requires separate owner decision).
