@@ -269,5 +269,20 @@ Prepares all Production rollout artifacts ahead of merge without performing any 
    - Confirmed zero modifications to `ws-server/**`, `shared/**`, Netlify poker runtime, Caddy, browser protocol.
    - Accepted runtime SHA `7340b270312b26dc51e0471f3e0afc758cf8a9de` remains latest runtime-affecting SHA. No new WS Preview Deploy required.
 
-Status: **T075–T083 COMPLETE. PROCEEDING TO T084 STAGE INVENTORY RESTORATION.**
+7. **Stage Continuous Inventory Restoration (T084)**:
+   - **Refill canary executed**: Workflow run `36632562803` on branch `docs/issue-1018-bot-quarantine` at reviewed SHA `9f9ab7f175729c5f4be2595231048f7cd603cefc`.
+   - **Pool refilled**: `POKER_BOT_SLOW_BANKROLL_100` (0 -> 2,000 CH).
+   - **Transaction details**: ID `237b47dd-c9f0-4ff8-9f96-aca5f9905cae`, type `MINT`, idempotency `poker-pool-refill:POKER_BOT_SLOW_BANKROLL_100:4:2026-09-29T21:00:00.000Z`, entries: `GENESIS` -2,000 CH, `POKER_BOT_SLOW_BANKROLL_100` +2,000 CH (balanced double-entry).
+   - **Profile restored**: `CONTINUOUS_BOT_DEFAULT` set to `enabled=true, desired_table_count=5, min_bot_count=2, target_bot_count=3, max_bot_count=3` via authorized maintenance API (`POST /internal/admin/poker-maintenance`).
+   - **Supervisor convergence**: Converged naturally to exactly 5 OPEN `CONTINUOUS_BOT` tables:
+     1. `6b43af4a-e876-4ddf-962d-eb5f05062316`
+     2. `2eaeff0c-0347-4483-8e7e-9a3c9e8ea03d`
+     3. `0b57a935-d32d-4a77-9550-0c52122a89bc`
+     4. `933fda8a-908e-4553-9e2c-34c8c8ce8b76`
+     5. `a13981eb-a7f6-485c-8f5b-bb7ce086133e`
+   - **Table details**: All 5 tables have `buy_in=100`, stakes `{"sb": 1, "bb": 2}`, and exactly 3 active bot seats each (15 bots total across seats 1, 2, 3).
+   - **Ledger funding verification**: All 15 bot `TABLE_BUY_IN` transactions debited exclusively from `POKER_BOT_BANKROLL_100` (-100 CH each; balance: 5,000 -> 3,500 CH). Zero funding from `POKER_BOT_SLOW_BANKROLL_100` (remains 2,000 CH) or `TREASURY`.
+   - **Supervisor health**: `lastError=null`, `creationLimited=false`, `remainingTableCount=0`, zero supervisor/seed churn.
+
+Status: **ALL TASKS T075–T084 COMPLETE. READY FOR OWNER REVIEW.**
 Production migration, Production refill/MINT, VPS timer activation, and PR merge remain strictly **NOT AUTHORIZED / NOT RUN**.

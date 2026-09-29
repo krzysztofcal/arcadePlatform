@@ -190,11 +190,11 @@ These tasks prepare the complete Production rollout artifacts ahead of merge wit
 - [x] T080 Define Production continuous-table restoration contract: target 2 tables (not Stage 5); buy-in 100 CH, blinds 1/2, target 3 bots; funded exclusively from `POKER_BOT_BANKROLL_100`; both 100 CH pools positive before enabling; supervisor convergence authoritative; failure path disables profile. (FR-006/007/021; SC-002)
 - [x] T081 Enforce Caddy / runtime boundary: confirm zero changes to `ws-server/**`, `shared/**`, Netlify poker runtime, Caddy, or browser protocol; no new WS Preview Deploy required. (FR-021; SC-007)
 - [x] T082 Run validation checks: `node scripts/check-db-migrations.mjs`, `npm run syntax`, `npm run ci:guards`, `npm run check:csp-inline`, `git diff --check`. Ensure full CI is green. (FR-021; SC-007)
-- [ ] T083 Report handoff evidence: P1 SHA256, PR HEAD, diff summary, test evidence, confirmation that Production baseline and live VPS remain untouched. (FR-021; SC-007)
+- [x] T083 Report handoff evidence: P1 SHA256, PR HEAD, diff summary, test evidence, confirmation that Production baseline and live VPS remain untouched. (FR-021; SC-007)
 
 ## Phase 14 — Stage continuous inventory restoration (T084)
 
-- [ ] T084 Restore Stage continuous inventory before merge: execute owner-gated Stage refill canary exclusively for `SLOW / buy_in=100` (`POKER_BOT_SLOW_BANKROLL_100: 0 -> 2000 CH`); verify refill MINT read-only; restore `CONTINUOUS_BOT_DEFAULT` (enabled=true, desired=5); await supervisor convergence to 5 OPEN tables with 3 bots each funded exclusively from `POKER_BOT_BANKROLL_100`; collect ledger and table evidence. (FR-006/007/011–014/021; SC-002/004/007)
+- [x] T084 Restore Stage continuous inventory before merge: execute owner-gated Stage refill canary exclusively for `SLOW / buy_in=100` (`POKER_BOT_SLOW_BANKROLL_100: 0 -> 2000 CH`); verify refill MINT read-only; restore `CONTINUOUS_BOT_DEFAULT` (enabled=true, desired=5); await supervisor convergence to 5 OPEN tables with 3 bots each funded exclusively from `POKER_BOT_BANKROLL_100`; collect ledger and table evidence. (FR-006/007/011–014/021; SC-002/004/007)
 
 ## Dependencies & Execution Order
 
