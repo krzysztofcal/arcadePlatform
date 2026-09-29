@@ -174,7 +174,7 @@ T037 is **PASS — final pre-merge Stage acceptance complete.**
    - Exact lowercase reviewed SHA checks passed:
      `POKER_BOT_REFILL_REVIEWED_REF == POKER_BOT_REFILL_CHECKED_SHA == DEPLOYED_COMMIT_SHA == 4af8c80e2e73de05f1bfa3bab856df0b7ba4949f`.
    - Worker outcome: `[{"status":"no_op","poolKey":"POKER_BOT_BANKROLL"}]`.
-   - Zero MINT executed, balances unchanged (`POKER_BOT_BANKROLL` = 986970 CH), tier 100 remains `enabled: false`.
+   - Zero MINT executed, balances unchanged (`POKER_BOT_BANKROLL` = 984480 CH, reflecting ledger state after the 2026-09-29 08:27:40 UTC manual smoke ending at sequence 276956), tier 100 remains `enabled: false`.
 
 2. **Manual owner smoke (Stage table `a008c0a1-a85e-4727-b8e2-4d7f649191da`)**:
    - Table: `a008c0a1-a85e-4727-b8e2-4d7f649191da` (500 CH STANDARD).
