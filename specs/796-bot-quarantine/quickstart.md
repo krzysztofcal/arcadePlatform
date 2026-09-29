@@ -224,6 +224,50 @@ Resolves the issue where an Admin mutation commits successfully on the backend, 
    - No backend, WS runtime, database migration, or endpoint contract changes.
    - CI guards and inline CSP hash checks pass.
 
-Status is **READY FOR MANUAL PR-DEPLOY SMOKE**.
-Production migration, seed, refill, cutover, and VPS refill timer activation remain strictly **NOT AUTHORIZED / NOT RUN**.
-GitHub PR merge remains unauthorized (requires separate owner decision).
+### Phase 13 / §27 verification evidence (T075–T083): Pre-merge Production rollout preparation
+
+Prepares all Production rollout artifacts ahead of merge without performing any Production mutation, Production refill, tier enablement, VPS scheduler activation, or PR merge:
+
+1. **P1 Production Migration**:
+   - File: `supabase/production-migrations/20260929201500_poker_bot_quarantine_production_contract.sql`
+   - SHA256: `15318b996031b3c530484bc61e21b7e8937a2474b58be8262dd8d1525767c199`
+   - Canonical Production Target: project `otbqfijerkieoxwpxjnm`, system identifier `7575202818581710058`.
+   - Single atomic transaction with operator advisory lock `chips-ledger-production-automation-v1:otbqfijerkieoxwpxjnm`.
+   - Prerequisite enforcement: requires E1 (`20260914090000`), E2 (`20260914091000`), and existing `POKER_BOT_BANKROLL` (1,000,490 CH).
+   - Rejects partial or drifted #1018 schema.
+   - Dark/off installation:
+     - Preserves existing `POKER_BOT_BANKROLL` without changing ID, balance, status or provenance.
+     - Provisions 3 missing exact pools at balance 0: `POKER_BOT_BANKROLL_100`, `POKER_BOT_SLOW_BANKROLL_100`, `POKER_BOT_SLOW_BANKROLL_500`.
+     - Adds `chips_accounts` columns with defaults `NORMAL/AUTO`, revision 1, and CHECK constraint accepting `FORCE_RESTRICTED`.
+     - Adds `poker_tables.is_slow_only` with one-way sticky trigger.
+     - Creates singleton `poker_access_policy` with defaults `1,000,000,000 / 500 bps / 950,000,000` and revision 1.
+     - Creates `poker_bot_tier_policy` with 100 and 500 tiers disabled (`enabled=false`, revision 1).
+     - Installs indexes and enables RLS denying anon/authenticated.
+     - Records only P1 (`20260929201500`) in `supabase_migrations.schema_migrations`; the 4 Stage versions remain intentional gaps.
+     - Produces zero financial transactions, entries, MINTs, or tables.
+2. **Inventory & Guard**:
+   - `supabase/production-migrations/manifest.json`: added P1 to `replacement_migrations` with SHA256 and prerequisites (E1, E2); mapped the 4 Stage migrations (`20260927100000`, `20260927110000`, `20260929130000`, `20260929163000`) to P1 (`awaiting-production-go`).
+   - `scripts/check-db-migrations.mjs`: refactored production directory validation against manifest replacements; validated 101 migration files and 3 Production replacements (`node scripts/check-db-migrations.mjs` PASS).
+   - `specs/004-production-retention/migration-inventory.md`: updated totals (26 needs-production-equivalent, 18 shared-safe, 3 stage-only; 47 missing source files) and documented P1 mapping.
+3. **Disposable PostgreSQL Test Proof**:
+   - `tests/chips/chips.migration.test.mjs`: extended `runProductionEquivalentFixture` with `assertProductionQuarantineContract`.
+   - Proves wrong project/system identity fails before DDL (P8910).
+   - Proves missing `POKER_BOT_BANKROLL` or drifted #1018 schema fails closed (P8910).
+   - Proves zero financial transactions, entries, or tables produced by P1.
+   - Proves existing USER account receives `NORMAL/AUTO` defaults with unchanged balance.
+   - Proves `POKER_BOT_BANKROLL` balance (1,000,490 CH) and ID are preserved.
+   - Proves `FORCE_RESTRICTED` in override CHECK constraint.
+   - Proves sticky `is_slow_only` cannot revert true -> false (P1018).
+   - Proves indexes and RLS.
+   - Proves only P1 recorded in schema migrations; 4 Stage versions remain absent.
+4. **Post-Merge Cutover Runbook**:
+   - Documented the exact future 15-step Production order.
+   - Production target for continuous tables is 2 (never copy Stage 5).
+5. **Existing-Host VPS Scheduler Readiness**:
+   - `infra/vps/README.md`: clarified targeted install procedure (bootstrap never run on live VPS, install and activation strictly separate, initial units disabled, production config selects `target=production` and `mode=mutate`, timer activation is separate owner GO after controlled invocation).
+6. **Runtime & Caddy Boundary**:
+   - Confirmed zero modifications to `ws-server/**`, `shared/**`, Netlify poker runtime, Caddy, browser protocol.
+   - Accepted runtime SHA `7340b270312b26dc51e0471f3e0afc758cf8a9de` remains latest runtime-affecting SHA. No new WS Preview Deploy required.
+
+Status: **T075–T083 COMPLETE. PROCEEDING TO T084 STAGE INVENTORY RESTORATION.**
+Production migration, Production refill/MINT, VPS timer activation, and PR merge remain strictly **NOT AUTHORIZED / NOT RUN**.

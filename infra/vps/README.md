@@ -249,3 +249,23 @@ target GitHub environment protections. Production additionally requires
 `POKER_BOT_REFILL_PRODUCTION_GO=1` in the workflow's trusted variables. Dispatch
 inputs cannot supply these approvals. Configuration alone does not activate
 those gates or authorize a refill.
+
+### Existing-host scheduler readiness and targeted installation procedure
+
+When deploying the scheduler to the running Production VPS:
+
+1. **Never run `infra/vps/bootstrap.sh` on the live VPS.** Bootstrap is strictly for a fresh host and would disturb active runtime state and releases.
+2. **Targeted install only:** An owner-approved procedure copies only the three reviewed artifacts:
+   - `infra/vps/arcade-poker-pool-dispatch.sh` -> `/usr/local/bin/arcade-poker-pool-dispatch`, mode `0755`, owned by `root:root`.
+   - `infra/vps/arcade-poker-pool-dispatch.service` -> `/etc/systemd/system/arcade-poker-pool-dispatch.service`, mode `0644`, owned by `root:root`.
+   - `infra/vps/arcade-poker-pool-dispatch.timer` -> `/etc/systemd/system/arcade-poker-pool-dispatch.timer`, mode `0644`, owned by `root:root`.
+3. **Install and activation are strictly separate:** Initial units remain disabled and unstarted during and immediately after installation. No unit shall dispatch during file staging.
+4. **Production configuration:** After artifact installation, create `/etc/arcade/poker-pool-dispatch.env` (`0600`, `root:root`) with:
+   ```ini
+   POKER_BOT_REFILL_TARGET=production
+   POKER_BOT_REFILL_MODE=mutate
+   ```
+   The workflow ref remains fixed to `main`.
+5. **No DB secrets:** The VPS receives only dedicated GitHub dispatch credentials (`arcade-poker-refill-dispatch`), never Supabase or PostgreSQL connection strings.
+6. **Controlled invocation before timer activation:** Run exactly one manual/controlled test dispatch with `systemctl start arcade-poker-pool-dispatch.service` and verify the GitHub Actions run outcome.
+7. **Separate owner GO for timer:** Separately enable and start `arcade-poker-pool-dispatch.timer` (`systemctl enable --now arcade-poker-pool-dispatch.timer`) only after the owner explicitly approves the controlled dispatch evidence.

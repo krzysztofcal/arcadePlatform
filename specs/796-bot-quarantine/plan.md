@@ -157,3 +157,43 @@ Addresses the two remaining P1 blockers from Issue #1018 following the successfu
 
 6. **T052 — Reporting & Handoff**:
    Document verification results and STOP before owner manual smoke T037.
+
+### Phase 12 — Truthful Admin mutation vs refresh outcome contract (§26, T053–T058)
+
+1. **Decouple mutation outcome from best-effort refresh**:
+   Audit and update all Admin POST/PATCH handlers in `js/admin-page.js` to ensure confirmed backend mutations are not displayed as errors if subsequent read-only status refresh fails. Display warning without retrying mutation.
+2. **Handle stale_revision and reload gracefully**:
+   Silently reload current state on stale revision and prompt operator review before saving again.
+3. **Decouple maintenance outcome from status refresh**:
+   Confirmed maintenance action + failed refresh yields warning status without wiping error state.
+4. **Support silent / throwOnError in loaders**:
+   Allow loaders to run silently or propagate errors explicitly when required by callers.
+
+### Phase 13 — Pre-merge Production rollout preparation (§27, T075–T083)
+
+1. **T075 — Production-equivalent #1018 contract (P1)**:
+   Author `supabase/production-migrations/20260929201500_poker_bot_quarantine_production_contract.sql` consolidating the final schema of the four Stage migrations into one dark/off Production migration under canonical project `otbqfijerkieoxwpxjnm` and system identifier `7575202818581710058`.
+2. **T076 — Inventory and Guard updates**:
+   Update `supabase/production-migrations/manifest.json`, `scripts/check-db-migrations.mjs`, and `specs/004-production-retention/migration-inventory.md`. Map the four Stage source migrations to P1 as their prepared Production equivalent (`awaiting-production-go`).
+3. **T077 — Fundamental disposable PostgreSQL proof**:
+   Extend `tests/chips/chips.migration.test.mjs` with `assertProductionQuarantineContract`, proving identity preflight, prerequisite fail-closed, dark/off defaults, zero transactions/entries, existing pool preservation, override CHECK, sticky `is_slow_only`, indexes, RLS, and migration history.
+4. **T078 — Post-merge cutover runbook**:
+   Check in the exact future 15-step Production order and keep Production execution forbidden.
+5. **T079 — VPS scheduler readiness**:
+   Clarify existing-host targeted installation procedure in `infra/vps/README.md`.
+6. **T080 — Continuous table restoration contract**:
+   Define future Production continuous inventory invariants (target 2 tables, NORMAL 100 funding only).
+7. **T081 — Runtime and Caddy boundary**:
+   Confirm no runtime, deployable, Caddy or browser protocol changes are introduced.
+8. **T082 — Validation & CI verification**:
+   Run repo guards, syntax checks, migration verification, and ensure all CI checks pass.
+9. **T083 — Handoff**:
+   Report exact SHA256 of P1, verification evidence, and confirmation that Production and live VPS remain untouched.
+
+### Phase 14 — Stage continuous inventory restoration (T084)
+
+1. Run owner-gated Stage refill canary exclusively for `SLOW / buy_in=100` (`POKER_BOT_SLOW_BANKROLL_100: 0 -> 2000 CH`).
+2. Verify refill MINT read-only (`GENESIS -> POKER_BOT_SLOW_BANKROLL_100`).
+3. Restore `CONTINUOUS_BOT_DEFAULT` (enabled=true, desired=5) via existing authorized maintenance path.
+4. Await natural supervisor convergence to 5 OPEN `CONTINUOUS_BOT` tables with 3 bots each funded from `POKER_BOT_BANKROLL_100`.
+5. Verify zero supervisor churn and record evidence before returning PR #1019 as merge-ready.

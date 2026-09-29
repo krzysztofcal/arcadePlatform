@@ -264,6 +264,7 @@ const runProductionEquivalentFixture = async (sql) => {
   const productionMigrationDir = path.join(process.cwd(), "supabase", "production-migrations");
   const e1File = "20260914090000_chips_ledger_production_retention_contract.sql";
   const e2File = "20260914091000_chips_ledger_production_table_fence_activation.sql";
+  const p1File = "20260929201500_poker_bot_quarantine_production_contract.sql";
   const canonicalProductionSystemIdentifier = "7575202818581710058";
 
   await dropAndRecreateSchema(sql);
@@ -335,6 +336,13 @@ const runProductionEquivalentFixture = async (sql) => {
   assert.equal(Number(activatedRows[0].max_transactions), 2, "E2 must preserve the cap2 pre-activation contract");
   await assertProductionRetentionSafetyContracts(sql);
   await assertProductionClosedHumanAutomaticP9273RegistryBinding(sql);
+  await assertProductionQuarantineContract(sql, {
+    productionMigrationDir,
+    p1File,
+    fixtureSql,
+    canonicalProductionSystemIdentifier,
+    fixtureSystemIdentifier,
+  });
 };
 
 const assertProductionRetentionSafetyContracts = async (sql) => {
@@ -1067,6 +1075,218 @@ async function assertProductionClosedHumanAutomaticP9273RegistryBinding(sql) {
   }).catch((error) => {
     if (error !== ROLLBACK) throw error;
   });
+}
+
+async function assertProductionQuarantineContract(sql, {
+  productionMigrationDir,
+  p1File,
+  fixtureSql,
+  canonicalProductionSystemIdentifier,
+  fixtureSystemIdentifier,
+}) {
+  const existingUserId = primaryUserId;
+  const existingUserAccountId = "00000000-0000-4000-8000-00000000e991";
+  await sql.unsafe(`
+    insert into public.chips_accounts (id, user_id, account_type, status, balance, next_entry_seq)
+    values ('${existingUserAccountId}', '${existingUserId}', 'USER', 'active', 500, 1)
+    on conflict (id) do nothing;
+  `);
+
+  // 1. Missing POKER_BOT_BANKROLL prerequisite must fail closed before DDL
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /Required existing POKER_BOT_BANKROLL account is missing/i.test(err?.message || ""),
+    "P1 must fail closed if required POKER_BOT_BANKROLL is missing",
+  );
+  await sql.unsafe("rollback;");
+
+  // Provision POKER_BOT_BANKROLL to represent production baseline (1,000,490 CH)
+  const existingBotBankrollId = "00000000-0000-4000-8000-00000000e992";
+  await sql.unsafe(`
+    insert into public.chips_accounts (id, account_type, system_key, status, balance, next_entry_seq)
+    values ('${existingBotBankrollId}', 'SYSTEM', 'POKER_BOT_BANKROLL', 'active', 1000490, 1)
+    on conflict (id) do nothing;
+  `);
+
+  // 2. Wrong project ref must fail closed before DDL
+  await sql.unsafe("set chips.production_project_ref = 'wrong-ref';");
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /identity preflight failed/i.test(err?.message || ""),
+    "P1 must fail closed on invalid project ref",
+  );
+  await sql.unsafe("rollback;");
+  await sql.unsafe("set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';");
+
+  // 3. Mismatched system identifier must fail closed before DDL
+  const rawP1Sql = fs.readFileSync(path.join(productionMigrationDir, p1File), "utf8");
+  if (fixtureSystemIdentifier !== canonicalProductionSystemIdentifier) {
+    await assert.rejects(
+      () => sql.unsafe(rawP1Sql),
+      (err) => err?.code === "P8910" && /identity preflight failed/i.test(err?.message || ""),
+      "P1 must fail closed on mismatched system identifier",
+    );
+    await sql.unsafe("rollback;");
+  }
+
+  // 4. Unexpected partial / drifted #1018 schema must fail closed
+  await sql.unsafe("create table public.poker_access_policy (dummy int);");
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /unexpected drifted state/i.test(err?.message || ""),
+    "P1 must fail closed if partial #1018 schema already exists",
+  );
+  await sql.unsafe("rollback;");
+  await sql.unsafe("drop table if exists public.poker_access_policy;");
+
+  // Record baseline counts before applying P1
+  const txCountBefore = Number((await sql.unsafe("select count(*) as c from public.chips_transactions;"))[0].c);
+  const entryCountBefore = Number((await sql.unsafe("select count(*) as c from public.chips_entries;"))[0].c);
+  const tableCountBefore = Number((await sql.unsafe("select count(*) as c from public.poker_tables;"))[0].c);
+
+  // 5. Apply valid P1
+  await sql.unsafe(fixtureSql(p1File));
+
+  // 6. Zero financial transactions, entries, or poker tables created by P1
+  const txCountAfter = Number((await sql.unsafe("select count(*) as c from public.chips_transactions;"))[0].c);
+  const entryCountAfter = Number((await sql.unsafe("select count(*) as c from public.chips_entries;"))[0].c);
+  const tableCountAfter = Number((await sql.unsafe("select count(*) as c from public.poker_tables;"))[0].c);
+  assert.equal(txCountAfter, txCountBefore, "P1 must produce zero chips_transactions");
+  assert.equal(entryCountAfter, entryCountBefore, "P1 must produce zero chips_entries");
+  assert.equal(tableCountAfter, tableCountBefore, "P1 must produce zero poker_tables");
+
+  // 7. Existing USER rows receive NORMAL/AUTO defaults without a financial write
+  const userAccountRows = await sql.unsafe(`
+    select poker_auto_class, poker_access_override, poker_access_revision, balance
+    from public.chips_accounts
+    where id = '${existingUserAccountId}';
+  `);
+  assert.equal(userAccountRows[0].poker_auto_class, "NORMAL");
+  assert.equal(userAccountRows[0].poker_access_override, "AUTO");
+  assert.equal(Number(userAccountRows[0].poker_access_revision), 1);
+  assert.equal(Number(userAccountRows[0].balance), 500, "User balance must remain unchanged after P1");
+
+  // 8. Existing POKER_BOT_BANKROLL preserved byte-for-byte; 3 new pools provisioned at balance 0
+  const botAccounts = await sql.unsafe(`
+    select system_key, balance, status, id
+    from public.chips_accounts
+    where account_type = 'SYSTEM'
+      and system_key in ('POKER_BOT_BANKROLL', 'POKER_BOT_BANKROLL_100', 'POKER_BOT_SLOW_BANKROLL_100', 'POKER_BOT_SLOW_BANKROLL_500')
+    order by system_key;
+  `);
+  const botAccountMap = new Map(botAccounts.map((a) => [a.system_key, a]));
+  assert.equal(botAccountMap.get("POKER_BOT_BANKROLL")?.id, existingBotBankrollId, "POKER_BOT_BANKROLL ID must be preserved");
+  assert.equal(Number(botAccountMap.get("POKER_BOT_BANKROLL")?.balance), 1000490, "POKER_BOT_BANKROLL balance must be preserved");
+  assert.equal(botAccountMap.get("POKER_BOT_BANKROLL")?.status, "active");
+  assert.equal(Number(botAccountMap.get("POKER_BOT_BANKROLL_100")?.balance), 0, "POKER_BOT_BANKROLL_100 must be provisioned at 0");
+  assert.equal(Number(botAccountMap.get("POKER_BOT_SLOW_BANKROLL_100")?.balance), 0, "POKER_BOT_SLOW_BANKROLL_100 must be provisioned at 0");
+  assert.equal(Number(botAccountMap.get("POKER_BOT_SLOW_BANKROLL_500")?.balance), 0, "POKER_BOT_SLOW_BANKROLL_500 must be provisioned at 0");
+
+  // 9. Access policy singleton shape and values
+  const accessPolicyRows = await sql.unsafe(`
+    select id, slow_threshold_ch, slow_hysteresis_bps, slow_recovery_threshold_ch, revision
+    from public.poker_access_policy;
+  `);
+  assert.equal(accessPolicyRows.length, 1, "poker_access_policy must have exactly 1 row");
+  assert.equal(Number(accessPolicyRows[0].id), 1);
+  assert.equal(Number(accessPolicyRows[0].slow_threshold_ch), 1000000000, "slow_threshold_ch default must be 1,000,000,000");
+  assert.equal(Number(accessPolicyRows[0].slow_hysteresis_bps), 500, "slow_hysteresis_bps default must be 500 bps");
+  assert.equal(Number(accessPolicyRows[0].slow_recovery_threshold_ch), 950000000, "slow_recovery_threshold_ch derived must be 950,000,000");
+  assert.equal(Number(accessPolicyRows[0].revision), 1, "initial revision must be 1");
+
+  // 10. Tier policies exist disabled
+  const tierPolicyRows = await sql.unsafe(`
+    select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
+           slow_refill_threshold_ch, slow_refill_amount_ch, revision
+    from public.poker_bot_tier_policy
+    order by buy_in;
+  `);
+  assert.deepEqual(tierPolicyRows.map((r) => Number(r.buy_in)), [100, 500]);
+  assert.equal(tierPolicyRows.every((r) => r.enabled === false), true, "All tier policies must be disabled in P1");
+  assert.equal(tierPolicyRows.every((r) => Number(r.revision) === 1), true, "Tier policy revision must be 1");
+  assert.equal(Number(tierPolicyRows[0].normal_refill_threshold_ch), 2000);
+  assert.equal(Number(tierPolicyRows[0].normal_refill_amount_ch), 5000);
+  assert.equal(Number(tierPolicyRows[0].slow_refill_threshold_ch), 1000);
+  assert.equal(Number(tierPolicyRows[0].slow_refill_amount_ch), 2000);
+  assert.equal(Number(tierPolicyRows[1].normal_refill_threshold_ch), 5000);
+  assert.equal(Number(tierPolicyRows[1].normal_refill_amount_ch), 10000);
+  assert.equal(Number(tierPolicyRows[1].slow_refill_threshold_ch), 2000);
+  assert.equal(Number(tierPolicyRows[1].slow_refill_amount_ch), 5000);
+
+  // 11. FORCE_RESTRICTED satisfies final override CHECK constraint
+  await sql.unsafe(`
+    update public.chips_accounts
+    set poker_access_override = 'FORCE_RESTRICTED'
+    where id = '${existingUserAccountId}';
+  `);
+  const restrictedRow = await sql.unsafe(`select poker_access_override from public.chips_accounts where id = '${existingUserAccountId}';`);
+  assert.equal(restrictedRow[0].poker_access_override, "FORCE_RESTRICTED");
+
+  await assert.rejects(
+    () => sql.unsafe(`update public.chips_accounts set poker_access_override = 'INVALID_OVERRIDE' where id = '${existingUserAccountId}';`),
+    (err) => err?.code === "23514",
+    "Invalid poker_access_override must fail CHECK constraint",
+  );
+  await sql.unsafe("rollback;");
+
+  // 12. Sticky is_slow_only cannot revert true -> false
+  const testTableId = "00000000-0000-4000-8000-00000000e993";
+  await sql.unsafe(`
+    insert into public.poker_tables (id, status, is_slow_only)
+    values ('${testTableId}', 'OPEN', false);
+  `);
+  await sql.unsafe(`update public.poker_tables set is_slow_only = true where id = '${testTableId}';`);
+  const slowTableRow = await sql.unsafe(`select is_slow_only from public.poker_tables where id = '${testTableId}';`);
+  assert.equal(slowTableRow[0].is_slow_only, true);
+
+  await assert.rejects(
+    () => sql.unsafe(`update public.poker_tables set is_slow_only = false where id = '${testTableId}';`),
+    (err) => err?.code === "P1018" && /is_slow_only is one-way/i.test(err?.message || ""),
+    "Reverting is_slow_only from true to false must fail with P1018",
+  );
+  await sql.unsafe("rollback;");
+  await sql.unsafe(`delete from public.poker_tables where id = '${testTableId}';`);
+
+  // 13. Required indexes and RLS
+  const indexRows = await sql.unsafe(`
+    select indexname from pg_indexes
+    where schemaname = 'public'
+      and indexname in (
+        'poker_seats_user_id_active_human_idx',
+        'poker_tables_created_by_pending_standard_idx',
+        'chips_transactions_poker_table_id_idx',
+        'chips_transactions_poker_pool_bucket_uidx'
+      );
+  `);
+  assert.equal(indexRows.length, 4, "All 4 #1018 indexes must exist");
+
+  const rlsRows = await sql.unsafe(`
+    select relname, relrowsecurity from pg_class
+    where relnamespace = 'public'::regnamespace
+      and relname in ('poker_access_policy', 'poker_bot_tier_policy');
+  `);
+  assert.equal(rlsRows.every((r) => r.relrowsecurity === true), true, "RLS must be enabled on policy tables");
+
+  // 14. History: only P1 recorded; 4 Stage versions are intentional gaps
+  const migrationHistory = await sql.unsafe(`
+    select version from supabase_migrations.schema_migrations
+    where version in (
+      '20260929201500',
+      '20260927100000',
+      '20260927110000',
+      '20260929130000',
+      '20260929163000'
+    );
+  `);
+  const recordedVersions = new Set(migrationHistory.map((r) => r.version));
+  assert.equal(recordedVersions.has("20260929201500"), true, "P1 version must be recorded");
+  assert.equal(recordedVersions.has("20260927100000"), false, "Stage version 20260927100000 must not be recorded");
+  assert.equal(recordedVersions.has("20260927110000"), false, "Stage version 20260927110000 must not be recorded");
+  assert.equal(recordedVersions.has("20260929130000"), false, "Stage version 20260929130000 must not be recorded");
+  assert.equal(recordedVersions.has("20260929163000"), false, "Stage version 20260929163000 must not be recorded");
+
+  // Clean up fixture-only rows
+  await sql.unsafe(`delete from public.chips_accounts where id in ('${existingUserAccountId}', '${existingBotBankrollId}');`);
 }
 
 const ensureGenesisFixture = async (sql) => {

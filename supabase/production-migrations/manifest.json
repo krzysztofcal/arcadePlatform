@@ -892,7 +892,7 @@
       "sha256": "116b6b4de20674cc84c03d89255da17689040428eec2bbf5a96115b8f17ba7f9",
       "category": "needs-production-equivalent",
       "status": "awaiting-production-go",
-      "replacement": null,
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
       "required_effects": [
         "NORMAL/SLOW access policy, sticky table marker, per-tier bot pools and bounded refill indexes under a separately reviewed Production identity"
       ],
@@ -906,7 +906,7 @@
       "sha256": "3bb727ccfff42bc257c66976052e0a09d08c74d6f7838e37df0889dbd69f9fc4",
       "category": "needs-production-equivalent",
       "status": "awaiting-production-go",
-      "replacement": null,
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
       "required_effects": [
         "FORCE_RESTRICTED override constraint accepted by the #1018 schema; Production equivalent remains separately reviewed"
       ],
@@ -920,7 +920,7 @@
       "sha256": "027368577288d95ccda16fc921c39dc57c717d74e648c517d68c2ac4a81addc3",
       "category": "needs-production-equivalent",
       "status": "awaiting-production-go",
-      "replacement": null,
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
       "required_effects": [
         "slow_recovery_threshold_ch added to poker_access_policy with positive safe range and recovery < entry threshold check; Production equivalent remains separately reviewed"
       ],
@@ -934,7 +934,7 @@
       "sha256": "bef0b1acbac59a802222737286f03322f153467be910461cc13094e83a55c330",
       "category": "needs-production-equivalent",
       "status": "awaiting-production-go",
-      "replacement": null,
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
       "required_effects": [
         "slow_hysteresis_bps added to poker_access_policy with range [100, 5000] and consistency check against derived recovery threshold; Production equivalent remains separately reviewed"
       ],
@@ -953,11 +953,20 @@
       "file": "20260914091000_chips_ledger_production_table_fence_activation.sql",
       "purpose": "E2 owner-gated TABLE fence activation; never automatic",
       "sha256": "f6d8334cf642df7c9c4ac3b633d4898254d5af09290814cdce54e253bc650cab"
+    },
+    {
+      "file": "20260929201500_poker_bot_quarantine_production_contract.sql",
+      "purpose": "P1 final Production #1018 bot quarantine and exact pools contract; dark/off",
+      "sha256": "15318b996031b3c530484bc61e21b7e8937a2474b58be8262dd8d1525767c199",
+      "prerequisites": [
+        "20260914090000_chips_ledger_production_retention_contract.sql",
+        "20260914091000_chips_ledger_production_table_fence_activation.sql"
+      ]
     }
   ],
   "provenance_rules": [
     "Source hashes are immutable inventory evidence.",
-    "Only E1/E2 are applied Production versions; omitted source versions are never marked applied.",
+    "Only E1/E2/P1 are applied Production versions; omitted source versions are never marked applied.",
     "Manifest entries classify every current main migration; new unclassified files fail the repository guard."
   ]
 }

@@ -107,3 +107,42 @@ In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
   - Returns `{ ok: true, controlledInactive: true, reason: "tier_disabled" | "tier_unprovisioned", status }`.
   - Does NOT churn, rollback or spam error logs every sweep.
 - In `createManagedTable()`: defense-in-depth preflight throws `tier_disabled` / `tier_unprovisioned` before any table mutation.
+
+## 10. Percentage-based hysteresis and reversible AUTO semantics (§26 / T059–T074)
+
+1. **Reversible AUTO Classification**:
+   - `AUTO / NORMAL` + evidence >= slow_threshold_ch -> automatic `SLOW`.
+   - `AUTO / SLOW` + authoritative recovery evidence < derived slow_recovery_threshold_ch -> automatic `NORMAL`.
+   - Hysteresis band `[recovery, entry)` preserves the current automatic class.
+   - Any `FORCE_*` override suppresses durable automatic mutations; effective class follows the override while durable automatic class is preserved.
+   - Return to AUTO re-evaluates the durable class using current authoritative evidence and thresholds.
+2. **Derived Recovery Threshold**:
+   - Stored in `poker_access_policy` as `slow_hysteresis_bps` (range 100–5000 bps, default 500 bps = 5%).
+   - Derived integer formula: `slow_recovery_threshold_ch = floor((slow_threshold_ch * (10000 - slow_hysteresis_bps)) / 10000)`.
+   - In Admin API, hysteresis is required on access policy PATCH (`slowHysteresisBps` or `slowHysteresisPercent`); missing hysteresis fails with 400 `invalid_slow_hysteresis_bps` rather than falling back to default.
+3. **Depleted SLOW Pool Human Join Isolation**:
+   - Empty or depleted bot bankroll does not block a valid human JOIN.
+   - Bot funding attempts run in an isolated savepoint; bot funding failure (`insufficient_funds`) rolls back only the bot seat/funding, while the human JOIN commits successfully.
+
+## 11. Production rollout preparation and continuous table restoration contract (§27 / T075–T084)
+
+1. **Production P1 Contract (`20260929201500_poker_bot_quarantine_production_contract.sql`)**:
+   - Single atomic transaction guarded by `chips.production_project_ref = 'otbqfijerkieoxwpxjnm'` and `pg_control_system().system_identifier = '7575202818581710058'`.
+   - Requires E1 (`20260914090000`) and E2 (`20260914091000`) applied, and existing `POKER_BOT_BANKROLL` present.
+   - Rejects drifted or partial #1018 schema.
+   - Installs #1018 dark/off:
+     - Preserves existing `POKER_BOT_BANKROLL` (1,000,490 CH) without modifying ID, balance, status or provenance.
+     - Provisions missing pools `POKER_BOT_BANKROLL_100`, `POKER_BOT_SLOW_BANKROLL_100`, and `POKER_BOT_SLOW_BANKROLL_500` at balance 0.
+     - Adds `chips_accounts` columns with `poker_auto_class='NORMAL'`, `poker_access_override='AUTO'`, `poker_access_revision=1`, and CHECK constraint accepting `FORCE_RESTRICTED`.
+     - Adds `poker_tables.is_slow_only` with one-way sticky trigger.
+     - Creates `poker_access_policy` singleton with conservative defaults `1,000,000,000 / 500 bps / 950,000,000` and revision 1.
+     - Creates `poker_bot_tier_policy` with 100 and 500 tiers disabled (`enabled=false`, revision 1).
+     - Installs indexes and enables RLS denying anon/authenticated.
+     - Records only P1 in `supabase_migrations.schema_migrations`; the 4 Stage versions remain intentional gaps.
+   - Produces zero financial transactions, entries, MINTs, or tables.
+2. **Continuous Table Restoration Contract**:
+   - Future Production deployment target is **2 tables** (never copy Stage/Preview 5).
+   - Managed tables are always NORMAL-funded from `POKER_BOT_BANKROLL_100`.
+   - `POKER_BOT_SLOW_BANKROLL_100` funds only SLOW STANDARD play and must never fund continuous tables.
+   - Both 100 CH pools must be active and positive before enabling managed profile.
+   - Stage pre-merge acceptance (T084) uses the owner-gated Stage refill canary for `SLOW / buy_in=100` (0 -> 2000 CH), then restores Stage `CONTINUOUS_BOT_DEFAULT` (desired 5, 3 bots each funded from `POKER_BOT_BANKROLL_100`).

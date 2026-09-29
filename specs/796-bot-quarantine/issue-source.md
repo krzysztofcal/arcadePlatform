@@ -870,3 +870,75 @@ Extend existing focused suites only. Prove:
 - migration is forward-only and Stage apply is expected.
 
 After runtime changes, perform a new exact-SHA WS Preview Deploy and manual smoke with FORCE_RESTRICTED before calling PR #1019 merge-ready.
+
+---
+
+## 25. Corrective pre-merge amendment — single-owner deterministic WS mutation
+
+Admin override mutation is implemented as a single WS-owned operation:
+`Admin UI → Netlify Admin auth → one internal WS request → WS fail-close → one DB transaction → WS cache/socket update → release fail-close → exact ACK`.
+
+Netlify authenticates the admin and forwards the actor ID with zero local DB write, zero pre-invalidation, zero confirmation retries, and zero recovery polling. WS owns the runtime guard (`activePokerAccessMutations`), short-lived fail-close lifecycle, single DB transaction with optimistic revision check, authoritative SLOW persistence, cache/socket broadcast, and fail-close cleanup.
+
+---
+
+## 26. Corrective pre-merge amendments — runtime stability & hysteresis derivation
+
+1. **Settled rollover retry & continuous bot table controlled inactivity**:
+   - Unknown access or bot funding snapshot triggers `scheduleSettledRolloverRetry()` without advancing state or bypassing funding.
+   - Disabled/unprovisioned tier 100 sets continuous bot supervisor to controlled inactive (`desiredCount = 0`, zero table creation, zero seed, graceful retirement of open continuous tables) without rollback or sweep churn.
+2. **Reversible AUTO with percentage-based hysteresis**:
+   - SLOW recovery threshold is derived deterministically: `floor(slow_threshold_ch * (10000 - slow_hysteresis_bps) / 10000)`.
+   - Stored in `poker_access_policy` as `slow_hysteresis_bps` (range 100–5000 bps, default 500 bps = 5%).
+   - While override is `AUTO`, automatic classification transitions reversibly (`NORMAL -> SLOW` when evidence >= entry, `SLOW -> NORMAL` when authoritative evidence < derived recovery).
+   - Any `FORCE_*` override suppresses durable automatic mutations.
+3. **Depleted SLOW pool human join isolation**:
+   - An empty or depleted SLOW bot bankroll does not fail a valid human JOIN.
+   - Bot funding is isolated in a savepoint; depleted bot pool rolls back only the bot seat/funding, allowing the human JOIN to commit successfully (`is_slow_only = true`, `seededBots = []`).
+
+---
+
+## 27. Pre-merge Production rollout preparation — AUTHORIZED / Production execution still forbidden
+
+Prepares the Production rollout artifacts ahead of merge without performing any Production DDL/DML, refill, tier enablement, VPS activation, or PR merge.
+
+### Production Baseline
+- Project: `otbqfijerkieoxwpxjnm`, system identifier: `7575202818581710058`.
+- E1 (`20260914090000`) and E2 (`20260914091000`) applied.
+- `POKER_BOT_BANKROLL` = 1,000,490 CH active (preserved byte-for-byte).
+- `POKER_BOT_BANKROLL_100`, `POKER_BOT_SLOW_BANKROLL_100`, `POKER_BOT_SLOW_BANKROLL_500` absent.
+- `CONTINUOUS_BOT_DEFAULT` disabled / desired 0, 0 OPEN continuous tables.
+
+### P1 Production Contract (T075)
+- File: `supabase/production-migrations/20260929201500_poker_bot_quarantine_production_contract.sql`.
+- Single atomic transaction guarded by canonical identity and E1/E2 presence.
+- Installs #1018 schema dark/off: 3 new pools at balance 0, conservative access defaults `1,000,000,000 / 500 bps / 950,000,000`, 100/500 tiers disabled, `FORCE_RESTRICTED` in override CHECK, sticky `is_slow_only`, indexes, RLS.
+- Zero financial transactions, entries, MINTs, or tables. Only P1 recorded in schema migrations.
+
+### Inventory, Guards & Tests (T076–T077)
+- `manifest.json`: P1 added to replacement_migrations; 4 Stage migrations mapped to P1.
+- `check-db-migrations.mjs`: validates production migrations against manifest; requires E1, E2, P1.
+- `chips.migration.test.mjs`: disposable PostgreSQL fixture test proving all P1 invariants.
+
+### Future Post-Merge Cutover Runbook (T078)
+1. Merge #1019 only after owner review and green CI.
+2. Wait for Production Netlify + WS deploy; verify health.
+3. Read-only preflight: canonical identity, E1/E2 present, P1 absent, 0 continuous tables.
+4. Apply only P1 via reviewed operator psql route.
+5. Read-only verify P1 post-state.
+6. Keep access threshold at conservative default until owner approval.
+7. Review disabled tier refill values; enable tier only after owner approval.
+8. Perform authorized Production refill via dedicated workflow.
+9. Verify positive 100 CH pools.
+10. Targeted VPS dispatcher install (never `bootstrap.sh`).
+11. Controlled test dispatch before timer enablement.
+12. Restore `CONTINUOUS_BOT_DEFAULT` with desired count 2 (never 5).
+13. Await supervisor natural convergence to 2 tables.
+14. Production smoke.
+15. Failure path: disable tier/profile, never fallback or manual SQL.
+
+### Stage Continuous Inventory Restoration (T084)
+- Run owner-gated Stage refill canary for `SLOW / buy_in=100` (`POKER_BOT_SLOW_BANKROLL_100: 0 -> 2000 CH`).
+- Verify refill MINT read-only.
+- Restore `CONTINUOUS_BOT_DEFAULT` (enabled=true, desired=5).
+- Await supervisor convergence to 5 OPEN tables funded from `POKER_BOT_BANKROLL_100`.

@@ -178,11 +178,29 @@ These tasks resolve the Admin UI issue where a mutation succeeds on the backend 
 - [x] T057 Update Admin loaders (`loadOps`, `loadUserDetail`, `loadTableDetail`, `loadTables`, `loadBonusCampaigns`, `loadLedger`, `loadUsers`) to support silent / post-mutation mode (`{ silent: true }`) without wiping or clobbering active status messages, propagating errors to callers when silent. (FR-017/020; SC-005)
 - [x] T058 Synchronize SpecKit documentation (`tasks.md`, `quickstart.md`), perform local verification (syntax check, `npm run ci:guards`, `npm run check:csp-inline`), push to PR branch, and confirm PR is ready for manual PR-deploy smoke. (FR-021; SC-005)
 
+## Phase 13 — Pre-merge Production rollout preparation (§27, T075–T083)
+
+These tasks prepare the complete Production rollout artifacts ahead of merge without performing any Production mutation, Production refill, tier enablement, or VPS activation.
+
+- [x] T075 Author the dark/off Production-equivalent #1018 schema contract in `supabase/production-migrations/20260929201500_poker_bot_quarantine_production_contract.sql` (P1). Consolidate the 4 Stage migrations into one forward-only migration guarded by `chips.production_project_ref='otbqfijerkieoxwpxjnm'` and `pg_control_system().system_identifier='7575202818581710058'`. Require E1/E2 present and `POKER_BOT_BANKROLL` preserved; reject drifted schema; install #1018 schema dark/off with conservative access defaults `1_000_000_000 / 500 bps / 950,000,000`, 100/500 tiers disabled, missing pools at balance 0; record only P1 in schema_migrations. (FR-021; SC-007)
+- [x] T076 Update `supabase/production-migrations/manifest.json`, `scripts/check-db-migrations.mjs`, and `specs/004-production-retention/migration-inventory.md`. Map the 4 Stage source migrations to P1 as their reviewed Production equivalent (`awaiting-production-go`). Add P1 sha256 and prerequisites to `replacement_migrations`. Refactor check script to validate production migrations directory against manifest replacements and require E1, E2, and P1. (FR-021; SC-007)
+- [x] T077 Extend `tests/chips/chips.migration.test.mjs` with `assertProductionQuarantineContract`. Exercise real P1 SQL with test-local identity substitution only; prove wrong project/system identity fails before DDL; missing E1/E2 or drifted schema fails closed; baseline+E1+E2+P1 reaches expected catalog/constraint/index/RLS shape; disabled tier policies; conservative access policy values; existing USER defaults without financial mutation; `FORCE_RESTRICTED` in override CHECK; sticky `is_slow_only`; zero transactions/entries/tables; only P1 recorded. (FR-021; SC-007)
+- [x] T078 Check in the exact post-merge cutover runbook in `specs/796-bot-quarantine/` (`issue-source.md`, `plan.md`, `tasks.md`, `quickstart.md`, `contracts/bot-quarantine.md`). Document the exact 15-step future Production cutover order and preserve all production prohibition gates. (FR-021; SC-007)
+- [x] T079 Clarify existing-host VPS scheduler readiness in `infra/vps/README.md`. Document that bootstrap is never run on live VPS; targeted install copies only the 3 reviewed artifacts; units remain disabled initially; production env specifies target production and mode mutate; no DB credentials on VPS; timer activation is separate owner GO. (FR-021; SC-004)
+- [x] T080 Define Production continuous-table restoration contract: target 2 tables (not Stage 5); buy-in 100 CH, blinds 1/2, target 3 bots; funded exclusively from `POKER_BOT_BANKROLL_100`; both 100 CH pools positive before enabling; supervisor convergence authoritative; failure path disables profile. (FR-006/007/021; SC-002)
+- [x] T081 Enforce Caddy / runtime boundary: confirm zero changes to `ws-server/**`, `shared/**`, Netlify poker runtime, Caddy, or browser protocol; no new WS Preview Deploy required. (FR-021; SC-007)
+- [x] T082 Run validation checks: `node scripts/check-db-migrations.mjs`, `npm run syntax`, `npm run ci:guards`, `npm run check:csp-inline`, `git diff --check`. Ensure full CI is green. (FR-021; SC-007)
+- [ ] T083 Report handoff evidence: P1 SHA256, PR HEAD, diff summary, test evidence, confirmation that Production baseline and live VPS remain untouched. (FR-021; SC-007)
+
+## Phase 14 — Stage continuous inventory restoration (T084)
+
+- [ ] T084 Restore Stage continuous inventory before merge: execute owner-gated Stage refill canary exclusively for `SLOW / buy_in=100` (`POKER_BOT_SLOW_BANKROLL_100: 0 -> 2000 CH`); verify refill MINT read-only; restore `CONTINUOUS_BOT_DEFAULT` (enabled=true, desired=5); await supervisor convergence to 5 OPEN tables with 3 bots each funded exclusively from `POKER_BOT_BANKROLL_100`; collect ledger and table evidence. (FR-006/007/011–014/021; SC-002/004/007)
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
 
-T001→T002→T003. US1 T004–T007→US2 T008–T010→US3 T011–T015→US4 T016–T020→US5 T021–T023→US6 T024–T026→T027→T028→T029→T030→T031→T032→T033→T034→T035→T036→Phase 11 (T047→T048→T049→T050→T051→T052)→T037→Phase 12 (T053→T054→T055→T056→T057→T058). Explicit prerequisites in each task are authoritative. T037 is the pre-merge Stage acceptance gate; Phase 12 completes the truthful Admin UI contract. Production and VPS activation remain separate unauthorized gates.
+T001→T002→T003. US1 T004–T007→US2 T008–T010→US3 T011–T015→US4 T016–T020→US5 T021–T023→US6 T024–T026→T027→T028→T029→T030→T031→T032→T033→T034→T035→T036→Phase 11 (T047→T048→T049→T050→T051→T052)→T037→Phase 12 (T053→T054→T055→T056→T057→T058)→Phase 13 (T075→T076→T077→T078→T079→T080→T081→T082→T083)→Phase 14 (T084). Explicit prerequisites in each task are authoritative. T037 is the pre-merge Stage acceptance gate; Phase 12 completes the truthful Admin UI contract; Phase 13 prepares Production rollout artifacts; Phase 14 restores Stage continuous inventory. Production and VPS activation remain separate unauthorized gates.
 
 ### User Story Dependencies
 
