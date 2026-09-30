@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   refill:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && ((inputs.operation != 'initial-seed-all' && (inputs.target == 'stage' || github.ref == 'refs/heads/main') && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && github.actor == vars.POKER_BOT_REFILL_DISPATCH_ACTOR && github.actor == 'arcade-poker-refill-dispatch'))) || (inputs.operation == 'initial-seed-all' && inputs.target == 'production' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.actor == 'krzysztofcal' && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && vars.POKER_BOT_REFILL_PRODUCTION_GO == '1')))) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && ((inputs.operation != 'initial-seed-all' && (inputs.target == 'stage' || github.ref == 'refs/heads/main') && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && github.actor == vars.POKER_BOT_REFILL_DISPATCH_ACTOR && github.actor == 'arcade-poker-refill-dispatch'))) || (inputs.operation == 'initial-seed-all' && inputs.target == 'production' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.actor == 'krzysztofcal' && (inputs.mode == 'dry-run' || inputs.mode == 'mutate'))) }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.target == 'production' && 'production-poker-refill' || 'stage-poker-refill' }}
     timeout-minutes: 15

@@ -257,7 +257,6 @@ assert.match(refillWorkflow, /github\.repository == 'krzysztofcal\/arcadePlatfor
 assert.match(refillWorkflow, /github\.ref == 'refs\/heads\/main'/);
 assert.match(refillWorkflow, /github\.event_name == 'workflow_dispatch'/);
 assert.match(refillWorkflow, /default: dry-run/);
-assert.match(refillWorkflow, /vars\.POKER_BOT_REFILL_ENABLED == '1'/);
 assert.match(refillWorkflow, /github\.actor == 'arcade-poker-refill-dispatch'/);
 assert.match(refillWorkflow, /POKER_BOT_REFILL_PRODUCTION_GO/);
 assert.match(refillWorkflow, /production-poker-refill/);
@@ -269,9 +268,9 @@ assert.match(refillWorkflow, /test "\$GITHUB_SHA" = "\$reviewed_ref"/);
 assert.match(refillWorkflow, /POKER_BOT_REFILL_CHECKED_SHA=\$checked_sha/);
 assert.match(refillWorkflow, /node scripts\/ops\/poker-bot-pool-refill\.mjs/);
 assert.doesNotMatch(refillWorkflow, /github\.event\.inputs\.mode\s*==\s*'mutate'[^\n]*true/);
-// Dispatch inputs select a target/mode; repository variables and trusted context
-// remain the authority even when the VPS requests mutation.
+// Dispatch inputs select target/mode; mutation gates run after environment activation.
 const refillJob = parsedRefillWorkflow.jobs.refill;
+assert.doesNotMatch(refillJob.if, /vars\.POKER_BOT_REFILL_(?:ENABLED|PRODUCTION_GO)/);
 assert.deepEqual(Object.keys(refillTriggers.workflow_dispatch.inputs).sort(), [
   "confirmation_sha",
   "mode",
@@ -313,7 +312,8 @@ for (const overrides of [
 ]) assert.equal(refillJobAllowed({ ...stageRefillGithub, ...overrides }, { target: "stage", mode: "mutate", operation: "refill" }, refillVars), false);
 assert.equal(refillJobAllowed({ ...stageRefillGithub, ref: "refs/heads/main" }, { target: "stage", mode: "mutate", operation: "refill" }, refillVars), true);
 assert.equal(refillJobAllowed({ ...productionRefillGithub, ref: "refs/heads/release" }, { target: "production", mode: "mutate", operation: "refill" }, refillVars), false);
-for (const overrides of [{ POKER_BOT_REFILL_ENABLED: "0" }, { POKER_BOT_REFILL_DISPATCH_ACTOR: "other" }]) {
+assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate", operation: "refill" }, { ...refillVars, POKER_BOT_REFILL_ENABLED: "0" }), true);
+for (const overrides of [{ POKER_BOT_REFILL_DISPATCH_ACTOR: "other" }]) {
   assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate", operation: "refill" }, { ...refillVars, ...overrides }), false);
 }
 
@@ -330,8 +330,8 @@ assert.equal(refillJobAllowed({ ...ownerInitialSeedGithub, actor: "arcade-poker-
 assert.equal(refillJobAllowed(ownerInitialSeedGithub, { target: "stage", mode: "mutate", operation: "initial-seed-all" }, refillVars), false);
 // Non-main ref is rejected:
 assert.equal(refillJobAllowed({ ...ownerInitialSeedGithub, ref: "refs/heads/feature" }, { target: "production", mode: "mutate", operation: "initial-seed-all" }, refillVars), false);
-// Production GO missing is rejected for mutate:
-assert.equal(refillJobAllowed(ownerInitialSeedGithub, { target: "production", mode: "mutate", operation: "initial-seed-all" }, { ...refillVars, POKER_BOT_REFILL_PRODUCTION_GO: "0" }), false);
+// Environment-level gates are checked after the job enters its environment:
+assert.equal(refillJobAllowed(ownerInitialSeedGithub, { target: "production", mode: "mutate", operation: "initial-seed-all" }, { ...refillVars, POKER_BOT_REFILL_ENABLED: "0", POKER_BOT_REFILL_PRODUCTION_GO: "0" }), true);
 
 const canaryStep = parsedWorkflow.jobs["stage-archive"].steps.find(
   (step) => step.name === "Execute exact poker bot pool refill Stage canary",
@@ -410,6 +410,7 @@ for (const [overrides, allowed] of [
   [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
   [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: checkedSha, GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
   [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "other", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_FEATURE_ENABLED: "0", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
   [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "0", CONFIRMATION_SHA_INPUT: checkedSha }, false],
   [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: "f".repeat(40) }, false],
   [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: "" }, false],
