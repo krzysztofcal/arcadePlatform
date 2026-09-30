@@ -334,7 +334,7 @@ T093 implemented the Stage and Production migration contracts. T095 removed the 
 Final §29 validation used disposable local PostgreSQL 17 only:
 
 - `node --test tests/chips/poker-pool-policy.transaction.test.mjs`: 6/6 passed, including database identity mismatch, kill switch, threshold/no-op, exact mapping/refill, same-hour replay/concurrency, later-hour allowance, mid-ledger pool-local rollback, balanced entries/sequence/registry, and EXPLAIN regressions.
-- The shared CI PostgreSQL database carries table-fence state across its ordered integration steps. The pool fixture now explicitly resets that disposable-only control through the existing `chips_set_table_fence_active(false)` helper; reproducing CI's fence-enabled starting state then passed 6/6, including the concurrent JOIN case.
+- The shared CI PostgreSQL database carries irreversible table-fence/cleanup state across its ordered integration steps. The workflow now creates a separate disposable `poker_pool_test` database before the pool transaction suite, avoiding any attempt to lower an already-activated fence. The same isolated setup passes 6/6 locally.
 - `node tests/chips/chips.migration.test.mjs`: passed on disposable `chips_migration_test`, including Stage default-off/ACL/no-cron/no-MINT and Production P2 identity-substitution/no-mutation checks. The P2 expected Production identifier was replaced only with the local fixture's ID.
 - `node tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs`: passed; `node --test ws-tests/infra-vps-workflow.guard.test.mjs`: 16/16 passed.
 - Focused ledger regression `npx vitest run tests/chips-ledger.test.mjs -t 'rejects every system-only MINT, including the former scheduled refill shape'`: 1 passed, 48 skipped.

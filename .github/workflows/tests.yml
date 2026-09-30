@@ -24,7 +24,7 @@ jobs:
           --health-retries 10
     env:
       CHIPS_MIGRATIONS_TEST_DB_URL: postgresql://postgres:contractpass@127.0.0.1:5433/chips_retention_test
-      POKER_POLICY_TEST_DB_URL: postgresql://postgres:contractpass@127.0.0.1:5433/chips_retention_test
+      POKER_POLICY_TEST_DB_URL: postgresql://postgres:contractpass@127.0.0.1:5433/poker_pool_test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,6 +99,9 @@ jobs:
 
       - name: Run PostgreSQL TABLE metadata fence regressions
         run: node tests/chips/chips-ledger-table-metadata-fence.test.mjs
+
+      - name: Create isolated PostgreSQL poker pool test database
+        run: psql "$CHIPS_MIGRATIONS_TEST_DB_URL" -v ON_ERROR_STOP=1 -c "create database poker_pool_test;"
 
       - name: Run disposable PostgreSQL poker pool refill contracts
         run: node --test tests/chips/poker-pool-policy.transaction.test.mjs
