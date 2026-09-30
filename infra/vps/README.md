@@ -30,9 +30,11 @@ The WS services run as `arcade:arcade`. The production release layout is
 release. Preview uses `/opt/arcade-ws-preview/ws-server` and its external env
 file at `/opt/arcade-ws-preview/.env.preview`.
 
-The Stage dispatcher runs as `copilot` with `HOME=/home/copilot` and
-`GH_CONFIG_DIR=/home/copilot/.config/gh`. The self-hosted runner uses the
-dedicated `arcade-stage-runner` account under
+The chips-ledger Stage cleanup dispatcher (`arcade-chips-ledger-dispatch.service`)
+runs as `copilot` with `HOME=/home/copilot` and
+`GH_CONFIG_DIR=/home/copilot/.config/gh`, authenticated as `krzysztofcal`.
+Preserve this owner-authenticated config for the existing cleanup path. The
+self-hosted runner uses the dedicated `arcade-stage-runner` account under
 `/var/lib/arcade-stage-runner/actions-runner`.
 
 The bootstrap creates the system group `arcade-deploy` and adds only `copilot`
@@ -226,6 +228,13 @@ its dispatcher without enabling or starting either unit. Bootstrap remains
 fresh-host-only; updating an existing host requires the separate owner-approved
 artifact installation procedure. Installing artifacts is not activation.
 
+Poker refill uses a separate GitHub CLI config:
+`GH_CONFIG_DIR=/home/copilot/.config/gh-poker-refill`, authenticated as
+`arcade-poker-refill-dispatch`. Keep the chips-ledger cleanup config at
+`/home/copilot/.config/gh` authenticated as `krzysztofcal`; never re-authenticate
+or overwrite it for poker refill. The dedicated poker config belongs to
+`copilot` and contains GitHub dispatch credentials only, never DB credentials.
+
 The service defaults to Stage `dry-run`. After owner approval, a root-owned
 `/etc/arcade/poker-pool-dispatch.env` file may override only the dispatch choices:
 
@@ -266,6 +275,6 @@ When deploying the scheduler to the running Production VPS:
    POKER_BOT_REFILL_MODE=mutate
    ```
    The workflow ref remains fixed to `main`.
-5. **No DB secrets:** The VPS receives only dedicated GitHub dispatch credentials (`arcade-poker-refill-dispatch`), never Supabase or PostgreSQL connection strings.
+5. **Separate GitHub credentials:** Poker refill uses `/home/copilot/.config/gh-poker-refill` as `arcade-poker-refill-dispatch`; preserve `/home/copilot/.config/gh` as `krzysztofcal` for chips cleanup. The VPS receives no Supabase or PostgreSQL connection strings.
 6. **Controlled invocation before timer activation:** Run exactly one manual/controlled test dispatch with `systemctl start arcade-poker-pool-dispatch.service` and verify the GitHub Actions run outcome.
 7. **Separate owner GO for timer:** Separately enable and start `arcade-poker-pool-dispatch.timer` (`systemctl enable --now arcade-poker-pool-dispatch.timer`) only after the owner explicitly approves the controlled dispatch evidence.

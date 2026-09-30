@@ -6,7 +6,7 @@ After=network.target
 Type=oneshot
 User=copilot
 Environment=HOME=/home/copilot
-Environment=GH_CONFIG_DIR=/home/copilot/.config/gh
+Environment=GH_CONFIG_DIR=/home/copilot/.config/gh-poker-refill
 Environment=PATH=/home/copilot/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=POKER_BOT_REFILL_MODE=dry-run
 Environment=POKER_BOT_REFILL_TARGET=stage
