@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   refill:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && ((inputs.operation != 'initial-seed-all' && (inputs.target == 'stage' || github.ref == 'refs/heads/main') && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && github.actor == vars.POKER_BOT_REFILL_DISPATCH_ACTOR && github.actor == 'arcade-poker-refill-dispatch'))) || (inputs.operation == 'initial-seed-all' && inputs.target == 'production' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.actor == 'krzysztofcal' && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && vars.POKER_BOT_REFILL_PRODUCTION_GO == '1')))) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && ((inputs.operation != 'initial-seed-all' && (inputs.target == 'stage' || github.ref == 'refs/heads/main') && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && github.actor == 'arcade-poker-refill-dispatch'))) || (inputs.operation == 'initial-seed-all' && inputs.target == 'production' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.actor == 'krzysztofcal' && (inputs.mode == 'dry-run' || inputs.mode == 'mutate'))) }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.target == 'production' && 'production-poker-refill' || 'stage-poker-refill' }}
     timeout-minutes: 15
@@ -59,8 +59,6 @@ jobs:
       POKER_BOT_REFILL_MODE: ${{ inputs.mode }}
       POKER_BOT_REFILL_OPERATION: ${{ inputs.operation || 'refill' }}
       POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: ${{ inputs.confirmation_sha || '' }}
-      POKER_BOT_REFILL_FEATURE_ENABLED: ${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}
-      POKER_BOT_REFILL_PRODUCTION_GO: ${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}
       SUPABASE_DB_URL: ${{ (inputs.target == 'production' && secrets.SUPABASE_PROD_DB_URL) || (inputs.target == 'stage' && secrets.SUPABASE_STAGE_DB_URL) || '' }}
     steps:
       - name: Checkout exact dispatch SHA
@@ -86,6 +84,9 @@ jobs:
           REFILL_OPERATION: ${{ inputs.operation || 'refill' }}
           CONFIRMATION_SHA_INPUT: ${{ inputs.confirmation_sha || '' }}
           REVIEWED_REF_INPUT: ${{ inputs.reviewed_ref }}
+          POKER_BOT_REFILL_FEATURE_ENABLED: ${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}
+          POKER_BOT_REFILL_PRODUCTION_GO: ${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}
+          POKER_BOT_REFILL_DISPATCH_ACTOR: ${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR || '' }}
         run: |
           set -euo pipefail
           checked_sha="$(git rev-parse --verify HEAD)"
@@ -126,7 +127,7 @@ jobs:
             fi
             if [[ "$REFILL_MODE" == "mutate" ]]; then
               test "${POKER_BOT_REFILL_FEATURE_ENABLED:-0}" = "1"
-              test "$GITHUB_ACTOR" = "${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR }}"
+              test "$GITHUB_ACTOR" = "${POKER_BOT_REFILL_DISPATCH_ACTOR:-}"
               test "$GITHUB_ACTOR" = "arcade-poker-refill-dispatch"
               if [[ "$REFILL_TARGET" == "production" ]]; then
                 test "${POKER_BOT_REFILL_PRODUCTION_GO:-0}" = "1"
@@ -136,4 +137,7 @@ jobs:
           echo "POKER_BOT_REFILL_CHECKED_SHA=$checked_sha" >> "$GITHUB_ENV"
 
       - name: Run bounded pool refill worker
+        env:
+          POKER_BOT_REFILL_FEATURE_ENABLED: ${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}
+          POKER_BOT_REFILL_PRODUCTION_GO: ${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}
         run: node scripts/ops/poker-bot-pool-refill.mjs
