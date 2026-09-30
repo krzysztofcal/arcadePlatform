@@ -19,10 +19,23 @@ on:
         options:
           - dry-run
           - mutate
+      operation:
+        description: Bounded refill operation
+        required: true
+        default: refill
+        type: choice
+        options:
+          - refill
+          - initial-seed-all
       reviewed_ref:
         description: Immutable reviewed ref; Stage mutation requires the exact 40-character PR SHA, Production requires main
         required: true
         default: main
+        type: string
+      confirmation_sha:
+        description: Exact 40-character commit SHA matching HEAD, required for initial-seed-all mutation
+        required: false
+        default: ''
         type: string
 
 concurrency:
@@ -34,15 +47,18 @@ permissions:
 
 jobs:
   refill:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && (inputs.target == 'stage' || github.ref == 'refs/heads/main') && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && github.actor == vars.POKER_BOT_REFILL_DISPATCH_ACTOR && github.actor == 'arcade-poker-refill-dispatch')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && ((inputs.operation != 'initial-seed-all' && (inputs.target == 'stage' || github.ref == 'refs/heads/main') && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && github.actor == vars.POKER_BOT_REFILL_DISPATCH_ACTOR && github.actor == 'arcade-poker-refill-dispatch'))) || (inputs.operation == 'initial-seed-all' && inputs.target == 'production' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.actor == 'krzysztofcal' && (inputs.mode == 'dry-run' || (inputs.mode == 'mutate' && vars.POKER_BOT_REFILL_ENABLED == '1' && vars.POKER_BOT_REFILL_PRODUCTION_GO == '1')))) }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.target == 'production' && 'production-poker-refill' || 'stage-poker-refill' }}
     timeout-minutes: 15
     env:
       GITHUB_REPOSITORY: ${{ github.repository }}
+      GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
       POKER_BOT_REFILL_REVIEWED_REF: ${{ inputs.target == 'production' && 'main' || inputs.reviewed_ref }}
       POKER_BOT_REFILL_TARGET: ${{ inputs.target }}
       POKER_BOT_REFILL_MODE: ${{ inputs.mode }}
+      POKER_BOT_REFILL_OPERATION: ${{ inputs.operation || 'refill' }}
+      POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: ${{ inputs.confirmation_sha || '' }}
       POKER_BOT_REFILL_FEATURE_ENABLED: ${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}
       POKER_BOT_REFILL_PRODUCTION_GO: ${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}
       SUPABASE_DB_URL: ${{ inputs.target == 'production' && secrets.SUPABASE_PROD_DB_URL || secrets.SUPABASE_STAGE_DB_URL }}
@@ -67,6 +83,8 @@ jobs:
         env:
           REFILL_TARGET: ${{ inputs.target }}
           REFILL_MODE: ${{ inputs.mode }}
+          REFILL_OPERATION: ${{ inputs.operation || 'refill' }}
+          CONFIRMATION_SHA_INPUT: ${{ inputs.confirmation_sha || '' }}
           REVIEWED_REF_INPUT: ${{ inputs.reviewed_ref }}
         run: |
           set -euo pipefail
@@ -76,23 +94,42 @@ jobs:
           test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
           test "$REFILL_TARGET" = "stage" || test "$REFILL_TARGET" = "production"
           test "$REFILL_MODE" = "dry-run" || test "$REFILL_MODE" = "mutate"
-          if [[ "$REFILL_TARGET" == "production" ]]; then
+          test "$REFILL_OPERATION" = "refill" || test "$REFILL_OPERATION" = "initial-seed-all"
+
+          if [[ "$REFILL_OPERATION" == "initial-seed-all" ]]; then
+            test "$REFILL_TARGET" = "production"
             test "$GITHUB_REF" = "refs/heads/main"
             test "$REVIEWED_REF_INPUT" = "main"
             test "$checked_sha" = "$GITHUB_SHA"
-          elif [[ "$REFILL_MODE" == "mutate" ]]; then
-            [[ "$reviewed_ref" =~ ^[0-9a-f]{40}$ ]]
-            test "$GITHUB_SHA" = "$reviewed_ref"
-            test "$reviewed_ref" = "$checked_sha"
-          else
-            test "$REVIEWED_REF_INPUT" = "main" || [[ "$reviewed_ref" =~ ^[0-9a-f]{40}$ ]]
-          fi
-          if [[ "$REFILL_MODE" == "mutate" ]]; then
-            test "${POKER_BOT_REFILL_FEATURE_ENABLED:-0}" = "1"
-            test "$GITHUB_ACTOR" = "${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR }}"
-            test "$GITHUB_ACTOR" = "arcade-poker-refill-dispatch"
-            if [[ "$REFILL_TARGET" == "production" ]]; then
+            test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
+            test "$GITHUB_ACTOR" = "krzysztofcal"
+            test "$GITHUB_ACTOR" != "arcade-poker-refill-dispatch"
+            if [[ "$REFILL_MODE" == "mutate" ]]; then
+              test "${POKER_BOT_REFILL_FEATURE_ENABLED:-0}" = "1"
               test "${POKER_BOT_REFILL_PRODUCTION_GO:-0}" = "1"
+              [[ "$CONFIRMATION_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]]
+              test "$CONFIRMATION_SHA_INPUT" = "$checked_sha"
+              test "$CONFIRMATION_SHA_INPUT" = "$GITHUB_SHA"
+            fi
+          else
+            if [[ "$REFILL_TARGET" == "production" ]]; then
+              test "$GITHUB_REF" = "refs/heads/main"
+              test "$REVIEWED_REF_INPUT" = "main"
+              test "$checked_sha" = "$GITHUB_SHA"
+            elif [[ "$REFILL_MODE" == "mutate" ]]; then
+              [[ "$reviewed_ref" =~ ^[0-9a-f]{40}$ ]]
+              test "$GITHUB_SHA" = "$reviewed_ref"
+              test "$reviewed_ref" = "$checked_sha"
+            else
+              test "$REVIEWED_REF_INPUT" = "main" || [[ "$reviewed_ref" =~ ^[0-9a-f]{40}$ ]]
+            fi
+            if [[ "$REFILL_MODE" == "mutate" ]]; then
+              test "${POKER_BOT_REFILL_FEATURE_ENABLED:-0}" = "1"
+              test "$GITHUB_ACTOR" = "${{ vars.POKER_BOT_REFILL_DISPATCH_ACTOR }}"
+              test "$GITHUB_ACTOR" = "arcade-poker-refill-dispatch"
+              if [[ "$REFILL_TARGET" == "production" ]]; then
+                test "${POKER_BOT_REFILL_PRODUCTION_GO:-0}" = "1"
+              fi
             fi
           fi
           echo "POKER_BOT_REFILL_CHECKED_SHA=$checked_sha" >> "$GITHUB_ENV"

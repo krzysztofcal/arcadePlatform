@@ -1,10 +1,11 @@
-# Issue source: #1018
+# Live Issue Source: GitHub Issue #1018
 
-**Authoritative requirements**: https://github.com/krzysztofcal/arcadePlatform/issues/1018
+- Source Issue: https://github.com/krzysztofcal/arcadePlatform/issues/1018
+- Title: Poker: simplified anti-farming alternative — periodic per-tier bot bankroll refill and SLOW pool
+- Live updated_at: 2026-09-30T07:50:43Z
+- Note: This document is a literal snapshot of GitHub Issue #1018 including amendments §25, §26, §27, and §28.
 
-**Live updated_at**: 2026-09-29T20:57:47Z
-
-**Snapshot captured**: 2026-09-30. Exact live issue body below. Live #1018 is the sole feature requirements source. #869/#1017 remain separate.
+---
 
 # Poker: simplified anti-farming alternative — periodic per-tier bot bankroll refill + SLOW pool
 
@@ -1462,3 +1463,163 @@ T084 authorizes only the above Stage refill and managed-profile restoration. It 
 - Any new inline script requires CSP SHA allowlisting.
 - Double-check/refactor the final diff and explicitly report breaking impacts.
 - No Production mutation, live-VPS mutation, merge or hidden scope expansion.
+
+
+## §28 Pre-merge future-tier bankroll readiness — all configured tiers through 10M
+
+Owner requirement: prepare bot liquidity now for the full canonical poker progression catalog so that future tier unlocks do not require another bankroll schema/mapping migration. This amendment extends the #1018 exact NORMAL/SLOW pool model to every currently configured default buy-in tier while keeping all tiers above 500 CH disabled after rollout.
+
+Canonical catalog from `shared/poker-domain/poker-progression.mjs::DEFAULT_POKER_BUY_IN_TIERS`:
+
+`100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000, 10_000_000`.
+
+This is a **pre-merge implementation requirement**, not documentation-only. It changes shared/runtime funding resolution and therefore invalidates the previous exact-runtime-SHA Preview gate. A new exact-SHA WS Preview Deploy + focused smoke is required before #1019 can again be merge-ready.
+
+### T085 — One canonical bot-funding tier catalog and exact key mapping
+
+Update `shared/poker-domain/table-economy.mjs` and `shared/poker-domain/poker-progression.mjs` without duplicating tier lists.
+
+Requirements:
+
+1. Keep one canonical ordered supported catalog equal to the 11 tiers above and reuse it for progression and schema-backed bot funding.
+2. For explicit schema-backed `poolClass`:
+   - NORMAL 100 → `POKER_BOT_BANKROLL_100`
+   - NORMAL 500 → existing legacy `POKER_BOT_BANKROLL` (identity/provenance preserved)
+   - NORMAL >500 → `POKER_BOT_BANKROLL_<buyIn>`
+   - SLOW every tier → `POKER_BOT_SLOW_BANKROLL_<buyIn>`
+3. Reject any explicit pool mapping whose buy-in is not in the canonical 11-tier catalog.
+4. Preserve pre-migration/legacy no-`poolClass` behavior exactly: 100 uses its existing legacy source semantics, 500 uses `POKER_BOT_BANKROLL`, and >500 remains unsupported on the legacy path. Higher-tier support must only become reachable through the schema-backed policy path.
+5. Do not create a generic arbitrary-system-key mechanism.
+
+### T086 — Extend trusted scheduled refill authority to the same 22 exact pools
+
+Update:
+
+- `netlify/functions/_shared/chips-ledger.mjs::SCHEDULED_POOL_CONFIG`
+- `scripts/ops/poker-bot-pool-refill.mjs::resolveRefillAuthorization/refillPool/runRefill`
+- existing fundamental refill/ledger tests only.
+
+Requirements:
+
+1. Scheduled SYSTEM MINT authority must recognize exactly NORMAL+SLOW mappings for the canonical 11 tiers and nothing else.
+2. Replace the current explicit buy-in filter restriction `[100, 500]` with the canonical 11-tier catalog.
+3. Ordinary scheduled refill remains unchanged: it processes **enabled tiers only** and never refills a disabled future tier.
+4. Add one narrowly gated **initial-seed-all** operation for Production rollout. It may read disabled policy rows and fund their exact pools without enabling the tier.
+5. Initial-seed-all must be impossible for the periodic VPS timer/default dispatcher path. It requires:
+   - target `production`;
+   - mutate mode;
+   - `main`;
+   - exact checked merged SHA;
+   - Production environment gate;
+   - explicit one-time owner confirmation bound to that SHA;
+   - the same trusted balanced `GENESIS → exact SYSTEM pool` ledger path.
+6. No direct SQL balance update, arbitrary SYSTEM MINT, catch-up loop or TREASURY fallback.
+7. Re-running initial-seed-all must be safe/idempotent under the existing pool/bucket and balance rules; already sufficiently funded pools may return `no_op`.
+8. The recurring 3-hour scheduler must continue to ignore all disabled >500 tiers until each tier is explicitly enabled later.
+
+### T087 — Provision the full future catalog on Stage and in Production P1
+
+Because the original Stage #1018 migration is already immutable/applied, create one new forward-only Stage migration using the normal `supabase migration new` flow. Before push, declare its automatic shared-Stage effect.
+
+Stage migration:
+
+- add disabled policy rows for `1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000, 10_000_000`;
+- create both exact NORMAL and SLOW SYSTEM accounts for those nine tiers at balance 0;
+- do not modify the already applied 100/500 policy rows or balances;
+- do not MINT;
+- do not enable a tier.
+
+Update the unapplied Production P1 `20260929201500_poker_bot_quarantine_production_contract.sql` so its final dark/off state contains all 11 policy rows and all 22 exact NORMAL/SLOW accounts, while preserving existing Production `POKER_BOT_BANKROLL`.
+
+Production P1 still performs zero financial transactions/MINTs and leaves **all 11 tiers disabled**.
+
+### T088 — Default dormant policy values
+
+Keep the existing reviewed 100 and 500 values unchanged.
+
+For every tier >= 1,000 CH, use one simple proportional dormant default:
+
+- NORMAL refill threshold = `10 × buy_in`
+- NORMAL refill amount = `20 × buy_in`
+- SLOW refill threshold = `4 × buy_in`
+- SLOW refill amount = `10 × buy_in`
+
+These values are configuration defaults while the tiers remain disabled. They do not authorize gameplay or scheduled MINT.
+
+Before the future Production initial seed, the operator must review the exact values. The owner may change them while the tier is disabled through the existing Admin policy path before funding.
+
+### T089 — Production initial seed of every tier before normal activation
+
+Extend the checked-in post-merge runbook.
+
+After P1 is applied and verified, but while all tier policies remain disabled:
+
+1. Review all 11 policy rows and all 22 exact accounts.
+2. Explicitly approve the initial-seed-all operation.
+3. Run it once through the reviewed owner-gated Production workflow.
+4. For a zero-balance pool, the initial seed uses that pool's configured refill amount through the normal trusted ledger MINT path.
+5. Existing `POKER_BOT_BANKROLL` 500 NORMAL is preserved; if already above its threshold it must no-op rather than receive an unnecessary MINT.
+6. Verify every canonical NORMAL/SLOW pool is active and positively funded, with ledger-balanced exact source metadata.
+7. Leave tiers >500 **disabled** after funding.
+8. Then enable only the currently approved playable bot tiers (initial rollout remains 100 and 500 unless separately changed).
+9. Future unlocking of a pre-provisioned higher tier must require only the existing product/progression gate plus explicit tier-policy enablement; no new bankroll account/mapping migration should be needed.
+10. Once a higher tier is enabled, the ordinary 3-hour scheduler automatically starts maintaining both its NORMAL and SLOW pools under the existing enabled-policy query.
+
+With the T088 defaults, a full zero-balance seed would represent up to `500,002,000 CH` across the 22 configured refill amounts. Because Production already has a heavily funded legacy 500 NORMAL pool, that exact pool is expected to no-op; the actual new MINT total must be computed and displayed by a dry-run before owner confirmation. Never perform the seed solely from this theoretical total.
+
+### T090 — Fundamental verification only
+
+Extend existing tests, no broad new suite:
+
+- `shared/poker-domain/poker-progression.behavior.test.mjs`: canonical catalog and exact NORMAL/SLOW mapping at representative low/mid/max tiers, including 10M; unsupported canonical-looking values reject.
+- existing ledger tests: trusted scheduled refill accepts canonical max-tier keys and rejects arbitrary pool keys/metadata mismatch.
+- `scripts/ops/poker-bot-pool-refill.behavior.test.mjs`: all-tier filter support, disabled tiers ignored in ordinary refill, initial-seed-all can inspect disabled tiers only under the exact Production owner gate, timer/default path cannot invoke seed mode, replay/no-op behavior.
+- migration tests: Stage forward migration and Production P1 contain exactly 11 policy rows / 22 mapped pools; existing 500 NORMAL identity/balance/provenance preserved; P1 still emits zero ledger rows.
+- Admin tier update test only if needed to prove an existing generic path can enable a pre-provisioned 10M tier once both exact pools exist.
+
+### T091 — New exact-SHA runtime gate
+
+T085/T086 change shared and Netlify runtime dependencies. Therefore:
+
+1. previous runtime SHA `7340b270312b26dc51e0471f3e0afc758cf8a9de` remains historical evidence only;
+2. after implementation and green CI, deploy the **latest runtime-affecting SHA** through manual WS Preview Deploy;
+3. verify matching deployed SHA and health;
+4. perform a narrow Stage/Preview smoke that proves current 100/500 behavior did not regress and a disabled high-tier policy cannot fund bots;
+5. do **not** seed higher Stage tiers solely for this smoke;
+6. current five Stage continuous tables must remain healthy; verify read-only after the deployment.
+
+### T092 — Final handoff / merge gate
+
+Before returning #1019 to merge-ready, report:
+
+- final 11-tier catalog;
+- exact 22 key mappings, including preserved legacy 500 NORMAL key;
+- Stage forward migration name and Stage apply result;
+- new P1 SHA256;
+- dry-run/behavior test evidence for initial-seed-all;
+- exact latest runtime SHA + WS Preview Deploy run;
+- read-only Stage evidence that 5 continuous tables remain healthy;
+- confirmation that Production and live VPS remain unmodified.
+
+Production execution, Production initial seed, VPS installation/timer activation and merge remain separately unauthorized until the owner explicitly approves them.
+
+### Breaking-impact notes for §28
+
+- Shared funding resolution expands from 100/500 to the canonical 11-tier catalog on the schema-backed path.
+- The trusted scheduled MINT allowlist expands from 4 exact pools to 22 exact pools, still derived from canonical tier/class mappings and guarded by workflow authority.
+- A new Stage migration intentionally provisions disabled future-tier policy rows/accounts at zero; this must not change current Stage economics.
+- Production P1 grows from 4 total exact pool accounts to the full 22-account catalog, still dark/off and zero-MINT.
+- The one-time Production initial seed can create a large ledger MINT total; mandatory dry-run and explicit owner confirmation are required before execution.
+- Tiers >500 remain disabled after seed. Funding readiness is not gameplay enablement.
+
+### Implementation notes for §28
+
+- Re-read live `agents.md` and `skills.md`.
+- Keep one tier catalog and one exact key resolver; do not duplicate 11-entry maps in multiple runtime files.
+- Preserve the special historical `POKER_BOT_BANKROLL` key for NORMAL 500.
+- Keep legacy pre-schema behavior unchanged.
+- Reuse the existing refill worker, ledger path, workflow, Admin policy endpoint and tests; no second scheduler or generic mint service.
+- Only fundamental deterministic tests.
+- No direct Production/VPS mutation during implementation.
+- Runtime changes require the new exact-SHA Preview gate before merge-ready.
+- Keep implementation simple, JSP-compatible, klog-only, no CSS/CSP change unless strictly necessary.

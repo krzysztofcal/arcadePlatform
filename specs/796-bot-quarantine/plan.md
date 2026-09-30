@@ -150,7 +150,7 @@ Addresses the two remaining P1 blockers from Issue #1018 following the successfu
    - In `createManagedTable()`: defense-in-depth preflight throws `tier_disabled` / `tier_unprovisioned` fast.
 
 4. **T050 — SpecKit synchronization**:
-   Update `plan.md`, `tasks.md`, `quickstart.md`, and `contracts/bot-quarantine.md`. T036 marked complete; Phase 11 added for T047–T052. T037 remains blocked on pre-merge acceptance.
+   Update `plan.md`, `tasks.md`, `quickstart.md`, and `contracts/bot-quarantine.md`. T036 marked complete; Phase 11 added for T047–T052. (Subsequent pre-merge acceptance T037 and continuous inventory restoration T084 have both completed as PASS).
 
 5. **T051 — Validation, deployment & read-only Stage verification**:
    Run full focused behavioral tests, CI guards, push to PR branch, dispatch exact-SHA WS Preview Deploy, verify runtime health, and verify Stage read-only invariant (tier 100 disabled, no supervisor seed errors, chips ledger unchanged).

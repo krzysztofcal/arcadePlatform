@@ -272,28 +272,56 @@ assert.doesNotMatch(refillWorkflow, /github\.event\.inputs\.mode\s*==\s*'mutate'
 // Dispatch inputs select a target/mode; repository variables and trusted context
 // remain the authority even when the VPS requests mutation.
 const refillJob = parsedRefillWorkflow.jobs.refill;
-assert.deepEqual(Object.keys(refillTriggers.workflow_dispatch.inputs).sort(), ["mode", "reviewed_ref", "target"]);
+assert.deepEqual(Object.keys(refillTriggers.workflow_dispatch.inputs).sort(), [
+  "confirmation_sha",
+  "mode",
+  "operation",
+  "reviewed_ref",
+  "target",
+]);
+assert.deepEqual(refillTriggers.workflow_dispatch.inputs.operation.options, [
+  "refill",
+  "initial-seed-all",
+]);
 assert.equal(refillJob.environment, "${{ inputs.target == 'production' && 'production-poker-refill' || 'stage-poker-refill' }}");
 assert.equal(refillJob.env.POKER_BOT_REFILL_FEATURE_ENABLED, "${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}");
 assert.equal(refillJob.env.POKER_BOT_REFILL_PRODUCTION_GO, "${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}");
+assert.equal(refillJob.env.POKER_BOT_REFILL_OPERATION, "${{ inputs.operation || 'refill' }}");
+assert.equal(refillJob.env.POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION, "${{ inputs.confirmation_sha || '' }}");
 const refillJobAllowed = new Function("github", "inputs", "vars", `return (${refillJob.if.slice(3, -2)});`);
 const stageRefillGithub = {
-  event_name: "workflow_dispatch", repository: "krzysztofcal/arcadePlatform",
+  event_name: "workflow_dispatch", repository: "krzysztofcal/arcadePlatform", repository_owner: "krzysztofcal",
   event: { repository: { fork: false } }, ref: "refs/heads/docs/issue-1018-bot-quarantine", actor: "arcade-poker-refill-dispatch",
 };
-const refillVars = { POKER_BOT_REFILL_ENABLED: "1", POKER_BOT_REFILL_DISPATCH_ACTOR: "arcade-poker-refill-dispatch" };
-assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate" }, refillVars), true);
+const refillVars = { POKER_BOT_REFILL_ENABLED: "1", POKER_BOT_REFILL_DISPATCH_ACTOR: "arcade-poker-refill-dispatch", POKER_BOT_REFILL_PRODUCTION_GO: "1" };
+assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate", operation: "refill" }, refillVars), true);
 const productionRefillGithub = { ...stageRefillGithub, ref: "refs/heads/main" };
-assert.equal(refillJobAllowed(productionRefillGithub, { target: "production", mode: "mutate" }, refillVars), true);
+assert.equal(refillJobAllowed(productionRefillGithub, { target: "production", mode: "mutate", operation: "refill" }, refillVars), true);
 for (const overrides of [
   { repository: "other/repo" }, { actor: "owner" },
   { event_name: "push" }, { event: { repository: { fork: true } } },
-]) assert.equal(refillJobAllowed({ ...stageRefillGithub, ...overrides }, { target: "stage", mode: "mutate" }, refillVars), false);
-assert.equal(refillJobAllowed({ ...stageRefillGithub, ref: "refs/heads/main" }, { target: "stage", mode: "mutate" }, refillVars), true);
-assert.equal(refillJobAllowed({ ...productionRefillGithub, ref: "refs/heads/release" }, { target: "production", mode: "mutate" }, refillVars), false);
+]) assert.equal(refillJobAllowed({ ...stageRefillGithub, ...overrides }, { target: "stage", mode: "mutate", operation: "refill" }, refillVars), false);
+assert.equal(refillJobAllowed({ ...stageRefillGithub, ref: "refs/heads/main" }, { target: "stage", mode: "mutate", operation: "refill" }, refillVars), true);
+assert.equal(refillJobAllowed({ ...productionRefillGithub, ref: "refs/heads/release" }, { target: "production", mode: "mutate", operation: "refill" }, refillVars), false);
 for (const overrides of [{ POKER_BOT_REFILL_ENABLED: "0" }, { POKER_BOT_REFILL_DISPATCH_ACTOR: "other" }]) {
-  assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate" }, { ...refillVars, ...overrides }), false);
+  assert.equal(refillJobAllowed(stageRefillGithub, { target: "stage", mode: "mutate", operation: "refill" }, { ...refillVars, ...overrides }), false);
 }
+
+// Initial-seed-all job-level authority matrix:
+const ownerInitialSeedGithub = {
+  event_name: "workflow_dispatch", repository: "krzysztofcal/arcadePlatform", repository_owner: "krzysztofcal",
+  event: { repository: { fork: false } }, ref: "refs/heads/main", actor: "krzysztofcal",
+};
+assert.equal(refillJobAllowed(ownerInitialSeedGithub, { target: "production", mode: "mutate", operation: "initial-seed-all" }, refillVars), true);
+assert.equal(refillJobAllowed(ownerInitialSeedGithub, { target: "production", mode: "dry-run", operation: "initial-seed-all" }, refillVars), true);
+// Dispatcher is forbidden from initial-seed-all:
+assert.equal(refillJobAllowed({ ...ownerInitialSeedGithub, actor: "arcade-poker-refill-dispatch" }, { target: "production", mode: "mutate", operation: "initial-seed-all" }, refillVars), false);
+// Non-production target is rejected:
+assert.equal(refillJobAllowed(ownerInitialSeedGithub, { target: "stage", mode: "mutate", operation: "initial-seed-all" }, refillVars), false);
+// Non-main ref is rejected:
+assert.equal(refillJobAllowed({ ...ownerInitialSeedGithub, ref: "refs/heads/feature" }, { target: "production", mode: "mutate", operation: "initial-seed-all" }, refillVars), false);
+// Production GO missing is rejected for mutate:
+assert.equal(refillJobAllowed(ownerInitialSeedGithub, { target: "production", mode: "mutate", operation: "initial-seed-all" }, { ...refillVars, POKER_BOT_REFILL_PRODUCTION_GO: "0" }), false);
 
 const canaryStep = parsedWorkflow.jobs["stage-archive"].steps.find(
   (step) => step.name === "Execute exact poker bot pool refill Stage canary",
@@ -340,10 +368,12 @@ const refillBoundaryRun = refillBoundary.run.replace("${{ vars.POKER_BOT_REFILL_
 const checkedSha = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { encoding: "utf8" }).stdout.trim();
 assert.match(checkedSha, /^[0-9a-f]{40}$/);
 const refillBoundaryEnv = {
-  GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform", GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
+  GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform", GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+  GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine",
   GITHUB_SHA: checkedSha, GITHUB_ENV: "/dev/null",
   GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_ACTOR: "arcade-poker-refill-dispatch",
   REVIEWED_REF_INPUT: checkedSha, REFILL_TARGET: "stage", REFILL_MODE: "mutate",
+  REFILL_OPERATION: "refill", CONFIRMATION_SHA_INPUT: "",
   POKER_BOT_REFILL_FEATURE_ENABLED: "1", POKER_BOT_REFILL_PRODUCTION_GO: "0",
 };
 for (const [overrides, allowed] of [
@@ -360,6 +390,17 @@ for (const [overrides, allowed] of [
   [{ GITHUB_ACTOR: "owner" }, false],
   [{ REFILL_TARGET: "other" }, false],
   [{ REFILL_MODE: "automatic" }, false],
+  [{ REFILL_OPERATION: "invalid" }, false],
+  // initial-seed-all boundary matrix:
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, true],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "arcade-poker-refill-dispatch", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "stage", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/docs/issue-1018-bot-quarantine", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: checkedSha, GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "other", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: checkedSha }, false],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "0", CONFIRMATION_SHA_INPUT: checkedSha }, false],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: "f".repeat(40) }, false],
+  [{ REFILL_OPERATION: "initial-seed-all", REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", GITHUB_ACTOR: "krzysztofcal", POKER_BOT_REFILL_PRODUCTION_GO: "1", CONFIRMATION_SHA_INPUT: "" }, false],
 ]) {
   const result = spawnSync("bash", ["-c", refillBoundaryRun], {
     env: { ...refillBoundaryEnv, ...overrides }, encoding: "utf8",
@@ -637,5 +678,74 @@ assert.deepEqual(Object.keys(productionEnv).sort(), [
   "SUPABASE_PROD_SERVICE_ROLE_KEY",
   "SUPABASE_PROD_URL",
 ].sort(), "Production job must expose only target-bound credentials and gates");
+
+// Runtime smoke contract verification for T091 (§28):
+// 1. Existing 100/500 behavior does not regress under generic mapping
+// 2. Disabled high tier (e.g. 1000) cannot execute bot funding
+// 3. Zero higher-tier funding allowed
+const { getBotFundingSystemKeyForBuyIn } = await import("../../shared/poker-domain/table-economy.mjs");
+const { decideSettledBotFunding } = await import("../../ws-server/poker/runtime/settled-bot-funding.mjs");
+
+assert.equal(getBotFundingSystemKeyForBuyIn(100, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL_100");
+assert.equal(getBotFundingSystemKeyForBuyIn(100, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_100");
+assert.equal(getBotFundingSystemKeyForBuyIn(500, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL");
+assert.equal(getBotFundingSystemKeyForBuyIn(500, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_500");
+assert.equal(getBotFundingSystemKeyForBuyIn(1000, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL_1000");
+assert.equal(getBotFundingSystemKeyForBuyIn(1000, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_1000");
+
+// Legacy callers without poolClass remain supported for 100/500, and return null for higher tiers:
+assert.equal(getBotFundingSystemKeyForBuyIn(100), "TREASURY");
+assert.equal(getBotFundingSystemKeyForBuyIn(500), "POKER_BOT_BANKROLL");
+assert.equal(getBotFundingSystemKeyForBuyIn(1000), null);
+
+const smokeSnapshot = {
+  schemaBacked: true,
+  expiresAtMs: Date.now() + 60000,
+  tiers: {
+    100: { enabled: true, provisioned: { NORMAL: true, SLOW: true } },
+    500: { enabled: true, provisioned: { NORMAL: true, SLOW: true } },
+    1000: { enabled: false, provisioned: { NORMAL: true, SLOW: true } },
+    5000: { enabled: false, provisioned: { NORMAL: true, SLOW: true } },
+    10000000: { enabled: false, provisioned: { NORMAL: true, SLOW: true } },
+  },
+};
+
+// 100/500 enabled funding succeeds:
+const norm100 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 100, isSlowOnly: false });
+assert.equal(norm100.allowed, true);
+assert.equal(norm100.systemKey, "POKER_BOT_BANKROLL_100");
+assert.equal(norm100.poolClass, "NORMAL");
+
+const slow100 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 100, isSlowOnly: true });
+assert.equal(slow100.allowed, true);
+assert.equal(slow100.systemKey, "POKER_BOT_SLOW_BANKROLL_100");
+assert.equal(slow100.poolClass, "SLOW");
+
+const norm500 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 500, isSlowOnly: false });
+assert.equal(norm500.allowed, true);
+assert.equal(norm500.systemKey, "POKER_BOT_BANKROLL");
+assert.equal(norm500.poolClass, "NORMAL");
+
+const slow500 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 500, isSlowOnly: true });
+assert.equal(slow500.allowed, true);
+assert.equal(slow500.systemKey, "POKER_BOT_SLOW_BANKROLL_500");
+assert.equal(slow500.poolClass, "SLOW");
+
+// Disabled high tier 1000 fails closed:
+const norm1000 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 1000, isSlowOnly: false });
+assert.equal(norm1000.allowed, false);
+assert.equal(norm1000.systemKey, null);
+assert.equal(norm1000.reason, "tier_disabled");
+
+const slow1000 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 1000, isSlowOnly: true });
+assert.equal(slow1000.allowed, false);
+assert.equal(slow1000.systemKey, null);
+assert.equal(slow1000.reason, "tier_disabled");
+
+// Max tier 10M disabled fails closed:
+const norm10M = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 10000000, isSlowOnly: false });
+assert.equal(norm10M.allowed, false);
+assert.equal(norm10M.systemKey, null);
+assert.equal(norm10M.reason, "tier_disabled");
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");
