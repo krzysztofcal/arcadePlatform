@@ -24,6 +24,7 @@ test("setDesiredState persists a bounded profile and keeps configured desired co
     maxDesiredTables: 100,
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
         if (sql.includes("update public.poker_managed_table_profiles")) {
           updateSql = sql;
@@ -62,6 +63,7 @@ test("setDesiredState atomically persists an extended 1/1/1 bot profile", async 
     maxDesiredTables: 2,
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE, desired_table_count: 0 }];
         if (sql.includes("update public.poker_managed_table_profiles")) {
           updateCount += 1;
@@ -116,6 +118,7 @@ test("setDesiredState rejects bot-count ordering before the profile UPDATE", asy
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     beginSql: async (run) => run({
       unsafe: async (sql) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
         if (sql.includes("update public.poker_managed_table_profiles")) updateCount += 1;
         return [];
@@ -143,6 +146,7 @@ test("setDesiredState rejects a desired-count jump larger than the ramp-up step"
     maxDesiredTables: 100,
     beginSql: async (run) => run({
       unsafe: async (sql) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE }];
         if (sql.includes("update public.poker_managed_table_profiles")) updateCalled = true;
         return [];
@@ -171,6 +175,7 @@ test("reconcile creates at most two missing tables per sweep", async () => {
     maxDesiredTables: 100,
     beginSql: async (run) => run({
       unsafe: async (sql) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) {
           return [{ ...PROFILE, enabled: true, desired_table_count: 100, min_bot_count: 0, target_bot_count: 0, max_bot_count: 0 }];
         }
@@ -194,6 +199,123 @@ test("reconcile creates at most two missing tables per sweep", async () => {
   assert.equal(result.remainingTableCount, 98);
 });
 
+test("reconcile treats an enabled profile with disabled tier 100 as controlled inactive without table creation churn", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000825";
+  let tableInserted = false;
+  let transactionCommitted = false;
+  let transactionRolledBack = false;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    beginSql: async (run) => {
+      const tx = {
+        unsafe: async (sql) => {
+          const normalizedSql = String(sql).toLowerCase();
+          if (normalizedSql.includes("to_regclass")) return [{ available: true }];
+          if (normalizedSql.includes("from public.poker_managed_table_profiles")) {
+            return [{
+              ...PROFILE,
+              enabled: true,
+              desired_table_count: 1,
+              min_bot_count: 1,
+              target_bot_count: 1,
+              max_bot_count: 1
+            }];
+          }
+          if (normalizedSql.includes("from public.poker_tables") && normalizedSql.includes("for update")) return [];
+          if (normalizedSql.includes("insert into public.poker_tables")) {
+            tableInserted = true;
+            return [{ id: tableId }];
+          }
+          if (normalizedSql.includes("from public.poker_bot_tier_policy")) {
+            return [{
+              buy_in: 100,
+              enabled: false,
+              normal_refill_threshold_ch: 1,
+              normal_refill_amount_ch: 1,
+              slow_refill_threshold_ch: 1,
+              slow_refill_amount_ch: 1,
+              revision: 1
+            }];
+          }
+          if (normalizedSql.includes("from public.chips_accounts") && normalizedSql.includes("system_key = any")) return [];
+          if (normalizedSql.includes("insert into public.chips_accounts")) return [{ id: "escrow-id" }];
+          if (normalizedSql.includes("select state from public.poker_state")) {
+            return [{ state: { tableId, phase: "INIT", seats: [], stacks: {} } }];
+          }
+          if (normalizedSql.includes("update public.poker_state")) return [{ table_id: tableId }];
+          return [];
+        }
+      };
+      try {
+        const result = await run(tx);
+        transactionCommitted = true;
+        return result;
+      } catch (error) {
+        transactionRolledBack = true;
+        throw error;
+      }
+    }
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(tableInserted, false);
+  assert.equal(transactionCommitted, true);
+  assert.equal(transactionRolledBack, false);
+  assert.equal(result.ok, true);
+  assert.equal(result.controlledInactive, true);
+  assert.equal(result.reason, "tier_disabled");
+  assert.deepEqual(result.createdTableIds, []);
+
+  // kolejne reconcile również nie generuje churnu
+  const secondResult = await repository.reconcile();
+  assert.equal(tableInserted, false);
+  assert.equal(secondResult.ok, true);
+  assert.equal(secondResult.controlledInactive, true);
+  assert.equal(secondResult.reason, "tier_disabled");
+  assert.deepEqual(secondResult.createdTableIds, []);
+});
+
+test("reconcile retires an existing managed table below its minimum bot occupancy", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000826";
+  let retirementUpdate = false;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    beginSql: async (run) => run({
+      unsafe: async (sql) => {
+        const normalizedSql = String(sql).toLowerCase();
+        if (normalizedSql.includes("to_regclass")) return [{ available: true }];
+        if (normalizedSql.includes("from public.poker_managed_table_profiles")) {
+          return [{ ...PROFILE, enabled: true, desired_table_count: 1, min_bot_count: 2, target_bot_count: 3, max_bot_count: 3 }];
+        }
+        if (normalizedSql.includes("from public.poker_tables") && normalizedSql.includes("for update")) {
+          return [{
+            id: tableId,
+            status: "OPEN",
+            max_players: 6,
+            buy_in: 100,
+            stakes: JSON.stringify({ sb: 1, bb: 2 }),
+            managed_profile_key: "CONTINUOUS_BOT_DEFAULT",
+            rotation_due_at: null,
+            created_at: "2026-09-27T19:00:00.000Z",
+            active_bot_count: 0
+          }];
+        }
+        if (normalizedSql.includes("update public.poker_tables set rotation_due_at")) {
+          retirementUpdate = true;
+          return [{ id: tableId }];
+        }
+        return [];
+      }
+    })
+  });
+  const result = await repository.reconcile();
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.retirementTableIds, [tableId]);
+  assert.deepEqual(result.activeTableIds, []);
+  assert.equal(retirementUpdate, true);
+});
+
 test("preview profile with desired count five creates canonical 100 CH tables", async () => {
   const tableIds = [
     "00000000-0000-4000-8000-000000000823",
@@ -206,6 +328,7 @@ test("preview profile with desired count five creates canonical 100 CH tables", 
     maxDesiredTables: 100,
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) {
           return [{ ...PROFILE, enabled: true, desired_table_count: 5, min_bot_count: 0, target_bot_count: 0, max_bot_count: 0 }];
         }
@@ -259,6 +382,7 @@ test("requestRetirement persists a due rotation for the exact managed table", as
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         queries.push({ sql, params });
         if (sql.includes("select id, status, lifecycle_kind, managed_profile_key, rotation_due_at")) {
           return [{
@@ -291,6 +415,7 @@ test("readStatus limits maintenance status to open continuous tables", async () 
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     beginSql: async (run) => run({
       unsafe: async (sql) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) return [{ ...PROFILE, enabled: true }];
         if (sql.includes("from public.poker_tables")) {
           assert.match(sql, /where status = 'OPEN'/);
@@ -314,6 +439,7 @@ test("reconcile schedules a missing rotation deadline from the table creation ti
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         queries.push({ sql, params });
         if (sql.includes("from public.poker_managed_table_profiles")) {
           return [{
@@ -364,6 +490,7 @@ test("postponeRotation extends only an already-due managed table", async () => {
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         queries.push({ sql, params });
         if (sql.includes("set rotation_due_at = $2") && sql.includes("rotation_due_at <= now()")) {
           return [{ id: tableId, rotation_due_at: "2026-07-29T15:05:00.000Z" }];
@@ -388,6 +515,7 @@ test("reconcile always returns rotationScheduledTableIds and rotationDueAtByTabl
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
     beginSql: async (run) => run({
       unsafe: async (sql) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) {
           return [{
             profile_key: "CONTINUOUS_BOT_DEFAULT",
@@ -426,6 +554,7 @@ test("reconcile includes a newly created table in rotationScheduledTableIds", as
     env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
     beginSql: async (run) => run({
       unsafe: async (sql, params) => {
+        if (sql.includes("to_regclass")) return [{ available: false }];
         if (sql.includes("from public.poker_managed_table_profiles")) {
           return [{
             profile_key: "CONTINUOUS_BOT_DEFAULT",
@@ -474,4 +603,59 @@ test("reconcile includes a newly created table in rotationScheduledTableIds", as
     Number.isFinite(Date.parse(result.rotationDueAtByTableId[newTableId])),
     "rotationDueAtByTableId entry must be a valid ISO timestamp"
   );
+});
+
+test("reconcile treats an enabled profile with unprovisioned tier 100 as controlled inactive with zero table INSERT", async () => {
+  let tableInserted = false;
+  const repository = createContinuousBotTableRepository({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", POKER_BOTS_ENABLED: "1" },
+    beginSql: async (run) => {
+      const tx = {
+        unsafe: async (sql) => {
+          const normalizedSql = String(sql).toLowerCase();
+          if (normalizedSql.includes("to_regclass")) return [{ available: true }];
+          if (normalizedSql.includes("from public.poker_managed_table_profiles")) {
+            return [{
+              ...PROFILE,
+              enabled: true,
+              desired_table_count: 1,
+              min_bot_count: 1,
+              target_bot_count: 1,
+              max_bot_count: 1
+            }];
+          }
+          if (normalizedSql.includes("from public.poker_tables") && normalizedSql.includes("for update")) return [];
+          if (normalizedSql.includes("from public.poker_bot_tier_policy")) {
+            return [{
+              buy_in: 100,
+              enabled: true,
+              normal_refill_threshold_ch: 1,
+              normal_refill_amount_ch: 1,
+              slow_refill_threshold_ch: 1,
+              slow_refill_amount_ch: 1,
+              revision: 1
+            }];
+          }
+          // Provisioning check: only NORMAL is provisioned, SLOW is missing
+          if (normalizedSql.includes("from public.chips_accounts") && normalizedSql.includes("system_key = any")) {
+            return [{ system_key: "POKER_BOT_BANKROLL_100", status: "ACTIVE" }];
+          }
+          if (normalizedSql.includes("insert into public.poker_tables")) {
+            tableInserted = true;
+            return [{ id: "unwanted-table-id" }];
+          }
+          return [];
+        }
+      };
+      return run(tx);
+    }
+  });
+
+  const result = await repository.reconcile();
+
+  assert.equal(tableInserted, false);
+  assert.equal(result.ok, true);
+  assert.equal(result.controlledInactive, true);
+  assert.equal(result.reason, "tier_unprovisioned");
+  assert.deepEqual(result.createdTableIds, []);
 });

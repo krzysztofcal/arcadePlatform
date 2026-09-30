@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
+const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", checkWsBuyInCapability = async () => ({ ok: true }) }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -26,8 +26,14 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], events = []
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
+          if (text.includes("to_regclass")) return [{ available: poolSchema }];
+          if (!poolSchema) assert.doesNotMatch(text, /is_slow_only|poker_auto_class|poker_access_policy/);
 
           if (text.includes("pg_advisory_xact_lock")) return [];
+
+          if (text.includes("select poker_auto_class, poker_access_override")) {
+            return [{ poker_auto_class: effectiveClass === "RESTRICTED" ? "NORMAL" : effectiveClass, poker_access_override: effectiveClass === "RESTRICTED" ? "FORCE_RESTRICTED" : "AUTO", poker_access_revision: 1 }];
+          }
 
           if (text.includes("join public.poker_seats s") && text.includes("s.user_id = $1")) {
             if (mode === "already_seated") return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: candidateBuyIn === 500 ? { sb: 5, bb: 10 } : { sb: 1, bb: 2 } }];
@@ -90,13 +96,36 @@ const makeHandler = ({ mode, queries, notifications = [], logs = [], events = []
 const findLockCall = (queries) =>
   queries.find((entry) => entry.query.toLowerCase().includes("pg_advisory_xact_lock(hashtext($1))"));
 
+const findLockCalls = (queries) =>
+  queries.filter((entry) => entry.query.toLowerCase().includes("pg_advisory_xact_lock(hashtext($1))"));
+
 const assertCanonicalLockKey = (queries, expectedKey) => {
   const lockCall = findLockCall(queries);
   assert.ok(lockCall, "quick seat should issue advisory lock query");
-  assert.equal(lockCall?.params?.[0], expectedKey);
+  const lockCalls = findLockCalls(queries);
+  const matchLock = lockCalls.find((entry) => entry?.params?.[0] === expectedKey);
+  assert.ok(matchLock, "quick seat should issue its match lock");
+  assert.match(String(lockCall?.params?.[0] || ""), /^poker-table-slots:v1:/);
+  assert.ok(queries.indexOf(lockCall) < queries.indexOf(matchLock), "user slot lock must precede match lock");
 };
 
 const run = async () => {
+  for (const mode of ["prefer_humans", "already_seated", "create"]) {
+    const queries = [];
+    const handler = makeHandler({ poolSchema: false, mode, queries });
+    const response = await callQuickSeat(handler, { maxPlayers: 6 });
+    assert.equal(response.statusCode, 200, `pre-migration Quick Seat ${mode} remains available`);
+    assert.equal(queries.some(({ query }) => query.includes("pending_tables")), false);
+  }
+
+  {
+    const queries = [];
+    const handler = makeHandler({ mode: "any_open", queries, effectiveClass: "RESTRICTED" });
+    const response = await callQuickSeat(handler, { maxPlayers: 6 });
+    assert.equal(response.statusCode, 200);
+    assert.ok(queries.some((entry) => entry.query.includes("$5::text = 'RESTRICTED'")), "restricted Quick Seat should use the bot-free candidate predicate");
+    assert.equal(JSON.parse(response.body).kind, undefined);
+  }
   {
     const queries = [];
     const notifications = [];
@@ -291,7 +320,11 @@ const run = async () => {
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
+          if (text.includes("to_regclass")) return [{ available: true }];
           if (text.includes("pg_advisory_xact_lock")) return [];
+          if (text.includes("select poker_auto_class, poker_access_override")) {
+            return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+          }
           if (text.includes("from public.poker_tables t")) return [];
           if (text.includes("account_type = 'user'")) return [{ balance: 110 }];
           if (text.includes("insert into public.poker_tables")) return [{ id: "table-slow-notify" }];
@@ -340,8 +373,12 @@ const run = async () => {
           unsafe: async (query, params) => {
             queries.push({ query: String(query), params });
             const text = String(query).toLowerCase();
+          if (text.includes("to_regclass")) return [{ available: true }];
 
             if (text.includes("pg_advisory_xact_lock")) return [];
+            if (text.includes("select poker_auto_class, poker_access_override")) {
+              return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+            }
             if (text.includes("account_type = 'user'")) return [{ balance: 110 }];
 
             if (
@@ -384,9 +421,11 @@ const run = async () => {
     assert.equal(createCalls.length, 1, "serialized matchmaking should avoid creating a second table when existing table is open");
 
     const lockCalls = queries.filter((entry) => entry.query.toLowerCase().includes("pg_advisory_xact_lock(hashtext($1))"));
-    assert.equal(lockCalls.length, 2);
-    assert.equal(lockCalls[0]?.params?.[0], "quickseat:6");
+    assert.equal(lockCalls.length, 4);
+    assert.match(lockCalls[0]?.params?.[0] || "", /^poker-table-slots:v1:/);
     assert.equal(lockCalls[1]?.params?.[0], "quickseat:6");
+    assert.match(lockCalls[2]?.params?.[0] || "", /^poker-table-slots:v1:/);
+    assert.equal(lockCalls[3]?.params?.[0], "quickseat:6");
   }
   {
     const queries = [];

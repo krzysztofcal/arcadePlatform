@@ -773,6 +773,7 @@
       legalActions: [],
       actionConstraints: {},
       currentUserId: nextUserId || null,
+      pokerAccess: null,
       youSeat: null,
       statusText: LIVE_STATUS_COPY.connecting,
       errorText: '',
@@ -6220,6 +6221,10 @@
       onReaction: function(event){
         if (gen !== liveModeGeneration) return;
         handleTableReaction(event);
+      },
+      onAccess: function(access){
+        if (gen !== liveModeGeneration || !access || !access.payload) return;
+        state.pokerAccess = access.payload;
       },
       onStatus: function(status, info){
         if (gen !== liveModeGeneration) return;

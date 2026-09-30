@@ -498,6 +498,12 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
 {
   const lockedProgression = {
     availableBuyIns: [],
+    pokerAccess: {
+      automaticClass: 'NORMAL',
+      override: 'AUTO',
+      effectiveClass: 'NORMAL',
+      revision: 1,
+    },
     tiers: [
       { buyIn: 100, available: false, unlocked: false, stakes: { sb: 1, bb: 2 } },
       { buyIn: 500, available: false, unlocked: false, stakes: { sb: 5, bb: 10 } }

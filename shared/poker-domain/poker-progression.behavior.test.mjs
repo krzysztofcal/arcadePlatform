@@ -32,6 +32,34 @@ test("bot funding is allowlisted to 100 and 500 CH with separate sources", () =>
   }
 });
 
+test("bot funding with explicit poolClass supports all 11 canonical tiers and rejects non-canonical", () => {
+  // 100
+  assert.equal(getBotFundingSystemKeyForBuyIn(100, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL_100");
+  assert.equal(getBotFundingSystemKeyForBuyIn(100, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_100");
+  // 500 preserves canonical POKER_BOT_BANKROLL for NORMAL
+  assert.equal(getBotFundingSystemKeyForBuyIn(500, { poolClass: "NORMAL" }), HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY);
+  assert.equal(getBotFundingSystemKeyForBuyIn(500, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_500");
+  // 1k
+  assert.equal(getBotFundingSystemKeyForBuyIn(1000, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL_1000");
+  assert.equal(getBotFundingSystemKeyForBuyIn(1000, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_1000");
+  // 50k
+  assert.equal(getBotFundingSystemKeyForBuyIn(50000, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL_50000");
+  assert.equal(getBotFundingSystemKeyForBuyIn(50000, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_50000");
+  // 10M
+  assert.equal(getBotFundingSystemKeyForBuyIn(10000000, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL_10000000");
+  assert.equal(getBotFundingSystemKeyForBuyIn(10000000, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_10000000");
+
+  // Non-canonical buyIns rejected
+  for (const invalidBuyIn of [0, -100, 200, 750, 2000, 99999, 100000000]) {
+    assert.equal(getBotFundingSystemKeyForBuyIn(invalidBuyIn, { poolClass: "NORMAL" }), null);
+    assert.equal(getBotFundingSystemKeyForBuyIn(invalidBuyIn, { poolClass: "SLOW" }), null);
+  }
+
+  // Invalid poolClass rejected
+  assert.equal(getBotFundingSystemKeyForBuyIn(500, { poolClass: "UNKNOWN" }), null);
+  assert.equal(getBotFundingSystemKeyForBuyIn(500, { poolClass: "" }), null);
+});
+
 test("progression resolves the default catalog and unlocks only the highest tier plus one fallback", () => {
   const tiers = resolvePokerBuyInTiers({});
   assert.equal(tiers[0], 100);

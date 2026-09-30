@@ -9,6 +9,7 @@ import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../../shared/poker-domain/table-economy.mjs";
 import { resolvePokerBuyInTiers } from "../../../shared/poker-domain/poker-progression.mjs";
+import { hasPokerPoolSchema, readPokerPoolProvisioning, readPokerTierPolicy } from "../../../shared/poker-domain/bot-access.mjs";
 
 export const CONTINUOUS_BOT_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
 const DEFAULT_MAX_DESIRED_TABLES = 2;
@@ -112,6 +113,19 @@ export function tableMatchesContinuousBotProfile(table, profile) {
 
 async function createManagedTable(tx, { profile, botConfig, klog }) {
   const buyIn = DEFAULT_CASH_TABLE_BUY_IN_CHIPS;
+  const poolSchema = await hasPokerPoolSchema(tx);
+  let fundingEnabled = true;
+  if (poolSchema) {
+    const tierPolicy = await readPokerTierPolicy(tx, { buyIn });
+    const provisioning = await readPokerPoolProvisioning(tx, { buyIn });
+    if (tierPolicy?.enabled !== true) {
+      throw Object.assign(new Error("tier_disabled"), { code: "tier_disabled" });
+    }
+    if (provisioning?.NORMAL !== true || provisioning?.SLOW !== true) {
+      throw Object.assign(new Error("tier_unprovisioned"), { code: "tier_unprovisioned" });
+    }
+    fundingEnabled = true;
+  }
   const stakes = calculateCanonicalPokerStakes(buyIn);
   const rotationDueAt = new Date(Date.now() + profile.rotationIntervalSeconds * 1_000).toISOString();
   const created = await createPokerTableWithState(tx, {
@@ -135,6 +149,9 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     targetBotCount: profile.targetBotCount,
     allowBotsOnly: true,
     requireExactTarget: true,
+    poolClass: poolSchema ? "NORMAL" : null,
+    fundingEnabled,
+    fundingProvisioned: fundingEnabled,
     fundingReason: "BOT_SEED_BUY_IN",
     idempotencyPrefix: "managed-bot-seed-buyin",
     klog
@@ -182,18 +199,41 @@ export function createContinuousBotTableRepository({
         const profileRows = await tx.unsafe(PROFILE_SELECT, [CONTINUOUS_BOT_PROFILE_KEY]);
         const profile = normalizeContinuousBotProfile(profileRows?.[0], { maxDesiredTables: desiredTableLimit });
         if (!profile) throw Object.assign(new Error("managed_profile_invalid"), { code: "managed_profile_invalid" });
+
+        const schemaBacked = await hasPokerPoolSchema(tx);
+        let controlledInactiveReason = null;
+        if (schemaBacked) {
+          const tierPolicy = await readPokerTierPolicy(tx, { buyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS });
+          if (tierPolicy?.enabled !== true) {
+            controlledInactiveReason = "tier_disabled";
+          } else {
+            const provisioning = await readPokerPoolProvisioning(tx, { buyIn: DEFAULT_CASH_TABLE_BUY_IN_CHIPS });
+            if (provisioning?.NORMAL !== true || provisioning?.SLOW !== true) {
+              controlledInactiveReason = "tier_unprovisioned";
+            }
+          }
+        }
+
         const tableRows = await tx.unsafe(
-          `select id, status, max_players, buy_in, stakes, managed_profile_key, rotation_due_at, created_at
+          `select id, status, max_players, buy_in, stakes, managed_profile_key, rotation_due_at, created_at,
+                  (select count(*) from public.poker_seats s
+                    where s.table_id = poker_tables.id
+                      and s.status = 'ACTIVE'
+                      and coalesce(s.is_bot, false) = true) as active_bot_count
              from public.poker_tables
             where status = 'OPEN' and lifecycle_kind = 'CONTINUOUS_BOT'
             order by created_at asc, id asc
             for update;`
         );
         const openTables = Array.isArray(tableRows) ? tableRows : [];
-        const desiredCount = profile.enabled ? profile.desiredTableCount : 0;
+        const desiredCount = (!controlledInactiveReason && profile.enabled) ? profile.desiredTableCount : 0;
         const retirementTableIds = [];
         for (const table of openTables) {
-          if (!tableMatchesContinuousBotProfile(table, profile)) {
+          const activeBotCount = Number(table?.active_bot_count);
+          const occupancyInvalid = profile.minBotCount > 0
+            && Number.isInteger(activeBotCount)
+            && activeBotCount < profile.minBotCount;
+          if (!tableMatchesContinuousBotProfile(table, profile) || occupancyInvalid) {
             retirementTableIds.push(table.id);
           }
         }
@@ -254,7 +294,10 @@ export function createContinuousBotTableRepository({
           rotationDueAtByTableId,
           creationLimitPerReconcile: MAX_TABLES_CREATED_PER_RECONCILE,
           creationLimited: remainingTableCount > 0,
-          remainingTableCount
+          remainingTableCount,
+          controlledInactive: Boolean(controlledInactiveReason),
+          reason: controlledInactiveReason || undefined,
+          status: controlledInactiveReason || undefined
         };
       }, { env });
       lastKnownProfile = result.profile;
@@ -457,7 +500,11 @@ export function createContinuousBotTableRepository({
         const [profileRows, tableRows] = await Promise.all([
           tx.unsafe(PROFILE_SELECT, [CONTINUOUS_BOT_PROFILE_KEY]),
           tx.unsafe(
-            `select id, status, lifecycle_kind, managed_profile_key, created_at, rotation_due_at
+            `select id, status, lifecycle_kind, managed_profile_key, created_at, rotation_due_at,
+                    (select count(*) from public.poker_seats s
+                      where s.table_id = poker_tables.id
+                        and s.status = 'ACTIVE'
+                        and coalesce(s.is_bot, false) = true) as active_bot_count
                from public.poker_tables
               where status = 'OPEN'
                 and lifecycle_kind = 'CONTINUOUS_BOT'
@@ -478,7 +525,9 @@ export function createContinuousBotTableRepository({
             lifecycleKind: table.lifecycle_kind || null,
             managedProfileKey: table.managed_profile_key || null,
             createdAt: table.created_at || null,
-            rotationDueAt: table.rotation_due_at || null
+            rotationDueAt: table.rotation_due_at || null,
+            activeBotCount: Number.isInteger(Number(table.active_bot_count)) ? Number(table.active_bot_count) : null,
+            healthy: profile.minBotCount <= 0 || Number(table.active_bot_count) >= profile.minBotCount
           }))
         };
       }, { env });

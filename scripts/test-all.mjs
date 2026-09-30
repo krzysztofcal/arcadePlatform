@@ -117,6 +117,7 @@ run("node", ["ws-server/poker/handlers/reaction.behavior.test.mjs"], "ws-reactio
 run("node", ["ws-server/poker/runtime/disconnect-cleanup.behavior.test.mjs"], "ws-disconnect-cleanup-runtime-behavior");
 run("node", ["ws-server/poker/runtime/table-janitor.behavior.test.mjs"], "ws-table-janitor-behavior");
 run("node", ["ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs"], "ws-accepted-bot-autoplay-adapter-behavior");
+run("node", ["ws-server/poker/runtime/poker-access-propagation.behavior.test.mjs"], "ws-poker-access-propagation-behavior");
 run("node", ["ws-tests/ws-lobby-join-public-snapshot.behavior.test.mjs"], "ws-lobby-join-public-snapshot-behavior");
 run("node", ["tests/admin-auth.behavior.test.mjs"], "admin-auth-behavior");
 run("node", ["tests/admin-endpoints.behavior.test.mjs"], "admin-endpoints-behavior");

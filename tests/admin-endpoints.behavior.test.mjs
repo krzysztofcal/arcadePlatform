@@ -6,6 +6,9 @@ const { createAdminUserBalanceHandler } = await import("../netlify/functions/adm
 const { createAdminUserLedgerHandler } = await import("../netlify/functions/admin-user-ledger.mjs");
 const { createAdminWsPreviewBotReactionHandler, parseBody: parseBotReactionBody } = await import("../netlify/functions/admin-ws-preview-bot-reaction.mjs");
 const { createAdminPokerLogControlHandler, parseBody: parsePokerLogControlBody } = await import("../netlify/functions/admin-poker-log-control.mjs");
+const { createAdminUserPokerAccessHandler } = await import("../netlify/functions/admin-user-poker-access.mjs");
+const { notifyWsPokerAccessMutation } = await import("../netlify/functions/_shared/poker-ws-runtime-notify.mjs");
+const { updatePokerPolicy } = await import("../netlify/functions/admin-poker-policy.mjs");
 
 function event(method, queryStringParameters = {}, body = null) {
   return {
@@ -51,6 +54,602 @@ function pokerLogSnapshot() {
     overrides: [],
   };
 }
+
+test("poker access admin rejects unauthorized override mutation before any write", async () => {
+  let wsCalls = 0;
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => {
+      const error = new Error("admin_required");
+      error.status = 403;
+      error.code = "admin_required";
+      throw error;
+    },
+    notifyWsPokerAccessMutation: async () => { wsCalls += 1; return { ok: true }; }
+  });
+  const response = await handler(event("PATCH", {}, JSON.stringify({
+    userId: "00000000-0000-4000-8000-000000000020",
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 1
+  })));
+  assert.equal(response.statusCode, 403);
+  assert.equal(wsCalls, 0);
+});
+
+test("Netlify PATCH executes exactly one WS mutation call, zero local DB write, zero retry", async () => {
+  const wsCalls = [];
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    notifyWsPokerAccessMutation: async (payload) => {
+      wsCalls.push(payload);
+      return {
+        ok: true,
+        revision: 9,
+        override: "FORCE_RESTRICTED",
+        automaticClass: "NORMAL",
+        effectiveClass: "RESTRICTED",
+        failClosed: false
+      };
+    }
+  });
+  const response = await handler(event("PATCH", {}, JSON.stringify({
+    userId: "00000000-0000-4000-8000-000000000020",
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8
+  })));
+  assert.equal(response.statusCode, 200);
+  assert.equal(wsCalls.length, 1);
+  assert.equal(wsCalls[0].userId, "00000000-0000-4000-8000-000000000020");
+  assert.equal(wsCalls[0].override, "FORCE_RESTRICTED");
+  assert.equal(wsCalls[0].expectedRevision, 8);
+  assert.equal(wsCalls[0].actorId, "00000000-0000-4000-8000-000000000010");
+  const body = JSON.parse(response.body);
+  assert.equal(body.ok, true);
+  assert.equal(body.revision, 9);
+  assert.equal(body.override, "FORCE_RESTRICTED");
+  assert.equal(body.effectiveClass, "RESTRICTED");
+});
+
+test("Netlify PATCH forwards WS 409 stale_revision and does zero retry", async () => {
+  let wsCalls = 0;
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    notifyWsPokerAccessMutation: async () => {
+      wsCalls += 1;
+      return { ok: false, status: 409, reason: "stale_revision" };
+    }
+  });
+  const response = await handler(event("PATCH", {}, JSON.stringify({
+    userId: "00000000-0000-4000-8000-000000000020",
+    override: "AUTO",
+    expectedRevision: 8
+  })));
+  assert.equal(response.statusCode, 409);
+  assert.equal(wsCalls, 1);
+  assert.deepEqual(JSON.parse(response.body), { error: "stale_revision", reason: "stale_revision" });
+});
+
+test("Netlify PATCH forwards WS 409 poker_access_mutation_in_progress directly", async () => {
+  let wsCalls = 0;
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    notifyWsPokerAccessMutation: async () => {
+      wsCalls += 1;
+      return { ok: false, status: 409, reason: "poker_access_mutation_in_progress" };
+    }
+  });
+  const response = await handler(event("PATCH", {}, JSON.stringify({
+    userId: "00000000-0000-4000-8000-000000000020",
+    override: "FORCE_SLOW",
+    expectedRevision: 8
+  })));
+  assert.equal(response.statusCode, 409);
+  assert.equal(wsCalls, 1);
+  assert.deepEqual(JSON.parse(response.body), { error: "poker_access_mutation_in_progress", reason: "poker_access_mutation_in_progress" });
+});
+
+test("Netlify PATCH handles WS timeout with zero replay mutation", async () => {
+  let wsCalls = 0;
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    notifyWsPokerAccessMutation: async () => {
+      wsCalls += 1;
+      return { ok: false, reason: "timeout" };
+    }
+  });
+  const response = await handler(event("PATCH", {}, JSON.stringify({
+    userId: "00000000-0000-4000-8000-000000000020",
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8
+  })));
+  assert.equal(response.statusCode, 503);
+  assert.equal(wsCalls, 1);
+  assert.deepEqual(JSON.parse(response.body), { error: "timeout", reason: "timeout" });
+});
+
+test("notifyWsPokerAccessMutation rejects WS HTTP 200 with mismatched revision or override", async () => {
+  const userId = "00000000-0000-4000-8000-000000000020";
+
+  // Case 1: Mismatched revision (WS returns rev 12, expected 8 + 1 = 9)
+  const resultMismatchRev = await notifyWsPokerAccessMutation({
+    userId,
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8,
+    actorId: "00000000-0000-4000-8000-000000000010",
+    env: { POKER_WS_INTERNAL_BASE_URL: "https://ws.test", POKER_WS_INTERNAL_TOKEN: "tok" },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        userId,
+        revision: 12,
+        override: "FORCE_RESTRICTED",
+        failClosed: false
+      })
+    })
+  });
+  assert.equal(resultMismatchRev.ok, false);
+  assert.equal(resultMismatchRev.reason, "poker_access_confirmation_mismatch");
+  assert.equal(resultMismatchRev.status, 503);
+
+  // Case 2: Mismatched override (WS returns AUTO, requested FORCE_RESTRICTED)
+  const resultMismatchOverride = await notifyWsPokerAccessMutation({
+    userId,
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8,
+    actorId: "00000000-0000-4000-8000-000000000010",
+    env: { POKER_WS_INTERNAL_BASE_URL: "https://ws.test", POKER_WS_INTERNAL_TOKEN: "tok" },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        userId,
+        revision: 9,
+        override: "AUTO",
+        failClosed: false
+      })
+    })
+  });
+  assert.equal(resultMismatchOverride.ok, false);
+  assert.equal(resultMismatchOverride.reason, "poker_access_confirmation_mismatch");
+  assert.equal(resultMismatchOverride.status, 503);
+
+  // Case 3: failClosed true
+  const resultFailClosed = await notifyWsPokerAccessMutation({
+    userId,
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8,
+    actorId: "00000000-0000-4000-8000-000000000010",
+    env: { POKER_WS_INTERNAL_BASE_URL: "https://ws.test", POKER_WS_INTERNAL_TOKEN: "tok" },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        userId,
+        revision: 9,
+        override: "FORCE_RESTRICTED",
+        failClosed: true
+      })
+    })
+  });
+  assert.equal(resultFailClosed.ok, false);
+  assert.equal(resultFailClosed.reason, "poker_access_confirmation_mismatch");
+  assert.equal(resultFailClosed.status, 503);
+});
+
+test("Netlify PATCH rejects WS HTTP 200 with mismatched revision or override and never returns 200", async () => {
+  const userId = "00000000-0000-4000-8000-000000000020";
+
+  // Handler integration with real notifyWsPokerAccessMutation & mock WS returning 200 + ok:true but wrong revision
+  const handler = createAdminUserPokerAccessHandler({
+    env: {
+      CHIPS_ENABLED: "1",
+      POKER_WS_INTERNAL_BASE_URL: "https://ws.test",
+      POKER_WS_INTERNAL_TOKEN: "tok"
+    },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    notifyWsPokerAccessMutation: (args) => notifyWsPokerAccessMutation({
+      ...args,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          userId,
+          revision: 99,
+          override: "FORCE_RESTRICTED",
+          failClosed: false
+        })
+      })
+    })
+  });
+
+  const response = await handler(event("PATCH", {}, JSON.stringify({
+    userId,
+    override: "FORCE_RESTRICTED",
+    expectedRevision: 8
+  })));
+
+  assert.notEqual(response.statusCode, 200);
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(JSON.parse(response.body), {
+    error: "poker_access_confirmation_mismatch",
+    reason: "poker_access_confirmation_mismatch"
+  });
+});
+
+test("Netlify GET poker access returns loaded access without mutation", async () => {
+  let loadCalls = 0;
+  const current = { userId: "00000000-0000-4000-8000-000000000020", revision: 8, override: "AUTO", effectiveClass: "NORMAL" };
+  const handler = createAdminUserPokerAccessHandler({
+    env: { CHIPS_ENABLED: "1" },
+    requireAdminUser: async () => ({ userId: "00000000-0000-4000-8000-000000000010" }),
+    loadPokerAccess: async (userId) => {
+      loadCalls += 1;
+      assert.equal(userId, "00000000-0000-4000-8000-000000000020");
+      return current;
+    }
+  });
+  const response = await handler(event("GET", { userId: "00000000-0000-4000-8000-000000000020" }));
+  assert.equal(response.statusCode, 200);
+  assert.equal(loadCalls, 1);
+  assert.deepEqual(JSON.parse(response.body), current);
+});
+
+
+test("poker tier policy cannot enable a tier without both exact NORMAL and SLOW pools", async () => {
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: {
+        kind: "tier",
+        buyIn: 100,
+        enabled: true,
+        expectedRevision: 1,
+        normal_refill_threshold_ch: 100,
+        normal_refill_amount_ch: 50,
+        slow_refill_threshold_ch: 100,
+        slow_refill_amount_ch: 50
+      },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn({ unsafe: async (sql) => {
+        if (String(sql).includes("select buy_in, revision")) return [{ buy_in: 100, revision: 1 }];
+        if (String(sql).includes("select system_key")) return [{ system_key: "POKER_BOT_BANKROLL_100" }];
+        return [];
+      } })
+    }),
+    (error) => error?.code === "tier_pools_unprovisioned"
+  );
+});
+
+test("poker access policy atomic save derives recovery from threshold + hysteresis bps and bumps revision once (T068)", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisBps: 500,
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  assert.equal(result.access.slowThresholdCh, 2000);
+  assert.equal(result.access.slowHysteresisBps, 500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1900);
+  assert.equal(result.access.revision, 2);
+  assert.match(executedUpdate.sql, /slow_threshold_ch = \$1, slow_hysteresis_bps = \$2, slow_recovery_threshold_ch = \$3, revision = revision \+ 1/);
+  assert.equal(executedUpdate.params[0], 2000);
+  assert.equal(executedUpdate.params[1], 500);
+  assert.equal(executedUpdate.params[2], 1900);
+});
+
+test("poker access policy cannot be overridden by client-supplied recovery threshold (T068)", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisBps: 500,
+      slowRecoveryThresholdCh: 9999, // untrusted client attempt
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  // Must authoritatively derive 1900, not 9999
+  assert.equal(result.access.slowRecoveryThresholdCh, 1900);
+  assert.equal(executedUpdate.params[2], 1900);
+});
+
+test("poker access policy rejects invalid hysteresis bps with zero mutation (T068)", async () => {
+  let updateCalled = false;
+  const mockTx = {
+    unsafe: async (sql) => {
+      if (String(sql).includes("update public.poker_access_policy")) {
+        updateCalled = true;
+      }
+      return [{ revision: 1 }];
+    }
+  };
+
+  // bps < 100 (below 1%)
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisBps: 50, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
+  );
+
+  // bps > 5000 (above 50%)
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisBps: 5001, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
+  );
+
+  // non-integer bps
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisBps: "invalid", expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
+  );
+
+  assert.equal(updateCalled, false, "zero DB update on invalid hysteresis bps");
+});
+
+test("poker access policy rejects missing hysteresis in update request with zero mutation", async () => {
+  let updateCalled = false;
+  const mockTx = {
+    unsafe: async (sql) => {
+      if (String(sql).includes("update public.poker_access_policy")) {
+        updateCalled = true;
+      }
+      return [{ revision: 1 }];
+    }
+  };
+
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
+  );
+
+  assert.equal(updateCalled, false, "zero DB update when hysteresis is omitted from update request");
+});
+
+test("poker access policy accepts explicit slowHysteresisBps = 1500 and updates derived recovery correctly", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisBps: 1500,
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  assert.equal(result.access.slowThresholdCh, 2000);
+  assert.equal(result.access.slowHysteresisBps, 1500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1700);
+  assert.equal(result.access.revision, 2);
+  assert.equal(executedUpdate.params[1], 1500);
+  assert.equal(executedUpdate.params[2], 1700);
+});
+
+test("poker access policy accepts slowHysteresisPercent = 15 and converts to 1500 bps", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisPercent: 15,
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  assert.equal(result.access.slowHysteresisBps, 1500);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1700);
+  assert.equal(executedUpdate.params[1], 1500);
+  assert.equal(executedUpdate.params[2], 1700);
+});
+
+test("poker access policy accepts slowHysteresisPercent = 5.25 and converts to 525 bps", async () => {
+  let executedUpdate = null;
+  const result = await updatePokerPolicy({
+    body: {
+      kind: "access",
+      slowThresholdCh: 2000,
+      slowHysteresisPercent: 5.25,
+      expectedRevision: 1,
+    },
+    actorId: "00000000-0000-4000-8000-000000000010",
+    runTransaction: async (fn) => fn({
+      unsafe: async (sql, params) => {
+        if (String(sql).includes("select revision from public.poker_access_policy")) {
+          return [{ revision: 1 }];
+        }
+        if (String(sql).includes("update public.poker_access_policy")) {
+          executedUpdate = { sql, params };
+          return [{
+            slow_threshold_ch: params[0],
+            slow_hysteresis_bps: params[1],
+            slow_recovery_threshold_ch: params[2],
+            revision: 2,
+            updated_at: "2026-09-29T12:00:00.000Z",
+            updated_by: params[3],
+          }];
+        }
+        return [];
+      }
+    })
+  });
+  assert.equal(result.access.slowHysteresisBps, 525);
+  assert.equal(result.access.slowRecoveryThresholdCh, 1895);
+  assert.equal(executedUpdate.params[1], 525);
+  assert.equal(executedUpdate.params[2], 1895);
+});
+
+test("poker access policy rejects unrepresentable slowHysteresisPercent (5.255) with zero mutation", async () => {
+  let updateCalled = false;
+  const mockTx = {
+    unsafe: async (sql) => {
+      if (String(sql).includes("update public.poker_access_policy")) {
+        updateCalled = true;
+      }
+      return [{ revision: 1 }];
+    }
+  };
+
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisPercent: 5.255, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_slow_hysteresis_bps"
+  );
+
+  assert.equal(updateCalled, false, "zero DB update on unrepresentable percentage");
+});
+
+test("poker access policy rejects threshold too small to produce positive recovery with zero mutation (T068)", async () => {
+  let updateCalled = false;
+  const mockTx = {
+    unsafe: async (sql) => {
+      if (String(sql).includes("update public.poker_access_policy")) {
+        updateCalled = true;
+      }
+      return [{ revision: 1 }];
+    }
+  };
+
+  // entry = 1 with 5% hysteresis produces floor(1 * 9500 / 10000) = 0 -> recovery <= 0
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 1, slowHysteresisBps: 500, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn(mockTx),
+    }),
+    (error) => error?.code === "invalid_threshold_relationship"
+  );
+
+  assert.equal(updateCalled, false, "zero DB update on non-positive derived recovery");
+});
+
+test("poker access policy rejects stale revision with zero mutation (T068)", async () => {
+  let updateCalled = false;
+  await assert.rejects(
+    () => updatePokerPolicy({
+      body: { kind: "access", slowThresholdCh: 2000, slowHysteresisBps: 500, expectedRevision: 1 },
+      actorId: "00000000-0000-4000-8000-000000000010",
+      runTransaction: async (fn) => fn({
+        unsafe: async (sql) => {
+          if (String(sql).includes("select revision from public.poker_access_policy")) {
+            return [{ revision: 2 }];
+          }
+          if (String(sql).includes("update public.poker_access_policy")) {
+            updateCalled = true;
+          }
+          return [];
+        }
+      }),
+    }),
+    (error) => error?.code === "stale_revision"
+  );
+  assert.equal(updateCalled, false, "zero DB update on stale revision");
+});
 
 test("admin-me returns admin payload for an allowlisted caller", async () => {
   const handler = createAdminMeHandler({

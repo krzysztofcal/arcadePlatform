@@ -280,3 +280,115 @@ export async function notifyWsLobbyMaterialize({
     clearTimeout(timer);
   }
 }
+
+export async function notifyWsPokerAccessMutation({
+  userId,
+  override = null,
+  expectedRevision = null,
+  actorId = null,
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+  klog = () => {}
+} = {}) {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) return { ok: false, skipped: true, reason: "invalid_user_id" };
+  const baseUrl = resolveBaseUrl(env);
+  if (!baseUrl) return { ok: false, skipped: true, reason: "ws_internal_base_url_missing" };
+  if (typeof fetchImpl !== "function") {
+    klog("poker_ws_access_mutation_notify_unavailable", { userId: normalizedUserId, reason: "fetch_unavailable" });
+    return { ok: false, skipped: false, reason: "fetch_unavailable" };
+  }
+  const timeoutMs = Math.min(resolveTimeoutMs(env), DEFAULT_NOTIFY_TIMEOUT_MS);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (typeof timer?.unref === "function") timer.unref();
+  const headers = { "content-type": "application/json", accept: "application/json" };
+  const token = resolveToken(env);
+  if (token) headers.authorization = `Bearer ${token}`;
+  try {
+    const response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/internal/admin/poker-access-refresh`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        userId: normalizedUserId,
+        action: "mutate",
+        phase: "mutate",
+        override: typeof override === "string" ? override.trim().toUpperCase() : null,
+        expectedRevision: Number(expectedRevision),
+        actorId: typeof actorId === "string" && actorId.trim() ? actorId.trim() : (actorId ?? null)
+      }),
+      signal: controller.signal
+    });
+    if (!response?.ok) {
+      let errorPayload = null;
+      try { errorPayload = await response.json(); } catch { errorPayload = null; }
+      const reason = typeof errorPayload?.reason === "string"
+        ? errorPayload.reason
+        : (typeof errorPayload?.error === "string" ? errorPayload.error : "notify_failed");
+      klog("poker_ws_access_mutation_notify_failed", {
+        userId: normalizedUserId,
+        status: response?.status ?? null,
+        reason
+      });
+      return {
+        ok: false,
+        skipped: false,
+        status: response?.status ?? null,
+        reason,
+        failClosed: typeof errorPayload?.failClosed === "boolean" ? errorPayload.failClosed : false
+      };
+    }
+    let payload = null;
+    try { payload = await response.json(); } catch { payload = null; }
+
+    const requestedOverrideCanonical = typeof override === "string" ? override.trim().toUpperCase() : null;
+    const expectedTargetRevision = Number(expectedRevision) + 1;
+    const isExactAck = payload?.ok === true
+      && payload?.userId === normalizedUserId
+      && Number(payload?.revision) === expectedTargetRevision
+      && payload?.override === requestedOverrideCanonical
+      && payload?.failClosed === false;
+
+    if (!isExactAck) {
+      klog("poker_ws_access_mutation_confirmation_mismatch", {
+        userId: normalizedUserId,
+        status: response.status,
+        expectedRevision: expectedTargetRevision,
+        actualRevision: payload?.revision,
+        expectedOverride: requestedOverrideCanonical,
+        actualOverride: payload?.override,
+        failClosed: payload?.failClosed
+      });
+      return {
+        ok: false,
+        skipped: false,
+        status: 503,
+        reason: "poker_access_confirmation_mismatch",
+        failClosed: typeof payload?.failClosed === "boolean" ? payload.failClosed : false
+      };
+    }
+
+    return {
+      ok: true,
+      skipped: false,
+      status: 200,
+      userId: payload.userId,
+      revision: payload.revision,
+      override: payload.override,
+      automaticClass: typeof payload?.automaticClass === "string" ? payload.automaticClass : null,
+      effectiveClass: typeof payload?.effectiveClass === "string" ? payload.effectiveClass : null,
+      failClosed: false,
+      access: payload?.access || null,
+      slowOnlyTableIds: Array.isArray(payload?.slowOnlyTableIds) ? payload.slowOnlyTableIds : []
+    };
+  } catch (error) {
+    const reason = error?.name === "AbortError" ? "timeout" : "request_failed";
+    klog("poker_ws_access_mutation_notify_error", {
+      userId: normalizedUserId,
+      reason
+    });
+    return { ok: false, skipped: false, reason };
+  } finally {
+    clearTimeout(timer);
+  }
+}

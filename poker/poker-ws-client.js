@@ -96,6 +96,7 @@
     var onStatus = typeof options.onStatus === 'function' ? options.onStatus : function(){};
     var onSnapshot = typeof options.onSnapshot === 'function' ? options.onSnapshot : function(){};
     var onLobbySnapshot = typeof options.onLobbySnapshot === 'function' ? options.onLobbySnapshot : function(){};
+    var onAccess = typeof options.onAccess === 'function' ? options.onAccess : function(){};
     var onReaction = typeof options.onReaction === 'function' ? options.onReaction : function(){};
     var onProtocolError = typeof options.onProtocolError === 'function' ? options.onProtocolError : function(){};
     var log = typeof options.klog === 'function' ? options.klog : klog;
@@ -368,6 +369,17 @@
             payload: frame.payload || {},
             rawType: frame.type,
             initial: initialLobby
+          });
+        } catch (_err){}
+        return;
+      }
+      if (frame.type === 'poker_access') {
+        try {
+          onAccess({
+            kind: 'poker_access',
+            payload: frame.payload || {},
+            rawType: frame.type,
+            initial: frame.payload && frame.payload.reason === 'auth_refresh'
           });
         } catch (_err){}
         return;

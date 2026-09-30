@@ -2,6 +2,20 @@ import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seed
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
 import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
+import {
+  hasPokerPoolSchema,
+  legacyPokerAccessSnapshot,
+  applyAutomaticThresholdEvidence,
+  deriveAccessState,
+  persistAutomaticSlow,
+  persistAutomaticTransition,
+  readPokerAccessPolicy,
+  readPokerAccessSnapshot,
+  readPokerAccessSnapshots,
+  readPokerPoolProvisioning,
+  readPokerTierPolicy,
+} from "./bot-access.mjs";
+import { assertActivePokerTableCapacity, lockUserTableSlots } from "./table-participation.mjs";
 
 const BUY_IN_IDEMPOTENCY_CONSTRAINT = "chips_transactions_idempotency_key_unique";
 
@@ -104,6 +118,75 @@ function makeError(code, validationReason = null, details = null) {
     }
   }
   return error;
+}
+
+async function resolveJoinAccess({ tx, userId, bankroll, buyIn = null, nowMs = Date.now() }) {
+  if (!await hasPokerPoolSchema(tx)) return { ...legacyPokerAccessSnapshot(nowMs), policy: await readPokerAccessPolicy(tx, { nowMs }), automaticChanged: false };
+  const policy = await readPokerAccessPolicy(tx, { nowMs });
+  const snapshot = await readPokerAccessSnapshot(tx, { userId, lock: true, nowMs });
+  if (!snapshot || !policy) return { effectiveClass: "UNKNOWN", schemaBacked: true };
+  const classified = applyAutomaticThresholdEvidence({
+    automaticClass: snapshot.automaticClass,
+    override: snapshot.override,
+    evidenceCh: bankroll,
+    slowThresholdCh: policy.slowThresholdCh,
+    slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
+    allowRecovery: true,
+  });
+  let persisted = null;
+  if (classified.changed && snapshot) {
+    persisted = await persistAutomaticTransition(tx, {
+      userId,
+      targetClass: classified.automaticClass,
+      expectedRevision: snapshot.revision,
+    });
+  }
+  const finalSnapshot = persisted?.snapshot || snapshot;
+  const finalAccessState = deriveAccessState({
+    automaticClass: finalSnapshot.automaticClass,
+    override: finalSnapshot.override
+  });
+  let tierPolicy = null;
+  let poolProvisioning = null;
+  if (snapshot?.schemaBacked) {
+    tierPolicy = await readPokerTierPolicy(tx, { buyIn });
+    poolProvisioning = await readPokerPoolProvisioning(tx, { buyIn });
+  }
+  return {
+    ...finalAccessState,
+    revision: finalSnapshot.revision,
+    policy: policy,
+    persisted: Boolean(persisted?.changed),
+    automaticChanged: classified.changed,
+    schemaBacked: Boolean(finalSnapshot?.schemaBacked),
+    tierPolicy,
+    poolProvisioning,
+  };
+}
+
+function isSafeSlowOwnerPromotion(table, { userId, seatRows, hasFundingHistory = false }) {
+  const status = String(table?.status || "").toUpperCase();
+  const lifecycleKind = String(table?.lifecycle_kind || "STANDARD").toUpperCase();
+  return status === "OPEN"
+    && lifecycleKind === "STANDARD"
+    && table?.created_by === userId
+    && table?.has_human_participant !== true
+    && table?.is_slow_only !== true
+    && Array.isArray(seatRows)
+    && seatRows.length === 0
+    && hasFundingHistory !== true;
+}
+
+async function hasMaterializedBotFunding(tx, tableId) {
+  const rows = await tx.unsafe(
+    `select 1
+       from public.chips_transactions
+      where metadata ->> 'tableId' = $1
+        and metadata ->> 'actor' = 'BOT'
+      limit 1;`,
+    [tableId]
+  );
+  return Array.isArray(rows) && rows.length > 0;
 }
 
 function isSeatConflictError(error) {
@@ -664,8 +747,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
   const runPostTransaction = await resolvePostTransactionFn(postTransactionFn);
   return beginSql(async (tx) => {
     try {
+      const poolSchema = await hasPokerPoolSchema(tx);
+      if (poolSchema) await lockUserTableSlots(tx, userId);
       const tableRows = await tx.unsafe(
-        "select id, status, max_players, stakes, buy_in from public.poker_tables where id = $1 limit 1 for update;",
+        `select id, status, max_players, stakes, buy_in, created_by, lifecycle_kind, has_human_participant${poolSchema ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1 for update;`,
         [tableId]
       );
       const table = tableRows?.[0] || null;
@@ -677,17 +762,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         throw makeError("invalid_buy_in");
       }
       const resolvedBuyIn = authoritativeBuyIn;
-
-      // Lock the table row before any mutation.  Mark human participation
-      // one-way (false -> true) so that action history retention uses the
-      // correct (long) window for tables with human gameplay.  The flag
-      // rolls back if the join transaction fails.
-      await tx.unsafe(
-        `update public.poker_tables
-            set has_human_participant = true
-          where id = $1 and has_human_participant = false`,
-        [tableId]
-      );
 
       const maxPlayers = Number(table.max_players);
       if (!Number.isInteger(maxPlayers) || maxPlayers < 1) throw makeError("table_not_open");
@@ -713,7 +787,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             throw makeError("authoritative_state_invalid", "rejoin_state_version_invalid");
           }
           const authoritativeStack = Number(stateRow.state?.stacks?.[userId]);
-          await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+          await tx.unsafe("update public.poker_tables set has_human_participant = true, last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
           return {
             ok: true,
             tableId,
@@ -751,7 +825,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         }
         const updatedState = writeLockedStateResult(await updateStateLocked(tx, { tableId, nextState: nextStateForStorage }));
         const snapshotVersion = requirePostMutationVersion({ previousVersion: stateRow.version, nextVersion: updatedState.version });
-        await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+        await tx.unsafe("update public.poker_tables set has_human_participant = true, last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
         return {
           ok: true,
           tableId,
@@ -776,8 +850,78 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         throw makeError("invalid_buy_in");
       }
 
+      const bankrollForAccess = await readPokerBankroll(tx, { userId, lock: true });
+      const joinAccess = await resolveJoinAccess({ tx, userId, bankroll: bankrollForAccess, buyIn: authoritativeBuyIn });
+      const tableIsSlowOnly = table?.is_slow_only === true;
+
+      if (joinAccess.effectiveClass !== "NORMAL"
+        && joinAccess.effectiveClass !== "SLOW"
+        && joinAccess.effectiveClass !== "RESTRICTED") {
+        throw makeError("poker_access_unavailable");
+      }
+
+      let hasFundingHistory = false;
+      if (joinAccess.effectiveClass === "SLOW" && !tableIsSlowOnly && table.created_by === userId) {
+        const fundingRows = await tx.unsafe(
+          "select 1 from public.chips_transactions where metadata ->> 'tableId' = $1 limit 1;",
+          [tableId]
+        );
+        hasFundingHistory = Array.isArray(fundingRows) && fundingRows.length > 0;
+      }
+
+      if (joinAccess.effectiveClass === "RESTRICTED") {
+        const activeRows = activeSeatRows(seatRows);
+        const hasActiveBot = activeRows.some((row) => row?.is_bot === true);
+        const hasBotFunding = hasActiveBot || await hasMaterializedBotFunding(tx, tableId);
+        if (String(table.lifecycle_kind || "STANDARD").toUpperCase() !== "STANDARD"
+          || tableIsSlowOnly
+          || hasBotFunding) {
+          throw makeError("restricted_table_required");
+        }
+      }
+
+      if (poolSchema) await assertActivePokerTableCapacity(tx, userId);
+
+      let existingHumanAccessAllowsBotFunding = true;
+      let existingHumanHasSlowAccess = false;
+      if (poolSchema) {
+        const existingHumanUserIds = activeSeatRows(seatRows)
+          .filter((row) => !row?.is_bot)
+          .map((row) => typeof row?.user_id === "string" ? row.user_id.trim().toLowerCase() : "")
+          .filter(Boolean);
+        if (existingHumanUserIds.length > 0) {
+          // Keep these rows locked through admission, debit and any bot funding
+          // decision. Admin override uses the same row lock, so either JOIN
+          // linearizes before the override or observes the committed override.
+          const existingHumanSnapshots = await readPokerAccessSnapshots(tx, { userIds: existingHumanUserIds, lock: true });
+          existingHumanAccessAllowsBotFunding = existingHumanUserIds.every((existingHumanUserId) => {
+            const snapshot = existingHumanSnapshots.get(existingHumanUserId);
+            if (snapshot?.effectiveClass === "SLOW") existingHumanHasSlowAccess = true;
+            return snapshot?.effectiveClass === "NORMAL" || snapshot?.effectiveClass === "SLOW";
+          });
+        }
+      }
+
+      // A seated SLOW human makes an ordinary table SLOW-only at this
+      // authoritative control point. The marker is persisted only with a
+      // successful admission, so a rejected NORMAL JOIN has no debit/seed side
+      // effect and the next control point re-evaluates the same state.
+      const slowOnlyAtAdmission = tableIsSlowOnly || existingHumanHasSlowAccess;
+      if (joinAccess.effectiveClass === "NORMAL" && slowOnlyAtAdmission) {
+        throw makeError("normal_table_required");
+      }
+      const canPromoteSlowTable = joinAccess.effectiveClass === "SLOW"
+        && !tableIsSlowOnly
+        && (existingHumanHasSlowAccess || isSafeSlowOwnerPromotion(table, { userId, seatRows, hasFundingHistory }));
+      if (joinAccess.effectiveClass === "SLOW" && !tableIsSlowOnly && !canPromoteSlowTable) {
+        throw makeError("slow_only_table_required");
+      }
+      if (joinAccess.effectiveClass === "RESTRICTED" && slowOnlyAtAdmission) {
+        throw makeError("restricted_table_required");
+      }
+
       const tiers = resolvePokerBuyInTiers(env);
-      const bankroll = await readPokerBankroll(tx, { userId, lock: true });
+      const bankroll = bankrollForAccess;
       const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers });
       if (!access.configured) throw makeError("invalid_buy_in");
       if (!access.eligible) {
@@ -894,9 +1038,18 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         );
       }
 
-      const botCfg = getBotConfig(process.env);
+      const botCfg = getBotConfig({ ...process.env, ...(env || {}) });
       const humanCountAfterJoin = activeSeatRows(seatRows).filter((row) => !row?.is_bot).length + 1;
-      const targetBotCount = isBotFundingAllowedForBuyIn(authoritativeBuyIn)
+      const botFundingAllowedForTableHumans = joinAccess.effectiveClass !== "RESTRICTED"
+        && existingHumanAccessAllowsBotFunding;
+      const fundingPoolClass = botFundingAllowedForTableHumans && joinAccess.schemaBacked
+        ? (slowOnlyAtAdmission || canPromoteSlowTable ? "SLOW" : "NORMAL")
+        : null;
+      const targetBotCount = botFundingAllowedForTableHumans
+        && isBotFundingAllowedForBuyIn(
+          authoritativeBuyIn,
+          fundingPoolClass ? { poolClass: fundingPoolClass } : {}
+        )
         && botCfg.enabled && shouldSeedBotsOnJoin({ humanCount: humanCountAfterJoin })
         ? computeTargetBotCount({
           maxPlayers,
@@ -905,6 +1058,11 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           maxBots: botCfg.maxPerTable
         })
         : 0;
+      const tierFundingEnabled = botFundingAllowedForTableHumans
+        && (!joinAccess.schemaBacked
+          || (joinAccess.tierPolicy?.enabled === true
+          && joinAccess.poolProvisioning?.NORMAL === true
+          && joinAccess.poolProvisioning?.SLOW === true));
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,
@@ -915,6 +1073,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       humanUserId: userId,
       postTransaction: runPostTransaction,
       targetBotCount,
+      poolClass: fundingPoolClass,
+      fundingEnabled: tierFundingEnabled,
+      fundingProvisioned: tierFundingEnabled,
       klog
       });
       const expectedBotCountAfterSeed = seededBots.length;
@@ -933,7 +1094,15 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       targetBotCount: expectedBotCountAfterSeed,
       markFreshJoinWaiting: true
       });
-      await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
+      await tx.unsafe(
+        `update public.poker_tables
+            set has_human_participant = true,
+                ${poolSchema ? "is_slow_only = case when $2::boolean then true else is_slow_only end," : ""}
+                last_activity_at = now(),
+                updated_at = now()
+          where id = $1;`,
+        poolSchema ? [tableId, slowOnlyAtAdmission || canPromoteSlowTable] : [tableId]
+      );
       return {
         ok: true,
         tableId,
@@ -946,6 +1115,19 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         me: { seated: true },
         joinStatus: updatedStateRow.joinStatus,
         seededBots,
+        access: {
+          schemaBacked: joinAccess.schemaBacked,
+          automaticClass: joinAccess.automaticClass,
+          override: joinAccess.override,
+          effectiveClass: joinAccess.effectiveClass,
+          revision: joinAccess.revision,
+          slowThresholdCh: joinAccess.policy?.slowThresholdCh,
+          slowHysteresisBps: joinAccess.policy?.slowHysteresisBps,
+          slowRecoveryThresholdCh: joinAccess.policy?.slowRecoveryThresholdCh,
+          policyRevision: joinAccess.policy?.revision,
+          loadedAtMs: Date.now(),
+          expiresAtMs: Date.now() + 30_000
+        },
         snapshot: buildProjectedSnapshot({
           state: updatedStateRow.state,
           seatRows: updatedStateRow.seatRows,

@@ -87,7 +87,10 @@ poker_activity as (
 user_accounts as (
   select
     a.user_id,
-    a.balance
+    a.balance,
+    to_jsonb(a) ->> 'poker_auto_class' as poker_auto_class,
+    to_jsonb(a) ->> 'poker_access_override' as poker_access_override,
+    (to_jsonb(a) ->> 'poker_access_revision')::bigint as poker_access_revision
   from public.chips_accounts a
   where a.account_type = 'USER'
 ),
@@ -104,6 +107,9 @@ base as (
     u.created_at,
     u.last_sign_in_at,
     coalesce(ua.balance, 0) as balance,
+    coalesce(ua.poker_auto_class, 'NORMAL') as poker_auto_class,
+    coalesce(ua.poker_access_override, 'AUTO') as poker_access_override,
+    coalesce(ua.poker_access_revision, 1) as poker_access_revision,
     coalesce(ase.active_seat_count, 0) as active_seat_count,
     coalesce(ase.active_table_count, 0) as active_table_count,
     greatest(
@@ -130,7 +136,11 @@ order by ${SORT_SQL[sort]}
 offset ${nextParam(pageInfo.offset)}
 limit ${nextParam(pageInfo.limit)};
   `;
-  const rows = await executeSql(query, params);
+  const [rows, capabilityRows] = await Promise.all([
+    executeSql(query, params),
+    executeSql("select to_regclass('public.poker_access_policy') is not null as available;")
+  ]);
+  const pokerAccessEditable = capabilityRows?.[0]?.available === true;
   const total = rows?.[0]?.total_count ? Number(rows[0].total_count) : 0;
   return {
     items: (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -143,7 +153,19 @@ limit ${nextParam(pageInfo.limit)};
       balance: Number.isFinite(Number(row.balance)) ? Number(row.balance) : 0,
       activeSeatCount: Number.isInteger(Number(row.active_seat_count)) ? Number(row.active_seat_count) : 0,
       activeTableCount: Number.isInteger(Number(row.active_table_count)) ? Number(row.active_table_count) : 0,
+      automaticClass: row.poker_auto_class || "NORMAL",
+      override: row.poker_access_override || "AUTO",
+      effectiveClass: row.poker_access_override === "FORCE_NORMAL"
+        ? "NORMAL"
+        : row.poker_access_override === "FORCE_SLOW"
+          ? "SLOW"
+          : row.poker_access_override === "FORCE_RESTRICTED"
+            ? "RESTRICTED"
+          : row.poker_auto_class || "NORMAL",
+      accessRevision: Number(row.poker_access_revision || 1),
+      pokerAccessEditable,
     })),
+    pokerAccessEditable,
     pagination: buildPagination({ page: pageInfo.page, limit: pageInfo.limit, total }),
   };
 }

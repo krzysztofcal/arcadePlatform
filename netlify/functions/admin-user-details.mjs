@@ -13,7 +13,7 @@ async function loadUserDetails(userId) {
   if (!userId) {
     throw badRequest("invalid_user_id", "invalid_user_id");
   }
-  const [userRows, activeSeatRows, pokerRows, balance, recentLedger] = await Promise.all([
+  const [userRows, activeSeatRows, pokerRows, balance, recentLedger, capabilityRows] = await Promise.all([
     executeSql(
       `
 with active_seats as (
@@ -48,6 +48,10 @@ select
   u.last_sign_in_at,
   coalesce(ase.active_seat_count, 0) as active_seat_count,
   coalesce(ase.active_table_count, 0) as active_table_count,
+  to_jsonb(ca) ->> 'poker_auto_class' as poker_auto_class,
+  to_jsonb(ca) ->> 'poker_access_override' as poker_access_override,
+  (to_jsonb(ca) ->> 'poker_access_revision')::bigint as poker_access_revision,
+  (to_jsonb(ca) ->> 'poker_auto_slow_at')::timestamptz as poker_auto_slow_at,
   greatest(
     coalesce(pa.last_poker_action_at, to_timestamp(0)),
     coalesce(ase.last_seat_seen_at, to_timestamp(0)),
@@ -56,6 +60,7 @@ select
     coalesce(u.created_at, to_timestamp(0))
   ) as last_activity_at
 from auth.users u
+left join public.chips_accounts ca on ca.user_id = u.id and ca.account_type = 'USER'
 left join active_seats ase on ase.user_id = u.id
 left join poker_activity pa on pa.user_id = u.id
 where u.id = $1::uuid
@@ -114,6 +119,7 @@ limit 12;
     ),
     getUserBalance(userId),
     listUserLedger(userId, { limit: 12 }),
+    executeSql("select to_regclass('public.poker_access_policy') is not null as available;"),
   ]);
   const user = userRows?.[0];
   if (!user) {
@@ -171,6 +177,18 @@ limit 12;
       lastActivityAt: user.last_activity_at || null,
       activeSeatCount: Number.isInteger(Number(user.active_seat_count)) ? Number(user.active_seat_count) : 0,
       activeTableCount: Number.isInteger(Number(user.active_table_count)) ? Number(user.active_table_count) : 0,
+      automaticClass: user.poker_auto_class || "NORMAL",
+      override: user.poker_access_override || "AUTO",
+      effectiveClass: user.poker_access_override === "FORCE_NORMAL"
+        ? "NORMAL"
+        : user.poker_access_override === "FORCE_SLOW"
+          ? "SLOW"
+          : user.poker_access_override === "FORCE_RESTRICTED"
+            ? "RESTRICTED"
+          : user.poker_auto_class || "NORMAL",
+      accessRevision: Number(user.poker_access_revision || 1),
+      automaticSlowAt: user.poker_auto_slow_at || null,
+      pokerAccessEditable: capabilityRows?.[0]?.available === true,
     },
     balance: {
       accountId: balance.accountId,
@@ -185,6 +203,7 @@ limit 12;
     },
     activeTables,
     activeSeats,
+    pokerAccessEditable: capabilityRows?.[0]?.available === true,
     recentPokerActivity: (Array.isArray(pokerRows) ? pokerRows : []).map((row) => ({
       tableId: row.table_id || null,
       actionType: row.action_type || null,

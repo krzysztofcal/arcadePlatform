@@ -4,7 +4,13 @@ import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
 const origin = "https://example.test";
 
-function makeHandler({ authResult, progression, calls, unsafe, checkWsBuyInCapability = async () => ({ ok: true }), klog = () => {} }) {
+function makeHandler({ poolSchema = true, authResult, progression, calls, unsafe, checkWsBuyInCapability = async () => ({ ok: true }), klog = () => {} }) {
+  const fallbackUnsafe = async (sql) => {
+    if (String(sql).toLowerCase().includes("select poker_auto_class, poker_access_override")) {
+      return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+    }
+    return [];
+  };
   return loadPokerHandler("netlify/functions/poker-progression.mjs", {
     baseHeaders: () => ({ "cache-control": "no-store" }),
     corsHeaders: () => ({ "access-control-allow-origin": origin }),
@@ -14,7 +20,7 @@ function makeHandler({ authResult, progression, calls, unsafe, checkWsBuyInCapab
       return authResult;
     },
     klog,
-    beginSql: async (fn) => fn({ unsafe: unsafe || (async () => []) }),
+    beginSql: async (fn) => fn({ unsafe: async (sql, params) => String(sql).includes("to_regclass") ? [{ available: poolSchema }] : (unsafe || fallbackUnsafe)(sql, params) }),
     readPokerProgression: async (_tx, options) => {
       calls.progression.push(options);
       return progression;
@@ -73,6 +79,13 @@ test("poker progression endpoint reads progression only for the verified user", 
       balance: 550,
       highestUnlockedBuyIn: 500,
       availableBuyIns: [500, 100],
+      pokerAccess: {
+        automaticClass: "NORMAL",
+        override: "AUTO",
+        effectiveClass: "NORMAL",
+        revision: 1,
+        automaticSlowAt: null
+      },
       rejoinableTableIds: [],
       tableAccess: null
     });
@@ -104,6 +117,7 @@ test("poker progression table access allows available tiers, locks historical lo
       checkWsBuyInCapability: async () => ({ ok: true }),
       unsafe: async (sql) => {
         const text = String(sql).toLowerCase();
+        if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
         if (text.includes("select distinct t.id")) return [{ id: tableId }].filter(() => seatRows.length > 0);
         if (text.includes("select id, status, buy_in, stakes")) return [table];
         if (text.includes("select 1 from public.poker_seats")) return seatRows;
@@ -129,6 +143,7 @@ test("poker progression table access allows available tiers, locks historical lo
       checkWsBuyInCapability: async () => ({ ok: false, reason: "buy_in_capability_unavailable" }),
       unsafe: async (sql) => {
         const text = String(sql).toLowerCase();
+        if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
         if (text.includes("select id, status, buy_in, stakes")) return [{ id: "table-5000", status: "OPEN", buy_in: 5000, stakes: { sb: 50, bb: 100 } }];
         return [];
       }
@@ -150,6 +165,37 @@ test("poker progression table access allows available tiers, locks historical lo
       httpMethod: "GET", queryStringParameters: { tableId: "table-100" }, headers: { origin, authorization: "Bearer token" }
     });
     assert.deepEqual(JSON.parse(rejoin.body).tableAccess, { tableId: "table-100", buyIn: 100, allowed: true, rejoin: true, reason: "rejoin" });
+  } finally {
+    if (previous === undefined) delete process.env.CHIPS_ENABLED;
+    else process.env.CHIPS_ENABLED = previous;
+  }
+});
+
+
+test("pre-migration progression/table access stays available without new schema columns", async () => {
+  const previous = process.env.CHIPS_ENABLED;
+  process.env.CHIPS_ENABLED = "1";
+  try {
+    for (const rejoin of [false, true]) {
+      const handler = makeHandler({
+        poolSchema: false,
+        authResult: { valid: true, userId: "legacy-user" },
+        progression: { balance: 110, availableBuyIns: [100], tiers: [{ buyIn: 100 }] },
+        calls: { tokens: [], progression: [] },
+        unsafe: async (query) => {
+          assert.doesNotMatch(query, /is_slow_only|poker_auto_class|poker_access_policy/);
+          if (query.includes("select id, status")) return [{ id: "legacy-table", status: "OPEN", buy_in: 100, stakes: { sb: 1, bb: 2 } }];
+          if (query.includes("select 1 from public.poker_seats")) return rejoin ? [{}] : [];
+          return [];
+        }
+      });
+      const response = await handler({ httpMethod: "GET", queryStringParameters: { tableId: "legacy-table" }, headers: { origin, authorization: "Bearer token" } });
+      assert.equal(response.statusCode, 200);
+      const body = JSON.parse(response.body);
+      assert.equal(body.pokerAccess.effectiveClass, "NORMAL");
+      assert.equal(body.tableAccess.allowed, true);
+      assert.equal(body.tableAccess.rejoin, rejoin);
+    }
   } finally {
     if (previous === undefined) delete process.env.CHIPS_ENABLED;
     else process.env.CHIPS_ENABLED = previous;
