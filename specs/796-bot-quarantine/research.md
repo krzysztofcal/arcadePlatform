@@ -36,23 +36,25 @@
 
 **Alternatives considered**: A shared SLOW pool allows high-tier starvation. TREASURY fallback defeats isolation. Progression catalog is not authorization to enable future bot tiers. No new managed SLOW lifecycle; an existing occupied managed table can become sticky SLOW-only while retaining lifecycle, but must not rotate participants into fresh ordinary funding.
 
-## R5 — Refill ledger and cross-revision bucket guard
+## R5 — Refill ledger and hourly database authority
 
-**Decision**: `scripts/ops/poker-bot-pool-refill.mjs` evaluates only the current UTC bucket. Under exact bankroll serialization and a stable policy revision, it checks existing committed ledger MINT metadata for pool+bucket across all revisions before posting one amount. It reuses `_shared/chips-ledger.mjs::postTransaction`, payload hash and `chips_transaction_idempotency`; deterministic key `poker-pool-refill:<system-key>:<revision>:<bucket>`. A narrow indexed pool/bucket identity on existing `chips_transactions` protects this purpose without a new receipt registry.
+The previous worker/dispatcher contract in this research section is historical and is superseded by Issue #1018 §29. The current design uses `public.poker_bot_pool_refill_hourly()` and, only after separate activation, one Supabase Cron job named `poker-bot-pool-refill-hourly` on `0 * * * *`.
 
-**Rationale**: Revision in idempotency key alone permits two refills after an edit; pool+bucket guard is additionally required. Current `validateEntries` rejects user-less MINT with `missing_user_entry`, so explicitly extend only backend-authorized scheduled GENESIS→exact provisioned pool MINT, never arbitrary metadata-based public MINT. Existing ledger/audit retains these low-volume system operations; no table binding or 7d/30d refill-MINT extension.
+The function validates `pg_control_system().system_identifier` against the singleton control row, exits while `enabled=false`, takes one transaction advisory lock, and uses a DB-derived UTC-hour bucket. It processes only enabled policies from the canonical 11-tier list and maps the exact 22 NORMAL/SLOW keys, including NORMAL 500 → `POKER_BOT_BANKROLL`. For each pool it locks/re-reads the policy and GENESIS/target accounts before deciding. Balance at/above threshold is no-op; below threshold issues exactly the configured amount.
 
-**Alternatives considered**: Per-funding exact deficit, composite mint/buy-in, permanent receipts, weekly allocation, refill-until-target and backlog catch-up all contradict live #1018. Shared policy row locked FOR SHARE during each refill and FOR UPDATE by Admin keeps a complete revision; accounts locked in stable ID order. A committed pool/bucket stays consumed after policy edit/disable/re-enable.
+The write follows the existing `postTransaction` ledger pattern: one deterministic 64-hex payload hash, append-only `chips_transactions` MINT, existing transaction trigger for `chips_transaction_idempotency`, atomic locked account deltas, exactly two balanced entries, and existing entry-sequence trigger. Identity is `poker-pool-refill:<poolKey>:<policyRevision>:<UTC-hour>`. The existing unique pool/bucket index prevents a second same-hour refill across policy revisions. Each pool has a narrow exception subtransaction, so failure is isolated and recorded while other pools proceed.
 
-## R6 — Admin and scheduler reuse
+**Rationale**: A database-owned transaction removes the GitHub/PAT/VPS actor path while retaining the existing source-of-truth ledger and idempotency. Hourly buckets allow another configured refill only in a later hour after renewed depletion. No receipt registry, balance trigger, Edge Function, queue, or alternate scheduler is added.
 
-**Decision**: Reuse `netlify/functions/_shared/admin-auth.mjs::requireAdminUser`, `admin-user-details.mjs::loadUserDetails`, `admin-users-list.mjs`, `admin-ops-summary.mjs::loadOpsSummary`, external `js/admin-page.js`. Add two narrow endpoints `admin-user-poker-access.mjs` and `admin-poker-policy.mjs`, following validated `admin-bonus-campaigns.mjs::createAdminBonusCampaignsHandler` patterns; row actor/time/revision metadata, no generic moderation or repurposing table-specific `insertTableAdminAction`.
+**Alternatives considered**: Keeping both authorities creates duplicate MINT risk. Balance triggers, queues and generic mint frameworks add write-path complexity. Catch-up/refill-until-target would exceed the configured per-pool hourly amount.
 
-Refill wake-up reuses the operating pattern in `infra/vps/arcade-chips-ledger-dispatch.sh/.service/.timer` and `docs/chips-ledger-stage-automation.md`, with a dedicated pool dispatcher/service/timer and dispatch-only workflow. Keep GitHub CLI auth separate: chips cleanup uses `/home/copilot/.config/gh` as `krzysztofcal`; poker refill uses `/home/copilot/.config/gh-poker-refill` as `arcade-poker-refill-dispatch`. Do not overwrite the chips config. `infra/vps/README.md` and the fresh-vps guard in `infra/vps/bootstrap.sh` restrict bootstrap to future fresh/rebuilt VPS; new files may be installed there only for that case. Never run bootstrap on an existing live VPS. Existing-host installation uses a separate owner-approved targeted upgrade/install flow: read-only inventory, reviewed artifact/rollback manifest, install only the dispatcher/units disabled, reload/verify without dispatch; activation is separately authorized. No code deploy, installation or bootstrap may automatically enable/start this new timer. VPS authenticates GitHub dispatch only; GitHub-hosted job holds environment-scoped DB access. Review repo/actor/ref/environment/feature gate as in `.github/workflows/chips-ledger-production-scheduled-automation.yml`.
+## R6 — Admin reuse and retired dispatcher
 
-**Rationale**: Existing Admin authorization and external systemd scheduler already solve these responsibilities. Production dispatch/refill activation remains separately authorized; adding the artifacts does not activate them.
+The Admin interfaces continue to use `requireAdminUser`, existing read/write validation and `klog` patterns. The old poker-specific workflow, Node refill worker, canary mode, VPS dispatcher/service/timer and `trustedScheduledRefill` application capability are removed after the database path is implemented. The separate chips cleanup dispatcher and its `/home/copilot/.config/gh` authentication remain unchanged.
 
-**Alternatives considered**: Generic config framework, native GitHub cron dependency and self-hosted runner are unnecessary. Never place DB credentials or mutation SQL on VPS.
+**Operational boundary**: the shared Stage migration may apply automatically from the PR, but the singleton remains `enabled=false`; no pg_cron extension or job is created and no MINT/balance/table/profile change occurs. The Production equivalent is prepared only. Existing poker service/timer on the VPS remain disabled/inactive and require separate post-merge owner GO for cleanup. Stage Cron activation and Production migration/activation are separate authorization gates. Do not run bootstrap on the live host.
+
+**Rationale**: There must be exactly one future refill authority, with schema alone economically dark. Retiring only the poker path must not replace, relog or remove the existing chips cleanup identity.
 
 ## R7 — Live lobby and DB Quick Seat
 
@@ -64,11 +66,11 @@ Refill wake-up reuses the operating pattern in `infra/vps/arcade-chips-ledger-di
 
 ## R8 — Validation and breaking impacts
 
-**Decision**: Extend existing JOIN, table-manager, persisted-state-writer, Quick Seat, Admin and ledger behavioral tests; one small new local PostgreSQL transaction suite verifies real slot/refill races. No UI/CSS/JSP/glue test suite. Use existing Node/postgres tooling, no package/framework additions.
+**Decision**: Extend only existing fundamental backend/ledger/migration and operational guard tests, plus the existing disposable PostgreSQL transaction suite. No UI/CSS/JSP/glue suite or scheduler framework is needed. The §29 tests prove control-off, tier/pool policy, exact ledger writes, same-hour replay/concurrency, next-hour eligibility, pool-local rollback, identity/ACL and no scheduler side effects.
 
-**Rationale**: Pure mocks cannot prove cross-table cap serialization or duplicate-dispatch issuance; T027 therefore uses one disposable local PostgreSQL database with two connections, barriers and planner statistics and records 6/6 passing subtests with no skip after the pre-migration capability regression was added. T028 reruns the focused implementation groups and compares the declared Vitest failures with the base checkout. Exact-SHA manual WS Preview Deploy, successful workflow verification and targeted smoke form the WS/Caddy runtime gate. The Stage-only refill canary supports NORMAL/SLOW with optional buy-in filtering; pre-merge Stage acceptance and T084 continuous inventory restoration have completed on Stage. The standalone refill workflow and dedicated dispatcher remain post-merge scheduler paths. Production remains a separate GO; live-VPS timer activation and PR merge remain strictly unauthorized. The shared Stage migration effect is declared before publication; applied migration corrections are forward-only.
+**Rationale**: Mocks cannot prove ledger trigger/registry behavior or transaction isolation. Disposable local PostgreSQL tests provide that evidence; they never target shared Stage or Production. The automatic Stage schema apply is documented and remains dark. No WS runtime changes require a Preview deploy.
 
-**Alternatives considered**: Broad test rewrites or Stage experiments during this docs task are unnecessary. Accepted risks remain Sybil, split wealth, below-threshold farming and depletion before next refill. Breaking changes are new 100 source, class segregation/sticky tables, 4+4 caps, bounded policy propagation and external periodic refill dependency.
+**Alternatives considered**: Live Stage depletion or real pg_cron activation is unnecessary to prove refill mechanics. Existing ledger and Cron catalogs provide future operational evidence after separate activation.
 
 ## R9 — Manual RESTRICTED amendment
 
@@ -81,3 +83,12 @@ Settled rollover reads effective RESTRICTED from the existing cached seated-huma
 `lobby_snapshot` carries only the minimal authoritative occupancy fact `botCount` plus existing lifecycle metadata; browser filtering is UX and does not replace JOIN authority. DB Quick Seat keeps its existing rejoin-first and Create fallback flow, adding only an indexed candidate predicate for ordinary bot-free RESTRICTED targets. CONTINUOUS_BOT remains NORMAL and is never a RESTRICTED fresh target.
 
 The new migration is classified `needs-production-equivalent` and intentionally causes one automatic Stage Apply effect (expected source inventory 98→99 applied after the existing 98 baseline). Production compatibility continues to probe capability per transaction: missing #1018 schema keeps legacy JOIN/rejoin, progression, Quick Seat, bootstrap and 100 CH provenance, while unrelated SQL errors propagate. The required exact-SHA Preview gate is new after T029; Stage refill/MINT, VPS activation, Production and merge remain separate gates.
+
+
+## R10 — §29 corrective database-owned refill amendment
+
+Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` creates a singleton disabled control with Stage system identifier `7656985631720456337` and the SECURITY INVOKER function. The Production equivalent `20260930211624_poker_bot_pool_refill_hourly.sql` uses `7575202818581710058`, is represented in the Production manifest, and remains unapplied. Both migrations avoid installing pg_cron, creating jobs or writing ledger rows.
+
+The sole documented future job is exactly `poker-bot-pool-refill-hourly`, schedule `0 * * * *`, command `select public.poker_bot_pool_refill_hourly();`. It is not activated by this PR. Stage automatic application can add only the dark schema/function; Production has no effect. Existing poker VPS units remain disabled/inactive pending separately authorized cleanup. No profile/table activation or `bootstrap.sh` execution is part of the implementation.
+
+Breaking impact: once separately activated, refill evaluation changes from three-hour to hourly buckets; a depleted pool can receive another configured amount sooner. Until the job and control are separately enabled, no recurring refill runs. Policy values, amounts, tier enablement and balances are unchanged.

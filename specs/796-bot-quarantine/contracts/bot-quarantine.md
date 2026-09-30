@@ -34,17 +34,19 @@ Known effective SLOW makes table sticky SLOW-only, including existing occupied C
 
 Only SYSTEM→ESCROW TABLE_BUY_IN in game runtime. No MINT in JOIN/seed/replacement/top-up, no cross-class/tier/TREASURY fallback. Existing source/hash/replay identity for TABLE_BUY_IN remains. Missing funds trigger safe no-funding restore/prepare/persist, generalized from current 500-only handling. Payout uses actual recorded source attribution, including legacy TREASURY; table marker or override never rewrites historical provenance.
 
-## 5. Scheduled refill
+## 5. Hourly database refill (§29)
 
-One dispatch-only GitHub-hosted job, primary trigger VPS systemd every three hours. Only current DB UTC bucket `[00,03,06,09,12,15,18,21]` is eligible; derive start from trusted clock, not user input. After locks, recheck current bucket before posting; stale queued invocation rolls to current bucket or no-ops, never mints backlog. Bounded transaction timeout prevents a request waiting across buckets from using an old allowance.
+The previous T019/T020/T086/T089–T092 VPS/GitHub dispatcher contract is historical and superseded. The only future scheduler is Supabase Cron job `poker-bot-pool-refill-hourly`, schedule `0 * * * *`, command `select public.poker_bot_pool_refill_hourly();`. This PR creates neither the pg_cron extension nor a job; the singleton control remains `enabled=false`.
 
-For each enabled exact pool: policy FOR SHARE→pool advisory lock→stable ordered ledger account locks; fresh balance plus committed pool/bucket check across revisions. Balance >= threshold means no-op; balance < threshold and unused bucket posts one configured amount. Key is `poker-pool-refill:<exact-system-key>:<policy-revision>:<UTC-bucket>`, stable payload/hash including original amount. Existing postTransaction replay verifies original identity before new calculation. Same pool/bucket ledger uniqueness spans revisions; changing threshold/amount or disable/re-enable cannot grant a second refill after commit. Before any old-key retry, recover the committed result; never substitute new amount under old identity. No-op does not consume a refill; later eligible retry in the same bucket may perform its sole amount.
+`public.poker_bot_pool_refill_hourly()` is SECURITY INVOKER with fully qualified application objects and no EXECUTE for PUBLIC, anon, authenticated or service_role. It validates the database's PostgreSQL system identifier against `poker_bot_refill_control`, then returns without ledger writes if the control is disabled. One transaction advisory lock prevents overlapping runs. DB time selects the current UTC hour only; there is no catch-up.
 
-Extend ledger validation with a backend-only scheduled-pool capability: exactly GENESIS debit/exact mapped SYSTEM credit, balanced positive safe amount and typed purpose/tier/class/revision/bucket metadata, valid target/environment/policy. Public metadata alone cannot enable SYSTEM MINT. Reject arbitrary account, tableId linkage, malformed revision, unsafe integer, disabled/unprovisioned tier or unknown target. One pool operation is atomic; another independent pool may proceed after a failed pool transaction, with explicit per-pool results. Unknown commit requires registry/ledger recovery, not blind second issuance. Normal system ledger/audit history remains; no table-linked retention extension.
+Only enabled canonical tiers and their exact NORMAL/SLOW keys are considered. NORMAL 500 maps to `POKER_BOT_BANKROLL`; the remaining keys follow the canonical mapping. For every pool, the function locks/re-reads its enabled policy and the GENESIS/target accounts, then makes the threshold decision. At/above threshold is no-op; below threshold debits GENESIS and credits exactly one configured amount to that pool.
 
-VPS stores only GitHub dispatch credentials, separated by service identity: chips cleanup uses `/home/copilot/.config/gh` as `krzysztofcal`; poker refill uses `/home/copilot/.config/gh-poker-refill` as `arcade-poker-refill-dispatch`. Never overwrite or re-authenticate the chips config for poker refill; neither config contains DB secrets or SQL. Dedicated workflow uses workflow_dispatch only, validated actor/repo/ref and separate Stage/Production environment gates; dry-run/read-only is default. Fresh/rebuilt VPS only: bootstrap.sh may install reviewed new artifacts disabled; never run it on an existing live VPS. Existing hosts use a separate owner-approved targeted upgrade/install flow following infra/vps/README.md and docs/chips-ledger-stage-automation.md, with read-only inventory and rollback manifest before installation. Installation and activation are separate: no code deploy/install/bootstrap automatically enables or starts the new timer or dispatches a workflow.
+Ledger identity is `poker-pool-refill:<poolKey>:<policyRevision>:<UTC-hour>`. The write uses append-only `chips_transactions` with `tx_type=MINT`, deterministic 64-hex payload hash via installed pgcrypto, exact purpose/pool/buy-in/class/revision/bucket metadata, the existing transaction trigger to populate `chips_transaction_idempotency`, atomic account balance deltas under locks, and exactly two balanced `chips_entries` using the existing sequence trigger. The existing unique pool/bucket index is defense in depth across policy revisions. No balance setter, registry mutation, new receipt table or alternate mint path is added.
 
-The WS runtime gate (manual exact-runtime-SHA WS Preview Deploy, verified workflow success and targeted smoke) is independent of the Stage acceptance refill canary. The Stage-only canary performs real Stage ledger MINT only through the already registered `chips-ledger-stage-scheduled-automation.yml` owner-only `poker-bot-pool-refill-canary` mode, supporting both `NORMAL` and `SLOW` pool classes with optional `POKER_BOT_REFILL_BUY_IN` filtering (100 or 500 CH), and must use the exact reviewed PR SHA as dispatched `GITHUB_SHA`, checkout HEAD and worker reviewed ref. Pre-merge Stage acceptance and continuous inventory restoration (including NORMAL verification and T084 SLOW 100 CH restoration) have been executed on Stage. The standalone `poker-bot-pool-refill.yml` and `arcade-poker-refill-dispatch` remain the post-merge scheduler path with unchanged Production gates and both NORMAL/SLOW class evaluation. Production migration, Production refill, and VPS timer activation remain strictly unauthorized and not run; PR merge remains separately unauthorized.
+Each pool is processed inside its own PL/pgSQL exception subtransaction. A failure rolls back that pool only, yields an explicit failed result, and permits later pools to proceed. The returned summary reports each pool result. A pool is limited to one refill in an hour; if depleted again, it can refill during a later hour.
+
+Stage may receive the forward-only migration automatically through DB Stage Apply. Its only effect is the disabled control/function; no pg_cron, job, MINT, balance/tier/profile/table mutation occurs. The Production equivalent is prepared but not applied. Stage Cron activation, Production apply/activation and live VPS cleanup require separate owner GO. Existing poker VPS units remain disabled/inactive; chips cleanup auth is unchanged. No bootstrap or profile/table activation is part of this amendment.
 
 ## 6. Admin interfaces
 
@@ -147,7 +149,7 @@ In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
    - Both 100 CH pools must be active and positive before enabling managed profile.
    - Stage pre-merge acceptance (T084) uses the owner-gated Stage refill canary for `SLOW / buy_in=100` (0 -> 2000 CH), then restores Stage `CONTINUOUS_BOT_DEFAULT` (desired 5, 3 bots each funded from `POKER_BOT_BANKROLL_100`).
 
-## 12. Full canonical tier catalog expansion and initial seed contract (§28 / T085–T092)
+## 12. Historical full tier catalog expansion and initial-seed workflow (§28 / T085–T092; refill path superseded by §29)
 
 1. **Canonical Tier Catalog (11 Tiers / 22 Pools)**:
    - Canonical tiers: `[100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000]`.
@@ -173,11 +175,18 @@ In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
    - Stage forward-only migration: `20260930075513_poker_bot_tier_catalog_expansion.sql`.
    - Production P1 contract (`20260929201500_poker_bot_quarantine_production_contract.sql`) provisions all 11 policies disabled and all 22 pools (21 missing at balance 0 + preserved `POKER_BOT_BANKROLL`).
 
-3. **Scheduled Refill & Production Initial Seed**:
-   - Ordinary 3h refill processes only `enabled = true` tiers.
-   - Owner-gated Production `initial-seed-all` mechanism:
+3. **Historical scheduled refill & Production initial seed (workflow removed by §29)**:
+   - The prior 3h refill/initial-seed workflow is historical; no worker or dispatcher remains. The current hourly function and its dark default are defined in §5.
+   - The removed owner-gated Production `initial-seed-all` mechanism:
      - Available only on Production target, `main` branch, `mutate` mode.
      - Strictly forbidden for automated dispatcher (`arcade-poker-refill-dispatch`).
      - Requires repository owner actor, checked SHA matching `GITHUB_SHA`, `POKER_BOT_REFILL_PRODUCTION_GO=1`, and explicit confirmation matching `GITHUB_SHA`.
      - Queries all policies without `where enabled = true` filter and passes `allowDisabled = true` to seed disabled pools without enabling them.
      - Tiers >500 remain disabled after seed.
+
+
+## 13. §29 refill replacement and operational boundary
+
+This section is authoritative over older scheduler descriptions in sections 5 and 12 and in historical task evidence. No GitHub workflow, VPS timer or dedicated poker dispatch credential remains the recurring refill authority. The single planned Supabase Cron job is documented above and is not created or activated in this PR.
+
+After merge, live VPS poker-unit cleanup needs a separate owner GO. Do not modify `arcade-chips-ledger-dispatch.*` or `/home/copilot/.config/gh`. Stage Cron setup and enabling `poker_bot_refill_control` are also separate owner gates. Production receives no migration, pg_cron/job setup, MINT or balance change from this PR. The hourly cadence is a behavioral change only after activation; before then refills do not run.

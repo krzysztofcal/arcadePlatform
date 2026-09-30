@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-26
 
-**Status**: Accepted implementation extension in progress — T001–T029 are historical implementation/evidence, while the manual RESTRICTED amendment is implemented locally and still requires its own exact-SHA WS Preview/runtime gate.
+**Status**: Accepted implementation with §29 hourly database-refill amendment in progress. T001–T092 are historical implementation/evidence; §29 supersedes the recurring VPS/GitHub refill design and is tracked in T093–T099.
 
 **Input**: Live [GitHub #1018](https://github.com/krzysztofcal/arcadePlatform/issues/1018), captured at `2026-09-27T17:10:33Z` in [issue-source.md](issue-source.md). Sole requirements source; supersedes previous #1019 designs and the earlier pre-amendment wording. SLOW here is not #869 rolling-12h SLOW.
 
@@ -55,7 +55,7 @@ Each enabled tier has separate NORMAL/SLOW liquidity, with historical returns go
 
 ### User Story 4 - Refill small amounts periodically (Priority: P1)
 
-Operations replenish each eligible pool once per three-hour bucket, independently of poker play.
+After separately authorized activation, Supabase Cron invokes the database refill function hourly; each eligible pool can refill at most once per UTC-hour bucket, independently of poker play.
 
 **Why this priority**: Caps each pool's short-term replenishment while maintaining regular availability.
 
@@ -63,9 +63,9 @@ Operations replenish each eligible pool once per three-hour bucket, independentl
 
 **Acceptance Scenarios**:
 
-1. **Given** an enabled pool below threshold, **When** its current UTC 3h bucket runs, **Then** exactly one configured amount is issued; balance equal to or above threshold issues zero.
+1. **Given** an enabled pool below threshold, **When** its current UTC-hour bucket runs, **Then** exactly one configured amount is issued; balance equal to or above threshold issues zero.
 2. **Given** a committed refill, **When** dispatch retries or policy changes in the same bucket, **Then** that pool receives no second refill; old-revision retries recover the original result.
-3. **Given** nine hours of missed dispatches, **When** the scheduler resumes, **Then** only the current bucket is considered, without backlog or refill-until-target.
+3. **Given** missed hourly runs, **When** the scheduler resumes, **Then** only the current hour is considered, without backlog or refill-until-target.
 
 ### User Story 5 - Tune access and economics through Admin (Priority: P2)
 
@@ -131,16 +131,16 @@ An administrator can make a user effective RESTRICTED without creating a third a
 - **FR-009**: Every explicitly bot-enabled tier MUST have provisioned NORMAL+SLOW SYSTEM bankrolls and enabled per-tier policy. 100 NORMAL=`POKER_BOT_BANKROLL_100`, 500 NORMAL=`POKER_BOT_BANKROLL`, SLOW=`POKER_BOT_SLOW_BANKROLL_100`/`POKER_BOT_SLOW_BANKROLL_500`. Catalog presence alone must not enable bots.
 - **FR-010**: Runtime seed, replacement and managed top-up MUST consume existing exact tier/class funds only, without runtime MINT or cross-class/cross-tier/TREASURY fallback. Resolve effective seated classes before positive funding; sticky SLOW-only uses SLOW funds. An effective RESTRICTED human allows legal settlement but authorizes no new bot seed, replacement or managed top-up. Preserve original source attribution and terminal returns.
 - **FR-011**: Per-tier policy MUST expose `buy_in`, `enabled`, `normal_refill_threshold_ch`, `normal_refill_amount_ch`, `slow_refill_threshold_ch`, `slow_refill_amount_ch`, monotonic revision and actor/time metadata. Use threshold terminology consistently.
-- **FR-012**: Every 3h, each enabled exact pool below its threshold MAY receive one configured amount; at most one per pool/current UTC bucket, never refill-until-target, multiple chunks or backlog catch-up. Policy changes cannot reopen an already consumed pool bucket.
-- **FR-013**: Refill MUST use existing balanced ledger/idempotency, GENESIS→exact bankroll; deterministic identity includes bankroll+policy revision+UTC 3h bucket. Retry/unknown COMMIT must not duplicate issuance. No permanent refill receipt table or table-linked refill-MINT retention machinery; retain normal ledger/audit history.
-- **FR-014**: Primary wake-up MUST reuse VPS/systemd→authenticated workflow_dispatch→GitHub-hosted job every 3h. VPS holds no DB credentials or mutation logic; native GitHub cron is not authoritative.
+- **FR-012**: After separate scheduler/control activation, each enabled exact pool below threshold MAY receive one configured amount per UTC-hour bucket. Never refill-until-target, issue multiple chunks or catch up missed hours. Policy changes cannot reopen a pool/hour already consumed.
+- **FR-013**: Refill MUST use existing balanced ledger/idempotency, GENESIS→exact bankroll; deterministic identity is `poker-pool-refill:<poolKey>:<policyRevision>:<UTC-hour>`. Retry/unknown COMMIT must not duplicate issuance within the hour. The existing unique pool/bucket index remains defense in depth. A later hour may refill again if balance falls below threshold. No receipt table or table-linked refill-MINT retention machinery; retain normal ledger/audit history.
+- **FR-014**: The sole future scheduler is one Supabase Cron job named `poker-bot-pool-refill-hourly`, schedule `0 * * * *`, command `select public.poker_bot_pool_refill_hourly();`. This PR creates no job and does not install `pg_cron`; the control defaults to disabled. No balance trigger, Edge Function, queue, VPS/GitHub refill workflow or second scheduler.
 - **FR-015**: Existing WS `activeLobbyTablesById`/`lobby_snapshot` MUST remain live inventory; add only `slowOnly`, minimal `botCount`/lifecycle compatibility and effective self class for filtering, preserving resume and authoritative JOIN revalidation. RESTRICTED fresh targets require ordinary bot-free occupancy. No personalized WS matchmaking or per-subscriber×table DB queries.
 - **FR-016**: Existing DB-backed Quick Seat MUST retain resume preference, add NORMAL/SLOW/RESTRICTED compatibility and constrained Create fallback; RESTRICTED selects only ordinary bot-free targets and final JOIN rejects stale targets. No WS migration of selection.
 - **FR-017**: Admin Users/Ops MUST show automatic/override/effective state, allow an authorized FORCE_RESTRICTED override in the existing flow, and retain dynamic access/per-tier policy tuning with audit and cache convergence. No public self-override or generic configuration/moderation framework.
 - **FR-018**: `has_human_participant` MUST become true only on accepted human admission/rejoin and never reset. Denied classification does not consume a slot/seat or falsify this marker.
 - **FR-019**: CONTINUOUS_BOT MUST retain existing lifecycle, ordinary exact NORMAL funding and denial of fresh SLOW or RESTRICTED; no separate SLOW/RESTRICTED lifecycle. Existing seated transition never kicks/aborts; preserve financed actions, rejoin, settlement, leave/cash-out and future SLOW funding without rotation into an ordinary funded target.
 - **FR-020**: Only fundamental deterministic backend/runtime/transaction tests are required. Reuse existing packages/methods; JSP/global JS compatibility, `klog` logging, CSS one selector per line, CSP SHA if future inline script is added. No broad UI/CSS/JSP/glue suites.
-- **FR-021**: The implementation MUST not perform Production migration/seed/refill, live-VPS scheduler activation or merge. Each migration published from this branch intentionally goes through the repository DB Stage Apply PR and is forward-only once applied; its shared-Stage effect must be declared before publication. Exact-SHA WS Preview/runtime verification and the reviewed Infra VPS/Caddy path are required gates for each runtime-affecting extension. The Stage-only refill canary supports NORMAL/SLOW with optional buy-in filtering; pre-merge Stage acceptance and T084 continuous inventory restoration have completed on Stage. Production migration/seed/refill/scheduler activation and PR merge remain strictly unauthorized.
+- **FR-021**: The new forward-only Stage migration may be applied automatically to shared Stage by the repository DB Stage Apply path; before publication this effect is declared economically dark: one control row remains `enabled=false`, with no `pg_cron` install, Cron job, MINT, tier/pool/profile/table activation or balance change. The prepared Production equivalent is not applied and has no Production effect. This PR performs no live-VPS cleanup, bootstrap, service/timer change or Cron activation; installed poker service/timer remain disabled/inactive until separate owner GO. PR merge remains subject to normal review and is not performed by this implementation.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -158,7 +158,7 @@ An administrator can make a user effective RESTRICTED without creating a third a
 - **SC-001**: All threshold, override, promotion and fresh-admission scenarios produce the expected class; existing financed hands/rejoin/payout complete without a classification-induced loss.
 - **SC-002**: Under concurrent requests, one user never exceeds four active or four pending tables; rejected fifth requests transfer zero CH and create zero table artifacts.
 - **SC-003**: Every new bot transfer debits its exact tier/class pool; runtime emits zero new CH and all terminal returns preserve provenance.
-- **SC-004**: Every pool receives zero or one configured refill amount per UTC 3h bucket, including retry/revision races and missed dispatches; no duplicate issuance.
+- **SC-004**: Every pool receives zero or one configured refill amount per UTC-hour bucket, including retry/revision races and missed runs; no duplicate issuance.
 - **SC-005**: Admin changes become effective without deploy; unauthorized changes produce zero mutations, and below-threshold settled hands add zero classification reads/writes.
 - **SC-006**: Both existing discovery paths preserve resume, expose compatible fresh targets and cannot bypass final class/slot validation.
 - **SC-007**: FORCE_RESTRICTED is Admin-only and manual-only; fresh restricted admission is ordinary bot-free with zero new bot funding, while financed rejoin, settlement, leave and cash-out remain legal.

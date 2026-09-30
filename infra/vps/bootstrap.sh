@@ -170,9 +170,6 @@ install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server-preview.servi
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.service" /etc/systemd/system/arcade-chips-ledger-dispatch.service
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.timer" /etc/systemd/system/arcade-chips-ledger-dispatch.timer
 install -D -o root -g root -m 0755 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.sh" /usr/local/bin/arcade-chips-ledger-dispatch.sh
-install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-poker-pool-dispatch.service" /etc/systemd/system/arcade-poker-pool-dispatch.service
-install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-poker-pool-dispatch.timer" /etc/systemd/system/arcade-poker-pool-dispatch.timer
-install -D -o root -g root -m 0755 "$REPO_ROOT/infra/vps/arcade-poker-pool-dispatch.sh" /usr/local/bin/arcade-poker-pool-dispatch.sh
 install -D -o root -g root -m 0755 \
   "$REPO_ROOT/infra/vps/vps-maintenance.sh" \
   /usr/local/sbin/arcadeplatform-vps-maintenance.sh
@@ -186,7 +183,6 @@ register the GitHub runner, enable/start WS services, or enable/start the Stage
 scheduler. It did not run VPS maintenance or enable/start its timer. Caddy was
 left disabled and unstarted after its package installation;
 follow docs/vps-disaster-recovery.md for the owner-approved activation and
-recovery sequence. The poker pool refill service/timer were installed as
-disabled fresh-host artifacts only; existing live hosts require the separate
-owner-approved targeted install flow and no bootstrap invocation.
+recovery sequence. Bootstrap does not perform the separate post-merge live-VPS
+cleanup procedure.
 NOTICE

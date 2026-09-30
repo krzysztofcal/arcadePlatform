@@ -21,9 +21,9 @@
 - [ ] CHK008 Are exact 100/500 NORMAL/SLOW pools and explicit future-tier provisioning defined with no TREASURY/cross-tier/class fallback? [FR-009/010]
 - [ ] CHK009 Do all runtime funding paths spend only existing CH and preserve historical source returns? [FR-010]
 - [ ] CHK010 Are enabled/four threshold+amount fields/revision/audit dynamically tunable, positive safe integers and backend-authorized? [FR-011/017]
-- [ ] CHK011 Is each current UTC3h pool bucket limited to one configured amount, including policy revision changes, retries and disable/re-enable? [FR-012/013]
+- [ ] CHK011 Is each current UTC-hour pool bucket limited to one configured amount, including policy revision changes, retries and disable/re-enable? [FR-012/013]
 - [ ] CHK012 Does existing ledger/idempotency protect scheduled SYSTEM MINT without new receipts, per-funding identity or table-linked retention? [FR-013]
-- [ ] CHK013 Is VPS/systemd authenticated dispatch the primary wake-up, with bootstrap only for fresh/rebuilt hosts and a separate owner-approved existing-host install? Are installation/activation separate, with no deploy/install auto-enable/start, DB credentials/SQL on VPS, native cron reliance or backlog? [FR-014/021]
+- [ ] CHK013 Is the only future scheduler the exact Supabase Cron job `poker-bot-pool-refill-hourly` (`0 * * * *`, `select public.poker_bot_pool_refill_hourly();`), while this PR leaves pg_cron/job/control disabled? Are live VPS cleanup, bootstrap and profile/table activation excluded pending separate owner GO? [FR-014/021]
 - [ ] CHK014 Has no drift between live #1018 and this Spec Kit been confirmed, with the accepted implementation instruction recorded before T001? [FR-021]
 
 ## Integration / scope
@@ -32,10 +32,10 @@
 - [ ] CHK016 Does CONTINUOUS_BOT retain lifecycle, no new SLOW/RESTRICTED lifecycle, no forced hand interruption or rotation bypass, and deny fresh RESTRICTED targets? [FR-019]
 - [ ] CHK017 Are Admin Users/Ops reused without generic policy/moderation product, public overrides or unnecessary UI tests? [FR-017/020]
 - [ ] CHK018 Are Sybil, split wealth, below-threshold farming and pool-chunk exhaustion explicitly accepted residual risks? [spec Assumptions]
-- [ ] CHK019 Are breaking impacts and shared Stage forward-only effects explicit, including the single CHECK-only RESTRICTED migration? Is required manual exact-SHA WS/Caddy verification/smoke followed by the explicitly authorized owner-only canary in the registered Stage workflow, with the standalone refill dispatcher and Production a wholly separate GO? [FR-021]
+- [ ] CHK019 Are breaking impacts and shared Stage forward-only effects explicit, including that shared Stage may automatically receive only a dark disabled control/function, while Production P2 remains unapplied? Is live VPS cleanup, Cron activation and Production a separate GO? [FR-021]
 - [ ] CHK020 Are tests fundamental, JS JSP/global compatible, logging klog-only, CSS one selector per line and future inline CSP SHA accounted for? [FR-020]
 
-- [ ] CHK021 Do T016/T019/T020 extend `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` and `ws-tests/infra-vps-workflow.guard.test.mjs` with minimal deterministic guards for workflow_dispatch-only, canonical repo/ref, actor/environment/feature gates, read-only default, separate Production GO and rejection of input-only authorization; exact VPS dispatch with no DB secrets/SQL; fresh-only installation without activation and separate existing-host install? Do tests avoid real dispatch/systemd/DB mutations and new frameworks/broad suites? [FR-014/020/021]
+- [ ] CHK021 Do the existing workflow/VPS guard tests prove that the retired poker refill workflow/worker/timer/canary are absent while the chips cleanup service/auth remain unchanged? Do the disposable PostgreSQL tests cover the database refill invariants without requiring real pg_cron or touching shared Stage/Production? [FR-014/020/021]
 
 ## Manual RESTRICTED amendment
 

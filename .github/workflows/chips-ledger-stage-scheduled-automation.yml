@@ -23,27 +23,6 @@ on:
           - external-existing-30d
           - external-scheduled-automatic
           - missing-table-bot-retirement-canary
-          - poker-bot-pool-refill-canary
-      poker_refill_reviewed_sha:
-        description: Exact lowercase 40-character PR SHA; must equal the dispatched GITHUB_SHA for the Stage refill canary
-        required: false
-        type: string
-      poker_refill_confirmation:
-        description: Exact REFILL <reviewed_sha> or REFILL SLOW [buy_in] <reviewed_sha> confirmation for the owner-gated Stage refill canary
-        required: false
-        type: string
-      poker_refill_pool_class:
-        description: Exact pool class for the Stage refill canary (NORMAL or SLOW)
-        required: false
-        default: NORMAL
-        type: choice
-        options:
-          - NORMAL
-          - SLOW
-      poker_refill_buy_in:
-        description: Exact tier buy-in for the Stage refill canary (optional 100 or 500)
-        required: false
-        type: string
       stage_30d_recovery_batch_id:
         description: Exact Stage 30-day recovery batch_id (optional for existing-30d-recovery-diagnostic; required for existing-30d-recovery-repair)
         required: false
@@ -94,13 +73,13 @@ permissions:
 
 jobs:
   stage-archive:
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-selector-diagnostic' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref == 'refs/heads/main') || (vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'bot-only-7d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair' && inputs.mode != 'external-existing-30d' && inputs.mode != 'missing-table-bot-retirement-canary' && inputs.mode != 'poker-bot-pool-refill-canary') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'external-existing-30d' || inputs.mode == 'bot-only-7d-recovery-repair')) || inputs.mode == 'closed-human-30d-recovery-repair'))) ) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'missing-table-bot-retirement-canary' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'poker-bot-pool-refill-canary' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref != 'refs/heads/main') }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'bot-only-7d-selector-diagnostic' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && github.ref == 'refs/heads/main') || (vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' && (github.event_name != 'workflow_dispatch' || (inputs.mode != 'escrow-retention-audit' && inputs.mode != 'escrow-retention-verify' && inputs.mode != 'existing-30d-recovery-repair' && inputs.mode != 'bot-only-7d-recovery-repair' && inputs.mode != 'closed-human-30d-recovery-repair' && inputs.mode != 'external-existing-30d' && inputs.mode != 'missing-table-bot-retirement-canary') || (github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner && ((github.ref == 'refs/heads/main' && (inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'external-existing-30d' || inputs.mode == 'bot-only-7d-recovery-repair')) || inputs.mode == 'closed-human-30d-recovery-repair'))) ) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'missing-table-bot-retirement-canary' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
-      SUPABASE_STAGE_URL: ${{ inputs.mode != 'missing-table-bot-retirement-canary' && inputs.mode != 'poker-bot-pool-refill-canary' && secrets.SUPABASE_STAGE_URL || '' }}
-      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ inputs.mode != 'missing-table-bot-retirement-canary' && inputs.mode != 'poker-bot-pool-refill-canary' && secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY || '' }}
+      SUPABASE_STAGE_URL: ${{ inputs.mode != 'missing-table-bot-retirement-canary' && secrets.SUPABASE_STAGE_URL || '' }}
+      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ inputs.mode != 'missing-table-bot-retirement-canary' && secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY || '' }}
     steps:
       - name: Checkout
         id: checkout
@@ -128,7 +107,7 @@ jobs:
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
       - name: Read-only Stage fence preflight
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-selector-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'bot-only-7d-recovery-repair' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'missing-table-bot-retirement-canary' || inputs.mode == 'poker-bot-pool-refill-canary') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'existing-30d-recovery-diagnostic' || inputs.mode == 'existing-30d-recovery-repair' || inputs.mode == 'bot-only-7d-summary-diagnostic' || inputs.mode == 'bot-only-7d-selector-diagnostic' || inputs.mode == 'bot-only-7d-automatic' || inputs.mode == 'bot-only-7d-recovery-repair' || inputs.mode == 'closed-human-30d-recovery-diagnostic' || inputs.mode == 'closed-human-30d-recovery-repair' || inputs.mode == 'escrow-retention-audit' || inputs.mode == 'escrow-retention-verify' || inputs.mode == 'missing-table-bot-retirement-canary') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -210,55 +189,6 @@ jobs:
 
           process.stdout.write("Stage read-only fence preflight passed\n");
           NODE
-
-      - name: Execute exact poker bot pool refill Stage canary
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'poker-bot-pool-refill-canary' }}
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
-          POKER_BOT_REFILL_TARGET: stage
-          POKER_BOT_REFILL_MODE: mutate
-          POKER_BOT_REFILL_REVIEWED_REF: ${{ github.sha }}
-          POKER_BOT_REFILL_CHECKED_SHA: ${{ steps.checkout-sha.outputs.sha }}
-          POKER_BOT_REFILL_FEATURE_ENABLED: "1"
-          POKER_BOT_REFILL_STAGE_CANARY: "1"
-          POKER_BOT_REFILL_POOL_CLASS: ${{ inputs.poker_refill_pool_class || 'NORMAL' }}
-          POKER_BOT_REFILL_BUY_IN: ${{ inputs.poker_refill_buy_in || '' }}
-          REVIEWED_SHA_INPUT: ${{ inputs.poker_refill_reviewed_sha }}
-          REVIEWED_SHA_CONFIRMATION: ${{ inputs.poker_refill_confirmation }}
-          DEPLOYED_COMMIT_SHA: ${{ steps.checkout-sha.outputs.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
-          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
-          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
-          test "$GITHUB_REF" != "refs/heads/main"
-          [[ "$REVIEWED_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]]
-          test "$REVIEWED_SHA_INPUT" = "$GITHUB_SHA"
-          test "$DEPLOYED_COMMIT_SHA" = "$GITHUB_SHA"
-          test "$POKER_BOT_REFILL_REVIEWED_REF" = "$GITHUB_SHA"
-          test "$POKER_BOT_REFILL_CHECKED_SHA" = "$GITHUB_SHA"
-          if [[ "$REVIEWED_SHA_CONFIRMATION" =~ ^REFILL\ (NORMAL|SLOW)\ (100|500)\ ([0-9a-f]{40})$ ]]; then
-            export POKER_BOT_REFILL_POOL_CLASS="${BASH_REMATCH[1]}"
-            export POKER_BOT_REFILL_BUY_IN="${BASH_REMATCH[2]}"
-            test "${BASH_REMATCH[3]}" = "$REVIEWED_SHA_INPUT"
-          elif [[ "$REVIEWED_SHA_CONFIRMATION" =~ ^REFILL\ (NORMAL|SLOW)\ ([0-9a-f]{40})$ ]]; then
-            export POKER_BOT_REFILL_POOL_CLASS="${BASH_REMATCH[1]}"
-            test "${BASH_REMATCH[2]}" = "$REVIEWED_SHA_INPUT"
-          elif [ "$POKER_BOT_REFILL_POOL_CLASS" = "SLOW" ]; then
-            test "$REVIEWED_SHA_CONFIRMATION" = "REFILL SLOW $REVIEWED_SHA_INPUT" || test "$REVIEWED_SHA_CONFIRMATION" = "REFILL $REVIEWED_SHA_INPUT"
-          else
-            test "$REVIEWED_SHA_CONFIRMATION" = "REFILL $REVIEWED_SHA_INPUT"
-          fi
-          test "$POKER_BOT_REFILL_FEATURE_ENABLED" = "1"
-          test "$POKER_BOT_REFILL_POOL_CLASS" = "NORMAL" || test "$POKER_BOT_REFILL_POOL_CLASS" = "SLOW"
-          if [ -n "${POKER_BOT_REFILL_BUY_IN:-}" ]; then
-            test "$POKER_BOT_REFILL_BUY_IN" = "100" || test "$POKER_BOT_REFILL_BUY_IN" = "500"
-          fi
-          test -n "$SUPABASE_DB_URL"
-          test -z "${SUPABASE_STAGE_URL:-}"
-          test -z "${SUPABASE_STAGE_SERVICE_ROLE_KEY:-}"
-          node scripts/ops/poker-bot-pool-refill.mjs
 
       - name: Execute exact missing-table bot retirement Stage canary
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'missing-table-bot-retirement-canary' }}

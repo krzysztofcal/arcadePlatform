@@ -1,6 +1,6 @@
 # Exhaustive Production migration inventory
 
-Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. Addenda for #1018 bot quarantine, manual RESTRICTED, recovery threshold, hysteresis bps, and tier catalog expansion bring missing source migrations to 48 entries; all five #1018 migrations are mapped to prepared Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`), awaiting explicit Production GO. Production remains at its 54-entry baseline.
+Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. Addenda for #1018 bot quarantine, manual RESTRICTED, recovery threshold, hysteresis bps, and tier catalog expansion bring missing source migrations to 49 entries. The five existing #1018 schema sources are mapped to prepared Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); the new hourly-refill source maps to prepared P2 (`20260930211624_poker_bot_pool_refill_hourly.sql`). Both await separate Production GO. Production remains at its 54-entry baseline; P2 is not applied.
 
 **Classification is not permission to execute.** `shared-safe` means no environment-specific rollout authority in that change, subject to dependencies; final equivalence can supersede a safe transient patch. `stage-only` has no required shared effect. `needs-production-equivalent` includes mixed migrations whose shared changes cannot be omitted merely because the filename mentions Stage. Every required effect is covered by E1's final definitions; E2 activates only TABLE fence; E3 alone activates fresh Production policies/cap. No old missing file is replayed or marked applied by this plan.
 
@@ -58,12 +58,13 @@ The last already-applied Production migration, `20260813090000_chips_ledger_arch
 | `20260929130000_poker_access_policy_recovery_threshold.sql` | needs-production-equivalent | Stage #1018 slow_recovery_threshold_ch column and positive/ordering constraints. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
 | `20260929163000_poker_access_policy_hysteresis_bps.sql` | needs-production-equivalent | Stage #1018 slow_hysteresis_bps column [100, 5000] and derived recovery threshold constraint. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
 | `20260930075513_poker_bot_tier_catalog_expansion.sql` | needs-production-equivalent | Stage #1018 §28 canonical tier catalog expansion (>500 buy-in tiers) with disabled policies and zero-balance exact pools. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
+| `20260930211623_poker_bot_pool_refill_hourly.sql` | needs-production-equivalent | Stage #1018 §29 disabled refill control and hourly SECURITY INVOKER ledger function. Prepared in Production P2 (`20260930211624_poker_bot_pool_refill_hourly.sql`) with canonical Production identity; no pg_cron/job/MINT and not applied. |
 
-Totals: **27 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (48 missing source files).
+Totals: **28 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (49 missing source files).
 
 ## History and equivalence proof
 
-New versions E1/E2/E3 under `supabase/production-migrations/` are actual applied history. A checked-in manifest maps every missing old version to category, immutable source SHA256, replacement version and explicit required/omitted contract. On Production, old Stage versions stay absent. The migration guard must report them as intentional gaps and reject new unclassified main versions. Do not call `supabase migration repair --status applied`, insert their old versions, or make generic db push treat their SQL as executed. No repair is required: Production and Stage intentionally have different histories.
+E1/E2 and P1 under `supabase/production-migrations/` are the reviewed Production-equivalent history; P2 is prepared but unapplied. A checked-in manifest maps every missing old version to category, immutable source SHA256, replacement version and explicit required/omitted contract. On Production, old Stage versions stay absent. The migration guard must report them as intentional gaps and reject new unclassified main versions. Do not call `supabase migration repair --status applied`, insert their old versions, or make generic db push treat their SQL as executed. No repair is required: Production and Stage intentionally have different histories.
 
 Before any inventory item is marked **covered**, capture normalized catalog evidence from a disposable baseline+E1 and Stage final contract: column type/default/nullability; constraints; indexes and predicates/opclasses; trigger event/timing/deferral/function; RLS enable/force flags and USING/WITH CHECK; function body/signature/owner/SECURITY DEFINER/search_path; EXECUTE/table grants and PUBLIC/API denials. Normalize only a reviewed map of Production/Stage identity, policy and explicitly renamed escrow/policy-table symbols. Exclude historical rows and legacy-only objects explicitly. Do not globally strip all literals/Stage text. Exercise actual binding, privilege, lifecycle and receipt behavior in existing PostgreSQL tests; catalog checks alone do not prove equivalence. Required differences are Production cap2/OFF, no legacy branches, fresh canary receipt binding, and conservative pre-fence eligibility.
 
@@ -72,6 +73,8 @@ A Stage-only item is **not applicable**, never “satisfied” by falsely record
 ## Stage rollout contamination search
 
 Search covered every missing SQL file for Stage project ref, PostgreSQL system identifier, policy literals, canary/batch IDs, activation confirmations/receipts, UUIDs/hashes, legacy allowlists/singleton inserts and assertions/fences. Per-source digest and object/literal references follow. Historical Stage anchors include batch **13**, canary **15** (live bot/escrow and orchestrator), canary **334**, human table `ec3f4897-c7bb-4d92-b63d-a38401e9a5c4`, run **32753223679**, cutoff **2026-08-17T16:51:28.074Z**, 974-table allowlist and frozen master hash `611ab69ba8ee160a4957f8fe9514c919b9f4129bc1ea7842778b04d28ea6ca05`. Stage singleton inserts are in 20260825120000, 20260902100000, 20260904100000; activation receipt checks in 20260905140000/150000 cannot be copied. Dynamic pg_get_functiondef patches inherit prior Stage coupling even when they contain no ref literal.
+
+The new P2 refill equivalent is a prepared, unapplied Production migration. Its inclusion in this inventory is not execution authorization.
 
 The existing generic `chips_prune_committed_archive_batch_internal`, `chips_guard_archive_batch_mutations`, `chips_guard_poker_table_mutations` and `chips_validate_table_transaction_binding` were replaced by mixed legacy migrations. E1 must reconstruct their **latest effective shared** bodies; copying only the first bot migration would lose later human GO, receipt retry, owner/RLS and scoped proof fixes.
 
@@ -554,3 +557,14 @@ Objects/references: `poker_bot_tier_policy` expansion for 9 higher tiers (>500 b
 Target/policy discriminators: none; this is the Stage #1018 §28 tier catalog expansion migration. Prepared in Production equivalent P1; Production apply remains separately reviewed.
 
 Historical hash/UUID literals: none.
+
+
+### 20260930211623 — §29 hourly refill contract
+
+Source: [SQL](../../supabase/migrations/20260930211623_poker_bot_pool_refill_hourly.sql) · SHA256 `336b51d947a5ff7aa34fae25e6422a82807d6d4e7b4639dbcef4091f9ef66fbe`.
+
+Objects: singleton `public.poker_bot_refill_control`, `public.poker_bot_pool_refill_hourly()`.
+
+Disposition: `needs-production-equivalent`, mapped to prepared P2 `20260930211624_poker_bot_pool_refill_hourly.sql`. P2 SHA256 `a3bec5f1f1d566e0dcbb6bb3e4cfc899750c8bf760144e6d47fe248444383c12`. It checks Production PostgreSQL system identifier `7575202818581710058`, keeps the control disabled, and creates no pg_cron extension/job or MINT. It has not been applied; there is no Production effect from this PR.
+
+The Stage source migration may apply automatically to shared Stage through DB Stage Apply. That allowed effect is limited to its `enabled=false` control row and refill function; it creates no pg_cron/job and changes no pool balance, tier, profile, table or ledger state.

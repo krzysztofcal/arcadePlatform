@@ -6,7 +6,7 @@
 
 **Tests**: Only requested fundamental deterministic backend/runtime/transaction tests. No UI/CSS/JSP/glue suites or new test framework.
 
-**Organization**: User-story phases follow the active Spec Kit template. T001–T029 are completed historical implementation/evidence; T029 is the earlier exact-SHA WS Preview/runtime gate recorded in `quickstart.md`. The current live #1018 amendment adds only the manual FORCE_RESTRICTED extension through T030–T036, followed by the pre-merge Stage acceptance gate T037. The Stage refill canary is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / RUN: NO-OP**; acceptance is complete (T037 PASS). Latest live #1018 supersedes the old 19-task farmer-only plan.
+**Organization**: User-story phases follow the active Spec Kit template. T001–T092 are historical implementation/evidence; §29 supersedes the recurring VPS/GitHub refill path and adds current tasks T093–T099. The old Stage refill canary authorization and prior runs are historical; do not repeat them. Latest live #1018 supersedes the old 19-task farmer-only plan.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -16,7 +16,7 @@
 
 **Purpose**: Confirm requirements and implementation authority, not generic project setup.
 
-- [x] T001 Record accepted independent review, selection of #1018 instead of #869, no drift from live issue, and separate explicit implementation instruction in `specs/796-bot-quarantine/quickstart.md`. Reconfirm periodic 3h per-tier NORMAL/SLOW policy, 4+4 limits and accepted Sybil risk. Before any future migration PR publication, declare intended shared Stage mutation via DB Stage Apply PR and applied forward-only rule; Production remains separate GO. No ignore/tooling/dependency cleanup. (FR-021)
+- [x] T001 Record accepted independent review, selection of #1018 instead of #869, no drift from live issue, and separate explicit implementation instruction in `specs/796-bot-quarantine/quickstart.md`. Reconfirm the then-current 3h per-tier NORMAL/SLOW policy, 4+4 limits and accepted Sybil risk; §29 later changes the refill cadence to hourly. Before any future migration PR publication, declare intended shared Stage mutation via DB Stage Apply PR and applied forward-only rule; Production remains separate GO. No ignore/tooling/dependency cleanup. (FR-021)
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
@@ -94,9 +94,9 @@
 ### Implementation for User Story 4
 
 - [x] T017 After T016, extend `netlify/functions/_shared/chips-ledger.mjs::validateEntries/postTransaction` narrowly for trusted scheduled-pool MINT: exactly GENESIS debit + mapped SYSTEM credit, balanced safe integer, purpose/pool/tier/class/revision/bucket metadata. Current missing_user_entry rule remains for unrelated SYSTEM MINT; reuse transaction/payload hash/registry, not public metadata capability or table funding key. (FR-013; SC-004)
-- [x] T018 After T017, add `scripts/ops/poker-bot-pool-refill.mjs`: current DB UTC 3h bucket only; per enabled pool policy FOR SHARE→pool serialization→ordered accounts, fresh balance and indexed cross-revision committed pool+bucket guard, then exactly one configured amount if below threshold. Use a `poker-pool-refill` key composed of the exact system key, policy revision and UTC bucket, with original payload on replay; policy edits/disable-reenable cannot reopen a consumed bucket. No-op can retry eligibility; old uncommitted buckets rejected, unknown commit recovered. Bounded tx timeout/recheck after locks, per-pool atomic outcomes, strict environment/ref authorization and dry-run default. No receipts/table-linked retention. (FR-011–014; SC-004)
-- [x] T019 After T018, add `.github/workflows/poker-bot-pool-refill.yml` using `.github/workflows/chips-ledger-production-scheduled-automation.yml` actor/repo/ref/environment guards; workflow_dispatch only, GitHub-hosted Node job, reviewed ref, explicit target/mode, dry-run default, separate Production gate. Dispatch concurrency is defense in depth; DB pool/bucket identity is authority. No native cron or automatic runtime-triggered refill. Complete and pass the T016 refill-workflow cases in `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` against this artifact. (FR-014/020/021; SC-004)
-- [x] T020 After T019, add `infra/vps/arcade-poker-pool-dispatch.sh`, `.service`, `.timer` reusing existing arcade-chips-ledger-dispatch pattern; extend `infra/vps/bootstrap.sh` only for future fresh/rebuilt VPS installation of disabled artifacts, never for an existing live VPS. In `specs/796-bot-quarantine/quickstart.md`, specify a separate owner-approved existing-host upgrade/install flow following `infra/vps/README.md` and `docs/chips-ledger-stage-automation.md`: read-only inventory and rollback manifest, targeted reviewed artifact installation, reload/verify without dispatch. Installation and activation are separate; neither code deploy nor installation automatically enables/starts the timer. Timer every3h dispatches intended repo/ref/target/mode with isolated GitHub CLI configs: chips cleanup `/home/copilot/.config/gh` as `krzysztofcal`; poker refill `/home/copilot/.config/gh-poker-refill` as `arcade-poker-refill-dispatch`. Preserve the chips config; no DB secrets/SQL or automatic activation by installation. Missed ticks dispatch at most current bucket. Production install/enable/refill requires separate authorization. Complete and pass the T016 dispatcher/service/timer/fresh-bootstrap cases in `ws-tests/infra-vps-workflow.guard.test.mjs`; scope no-start/no-enable assertions to the new refill artifacts, preserving unrelated existing bootstrap behavior. (FR-014/020/021; SC-004)
+- [x] T018 (historical, superseded by T093) After T017, add `scripts/ops/poker-bot-pool-refill.mjs`: current DB UTC 3h bucket only; per enabled pool policy FOR SHARE→pool serialization→ordered accounts, fresh balance and indexed cross-revision committed pool+bucket guard, then exactly one configured amount if below threshold. Use a `poker-pool-refill` key composed of the exact system key, policy revision and UTC bucket, with original payload on replay; policy edits/disable-reenable cannot reopen a consumed bucket. No-op can retry eligibility; old uncommitted buckets rejected, unknown commit recovered. Bounded tx timeout/recheck after locks, per-pool atomic outcomes, strict environment/ref authorization and dry-run default. No receipts/table-linked retention. (FR-011–014; SC-004)
+- [x] T019 (historical, superseded by T095) After T018, add `.github/workflows/poker-bot-pool-refill.yml` using `.github/workflows/chips-ledger-production-scheduled-automation.yml` actor/repo/ref/environment guards; workflow_dispatch only, GitHub-hosted Node job, reviewed ref, explicit target/mode, dry-run default, separate Production gate. Dispatch concurrency is defense in depth; DB pool/bucket identity is authority. No native cron or automatic runtime-triggered refill. Complete and pass the T016 refill-workflow cases in `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` against this artifact. (FR-014/020/021; SC-004)
+- [x] T020 (historical, superseded by T095) After T019, add `infra/vps/arcade-poker-pool-dispatch.sh`, `.service`, `.timer` reusing existing arcade-chips-ledger-dispatch pattern; extend `infra/vps/bootstrap.sh` only for future fresh/rebuilt VPS installation of disabled artifacts, never for an existing live VPS. In `specs/796-bot-quarantine/quickstart.md`, specify a separate owner-approved existing-host upgrade/install flow following `infra/vps/README.md` and `docs/chips-ledger-stage-automation.md`: read-only inventory and rollback manifest, targeted reviewed artifact installation, reload/verify without dispatch. Installation and activation are separate; neither code deploy nor installation automatically enables/starts the timer. Timer every3h dispatches intended repo/ref/target/mode with isolated GitHub CLI configs: chips cleanup `/home/copilot/.config/gh` as `krzysztofcal`; poker refill `/home/copilot/.config/gh-poker-refill` as `arcade-poker-refill-dispatch`. Preserve the chips config; no DB secrets/SQL or automatic activation by installation. Missed ticks dispatch at most current bucket. Production install/enable/refill requires separate authorization. Complete and pass the T016 dispatcher/service/timer/fresh-bootstrap cases in `ws-tests/infra-vps-workflow.guard.test.mjs`; scope no-start/no-enable assertions to the new refill artifacts, preserving unrelated existing bootstrap behavior. (FR-014/020/021; SC-004)
 
 **Checkpoint**: Worker locally validated and operational artifacts prepared; scheduler not activated by this plan.
 
@@ -196,7 +196,7 @@ These tasks prepare the complete Production rollout artifacts ahead of merge wit
 
 - [x] T084 Restore Stage continuous inventory before merge: execute owner-gated Stage refill canary exclusively for `SLOW / buy_in=100` (`POKER_BOT_SLOW_BANKROLL_100: 0 -> 2000 CH`); verify refill MINT read-only; restore `CONTINUOUS_BOT_DEFAULT` (enabled=true, desired=5); await supervisor convergence to 5 OPEN tables with 3 bots each funded exclusively from `POKER_BOT_BANKROLL_100`; collect ledger and table evidence. (FR-006/007/011–014/021; SC-002/004/007)
 
-## Phase 15 — Full canonical tier catalog expansion & initial seed (§28, T085–T092)
+## Phase 15 — Full canonical tier catalog expansion & initial seed (§28, T085–T092; historical, scheduler superseded by §29)
 
 - [x] T085 Implement single canonical tier catalog in `shared/poker-domain/table-economy.mjs` (`CANONICAL_POKER_BUY_IN_TIERS` = 11 tiers) and re-export in `shared/poker-domain/poker-progression.mjs` without duplication. Generalize `getBotFundingSystemKeyForBuyIn` to support all 11 tiers for explicit `poolClass` (NORMAL 500 = `POKER_BOT_BANKROLL`, other NORMAL = `POKER_BOT_BANKROLL_<buyIn>`, all SLOW = `POKER_BOT_SLOW_BANKROLL_<buyIn>`), while preserving legacy mapping for callers without `poolClass`. Define `CANONICAL_POKER_BOT_POOL_KEYS` (22 exact keys).
 - [x] T086 Generalize ledger refill validation in `netlify/functions/_shared/chips-ledger.mjs` to dynamically accept all 22 exact pools. Extend `scripts/ops/poker-bot-pool-refill.mjs` to validate requested buy-in against canonical catalog, add owner-gated Production `initial-seed-all` mechanism (forbidden for dispatcher, requires production target, mutate mode, main ref, owner actor, checked SHA, production GO, and explicit confirmation matching SHA), query all policies when initialSeedAll is set, and allow seeding disabled pools via `allowDisabled: true` without enabling them.
@@ -237,7 +237,7 @@ Add caps, isolated funding, scheduled refill, Admin and discovery in that order,
 
 ### Notes
 
-43 tasks: setup1, foundation2, US1=4, US2=3, US3=5, US4=5, US5=3, US6=3, cross-cutting3, final manual RESTRICTED amendment7, Phase 11 rollover/controlled-inactivity6, pre-merge Stage acceptance1, Phase 12 admin contract6. T001–T035 and Phase 11/12 are complete in this implementation worktree; T029 remains historical exact-SHA evidence, T036 is the final amendment WS Preview/runtime gate, and T037 is the pre-merge Stage acceptance gate. The Stage refill canary is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / RUN: NO-OP**; acceptance is complete (T037 PASS). The immutable original migration and the CHECK-only FORCE_RESTRICTED migration are both applied; Stage currently reports 99 applied / 0 pending. No Stage refill/MINT, Production operation, live-VPS scheduler activation or merge was performed.
+43 tasks: setup1, foundation2, US1=4, US2=3, US3=5, US4=5, US5=3, US6=3, cross-cutting3, final manual RESTRICTED amendment7, Phase 11 rollover/controlled-inactivity6, pre-merge Stage acceptance1, Phase 12 admin contract6. T001–T035 and Phase 11/12 are complete in this implementation worktree; T029 remains historical exact-SHA evidence, T036 is the final amendment WS Preview/runtime gate, and T037 is the pre-merge Stage acceptance gate. The Stage refill canary authorization and prior runs are historical; §29 removes that canary and the external refill scheduler. The immutable original migration and the CHECK-only FORCE_RESTRICTED migration are both applied; Stage currently reports 99 applied / 0 pending. No Stage refill/MINT, Production operation, live-VPS scheduler activation or merge was performed.
 
 ## Requirement coverage index
 
@@ -256,20 +256,20 @@ The task references below make the complete FR/SC coverage explicit while keepin
 | FR-009 | T002–T003, T011–T013, T021–T022 |
 | FR-010 | T011–T015, T030, T033–T034 |
 | FR-011 | T002–T003, T016–T018, T021–T022 |
-| FR-012 | T016, T018–T020, T027 |
-| FR-013 | T002, T016–T019, T027 |
-| FR-014 | T016, T019–T020 |
+| FR-012 | T016, T018–T020, T027, T093–T094 |
+| FR-013 | T002, T016–T019, T027, T093–T094 |
+| FR-014 | T016, T019–T020, T093, T095, T097 |
 | FR-015 | T024–T025, T030, T034 |
 | FR-016 | T024–T026, T033 |
 | FR-017 | T003, T021–T023, T030–T032 |
 | FR-018 | T004–T005, T008, T010 |
 | FR-019 | T006–T007, T011, T013–T014, T030, T033–T034 |
 | FR-020 | T004, T011, T016, T021, T023–T024, T027–T028, T030–T035 |
-| FR-021 | T001–T002, T016, T019–T020, T028–T037 |
+| FR-021 | T001–T002, T016, T019–T020, T028–T037, T093, T095–T099 |
 | SC-001 | T004–T007, T027–T029, T030–T037 |
 | SC-002 | T008–T010, T027 |
 | SC-003 | T011–T015, T027 |
-| SC-004 | T016–T020, T027 |
+| SC-004 | T016–T020, T027, T093–T094 |
 | SC-005 | T004, T006, T021–T023, T027–T028, T030–T037 |
 | SC-006 | T024–T026, T028–T029, T030–T037 |
 | SC-007 | T030–T037 |
@@ -291,3 +291,18 @@ Tested with deterministic behavioral suites (`ws-server/poker/runtime/poker-acce
 7. FORCE_SLOW / Return AUTO preserves sticky is_slow_only.
 8. Netlify PATCH executes exactly one WS call with zero DB write and zero retry.
 9. WS timeout/network error results in zero replay mutation.
+
+
+## Phase 16 — Database-owned hourly refill amendment (§29, T093–T099)
+
+§29 supersedes the recurring VPS/GitHub scheduler in T019/T020/T086/T089–T092 and comment #5917832415. It keeps current tier policies, thresholds, refill amounts and exact pools. Current operational state is dark: Stage has no Cron job or pg_cron extension; Production is untouched; existing VPS poker service/timer remain disabled/inactive. This PR does not run live cleanup, table/profile activation or `bootstrap.sh`.
+
+- [x] **T093 — Add forward-only Stage contract and Production equivalent.** Use the standard `supabase migration new poker_bot_pool_refill_hourly` path. Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` creates `poker_bot_refill_control` with `enabled=false`, canonical Stage system identifier, RLS/no API access, and `public.poker_bot_pool_refill_hourly()` as SECURITY INVOKER with fully qualified application objects and no PUBLIC/anon/authenticated/service_role EXECUTE. The function uses one run lock, a DB UTC-hour bucket, enabled-only exact 11-tier/22-pool mapping, fresh policy/account locks, threshold rules, hourly replay identity, existing balanced ledger triggers/registry/index, and isolated per-pool exception blocks. Prepared Production equivalent `20260930211624_poker_bot_pool_refill_hourly.sql` uses canonical Production identity and defaults disabled. Neither migration installs pg_cron, creates a job or MINTs. The Stage source migration can apply automatically to shared Stage from the PR and is economically dark. (FR-012–014/021; SC-004)
+- [x] **T094 — Fundamental disposable PostgreSQL proof.** Extend existing `tests/chips/poker-pool-policy.transaction.test.mjs` and `tests/chips/chips.migration.test.mjs` only. Verify kill switch, disabled tier, threshold/no-op, exact refill, same-hour replay/concurrency, next-hour refill, 100/500/max-tier mappings, missing/inactive pool isolation, ledger/balance/sequence/idempotency consistency, and ACL; no real pg_cron. Final fresh runs passed on disposable PostgreSQL 17: transaction suite 6/6 and migration contracts PASS, including dark Stage ACL/state and Production P2 identity-substitution fixture; focused system-only MINT rejection 1/1. Existing workflow/VPS guards pass 1/1 and 16/16. No real pg_cron or shared Stage/Production target was used.
+- [x] **T095 — Retire external recurring refill authority.** Remove poker refill workflow, Node worker/test, VPS dispatcher/service/timer and canary mode; remove the `trustedScheduledRefill`/`SCHEDULED_POOL_CONFIG` application-level capability so arbitrary system-only MINT remains rejected. Preserve the separate chips-ledger cleanup dispatcher and auth. The changes do not clean up installed live VPS files.
+- [ ] **T096 — Existing live VPS cleanup after merge (separate owner GO).** The installed poker service/timer are disabled/inactive. After merge and a separate owner GO, remove only poker refill artifacts and verify the units are absent; preserve chips-ledger cleanup/auth. This PR does not connect to or mutate the VPS.
+- [ ] **T097 — Stage Cron activation (separate owner GO).** After merge, separately authorize installing/enabling pg_cron and creating the sole `poker-bot-pool-refill-hourly` job with schedule `0 * * * *` and command `select public.poker_bot_pool_refill_hourly();`. Keep control disabled through scheduler verification; enabling the control is another explicit action. No activation in this PR.
+- [x] **T098 — Production inventory only.** Add the forward-only P2 equivalent and update manifest/checker/inventory. P2 is prepared only; no Production migration, pg_cron, job, enablement, MINT or balance change.
+- [x] **T099 — Runbook and guard synchronization.** Document the exact one future Cron job and dark defaults; update README and existing guard tests. Existing live VPS cleanup and bootstrap remain out of scope.
+
+Breaking impacts: external refill workflow/worker/timer and dedicated actor/PAT/config are retired in the repository. Once separately authorized and activated, DB refill decisions occur hourly, rather than every three hours, so the configured amount can be issued once per pool per hour when its balance returns below threshold. Until activation no automatic refill runs. No policy, amount, enablement, current balance, Production state or active poker profile/table is changed here. Shared Stage may receive only the dark schema/function migration automatically.

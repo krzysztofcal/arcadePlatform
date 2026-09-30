@@ -73,7 +73,7 @@ function validateProductionManifest() {
   }
   const baseline = Array.isArray(manifest.baseline_applied) ? manifest.baseline_applied : [];
   const missing = Array.isArray(manifest.missing) ? manifest.missing : [];
-  if (baseline.length !== 54 || missing.length !== 48) fail("Production migration manifest must contain 54 baseline and 48 missing entries");
+  if (baseline.length !== 54 || missing.length !== 49) fail("Production migration manifest must contain 54 baseline and 49 missing entries");
   const expectedSourceFiles = [...sorted];
   const manifestSourceFiles = [...baseline, ...missing].map((entry) => entry?.file).sort();
   if (JSON.stringify(manifestSourceFiles) !== JSON.stringify(expectedSourceFiles)) {
@@ -94,8 +94,8 @@ function validateProductionManifest() {
     if (entry.category !== "baseline-applied" && !categories.has(entry.category)) fail(`Invalid Production migration category: ${entry.file}`);
   }
   const counts = Object.fromEntries([...categories].map((category) => [category, missing.filter((entry) => entry.category === category).length]));
-  if (counts["shared-safe"] !== 18 || counts["stage-only"] !== 3 || counts["needs-production-equivalent"] !== 27) {
-    fail(`Production migration categories must be 18/3/27, got ${JSON.stringify(counts)}`);
+  if (counts["shared-safe"] !== 18 || counts["stage-only"] !== 3 || counts["needs-production-equivalent"] !== 28) {
+    fail(`Production migration categories must be 18/3/28, got ${JSON.stringify(counts)}`);
   }
   const productionFiles = fs.existsSync(PRODUCTION_MIGRATIONS_DIR)
     ? fs.readdirSync(PRODUCTION_MIGRATIONS_DIR).filter((name) => name.endsWith(".sql")).sort()
@@ -111,6 +111,7 @@ function validateProductionManifest() {
     "20260914090000_chips_ledger_production_retention_contract.sql",
     "20260914091000_chips_ledger_production_table_fence_activation.sql",
     "20260929201500_poker_bot_quarantine_production_contract.sql",
+    "20260930211624_poker_bot_pool_refill_hourly.sql",
   ]) {
     if (!replacementNames.has(required)) fail(`Missing Production replacement migration: ${required}`);
   }

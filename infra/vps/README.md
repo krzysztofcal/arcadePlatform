@@ -221,60 +221,27 @@ exact labels `self-hosted`, `Linux`, `X64`, and `stage-db-ipv6`. The registratio
 token is supplied interactively by an owner and is never stored in this repo,
 bootstrap script, or a unit file.
 
-## Poker bot pool refill scheduler
+## Poker bot pool refill
 
-Fresh-host bootstrap installs `arcade-poker-pool-dispatch.{service,timer}` and
-its dispatcher without enabling or starting either unit. Bootstrap remains
-fresh-host-only; updating an existing host requires the separate owner-approved
-artifact installation procedure. Installing artifacts is not activation.
+Poker pool refills now run only through the database ledger function. The retired
+VPS dispatcher, systemd service/timer, and GitHub refill workflow are removed.
+The future scheduler contract is exactly one Supabase Cron job:
 
-Poker refill uses a separate GitHub CLI config:
-`GH_CONFIG_DIR=/home/copilot/.config/gh-poker-refill`, authenticated as
-`arcade-poker-refill-dispatch`. Keep the chips-ledger cleanup config at
-`/home/copilot/.config/gh` authenticated as `krzysztofcal`; never re-authenticate
-or overwrite it for poker refill. The dedicated poker config belongs to
-`copilot` and contains GitHub dispatch credentials only, never DB credentials.
+- name: `poker-bot-pool-refill-hourly`
+- schedule: `0 * * * *`
+- command: `select public.poker_bot_pool_refill_hourly();`
 
-The service defaults to Stage `dry-run`. After owner approval, a root-owned
-`/etc/arcade/poker-pool-dispatch.env` file may override only the dispatch choices:
+The implementation migration creates a singleton `poker_bot_refill_control` row
+with `enabled=false` and the hourly function. Shared Stage may receive that
+migration automatically; it does not install `pg_cron`, create a job, or MINT.
+Cron activation and enabling the refill control require a separate owner GO.
+Production has a separate forward-only migration and remains untouched until its
+own authorization.
 
-```ini
-POKER_BOT_REFILL_TARGET=stage
-POKER_BOT_REFILL_MODE=mutate
-```
-
-Use `production` instead of `stage` only for the separately approved Production
-configuration. The workflow ref remains `main`; the dispatcher rejects other
-refs and unknown targets/modes. Keep the configuration directory and file
-writable only by root (for example `0755` and `0600` respectively). The file is
-optional and is never created by bootstrap. The owner must separately approve
-starting/enabling the timer; its three-hour cadence dispatches the configured
-mode on each tick.
-
-The VPS holds only GitHub dispatch authentication; never put database credentials
-or SQL on this scheduler path. A `mutate` request still requires the workflow's
-fixed repository/main-ref checks, dedicated dispatch actor, feature gate, and
-target GitHub environment protections. Production additionally requires
-`POKER_BOT_REFILL_PRODUCTION_GO=1` in the workflow's trusted variables. Dispatch
-inputs cannot supply these approvals. Configuration alone does not activate
-those gates or authorize a refill.
-
-### Existing-host scheduler readiness and targeted installation procedure
-
-When deploying the scheduler to the running Production VPS:
-
-1. **Never run `infra/vps/bootstrap.sh` on the live VPS.** Bootstrap is strictly for a fresh host and would disturb active runtime state and releases.
-2. **Targeted install only:** An owner-approved procedure copies only the three reviewed artifacts:
-   - `infra/vps/arcade-poker-pool-dispatch.sh` -> `/usr/local/bin/arcade-poker-pool-dispatch`, mode `0755`, owned by `root:root`.
-   - `infra/vps/arcade-poker-pool-dispatch.service` -> `/etc/systemd/system/arcade-poker-pool-dispatch.service`, mode `0644`, owned by `root:root`.
-   - `infra/vps/arcade-poker-pool-dispatch.timer` -> `/etc/systemd/system/arcade-poker-pool-dispatch.timer`, mode `0644`, owned by `root:root`.
-3. **Install and activation are strictly separate:** Initial units remain disabled and unstarted during and immediately after installation. No unit shall dispatch during file staging.
-4. **Production configuration:** After artifact installation, create `/etc/arcade/poker-pool-dispatch.env` (`0600`, `root:root`) with:
-   ```ini
-   POKER_BOT_REFILL_TARGET=production
-   POKER_BOT_REFILL_MODE=mutate
-   ```
-   The workflow ref remains fixed to `main`.
-5. **Separate GitHub credentials:** Poker refill uses `/home/copilot/.config/gh-poker-refill` as `arcade-poker-refill-dispatch`; preserve `/home/copilot/.config/gh` as `krzysztofcal` for chips cleanup. The VPS receives no Supabase or PostgreSQL connection strings.
-6. **Controlled invocation before timer activation:** Run exactly one manual/controlled test dispatch with `systemctl start arcade-poker-pool-dispatch.service` and verify the GitHub Actions run outcome.
-7. **Separate owner GO for timer:** Separately enable and start `arcade-poker-pool-dispatch.timer` (`systemctl enable --now arcade-poker-pool-dispatch.timer`) only after the owner explicitly approves the controlled dispatch evidence.
+The existing live VPS poker service/timer are currently disabled and inactive.
+After merge, remove the installed poker dispatcher/service/timer only with a
+separate owner GO. Never run `infra/vps/bootstrap.sh` on the existing VPS. The
+cleanup must leave `arcade-chips-ledger-dispatch.*`,
+`/home/copilot/.config/gh` (the `krzysztofcal` chips-cleanup identity), WS,
+Caddy, and unrelated timers untouched. Do not provision a poker-refill GitHub
+actor/config, PAT, database URL, or SQL on the VPS.
