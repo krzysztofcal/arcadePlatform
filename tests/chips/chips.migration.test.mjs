@@ -1122,10 +1122,9 @@ async function assertProductionQuarantineContract(sql, {
     const poolCheck = await sql.unsafe(`
       select count(*) as c from public.chips_accounts
       where account_type = 'SYSTEM'
-        and system_key in (
-          'POKER_BOT_BANKROLL_100',
-          'POKER_BOT_SLOW_BANKROLL_100',
-          'POKER_BOT_SLOW_BANKROLL_500'
+        and (
+          system_key like 'POKER_BOT_BANKROLL_%'
+          or system_key like 'POKER_BOT_SLOW_BANKROLL_%'
         );
     `);
     assert.equal(Number(poolCheck[0].c), 0, "No new quarantine pool accounts must exist after rejected preflight");
@@ -1236,6 +1235,17 @@ async function assertProductionQuarantineContract(sql, {
   await sql.unsafe("drop table if exists public.poker_access_policy;");
   await assertNoQuarantineDdl();
 
+  // 7b. Unexpected drifted higher-tier pool account must fail closed
+  await sql.unsafe("insert into public.chips_accounts (account_type, system_key, status, balance) values ('SYSTEM', 'POKER_BOT_BANKROLL_1000', 'active', 0);");
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /unexpected drifted state/i.test(err?.message || ""),
+    "P1 must fail closed if higher-tier quarantine pool account already exists as drift",
+  );
+  await sql.unsafe("rollback;");
+  await sql.unsafe("delete from public.chips_accounts where system_key = 'POKER_BOT_BANKROLL_1000';");
+  await assertNoQuarantineDdl();
+
   // Record baseline counts before applying P1
   const txCountBefore = Number((await sql.unsafe("select count(*) as c from public.chips_transactions;"))[0].c);
   const entryCountBefore = Number((await sql.unsafe("select count(*) as c from public.chips_entries;"))[0].c);
@@ -1263,21 +1273,28 @@ async function assertProductionQuarantineContract(sql, {
   assert.equal(Number(userAccountRows[0].poker_access_revision), 1);
   assert.equal(Number(userAccountRows[0].balance), 500, "User balance must remain unchanged after P1");
 
-  // 8. Existing POKER_BOT_BANKROLL preserved byte-for-byte; 3 new pools provisioned at balance 0
+  // 8. Existing POKER_BOT_BANKROLL preserved byte-for-byte; 21 new pools provisioned at balance 0
   const botAccounts = await sql.unsafe(`
     select system_key, balance, status, id
     from public.chips_accounts
     where account_type = 'SYSTEM'
-      and system_key in ('POKER_BOT_BANKROLL', 'POKER_BOT_BANKROLL_100', 'POKER_BOT_SLOW_BANKROLL_100', 'POKER_BOT_SLOW_BANKROLL_500')
+      and (
+        system_key = 'POKER_BOT_BANKROLL'
+        or system_key like 'POKER_BOT_BANKROLL_%'
+        or system_key like 'POKER_BOT_SLOW_BANKROLL_%'
+      )
     order by system_key;
   `);
+  assert.equal(botAccounts.length, 22, "Exactly 22 bot accounts must exist (1 preserved + 21 provisioned)");
   const botAccountMap = new Map(botAccounts.map((a) => [a.system_key, a]));
   assert.equal(botAccountMap.get("POKER_BOT_BANKROLL")?.id, existingBotBankrollId, "POKER_BOT_BANKROLL ID must be preserved");
   assert.equal(Number(botAccountMap.get("POKER_BOT_BANKROLL")?.balance), 1000490, "POKER_BOT_BANKROLL balance must be preserved");
   assert.equal(botAccountMap.get("POKER_BOT_BANKROLL")?.status, "active");
-  assert.equal(Number(botAccountMap.get("POKER_BOT_BANKROLL_100")?.balance), 0, "POKER_BOT_BANKROLL_100 must be provisioned at 0");
-  assert.equal(Number(botAccountMap.get("POKER_BOT_SLOW_BANKROLL_100")?.balance), 0, "POKER_BOT_SLOW_BANKROLL_100 must be provisioned at 0");
-  assert.equal(Number(botAccountMap.get("POKER_BOT_SLOW_BANKROLL_500")?.balance), 0, "POKER_BOT_SLOW_BANKROLL_500 must be provisioned at 0");
+  for (const account of botAccounts) {
+    if (account.system_key === "POKER_BOT_BANKROLL") continue;
+    assert.equal(Number(account.balance), 0, `${account.system_key} must be provisioned at 0`);
+    assert.equal(account.status, "active", `${account.system_key} status must be active`);
+  }
 
   // 9. Access policy singleton shape and values
   const accessPolicyRows = await sql.unsafe(`
@@ -1291,24 +1308,36 @@ async function assertProductionQuarantineContract(sql, {
   assert.equal(Number(accessPolicyRows[0].slow_recovery_threshold_ch), 950000000, "slow_recovery_threshold_ch derived must be 950,000,000");
   assert.equal(Number(accessPolicyRows[0].revision), 1, "initial revision must be 1");
 
-  // 10. Tier policies exist disabled
+  // 10. Tier policies exist disabled for all 11 canonical tiers
   const tierPolicyRows = await sql.unsafe(`
     select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
            slow_refill_threshold_ch, slow_refill_amount_ch, revision
     from public.poker_bot_tier_policy
     order by buy_in;
   `);
-  assert.deepEqual(tierPolicyRows.map((r) => Number(r.buy_in)), [100, 500]);
+  assert.deepEqual(tierPolicyRows.map((r) => Number(r.buy_in)), [
+    100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000
+  ]);
+  assert.equal(tierPolicyRows.length, 11);
   assert.equal(tierPolicyRows.every((r) => r.enabled === false), true, "All tier policies must be disabled in P1");
   assert.equal(tierPolicyRows.every((r) => Number(r.revision) === 1), true, "Tier policy revision must be 1");
-  assert.equal(Number(tierPolicyRows[0].normal_refill_threshold_ch), 2000);
-  assert.equal(Number(tierPolicyRows[0].normal_refill_amount_ch), 5000);
-  assert.equal(Number(tierPolicyRows[0].slow_refill_threshold_ch), 1000);
-  assert.equal(Number(tierPolicyRows[0].slow_refill_amount_ch), 2000);
-  assert.equal(Number(tierPolicyRows[1].normal_refill_threshold_ch), 5000);
-  assert.equal(Number(tierPolicyRows[1].normal_refill_amount_ch), 10000);
-  assert.equal(Number(tierPolicyRows[1].slow_refill_threshold_ch), 2000);
-  assert.equal(Number(tierPolicyRows[1].slow_refill_amount_ch), 5000);
+  const tierPolicyMap = new Map(tierPolicyRows.map((r) => [Number(r.buy_in), r]));
+  assert.equal(Number(tierPolicyMap.get(100).normal_refill_threshold_ch), 2000);
+  assert.equal(Number(tierPolicyMap.get(100).normal_refill_amount_ch), 5000);
+  assert.equal(Number(tierPolicyMap.get(100).slow_refill_threshold_ch), 1000);
+  assert.equal(Number(tierPolicyMap.get(100).slow_refill_amount_ch), 2000);
+  assert.equal(Number(tierPolicyMap.get(500).normal_refill_threshold_ch), 5000);
+  assert.equal(Number(tierPolicyMap.get(500).normal_refill_amount_ch), 10000);
+  assert.equal(Number(tierPolicyMap.get(500).slow_refill_threshold_ch), 2000);
+  assert.equal(Number(tierPolicyMap.get(500).slow_refill_amount_ch), 5000);
+  assert.equal(Number(tierPolicyMap.get(1000).normal_refill_threshold_ch), 10000);
+  assert.equal(Number(tierPolicyMap.get(1000).normal_refill_amount_ch), 20000);
+  assert.equal(Number(tierPolicyMap.get(1000).slow_refill_threshold_ch), 4000);
+  assert.equal(Number(tierPolicyMap.get(1000).slow_refill_amount_ch), 10000);
+  assert.equal(Number(tierPolicyMap.get(10000000).normal_refill_threshold_ch), 100000000);
+  assert.equal(Number(tierPolicyMap.get(10000000).normal_refill_amount_ch), 200000000);
+  assert.equal(Number(tierPolicyMap.get(10000000).slow_refill_threshold_ch), 40000000);
+  assert.equal(Number(tierPolicyMap.get(10000000).slow_refill_amount_ch), 100000000);
 
   // 11. FORCE_RESTRICTED satisfies final override CHECK constraint
   await sql.unsafe(`
@@ -1362,7 +1391,7 @@ async function assertProductionQuarantineContract(sql, {
   `);
   assert.equal(rlsRows.every((r) => r.relrowsecurity === true), true, "RLS must be enabled on policy tables");
 
-  // 14. History: only P1 recorded; 4 Stage versions are intentional gaps
+  // 14. History: only P1 recorded; 5 Stage versions are intentional gaps
   const migrationHistory = await sql.unsafe(`
     select version from supabase_migrations.schema_migrations
     where version in (
@@ -1370,7 +1399,8 @@ async function assertProductionQuarantineContract(sql, {
       '20260927100000',
       '20260927110000',
       '20260929130000',
-      '20260929163000'
+      '20260929163000',
+      '20260930075513'
     );
   `);
   const recordedVersions = new Set(migrationHistory.map((r) => r.version));
@@ -1379,6 +1409,7 @@ async function assertProductionQuarantineContract(sql, {
   assert.equal(recordedVersions.has("20260927110000"), false, "Stage version 20260927110000 must not be recorded");
   assert.equal(recordedVersions.has("20260929130000"), false, "Stage version 20260929130000 must not be recorded");
   assert.equal(recordedVersions.has("20260929163000"), false, "Stage version 20260929163000 must not be recorded");
+  assert.equal(recordedVersions.has("20260930075513"), false, "Stage version 20260930075513 must not be recorded");
 
   // 15. Re-running P1 fails closed because version 20260929201500 is already recorded
   await assert.rejects(

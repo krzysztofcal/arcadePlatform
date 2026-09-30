@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
+import { CANONICAL_POKER_BUY_IN_TIERS, getBotFundingSystemKeyForBuyIn } from "../../../shared/poker-domain/table-economy.mjs";
 
 const VALID_TX_TYPES = new Set([
   "MINT",
@@ -16,12 +17,30 @@ const VALID_TX_TYPES = new Set([
   "PROMO_BONUS",
 ]);
 
-const SCHEDULED_POOL_CONFIG = Object.freeze({
-  POKER_BOT_BANKROLL_100: Object.freeze({ buyIn: 100, poolClass: "NORMAL" }),
-  POKER_BOT_BANKROLL: Object.freeze({ buyIn: 500, poolClass: "NORMAL" }),
-  POKER_BOT_SLOW_BANKROLL_100: Object.freeze({ buyIn: 100, poolClass: "SLOW" }),
-  POKER_BOT_SLOW_BANKROLL_500: Object.freeze({ buyIn: 500, poolClass: "SLOW" }),
-});
+const buildScheduledPoolConfig = () => {
+  const tiers = typeof CANONICAL_POKER_BUY_IN_TIERS !== "undefined"
+    ? CANONICAL_POKER_BUY_IN_TIERS
+    : [100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000];
+  const getKey = typeof getBotFundingSystemKeyForBuyIn === "function"
+    ? getBotFundingSystemKeyForBuyIn
+    : (buyIn, { poolClass } = {}) => poolClass === "SLOW"
+      ? `POKER_BOT_SLOW_BANKROLL_${buyIn}`
+      : (buyIn === 500 ? "POKER_BOT_BANKROLL" : `POKER_BOT_BANKROLL_${buyIn}`);
+  const config = {};
+  for (const buyIn of tiers) {
+    const normalKey = getKey(buyIn, { poolClass: "NORMAL" });
+    if (normalKey) {
+      config[normalKey] = Object.freeze({ buyIn, poolClass: "NORMAL" });
+    }
+    const slowKey = getKey(buyIn, { poolClass: "SLOW" });
+    if (slowKey) {
+      config[slowKey] = Object.freeze({ buyIn, poolClass: "SLOW" });
+    }
+  }
+  return Object.freeze(config);
+};
+
+const SCHEDULED_POOL_CONFIG = buildScheduledPoolConfig();
 
 // Loose integer parsing for non-sequence fields only (balances, etc.).
 const asLooseInt = (value, fallback = 0) => {

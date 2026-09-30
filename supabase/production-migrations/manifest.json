@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 47,
+    "missing_count": 48,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -941,6 +941,20 @@
       "omitted_effects": [
         "No Production migration, activation or runtime mutation is authorized by this Stage migration"
       ]
+    },
+    {
+      "version": "20260930075513",
+      "file": "20260930075513_poker_bot_tier_catalog_expansion.sql",
+      "sha256": "e9b292018b4f89688103892e8988997480b5e222c4f6d22d833f6383ca88862d",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
+      "required_effects": [
+        "Canonical tier catalog expansion (>500 buy-in tiers) with disabled policies and zero-balance exact pools under a separately reviewed Production identity"
+      ],
+      "omitted_effects": [
+        "No Production migration, activation or runtime mutation is authorized by this Stage migration"
+      ]
     }
   ],
   "replacement_migrations": [
@@ -957,7 +971,7 @@
     {
       "file": "20260929201500_poker_bot_quarantine_production_contract.sql",
       "purpose": "P1 final Production #1018 bot quarantine and exact pools contract; dark/off",
-      "sha256": "8890bf10d7c102250ce43ad763ee198f8b3dd403d8f90a27418268bbfe299840",
+      "sha256": "be8fc7227930e3f66da8a35214af3c7d2e1a0595730fa15b127b078350648bd3",
       "prerequisites": [
         "20260914090000_chips_ledger_production_retention_contract.sql",
         "20260914091000_chips_ledger_production_table_fence_activation.sql"

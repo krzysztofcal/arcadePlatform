@@ -1,7 +1,10 @@
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
 import { badRequest, conflict, parseJsonBody } from "./_shared/admin-ops.mjs";
 import { baseHeaders, beginSql, corsHeaders, executeSql, klog } from "./_shared/supabase-admin.mjs";
-import { getBotFundingSystemKeyForBuyIn } from "../../shared/poker-domain/table-economy.mjs";
+import {
+  CANONICAL_POKER_BOT_POOL_KEYS,
+  getBotFundingSystemKeyForBuyIn,
+} from "../../shared/poker-domain/table-economy.mjs";
 import {
   deriveSlowRecoveryThresholdCh,
   DEFAULT_SLOW_HYSTERESIS_BPS,
@@ -14,12 +17,7 @@ const POLICY_FIELDS = [
   "normal_refill_threshold_ch", "normal_refill_amount_ch",
   "slow_refill_threshold_ch", "slow_refill_amount_ch",
 ];
-const POOL_KEYS = [
-  "POKER_BOT_BANKROLL_100",
-  "POKER_BOT_BANKROLL",
-  "POKER_BOT_SLOW_BANKROLL_100",
-  "POKER_BOT_SLOW_BANKROLL_500",
-];
+const POOL_KEYS = CANONICAL_POKER_BOT_POOL_KEYS;
 
 function positiveSafe(value, code = "invalid_amount") {
   const parsed = Number(value);

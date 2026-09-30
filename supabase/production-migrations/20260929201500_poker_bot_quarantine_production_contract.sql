@@ -2,7 +2,8 @@ begin;
 
 -- This file is the forward-only Production equivalent for #1018 (NORMAL/SLOW
 -- bot quarantine and exact bot pools). It consolidates the final schema
--- contract of 20260927100000, 20260927110000, 20260929130000, and 20260929163000.
+-- contract of 20260927100000, 20260927110000, 20260929130000, 20260929163000,
+-- and 20260930075513.
 -- It must be applied by the reviewed operator route with:
 --   set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';
 -- The setting is deliberately absent from application environments.
@@ -104,10 +105,9 @@ begin
      or exists (
        select 1 from public.chips_accounts
        where account_type = 'SYSTEM'
-         and system_key in (
-           'POKER_BOT_BANKROLL_100',
-           'POKER_BOT_SLOW_BANKROLL_100',
-           'POKER_BOT_SLOW_BANKROLL_500'
+         and (
+           system_key like 'POKER_BOT_BANKROLL_%'
+           or system_key like 'POKER_BOT_SLOW_BANKROLL_%'
          )
      ) then
     raise exception using
@@ -211,15 +211,42 @@ insert into public.poker_bot_tier_policy (
 )
 values
   (100, false, 2000, 5000, 1000, 2000),
-  (500, false, 5000, 10000, 2000, 5000);
+  (500, false, 5000, 10000, 2000, 5000),
+  (1000, false, 10000, 20000, 4000, 10000),
+  (5000, false, 50000, 100000, 20000, 50000),
+  (10000, false, 100000, 200000, 40000, 100000),
+  (50000, false, 500000, 1000000, 200000, 500000),
+  (100000, false, 1000000, 2000000, 400000, 1000000),
+  (500000, false, 5000000, 10000000, 2000000, 5000000),
+  (1000000, false, 10000000, 20000000, 4000000, 10000000),
+  (5000000, false, 50000000, 100000000, 20000000, 50000000),
+  (10000000, false, 100000000, 200000000, 40000000, 100000000);
 
--- Provision only the three missing exact pools at balance 0.
+-- Provision only the 21 missing exact pools at balance 0.
 -- Existing POKER_BOT_BANKROLL is preserved without modification.
 insert into public.chips_accounts (account_type, system_key, status, balance)
 values
   ('SYSTEM', 'POKER_BOT_BANKROLL_100', 'active', 0),
   ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_100', 'active', 0),
-  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_500', 'active', 0);
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_500', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_1000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_1000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_5000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_5000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_10000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_10000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_50000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_50000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_100000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_100000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_500000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_500000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_1000000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_1000000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_5000000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_5000000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_BANKROLL_10000000', 'active', 0),
+  ('SYSTEM', 'POKER_BOT_SLOW_BANKROLL_10000000', 'active', 0);
 
 create index if not exists poker_seats_user_id_active_human_idx
   on public.poker_seats (user_id, table_id)

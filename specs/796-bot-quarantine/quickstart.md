@@ -283,7 +283,18 @@ Prepares all Production rollout artifacts ahead of merge without performing any 
      5. `a13981eb-a7f6-485c-8f5b-bb7ce086133e`
    - **Table details**: All 5 tables have `buy_in=100`, stakes `{"sb": 1, "bb": 2}`, and exactly 3 active bot seats each (15 bots total across seats 1, 2, 3).
    - **Ledger funding verification**: All 15 bot `TABLE_BUY_IN` transactions debited exclusively from `POKER_BOT_BANKROLL_100` (-100 CH each; balance: 5,000 -> 3,500 CH). Zero funding from `POKER_BOT_SLOW_BANKROLL_100` (remains 2,000 CH) or `TREASURY`.
-   - **Supervisor health**: `lastError=null`, `creationLimited=false`, `remainingTableCount=0`, zero supervisor/seed churn.
+8. **Canonical Tier Catalog Expansion & Initial-Seed-All (T085–T092)**:
+   - **Canonical 11-Tier Catalog**: `[100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000]` defined centrally in `shared/poker-domain/table-economy.mjs` and re-exported as `DEFAULT_POKER_BUY_IN_TIERS` in `shared/poker-domain/poker-progression.mjs`.
+   - **22 Exact Pools**: NORMAL 500 = `POKER_BOT_BANKROLL`; other NORMAL = `POKER_BOT_BANKROLL_<buyIn>`; all SLOW = `POKER_BOT_SLOW_BANKROLL_<buyIn>`.
+   - **Stage Migration**: `supabase/migrations/20260930075513_poker_bot_tier_catalog_expansion.sql` (SHA256 `e9b292018b4f89688103892e8988997480b5e222c4f6d22d833f6383ca88862d`), provisions 9 higher tiers disabled and 18 zero-balance accounts. Zero MINT.
+   - **Production P1 Contract**: Updated `supabase/production-migrations/20260929201500_poker_bot_quarantine_production_contract.sql` (new SHA256 `be8fc7227930e3f66da8a35214af3c7d2e1a0595730fa15b127b078350648bd3`), provisions all 11 policies disabled and all 22 pools (21 missing at 0 + preserved `POKER_BOT_BANKROLL`).
+   - **Owner-gated Initial Seed**: Production `initial-seed-all` gates: production target only, dispatcher forbidden, `main` ref only, owner actor (`krzysztofcal`), checked SHA matching GITHUB_SHA, Production GO = 1, and confirmation matching GITHUB_SHA.
+   - **Ordinary 3h Refill**: Operates only on `enabled = true` tiers.
+   - **Tests Extended**:
+     - `shared/poker-domain/poker-progression.behavior.test.mjs`: verified 11 tiers, NORMAL/SLOW mappings at 100, 500, 1k, 50k, 10M, and non-canonical rejection.
+     - `scripts/ops/poker-bot-pool-refill.behavior.test.mjs`: tested canonical buy-in filter, initial-seed-all authorization matrix, and disabled tier execution.
+     - `tests/chips-ledger.test.mjs`: verified max-tier 10M refill accepted, uncataloged pool rejected.
+     - `tests/chips/chips.migration.test.mjs`: updated for 22 accounts, 11 tier policies, drift check on higher-tier accounts, and 20260930075513 gap verification.
 
-Status: **ALL TASKS T075–T084 COMPLETE. READY FOR OWNER REVIEW.**
+Status: **ALL TASKS T085–T092 IMPLEMENTED. READY FOR CI, PREVIEW RUN & SMOKE.**
 Production migration, Production refill/MINT, VPS timer activation, and PR merge remain strictly **NOT AUTHORIZED / NOT RUN**.

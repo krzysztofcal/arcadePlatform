@@ -1,6 +1,9 @@
 import { beginSql, klog } from "../../netlify/functions/_shared/supabase-admin.mjs";
 import { postTransaction } from "../../netlify/functions/_shared/chips-ledger.mjs";
-import { getBotFundingSystemKeyForBuyIn } from "../../shared/poker-domain/table-economy.mjs";
+import {
+  CANONICAL_POKER_BUY_IN_TIERS,
+  getBotFundingSystemKeyForBuyIn,
+} from "../../shared/poker-domain/table-economy.mjs";
 import { isValidTierPolicy } from "../../shared/poker-domain/bot-access.mjs";
 
 export const REFILL_BUCKET_MS = 3 * 60 * 60 * 1000;
@@ -43,6 +46,8 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   const normalizedMode = String(mode || "dry-run").trim().toLowerCase();
   const target = String(env.POKER_BOT_REFILL_TARGET || "stage").trim().toLowerCase();
   const stageCanary = env.POKER_BOT_REFILL_STAGE_CANARY === "1";
+  const initialSeedAll = env.POKER_BOT_REFILL_INITIAL_SEED_ALL === "1"
+    || env.POKER_BOT_REFILL_OPERATION === "initial-seed-all";
   const requestedPoolClass = String(env.POKER_BOT_REFILL_POOL_CLASS || "").trim().toUpperCase();
   const requestedBuyIn = positiveSafeInteger(env.POKER_BOT_REFILL_BUY_IN);
   if (repository !== CANONICAL_REPOSITORY) throw fail("refill_repository_mismatch");
@@ -63,24 +68,53 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
   if (requestedPoolClass && !["NORMAL", "SLOW"].includes(requestedPoolClass)) {
     throw fail("refill_pool_class_invalid");
   }
-  if (requestedBuyIn && ![100, 500].includes(requestedBuyIn)) {
+  if (requestedBuyIn && !CANONICAL_POKER_BUY_IN_TIERS.includes(requestedBuyIn)) {
     throw fail("refill_buy_in_invalid");
   }
   if (stageCanary && requestedPoolClass !== "NORMAL" && requestedPoolClass !== "SLOW") {
     throw fail("refill_stage_canary_pool_class_invalid");
   }
-  const ownerCanaryActor = stageCanary
-    && env.GITHUB_REPOSITORY_OWNER === CANONICAL_REPOSITORY.split("/")[0]
+  const isOwnerActor = env.GITHUB_REPOSITORY_OWNER === CANONICAL_REPOSITORY.split("/")[0]
     && env.GITHUB_ACTOR === env.GITHUB_REPOSITORY_OWNER;
-  if (normalizedMode === "mutate" && env.GITHUB_ACTOR !== "arcade-poker-refill-dispatch" && !ownerCanaryActor) {
-    throw fail("refill_actor_not_allowed");
+  const ownerCanaryActor = stageCanary && isOwnerActor;
+
+  if (initialSeedAll) {
+    if (target !== "production") throw fail("refill_initial_seed_production_only");
+    if (env.GITHUB_ACTOR === "arcade-poker-refill-dispatch") {
+      throw fail("refill_initial_seed_dispatcher_forbidden");
+    }
+    if (ref !== "main" || env.GITHUB_REF !== "refs/heads/main") {
+      throw fail("refill_main_ref_required");
+    }
+    if (normalizedMode === "mutate") {
+      if (!isOwnerActor) throw fail("refill_initial_seed_owner_required");
+      if (!env.POKER_BOT_REFILL_CHECKED_SHA || env.POKER_BOT_REFILL_CHECKED_SHA !== env.GITHUB_SHA) {
+        throw fail("refill_checked_sha_mismatch");
+      }
+      if (env.POKER_BOT_REFILL_PRODUCTION_GO !== "1") {
+        throw fail("refill_production_go_required");
+      }
+      const confirmation = String(
+        env.POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION
+        || env.POKER_BOT_REFILL_INITIAL_SEED_CONFIRMED_SHA
+        || ""
+      ).trim();
+      if (!confirmation || confirmation !== env.GITHUB_SHA) {
+        throw fail("refill_initial_seed_confirmation_required");
+      }
+    }
+  } else {
+    if (normalizedMode === "mutate" && env.GITHUB_ACTOR !== "arcade-poker-refill-dispatch" && !ownerCanaryActor) {
+      throw fail("refill_actor_not_allowed");
+    }
   }
+
   if (normalizedMode === "mutate" && target === "stage") {
     if (!/^[0-9a-f]{40}$/.test(ref)) throw fail("refill_stage_reviewed_sha_required");
     if (env.GITHUB_SHA !== ref) throw fail("refill_dispatch_sha_mismatch");
     if (env.POKER_BOT_REFILL_CHECKED_SHA !== ref) throw fail("refill_checked_sha_mismatch");
   }
-  if (normalizedMode === "mutate" && target === "production") {
+  if (normalizedMode === "mutate" && target === "production" && !initialSeedAll) {
     if (env.GITHUB_REF !== "refs/heads/main") throw fail("refill_main_ref_required");
     if (ref !== "main") throw fail("refill_production_ref_required");
     if (env.POKER_BOT_REFILL_CHECKED_SHA && env.POKER_BOT_REFILL_CHECKED_SHA !== env.GITHUB_SHA) {
@@ -95,6 +129,7 @@ export function resolveRefillAuthorization(env = process.env, { mode = env.POKER
     dryRun: normalizedMode !== "mutate",
     target,
     stageCanary,
+    initialSeedAll,
     poolClass: requestedPoolClass || null,
     buyIn: requestedBuyIn || null,
   };
@@ -126,10 +161,11 @@ export async function refillPool({
   poolClass,
   bucket,
   dryRun = true,
+  allowDisabled = false,
   postTransactionFn = postTransaction,
 } = {}) {
   if (!tx || typeof tx.unsafe !== "function") throw fail("refill_tx_required");
-  if (!isValidTierPolicy(policy) || policy.enabled !== true) return { status: "disabled" };
+  if (!isValidTierPolicy(policy) || (policy.enabled !== true && !allowDisabled)) return { status: "disabled" };
   await boundRefillTransaction(tx);
   const currentBucket = utcBucketStart(await databaseNow(tx));
   bucket ??= currentBucket;
@@ -216,11 +252,12 @@ export async function runRefill({
     await boundRefillTransaction(tx);
     const startedAt = await databaseNow(tx);
     const bucket = utcBucketStart(startedAt);
+    const whereClause = authorization.initialSeedAll ? "" : "where enabled = true";
     const policyRows = await tx.unsafe(`
 select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
        slow_refill_threshold_ch, slow_refill_amount_ch, revision
 from public.poker_bot_tier_policy
-where enabled = true
+${whereClause}
 order by buy_in asc
 for share;
 `);
@@ -237,6 +274,7 @@ for share;
           poolClass,
           bucket,
           dryRun: authorization.dryRun,
+          allowDisabled: authorization.initialSeedAll === true,
           postTransactionFn,
         }));
       }

@@ -913,6 +913,62 @@ describe("chips ledger idempotency and validation", () => {
     })).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
   });
 
+  it("accepts canonical max-tier scheduled refill and rejects uncataloged pools", async () => {
+    const { postTransaction } = await loadLedger();
+    mockDb.accounts.set("genesis-refill-max", {
+      id: "genesis-refill-max",
+      account_type: "SYSTEM",
+      system_key: "GENESIS",
+      status: "active",
+      balance: 1_000_000_000,
+      next_entry_seq: 1,
+    });
+    mockDb.accounts.set("max-pool-refill", {
+      id: "max-pool-refill",
+      account_type: "SYSTEM",
+      system_key: "POKER_BOT_SLOW_BANKROLL_10000000",
+      status: "active",
+      balance: 0,
+      next_entry_seq: 1,
+    });
+    const maxPayload = {
+      userId: null,
+      txType: "MINT",
+      idempotencyKey: "poker-refill-max-1",
+      trustedScheduledRefill: true,
+      metadata: {
+        purpose: "poker_pool_refill",
+        bankrollSystemKey: "POKER_BOT_SLOW_BANKROLL_10000000",
+        buyIn: 10_000_000,
+        poolClass: "SLOW",
+        policyRevision: 1,
+        bucket: "2026-09-27T06:00:00.000Z",
+      },
+      entries: [
+        { accountType: "SYSTEM", systemKey: "GENESIS", amount: -100_000_000 },
+        { accountType: "SYSTEM", systemKey: "POKER_BOT_SLOW_BANKROLL_10000000", amount: 100_000_000 },
+      ],
+    };
+    const result = await postTransaction(maxPayload);
+    expect(result.transaction.id).toBeDefined();
+    expect(mockDb.accounts.get("max-pool-refill").balance).toBe(100_000_000);
+
+    // Arbitrary uncataloged pool rejected
+    await expect(postTransaction({
+      ...maxPayload,
+      idempotencyKey: "poker-refill-uncataloged",
+      metadata: {
+        ...maxPayload.metadata,
+        bankrollSystemKey: "POKER_BOT_BANKROLL_99999999",
+        buyIn: 99_999_999,
+      },
+      entries: [
+        { accountType: "SYSTEM", systemKey: "GENESIS", amount: -100 },
+        { accountType: "SYSTEM", systemKey: "POKER_BOT_BANKROLL_99999999", amount: 100 },
+      ],
+    })).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
+  });
+
   it("uses explicit USER entry userId when provided", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({

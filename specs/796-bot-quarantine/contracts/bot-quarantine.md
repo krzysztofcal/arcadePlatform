@@ -138,7 +138,7 @@ In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
      - Creates `poker_access_policy` singleton with conservative defaults `1,000,000,000 / 500 bps / 950,000,000` and revision 1.
      - Creates `poker_bot_tier_policy` with 100 and 500 tiers disabled (`enabled=false`, revision 1).
      - Installs indexes and enables RLS denying anon/authenticated.
-     - Records only P1 in `supabase_migrations.schema_migrations`; the 4 Stage versions remain intentional gaps.
+     - Records only P1 in `supabase_migrations.schema_migrations`; the 5 Stage versions remain intentional gaps.
    - Produces zero financial transactions, entries, MINTs, or tables.
 2. **Continuous Table Restoration Contract**:
    - Future Production deployment target is **2 tables** (never copy Stage/Preview 5).
@@ -146,3 +146,38 @@ In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
    - `POKER_BOT_SLOW_BANKROLL_100` funds only SLOW STANDARD play and must never fund continuous tables.
    - Both 100 CH pools must be active and positive before enabling managed profile.
    - Stage pre-merge acceptance (T084) uses the owner-gated Stage refill canary for `SLOW / buy_in=100` (0 -> 2000 CH), then restores Stage `CONTINUOUS_BOT_DEFAULT` (desired 5, 3 bots each funded from `POKER_BOT_BANKROLL_100`).
+
+## 12. Full canonical tier catalog expansion and initial seed contract (§28 / T085–T092)
+
+1. **Canonical Tier Catalog (11 Tiers / 22 Pools)**:
+   - Canonical tiers: `[100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000]`.
+   - Defined once in `shared/poker-domain/table-economy.mjs` (`CANONICAL_POKER_BUY_IN_TIERS`) and re-exported as `DEFAULT_POKER_BUY_IN_TIERS` in `shared/poker-domain/poker-progression.mjs` without duplication.
+   - Exact pool keys:
+     - NORMAL 500: `POKER_BOT_BANKROLL` (canonical legacy preserve)
+     - NORMAL others: `POKER_BOT_BANKROLL_<buyIn>`
+     - SLOW all: `POKER_BOT_SLOW_BANKROLL_<buyIn>`
+   - `CANONICAL_POKER_BOT_POOL_KEYS` contains all 22 distinct keys.
+   - Legacy / no-`poolClass` callers continue using legacy mapping (100 -> legacy source, 500 -> `POKER_BOT_BANKROLL`, others -> unsupported null).
+
+2. **Dormant Tier Policy Defaults (>500 Tiers)**:
+   - 1,000: NORMAL 10k / 20k, SLOW 4k / 10k
+   - 5,000: NORMAL 50k / 100k, SLOW 20k / 50k
+   - 10,000: NORMAL 100k / 200k, SLOW 40k / 100k
+   - 50,000: NORMAL 500k / 1M, SLOW 200k / 500k
+   - 100,000: NORMAL 1M / 2M, SLOW 400k / 1M
+   - 500,000: NORMAL 5M / 10M, SLOW 2M / 5M
+   - 1,000,000: NORMAL 10M / 20M, SLOW 4M / 10M
+   - 5,000,000: NORMAL 50M / 100M, SLOW 20M / 50M
+   - 10,000,000: NORMAL 100M / 200M, SLOW 40M / 100M
+   - All 9 higher tiers provisioned disabled (`enabled = false`, revision 1) with 0 balance accounts. Zero MINT.
+   - Stage forward-only migration: `20260930075513_poker_bot_tier_catalog_expansion.sql`.
+   - Production P1 contract (`20260929201500_poker_bot_quarantine_production_contract.sql`) provisions all 11 policies disabled and all 22 pools (21 missing at balance 0 + preserved `POKER_BOT_BANKROLL`).
+
+3. **Scheduled Refill & Production Initial Seed**:
+   - Ordinary 3h refill processes only `enabled = true` tiers.
+   - Owner-gated Production `initial-seed-all` mechanism:
+     - Available only on Production target, `main` branch, `mutate` mode.
+     - Strictly forbidden for automated dispatcher (`arcade-poker-refill-dispatch`).
+     - Requires repository owner actor, checked SHA matching `GITHUB_SHA`, `POKER_BOT_REFILL_PRODUCTION_GO=1`, and explicit confirmation matching `GITHUB_SHA`.
+     - Queries all policies without `where enabled = true` filter and passes `allowDisabled = true` to seed disabled pools without enabling them.
+     - Tiers >500 remain disabled after seed.

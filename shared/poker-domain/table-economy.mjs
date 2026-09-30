@@ -3,16 +3,34 @@ export const HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY = "POKER_BOT_BANKROLL";
 export const MAX_POKER_STAKE_CHIPS = 1_000_000;
 export const POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION = "2";
 
+export const CANONICAL_POKER_BUY_IN_TIERS = Object.freeze([
+  DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+  500,
+  1_000,
+  5_000,
+  10_000,
+  50_000,
+  100_000,
+  500_000,
+  1_000_000,
+  5_000_000,
+  10_000_000,
+]);
+
 export function getBotFundingSystemKeyForBuyIn(buyIn, options = {}) {
   const normalizedBuyIn = Number(buyIn);
   const hasExplicitPoolClass = Object.prototype.hasOwnProperty.call(options, "poolClass");
   const poolClass = typeof options.poolClass === "string" ? options.poolClass.trim().toUpperCase() : "";
   if (hasExplicitPoolClass) {
     if (poolClass !== "NORMAL" && poolClass !== "SLOW") return null;
-    const keys = poolClass === "SLOW"
-      ? { 100: "POKER_BOT_SLOW_BANKROLL_100", 500: "POKER_BOT_SLOW_BANKROLL_500" }
-      : { 100: "POKER_BOT_BANKROLL_100", 500: HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY };
-    return keys[normalizedBuyIn] || null;
+    if (!CANONICAL_POKER_BUY_IN_TIERS.includes(normalizedBuyIn)) return null;
+    if (poolClass === "SLOW") {
+      return `POKER_BOT_SLOW_BANKROLL_${normalizedBuyIn}`;
+    }
+    if (normalizedBuyIn === 500) {
+      return HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY;
+    }
+    return `POKER_BOT_BANKROLL_${normalizedBuyIn}`;
   }
   const { legacySystemKey = "TREASURY" } = options;
   if (normalizedBuyIn === DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
@@ -22,6 +40,17 @@ export function getBotFundingSystemKeyForBuyIn(buyIn, options = {}) {
   if (normalizedBuyIn === 500) return HIGH_TIER_BOT_BANKROLL_SYSTEM_KEY;
   return null;
 }
+
+export const CANONICAL_POKER_BOT_POOL_KEYS = Object.freeze((() => {
+  const keys = [];
+  for (const buyIn of CANONICAL_POKER_BUY_IN_TIERS) {
+    const normal = getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: "NORMAL" });
+    const slow = getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: "SLOW" });
+    if (normal) keys.push(normal);
+    if (slow) keys.push(slow);
+  }
+  return [...new Set(keys)];
+})());
 
 export function isBotFundingAllowedForBuyIn(buyIn, options = {}) {
   return getBotFundingSystemKeyForBuyIn(buyIn, options) !== null;

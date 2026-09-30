@@ -1,21 +1,14 @@
-import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS, isCanonicalPokerBuyIn } from "./table-economy.mjs";
+import {
+  calculateCanonicalPokerStakes,
+  CANONICAL_POKER_BUY_IN_TIERS,
+  DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
+  isCanonicalPokerBuyIn,
+} from "./table-economy.mjs";
 
 const BUY_IN_TIERS_ENV = "POKER_BUY_IN_TIERS_JSON";
 const POSTGRES_INTEGER_MAX = 2_147_483_647;
 
-export const DEFAULT_POKER_BUY_IN_TIERS = Object.freeze([
-  DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
-  500,
-  1_000,
-  5_000,
-  10_000,
-  50_000,
-  100_000,
-  500_000,
-  1_000_000,
-  5_000_000,
-  10_000_000
-]);
+export const DEFAULT_POKER_BUY_IN_TIERS = CANONICAL_POKER_BUY_IN_TIERS;
 
 function configError() {
   const error = new Error("poker_buy_in_tiers_config_invalid");

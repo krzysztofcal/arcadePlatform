@@ -1,6 +1,6 @@
 # Exhaustive Production migration inventory
 
-Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. Addenda for #1018 bot quarantine, manual RESTRICTED, recovery threshold and hysteresis bps bring missing source migrations to 47 entries; all four #1018 migrations are mapped to prepared Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`), awaiting explicit Production GO. Production remains at its 54-entry baseline.
+Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. Addenda for #1018 bot quarantine, manual RESTRICTED, recovery threshold, hysteresis bps, and tier catalog expansion bring missing source migrations to 48 entries; all five #1018 migrations are mapped to prepared Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`), awaiting explicit Production GO. Production remains at its 54-entry baseline.
 
 **Classification is not permission to execute.** `shared-safe` means no environment-specific rollout authority in that change, subject to dependencies; final equivalence can supersede a safe transient patch. `stage-only` has no required shared effect. `needs-production-equivalent` includes mixed migrations whose shared changes cannot be omitted merely because the filename mentions Stage. Every required effect is covered by E1's final definitions; E2 activates only TABLE fence; E3 alone activates fresh Production policies/cap. No old missing file is replayed or marked applied by this plan.
 
@@ -57,8 +57,9 @@ The last already-applied Production migration, `20260813090000_chips_ledger_arch
 | `20260927110000_poker_force_restricted.sql` | needs-production-equivalent | Stage #1018 manual FORCE_RESTRICTED override constraint extension. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
 | `20260929130000_poker_access_policy_recovery_threshold.sql` | needs-production-equivalent | Stage #1018 slow_recovery_threshold_ch column and positive/ordering constraints. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
 | `20260929163000_poker_access_policy_hysteresis_bps.sql` | needs-production-equivalent | Stage #1018 slow_hysteresis_bps column [100, 5000] and derived recovery threshold constraint. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
+| `20260930075513_poker_bot_tier_catalog_expansion.sql` | needs-production-equivalent | Stage #1018 §28 canonical tier catalog expansion (>500 buy-in tiers) with disabled policies and zero-balance exact pools. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
 
-Totals: **26 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (47 missing source files).
+Totals: **27 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (48 missing source files).
 
 ## History and equivalence proof
 
@@ -541,5 +542,15 @@ Source: [SQL](../../supabase/migrations/20260929163000_poker_access_policy_hyste
 Objects/references: `poker_access_policy.slow_hysteresis_bps` column [100, 5000] and derived recovery threshold constraint.
 
 Target/policy discriminators: none; this is the Stage #1018 hysteresis bps migration. Prepared in Production equivalent P1; Production apply remains separately reviewed.
+
+Historical hash/UUID literals: none.
+
+### 20260930075513
+
+Source: [SQL](../../supabase/migrations/20260930075513_poker_bot_tier_catalog_expansion.sql) · SHA256 `e9b292018b4f89688103892e8988997480b5e222c4f6d22d833f6383ca88862d`.
+
+Objects/references: `poker_bot_tier_policy` expansion for 9 higher tiers (>500 buy-in) with disabled policies; 18 zero-balance exact NORMAL/SLOW bankroll accounts; zero MINT.
+
+Target/policy discriminators: none; this is the Stage #1018 §28 tier catalog expansion migration. Prepared in Production equivalent P1; Production apply remains separately reviewed.
 
 Historical hash/UUID literals: none.

@@ -3,6 +3,7 @@ import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
 import { projectDurableActionResult } from "../idempotency/action-command.mjs";
+import { CANONICAL_POKER_BOT_POOL_KEYS } from "../../../shared/poker-domain/table-economy.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 2;
@@ -12,12 +13,7 @@ const MAX_REPLACEMENT_FUNDINGS = 10;
 const MAX_MANAGED_BOT_TOP_UPS = 6;
 const MAX_HUMAN_STACK_UPDATES = 10;
 const MAX_SETTLED_ACCESS_TRANSITIONS = 10;
-const CONFIGURED_POKER_POOL_KEYS = new Set([
-  "POKER_BOT_BANKROLL_100",
-  "POKER_BOT_BANKROLL",
-  "POKER_BOT_SLOW_BANKROLL_100",
-  "POKER_BOT_SLOW_BANKROLL_500",
-]);
+const CONFIGURED_POKER_POOL_KEYS = new Set(CANONICAL_POKER_BOT_POOL_KEYS);
 const DURABLE_ACTION_KIND = "ACT";
 const PAYLOAD_HASH_PATTERN = /^[a-f0-9]{64}$/;
 

@@ -8,6 +8,7 @@ import {
   resolveJanitorConfig,
 } from "./_shared/admin-ops.mjs";
 import { baseHeaders, corsHeaders, executeSql, klog } from "./_shared/supabase-admin.mjs";
+import { CANONICAL_POKER_BOT_POOL_KEYS } from "../../shared/poker-domain/table-economy.mjs";
 
 async function loadPokerEscrowResidualSummary(runSql = executeSql) {
   try {
@@ -148,10 +149,11 @@ function loadLedgerCapacity(env = process.env, runSql = executeSql) {
 
 async function loadPokerBotPolicySummary(runSql = executeSql) {
   try {
+    const poolKeysSql = CANONICAL_POKER_BOT_POOL_KEYS.map((k) => `'${k}'`).join(", ");
     const [accessRows, tierRows, poolRows] = await Promise.all([
       runSql("select slow_threshold_ch, slow_hysteresis_bps, slow_recovery_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
       runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
-      runSql("select system_key, balance, status from public.chips_accounts where account_type = 'SYSTEM' and system_key in ('POKER_BOT_BANKROLL_100', 'POKER_BOT_BANKROLL', 'POKER_BOT_SLOW_BANKROLL_100', 'POKER_BOT_SLOW_BANKROLL_500') order by system_key;"),
+      runSql(`select system_key, balance, status from public.chips_accounts where account_type = 'SYSTEM' and system_key in (${poolKeysSql}) order by system_key;`),
     ]);
     return {
       access: accessRows?.[0] ? {

@@ -387,3 +387,194 @@ test("runRefill filters by buyIn when configured", async () => {
   assert.equal(result.outcomes[0].poolKey, "POKER_BOT_SLOW_BANKROLL_500");
   assert.equal(result.outcomes[0].status, "would_refill");
 });
+
+test("canonical buy-in filter accepts all 11 canonical tiers and rejects non-canonical", () => {
+  for (const buyIn of [100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000]) {
+    const auth = resolveRefillAuthorization({
+      GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+      POKER_BOT_REFILL_REVIEWED_REF: "refs/heads/main",
+      POKER_BOT_REFILL_BUY_IN: String(buyIn),
+    });
+    assert.equal(auth.buyIn, buyIn);
+  }
+  for (const invalid of [250, 750, 1200, 99999, 100000000]) {
+    assert.throws(() => resolveRefillAuthorization({
+      GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+      POKER_BOT_REFILL_REVIEWED_REF: "refs/heads/main",
+      POKER_BOT_REFILL_BUY_IN: String(invalid),
+    }), { code: "refill_buy_in_invalid" });
+  }
+});
+
+test("initial-seed-all authorization strictly gates Production seeding", () => {
+  const mainSha = "0123456789abcdef0123456789abcdef01234567";
+
+  // Dry-run mode on production: accepted
+  const dryRunAuth = resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REF: "refs/heads/main",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+    POKER_BOT_REFILL_MODE: "dry-run",
+  });
+  assert.equal(dryRunAuth.initialSeedAll, true);
+  assert.equal(dryRunAuth.dryRun, true);
+
+  // Initial-seed-all target must be production
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REF: "refs/heads/main",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+  }), { code: "refill_initial_seed_production_only" });
+
+  // Dispatcher is strictly forbidden for initial-seed-all
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+  }), { code: "refill_initial_seed_dispatcher_forbidden" });
+
+  // Ref must be main
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REF: "refs/heads/feature-branch",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+  }), { code: "refill_main_ref_required" });
+
+  // Mutate mode requires owner actor
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: mainSha,
+    GITHUB_ACTOR: "unauthorized-user",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_CHECKED_SHA: mainSha,
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_PRODUCTION_GO: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: mainSha,
+  }), { code: "refill_initial_seed_owner_required" });
+
+  // Mutate mode requires checked SHA
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: mainSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_CHECKED_SHA: "wrong-sha",
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_PRODUCTION_GO: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: mainSha,
+  }), { code: "refill_checked_sha_mismatch" });
+
+  // Mutate mode requires production GO
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: mainSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_CHECKED_SHA: mainSha,
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: mainSha,
+  }), { code: "refill_production_go_required" });
+
+  // Mutate mode requires confirmation matching GITHUB_SHA
+  assert.throws(() => resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: mainSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_CHECKED_SHA: mainSha,
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_PRODUCTION_GO: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: "wrong-confirmation-sha",
+  }), { code: "refill_initial_seed_confirmation_required" });
+
+  // Mutate mode succeeds with all owner gates
+  const mutateAuth = resolveRefillAuthorization({
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: mainSha,
+    GITHUB_ACTOR: "krzysztofcal",
+    POKER_BOT_REFILL_REVIEWED_REF: "main",
+    POKER_BOT_REFILL_CHECKED_SHA: mainSha,
+    POKER_BOT_REFILL_TARGET: "production",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_PRODUCTION_GO: "1",
+    POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: mainSha,
+  });
+  assert.equal(mutateAuth.initialSeedAll, true);
+  assert.equal(mutateAuth.dryRun, false);
+});
+
+test("runRefill with initial-seed-all seeds disabled tiers without enabling them", async () => {
+  const policies = [
+    { buy_in: 1000, enabled: false, normal_refill_threshold_ch: 10000, normal_refill_amount_ch: 20000, slow_refill_threshold_ch: 4000, slow_refill_amount_ch: 10000, revision: 1 }
+  ];
+  let queriedWhere = null;
+  const tx = {
+    async unsafe(query, params = []) {
+      const text = String(query).toLowerCase();
+      if (text.includes("clock_timestamp()")) return [{ now: "2026-09-27T07:00:00.000Z" }];
+      if (text.includes("poker_bot_tier_policy")) {
+        queriedWhere = text;
+        return policies;
+      }
+      if (text.includes("chips_transactions") && text.includes("poker_pool_refill")) return [];
+      if (text.includes("chips_accounts") && text.includes("system_key = $1")) return [{ id: "pool", balance: 0, status: "active" }];
+      return [];
+    }
+  };
+  const result = await runRefill({
+    env: {
+      GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+      GITHUB_REF: "refs/heads/main",
+      POKER_BOT_REFILL_REVIEWED_REF: "main",
+      POKER_BOT_REFILL_TARGET: "production",
+      POKER_BOT_REFILL_INITIAL_SEED_ALL: "1",
+      POKER_BOT_REFILL_MODE: "dry-run",
+      POKER_BOT_REFILL_BUY_IN: "1000",
+      POKER_BOT_REFILL_POOL_CLASS: "NORMAL",
+    },
+    beginSqlFn: async (callback) => callback(tx),
+  });
+  assert.equal(queriedWhere.includes("where enabled = true"), false);
+  assert.equal(result.outcomes.length, 1);
+  assert.equal(result.outcomes[0].poolKey, "POKER_BOT_BANKROLL_1000");
+  assert.equal(result.outcomes[0].status, "would_refill");
+  assert.equal(result.outcomes[0].amount, 20000);
+});

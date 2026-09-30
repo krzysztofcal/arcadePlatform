@@ -197,3 +197,22 @@ Addresses the two remaining P1 blockers from Issue #1018 following the successfu
 3. Restore `CONTINUOUS_BOT_DEFAULT` (enabled=true, desired=5) via existing authorized maintenance path.
 4. Await natural supervisor convergence to 5 OPEN `CONTINUOUS_BOT` tables with 3 bots each funded from `POKER_BOT_BANKROLL_100`.
 5. Verify zero supervisor churn and record evidence before returning PR #1019 as merge-ready.
+
+### Phase 15 — Canonical tier catalog expansion and initial seed (T085–T092)
+
+1. **T085 — Domain and Catalog Mapping**:
+   Define `CANONICAL_POKER_BUY_IN_TIERS` (11 tiers) in `shared/poker-domain/table-economy.mjs` and re-export in `poker-progression.mjs`. Update `getBotFundingSystemKeyForBuyIn` to support all 11 tiers for explicit `poolClass` while preserving legacy path for 100/500/unsupported >500. Define `CANONICAL_POKER_BOT_POOL_KEYS` (22 exact keys).
+2. **T086 — Ledger Validation & Refill Script**:
+   Update `netlify/functions/_shared/chips-ledger.mjs` to dynamically map all 22 pools. Update `scripts/ops/poker-bot-pool-refill.mjs` to validate buyIns against canonical tiers, add owner-gated Production `initial-seed-all` (dispatcher forbidden, target production, mutate mode, main ref, owner actor, checked SHA, production GO, explicit confirmation). Allow seeding disabled tiers without enabling them.
+3. **T087 — WS Runtime & Admin Surfaces**:
+   Update `ws-server/poker/persistence/persisted-state-writer.mjs`, `netlify/functions/admin-poker-policy.mjs`, and `netlify/functions/admin-ops-summary.mjs` to consume `CANONICAL_POKER_BOT_POOL_KEYS`.
+4. **T088 — Stage & Production Migrations**:
+   Add forward-only Stage migration `20260930075513_poker_bot_tier_catalog_expansion.sql` provisioning 9 higher tiers disabled and 18 zero-balance accounts. Zero MINT. Update Production P1 contract `20260929201500_poker_bot_quarantine_production_contract.sql` to provision all 11 policies disabled and all 22 pools.
+5. **T089 — Manifest & Inventory Update**:
+   Update `manifest.json` (48 missing entries, new P1 hash, 20260930075513 mapping), `scripts/check-db-migrations.mjs` (48 missing, 27 needs-production-equivalent), and `specs/004-production-retention/migration-inventory.md`.
+6. **T090 — Test Suite Extension**:
+   Extend fundamental behavior tests: progression (11 tiers, pool keys, non-canonical rejection), refill (canonical buy-in filter, initial-seed-all authorization, disabled tier execution), chips-ledger (max-tier 10M refill accepted, uncataloged pool rejected), and chips.migration (22 accounts, 11 policies, higher-tier drift, 20260930075513 history gap).
+7. **T091 — CI, DB Stage Apply, WS Preview Deploy & Smoke**:
+   Push to PR branch, await green CI and automatic DB Stage Apply PR. Trigger WS Preview Deploy for new exact SHA, verify health and execute smoke (continuous tables healthy, 100/500 work, disabled high tier cannot fund).
+8. **T092 — Final Handoff**:
+   Report final HEAD SHA, new P1 SHA256, Stage migration name, CI, exact-SHA Preview run, and read-only proof of 5 healthy Stage continuous tables.
