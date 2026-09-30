@@ -258,28 +258,69 @@ export async function runRefill({
   postTransactionFn = postTransaction,
 } = {}) {
   const authorization = resolveRefillAuthorization(env);
-  return beginSqlFn(async (tx) => {
+
+  // Keep this discovery transaction short. It establishes the DB identity and
+  // one trusted current bucket; all policy locking and pool work happens in
+  // independent transactions below.
+  const { bucket, buyIns } = await beginSqlFn(async (tx) => {
     await assertRefillDatabaseIdentity(tx, authorization.target);
     await boundRefillTransaction(tx);
     const startedAt = await databaseNow(tx);
     const bucket = utcBucketStart(startedAt);
-    const whereClause = authorization.initialSeedAll ? "" : "where enabled = true";
-    const policyRows = await tx.unsafe(`
+    let buyIns = CANONICAL_POKER_BUY_IN_TIERS;
+    if (!authorization.initialSeedAll) {
+      const rows = await tx.unsafe(`
+select buy_in
+from public.poker_bot_tier_policy
+where enabled = true
+order by buy_in asc;
+`);
+      buyIns = (Array.isArray(rows) ? rows : [])
+        .map((row) => positiveSafeInteger(row.buy_in))
+        .filter((buyIn) => CANONICAL_POKER_BUY_IN_TIERS.includes(buyIn));
+    }
+    const finishedAt = await databaseNow(tx);
+    if (utcBucketStart(finishedAt) !== bucket) throw fail("refill_bucket_expired");
+    if (finishedAt.getTime() - startedAt.getTime() > 60_000) throw fail("refill_transaction_expired");
+    return {
+      bucket,
+      buyIns: buyIns.filter((buyIn) => !authorization.buyIn || buyIn === authorization.buyIn),
+    };
+  });
+
+  const poolClasses = authorization.poolClass ? [authorization.poolClass] : ["NORMAL", "SLOW"];
+  const poolTargets = buyIns.flatMap((buyIn) => poolClasses.map((poolClass) => ({ buyIn, poolClass })));
+  const outcomes = [];
+  let stopReason = null;
+
+  for (let index = 0; index < poolTargets.length; index += 1) {
+    const { buyIn, poolClass } = poolTargets[index];
+    const poolKey = getBotFundingSystemKeyForBuyIn(buyIn, { poolClass });
+    try {
+      const outcome = await beginSqlFn(async (tx) => {
+        await assertRefillDatabaseIdentity(tx, authorization.target);
+        await boundRefillTransaction(tx);
+        const startedAt = await databaseNow(tx);
+        if (utcBucketStart(startedAt) !== bucket) throw fail("refill_bucket_expired");
+
+        // Re-read and lock policy inside this pool's transaction. The initial
+        // discovery query is never trusted for enablement, revision, or amount.
+        const policyRows = await tx.unsafe(`
 select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
        slow_refill_threshold_ch, slow_refill_amount_ch, revision
 from public.poker_bot_tier_policy
-${whereClause}
-order by buy_in asc
+where buy_in = $1
 for share;
-`);
-    const outcomes = [];
-    for (const policy of Array.isArray(policyRows) ? policyRows : []) {
-      if (authorization.buyIn && Number(policy.buy_in) !== authorization.buyIn) continue;
-      for (const poolClass of authorization.poolClass ? [authorization.poolClass] : ["NORMAL", "SLOW"]) {
-        if ((await databaseNow(tx)).getTime() - startedAt.getTime() > 60_000) {
-          throw fail("refill_transaction_expired");
-        }
-        outcomes.push(await refillPool({
+`, [buyIn]);
+        const policy = Array.isArray(policyRows) ? policyRows[0] : null;
+        const afterPolicyLock = await databaseNow(tx);
+        if (utcBucketStart(afterPolicyLock) !== bucket) throw fail("refill_bucket_expired");
+        if (afterPolicyLock.getTime() - startedAt.getTime() > 60_000) throw fail("refill_transaction_expired");
+        if (!policy) throw fail("refill_policy_missing", { buyIn });
+        if (!isValidTierPolicy(policy)) throw fail("refill_policy_invalid", { buyIn });
+        if (policy.enabled !== true && !authorization.initialSeedAll) return { status: "disabled", poolKey };
+
+        const result = await refillPool({
           tx,
           policy,
           poolClass,
@@ -287,31 +328,62 @@ for share;
           dryRun: authorization.dryRun,
           allowDisabled: authorization.initialSeedAll === true,
           postTransactionFn,
-        }));
+        });
+        if (result.status === "stale_bucket") throw fail("refill_bucket_expired", { buyIn, poolClass });
+        if (result.status === "unprovisioned") throw fail("refill_pool_unprovisioned", { buyIn, poolClass });
+
+        const finishedAt = await databaseNow(tx);
+        if (utcBucketStart(finishedAt) !== bucket) throw fail("refill_bucket_expired");
+        if (finishedAt.getTime() - startedAt.getTime() > 60_000) throw fail("refill_transaction_expired");
+        return result;
+      });
+      outcomes.push({ buyIn, poolClass, poolKey, ...outcome });
+    } catch (error) {
+      const errorCode = error?.code || "refill_pool_failed";
+      outcomes.push({ buyIn, poolClass, poolKey, status: "failed", errorCode });
+      if (["refill_database_identity_mismatch", "refill_bucket_expired", "invalid_refill_clock"].includes(errorCode)) {
+        stopReason = errorCode;
+        for (const remaining of poolTargets.slice(index + 1)) {
+          outcomes.push({
+            ...remaining,
+            poolKey: getBotFundingSystemKeyForBuyIn(remaining.buyIn, { poolClass: remaining.poolClass }),
+            status: "not_attempted",
+            reason: stopReason,
+          });
+        }
+        break;
       }
     }
-    const finishedAt = await databaseNow(tx);
-    if (utcBucketStart(finishedAt) !== bucket) throw fail("refill_bucket_expired");
-    if (finishedAt.getTime() - startedAt.getTime() > 60_000) throw fail("refill_transaction_expired");
-    return { authorization, bucket, outcomes };
-  });
+  }
+
+  const failed = outcomes.some(({ status }) => status === "failed" || status === "not_attempted");
+  return { authorization, bucket, outcomes, failed, stopReason };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runRefill()
-    .then((result) => klog("poker_bot_pool_refill_complete", {
-      bucket: result.bucket,
-      mode: result.authorization.mode,
-      poolClass: result.authorization.poolClass,
-      buyIn: result.authorization.buyIn,
-      outcomes: result.outcomes.map(({ status, poolKey, amount, transaction }) => ({
-        status,
-        poolKey,
-        amount: amount || null,
-        transactionId: transaction?.id || null,
-        transactionReference: transaction?.reference || null,
-      })),
-    }))
+    .then((result) => {
+      const event = result.failed ? "poker_bot_pool_refill_failed" : "poker_bot_pool_refill_complete";
+      klog(event, {
+        bucket: result.bucket,
+        mode: result.authorization.mode,
+        poolClass: result.authorization.poolClass,
+        buyIn: result.authorization.buyIn,
+        stopReason: result.stopReason,
+        outcomes: result.outcomes.map(({ buyIn, poolClass, status, poolKey, amount, transaction, errorCode, reason }) => ({
+          buyIn,
+          poolClass,
+          status,
+          poolKey,
+          amount: amount || null,
+          transactionId: transaction?.id || null,
+          transactionReference: transaction?.reference || null,
+          errorCode: errorCode || null,
+          reason: reason || null,
+        })),
+      });
+      if (result.failed) process.exitCode = 1;
+    })
     .catch((error) => {
       klog("poker_bot_pool_refill_failed", { code: error?.code || "refill_failed", message: error?.message });
       process.exitCode = 1;

@@ -43,6 +43,109 @@ const policy = {
   revision: 3,
 };
 
+function transactionalRefillDb({
+  policies = [policy],
+  systemIdentifier = "7656985631720456337",
+  now = "2026-09-27T07:00:00.000Z",
+  balances = {},
+  beforeQuery = async () => {},
+  beforePost = async () => {},
+} = {}) {
+  const state = {
+    policies,
+    systemIdentifier,
+    now,
+    balances: new Map(Object.entries(balances)),
+    committed: new Map(),
+    transactionCount: 0,
+    committedTransactions: 0,
+    rolledBackTransactions: 0,
+    postCount: 0,
+    nextTransactionId: 0,
+  };
+  const pendingByTx = new WeakMap();
+
+  async function beginSqlFn(callback) {
+    state.transactionCount += 1;
+    const pending = [];
+    const tx = {
+      async unsafe(query, params = []) {
+        const text = String(query).toLowerCase();
+        await beforeQuery({ state, text, params, tx });
+        if (text.includes("pg_control_system")) return [{ system_identifier: state.systemIdentifier }];
+        if (text.includes("clock_timestamp()")) return [{ now: state.now }];
+        if (text.includes("poker_bot_tier_policy")) {
+          if (params.length) {
+            return state.policies.filter((row) => Number(row.buy_in) === Number(params[0])
+              && (!text.includes("enabled = true") || row.enabled === true));
+          }
+          return state.policies.filter((row) => !text.includes("enabled = true") || row.enabled === true);
+        }
+        if (text.includes("chips_transactions") && text.includes("poker_pool_refill")) {
+          const committed = state.committed.get(`${params[0]}:${params[1]}`);
+          return committed ? [committed] : [];
+        }
+        if (text.includes("chips_accounts") && text.includes("system_key = 'genesis'")) {
+          return [{ id: "genesis-account" }];
+        }
+        if (text.includes("chips_accounts") && text.includes("system_key = $1")) {
+          return [{ id: `account:${params[0]}`, balance: state.balances.get(params[0]) ?? 0, status: "active" }];
+        }
+        return [];
+      },
+    };
+    pendingByTx.set(tx, pending);
+    try {
+      const result = await callback(tx);
+      for (const commit of pending) commit();
+      state.committedTransactions += 1;
+      return result;
+    } catch (error) {
+      state.rolledBackTransactions += 1;
+      throw error;
+    }
+  }
+
+  async function postTransactionFn(payload) {
+    state.postCount += 1;
+    await beforePost({ state, payload });
+    const transaction = {
+      id: `tx-${state.nextTransactionId += 1}`,
+      reference: payload.reference,
+    };
+    const metadata = payload.metadata;
+    pendingByTx.get(payload.tx).push(() => {
+      state.committed.set(`${metadata.bankrollSystemKey}:${metadata.bucket}`, {
+        id: transaction.id,
+        idempotency_key: payload.idempotencyKey,
+        metadata,
+      });
+      state.balances.set(metadata.bankrollSystemKey,
+        (state.balances.get(metadata.bankrollSystemKey) ?? 0) + payload.entries[1].amount);
+    });
+    return { transaction };
+  }
+
+  return { state, beginSqlFn, postTransactionFn };
+}
+
+function authorizedStageMutateEnv(overrides = {}) {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  return {
+    GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/ops/refill-test",
+    GITHUB_SHA: sha,
+    GITHUB_ACTOR: "arcade-poker-refill-dispatch",
+    POKER_BOT_REFILL_REVIEWED_REF: sha,
+    POKER_BOT_REFILL_CHECKED_SHA: sha,
+    POKER_BOT_REFILL_TARGET: "stage",
+    POKER_BOT_REFILL_MODE: "mutate",
+    POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+    ...overrides,
+  };
+}
+
 test("refill uses the current UTC three-hour bucket and one configured amount", async () => {
   const now = new Date("2026-09-27T07:59:00.000Z");
   assert.equal(utcBucketStart(now), "2026-09-27T06:00:00.000Z");
@@ -344,21 +447,22 @@ test("refill aborts its transaction when a later ledger wait crosses the boundar
   }), { code: "refill_bucket_expired" });
 });
 
-test("runRefill rolls back a bucket that expires while acquiring policy locks", async () => {
-  let dbNow = "2026-09-27T08:59:59.000Z";
-  let posts = 0;
-  const tx = fakeTx({
-    clock: () => dbNow,
-    onQuery: async (query) => {
-      if (query.includes("for share")) dbNow = "2026-09-27T09:00:00.000Z";
+test("runRefill fails closed when the current bucket expires while acquiring a pool policy lock", async () => {
+  const db = transactionalRefillDb({
+    now: "2026-09-27T08:59:59.000Z",
+    beforeQuery: async ({ state, text }) => {
+      if (text.includes("poker_bot_tier_policy") && text.includes("for share")) state.now = "2026-09-27T09:00:00.000Z";
     },
   });
-  await assert.rejects(runRefill({
+  const result = await runRefill({
     env: { POKER_BOT_REFILL_REVIEWED_REF: "refs/heads/main" },
-    beginSqlFn: async (callback) => callback(tx),
-    postTransactionFn: async () => { posts += 1; },
-  }), { code: "refill_bucket_expired" });
-  assert.equal(posts, 0);
+    beginSqlFn: db.beginSqlFn,
+    postTransactionFn: db.postTransactionFn,
+  });
+  assert.equal(result.failed, true);
+  assert.equal(result.outcomes[0].status, "failed");
+  assert.equal(result.outcomes[0].errorCode, "refill_bucket_expired");
+  assert.equal(db.state.postCount, 0);
 });
 
 test("Production identity mismatch fails both dry-run and mutate before refill SQL or ledger writes", async () => {
@@ -442,7 +546,11 @@ test("runRefill filters by buyIn when configured", async () => {
       const text = String(query).toLowerCase();
       if (text.includes("pg_control_system")) return [{ system_identifier: "7656985631720456337" }];
       if (text.includes("clock_timestamp()")) return [{ now: "2026-09-27T07:00:00.000Z" }];
-      if (text.includes("poker_bot_tier_policy")) return policies;
+      if (text.includes("poker_bot_tier_policy")) {
+        return params.length
+          ? policies.filter((row) => Number(row.buy_in) === Number(params[0]) && (!text.includes("enabled = true") || row.enabled === true))
+          : policies.filter((row) => !text.includes("enabled = true") || row.enabled === true);
+      }
       if (text.includes("chips_transactions") && text.includes("poker_pool_refill")) return [];
       if (text.includes("chips_accounts") && text.includes("system_key = $1")) return [{ id: "pool", balance: 0, status: "active" }];
       return [];
@@ -465,6 +573,94 @@ test("runRefill filters by buyIn when configured", async () => {
   assert.equal(result.outcomes.length, 1);
   assert.equal(result.outcomes[0].poolKey, "POKER_BOT_SLOW_BANKROLL_500");
   assert.equal(result.outcomes[0].status, "would_refill");
+});
+
+test("runRefill bounds each pool in its own transaction", async () => {
+  const policies = [
+    policy,
+    { ...policy, buy_in: 500, normal_refill_threshold_ch: 500, normal_refill_amount_ch: 250 },
+  ];
+  const db = transactionalRefillDb({ policies });
+  const result = await runRefill({
+    env: {
+      POKER_BOT_REFILL_REVIEWED_REF: "refs/heads/main",
+      POKER_BOT_REFILL_POOL_CLASS: "NORMAL",
+    },
+    beginSqlFn: db.beginSqlFn,
+    postTransactionFn: db.postTransactionFn,
+  });
+
+  assert.equal(db.state.transactionCount, 3, "one discovery transaction plus one transaction per pool");
+  assert.equal(db.state.committedTransactions, 3);
+  assert.deepEqual(result.outcomes.map(({ status }) => status), ["would_refill", "would_refill"]);
+});
+
+test("a failed pool leaves prior commits intact, later pools proceed, and rerun safely completes only the failed pool", async () => {
+  const policies = [
+    policy,
+    { ...policy, buy_in: 500, normal_refill_threshold_ch: 500, normal_refill_amount_ch: 250 },
+    { ...policy, buy_in: 5000, normal_refill_threshold_ch: 5000, normal_refill_amount_ch: 2500 },
+  ];
+  let fail500Once = true;
+  const db = transactionalRefillDb({
+    policies,
+    beforePost: async ({ payload }) => {
+      if (payload.metadata.buyIn === 500 && fail500Once) {
+        fail500Once = false;
+        const error = new Error("injected independent pool failure");
+        error.code = "injected_pool_failure";
+        throw error;
+      }
+    },
+  });
+  const env = authorizedStageMutateEnv({
+    POKER_BOT_REFILL_POOL_CLASS: "NORMAL",
+  });
+  const first = await runRefill({ env, beginSqlFn: db.beginSqlFn, postTransactionFn: db.postTransactionFn });
+  assert.equal(first.failed, true);
+  assert.deepEqual(first.outcomes.map(({ status }) => status), ["refilled", "failed", "refilled"]);
+  assert.equal(first.outcomes[1].errorCode, "injected_pool_failure");
+  assert.equal(db.state.committed.size, 2, "successful pools on both sides of the failure committed independently");
+  assert.equal(db.state.balances.get(first.outcomes[0].poolKey), 50);
+  assert.equal(db.state.balances.get("POKER_BOT_BANKROLL") ?? 0, 0);
+  assert.equal(db.state.balances.get(first.outcomes[2].poolKey), 2500);
+
+  const rerun = await runRefill({ env, beginSqlFn: db.beginSqlFn, postTransactionFn: db.postTransactionFn });
+  assert.equal(rerun.failed, false);
+  assert.deepEqual(rerun.outcomes.map(({ status }) => status), ["replay", "refilled", "replay"]);
+  assert.equal(db.state.committed.size, 3);
+  assert.equal(db.state.postCount, 4, "already committed pools are never posted again");
+  assert.equal(db.state.balances.get(rerun.outcomes[0].poolKey), 50);
+  assert.equal(db.state.balances.get("POKER_BOT_BANKROLL"), 250);
+  assert.equal(db.state.balances.get(rerun.outcomes[2].poolKey), 2500);
+});
+
+test("runRefill fails closed when a per-pool transaction exceeds 60 seconds or crosses its bucket", async () => {
+  for (const [initialTime, nextTime, expectedCode] of [
+    ["2026-09-27T07:00:00.000Z", "2026-09-27T07:01:00.001Z", "refill_transaction_expired"],
+    ["2026-09-27T08:59:59.000Z", "2026-09-27T09:00:00.000Z", "refill_bucket_expired"],
+  ]) {
+    const db = transactionalRefillDb({
+      policies: [policy],
+      now: initialTime,
+      beforeQuery: async ({ state, text }) => {
+        if (text.includes("poker_bot_tier_policy") && text.includes("for share")) state.now = nextTime;
+      },
+    });
+    const result = await runRefill({
+      env: {
+        POKER_BOT_REFILL_REVIEWED_REF: "refs/heads/main",
+        POKER_BOT_REFILL_POOL_CLASS: "NORMAL",
+      },
+      beginSqlFn: db.beginSqlFn,
+      postTransactionFn: db.postTransactionFn,
+    });
+    assert.equal(result.failed, true);
+    assert.equal(result.outcomes[0].status, "failed");
+    assert.equal(result.outcomes[0].errorCode, expectedCode);
+    assert.equal(db.state.postCount, 0);
+    assert.equal(db.state.committed.size, 0);
+  }
 });
 
 test("canonical buy-in filter accepts all 11 canonical tiers and rejects non-canonical", () => {
