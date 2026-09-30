@@ -333,14 +333,22 @@ T093 implemented the Stage and Production migration contracts. T095 removed the 
 
 Final §29 validation used disposable local PostgreSQL 17 only:
 
-- `node --test tests/chips/poker-pool-policy.transaction.test.mjs`: 6/6 passed, including database identity mismatch, kill switch, threshold/no-op, exact mapping/refill, same-hour replay/concurrency, later-hour allowance, mid-ledger pool-local rollback, balanced entries/sequence/registry, and EXPLAIN regressions.
-- The shared CI PostgreSQL database carries irreversible table-fence/cleanup state across its ordered integration steps. The workflow now creates a separate disposable `poker_pool_test` database before the pool transaction suite, avoiding any attempt to lower an already-activated fence. The same isolated setup passes 6/6 locally.
+- `node --test tests/chips/poker-pool-policy.transaction.test.mjs`: 7/7 passed, including database identity mismatch, kill switch, threshold/no-op, exact mapping/refill, same-hour replay/concurrency, later-hour allowance, mid-ledger pool-local rollback, lock-contention isolation (locked pool `failed`/`55P03`, independent pool commits one balanced MINT), balanced entries/sequence/registry, and EXPLAIN regressions.
+- The shared CI PostgreSQL database carries irreversible table-fence/cleanup state across its ordered integration steps. The workflow now creates a separate disposable `poker_pool_test` database before the pool transaction suite, avoiding any attempt to lower an already-activated fence. The same isolated setup passes 7/7 locally.
 - `node tests/chips/chips.migration.test.mjs`: passed on disposable `chips_migration_test`, including Stage default-off/ACL/no-cron/no-MINT and Production P2 identity-substitution/no-mutation checks. The P2 expected Production identifier was replaced only with the local fixture's ID.
 - `node tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs`: passed; `node --test ws-tests/infra-vps-workflow.guard.test.mjs`: 16/16 passed.
 - Focused ledger regression `npx vitest run tests/chips-ledger.test.mjs -t 'rejects every system-only MINT, including the former scheduled refill shape'`: 1 passed, 48 skipped.
-- `npm run syntax` passed (220 files); `npm run ci:guards`, `npm run check:csp-inline`, `node scripts/check-db-migrations.mjs` (103 source migrations / 4 Production replacements), and `git diff --check` passed.
+- `npm run syntax` passed (220 files); `npm run ci:guards`, `npm run check:csp-inline`, `node scripts/check-db-migrations.mjs` (104 source migrations / 4 Production replacements), and `git diff --check` passed.
 - The broader ledger Vitest file reports 12 existing failures in both base `715b6f972e9d274d9931a9af11e284bfc7e09680` and this branch; the failing test names are identical. Base: 38 pass / 12 fail; branch: 37 pass / 12 fail because the retired scheduled SYSTEM-MINT acceptance coverage was removed and replaced with the rejection guard. No new failure was introduced. These unrelated paging/mock failures are outside the requested fundamental test set.
 
 No test requires real pg_cron. None connected to Stage, Production or a VPS.
 
 Breaking impact: once Cron and the DB control are separately activated, refill opportunities move from one per 3-hour bucket to one per UTC hour. A pool that falls below threshold again may therefore receive another configured amount sooner. Until separate activation, recurring refills stop. The dedicated GitHub actor/PAT/config and external worker are no longer used. Policy values, current pools/balances, live poker units, tables/profiles and Production remain unchanged by this PR.
+
+### PR #1026 P1 correction — bounded pool lock waits
+
+The already-applied Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` remains unchanged. The new forward-only correction is `supabase/migrations/20260930223409_poker_bot_pool_refill_lock_timeout.sql` (SHA256 `9c1bf241345a026c755112df06bebfbc99dacda28631a5b3cb03860041dc9595`); it preserves the current function body and adds function-level `SET lock_timeout = '5s'` beside `SET search_path = ''`. The existing not-yet-applied Production P2 is updated in place with that setting (final SHA256 `139a00efb8ed712eae9aff9cf9a9264884da49c353a72a8bb492f7fcbe560372`).
+
+Publishing the Stage correction intentionally allows DB Stage Apply to replace only `public.poker_bot_pool_refill_hourly()`. The singleton stays `enabled=false`; there is no pg_cron extension/job, MINT, balance/policy/table/profile mutation or Production effect. The function body, advisory lock, hourly idempotency, ACL, exact pool allowlist, and remaining refill semantics are unchanged.
+
+The new disposable PostgreSQL contention test uses a confirmed `FOR UPDATE` lock held by a second connection. Before the correction, the test failed with `57014` at its 8s test statement timeout. With the corrected function it passes in about 5 seconds: the NORMAL 100 pool reports `failed`/`55P03`, while SLOW 100 commits one balanced 2,000 CH MINT. Promise coordination is used; no sleep is used. Stage DB Apply evidence for this correction will be recorded here after the PR update triggers the existing workflow.

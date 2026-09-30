@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 49,
+    "missing_count": 50,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -969,6 +969,20 @@
       "omitted_effects": [
         "No pg_cron extension/job, enabled refill control, MINT or Production activation is authorized by this PR"
       ]
+    },
+    {
+      "version": "20260930223409",
+      "file": "20260930223409_poker_bot_pool_refill_lock_timeout.sql",
+      "sha256": "9c1bf241345a026c755112df06bebfbc99dacda28631a5b3cb03860041dc9595",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260930211624_poker_bot_pool_refill_hourly.sql",
+      "required_effects": [
+        "Function-scoped 5s lock timeout preserves per-pool failure isolation under row-lock contention"
+      ],
+      "omitted_effects": [
+        "No pg_cron extension/job, control enablement, MINT or Production migration is authorized by this PR"
+      ]
     }
   ],
   "replacement_migrations": [
@@ -994,7 +1008,7 @@
     {
       "file": "20260930211624_poker_bot_pool_refill_hourly.sql",
       "purpose": "P2 Production #1018 hourly poker bot refill contract; dark/off; no pg_cron/job/MINT",
-      "sha256": "a3bec5f1f1d566e0dcbb6bb3e4cfc899750c8bf760144e6d47fe248444383c12",
+      "sha256": "139a00efb8ed712eae9aff9cf9a9264884da49c353a72a8bb492f7fcbe560372",
       "prerequisites": [
         "20260929201500_poker_bot_quarantine_production_contract.sql"
       ]

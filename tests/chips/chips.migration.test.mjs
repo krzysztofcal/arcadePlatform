@@ -271,7 +271,7 @@ const assertPokerBotQuarantineSchema = async (sql) => {
   `;
   assert.equal(refillFunction.length, 1);
   assert.equal(refillFunction[0].prosecdef, false, "refill function must be SECURITY INVOKER");
-  assert.deepEqual(refillFunction[0].proconfig, ["search_path=\"\""]);
+  assert.deepEqual(refillFunction[0].proconfig, ["search_path=\"\"", "lock_timeout=5s"]);
   for (const role of ["anon", "authenticated", "service_role"]) {
     const acl = await sql.unsafe("select has_function_privilege($1, 'public.poker_bot_pool_refill_hourly()', 'EXECUTE') as allowed;", [role]);
     assert.equal(acl[0].allowed, false, `${role} must not execute the refill function`);

@@ -1820,3 +1820,9 @@ On any uncertain result: disable DB refill control, inspect current ledger/idemp
 - Any automatic `supabase/migrations/**` Stage apply must be explicitly declared and remain economically dark.
 - No JS/CSS/UI work is expected. If JS changes are necessary, preserve JSP compatibility and use `klog`, never `console.log`.
 - Double-check the final diff and call out breaking impacts before merge.
+
+### §29 lock-timeout correction for PR #1026
+
+The applied Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` is immutable. Add forward-only Stage migration `20260930223409_poker_bot_pool_refill_lock_timeout.sql` using the normal `supabase migration new` flow. It must preserve the current function body and add function-level `SET lock_timeout = '5s'` beside `SET search_path = ''`, so lock waits become catchable per-pool failures before the global statement timeout. Keep the correction economically dark: the existing control remains disabled, with no pg_cron extension/job or MINT. Update the existing unapplied Production P2 `20260930211624_poker_bot_pool_refill_hourly.sql` to the same final function definition; do not add another Production migration.
+
+Add one fundamental disposable PostgreSQL contention test using connection coordination rather than sleeps. One connection holds `FOR UPDATE` on an exact pool/account row while another invokes the function; the locked pool must report `failed` through its bounded timeout, while an independent pool commits exactly one balanced MINT. Preserve run-level advisory lock, hourly idempotency, ACL, exact 22-pool allowlist and all other decisions. No Production, pg_cron/control activation, VPS operation or unrelated runtime change is authorized.

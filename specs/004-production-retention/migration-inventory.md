@@ -1,6 +1,6 @@
 # Exhaustive Production migration inventory
 
-Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. Addenda for #1018 bot quarantine, manual RESTRICTED, recovery threshold, hysteresis bps, and tier catalog expansion bring missing source migrations to 49 entries. The five existing #1018 schema sources are mapped to prepared Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); the new hourly-refill source maps to prepared P2 (`20260930211624_poker_bot_pool_refill_hourly.sql`). Both await separate Production GO. Production remains at its 54-entry baseline; P2 is not applied.
+Audit: 2026-09-13, main `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`. Compared filenames/versions/names against both live `supabase_migrations.schema_migrations` histories. The recorded baseline was Main=Stage=97; Production=54; unknown remote versions=0. The original audit listed 43 missing files. Addenda for #1018 bot quarantine, manual RESTRICTED, recovery threshold, hysteresis bps, tier catalog expansion and the hourly-refill lock-timeout correction bring missing source migrations to 50 entries. The five existing #1018 schema sources and both hourly-refill sources map to prepared Production equivalents P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`) and P2 (`20260930211624_poker_bot_pool_refill_hourly.sql`). Both await separate Production GO. Production remains at its 54-entry baseline; P2 is not applied.
 
 **Classification is not permission to execute.** `shared-safe` means no environment-specific rollout authority in that change, subject to dependencies; final equivalence can supersede a safe transient patch. `stage-only` has no required shared effect. `needs-production-equivalent` includes mixed migrations whose shared changes cannot be omitted merely because the filename mentions Stage. Every required effect is covered by E1's final definitions; E2 activates only TABLE fence; E3 alone activates fresh Production policies/cap. No old missing file is replayed or marked applied by this plan.
 
@@ -59,8 +59,9 @@ The last already-applied Production migration, `20260813090000_chips_ledger_arch
 | `20260929163000_poker_access_policy_hysteresis_bps.sql` | needs-production-equivalent | Stage #1018 slow_hysteresis_bps column [100, 5000] and derived recovery threshold constraint. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
 | `20260930075513_poker_bot_tier_catalog_expansion.sql` | needs-production-equivalent | Stage #1018 §28 canonical tier catalog expansion (>500 buy-in tiers) with disabled policies and zero-balance exact pools. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
 | `20260930211623_poker_bot_pool_refill_hourly.sql` | needs-production-equivalent | Stage #1018 §29 disabled refill control and hourly SECURITY INVOKER ledger function. Prepared in Production P2 (`20260930211624_poker_bot_pool_refill_hourly.sql`) with canonical Production identity; no pg_cron/job/MINT and not applied. |
+| `20260930223409_poker_bot_pool_refill_lock_timeout.sql` | needs-production-equivalent | Forward-only Stage replacement of the hourly function with a function-scoped 5s lock timeout so a row-lock wait is isolated to its pool. Final equivalent is the existing unapplied Production P2; no control change, pg_cron/job or MINT. |
 
-Totals: **28 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (49 missing source files).
+Totals: **29 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (50 missing source files).
 
 ## History and equivalence proof
 
@@ -565,6 +566,12 @@ Source: [SQL](../../supabase/migrations/20260930211623_poker_bot_pool_refill_hou
 
 Objects: singleton `public.poker_bot_refill_control`, `public.poker_bot_pool_refill_hourly()`.
 
-Disposition: `needs-production-equivalent`, mapped to prepared P2 `20260930211624_poker_bot_pool_refill_hourly.sql`. P2 SHA256 `a3bec5f1f1d566e0dcbb6bb3e4cfc899750c8bf760144e6d47fe248444383c12`. It checks Production PostgreSQL system identifier `7575202818581710058`, keeps the control disabled, and creates no pg_cron extension/job or MINT. It has not been applied; there is no Production effect from this PR.
+Disposition: `needs-production-equivalent`, mapped to prepared P2 `20260930211624_poker_bot_pool_refill_hourly.sql`. P2 SHA256 `139a00efb8ed712eae9aff9cf9a9264884da49c353a72a8bb492f7fcbe560372`. Its final function has a function-scoped 5s lock timeout, checks Production PostgreSQL system identifier `7575202818581710058`, keeps the control disabled, and creates no pg_cron extension/job or MINT. It has not been applied; there is no Production effect from this PR.
 
-The Stage source migration may apply automatically to shared Stage through DB Stage Apply. That allowed effect is limited to its `enabled=false` control row and refill function; it creates no pg_cron/job and changes no pool balance, tier, profile, table or ledger state.
+The Stage source migration may apply automatically to shared Stage through DB Stage Apply. The original migration's allowed effect is limited to its `enabled=false` control row and refill function. The new lock-timeout correction replaces only that function, preserving its body and adding a function-scoped 5s lock timeout; it leaves the disabled control unchanged. Neither creates pg_cron/job or changes pool balance, tier, profile, table or ledger state.
+
+### 20260930223409 — §29 bounded per-pool lock wait
+
+Source: [SQL](../../supabase/migrations/20260930223409_poker_bot_pool_refill_lock_timeout.sql) · SHA256 `9c1bf241345a026c755112df06bebfbc99dacda28631a5b3cb03860041dc9595`.
+
+Disposition: `needs-production-equivalent`, mapped to the existing prepared P2 `20260930211624_poker_bot_pool_refill_hourly.sql` (SHA256 `139a00efb8ed712eae9aff9cf9a9264884da49c353a72a8bb492f7fcbe560372`). The correction preserves the deployed function body and adds only `SET lock_timeout = '5s'` beside `SET search_path = ''`. Automatic shared Stage apply replaces the function only; the control remains disabled and no pg_cron/job/MINT is created. P2 carries the same final function setting but remains unapplied; Production effect is none.

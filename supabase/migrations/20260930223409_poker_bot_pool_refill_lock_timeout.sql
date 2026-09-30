@@ -1,58 +1,5 @@
-begin;
-
--- Forward-only Production equivalent for #1018 §29. This installs a dark control
--- and SECURITY INVOKER function only; it never enables pg_cron, schedules work or MINTs.
--- Apply only through the reviewed Production migration route with the exact identity below.
-
-do $identity$
-declare
-  actual_system_identifier text;
-begin
-  select control_identity.system_identifier::text
-    into actual_system_identifier
-    from pg_catalog.pg_control_system() as control_identity;
-  if pg_catalog.current_setting('chips.production_project_ref', true) is distinct from 'otbqfijerkieoxwpxjnm'
-     or actual_system_identifier is distinct from '7575202818581710058' then
-    raise exception using errcode = 'P1029', message = 'Production hourly poker refill migration identity preflight failed';
-  end if;
-end;
-$identity$;
-
-select pg_catalog.pg_advisory_xact_lock(
-  pg_catalog.hashtextextended('poker-bot-pool-refill-hourly:otbqfijerkieoxwpxjnm', 0)
-);
-
-do $prerequisites$
-begin
-  if not exists (select 1 from supabase_migrations.schema_migrations where version = '20260929201500')
-     or pg_catalog.to_regclass('public.poker_bot_tier_policy') is null
-     or pg_catalog.to_regclass('public.chips_transaction_idempotency') is null
-     or pg_catalog.to_regclass('public.chips_transactions_poker_pool_bucket_uidx') is null
-     or pg_catalog.to_regprocedure('extensions.digest(bytea,text)') is null then
-    raise exception using errcode = 'P1029', message = 'Production hourly poker refill prerequisites are missing';
-  end if;
-  if pg_catalog.to_regclass('public.poker_bot_refill_control') is not null
-     or pg_catalog.to_regprocedure('public.poker_bot_pool_refill_hourly()') is not null then
-    raise exception using errcode = 'P1029', message = 'Production hourly poker refill objects already exist';
-  end if;
-  if exists (select 1 from supabase_migrations.schema_migrations where version = '20260930211624') then
-    raise exception using errcode = 'P1029', message = 'Production migration version 20260930211624 is already recorded';
-  end if;
-end;
-$prerequisites$;
-
-create table public.poker_bot_refill_control (
-  id smallint primary key default 1,
-  enabled boolean not null default false,
-  expected_system_identifier text not null,
-  constraint poker_bot_refill_control_singleton_chk check (id = 1)
-);
-
-insert into public.poker_bot_refill_control (id, enabled, expected_system_identifier)
-values (1, false, '7575202818581710058');
-
-alter table public.poker_bot_refill_control enable row level security;
-revoke all on table public.poker_bot_refill_control from public, anon, authenticated, service_role;
+-- Forward-only Stage correction: bound row-lock waits inside each pool subtransaction.
+-- This changes no control state and creates no pg_cron extension/job or ledger entry.
 
 create or replace function public.poker_bot_pool_refill_hourly()
 returns jsonb
@@ -316,8 +263,3 @@ end;
 $function$;
 
 revoke all on function public.poker_bot_pool_refill_hourly() from public, anon, authenticated, service_role;
-
-insert into supabase_migrations.schema_migrations (version)
-values ('20260930211624');
-
-commit;

@@ -20,6 +20,7 @@ const sourcePath = path.join(process.cwd(), "shared", "poker-domain", "table-par
 const migrationPath = path.join(process.cwd(), "supabase", "migrations", "20260927100000_poker_bot_quarantine_policy.sql");
 const tierCatalogMigrationPath = path.join(process.cwd(), "supabase", "migrations", "20260930075513_poker_bot_tier_catalog_expansion.sql");
 const hourlyRefillMigrationPath = path.join(process.cwd(), "supabase", "migrations", "20260930211623_poker_bot_pool_refill_hourly.sql");
+const refillLockTimeoutMigrationPath = path.join(process.cwd(), "supabase", "migrations", "20260930223409_poker_bot_pool_refill_lock_timeout.sql");
 const ledgerFixtureMigrations = [
   "20251218213520_chips_ledger.sql",
   "20251218230000_chips_ledger_fixups.sql",
@@ -119,7 +120,10 @@ async function ensurePoolMigrationFixture(sql) {
     to_regclass('public.chips_accounts') as accounts,
     to_regclass('public.chips_transaction_idempotency') as registry,
     to_regprocedure('public.poker_bot_pool_refill_hourly()') as refill_function;`;
-  if (schemaRows[0]?.refill_function && schemaRows[0]?.registry) return;
+  if (schemaRows[0]?.refill_function && schemaRows[0]?.registry) {
+    await sql.unsafe(await fs.readFile(refillLockTimeoutMigrationPath, "utf8"));
+    return;
+  }
   if (schemaRows[0]?.accounts) {
     throw new Error("pool tests require the current full chips schema; run chips migration contracts first");
   }
@@ -142,6 +146,7 @@ async function ensurePoolMigrationFixture(sql) {
   await sql.unsafe(await migrationSql());
   await sql.unsafe(await fs.readFile(tierCatalogMigrationPath, "utf8"));
   await sql.unsafe(await fs.readFile(hourlyRefillMigrationPath, "utf8"));
+  await sql.unsafe(await fs.readFile(refillLockTimeoutMigrationPath, "utf8"));
 }
 
 function fixtureUuid(value) {
@@ -757,6 +762,92 @@ test("disposable PostgreSQL proves hourly ledger refill, exact mapping, idempote
       (error) => error?.code === "23514",
       "malformed refill policy remains rejected by the policy CHECK constraint",
     );
+  });
+});
+
+test("disposable PostgreSQL bounds a contended pool lock and commits an independent pool", { skip: !dbUrl }, async () => {
+  await withFixture(async (sql) => {
+    await sql`update public.poker_bot_refill_control set enabled = true where id = 1;`;
+    await sql`update public.poker_bot_tier_policy set enabled = (buy_in = 100);`;
+
+    const holder = postgres(dbUrl, { max: 1, idle_timeout: 0, connect_timeout: 5 });
+    let signalLockAcquired;
+    let rejectLockAcquisition;
+    let releaseHolder;
+    const lockAcquired = new Promise((resolve, reject) => {
+      signalLockAcquired = resolve;
+      rejectLockAcquisition = reject;
+    });
+    const holdTransaction = new Promise((resolve) => { releaseHolder = resolve; });
+    const lockTask = holder.begin(async (tx) => {
+      try {
+        const lockedRows = await tx`
+          select id from public.chips_accounts
+          where account_type = 'SYSTEM' and system_key = 'POKER_BOT_BANKROLL_100'
+          for update;
+        `;
+        assert.equal(lockedRows.length, 1, "the required NORMAL pool account exists in the disposable fixture");
+        signalLockAcquired();
+      } catch (error) {
+        rejectLockAcquisition(error);
+        throw error;
+      }
+      await holdTransaction;
+    });
+
+    try {
+      await lockAcquired;
+      await sql.unsafe("set lock_timeout = '0';");
+      await sql.unsafe("set statement_timeout = '8s';");
+      const summary = (await sql`select public.poker_bot_pool_refill_hourly() as summary;`)[0].summary;
+      assert.equal(summary.status, "processed");
+      const lockedPool = summary.pools.find((pool) => pool.systemKey === "POKER_BOT_BANKROLL_100");
+      assert.equal(lockedPool.status, "failed");
+      assert.equal(lockedPool.sqlState, "55P03", "the locked pool fails through PostgreSQL's bounded lock timeout");
+      const independentPool = summary.pools.find((pool) => pool.systemKey === "POKER_BOT_SLOW_BANKROLL_100");
+      assert.equal(independentPool.status, "refilled");
+      assert.equal(Number(independentPool.amount), 2000);
+
+      const committed = await sql`
+        select tx.id, tx.idempotency_key, entry.account_id, account.system_key, entry.amount
+        from public.chips_transactions as tx
+        join public.chips_entries as entry on entry.transaction_id = tx.id
+        join public.chips_accounts as account on account.id = entry.account_id
+        where tx.tx_type = 'MINT'::public.chips_tx_type
+          and tx.metadata ->> 'purpose' = 'poker_pool_refill'
+          and tx.metadata ->> 'bankrollSystemKey' = 'POKER_BOT_SLOW_BANKROLL_100';
+      `;
+      assert.equal(committed.length, 2, "the independent pool commits one MINT with its two ledger entries");
+      assert.equal(Number((await sql`
+        select count(*)::int as count
+        from public.chips_transactions
+        where tx_type = 'MINT'::public.chips_tx_type
+          and metadata ->> 'purpose' = 'poker_pool_refill'
+          and metadata ->> 'bankrollSystemKey' = 'POKER_BOT_SLOW_BANKROLL_100';
+      `)[0].count), 1, "the independent pool receives exactly one committed MINT");
+      assert.equal(new Set(committed.map((entry) => entry.id)).size, 1);
+      assert.equal(new Set(committed.map((entry) => entry.idempotency_key)).size, 1);
+      assert.equal(committed.reduce((sum, entry) => sum + Number(entry.amount), 0), 0, "the committed MINT is balanced");
+      assert.deepEqual(
+        committed.map((entry) => [entry.system_key, Number(entry.amount)]).sort(),
+        [["GENESIS", -2000], ["POKER_BOT_SLOW_BANKROLL_100", 2000]].sort(),
+      );
+      assert.equal(Number((await sql`select balance from public.chips_accounts where system_key = 'POKER_BOT_BANKROLL_100';`)[0].balance), 0,
+        "the failed pool remains unchanged");
+      assert.equal(Number((await sql`
+        select count(*)::int as count
+        from public.chips_transactions
+        where tx_type = 'MINT'::public.chips_tx_type
+          and metadata ->> 'purpose' = 'poker_pool_refill'
+          and metadata ->> 'bankrollSystemKey' = 'POKER_BOT_BANKROLL_100';
+      `)[0].count), 0, "the failed pool leaves no committed MINT");
+      assert.equal(Number((await sql`select balance from public.chips_accounts where system_key = 'POKER_BOT_SLOW_BANKROLL_100';`)[0].balance), 2000,
+        "the independent pool balance commits");
+    } finally {
+      releaseHolder();
+      await lockTask.catch(() => {});
+      await holder.end({ timeout: 5 });
+    }
   });
 });
 

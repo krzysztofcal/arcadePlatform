@@ -46,6 +46,8 @@ Ledger identity is `poker-pool-refill:<poolKey>:<policyRevision>:<UTC-hour>`. Th
 
 Each pool is processed inside its own PL/pgSQL exception subtransaction. A failure rolls back that pool only, yields an explicit failed result, and permits later pools to proceed. The returned summary reports each pool result. A pool is limited to one refill in an hour; if depleted again, it can refill during a later hour.
 
+The function sets `lock_timeout = '5s'` at function scope. This keeps account/policy row-lock waits bounded below the database's statement timeout so `55P03` is caught by the pool's existing exception subtransaction. The forward-only Stage correction replaces only the function; it leaves the global control disabled. The unapplied Production P2 has the same final setting.
+
 Stage may receive the forward-only migration automatically through DB Stage Apply. Its only effect is the disabled control/function; no pg_cron, job, MINT, balance/tier/profile/table mutation occurs. The Production equivalent is prepared but not applied. Stage Cron activation, Production apply/activation and live VPS cleanup require separate owner GO. Existing poker VPS units remain disabled/inactive; chips cleanup auth is unchanged. No bootstrap or profile/table activation is part of this amendment.
 
 ## 6. Admin interfaces
