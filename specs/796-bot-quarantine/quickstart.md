@@ -286,15 +286,32 @@ Prepares all Production rollout artifacts ahead of merge without performing any 
 8. **Canonical Tier Catalog Expansion & Initial-Seed-All (T085–T092)**:
    - **Canonical 11-Tier Catalog**: `[100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000]` defined centrally in `shared/poker-domain/table-economy.mjs` and re-exported as `DEFAULT_POKER_BUY_IN_TIERS` in `shared/poker-domain/poker-progression.mjs`.
    - **22 Exact Pools**: NORMAL 500 = `POKER_BOT_BANKROLL`; other NORMAL = `POKER_BOT_BANKROLL_<buyIn>`; all SLOW = `POKER_BOT_SLOW_BANKROLL_<buyIn>`.
-   - **Stage Migration**: `supabase/migrations/20260930075513_poker_bot_tier_catalog_expansion.sql` (SHA256 `e9b292018b4f89688103892e8988997480b5e222c4f6d22d833f6383ca88862d`), provisions 9 higher tiers disabled and 18 zero-balance accounts. Zero MINT.
+   - **Stage Migration**: `supabase/migrations/20260930075513_poker_bot_tier_catalog_expansion.sql` (SHA256 `e9b292018b4f89688103892e8988997480b5e222c4f6d22d833f6383ca88862d`), provisions 9 higher tiers disabled and 18 zero-balance accounts. Zero MINT. Applied cleanly via `db-stage-apply-pr.yml` ([run 36688882862](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882862)).
    - **Production P1 Contract**: Updated `supabase/production-migrations/20260929201500_poker_bot_quarantine_production_contract.sql` (new SHA256 `be8fc7227930e3f66da8a35214af3c7d2e1a0595730fa15b127b078350648bd3`), provisions all 11 policies disabled and all 22 pools (21 missing at 0 + preserved `POKER_BOT_BANKROLL`).
    - **Owner-gated Initial Seed**: Production `initial-seed-all` gates: production target only, dispatcher forbidden, `main` ref only, owner actor (`krzysztofcal`), checked SHA matching GITHUB_SHA, Production GO = 1, and confirmation matching GITHUB_SHA.
    - **Ordinary 3h Refill**: Operates only on `enabled = true` tiers.
-   - **Tests Extended**:
-     - `shared/poker-domain/poker-progression.behavior.test.mjs`: verified 11 tiers, NORMAL/SLOW mappings at 100, 500, 1k, 50k, 10M, and non-canonical rejection.
-     - `scripts/ops/poker-bot-pool-refill.behavior.test.mjs`: tested canonical buy-in filter, initial-seed-all authorization matrix, and disabled tier execution.
-     - `tests/chips-ledger.test.mjs`: verified max-tier 10M refill accepted, uncataloged pool rejected.
-     - `tests/chips/chips.migration.test.mjs`: updated for 22 accounts, 11 tier policies, drift check on higher-tier accounts, and 20260930075513 gap verification.
+   - **Full CI Suite (100% Green on PR HEAD `53c6c115b6c579aa4d50e765c33ee6667784103e`)**:
+     - `DB Stage Apply PR`: [run 36688882862](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882862) (success)
+     - `CI`: [run 36688882916](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882916) (success)
+     - `Tests`: [run 36688882907](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882907) (success)
+     - `DB Migration Check`: [run 36688882833](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882833) (success)
+     - `WS PR Checks`: [run 36688882796](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882796) (success)
+     - `Infra VPS`: [run 36688882806](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882806) (success)
+     - `Validate games catalog`: [run 36688882913](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882913) (success)
+     - `CodeQL`: [run 36688882928](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36688882928) (success)
+   - **Exact-SHA WS Preview Deploy (T091)**:
+     - Dispatched for exact commit SHA `53c6c115b6c579aa4d50e765c33ee6667784103e`: [run 36689338835](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36689338835) (success).
+     - Deployed cleanly to `ws-preview.kcswh.pl`, verified release metadata, and passed local and public `/healthz` gates with HTTP 200 `ok`, `x-poker-buy-in-materialization: 2`.
+   - **Read-Only Stage Verification (T091 / T092)**:
+     - 102 migrations applied; `20260930075513` confirmed in `supabase_migrations.schema_migrations`.
+     - 11 tier policies in `poker_bot_tier_policy`: tiers 100 and 500 enabled; tiers 1000..10000000 (9 rows) disabled with dormant default thresholds/amounts.
+     - 22 exact pools in `chips_accounts`: 18 new higher-tier pools created at 0 CH balance; existing pools untouched (`POKER_BOT_BANKROLL`: 984,430 CH; `POKER_BOT_BANKROLL_100`: 3,500 CH; `POKER_BOT_SLOW_BANKROLL_100`: 2,000 CH; `POKER_BOT_SLOW_BANKROLL_500`: 5,135 CH).
+     - Exactly 5 OPEN continuous tables (`CONTINUOUS_BOT_DEFAULT` profile: enabled=true, desired=5) with 3 seated bots each:
+       1. `3adf99e9-6fa6-4b5b-8890-dcd9e17f27cf` (seated: 3, bots: 3)
+       2. `43c3dddc-21d6-4983-870f-394b5db848a7` (seated: 3, bots: 3)
+       3. `3584c00e-2f71-4643-ad6e-2c589e6e1f41` (seated: 3, bots: 3)
+       4. `a00691ad-bb81-411d-8203-8b4a87901ea5` (seated: 3, bots: 3)
+       5. `9d6df974-4eed-4d08-bdd4-93fd2defdc39` (seated: 3, bots: 3)
 
-Status: **ALL TASKS T085–T092 IMPLEMENTED. READY FOR CI, PREVIEW RUN & SMOKE.**
+Status: **ALL TASKS T085–T092 COMPLETE. PR #1019 READY FOR REVIEW.**
 Production migration, Production refill/MINT, VPS timer activation, and PR merge remain strictly **NOT AUTHORIZED / NOT RUN**.
