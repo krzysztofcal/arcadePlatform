@@ -8,7 +8,13 @@ import {
   utcBucketStart,
 } from "./poker-bot-pool-refill.mjs";
 
-function fakeTx({ balance = 0, consumed = null, clock = () => "2026-09-27T07:00:00.000Z", onQuery = async () => {} } = {}) {
+function fakeTx({
+  balance = 0,
+  consumed = null,
+  systemIdentifier = "7656985631720456337",
+  clock = () => "2026-09-27T07:00:00.000Z",
+  onQuery = async () => {},
+} = {}) {
   const calls = [];
   return {
     calls,
@@ -16,6 +22,7 @@ function fakeTx({ balance = 0, consumed = null, clock = () => "2026-09-27T07:00:
       calls.push({ query: String(query), params });
       const text = String(query).toLowerCase();
       await onQuery(text, params);
+      if (text.includes("pg_control_system")) return [{ system_identifier: systemIdentifier }];
       if (text.includes("clock_timestamp()")) return [{ now: clock() }];
       if (text.includes("chips_transactions") && text.includes("poker_pool_refill")) return consumed ? [consumed] : [];
       if (text.includes("chips_accounts") && text.includes("system_key = $1")) {
@@ -354,6 +361,77 @@ test("runRefill rolls back a bucket that expires while acquiring policy locks", 
   assert.equal(posts, 0);
 });
 
+test("Production identity mismatch fails both dry-run and mutate before refill SQL or ledger writes", async () => {
+  const checkedSha = "0123456789abcdef0123456789abcdef01234567";
+  const identityQuery = "select system_identifier::text as system_identifier from pg_catalog.pg_control_system();";
+  for (const mode of ["dry-run", "mutate"]) {
+    const queries = [];
+    let posts = 0;
+    const tx = {
+      async unsafe(query) {
+        queries.push(String(query));
+        if (String(query).toLowerCase().includes("pg_control_system")) {
+          return [{ system_identifier: "7656985631720456337" }];
+        }
+        return [];
+      },
+    };
+    const env = {
+      GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+      GITHUB_REPOSITORY_OWNER: "krzysztofcal",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: checkedSha,
+      GITHUB_ACTOR: "krzysztofcal",
+      POKER_BOT_REFILL_REVIEWED_REF: "main",
+      POKER_BOT_REFILL_CHECKED_SHA: checkedSha,
+      POKER_BOT_REFILL_TARGET: "production",
+      POKER_BOT_REFILL_MODE: mode,
+      POKER_BOT_REFILL_FEATURE_ENABLED: "1",
+      POKER_BOT_REFILL_PRODUCTION_GO: "1",
+      POKER_BOT_REFILL_OPERATION: "initial-seed-all",
+      POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: checkedSha,
+    };
+    await assert.rejects(runRefill({
+      env,
+      beginSqlFn: async (callback) => callback(tx),
+      postTransactionFn: async () => { posts += 1; },
+    }), { code: "refill_database_identity_mismatch" });
+    assert.deepEqual(queries, [identityQuery]);
+    assert.equal(posts, 0);
+  }
+});
+
+test("runRefill accepts the matching Stage and Production PostgreSQL identities", async () => {
+  for (const [target, systemIdentifier] of [
+    ["stage", "7656985631720456337"],
+    ["production", "7575202818581710058"],
+  ]) {
+    const queries = [];
+    const tx = {
+      async unsafe(query) {
+        queries.push(String(query));
+        const text = String(query).toLowerCase();
+        if (text.includes("pg_control_system")) return [{ system_identifier: systemIdentifier }];
+        if (text.includes("clock_timestamp()")) return [{ now: "2026-09-27T07:00:00.000Z" }];
+        return [];
+      },
+    };
+    const result = await runRefill({
+      env: {
+        GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+        GITHUB_REF: "refs/heads/main",
+        POKER_BOT_REFILL_REVIEWED_REF: "main",
+        POKER_BOT_REFILL_TARGET: target,
+        POKER_BOT_REFILL_MODE: "dry-run",
+      },
+      beginSqlFn: async (callback) => callback(tx),
+    });
+    assert.equal(result.authorization.target, target);
+    assert.match(queries[0], /pg_control_system/);
+  }
+});
+
 test("runRefill filters by buyIn when configured", async () => {
   const policies = [
     { buy_in: 100, enabled: true, normal_refill_threshold_ch: 100, normal_refill_amount_ch: 50, slow_refill_threshold_ch: 80, slow_refill_amount_ch: 25, revision: 1 },
@@ -362,6 +440,7 @@ test("runRefill filters by buyIn when configured", async () => {
   const tx = {
     async unsafe(query, params = []) {
       const text = String(query).toLowerCase();
+      if (text.includes("pg_control_system")) return [{ system_identifier: "7656985631720456337" }];
       if (text.includes("clock_timestamp()")) return [{ now: "2026-09-27T07:00:00.000Z" }];
       if (text.includes("poker_bot_tier_policy")) return policies;
       if (text.includes("chips_transactions") && text.includes("poker_pool_refill")) return [];
@@ -549,6 +628,7 @@ test("runRefill with initial-seed-all seeds disabled tiers without enabling them
   const tx = {
     async unsafe(query, params = []) {
       const text = String(query).toLowerCase();
+      if (text.includes("pg_control_system")) return [{ system_identifier: "7575202818581710058" }];
       if (text.includes("clock_timestamp()")) return [{ now: "2026-09-27T07:00:00.000Z" }];
       if (text.includes("poker_bot_tier_policy")) {
         queriedWhere = text;
