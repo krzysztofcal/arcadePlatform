@@ -5,6 +5,7 @@ import {
   getBotFundingSystemKeyForBuyIn,
 } from "../../shared/poker-domain/table-economy.mjs";
 import { isValidTierPolicy } from "../../shared/poker-domain/bot-access.mjs";
+import { RETENTION_TARGETS } from "./_shared/chips-ledger-retention-profile.mjs";
 
 export const REFILL_BUCKET_MS = 3 * 60 * 60 * 1000;
 export const CANONICAL_REPOSITORY = "krzysztofcal/arcadePlatform";
@@ -149,6 +150,15 @@ async function databaseNow(tx) {
   return now;
 }
 
+async function assertRefillDatabaseIdentity(tx, target) {
+  const expectedSystemIdentifier = RETENTION_TARGETS[target]?.systemIdentifier;
+  if (!expectedSystemIdentifier) throw fail("refill_target_invalid");
+  const rows = await tx.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
+  if (String(rows?.[0]?.system_identifier ?? "") !== expectedSystemIdentifier) {
+    throw fail("refill_database_identity_mismatch", { target });
+  }
+}
+
 async function boundRefillTransaction(tx) {
   await tx.unsafe("set local lock_timeout = '5s';");
   await tx.unsafe("set local statement_timeout = '10s';");
@@ -249,6 +259,7 @@ export async function runRefill({
 } = {}) {
   const authorization = resolveRefillAuthorization(env);
   return beginSqlFn(async (tx) => {
+    await assertRefillDatabaseIdentity(tx, authorization.target);
     await boundRefillTransaction(tx);
     const startedAt = await databaseNow(tx);
     const bucket = utcBucketStart(startedAt);

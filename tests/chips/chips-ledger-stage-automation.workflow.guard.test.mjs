@@ -288,6 +288,16 @@ assert.equal(refillJob.env.POKER_BOT_REFILL_FEATURE_ENABLED, "${{ vars.POKER_BOT
 assert.equal(refillJob.env.POKER_BOT_REFILL_PRODUCTION_GO, "${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}");
 assert.equal(refillJob.env.POKER_BOT_REFILL_OPERATION, "${{ inputs.operation || 'refill' }}");
 assert.equal(refillJob.env.POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION, "${{ inputs.confirmation_sha || '' }}");
+assert.equal(refillJob.env.SUPABASE_DB_URL, "${{ (inputs.target == 'production' && secrets.SUPABASE_PROD_DB_URL) || (inputs.target == 'stage' && secrets.SUPABASE_STAGE_DB_URL) || '' }}");
+const selectRefillDbSecret = new Function("inputs", "secrets", `return (${refillJob.env.SUPABASE_DB_URL.slice(3, -2)});`);
+assert.equal(selectRefillDbSecret({ target: "production" }, { SUPABASE_PROD_DB_URL: "prod-secret", SUPABASE_STAGE_DB_URL: "stage-secret" }), "prod-secret");
+assert.equal(selectRefillDbSecret({ target: "production" }, { SUPABASE_PROD_DB_URL: "", SUPABASE_STAGE_DB_URL: "stage-secret" }), "");
+assert.equal(selectRefillDbSecret({ target: "stage" }, { SUPABASE_PROD_DB_URL: "prod-secret", SUPABASE_STAGE_DB_URL: "stage-secret" }), "stage-secret");
+assert.equal(selectRefillDbSecret({ target: "stage" }, { SUPABASE_PROD_DB_URL: "prod-secret", SUPABASE_STAGE_DB_URL: "" }), "");
+const databaseSelectionBoundaryStep = refillJob.steps.find((step) => step.name === "Verify refill authority boundary");
+const refillWorker = refillJob.steps.find((step) => step.name === "Run bounded pool refill worker");
+assert.ok(refillJob.steps.indexOf(databaseSelectionBoundaryStep) < refillJob.steps.indexOf(refillWorker));
+assert.match(databaseSelectionBoundaryStep.run, /test -n "\$\{SUPABASE_DB_URL:-\}"/);
 const refillJobAllowed = new Function("github", "inputs", "vars", `return (${refillJob.if.slice(3, -2)});`);
 const stageRefillGithub = {
   event_name: "workflow_dispatch", repository: "krzysztofcal/arcadePlatform", repository_owner: "krzysztofcal",
@@ -375,6 +385,7 @@ const refillBoundaryEnv = {
   REVIEWED_REF_INPUT: checkedSha, REFILL_TARGET: "stage", REFILL_MODE: "mutate",
   REFILL_OPERATION: "refill", CONFIRMATION_SHA_INPUT: "",
   POKER_BOT_REFILL_FEATURE_ENABLED: "1", POKER_BOT_REFILL_PRODUCTION_GO: "0",
+  SUPABASE_DB_URL: "workflow-test-url",
 };
 for (const [overrides, allowed] of [
   [{}, true],
@@ -384,6 +395,7 @@ for (const [overrides, allowed] of [
   [{ GITHUB_SHA: "f".repeat(40) }, false],
   [{ REFILL_TARGET: "production" }, false],
   [{ REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", POKER_BOT_REFILL_PRODUCTION_GO: "1" }, true],
+  [{ REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: "main", POKER_BOT_REFILL_PRODUCTION_GO: "1", SUPABASE_DB_URL: "" }, false],
   [{ REFILL_TARGET: "production", GITHUB_REF: "refs/heads/main", REVIEWED_REF_INPUT: checkedSha, POKER_BOT_REFILL_PRODUCTION_GO: "1" }, false],
   [{ REFILL_TARGET: "production", POKER_BOT_REFILL_PRODUCTION_GO: "1" }, false],
   [{ POKER_BOT_REFILL_FEATURE_ENABLED: "0" }, false],

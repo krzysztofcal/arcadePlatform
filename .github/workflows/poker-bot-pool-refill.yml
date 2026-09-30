@@ -61,7 +61,7 @@ jobs:
       POKER_BOT_REFILL_INITIAL_SEED_CONFIRMATION: ${{ inputs.confirmation_sha || '' }}
       POKER_BOT_REFILL_FEATURE_ENABLED: ${{ vars.POKER_BOT_REFILL_ENABLED || '0' }}
       POKER_BOT_REFILL_PRODUCTION_GO: ${{ vars.POKER_BOT_REFILL_PRODUCTION_GO || '0' }}
-      SUPABASE_DB_URL: ${{ inputs.target == 'production' && secrets.SUPABASE_PROD_DB_URL || secrets.SUPABASE_STAGE_DB_URL }}
+      SUPABASE_DB_URL: ${{ (inputs.target == 'production' && secrets.SUPABASE_PROD_DB_URL) || (inputs.target == 'stage' && secrets.SUPABASE_STAGE_DB_URL) || '' }}
     steps:
       - name: Checkout exact dispatch SHA
         uses: actions/checkout@v4
@@ -95,6 +95,7 @@ jobs:
           test "$REFILL_TARGET" = "stage" || test "$REFILL_TARGET" = "production"
           test "$REFILL_MODE" = "dry-run" || test "$REFILL_MODE" = "mutate"
           test "$REFILL_OPERATION" = "refill" || test "$REFILL_OPERATION" = "initial-seed-all"
+          test -n "${SUPABASE_DB_URL:-}"
 
           if [[ "$REFILL_OPERATION" == "initial-seed-all" ]]; then
             test "$REFILL_TARGET" = "production"
