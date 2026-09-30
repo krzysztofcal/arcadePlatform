@@ -1386,6 +1386,7 @@ async function assertProductionQuarantineContract(sql, {
     (err) => err?.code === "P8910" && /version 20260929201500 is already recorded/i.test(err?.message || ""),
     "Re-running P1 must fail closed because P1 version is already recorded",
   );
+  await sql.unsafe("rollback;");
 
   // Clean up fixture-only rows and history schema
   await sql.unsafe(`delete from public.chips_accounts where id in ('${existingUserAccountId}', '${existingBotBankrollId}');`);
