@@ -180,6 +180,7 @@ async function ensureFixture(sql) {
   }
   assert.ok(rows[0]?.idempotency_table, "run the disposable chips migration contract before pool refill tests");
   assert.ok(rows[0]?.refill_function, "the hourly refill migration must be applied before pool refill tests");
+  await sql.unsafe("select public.chips_set_table_fence_active(false);");
   await sql.unsafe("drop trigger if exists fixture_fail_specific_poker_refill_entry_trg on public.chips_entries;");
   await sql.unsafe("drop function if exists public.fixture_fail_specific_poker_refill_entry();");
   await sql.unsafe(`
