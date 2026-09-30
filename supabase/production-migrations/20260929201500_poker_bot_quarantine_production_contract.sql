@@ -53,13 +53,24 @@ begin
       message = 'Production retention prerequisites E1/E2 are missing';
   end if;
 
-  if to_regclass('supabase_migrations.schema_migrations') is not null then
-    if not exists (select 1 from supabase_migrations.schema_migrations where version = '20260914090000')
-       or not exists (select 1 from supabase_migrations.schema_migrations where version = '20260914091000') then
-      raise exception using
-        errcode = 'P8910',
-        message = 'Production schema migrations prerequisite versions E1/E2 are missing';
-    end if;
+  -- Require schema migrations history table to exist and contain E1 and E2, but not P1
+  if to_regclass('supabase_migrations.schema_migrations') is null then
+    raise exception using
+      errcode = 'P8910',
+      message = 'Production schema migrations table supabase_migrations.schema_migrations is missing';
+  end if;
+
+  if not exists (select 1 from supabase_migrations.schema_migrations where version = '20260914090000')
+     or not exists (select 1 from supabase_migrations.schema_migrations where version = '20260914091000') then
+    raise exception using
+      errcode = 'P8910',
+      message = 'Production schema migrations prerequisite versions E1/E2 are missing';
+  end if;
+
+  if exists (select 1 from supabase_migrations.schema_migrations where version = '20260929201500') then
+    raise exception using
+      errcode = 'P8910',
+      message = 'Production schema migration version 20260929201500 is already recorded';
   end if;
 
   -- Require existing POKER_BOT_BANKROLL to be present
@@ -238,12 +249,7 @@ alter table public.poker_access_policy enable row level security;
 alter table public.poker_bot_tier_policy enable row level security;
 revoke all on table public.poker_access_policy, public.poker_bot_tier_policy from anon, authenticated;
 
-do $history$
-begin
-  if to_regclass('supabase_migrations.schema_migrations') is not null then
-    execute 'insert into supabase_migrations.schema_migrations(version) values ($1) on conflict do nothing' using '20260929201500';
-  end if;
-end;
-$history$;
+insert into supabase_migrations.schema_migrations (version)
+values ('20260929201500');
 
 commit;

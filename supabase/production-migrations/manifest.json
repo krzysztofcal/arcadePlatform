@@ -957,7 +957,7 @@
     {
       "file": "20260929201500_poker_bot_quarantine_production_contract.sql",
       "purpose": "P1 final Production #1018 bot quarantine and exact pools contract; dark/off",
-      "sha256": "15318b996031b3c530484bc61e21b7e8937a2474b58be8262dd8d1525767c199",
+      "sha256": "8890bf10d7c102250ce43ad763ee198f8b3dd403d8f90a27418268bbfe299840",
       "prerequisites": [
         "20260914090000_chips_ledger_production_retention_contract.sql",
         "20260914091000_chips_ledger_production_table_fence_activation.sql"

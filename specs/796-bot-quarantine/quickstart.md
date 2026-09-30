@@ -2,7 +2,7 @@
 
 ## Current gate
 
-Implementation of the accepted Spec Kit is authorized from T001 onward. Live #1018 remains the requirements source; snapshot synced 2026-09-27, updated_at 2026-09-27T17:10:33Z, and the final amendment adds manual-only FORCE_RESTRICTED without a third automatic class. T001–T029 and their runtime evidence are historical; T030–T037 are the final amendment and acceptance sequence. No stale “sync live issue first” blocker remains. Local implementation and deterministic tests are allowed; both forward-only Stage migrations are applied and Stage currently reports 99 applied / 0 pending. The Stage-only refill canary is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / NOT RUN**; Production mutations, scheduler activation, live-VPS installation and merge remain separately gated.
+Implementation of the accepted Spec Kit is authorized from T001 onward. Live #1018 remains the requirements source; snapshot synced 2026-09-30, updated_at 2026-09-29T20:57:47Z. The Stage-only refill canary supports NORMAL/SLOW with optional buy-in filtering; pre-merge Stage acceptance and T084 continuous inventory restoration have completed on Stage. Production mutations, Production refill/MINT, live-VPS scheduler activation and PR merge remain strictly unauthorized.
 
 ## Prerequisites for later implementation validation
 
@@ -10,7 +10,7 @@ Implementation of the accepted Spec Kit is authorized from T001 onward. Live #10
 - DB Stage Apply PR [36310279719](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36310279719) applied `20260927100000_poker_bot_quarantine_policy.sql` to shared Stage (97→98 applied, smoke PASS); [36310527312](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36310527312) confirmed 98 applied / 0 pending and smoke PASS. The applied migration is immutable. No Stage refill/MINT occurred; Production remains unmodified and requires separate GO.
 - The amendment added exactly `supabase/migrations/20260927110000_poker_force_restricted.sql`, extending only `chips_accounts_poker_access_override_chk`; it is classified `needs-production-equivalent` in the exhaustive manifest. Shared Stage read-only verification now reports 99 applied / 0 pending; the immutable 20260927100000 migration was not edited. No Stage refill/MINT occurred, and Production still requires a separate GO.
 - Local fixtures: four exact pool accounts at zero, valid disabled tier policies, automatic NORMAL/AUTO users, empty STANDARD tables and existing managed table fixture. Enable/fund only explicit local test fixtures; no production values inferred from Stage examples.
-- For integration later: exact runtime-SHA WS Preview and target identity evidence. The Stage-only refill/MINT canary is **AUTHORIZED FOR PRE-MERGE STAGE ACCEPTANCE / NOT RUN** and is a separate gate after the runtime/Caddy gate. Production migration, seed, MINT, timer/refill activation require a wholly separate GO.
+- For integration: exact runtime-SHA WS Preview and target identity evidence. Stage-only refill canary (NORMAL/SLOW + buy-in filter) and continuous table restoration have completed on Stage (T084). Production migration, seed, MINT, timer/refill activation require a wholly separate GO; PR merge remains separately unauthorized.
 
 ## Focused local commands (after corresponding tasks exist)
 
@@ -230,7 +230,7 @@ Prepares all Production rollout artifacts ahead of merge without performing any 
 
 1. **P1 Production Migration**:
    - File: `supabase/production-migrations/20260929201500_poker_bot_quarantine_production_contract.sql`
-   - SHA256: `15318b996031b3c530484bc61e21b7e8937a2474b58be8262dd8d1525767c199`
+   - SHA256: `8890bf10d7c102250ce43ad763ee198f8b3dd403d8f90a27418268bbfe299840`
    - Canonical Production Target: project `otbqfijerkieoxwpxjnm`, system identifier `7575202818581710058`.
    - Single atomic transaction with operator advisory lock `chips-ledger-production-automation-v1:otbqfijerkieoxwpxjnm`.
    - Prerequisite enforcement: requires E1 (`20260914090000`), E2 (`20260914091000`), and existing `POKER_BOT_BANKROLL` (1,000,490 CH).
@@ -251,8 +251,9 @@ Prepares all Production rollout artifacts ahead of merge without performing any 
    - `specs/004-production-retention/migration-inventory.md`: updated totals (26 needs-production-equivalent, 18 shared-safe, 3 stage-only; 47 missing source files) and documented P1 mapping.
 3. **Disposable PostgreSQL Test Proof**:
    - `tests/chips/chips.migration.test.mjs`: extended `runProductionEquivalentFixture` with `assertProductionQuarantineContract`.
-   - Proves wrong project/system identity fails before DDL (P8910).
-   - Proves missing `POKER_BOT_BANKROLL` or drifted #1018 schema fails closed (P8910).
+   - Proves missing `schema_migrations`, missing prerequisite E1 or E2, pre-recorded P1 (drift), wrong project/system identity, missing `POKER_BOT_BANKROLL` or drifted #1018 schema fail closed before DDL (P8910).
+   - Proves zero #1018 DDL committed after each rejected preflight.
+   - Proves re-running P1 fails closed because version 20260929201500 is already recorded (P8910).
    - Proves zero financial transactions, entries, or tables produced by P1.
    - Proves existing USER account receives `NORMAL/AUTO` defaults with unchanged balance.
    - Proves `POKER_BOT_BANKROLL` balance (1,000,490 CH) and ID are preserved.

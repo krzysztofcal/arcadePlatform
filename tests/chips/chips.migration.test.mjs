@@ -1092,24 +1092,107 @@ async function assertProductionQuarantineContract(sql, {
     on conflict (id) do nothing;
   `);
 
-  // Ensure supabase_migrations exists with E1 and E2 versions present
+  const assertNoQuarantineDdl = async () => {
+    const tableCheck = await sql.unsafe(`
+      select count(*) as c from pg_class
+      where relnamespace = 'public'::regnamespace
+        and relname in ('poker_access_policy', 'poker_bot_tier_policy');
+    `);
+    assert.equal(Number(tableCheck[0].c), 0, "No quarantine tables must exist after rejected preflight");
+
+    const columnCheck = await sql.unsafe(`
+      select count(*) as c from pg_catalog.pg_attribute
+      where attrelid = 'public.chips_accounts'::pg_catalog.regclass
+        and attname in (
+          'poker_auto_class', 'poker_access_override', 'poker_access_revision',
+          'poker_auto_slow_at', 'poker_access_updated_at', 'poker_access_updated_by'
+        )
+        and not attisdropped;
+    `);
+    assert.equal(Number(columnCheck[0].c), 0, "No quarantine columns on chips_accounts must exist after rejected preflight");
+
+    const tableColCheck = await sql.unsafe(`
+      select count(*) as c from pg_catalog.pg_attribute
+      where attrelid = 'public.poker_tables'::pg_catalog.regclass
+        and attname = 'is_slow_only'
+        and not attisdropped;
+    `);
+    assert.equal(Number(tableColCheck[0].c), 0, "is_slow_only column must not exist after rejected preflight");
+
+    const poolCheck = await sql.unsafe(`
+      select count(*) as c from public.chips_accounts
+      where account_type = 'SYSTEM'
+        and system_key in (
+          'POKER_BOT_BANKROLL_100',
+          'POKER_BOT_SLOW_BANKROLL_100',
+          'POKER_BOT_SLOW_BANKROLL_500'
+        );
+    `);
+    assert.equal(Number(poolCheck[0].c), 0, "No new quarantine pool accounts must exist after rejected preflight");
+  };
+
+  // 1. Missing schema_migrations table fails closed before DDL
+  await sql.unsafe("drop schema if exists supabase_migrations cascade;");
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /Production schema migrations table supabase_migrations\.schema_migrations is missing/i.test(err?.message || ""),
+    "P1 must fail closed if supabase_migrations.schema_migrations is missing",
+  );
+  await sql.unsafe("rollback;");
+  await assertNoQuarantineDdl();
+
+  // Create schema_migrations table
   await sql.unsafe(`
     create schema if not exists supabase_migrations;
     create table if not exists supabase_migrations.schema_migrations (
       version text primary key,
       inserted_at timestamptz not null default now()
     );
-    insert into supabase_migrations.schema_migrations (version) values ('20260914090000'), ('20260914091000')
-    on conflict do nothing;
   `);
 
-  // 1. Missing POKER_BOT_BANKROLL prerequisite must fail closed before DDL
+  // 2. Missing E1/E2 entries fail closed before DDL
+  // 2a. Missing E1 (only E2 present)
+  await sql.unsafe("insert into supabase_migrations.schema_migrations (version) values ('20260914091000');");
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /Production schema migrations prerequisite versions E1\/E2 are missing/i.test(err?.message || ""),
+    "P1 must fail closed if prerequisite version E1 is missing",
+  );
+  await sql.unsafe("rollback;");
+  await assertNoQuarantineDdl();
+
+  // 2b. Missing E2 (only E1 present)
+  await sql.unsafe("delete from supabase_migrations.schema_migrations;");
+  await sql.unsafe("insert into supabase_migrations.schema_migrations (version) values ('20260914090000');");
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /Production schema migrations prerequisite versions E1\/E2 are missing/i.test(err?.message || ""),
+    "P1 must fail closed if prerequisite version E2 is missing",
+  );
+  await sql.unsafe("rollback;");
+  await assertNoQuarantineDdl();
+
+  // 3. Pre-recorded P1 (20260929201500) upon unapplied schema fails closed as drift
+  await sql.unsafe("insert into supabase_migrations.schema_migrations (version) values ('20260914091000'), ('20260929201500');");
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /version 20260929201500 is already recorded/i.test(err?.message || ""),
+    "P1 must fail closed if P1 version is already recorded without schema applied",
+  );
+  await sql.unsafe("rollback;");
+  await assertNoQuarantineDdl();
+
+  // Remove pre-recorded P1; now E1 and E2 are properly present
+  await sql.unsafe("delete from supabase_migrations.schema_migrations where version = '20260929201500';");
+
+  // 4. Missing POKER_BOT_BANKROLL prerequisite must fail closed before DDL
   await assert.rejects(
     () => sql.unsafe(fixtureSql(p1File)),
     (err) => err?.code === "P8910" && /Required existing POKER_BOT_BANKROLL account is missing/i.test(err?.message || ""),
     "P1 must fail closed if required POKER_BOT_BANKROLL is missing",
   );
   await sql.unsafe("rollback;");
+  await assertNoQuarantineDdl();
 
   // Provision POKER_BOT_BANKROLL to represent production baseline (1,000,490 CH)
   const existingBotBankrollId = "00000000-0000-4000-8000-00000000e992";
@@ -1119,7 +1202,7 @@ async function assertProductionQuarantineContract(sql, {
     on conflict (id) do nothing;
   `);
 
-  // 2. Wrong project ref must fail closed before DDL
+  // 5. Wrong project ref must fail closed before DDL
   await sql.unsafe("set chips.production_project_ref = 'wrong-ref';");
   await assert.rejects(
     () => sql.unsafe(fixtureSql(p1File)),
@@ -1127,9 +1210,10 @@ async function assertProductionQuarantineContract(sql, {
     "P1 must fail closed on invalid project ref",
   );
   await sql.unsafe("rollback;");
+  await assertNoQuarantineDdl();
   await sql.unsafe("set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';");
 
-  // 3. Mismatched system identifier must fail closed before DDL
+  // 6. Mismatched system identifier must fail closed before DDL
   const rawP1Sql = fs.readFileSync(path.join(productionMigrationDir, p1File), "utf8");
   if (fixtureSystemIdentifier !== canonicalProductionSystemIdentifier) {
     await assert.rejects(
@@ -1138,9 +1222,10 @@ async function assertProductionQuarantineContract(sql, {
       "P1 must fail closed on mismatched system identifier",
     );
     await sql.unsafe("rollback;");
+    await assertNoQuarantineDdl();
   }
 
-  // 4. Unexpected partial / drifted #1018 schema must fail closed
+  // 7. Unexpected partial / drifted #1018 schema must fail closed
   await sql.unsafe("create table public.poker_access_policy (dummy int);");
   await assert.rejects(
     () => sql.unsafe(fixtureSql(p1File)),
@@ -1149,6 +1234,7 @@ async function assertProductionQuarantineContract(sql, {
   );
   await sql.unsafe("rollback;");
   await sql.unsafe("drop table if exists public.poker_access_policy;");
+  await assertNoQuarantineDdl();
 
   // Record baseline counts before applying P1
   const txCountBefore = Number((await sql.unsafe("select count(*) as c from public.chips_transactions;"))[0].c);
@@ -1293,6 +1379,13 @@ async function assertProductionQuarantineContract(sql, {
   assert.equal(recordedVersions.has("20260927110000"), false, "Stage version 20260927110000 must not be recorded");
   assert.equal(recordedVersions.has("20260929130000"), false, "Stage version 20260929130000 must not be recorded");
   assert.equal(recordedVersions.has("20260929163000"), false, "Stage version 20260929163000 must not be recorded");
+
+  // 15. Re-running P1 fails closed because version 20260929201500 is already recorded
+  await assert.rejects(
+    () => sql.unsafe(fixtureSql(p1File)),
+    (err) => err?.code === "P8910" && /version 20260929201500 is already recorded/i.test(err?.message || ""),
+    "Re-running P1 must fail closed because P1 version is already recorded",
+  );
 
   // Clean up fixture-only rows and history schema
   await sql.unsafe(`delete from public.chips_accounts where id in ('${existingUserAccountId}', '${existingBotBankrollId}');`);
