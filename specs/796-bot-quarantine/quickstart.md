@@ -96,9 +96,9 @@ For the 100 CH cutover, restoring non-stop tables is an explicit checkpoint, not
 
 100 new funding moves from TREASURY to its own NORMAL pool; SLOW uses its own tier pool and can run out before the next refill. Sticky tables do not revert under FORCE_NORMAL. 4+4 applies to both classes; Sybil can multiply this per-account containment and remains an accepted residual risk. Admin override mutation is owned by WS with a single DB transaction, short-lived runtime guard, and exact ACK; stale expectedRevision returns 409 stale_revision without mutation, and concurrent mutations return 409 poker_access_mutation_in_progress. Rollback keeps new funding disabled rather than restoring class/limit/fallback bypass; applied migrations stay forward-only.
 
-## Evidence record to complete later
+## Evidence record
 
-T028 records the local command results and simplicity/constitution review here. T027's isolated PostgreSQL concurrency and active/pending SQL/index/EXPLAIN evidence is complete. T029 contains historical WS Preview evidence. T036 is PASS (single-owner deterministic WS mutation). T037 is PASS (pre-merge Stage acceptance complete). T084 is PASS (Stage continuous inventory restored with 5 healthy tables). T085–T092 are complete (canonical 11-tier catalog expansion, 22 exact pools, Production initial-seed-all workflow path and guard tests).
+T028 records the local command results and simplicity/constitution review here. T027's isolated PostgreSQL concurrency and active/pending SQL/index/EXPLAIN evidence is complete. T029 contains historical WS Preview evidence. T036 is PASS (single-owner deterministic WS mutation). T037 is PASS (pre-merge Stage acceptance complete). T084 is PASS (Stage continuous inventory restored with 5 healthy tables). T085–T092 are complete (canonical 11-tier catalog expansion, 22 exact pools, Production initial-seed-all workflow path and guard tests); the final owner-run, read-only T091 Preview runtime smoke is recorded below.
 
 ### Vitest baseline failure evidence
 
@@ -106,7 +106,7 @@ The implementation and base checkouts both failed on exactly these twelve tests:
 
 ## Local implementation evidence
 
-Historical local record for T001–T028: fundamental deterministic checks passed for access classification, authoritative JOIN/capacity and safe promotion, Quick Seat/Create compatibility, settled rollover persistence, exact pool mapping, refill authority/idempotency, Admin policy/override guards, WS self-access delivery, workflow/VPS guard contracts, and the full local PostgreSQL T027 proof. Evidence/refactor review confirmed FORCE_NORMAL automatic-state persistence, no runtime MINT or cross-class/tier/TREASURY fallback on the schema-backed path, klog-only new logging, JSP/global-script compatibility, unchanged CSS/CSP rules, and no broad test expansion. `issue-source.md` remains byte-for-byte unchanged as the live #1018 snapshot. The former T029 exact-SHA WS Preview/runtime smoke remains historical evidence only; the final amendment is covered by T030–T037. The automatic Stage migration apply is recorded above. No Stage refill/MINT, Production operations, live-VPS installation/activation or merge was performed; the only Preview runtime checks were the documented targeted smoke and read-only maintenance GET.
+Historical local record for T001–T028: fundamental deterministic checks passed for access classification, authoritative JOIN/capacity and safe promotion, Quick Seat/Create compatibility, settled rollover persistence, exact pool mapping, refill authority/idempotency, Admin policy/override guards, WS self-access delivery, workflow/VPS guard contracts, and the full local PostgreSQL T027 proof. Evidence/refactor review confirmed FORCE_NORMAL automatic-state persistence, no runtime MINT or cross-class/tier/TREASURY fallback on the schema-backed path, klog-only new logging, JSP/global-script compatibility, unchanged CSS/CSP rules, and no broad test expansion. `issue-source.md` remains byte-for-byte unchanged as the live #1018 snapshot. The former T029 exact-SHA WS Preview/runtime smoke remains historical evidence only; the final amendment is covered by T030–T037. This T001–T028 historical record predates the Stage refill canary and inventory restoration recorded in Phase 14. No Stage refill/MINT occurred during that historical local implementation work. Production operations, live-VPS installation/activation, and merge remain not performed; the later exact-SHA Preview checks and owner-run T091 read-only smoke are recorded in Phase 15 below.
 
 
 ## Review fix evidence — 2026-09-27
@@ -306,29 +306,20 @@ Prepares all Production rollout artifacts ahead of merge without performing any 
    - **Exact-SHA WS Preview Deploy (T091)**:
      - Dispatched for exact commit SHA `53c6c115b6c579aa4d50e765c33ee6667784103e`: [run 36689338835](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36689338835) (success).
      - Deployed cleanly to `ws-preview.kcswh.pl`, verified release metadata, and passed local and public `/healthz` gates with HTTP 200 `ok`, `x-poker-buy-in-materialization: 2`.
-   - **T091 Runtime Smoke Evidence on Deployed SHA `53c6c115...`**:
-     - **100/500 Non-Regression**:
-       - Tier 100: `POKER_BOT_BANKROLL_100` (3,500 CH) actively funds 5 OPEN Stage continuous tables (3 bots each, 15 seated bots); `POKER_BOT_SLOW_BANKROLL_100` (2,000 CH) active; `decideSettledBotFunding` returns `allowed: true` with exact keys for NORMAL and SLOW.
-       - Tier 500: `POKER_BOT_BANKROLL` (984,430 CH) preserved for NORMAL 500; `POKER_BOT_SLOW_BANKROLL_500` (5,135 CH) active for SLOW 500; `decideSettledBotFunding` returns `allowed: true`.
-     - **Disabled High Tier (e.g. 1000 CH) Bot Funding Denial**:
-       - Stage DB: `poker_bot_tier_policy` has `buy_in: 1000, enabled: false`.
-       - `decideSettledBotFunding({ buyIn: 1000, isSlowOnly: false })` returns `{ known: true, allowed: false, systemKey: null, reason: "tier_disabled" }`.
-       - `decideSettledBotFunding({ buyIn: 1000, isSlowOnly: true })` returns `{ known: true, allowed: false, systemKey: null, reason: "tier_disabled" }`.
-       - Authoritative JOIN for 1000 CH computes `tierFundingEnabled: false`, yielding `seededBots: []` (0 bots seeded) without failure or retry churn.
-       - Refill worker ignores tier 1000 during ordinary refill (`WHERE enabled = true`).
-     - **Zero Higher-Tier Ledger Mutation**:
-       - All 18 higher-tier pools (1k to 10M NORMAL and SLOW) have `balance = 0 CH`, `status = 'active'`, and exactly `0` entries in `chips_entries`.
-       - Total higher-tier transactions in `chips_transactions`: `0` (`TABLE_BUY_IN = 0`, `MINT = 0`).
-   - **Read-Only Stage Verification (T091 / T092)**:
-     - 102 migrations applied; `20260930075513` confirmed in `supabase_migrations.schema_migrations`.
-     - 11 tier policies in `poker_bot_tier_policy`: tiers 100 and 500 enabled; tiers 1000..10000000 (9 rows) disabled with dormant default thresholds/amounts.
-     - 22 exact pools in `chips_accounts`: 18 new higher-tier pools at 0 CH balance; existing pools untouched (`POKER_BOT_BANKROLL`: 984,430 CH; `POKER_BOT_BANKROLL_100`: 3,500 CH; `POKER_BOT_SLOW_BANKROLL_100`: 2,000 CH; `POKER_BOT_SLOW_BANKROLL_500`: 5,135 CH).
-     - Exactly 5 OPEN continuous tables (`CONTINUOUS_BOT_DEFAULT` profile: enabled=true, desired=5) with 3 seated bots each:
-       1. `3adf99e9-6fa6-4b5b-8890-dcd9e17f27cf` (seated: 3, bots: 3)
-       2. `43c3dddc-21d6-4983-870f-394b5db848a7` (seated: 3, bots: 3)
-       3. `3584c00e-2f71-4643-ad6e-2c589e6e1f41` (seated: 3, bots: 3)
-       4. `a00691ad-bb81-411d-8203-8b4a87901ea5` (seated: 3, bots: 3)
-       5. `9d6df974-4eed-4d08-bdd4-93fd2defdc39` (seated: 3, bots: 3)
+   - **T091 Runtime Smoke Evidence — owner-run PASS on deployed Preview SHA `53c6c115b6c579aa4d50e765c33ee6667784103e`**:
+     - **Release identity**: `release-metadata.json` reported `releaseSha` and `deployRef` both equal to `53c6c115b6c579aa4d50e765c33ee6667784103e`, `environment=preview`; `ws-server-preview.service` was active. The exact-SHA deployment is [run 36689338835](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36689338835).
+     - **Read-only execution**: Smoke called the deployed release's `readSettledBotFundingSnapshot()` and `decideSettledBotFunding()` against live Stage DB within a transaction started with `SET TRANSACTION READ ONLY`. `schemaBacked=true`; no mutation was performed. These direct function calls created no table, JOIN, user/session, or write-action IDs.
+     - **Live policy and funding decisions**:
 
-Status: **ALL TASKS T085–T092 COMPLETE. PR #1019 READY FOR REVIEW.**
+       | Buy-in | Class | Policy | Pools provisioned | Decision |
+       | --- | --- | --- | --- | --- |
+       | 500 CH | NORMAL | `enabled=true` | yes | `allowed=true`, `systemKey=POKER_BOT_BANKROLL`, `reason=funding_allowed` |
+       | 500 CH | SLOW | `enabled=true` | yes | `allowed=true`, `systemKey=POKER_BOT_SLOW_BANKROLL_500`, `reason=funding_allowed` |
+       | 1000 CH | NORMAL | `enabled=false` | yes | `known=true`, `allowed=false`, `systemKey=null`, `reason=tier_disabled` |
+       | 1000 CH | SLOW | `enabled=false` | yes | `known=true`, `allowed=false`, `systemKey=null`, `reason=tier_disabled` |
+
+     - **Post-smoke Stage read-only checks**: `higher_pool_count=18`, `higher_nonzero=0`; both 1000 CH pools and all 18 pools for tiers above 500 remained at 0 CH. Higher-tier ledger entries = 0, higher-tier `MINT` = 0, higher-tier `TABLE_BUY_IN` = 0, and total higher-tier transactions = 0.
+     - **Continuous-table regression guard**: `CONTINUOUS_BOT_DEFAULT` remained at exactly 5 healthy OPEN tables; minimum and maximum bots per table were both 3. No table or pool state was changed by the smoke.
+   - **T092 Final Handoff — COMPLETE**: Canonical 11 tiers and 22 exact NORMAL/SLOW pools are documented above; Stage migration and Production P1 contract checksums, CI, exact-SHA Preview deployment, and the owner-run T091 evidence are recorded here. Production migration/seed, Production/VPS operations, and PR merge remain separately unauthorized and were not run.
+Status: **T085–T092 COMPLETE. PR #1019 READY FOR MERGE.**
 Production migration, Production refill/MINT, VPS timer activation, and PR merge remain strictly **NOT AUTHORIZED / NOT RUN**.
