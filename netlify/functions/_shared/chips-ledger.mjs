@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
-import { CANONICAL_POKER_BUY_IN_TIERS, getBotFundingSystemKeyForBuyIn } from "../../../shared/poker-domain/table-economy.mjs";
 
 const VALID_TX_TYPES = new Set([
   "MINT",
@@ -16,31 +15,6 @@ const VALID_TX_TYPES = new Set([
   "WELCOME_BONUS",
   "PROMO_BONUS",
 ]);
-
-const buildScheduledPoolConfig = () => {
-  const tiers = typeof CANONICAL_POKER_BUY_IN_TIERS !== "undefined"
-    ? CANONICAL_POKER_BUY_IN_TIERS
-    : [100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000, 10000000];
-  const getKey = typeof getBotFundingSystemKeyForBuyIn === "function"
-    ? getBotFundingSystemKeyForBuyIn
-    : (buyIn, { poolClass } = {}) => poolClass === "SLOW"
-      ? `POKER_BOT_SLOW_BANKROLL_${buyIn}`
-      : (buyIn === 500 ? "POKER_BOT_BANKROLL" : `POKER_BOT_BANKROLL_${buyIn}`);
-  const config = {};
-  for (const buyIn of tiers) {
-    const normalKey = getKey(buyIn, { poolClass: "NORMAL" });
-    if (normalKey) {
-      config[normalKey] = Object.freeze({ buyIn, poolClass: "NORMAL" });
-    }
-    const slowKey = getKey(buyIn, { poolClass: "SLOW" });
-    if (slowKey) {
-      config[slowKey] = Object.freeze({ buyIn, poolClass: "SLOW" });
-    }
-  }
-  return Object.freeze(config);
-};
-
-const SCHEDULED_POOL_CONFIG = buildScheduledPoolConfig();
 
 // Loose integer parsing for non-sequence fields only (balances, etc.).
 const asLooseInt = (value, fallback = 0) => {
@@ -819,7 +793,7 @@ select
   return rows?.[0] || null;
 }
 
-function validateEntries(entries, payloadUserId, { txType = null, createdBy = null, metadata = {}, trustedScheduledRefill = false } = {}) {
+function validateEntries(entries, payloadUserId, { txType = null, createdBy = null } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw badRequest("missing_entries", "At least one entry is required");
   }
@@ -889,34 +863,6 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
   const payloadUserIdNormalized = String(payloadUserId == null ? "" : payloadUserId).trim();
   const createdByNormalized = String(createdBy == null ? "" : createdBy).trim();
   const entryKind = (entry) => entry?.accountType || entry?.kind;
-  const scheduledPoolKey = entries.find((entry) => entryKind(entry) === "SYSTEM" && entry.systemKey !== "GENESIS")?.systemKey || "";
-  const scheduledPoolConfig = SCHEDULED_POOL_CONFIG[scheduledPoolKey] || null;
-  const scheduledGenesisEntries = entries.filter((entry) => entryKind(entry) === "SYSTEM" && entry.systemKey === "GENESIS");
-  const scheduledPoolEntries = entries.filter((entry) => entryKind(entry) === "SYSTEM" && entry.systemKey === scheduledPoolKey);
-  const scheduledAmount = scheduledPoolEntries.length === 1 ? Number(scheduledPoolEntries[0].amount) : null;
-  const scheduledPoolMint = txType === "MINT"
-    && trustedScheduledRefill === true
-    && payloadUserIdNormalized === ""
-    && createdByNormalized === ""
-    && entries.length === 2
-    && entries.every((entry) => entryKind(entry) === "SYSTEM")
-    && scheduledGenesisEntries.length === 1
-    && scheduledPoolEntries.length === 1
-    && Number.isSafeInteger(scheduledAmount)
-    && scheduledAmount > 0
-    && Number(scheduledGenesisEntries[0].amount) === -scheduledAmount
-    && scheduledPoolConfig !== null
-    && metadata?.purpose === "poker_pool_refill"
-    && typeof metadata?.bankrollSystemKey === "string"
-    && metadata.bankrollSystemKey === scheduledPoolKey
-    && Number(metadata?.buyIn) === scheduledPoolConfig.buyIn
-    && metadata?.poolClass === scheduledPoolConfig.poolClass
-    && typeof metadata?.policyRevision === "number"
-    && Number.isSafeInteger(metadata.policyRevision)
-    && metadata.policyRevision > 0
-    && typeof metadata?.bucket === "string"
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/.test(metadata.bucket)
-    && entries.reduce((sum, entry) => sum + entry.amount, 0) === 0;
   const allowEscrowOnlyTableBuyIn =
     !hasUserEntry &&
     txType === "TABLE_BUY_IN" &&
@@ -949,8 +895,8 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
   if (!hasUserEntry && txType === "TABLE_CASH_OUT" && !allowEscrowOnlyTableCashOut) {
     throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_CASH_OUT requires ESCROW(-) and SYSTEM(+) strict shape");
   }
-  if (!hasUserEntry && txType === "MINT" && !scheduledPoolMint) {
-    throw badRequest("missing_user_entry", "Scheduled pool MINT requires trusted worker authority");
+  if (!hasUserEntry && txType === "MINT") {
+    throw badRequest("missing_user_entry", "System-only MINT is not authorized through the application ledger");
   }
   if (!hasUserEntry && txType !== "TABLE_BUY_IN" && txType !== "TABLE_CASH_OUT" && txType !== "MINT") {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
@@ -968,7 +914,6 @@ async function postTransaction({
   entries = [],
   createdBy = null,
   tx = null,
-  trustedScheduledRefill = false,
 }) {
   if (!VALID_TX_TYPES.has(txType)) {
     throw badRequest("invalid_tx_type", "Invalid transaction type");
@@ -992,8 +937,6 @@ async function postTransaction({
   const normalizedEntries = validateEntries(entries, payloadUserId, {
     txType,
     createdBy,
-    metadata,
-    trustedScheduledRefill,
   });
   assertPlainObjectOrNull(metadata, "invalid_metadata");
   const safeMetadata = metadata ?? {};

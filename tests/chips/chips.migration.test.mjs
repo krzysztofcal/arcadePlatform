@@ -248,13 +248,55 @@ const assertPokerBotQuarantineSchema = async (sql) => {
     select relname, relrowsecurity
     from pg_class
     where relnamespace = 'public'::regnamespace
-      and relname in ('poker_access_policy', 'poker_bot_tier_policy')
+      and relname in ('poker_access_policy', 'poker_bot_tier_policy', 'poker_bot_refill_control')
     order by relname;
   `;
   assert.deepEqual(rlsRows.map((row) => [row.relname, row.relrowsecurity]), [
     ["poker_access_policy", true],
+    ["poker_bot_refill_control", true],
     ["poker_bot_tier_policy", true],
   ]);
+
+  const refillControl = await sql`
+    select id, enabled, expected_system_identifier
+    from public.poker_bot_refill_control;
+  `;
+  assert.deepEqual(refillControl.map((row) => [Number(row.id), row.enabled, row.expected_system_identifier]), [
+    [1, false, "7656985631720456337"],
+  ], "Stage hourly refill control is a single dark row bound to canonical Stage identity");
+  const refillFunction = await sql`
+    select p.oid::regprocedure::text as signature, p.prosecdef, p.proconfig
+    from pg_proc p
+    where p.oid = 'public.poker_bot_pool_refill_hourly()'::regprocedure;
+  `;
+  assert.equal(refillFunction.length, 1);
+  assert.equal(refillFunction[0].prosecdef, false, "refill function must be SECURITY INVOKER");
+  assert.deepEqual(refillFunction[0].proconfig, ["search_path=\"\"", "lock_timeout=5s"]);
+  for (const role of ["anon", "authenticated", "service_role"]) {
+    const acl = await sql.unsafe("select has_function_privilege($1, 'public.poker_bot_pool_refill_hourly()', 'EXECUTE') as allowed;", [role]);
+    assert.equal(acl[0].allowed, false, `${role} must not execute the refill function`);
+    const tableAcl = await sql.unsafe("select has_table_privilege($1, 'public.poker_bot_refill_control', 'SELECT,INSERT,UPDATE,DELETE') as allowed;", [role]);
+    assert.equal(tableAcl[0].allowed, false, `${role} must not access the refill control table`);
+  }
+  const publicAcl = await sql`
+    select exists (
+      select 1
+      from pg_proc p
+      cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) privilege
+      where p.oid = 'public.poker_bot_pool_refill_hourly()'::regprocedure
+        and privilege.grantee = 0
+        and privilege.privilege_type = 'EXECUTE'
+    ) as allowed;
+  `;
+  assert.equal(publicAcl[0].allowed, false, "PUBLIC must not execute the refill function");
+  const cronObjects = await sql`
+    select
+      exists (select 1 from pg_extension where extname = 'pg_cron') as cron_extension,
+      to_regclass('cron.job') is not null as cron_job_table,
+      (select count(*)::int from public.chips_transactions where metadata ->> 'purpose' = 'poker_pool_refill') as refill_mints;
+  `;
+  assert.deepEqual(cronObjects.map((row) => [row.cron_extension, row.cron_job_table, Number(row.refill_mints)]), [[false, false, 0]],
+    "migration must stay dark: no pg_cron extension/job or refill MINT");
 };
 
 const runProductionEquivalentFixture = async (sql) => {
@@ -265,6 +307,7 @@ const runProductionEquivalentFixture = async (sql) => {
   const e1File = "20260914090000_chips_ledger_production_retention_contract.sql";
   const e2File = "20260914091000_chips_ledger_production_table_fence_activation.sql";
   const p1File = "20260929201500_poker_bot_quarantine_production_contract.sql";
+  const p2File = "20260930211624_poker_bot_pool_refill_hourly.sql";
   const canonicalProductionSystemIdentifier = "7575202818581710058";
 
   await dropAndRecreateSchema(sql);
@@ -343,6 +386,44 @@ const runProductionEquivalentFixture = async (sql) => {
     canonicalProductionSystemIdentifier,
     fixtureSystemIdentifier,
   });
+
+  // The P1 contract fixture removes its temporary history schema on cleanup.
+  // Recreate only the applied P1 marker so the independent P2 prerequisite is
+  // exercised without weakening the Production migration's version checks.
+  await sql.unsafe(`
+    create schema supabase_migrations;
+    create table supabase_migrations.schema_migrations (
+      version text primary key,
+      inserted_at timestamptz not null default now()
+    );
+    insert into supabase_migrations.schema_migrations (version) values ('20260929201500');
+  `);
+
+  const productionMintsBeforeHourly = Number((await sql.unsafe("select count(*) as c from public.chips_transactions where metadata ->> 'purpose' = 'poker_pool_refill';"))[0].c);
+  const productionEntriesBeforeHourly = Number((await sql.unsafe("select count(*) as c from public.chips_entries;"))[0].c);
+  await sql.unsafe(fixtureSql(p2File));
+  const hourlyControl = await sql.unsafe("select id, enabled, expected_system_identifier from public.poker_bot_refill_control;");
+  assert.deepEqual(hourlyControl.map((row) => [Number(row.id), row.enabled, row.expected_system_identifier]), [
+    [1, false, fixtureSystemIdentifier],
+  ], "Production equivalent is dark and bound to the local fixture identity substitution");
+  const hourlyFunction = await sql.unsafe(`
+    select p.prosecdef,
+      has_function_privilege('anon', p.oid, 'EXECUTE') as anon_execute,
+      has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute,
+      has_function_privilege('service_role', p.oid, 'EXECUTE') as service_execute
+    from pg_proc p where p.oid = 'public.poker_bot_pool_refill_hourly()'::regprocedure;
+  `);
+  assert.deepEqual(hourlyFunction.map((row) => [row.prosecdef, row.anon_execute, row.authenticated_execute, row.service_execute]), [[false, false, false, false]]);
+  const productionDarkState = await sql.unsafe(`
+    select exists (select 1 from pg_extension where extname = 'pg_cron') as cron_extension,
+      pg_catalog.to_regclass('cron.job') is not null as cron_job_table,
+      (select count(*)::int from public.chips_transactions where metadata ->> 'purpose' = 'poker_pool_refill') as refill_mints,
+      (select count(*)::int from public.chips_entries) as entry_count,
+      exists (select 1 from supabase_migrations.schema_migrations where version = '20260930211624') as p2_recorded;
+  `);
+  assert.deepEqual(productionDarkState.map((row) => [row.cron_extension, row.cron_job_table, Number(row.refill_mints), Number(row.entry_count), row.p2_recorded]), [
+    [false, false, productionMintsBeforeHourly, productionEntriesBeforeHourly, true],
+  ], "Production equivalent creates no scheduler or ledger mutation and records only its own migration version");
 };
 
 const assertProductionRetentionSafetyContracts = async (sql) => {

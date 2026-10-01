@@ -289,71 +289,25 @@ test("infra VPS repository versions the audited production WS and Stage schedule
   assert.doesNotMatch(dispatcher, /SUPABASE_(DB_URL|SERVICE_ROLE_KEY|ACCESS_TOKEN|JWT_SECRET)|gh auth login|--token/i);
 });
 
-test("poker refill VPS artifacts dispatch only the guarded workflow without ledger credentials", () => {
-  const dispatcher = fileText("infra/vps/arcade-poker-pool-dispatch.sh");
-  const service = fileText("infra/vps/arcade-poker-pool-dispatch.service");
-  const timer = fileText("infra/vps/arcade-poker-pool-dispatch.timer");
+test("retired poker refill scheduler is absent and chips cleanup credentials stay unchanged", () => {
+  const retiredArtifacts = [
+    "infra/vps/arcade-poker-pool-dispatch.sh",
+    "infra/vps/arcade-poker-pool-dispatch.service",
+    "infra/vps/arcade-poker-pool-dispatch.timer",
+    ".github/workflows/poker-bot-pool-refill.yml",
+    "scripts/ops/poker-bot-pool-refill.mjs",
+    "scripts/ops/poker-bot-pool-refill.behavior.test.mjs",
+  ];
+  for (const artifact of retiredArtifacts) assert.equal(fs.existsSync(artifact), false, `${artifact} must be removed`);
   const bootstrap = fileText("infra/vps/bootstrap.sh");
+  assert.doesNotMatch(bootstrap, /arcade-poker-pool-dispatch|poker-bot-pool-refill|arcade-poker-refill/i);
 
-  assert.match(dispatcher, /REPO="krzysztofcal\/arcadePlatform"/);
-  assert.match(dispatcher, /WORKFLOW_FILE="\.github\/workflows\/poker-bot-pool-refill\.yml"/);
-  assert.match(dispatcher, /workflow run "\$WORKFLOW_FILE"/);
-  assert.match(dispatcher, /-f "mode=\$MODE"/);
-  assert.match(dispatcher, /MODE="\$\{POKER_BOT_REFILL_MODE:-dry-run\}"/);
-  assert.match(dispatcher, /POKER_BOT_REFILL_MODE.*dry-run/);
-  assert.doesNotMatch(dispatcher, /SUPABASE|DATABASE_URL|psql|sql\s/);
-  assert.doesNotMatch(dispatcher, /--mode mutate|mode=mutate/);
-
-  assert.match(service, /User=copilot/);
-  assert.match(service, /ExecStart=\/usr\/local\/bin\/arcade-poker-pool-dispatch\.sh/);
-  assert.match(service, /Environment=POKER_BOT_REFILL_MODE=dry-run/);
-  assert.match(service, /EnvironmentFile=-\/etc\/arcade\/poker-pool-dispatch\.env/);
-  assert.doesNotMatch(service, /SUPABASE|DATABASE_URL|psql|SQL/);
-  assert.match(timer, /OnCalendar=.*00\/3/);
-  assert.doesNotMatch(timer, /ExecStart|workflow_dispatch/);
-
-  const pokerInstall = bootstrap.match(/install -D[^\n]+arcade-poker-pool-dispatch[^\n]+/g) || [];
-  assert.equal(pokerInstall.length, 3);
-  assert.doesNotMatch(bootstrap, /enable\s+--now\s+arcade-poker-pool-dispatch|start\s+arcade-poker-pool-dispatch/);
-  assert.match(bootstrap, /fresh-host artifacts only/);
-  assert.match(bootstrap, /existing live hosts require the separate/);
-});
-
-test("poker refill dispatcher defaults to preview and accepts only bounded configured mutation", () => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "poker-dispatch-"));
-  const gh = path.join(temporary, "gh");
-  fs.writeFileSync(gh, '#!/bin/bash\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
-  const dispatch = (overrides = {}) => spawnSync("bash", ["infra/vps/arcade-poker-pool-dispatch.sh"], {
-    encoding: "utf8",
-    env: { PATH: process.env.PATH, GH_BIN: gh, ...overrides },
-  });
-  try {
-    for (const [overrides, target, mode] of [
-      [{}, "stage", "dry-run"],
-      [{ POKER_BOT_REFILL_MODE: "mutate", POKER_BOT_REFILL_TARGET: "stage" }, "stage", "mutate"],
-      [{ POKER_BOT_REFILL_MODE: "mutate", POKER_BOT_REFILL_TARGET: "production" }, "production", "mutate"],
-    ]) {
-      const result = dispatch(overrides);
-      assert.equal(result.status, 0, result.stderr);
-      assert.deepEqual(result.stdout.trim().split("\n").slice(0, -1), [
-        "workflow", "run", ".github/workflows/poker-bot-pool-refill.yml",
-        "--repo", "krzysztofcal/arcadePlatform", "--ref", "main",
-        "-f", `target=${target}`, "-f", `mode=${mode}`, "-f", "reviewed_ref=main",
-      ]);
-      assert.match(result.stdout, new RegExp(`dispatched ${mode} refill`));
-    }
-    for (const overrides of [
-      { POKER_BOT_REFILL_MODE: "automatic" },
-      { POKER_BOT_REFILL_TARGET: "other" },
-      { POKER_BOT_REFILL_REF: "unreviewed-branch" },
-    ]) {
-      const result = dispatch(overrides);
-      assert.notEqual(result.status, 0);
-      assert.equal(result.stdout, "", "invalid configuration must never call GitHub");
-    }
-  } finally {
-    fs.rmSync(temporary, { recursive: true, force: true });
-  }
+  const chipsService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
+  assert.match(chipsService, /^Environment=GH_CONFIG_DIR=\/home\/copilot\/\.config\/gh$/m);
+  assert.doesNotMatch(chipsService, /poker-refill|arcade-poker/);
+  const dispatcher = fileText("infra/vps/arcade-chips-ledger-dispatch.sh");
+  assert.match(dispatcher, /^REPO="krzysztofcal\/arcadePlatform"$/m);
+  assert.doesNotMatch(dispatcher, /poker-bot-pool-refill|poker-pool-refill/);
 });
 
 test("infra VPS environment examples expose only the audited variable names without live secrets", () => {

@@ -1623,3 +1623,206 @@ Production execution, Production initial seed, VPS installation/timer activation
 - No direct Production/VPS mutation during implementation.
 - Runtime changes require the new exact-SHA Preview gate before merge-ready.
 - Keep implementation simple, JSP-compatible, klog-only, no CSS/CSP change unless strictly necessary.
+
+
+## §29 Corrective post-merge amendment — replace VPS/GitHub refill scheduler with hourly Supabase Cron
+
+This amendment **supersedes the recurring-refill scheduler design in T019/T020/T086/T089–T092 and corrective comment #5917832415**. The economic policy remains unchanged: only enabled tiers are eligible; NORMAL/SLOW pools retain their configured thresholds and refill amounts; all refill value still enters through balanced `GENESIS -> exact SYSTEM pool` ledger MINTs.
+
+### Decision
+
+Replace:
+
+`VPS systemd timer -> GitHub CLI/PAT -> GitHub Actions -> Production DB`
+
+with:
+
+`Supabase Cron (hourly) -> DB refill function -> ledger`
+
+There is **no balance-change trigger** and no poker-runtime MINT. The database checks balances once per hour. No dedicated GitHub refill actor/PAT is required.
+
+Read-only baseline on 2026-09-30:
+- Stage and Production both have `pgcrypto 1.3` installed.
+- `pg_cron` is available on Supabase but currently **not installed** in either Stage or Production.
+- The live VPS has the poker refill script/service/timer installed, but the poker service/timer remain disabled/inactive.
+- No `/home/copilot/.config/gh-poker-refill` credentials were provisioned and no poker refill timer was activated.
+
+Supabase documents that Cron is backed by `pg_cron`, can invoke database functions directly, stores jobs in `cron.job` and run history in `cron.job_run_details`. Schedule is exactly hourly: `0 * * * *`.
+
+### T093 — Forward-only DB refill contract, dark by default
+
+Create a new Stage migration using the normal `supabase migration new poker_bot_pool_refill_hourly` flow. Do not edit any already-applied #1018 migration.
+
+Add a singleton operator control table, e.g. `public.poker_bot_refill_control`:
+- exactly one row (`id = 1`);
+- `enabled boolean not null default false`;
+- `expected_system_identifier text not null`;
+- optional revision/update metadata only if needed to follow the existing operator-control pattern;
+- RLS enabled and no `anon`/`authenticated` access.
+
+Stage stores the canonical Stage PostgreSQL system identifier `7656985631720456337`. The separate Production equivalent stores `7575202818581710058`.
+
+Add `public.poker_bot_pool_refill_hourly()` as a database-only operator function:
+- `SECURITY INVOKER`, fully schema-qualified objects;
+- revoke EXECUTE from `PUBLIC`, `anon`, `authenticated` and `service_role`; it is intended for the database owner/`postgres` cron job only;
+- first verify `pg_control_system().system_identifier` against the singleton control row;
+- if global control is disabled, return a no-op summary immediately;
+- acquire one run-level advisory transaction lock so overlapping/manual duplicate runs fail/skip closed;
+- use an hourly UTC bucket derived from database time, not application/VPS time;
+- inspect only `public.poker_bot_tier_policy where enabled = true`;
+- process NORMAL and SLOW for each enabled canonical tier only;
+- derive only the existing 22 exact pool keys, preserving NORMAL 500 as `POKER_BOT_BANKROLL`;
+- lock/re-read the policy and exact GENESIS/pool accounts before the threshold decision;
+- if pool balance is at/above threshold: no-op;
+- if below threshold: apply exactly the configured refill amount.
+
+The function must preserve the current ledger model rather than directly “setting” balances:
+- create one append-only `chips_transactions` row with `tx_type='MINT'`;
+- exact metadata: `purpose='poker_pool_refill'`, bankroll system key, buy-in, pool class, policy revision and hourly bucket;
+- deterministic 64-hex `payload_hash` using already-installed `pgcrypto`;
+- reuse the existing transaction insert trigger to populate `chips_transaction_idempotency`;
+- apply account deltas using the same locked-account atomic pattern as the current `postTransaction` implementation: GENESIS debit and exact pool credit, with GENESIS as the only account allowed to become negative;
+- insert exactly two balanced `chips_entries`; reuse the existing entry-sequence trigger;
+- never update/delete ledger rows or manually mutate the idempotency registry.
+
+Replace the old 3-hour identity with hourly identity:
+`poker-pool-refill:<poolKey>:<policyRevision>:<UTC-hour>`.
+
+Reuse the existing unique `chips_transactions_poker_pool_bucket_uidx` as defense in depth. A retry in the same hour must not create a second refill. A genuinely depleted pool may refill again in a later hour.
+
+Keep pool work isolated with narrow PL/pgSQL exception/subtransaction blocks so a failure in one pool rolls back that pool only and does not undo already successful independent pools. Emit a database warning for a failed pool and continue; do not add a new broad audit subsystem.
+
+**Important Stage side effect:** the normal PR migration may create the dark control/function on shared Stage, with `enabled=false`. It must **not** install/enable `pg_cron`, create a cron job, or MINT as part of automatic Stage apply.
+
+### T094 — Fundamental deterministic DB tests
+
+Extend existing database-backed tests only, primarily:
+- `tests/chips/poker-pool-policy.transaction.test.mjs`;
+- `tests/chips/chips.migration.test.mjs` where schema/ACL assertions belong.
+
+Required fundamentals:
+1. control disabled => zero mutation;
+2. disabled tier => ignored;
+3. enabled pool at threshold or above => no-op;
+4. enabled pool below threshold => exactly one balanced GENESIS/pool MINT for configured amount;
+5. same-hour replay/concurrent invocation => at most one refill;
+6. next UTC hour may refill again if the locked balance is below threshold again;
+7. NORMAL 500 preserves `POKER_BOT_BANKROLL`; representative 100 and max-tier NORMAL/SLOW mapping stays exact;
+8. missing/inactive/malformed pool/policy fails that pool without arbitrary SYSTEM MINT;
+9. transaction, entries, balances, sequences and idempotency registry are mutually consistent;
+10. function ACL prevents public/API execution.
+
+Tests call the DB function directly on disposable PostgreSQL. They do not need a real cron scheduler and must never point mutation tests at shared Stage/Production.
+
+### T095 — Remove the obsolete GitHub/VPS recurring refill authority
+
+Once the DB function is implemented and fundamental tests pass, remove the recurring external refill path rather than retaining two automatic MINT authorities.
+
+Remove:
+- `infra/vps/arcade-poker-pool-dispatch.sh`;
+- `infra/vps/arcade-poker-pool-dispatch.service`;
+- `infra/vps/arcade-poker-pool-dispatch.timer`;
+- poker-dispatch install lines/notices from `infra/vps/bootstrap.sh`;
+- `.github/workflows/poker-bot-pool-refill.yml`;
+- `scripts/ops/poker-bot-pool-refill.mjs`;
+- `scripts/ops/poker-bot-pool-refill.behavior.test.mjs`;
+- the `poker-bot-pool-refill-canary` mode/inputs/step from `.github/workflows/chips-ledger-stage-scheduled-automation.yml`.
+
+Because the old Node refill worker is the only caller of `trustedScheduledRefill`, remove the dedicated scheduled SYSTEM-MINT capability from `netlify/functions/_shared/chips-ledger.mjs` and adjust `tests/chips-ledger.test.mjs` so arbitrary system-only MINT remains rejected. This reduces runtime mint authority after the DB path becomes canonical.
+
+Update:
+- `infra/vps/README.md`;
+- `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs`;
+- `ws-tests/infra-vps-workflow.guard.test.mjs`;
+- `specs/796-bot-quarantine/{plan,tasks,quickstart,research,contracts/bot-quarantine.md,issue-source.md}`.
+
+Do not change the existing chips-ledger Stage dispatcher or its `/home/copilot/.config/gh` owner credentials.
+
+### T096 — Existing live VPS cleanup after merge, separately authorized
+
+The obsolete poker refill artifacts are currently installed on the live VPS but disabled/inactive. After the replacement PR is merged, require a separate owner GO and remove only:
+- `/usr/local/bin/arcade-poker-pool-dispatch.sh` or the actually installed poker-dispatch binary path;
+- `/etc/systemd/system/arcade-poker-pool-dispatch.service`;
+- `/etc/systemd/system/arcade-poker-pool-dispatch.timer`;
+- optional `/etc/arcade/poker-pool-dispatch.env` if it exists;
+- optional `/home/copilot/.config/gh-poker-refill` only if it exists and contains no credentials needed elsewhere.
+
+Then `systemctl daemon-reload` and verify the poker units are not found. Do **not** touch:
+- `arcade-chips-ledger-dispatch.*`;
+- `/home/copilot/.config/gh`;
+- WS/Caddy/other timers.
+
+Never run `bootstrap.sh` on the existing VPS.
+
+### T097 — Stage Cron activation, separate owner gate
+
+After merge and read-only verification of the dark Stage function/control:
+1. separately authorize Stage Cron setup;
+2. enable the Supabase `pg_cron` extension on Stage;
+3. create exactly one job named `poker-bot-pool-refill-hourly` with schedule `0 * * * *` calling `select public.poker_bot_pool_refill_hourly();`;
+4. keep `poker_bot_refill_control.enabled=false` while verifying `cron.job`, function owner/ACL, system identity and one no-op invocation;
+5. separately enable the DB control;
+6. observe normal hourly delivery in `cron.job_run_details` and verify ledger/balance invariants read-only.
+
+Do not manufacture Production-like depletion on shared Stage. The actual MINT mechanics are proven in disposable DB tests; if a naturally low enabled Stage pool exists, one ordinary Stage run may additionally prove the real refill path.
+
+Kill switch: set `poker_bot_refill_control.enabled=false` first. If scheduler-level disable is needed, deactivate/unschedule the single cron job. No PAT/token revocation is involved.
+
+### T098 — Production equivalent and activation
+
+Do not modify already-applied Production P1. Add a new forward-only file under `supabase/production-migrations/` using the existing Production migration/manifest identity pattern and update:
+- `supabase/production-migrations/manifest.json`;
+- `scripts/check-db-migrations.mjs` if classification requires it;
+- `specs/004-production-retention/migration-inventory.md`.
+
+The Production equivalent must create the same control/function with canonical Production system identifier and `enabled=false`; it must not install pg_cron, schedule a job or MINT during migration.
+
+Production rollout remains separately owner-authorized:
+1. apply exact reviewed Production migration;
+2. read-only verify function hash/ACL/control/system identity and unchanged balances/ledger;
+3. separately enable `pg_cron`;
+4. create the one hourly job while control remains disabled;
+5. verify a no-op run/history;
+6. separate GO to set Production refill control enabled;
+7. observe the next normal hourly run and verify only enabled tiers were considered and any refill is balanced/idempotent.
+
+No poker runtime/table/profile activation is implied by enabling refill.
+
+### T099 — Observability and failure posture
+
+Use existing evidence rather than a new monitoring service:
+- `cron.job` for configured schedule;
+- `cron.job_run_details` for execution history;
+- `chips_transactions/chips_entries/chips_transaction_idempotency` for refill evidence;
+- exact pool balances for economic post-state.
+
+Hourly history is only 24 runs/day; do not add another cleanup cron solely for this job at current scale.
+
+On any uncertain result: disable DB refill control, inspect current ledger/idempotency state, and do not blind-retry or edit balances directly.
+
+### Breaking-impact notes
+
+- Recurring refill authority moves from GitHub/VPS credentials to the database owner through Supabase Cron.
+- The dedicated actor `arcade-poker-refill-dispatch`, its PAT/config, workflow and VPS timer become unnecessary and should not be provisioned.
+- The old Netlify `trustedScheduledRefill` SYSTEM-MINT path is removed after DB parity, reducing external mint authority.
+- Enabling `pg_cron` and the Production hourly job are new database operational changes and remain separately gated.
+- The new DB function is privileged financial logic: ACL, exact system identity, locks, balanced entries, idempotency and canonical-pool allowlisting are merge blockers.
+- No change to poker gameplay thresholds, refill amounts, enabled tier selection or NORMAL/SLOW economics.
+- No WS protocol/runtime change is planned; if implementation stays outside `ws-server/**` and shared WS dependencies, no WS Preview Deploy is required.
+
+### Implementation notes
+
+- Re-read live `agents.md` / `skills.md` and current #1018 before coding.
+- Keep the implementation compact; no trigger-on-balance, Edge Function, queue, second scheduler or generic mint framework.
+- Reuse existing ledger tables/triggers/indexes and operator patterns.
+- Only fundamental deterministic tests.
+- No Production mutation, Stage cron activation, live-VPS cleanup or timer/job activation from the implementation PR itself.
+- Any automatic `supabase/migrations/**` Stage apply must be explicitly declared and remain economically dark.
+- No JS/CSS/UI work is expected. If JS changes are necessary, preserve JSP compatibility and use `klog`, never `console.log`.
+- Double-check the final diff and call out breaking impacts before merge.
+
+### §29 lock-timeout correction for PR #1026
+
+The applied Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` is immutable. Add forward-only Stage migration `20260930223409_poker_bot_pool_refill_lock_timeout.sql` using the normal `supabase migration new` flow. It must preserve the current function body and add function-level `SET lock_timeout = '5s'` beside `SET search_path = ''`, so lock waits become catchable per-pool failures before the global statement timeout. Keep the correction economically dark: the existing control remains disabled, with no pg_cron extension/job or MINT. Update the existing unapplied Production P2 `20260930211624_poker_bot_pool_refill_hourly.sql` to the same final function definition; do not add another Production migration.
+
+Add one fundamental disposable PostgreSQL contention test using connection coordination rather than sleeps. One connection holds `FOR UPDATE` on an exact pool/account row while another invokes the function; the locked pool must report `failed` through its bounded timeout, while an independent pool commits exactly one balanced MINT. Preserve run-level advisory lock, hourly idempotency, ACL, exact 22-pool allowlist and all other decisions. No Production, pg_cron/control activation, VPS operation or unrelated runtime change is authorized.
