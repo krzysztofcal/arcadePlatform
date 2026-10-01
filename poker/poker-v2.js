@@ -244,7 +244,7 @@
     revealedShowdownCardsByUserId: {},
     communityCards: []
   };
-  var pendingPostRevealSnapshot = null;
+  var pendingPostRevealSnapshots = [];
   var lastPresentedSettlementHandId = null;
   var lastAnimatedSettlementHandId = null;
   var lastSettlementFailureKey = null;
@@ -2247,25 +2247,22 @@
     return null;
   }
 
-  function scheduleRevealDismiss(){
+  function scheduleRevealDismiss(processSnapshot){
     var sticky = getActiveWinnerReveal();
-    clearWinnerRevealTimer();
     if (!sticky) return;
+    clearWinnerRevealTimer();
     var remainingMs = Math.max(0, sticky.visibleUntilMs - Date.now());
     revealDismissTimer = window.setTimeout(function(){
       revealDismissTimer = null;
       stickyWinnerReveal.visibleUntilMs = 0;
-      if (pendingPostRevealSnapshot){
-        var nextFrame = pendingPostRevealSnapshot;
-        pendingPostRevealSnapshot = null;
-        mergeSnapshot(nextFrame.payload, nextFrame);
-      }
-      render();
-      autoJoinSeat();
+      var nextFrames = pendingPostRevealSnapshots;
+      pendingPostRevealSnapshots = [];
+      nextFrames.forEach(function(nextFrame){ processSnapshot(nextFrame, nextFrame); });
     }, remainingMs);
   }
 
   function shouldDeferSnapshotUntilRevealEnds(payload){
+    if (pendingPostRevealSnapshots.length) return true;
     var sticky = getActiveWinnerReveal();
     if (!sticky) return false;
     var nextHandId = extractSnapshotHandId(payload);
@@ -2799,13 +2796,28 @@
     return 'join_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
   }
 
-  function reconcileJoinOperationFromSnapshot(){
+  function reconcileJoinOperationFromSnapshot(authoritativeSnapshot){
     // Guest seats can be projected before the required join is acknowledged.
     if (isGuestMode) return false;
     var seat = deriveCurrentSeat();
-    if (!seat) return false;
+    if (!seat){
+      var completedJoinWithoutSeat = authoritativeSnapshot === true
+        && (joinOperation.phase === 'active' || joinOperation.phase === 'waiting_next_hand')
+        && !state.reconnectGate
+        && !Number.isInteger(reconnectSeatNo)
+        && joinOperation.source !== 'reconnect';
+      if (completedJoinWithoutSeat){
+        joinOperation.phase = 'idle';
+        joinOperation.source = null;
+        reconnectSeatNo = null;
+        lastKnownCurrentSeatNo = null;
+        state.statusText = LIVE_STATUS_COPY.live;
+      }
+      return false;
+    }
     var waiting = currentPlayerStatus() === 'WAITING_NEXT_HAND';
     joinOperation.phase = waiting ? 'waiting_next_hand' : 'active';
+    joinOperation.source = null;
     state.statusText = waiting ? 'Seat reserved · Joining next hand' : LIVE_STATUS_COPY.live;
     joinOperation.requestId = null;
     joinOperation.payload = null;
@@ -6103,7 +6115,7 @@
     cancelClosedTableRedirect();
     resetAutoJoinRetryState();
     autoJoinAttempted = false;
-    pendingPostRevealSnapshot = null;
+    pendingPostRevealSnapshots = [];
     state.wsReady = false;
     if (wsClient && typeof wsClient.destroy === 'function'){
       try { wsClient.destroy(); } catch (_err){}
@@ -6213,6 +6225,77 @@
       render();
     }
     markBootReady();
+    var processSnapshotFrame = function(snapshot, deferredFrame){
+      if (gen !== liveModeGeneration) return;
+      var payload = snapshot && snapshot.payload ? snapshot.payload : null;
+      var frame = {
+        kind: snapshot && typeof snapshot.kind === 'string' ? snapshot.kind : 'stateSnapshot',
+        initial: !!(snapshot && snapshot.initial),
+        suppressSettlementAnimation: deferredFrame
+          ? deferredFrame.suppressSettlementAnimation === true
+          : suppressSettlementAnimationUntilAuthoritativeSnapshot,
+        payload: payload
+      };
+      var authoritativeSnapshot = frame.kind === 'stateSnapshot' || (frame.kind === 'table_state' && frame.initial);
+      // Snapshot acceptance contract: current tableId, no version regression.
+      if (payload && payload.tableId && state.tableId && payload.tableId !== state.tableId){
+        clearCelebration();
+        resetWinStreakSession();
+        return;
+      }
+      var incomingVersion = Number(payload && payload.stateVersion) || 0;
+      var appliedVersion = Number(state.stateVersion) || 0;
+      if (incomingVersion > 0 && appliedVersion > 0 && incomingVersion < appliedVersion){
+        resetWinStreakSession();
+        return;
+      }
+      if (snapshot && (snapshot.initial || (deferredFrame
+        ? deferredFrame.suppressSettlementAnimation === true
+        : suppressSettlementAnimationUntilAuthoritativeSnapshot))) resetWinStreakSession();
+      observeCelebrationSnapshot(payload, frame);
+      if (shouldDeferSnapshotUntilRevealEnds(payload)){
+        pendingPostRevealSnapshots.push(frame);
+        scheduleRevealDismiss(processSnapshotFrame);
+        return;
+      }
+      var previousVisual = captureVisualSnapshot();
+      mergeSnapshot(payload, frame);
+      if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
+      reconcileRebuyOperationFromSnapshot(authoritativeSnapshot);
+      if (authoritativeSnapshot) state.hasAppliedAuthoritativeSnapshot = true;
+      // Open the reconnect gate only after a full authoritative snapshot is merged.
+      var openedRecoveryGate = false;
+      if (authoritativeSnapshot && state.reconnectGate){
+        state.reconnectGate = false;
+        stopSnapshotRecoveryTimer();
+        openedRecoveryGate = true;
+        if (snapshotRecoveryTimedOut){
+          // A late snapshot arrived after the bounded retries exhausted. Clear the
+          // recovery status/error ONLY if the current error is still the recovery
+          // timeout — a newer unrelated error (failed/error status, rejected async
+          // op) must not be wiped by a stale timeout flag.
+          var clearingRecoveryTimeout = state.errorText === SNAPSHOT_RECOVERY_TIMEOUT_COPY;
+          snapshotRecoveryTimedOut = false;
+          if (clearingRecoveryTimeout){
+            state.statusText = LIVE_STATUS_COPY.live;
+            state.errorText = '';
+          }
+        }
+        if (pendingLeaveRetryAfterReconnect){
+          leaveAndReturnToLobby();
+          return;
+        }
+        if (!resumePendingJoinOperation() && !rejoinSeatAfterReconnect()) autoJoinSeat();
+      }
+      // reconcileJoinOperationFromSnapshot() resets joinOperation.requestId; do not
+      // run it right after the recovery gate already started a deferred join/rejoin.
+      if (!openedRecoveryGate) reconcileJoinOperationFromSnapshot(authoritativeSnapshot);
+      maybeExecuteQueuedPreaction();
+      render();
+      var nextVisual = captureVisualSnapshot();
+      animateChipDiff(previousVisual, nextVisual, frame);
+      autoJoinSeat();
+    };
     wsClient = window.PokerWsClient.create({
       tableId: tableId,
       guestToken: isGuestMode && currentGuestSession ? currentGuestSession.token : null,
@@ -6306,73 +6389,7 @@
           renderControls();
         }
       },
-      onSnapshot: function(snapshot){
-        if (gen !== liveModeGeneration) return;
-        var payload = snapshot && snapshot.payload ? snapshot.payload : null;
-        var frame = {
-          kind: snapshot && typeof snapshot.kind === 'string' ? snapshot.kind : 'stateSnapshot',
-          initial: !!(snapshot && snapshot.initial),
-          suppressSettlementAnimation: suppressSettlementAnimationUntilAuthoritativeSnapshot,
-          payload: payload
-        };
-        var authoritativeSnapshot = frame.kind === 'stateSnapshot' || (frame.kind === 'table_state' && frame.initial);
-        // Snapshot acceptance contract: current tableId, no version regression.
-        if (payload && payload.tableId && state.tableId && payload.tableId !== state.tableId){
-          clearCelebration();
-          resetWinStreakSession();
-          return;
-        }
-        var incomingVersion = Number(payload && payload.stateVersion) || 0;
-        var appliedVersion = Number(state.stateVersion) || 0;
-        if (incomingVersion > 0 && appliedVersion > 0 && incomingVersion < appliedVersion){
-          resetWinStreakSession();
-          return;
-        }
-        if (snapshot && (snapshot.initial || suppressSettlementAnimationUntilAuthoritativeSnapshot)) resetWinStreakSession();
-        observeCelebrationSnapshot(payload, frame);
-        if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
-        if (shouldDeferSnapshotUntilRevealEnds(payload)){
-          pendingPostRevealSnapshot = frame;
-          scheduleRevealDismiss();
-          return;
-        }
-        var previousVisual = captureVisualSnapshot();
-        mergeSnapshot(payload, frame);
-        reconcileRebuyOperationFromSnapshot(authoritativeSnapshot);
-        if (authoritativeSnapshot) state.hasAppliedAuthoritativeSnapshot = true;
-        // Open the reconnect gate only after a full authoritative snapshot is merged.
-        var openedRecoveryGate = false;
-        if (authoritativeSnapshot && state.reconnectGate){
-          state.reconnectGate = false;
-          stopSnapshotRecoveryTimer();
-          openedRecoveryGate = true;
-          if (snapshotRecoveryTimedOut){
-            // A late snapshot arrived after the bounded retries exhausted. Clear the
-            // recovery status/error ONLY if the current error is still the recovery
-            // timeout — a newer unrelated error (failed/error status, rejected async
-            // op) must not be wiped by a stale timeout flag.
-            var clearingRecoveryTimeout = state.errorText === SNAPSHOT_RECOVERY_TIMEOUT_COPY;
-            snapshotRecoveryTimedOut = false;
-            if (clearingRecoveryTimeout){
-              state.statusText = LIVE_STATUS_COPY.live;
-              state.errorText = '';
-            }
-          }
-          if (pendingLeaveRetryAfterReconnect){
-            leaveAndReturnToLobby();
-            return;
-          }
-          if (!resumePendingJoinOperation() && !rejoinSeatAfterReconnect()) autoJoinSeat();
-        }
-        // reconcileJoinOperationFromSnapshot() resets joinOperation.requestId; do not
-        // run it right after the recovery gate already started a deferred join/rejoin.
-        if (!openedRecoveryGate) reconcileJoinOperationFromSnapshot();
-        maybeExecuteQueuedPreaction();
-        render();
-        var nextVisual = captureVisualSnapshot();
-        animateChipDiff(previousVisual, nextVisual, frame);
-        autoJoinSeat();
-      },
+      onSnapshot: processSnapshotFrame,
       onProtocolError: function(info){
         if (gen !== liveModeGeneration) return;
         clearCelebration();

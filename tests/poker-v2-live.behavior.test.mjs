@@ -613,6 +613,153 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.windowLocation.href, '/poker/');
 });
 
+test('poker v2 restores Join after authoritative seat removal without clearing a pending JOIN', async () => {
+  const harness = createHarness({
+    sendJoin: (_payload, { attempt }) => attempt === 1
+      ? Promise.resolve({ ok: true, seatNo: 1 })
+      : new Promise(() => {})
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false);
+
+  harness.elements.pokerV2JoinBtn.click();
+  await harness.flush();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: 'hand-active', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'the confirmed seat should hide Join');
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 3,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
+      public: { hand: { handId: 'hand-active', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.getCreateCount(), 1, 'authoritative seat removal should not need a reload');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'Join should return after the full snapshot removes the user seat');
+
+  ws.onStatus('reconnecting', { attempt: 1 });
+  ws.onStatus('auth_ok');
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 4,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
+      public: { hand: { handId: 'hand-active', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1, 'a normal reconnect after authoritative removal must not JOIN the stale seat');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'Join should remain available after reconnect without the removed seat');
+
+  harness.elements.pokerV2JoinBtn.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true);
+  assert.equal(harness.elements.pokerV2JoinBtn.attributes['aria-busy'], 'true');
+  assert.ok(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'), 'the unresolved JOIN should remain persisted');
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 5,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
+      public: { hand: { handId: 'hand-active', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'an authoritative no-seat snapshot must not clear a reserving JOIN');
+  assert.equal(harness.elements.pokerV2JoinBtn.attributes['aria-busy'], 'true');
+  assert.ok(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'));
+
+  ws.onStatus('join_pending', { requestId: harness.joinRequestIds[1] });
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Checking seat reservation…');
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 6,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
+      public: { hand: { handId: 'hand-active', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'a no-seat snapshot must not clear a checking JOIN');
+  assert.equal(harness.elements.pokerV2LiveStatus.textContent, 'Checking seat reservation…');
+  assert.ok(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'));
+
+  const reconnectHarness = createHarness();
+  reconnectHarness.fireDomContentLoaded();
+  await reconnectHarness.flush();
+  const reconnectWs = reconnectHarness.getCreateOptions();
+  sendInitialTableSnapshot(reconnectHarness);
+  await reconnectHarness.flush();
+  reconnectWs.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: 'hand-reconnect', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await reconnectHarness.flush();
+  reconnectWs.onStatus('reconnecting', { attempt: 1 });
+  reconnectWs.onStatus('auth_ok');
+  reconnectWs.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 3,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
+      public: { hand: { handId: 'hand-reconnect', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: null }
+    }
+  });
+  await reconnectHarness.flush();
+  assert.equal(reconnectHarness.joinPayloads.length, 1, 'recovery should resume the remembered seat through JOIN');
+  assert.equal(reconnectHarness.elements.pokerV2JoinBtn.hidden, true);
+
+  reconnectWs.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 4,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
+      public: { hand: { handId: 'hand-reconnect', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: null }
+    }
+  });
+  await reconnectHarness.flush();
+  assert.equal(reconnectHarness.elements.pokerV2JoinBtn.hidden, true, 'a no-seat snapshot must not discard the active reconnect JOIN');
+});
+
 test('poker v2 tears down the previous user socket and ignores stale access preflights', async () => {
   const tokenFor = (userId) => `aaa.${Buffer.from(JSON.stringify({ sub: userId })).toString('base64')}.zzz`;
   const pendingPreflights = [];
@@ -4215,6 +4362,97 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
   assert.equal(switchedVillainCards.children[1].className.includes('poker-card--back'), true);
   assert.equal(harness.elements.pokerCommunityCards.children.length, 0);
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
+});
+
+test('poker v2 applies queued full snapshot and later state patch after a JOIN during winner reveal', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 10,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [{ userId: 'villain-1', seat: 2, displayName: 'Villain 1' }]
+      },
+      public: {
+        hand: { handId: 'hand-reveal-join', status: 'SETTLED', dealerSeatNo: 2 },
+        turn: { userId: null, seat: null },
+        board: { cards: ['2H', '3H', '4H', '9C', 'KD'] },
+        pot: { total: 0, sidePots: [] },
+        legalActions: { seat: null, actions: [] },
+        showdown: {
+          handId: 'hand-reveal-join',
+          winners: ['villain-1'],
+          reason: 'computed',
+          revealedShowdownParticipants: [{ userId: 'villain-1', holeCards: ['AS', 'AD'] }]
+        },
+        handSettlement: { handId: 'hand-reveal-join', settledAt: '2026-04-11T10:00:00.000Z' }
+      },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'Join should remain available to a spectator during reveal');
+  harness.elements.pokerV2JoinBtn.click();
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1, 'the user should be able to issue JOIN during reveal');
+
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 11,
+      table: {
+        tableId: 'table-1',
+        status: 'OPEN',
+        maxSeats: 6,
+        members: [
+          { userId: 'user-1', seat: 3, displayName: 'Hero' },
+          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
+        ]
+      },
+      public: {
+        hand: { handId: 'hand-after-reveal', status: 'PREFLOP', dealerSeatNo: 1 },
+        turn: { userId: 'villain-1', seat: 2 },
+        pot: { total: 10, sidePots: [] },
+        legalActions: { seat: null, actions: [] }
+      },
+      you: { seat: 3 }
+    }
+  });
+  ws.onSnapshot({
+    kind: 'statePatch',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 12,
+      turn: { userId: 'user-1', seat: 3, startedAt: Date.now(), deadlineAt: Date.now() + 20_000 },
+      legalActions: { seat: 3, actions: ['FOLD', 'CALL'] },
+      actionConstraints: { toCall: 10 }
+    }
+  });
+  await harness.flush();
+
+  harness.advanceTime(3500);
+  await harness.flush();
+
+  const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
+  assert.ok(heroSeat, 'the full snapshot seat should be applied after reveal');
+  assert.equal(findSeatChild(heroSeat, 'poker-seat-number').textContent, 'S3');
+  assert.equal(harness.elements.pokerV2TurnText.textContent, 'Your turn.');
+  assert.equal(harness.elements.pokerV2FoldBtn.hidden, false);
+  assert.equal(harness.elements.pokerV2FoldBtn.disabled, false);
+  assert.equal(harness.elements.pokerV2PrimaryBtn.dataset.action, 'CALL');
+  assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Call (10)');
+  assert.equal(harness.elements.pokerV2PrimaryBtn.disabled, false);
+  assert.equal(harness.getCreateCount(), 1, 'the latest seat, turn, and legal actions should be applied without a reload');
 });
 
 test('poker v2 does not switch away from the settled reveal scene before the local window ends', async () => {
