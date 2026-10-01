@@ -657,6 +657,22 @@ test('poker v2 restores Join after authoritative seat removal without clearing a
   assert.equal(harness.getCreateCount(), 1, 'authoritative seat removal should not need a reload');
   assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'Join should return after the full snapshot removes the user seat');
 
+  ws.onStatus('reconnecting', { attempt: 1 });
+  ws.onStatus('auth_ok');
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 4,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
+      public: { hand: { handId: 'hand-active', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
+      you: { seat: null }
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1, 'a normal reconnect after authoritative removal must not JOIN the stale seat');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'Join should remain available after reconnect without the removed seat');
+
   harness.elements.pokerV2JoinBtn.click();
   await harness.flush();
   assert.equal(harness.elements.pokerV2JoinBtn.hidden, true);
@@ -667,7 +683,7 @@ test('poker v2 restores Join after authoritative seat removal without clearing a
     kind: 'stateSnapshot',
     payload: {
       tableId: 'table-1',
-      stateVersion: 4,
+      stateVersion: 5,
       table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
       public: { hand: { handId: 'hand-active', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
       you: { seat: null }
@@ -685,7 +701,7 @@ test('poker v2 restores Join after authoritative seat removal without clearing a
     kind: 'stateSnapshot',
     payload: {
       tableId: 'table-1',
-      stateVersion: 5,
+      stateVersion: 6,
       table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'villain-1', seat: 2 }] },
       public: { hand: { handId: 'hand-active', status: 'TURN' }, turn: { userId: 'villain-1' }, pot: { total: 0 } },
       you: { seat: null }
@@ -4417,7 +4433,6 @@ test('poker v2 applies queued full snapshot and later state patch after a JOIN d
     payload: {
       tableId: 'table-1',
       stateVersion: 12,
-      hand: { handId: 'hand-after-reveal', status: 'TURN' },
       turn: { userId: 'user-1', seat: 3, startedAt: Date.now(), deadlineAt: Date.now() + 20_000 },
       legalActions: { seat: 3, actions: ['FOLD', 'CALL'] },
       actionConstraints: { toCall: 10 }

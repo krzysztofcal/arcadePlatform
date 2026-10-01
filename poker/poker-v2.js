@@ -2249,8 +2249,8 @@
 
   function scheduleRevealDismiss(processSnapshot){
     var sticky = getActiveWinnerReveal();
-    clearWinnerRevealTimer();
     if (!sticky) return;
+    clearWinnerRevealTimer();
     var remainingMs = Math.max(0, sticky.visibleUntilMs - Date.now());
     revealDismissTimer = window.setTimeout(function(){
       revealDismissTimer = null;
@@ -2262,6 +2262,7 @@
   }
 
   function shouldDeferSnapshotUntilRevealEnds(payload){
+    if (pendingPostRevealSnapshots.length) return true;
     var sticky = getActiveWinnerReveal();
     if (!sticky) return false;
     var nextHandId = extractSnapshotHandId(payload);
@@ -2808,6 +2809,8 @@
       if (completedJoinWithoutSeat){
         joinOperation.phase = 'idle';
         joinOperation.source = null;
+        reconnectSeatNo = null;
+        lastKnownCurrentSeatNo = null;
         state.statusText = LIVE_STATUS_COPY.live;
       }
       return false;
@@ -6250,7 +6253,6 @@
         ? deferredFrame.suppressSettlementAnimation === true
         : suppressSettlementAnimationUntilAuthoritativeSnapshot))) resetWinStreakSession();
       observeCelebrationSnapshot(payload, frame);
-      if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
       if (shouldDeferSnapshotUntilRevealEnds(payload)){
         pendingPostRevealSnapshots.push(frame);
         scheduleRevealDismiss(processSnapshotFrame);
@@ -6258,6 +6260,7 @@
       }
       var previousVisual = captureVisualSnapshot();
       mergeSnapshot(payload, frame);
+      if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
       reconcileRebuyOperationFromSnapshot(authoritativeSnapshot);
       if (authoritativeSnapshot) state.hasAppliedAuthoritativeSnapshot = true;
       // Open the reconnect gate only after a full authoritative snapshot is merged.
