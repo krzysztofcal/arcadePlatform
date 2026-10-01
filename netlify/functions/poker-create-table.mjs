@@ -125,6 +125,13 @@ export async function handler(event) {
       return { kind: "created", tableId: created.tableId };
     });
   } catch (error) {
+    if (error?.code === "pending_table_limit") {
+      return {
+        statusCode: 409,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "pending_table_limit", limit: 4 })
+      };
+    }
     klog("poker_create_table_error", { message: error?.message || "unknown_error" });
     return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
   }

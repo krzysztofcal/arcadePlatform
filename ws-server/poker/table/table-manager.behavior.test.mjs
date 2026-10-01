@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "../runtime/settled-bot-funding.mjs";
 import { __testOnly, createTableManager as createRuntimeTableManager } from "./table-manager.mjs";
 
 function createTableManager(options = {}) {
@@ -70,6 +71,222 @@ test("resolveNextDealerSeatNo skips ineligible seats based on settled continuati
   });
 
   assert.equal(nextDealer, 3);
+});
+
+test("settled access classification does not mutate automatic class under FORCE_* overrides (Finding 1)", () => {
+  const tableId = "table_settled_access_contract";
+  const userId = "user_settled_access";
+  const manager = createTableManager({ maxSeats: 4 });
+  const restored = manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, isSlowOnly: false },
+    coreState: {
+      version: 4,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId, seat: 1 }, { userId: "bot_a", seat: 2 }],
+      seats: { [userId]: 1, bot_a: 2 },
+      seatDetailsByUserId: {
+        [userId]: { isBot: false },
+        bot_a: { isBot: true }
+      },
+      pokerState: { phase: "SETTLED", stacks: { [userId]: 100, bot_a: 100 } }
+    }
+  });
+  assert.equal(restored.ok, true);
+  const cacheAt = 100;
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL",
+    override: "FORCE_NORMAL",
+    effectiveClass: "NORMAL",
+    revision: 7,
+    loadedAtMs: cacheAt,
+    expiresAtMs: cacheAt + 30_000
+  }, {
+    slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
+    slowRecoveryThresholdCh: 90,
+    revision: 3,
+    loadedAtMs: cacheAt,
+    expiresAtMs: cacheAt + 30_000
+  }, cacheAt);
+  const forced = manager.classifySettledAccess(tableId, [{ userId, stack: 100 }], { nowMs: 200 });
+  assert.equal(forced.known, true);
+  // Under FORCE_NORMAL, threshold evidence above entry does NOT mutate durable automatic class
+  assert.deepEqual(forced.transitions, []);
+  assert.equal(forced.effectiveSlow, false);
+  assert.equal(forced.effectiveRestricted, false);
+
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL",
+    override: "FORCE_RESTRICTED",
+    effectiveClass: "RESTRICTED",
+    revision: 9,
+    loadedAtMs: 200,
+    expiresAtMs: 30_200
+  }, {
+    slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
+    slowRecoveryThresholdCh: 90,
+    revision: 3,
+    loadedAtMs: 200,
+    expiresAtMs: 30_200
+  }, 200);
+  const restricted = manager.classifySettledAccess(tableId, [{ userId, stack: 100 }], { nowMs: 250 });
+  assert.equal(restricted.known, true);
+  assert.equal(restricted.effectiveRestricted, true);
+  // Under FORCE_RESTRICTED, threshold evidence does NOT mutate durable automatic class
+  assert.deepEqual(restricted.transitions, []);
+
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "SLOW",
+    override: "FORCE_RESTRICTED",
+    effectiveClass: "RESTRICTED",
+    revision: 10,
+    loadedAtMs: 250,
+    expiresAtMs: 30_250
+  }, {
+    slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
+    slowRecoveryThresholdCh: 90,
+    revision: 3,
+    loadedAtMs: 250,
+    expiresAtMs: 30_250
+  }, 250);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 300 }).effectiveRestricted, true);
+
+  // Return to AUTO: evaluate normally
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL",
+    override: "AUTO",
+    effectiveClass: "NORMAL",
+    revision: 11,
+    loadedAtMs: 300,
+    expiresAtMs: 30_300
+  }, {
+    slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
+    slowRecoveryThresholdCh: 90,
+    revision: 3,
+    loadedAtMs: 300,
+    expiresAtMs: 30_300
+  }, 300);
+  const returnedToAuto = manager.classifySettledAccess(tableId, [{ userId, stack: 100 }], { nowMs: 350 });
+  assert.equal(returnedToAuto.known, true);
+  assert.deepEqual(returnedToAuto.transitions, [{
+    userId,
+    expectedRevision: 11,
+    automaticClass: "SLOW",
+    override: "AUTO",
+    effectiveClass: "SLOW"
+  }]);
+
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 1,
+    loadedAtMs: 300, expiresAtMs: 30_300
+  }, { schemaBacked: false, slowThresholdCh: 100, revision: 1, loadedAtMs: 300, expiresAtMs: 30_300 }, 300);
+  assert.deepEqual(manager.classifySettledAccess(tableId, [{ userId, stack: Number.MAX_SAFE_INTEGER }], { nowMs: 400 }), {
+    known: true, transitions: [], effectiveSlow: false
+  });
+});
+
+test("Admin access invalidation makes the next settled rollover fail closed for new funding", () => {
+  const tableId = "table_access_invalidation_funding_gate";
+  const userId = "user_access_invalidation";
+  const manager = createTableManager({ maxSeats: 4 });
+  assert.equal(manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, buyIn: 100, isSlowOnly: false },
+    coreState: {
+      version: 2,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId, seat: 1 }, { userId: "bot_a", seat: 2 }],
+      seats: { [userId]: 1, bot_a: 2 },
+      seatDetailsByUserId: { [userId]: { isBot: false }, bot_a: { isBot: true } },
+      pokerState: { phase: "SETTLED", handId: "hand_access_invalidation", stacks: { [userId]: 100, bot_a: 0 } }
+    }
+  }).ok, true);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 1,
+    loadedAtMs: 100, expiresAtMs: 30_100
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, true);
+  assert.equal(manager.invalidatePokerAccessForUser(userId), 1);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, false);
+  const prepared = manager.prepareSettledHandRollover({ tableId, nowMs: 200, allowBotFunding: false });
+  assert.equal(prepared.ok, true);
+  assert.deepEqual(prepared.replacementFundings ?? [], []);
+  assert.deepEqual(prepared.managedBotTopUps ?? [], []);
+});
+
+test("Admin FORCE_SLOW propagation makes the ordinary table sticky SLOW-only without resetting on later overrides", () => {
+  const tableId = "table_admin_force_slow_sticky";
+  const userId = "user_admin_force_slow_sticky";
+  const manager = createTableManager({ maxSeats: 4 });
+  assert.equal(manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, buyIn: 100, lifecycleKind: "STANDARD", isSlowOnly: false },
+    coreState: {
+      version: 2,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId, seat: 1 }, { userId: "human_b", seat: 2 }],
+      seats: { [userId]: 1, human_b: 2 },
+      seatDetailsByUserId: {
+        [userId]: { isBot: false },
+        human_b: { isBot: false }
+      },
+      pokerState: { phase: "SETTLED", handId: "hand_force_slow_sticky", stacks: { [userId]: 100, human_b: 100 } }
+    }
+  }).ok, true);
+
+  assert.equal(manager.markSlowOnlyTables([tableId]).marked, 1);
+  assert.equal(manager.tableMeta(tableId).isSlowOnly, true);
+  assert.equal(manager.markSlowOnlyTables([tableId]).marked, 0);
+
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "FORCE_NORMAL", effectiveClass: "NORMAL", revision: 2,
+    loadedAtMs: 100, expiresAtMs: 30_100
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  assert.equal(manager.tableMeta(tableId).isSlowOnly, true);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 3,
+    loadedAtMs: 200, expiresAtMs: 30_200
+  }, null, 200);
+  assert.equal(manager.tableMeta(tableId).isSlowOnly, true);
+});
+
+test("Admin access pre-invalidation keeps settled rollover fail-closed until authoritative refresh", () => {
+  const tableId = "table_admin_access_pending_barrier";
+  const userId = "user_admin_access_pending_barrier";
+  const manager = createTableManager({ maxSeats: 4 });
+  assert.equal(manager.restoreTableFromPersisted(tableId, {
+    tableMeta: { maxPlayers: 4, buyIn: 100, isSlowOnly: false },
+    coreState: {
+      version: 2,
+      roomId: tableId,
+      maxSeats: 4,
+      members: [{ userId, seat: 1 }, { userId: "bot_pending", seat: 2 }],
+      seats: { [userId]: 1, bot_pending: 2 },
+      seatDetailsByUserId: { [userId]: { isBot: false }, bot_pending: { isBot: true } },
+      pokerState: { phase: "SETTLED", handId: "hand_pending_barrier", stacks: { [userId]: 100, bot_pending: 0 } }
+    }
+  }).ok, true);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 7,
+    loadedAtMs: 100, expiresAtMs: 30_100
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 100, expiresAtMs: 30_100 }, 100);
+  assert.equal(manager.setPokerAccessMutationFailClosed(userId, true).ok, true);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, false);
+  const prepared = manager.prepareSettledHandRollover({ tableId, nowMs: 200, allowBotFunding: false });
+  assert.deepEqual(prepared.replacementFundings ?? [], []);
+  assert.deepEqual(prepared.managedBotTopUps ?? [], []);
+  manager.setPokerAccessMutationFailClosed(userId, false);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 200 }).known, false);
+  manager.cachePokerAccess(tableId, userId, {
+    automaticClass: "NORMAL", override: "FORCE_RESTRICTED", effectiveClass: "RESTRICTED", revision: 8,
+    loadedAtMs: 300, expiresAtMs: 30_300
+  }, { schemaBacked: true, slowThresholdCh: 1_000_000_000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950_000_000, revision: 1, loadedAtMs: 300, expiresAtMs: 30_300 }, 300);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 300 }).known, true);
+  assert.equal(manager.settledAccessStatus(tableId, { nowMs: 300 }).effectiveRestricted, true);
 });
 
 test("bots-only bootstrap requires both trusted managed metadata and explicit internal intent", () => {
@@ -330,6 +547,16 @@ test("managed continuous table rolls the same table into the next bots-only hand
 
   assert.equal(restored.ok, true);
 
+  const noNewFunding = tableManager.prepareSettledHandRollover({
+    tableId, nowMs: 8_000, allowManagedBotsOnly: true, allowBotFunding: false,
+    managedBotProfile: { minBotCount: 4, targetBotCount: 4, maxBotCount: 4 }
+  });
+  assert.equal(noNewFunding.changed, true);
+  assert.deepEqual(noNewFunding.replacementFundings, []);
+  assert.deepEqual(noNewFunding.managedBotTopUps, []);
+  assert.equal(noNewFunding.nextCoreState.members.length, 3);
+  assert.deepEqual(tableManager.persistedPokerState(tableId).handSettlement.payouts, { bot_a: 12 });
+
   const prepared = tableManager.prepareSettledHandRollover({
     tableId,
     nowMs: 8_000,
@@ -407,6 +634,56 @@ test("persistent bot replacement commits runtime only with matching funding rece
     requestId: "join-replacement-receipt",
     nowTs: 1
   }).ok, true);
+
+  tableManager.cachePokerAccess(tableId, humanUserId, {
+    automaticClass: "NORMAL",
+    override: "FORCE_RESTRICTED",
+    effectiveClass: "RESTRICTED",
+    revision: 2,
+    loadedAtMs: 1,
+    expiresAtMs: 30_001
+  }, {
+    slowThresholdCh: 100,
+    slowHysteresisBps: 1000,
+    slowRecoveryThresholdCh: 90,
+    revision: 1,
+    loadedAtMs: 1,
+    expiresAtMs: 30_001
+  }, 1);
+  const restrictedAccess = tableManager.settledAccessStatus(tableId, { nowMs: 5_000 });
+  assert.equal(restrictedAccess.known, true);
+  assert.equal(restrictedAccess.effectiveRestricted, true);
+  const restrictedPrepared = tableManager.prepareSettledHandRollover({
+    tableId,
+    nowMs: 5_000,
+    allowBotFunding: restrictedAccess.known === true && restrictedAccess.effectiveRestricted !== true
+  });
+  assert.equal(restrictedPrepared.ok, true);
+  assert.deepEqual(restrictedPrepared.replacementFundings ?? [], []);
+  assert.deepEqual(restrictedPrepared.managedBotTopUps ?? [], []);
+
+  tableManager.cachePokerAccess(tableId, humanUserId, {
+    automaticClass: "NORMAL",
+    override: "AUTO",
+    effectiveClass: "NORMAL",
+    revision: 3,
+    loadedAtMs: 5_000,
+    expiresAtMs: 35_000
+  }, {
+    slowThresholdCh: 1_000,
+    slowHysteresisBps: 1000,
+    slowRecoveryThresholdCh: 900,
+    revision: 1,
+    loadedAtMs: 5_000,
+    expiresAtMs: 35_000
+  }, 5_000);
+
+  const unfunded = tableManager.prepareSettledHandRollover({ tableId, nowMs: 5_000, allowBotFunding: false });
+  assert.equal(unfunded.ok, true);
+  assert.equal(unfunded.changed, false);
+  assert.equal(unfunded.reason, "not_enough_players");
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+  assert.equal(tableManager.persistedPokerState(tableId).stacks[humanUserId], 199);
 
   const prepared = tableManager.prepareSettledHandRollover({ tableId, nowMs: 5_000 });
   assert.equal(prepared.ok, true);
@@ -3484,4 +3761,58 @@ test("beginTableRetirement skips ids with an in-flight persisted bootstrap", asy
 
   releaseBootstrap();
   await bootstrapPromise;
+});
+
+
+test("settled funding requires a fresh enabled tier and both provisioned pools, using the exact resulting class", () => {
+  const snapshot = { schemaBacked: true, expiresAtMs: 30_000, tiers: {
+    100: { enabled: true, provisioned: { NORMAL: true, SLOW: true } }
+  } };
+  const resolve = (changes = {}) => resolveSettledBotFundingSystemKey({
+    snapshot, buyIn: 100, nowMs: 100, legacySystemKey: "TREASURY", ...changes
+  });
+  assert.equal(resolve(), "POKER_BOT_BANKROLL_100");
+  assert.equal(resolve({ effectiveRestricted: true }), null);
+  assert.equal(resolve({ tableMarkerTransition: true }), "POKER_BOT_SLOW_BANKROLL_100");
+  assert.equal(resolve({ isSlowOnly: true }), "POKER_BOT_SLOW_BANKROLL_100");
+  assert.equal(resolve({ isSlowOnly: true, tableMarkerTransition: true, lifecycleKind: "CONTINUOUS_BOT" }), "POKER_BOT_BANKROLL_100");
+  snapshot.tiers[100].enabled = false;
+  assert.equal(resolve(), null);
+  snapshot.tiers[100].enabled = true;
+  snapshot.tiers[100].provisioned.SLOW = false;
+  assert.equal(resolve(), null);
+  assert.equal(resolve({ tableMarkerTransition: true }), null);
+  snapshot.tiers[100].provisioned.SLOW = true;
+  assert.equal(resolve({ nowMs: 30_001 }), null);
+  assert.equal(resolve({ snapshot: null }), null);
+  assert.equal(resolve({ snapshot: { schemaBacked: false, expiresAtMs: 30_000 } }), "TREASURY");
+});
+
+test("settled funding snapshot preserves legacy funding only when the catalog confirms the schema is absent", async () => {
+  const queries = [];
+  const snapshot = await readSettledBotFundingSnapshot({ unsafe: async (sql) => {
+    queries.push(sql);
+    return [{ available: false }];
+  } }, { nowMs: 100 });
+  assert.equal(snapshot.schemaBacked, false);
+  assert.equal(queries.length, 1);
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 100, nowMs: 200 }), "TREASURY");
+});
+
+
+test("settled funding snapshot reads enabled state and both actual pool accounts", async () => {
+  const snapshot = await readSettledBotFundingSnapshot({ unsafe: async (sql, params) => {
+    if (sql.includes("to_regclass")) return [{ available: true }];
+    if (sql.includes("poker_bot_tier_policy")) return [{
+      buy_in: params[0], enabled: params[0] === 100, revision: 1,
+      normal_refill_threshold_ch: 1, normal_refill_amount_ch: 10,
+      slow_refill_threshold_ch: 1, slow_refill_amount_ch: 10
+    }];
+    if (sql.includes("system_key")) return params[0].map((system_key) => ({ system_key }));
+    throw new Error("unexpected query");
+  } }, { nowMs: 100 });
+  assert.equal(snapshot.schemaBacked, true);
+  assert.equal(snapshot.expiresAtMs, 30_100);
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 100, nowMs: 200 }), "POKER_BOT_BANKROLL_100");
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 500, nowMs: 200 }), null);
 });

@@ -171,6 +171,7 @@ register("WARN", "recovery", [
 register("WARN", "session", [
   "ws_invalidate_before_close",
   "ws_invalidating_stale_socket",
+  "ws_poker_access_frame_send_failed",
   "ws_stale_session_socket_rejected",
   "ws_transport_watchdog_terminated"
 ]);
@@ -245,6 +246,9 @@ register("ERROR", "recovery", [
   "ws_deferred_leave_finalization_failed",
   "ws_join_restore_invalid",
   "ws_leave_restore_rejected",
+  "ws_poker_access_refresh_failed",
+  "ws_poker_access_refresh_sweep_failed",
+  "ws_poker_access_mutation_failed",
   "ws_persisted_bootstrap_live_hand_rejected",
   "ws_rebuy_runtime_restore_failed",
   "ws_restore_failed",

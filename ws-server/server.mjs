@@ -64,6 +64,11 @@ import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
 import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
+import {
+  decideSettledBotFunding,
+  readSettledBotFundingSnapshot,
+  resolveSettledBotFundingSystemKey
+} from "./poker/runtime/settled-bot-funding.mjs";
 import { resolveSettledRevealDueAt } from "./poker/runtime/settled-reveal-timing.mjs";
 import { loadBotClaimsRecoveryExecutorIfInactive } from "./poker/persistence/bot-claims-recovery-adapter.mjs";
 import { serializePokerLogPayload } from "./poker/observability/poker-log-policy.mjs";
@@ -75,12 +80,23 @@ import { getBotConfig } from "./shared/poker-domain/bots.mjs";
 import {
   calculateCanonicalPokerStakes,
   DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
-  getBotFundingSystemKeyForBuyIn,
   POKER_BUY_IN_MATERIALIZATION_CAPABILITY_VERSION
 } from "../shared/poker-domain/table-economy.mjs";
+import {
+  ACCESS_OVERRIDES,
+  hasPokerPoolSchema,
+  isFreshAccessSnapshot,
+  isFreshPolicySnapshot,
+  normalizeAccessOverride,
+  normalizeAccessSnapshot,
+  readPokerAccessPolicy,
+  readPokerAccessSnapshot,
+  readPokerAccessSnapshots
+} from "../shared/poker-domain/bot-access.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
+import { buildPokerAccessRefreshCandidates, persistAuthoritativeSlowOnlyForUser } from "./poker/runtime/poker-access-propagation.mjs";
 import { createActionHistoryCleanup } from "./poker/persistence/action-history-cleanup.mjs";
 import { createClosedTableCleanup } from "./poker/persistence/closed-table-cleanup.mjs";
 import { createVpsMetricsCollector } from "./observability/vps-metrics.mjs";
@@ -364,6 +380,8 @@ const TERMINAL_JANITOR_SUPPRESSION_TTL_MS = 10 * 60_000;
 const TERMINAL_JANITOR_SUPPRESSION_MAX = 1_000;
 const lobbyEmptyJoinableGraceMs = resolveEmptyJoinableGraceMs(process.env.POKER_TABLE_CLOSE_GRACE_MS);
 const internalRuntimeToken = typeof process.env.POKER_WS_INTERNAL_TOKEN === "string" ? process.env.POKER_WS_INTERNAL_TOKEN.trim() : "";
+const activePokerAccessMutations = new Set();
+const pokerAccessMutationGenerationByUser = new Map();
 const botReactionOverrideStore = createBotReactionOverrideStore({ env: process.env });
 let openTableJanitorCursor = null;
 
@@ -743,10 +761,364 @@ async function loadAcceptedBotAutoplayExecutor() {
 
 async function loadBeginSqlWs() {
   if (!beginSqlWsLoaderPromise) {
-    beginSqlWsLoaderPromise = import("./poker/bootstrap/persisted-bootstrap-db.mjs")
+    const configured = typeof process.env.WS_BEGIN_SQL_LOADER_MODULE_PATH === "string"
+      ? process.env.WS_BEGIN_SQL_LOADER_MODULE_PATH.trim()
+      : "";
+    beginSqlWsLoaderPromise = import(configured || "./poker/bootstrap/persisted-bootstrap-db.mjs")
       .then((module) => module.beginSqlWs);
   }
   return beginSqlWsLoaderPromise;
+}
+
+function normalizeWsPokerAccessPayload(access) {
+  if (!access || typeof access !== "object") return null;
+  const automaticClass = access.automaticClass === "SLOW" ? "SLOW" : access.automaticClass === "NORMAL" ? "NORMAL" : null;
+  const override = ["AUTO", "FORCE_NORMAL", "FORCE_SLOW", "FORCE_RESTRICTED"].includes(access.override) ? access.override : null;
+  const effectiveClass = access.effectiveClass === "SLOW"
+    ? "SLOW"
+    : access.effectiveClass === "NORMAL"
+      ? "NORMAL"
+      : access.effectiveClass === "RESTRICTED"
+        ? "RESTRICTED"
+        : null;
+  const revision = Number(access.revision);
+  if (!automaticClass || !override || !effectiveClass || !Number.isSafeInteger(revision) || revision <= 0) return null;
+  const threshold = Number(access.slowThresholdCh ?? access.policy?.slowThresholdCh);
+  const hysteresisBps = Number(access.slowHysteresisBps ?? access.policy?.slowHysteresisBps);
+  const recoveryThreshold = Number(access.slowRecoveryThresholdCh ?? access.policy?.slowRecoveryThresholdCh);
+  const policyRevision = Number(access.policyRevision ?? access.policy?.revision);
+  return {
+    automaticClass,
+    override,
+    effectiveClass,
+    revision,
+    ...(Number.isSafeInteger(threshold) && threshold > 0 ? { slowThresholdCh: threshold } : {}),
+    ...(Number.isSafeInteger(hysteresisBps) && hysteresisBps >= 100 && hysteresisBps <= 5000 ? { slowHysteresisBps: hysteresisBps } : {}),
+    ...(Number.isSafeInteger(recoveryThreshold) && recoveryThreshold > 0 ? { slowRecoveryThresholdCh: recoveryThreshold } : {}),
+    ...(Number.isSafeInteger(policyRevision) && policyRevision > 0 ? { policyRevision } : {}),
+    ...(access.automaticSlowAt ? { automaticSlowAt: access.automaticSlowAt } : {})
+  };
+}
+
+function sendPokerAccessFrame(ws, connState, access, { requestId = null, reason = null } = {}) {
+  const payload = normalizeWsPokerAccessPayload(access);
+  if (!payload) return false;
+  const frame = {
+    version: "1.0",
+    type: "poker_access",
+    ts: nowTs(),
+    sessionId: connState.sessionId,
+    payload
+  };
+  if (requestId) frame.requestId = requestId;
+  if (reason) frame.payload.reason = reason;
+  sendFrame(ws, frame);
+  return true;
+}
+
+async function refreshConnectionPokerAccess(ws, connState, { requestId = null, force = false, reason = "cache_refresh" } = {}) {
+  const userId = connState?.session?.userId;
+  if (!userId || connState.session.identityMode === "guest") return null;
+  if (activePokerAccessMutations.has(userId)
+    || tableManager.isPokerAccessMutationFailClosed?.(userId) === true) {
+    return null;
+  }
+  const cached = connState.pokerAccess;
+  if (!force && cached && isFreshAccessSnapshot(cached) && isFreshPolicySnapshot(cached.policy)) {
+    sendPokerAccessFrame(ws, connState, cached, { requestId, reason });
+    return cached;
+  }
+  if (!hasSupabaseDbUrl) return null;
+  const capturedGeneration = pokerAccessMutationGenerationByUser.get(userId) || 0;
+  try {
+    const beginSqlWs = await loadBeginSqlWs();
+    const access = await beginSqlWs(async (tx) => {
+      const [snapshot, policy] = [
+        await readPokerAccessSnapshot(tx, { userId }),
+        await readPokerAccessPolicy(tx)
+      ];
+      if (!snapshot || !policy) return null;
+      return {
+        ...snapshot,
+        policy,
+        slowThresholdCh: policy.slowThresholdCh,
+        slowHysteresisBps: policy.slowHysteresisBps,
+        slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
+        policyRevision: policy.revision
+      };
+    });
+    if (!access) return null;
+    if (activePokerAccessMutations.has(userId)
+      || (pokerAccessMutationGenerationByUser.get(userId) || 0) !== capturedGeneration) {
+      return null;
+    }
+    connState.pokerAccess = access;
+    if (typeof tableManager.cachePokerAccessForUser === "function") {
+      tableManager.cachePokerAccessForUser(
+        userId,
+        access,
+        access.policy,
+        Date.now()
+      );
+    }
+    sendPokerAccessFrame(ws, connState, access, { requestId, reason });
+    return access;
+  } catch (error) {
+    klogSafe("ws_poker_access_refresh_failed", { code: error?.code || "access_refresh_failed" });
+    return null;
+  }
+}
+
+async function mutatePokerAccessForUser({ userId, override, expectedRevision, actorId } = {}) {
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (!isUuid(normalizedUserId)) {
+    return { ok: false, statusCode: 400, reason: "invalid_user_id", failClosed: false };
+  }
+  const normalizedOverride = normalizeAccessOverride(override);
+  if (!normalizedOverride || !ACCESS_OVERRIDES.includes(normalizedOverride)) {
+    return { ok: false, statusCode: 400, reason: "invalid_override", failClosed: false };
+  }
+  const parsedExpectedRevision = Number(expectedRevision);
+  if (!Number.isSafeInteger(parsedExpectedRevision) || parsedExpectedRevision <= 0 || parsedExpectedRevision >= Number.MAX_SAFE_INTEGER) {
+    return { ok: false, statusCode: 400, reason: "invalid_expected_revision", failClosed: false };
+  }
+  const normalizedActorId = typeof actorId === "string" && isUuid(actorId.trim()) ? actorId.trim() : null;
+  if (!normalizedActorId) {
+    return { ok: false, statusCode: 400, reason: "invalid_actor_id", failClosed: false };
+  }
+
+  if (activePokerAccessMutations.has(normalizedUserId)) {
+    return {
+      ok: false,
+      statusCode: 409,
+      reason: "poker_access_mutation_in_progress",
+      failClosed: true
+    };
+  }
+
+  pokerAccessMutationGenerationByUser.set(
+    normalizedUserId,
+    (pokerAccessMutationGenerationByUser.get(normalizedUserId) || 0) + 1
+  );
+  activePokerAccessMutations.add(normalizedUserId);
+  tableManager.setPokerAccessMutationFailClosed?.(normalizedUserId, true);
+  for (const socket of sessionStore.connectionsForUser(normalizedUserId) || []) {
+    const state = socket?.__connState;
+    if (state && state.session?.identityMode !== "guest") state.pokerAccess = null;
+  }
+
+  try {
+    if (!hasSupabaseDbUrl) {
+      return { ok: false, statusCode: 503, reason: "database_unavailable", failClosed: false };
+    }
+    const beginSqlWs = await loadBeginSqlWs();
+    const committed = await beginSqlWs(async (tx) => {
+      if (!await hasPokerPoolSchema(tx)) {
+        const error = new Error("poker_access_schema_unavailable");
+        error.code = "poker_access_schema_unavailable";
+        error.statusCode = 409;
+        throw error;
+      }
+      const rows = await tx.unsafe(`
+select user_id, poker_auto_class, poker_access_override, poker_access_revision,
+       poker_auto_slow_at, poker_access_updated_at, poker_access_updated_by
+  from public.chips_accounts
+ where user_id = $1::uuid and account_type = 'USER'
+   for update;
+`, [normalizedUserId]);
+      if (!rows?.[0]) {
+        const error = new Error("user_not_found");
+        error.code = "user_not_found";
+        error.statusCode = 404;
+        throw error;
+      }
+      if (Number(rows[0].poker_access_revision) !== parsedExpectedRevision) {
+        const error = new Error("stale_revision");
+        error.code = "stale_revision";
+        error.statusCode = 409;
+        throw error;
+      }
+      const updated = await tx.unsafe(`
+update public.chips_accounts
+   set poker_access_override = $2,
+       poker_access_revision = poker_access_revision + 1,
+       poker_access_updated_at = timezone('utc', now()),
+       poker_access_updated_by = $3::uuid
+ where user_id = $1::uuid and account_type = 'USER'
+returning user_id, poker_auto_class, poker_access_override, poker_access_revision,
+          poker_auto_slow_at, poker_access_updated_at, poker_access_updated_by;
+`, [normalizedUserId, normalizedOverride, normalizedActorId]);
+      if (!updated?.[0]) {
+        const error = new Error("mutation_failed");
+        error.code = "mutation_failed";
+        error.statusCode = 500;
+        throw error;
+      }
+      const snapshot = normalizeAccessSnapshot(updated[0]);
+      if (!snapshot) {
+        const error = new Error("invalid_snapshot");
+        error.code = "invalid_snapshot";
+        error.statusCode = 500;
+        throw error;
+      }
+      const policy = await readPokerAccessPolicy(tx);
+      const access = {
+        ...snapshot,
+        policy,
+        slowThresholdCh: policy.slowThresholdCh,
+        slowHysteresisBps: policy.slowHysteresisBps,
+        slowRecoveryThresholdCh: policy.slowRecoveryThresholdCh,
+        policyRevision: policy.revision
+      };
+      let slowOnlyTableIds = [];
+      if (access.effectiveClass === "SLOW") {
+        slowOnlyTableIds = await persistAuthoritativeSlowOnlyForUser(tx, {
+          userId: normalizedUserId,
+          schemaBacked: access.schemaBacked,
+          effectiveClass: access.effectiveClass
+        });
+      }
+      return { access, slowOnlyTableIds };
+    });
+
+    if (committed?.slowOnlyTableIds?.length > 0) {
+      tableManager.markSlowOnlyTables?.(committed.slowOnlyTableIds);
+    }
+    const access = committed.access;
+    tableManager.cachePokerAccessForUser(normalizedUserId, access, access.policy, Date.now());
+
+    for (const socket of sessionStore.connectionsForUser(normalizedUserId) || []) {
+      const state = socket?.__connState;
+      if (!state || state.session?.identityMode === "guest") continue;
+      state.pokerAccess = access;
+      try {
+        sendPokerAccessFrame(socket, state, access, { reason: "admin_mutation" });
+      } catch (err) {
+        klogSafe("ws_poker_access_frame_send_failed", {
+          userId: normalizedUserId,
+          error: err?.message || "frame_send_failed"
+        });
+      }
+    }
+
+    tableManager.setPokerAccessMutationFailClosed?.(normalizedUserId, false);
+
+    return {
+      ok: true,
+      statusCode: 200,
+      userId: normalizedUserId,
+      revision: access.revision,
+      override: access.override,
+      automaticClass: access.automaticClass,
+      effectiveClass: access.effectiveClass,
+      failClosed: false,
+      slowOnlyTableIds: committed.slowOnlyTableIds,
+      access
+    };
+  } catch (error) {
+    const code = error?.code || "access_mutation_failed";
+    const statusCode = error?.statusCode || (code === "stale_revision" || code === "poker_access_schema_unavailable" ? 409 : (code === "user_not_found" ? 404 : 503));
+    klogSafe("ws_poker_access_mutation_failed", { userId: normalizedUserId, code, statusCode, message: error?.message, stack: error?.stack });
+    return {
+      ok: false,
+      statusCode,
+      reason: code,
+      failClosed: false
+    };
+  } finally {
+    pokerAccessMutationGenerationByUser.set(
+      normalizedUserId,
+      (pokerAccessMutationGenerationByUser.get(normalizedUserId) || 0) + 1
+    );
+    activePokerAccessMutations.delete(normalizedUserId);
+    tableManager.setPokerAccessMutationFailClosed?.(normalizedUserId, false);
+  }
+}
+
+function broadcastPokerAccessTransition(userId, transition) {
+  if (typeof userId !== "string" || !userId.trim() || !transition) return;
+  const revision = Number(transition.expectedRevision) + 1;
+  if (!Number.isSafeInteger(revision) || revision <= 0) return;
+  for (const socket of sessionStore.connectionsForUser(userId) || []) {
+    const state = socket?.__connState;
+    if (!state) continue;
+    const current = state.pokerAccess || {};
+    const access = {
+      ...current,
+      automaticClass: "SLOW",
+      override: transition.override || current.override || "AUTO",
+      effectiveClass: ["NORMAL", "SLOW", "RESTRICTED"].includes(transition.effectiveClass)
+        ? transition.effectiveClass
+        : "SLOW",
+      revision,
+      loadedAtMs: Date.now(),
+      expiresAtMs: Date.now() + 30_000
+    };
+    state.pokerAccess = access;
+    sendPokerAccessFrame(socket, state, access, { reason: "settled_transition" });
+  }
+}
+
+let settledBotFundingSnapshot = null;
+
+async function refreshActivePokerAccess() {
+  if (!hasSupabaseDbUrl) return;
+  const normalizedUserIds = buildPokerAccessRefreshCandidates({
+    activeUserIds: sessionStore.activeUserIds?.() || [],
+    seatedUserIds: tableManager.activeHumanUserIds?.({ limit: 512 }) || [],
+    limit: 512
+  });
+  const capturedGenerations = new Map(
+    normalizedUserIds.map((userId) => [userId, pokerAccessMutationGenerationByUser.get(userId) || 0])
+  );
+  try {
+    const beginSqlWs = await loadBeginSqlWs();
+    const refreshed = await beginSqlWs(async (tx) => {
+      const buyIns = [...new Set(tableManager.listTableIds().map((tableId) => tableManager.tableMeta(tableId)?.buyIn))];
+      const funding = await readSettledBotFundingSnapshot(tx, { buyIns });
+      const policy = await readPokerAccessPolicy(tx);
+      const snapshots = await readPokerAccessSnapshots(tx, { userIds: normalizedUserIds });
+      const slowOnlyTableIdsByUser = new Map();
+      for (const [userId, snapshot] of snapshots.entries()) {
+        const tableIds = await persistAuthoritativeSlowOnlyForUser(tx, {
+          userId,
+          schemaBacked: snapshot.schemaBacked,
+          effectiveClass: snapshot.effectiveClass
+        });
+        if (tableIds.length > 0) slowOnlyTableIdsByUser.set(userId, tableIds);
+      }
+      return { policy, snapshots, funding, slowOnlyTableIdsByUser };
+    });
+    settledBotFundingSnapshot = refreshed?.funding || null;
+    if (!refreshed?.policy || !(refreshed.snapshots instanceof Map)) return;
+    for (const [userId, snapshot] of refreshed.snapshots.entries()) {
+      if (activePokerAccessMutations.has(userId)) continue;
+      if ((pokerAccessMutationGenerationByUser.get(userId) || 0) !== (capturedGenerations.get(userId) || 0)) {
+        continue;
+      }
+      const access = {
+        ...snapshot,
+        policy: refreshed.policy,
+        slowThresholdCh: refreshed.policy.slowThresholdCh,
+        slowHysteresisBps: refreshed.policy.slowHysteresisBps,
+        slowRecoveryThresholdCh: refreshed.policy.slowRecoveryThresholdCh,
+        policyRevision: refreshed.policy.revision,
+      };
+      const slowOnlyTableIds = refreshed.slowOnlyTableIdsByUser instanceof Map
+        ? refreshed.slowOnlyTableIdsByUser.get(userId) || []
+        : [];
+      if (slowOnlyTableIds.length > 0) tableManager.markSlowOnlyTables?.(slowOnlyTableIds);
+      tableManager.cachePokerAccessForUser(userId, access, refreshed.policy, Date.now());
+      for (const socket of sessionStore.connectionsForUser(userId) || []) {
+        const state = socket?.__connState;
+        if (!state || state.session?.identityMode === "guest") continue;
+        state.pokerAccess = access;
+        sendPokerAccessFrame(socket, state, access, { reason: "interval_refresh" });
+      }
+    }
+  } catch (error) {
+    klogSafe("ws_poker_access_refresh_failed", { code: error?.code || "access_refresh_failed" });
+  }
 }
 
 function resolvePositiveInt(rawValue, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
@@ -836,6 +1208,14 @@ const terminalJanitorSuppressionSummaryTimer = setInterval(() => {
   flushSuppressedTerminalJanitorSummary();
 }, 60_000);
 terminalJanitorSuppressionSummaryTimer.unref();
+
+const pokerAccessRefreshTimer = setInterval(() => {
+  void refreshActivePokerAccess().catch((error) => {
+    klogSafe("ws_poker_access_refresh_sweep_failed", { code: error?.code || "access_refresh_sweep_failed" });
+  });
+}, 25_000);
+pokerAccessRefreshTimer.unref();
+void refreshActivePokerAccess();
 
 function loadReleaseMetadata() {
   const fallback = {
@@ -1337,6 +1717,7 @@ function buildLobbyTableEntry(tableId) {
     return null;
   }
   const humanCount = seats.filter((seat) => seat?.isBot !== true).length;
+  const botCount = seats.filter((seat) => seat?.isBot === true).length;
   return {
     id: tableId,
     tableId,
@@ -1349,7 +1730,10 @@ function buildLobbyTableEntry(tableId) {
     buyIn: tableMeta?.buyIn ?? null,
     maxPlayers,
     seatCount: seats.length,
-    humanCount
+    humanCount,
+    botCount,
+    lifecycleKind: tableMeta?.lifecycleKind || null,
+    slowOnly: tableMeta?.isSlowOnly === true
   };
 }
 
@@ -1673,6 +2057,8 @@ async function persistMutatedState({
   replacementFundings = undefined,
   managedBotTopUps = undefined,
   humanStackUpdates = undefined,
+  settledAccessTransitions = undefined,
+  tableMarkerTransition = false,
   replacementFundingSystemKey = null,
   durableActionRequest = null,
   deferRuntimeVersionUpdate = false
@@ -1682,7 +2068,9 @@ async function persistMutatedState({
   }
   if (!persistedStateWriter) {
     if ((Array.isArray(replacementFundings) && replacementFundings.length > 0)
-      || (Array.isArray(managedBotTopUps) && managedBotTopUps.length > 0)) {
+      || (Array.isArray(managedBotTopUps) && managedBotTopUps.length > 0)
+      || (Array.isArray(settledAccessTransitions) && settledAccessTransitions.length > 0)
+      || tableMarkerTransition === true) {
       return { ok: false, reason: "persistence_required" };
     }
     if (process.env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON && Array.isArray(humanStackUpdates)) {
@@ -1720,6 +2108,8 @@ async function persistMutatedState({
     replacementFundings,
     managedBotTopUps,
     humanStackUpdates,
+    settledAccessTransitions,
+    tableMarkerTransition,
     botFundingSystemKey: replacementFundingSystemKey,
     durableActionRequest
   });
@@ -2176,7 +2566,7 @@ function scheduleSettledRolloverRetry({ tableId, generationKey, attempt }) {
 async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }) {
   const rolloverStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_settled_rollover_start", { tableId }) ? Date.now() : null;
   const finishSettledRollover = (result) => {
-    klogVerbose("ws_settled_rollover_outcome", () => ({
+    klogSafe("ws_settled_rollover_outcome", {
       tableId,
       attempt,
       ok: result?.ok !== false,
@@ -2184,7 +2574,7 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       closed: result?.closed === true,
       reason: result?.reason || result?.code || result?.status || (result?.changed === true ? "changed" : "unchanged"),
       durationMs: Math.max(0, Date.now() - rolloverStartedAtMs)
-    }), { tableId });
+    });
     return result;
   };
   let pokerState = tableManager.persistedPokerState(tableId);
@@ -2273,11 +2663,47 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
     return finishSettledRollover({ ok: false, changed: false, reason: "managed_profile_unavailable" });
   }
+  const isGuest = isGuestTableId(tableId);
+  const requiresDbState = Boolean(hasSupabaseDbUrl && !isGuest);
+  const settledAccessStatus = requiresDbState && typeof tableManager.settledAccessStatus === "function"
+    ? tableManager.settledAccessStatus(tableId, { nowMs: Date.now() })
+    : { known: true, transitions: [], effectiveRestricted: false };
+  if (settledAccessStatus.known !== true) {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    return finishSettledRollover({
+      ok: true,
+      changed: false,
+      retryable: true,
+      reason: settledAccessStatus.reason || "access_cache_unknown"
+    });
+  }
+  const fundingOptions = {
+    snapshot: requiresDbState ? settledBotFundingSnapshot : { schemaBacked: false, expiresAtMs: Number.MAX_SAFE_INTEGER },
+    ...tableMeta,
+    legacySystemKey: legacyBotFundingSystemKey,
+    nowMs: Date.now()
+  };
+  const fundingDecision = decideSettledBotFunding({
+    ...fundingOptions,
+    effectiveRestricted: settledAccessStatus.effectiveRestricted
+  });
+  if (fundingDecision.known !== true) {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    return finishSettledRollover({
+      ok: true,
+      changed: false,
+      retryable: true,
+      reason: fundingDecision.reason || "funding_unknown"
+    });
+  }
+  const allowBotFunding = settledAccessStatus.effectiveRestricted !== true
+    && fundingDecision.allowed === true;
   const prepared = tableManager.prepareSettledHandRollover({
     tableId,
     nowMs: Date.now(),
     allowManagedBotsOnly: managedContinuousTable,
-    managedBotProfile
+    managedBotProfile,
+    allowBotFunding
   });
   if (!prepared?.ok || !prepared.changed) {
     return finishSettledRollover(prepared);
@@ -2293,12 +2719,16 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     replacementFundings: prepared.replacementFundings,
     managedBotTopUps: prepared.managedBotTopUps,
     humanStackUpdates: prepared.humanStackUpdates,
-    replacementFundingSystemKey: getBotFundingSystemKeyForBuyIn(tableMeta?.buyIn, {
-      legacySystemKey: legacyBotFundingSystemKey
+    settledAccessTransitions: prepared.settledAccessTransitions,
+    tableMarkerTransition: prepared.tableMarkerTransition,
+    replacementFundingSystemKey: resolveSettledBotFundingSystemKey({
+      ...fundingOptions,
+      tableMarkerTransition: prepared.tableMarkerTransition,
+      effectiveRestricted: settledAccessStatus.effectiveRestricted
     }),
     deferRuntimeVersionUpdate: true
   });
-  if (persisted?.reason === "bot_bounded_bankroll_exhausted" && Number(tableMeta?.buyIn) === 500) {
+  if (persisted?.reason === "bot_bounded_bankroll_exhausted") {
     clearSettledRolloverTimer(tableId);
     const restoredAfterFundingFailure = await restoreTableFromPersisted(tableId);
     if (!restoredAfterFundingFailure?.ok) {
@@ -2323,6 +2753,8 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       replacementFundings: [],
       managedBotTopUps: [],
       humanStackUpdates: fallbackPrepared.humanStackUpdates,
+      settledAccessTransitions: fallbackPrepared.settledAccessTransitions,
+      tableMarkerTransition: fallbackPrepared.tableMarkerTransition,
       replacementFundingSystemKey: null,
       deferRuntimeVersionUpdate: true
     });
@@ -2407,7 +2839,10 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     replacementFundings: prepared.replacementFundings,
     managedBotTopUps: prepared.managedBotTopUps,
     managedBotProfile,
+    allowBotFunding: prepared.allowBotFunding !== false,
     humanStackUpdates: prepared.humanStackUpdates,
+    settledAccessTransitions: prepared.settledAccessTransitions,
+    tableMarkerTransition: prepared.tableMarkerTransition,
     persistenceReceipt: persisted,
     nowMs: Date.now()
   });
@@ -2423,6 +2858,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
   }
 
   tableManager.setPersistedStateVersion(tableId, persisted.newVersion);
+  for (const transition of prepared.settledAccessTransitions || []) {
+    broadcastPokerAccessTransition(transition.userId, transition);
+  }
   broadcastStateSnapshots(tableId);
   try {
     scheduleBotStep({ tableId, trigger: "settled_rollover", requestId: null, frameTs: null });
@@ -4184,6 +4622,47 @@ async function handleInternalAccountPoker(req, res) {
   }
 }
 
+async function handleInternalPokerAccessRefresh(req, res) {
+  if (req.method !== "POST") {
+    sendInternalJson(res, 405, { error: "method_not_allowed" });
+    return;
+  }
+  if (!internalRuntimeToken) {
+    sendInternalJson(res, 503, { error: "internal_runtime_token_missing" });
+    return;
+  }
+  const authHeader = typeof req.headers?.authorization === "string" ? req.headers.authorization.trim() : "";
+  if (authHeader !== `Bearer ${internalRuntimeToken}`) {
+    sendInternalJson(res, 401, { error: "unauthorized" });
+    return;
+  }
+  try {
+    const payload = await readJsonBody(req, { maxBytes: 2_048 });
+    const userId = typeof payload?.userId === "string" ? payload.userId.trim() : "";
+    if (!isUuid(userId)) {
+      sendInternalJson(res, 400, { error: "invalid_user_id", reason: "invalid_user_id" });
+      return;
+    }
+    const result = await mutatePokerAccessForUser({
+      userId,
+      override: payload?.override,
+      expectedRevision: payload?.expectedRevision ?? payload?.expected_revision,
+      actorId: payload?.actorId || payload?.actor_id
+    });
+    const requestedStatus = Number(result?.statusCode);
+    const statusCode = result.ok === true
+      ? 200
+      : Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus < 600
+        ? requestedStatus
+        : 503;
+    const { statusCode: _statusCode, ...response } = result;
+    sendInternalJson(res, statusCode, { ...response, phase: "mutate", userId });
+  } catch (error) {
+    const code = error?.code || (error instanceof SyntaxError ? "invalid_json" : "access_mutation_failed");
+    sendInternalJson(res, code === "invalid_json" ? 400 : 503, { error: code, reason: code });
+  }
+}
+
 async function handleHttpRequest(req, res) {
   if (req.url === "/healthz") {
     res.writeHead(200, {
@@ -4217,6 +4696,10 @@ async function handleHttpRequest(req, res) {
   const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
   if (requestUrl.pathname === "/internal/account/poker") {
     await handleInternalAccountPoker(req, res);
+    return;
+  }
+  if (requestUrl.pathname === "/internal/admin/poker-access-refresh") {
+    await handleInternalPokerAccessRefresh(req, res);
     return;
   }
   if (requestUrl.pathname === "/internal/admin/vps-metrics") {
@@ -4387,6 +4870,10 @@ wss.on("connection", (ws) => {
       sendFrame(ws, response.frame);
       if (response.frame.type === "authOk" && connState.session.userId) {
         sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
+        await refreshConnectionPokerAccess(ws, connState, {
+          requestId: frame.requestId ?? null,
+          reason: "auth_refresh"
+        });
       }
       return;
     }
@@ -4589,6 +5076,10 @@ wss.on("connection", (ws) => {
     if (frame.type === "lobby_subscribe") {
       sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
       lobbySubscribers.add(ws);
+      await refreshConnectionPokerAccess(ws, connState, {
+        requestId: frame.requestId ?? null,
+        reason: "lobby_refresh"
+      });
       syncLobbyRegistry();
       sendLobbySnapshot(ws, connState, { requestId: frame.requestId ?? null });
       return;
@@ -4729,6 +5220,28 @@ wss.on("connection", (ws) => {
           observeOnlyJoinEnabled,
           persistedBootstrapEnabled,
           loadAuthoritativeJoinExecutor,
+          sendPokerAccess: (socket, state, access, options = {}) => {
+            state.pokerAccess = {
+              ...access,
+              loadedAtMs: Number(access?.loadedAtMs || Date.now()),
+              expiresAtMs: Number(access?.expiresAtMs || Date.now() + 30_000),
+              policy: Number.isSafeInteger(Number(access?.slowThresholdCh))
+                ? {
+                    slowThresholdCh: Number(access.slowThresholdCh),
+                    ...(Number.isSafeInteger(Number(access?.slowHysteresisBps))
+                      ? { slowHysteresisBps: Number(access.slowHysteresisBps) }
+                      : {}),
+                    ...(Number.isSafeInteger(Number(access?.slowRecoveryThresholdCh))
+                      ? { slowRecoveryThresholdCh: Number(access.slowRecoveryThresholdCh) }
+                      : {}),
+                    revision: Number(access.policyRevision || 1),
+                    loadedAtMs: Number(access.loadedAtMs || Date.now()),
+                    expiresAtMs: Number(access.expiresAtMs || Date.now() + 30_000)
+                  }
+                : null
+            };
+            sendPokerAccessFrame(socket, state, state.pokerAccess, options);
+          },
           scheduleBotStep,
           klog: klogSafe,
           klogVerbose,

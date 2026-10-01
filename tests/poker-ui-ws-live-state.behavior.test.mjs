@@ -39,6 +39,8 @@ const sandbox = {
   JSON,
   Date,
   Math,
+  setInterval: () => ({ unref() {} }),
+  clearInterval: () => {},
 };
 
 sandbox.window.fetch = sandbox.fetch;

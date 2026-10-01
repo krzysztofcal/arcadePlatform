@@ -1,3 +1,4 @@
+import { hasPokerPoolSchema, readPokerAccessSnapshot } from "../../shared/poker-domain/bot-access.mjs";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { checkWsBuyInCapability } from "./_shared/poker-ws-runtime-notify.mjs";
 import { isConfiguredPokerBuyIn, readPokerProgression } from "../../shared/poker-domain/poker-progression.mjs";
@@ -37,7 +38,7 @@ where t.status = 'OPEN'
 
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
-    "select id, status, buy_in, stakes from public.poker_tables where id = $1 limit 1;",
+    `select id, status, buy_in, stakes, lifecycle_kind${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
     [tableId]
   );
   const table = rows?.[0] || null;
@@ -56,6 +57,11 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
   if (seatRows?.length) {
     return { tableId, buyIn: normalizedBuyIn, allowed: true, rejoin: true, reason: "rejoin" };
   }
+  if (progression.pokerAccess?.effectiveClass !== "NORMAL" && progression.pokerAccess?.effectiveClass !== "SLOW") {
+    if (progression.pokerAccess?.effectiveClass !== "RESTRICTED") {
+      return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "poker_access_unavailable" };
+    }
+  }
   if (!normalizedBuyIn || !isConfiguredPokerBuyIn(normalizedBuyIn, progression?.tiers?.map((tier) => tier.buyIn) || [])) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: "invalid_buy_in" };
   }
@@ -65,7 +71,33 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
   if (!progression.availableBuyIns.includes(normalizedBuyIn)) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "buy_in_tier_locked" };
   }
+  if (progression.pokerAccess?.effectiveClass === "NORMAL" && table.is_slow_only === true) {
+    return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "normal_table_required" };
+  }
+  if (progression.pokerAccess?.effectiveClass === "SLOW" && table.is_slow_only !== true) {
+    return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "slow_only_table_required" };
+  }
+  if (progression.pokerAccess?.effectiveClass === "RESTRICTED") {
+    const occupancyRows = await tx.unsafe(
+      `select count(*) filter (where status = 'ACTIVE' and coalesce(is_bot, false) = true)::int as bot_count
+         from public.poker_seats
+        where table_id = $1;`,
+      [tableId]
+    );
+    if (String(table.lifecycle_kind || "STANDARD").toUpperCase() !== "STANDARD"
+      || table.is_slow_only === true
+      || Number(occupancyRows?.[0]?.bot_count || 0) > 0) {
+      return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "restricted_table_required" };
+    }
+  }
   return { tableId, buyIn: normalizedBuyIn, allowed: true, rejoin: false, reason: "available" };
+}
+
+async function readPokerAccess(tx, userId) {
+  const snapshot = await readPokerAccessSnapshot(tx, { userId });
+  if (!snapshot) return { automaticClass: null, override: null, effectiveClass: "UNKNOWN", revision: null, automaticSlowAt: null };
+  const { automaticClass, override, effectiveClass, revision, automaticSlowAt } = snapshot;
+  return { automaticClass, override, effectiveClass, revision, automaticSlowAt };
 }
 
 export async function handler(event) {
@@ -94,6 +126,8 @@ export async function handler(event) {
     const tableId = requestedTableId(event);
     const result = await beginSql(async (tx) => {
       const progression = await readPokerProgression(tx, { userId: auth.userId });
+      const pokerAccess = await readPokerAccess(tx, auth.userId);
+      progression.pokerAccess = pokerAccess;
       const rejoinableTableIds = await readRejoinableTableIds(tx, auth.userId);
       const tableAccess = tableId
         ? await readTableAccess(tx, { userId: auth.userId, tableId, progression })

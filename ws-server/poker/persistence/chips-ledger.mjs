@@ -279,12 +279,11 @@ async function runTableBuyIn(sqlTx, {
     }
   }
 
-  await sqlTx.unsafe("savepoint chips_idempotency_attempt;");
-  const runNewTransaction = async () => {
+  const runNewTransaction = async (activeTx = sqlTx) => {
     const userIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId))];
     const userAccountById = new Map();
     for (const accountUserId of userIds) {
-      userAccountById.set(accountUserId, await getOrCreateUserAccount(sqlTx, accountUserId));
+      userAccountById.set(accountUserId, await getOrCreateUserAccount(activeTx, accountUserId));
     }
 
     const entryRecords = normalizedEntries.map((entry) => {
@@ -301,7 +300,7 @@ async function runTableBuyIn(sqlTx, {
     const safeMetadataJson = JSON.stringify(metadata);
     const entriesPayload = JSON.stringify(entryRecords);
 
-  const txRows = await sqlTx.unsafe(
+  const txRows = await activeTx.unsafe(
     `
 insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
 values ($1, $2, ($3::text)::jsonb, $4, $5, $6, $7, $8)
@@ -314,7 +313,7 @@ returning *;
     throw new Error("Failed to insert transaction row");
   }
 
-  const applyResult = await sqlTx.unsafe(
+  const applyResult = await activeTx.unsafe(
     `
 with input_entries as (
   select v.account_id, v.amount, coalesce(v.metadata, '{}'::jsonb) as metadata
@@ -379,7 +378,7 @@ select
     throw error;
   }
 
-  const entryRows = await sqlTx.unsafe(
+  const entryRows = await activeTx.unsafe(
     `
 with input_entries as (
   select v.account_id, v.amount, coalesce(v.metadata, '{}'::jsonb) as metadata
@@ -404,7 +403,7 @@ from inserted i;
     throw error;
   }
 
-    const registryRows = await sqlTx.unsafe(`
+    const registryRows = await activeTx.unsafe(`
 select idempotency_key
 from public.chips_transaction_idempotency
 where idempotency_key = $1
@@ -423,14 +422,29 @@ limit 1;
     };
   };
 
+  const executeAttempt = async () => {
+    if (typeof sqlTx.savepoint === "function") {
+      return await sqlTx.savepoint("chips_idempotency_attempt", async (spTx) => {
+        if (sqlTx?.klog && !spTx.klog) spTx.klog = sqlTx.klog;
+        return await runNewTransaction(spTx);
+      });
+    }
+    await sqlTx.unsafe("savepoint chips_idempotency_attempt;");
+    try {
+      const result = await runNewTransaction(sqlTx);
+      await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
+      return result;
+    } catch (attemptError) {
+      await sqlTx.unsafe("rollback to savepoint chips_idempotency_attempt;");
+      await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
+      throw attemptError;
+    }
+  };
+
   try {
-    const result = await runNewTransaction();
-    await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
-    return result;
+    return await executeAttempt();
   } catch (error) {
     if (!isIdempotencyUniqueError(error)) throw error;
-    await sqlTx.unsafe("rollback to savepoint chips_idempotency_attempt;");
-    await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
     const authoritativeRecord = await findIdempotencyRecord(sqlTx, idempotencyKey);
     if (!authoritativeRecord) throw error;
     return resolveIdempotentReplay(sqlTx, authoritativeRecord, {

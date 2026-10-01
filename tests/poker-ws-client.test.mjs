@@ -10,6 +10,7 @@ function loadClientHarness(options = {}){
   const statuses = [];
   const snapshots = [];
   const lobbySnapshots = [];
+  const accessFrames = [];
   const reactions = [];
   const protocolErrors = [];
   let fetchCalls = [];
@@ -78,11 +79,12 @@ function loadClientHarness(options = {}){
     onStatus: (status, data) => statuses.push({ status, data }),
     onSnapshot: (snapshot) => snapshots.push(snapshot),
     onLobbySnapshot: (snapshot) => lobbySnapshots.push(snapshot),
+    onAccess: (access) => accessFrames.push(access),
     onReaction: (reaction) => reactions.push(reaction),
     onProtocolError: (info) => protocolErrors.push(info)
   }, options.clientOptions || {}));
 
-  return { client, FakeWebSocket, sentFrames, logs, statuses, snapshots, lobbySnapshots, reactions, protocolErrors, getFetchCalls: () => fetchCalls };
+  return { client, FakeWebSocket, sentFrames, logs, statuses, snapshots, lobbySnapshots, accessFrames, reactions, protocolErrors, getFetchCalls: () => fetchCalls };
 }
 
 function getLogEntries(logs, kind){
@@ -147,6 +149,18 @@ test('poker ws client bootstraps hello -> auth -> snapshot once', async () => {
   const logDump = JSON.stringify(h.logs);
   assert.equal(logDump.includes('minted_token_value'), false);
   assert.equal(logDump.includes('supabase_token_value'), false);
+});
+
+test('poker ws client delivers self-only poker access frames without treating them as table snapshots', () => {
+  const h = loadClientHarness();
+  h.client.start();
+  const ws = h.FakeWebSocket.instances[0];
+  ws.open();
+  ws.message({ type: 'poker_access', payload: { effectiveClass: 'SLOW', automaticClass: 'SLOW', override: 'FORCE_NORMAL', revision: 8 } });
+  assert.equal(h.accessFrames.length, 1);
+  assert.equal(h.accessFrames[0].kind, 'poker_access');
+  assert.equal(h.accessFrames[0].payload.effectiveClass, 'SLOW');
+  assert.equal(h.snapshots.length, 0);
 });
 
 

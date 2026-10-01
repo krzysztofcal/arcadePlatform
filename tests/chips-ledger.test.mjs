@@ -861,6 +861,46 @@ describe("chips ledger idempotency and validation", () => {
     ).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
   });
 
+  it("rejects every system-only MINT, including the former scheduled refill shape", async () => {
+    const { postTransaction } = await loadLedger();
+    const formerRefillShapes = [
+      {
+        idempotencyKey: "poker-refill-normal-500",
+        metadata: {
+          purpose: "poker_pool_refill", bankrollSystemKey: "POKER_BOT_BANKROLL",
+          buyIn: 500, poolClass: "NORMAL", policyRevision: 1,
+          bucket: "2026-09-27T06:00:00.000Z",
+        },
+        entries: [
+          { accountType: "SYSTEM", systemKey: "GENESIS", amount: -25 },
+          { accountType: "SYSTEM", systemKey: "POKER_BOT_BANKROLL", amount: 25 },
+        ],
+      },
+      {
+        idempotencyKey: "poker-refill-slow-max",
+        metadata: {
+          purpose: "poker_pool_refill", bankrollSystemKey: "POKER_BOT_SLOW_BANKROLL_10000000",
+          buyIn: 10_000_000, poolClass: "SLOW", policyRevision: 1,
+          bucket: "2026-09-27T06:00:00.000Z",
+        },
+        entries: [
+          { accountType: "SYSTEM", systemKey: "GENESIS", amount: -100 },
+          { accountType: "SYSTEM", systemKey: "POKER_BOT_SLOW_BANKROLL_10000000", amount: 100 },
+        ],
+      },
+    ];
+    for (const payload of formerRefillShapes) {
+      await expect(postTransaction({
+        userId: null,
+        txType: "MINT",
+        trustedScheduledRefill: true,
+        ...payload,
+      })).rejects.toMatchObject({ code: "missing_user_entry", status: 400 });
+    }
+    expect(mockDb.transactions.size).toBe(0);
+    expect(mockDb.entries).toHaveLength(0);
+  });
+
   it("uses explicit USER entry userId when provided", async () => {
     const { postTransaction } = await loadLedger();
     await postTransaction({

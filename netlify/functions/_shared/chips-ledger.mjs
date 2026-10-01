@@ -862,6 +862,7 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
   }
   const payloadUserIdNormalized = String(payloadUserId == null ? "" : payloadUserId).trim();
   const createdByNormalized = String(createdBy == null ? "" : createdBy).trim();
+  const entryKind = (entry) => entry?.accountType || entry?.kind;
   const allowEscrowOnlyTableBuyIn =
     !hasUserEntry &&
     txType === "TABLE_BUY_IN" &&
@@ -894,7 +895,10 @@ function validateEntries(entries, payloadUserId, { txType = null, createdBy = nu
   if (!hasUserEntry && txType === "TABLE_CASH_OUT" && !allowEscrowOnlyTableCashOut) {
     throw badRequest("invalid_escrow_only_entries", "Escrow-only TABLE_CASH_OUT requires ESCROW(-) and SYSTEM(+) strict shape");
   }
-  if (!hasUserEntry && txType !== "TABLE_BUY_IN" && txType !== "TABLE_CASH_OUT") {
+  if (!hasUserEntry && txType === "MINT") {
+    throw badRequest("missing_user_entry", "System-only MINT is not authorized through the application ledger");
+  }
+  if (!hasUserEntry && txType !== "TABLE_BUY_IN" && txType !== "TABLE_CASH_OUT" && txType !== "MINT") {
     throw badRequest("missing_user_entry", "Transactions must include the user account");
   }
   return sanitized;
@@ -930,7 +934,10 @@ async function postTransaction({
   }
   const payloadUserId = isUuidLike(payloadUserIdRaw) ? payloadUserIdRaw : "";
 
-  const normalizedEntries = validateEntries(entries, payloadUserId, { txType, createdBy });
+  const normalizedEntries = validateEntries(entries, payloadUserId, {
+    txType,
+    createdBy,
+  });
   assertPlainObjectOrNull(metadata, "invalid_metadata");
   const safeMetadata = metadata ?? {};
   let safeMetadataJson = "{}";
@@ -1002,13 +1009,12 @@ async function postTransaction({
   let result;
   let userAccount = null;
   const runInTx = async (sqlTx) => {
-    await sqlTx.unsafe("savepoint chips_idempotency_attempt;");
-    const runNewTransaction = async () => {
-      // IMPORTANT: inside this block use ONLY `sqlTx` for all SQL to keep it atomic.
+    const runNewTransaction = async (activeTx = sqlTx) => {
+      // IMPORTANT: inside this block use ONLY `activeTx` for all SQL to keep it atomic.
       const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
       const userAccountById = new Map();
       for (const userEntryId of userEntryIds) {
-        userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, sqlTx));
+        userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, activeTx));
       }
 
       userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
@@ -1042,7 +1048,7 @@ async function postTransaction({
         throw badRequest("invalid_entry_metadata", "Entry metadata must be JSON-serializable");
       }
 
-      const txRows = await sqlTx`
+      const txRows = await activeTx`
       insert into public.chips_transactions (reference, description, metadata, idempotency_key, payload_hash, tx_type, user_id, created_by)
       values (${reference}, ${description}, (${safeMetadataJson}::text)::jsonb, ${idempotencyKey}, ${payloadHash}, ${txType}, ${payloadUserId || null}, ${createdBy})
       returning *;
@@ -1053,7 +1059,7 @@ async function postTransaction({
         throw new Error("Failed to insert transaction row");
       }
 
-      const applyResult = await sqlTx.unsafe(
+      const applyResult = await activeTx.unsafe(
       `
 with input_entries as (
   select
@@ -1128,7 +1134,7 @@ select
         throw mismatch;
       }
 
-      const entriesResult = await sqlTx.unsafe(
+      const entriesResult = await activeTx.unsafe(
       `
 with input_entries as (
   select
@@ -1166,7 +1172,7 @@ from inserted i;
 
       const shouldLoadUserAccountSnapshot = Boolean(payloadUserId && userAccount?.id);
       const accountRows = shouldLoadUserAccountSnapshot
-        ? await sqlTx`
+        ? await activeTx`
       select id, balance, next_entry_seq
       from public.chips_accounts
       where id = ${userAccount.id}
@@ -1179,22 +1185,37 @@ from inserted i;
         entries: insertedEntries,
         account: accountRows?.[0] || null,
       };
-      const registryRecord = await findIdempotencyRecord(idempotencyKey, sqlTx);
+      const registryRecord = await findIdempotencyRecord(idempotencyKey, activeTx);
       if (!registryRecord) {
         throw idempotencyError("chips_idempotency_registry_missing", "Transaction idempotency registry row is missing");
       }
-      await storeIdempotencyReplay(registryRecord, freshResult, sqlTx);
+      await storeIdempotencyReplay(registryRecord, freshResult, activeTx);
       return freshResult;
     };
 
+    const executeAttempt = async () => {
+      if (typeof sqlTx.savepoint === "function") {
+        return await sqlTx.savepoint("chips_idempotency_attempt", async (spTx) => {
+          if (sqlTx?.klog && !spTx.klog) spTx.klog = sqlTx.klog;
+          return await runNewTransaction(spTx);
+        });
+      }
+      await sqlTx.unsafe("savepoint chips_idempotency_attempt;");
+      try {
+        const freshResult = await runNewTransaction(sqlTx);
+        await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
+        return freshResult;
+      } catch (attemptError) {
+        await sqlTx.unsafe("rollback to savepoint chips_idempotency_attempt;");
+        await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
+        throw attemptError;
+      }
+    };
+
     try {
-      const freshResult = await runNewTransaction();
-      await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
-      return freshResult;
+      return await executeAttempt();
     } catch (error) {
       if (!isIdempotencyUniqueError(error)) throw error;
-      await sqlTx.unsafe("rollback to savepoint chips_idempotency_attempt;");
-      await sqlTx.unsafe("release savepoint chips_idempotency_attempt;");
       const authoritativeRecord = await findIdempotencyRecord(idempotencyKey, sqlTx);
       if (!authoritativeRecord) throw error;
       return resolveIdempotentReplay(authoritativeRecord, {

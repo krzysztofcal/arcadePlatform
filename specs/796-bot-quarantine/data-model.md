@@ -1,0 +1,82 @@
+# Data Model: NORMAL/SLOW per-tier pools with manual RESTRICTED
+
+This is the accepted schema contract implemented by the immutable migration `20260927100000_poker_bot_quarantine_policy.sql`, now applied on shared Stage by DB Stage Apply PR (36310279719: 97→98 applied; 36310527312: 98 applied / 0 pending; both smoke PASS). The manual RESTRICTED amendment adds only forward-only migration `20260927110000_poker_force_restricted.sql`, which extends the existing override CHECK and is classified as awaiting a separate Production equivalent. T027 uses a separate disposable local fixture. Production is not migrated. [Spec](spec.md) and [contracts](contracts/bot-quarantine.md) define behavior. Use existing USER accounts, tables, seats, state and ledger; no new per-user budget, RESTRICTED bankroll, table marker or refill receipt entities.
+
+## 1. Existing chips_accounts USER access fields
+
+| Field | Constraint / meaning |
+| --- | --- |
+| poker_auto_class | NOT NULL, NORMAL or SLOW, default NORMAL; automatic transition only NORMAL→SLOW |
+| poker_access_override | NOT NULL, AUTO/FORCE_NORMAL/FORCE_SLOW/FORCE_RESTRICTED, default AUTO |
+| poker_access_revision | positive bigint, monotonic on actual access mutation |
+| poker_auto_slow_at | nullable timestamp, set on first automatic transition only |
+| poker_access_updated_at / poker_access_updated_by | timestamp and authenticated Admin UUID for manual changes; system transition identifies backend actor, never client-supplied authority |
+
+Fields apply to USER rows; no client-write grants. Effective state is derived, not another stored automatic enum. FORCE_NORMAL→NORMAL; FORCE_SLOW→SLOW; FORCE_RESTRICTED→RESTRICTED; AUTO→automatic NORMAL/SLOW state. Threshold detection still persists automatic NORMAL→SLOW under every override, including FORCE_RESTRICTED; no automatic mechanism can write RESTRICTED. The override affects only effective state and neither blocks nor clears automatic SLOW. Return to AUTO immediately derives effective SLOW from persisted automatic state without a new threshold check. FORCE_NORMAL/FORCE_RESTRICTED never revert `is_slow_only`. Admin writes only override and metadata, never overwrite automatic state. Automatic writes only transition field(s) with revision comparison/locked reconciliation so concurrent overrides survive.
+
+## 2. poker_access_policy (new purpose-specific singleton)
+
+`id=1` primary key/check; `slow_threshold_ch` positive safe-integer CH (1..9007199254740991), initially 1000000000; `revision` positive bigint initially 1, increases on successful change; `updated_at` non-null and `updated_by` authenticated Admin UUID (initial provisioning backend actor). No independent WS environment threshold override. No generic key/value settings API.
+
+Cache representation: value+revision+loadedAt; user snapshots carry automatic/override/revision. Refresh interval and max age 30 seconds, outside settled-hand hot path; batch pending mutation IDs first, including offline/nonseated users, then connected/still-seated IDs (dedupe, limit 512). Admin access Save requires exact synchronous DB+WS confirmation; background refresh is a safety backstop. Unknown/expired values cannot authorize new admissions/funding. Actual transitions may perform needed persistence; unchanged settled hands add no classification DB access.
+
+## 3. Existing poker_tables / participation
+
+Add `is_slow_only boolean NOT NULL DEFAULT false`; backend-only false→true, never revert. Project to `tableMeta.isSlowOnly` and lobby `slowOnly`. Keep existing `STANDARD/CONTINUOUS_BOT`, owner/status/state and one-way `has_human_participant`.
+
+- Active count: distinct nonterminal tables with current human seat/financed participation for user; include disconnected/pending-leave participation until existing leave/cash-out releases it. Rejoin does not insert a new membership/count.
+- Pending count: owned OPEN STANDARD, never accepted human participation (`has_human_participant=false`), no human/bot seats, empty safe initial state, no bot funding history; no historical creation quota. Closed tables excluded.
+- First accepted JOIN atomically creates active participation and sets human marker so pending predicate ceases to match. A denied JOIN leaves seat/buy-in/marker unchanged.
+- SLOW owner promotion needs all pending safety proofs under table/state lock, no ledger/source history ambiguity and no managed lifecycle; it occurs with accepted fresh admission, not Create. Empty with past funding does not qualify.
+- Both cap values are fixed V1 constants 4; no Admin tuning or stored counters. The limits apply independently of NORMAL/SLOW/RESTRICTED class, so pending `OPEN` `STANDARD` tables include both ordinary and already-promoted `is_slow_only` tables. Shared `pg_advisory_xact_lock` key derives identically from `poker-table-slots:v1` and canonical user UUID. Hash collision can only serialize extra users, never skip validation. Acquire before count/decision/mutation; transaction release, never session locks. Both hot-path counts MUST have narrow predicate-matched indexes/access paths: user_id-leading on poker_seats for active human membership (table_id available for distinct membership/join), and created_by-leading on poker_tables for pending owned tables. Match final active status/financed-participation and OPEN STANDARD/pending predicates, using selective indexed per-table EXISTS checks for seats/funding. Table-leading unique (table_id,user_id) is not the required user lookup; the reviewed live schema lacks both required leading paths. T002 supplies them; T009 limits to five qualifying distinct tables, not a full COUNT followed by LIMIT, and fresh JOIN/Create must perform zero global table/seat scans. T027 must verify final SQL and EXPLAIN access paths on representative local PostgreSQL fixtures with planner statistics. Reuse an existing adequate index only with recorded SQL/index/EXPLAIN evidence; do not add a duplicate or a broad general index.
+
+## 4. Tier bankrolls and poker_bot_tier_policy
+
+| buy_in | NORMAL SYSTEM key | SLOW SYSTEM key |
+| --- | --- | --- |
+| 100 | POKER_BOT_BANKROLL_100 | POKER_BOT_SLOW_BANKROLL_100 |
+| 500 | POKER_BOT_BANKROLL | POKER_BOT_SLOW_BANKROLL_500 |
+
+Existing account IDs, balances and ledger provenance remain, including the 500 POKER_BOT_BANKROLL. Only new pool accounts start at zero; provisioning never resets an existing balance and does not MINT. New tiers need an explicit exact pair mapping and enabled policy before bots are allowed; `POKER_BUY_IN_TIERS_JSON` alone is insufficient. Do not auto-create/fallback a missing pool during runtime. If either mapped account is absent/invalid, new tier funding is unavailable.
+
+New purpose-specific `poker_bot_tier_policy`: `buy_in` primary key positive safe integer; `enabled` boolean NOT NULL default false; `normal_refill_threshold_ch`, `normal_refill_amount_ch`, `slow_refill_threshold_ch`, `slow_refill_amount_ch` each positive safe-integer CH; `revision` positive monotonic bigint; `updated_at` non-null, `updated_by` authenticated operator identity. Disabled is the way to stop refills/funding, not invalid zero/negative amounts. All amounts and resulting balances must remain safe integers. Backend-only, RLS enabled on exposed public tables with no anon/authenticated policy or write grant.
+
+Initial Stage tuning examples, not Production authorization:
+
+| Tier | NORMAL threshold | NORMAL amount | SLOW threshold | SLOW amount |
+| --- | --- | --- | --- | --- |
+| 100 | 2000 | 5000 | 1000 | 2000 |
+| 500 | 5000 | 10000 | 2000 | 5000 |
+
+Policy enablement follows deliberate provisioning/cutover. Purpose-specific mapping owns account keys; public/Admin inputs cannot redirect a tier to arbitrary SYSTEM/TREASURY accounts. Admin controls thresholds, amounts and enabled status only, with optimistic revision check and actor/time metadata.
+
+## 5. Existing ledger/idempotency for scheduled MINT
+
+No new receipt table. Reuse `chips_transactions`, `chips_entries`, `chips_transaction_idempotency` and payload hash. Post one balanced MINT GENESIS→exact pool for one configured amount. Metadata includes `purpose=poker_pool_refill`, `bankrollSystemKey`, `buyIn`, `poolClass`, `policyRevision`, `bucket` (UTC start of current hour). No tableId/funding key binding.
+
+Identity: `poker-pool-refill:<poolKey>:<policyRevision>:<UTC-hour>`. Existing committed transactions supply an additional unique purpose-scoped pool+bucket guard across revisions (narrow partial expression index on existing transaction metadata). This supports indexed lookup and prevents a revision edit opening a second allowance. Validate required typed metadata before insertion so NULL cannot evade the guard. No reinterpretation of old transactions/manifests; normal system ledger/audit history remains, with no table-linked retention additions.
+
+The scheduler locks policy FOR SHARE, then exact pool serialization, then necessary ledger accounts in stable ID order; Admin update uses policy FOR UPDATE. Same-bucket committed record wins regardless of new settings. Balance/eligibility read and MINT commit are one transaction; no-op creates no fake receipt. Only current bucket is eligible; a restarted old invocation cannot mint a missed bucket. Existing replay can return an old committed result but never create a historical operation. Check DB UTC bucket after acquiring locks, immediately before mutation, with bounded transaction timeout.
+
+## 6. State changes and trust boundaries
+
+Automatic NORMAL→SLOW is sticky; override may change freely among four values. FORCE_RESTRICTED is effective-only and manual; it never changes the automatic field, threshold logic, table marker or bankroll mapping. Table false→true follows known effective SLOW and is irreversible in V1; later FORCE_NORMAL/FORCE_RESTRICTED or lifecycle changes never undo it. Mixed financed participation is grandfathered; fresh compatibility and new funds follow sticky table class. UNKNOWN has no durable class value and cannot set table marker. RESTRICTED has no table marker or pool and denies only fresh bot-compatible admission/new bot funding; legal existing finance and settlement remain available.
+
+Authoritative runtime state remains WS; DB seat/count facts enforce transactional capacity, not a competing poker simulation. Admin server auth and operational environment guards are mandatory. The migration is forward-only once applied; shared Stage apply completed through the automatic repository workflow above. No Stage refill/MINT occurred. Production is separate GO.
+
+## 7. Manual RESTRICTED amendment
+
+`FORCE_RESTRICTED` is the only new schema value. `20260927110000_poker_force_restricted.sql` drops and recreates the existing `chips_accounts_poker_access_override_chk` with `AUTO`, `FORCE_NORMAL`, `FORCE_SLOW` and `FORCE_RESTRICTED`. It adds no columns, rows, accounts, indexes or policy fields. The source is classified `needs-production-equivalent`; Production remains at its pre-cutover behavior until a separately reviewed equivalent and GO.
+
+Automatic normalization still accepts only `NORMAL` and `SLOW`. Effective RESTRICTED has no `is_restricted_only` marker and never changes a table's stored class. A fresh RESTRICTED user may join only an ordinary bot-free STANDARD table; existing financed rejoin and legal settlement are independent grandfathered paths. New seed/replacement/top-up is disabled whenever a fresh cached seated human is effective RESTRICTED, while no per-hand policy read is introduced.
+
+
+## 6. §29 hourly refill control and function
+
+The forward-only Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` adds `public.poker_bot_refill_control`, a singleton (`id=1`) with `enabled=false` and expected Stage PostgreSQL system identifier `7656985631720456337`. RLS is enabled; anon/authenticated have no access. The SECURITY INVOKER function `public.poker_bot_pool_refill_hourly()` has EXECUTE revoked from PUBLIC, anon, authenticated and service_role. It checks `pg_control_system()` before the disabled no-op, and only processes enabled policies across the exact canonical 11 tiers / 22 pools.
+
+For every pool, the function locks and re-reads policy and account state; a balance at/above threshold is a no-op and a lower balance gets exactly the configured amount. The per-hour deterministic identity is `poker-pool-refill:<poolKey>:<policyRevision>:<UTC-hour>`. Ledger output reuses existing `chips_transactions`, `chips_entries`, `chips_transaction_idempotency`, transaction and sequence triggers, and the unique pool/hour index. Each pool has an isolated PL/pgSQL exception subtransaction. No scheduler extension/job is part of either migration.
+
+The applied Stage migration remains immutable. Forward-only Stage correction `20260930223409_poker_bot_pool_refill_lock_timeout.sql` replaces only the function and sets `lock_timeout = '5s'` at function scope; this keeps lock contention inside the existing per-pool failure block. Its automatic Stage apply leaves the disabled control unchanged and creates no pg_cron/job/MINT. The existing Production P2 remains unapplied and includes the same final function setting.
+
+Production uses the prepared equivalent `20260930211624_poker_bot_pool_refill_hourly.sql` with expected system identifier `7575202818581710058`; it is not applied. Shared Stage automatic migration application may add only the dark schema/function. No balance, tier, table or profile activation occurs.

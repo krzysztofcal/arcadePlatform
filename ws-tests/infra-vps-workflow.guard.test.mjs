@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const WORKFLOW_PATH = ".github/workflows/infra-vps.yml";
 
@@ -285,6 +287,27 @@ test("infra VPS repository versions the audited production WS and Stage schedule
   assert.match(dispatcher, /^MODE="external-scheduled-automatic"$/m);
   assert.match(dispatcher, /^WORKFLOW_FILE="\.github\/workflows\/chips-ledger-stage-scheduled-automation\.yml"$/m);
   assert.doesNotMatch(dispatcher, /SUPABASE_(DB_URL|SERVICE_ROLE_KEY|ACCESS_TOKEN|JWT_SECRET)|gh auth login|--token/i);
+});
+
+test("retired poker refill scheduler is absent and chips cleanup credentials stay unchanged", () => {
+  const retiredArtifacts = [
+    "infra/vps/arcade-poker-pool-dispatch.sh",
+    "infra/vps/arcade-poker-pool-dispatch.service",
+    "infra/vps/arcade-poker-pool-dispatch.timer",
+    ".github/workflows/poker-bot-pool-refill.yml",
+    "scripts/ops/poker-bot-pool-refill.mjs",
+    "scripts/ops/poker-bot-pool-refill.behavior.test.mjs",
+  ];
+  for (const artifact of retiredArtifacts) assert.equal(fs.existsSync(artifact), false, `${artifact} must be removed`);
+  const bootstrap = fileText("infra/vps/bootstrap.sh");
+  assert.doesNotMatch(bootstrap, /arcade-poker-pool-dispatch|poker-bot-pool-refill|arcade-poker-refill/i);
+
+  const chipsService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
+  assert.match(chipsService, /^Environment=GH_CONFIG_DIR=\/home\/copilot\/\.config\/gh$/m);
+  assert.doesNotMatch(chipsService, /poker-refill|arcade-poker/);
+  const dispatcher = fileText("infra/vps/arcade-chips-ledger-dispatch.sh");
+  assert.match(dispatcher, /^REPO="krzysztofcal\/arcadePlatform"$/m);
+  assert.doesNotMatch(dispatcher, /poker-bot-pool-refill|poker-pool-refill/);
 });
 
 test("infra VPS environment examples expose only the audited variable names without live secrets", () => {

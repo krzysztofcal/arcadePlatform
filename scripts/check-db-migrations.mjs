@@ -73,7 +73,7 @@ function validateProductionManifest() {
   }
   const baseline = Array.isArray(manifest.baseline_applied) ? manifest.baseline_applied : [];
   const missing = Array.isArray(manifest.missing) ? manifest.missing : [];
-  if (baseline.length !== 54 || missing.length !== 43) fail("Production migration manifest must contain 54 baseline and 43 missing entries");
+  if (baseline.length !== 54 || missing.length !== 50) fail("Production migration manifest must contain 54 baseline and 50 missing entries");
   const expectedSourceFiles = [...sorted];
   const manifestSourceFiles = [...baseline, ...missing].map((entry) => entry?.file).sort();
   if (JSON.stringify(manifestSourceFiles) !== JSON.stringify(expectedSourceFiles)) {
@@ -94,29 +94,45 @@ function validateProductionManifest() {
     if (entry.category !== "baseline-applied" && !categories.has(entry.category)) fail(`Invalid Production migration category: ${entry.file}`);
   }
   const counts = Object.fromEntries([...categories].map((category) => [category, missing.filter((entry) => entry.category === category).length]));
-  if (counts["shared-safe"] !== 18 || counts["stage-only"] !== 3 || counts["needs-production-equivalent"] !== 22) {
-    fail(`Production migration categories must be 18/3/22, got ${JSON.stringify(counts)}`);
+  if (counts["shared-safe"] !== 18 || counts["stage-only"] !== 3 || counts["needs-production-equivalent"] !== 29) {
+    fail(`Production migration categories must be 18/3/29, got ${JSON.stringify(counts)}`);
   }
   const productionFiles = fs.existsSync(PRODUCTION_MIGRATIONS_DIR)
     ? fs.readdirSync(PRODUCTION_MIGRATIONS_DIR).filter((name) => name.endsWith(".sql")).sort()
     : [];
-  if (productionFiles.length !== 2) fail("Production migration directory must contain exactly E1 and E2");
+  const replacements = Array.isArray(manifest.replacement_migrations) ? manifest.replacement_migrations : [];
+  const manifestReplacementFiles = replacements.map((entry) => entry?.file).sort();
+  if (JSON.stringify(productionFiles) !== JSON.stringify(manifestReplacementFiles)) {
+    fail("Production migration directory does not match manifest replacement_migrations");
+  }
+
   const replacementNames = new Set(productionFiles);
   for (const required of [
     "20260914090000_chips_ledger_production_retention_contract.sql",
     "20260914091000_chips_ledger_production_table_fence_activation.sql",
+    "20260929201500_poker_bot_quarantine_production_contract.sql",
+    "20260930211624_poker_bot_pool_refill_hourly.sql",
   ]) {
     if (!replacementNames.has(required)) fail(`Missing Production replacement migration: ${required}`);
-    const match = required.match(MIGRATION_RE);
-    if (!match) fail(`Invalid Production replacement migration filename: ${required}`);
-    const sql = fs.readFileSync(path.join(PRODUCTION_MIGRATIONS_DIR, required), "utf8");
-    if (!sql.trim() || /\r/.test(sql)) fail(`Invalid Production replacement migration content: ${required}`);
   }
-  const replacements = Array.isArray(manifest.replacement_migrations) ? manifest.replacement_migrations : [];
-  for (const required of productionFiles) {
-    const replacement = replacements.find((entry) => entry?.file === required);
-    if (!replacement || replacement.sha256 !== sha256(path.join(PRODUCTION_MIGRATIONS_DIR, required))) {
-      fail(`Production replacement hash is missing or stale: ${required}`);
+
+  const seenProdVersions = new Set();
+  const seenProdNames = new Set();
+  for (const file of productionFiles) {
+    const match = file.match(MIGRATION_RE);
+    if (!match) fail(`Invalid Production replacement migration filename: ${file}`);
+    const [, version, name] = match;
+    if (seenProdVersions.has(version)) fail(`Duplicate Production replacement version: ${version}`);
+    seenProdVersions.add(version);
+    if (seenProdNames.has(name)) fail(`Duplicate Production replacement name: ${name}`);
+    seenProdNames.add(name);
+
+    const sql = fs.readFileSync(path.join(PRODUCTION_MIGRATIONS_DIR, file), "utf8");
+    if (!sql.trim() || /\r/.test(sql)) fail(`Invalid Production replacement migration content: ${file}`);
+
+    const replacement = replacements.find((entry) => entry?.file === file);
+    if (!replacement || replacement.sha256 !== sha256(path.join(PRODUCTION_MIGRATIONS_DIR, file))) {
+      fail(`Production replacement hash is missing or stale: ${file}`);
     }
   }
   process.stdout.write(`Validated ${sorted.length} migration files and ${productionFiles.length} Production replacements.\n`);

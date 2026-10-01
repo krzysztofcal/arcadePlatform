@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 
 const workflow = fs.readFileSync(".github/workflows/chips-ledger-stage-scheduled-automation.yml", "utf8");
@@ -48,6 +49,7 @@ const RETIRED_MODES = [
   "closed-human-policy-diagnostic",
   "closed-human-30d-lifecycle-completion",
   "closed-human-30d-activation",
+  "poker-bot-pool-refill-canary",
 ];
 
 const RETIRED_INPUTS = [
@@ -87,6 +89,7 @@ const RETIRED_STEPS = [
   "Diagnose closed-human retention policy",
   "Complete exact closed-human table lifecycle",
   "Activate closed-human 30-day Stage automatic retention",
+  "Execute exact poker bot pool refill Stage canary",
 ];
 
 const modeOptionsBlock = workflow.slice(workflow.indexOf("type: choice"), workflow.indexOf("schedule:"));
@@ -152,6 +155,22 @@ assert.doesNotMatch(workflow, /legacy-stage-allowlist|execute-batch-13|audit-bat
 assert.equal((workflow.match(/- cron:/g) || []).length, 1);
 assert.doesNotMatch(workflow, /- cron: "17 2 \* \* \*"/);
 assert.match(workflow, /- cron: "7,22,37,52 \* \* \* \*"/);
+for (const artifact of [
+  ".github/workflows/poker-bot-pool-refill.yml",
+  "infra/vps/arcade-poker-pool-dispatch.sh",
+  "infra/vps/arcade-poker-pool-dispatch.service",
+  "infra/vps/arcade-poker-pool-dispatch.timer",
+  "scripts/ops/poker-bot-pool-refill.mjs",
+  "scripts/ops/poker-bot-pool-refill.behavior.test.mjs",
+]) assert.equal(fs.existsSync(artifact), false, `retired recurring refill artifact must be absent: ${artifact}`);
+const vpsBootstrap = fs.readFileSync("infra/vps/bootstrap.sh", "utf8");
+assert.doesNotMatch(vpsBootstrap, /arcade-poker-pool-dispatch|poker-bot-pool-refill/);
+const vpsReadme = fs.readFileSync("infra/vps/README.md", "utf8");
+assert.match(vpsReadme, /poker-bot-pool-refill-hourly/);
+assert.match(vpsReadme, /0 \* \* \* \*/);
+assert.match(vpsReadme, /select public\.poker_bot_pool_refill_hourly\(\);/);
+assert.match(vpsReadme, /enabled=false/);
+assert.doesNotMatch(vpsReadme, /gh-poker-refill|arcade-poker-refill-dispatch/);
 
 const concurrencyBlock = workflow.match(
   /^concurrency:\n(?:  [^\n]+\n)+(?=\n\S)/m,
@@ -238,6 +257,7 @@ const stageJobIf = workflow.match(
   /^    if: .*$/m,
 )[0];
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-audit'/);
+
 assert.match(stageJobIf, /inputs\.mode != 'escrow-retention-verify'/);
 assert.match(stageJobIf, /inputs\.mode != 'existing-30d-recovery-repair'/);
 assert.match(stageJobIf, /inputs\.mode != 'bot-only-7d-recovery-repair'/);
@@ -504,5 +524,74 @@ assert.deepEqual(Object.keys(productionEnv).sort(), [
   "SUPABASE_PROD_SERVICE_ROLE_KEY",
   "SUPABASE_PROD_URL",
 ].sort(), "Production job must expose only target-bound credentials and gates");
+
+// Runtime smoke contract verification for T091 (§28):
+// 1. Existing 100/500 behavior does not regress under generic mapping
+// 2. Disabled high tier (e.g. 1000) cannot execute bot funding
+// 3. Zero higher-tier funding allowed
+const { getBotFundingSystemKeyForBuyIn } = await import("../../shared/poker-domain/table-economy.mjs");
+const { decideSettledBotFunding } = await import("../../ws-server/poker/runtime/settled-bot-funding.mjs");
+
+assert.equal(getBotFundingSystemKeyForBuyIn(100, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL_100");
+assert.equal(getBotFundingSystemKeyForBuyIn(100, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_100");
+assert.equal(getBotFundingSystemKeyForBuyIn(500, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL");
+assert.equal(getBotFundingSystemKeyForBuyIn(500, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_500");
+assert.equal(getBotFundingSystemKeyForBuyIn(1000, { poolClass: "NORMAL" }), "POKER_BOT_BANKROLL_1000");
+assert.equal(getBotFundingSystemKeyForBuyIn(1000, { poolClass: "SLOW" }), "POKER_BOT_SLOW_BANKROLL_1000");
+
+// Legacy callers without poolClass remain supported for 100/500, and return null for higher tiers:
+assert.equal(getBotFundingSystemKeyForBuyIn(100), "TREASURY");
+assert.equal(getBotFundingSystemKeyForBuyIn(500), "POKER_BOT_BANKROLL");
+assert.equal(getBotFundingSystemKeyForBuyIn(1000), null);
+
+const smokeSnapshot = {
+  schemaBacked: true,
+  expiresAtMs: Date.now() + 60000,
+  tiers: {
+    100: { enabled: true, provisioned: { NORMAL: true, SLOW: true } },
+    500: { enabled: true, provisioned: { NORMAL: true, SLOW: true } },
+    1000: { enabled: false, provisioned: { NORMAL: true, SLOW: true } },
+    5000: { enabled: false, provisioned: { NORMAL: true, SLOW: true } },
+    10000000: { enabled: false, provisioned: { NORMAL: true, SLOW: true } },
+  },
+};
+
+// 100/500 enabled funding succeeds:
+const norm100 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 100, isSlowOnly: false });
+assert.equal(norm100.allowed, true);
+assert.equal(norm100.systemKey, "POKER_BOT_BANKROLL_100");
+assert.equal(norm100.poolClass, "NORMAL");
+
+const slow100 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 100, isSlowOnly: true });
+assert.equal(slow100.allowed, true);
+assert.equal(slow100.systemKey, "POKER_BOT_SLOW_BANKROLL_100");
+assert.equal(slow100.poolClass, "SLOW");
+
+const norm500 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 500, isSlowOnly: false });
+assert.equal(norm500.allowed, true);
+assert.equal(norm500.systemKey, "POKER_BOT_BANKROLL");
+assert.equal(norm500.poolClass, "NORMAL");
+
+const slow500 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 500, isSlowOnly: true });
+assert.equal(slow500.allowed, true);
+assert.equal(slow500.systemKey, "POKER_BOT_SLOW_BANKROLL_500");
+assert.equal(slow500.poolClass, "SLOW");
+
+// Disabled high tier 1000 fails closed:
+const norm1000 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 1000, isSlowOnly: false });
+assert.equal(norm1000.allowed, false);
+assert.equal(norm1000.systemKey, null);
+assert.equal(norm1000.reason, "tier_disabled");
+
+const slow1000 = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 1000, isSlowOnly: true });
+assert.equal(slow1000.allowed, false);
+assert.equal(slow1000.systemKey, null);
+assert.equal(slow1000.reason, "tier_disabled");
+
+// Max tier 10M disabled fails closed:
+const norm10M = decideSettledBotFunding({ snapshot: smokeSnapshot, buyIn: 10000000, isSlowOnly: false });
+assert.equal(norm10M.allowed, false);
+assert.equal(norm10M.systemKey, null);
+assert.equal(norm10M.reason, "tier_disabled");
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");

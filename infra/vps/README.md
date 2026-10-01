@@ -30,9 +30,11 @@ The WS services run as `arcade:arcade`. The production release layout is
 release. Preview uses `/opt/arcade-ws-preview/ws-server` and its external env
 file at `/opt/arcade-ws-preview/.env.preview`.
 
-The Stage dispatcher runs as `copilot` with `HOME=/home/copilot` and
-`GH_CONFIG_DIR=/home/copilot/.config/gh`. The self-hosted runner uses the
-dedicated `arcade-stage-runner` account under
+The chips-ledger Stage cleanup dispatcher (`arcade-chips-ledger-dispatch.service`)
+runs as `copilot` with `HOME=/home/copilot` and
+`GH_CONFIG_DIR=/home/copilot/.config/gh`, authenticated as `krzysztofcal`.
+Preserve this owner-authenticated config for the existing cleanup path. The
+self-hosted runner uses the dedicated `arcade-stage-runner` account under
 `/var/lib/arcade-stage-runner/actions-runner`.
 
 The bootstrap creates the system group `arcade-deploy` and adds only `copilot`
@@ -218,3 +220,28 @@ Register the repository runner from the documented recovery procedure with
 exact labels `self-hosted`, `Linux`, `X64`, and `stage-db-ipv6`. The registration
 token is supplied interactively by an owner and is never stored in this repo,
 bootstrap script, or a unit file.
+
+## Poker bot pool refill
+
+Poker pool refills now run only through the database ledger function. The retired
+VPS dispatcher, systemd service/timer, and GitHub refill workflow are removed.
+The future scheduler contract is exactly one Supabase Cron job:
+
+- name: `poker-bot-pool-refill-hourly`
+- schedule: `0 * * * *`
+- command: `select public.poker_bot_pool_refill_hourly();`
+
+The implementation migration creates a singleton `poker_bot_refill_control` row
+with `enabled=false` and the hourly function. Shared Stage may receive that
+migration automatically; it does not install `pg_cron`, create a job, or MINT.
+Cron activation and enabling the refill control require a separate owner GO.
+Production has a separate forward-only migration and remains untouched until its
+own authorization.
+
+The existing live VPS poker service/timer are currently disabled and inactive.
+After merge, remove the installed poker dispatcher/service/timer only with a
+separate owner GO. Never run `infra/vps/bootstrap.sh` on the existing VPS. The
+cleanup must leave `arcade-chips-ledger-dispatch.*`,
+`/home/copilot/.config/gh` (the `krzysztofcal` chips-cleanup identity), WS,
+Caddy, and unrelated timers untouched. Do not provision a poker-refill GitHub
+actor/config, PAT, database URL, or SQL on the VPS.

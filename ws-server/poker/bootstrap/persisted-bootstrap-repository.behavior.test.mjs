@@ -81,3 +81,24 @@ test("public profile repository skips invalid ids and caps deterministic candida
   assert.equal(normalized.length, 10);
   assert.deepEqual(normalized, [...normalized].sort((left, right) => left.localeCompare(right)));
 });
+
+
+test("pre-migration persisted bootstrap omits new columns and observes schema on next load", async () => {
+  let available = false;
+  const repo = createPersistedBootstrapRepository({
+    env: { SUPABASE_DB_URL: "fixture" },
+    beginSql: async (fn) => fn({ unsafe: async (query) => {
+      if (query.includes("to_regclass")) return [{ available }];
+      if (!available) assert.doesNotMatch(query, /is_slow_only/);
+      if (query.includes("from public.poker_tables")) {
+        if (available) assert.match(query, /is_slow_only/);
+        return [{ id: "legacy", ...(available ? { is_slow_only: true } : {}) }];
+      }
+      if (query.includes("poker_state")) return [{ version: 7, state: { phase: "SETTLED" } }];
+      return [];
+    } })
+  });
+  assert.equal((await repo.load("legacy")).stateRow.version, 7);
+  available = true;
+  assert.equal((await repo.load("legacy")).tableRow.is_slow_only, true);
+});

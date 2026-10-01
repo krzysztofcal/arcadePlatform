@@ -893,6 +893,40 @@ test("persisted state writer atomically projects authoritative human stack after
   assert.equal(queries.findIndex((query) => query.includes("update public.poker_seats")) > queries.findIndex((query) => query.startsWith("update public.poker_state")), true);
 });
 
+test("persisted state writer commits settled automatic SLOW and sticky table marker with rollover state", async () => {
+  const tableId = "00000000-0000-4000-8000-0000000008a1";
+  const userId = "00000000-0000-4000-8000-0000000008b1";
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db" },
+    beginSql: async (fn) => fn({ unsafe: async (query, params = []) => {
+      const text = String(query);
+      queries.push({ text, params });
+      if (text.startsWith("update public.poker_state set version = version + 1")) return [{ version: 10 }];
+      if (text.startsWith("update public.poker_seats")) return [{ user_id: userId, seat_no: 1, stack: 1_000_000_000 }];
+      if (text.startsWith("update public.chips_accounts")) return [{ user_id: userId, poker_access_revision: 3 }];
+      if (text.startsWith("update public.poker_tables") && text.includes("is_slow_only = true")) return [{ id: tableId }];
+      return [];
+    } }),
+    klog: () => {}
+  });
+
+  const result = await writer.writeMutation({
+    tableId,
+    expectedVersion: 9,
+    nextState: { tableId, handId: "next", phase: "PREFLOP", stacks: { [userId]: 1_000_000_000 } },
+    humanStackUpdates: [{ userId, seatNo: 1, stack: 1_000_000_000, settledHandId: "settled", fromStateVersion: 9, toStateVersion: 10 }],
+    settledAccessTransitions: [{ userId, expectedRevision: 2, automaticClass: "SLOW" }],
+    tableMarkerTransition: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.settledAccessTransitionsCommitted, true);
+  assert.equal(result.tableMarkerTransitionCommitted, true);
+  assert.equal(queries.findIndex(({ text }) => text.startsWith("update public.chips_accounts")) > queries.findIndex(({ text }) => text.startsWith("update public.poker_state")), true);
+  assert.equal(queries.findIndex(({ text }) => text.startsWith("update public.poker_tables") && text.includes("is_slow_only = true")) > queries.findIndex(({ text }) => text.startsWith("update public.chips_accounts")), true);
+});
+
 test("persisted state writer never projects human stack when state CAS conflicts", async () => {
   const queries = [];
   const writer = createPersistedStateWriter({

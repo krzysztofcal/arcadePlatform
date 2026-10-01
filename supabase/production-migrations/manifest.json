@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 43,
+    "missing_count": 50,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -885,6 +885,104 @@
       "omitted_effects": [
         "Stage policy IDs, refs, system identifiers, canaries, receipts, legacy allowlists and Stage-only APIs"
       ]
+    },
+    {
+      "version": "20260927100000",
+      "file": "20260927100000_poker_bot_quarantine_policy.sql",
+      "sha256": "116b6b4de20674cc84c03d89255da17689040428eec2bbf5a96115b8f17ba7f9",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
+      "required_effects": [
+        "NORMAL/SLOW access policy, sticky table marker, per-tier bot pools and bounded refill indexes under a separately reviewed Production identity"
+      ],
+      "omitted_effects": [
+        "No Production application, activation or runtime mutation is authorized by this Stage migration"
+      ]
+    },
+    {
+      "version": "20260927110000",
+      "file": "20260927110000_poker_force_restricted.sql",
+      "sha256": "3bb727ccfff42bc257c66976052e0a09d08c74d6f7838e37df0889dbd69f9fc4",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
+      "required_effects": [
+        "FORCE_RESTRICTED override constraint accepted by the #1018 schema; Production equivalent remains separately reviewed"
+      ],
+      "omitted_effects": [
+        "No Production migration, activation or runtime mutation is authorized by this Stage migration"
+      ]
+    },
+    {
+      "version": "20260929130000",
+      "file": "20260929130000_poker_access_policy_recovery_threshold.sql",
+      "sha256": "027368577288d95ccda16fc921c39dc57c717d74e648c517d68c2ac4a81addc3",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
+      "required_effects": [
+        "slow_recovery_threshold_ch added to poker_access_policy with positive safe range and recovery < entry threshold check; Production equivalent remains separately reviewed"
+      ],
+      "omitted_effects": [
+        "No Production migration, activation or runtime mutation is authorized by this Stage migration"
+      ]
+    },
+    {
+      "version": "20260929163000",
+      "file": "20260929163000_poker_access_policy_hysteresis_bps.sql",
+      "sha256": "bef0b1acbac59a802222737286f03322f153467be910461cc13094e83a55c330",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
+      "required_effects": [
+        "slow_hysteresis_bps added to poker_access_policy with range [100, 5000] and consistency check against derived recovery threshold; Production equivalent remains separately reviewed"
+      ],
+      "omitted_effects": [
+        "No Production migration, activation or runtime mutation is authorized by this Stage migration"
+      ]
+    },
+    {
+      "version": "20260930075513",
+      "file": "20260930075513_poker_bot_tier_catalog_expansion.sql",
+      "sha256": "e9b292018b4f89688103892e8988997480b5e222c4f6d22d833f6383ca88862d",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260929201500_poker_bot_quarantine_production_contract.sql",
+      "required_effects": [
+        "Canonical tier catalog expansion (>500 buy-in tiers) with disabled policies and zero-balance exact pools under a separately reviewed Production identity"
+      ],
+      "omitted_effects": [
+        "No Production migration, activation or runtime mutation is authorized by this Stage migration"
+      ]
+    },
+    {
+      "version": "20260930211623",
+      "file": "20260930211623_poker_bot_pool_refill_hourly.sql",
+      "sha256": "336b51d947a5ff7aa34fae25e6422a82807d6d4e7b4639dbcef4091f9ef66fbe",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260930211624_poker_bot_pool_refill_hourly.sql",
+      "required_effects": [
+        "Dark singleton refill control and SECURITY INVOKER hourly ledger function bound to canonical Production identity"
+      ],
+      "omitted_effects": [
+        "No pg_cron extension/job, enabled refill control, MINT or Production activation is authorized by this PR"
+      ]
+    },
+    {
+      "version": "20260930223409",
+      "file": "20260930223409_poker_bot_pool_refill_lock_timeout.sql",
+      "sha256": "9c1bf241345a026c755112df06bebfbc99dacda28631a5b3cb03860041dc9595",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20260930211624_poker_bot_pool_refill_hourly.sql",
+      "required_effects": [
+        "Function-scoped 5s lock timeout preserves per-pool failure isolation under row-lock contention"
+      ],
+      "omitted_effects": [
+        "No pg_cron extension/job, control enablement, MINT or Production migration is authorized by this PR"
+      ]
     }
   ],
   "replacement_migrations": [
@@ -897,11 +995,28 @@
       "file": "20260914091000_chips_ledger_production_table_fence_activation.sql",
       "purpose": "E2 owner-gated TABLE fence activation; never automatic",
       "sha256": "f6d8334cf642df7c9c4ac3b633d4898254d5af09290814cdce54e253bc650cab"
+    },
+    {
+      "file": "20260929201500_poker_bot_quarantine_production_contract.sql",
+      "purpose": "P1 final Production #1018 bot quarantine and exact pools contract; dark/off",
+      "sha256": "be8fc7227930e3f66da8a35214af3c7d2e1a0595730fa15b127b078350648bd3",
+      "prerequisites": [
+        "20260914090000_chips_ledger_production_retention_contract.sql",
+        "20260914091000_chips_ledger_production_table_fence_activation.sql"
+      ]
+    },
+    {
+      "file": "20260930211624_poker_bot_pool_refill_hourly.sql",
+      "purpose": "P2 Production #1018 hourly poker bot refill contract; dark/off; no pg_cron/job/MINT",
+      "sha256": "139a00efb8ed712eae9aff9cf9a9264884da49c353a72a8bb492f7fcbe560372",
+      "prerequisites": [
+        "20260929201500_poker_bot_quarantine_production_contract.sql"
+      ]
     }
   ],
   "provenance_rules": [
     "Source hashes are immutable inventory evidence.",
-    "Only E1/E2 are applied Production versions; omitted source versions are never marked applied.",
+    "Only E1/E2/P1 are applied Production versions; omitted source versions are never marked applied.",
     "Manifest entries classify every current main migration; new unclassified files fail the repository guard."
   ]
 }

@@ -18,6 +18,7 @@ const makeHandler = (queries, options = {}) =>
       fn({
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
+          if (text.includes("to_regclass")) return [{ available: true }];
           queries.push({ query: String(query), params });
           if (text.includes("account_type = 'user'")) {
             if (options.balanceError) throw new Error("balance_read_failed");

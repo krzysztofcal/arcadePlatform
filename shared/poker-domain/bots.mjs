@@ -220,20 +220,33 @@ async function seedBotsForJoin({
   targetBotCount = null,
   allowBotsOnly = false,
   requireExactTarget = false,
+  poolClass = null,
+  fundingEnabled = true,
+  fundingProvisioned = true,
   fundingReason = "BOT_SEED_BUY_IN",
   idempotencyPrefix = "bot-seed-buyin",
   klog = () => {},
   random = Math.random
 }) {
   if (!cfg?.enabled || typeof postTransaction !== "function") return [];
+  if (fundingEnabled !== true || fundingProvisioned !== true) {
+    if (requireExactTarget) {
+      const error = new Error("managed_bot_table_seed_incomplete");
+      error.code = "managed_bot_table_seed_incomplete";
+      throw error;
+    }
+    return [];
+  }
   const normalizedBuyIn = Number(buyInChips);
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("invalid_bot_buy_in");
   }
   if (!isBotFundingAllowedForBuyIn(normalizedBuyIn)) return [];
-  const fundingSystemKey = getBotFundingSystemKeyForBuyIn(normalizedBuyIn, {
-    legacySystemKey: cfg.bankrollSystemKey
-  });
+  const fundingOptions = {
+    legacySystemKey: cfg.bankrollSystemKey,
+    ...(poolClass ? { poolClass } : {})
+  };
+  const fundingSystemKey = getBotFundingSystemKeyForBuyIn(normalizedBuyIn, fundingOptions);
   if (!fundingSystemKey) return [];
   const stakesParsed = parseStakes(tableStakes);
   if (!stakesParsed.ok) {
@@ -267,22 +280,20 @@ async function seedBotsForJoin({
     const botUserId = makeBotUserId(tableId, seatNo);
     const botSystemKey = makeBotSystemKey(tableId, seatNo);
     const botProfile = normalizeBotProfile(cfg.defaultProfile, random);
-    await tx.unsafe("savepoint poker_bot_seed_funding;");
-    const insertRows = await tx.unsafe(
-      `
+    const seedSingleBot = async (activeTx) => {
+      const insertRows = await activeTx.unsafe(
+        `
 insert into public.poker_seats (table_id, user_id, seat_no, status, is_bot, bot_profile, leave_after_hand, stack, last_seen_at, joined_at)
 values ($1, $2, $3, 'ACTIVE', true, $4, false, $5, now(), now())
 on conflict do nothing
 returning seat_no;
-      `,
-      [tableId, botUserId, seatNo, botProfile, normalizedBuyIn]
-    );
-    if (!insertRows?.length) {
-      await tx.unsafe("release savepoint poker_bot_seed_funding;");
-      continue;
-    }
+        `,
+        [tableId, botUserId, seatNo, botProfile, normalizedBuyIn]
+      );
+      if (!insertRows?.length) {
+        return false;
+      }
 
-    try {
       await postTransaction({
         userId: null,
         txType: "TABLE_BUY_IN",
@@ -302,9 +313,30 @@ returning seat_no;
           { accountType: "ESCROW", systemKey: escrowSystemKey, amount: normalizedBuyIn }
         ],
         createdBy: allowBotsOnly ? null : humanUserId,
-        tx
+        tx: activeTx
       });
-      await tx.unsafe("release savepoint poker_bot_seed_funding;");
+      return true;
+    };
+
+    try {
+      let seated = false;
+      if (typeof tx.savepoint === "function") {
+        seated = await tx.savepoint("poker_bot_seed_funding", async (spTx) => {
+          if (tx?.klog && !spTx.klog) spTx.klog = tx.klog;
+          return await seedSingleBot(spTx);
+        });
+      } else {
+        await tx.unsafe("savepoint poker_bot_seed_funding;");
+        try {
+          seated = await seedSingleBot(tx);
+          await tx.unsafe("release savepoint poker_bot_seed_funding;");
+        } catch (innerError) {
+          await tx.unsafe("rollback to savepoint poker_bot_seed_funding;");
+          await tx.unsafe("release savepoint poker_bot_seed_funding;");
+          throw innerError;
+        }
+      }
+      if (!seated) continue;
       seededBots.push({
         userId: botUserId,
         seatNo,
@@ -316,12 +348,14 @@ returning seat_no;
       });
       occupied.add(seatNo);
     } catch (error) {
-      await tx.unsafe("rollback to savepoint poker_bot_seed_funding;");
-      await tx.unsafe("release savepoint poker_bot_seed_funding;");
-      await tx.unsafe(
-        "delete from public.poker_seats where table_id = $1 and user_id = $2 and seat_no = $3 and coalesce(is_bot, false) = true;",
-        [tableId, botUserId, seatNo]
-      );
+      if (typeof tx.savepoint !== "function") {
+        try {
+          await tx.unsafe(
+            "delete from public.poker_seats where table_id = $1 and user_id = $2 and seat_no = $3 and coalesce(is_bot, false) = true;",
+            [tableId, botUserId, seatNo]
+          );
+        } catch (_) {}
+      }
       klog("poker_join_bot_seed_failed", { tableId, seatNo, botUserId, reason: error?.code || error?.message || "unknown_error" });
       const errorCode = String(error?.code || "").toLowerCase();
       const errorMessage = String(error?.message || "").toLowerCase();

@@ -74,6 +74,10 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
     return sockets ? [...sockets] : [];
   }
 
+  function activeUserIds() {
+    return [...socketsByUserId.keys()];
+  }
+
   function rebindSession({ sessionId, userId, ws }) {
     const session = sessionForId(sessionId);
     if (!session) {
@@ -126,6 +130,7 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
     untrackConnection,
     hasActiveConnection,
     connectionsForUser,
+    activeUserIds,
     rebindSession,
     socketOwnsSession,
     sweepExpiredSessions
