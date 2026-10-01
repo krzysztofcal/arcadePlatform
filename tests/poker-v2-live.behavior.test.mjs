@@ -6160,3 +6160,70 @@ test('poker v2 keeps live state and one resize binding across responsive transit
   assert.equal(harness.getWindowListenerCount('orientationchange'), 1, 'repeated orientation events must not add bindings');
   assert.equal(harness.actPayloads.length, 0, 'responsive presentation refresh must not send a gameplay action');
 });
+
+test('bot-only all-in loss reaction catalog entries resolve emoji/labels, humanSelectable: false, menu omission, and shake motion', async () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.js'), 'utf8');
+
+  const catalogMatch = source.match(/var REACTION_CATALOG = (\[[\s\S]*?\n  \]);/);
+  assert.ok(catalogMatch, 'poker reaction catalog should be discoverable in poker-v2.js');
+  const catalog = vm.runInNewContext(catalogMatch[1]);
+
+  const motionFnMatch = source.match(/function resolveBotAvatarReactionMotion\([\s\S]*?\n  \}/);
+  assert.ok(motionFnMatch, 'resolveBotAvatarReactionMotion should be discoverable in poker-v2.js');
+  const resolveMotion = vm.runInNewContext(`(${motionFnMatch[0]})`);
+
+  const expectedEntries = [
+    { key: 'all_in_oh_no', emoji: '😞', label: 'Oh no...' },
+    { key: 'all_in_that_hurts', emoji: '😣', label: 'That hurts.' },
+    { key: 'all_in_no_way', emoji: '😠', label: 'No way...' },
+    { key: 'all_in_come_on', emoji: '😤', label: 'Come on!' },
+    { key: 'all_in_censored', emoji: '🤬', label: '******!' }
+  ];
+
+  for (const exp of expectedEntries) {
+    const entry = catalog.find((item) => item.key === exp.key);
+    assert.ok(entry, `REACTION_CATALOG entry must exist for ${exp.key}`);
+    assert.equal(entry.emoji, exp.emoji, `Emoji for ${exp.key} must match`);
+    assert.equal(entry.label, exp.label, `Label for ${exp.key} must match`);
+    assert.equal(entry.humanSelectable, false, `humanSelectable for ${exp.key} must be false`);
+    assert.equal(resolveMotion(exp.key), 'shake', `Motion for ${exp.key} must map to shake`);
+  }
+
+  const { harness, ws } = await bootReactionHistoryHarness({ historySenderIsBot: true });
+  harness.elements.pokerV2ReactionBtn.click();
+  const menuKeys = harness.elements.pokerV2ReactionMenu.children.map((option) => option.dataset.reactionKey);
+  for (const exp of expectedEntries) {
+    assert.equal(menuKeys.includes(exp.key), false, `${exp.key} must be omitted from human reaction menu`);
+  }
+
+  for (const exp of expectedEntries) {
+    ws.onReaction({ payload: { seatNo: 2, reactionKey: exp.key } });
+    await harness.flush();
+
+    const bubble = harness.elements.pokerReactionLayer.children
+      .flatMap((anchor) => anchor.children || [])
+      .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
+    assert.ok(bubble, `Reaction bubble must render for ${exp.key}`);
+    assert.equal(bubble.textContent, `${exp.emoji} ${exp.label}`);
+
+    const activeBotAvatarEl = harness.elements.pokerSeatLayer.children
+      .flatMap((seat) => seat.children || [])
+      .find((child) => child.classList && child.classList.contains('poker-seat-avatar') && child.dataset.userId === 'user-2');
+
+    if (activeBotAvatarEl) {
+      assert.equal(
+        activeBotAvatarEl.classList.contains('poker-seat-avatar--react-shake'),
+        true,
+        `Bot avatar must have shake reaction class for ${exp.key}`
+      );
+      harness.advanceTime(500);
+      await harness.flush();
+      assert.equal(
+        activeBotAvatarEl.classList.contains('poker-seat-avatar--react-shake'),
+        false,
+        `Bot avatar must clear reaction class after animation window`
+      );
+    }
+  }
+});
+

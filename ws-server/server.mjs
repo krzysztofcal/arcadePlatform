@@ -584,6 +584,12 @@ function buildDetachedReactionContext(state) {
       })])))
     : undefined;
   const riverChangedWinnerUserIds = Object.freeze(deriveRiverChangedWinnerUserIds(state));
+  const handStartStacksByUserId = state?.handStartStacksByUserId && typeof state.handStartStacksByUserId === "object"
+    ? Object.freeze({ ...state.handStartStacksByUserId })
+    : undefined;
+  const contributionsByUserId = state?.contributionsByUserId && typeof state.contributionsByUserId === "object"
+    ? Object.freeze({ ...state.contributionsByUserId })
+    : undefined;
   return Object.freeze({
     phase: state?.phase,
     handId: state?.handId,
@@ -596,6 +602,8 @@ function buildDetachedReactionContext(state) {
     leftTableByUserId: copyBooleanMap(state?.leftTableByUserId),
     sitOutByUserId: copyBooleanMap(state?.sitOutByUserId),
     riverChangedWinnerUserIds,
+    handStartStacksByUserId,
+    contributionsByUserId,
     handSettlement: state?.handSettlement ? Object.freeze({ handId: state.handSettlement.handId, payouts }) : null,
     showdown: state?.showdown ? Object.freeze({
       handId: state.showdown.handId,

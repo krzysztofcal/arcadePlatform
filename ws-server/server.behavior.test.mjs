@@ -6124,6 +6124,142 @@ export function createAcceptedBotStepExecutor({ tableManager, persistMutatedStat
   }
 });
 
+test("settlement reaction pipeline evaluates detached context with authoritative all-in accounting and preserves protocol isolation", async () => {
+  const secret = "reaction-all-in-secret";
+  const tableId = "table_settlement_all_in_reaction";
+  const actorUserId = "act_settled_human";
+  const botUserId = makeBotUserId(tableId, 2);
+
+  const fixtureManager = createTableManager({ maxSeats: 6, defaultBuyIn: 100 });
+  const wsActor = new EventEmitter();
+  const wsOther = new EventEmitter();
+  wsActor.close = () => {};
+  wsOther.close = () => {};
+  assert.equal(fixtureManager.join({ ws: wsActor, userId: actorUserId, tableId, requestId: "join-actor", nowTs: 1 }).ok, true);
+  assert.equal(fixtureManager.join({ ws: wsOther, userId: botUserId, tableId, requestId: "join-bot", nowTs: 2 }).ok, true);
+  assert.equal(fixtureManager.bootstrapHand(tableId).ok, true);
+
+  let snapshot = fixtureManager.tableSnapshot(tableId, actorUserId);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: actorUserId, requestId: "fixture-pre-call", action: "CALL", amount: 0 }).accepted, true);
+  snapshot = fixtureManager.tableSnapshot(tableId, botUserId);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: botUserId, requestId: "fixture-flop-check-1", action: "CHECK", amount: 0 }).accepted, true);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: actorUserId, requestId: "fixture-flop-check-2", action: "CHECK", amount: 0 }).accepted, true);
+  snapshot = fixtureManager.tableSnapshot(tableId, botUserId);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: botUserId, requestId: "fixture-turn-check-1", action: "CHECK", amount: 0 }).accepted, true);
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: actorUserId, requestId: "fixture-turn-check-2", action: "CHECK", amount: 0 }).accepted, true);
+  snapshot = fixtureManager.tableSnapshot(tableId, botUserId);
+  assert.equal(snapshot.hand.status, "RIVER");
+  assert.equal(fixtureManager.applyAction({ tableId, handId: snapshot.hand.handId, userId: botUserId, requestId: "fixture-river-check-1", action: "CHECK", amount: 0 }).accepted, true);
+
+  const baseRiverState = fixtureManager.persistedPokerState(tableId);
+  const riverVersion = fixtureManager.persistedStateVersion(tableId);
+  assert.equal(baseRiverState.phase, "RIVER");
+  assert.equal(baseRiverState.turnUserId, actorUserId);
+
+  const riverState = {
+    ...baseRiverState,
+    handStartStacksByUserId: { [actorUserId]: 100, [botUserId]: 10 },
+    contributionsByUserId: { [actorUserId]: 10, [botUserId]: 10 },
+    stacks: { [actorUserId]: 90, [botUserId]: 0 },
+    holeCardsByUserId: {
+      [actorUserId]: ["AS", "AH"],
+      [botUserId]: ["2C", "2D"]
+    },
+    community: ["KS", "QD", "JC", "9H", "4S"]
+  };
+
+  const { dir, filePath } = await writePersistedFile({
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
+        seatRows: [
+          { user_id: actorUserId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 90 },
+          { user_id: botUserId, seat_no: 2, status: "ACTIVE", is_bot: true, stack: 0, bot_profile: "NORMAL" }
+        ],
+        stateRow: { version: riverVersion, state: riverState }
+      }
+    }
+  });
+
+  const randomModule = await writeTestModule("Math.random = () => 0;", "reaction-random-zero.mjs");
+  const serverOptions = {
+    nodeArgs: ["--import", randomModule.filePath],
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_PERSISTED_STATE_FILE: filePath,
+      WS_POKER_SETTLED_REVEAL_MS: "5000",
+      WS_TIMEOUT_SWEEP_MS: "60000",
+      WS_ZOMBIE_TABLE_SWEEP_MS: "60000"
+    }
+  };
+  const serverRuntime = await createServer(serverOptions);
+
+  try {
+    await waitForListening(serverRuntime.child, 5000);
+    const ws = await connectClient(serverRuntime.port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: actorUserId }), "auth-reaction-pipeline");
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_join",
+      requestId: "join-reaction-pipeline",
+      ts: "2026-08-07T12:00:00Z",
+      payload: { tableId }
+    });
+    assert.equal((await nextCommandResultForRequest(ws, "join-reaction-pipeline")).payload.status, "accepted");
+    await nextMessageOfType(ws, "table_state");
+
+    const reactionPromise = nextMessageMatching(
+      ws,
+      (frame) => frame?.type === "table_reaction" && frame?.payload?.seatNo === 2,
+      3000
+    );
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "act",
+      requestId: "act-settle-all-in",
+      ts: new Date().toISOString(),
+      payload: { tableId, handId: riverState.handId, action: "check" }
+    });
+    const actAck = await nextCommandResultForRequest(ws, "act-settle-all-in");
+    assert.equal(actAck.payload.status, "accepted");
+
+    const reactionFrame = await reactionPromise;
+    assert.equal(reactionFrame.type, "table_reaction");
+    assert.deepEqual(reactionFrame.payload, {
+      seatNo: 2,
+      reactionKey: "all_in_oh_no"
+    });
+    assert.equal(reactionFrame.payload.targetSeatNo, undefined);
+
+    sendFrame(ws, {
+      version: "1.0",
+      type: "table_state_sub",
+      requestId: "snap-reaction-pipeline",
+      ts: new Date().toISOString(),
+      payload: { tableId, view: "snapshot" }
+    });
+    const snapshotFrame = await nextMessageOfType(ws, "stateSnapshot");
+    const snapshotStr = JSON.stringify(snapshotFrame.payload);
+    assert.equal(snapshotStr.includes("handStartStacksByUserId"), false);
+    assert.equal(snapshotStr.includes("contributionsByUserId"), false);
+
+    const reactionStr = JSON.stringify(reactionFrame.payload);
+    assert.equal(reactionStr.includes("handStartStacksByUserId"), false);
+    assert.equal(reactionStr.includes("contributionsByUserId"), false);
+
+    ws.close();
+  } finally {
+    if (serverRuntime.child.exitCode === null) serverRuntime.child.kill("SIGTERM");
+    await waitForExit(serverRuntime.child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(randomModule.dir, { recursive: true, force: true });
+  }
+});
+
 test("duplicate act requestId is idempotent and does not emit extra advancing state", async () => {
   const secret = "test-secret";
   const tableId = "table_replace_act_idempotent";

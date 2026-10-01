@@ -106,6 +106,11 @@
     { key: 'lucky', emoji: '🍀', label: 'Lucky!', humanSelectable: false },
     { key: 'congrats', emoji: '🎉', label: 'Congrats!', humanSelectable: false },
     { key: 'not_this_time', emoji: '😌', label: 'Not this time.', humanSelectable: false },
+    { key: 'all_in_oh_no', emoji: '😞', label: 'Oh no...', humanSelectable: false },
+    { key: 'all_in_that_hurts', emoji: '😣', label: 'That hurts.', humanSelectable: false },
+    { key: 'all_in_no_way', emoji: '😠', label: 'No way...', humanSelectable: false },
+    { key: 'all_in_come_on', emoji: '😤', label: 'Come on!', humanSelectable: false },
+    { key: 'all_in_censored', emoji: '🤬', label: '******!', humanSelectable: false },
     { key: 'ambient_hmm', emoji: '💭', label: 'Hmm...', humanSelectable: false },
     { key: 'ambient_interesting', emoji: '💭', label: 'Interesting...', humanSelectable: false },
     { key: 'ambient_lets_see', emoji: '💭', label: "Let's see...", humanSelectable: false },
@@ -3383,6 +3388,11 @@
       case 'bad_beat':
       case 'hurry_up':
       case 'not_this_time':
+      case 'all_in_oh_no':
+      case 'all_in_that_hurts':
+      case 'all_in_no_way':
+      case 'all_in_come_on':
+      case 'all_in_censored':
         return 'shake';
       default:
         if (typeof reactionKey === 'string' && reactionKey.indexOf('ambient_') === 0) return 'tilt';
