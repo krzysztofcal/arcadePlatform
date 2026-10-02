@@ -48,6 +48,8 @@ function parseHysteresisPercent(rawPercent) {
 }
 
 function normalizePolicy(row) {
+  const normalCap = row.normal_hourly_refill_cap_ch;
+  const slowCap = row.slow_hourly_refill_cap_ch;
   return {
     buyIn: Number(row.buy_in),
     enabled: row.enabled === true,
@@ -55,6 +57,8 @@ function normalizePolicy(row) {
     normalRefillAmountCh: Number(row.normal_refill_amount_ch),
     slowRefillThresholdCh: Number(row.slow_refill_threshold_ch),
     slowRefillAmountCh: Number(row.slow_refill_amount_ch),
+    normalHourlyRefillCapCh: normalCap === null || normalCap === undefined ? null : Number(normalCap),
+    slowHourlyRefillCapCh: slowCap === null || slowCap === undefined ? null : Number(slowCap),
     revision: Number(row.revision),
     updatedAt: row.updated_at || null,
     updatedBy: row.updated_by || null,
@@ -64,7 +68,7 @@ function normalizePolicy(row) {
 async function loadPokerPolicy(runSql = executeSql) {
   const [accessRows, tierRows, poolRows] = await Promise.all([
     runSql("select slow_threshold_ch, slow_hysteresis_bps, slow_recovery_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
-    runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
+    runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, normal_hourly_refill_cap_ch, slow_hourly_refill_cap_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
     runSql("select system_key, balance, status from public.chips_accounts where account_type = 'SYSTEM' and system_key = any($1::text[]) order by system_key;", [POOL_KEYS]),
   ]);
   return {
@@ -86,11 +90,25 @@ async function loadPokerPolicy(runSql = executeSql) {
   };
 }
 
+function parseNullablePositiveSafe(value) {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > MAX_SAFE) return undefined; // undefined = invalid
+  return parsed;
+}
+
 function parseTierPayload(body) {
   const buyIn = positiveSafe(body.buyIn ?? body.buy_in, "invalid_buy_in");
   const enabled = body.enabled === true;
   const values = {};
   for (const field of POLICY_FIELDS) values[field] = positiveSafe(body[field], `invalid_${field}`);
+  // §32: hourly cap — null = Unlimited, positive integer = finite cap
+  const normalCap = parseNullablePositiveSafe(body.normal_hourly_refill_cap_ch);
+  if (normalCap === undefined) throw badRequest("invalid_normal_hourly_refill_cap_ch", "invalid_normal_hourly_refill_cap_ch");
+  const slowCap = parseNullablePositiveSafe(body.slow_hourly_refill_cap_ch);
+  if (slowCap === undefined) throw badRequest("invalid_slow_hourly_refill_cap_ch", "invalid_slow_hourly_refill_cap_ch");
+  values.normal_hourly_refill_cap_ch = normalCap;
+  values.slow_hourly_refill_cap_ch = slowCap;
   const expectedRevision = positiveSafe(body.expectedRevision ?? body.expected_revision, "invalid_expected_revision");
   return { buyIn, enabled, values, expectedRevision };
 }
@@ -172,12 +190,16 @@ set enabled = $2,
     normal_refill_amount_ch = $4,
     slow_refill_threshold_ch = $5,
     slow_refill_amount_ch = $6,
+    normal_hourly_refill_cap_ch = $8,
+    slow_hourly_refill_cap_ch = $9,
     revision = revision + 1,
     updated_at = timezone('utc', now()), updated_by = $7::uuid
 where buy_in = $1
 returning buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
-          slow_refill_threshold_ch, slow_refill_amount_ch, revision, updated_at, updated_by;
-`, [buyIn, enabled, values.normal_refill_threshold_ch, values.normal_refill_amount_ch, values.slow_refill_threshold_ch, values.slow_refill_amount_ch, actorId]);
+          slow_refill_threshold_ch, slow_refill_amount_ch,
+          normal_hourly_refill_cap_ch, slow_hourly_refill_cap_ch,
+          revision, updated_at, updated_by;
+`, [buyIn, enabled, values.normal_refill_threshold_ch, values.normal_refill_amount_ch, values.slow_refill_threshold_ch, values.slow_refill_amount_ch, actorId, values.normal_hourly_refill_cap_ch, values.slow_hourly_refill_cap_ch]);
     klog("admin_poker_tier_policy_updated", { actorId, buyIn, enabled, revision: updated?.[0]?.revision });
     return { tier: normalizePolicy(updated?.[0]), propagationMs: 30_000 };
   });

@@ -2061,7 +2061,9 @@ async function persistMutatedState({
   tableMarkerTransition = false,
   replacementFundingSystemKey = null,
   durableActionRequest = null,
-  deferRuntimeVersionUpdate = false
+  deferRuntimeVersionUpdate = false,
+  demandRefillBuyIn = null,
+  demandRefillPoolClass = null,
 }) {
   if (isGuestTableId(tableId)) {
     return { ok: true, skipped: true, guest: true };
@@ -2111,7 +2113,9 @@ async function persistMutatedState({
     settledAccessTransitions,
     tableMarkerTransition,
     botFundingSystemKey: replacementFundingSystemKey,
-    durableActionRequest
+    durableActionRequest,
+    demandRefillBuyIn,
+    demandRefillPoolClass,
   });
   if (!persisted?.ok) {
     klogSafe("ws_state_persist_failed", { tableId, expectedVersion, mutationKind, reason: persisted?.reason || "unknown" });
@@ -2726,7 +2730,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
       tableMarkerTransition: prepared.tableMarkerTransition,
       effectiveRestricted: settledAccessStatus.effectiveRestricted
     }),
-    deferRuntimeVersionUpdate: true
+    deferRuntimeVersionUpdate: true,
+    demandRefillBuyIn: allowBotFunding ? (tableMeta?.buyIn || null) : null,
+    demandRefillPoolClass: allowBotFunding ? (fundingDecision.poolClass || null) : null,
   });
   if (persisted?.reason === "bot_bounded_bankroll_exhausted") {
     clearSettledRolloverTimer(tableId);

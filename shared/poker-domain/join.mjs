@@ -1063,6 +1063,14 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           || (joinAccess.tierPolicy?.enabled === true
           && joinAccess.poolProvisioning?.NORMAL === true
           && joinAccess.poolProvisioning?.SLOW === true));
+      // §32: Create demand refill function for bot seeding
+      let joinDemandRefillFn = null;
+      if (tierFundingEnabled && fundingPoolClass) {
+        try {
+          const { attemptDemandRefill } = await import("./demand-refill.mjs");
+          joinDemandRefillFn = (opts) => attemptDemandRefill({ ...opts, postTransactionFn: runPostTransaction });
+        } catch { /* demand refill not available yet — safe fallback */ }
+      }
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,
@@ -1076,6 +1084,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       poolClass: fundingPoolClass,
       fundingEnabled: tierFundingEnabled,
       fundingProvisioned: tierFundingEnabled,
+      demandRefillFn: joinDemandRefillFn,
       klog
       });
       const expectedBotCountAfterSeed = seededBots.length;

@@ -1642,6 +1642,11 @@
       [["normalRefillThresholdCh", "NORMAL threshold"], ["normalRefillAmountCh", "NORMAL amount"], ["slowRefillThresholdCh", "SLOW threshold"], ["slowRefillAmountCh", "SLOW amount"]].forEach(function(pair){
         html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + '</span><input class="admin-input" name="' + pair[0] + '-' + escapeHtml(tier.buyIn) + '" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(tier[pair[0]] || "") + '"></label>');
       });
+      // §32: Hourly refill caps — blank = Unlimited (NULL)
+      [["normalHourlyRefillCapCh", "NORMAL hourly cap", "∞ Unlimited"], ["slowHourlyRefillCapCh", "SLOW hourly cap", "∞ Unlimited"]].forEach(function(pair){
+        var capValue = tier[pair[0]];
+        html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + '</span><input class="admin-input" name="' + pair[0] + '-' + escapeHtml(tier.buyIn) + '" type="number" min="1" max="9007199254740991" step="1" placeholder="' + pair[2] + '" value="' + (capValue === null || capValue === undefined ? "" : escapeHtml(capValue)) + '"></label>');
+      });
       html.push('<input type="hidden" name="revision-' + escapeHtml(tier.buyIn) + '" value="' + escapeHtml(tier.revision || 1) + '"></fieldset><div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save tier policy</button></div><p class="admin-note" data-poker-tier-policy-status aria-live="polite">Tier changes are independent mutations.</p></form>');
     });
     nodes.opsRuntime.insertAdjacentHTML("beforeend", html.join(""));
@@ -1828,10 +1833,14 @@
     if (status) status.textContent = "Saving…";
     try {
       try {
+        var normalCapRaw = data["normalHourlyRefillCapCh-" + buyIn];
+        var slowCapRaw = data["slowHourlyRefillCapCh-" + buyIn];
         await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({
           kind: "tier", buyIn: buyIn, enabled: data["enabled-" + buyIn] === "on", expectedRevision: data["revision-" + buyIn],
           normal_refill_threshold_ch: data["normalRefillThresholdCh-" + buyIn], normal_refill_amount_ch: data["normalRefillAmountCh-" + buyIn],
-          slow_refill_threshold_ch: data["slowRefillThresholdCh-" + buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + buyIn]
+          slow_refill_threshold_ch: data["slowRefillThresholdCh-" + buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + buyIn],
+          normal_hourly_refill_cap_ch: normalCapRaw === "" || normalCapRaw == null ? null : Number(normalCapRaw),
+          slow_hourly_refill_cap_ch: slowCapRaw === "" || slowCapRaw == null ? null : Number(slowCapRaw)
         }) });
       } catch (err){
         if (err && err.code === "stale_revision"){
