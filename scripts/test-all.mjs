@@ -44,6 +44,7 @@ run("node", ["tests/secureStorage.test.mjs"], "secure-storage");
 run("node", ["tests/favorites-service.test.mjs"], "favorites-service");
 run("node", ["tests/poker-stakes.test.mjs"], "poker-stakes");
 run("node", ["tests/poker-bots.unit.test.mjs"], "poker-bots-unit");
+run("node", ["--test", "shared/poker-domain/demand-refill.behavior.test.mjs"], "poker-demand-refill");
 run("node", ["tests/poker-bot-cashout.userId-is-bot.unit.test.mjs"], "poker-bot-cashout-userid-is-bot-unit");
 run("node", ["tests/chips-ledger.escrow-only.null-user.unit.test.mjs"], "chips-ledger-escrow-only-null-user");
 run("node", ["tests/chips-ledger.human.buyin.unit.test.mjs"], "chips-ledger-human-buyin");

@@ -255,25 +255,6 @@ async function seedBotsForJoin({
     return [];
   }
 
-  // §32: Attempt demand refill before seeding if pool class is known
-  if (typeof demandRefillFn === "function" && poolClass) {
-    try {
-      const refillResult = await demandRefillFn({
-        tx,
-        buyIn: normalizedBuyIn,
-        poolClass,
-        fundingDemandId: `${idempotencyPrefix}:${tableId}`,
-        requiredDebitCh: normalizedBuyIn * 3, // estimate for typical 3-bot seed
-      });
-      if (refillResult?.status) {
-        klog("poker_demand_refill_seed", { tableId, poolClass, status: refillResult.status, poolKey: refillResult.poolKey || null });
-      }
-    } catch (refillError) {
-      // Demand refill failure must not block seeding — existing safe fallback handles pool exhaustion
-      klog("poker_demand_refill_seed_error", { tableId, poolClass, code: refillError?.code || "refill_error" });
-    }
-  }
-
   const seatRows = await loadSeatRows(tx, tableId);
   const activeSeats = seatRows.filter((row) => String(row?.status || "ACTIVE").toUpperCase() === "ACTIVE");
   const humanCount = activeSeats.filter((row) => !row?.is_bot).length;
@@ -292,6 +273,29 @@ async function seedBotsForJoin({
   if (toSeed <= 0) return [];
 
   const occupied = new Set(activeSeats.map((row) => normalizeSeatNo(row?.seat_no)).filter(Boolean));
+  const plannedSeats = [];
+  for (let seatNo = 1; seatNo <= maxPlayers && plannedSeats.length < toSeed; seatNo += 1) {
+    if (!occupied.has(seatNo)) plannedSeats.push(seatNo);
+  }
+  // §32: Attempt demand refill before seeding if pool class is known
+  if (typeof demandRefillFn === "function" && poolClass && plannedSeats.length > 0) {
+    try {
+      const refillResult = await demandRefillFn({
+        tx,
+        buyIn: normalizedBuyIn,
+        poolClass,
+        fundingDemandId: plannedSeats.map((seatNo) => `${idempotencyPrefix}:${tableId}:${seatNo}`).join("|"),
+        requiredDebitCh: normalizedBuyIn * plannedSeats.length,
+      });
+      if (refillResult?.status) {
+        klog("poker_demand_refill_seed", { tableId, poolClass, status: refillResult.status, poolKey: refillResult.poolKey || null });
+      }
+    } catch (refillError) {
+      // Demand refill failure must not block seeding — existing safe fallback handles pool exhaustion
+      klog("poker_demand_refill_seed_error", { tableId, poolClass, code: refillError?.code || "refill_error" });
+    }
+  }
+
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   const seededBots = [];
 

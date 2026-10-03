@@ -102,13 +102,13 @@ function parseTierPayload(body) {
   const enabled = body.enabled === true;
   const values = {};
   for (const field of POLICY_FIELDS) values[field] = positiveSafe(body[field], `invalid_${field}`);
-  // §32: hourly cap — null = Unlimited, positive integer = finite cap
-  const normalCap = parseNullablePositiveSafe(body.normal_hourly_refill_cap_ch);
-  if (normalCap === undefined) throw badRequest("invalid_normal_hourly_refill_cap_ch", "invalid_normal_hourly_refill_cap_ch");
-  const slowCap = parseNullablePositiveSafe(body.slow_hourly_refill_cap_ch);
-  if (slowCap === undefined) throw badRequest("invalid_slow_hourly_refill_cap_ch", "invalid_slow_hourly_refill_cap_ch");
-  values.normal_hourly_refill_cap_ch = normalCap;
-  values.slow_hourly_refill_cap_ch = slowCap;
+  for (const field of ["normal_hourly_refill_cap_ch", "slow_hourly_refill_cap_ch"]) {
+    if (!Object.prototype.hasOwnProperty.call(body, field)) continue;
+    const raw = body[field];
+    const cap = raw === null ? null : (typeof raw === "number" || typeof raw === "string") ? parseNullablePositiveSafe(raw) : undefined;
+    if (cap === undefined || raw === undefined) throw badRequest(`invalid_${field}`, `invalid_${field}`);
+    values[field] = cap;
+  }
   const expectedRevision = positiveSafe(body.expectedRevision ?? body.expected_revision, "invalid_expected_revision");
   return { buyIn, enabled, values, expectedRevision };
 }
@@ -170,9 +170,12 @@ returning slow_threshold_ch, slow_hysteresis_bps, slow_recovery_threshold_ch, re
     }
     if (kind !== "tier") throw badRequest("invalid_policy_scope", "invalid_policy_scope");
     const { buyIn, enabled, values, expectedRevision } = parseTierPayload(body);
-    const rows = await tx.unsafe("select buy_in, revision from public.poker_bot_tier_policy where buy_in = $1 for update;", [buyIn]);
+    const rows = await tx.unsafe("select buy_in, revision, normal_hourly_refill_cap_ch, slow_hourly_refill_cap_ch from public.poker_bot_tier_policy where buy_in = $1 for update;", [buyIn]);
     if (!rows?.[0]) throw badRequest("tier_policy_missing", "tier_policy_missing");
     if (Number(rows[0].revision) !== expectedRevision) throw conflict("stale_revision", "stale_revision");
+    for (const field of ["normal_hourly_refill_cap_ch", "slow_hourly_refill_cap_ch"]) {
+      if (!Object.prototype.hasOwnProperty.call(values, field)) values[field] = rows[0][field];
+    }
     if (enabled) {
       const normalKey = getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: "NORMAL" });
       const slowKey = getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: "SLOW" });

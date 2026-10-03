@@ -299,8 +299,6 @@ export function isValidTierPolicy(policy) {
 
 export function normalizeTierPolicySnapshot(row) {
   if (!row) return null;
-  const normalCap = row.normal_hourly_refill_cap_ch ?? row.normalHourlyRefillCapCh;
-  const slowCap = row.slow_hourly_refill_cap_ch ?? row.slowHourlyRefillCapCh;
   const policy = {
     buyIn: Number(row.buy_in ?? row.buyIn),
     enabled: row.enabled === true,
@@ -308,8 +306,6 @@ export function normalizeTierPolicySnapshot(row) {
     normal_refill_amount_ch: Number(row.normal_refill_amount_ch),
     slow_refill_threshold_ch: Number(row.slow_refill_threshold_ch),
     slow_refill_amount_ch: Number(row.slow_refill_amount_ch),
-    normal_hourly_refill_cap_ch: normalCap === null || normalCap === undefined ? null : Number(normalCap),
-    slow_hourly_refill_cap_ch: slowCap === null || slowCap === undefined ? null : Number(slowCap),
     revision: Number(row.revision),
   };
   return Number.isSafeInteger(policy.buyIn) && policy.buyIn > 0 && isValidTierPolicy(policy) ? policy : null;
@@ -321,8 +317,7 @@ export async function readPokerTierPolicy(tx, { buyIn } = {}) {
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) return null;
   const rows = await tx.unsafe(
     `select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
-            slow_refill_threshold_ch, slow_refill_amount_ch,
-            normal_hourly_refill_cap_ch, slow_hourly_refill_cap_ch, revision
+            slow_refill_threshold_ch, slow_refill_amount_ch, revision
        from public.poker_bot_tier_policy
       where buy_in = $1
       limit 1;`,

@@ -1,3 +1,4 @@
+import { attemptDemandRefill } from "./demand-refill.mjs";
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
 import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
@@ -1063,14 +1064,6 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           || (joinAccess.tierPolicy?.enabled === true
           && joinAccess.poolProvisioning?.NORMAL === true
           && joinAccess.poolProvisioning?.SLOW === true));
-      // §32: Create demand refill function for bot seeding
-      let joinDemandRefillFn = null;
-      if (tierFundingEnabled && fundingPoolClass) {
-        try {
-          const { attemptDemandRefill } = await import("./demand-refill.mjs");
-          joinDemandRefillFn = (opts) => attemptDemandRefill({ ...opts, postTransactionFn: runPostTransaction });
-        } catch { /* demand refill not available yet — safe fallback */ }
-      }
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,
@@ -1084,7 +1077,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       poolClass: fundingPoolClass,
       fundingEnabled: tierFundingEnabled,
       fundingProvisioned: tierFundingEnabled,
-      demandRefillFn: joinDemandRefillFn,
+      demandRefillFn: tierFundingEnabled && fundingPoolClass ? attemptDemandRefill : null,
       klog
       });
       const expectedBotCountAfterSeed = seededBots.length;

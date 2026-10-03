@@ -1,3 +1,4 @@
+begin;
 -- T101: Add demand-driven hourly refill caps to poker_bot_tier_policy (§32)
 --
 -- Adds nullable NORMAL/SLOW hourly cap columns.
@@ -51,3 +52,5 @@ create index if not exists chips_transactions_poker_pool_refill_lookup_idx
   where metadata ->> 'purpose' = 'poker_pool_refill'
     and nullif(metadata ->> 'bankrollSystemKey', '') is not null
     and nullif(metadata ->> 'bucket', '') is not null;
+
+commit;

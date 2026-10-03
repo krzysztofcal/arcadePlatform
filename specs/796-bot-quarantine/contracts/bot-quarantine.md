@@ -1,5 +1,8 @@
 # Contracts: NORMAL/SLOW admission and periodic tier pools with manual RESTRICTED
 
+> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. See the §32 implementation section at the end of this document. Final state is demand-only; temporary Cron uses the same DB allowance until accepted Stage smoke and separate removal GO.
+
+
 Historical filename retained for the PR link. This contract implements the requirements of [spec.md](../spec.md), sourced solely from the live #1018 snapshot including its manual RESTRICTED amendment. Local T001–T029 evidence remains historical; the final amendment requires T030–T036, a new exact-SHA WS gate and the pre-merge Stage acceptance T037.
 
 ## 1. Effective access and cache
@@ -192,3 +195,9 @@ In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
 This section is authoritative over older scheduler descriptions in sections 5 and 12 and in historical task evidence. No GitHub workflow, VPS timer or dedicated poker dispatch credential remains the recurring refill authority. The single planned Supabase Cron job is documented above and is not created or activated in this PR.
 
 After merge, live VPS poker-unit cleanup needs a separate owner GO. Do not modify `arcade-chips-ledger-dispatch.*` or `/home/copilot/.config/gh`. Stage Cron setup and enabling `poker_bot_refill_control` are also separate owner gates. Production receives no migration, pg_cron/job setup, MINT or balance change from this PR. The hourly cadence is a behavioral change only after activation; before then refills do not run.
+
+## §32 current refill contract
+
+Trusted DB runtime calls `public.poker_bot_pool_refill_demand(buyIn, poolClass, fundingDemandId, requiredDebitCh)` only after resolving positive legal bot funding. It cannot supply MINT amount or pool key. DB reads policy/control and validates identity, locks GENESIS then exact pool plus pool/hour advisory lock, aggregates exact positive refill entries, bounds one chunk by current-hour allowance, and refuses a partial refill that cannot cover demand. Funding continues once in its original transaction. Savepoint rollback isolates errors.
+
+`NULL=Unlimited`; finite positive safe bigint caps fresh current-hour refill MINT. Same funding identity/bucket replay is guarded across policy revisions. Admin omitted field preserves locked value; explicit NULL sets Unlimited; revision/audit remains. Temporary hourly wrapper uses the identical core/ledger allowance and is removed only after Stage acceptance and separate GO. PUBLIC/anon/authenticated/service_role cannot execute either entry point. See [plan.md](../plan.md).

@@ -1,9 +1,10 @@
+import { attemptDemandRefill } from "../../../shared/poker-domain/demand-refill.mjs";
 import { createHash } from "node:crypto";
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
 import { projectDurableActionResult } from "../idempotency/action-command.mjs";
-import { CANONICAL_POKER_BOT_POOL_KEYS } from "../../../shared/poker-domain/table-economy.mjs";
+import { CANONICAL_POKER_BOT_POOL_KEYS, getBotFundingSystemKeyForBuyIn } from "../../../shared/poker-domain/table-economy.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 2;
@@ -1034,21 +1035,17 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         });
         // §32: Attempt demand refill before bot funding writes
         if (demandRefillBuyIn && demandRefillPoolClass && botFundingSystemKey
+            && getBotFundingSystemKeyForBuyIn(demandRefillBuyIn, { poolClass: demandRefillPoolClass }) === botFundingSystemKey
             && (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0)) {
           try {
-            const { attemptDemandRefill } = await import("../../../shared/poker-domain/demand-refill.mjs");
-            const { postTransaction: mintPostTransaction } = await import("../../../netlify/functions/_shared/chips-ledger.mjs");
-            const totalDebit = [
-              ...replacementFundingPlan.fundings.map((f) => Number(f.fundingDelta) || 0),
-              ...managedBotTopUpPlan.fundings.map((f) => Number(f.targetStack) || 0),
-            ].reduce((sum, v) => sum + Math.abs(v), 0);
+            const fundings = [...replacementFundingPlan.fundings, ...managedBotTopUpPlan.fundings];
+            const totalDebit = fundings.reduce((sum, funding) => sum + funding.fundingDelta, 0);
             const refillResult = await attemptDemandRefill({
               tx,
               buyIn: demandRefillBuyIn,
               poolClass: demandRefillPoolClass,
-              fundingDemandId: `settled:${tableId}:${expectedVersion}`,
+              fundingDemandId: fundings.map((funding) => funding.idempotencyKey).join("|"),
               requiredDebitCh: totalDebit,
-              postTransactionFn: mintPostTransaction,
             });
             if (refillResult?.status) {
               klog("ws_demand_refill_settled", {

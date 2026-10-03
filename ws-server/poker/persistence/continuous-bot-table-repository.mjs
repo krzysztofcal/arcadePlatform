@@ -1,3 +1,4 @@
+import { attemptDemandRefill } from "../../../shared/poker-domain/demand-refill.mjs";
 import { createPokerTableWithState } from "../../../netlify/functions/_shared/poker-table-init.mjs";
 import {
   applySeatsAndStacksToState,
@@ -137,15 +138,6 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     managedProfileKey: profile.profileKey,
     rotationDueAt
   });
-  // §32: Create demand refill function for managed bot seeding
-  let managedDemandRefillFn = null;
-  if (poolSchema && fundingEnabled) {
-    try {
-      const { attemptDemandRefill } = await import("../../../shared/poker-domain/demand-refill.mjs");
-      const { postTransaction: mintPostTransaction } = await import("../../../netlify/functions/_shared/chips-ledger.mjs");
-      managedDemandRefillFn = (opts) => attemptDemandRefill({ ...opts, postTransactionFn: mintPostTransaction });
-    } catch { /* demand refill not available yet */ }
-  }
   const seededBots = await seedBotsForJoin({
     tx,
     tableId: created.tableId,
@@ -163,7 +155,7 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     fundingProvisioned: fundingEnabled,
     fundingReason: "BOT_SEED_BUY_IN",
     idempotencyPrefix: "managed-bot-seed-buyin",
-    demandRefillFn: managedDemandRefillFn,
+    demandRefillFn: poolSchema && fundingEnabled ? attemptDemandRefill : null,
     klog
   });
   const stateRows = await tx.unsafe(

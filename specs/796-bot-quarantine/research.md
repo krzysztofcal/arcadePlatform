@@ -1,5 +1,8 @@
 # Research: #1018 NORMAL/SLOW periodic pools with manual RESTRICTED
 
+> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. See the §32 implementation section at the end of this document. Final state is demand-only; temporary Cron uses the same DB allowance until accepted Stage smoke and separate removal GO.
+
+
 **Date**: 2026-09-27. Requirements: [live snapshot](issue-source.md), updated 2026-09-27T17:10:33Z. Code inspected against the current implementation branch; relevant runtime files match this PR extension. Read live `agents.md`, `skills.md`, constitution and active Spec Kit skills/templates. These decisions are the accepted implementation contract; local evidence is recorded in [quickstart.md](quickstart.md). T001–T029 are historical evidence; the manual RESTRICTED amendment requires T030–T036 and a new exact-SHA WS gate.
 
 ## R1 — Classification and current runtime
@@ -98,3 +101,7 @@ Breaking impact: once separately activated, refill evaluation changes from three
 PostgreSQL `lock_timeout=0` lets a pool's `FOR UPDATE` wait reach the global statement timeout. A `QUERY_CANCELED` at that boundary is not caught by `EXCEPTION WHEN OTHERS`, so the outer call can roll back earlier pool commits. The immutable applied Stage migration remains unchanged. Forward-only Stage correction `20260930223409_poker_bot_pool_refill_lock_timeout.sql` replaces the function with the same body plus function-level `SET lock_timeout = '5s'`; the existing per-pool exception block then records the timed-out pool as failed and continues. The not-yet-applied Production P2 receives the same final setting instead of a new migration.
 
 Only one new disposable PostgreSQL test is needed: one connection confirms it holds `FOR UPDATE` on an exact pool account, then the second calls the function and verifies the first pool returns `failed` with `55P03` while an independent pool commits one balanced MINT. Promises coordinate lock acquisition/release; there is no sleep. The Stage correction's automatic apply replaces only the function, with the control still disabled and no pg_cron/job/MINT. Production/VPS remain untouched.
+
+## §32 current decisions
+
+Use the existing DB ledger contract instead of the removed `trustedScheduledRefill` capability. A narrow SQL core is reused by actual funding and temporary Cron to avoid two independent allowance calculations. Ledger aggregation is sufficient; exact SYSTEM account joins fix the old schema mismatch. GENESIS locks precede exact pool locks across all refill callers to prevent multi-pool transition deadlocks. DB time supplies each UTC bucket; no reset job. Savepoint isolation preserves original funding when the core fails. Final Cron removal is a rollout operation after smoke and separate GO, not a retained backup. See [plan.md](plan.md) and [quickstart.md](quickstart.md).
