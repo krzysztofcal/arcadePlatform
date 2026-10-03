@@ -199,12 +199,14 @@ const assertPokerBotQuarantineSchema = async (sql) => {
     select indexname, indexdef
     from pg_indexes
     where schemaname = 'public'
-      and indexname in ('poker_seats_user_id_active_human_idx', 'poker_tables_created_by_pending_standard_idx', 'chips_transactions_poker_pool_bucket_uidx');
+      and indexname in ('poker_seats_user_id_active_human_idx', 'poker_tables_created_by_pending_standard_idx', 'chips_transactions_poker_pool_refill_lookup_idx');
   `;
   const indexByName = new Map(indexRows.map((row) => [row.indexname, row.indexdef]));
   assert.match(indexByName.get("poker_seats_user_id_active_human_idx") || "", /\(user_id, table_id\)/i);
   assert.match(indexByName.get("poker_tables_created_by_pending_standard_idx") || "", /\(created_by, id\)/i);
-  assert.match(indexByName.get("chips_transactions_poker_pool_bucket_uidx") || "", /metadata/i);
+  assert.match(indexByName.get("chips_transactions_poker_pool_refill_lookup_idx") || "", /metadata/i);
+  assert.equal((await sql`select to_regclass('public.chips_transactions_poker_pool_bucket_uidx') as old;`)[0].old, null);
+  assert.doesNotMatch(indexByName.get("chips_transactions_poker_pool_refill_lookup_idx"), /CREATE UNIQUE INDEX/i);
   const tableIdIndexRows = await sql`
     select indexname, indexdef
     from pg_indexes

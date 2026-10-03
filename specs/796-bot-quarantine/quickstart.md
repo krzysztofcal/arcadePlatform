@@ -1,5 +1,8 @@
 # Quickstart: validate NORMAL/SLOW per-tier pools with manual RESTRICTED
 
+> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. See the §32 implementation section at the end of this document. Final state is demand-only; temporary Cron uses the same DB allowance until accepted Stage smoke and separate removal GO.
+
+
 ## Current gate
 
 Implementation of the accepted Spec Kit is authorized from T001 onward. Live #1018 remains the requirements source; §29 is the current refill design and supersedes the older GitHub/VPS dispatcher and Stage canary instructions below. The Stage schema migration may apply automatically from the PR but remains dark (`enabled=false`, no pg_cron/job/MINT). The old owner-run canary evidence is historical. Production mutation, live-VPS cleanup, Stage/Production Cron activation, bootstrap, profile/table activation and merge are outside this task; poker VPS service/timer remain disabled/inactive.
@@ -354,3 +357,28 @@ Publishing the Stage correction intentionally allows DB Stage Apply to replace o
 The new disposable PostgreSQL contention test uses a confirmed `FOR UPDATE` lock held by a second connection. Before the correction, the test failed with `57014` at its 8s test statement timeout. With the corrected function it passes in about 5 seconds: the NORMAL 100 pool reports `failed`/`55P03`, while SLOW 100 commits one balanced 2,000 CH MINT. Promise coordination is used; no sleep is used.
 
 Stage DB Apply run [36787645932](https://github.com/krzysztofcal/arcadePlatform/actions/runs/36787645932) checked out exact SHA `aa0d2b5cad0b22dc3a217786ceee4a8e678d82f7`, verified the canonical Stage identity, and reported 103 applied / 1 pending migration. It applied only `20260930223409_poker_bot_pool_refill_lock_timeout.sql` (`CREATE FUNCTION`, then `REVOKE`) and reported “Stage DB migrations are applied and smoke checks passed.” The correction does not update the already-disabled control or call the function; it contains no pg_cron/job or ledger write, so no MINT or balance change was performed. Production and VPS were not accessed.
+
+## §32 implementation and rollout (2026-10-03)
+### Intended automatic shared Stage effect before push
+
+Read-only Stage baseline: 104 applied migrations; neither §32 migration applied; canonical identity `7656985631720456337`; control enabled; one active Cron `poker-bot-pool-refill-hourly` (`0 * * * *`).
+
+Normal `DB Stage Apply PR` intentionally applies `20261001200000_poker_demand_refill_caps.sql` and `20261003183317_poker_demand_refill_core.sql`: add nullable caps/constraints; initialize NORMAL Unlimited and SLOW from existing chunk; drop old one-per-hour unique index; install non-unique pool/bucket lookup; install restricted-access demand DB core; replace active Cron wrapper with shared-cap accounting. Expected inventory 104 -> 106. Existing enabled control and active Cron remain enabled; subsequent scheduled calls use the new shared allowance, and exact-SHA WS Preview deployment activates demand calls against Stage. The migration itself creates no MINT/ledger entries, balances, pools, tables, profiles or jobs and does not invoke refill. No already-applied migration changes. Production equivalent is prepared in `supabase/production-migrations/20261003183626_poker_demand_refill_production_contract.sql` with Production project/system identity guards; it is never auto-applied.
+
+### Verification and gates
+
+Fundamental deterministic coverage extends the existing disposable PostgreSQL transaction suite: multiple Unlimited demands; finite NORMAL/SLOW aggregate including concurrency; new DB-derived UTC bucket without reset; same-demand replay across revisions; Cron+demand shared cap; live Admin finite/Unlimited changes and omitted fields; identity/kill switch; insufficient useful allowance; exact class/tier isolation; balanced ledger/registry and pool-local rollback. Existing migration contracts now require non-unique lookup and absence of the old index. No rendering/framework/broad test suite added.
+
+Required before calling merge-ready: green required CI, successful exact runtime-SHA `WS Preview Deploy`, relevant authenticated Deploy Preview -> WS Preview smoke and Stage NORMAL Unlimited / finite NORMAL / finite SLOW plus live Admin verification. Runtime smoke is pending until evidence is recorded. Separate GO still required for Stage Cron removal/wrapper decommission after acceptance, all Production migration/runtime activation/Cron removal, and optional pg_cron cleanup after rechecking other jobs. Keep #1030 draft; never merge automatically.
+
+### §32 local review evidence
+
+Rebased HEAD `ce604b14f9374aaf549aed1d74a6aea73b203f0c` descends from current main `5aa64b59c0bc59122319ea2ff499dc56b78d45ac`; #1030 now targets `main` and remains draft. Read-only Stage confirmed 104 applied versions and 3 historical refill transactions before rollout. Local PostgreSQL 17: transaction suite 12/12, full chips migration contract PASS. Focused funding/runtime suite 91/91; WS server/table manager regression 239/239; syntax and exhaustive migration guard PASS. No deleted Node worker or trustedScheduledRefill capability is restored. Production equivalent records only its own new version and rejects replay; Production was not accessed. CI, Stage Apply, exact-SHA WS Preview and authenticated smoke evidence remain tracked below after execution.
+
+### §32 Stage and exact-SHA deployment evidence
+
+[DB Stage Apply PR 37145726559](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726559) checked out `e10fbbb471de310292416c76399ca6e8ad771387`, verified canonical identity and applied only the two §32 migrations (104 applied / 2 pending -> 106 applied, smoke checks PASS). Read-only Stage afterward: control enabled, exact hourly Cron still active, new core installed, old unique index absent, non-unique lookup present, NORMAL NULL and SLOW 2000/5000 for enabled 100/500 tiers. Refill transaction count stayed 3 across apply: no migration-time MINT.
+
+[WS Preview Deploy 37145758741](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145758741) was dispatched with workflow `--ref main` and application `ref=e10fbbb471de310292416c76399ca6e8ad771387`; validation, exact-SHA release metadata, atomic switch/restart and local/public health gates PASS. Public `/healthz` returned `ok`. Browser preview: https://deploy-preview-1030--playkcswh.netlify.app. Authenticated legal-funding/live-Admin smoke remains pending; deployment/health alone does not prove Stage §32 acceptance.
+
+Any later docs-only evidence commit retains the deployed runtime evidence after confirming zero runtime/deployable/config changes. CI status is tracked on #1030; do not call merge-ready until required checks and the pending authenticated smoke are accepted. Stage Cron decommission and Production remain separate GO.

@@ -1,9 +1,10 @@
+import { attemptDemandRefill } from "../../../shared/poker-domain/demand-refill.mjs";
 import { createHash } from "node:crypto";
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { writePersistedTableToFile } from "./persisted-state-file-store.mjs";
 import { projectDurableActionResult } from "../idempotency/action-command.mjs";
-import { CANONICAL_POKER_BOT_POOL_KEYS } from "../../../shared/poker-domain/table-economy.mjs";
+import { CANONICAL_POKER_BOT_POOL_KEYS, getBotFundingSystemKeyForBuyIn } from "../../../shared/poker-domain/table-economy.mjs";
 
 const HAND_SETTLED_ACTION_TYPE = "HAND_SETTLED";
 const SETTLEMENT_AUDIT_VERSION = 2;
@@ -998,7 +999,9 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     settledAccessTransitionPlan,
     tableMarkerTransition,
     botFundingSystemKey = null,
-    durableActionPlan
+    durableActionPlan,
+    demandRefillBuyIn = null,
+    demandRefillPoolClass = null,
   }) {
     let successfulHoleCardWrite = null;
     const result = await beginSql(async (tx) => {
@@ -1030,6 +1033,35 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
           tableId,
           requested: tableMarkerTransition
         });
+        // §32: Attempt demand refill before bot funding writes
+        if (demandRefillBuyIn && demandRefillPoolClass && botFundingSystemKey
+            && getBotFundingSystemKeyForBuyIn(demandRefillBuyIn, { poolClass: demandRefillPoolClass }) === botFundingSystemKey
+            && (replacementFundingPlan.fundings.length > 0 || managedBotTopUpPlan.fundings.length > 0)) {
+          try {
+            const fundings = [...replacementFundingPlan.fundings, ...managedBotTopUpPlan.fundings];
+            const totalDebit = fundings.reduce((sum, funding) => sum + funding.fundingDelta, 0);
+            const refillResult = await attemptDemandRefill({
+              tx,
+              buyIn: demandRefillBuyIn,
+              poolClass: demandRefillPoolClass,
+              fundingDemandId: fundings.map((funding) => funding.idempotencyKey).join("|"),
+              requiredDebitCh: totalDebit,
+            });
+            if (refillResult?.status) {
+              klog("ws_demand_refill_settled", {
+                tableId,
+                status: refillResult.status,
+                poolKey: refillResult.poolKey || null,
+                amount: refillResult.amount || null,
+              });
+            }
+          } catch (refillError) {
+            klog("ws_demand_refill_settled_error", {
+              tableId,
+              code: refillError?.code || "refill_error",
+            });
+          }
+        }
         const fundedReplacements = await writeReplacementFundings({
           tx,
           tableId,
@@ -1219,7 +1251,9 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     settledAccessTransitions = undefined,
     tableMarkerTransition = false,
     botFundingSystemKey = null,
-    durableActionRequest = null
+    durableActionRequest = null,
+    demandRefillBuyIn = null,
+    demandRefillPoolClass = null,
   }) {
     if (!tableId || !Number.isInteger(expectedVersion) || expectedVersion < 0) {
       return { ok: false, reason: "invalid" };
@@ -1292,7 +1326,9 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         settledAccessTransitionPlan,
         tableMarkerTransition,
         botFundingSystemKey,
-        durableActionPlan
+        durableActionPlan,
+        demandRefillBuyIn,
+        demandRefillPoolClass,
       });
     } catch (error) {
       klog("ws_persisted_state_write_error", {

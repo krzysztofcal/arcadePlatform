@@ -983,6 +983,34 @@
       "omitted_effects": [
         "No pg_cron extension/job, control enablement, MINT or Production migration is authorized by this PR"
       ]
+    },
+    {
+      "version": "20261001200000",
+      "file": "20261001200000_poker_demand_refill_caps.sql",
+      "sha256": "d1a9c0c3e4f67b673d2472c5bb9f564480d31200edab6577f9fcd53bb822aad9",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20261003183626_poker_demand_refill_production_contract.sql",
+      "required_effects": [
+        "\u00a732 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
+      ],
+      "omitted_effects": [
+        "No Production mutation, Cron removal, control activation or migration-time MINT"
+      ]
+    },
+    {
+      "version": "20261003183317",
+      "file": "20261003183317_poker_demand_refill_core.sql",
+      "sha256": "252e7ebb3af1f92faf3d3595331f21c8599a9a41f77cbe673c523a0cbe8717ac",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20261003183626_poker_demand_refill_production_contract.sql",
+      "required_effects": [
+        "\u00a732 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
+      ],
+      "omitted_effects": [
+        "No Production mutation, Cron removal, control activation or migration-time MINT"
+      ]
     }
   ],
   "replacement_migrations": [
@@ -1011,6 +1039,14 @@
       "sha256": "139a00efb8ed712eae9aff9cf9a9264884da49c353a72a8bb492f7fcbe560372",
       "prerequisites": [
         "20260929201500_poker_bot_quarantine_production_contract.sql"
+      ]
+    },
+    {
+      "file": "20261003183626_poker_demand_refill_production_contract.sql",
+      "purpose": "\u00a732 Production hourly cap and shared demand refill contract; separate GO only",
+      "sha256": "db23077155394845da289d9e1f59b50cbeae3f1400a1b609cffea1d9cc19a39b",
+      "prerequisites": [
+        "20260930211624_poker_bot_pool_refill_hourly.sql"
       ]
     }
   ],

@@ -425,3 +425,6 @@ export {
   POKER_LOG_CATEGORIES,
   POKER_LOG_SEVERITIES
 };
+
+register("INFO", "ledger", ["poker_demand_refill_seed", "ws_demand_refill_settled"]);
+register("WARN", "ledger", ["poker_demand_refill_seed_error", "ws_demand_refill_settled_error"]);

@@ -1,5 +1,8 @@
 # Tasks: NORMAL/SLOW periodic per-tier pools
 
+> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. See the §32 implementation section at the end of this document. Final state is demand-only; temporary Cron uses the same DB allowance until accepted Stage smoke and separate removal GO.
+
+
 **Input**: Design documents from `/specs/796-bot-quarantine/`.
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/bot-quarantine.md](contracts/bot-quarantine.md).
@@ -307,3 +310,48 @@ Tested with deterministic behavioral suites (`ws-server/poker/runtime/poker-acce
 - [x] **T100 — Bound hourly refill row-lock waits.** Keep applied Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` immutable. Add standard forward-only Stage migration `20260930223409_poker_bot_pool_refill_lock_timeout.sql` with the same function body plus function-level `SET lock_timeout = '5s'`; update the existing unapplied Production P2 to the same final definition. The coordinated disposable PostgreSQL test proves a `55P03` failure is isolated to the locked pool while an independent pool commits exactly one balanced MINT. DB Stage Apply run `36787645932` on SHA `aa0d2b5cad0b22dc3a217786ceee4a8e678d82f7` applied the correction as its only pending migration, and the Stage migration smoke checks passed. The change is only a function replacement: the singleton remains `enabled=false`, with no pg_cron/job/MINT. Production manifest/checker/inventory and runbook evidence are synchronized. No other refill behavior or Production/VPS state changed.
 
 Breaking impacts: external refill workflow/worker/timer and dedicated actor/PAT/config are retired in the repository. Once separately authorized and activated, DB refill decisions occur hourly, rather than every three hours, so the configured amount can be issued once per pool per hour when its balance returns below threshold. Until activation no automatic refill runs. No policy, amount, enablement, current balance, Production state or active poker profile/table is changed here. Shared Stage may receive only the dark schema/function migration automatically.
+
+## §32 implementation and rollout (2026-10-03)
+
+Current base: `main` at `5aa64b59`; implementation ported from #1030 without the deleted Node worker or `trustedScheduledRefill`. The existing SQL ledger/registry/entry-sequence contract is authoritative.
+
+`real funding demand -> exact tier/class -> current DB policy -> UTC-hour allowance -> at most one refill -> original funding`.
+
+- `normal_hourly_refill_cap_ch` / `slow_hourly_refill_cap_ch`: SQL NULL means Unlimited; positive safe bigint bounds aggregate fresh refill MINT per exact pool/UTC hour. Existing balance is excluded. Threshold and chunk remain independent.
+- `public.poker_bot_pool_refill_demand(bigint,text,text,bigint)` is SECURITY INVOKER, empty search path, trusted DB-role only (PUBLIC/anon/authenticated/service_role denied). Caller supplies legal tier/class/funding identity/debit, never an arbitrary pool or MINT amount. Existing global `poker_bot_refill_control` remains the automatic refill kill switch; DB system identifier must match its canonical installation identity.
+- Policy/control share locks, GENESIS locked before the exact pool, exact pool/hour advisory lock, DB-time bucket checks. Usage joins transactions -> entries -> accounts with exact SYSTEM account ID/key. Same funding identity in the same bucket replays even across policy revision changes. Existing successful funding registry also blocks a later retry. Balanced GENESIS/exact-pool entries use existing triggers and registry; no counter table.
+- Initial seed computes actual planned free seats bounded by `toSeed`; demand debit is their exact buy-in sum and identity derives from planned funding idempotency keys. Settled replacement/top-up uses validated funding deltas and keys, guarded against mismatch with the resolved funding SYSTEM key. RESTRICTED, arbitrary tiers/classes and TREASURY fallback cannot invoke refill. Savepoint isolation restores the original transaction after refill failure; existing bounded/no-funding paths remain authoritative.
+- Admin reads DB policy live. Explicit NULL changes cap to Unlimited; omitted fields preserve the locked existing values. Explicit Unlimited toggles for NORMAL/SLOW, finite number validation, revision conflict and actor/timestamp/klog audit remain.
+- Transition wrapper `poker_bot_pool_refill_hourly()` calls the same core with one transition identity per bucket; it consumes the same ledger-derived allowance as demand. It is temporary, not a final backup authority. Existing exact Cron job and control state are preserved until separate removal GO.
+
+### Intended automatic shared Stage effect before push
+
+Read-only Stage baseline: 104 applied migrations; neither §32 migration applied; canonical identity `7656985631720456337`; control enabled; one active Cron `poker-bot-pool-refill-hourly` (`0 * * * *`).
+
+Normal `DB Stage Apply PR` intentionally applies `20261001200000_poker_demand_refill_caps.sql` and `20261003183317_poker_demand_refill_core.sql`: add nullable caps/constraints; initialize NORMAL Unlimited and SLOW from existing chunk; drop old one-per-hour unique index; install non-unique pool/bucket lookup; install restricted-access demand DB core; replace active Cron wrapper with shared-cap accounting. Expected inventory 104 -> 106. Existing enabled control and active Cron remain enabled; subsequent scheduled calls use the new shared allowance, and exact-SHA WS Preview deployment activates demand calls against Stage. The migration itself creates no MINT/ledger entries, balances, pools, tables, profiles or jobs and does not invoke refill. No already-applied migration changes. Production equivalent is prepared in `supabase/production-migrations/20261003183626_poker_demand_refill_production_contract.sql` with Production project/system identity guards; it is never auto-applied.
+
+### Verification and gates
+
+Fundamental deterministic coverage extends the existing disposable PostgreSQL transaction suite: multiple Unlimited demands; finite NORMAL/SLOW aggregate including concurrency; new DB-derived UTC bucket without reset; same-demand replay across revisions; Cron+demand shared cap; live Admin finite/Unlimited changes and omitted fields; identity/kill switch; insufficient useful allowance; exact class/tier isolation; balanced ledger/registry and pool-local rollback. Existing migration contracts now require non-unique lookup and absence of the old index. No rendering/framework/broad test suite added.
+
+Required before calling merge-ready: green required CI, successful exact runtime-SHA `WS Preview Deploy`, relevant authenticated Deploy Preview -> WS Preview smoke and Stage NORMAL Unlimited / finite NORMAL / finite SLOW plus live Admin verification. Runtime smoke is pending until evidence is recorded. Separate GO still required for Stage Cron removal/wrapper decommission after acceptance, all Production migration/runtime activation/Cron removal, and optional pg_cron cleanup after rechecking other jobs. Keep #1030 draft; never merge automatically.
+
+### §32 tasks (local implementation; rollout evidence tracked separately)
+
+- [x] T101 Add nullable cap schema and separate identity-guarded Production equivalent; classify both Stage sources and Production file in exhaustive manifest.
+- [x] T102 Install narrow DB demand core using current ledger contract, exact pool/hour usage, idempotency, control and database identity.
+- [x] T103 Make temporary Cron wrapper consume the same core/allowance. Preserve existing Cron job/control state.
+- [x] T104 Integrate actual positive seed/replacement/managed-top-up demand with exact planned amounts, class/tier and funding identities; isolate refill errors.
+- [x] T105 Add explicit NORMAL/SLOW Unlimited controls and revision-checked omitted-field preservation.
+- [x] T106 Extend fundamental existing real PostgreSQL migration/transaction and runtime tests; classify klog events.
+- [ ] T107 Confirm automatic Stage 104 -> 106 apply and green CI; exact-SHA WS Preview deploy; authenticated smoke including live Admin. After accepted smoke + separate GO remove Stage Cron and scheduled wrapper/dead documentation assumptions using forward-only changes.
+- [ ] T108 Separate Production GO: reviewed equivalent, exact WS deploy, read-only ledger evidence, exact Production Cron removal; inspect other jobs before optional pg_cron removal. No Production mutation authorized here.
+
+### T107 evidence split
+
+- [x] Automatic Stage apply 104 -> 106 and DB smoke PASS ([37145726559](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726559)); read-only post-apply confirms no migration-time MINT and preserved active Cron/control.
+- [x] Exact runtime SHA `e10fbbb471de310292416c76399ca6e8ad771387` WS Preview deployed with release metadata + local/public health PASS ([37145758741](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145758741)).
+- [x] Required runtime CI passed on `e10fbbb471de310292416c76399ca6e8ad771387`: [Tests](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726567), [WS PR Checks](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726647), [CI](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726508), migration guard and Stage Apply. Final docs-only HEAD checks are tracked on draft #1030.
+- [ ] Owner authenticated Deploy Preview -> WS Preview smoke: actual legal NORMAL Unlimited / finite NORMAL / finite SLOW funding and live Admin finite <-> Unlimited; runtime acceptance pending.
+- [ ] Separate Stage Cron-removal GO after accepted smoke, then forward-only wrapper/dead scheduler cleanup.
+- [ ] T108 Production migration/runtime activation/exact Cron removal: separate GO, no Production mutation performed.
