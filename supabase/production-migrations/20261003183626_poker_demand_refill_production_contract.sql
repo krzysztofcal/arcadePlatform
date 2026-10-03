@@ -5,10 +5,17 @@ do $$ begin
      or (select system_identifier::text from pg_catalog.pg_control_system()) is distinct from '7575202818581710058' then
     raise exception 'Production identity mismatch';
   end if;
+  if exists (select 1 from supabase_migrations.schema_migrations where version='20261003183626') then
+    raise exception 'Production demand refill migration already recorded';
+  end if;
+  if not exists (select 1 from supabase_migrations.schema_migrations where version='20260930211624') then
+    raise exception 'Production hourly refill migration prerequisite missing';
+  end if;
   if not exists (select 1 from public.poker_bot_refill_control where id=1 and expected_system_identifier='7575202818581710058') then
     raise exception 'Production refill contract prerequisite missing';
   end if;
 end $$;
+select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('poker-demand-refill:otbqfijerkieoxwpxjnm', 0));
 -- T101: Add demand-driven hourly refill caps to poker_bot_tier_policy (§32)
 --
 -- Adds nullable NORMAL/SLOW hourly cap columns.
@@ -266,4 +273,5 @@ end;
 $function$;
 revoke all on function public.poker_bot_pool_refill_hourly() from public, anon, authenticated, service_role;
 
+insert into supabase_migrations.schema_migrations(version) values ('20261003183626');
 commit;
