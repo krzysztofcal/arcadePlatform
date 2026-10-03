@@ -346,3 +346,12 @@ Required before calling merge-ready: green required CI, successful exact runtime
 - [x] T106 Extend fundamental existing real PostgreSQL migration/transaction and runtime tests; classify klog events.
 - [ ] T107 Confirm automatic Stage 104 -> 106 apply and green CI; exact-SHA WS Preview deploy; authenticated smoke including live Admin. After accepted smoke + separate GO remove Stage Cron and scheduled wrapper/dead documentation assumptions using forward-only changes.
 - [ ] T108 Separate Production GO: reviewed equivalent, exact WS deploy, read-only ledger evidence, exact Production Cron removal; inspect other jobs before optional pg_cron removal. No Production mutation authorized here.
+
+### T107 evidence split
+
+- [x] Automatic Stage apply 104 -> 106 and DB smoke PASS ([37145726559](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726559)); read-only post-apply confirms no migration-time MINT and preserved active Cron/control.
+- [x] Exact runtime SHA `e10fbbb471de310292416c76399ca6e8ad771387` WS Preview deployed with release metadata + local/public health PASS ([37145758741](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145758741)).
+- [ ] Required final CI tracked on draft #1030.
+- [ ] Owner authenticated Deploy Preview -> WS Preview smoke: actual legal NORMAL Unlimited / finite NORMAL / finite SLOW funding and live Admin finite <-> Unlimited; runtime acceptance pending.
+- [ ] Separate Stage Cron-removal GO after accepted smoke, then forward-only wrapper/dead scheduler cleanup.
+- [ ] T108 Production migration/runtime activation/exact Cron removal: separate GO, no Production mutation performed.

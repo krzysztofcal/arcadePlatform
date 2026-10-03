@@ -374,3 +374,11 @@ Required before calling merge-ready: green required CI, successful exact runtime
 ### §32 local review evidence
 
 Rebased HEAD `ce604b14f9374aaf549aed1d74a6aea73b203f0c` descends from current main `5aa64b59c0bc59122319ea2ff499dc56b78d45ac`; #1030 now targets `main` and remains draft. Read-only Stage confirmed 104 applied versions and 3 historical refill transactions before rollout. Local PostgreSQL 17: transaction suite 12/12, full chips migration contract PASS. Focused funding/runtime suite 91/91; WS server/table manager regression 239/239; syntax and exhaustive migration guard PASS. No deleted Node worker or trustedScheduledRefill capability is restored. Production equivalent records only its own new version and rejects replay; Production was not accessed. CI, Stage Apply, exact-SHA WS Preview and authenticated smoke evidence remain tracked below after execution.
+
+### §32 Stage and exact-SHA deployment evidence
+
+[DB Stage Apply PR 37145726559](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726559) checked out `e10fbbb471de310292416c76399ca6e8ad771387`, verified canonical identity and applied only the two §32 migrations (104 applied / 2 pending -> 106 applied, smoke checks PASS). Read-only Stage afterward: control enabled, exact hourly Cron still active, new core installed, old unique index absent, non-unique lookup present, NORMAL NULL and SLOW 2000/5000 for enabled 100/500 tiers. Refill transaction count stayed 3 across apply: no migration-time MINT.
+
+[WS Preview Deploy 37145758741](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145758741) was dispatched with workflow `--ref main` and application `ref=e10fbbb471de310292416c76399ca6e8ad771387`; validation, exact-SHA release metadata, atomic switch/restart and local/public health gates PASS. Public `/healthz` returned `ok`. Browser preview: https://deploy-preview-1030--playkcswh.netlify.app. Authenticated legal-funding/live-Admin smoke remains pending; deployment/health alone does not prove Stage §32 acceptance.
+
+Any later docs-only evidence commit retains the deployed runtime evidence after confirming zero runtime/deployable/config changes. CI status is tracked on #1030; do not call merge-ready until required checks and the pending authenticated smoke are accepted. Stage Cron decommission and Production remain separate GO.
