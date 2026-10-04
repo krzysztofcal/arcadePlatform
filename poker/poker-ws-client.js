@@ -385,6 +385,11 @@
         return;
       }
       if (isSnapshotFrameType(frame.type)) { var initial = !initialSnapshotDelivered; initialSnapshotDelivered = true; var normalized = normalizeSnapshot(frame, initial); if (normalized) onSnapshot(normalized); return; }
+      if (frame.type === 'table_gift' || frame.type === 'table_gift_state') {
+        var giftCallback = frame.type === 'table_gift' ? options.onGift : options.onGiftState;
+        try { if (typeof giftCallback === 'function') giftCallback(frame.payload || {}); } catch (_err){}
+        return;
+      }
       if (frame.type === 'table_reaction') {
         try {
           onReaction({
@@ -511,6 +516,7 @@
       sendLeave: function(payload, requestId){ return sendCommand('leave', payload || { tableId: tableId }, requestId); },
       sendLeaveQueued: function(payload, requestId){ return queueCommand('leave', payload || { tableId: tableId }, requestId); },
       sendStartHand: function(payload, requestId){ return sendCommand('start_hand', payload || { tableId: tableId }, requestId); },
+      sendGift: function(giftKey, targetSeatNo, requestId){ return sendCommand('gift_send', { tableId: tableId, giftKey: giftKey, targetSeatNo: targetSeatNo }, requestId); },
       sendReaction: function(reactionKey, requestId){ return sendCommand('reaction_send', { tableId: tableId, reactionKey: reactionKey }, requestId); },
       sendTargetedReaction: function(targetSeatNo, handId, requestId){
         return sendCommand('reaction_send', {

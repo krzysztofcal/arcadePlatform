@@ -4270,13 +4270,168 @@
     container.appendChild(cards);
   }
 
+  var giftCatalog = [
+    { key: 'coffee', emoji: '☕', price: 10 }, { key: 'beer', emoji: '🍺', price: 25 },
+    { key: 'whisky', emoji: '🥃', price: 50 }, { key: 'pizza', emoji: '🍕', price: 100 },
+    { key: 'cake', emoji: '🎂', price: 250 }, { key: 'diamond', emoji: '💎', price: 1000 }
+  ];
+  var renderedGiftBadges = {};
+  var giftsBySeat = {};
+  var giftOwners = {};
+  var giftEventIds = new Set();
+  var giftAnimationQueue = [];
+  var giftAnimationTimer = null;
+  var giftTableId = null;
+  var giftNoticeTimer = null;
+  var giftPending = false;
+  var giftRetry = null;
+  function giftByKey(key){ return giftCatalog.filter(function(gift){ return gift.key === key; })[0] || null; }
+  function giftName(gift){ return t('pokerGift_' + gift.key, gift.key); }
+  function giftEligibleSeats(){ return state.seats.filter(function(seat){ return seat && seat.userId && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''); }); }
+  function giftShopAvailable(){ var seat = deriveCurrentSeat(); return !isGuestMode && isSignedIn() && seat && !seat.isBot && isWsReady() && !state.reconnectGate; }
+  function renderGiftBadges(){
+    state.seats.forEach(function(seat){
+      var avatar = renderedSeatAvatars[seat.seatNo];
+      if (!avatar || !seat.userId) return;
+      var old = renderedGiftBadges[seat.seatNo];
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      delete renderedGiftBadges[seat.seatNo];
+      var counts = giftsBySeat[seat.seatNo] || {};
+      var gifts = giftCatalog.filter(function(gift){ return counts[gift.key] > 0; });
+      if (!gifts.length) return;
+      var badges = document.createElement('span');
+      badges.className = 'poker-gift-badges';
+      badges.title = gifts.map(function(gift){ return giftName(gift) + ' ×' + counts[gift.key]; }).join(', ');
+      badges.textContent = gifts.slice(0, 3).map(function(gift){ return gift.emoji + (counts[gift.key] > 1 ? ' ×' + counts[gift.key] : ''); }).join(' ')
+        + (gifts.length > 3 ? ' +' + (gifts.length - 3) : '');
+      avatar.appendChild(badges);
+      renderedGiftBadges[seat.seatNo] = badges;
+    });
+  }
+  function syncGiftOwners(){
+    if (giftTableId !== state.tableId) { giftsBySeat = {}; giftOwners = {}; giftEventIds.clear(); giftAnimationQueue = []; giftRetry = null; giftTableId = state.tableId; }
+    var owners = {};
+    giftEligibleSeats().forEach(function(seat){ owners[seat.seatNo] = seat.userId; });
+    Object.keys(giftOwners).forEach(function(seatNo){ if (giftOwners[seatNo] !== owners[seatNo]) delete giftsBySeat[seatNo]; });
+    giftOwners = owners;
+  }
+  function applyTableGiftState(payload){
+    if (!payload || !Array.isArray(payload.seats)) return;
+    syncGiftOwners();
+    giftsBySeat = {};
+    payload.seats.forEach(function(seat){
+      if (!Number.isInteger(seat.seatNo) || !giftOwners[seat.seatNo] || !Array.isArray(seat.gifts)) return;
+      var counts = {};
+      seat.gifts.forEach(function(gift){ if (giftByKey(gift.giftKey) && Number.isSafeInteger(gift.count) && gift.count > 0) counts[gift.giftKey] = gift.count; });
+      giftsBySeat[seat.seatNo] = counts;
+    });
+    renderGiftBadges();
+  }
+  function playNextGift(){
+    if (giftAnimationTimer || !giftAnimationQueue.length) return;
+    var event = giftAnimationQueue.shift();
+    var gift = giftByKey(event.giftKey);
+    var sender = renderedSeatAvatars[event.senderSeatNo];
+    var recipient = renderedSeatAvatars[event.recipientSeatNo];
+    if (!sender || !recipient || !gift) { playNextGift(); return; }
+    var node = document.createElement('span');
+    node.className = 'poker-gift-fly';
+    node.textContent = gift.emoji;
+    node.setAttribute('aria-hidden', 'true');
+    var from = sender.getBoundingClientRect();
+    var to = recipient.getBoundingClientRect();
+    node.style.left = (from.left + from.width / 2) + 'px';
+    node.style.top = (from.top + from.height / 2) + 'px';
+    node.style.setProperty('--gift-x', (to.left + to.width / 2 - from.left - from.width / 2) + 'px');
+    node.style.setProperty('--gift-y', (to.top + to.height / 2 - from.top - from.height / 2) + 'px');
+    document.body.appendChild(node);
+    giftAnimationTimer = setTimeout(function(){ node.remove(); giftAnimationTimer = null; playNextGift(); }, 800);
+  }
+  function handleTableGift(event){
+    var gift = event && giftByKey(event.giftKey);
+    if (!gift || typeof event.eventId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(event.eventId)
+        || !Number.isInteger(event.senderSeatNo) || !Number.isInteger(event.recipientSeatNo) || giftEventIds.has(event.eventId)) return;
+    giftEventIds.add(event.eventId);
+    if (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
+    syncGiftOwners();
+    if (!giftOwners[event.recipientSeatNo]) return;
+    var counts = giftsBySeat[event.recipientSeatNo] || (giftsBySeat[event.recipientSeatNo] = {});
+    counts[event.giftKey] = (counts[event.giftKey] || 0) + 1;
+    renderGiftBadges();
+    if (els.giftNotice) {
+      els.giftNotice.textContent = gift.emoji + ' ' + t('pokerGiftSent', 'Gift sent') + ' · S' + event.recipientSeatNo;
+      els.giftNotice.hidden = false;
+      clearTimeout(giftNoticeTimer);
+      giftNoticeTimer = setTimeout(function(){ els.giftNotice.hidden = true; }, 2200);
+    }
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (giftAnimationQueue.length < 8) giftAnimationQueue.push(event);
+    playNextGift();
+  }
+  function syncGiftShop(){
+    if (!els.giftShopButton) return;
+    var available = giftShopAvailable();
+    els.giftShopButton.hidden = !available;
+    els.giftShopButton.title = t('pokerGiftShop', 'Gift Shop');
+    els.giftShopButton.setAttribute('aria-label', t('pokerGiftShop', 'Gift Shop'));
+    if (!available) { els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); }
+    Array.prototype.forEach.call(els.giftSelect.options, function(option){
+      var gift = giftByKey(option.value);
+      option.textContent = gift ? gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH' : t('pokerGiftChoose', 'Choose a gift');
+    });
+    var selected = els.giftRecipient.value;
+    els.giftRecipient.innerHTML = '';
+    var placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = t('pokerGiftRecipient', 'Recipient'); els.giftRecipient.appendChild(placeholder);
+    giftEligibleSeats().forEach(function(seat){ var option = document.createElement('option'); option.value = String(seat.seatNo); option.textContent = 'S' + seat.seatNo + ' · ' + getDisplayName(seat); els.giftRecipient.appendChild(option); });
+    els.giftRecipient.value = selected;
+    els.giftSend.disabled = !available || giftPending || !giftByKey(els.giftSelect.value) || !els.giftRecipient.value;
+    els.giftSelect.disabled = giftPending;
+    els.giftRecipient.disabled = giftPending;
+  }
+  function bindGiftShop(){
+    ['giftShopButton', 'giftShop', 'giftSelect', 'giftRecipient', 'giftSend', 'giftMessage', 'giftClose'].forEach(function(key){
+      var ids = { giftShopButton: 'pokerGiftShopButton', giftShop: 'pokerGiftShop', giftSelect: 'pokerGiftSelect', giftRecipient: 'pokerGiftRecipient', giftSend: 'pokerGiftSend', giftMessage: 'pokerGiftMessage', giftClose: 'pokerGiftClose' };
+      els[key] = document.getElementById(ids[key]);
+    });
+    if (!els.giftShopButton) return;
+    els.giftNotice = document.getElementById('pokerGiftNotice');
+    var placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = t('pokerGiftChoose', 'Choose a gift'); els.giftSelect.appendChild(placeholder);
+    giftCatalog.forEach(function(gift){ var option = document.createElement('option'); option.value = gift.key; option.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH'; els.giftSelect.appendChild(option); });
+    els.giftShopButton.addEventListener('click', function(){ syncGiftShop(); els.giftShop.hidden = !els.giftShop.hidden; els.giftShopButton.setAttribute('aria-expanded', String(!els.giftShop.hidden)); });
+    function close(){ els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); els.giftShopButton.focus(); }
+    els.giftClose.addEventListener('click', close);
+    els.giftShop.addEventListener('keydown', function(event){ if (event.key === 'Escape') close(); });
+    els.giftSelect.addEventListener('change', function(){ giftRetry = null; syncGiftShop(); });
+    els.giftRecipient.addEventListener('change', function(){ giftRetry = null; syncGiftShop(); });
+    els.giftSend.addEventListener('click', function(){
+      if (els.giftSend.disabled || !wsClient) return;
+      var key = els.giftSelect.value;
+      var seatNo = Number(els.giftRecipient.value);
+      var retry = giftRetry && giftRetry.key === key && giftRetry.seatNo === seatNo ? giftRetry : { key: key, seatNo: seatNo, requestId: 'gift_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10) };
+      giftRetry = retry;
+      giftPending = true; syncGiftShop();
+      wsClient.sendGift(key, seatNo, retry.requestId).then(function(){
+        giftRetry = null;
+        els.giftMessage.textContent = t('pokerGiftSent', 'Gift sent');
+        document.dispatchEvent(new CustomEvent('chips:tx-complete'));
+      }).catch(function(error){
+        var messages = { gift_insufficient_chips: 'pokerGiftInsufficient', gift_rate_limited: 'pokerGiftRateLimited', gift_target_unavailable: 'pokerGiftTargetUnavailable', gift_shop_unavailable: 'pokerGiftUnavailable' };
+        els.giftMessage.textContent = t(messages[error.code] || 'pokerGiftFailed', 'Gift purchase failed');
+        // Preserve the request identity after uncertain transport failure; a retry cannot charge twice.
+        if ((String(error.code || '').indexOf('gift_') === 0 && error.code !== 'gift_purchase_failed') || error.code === 'not_seated' || error.code === 'invalid_sender') giftRetry = null;
+      }).then(function(){ giftPending = false; syncGiftShop(); });
+    });
+  }
+
   function renderSeats(){
     if (!els.seatLayer) return;
     if (els.scene && els.scene.dataset) els.scene.dataset.pokerMaxSeats = String(state.maxSeats);
+    syncGiftOwners();
     clearReactionBubblesWithChangedOwners();
     clearTargetedReactionEffectsWithChangedOwners();
     clearBotAvatarReactions();
     els.seatLayer.innerHTML = '';
+    renderedGiftBadges = {};
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
     renderedSeatAvatars = {};
@@ -4436,6 +4591,8 @@
       var reactionBubble = reactionBubblesBySeatNo[seatNo];
       if (reactionBubble) reactionBubble.animate = false;
     });
+    renderGiftBadges();
+    syncGiftShop();
   }
 
   function clearReactionRenderNodes(){
@@ -5977,6 +6134,7 @@
     els.menuSettings = document.getElementById('pokerMenuSettings');
     els.menuSignIn = document.getElementById('pokerMenuSignIn');
     els.menuGuestInfo = document.getElementById('pokerMenuGuestInfo');
+    bindGiftShop();
     els.socialSettingsPanel = document.getElementById('pokerSocialSettingsPanel');
     els.socialSettingsClose = document.getElementById('pokerSocialSettingsClose');
     els.reactionBubblesPreference = document.getElementById('pokerReactionBubblesPreference');
@@ -6311,6 +6469,8 @@
       guestToken: isGuestMode && currentGuestSession ? currentGuestSession.token : null,
       getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
       klog: klog,
+      onGift: function(event){ if (gen === liveModeGeneration) handleTableGift(event); },
+      onGiftState: function(payload){ if (gen === liveModeGeneration) applyTableGiftState(payload); },
       onReaction: function(event){
         if (gen !== liveModeGeneration) return;
         handleTableReaction(event);

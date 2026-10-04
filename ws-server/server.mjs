@@ -1,3 +1,5 @@
+import { createGiftAdapter } from './poker/persistence/gift-adapter.mjs';
+import { handleGiftSendCommand } from './poker/handlers/gift.mjs';
 import http from "http";
 import fs from "node:fs";
 import WebSocket, { WebSocketServer } from "ws";
@@ -117,6 +119,7 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "lobby_subscribe",
   "table_state_sub",
   "table_snapshot",
+  "gift_send",
   "reaction_send",
   "act",
   "start_hand",
@@ -124,7 +127,7 @@ const PROTECTED_MESSAGE_TYPES = new Set([
   "resume",
   "ack"
 ]);
-const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "rebuy", "table_rebuy", "lobby_subscribe", "table_state_sub", "table_snapshot", "reaction_send", "act", "start_hand", "resync", "resume"]);
+const REQUEST_ID_REQUIRED_TYPES = new Set(["join", "leave", "table_join", "table_leave", "rebuy", "table_rebuy", "lobby_subscribe", "table_state_sub", "table_snapshot", "gift_send", "reaction_send", "act", "start_hand", "resync", "resume"]);
 const TABLE_SNAPSHOT_KNOWN_FAILURE_CODES = new Set([
   "invalid_table_id",
   "table_not_found",
@@ -3084,6 +3087,42 @@ function broadcastStateSnapshots(tableId) {
   }
 }
 
+const giftAdapter = createGiftAdapter({ klog: klogSafe });
+// Gift recovery and broadcasts share ordering, without occupying the gameplay command queue.
+const giftWorkByTable = new Map();
+function runGiftWork(tableId, run) {
+  const previous = giftWorkByTable.get(tableId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(run);
+  giftWorkByTable.set(tableId, current);
+  void current.finally(() => { if (giftWorkByTable.get(tableId) === current) giftWorkByTable.delete(tableId); }).catch(() => {});
+  return current;
+}
+function sendGiftFrame(ws, connState, tableId, type, payload) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  sendFrame(ws, { version: "1.0", type, ts: nowTs(), roomId: tableId, sessionId: connState.sessionId, payload });
+}
+function recoverGiftState(ws, connState, tableId) {
+  if (connState.session?.identityMode !== "user") return Promise.resolve();
+  return runGiftWork(tableId, async () => {
+    const payload = await giftAdapter.loadActiveGiftSummary(tableId);
+    const association = tableManager.connectionTableAssociation(ws);
+    if (payload && (association?.joinedTableId === tableId || association?.subscribedTableId === tableId)) {
+      sendGiftFrame(ws, connState, tableId, "table_gift_state", payload);
+    }
+  });
+}
+function refreshTableGiftState(tableId) {
+  return runGiftWork(tableId, async () => {
+    const payload = await giftAdapter.loadActiveGiftSummary(tableId);
+    if (payload) broadcastGiftFrame(tableId, "table_gift_state", payload);
+  });
+}
+function broadcastGiftFrame(tableId, type, payload) {
+  for (const recipient of tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "")) {
+    if (recipient.__connState) sendGiftFrame(recipient, recipient.__connState, tableId, type, payload);
+  }
+}
+
 function broadcastTableReaction(tableId, { seatNo, targetSeatNo, reactionKey } = {}) {
   const recipients = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.__connState?.sessionId ?? "");
   let sentCount = 0;
@@ -4929,6 +4968,33 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if (frame.type === "gift_send") {
+      const resolved = resolveRoomId(frame);
+      if (!resolved.ok) {
+        sendError(ws, connState, { code: resolved.code, message: resolved.message, requestId: frame.requestId ?? null });
+        return;
+      }
+      const tableId = resolved.roomId;
+      await runGiftWork(tableId, async () => {
+        const association = tableManager.connectionTableAssociation(ws);
+        const snapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+        const outcome = await handleGiftSendCommand({ payload: frame.payload, identityMode: connState.session.identityMode,
+          tableId, buyerUserId: connState.session.userId, requestId: frame.requestId,
+          connectedToTable: association?.joinedTableId === tableId || association?.subscribedTableId === tableId,
+          senderSeatNo: snapshot?.youSeat, senderIsBot: tableManager.isBotUser(tableId, connState.session.userId),
+          purchase: giftAdapter.purchase });
+        sendCommandResult(ws, connState, { requestId: frame.requestId, tableId,
+          status: outcome.ok ? "accepted" : "rejected", ...(outcome.ok ? {} : { reason: outcome.code }) });
+        if (outcome.ok) {
+          broadcastGiftFrame(tableId, "table_gift", outcome.event);
+          // Correct clients that recovered counts before an old request was replayed.
+          const recovered = await giftAdapter.loadActiveGiftSummary(tableId);
+          if (recovered) broadcastGiftFrame(tableId, "table_gift_state", recovered);
+        }
+      });
+      return;
+    }
+
     if (frame.type === "reaction_send") {
       const resolvedRoomId = resolveRoomId(frame);
       if (!resolvedRoomId.ok) {
@@ -5254,6 +5320,7 @@ wss.on("connection", (ws) => {
           })
         })
       });
+      if (joinResult?.accepted) void refreshTableGiftState(frame.__resolvedTableId).catch(() => {});
       if (joinResult?.newHumanJoined === true && Number.isInteger(joinResult.seatNo)) {
         runReactionObserverSafely("human_join", () => scheduleBotReactionCandidate(
           frame.__resolvedTableId,
@@ -5311,6 +5378,7 @@ wss.on("connection", (ws) => {
         await tableManager.refreshPublicProfiles(tableId);
         const resyncedSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: resynced.tableState, tableSnapshot: resyncedSnapshot });
+        void recoverGiftState(ws, connState, tableId).catch(() => {});
         maybeScheduleSettledRollover(tableId);
         maybeTouchPersistedSeatLastSeen(ws, connState);
         scheduleObservedBotTurn({
@@ -5409,6 +5477,7 @@ wss.on("connection", (ws) => {
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         await nextEventLoopTurn();
         sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
+        void recoverGiftState(ws, connState, tableId).catch(() => {});
         maybeScheduleSettledRollover(tableId);
         scheduleObservedBotTurn({
           tableId,
@@ -5421,6 +5490,7 @@ wss.on("connection", (ws) => {
 
       if (replay.frames.length === 0) {
         sendResumeAck(ws, connState, { requestId: frame.requestId ?? null, tableId });
+        void recoverGiftState(ws, connState, tableId).catch(() => {});
         scheduleObservedBotTurn({
           tableId,
           trigger: "resume_ack",
@@ -5434,6 +5504,7 @@ wss.on("connection", (ws) => {
         connState.session.latestDeliveredSeqByTableId.set(tableId, replayFrame.seq);
         sendFrame(ws, replayFrame);
       }
+      void recoverGiftState(ws, connState, tableId).catch(() => {});
       maybeScheduleSettledRollover(tableId);
       scheduleObservedBotTurn({
         tableId,
@@ -5627,6 +5698,7 @@ wss.on("connection", (ws) => {
         await tableManager.refreshPublicProfiles(tableId);
         const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         sendStateSnapshot(ws, connState, { requestId: frame.requestId ?? null, tableSnapshot });
+        void recoverGiftState(ws, connState, tableId).catch(() => {});
         maybeScheduleSettledRollover(tableId);
         maybeTouchPersistedSeatLastSeen(ws, connState);
         return;
@@ -5661,6 +5733,7 @@ wss.on("connection", (ws) => {
       await tableManager.refreshPublicProfiles(tableId);
       const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
       sendTableState(ws, connState, { requestId: frame.requestId ?? null, tableState: subscribed.tableState, tableSnapshot });
+      void recoverGiftState(ws, connState, tableId).catch(() => {});
       maybeScheduleSettledRollover(tableId);
       maybeTouchPersistedSeatLastSeen(ws, connState);
       scheduleObservedBotTurn({

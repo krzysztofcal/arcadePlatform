@@ -48,6 +48,7 @@ run("node", ["--test", "shared/poker-domain/demand-refill.behavior.test.mjs"], "
 run("node", ["tests/poker-bot-cashout.userId-is-bot.unit.test.mjs"], "poker-bot-cashout-userid-is-bot-unit");
 run("node", ["tests/chips-ledger.escrow-only.null-user.unit.test.mjs"], "chips-ledger-escrow-only-null-user");
 run("node", ["tests/chips-ledger.human.buyin.unit.test.mjs"], "chips-ledger-human-buyin");
+run("node", ["--test", "shared/poker-domain/gift-purchase.behavior.test.mjs", "ws-server/poker/handlers/gift.behavior.test.mjs"], "poker-gift-fundamentals");
 run("node", ["tests/chips-ledger-pagination.behavior.test.mjs"], "chips-ledger-pagination-behavior");
 run("node", ["tests/chips/chips-ledger-archive-export.test.mjs"], "chips-ledger-archive-export");
 run("node", ["tests/chips/chips-ledger-archive-storage.test.mjs"], "chips-ledger-archive-storage");

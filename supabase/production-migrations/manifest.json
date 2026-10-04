@@ -992,7 +992,7 @@
       "status": "awaiting-production-go",
       "replacement": "20261003183626_poker_demand_refill_production_contract.sql",
       "required_effects": [
-        "§32 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
+        "\u00a732 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
       ],
       "omitted_effects": [
         "No Production mutation, Cron removal, control activation or migration-time MINT"
@@ -1006,7 +1006,7 @@
       "status": "awaiting-production-go",
       "replacement": "20261003183626_poker_demand_refill_production_contract.sql",
       "required_effects": [
-        "§32 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
+        "\u00a732 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
       ],
       "omitted_effects": [
         "No Production mutation, Cron removal, control activation or migration-time MINT"
@@ -1019,12 +1019,26 @@
       "category": "needs-production-equivalent",
       "status": "awaiting-production-go",
       "required_effects": [
-        "§32 Stage removes the exact poker-bot-pool-refill-hourly Cron job and drops only the temporary public.poker_bot_pool_refill_hourly() wrapper after accepted demand smoke"
+        "\u00a732 Stage removes the exact poker-bot-pool-refill-hourly Cron job and drops only the temporary public.poker_bot_pool_refill_hourly() wrapper after accepted demand smoke"
       ],
       "omitted_effects": [
         "Production remains untouched; demand core, refill control kill switch/identity guard, pg_cron extension and ledger/pool state are preserved"
       ],
       "replacement": "20261004114411_poker_demand_refill_production_scheduler_decommission.sql"
+    },
+    {
+      "version": "20261004220956",
+      "file": "20261004220956_poker_gift_purchases.sql",
+      "sha256": "f88f4f4707b681fee6ebba2bb62a57853478b4850d267c17e6b5c45621ac7608",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20261004222426_poker_gift_purchases_production_contract.sql",
+      "required_effects": [
+        "Empty backend-only receipt schema, RLS, constraints and two narrow indexes"
+      ],
+      "omitted_effects": [
+        "No Production application, receipts, ledger transactions or CH mutation"
+      ]
     }
   ],
   "replacement_migrations": [
@@ -1057,7 +1071,7 @@
     },
     {
       "file": "20261003183626_poker_demand_refill_production_contract.sql",
-      "purpose": "§32 Production hourly cap and shared demand refill contract; separate GO only",
+      "purpose": "\u00a732 Production hourly cap and shared demand refill contract; separate GO only",
       "sha256": "db23077155394845da289d9e1f59b50cbeae3f1400a1b609cffea1d9cc19a39b",
       "prerequisites": [
         "20260930211624_poker_bot_pool_refill_hourly.sql"
@@ -1065,11 +1079,16 @@
     },
     {
       "file": "20261004114411_poker_demand_refill_production_scheduler_decommission.sql",
-      "purpose": "§32 Production scheduler decommission after accepted demand rollout; exact Cron job/hourly wrapper only",
+      "purpose": "\u00a732 Production scheduler decommission after accepted demand rollout; exact Cron job/hourly wrapper only",
       "sha256": "0984f91bfe20272e9df69d6871cb276d9100b6428b7d4d1d27ffdf4f3144d61c",
       "prerequisites": [
         "20261003183626_poker_demand_refill_production_contract.sql"
       ]
+    },
+    {
+      "file": "20261004222426_poker_gift_purchases_production_contract.sql",
+      "purpose": "#1042 empty receipt schema; separate owner GO only",
+      "sha256": "8f8a3bd3c86cf38aaddc4fbddafc02e275640ae3b260558046ef5707dab72415"
     }
   ],
   "provenance_rules": [
