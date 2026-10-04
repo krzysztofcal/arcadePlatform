@@ -34,11 +34,11 @@ test("workflow separates validate and deploy with dependency gating", () => {
   assert.match(text, /deploy:/);
   assert.doesNotMatch(text, /validate:\n\s+if: github\.event_name == 'pull_request'/);
   assert.match(text, /deploy:\n\s+needs: validate/);
-  assert.match(text, /deploy:\n\s+needs: validate[\s\S]*?\n\s+if: github\.event_name == 'workflow_dispatch'\n/);
+  assert.match(text, /deploy:\n\s+needs: validate[\s\S]*?\n\s+if: github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\n/);
   assert.match(text, /\n  push:\n\s+branches:\n\s+- "main"/);
   assert.match(text, /\n  workflow_dispatch:/);
   const condition = text.match(/deploy:\n\s+needs: validate[\s\S]*?\n\s+if: ([^\n]+)/)[1];
-  assert.equal(condition, "github.event_name == 'workflow_dispatch'", "main push must validate without Production deployment until separate T108 GO");
+  assert.equal(condition, "github.event_name == 'push' || github.event_name == 'workflow_dispatch'", "main push must deploy again after the authorized T108 Production DB compatibility gate");
 });
 
 test("workflow includes rollback discipline and atomic current switch markers", () => {
