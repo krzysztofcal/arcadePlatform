@@ -23,3 +23,7 @@ Execute sequentially T001–T015; each depends on the preceding task. Stage auto
 T003 includes scripts/check-db-migrations.mjs inventory counts, required by the new exhaustive manifest entry.
 
 T012 requires registering the two focused gift suites in scripts/test-all.mjs and classifying the two gift diagnostics in ws-server/poker/observability/poker-log-policy.mjs. Existing vitest-only tests/chips-ledger.test.mjs is not runnable with installed repo dependencies; extend the existing Node canonical-ledger suite tests/chips-ledger.human.buyin.unit.test.mjs instead. Receipt migration constraints/RLS/indexes are exercised with existing PGlite in the focused domain suite; external migration DB suite remains gated by CHIPS_MIGRATIONS_TEST_DB_URL. No new framework/dependency.
+
+## Gate progress
+
+T013 partial: Stage apply and exact-SHA WS Preview Deploy succeeded for `eb4144882028f44233609ade15b1323b553e9564`; installed metadata/health checks passed. Authenticated Stage gift smoke remains pending (no credentials here). T014 Production-equivalent schema and manifest are prepared, not applied; separate owner GO is required. T015 evidence is recorded in review.md and draft PR #1047, but final completion remains gated by required runtime smoke/Production handoff. No merge.
