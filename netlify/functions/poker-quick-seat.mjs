@@ -73,7 +73,7 @@ const readQuickSeatEffectiveClass = async (tx, userId) => {
 };
 
 const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability }) => {
-  const buyIn = progression?.highestUnlockedBuyIn;
+  const buyIn = progression?.availableBuyIns?.[0];
   if (!Number.isSafeInteger(buyIn) || buyIn <= 0) {
     const firstTier = progression?.tiers?.[0] || null;
     return {
@@ -214,6 +214,7 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, buyIn, ta
   const access = evaluatePokerBuyInAccess({
     balance: progression?.balance ?? 0,
     buyIn: normalizedBuyIn,
+    maxPlayableBuyIn: progression?.maxPlayableBuyIn,
     tiers: progression?.tiers?.map((tier) => tier.buyIn) || []
   });
   if (!access.configured || !access.eligible) {

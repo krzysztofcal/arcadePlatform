@@ -66,6 +66,14 @@ export function resolvePokerBuyInTiers(env = process.env) {
   return normalizedTiers;
 }
 
+export function resolvePokerMaxPlayableBuyIn(env = process.env, tiers = resolvePokerBuyInTiers(env)) {
+  const raw = env?.POKER_MAX_PLAYABLE_BUY_IN;
+  if (raw !== undefined && (typeof raw !== "string" || !raw.trim())) throw configError();
+  const maxPlayableBuyIn = raw === undefined ? 500 : Number(raw);
+  if (!Number.isSafeInteger(maxPlayableBuyIn) || maxPlayableBuyIn <= 0 || !tiers.includes(maxPlayableBuyIn)) throw configError();
+  return maxPlayableBuyIn;
+}
+
 export function calculateUnlockBankroll(buyIn) {
   const normalizedBuyIn = normalizePositiveSafeInteger(buyIn, "invalid_buy_in");
   if (normalizedBuyIn === DEFAULT_CASH_TABLE_BUY_IN_CHIPS) return normalizedBuyIn;
@@ -78,15 +86,18 @@ export function calculateUnlockBankroll(buyIn) {
   return normalizedBuyIn + buffer;
 }
 
-export function evaluatePokerProgression({ balance, tiers }) {
+export function evaluatePokerProgression({ balance, tiers, maxPlayableBuyIn = 500 }) {
   const normalizedBalance = normalizeBalance(balance);
   if (!Array.isArray(tiers) || tiers.length === 0) throw configError();
   const normalizedTiers = tiers.map((tier) => normalizePositiveSafeInteger(tier, "poker_buy_in_tiers_config_invalid"));
+  if (!Number.isSafeInteger(maxPlayableBuyIn) || !normalizedTiers.includes(maxPlayableBuyIn)) throw configError();
   let highestUnlockedIndex = -1;
+  let highestPlayableIndex = -1;
   const tierRows = normalizedTiers.map((buyIn, index) => {
     const unlockBankroll = calculateUnlockBankroll(buyIn);
     const unlocked = normalizedBalance >= unlockBankroll;
     if (unlocked) highestUnlockedIndex = index;
+    if (unlocked && buyIn <= maxPlayableBuyIn) highestPlayableIndex = index;
     const progressPercent = unlocked
       ? 100
       : Math.max(0, Math.min(99, Math.round((normalizedBalance / unlockBankroll) * 100)));
@@ -100,9 +111,9 @@ export function evaluatePokerProgression({ balance, tiers }) {
       remaining: Math.max(0, unlockBankroll - normalizedBalance)
     };
   });
-  const availableIndexes = highestUnlockedIndex < 0
+  const availableIndexes = highestPlayableIndex < 0
     ? []
-    : [highestUnlockedIndex, highestUnlockedIndex - 1].filter((index) => index >= 0);
+    : [highestPlayableIndex, highestPlayableIndex - 1].filter((index) => index >= 0);
   const availableSet = new Set(availableIndexes);
   const tiersWithAvailability = tierRows.map((tier, index) => ({
     ...tier,
@@ -110,6 +121,7 @@ export function evaluatePokerProgression({ balance, tiers }) {
   }));
   return {
     balance: normalizedBalance,
+    maxPlayableBuyIn,
     highestUnlockedIndex,
     highestUnlockedBuyIn: highestUnlockedIndex >= 0 ? normalizedTiers[highestUnlockedIndex] : null,
     availableBuyIns: availableIndexes.map((index) => normalizedTiers[index]),
@@ -144,11 +156,12 @@ limit 1${lockClause};
 
 export async function readPokerProgression(tx, { userId, env = process.env, lock = false } = {}) {
   const tiers = resolvePokerBuyInTiers(env);
+  const maxPlayableBuyIn = resolvePokerMaxPlayableBuyIn(env, tiers);
   const balance = await readPokerBankroll(tx, { userId, lock });
-  return evaluatePokerProgression({ balance, tiers });
+  return evaluatePokerProgression({ balance, tiers, maxPlayableBuyIn });
 }
 
-export function evaluatePokerBuyInAccess({ balance, buyIn, tiers }) {
+export function evaluatePokerBuyInAccess({ balance, buyIn, tiers, maxPlayableBuyIn = 500 }) {
   const normalizedBuyIn = Number(buyIn);
   if (!isConfiguredPokerBuyIn(normalizedBuyIn, tiers)) {
     return {
@@ -160,7 +173,7 @@ export function evaluatePokerBuyInAccess({ balance, buyIn, tiers }) {
     };
   }
   const requiredBankroll = calculateUnlockBankroll(normalizedBuyIn);
-  const progression = evaluatePokerProgression({ balance, tiers });
+  const progression = evaluatePokerProgression({ balance, tiers, maxPlayableBuyIn });
   return {
     eligible: progression.availableBuyIns.includes(normalizedBuyIn),
     configured: true,

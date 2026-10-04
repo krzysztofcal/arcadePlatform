@@ -4,7 +4,9 @@ import {
   calculateUnlockBankroll,
   evaluatePokerProgression,
   readPokerBankroll,
-  resolvePokerBuyInTiers
+  resolvePokerBuyInTiers,
+  resolvePokerMaxPlayableBuyIn,
+  readPokerProgression
 } from "./poker-progression.mjs";
 import {
   calculateCanonicalPokerStakes,
@@ -119,4 +121,35 @@ test("authoritative bankroll reads can lock the account row for the join transac
   }, { userId: "user-1", lock: true });
   assert.equal(balance, 550);
   assert.match(query, /for update/i);
+});
+
+test("playable frontier caps availability while preserving the full bankroll roadmap", async () => {
+  const tiers = [100, 500, 1000, 5000];
+  for (const [maxPlayableBuyIn, expected] of [[500, [500, 100]], [1000, [1000, 500]], [5000, [5000, 1000]]]) {
+    const result = evaluatePokerProgression({ balance: 1_000_000, tiers, maxPlayableBuyIn });
+    assert.deepEqual(result.availableBuyIns, expected);
+    assert.equal(result.maxPlayableBuyIn, maxPlayableBuyIn);
+    assert.equal(result.highestUnlockedBuyIn, 5000);
+    assert.equal(result.tiers.length, 4);
+    assert.equal(result.tiers.every((tier) => tier.unlocked && tier.progressPercent === 100 && tier.remaining === 0), true);
+  }
+  assert.deepEqual(evaluatePokerProgression({ balance: 549, tiers, maxPlayableBuyIn: 500 }).availableBuyIns, [100]);
+  assert.equal(resolvePokerMaxPlayableBuyIn({}, tiers), 500);
+  let reads = 0;
+  const result = await readPokerProgression({ unsafe: async () => { reads++; return [{ balance: 1_000_000 }]; } }, {
+    userId: "wealthy", env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify(tiers), POKER_MAX_PLAYABLE_BUY_IN: "1000" }
+  });
+  assert.deepEqual(result.availableBuyIns, [1000, 500]);
+  assert.equal(reads, 1);
+});
+
+test("invalid playable frontier fails closed as a tier configuration error", () => {
+  const tiers = [100, 500, 1000];
+  for (const value of ["", "750", "0", "-1", "1.5", "nope", "9007199254740992", null]) {
+    assert.throws(() => resolvePokerMaxPlayableBuyIn({ POKER_MAX_PLAYABLE_BUY_IN: value }, tiers),
+      (error) => error.code === "poker_buy_in_tiers_config_invalid");
+  }
+  assert.throws(() => resolvePokerMaxPlayableBuyIn({}, [100]), (error) => error.code === "poker_buy_in_tiers_config_invalid");
+  assert.throws(() => evaluatePokerProgression({ balance: 1_000_000, tiers, maxPlayableBuyIn: 750 }),
+    (error) => error.code === "poker_buy_in_tiers_config_invalid");
 });

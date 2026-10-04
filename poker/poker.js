@@ -1686,7 +1686,7 @@
 
     function showProgressionCelebration(data){
       if (!progressionCelebration) return;
-      var highest = Number(data && data.highestUnlockedBuyIn);
+      var highest = Number(data && data.availableBuyIns && data.availableBuyIns[0]);
       if (!Number.isSafeInteger(highest) || highest <= 0) return;
       progressionCelebration.textContent = '🎉 Congratulations! ' + formatChips(highest) + ' CH tables unlocked.';
       progressionCelebration.hidden = false;
@@ -1699,7 +1699,7 @@
 
     function updateProgressionHighWaterMark(data){
       var key = progressionStorageKey(data);
-      var current = Number(data && data.highestUnlockedBuyIn);
+      var current = Number(data && data.availableBuyIns && data.availableBuyIns[0]);
       if (!key || !Number.isSafeInteger(current) || current <= 0) return;
       try {
         var storedRaw = window.localStorage.getItem(key);
@@ -1754,7 +1754,7 @@
             + (unlocked && !available ? ' poker-progression-row--unavailable' : '');
           var label = document.createElement('span');
           label.className = 'poker-progression-row__tier';
-          label.textContent = (available ? '✅ ' : (unlocked ? '🔓 ' : '🔒 ')) + formatChips(tier.buyIn) + ' CH' + (index === Number(data.highestUnlockedIndex) ? ' (Current)' : '');
+          label.textContent = (available ? '✅ ' : (unlocked ? '🔓 ' : '🔒 ')) + formatChips(tier.buyIn) + ' CH' + (Number(tier.buyIn) === Number(data.availableBuyIns && data.availableBuyIns[0]) ? ' (Current)' : '');
           row.appendChild(label);
           var detail = document.createElement('span');
           detail.className = 'poker-progression-row__detail';
