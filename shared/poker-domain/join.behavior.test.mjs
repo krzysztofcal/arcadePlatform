@@ -70,7 +70,7 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
           if (String(sql).includes("from public.poker_bot_tier_policy")) return args?.tierPolicyRows || pokerTierPolicyRows(args?.enabledBuyIns);
           if (String(sql).includes("system_key = any")) return params[0].filter(key => key !== args?.missingPoolKey).map((system_key) => ({ system_key }));
           if (String(sql).includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
-          if (String(sql).includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: args?.autoClass || "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+          if (String(sql).includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: args?.autoClass || "NORMAL", poker_access_override: args?.accessOverride || "AUTO", poker_access_revision: 1 }];
           const rows = await tx.unsafe(sql, params);
           if (String(sql).includes("from public.poker_tables") && Array.isArray(rows)) {
             return rows.map((row) => {
@@ -2334,7 +2334,8 @@ test(`fresh ${poolClass} JOIN ${buyIn} seeds exact canonical class pool`, async 
       requestId: "join-bounded-bots",
       seatNo: 1,
       buyIn,
-      autoClass: poolClass,
+      autoClass: "NORMAL",
+      accessOverride: poolClass === "SLOW" ? "FORCE_SLOW" : "AUTO",
       tierPolicyRows: [{ ...pokerTierPolicyRows([1000])[2], buy_in: buyIn }],
       postTransactionFn: async (payload) => {
         store.ledgerCalls.push(payload);
