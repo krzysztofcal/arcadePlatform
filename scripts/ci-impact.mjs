@@ -32,11 +32,13 @@ export function classifyCiImpact(paths) {
     else if (p.startsWith('shared/') || p.startsWith('.github/') || /^package(-lock)?\.json$/.test(p) || ['scripts/test-all.mjs', 'scripts/ci-impact.mjs', 'tests/test-all.runner-registration.guard.test.mjs', 'tests/poker-workflows.playwright-install.guard.test.mjs'].includes(p)) add(...DOMAINS);
     else if (p.startsWith('ws-server/')) add('core', 'ws_poker');
     else if (p.startsWith('ws-tests/')) add('ws_poker');
-    else if (p.startsWith('netlify/functions/_shared/')) add('core', 'chips_db', 'ws_poker');
+    else if (p.startsWith('netlify/functions/_shared/')) add(...DOMAINS);
     else if (['tests/poker-ws-client.test.mjs', 'tests/poker-v2-live.behavior.test.mjs'].includes(p)) add('core', 'web', 'ws_poker');
     else if (p.startsWith('poker/')) add('core', 'web', 'ws_poker');
     else if (p.startsWith('tests/e2e') || /^playwright\.config\./.test(p) || ['scripts/run-e2e.js', 'scripts/prepare-playwright.js'].includes(p)) add('web');
-    else if (p.startsWith('games/') || /scripts\/(check|guard)-games/.test(p) || p === 'scripts/check-xpbadge.js' || p === 'scripts/check-lifecycle.js') add('core', 'web', 'games');
+    else if (p.startsWith('games/') || p.startsWith('games-open/') || /^game[^/]*\.html$/.test(p) || /scripts\/(check|guard)-games/.test(p) || p === 'scripts/check-xpbadge.js' || p === 'scripts/check-lifecycle.js') add('core', 'web', 'games');
+    else if (/^tests\/chips[-.]/.test(p)) add('core', 'chips_db');
+    else if (/^netlify\/functions\/chips-/.test(p)) add('core', 'web', 'chips_db');
     else if (p.startsWith('tests/')) add('core');
     else if (p.startsWith('js/') || p.startsWith('css/') || p.startsWith('poker/') || p.startsWith('netlify/functions/') || /\.html$/.test(p)) add('core', 'web');
     else add(...DOMAINS);

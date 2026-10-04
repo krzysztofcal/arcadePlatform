@@ -11,6 +11,8 @@ test('representative changes select only their owned domains', () => {
     ['docs/ci.md', []], ['README.md', []],
     ['supabase/migrations/fixture.sql', ['chips_db']],
     ['tests/chips/fixture.test.mjs', ['chips_db']],
+    ['tests/chips-economy-reset-cli.contract.test.mjs', ['core', 'chips_db']],
+    ['games-open/mines/index.html', ['core', 'web', 'games']],
     ['scripts/ops/chips-ledger-stage-automation.mjs', ['chips_db']],
     ['js/consent.js', ['core', 'web']],
     ['tests/e2e/consent-footer.spec.js', ['web']],
@@ -30,6 +32,7 @@ test('representative changes select only their owned domains', () => {
 
 test('empty, unknown, shared and CI inputs fail safe; unions retain all affected domains', () => {
   for (const paths of [[], ['unexpected/new.file'], ['shared/profile-avatar-projection.mjs'],
+    ['netlify/functions/_shared/xp-identity.mjs'],
     ['package.json'], ['package-lock.json'], ['scripts/test-all.mjs'],
     ['scripts/ci-impact.mjs'], ['.github/workflows/tests.yml']]) {
     const result = classifyCiImpact(paths);
