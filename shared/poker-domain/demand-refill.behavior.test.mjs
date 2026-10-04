@@ -46,3 +46,31 @@ test("initial seed refill uses actual planned seats and exact funding identities
   await seedBotsForJoin({...options,targetBotCount:0});
   assert.equal(demands.length,0);
 });
+
+test("higher-tier seed fails closed without enabled/provisioned funding or exact class", async () => {
+  for (const options of [{fundingEnabled:false},{fundingProvisioned:false},{poolClass:"RESTRICTED"},{poolClass:"UNKNOWN"},{}]) {
+    const result=await seedBotsForJoin({
+      tx:{unsafe:()=>{throw Error("must_not_query");}},tableId:"denied",maxPlayers:6,
+      buyInChips:1000,tableStakes:{sb:10,bb:20},cfg:{enabled:true,bankrollSystemKey:"TREASURY"},
+      targetBotCount:2,postTransaction:()=>{throw Error("must_not_fund");},...options
+    });
+    assert.deepEqual(result,[]);
+  }
+});
+
+test("higher-tier exhausted exact pool never falls back to another tier/class/TREASURY", async () => {
+  for (const [poolClass,expectedKey] of [["NORMAL","POKER_BOT_BANKROLL_1000"],["SLOW","POKER_BOT_SLOW_BANKROLL_1000"]]) {
+    const debits=[];
+    const tx={unsafe:async(sql,params)=>{
+      if(sql.includes("select user_id, seat_no"))return [{user_id:"human",seat_no:1,is_bot:false,status:"ACTIVE"}];
+      if(sql.includes("insert into public.poker_seats"))return [{seat_no:params[2]}];
+      return [];
+    }};
+    const seeded=await seedBotsForJoin({tx,tableId:"exhausted",maxPlayers:6,buyInChips:1000,
+      tableStakes:{sb:10,bb:20},cfg:{enabled:true,bankrollSystemKey:"TREASURY"},poolClass,targetBotCount:2,
+      postTransaction:async payload=>{debits.push(payload.entries[0]);throw Object.assign(Error("insufficient_funds"),{code:"insufficient_funds"});}
+    });
+    assert.deepEqual(seeded,[]);
+    assert.deepEqual(debits,[{accountType:"SYSTEM",systemKey:expectedKey,amount:-1000}]);
+  }
+});
