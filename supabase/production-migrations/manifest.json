@@ -992,7 +992,7 @@
       "status": "awaiting-production-go",
       "replacement": "20261003183626_poker_demand_refill_production_contract.sql",
       "required_effects": [
-        "\u00a732 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
+        "§32 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
       ],
       "omitted_effects": [
         "No Production mutation, Cron removal, control activation or migration-time MINT"
@@ -1006,10 +1006,23 @@
       "status": "awaiting-production-go",
       "replacement": "20261003183626_poker_demand_refill_production_contract.sql",
       "required_effects": [
-        "\u00a732 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
+        "§32 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
       ],
       "omitted_effects": [
         "No Production mutation, Cron removal, control activation or migration-time MINT"
+      ]
+    },
+    {
+      "version": "20261004073000",
+      "file": "20261004073000_poker_demand_refill_scheduler_decommission.sql",
+      "sha256": "49263025f8e5827e3cf0c11e40712969dae1e76397afc4801fe9b5caf33d88c8",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "required_effects": [
+        "§32 Stage removes the exact poker-bot-pool-refill-hourly Cron job and drops only the temporary public.poker_bot_pool_refill_hourly() wrapper after accepted demand smoke"
+      ],
+      "omitted_effects": [
+        "Production remains untouched; demand core, refill control kill switch/identity guard, pg_cron extension and ledger/pool state are preserved"
       ]
     }
   ],
@@ -1043,7 +1056,7 @@
     },
     {
       "file": "20261003183626_poker_demand_refill_production_contract.sql",
-      "purpose": "\u00a732 Production hourly cap and shared demand refill contract; separate GO only",
+      "purpose": "§32 Production hourly cap and shared demand refill contract; separate GO only",
       "sha256": "db23077155394845da289d9e1f59b50cbeae3f1400a1b609cffea1d9cc19a39b",
       "prerequisites": [
         "20260930211624_poker_bot_pool_refill_hourly.sql"

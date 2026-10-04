@@ -60,8 +60,11 @@ The last already-applied Production migration, `20260813090000_chips_ledger_arch
 | `20260930075513_poker_bot_tier_catalog_expansion.sql` | needs-production-equivalent | Stage #1018 §28 canonical tier catalog expansion (>500 buy-in tiers) with disabled policies and zero-balance exact pools. Prepared in Production equivalent P1 (`20260929201500_poker_bot_quarantine_production_contract.sql`); awaiting Production GO. |
 | `20260930211623_poker_bot_pool_refill_hourly.sql` | needs-production-equivalent | Stage #1018 §29 disabled refill control and hourly SECURITY INVOKER ledger function. Prepared in Production P2 (`20260930211624_poker_bot_pool_refill_hourly.sql`) with canonical Production identity; no pg_cron/job/MINT and not applied. |
 | `20260930223409_poker_bot_pool_refill_lock_timeout.sql` | needs-production-equivalent | Forward-only Stage replacement of the hourly function with a function-scoped 5s lock timeout so a row-lock wait is isolated to its pool. Final equivalent is the existing unapplied Production P2; no control change, pg_cron/job or MINT. |
+| `20261001200000_poker_demand_refill_caps.sql` | needs-production-equivalent | §32 nullable NORMAL/SLOW hourly caps and non-unique refill lookup. Prepared in the unapplied Production §32 contract; Production remains separate GO. |
+| `20261003183317_poker_demand_refill_core.sql` | needs-production-equivalent | §32 restricted demand refill core with the control retained as kill switch/identity guard; temporary Stage Cron wrapper remains only for cutover. Prepared in the unapplied Production §32 contract. |
+| `20261004073000_poker_demand_refill_scheduler_decommission.sql` | needs-production-equivalent | Final Stage §32 demand-only cutover: unschedule only `poker-bot-pool-refill-hourly` and drop only `public.poker_bot_pool_refill_hourly()`; preserve demand core, control and pg_cron extension. Production cleanup requires separate GO. |
 
-Totals: **29 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (50 missing source files).
+Totals: **32 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (53 missing source files).
 
 ## History and equivalence proof
 
@@ -575,3 +578,10 @@ The Stage source migration may apply automatically to shared Stage through DB St
 Source: [SQL](../../supabase/migrations/20260930223409_poker_bot_pool_refill_lock_timeout.sql) · SHA256 `9c1bf241345a026c755112df06bebfbc99dacda28631a5b3cb03860041dc9595`.
 
 Disposition: `needs-production-equivalent`, mapped to the existing prepared P2 `20260930211624_poker_bot_pool_refill_hourly.sql` (SHA256 `139a00efb8ed712eae9aff9cf9a9264884da49c353a72a8bb492f7fcbe560372`). The correction preserves the deployed function body and adds only `SET lock_timeout = '5s'` beside `SET search_path = ''`. Automatic shared Stage apply replaces the function only; the control remains disabled and no pg_cron/job/MINT is created. P2 carries the same final function setting but remains unapplied; Production effect is none.
+
+
+### 20261004073000 — §32 Stage scheduler decommission
+
+Source: [SQL](../../supabase/migrations/20261004073000_poker_demand_refill_scheduler_decommission.sql) · SHA256 `49263025f8e5827e3cf0c11e40712969dae1e76397afc4801fe9b5caf33d88c8`.
+
+Disposition: `needs-production-equivalent`; Production execution remains separately authorized. Stage removes only the exact `poker-bot-pool-refill-hourly` job and temporary hourly wrapper after accepted owner smoke. The demand core, `poker_bot_refill_control` kill switch/identity guard, `pg_cron` extension, balances, policies and ledger history are preserved.
