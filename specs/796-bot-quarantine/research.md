@@ -1,6 +1,6 @@
 # Research: #1018 NORMAL/SLOW periodic pools with manual RESTRICTED
 
-> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. See the §32 implementation section at the end of this document. Final state is demand-only; temporary Cron uses the same DB allowance until accepted Stage smoke and separate removal GO.
+> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. Final state is demand-only. Stage cutover is complete: the exact poker refill Cron job and temporary hourly wrapper are removed; `poker_bot_refill_control` remains the demand-path kill switch/database-identity guard. Production remains a separate GO.
 
 
 **Date**: 2026-09-27. Requirements: [live snapshot](issue-source.md), updated 2026-09-27T17:10:33Z. Code inspected against the current implementation branch; relevant runtime files match this PR extension. Read live `agents.md`, `skills.md`, constitution and active Spec Kit skills/templates. These decisions are the accepted implementation contract; local evidence is recorded in [quickstart.md](quickstart.md). T001–T029 are historical evidence; the manual RESTRICTED amendment requires T030–T036 and a new exact-SHA WS gate.
@@ -41,7 +41,7 @@
 
 ## R5 — Refill ledger and hourly database authority
 
-The previous worker/dispatcher contract in this research section is historical and is superseded by Issue #1018 §29. The current design uses `public.poker_bot_pool_refill_hourly()` and, only after separate activation, one Supabase Cron job named `poker-bot-pool-refill-hourly` on `0 * * * *`.
+The previous worker/dispatcher and §29 hourly scheduler contracts in this research section are historical. Issue #1018 §32 final state uses only the restricted demand refill core; Stage `poker-bot-pool-refill-hourly` and `public.poker_bot_pool_refill_hourly()` were removed after accepted smoke + owner GO.
 
 The function validates `pg_control_system().system_identifier` against the singleton control row, exits while `enabled=false`, takes one transaction advisory lock, and uses a DB-derived UTC-hour bucket. It processes only enabled policies from the canonical 11-tier list and maps the exact 22 NORMAL/SLOW keys, including NORMAL 500 → `POKER_BOT_BANKROLL`. For each pool it locks/re-reads the policy and GENESIS/target accounts before deciding. Balance at/above threshold is no-op; below threshold issues exactly the configured amount.
 
@@ -55,7 +55,7 @@ The write follows the existing `postTransaction` ledger pattern: one determinist
 
 The Admin interfaces continue to use `requireAdminUser`, existing read/write validation and `klog` patterns. The old poker-specific workflow, Node refill worker, canary mode, VPS dispatcher/service/timer and `trustedScheduledRefill` application capability are removed after the database path is implemented. The separate chips cleanup dispatcher and its `/home/copilot/.config/gh` authentication remain unchanged.
 
-**Operational boundary**: the shared Stage migration may apply automatically from the PR, but the singleton remains `enabled=false`; no pg_cron extension or job is created and no MINT/balance/table/profile change occurs. The Production equivalent is prepared only. Existing poker service/timer on the VPS remain disabled/inactive and require separate post-merge owner GO for cleanup. Stage Cron activation and Production migration/activation are separate authorization gates. Do not run bootstrap on the live host.
+**Operational boundary**: Stage §32 migrations apply only through the reviewed repository path. Final Stage keeps `poker_bot_refill_control` as demand kill switch/identity guard, removes the exact poker refill Cron job/hourly wrapper, and leaves `pg_cron` installed. Production migration/activation/Cron removal remain separate authorization. Do not run bootstrap on the live host.
 
 **Rationale**: There must be exactly one future refill authority, with schema alone economically dark. Retiring only the poker path must not replace, relog or remove the existing chips cleanup identity.
 
@@ -69,11 +69,11 @@ The Admin interfaces continue to use `requireAdminUser`, existing read/write val
 
 ## R8 — Validation and breaking impacts
 
-**Decision**: Extend only existing fundamental backend/ledger/migration and operational guard tests, plus the existing disposable PostgreSQL transaction suite. No UI/CSS/JSP/glue suite or scheduler framework is needed. The §29 tests prove control-off, tier/pool policy, exact ledger writes, same-hour replay/concurrency, next-hour eligibility, pool-local rollback, identity/ACL and no scheduler side effects.
+**Decision**: Extend only existing fundamental backend/ledger/migration and operational guard tests, plus the existing disposable PostgreSQL transaction suite. No UI/CSS/JSP/glue suite or scheduler framework is needed. §32 tests prove finite/Unlimited demand allowance, replay/concurrency, new-hour eligibility, identity/ACL and final hourly-wrapper absence.
 
 **Rationale**: Mocks cannot prove ledger trigger/registry behavior or transaction isolation. Disposable local PostgreSQL tests provide that evidence; they never target shared Stage or Production. The automatic Stage schema apply is documented and remains dark. No WS runtime changes require a Preview deploy.
 
-**Alternatives considered**: Live Stage depletion or real pg_cron activation is unnecessary to prove refill mechanics. Existing ledger and Cron catalogs provide future operational evidence after separate activation.
+**Alternatives considered**: A retained recurring refill scheduler is unnecessary. Accepted Stage demand smoke plus ledger/catalog evidence proves the final model; `pg_cron` stays installed but has no poker refill job.
 
 ## R9 — Manual RESTRICTED amendment
 
@@ -92,7 +92,7 @@ The new migration is classified `needs-production-equivalent` and intentionally 
 
 Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` creates a singleton disabled control with Stage system identifier `7656985631720456337` and the SECURITY INVOKER function. The Production equivalent `20260930211624_poker_bot_pool_refill_hourly.sql` uses `7575202818581710058`, is represented in the Production manifest, and remains unapplied. Both migrations avoid installing pg_cron, creating jobs or writing ledger rows.
 
-The sole documented future job is exactly `poker-bot-pool-refill-hourly`, schedule `0 * * * *`, command `select public.poker_bot_pool_refill_hourly();`. It is not activated by this PR. Stage automatic application can add only the dark schema/function; Production has no effect. Existing poker VPS units remain disabled/inactive pending separately authorized cleanup. No profile/table activation or `bootstrap.sh` execution is part of the implementation.
+Final Stage has no poker refill scheduler job. The historical `poker-bot-pool-refill-hourly` job and temporary wrapper were removed by forward-only Stage migration `20261004073000_poker_demand_refill_scheduler_decommission.sql` after accepted smoke + owner GO. Production has no effect until separate authorization.
 
 Breaking impact: once separately activated, refill evaluation changes from three-hour to hourly buckets; a depleted pool can receive another configured amount sooner. Until the job and control are separately enabled, no recurring refill runs. Policy values, amounts, tier enablement and balances are unchanged.
 
@@ -104,4 +104,4 @@ Only one new disposable PostgreSQL test is needed: one connection confirms it ho
 
 ## §32 current decisions
 
-Use the existing DB ledger contract instead of the removed `trustedScheduledRefill` capability. A narrow SQL core is reused by actual funding and temporary Cron to avoid two independent allowance calculations. Ledger aggregation is sufficient; exact SYSTEM account joins fix the old schema mismatch. GENESIS locks precede exact pool locks across all refill callers to prevent multi-pool transition deadlocks. DB time supplies each UTC bucket; no reset job. Savepoint isolation preserves original funding when the core fails. Final Cron removal is a rollout operation after smoke and separate GO, not a retained backup. See [plan.md](plan.md) and [quickstart.md](quickstart.md).
+Use the existing DB ledger contract instead of the removed `trustedScheduledRefill` capability. The narrow SQL core is called by actual positive funding demand only in final Stage. Ledger aggregation is sufficient; exact SYSTEM account joins fix the old schema mismatch. GENESIS locks precede exact pool locks. DB time supplies each UTC bucket; no reset job. Savepoint isolation preserves original funding when the core fails. Stage Cron removal is complete and is not a retained backup. See [plan.md](plan.md) and [quickstart.md](quickstart.md).

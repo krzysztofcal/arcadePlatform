@@ -1,6 +1,6 @@
 # Tasks: NORMAL/SLOW periodic per-tier pools
 
-> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. See the §32 implementation section at the end of this document. Final state is demand-only; temporary Cron uses the same DB allowance until accepted Stage smoke and separate removal GO.
+> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. Final state is demand-only. Stage cutover is complete: the exact poker refill Cron job and temporary hourly wrapper are removed; `poker_bot_refill_control` remains the demand-path kill switch/database-identity guard. Production remains a separate GO.
 
 
 **Input**: Design documents from `/specs/796-bot-quarantine/`.
@@ -344,7 +344,7 @@ Required before calling merge-ready: green required CI, successful exact runtime
 - [x] T104 Integrate actual positive seed/replacement/managed-top-up demand with exact planned amounts, class/tier and funding identities; isolate refill errors.
 - [x] T105 Add explicit NORMAL/SLOW Unlimited controls and revision-checked omitted-field preservation.
 - [x] T106 Extend fundamental existing real PostgreSQL migration/transaction and runtime tests; classify klog events.
-- [ ] T107 Confirm automatic Stage 104 -> 106 apply and green CI; exact-SHA WS Preview deploy; authenticated smoke including live Admin. After accepted smoke + separate GO remove Stage Cron and scheduled wrapper/dead documentation assumptions using forward-only changes.
+- [x] T107 Confirm automatic Stage 104 -> 106 apply and green CI; exact-SHA WS Preview deploy; authenticated NORMAL finite/Unlimited + SLOW finite smoke including live Admin; after owner GO apply forward-only Stage scheduler decommission 106 -> 107 and remove the exact Cron job/hourly wrapper while retaining the demand core/control.
 - [ ] T108 Separate Production GO: reviewed equivalent, exact WS deploy, read-only ledger evidence, exact Production Cron removal; inspect other jobs before optional pg_cron removal. No Production mutation authorized here.
 
 ### T107 evidence split
@@ -352,6 +352,6 @@ Required before calling merge-ready: green required CI, successful exact runtime
 - [x] Automatic Stage apply 104 -> 106 and DB smoke PASS ([37145726559](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726559)); read-only post-apply confirms no migration-time MINT and preserved active Cron/control.
 - [x] Exact runtime SHA `e10fbbb471de310292416c76399ca6e8ad771387` WS Preview deployed with release metadata + local/public health PASS ([37145758741](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145758741)).
 - [x] Required runtime CI passed on `e10fbbb471de310292416c76399ca6e8ad771387`: [Tests](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726567), [WS PR Checks](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726647), [CI](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37145726508), migration guard and Stage Apply. Final docs-only HEAD checks are tracked on draft #1030.
-- [ ] Owner authenticated Deploy Preview -> WS Preview smoke: actual legal NORMAL Unlimited / finite NORMAL / finite SLOW funding and live Admin finite <-> Unlimited; runtime acceptance pending.
-- [ ] Separate Stage Cron-removal GO after accepted smoke, then forward-only wrapper/dead scheduler cleanup.
+- [x] Owner authenticated Deploy Preview -> WS Preview smoke PASS: finite NORMAL produced one capped +5000 demand refill and later NORMAL funding did not exceed that bucket cap; table `b3991744-c58f-42c1-947e-879e6f9bb79f` proved live Admin `NULL = Unlimited` with a second same-hour +5000 demand refill; table `cbbf8df1-f26f-4747-a4c8-5b3f79965adb` under FORCE_SLOW produced exactly one +2000 SLOW demand refill and funded all four bots from `POKER_BOT_SLOW_BANKROLL_100`. Tier 100 and the test user were restored afterward.
+- [x] Owner GO accepted for Stage Cron removal. `DB Stage Apply PR` run [37186272701](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37186272701) applied only `20261004073000_poker_demand_refill_scheduler_decommission.sql` (106 applied / 1 pending -> applied; smoke PASS). Read-only Stage afterward: `cron.job` empty, `public.poker_bot_pool_refill_hourly()` absent, demand core present, control enabled/bound to canonical Stage identity, `pg_cron` still installed, no cleanup-time refill MINT, Tier 100 restored.
 - [ ] T108 Production migration/runtime activation/exact Cron removal: separate GO, no Production mutation performed.

@@ -1,6 +1,6 @@
 # Contracts: NORMAL/SLOW admission and periodic tier pools with manual RESTRICTED
 
-> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. See the §32 implementation section at the end of this document. Final state is demand-only; temporary Cron uses the same DB allowance until accepted Stage smoke and separate removal GO.
+> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. Final state is demand-only. Stage cutover is complete: the exact poker refill Cron job and temporary hourly wrapper are removed; `poker_bot_refill_control` remains the demand-path kill switch/database-identity guard. Production remains a separate GO.
 
 
 Historical filename retained for the PR link. This contract implements the requirements of [spec.md](../spec.md), sourced solely from the live #1018 snapshot including its manual RESTRICTED amendment. Local T001–T029 evidence remains historical; the final amendment requires T030–T036, a new exact-SHA WS gate and the pre-merge Stage acceptance T037.
@@ -39,7 +39,7 @@ Only SYSTEM→ESCROW TABLE_BUY_IN in game runtime. No MINT in JOIN/seed/replacem
 
 ## 5. Hourly database refill (§29)
 
-The previous T019/T020/T086/T089–T092 VPS/GitHub dispatcher contract is historical and superseded. The only future scheduler is Supabase Cron job `poker-bot-pool-refill-hourly`, schedule `0 * * * *`, command `select public.poker_bot_pool_refill_hourly();`. This PR creates neither the pg_cron extension nor a job; the singleton control remains `enabled=false`.
+The previous T019/T020/T086/T089–T092 VPS/GitHub dispatcher and §29 Supabase Cron contracts are historical and superseded. Final Stage refill authority is positive funding demand only. The exact `poker-bot-pool-refill-hourly` job and temporary hourly wrapper are removed; the singleton control remains as backend kill switch/identity guard.
 
 `public.poker_bot_pool_refill_hourly()` is SECURITY INVOKER with fully qualified application objects and no EXECUTE for PUBLIC, anon, authenticated or service_role. It validates the database's PostgreSQL system identifier against `poker_bot_refill_control`, then returns without ledger writes if the control is disabled. One transaction advisory lock prevents overlapping runs. DB time selects the current UTC hour only; there is no catch-up.
 
@@ -51,7 +51,7 @@ Each pool is processed inside its own PL/pgSQL exception subtransaction. A failu
 
 The function sets `lock_timeout = '5s'` at function scope. This keeps account/policy row-lock waits bounded below the database's statement timeout so `55P03` is caught by the pool's existing exception subtransaction. The forward-only Stage correction replaces only the function; it leaves the global control disabled. The unapplied Production P2 has the same final setting.
 
-Stage may receive the forward-only migration automatically through DB Stage Apply. Its only effect is the disabled control/function; no pg_cron, job, MINT, balance/tier/profile/table mutation occurs. The Production equivalent is prepared but not applied. Stage Cron activation, Production apply/activation and live VPS cleanup require separate owner GO. Existing poker VPS units remain disabled/inactive; chips cleanup auth is unchanged. No bootstrap or profile/table activation is part of this amendment.
+Stage uses reviewed forward-only migrations through DB Stage Apply. §32 final cutover removes only the exact poker refill Cron job/hourly wrapper; demand core/control remain and no cleanup-time MINT/balance/tier/profile/table mutation occurs. `pg_cron` stays installed. Production apply/activation/Cron removal require separate owner GO. No bootstrap or profile/table activation is part of this amendment.
 
 ## 6. Admin interfaces
 
@@ -192,9 +192,9 @@ In `ws-server/poker/persistence/continuous-bot-table-repository.mjs`:
 
 ## 13. §29 refill replacement and operational boundary
 
-This section is authoritative over older scheduler descriptions in sections 5 and 12 and in historical task evidence. No GitHub workflow, VPS timer or dedicated poker dispatch credential remains the recurring refill authority. The single planned Supabase Cron job is documented above and is not created or activated in this PR.
+This section is authoritative over older scheduler descriptions in sections 5 and 12 and in historical task evidence. No GitHub workflow, VPS timer, Supabase Cron job or dedicated poker dispatch credential remains the recurring refill authority on final Stage.
 
-After merge, live VPS poker-unit cleanup needs a separate owner GO. Do not modify `arcade-chips-ledger-dispatch.*` or `/home/copilot/.config/gh`. Stage Cron setup and enabling `poker_bot_refill_control` are also separate owner gates. Production receives no migration, pg_cron/job setup, MINT or balance change from this PR. The hourly cadence is a behavioral change only after activation; before then refills do not run.
+Do not modify `arcade-chips-ledger-dispatch.*` or `/home/copilot/.config/gh`. Stage recurring refill is already removed; `poker_bot_refill_control` remains enabled for the accepted demand path. Production receives no migration/Cron removal/MINT or balance change without separate GO.
 
 ## §32 current refill contract
 
