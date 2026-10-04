@@ -579,3 +579,20 @@ test('does not emit routine authoritative join lifecycle logs', async () => {
   assert.equal(eventNames.includes('ws_join_restore_validate'), false);
   assert.equal(calls.command[0].status, 'accepted');
 });
+
+
+test('successful SETTLED join publishes waiting status before scheduling the existing rollover once', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => async () => ({ ok: true, seatNo: 2, buyIn: 100, rejoin: false, joinStatus: 'WAITING_NEXT_HAND', snapshot: { stateVersion: 1 } });
+  const scheduled = [];
+  ctx.scheduleSettledRollover = tableId => {
+    assert.equal(calls.command[0].joinStatus, 'WAITING_NEXT_HAND');
+    assert.equal(calls.actorTableState, 1);
+    scheduled.push(tableId);
+  };
+  await handleJoinCommand(ctx);
+  assert.deepEqual(scheduled, ['t1']);
+  assert.equal(calls.autoplay.length, 0);
+});

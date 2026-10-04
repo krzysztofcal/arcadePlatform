@@ -1246,7 +1246,7 @@ test("rejects malformed stringified state with state_invalid", async () => {
   );
 });
 
-test("fresh funded join preserves existing authoritative stacks when seat projections are stale", async () => withBotsDisabled(async () => {
+for (const phase of ["FLOP", "SETTLED"]) test(`fresh funded ${phase} join preserves stacks and waits for the next hand`, async () => withBotsDisabled(async () => {
   const seatRows = [
     { user_id: "human_1", seat_no: 1, status: "ACTIVE", stack: 98, is_bot: false, bot_profile: null, leave_after_hand: false },
     { user_id: "bot_1", seat_no: 2, status: "ACTIVE", stack: 100, is_bot: true, bot_profile: "TRIVIAL", leave_after_hand: false },
@@ -1256,7 +1256,7 @@ test("fresh funded join preserves existing authoritative stacks when seat projec
     version: 5,
     state: {
       tableId: "t-live",
-      phase: "FLOP",
+      phase,
       handId: "hand_live_join",
       handSeats: [
         { userId: "human_1", seatNo: 1 },
@@ -1334,6 +1334,7 @@ test("fresh funded join preserves existing authoritative stacks when seat projec
   assert.equal(result.snapshot.stacks.bot_1, 120);
   assert.equal(result.snapshot.stacks.bot_2, 84);
   assert.equal(result.joinStatus, "WAITING_NEXT_HAND");
+  assert.equal(seatRows.find(seat => seat.user_id === "human_2").status, "ACTIVE");
   assert.equal(stateRow.state.waitingForNextHandByUserId.human_2, true);
   assert.deepEqual(stateRow.state.handSeats.map((seat) => seat.userId), ["human_1", "bot_1", "bot_2"]);
   assert.equal(stateRow.state.stacks.bot_1, 120);
@@ -1447,6 +1448,8 @@ test("returns canonical db seat number and authoritative stack on rejoin", async
             version: 1,
             state: {
               tableId: "t1",
+              phase: "SETTLED",
+              handSeats: [{ userId: "u1", seatNo: 4 }],
               seats: [{ userId: "u1", seatNo: 4, status: "ACTIVE" }],
               stacks: { u1: 330 }
             }
@@ -1467,6 +1470,7 @@ test("returns canonical db seat number and authoritative stack on rejoin", async
   assert.equal(result.seatNo, 4);
   assert.equal(result.rejoin, true);
   assert.equal(result.stack, 330);
+  assert.equal(result.joinStatus, "ACTIVE");
 });
 
 test("rejoin projects stale state-only seats out of the authoritative snapshot", async () => {

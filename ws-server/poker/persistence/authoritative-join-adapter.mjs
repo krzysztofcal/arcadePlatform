@@ -173,6 +173,7 @@ function normalizeSuccess(result, { tableId, userId, requestId }) {
     stack,
     buyIn,
     rejoin,
+    joinStatus: result.joinStatus === "WAITING_NEXT_HAND" ? "WAITING_NEXT_HAND" : "ACTIVE",
     requestId: requestId || null,
     seededBots,
     snapshot

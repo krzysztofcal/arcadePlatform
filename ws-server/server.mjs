@@ -5249,6 +5249,7 @@ wss.on("connection", (ws) => {
             sendPokerAccessFrame(socket, state, state.pokerAccess, options);
           },
           scheduleBotStep,
+          scheduleSettledRollover: maybeScheduleSettledRollover,
           klog: klogSafe,
           klogVerbose,
           verboseLogsEnabled: pokerLogRuntimeControl.mayBuildDebugPayload("ws_join_authoritative_start", {
@@ -5270,7 +5271,6 @@ wss.on("connection", (ws) => {
           { targetUserId: joinResult.userId }
         ));
       }
-      maybeScheduleSettledRollover(frame.__resolvedTableId);
       maybeTouchPersistedSeatLastSeen(ws, connState);
       return;
     }

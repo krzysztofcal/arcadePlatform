@@ -875,3 +875,57 @@ test("authoritative join adapter resolves in ws artifact layout without netlify 
     await rm(stageDir, { recursive: true, force: true });
   }
 });
+
+
+test("SETTLED boundary join publishes waiting then includes the human in next hand without refresh", async () => {
+  const secret = "settled-boundary-smoke-secret";
+  const tableId = "table_settled_boundary_join";
+  const userId = "boundary_human";
+  const bots = [1, 2, 3].map(seatNo => ({ userId: makeBotUserId(tableId, seatNo), seatNo, isBot: true, botProfile: "NORMAL", status: "ACTIVE" }));
+  const stacks = Object.fromEntries(bots.map(bot => [bot.userId, 100]));
+  const store = {
+    accounts: [{ user_id: userId, account_type: "USER", balance: 120 }],
+    tables: { [tableId]: {
+      tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
+      seatRows: bots.map(bot => ({ user_id: bot.userId, seat_no: bot.seatNo, stack: 100, status: "ACTIVE", is_bot: true, bot_profile: "NORMAL", leave_after_hand: false })),
+      stateRow: { version: 94, state: {
+        tableId, phase: "SETTLED", handId: "boundary_previous_hand", seats: bots, handSeats: bots,
+        stacks, dealerSeatNo: 1, pot: 0, community: [],
+        showdown: { handId: "boundary_previous_hand", winners: [bots[0].userId], potsAwarded: [], potAwardedTotal: 0, reason: "computed" },
+        handSettlement: { handId: "boundary_previous_hand", settledAt: new Date().toISOString(), payouts: {} }
+      } }
+    } }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const { port, child } = await createServer({ env: {
+    ...runtimeJoinEnv({ secret, filePath }), POKER_BOTS_ENABLED: "0",
+    WS_POKER_SETTLED_REVEAL_MS: "100", WS_POKER_TURN_MS: "60000"
+  } });
+  let ws;
+  try {
+    await waitForListening(child, 5000);
+    ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: userId }));
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "boundary-join", ts: new Date().toISOString(), payload: { tableId, seatNo: 4, buyIn: 100 } });
+    const ack = await nextCommandResultForRequest(ws, "boundary-join");
+    assert.equal(ack.payload.status, "accepted", JSON.stringify(ack.payload));
+    assert.equal(ack.payload.joinStatus, "WAITING_NEXT_HAND");
+    const waiting = await nextMessageMatching(ws, frame => frame.type === "table_state" && frame.payload?.hand?.status === "SETTLED");
+    assert.equal(waiting.payload.seats.find(seat => seat.userId === userId).status, "WAITING_NEXT_HAND");
+    // No subscription, resync, reconnect or refresh command is sent.
+    const next = await nextMessageMatching(ws, frame => frame.type === "stateSnapshot" && frame.payload?.public?.hand?.status === "PREFLOP", { timeoutMs: 10000 });
+    assert.equal(next.payload.public.hand.handId !== "boundary_previous_hand", true);
+    assert.equal(next.payload.public.seats.find(seat => seat.userId === userId).status, "ACTIVE");
+    assert.equal(next.payload.public.seats.length, 4);
+    assert.equal(next.payload.stateVersion, 96);
+    const persisted = await readPersistedFile(filePath);
+    assert.equal(persisted.tables[tableId].seatRows.find(seat => seat.user_id === userId).status, "ACTIVE");
+    assert.equal(persisted.tables[tableId].stateRow.state.handSeats.some(seat => seat.userId === userId), true);
+  } finally {
+    if (ws) ws.close();
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
