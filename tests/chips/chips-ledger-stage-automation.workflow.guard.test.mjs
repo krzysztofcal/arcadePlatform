@@ -166,10 +166,11 @@ for (const artifact of [
 const vpsBootstrap = fs.readFileSync("infra/vps/bootstrap.sh", "utf8");
 assert.doesNotMatch(vpsBootstrap, /arcade-poker-pool-dispatch|poker-bot-pool-refill/);
 const vpsReadme = fs.readFileSync("infra/vps/README.md", "utf8");
+assert.match(vpsReadme, /demand-driven only/);
+assert.match(vpsReadme, /poker_bot_refill_control/);
 assert.match(vpsReadme, /poker-bot-pool-refill-hourly/);
-assert.match(vpsReadme, /0 \* \* \* \*/);
-assert.match(vpsReadme, /select public\.poker_bot_pool_refill_hourly\(\);/);
-assert.match(vpsReadme, /enabled=false/);
+assert.doesNotMatch(vpsReadme, /0 \* \* \* \*/);
+assert.doesNotMatch(vpsReadme, /select public\.poker_bot_pool_refill_hourly\(\);/);
 assert.doesNotMatch(vpsReadme, /gh-poker-refill|arcade-poker-refill-dispatch/);
 
 const concurrencyBlock = workflow.match(
