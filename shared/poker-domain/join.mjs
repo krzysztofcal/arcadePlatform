@@ -1,6 +1,6 @@
 import { attemptDemandRefill } from "./demand-refill.mjs";
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
-import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
+import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers, resolvePokerMaxPlayableBuyIn } from "./poker-progression.mjs";
 import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 import {
@@ -922,8 +922,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       }
 
       const tiers = resolvePokerBuyInTiers(env);
+      const maxPlayableBuyIn = resolvePokerMaxPlayableBuyIn(env, tiers);
       const bankroll = bankrollForAccess;
-      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers });
+      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers, maxPlayableBuyIn });
       if (!access.configured) throw makeError("invalid_buy_in");
       if (!access.eligible) {
         throw makeError("buy_in_tier_locked", null, {

@@ -162,46 +162,49 @@ test("shared join requires injected locked-state validator", async () => {
 });
 
 test("fresh join locks the bankroll row before posting the table buy-in", async () => withBotsDisabled(async () => {
-  const events = [];
-  const seatRows = [];
-  const result = await executePokerJoinAuthoritative(withStorageValidator({
-    beginSql: async (fn) => fn({
-      unsafe: async (sql) => {
-        const text = String(sql);
-        if (text.includes("from public.poker_tables")) return [{ id: "t-progression-lock", status: "OPEN", max_players: 6, buy_in: 500 }];
-        if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) return seatRows.map((row) => ({ ...row }));
-        if (text.includes("from public.chips_accounts") && text.includes("account_type = 'USER'")) {
-          events.push(text);
-          return [{ balance: 550 }];
+  for (const balance of [550, 1_000_000]) {
+    const events = [];
+    const seatRows = [];
+    const result = await executePokerJoinAuthoritative(withStorageValidator({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("from public.poker_tables")) return [{ id: "t-progression-lock", status: "OPEN", max_players: 6, buy_in: 500 }];
+          if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) return seatRows.map((row) => ({ ...row }));
+          if (text.includes("from public.chips_accounts") && text.includes("account_type = 'USER'")) {
+            events.push(text);
+            return [{ balance }];
+          }
+          if (text.includes("insert into public.poker_seats")) {
+            seatRows.push({ user_id: "u-progression-lock", seat_no: 1, status: "ACTIVE", is_bot: false, bot_profile: null, leave_after_hand: false, stack: 0 });
+            return [{ seat_no: 1 }];
+          }
+          if (text.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t-progression-lock", seats: [], stacks: {} } }];
+          if (text.includes("update public.poker_state set state")) return [{ version: 2 }];
+          if (text.includes("update public.poker_seats set stack")) {
+            seatRows[0].stack = 500;
+            return [{ ok: true }];
+          }
+          if (text.includes("update public.poker_tables")) return [];
+          return [];
         }
-        if (text.includes("insert into public.poker_seats")) {
-          seatRows.push({ user_id: "u-progression-lock", seat_no: 1, status: "ACTIVE", is_bot: false, bot_profile: null, leave_after_hand: false, stack: 0 });
-          return [{ seat_no: 1 }];
-        }
-        if (text.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t-progression-lock", seats: [], stacks: {} } }];
-        if (text.includes("update public.poker_state set state")) return [{ version: 2 }];
-        if (text.includes("update public.poker_seats set stack")) {
-          seatRows[0].stack = 500;
-          return [{ ok: true }];
-        }
-        if (text.includes("update public.poker_tables")) return [];
-        return [];
+      }),
+      tableId: "t-progression-lock",
+      userId: "u-progression-lock",
+      requestId: "join-progression-lock",
+      buyIn: 500,
+      progressionBalance: balance,
+      progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500,1000,5000]", POKER_MAX_PLAYABLE_BUY_IN: "500" },
+      postTransactionFn: async () => {
+        events.push("postTransaction");
+        return { ok: true };
       }
-    }),
-    tableId: "t-progression-lock",
-    userId: "u-progression-lock",
-    requestId: "join-progression-lock",
-    buyIn: 500,
-    progressionBalance: 550,
-    postTransactionFn: async () => {
-      events.push("postTransaction");
-      return { ok: true };
-    }
-  }));
-  assert.equal(result.ok, true);
-  assert.equal(result.stack, 500);
-  assert.match(events[0], /for update/i);
-  assert.equal(events.indexOf("postTransaction") > 0, true);
+    }));
+    assert.equal(result.ok, true);
+    assert.equal(result.stack, 500);
+    assert.match(events[0], /for update/i);
+    assert.equal(events.indexOf("postTransaction") > 0, true);
+  }
 }));
 
 test("authoritative wallet threshold does not mutate automatic class under FORCE_NORMAL (Finding 1)", async () => withBotsDisabled(async () => {
@@ -247,7 +250,7 @@ test("authoritative wallet threshold does not mutate automatic class under FORCE
       return { ok: true, newVersion: rows[0]?.version || 2 };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
 
   assert.equal(result.ok, true);
@@ -308,7 +311,7 @@ test("fresh join with wallet < recovery threshold transitions SLOW->NORMAL and b
       return { ok: true, newVersion: rows[0]?.version || 2 };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
 
   assert.equal(result.ok, true);
@@ -365,7 +368,7 @@ test("fresh join with wallet in hysteresis band retains previous class with zero
       return { ok: true, newVersion: rows[0]?.version || 2 };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
 
   assert.equal(result.ok, true);
@@ -417,7 +420,7 @@ test("fresh join with custom policy thresholds entry=2000 and recovery=1500 retu
       return { ok: true, newVersion: rows[0]?.version || 2 };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
 
   assert.equal(result.ok, true);
@@ -465,7 +468,7 @@ test("is_slow_only remains one-way: recovered NORMAL user cannot fresh-join an e
         return { ok: true, newVersion: rows[0]?.version || 2 };
       },
       validateStateForStorage: () => true,
-      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
     }),
     (error) => error?.message === "normal_table_required" || error?.validationReason === "normal_table_required"
   );
@@ -517,7 +520,7 @@ test("fresh FORCE_RESTRICTED own empty STANDARD join accepts with zero bot fundi
     },
     updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
   assert.equal(result.ok, true);
   assert.equal(result.access.effectiveClass, "RESTRICTED");
@@ -609,7 +612,7 @@ test("an active RESTRICTED human blocks bot seeding for a later NORMAL join", as
       return { ok: true, newVersion: store.stateRow.version };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
 
   const restrictedJoin = await runJoin(restrictedUserId, "restricted-first");
@@ -697,7 +700,7 @@ test("missing existing human access keeps NORMAL JOIN legal but blocks bot fundi
       return { ok: true, newVersion: store.stateRow.version };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
 
   assert.equal(result.ok, true);
@@ -768,7 +771,7 @@ test("fresh NORMAL JOIN remains fail-soft when the tier policy disables bot fund
     loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId, seats: [], stacks: {} } }),
     updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
 
   assert.equal(result.ok, true);
@@ -804,7 +807,7 @@ test("fresh FORCE_RESTRICTED join rejects an active bot table before buy-in", as
       loadStateForUpdate: async () => ({ ok: true, version: 1, state: { seats: [], stacks: {} } }),
       updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
       validateStateForStorage: () => true,
-      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
     }),
     (error) => error?.code === "restricted_table_required"
   );
@@ -852,7 +855,7 @@ test("existing financed FORCE_RESTRICTED rejoin remains legal without a new debi
     },
     updateStateLocked: async () => ({ ok: true, newVersion: 4 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
   assert.equal(result.ok, true);
   assert.equal(result.rejoin, true);
@@ -893,7 +896,7 @@ test("fresh FORCE_RESTRICTED join rejects SLOW-only and CONTINUOUS_BOT targets b
         loadStateForUpdate: async () => ({ ok: true, version: 1, state: { seats: [], stacks: {} } }),
         updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
         validateStateForStorage: () => true,
-        env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+        env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
       }),
       (error) => error?.code === "restricted_table_required"
     );
@@ -946,7 +949,7 @@ test("existing SLOW human makes an ordinary table reject a fresh NORMAL join bef
       loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId, seats: [], stacks: {} } }),
       updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
       validateStateForStorage: () => true,
-      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
     }),
     (error) => error?.code === "normal_table_required"
   );
@@ -1003,7 +1006,7 @@ test("existing SLOW human permits a SLOW join and selects sticky SLOW funding", 
     } }),
     updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
   assert.equal(result.ok, true);
   assert.equal(result.access.effectiveClass, "SLOW");
@@ -1060,7 +1063,7 @@ test("fresh JOIN serializes with a committed FORCE_RESTRICTED override before bo
     loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId, seats: [{ userId: existingUserId, seatNo: 1, status: "ACTIVE", isBot: false }], stacks: { [existingUserId]: 100 } } }),
     updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
   });
   assert.equal(result.ok, true);
   assert.equal(adminCommitted, true);
@@ -1100,23 +1103,56 @@ test("fresh join rejects a 500 CH tier when bankroll is 549 CH", async () => wit
   assert.deepEqual(writes, []);
 }));
 
-test("active rejoin succeeds below the current tier threshold without reading progression", async () => withBotsDisabled(async () => {
+test("wealthy fresh join to 1000 CH is blocked at frontier 500 before any writes", async () => withBotsDisabled(async () => {
+  const writes = [];
+  await assert.rejects(
+    () => executePokerJoinAuthoritative(withStorageValidator({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("from public.poker_tables")) return [{ id: "t-tier-locked", status: "OPEN", max_players: 6, buy_in: 1000 }];
+          if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) return [];
+          if (text.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t-tier-locked", seats: [], stacks: {} } }];
+          if (text.includes("insert into public.poker_seats")) writes.push("insert_seat");
+          return [];
+        }
+      }),
+      tableId: "t-tier-locked",
+      userId: "u-tier-locked",
+      requestId: "join-tier-locked",
+      buyIn: 1000,
+      progressionBalance: 1_000_000,
+      progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500,1000,5000]", POKER_MAX_PLAYABLE_BUY_IN: "500" },
+      postTransactionFn: async () => { writes.push("ledger_buyin"); return { ok: true }; }
+    })),
+    (error) => {
+      assert.equal(error?.code, "buy_in_tier_locked");
+      assert.equal(error?.buyIn, 1000);
+      assert.equal(error?.requiredBankroll, 1100);
+      assert.equal(error?.balance, 1_000_000);
+      return true;
+    }
+  );
+  assert.deepEqual(writes, []);
+}));
+
+test("active rejoin succeeds above the playable frontier and below the bankroll threshold without reading progression", async () => withBotsDisabled(async () => {
   let progressionReads = 0;
   const result = await executePokerJoinAuthoritative(withStorageValidator({
     beginSql: async (fn) => fn({
       unsafe: async (sql, params = []) => {
         const text = String(sql);
-        if (text.includes("from public.poker_tables")) return [{ id: "t-rejoin-low-bankroll", status: "OPEN", max_players: 6, buy_in: 500 }];
+        if (text.includes("from public.poker_tables")) return [{ id: "t-rejoin-low-bankroll", status: "OPEN", max_players: 6, buy_in: 1000 }];
         if (text.includes("from public.chips_accounts")) {
           progressionReads += 1;
           return [{ balance: 0 }];
         }
-        if (text.includes("from public.poker_seats") && text.includes("seat_no, stack")) return [{ seat_no: 1, stack: 500 }];
+        if (text.includes("from public.poker_seats") && text.includes("seat_no, stack")) return [{ seat_no: 1, stack: 1000 }];
         if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) {
-          return [{ user_id: "u-rejoin-low-bankroll", seat_no: 1, status: "ACTIVE", stack: 500, is_bot: false, bot_profile: null, leave_after_hand: false }];
+          return [{ user_id: "u-rejoin-low-bankroll", seat_no: 1, status: "ACTIVE", stack: 1000, is_bot: false, bot_profile: null, leave_after_hand: false }];
         }
         if (text.includes("select version, state from public.poker_state")) {
-          return [{ version: 1, state: { tableId: "t-rejoin-low-bankroll", seats: [{ userId: "u-rejoin-low-bankroll", seatNo: 1, status: "ACTIVE" }], stacks: { "u-rejoin-low-bankroll": 500 } } }];
+          return [{ version: 1, state: { tableId: "t-rejoin-low-bankroll", seats: [{ userId: "u-rejoin-low-bankroll", seatNo: 1, status: "ACTIVE" }], stacks: { "u-rejoin-low-bankroll": 1000 } } }];
         }
         return [];
       }
@@ -1124,14 +1160,14 @@ test("active rejoin succeeds below the current tier threshold without reading pr
     tableId: "t-rejoin-low-bankroll",
     userId: "u-rejoin-low-bankroll",
     requestId: "rejoin-low-bankroll",
-    buyIn: 500,
+    buyIn: 1000,
     progressionBalance: 0,
     postTransactionFn: async () => ({ ok: true })
   }));
 
   assert.equal(result.ok, true);
   assert.equal(result.rejoin, true);
-  assert.equal(result.stack, 500);
+  assert.equal(result.stack, 1000);
   assert.equal(progressionReads, 0);
 }));
 
