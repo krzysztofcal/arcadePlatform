@@ -345,10 +345,10 @@ Required before calling merge-ready: green required CI, successful exact runtime
 - [x] T105 Add explicit NORMAL/SLOW Unlimited controls and revision-checked omitted-field preservation.
 - [x] T106 Extend fundamental existing real PostgreSQL migration/transaction and runtime tests; classify klog events.
 - [x] T107 Confirm automatic Stage 104 -> 106 apply and green CI; exact-SHA WS Preview deploy; authenticated NORMAL finite/Unlimited + SLOW finite smoke including live Admin; after owner GO apply forward-only Stage scheduler decommission 106 -> 107 and remove the exact Cron job/hourly wrapper while retaining the demand core/control.
-- [ ] T108 Production rollout under owner GO: reviewed equivalent, exact WS deploy, read-only ledger evidence, exact Production Cron removal; inspect other jobs before optional pg_cron removal.
+- [x] T108 Production rollout under owner GO: reviewed equivalent, exact WS deploy, read-only ledger evidence and exact Production Cron removal complete.
   - [x] Owner GO accepted. Production equivalent `20261003183626_poker_demand_refill_production_contract.sql` applied under canonical identity guard; migration recorded, demand core present, NORMAL caps Unlimited, SLOW caps finite, refill ledger count unchanged at 21.
-  - [ ] Restore main-push Production WS deployment and verify the exact merged SHA/release health.
-  - [ ] Apply reviewed Production scheduler cleanup `20261004114411_poker_demand_refill_production_scheduler_decommission.sql`; verify Cron/wrapper absent, demand core/control preserved and ledger unchanged.
+  - [x] Main-push Production WS deployment restored by #1031. `WS Server Deploy` run 37200053339 deployed exact merge SHA `e91d6fe312a2250a5884bf6df4fb17cadf4189d1`; validate, atomic switch/restart, local/public health gates and WebSocket handshake PASS.
+  - [x] Production scheduler cleanup `20261004114411_poker_demand_refill_production_scheduler_decommission.sql` applied under canonical identity guard. Read-only audit: `cron.job` empty; `public.poker_bot_pool_refill_hourly()` absent; demand core present; refill control enabled/bound to Production identity; `pg_cron` retained; enabled tiers NORMAL cap NULL/Unlimited and SLOW caps 2000/5000 CH/h; refill ledger count still 21 with no T108-time MINT.
 
 ### T107 evidence split
 
