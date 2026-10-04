@@ -1074,8 +1074,7 @@ async function refreshActivePokerAccess() {
   try {
     const beginSqlWs = await loadBeginSqlWs();
     const refreshed = await beginSqlWs(async (tx) => {
-      const buyIns = [...new Set(tableManager.listTableIds().map((tableId) => tableManager.tableMeta(tableId)?.buyIn))];
-      const funding = await readSettledBotFundingSnapshot(tx, { buyIns });
+      const funding = await readSettledBotFundingSnapshot(tx);
       const policy = await readPokerAccessPolicy(tx);
       const snapshots = await readPokerAccessSnapshots(tx, { userIds: normalizedUserIds });
       const slowOnlyTableIdsByUser = new Map();
@@ -2684,7 +2683,6 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
   const fundingOptions = {
     snapshot: requiresDbState ? settledBotFundingSnapshot : { schemaBacked: false, expiresAtMs: Number.MAX_SAFE_INTEGER },
     ...tableMeta,
-    legacySystemKey: legacyBotFundingSystemKey,
     nowMs: Date.now()
   };
   const fundingDecision = decideSettledBotFunding({

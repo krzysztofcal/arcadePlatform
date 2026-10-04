@@ -204,12 +204,18 @@ test("pre-migration progression/table access stays available without new schema 
   }
 });
 
-test("wealthy table access follows the shared frontier and preserves rejoin above it", async () => {
+test("table access follows shared activation, bankroll and financed rejoin", async () => {
   const previous = process.env.CHIPS_ENABLED;
   process.env.CHIPS_ENABLED = "1";
   try {
-    const progression = evaluatePokerProgression({ balance: 1_000_000, tiers: [100, 500, 1000, 5000], maxPlayableBuyIn: 500 });
-    for (const [buyIn, rejoin, allowed] of [[500, false, true], [1000, false, false], [1000, true, true]]) {
+    for (const [enabledBuyIns, balance, buyIn, rejoin, allowed, availableBuyIns] of [
+      [[100, 500], 1_000_000, 500, false, true, [500, 100]],
+      [[100, 500], 1_000_000, 1000, false, false, [500, 100]],
+      [[100, 500], 1_000_000, 1000, true, true, [500, 100]],
+      [[100, 500, 1000], 1099, 1000, false, false, [500, 100]],
+      [[100, 500, 1000], 1100, 1000, false, true, [1000, 500]]
+    ]) {
+      const progression = evaluatePokerProgression({ balance, tiers: [100, 500, 1000, 5000], enabledBuyIns });
       const handler = makeHandler({
         authResult: { valid: true, userId: "wealthy" }, progression,
         calls: { tokens: [], progression: [] },
@@ -224,8 +230,8 @@ test("wealthy table access follows the shared frontier and preserves rejoin abov
       const response = await handler({ httpMethod: "GET", queryStringParameters: { tableId: "frontier-table" }, headers: { origin, authorization: "Bearer token" } });
       assert.equal(response.statusCode, 200);
       const body = JSON.parse(response.body);
-      assert.deepEqual(body.availableBuyIns, [500, 100]);
-      assert.equal(body.maxPlayableBuyIn, 500);
+      assert.deepEqual(body.availableBuyIns, availableBuyIns);
+      assert.deepEqual(body.enabledBuyIns, enabledBuyIns);
       assert.equal(body.tableAccess.allowed, allowed);
       assert.equal(body.tableAccess.reason, rejoin ? "rejoin" : allowed ? "available" : "buy_in_tier_locked");
     }

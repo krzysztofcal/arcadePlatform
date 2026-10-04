@@ -5,7 +5,6 @@ import {
   evaluatePokerProgression,
   readPokerBankroll,
   resolvePokerBuyInTiers,
-  resolvePokerMaxPlayableBuyIn,
   readPokerProgression
 } from "./poker-progression.mjs";
 import {
@@ -66,16 +65,16 @@ test("progression resolves the default catalog and unlocks only the highest tier
   const tiers = resolvePokerBuyInTiers({});
   assert.equal(tiers[0], 100);
   assert.equal(tiers.at(-1), 10_000_000);
-  assert.deepEqual(evaluatePokerProgression({ balance: 550, tiers }).availableBuyIns, [500, 100]);
-  assert.deepEqual(evaluatePokerProgression({ balance: 550, tiers }).tiers.find((tier) => tier.buyIn === 500)?.stakes, { sb: 5, bb: 10 });
+  assert.deepEqual(evaluatePokerProgression({ balance: 550, tiers, enabledBuyIns: [100, 500] }).availableBuyIns, [500, 100]);
+  assert.deepEqual(evaluatePokerProgression({ balance: 550, tiers, enabledBuyIns: [100, 500] }).tiers.find((tier) => tier.buyIn === 500)?.stakes, { sb: 5, bb: 10 });
   assert.equal(calculateUnlockBankroll(100), 100);
   assert.equal(calculateUnlockBankroll(500), 550);
 });
 
 test("the 100 CH tier unlocks at exactly 100 CH while higher tiers keep their buffer", () => {
   const tiers = [100, 500, 1_000];
-  const belowMinimum = evaluatePokerProgression({ balance: 99, tiers });
-  const atMinimum = evaluatePokerProgression({ balance: 100, tiers });
+  const belowMinimum = evaluatePokerProgression({ balance: 99, tiers, enabledBuyIns: [100, 500] });
+  const atMinimum = evaluatePokerProgression({ balance: 100, tiers, enabledBuyIns: [100, 500] });
   assert.deepEqual(belowMinimum.availableBuyIns, []);
   assert.deepEqual(atMinimum.availableBuyIns, [100]);
   assert.equal(atMinimum.tiers.find((tier) => tier.buyIn === 100)?.unlockBankroll, 100);
@@ -123,33 +122,43 @@ test("authoritative bankroll reads can lock the account row for the join transac
   assert.match(query, /for update/i);
 });
 
-test("playable frontier caps availability while preserving the full bankroll roadmap", async () => {
+test("enabled tiers keep the highest playable tier uncapped and skip disabled fallback", () => {
   const tiers = [100, 500, 1000, 5000];
-  for (const [maxPlayableBuyIn, expected] of [[500, [500, 100]], [1000, [1000, 500]], [5000, [5000, 1000]]]) {
-    const result = evaluatePokerProgression({ balance: 1_000_000, tiers, maxPlayableBuyIn });
-    assert.deepEqual(result.availableBuyIns, expected);
-    assert.equal(result.maxPlayableBuyIn, maxPlayableBuyIn);
-    assert.equal(result.highestUnlockedBuyIn, 5000);
-    assert.equal(result.tiers.length, 4);
-    assert.equal(result.tiers.every((tier) => tier.unlocked && tier.progressPercent === 100 && tier.remaining === 0), true);
+  for (const [enabledBuyIns, expected] of [
+    [[100, 500], [500, 100]], [[100, 500, 1000], [1000, 500]],
+    [[100, 500, 1000, 5000], [5000, 1000]], [[100, 1000], [1000, 100]]
+  ]) {
+    for (const balance of [10_000, 1_000_000]) {
+      const result = evaluatePokerProgression({ balance, tiers, enabledBuyIns });
+      assert.deepEqual(result.availableBuyIns, expected);
+      assert.equal(result.highestUnlockedBuyIn, 5000);
+      assert.equal(result.tiers.length, 4);
+      assert.equal(result.tiers.every((tier) => tier.unlocked && tier.progressPercent === 100 && tier.remaining === 0), true);
+    }
   }
-  assert.deepEqual(evaluatePokerProgression({ balance: 549, tiers, maxPlayableBuyIn: 500 }).availableBuyIns, [100]);
-  assert.equal(resolvePokerMaxPlayableBuyIn({}, tiers), 500);
-  let reads = 0;
-  const result = await readPokerProgression({ unsafe: async () => { reads++; return [{ balance: 1_000_000 }]; } }, {
-    userId: "wealthy", env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify(tiers), POKER_MAX_PLAYABLE_BUY_IN: "1000" }
-  });
-  assert.deepEqual(result.availableBuyIns, [1000, 500]);
-  assert.equal(reads, 1);
+  assert.deepEqual(evaluatePokerProgression({ balance: 549, tiers, enabledBuyIns: [100, 500] }).availableBuyIns, [100]);
+  assert.deepEqual(evaluatePokerProgression({ balance: 550, tiers, enabledBuyIns: [100, 500] }).availableBuyIns, [500, 100]);
+  assert.deepEqual(evaluatePokerProgression({ balance: 1099, tiers, enabledBuyIns: [100, 500, 1000] }).availableBuyIns, [500, 100]);
+  assert.deepEqual(evaluatePokerProgression({ balance: 1100, tiers, enabledBuyIns: [100, 500, 1000] }).availableBuyIns, [1000, 500]);
+  assert.deepEqual(evaluatePokerProgression({ balance: 1_000_000, tiers }).availableBuyIns, []);
 });
 
-test("invalid playable frontier fails closed as a tier configuration error", () => {
-  const tiers = [100, 500, 1000];
-  for (const value of ["", "750", "0", "-1", "1.5", "nope", "9007199254740992", null]) {
-    assert.throws(() => resolvePokerMaxPlayableBuyIn({ POKER_MAX_PLAYABLE_BUY_IN: value }, tiers),
-      (error) => error.code === "poker_buy_in_tiers_config_invalid");
+
+test("progression reader uses enabled provisioned policy and propagates the same access decision", async () => {
+  for (const enabled of [false, true]) {
+    const result = await readPokerProgression({ unsafe: async (sql, params) => {
+      if (sql.includes("to_regclass")) return [{ available: true }];
+      if (sql.includes("poker_bot_tier_policy")) return [100, 500, 1000].map((buy_in) => ({
+        buy_in, enabled: buy_in !== 1000 || enabled, revision: 1,
+        normal_refill_threshold_ch: 1, normal_refill_amount_ch: 10,
+        slow_refill_threshold_ch: 1, slow_refill_amount_ch: 10
+      }));
+      if (sql.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
+      if (sql.includes("select balance")) return [{ balance: 1_000_000 }];
+      throw new Error("unexpected query");
+    } }, { userId: "wealthy", env: {} });
+    assert.deepEqual(result.availableBuyIns, enabled ? [1000, 500] : [500, 100]);
+    assert.deepEqual(result.enabledBuyIns, enabled ? [100, 500, 1000] : [100, 500]);
+    assert.equal(result.tiers.length, 11);
   }
-  assert.throws(() => resolvePokerMaxPlayableBuyIn({}, [100]), (error) => error.code === "poker_buy_in_tiers_config_invalid");
-  assert.throws(() => evaluatePokerProgression({ balance: 1_000_000, tiers, maxPlayableBuyIn: 750 }),
-    (error) => error.code === "poker_buy_in_tiers_config_invalid");
 });

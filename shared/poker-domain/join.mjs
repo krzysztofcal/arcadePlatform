@@ -1,6 +1,6 @@
 import { attemptDemandRefill } from "./demand-refill.mjs";
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
-import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers, resolvePokerMaxPlayableBuyIn } from "./poker-progression.mjs";
+import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
 import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 import {
@@ -13,8 +13,8 @@ import {
   readPokerAccessPolicy,
   readPokerAccessSnapshot,
   readPokerAccessSnapshots,
-  readPokerPoolProvisioning,
-  readPokerTierPolicy,
+  readPokerTierPolicySnapshot,
+  resolvePokerEnabledBuyIns,
 } from "./bot-access.mjs";
 import { assertActivePokerTableCapacity, lockUserTableSlots } from "./table-participation.mjs";
 
@@ -147,11 +147,13 @@ async function resolveJoinAccess({ tx, userId, bankroll, buyIn = null, nowMs = D
     automaticClass: finalSnapshot.automaticClass,
     override: finalSnapshot.override
   });
+  let tierPolicySnapshot = null;
   let tierPolicy = null;
   let poolProvisioning = null;
   if (snapshot?.schemaBacked) {
-    tierPolicy = await readPokerTierPolicy(tx, { buyIn });
-    poolProvisioning = await readPokerPoolProvisioning(tx, { buyIn });
+    tierPolicySnapshot = await readPokerTierPolicySnapshot(tx, { nowMs });
+    tierPolicy = tierPolicySnapshot.tiers[buyIn] || null;
+    poolProvisioning = tierPolicy?.provisioned || null;
   }
   return {
     ...finalAccessState,
@@ -160,6 +162,7 @@ async function resolveJoinAccess({ tx, userId, bankroll, buyIn = null, nowMs = D
     persisted: Boolean(persisted?.changed),
     automaticChanged: classified.changed,
     schemaBacked: Boolean(finalSnapshot?.schemaBacked),
+    tierPolicySnapshot,
     tierPolicy,
     poolProvisioning,
   };
@@ -922,9 +925,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       }
 
       const tiers = resolvePokerBuyInTiers(env);
-      const maxPlayableBuyIn = resolvePokerMaxPlayableBuyIn(env, tiers);
+      const enabledBuyIns = resolvePokerEnabledBuyIns(joinAccess.tierPolicySnapshot, tiers);
       const bankroll = bankrollForAccess;
-      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers, maxPlayableBuyIn });
+      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers, enabledBuyIns });
       if (!access.configured) throw makeError("invalid_buy_in");
       if (!access.eligible) {
         throw makeError("buy_in_tier_locked", null, {
@@ -1061,10 +1064,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         })
         : 0;
       const tierFundingEnabled = botFundingAllowedForTableHumans
-        && (!joinAccess.schemaBacked
-          || (joinAccess.tierPolicy?.enabled === true
-          && joinAccess.poolProvisioning?.NORMAL === true
-          && joinAccess.poolProvisioning?.SLOW === true));
+        && joinAccess.tierPolicy?.enabled === true
+        && joinAccess.poolProvisioning?.NORMAL === true
+        && joinAccess.poolProvisioning?.SLOW === true;
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,

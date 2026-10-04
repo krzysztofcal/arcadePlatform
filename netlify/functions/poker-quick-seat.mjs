@@ -214,7 +214,7 @@ const recommendSeatAtTable = async (tx, { tableId, userId, maxPlayers, buyIn, ta
   const access = evaluatePokerBuyInAccess({
     balance: progression?.balance ?? 0,
     buyIn: normalizedBuyIn,
-    maxPlayableBuyIn: progression?.maxPlayableBuyIn,
+    enabledBuyIns: progression?.enabledBuyIns,
     tiers: progression?.tiers?.map((tier) => tier.buyIn) || []
   });
   if (!access.configured || !access.eligible) {
