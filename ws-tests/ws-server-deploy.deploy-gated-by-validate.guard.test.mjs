@@ -45,3 +45,18 @@ test('main validation contains the retained runtime/build and unique deploy safe
   assert.match(validate, /docker build[^\n]*-f "\$WS_DOCKERFILE_PATH" "\$WS_DOCKER_BUILD_CONTEXT"/);
   assert.doesNotMatch(validate, /if:.*workflow_dispatch|if:.*== 'pull_request'/);
 });
+
+test('deploy-context-only changes require deploy validation without the full WS PR harness', async () => {
+  const { classifyCiImpact } = await import('../scripts/ci-impact.mjs');
+  const impact = classifyCiImpact(['netlify/functions/_generated/deploy-context.mjs']);
+  assert.equal(impact.deploy_ws, true);
+  assert.equal(impact.ws_poker, false);
+
+  const text = workflowText();
+  const validate = text.slice(text.indexOf('  validate:'), text.indexOf('  deploy:'));
+  assert.match(validate, /if: \$\{\{ needs\.impact\.outputs\.ws_poker == 'true' \|\| needs\.impact\.outputs\.deploy_ws == 'true' \}\}/);
+  assert.match(text, /deploy:\n\s+needs: \[impact, validate\]/);
+  const pr = fs.readFileSync('.github/workflows/ws-pr-checks.yml', 'utf8');
+  const harness = pr.slice(pr.indexOf('  ws-harness:'));
+  assert.match(harness, /if: \$\{\{ needs\.impact\.outputs\.ws_poker == 'true' \}\}/);
+});

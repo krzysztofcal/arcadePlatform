@@ -42,7 +42,7 @@ jobs:
 
   validate:
     needs: impact
-    if: ${{ needs.impact.outputs.ws_poker == 'true' }}
+    if: ${{ needs.impact.outputs.ws_poker == 'true' || needs.impact.outputs.deploy_ws == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
