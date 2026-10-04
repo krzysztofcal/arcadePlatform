@@ -52,21 +52,27 @@ test('Fullscreen buttons sanity (enter/exit visibility)', async ({ page }) => {
   const exitDisplay0 = await exit.evaluate((el) => (el as HTMLElement).style.display || '');
   expect(exitDisplay0).toBe('none');
 
-  // Try to enter fullscreen; in headless this may be ignored, so tolerate either outcome
-  await enter.click();
-  await page.waitForTimeout(300);
-
-  const isFs = await page.evaluate(() => {
-    return !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
-  });
-  const exitDisplay1 = await exit.evaluate((el) => getComputedStyle(el).display);
+  // Await the native outcome, not a fixed delay or an intermediate fullscreen property.
+  const [isFs] = await Promise.all([
+    page.evaluate(() => {
+      if (!document.fullscreenEnabled && !(document as any).webkitFullscreenEnabled) return false;
+      return new Promise<boolean>((resolve) => {
+        const events = ['fullscreenchange', 'webkitfullscreenchange', 'fullscreenerror', 'webkitfullscreenerror'];
+        const done = () => {
+          events.forEach((event) => document.removeEventListener(event, done));
+          resolve(!!(document.fullscreenElement || (document as any).webkitFullscreenElement));
+        };
+        events.forEach((event) => document.addEventListener(event, done, { once: true }));
+      });
+    }),
+    enter.click(),
+  ]);
 
   if (isFs) {
-    // If fullscreen succeeded, exit button should be visible
-    expect(exitDisplay1).not.toBe('none');
+    // The existing application listener synchronizes the buttons on fullscreenchange.
+    await expect(exit).toBeVisible();
   } else {
-    // Otherwise, at least ensure the click didn't break layout (enter stays visible)
-    const enterVisible = await enter.isVisible();
-    expect(enterVisible).toBeTruthy();
+    // Preserve coverage for browsers where headless fullscreen is unavailable/rejected.
+    await expect(enter).toBeVisible();
   }
 });

@@ -44,6 +44,8 @@ test('footer navigation remains clickable after consent is resolved', async ({ p
   await page.locator('.site-footer a[href="about.en.html"]').click();
   await expect(page).toHaveURL(/\/about\.en\.html$/);
 
+  // URL commit can precede parsing/deferred scripts; settle the new document before resizing.
+  await page.waitForLoadState('domcontentloaded');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await addMockNetlifyDrawer(page);
