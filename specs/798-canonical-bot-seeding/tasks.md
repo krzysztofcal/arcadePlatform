@@ -8,4 +8,4 @@
 ## Review corrections
 - [x] T006 Fix authoritative SLOW fixture in shared/poker-domain/join.behavior.test.mjs using FORCE_SLOW; rerun54 JOIN tests.
 - [x] T007 Synchronize stale funding fragments in docs/poker-deployment.md and docs/poker-bots.md.
-- [ ] T008 Final whole-diff review and required CI; reuse verified runtime SHA after proving tests/docs-only diff.
+- [x] T008 Final whole-diff review and required CI; reuse verified runtime SHA after proving tests/docs-only diff.
