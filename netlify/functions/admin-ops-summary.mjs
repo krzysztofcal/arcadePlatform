@@ -152,7 +152,7 @@ async function loadPokerBotPolicySummary(runSql = executeSql) {
     const poolKeysSql = CANONICAL_POKER_BOT_POOL_KEYS.map((k) => `'${k}'`).join(", ");
     const [accessRows, tierRows, poolRows] = await Promise.all([
       runSql("select slow_threshold_ch, slow_hysteresis_bps, slow_recovery_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
-      runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
+      runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, normal_hourly_refill_cap_ch, slow_hourly_refill_cap_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
       runSql(`select system_key, balance, status from public.chips_accounts where account_type = 'SYSTEM' and system_key in (${poolKeysSql}) order by system_key;`),
     ]);
     return {
@@ -171,6 +171,8 @@ async function loadPokerBotPolicySummary(runSql = executeSql) {
         normalRefillAmountCh: Number(row.normal_refill_amount_ch),
         slowRefillThresholdCh: Number(row.slow_refill_threshold_ch),
         slowRefillAmountCh: Number(row.slow_refill_amount_ch),
+        normalHourlyRefillCapCh: row.normal_hourly_refill_cap_ch === null ? null : Number(row.normal_hourly_refill_cap_ch),
+        slowHourlyRefillCapCh: row.slow_hourly_refill_cap_ch === null ? null : Number(row.slow_hourly_refill_cap_ch),
         revision: Number(row.revision),
         updatedAt: row.updated_at || null,
         updatedBy: row.updated_by || null,

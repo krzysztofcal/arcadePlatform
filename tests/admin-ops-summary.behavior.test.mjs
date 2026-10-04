@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { createAdminOpsSummaryHandler, loadLedgerCapacity, loadPokerEscrowResidualSummary, resolveLedgerDbWarningMb } = await import("../netlify/functions/admin-ops-summary.mjs");
+const { createAdminOpsSummaryHandler, loadLedgerCapacity, loadPokerEscrowResidualSummary, loadPokerBotPolicySummary, resolveLedgerDbWarningMb } = await import("../netlify/functions/admin-ops-summary.mjs");
 
 function createEvent() {
   return {
@@ -197,4 +197,32 @@ test("ledger capacity returns available:false without raw error on SQL failure",
   assert.equal(summary.capacityStatus, null);
   assert.equal("error" in summary, false);
   assert.equal(summary.warningThresholdBytes, 800 * 1024 * 1024);
+});
+
+test("Ops poker tier summary preserves finite hourly caps and SQL NULL Unlimited after refresh", async () => {
+  let tierQuery;
+  const summary = await loadPokerBotPolicySummary(async (sql) => {
+    if (!sql.includes("from public.poker_bot_tier_policy")) return [];
+    tierQuery = sql;
+    const policy = {
+      enabled: true,
+      normal_refill_threshold_ch: "2000", normal_refill_amount_ch: "5000",
+      slow_refill_threshold_ch: "1000", slow_refill_amount_ch: "2000",
+      revision: "5", updated_at: "2026-10-04T10:00:00.000Z", updated_by: "admin",
+    };
+    return [
+      { ...policy, buy_in: "100", normal_hourly_refill_cap_ch: "5000", slow_hourly_refill_cap_ch: "2000" },
+      { ...policy, buy_in: "500", normal_hourly_refill_cap_ch: null, slow_hourly_refill_cap_ch: null },
+    ];
+  });
+
+  const response = JSON.parse(JSON.stringify(summary));
+  assert.deepEqual(response.tiers.map(tier => ({
+    buyIn: tier.buyIn, normal: tier.normalHourlyRefillCapCh, slow: tier.slowHourlyRefillCapCh, revision: tier.revision,
+  })), [
+    { buyIn: 100, normal: 5000, slow: 2000, revision: 5 },
+    { buyIn: 500, normal: null, slow: null, revision: 5 },
+  ]);
+  assert.match(tierQuery, /select[^;]*\bnormal_hourly_refill_cap_ch\b[^;]*from public\.poker_bot_tier_policy/i);
+  assert.match(tierQuery, /select[^;]*\bslow_hourly_refill_cap_ch\b[^;]*from public\.poker_bot_tier_policy/i);
 });
