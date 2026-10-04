@@ -2522,6 +2522,10 @@
     var throwOnError = Boolean(opts.throwOnError);
     if (!isSilent){
       setStatus(t("loading", "Loading..."), "info");
+      if (nodes.userDetail){
+        nodes.userDetail.innerHTML = '<h2 class="xp-card__title">User details</h2><p class="admin-empty">' + escapeHtml(t("loading", "Loading...")) + "</p>";
+        if (typeof nodes.userDetail.scrollIntoView === "function") nodes.userDetail.scrollIntoView({ block: "nearest" });
+      }
     }
     try {
       var payload = await apiFetch("/.netlify/functions/admin-user-details?userId=" + encodeURIComponent(userId), { method: "GET" });
@@ -2535,6 +2539,9 @@
         klog("admin_user_detail_load_failed", { userId: userId, code: err && err.code ? err.code : "request_failed" });
         if (throwOnError) throw err;
         return;
+      }
+      if (nodes.userDetail){
+        nodes.userDetail.innerHTML = '<h2 class="xp-card__title">User details</h2><p class="admin-empty">Could not load user details.</p>';
       }
       handleApiError(err, "Could not load user details.");
     }
