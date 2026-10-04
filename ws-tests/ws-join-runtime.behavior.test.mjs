@@ -877,7 +877,7 @@ test("authoritative join adapter resolves in ws artifact layout without netlify 
 });
 
 
-test("SETTLED boundary join publishes waiting then includes the human in next hand without refresh", async () => {
+test("SETTLED boundary join publishes waiting then includes the human in next hand without refresh", async (t) => {
   const secret = "settled-boundary-smoke-secret";
   const tableId = "table_settled_boundary_join";
   const userId = "boundary_human";
@@ -910,18 +910,24 @@ test("SETTLED boundary join publishes waiting then includes the human in next ha
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "boundary-join", ts: new Date().toISOString(), payload: { tableId, seatNo: 4, buyIn: 100 } });
     const ack = await nextCommandResultForRequest(ws, "boundary-join");
     assert.equal(ack.payload.status, "accepted", JSON.stringify(ack.payload));
-    assert.equal(ack.payload.joinStatus, "WAITING_NEXT_HAND");
     const waiting = await nextMessageMatching(ws, frame => frame.type === "table_state" && frame.payload?.hand?.status === "SETTLED");
-    assert.equal(waiting.payload.seats.find(seat => seat.userId === userId).status, "WAITING_NEXT_HAND");
-    // No subscription, resync, reconnect or refresh command is sent.
-    const next = await nextMessageMatching(ws, frame => frame.type === "stateSnapshot" && frame.payload?.public?.hand?.status === "PREFLOP", { timeoutMs: 10000 });
-    assert.equal(next.payload.public.hand.handId !== "boundary_previous_hand", true);
-    assert.equal(next.payload.public.seats.find(seat => seat.userId === userId).status, "ACTIVE");
-    assert.equal(next.payload.public.seats.length, 4);
-    assert.equal(next.payload.stateVersion, 96);
-    const persisted = await readPersistedFile(filePath);
-    assert.equal(persisted.tables[tableId].seatRows.find(seat => seat.user_id === userId).status, "ACTIVE");
-    assert.equal(persisted.tables[tableId].stateRow.state.handSeats.some(seat => seat.userId === userId), true);
+    await t.test("A: fresh settled join acknowledges and publishes WAITING_NEXT_HAND", () => {
+      assert.deepEqual({
+        acknowledged: ack.payload.joinStatus,
+        published: waiting.payload.seats.find(seat => seat.userId === userId).status
+      }, { acknowledged: "WAITING_NEXT_HAND", published: "WAITING_NEXT_HAND" });
+    });
+    await t.test("B: runtime rolls into next hand without another client command", async () => {
+      // No subscription, resync, reconnect or refresh command is sent.
+      const next = await nextMessageMatching(ws, frame => frame.type === "stateSnapshot" && frame.payload?.public?.hand?.status === "PREFLOP", { timeoutMs: 10000 });
+      assert.equal(next.payload.public.hand.handId !== "boundary_previous_hand", true);
+      assert.equal(next.payload.public.seats.find(seat => seat.userId === userId).status, "ACTIVE");
+      assert.equal(next.payload.public.seats.length, 4);
+      assert.equal(next.payload.stateVersion, 96);
+      const persisted = await readPersistedFile(filePath);
+      assert.equal(persisted.tables[tableId].seatRows.find(seat => seat.user_id === userId).status, "ACTIVE");
+      assert.equal(persisted.tables[tableId].stateRow.state.handSeats.some(seat => seat.userId === userId), true);
+    });
   } finally {
     if (ws) ws.close();
     child.kill("SIGTERM");
