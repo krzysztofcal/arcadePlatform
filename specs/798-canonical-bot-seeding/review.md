@@ -10,5 +10,12 @@ Independent whole-diff review: no correctness/security/scope findings. No other 
 ## Breaking impact
 Intentional: enabled/provisioned canonical tiers above500 now seed and produce replacement/top-up plans rather than silently skipping. This permits the already-authorized exact pool debits. No API/schema/config, legacy no-class100/500, continuous100, accounting/refill/caps or class behavior change. No additional breaking impact identified.
 
-## Pending evidence
-Full suite/CI, Netlify Preview, exact latest-runtime-SHA WS Preview deployment and narrow authenticated Stage1000 seed smoke. No Production actions, no merge.
+## Runtime verification
+Full npm test and ci:guards passed; required CI and Netlify Deploy Preview passed on ad24546ba6a51d85a99f0b3a631655d2d38b30f1. Draft [PR1040](https://github.com/krzysztofcal/arcadePlatform/pull/1040).
+
+[WS Preview Deploy](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37228596375) succeeded. Installed releaseSha == deployRef == RELEASE_SHA == DEPLOY_REF == ad24546ba6a51d85a99f0b3a631655d2d38b30f1.
+
+Authenticated Netlify Preview → WS Preview Stage smoke: 1100 CH NORMAL/AUTO human, enabled/provisioned1000, fresh JOIN accepted; observed three initial bot seats and exactly three initial seed ledger debits of1000 CH from POKER_BOT_BANKROLL_1000. No cross-class/tier/TREASURY debit. The initial harness assumed Preview WS MAX_PER_TABLE=2 from Netlify ENV and failed its count assertion; these runtimes have separate ENV. The WS environment file/process environment is not readable by this account, so its configured value is unverified. Subsequent same-table verification confirmed exact seed debits and successful leave; the Production MAX_PER_TABLE=2 case is explicitly covered by deterministic JOIN regression. No runtime change was made to address this smoke-only assumption.
+
+Isolated human left, active seats0, wallet refunded through existing ledger to0 (1100 CH); no global policy/ENV mutation. SLOW1000 and10M verified deterministically, without toggling Stage higher tiers/class overrides. No Production action/deploy or merge. Later commits update evidence only and do not change deployed runtime.
+
