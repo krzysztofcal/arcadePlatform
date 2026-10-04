@@ -22,6 +22,10 @@ test('representative changes select only their owned domains', () => {
     ['tests/poker-v2-live.behavior.test.mjs', ['core', 'web', 'ws_poker']],
     ['infra/vps/Caddyfile', ['infra']],
     ['ws-tests/vps-maintenance.behavior.test.mjs', ['infra']],
+    ['ws-tests/fixtures/vps-maintenance-function-driver.sh', ['infra']],
+    ['docs/vps-disaster-recovery.md', ['infra']],
+    ['docs/vps-disaster-recovery-inventory.md', ['infra']],
+    ['docs/poker-deployment.md', ['core', 'ws_poker']],
   ];
   for (const [path, expected] of cases) {
     const result = classifyCiImpact([path]);

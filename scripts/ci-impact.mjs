@@ -24,7 +24,8 @@ export function classifyCiImpact(paths) {
   const add = (...domains) => domains.forEach(d => { result[d] = true; });
   if (!files.length) add(...DOMAINS);
   for (const p of files) {
-    if (p.startsWith('infra/') || /^ws-tests\/(infra-vps|vps-maintenance)/.test(p) || p === '.github/workflows/infra-vps.yml') add('infra');
+    if (p.startsWith('infra/') || /^ws-tests\/(infra-vps|vps-maintenance)/.test(p) || p.startsWith('ws-tests/fixtures/vps-maintenance-') || ['docs/vps-disaster-recovery.md', 'docs/vps-disaster-recovery-inventory.md', '.github/workflows/infra-vps.yml'].includes(p)) add('infra');
+    else if (p === 'docs/poker-deployment.md') add('core', 'ws_poker');
     else if (p === 'docs/ws-poker-protocol.md') add('ws_poker');
     else if (p.startsWith('docs/') || p.startsWith('specs/') || /^(README|agents|skills|AGENTS)\.md$/i.test(p)) continue;
     else if (['js/games.json', 'js/games.schema.json', 'scripts/validate-games.js', '.github/workflows/validate-games.yml'].includes(p)) add('games');
