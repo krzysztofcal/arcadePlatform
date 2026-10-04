@@ -1,8 +1,8 @@
 # Feature Specification: Admin tier playability
 
-**Feature Branch**: `fix/1038-admin-tier-playability`  
-**Created**: 2026-10-04  
-**Status**: Draft implementation specification  
+**Feature Branch**: `fix/1038-admin-tier-playability`
+**Created**: 2026-10-04
+**Status**: Draft implementation specification
 **Input**: GitHub Issue #1038, live main `1683847a`.
 
 ## User Scenarios & Testing

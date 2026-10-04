@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { executePokerJoinAuthoritative } from "./join.mjs";
-import { pokerTierPolicyRows } from "../../tests/helpers/poker-test-helpers.mjs";
+import { pokerTierPolicyRows } from "../../tests/helpers/poker-tier-policy-fixture.mjs";
 import { calculateCanonicalPokerStakes } from "./table-economy.mjs";
 import { isStateStorageValid } from "../../ws-server/poker/snapshot-runtime/poker-state-utils.mjs";
 

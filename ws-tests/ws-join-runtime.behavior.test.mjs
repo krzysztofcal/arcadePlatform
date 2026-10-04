@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { createRequire } from "node:module";
-import { pokerTierPolicyRows } from "../tests/helpers/poker-test-helpers.mjs";
+import { pokerTierPolicyRows } from "../tests/helpers/poker-tier-policy-fixture.mjs";
 import { getBotFundingSystemKeyForBuyIn } from "../shared/poker-domain/table-economy.mjs";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 

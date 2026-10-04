@@ -9,7 +9,7 @@ import path from "node:path";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
-import { pokerTierPolicyRows } from "../tests/helpers/poker-test-helpers.mjs";
+import { pokerTierPolicyRows } from "../tests/helpers/poker-tier-policy-fixture.mjs";
 import { getBotFundingSystemKeyForBuyIn } from "../shared/poker-domain/table-economy.mjs";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
