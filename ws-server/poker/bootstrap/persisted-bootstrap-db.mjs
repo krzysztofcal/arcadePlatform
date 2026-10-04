@@ -36,17 +36,21 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
   const tx = {
     unsafe: async (query, params = []) => {
       const sql = String(query).toLowerCase();
-      if (sql.includes("to_regclass")) return [{ available: false }];
+      if (sql.includes("to_regclass")) return [{ available: Array.isArray(doc?.pokerTierPolicies) && Boolean(doc?.pokerAccessPolicy) }];
+      if (sql.includes("from public.poker_bot_tier_policy")) return doc.pokerTierPolicies || [];
+      if (sql.includes("from public.poker_access_policy")) return doc.pokerAccessPolicy ? [doc.pokerAccessPolicy] : [];
+      if (sql.includes("system_key = any")) return accounts.filter((account) => (
+        account.account_type === "SYSTEM" && account.status === "active" && params[0].includes(account.system_key)
+      ));
       const tableId = params?.[0];
       const table = tables?.[tableId] || null;
 
       if (sql.includes("from public.chips_accounts") && sql.includes("account_type = 'user'")) {
-        const userId = params?.[0];
-        const account = accounts.find((candidate) => (
-          candidate?.user_id === userId
+        const userIds = Array.isArray(params?.[0]) ? params[0] : [params?.[0]];
+        return accounts.filter((candidate) => (
+          userIds.includes(candidate?.user_id)
           && String(candidate?.account_type || "USER").toUpperCase() === "USER"
-        ));
-        return account ? [{ balance: account.balance }] : [];
+        )).map((account) => ({ ...account }));
       }
 
       if (sql.includes("from public.poker_seats s") && sql.includes("order by s.last_seen_at")) {

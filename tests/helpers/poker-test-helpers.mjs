@@ -45,7 +45,7 @@ import {
   resolvePokerBuyInTiers
 } from "../../shared/poker-domain/poker-progression.mjs";
 import { lockUserTableSlots } from "../../shared/poker-domain/table-participation.mjs";
-import { hasPokerPoolSchema, readPokerAccessSnapshot } from "../../shared/poker-domain/bot-access.mjs";
+import { hasPokerPoolSchema, readPokerAccessSnapshot, readPokerTierPolicySnapshot, resolvePokerEnabledBuyIns } from "../../shared/poker-domain/bot-access.mjs";
 
 const root = process.cwd();
 const sharedLeavePath = path.join(root, "shared/poker-domain/leave.mjs");
@@ -192,6 +192,8 @@ export const loadPokerHandler = (filePath, mocks) => {
     "lockUserTableSlots",
     "hasPokerPoolSchema",
     "readPokerAccessSnapshot",
+    "readPokerTierPolicySnapshot",
+    "resolvePokerEnabledBuyIns",
   ];
   const injectedNames = injectable.filter((name) => !declared.has(name));
   const destructureLine = injectedNames.length ? `const { ${injectedNames.join(", ")} } = mocks;` : "";
@@ -257,6 +259,8 @@ return handler;`
       lockUserTableSlots,
       hasPokerPoolSchema,
       readPokerAccessSnapshot,
+      readPokerTierPolicySnapshot,
+      resolvePokerEnabledBuyIns,
       deriveRemainingDeck,
       deriveCommunityCards,
       loadHoleCardsByUserId,
@@ -272,3 +276,5 @@ return handler;`
     throw new Error(`[poker-test-helpers] Failed to compile ${filePath}: ${error?.message || error}`);
   }
 };
+
+export { pokerTierPolicyRows } from "./poker-tier-policy-fixture.mjs";

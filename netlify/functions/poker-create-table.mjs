@@ -1,3 +1,4 @@
+import { readPokerTierPolicySnapshot, resolvePokerEnabledBuyIns } from "../../shared/poker-domain/bot-access.mjs";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes } from "./_shared/poker-stakes.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
@@ -79,13 +80,7 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
   }
 
-  let tiers;
-  try {
-    tiers = resolvePokerBuyInTiers();
-  } catch (error) {
-    klog("poker_create_table_buy_in_config_invalid", { code: error?.code || "unknown_error" });
-    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "poker_buy_in_config_invalid" }) };
-  }
+  const tiers = resolvePokerBuyInTiers();
   if (!isConfiguredPokerBuyIn(buyIn, tiers)) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in_tier" }) };
   }
@@ -121,6 +116,8 @@ export async function handler(event) {
   let transactionResult = null;
   try {
     transactionResult = await beginSql(async (tx) => {
+      const tierPolicySnapshot = await readPokerTierPolicySnapshot(tx);
+      if (!resolvePokerEnabledBuyIns(tierPolicySnapshot, tiers).includes(buyIn)) return { kind: "tier_disabled" };
       const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson, buyIn });
       return { kind: "created", tableId: created.tableId };
     });
@@ -134,6 +131,10 @@ export async function handler(event) {
     }
     klog("poker_create_table_error", { message: error?.message || "unknown_error" });
     return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "server_error" }) };
+  }
+
+  if (transactionResult?.kind === "tier_disabled") {
+    return { statusCode: 409, headers: mergeHeaders(cors), body: JSON.stringify({ error: "buy_in_tier_locked", buyIn }) };
   }
 
   const tableId = transactionResult?.kind === "created" ? transactionResult.tableId : null;

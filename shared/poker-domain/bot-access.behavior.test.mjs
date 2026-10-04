@@ -14,6 +14,8 @@ import {
   normalizePolicySnapshot,
   isFreshPolicySnapshot,
   classifySettledAccessEvidence,
+  readPokerTierPolicySnapshot,
+  resolvePokerEnabledBuyIns,
 } from "./bot-access.mjs";
 
 test("FORCE_* overrides prevent automatic threshold mutations to durable class (Finding 1)", () => {
@@ -596,3 +598,48 @@ test("AUTO/SLOW user under low threshold recovers to AUTO/NORMAL on next fresh w
   assert.equal(userRecovered.changed, true);
 });
 
+
+
+test("tier activation snapshot batches the catalog once per transaction and changes on refresh", async () => {
+  let enabled = true;
+  let queries = 0;
+  const transaction = () => ({ unsafe: async (sql, params) => {
+    queries += 1;
+    if (sql.includes("to_regclass")) return [{ available: true }];
+    if (sql.includes("poker_bot_tier_policy")) return [100, 500, 1000, 5000, 200, 10000].map((buy_in) => ({
+      buy_in, enabled: buy_in <= 1000 && (buy_in !== 1000 || enabled), revision: buy_in === 10000 ? 0 : enabled ? 1 : 2,
+      normal_refill_threshold_ch: 1, normal_refill_amount_ch: 10,
+      slow_refill_threshold_ch: 1, slow_refill_amount_ch: 10
+    }));
+    if (sql.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
+    throw new Error("unexpected query");
+  } });
+  const tx = transaction();
+  const snapshot = await readPokerTierPolicySnapshot(tx, { nowMs: 0 });
+  assert.equal(await readPokerTierPolicySnapshot(tx, { nowMs: 1 }), snapshot);
+  assert.equal(queries, 3);
+  assert.deepEqual(resolvePokerEnabledBuyIns(snapshot, [100, 500, 1000, 5000, 200], 25_000), [100, 500, 1000]);
+  assert.equal(snapshot.tiers[200], undefined);
+  assert.equal(snapshot.tiers[10000], undefined);
+  assert.deepEqual(resolvePokerEnabledBuyIns(snapshot, undefined, 30_001), []);
+  enabled = false;
+  const refreshed = await readPokerTierPolicySnapshot(transaction(), { nowMs: 25_000 });
+  assert.deepEqual(resolvePokerEnabledBuyIns(refreshed, undefined, 25_001), [100, 500]);
+  assert.equal(refreshed.tiers[1000].revision, 2);
+  assert.equal(queries, 6);
+});
+
+test("tier activation requires trusted fresh policy and both exact provisioned pools", async () => {
+  for (const snapshot of [null, { schemaBacked: false, expiresAtMs: 30_000 },
+    { schemaBacked: true, expiresAtMs: 30_000, tiers: {} }]) {
+    assert.deepEqual(resolvePokerEnabledBuyIns(snapshot, [100, 500], 0), []);
+  }
+  const snapshot = { schemaBacked: true, expiresAtMs: 30_000, tiers: {
+    500: { enabled: true, provisioned: { NORMAL: true, SLOW: false } }
+  } };
+  assert.deepEqual(resolvePokerEnabledBuyIns(snapshot, [100, 500], 0), []);
+  snapshot.tiers[500].provisioned.SLOW = true;
+  assert.deepEqual(resolvePokerEnabledBuyIns(snapshot, [100, 500], 0), [500]);
+  snapshot.tiers[500].enabled = false;
+  assert.deepEqual(resolvePokerEnabledBuyIns(snapshot, [100, 500], 0), []);
+});

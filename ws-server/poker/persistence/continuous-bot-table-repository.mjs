@@ -9,7 +9,6 @@ import {
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { calculateCanonicalPokerStakes, DEFAULT_CASH_TABLE_BUY_IN_CHIPS } from "../../../shared/poker-domain/table-economy.mjs";
-import { resolvePokerBuyInTiers } from "../../../shared/poker-domain/poker-progression.mjs";
 import { hasPokerPoolSchema, readPokerPoolProvisioning, readPokerTierPolicy } from "../../../shared/poker-domain/bot-access.mjs";
 
 export const CONTINUOUS_BOT_PROFILE_KEY = "CONTINUOUS_BOT_DEFAULT";
@@ -191,10 +190,6 @@ export function createContinuousBotTableRepository({
 
   async function reconcile() {
     try {
-      const configuredBuyIns = resolvePokerBuyInTiers(env);
-      if (!configuredBuyIns.includes(DEFAULT_CASH_TABLE_BUY_IN_CHIPS)) {
-        throw Object.assign(new Error("poker_buy_in_tiers_config_invalid"), { code: "poker_buy_in_tiers_config_invalid" });
-      }
       const botConfig = getBotConfig(env);
       const result = await beginSql(async (tx) => {
         await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", ["poker:continuous-bot-supervisor:v1"]);

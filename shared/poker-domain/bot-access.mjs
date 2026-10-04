@@ -1,4 +1,4 @@
-import { getBotFundingSystemKeyForBuyIn } from "./table-economy.mjs";
+import { CANONICAL_POKER_BUY_IN_TIERS, getBotFundingSystemKeyForBuyIn } from "./table-economy.mjs";
 
 export const ACCESS_CLASSES = Object.freeze(["NORMAL", "SLOW"]);
 export const ACCESS_EFFECTIVE_STATES = Object.freeze(["NORMAL", "SLOW", "RESTRICTED"]);
@@ -324,6 +324,54 @@ export async function readPokerTierPolicy(tx, { buyIn } = {}) {
     [normalizedBuyIn]
   );
   return normalizeTierPolicySnapshot(rows?.[0]);
+}
+
+// One trusted catalog snapshot per transaction; the WS runtime reuses its existing refresh cache.
+const tierPolicyByTransaction = new WeakMap();
+export async function readPokerTierPolicySnapshot(tx, { nowMs = Date.now() } = {}) {
+  if (!tx || typeof tx.unsafe !== "function") throw new Error("poker_access_tx_required");
+  if (!tierPolicyByTransaction.has(tx)) {
+    tierPolicyByTransaction.set(tx, (async () => {
+      const schemaBacked = await hasPokerPoolSchema(tx);
+      const snapshot = { schemaBacked, expiresAtMs: nowMs + ACCESS_SNAPSHOT_MAX_AGE_MS, tiers: {} };
+      if (!schemaBacked) return snapshot;
+      const policies = await tx.unsafe(`
+select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
+       slow_refill_threshold_ch, slow_refill_amount_ch, revision
+from public.poker_bot_tier_policy order by buy_in asc;
+`);
+      const keys = CANONICAL_POKER_BUY_IN_TIERS.flatMap((buyIn) => [
+        getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: "NORMAL" }),
+        getBotFundingSystemKeyForBuyIn(buyIn, { poolClass: "SLOW" })
+      ]);
+      const accounts = await tx.unsafe(`
+select system_key from public.chips_accounts
+where account_type = 'SYSTEM' and status = 'active' and system_key = any($1::text[]);
+`, [keys]);
+      const provisionedKeys = new Set((accounts || []).map((row) => row.system_key));
+      for (const row of policies || []) {
+        const policy = normalizeTierPolicySnapshot(row);
+        if (!policy || !CANONICAL_POKER_BUY_IN_TIERS.includes(policy.buyIn)) continue;
+        snapshot.tiers[policy.buyIn] = {
+          ...policy,
+          provisioned: {
+            NORMAL: provisionedKeys.has(getBotFundingSystemKeyForBuyIn(policy.buyIn, { poolClass: "NORMAL" })),
+            SLOW: provisionedKeys.has(getBotFundingSystemKeyForBuyIn(policy.buyIn, { poolClass: "SLOW" }))
+          }
+        };
+      }
+      return snapshot;
+    })());
+  }
+  return tierPolicyByTransaction.get(tx);
+}
+
+export function resolvePokerEnabledBuyIns(snapshot, tiers = CANONICAL_POKER_BUY_IN_TIERS, nowMs = Date.now()) {
+  if (snapshot?.schemaBacked !== true || !Number.isFinite(snapshot.expiresAtMs) || nowMs > snapshot.expiresAtMs) return [];
+  return tiers.filter((buyIn) => CANONICAL_POKER_BUY_IN_TIERS.includes(buyIn)
+    && snapshot.tiers?.[buyIn]?.enabled === true
+    && snapshot.tiers[buyIn].provisioned?.NORMAL === true
+    && snapshot.tiers[buyIn].provisioned?.SLOW === true);
 }
 
 export async function readPokerPoolProvisioning(tx, { buyIn } = {}) {

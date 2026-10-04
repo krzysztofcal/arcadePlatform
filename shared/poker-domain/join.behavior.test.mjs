@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { executePokerJoinAuthoritative } from "./join.mjs";
+import { pokerTierPolicyRows } from "../../tests/helpers/poker-tier-policy-fixture.mjs";
 import { calculateCanonicalPokerStakes } from "./table-economy.mjs";
 import { isStateStorageValid } from "../../ws-server/poker/snapshot-runtime/poker-state-utils.mjs";
 
@@ -59,14 +60,17 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
     ? Number(args.progressionBalance)
     : configuredBuyIn + Math.ceil(configuredBuyIn / 10);
   const progressionEnv = args?.progressionEnv || {
-    POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 150, 200, 250, 300, 500, 1_000])
+    POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 500, 1_000])
   };
   const beginSql = typeof originalBeginSql === "function"
     ? (fn) => originalBeginSql(async (tx) => {
         const wrappedTx = Object.create(tx || null);
         wrappedTx.unsafe = async (sql, params = []) => {
-          if (String(sql).includes("to_regclass")) return [{ available: false }];
-          assert.doesNotMatch(String(sql), /is_slow_only|poker_auto_class|poker_access_policy|poker_bot_tier_policy/, "legacy JOIN never references new schema");
+          if (String(sql).includes("to_regclass")) return [{ available: args?.poolSchema !== false }];
+          if (String(sql).includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows(args?.enabledBuyIns);
+          if (String(sql).includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
+          if (String(sql).includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
+          if (String(sql).includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
           const rows = await tx.unsafe(sql, params);
           if (String(sql).includes("from public.poker_tables") && Array.isArray(rows)) {
             return rows.map((row) => {
@@ -162,14 +166,14 @@ test("shared join requires injected locked-state validator", async () => {
 });
 
 test("fresh join locks the bankroll row before posting the table buy-in", async () => withBotsDisabled(async () => {
-  for (const balance of [550, 1_000_000]) {
+  for (const [buyIn, balance, enabledBuyIns] of [[500, 550, [100, 500]], [500, 1_000_000, [100, 500]], [1000, 1100, [100, 500, 1000]]]) {
     const events = [];
     const seatRows = [];
     const result = await executePokerJoinAuthoritative(withStorageValidator({
       beginSql: async (fn) => fn({
         unsafe: async (sql) => {
           const text = String(sql);
-          if (text.includes("from public.poker_tables")) return [{ id: "t-progression-lock", status: "OPEN", max_players: 6, buy_in: 500 }];
+          if (text.includes("from public.poker_tables")) return [{ id: "t-progression-lock", status: "OPEN", max_players: 6, buy_in: buyIn }];
           if (text.includes("from public.poker_seats") && text.includes("order by seat_no asc;")) return seatRows.map((row) => ({ ...row }));
           if (text.includes("from public.chips_accounts") && text.includes("account_type = 'USER'")) {
             events.push(text);
@@ -182,7 +186,7 @@ test("fresh join locks the bankroll row before posting the table buy-in", async 
           if (text.includes("select version, state from public.poker_state")) return [{ version: 1, state: { tableId: "t-progression-lock", seats: [], stacks: {} } }];
           if (text.includes("update public.poker_state set state")) return [{ version: 2 }];
           if (text.includes("update public.poker_seats set stack")) {
-            seatRows[0].stack = 500;
+            seatRows[0].stack = buyIn;
             return [{ ok: true }];
           }
           if (text.includes("update public.poker_tables")) return [];
@@ -192,16 +196,17 @@ test("fresh join locks the bankroll row before posting the table buy-in", async 
       tableId: "t-progression-lock",
       userId: "u-progression-lock",
       requestId: "join-progression-lock",
-      buyIn: 500,
+      buyIn,
+      enabledBuyIns,
       progressionBalance: balance,
-      progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500,1000,5000]", POKER_MAX_PLAYABLE_BUY_IN: "500" },
+      progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500]" },
       postTransactionFn: async () => {
         events.push("postTransaction");
         return { ok: true };
       }
     }));
     assert.equal(result.ok, true);
-    assert.equal(result.stack, 500);
+    assert.equal(result.stack, buyIn);
     assert.match(events[0], /for update/i);
     assert.equal(events.indexOf("postTransaction") > 0, true);
   }
@@ -228,7 +233,7 @@ test("authoritative wallet threshold does not mutate automatic class under FORCE
         if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 4 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "FORCE_NORMAL", poker_access_revision: 7 }];
         if (text.includes("update public.chips_accounts")) { automaticUpdateCalls += 1; return [{ poker_auto_class: "SLOW", poker_access_override: "FORCE_NORMAL", poker_access_revision: 8, poker_auto_slow_at: "2026-09-27T00:00:00.000Z" }]; }
-        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
         if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
         if (text.startsWith("insert into public.poker_seats")) { seatInserted = true; return [{ seat_no: 1 }]; }
         if (text.startsWith("update public.poker_seats set stack")) return [{ ok: true }];
@@ -250,7 +255,7 @@ test("authoritative wallet threshold does not mutate automatic class under FORCE
       return { ok: true, newVersion: rows[0]?.version || 2 };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
 
   assert.equal(result.ok, true);
@@ -289,7 +294,7 @@ test("fresh join with wallet < recovery threshold transitions SLOW->NORMAL and b
           automaticUpdateCalls += 1;
           return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 6, poker_auto_slow_at: "2026-09-27T00:00:00.000Z" }];
         }
-        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
         if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
         if (text.startsWith("insert into public.poker_seats")) { seatInserted = true; return [{ seat_no: 1 }]; }
         if (text.startsWith("update public.poker_seats set stack")) return [{ ok: true }];
@@ -311,7 +316,7 @@ test("fresh join with wallet < recovery threshold transitions SLOW->NORMAL and b
       return { ok: true, newVersion: rows[0]?.version || 2 };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
 
   assert.equal(result.ok, true);
@@ -346,7 +351,7 @@ test("fresh join with wallet in hysteresis band retains previous class with zero
           automaticUpdateCalls += 1;
           return [];
         }
-        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
         if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
         if (text.startsWith("insert into public.poker_seats")) { seatInserted = true; return [{ seat_no: 1 }]; }
         if (text.startsWith("update public.poker_seats set stack")) return [{ ok: true }];
@@ -368,7 +373,7 @@ test("fresh join with wallet in hysteresis band retains previous class with zero
       return { ok: true, newVersion: rows[0]?.version || 2 };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
 
   assert.equal(result.ok, true);
@@ -398,7 +403,7 @@ test("fresh join with custom policy thresholds entry=2000 and recovery=1500 retu
         if (text.includes("select balance") && text.includes("chips_accounts")) return [{ balance: 1800 }]; // In hysteresis band [1500, 2000)
         if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 2000, slow_hysteresis_bps: 2500, slow_recovery_threshold_ch: 1500, revision: 4 }];
         if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 2 }];
-        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: false, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+        if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
         if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL_100" }, { system_key: "POKER_BOT_SLOW_BANKROLL_100" }];
         if (text.startsWith("insert into public.poker_seats")) { seatInserted = true; return [{ seat_no: 1 }]; }
         if (text.startsWith("update public.poker_seats set stack")) return [{ ok: true }];
@@ -420,7 +425,7 @@ test("fresh join with custom policy thresholds entry=2000 and recovery=1500 retu
       return { ok: true, newVersion: rows[0]?.version || 2 };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
 
   assert.equal(result.ok, true);
@@ -468,7 +473,7 @@ test("is_slow_only remains one-way: recovered NORMAL user cannot fresh-join an e
         return { ok: true, newVersion: rows[0]?.version || 2 };
       },
       validateStateForStorage: () => true,
-      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
     }),
     (error) => error?.message === "normal_table_required" || error?.validationReason === "normal_table_required"
   );
@@ -520,7 +525,7 @@ test("fresh FORCE_RESTRICTED own empty STANDARD join accepts with zero bot fundi
     },
     updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
   assert.equal(result.ok, true);
   assert.equal(result.access.effectiveClass, "RESTRICTED");
@@ -612,7 +617,7 @@ test("an active RESTRICTED human blocks bot seeding for a later NORMAL join", as
       return { ok: true, newVersion: store.stateRow.version };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
 
   const restrictedJoin = await runJoin(restrictedUserId, "restricted-first");
@@ -700,7 +705,7 @@ test("missing existing human access keeps NORMAL JOIN legal but blocks bot fundi
       return { ok: true, newVersion: store.stateRow.version };
     },
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
 
   assert.equal(result.ok, true);
@@ -710,12 +715,12 @@ test("missing existing human access keeps NORMAL JOIN legal but blocks bot fundi
   assert.equal(store.accessSnapshotReads, 1);
 }));
 
-test("fresh NORMAL JOIN remains fail-soft when the tier policy disables bot funding", async () => withBotEnv(async () => {
+test("fresh NORMAL JOIN denies a disabled tier before seat or ledger writes", async () => withBotEnv(async () => {
   const tableId = "00000000-0000-4000-8000-0000000000c7";
   const userId = "00000000-0000-4000-8000-0000000000c8";
   const ledgerCalls = [];
   let seatInserted = false;
-  const result = await executePokerJoinAuthoritative({
+  await assert.rejects(() => executePokerJoinAuthoritative({
     beginSql: async (fn) => fn({
       unsafe: async (sql) => {
         const text = String(sql);
@@ -771,11 +776,11 @@ test("fresh NORMAL JOIN remains fail-soft when the tier policy disables bot fund
     loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId, seats: [], stacks: {} } }),
     updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
-  });
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
+  }), (error) => error.code === "buy_in_tier_locked");
 
-  assert.equal(result.ok, true);
-  assert.deepEqual(result.seededBots, []);
+  assert.equal(seatInserted, false);
+  assert.deepEqual(ledgerCalls, []);
   assert.equal(ledgerCalls.filter((payload) => payload.metadata?.actor === "BOT").length, 0);
 }));
 
@@ -807,7 +812,7 @@ test("fresh FORCE_RESTRICTED join rejects an active bot table before buy-in", as
       loadStateForUpdate: async () => ({ ok: true, version: 1, state: { seats: [], stacks: {} } }),
       updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
       validateStateForStorage: () => true,
-      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
     }),
     (error) => error?.code === "restricted_table_required"
   );
@@ -855,7 +860,7 @@ test("existing financed FORCE_RESTRICTED rejoin remains legal without a new debi
     },
     updateStateLocked: async () => ({ ok: true, newVersion: 4 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
   assert.equal(result.ok, true);
   assert.equal(result.rejoin, true);
@@ -896,7 +901,7 @@ test("fresh FORCE_RESTRICTED join rejects SLOW-only and CONTINUOUS_BOT targets b
         loadStateForUpdate: async () => ({ ok: true, version: 1, state: { seats: [], stacks: {} } }),
         updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
         validateStateForStorage: () => true,
-        env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+        env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
       }),
       (error) => error?.code === "restricted_table_required"
     );
@@ -949,7 +954,7 @@ test("existing SLOW human makes an ordinary table reject a fresh NORMAL join bef
       loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId, seats: [], stacks: {} } }),
       updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
       validateStateForStorage: () => true,
-      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+      env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
     }),
     (error) => error?.code === "normal_table_required"
   );
@@ -1006,7 +1011,7 @@ test("existing SLOW human permits a SLOW join and selects sticky SLOW funding", 
     } }),
     updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
   assert.equal(result.ok, true);
   assert.equal(result.access.effectiveClass, "SLOW");
@@ -1028,6 +1033,8 @@ test("fresh JOIN serializes with a committed FORCE_RESTRICTED override before bo
       unsafe: async (sql, params = []) => {
         const text = String(sql);
         if (text.includes("to_regclass")) return [{ available: true }];
+        if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows();
+        if (text.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
         if (text.includes("from public.poker_tables")) return [{
           id: tableId, status: "OPEN", max_players: 6, buy_in: 100,
           stakes: calculateCanonicalPokerStakes(100), created_by: existingUserId,
@@ -1063,7 +1070,7 @@ test("fresh JOIN serializes with a committed FORCE_RESTRICTED override before bo
     loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId, seats: [{ userId: existingUserId, seatNo: 1, status: "ACTIVE", isBot: false }], stacks: { [existingUserId]: 100 } } }),
     updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
     validateStateForStorage: () => true,
-    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]), POKER_MAX_PLAYABLE_BUY_IN: "100" }
+    env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
   assert.equal(result.ok, true);
   assert.equal(adminCommitted, true);
@@ -1103,7 +1110,7 @@ test("fresh join rejects a 500 CH tier when bankroll is 549 CH", async () => wit
   assert.deepEqual(writes, []);
 }));
 
-test("wealthy fresh join to 1000 CH is blocked at frontier 500 before any writes", async () => withBotsDisabled(async () => {
+test("wealthy fresh join to 1000 CH is blocked while its policy is disabled before any writes", async () => withBotsDisabled(async () => {
   const writes = [];
   await assert.rejects(
     () => executePokerJoinAuthoritative(withStorageValidator({
@@ -1122,7 +1129,7 @@ test("wealthy fresh join to 1000 CH is blocked at frontier 500 before any writes
       requestId: "join-tier-locked",
       buyIn: 1000,
       progressionBalance: 1_000_000,
-      progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500,1000,5000]", POKER_MAX_PLAYABLE_BUY_IN: "500" },
+      progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500,1000,5000]" },
       postTransactionFn: async () => { writes.push("ledger_buyin"); return { ok: true }; }
     })),
     (error) => {
@@ -1136,7 +1143,7 @@ test("wealthy fresh join to 1000 CH is blocked at frontier 500 before any writes
   assert.deepEqual(writes, []);
 }));
 
-test("active rejoin succeeds above the playable frontier and below the bankroll threshold without reading progression", async () => withBotsDisabled(async () => {
+test("active rejoin succeeds on a disabled tier and below the bankroll threshold without reading progression", async () => withBotsDisabled(async () => {
   let progressionReads = 0;
   const result = await executePokerJoinAuthoritative(withStorageValidator({
     beginSql: async (fn) => fn({
@@ -1756,7 +1763,7 @@ test("authoritative join rejects when financial mutation fails", async () => {
       tableId: "t1",
       userId: "u1",
       requestId: "r4",
-      buyIn: 200,
+      buyIn: 500,
       postTransactionFn: async () => {
         const err = new Error("insufficient_funds");
         err.code = "insufficient_funds";
@@ -1807,12 +1814,12 @@ test("authoritative join funds stack only after financial mutation succeeds", as
     userId: "u1",
     requestId: "r5",
     seatNo: 3,
-    buyIn: 250,
+    buyIn: 500,
     postTransactionFn: async () => { sequence.push('ledger_buyin'); return { ok: true }; }
   }));
 
   assert.equal(result.ok, true);
-  assert.equal(result.stack, 250);
+  assert.equal(result.stack, 500);
   assert.deepEqual(sequence, ['insert_seat', 'ledger_buyin', 'update_stack', 'update_state']);
 }));
 
@@ -1860,15 +1867,15 @@ test("authoritative auto-seat respects preferred seat and initializes stack from
     requestId: "r7",
     autoSeat: true,
     preferredSeatNo: 2,
-    buyIn: 200,
+    buyIn: 500,
     postTransactionFn: async () => ({ ok: true })
   }));
 
   assert.equal(result.ok, true);
   assert.equal(result.seatNo, 3);
-  assert.equal(result.stack, 200);
+  assert.equal(result.stack, 500);
   assert.equal(writes.length, 1);
-  assert.equal(writes[0].stacks.u2, 200);
+  assert.equal(writes[0].stacks.u2, 500);
 }));
 
 test("authoritative auto-seat retries past stale seat conflicts and uses the next free seat", async () => withBotsDisabled(async () => {
@@ -1920,7 +1927,7 @@ test("authoritative auto-seat retries past stale seat conflicts and uses the nex
     requestId: "r7-retry",
     autoSeat: true,
     preferredSeatNo: 1,
-    buyIn: 200,
+    buyIn: 500,
     postTransactionFn: async () => ({ ok: true })
   }));
 
@@ -1975,7 +1982,7 @@ test("authoritative auto-seat retries when insert is skipped by unique conflict 
     requestId: "r7-retry-noabort",
     autoSeat: true,
     preferredSeatNo: 1,
-    buyIn: 200,
+    buyIn: 500,
     postTransactionFn: async () => ({ ok: true })
   }));
 
@@ -2050,7 +2057,7 @@ test("authoritative auto-seat reclaims inactive seat blockers before reporting t
     requestId: "r-inactive-reclaim",
     autoSeat: true,
     preferredSeatNo: 4,
-    buyIn: 200,
+    buyIn: 500,
     postTransactionFn: async () => ({ ok: true })
   }));
 
@@ -2107,7 +2114,7 @@ test("duplicate buyin idempotency without funded persisted stack fails closed", 
       userId: "u3",
       requestId: "r9",
       seatNo: 2,
-      buyIn: 150,
+      buyIn: 500,
       postTransactionFn: async () => {
         const err = new Error("duplicate idempotency");
         err.code = "23505";
@@ -2495,7 +2502,7 @@ test("same-request authoritative join replay becomes rejoin without duplicate se
 
 test("fresh authoritative join starting from version 0 returns the persisted post-mutation version", async () => withBotEnv(async () => {
   const store = {
-    table: { id: "t-fresh-version", status: "OPEN", max_players: 6, stakes: '{"sb":1,"bb":3}' },
+    table: { id: "t-fresh-version", status: "OPEN", max_players: 6, stakes: '{"sb":5,"bb":10}' },
     seatRows: [],
     stateRow: { version: 0, state: { tableId: "t-fresh-version", seats: [], stacks: {}, phase: "INIT", pot: 0 } },
     updateVersions: []
@@ -2549,7 +2556,7 @@ test("fresh authoritative join starting from version 0 returns the persisted pos
     userId: "fresh_human",
     requestId: "fresh-version-join",
     seatNo: 1,
-    buyIn: 150,
+    buyIn: 500,
     postTransactionFn: async () => ({ ok: true })
   }));
 

@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { createRequire } from "node:module";
+import { pokerTierPolicyRows } from "../tests/helpers/poker-tier-policy-fixture.mjs";
+import { getBotFundingSystemKeyForBuyIn } from "../shared/poker-domain/table-economy.mjs";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 
 const require = createRequire(new URL("../ws-server/package.json", import.meta.url));
@@ -328,6 +330,15 @@ function sendFrame(ws, frame) {
 async function writePersistedFile(fixture) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-persist-"));
   const filePath = path.join(dir, "persisted-state.json");
+  // Model the existing operational schema; missing policy remains fail-closed.
+  fixture.pokerTierPolicies = pokerTierPolicyRows();
+  fixture.pokerAccessPolicy = { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 };
+  fixture.accounts = (fixture.accounts || []).map((account) => ({
+    poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1, ...account
+  }));
+  for (const buyIn of [100, 500]) for (const poolClass of ["NORMAL", "SLOW"]) {
+    fixture.accounts.push({ account_type: "SYSTEM", status: "active", system_key: getBotFundingSystemKeyForBuyIn(buyIn, { poolClass }) });
+  }
   await fs.writeFile(filePath, `${JSON.stringify(fixture)}\n`, "utf8");
   return { dir, filePath };
 }

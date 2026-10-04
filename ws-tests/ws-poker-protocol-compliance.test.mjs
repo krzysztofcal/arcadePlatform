@@ -1,3 +1,5 @@
+import { pokerTierPolicyRows } from "../tests/helpers/poker-tier-policy-fixture.mjs";
+import { getBotFundingSystemKeyForBuyIn } from "../shared/poker-domain/table-economy.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -117,7 +119,7 @@ function persistedBootstrapFixturesEnv(fixtures) {
 }
 
 
-async function writePersistedStateFile(fixtures, { accounts = [] } = {}) {
+async function writePersistedStateFile(fixtures, { accounts = [], pokerTierPolicies, pokerAccessPolicy } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-protocol-persist-"));
   const filePath = path.join(dir, "persisted-state.json");
   const tables = {};
@@ -130,6 +132,8 @@ async function writePersistedStateFile(fixtures, { accounts = [] } = {}) {
   }
   await fs.writeFile(filePath, `${JSON.stringify({
     tables,
+    pokerTierPolicies,
+    pokerAccessPolicy,
     ...(Array.isArray(accounts) && accounts.length > 0 ? { accounts } : {})
   })}
 `, "utf8");
@@ -1978,7 +1982,12 @@ test("real authoritative join with historical non-ACTIVE seat retries to the nex
     }
   };
   const { dir, filePath } = await writePersistedStateFile(fixtures, {
-    accounts: [{ user_id: "historical_proto_user", account_type: "USER", balance: 110 }]
+    pokerTierPolicies: pokerTierPolicyRows([100]),
+    pokerAccessPolicy: { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 },
+    accounts: [
+      { user_id: "historical_proto_user", account_type: "USER", balance: 110, poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 },
+      ...["NORMAL", "SLOW"].map((poolClass) => ({ account_type: "SYSTEM", status: "active", system_key: getBotFundingSystemKeyForBuyIn(100, { poolClass }) }))
+    ]
   });
   const { port, child } = await createServer({
     env: { WS_AUTH_REQUIRED: "1", WS_AUTH_TEST_SECRET: secret, WS_PERSISTED_STATE_FILE: filePath, WS_AUTHORITATIVE_JOIN_ENABLED: "1" }

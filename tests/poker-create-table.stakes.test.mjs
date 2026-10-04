@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { loadPokerHandler, pokerTierPolicyRows } from "./helpers/poker-test-helpers.mjs";
 import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 import { checkWsBuyInCapability } from "../netlify/functions/_shared/poker-ws-runtime-notify.mjs";
 
@@ -19,6 +19,8 @@ const makeHandler = (queries, options = {}) =>
         unsafe: async (query, params) => {
           const text = String(query).toLowerCase();
           if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows(options.enabledBuyIns);
+          if (text.includes("system_key = any")) return options.unprovisioned ? [] : params[0].map((system_key) => ({ system_key }));
           queries.push({ query: String(query), params });
           if (text.includes("account_type = 'user'")) {
             if (options.balanceError) throw new Error("balance_read_failed");
@@ -257,3 +259,19 @@ await runLockedBuyInCreation();
 await runWsCapabilityHeaderCheck();
 await runSlowNotifyDoesNotDelayResponse();
 await runMaintenanceGuard();
+
+// Manual Create gates activation only; bankroll is still authoritative at JOIN.
+for (const [options, expectedStatus] of [
+  [{ enabledBuyIns: [100, 500] }, 409],
+  [{ enabledBuyIns: [100, 500, 1000], balanceError: true }, 200],
+  [{ enabledBuyIns: [100, 500, 1000], unprovisioned: true }, 409]
+]) {
+  const queries = [];
+  const response = await makeHandler(queries, options)({
+    httpMethod: "POST", headers: { origin: "https://example.test", authorization: "Bearer token" },
+    body: JSON.stringify({ maxPlayers: 6, buyIn: 1000 })
+  });
+  assert.equal(response.statusCode, expectedStatus);
+  assert.equal(queries.some(({ query }) => query.includes("insert into public.poker_tables")), expectedStatus === 200);
+  assert.equal(queries.some(({ query }) => query.includes("account_type = 'USER'")), false);
+}

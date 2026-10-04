@@ -9,6 +9,8 @@ import path from "node:path";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
+import { pokerTierPolicyRows } from "../tests/helpers/poker-tier-policy-fixture.mjs";
+import { getBotFundingSystemKeyForBuyIn } from "../shared/poker-domain/table-economy.mjs";
 import { makeBotUserId } from "../shared/poker-domain/bots.mjs";
 import { dealHoleCards, deriveDeck, toCardCodes } from "./poker/shared/poker-primitives.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
@@ -8908,6 +8910,10 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
       }
     }
   };
+  store.pokerTierPolicies = pokerTierPolicyRows([100]);
+  store.pokerAccessPolicy = { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 };
+  store.accounts = store.accounts.map((account) => ({ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1, ...account }));
+  for (const poolClass of ["NORMAL", "SLOW"]) store.accounts.push({ account_type: "SYSTEM", status: "active", system_key: getBotFundingSystemKeyForBuyIn(100, { poolClass }) });
   const { dir, filePath } = await writePersistedFile(store);
   const { port, child } = await createServer({
     env: {
@@ -8959,6 +8965,10 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       }
     }
   };
+  store.pokerTierPolicies = pokerTierPolicyRows([100]);
+  store.pokerAccessPolicy = { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 };
+  store.accounts = store.accounts.map((account) => ({ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1, ...account }));
+  for (const poolClass of ["NORMAL", "SLOW"]) store.accounts.push({ account_type: "SYSTEM", status: "active", system_key: getBotFundingSystemKeyForBuyIn(100, { poolClass }) });
   const { dir, filePath } = await writePersistedFile(store);
   const botSeat2 = makeBotUserId(tableId, 2);
   const botSeat3 = makeBotUserId(tableId, 3);

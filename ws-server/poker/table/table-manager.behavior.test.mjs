@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "../runtime/settled-bot-funding.mjs";
+import { decideSettledBotFunding, readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "../runtime/settled-bot-funding.mjs";
 import { __testOnly, createTableManager as createRuntimeTableManager } from "./table-manager.mjs";
 
 function createTableManager(options = {}) {
@@ -3769,7 +3769,7 @@ test("settled funding requires a fresh enabled tier and both provisioned pools, 
     100: { enabled: true, provisioned: { NORMAL: true, SLOW: true } }
   } };
   const resolve = (changes = {}) => resolveSettledBotFundingSystemKey({
-    snapshot, buyIn: 100, nowMs: 100, legacySystemKey: "TREASURY", ...changes
+    snapshot, buyIn: 100, nowMs: 100, ...changes
   });
   assert.equal(resolve(), "POKER_BOT_BANKROLL_100");
   assert.equal(resolve({ effectiveRestricted: true }), null);
@@ -3785,10 +3785,10 @@ test("settled funding requires a fresh enabled tier and both provisioned pools, 
   snapshot.tiers[100].provisioned.SLOW = true;
   assert.equal(resolve({ nowMs: 30_001 }), null);
   assert.equal(resolve({ snapshot: null }), null);
-  assert.equal(resolve({ snapshot: { schemaBacked: false, expiresAtMs: 30_000 } }), "TREASURY");
+  assert.equal(resolve({ snapshot: { schemaBacked: false, expiresAtMs: 30_000 } }), null);
 });
 
-test("settled funding snapshot preserves legacy funding only when the catalog confirms the schema is absent", async () => {
+test("settled funding snapshot fails closed when tier policy schema is absent", async () => {
   const queries = [];
   const snapshot = await readSettledBotFundingSnapshot({ unsafe: async (sql) => {
     queries.push(sql);
@@ -3796,23 +3796,45 @@ test("settled funding snapshot preserves legacy funding only when the catalog co
   } }, { nowMs: 100 });
   assert.equal(snapshot.schemaBacked, false);
   assert.equal(queries.length, 1);
-  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 100, nowMs: 200 }), "TREASURY");
+  assert.deepEqual(decideSettledBotFunding({ snapshot, buyIn: 100, nowMs: 200 }), { known: true, allowed: false, systemKey: null, reason: "tier_policy_schema_unavailable" });
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 100, nowMs: 200 }), null);
 });
 
 
 test("settled funding snapshot reads enabled state and both actual pool accounts", async () => {
   const snapshot = await readSettledBotFundingSnapshot({ unsafe: async (sql, params) => {
     if (sql.includes("to_regclass")) return [{ available: true }];
-    if (sql.includes("poker_bot_tier_policy")) return [{
-      buy_in: params[0], enabled: params[0] === 100, revision: 1,
+    if (sql.includes("poker_bot_tier_policy")) return [100, 500, 1000].map((buy_in) => ({
+      buy_in, enabled: buy_in !== 500, revision: 1,
       normal_refill_threshold_ch: 1, normal_refill_amount_ch: 10,
       slow_refill_threshold_ch: 1, slow_refill_amount_ch: 10
-    }];
+    }));
     if (sql.includes("system_key")) return params[0].map((system_key) => ({ system_key }));
     throw new Error("unexpected query");
   } }, { nowMs: 100 });
   assert.equal(snapshot.schemaBacked, true);
   assert.equal(snapshot.expiresAtMs, 30_100);
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 1000, nowMs: 200 }), "POKER_BOT_BANKROLL_1000");
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 1000, isSlowOnly: true, nowMs: 200 }), "POKER_BOT_SLOW_BANKROLL_1000");
   assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 100, nowMs: 200 }), "POKER_BOT_BANKROLL_100");
   assert.equal(resolveSettledBotFundingSystemKey({ snapshot, buyIn: 500, nowMs: 200 }), null);
+});
+
+
+test("settled funding cache observes live tier disable on its next existing refresh and expires closed", async () => {
+  let enabled = true;
+  const transaction = () => ({ unsafe: async (sql, params) => {
+    if (sql.includes("to_regclass")) return [{ available: true }];
+    if (sql.includes("poker_bot_tier_policy")) return [{ buy_in: 1000, enabled, revision: enabled ? 1 : 2,
+      normal_refill_threshold_ch: 1, normal_refill_amount_ch: 10,
+      slow_refill_threshold_ch: 1, slow_refill_amount_ch: 10 }];
+    if (sql.includes("system_key")) return params[0].map((system_key) => ({ system_key }));
+    throw new Error("unexpected query");
+  } });
+  const cached = await readSettledBotFundingSnapshot(transaction(), { nowMs: 0 });
+  enabled = false;
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot: cached, buyIn: 1000, nowMs: 24_999 }), "POKER_BOT_BANKROLL_1000");
+  const refreshed = await readSettledBotFundingSnapshot(transaction(), { nowMs: 25_000 });
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot: refreshed, buyIn: 1000, nowMs: 25_001 }), null);
+  assert.equal(resolveSettledBotFundingSystemKey({ snapshot: cached, buyIn: 1000, nowMs: 30_001 }), null);
 });

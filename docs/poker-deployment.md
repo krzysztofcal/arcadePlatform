@@ -50,7 +50,6 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BOT_BANKROLL_SYSTEM_KEY` (legacy 100 CH source override; default: `TREASURY`; it never overrides the fixed 500 CH source `POKER_BOT_BANKROLL`)
 - The fixed 500 CH bot bankroll is seeded once by migration with `1,000,000 CH` from `GENESIS` and is never automatically replenished.
 - Optional later: `POKER_BOTS_MAX_ACTIONS_PER_POLL`
-- `POKER_BUY_IN_TIERS_JSON` (shared ordered buy-in tier catalog; omitted uses the built-in catalog)
 
 Operational notes:
 - Before deploying the runtime to Stage, WS Preview, or production, apply `supabase/migrations/20260810100000_poker_bot_bankroll.sql` to that environment. It creates the active `SYSTEM/POKER_BOT_BANKROLL` account and performs the one-time idempotent `GENESIS -1,000,000` / `POKER_BOT_BANKROLL +1,000,000` allocation. Verify the account and seed transaction before enabling 500 CH bot funding; do not substitute `TREASURY` or edit balances directly.
@@ -613,10 +612,14 @@ A shared stage database may contain a historical backlog. A recently active cont
 - No `ws_action_history_cleanup_failed` events were observed.
 - Preview was then configured for continuous retention with the policy documented above.
 
-### Human playable-tier rollout frontier
+### Live tier activation through Poker Admin
 
-`POKER_MAX_PLAYABLE_BUY_IN` defaults to `500` and must be a positive safe integer matching a tier in the configured `POKER_BUY_IN_TIERS_JSON` catalog (or the default canonical catalog). Invalid configuration fails closed with `poker_buy_in_tiers_config_invalid`.
+`poker_bot_tier_policy.enabled` (Poker Admin → Enabled) is the single operational gate for both human playability and bot funding. Playability uses only `CANONICAL_POKER_BUY_IN_TIERS` as its catalog; no ENV value can narrow it. Operators change activation live through the existing audited Admin policy endpoint, without a deploy or restart. A valid policy and both existing active SYSTEM accounts (the exact NORMAL/SLOW keys from `getBotFundingSystemKeyForBuyIn`; NORMAL 500 retains `POKER_BOT_BANKROLL`) are required; missing, disabled, invalid or expired evidence fails closed. Never provision pools or change balances directly to activate a tier.
 
-This is the human gameplay rollout frontier, not a bankroll cap. Once its normal unlock threshold is met (550 CH for 500 CH), the highest open tier remains playable at any larger bankroll. Setting the frontier to `1000` makes 1000 CH the uncapped top tier; 500 CH returns to the normal highest-plus-one-fallback progression rule. Future tiers remain visible in the full roadmap before rollout, but cannot replace the current playable tier or be selected by Quick Seat, including its automatic Create fallback.
+The Stage rollout target is 100, 500 and 1000 Enabled, with 5000+ Disabled. The Production target is the same, but applying it requires separate Production authorization. Preserve existing refill settings, caps, thresholds and access overrides when changing Enabled.
 
-Configure the same frontier for Netlify and WS. `poker_bot_tier_policy.enabled` controls bot liquidity independently and does not open human tiers. Manual Create retains the #788 contract: configured tiers may be created, but fresh seating must pass JOIN eligibility. Financed rejoin/resume is unchanged. No database migration is required.
+Bankroll thresholds still apply: 549 CH cannot unlock 500; 550 CH can; 1099 CH cannot unlock 1000; 1100 CH can. Availability consists of the two highest enabled, provisioned tiers whose thresholds have been met. Disabled gaps are skipped. The highest active tier has no upper bankroll limit: with 100/500/1000 enabled, a huge wallet still has `[1000, 500]`. Future tiers remain visible in the full roadmap. Quick Seat and its Create fallback choose `availableBuyIns[0]`; lobby Current and direct table access use the same availability.
+
+Manual Create checks activation but keeps the #788 bankroll-independent creation contract. Fresh JOIN rechecks authoritative activation and bankroll; financed rejoin/resume remains legal after disabling a tier. WS reuses the existing 25-second policy refresh and 30-second expiry, including for tiers with no active table; funding does not query per hand. Unknown or expired snapshots deny funding, with no TREASURY or cross-tier/class fallback. No new schema, pool, scheduler or flag is required.
+
+**Breaking impact:** Legacy ENV catalog overrides are ignored. Enabled expands from a bot-funding gate to a shared playability + bot-funding gate. Disabled or unprovisioned tiers can no longer accept manual Create or fresh human JOIN. Deployments without the existing policy schema now fail closed for fresh admission and bot funding. The progression response replaces the former frontier field with `enabledBuyIns` and per-tier `enabled`; callers must use `availableBuyIns` for playable decisions.

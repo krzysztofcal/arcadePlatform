@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
+import { loadPokerHandler, pokerTierPolicyRows } from "./helpers/poker-test-helpers.mjs";
 import { isStateStorageValid, normalizeJsonState } from "../netlify/functions/_shared/poker-state-utils.mjs";
 
 process.env.CHIPS_ENABLED = "1";
@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", checkWsBuyInCapability = async () => ({ ok: true }) }) =>
+const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", checkWsBuyInCapability = async () => ({ ok: true }) }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -27,6 +27,8 @@ const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], log
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
           if (text.includes("to_regclass")) return [{ available: poolSchema }];
+          if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows(enabledBuyIns);
+          if (text.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
           if (!poolSchema) assert.doesNotMatch(text, /is_slow_only|poker_auto_class|poker_access_policy/);
 
           if (text.includes("pg_advisory_xact_lock")) return [];
@@ -36,7 +38,7 @@ const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], log
           }
 
           if (text.includes("join public.poker_seats s") && text.includes("s.user_id = $1")) {
-            if (mode === "already_seated") return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: candidateBuyIn === 500 ? { sb: 5, bb: 10 } : { sb: 1, bb: 2 } }];
+            if (mode === "already_seated") return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: { sb: candidateBuyIn / 100, bb: candidateBuyIn / 50 } }];
             return [];
           }
 
@@ -53,12 +55,12 @@ const makeHandler = ({ poolSchema = true, mode, queries, notifications = [], log
           ) {
             const requireHuman = params?.[1] === true;
             if (mode === "prefer_humans" || mode === "already_seated") {
-              if (requireHuman) return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: candidateBuyIn === 500 ? { sb: 5, bb: 10 } : { sb: 1, bb: 2 } }];
+              if (requireHuman) return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: { sb: candidateBuyIn / 100, bb: candidateBuyIn / 50 } }];
               return [];
             }
             if (mode === "any_open") {
               if (requireHuman) return [];
-              return [{ id: "table-any", max_players: 6, buy_in: candidateBuyIn, stakes: candidateBuyIn === 500 ? { sb: 5, bb: 10 } : { sb: 1, bb: 2 } }];
+              return [{ id: "table-any", max_players: 6, buy_in: candidateBuyIn, stakes: { sb: candidateBuyIn / 100, bb: candidateBuyIn / 50 } }];
             }
             return [];
           }
@@ -124,11 +126,23 @@ const run = async () => {
     } else assert.equal(JSON.parse(response.body).tableId, "table-human");
   }
 
+  for (const balance of [1100, 1_000_000]) {
+    for (const mode of ["prefer_humans", "create"]) {
+      const queries = [];
+      const handler = makeHandler({ mode, queries, balance, candidateBuyIn: 1000, enabledBuyIns: [100, 500, 1000] });
+      const response = await callQuickSeat(handler, { maxPlayers: 6 });
+      assert.equal(response.statusCode, 200);
+      assert.ok(queries.filter(({ query }) => query.includes("t.buy_in = any($4::int[])"))
+        .every(({ params }) => JSON.stringify(params[3]) === "[1000,500]"));
+      if (mode === "create") assert.equal(queries.find(({ query }) => query.includes("insert into public.poker_tables"))?.params[1], 1000);
+    }
+  }
+
   for (const mode of ["prefer_humans", "already_seated", "create"]) {
     const queries = [];
     const handler = makeHandler({ poolSchema: false, mode, queries });
     const response = await callQuickSeat(handler, { maxPlayers: 6 });
-    assert.equal(response.statusCode, 200, `pre-migration Quick Seat ${mode} remains available`);
+    assert.equal(response.statusCode, mode === "already_seated" ? 200 : 409, `missing tier policy denies fresh play but permits rejoin: ${mode}`);
     assert.equal(queries.some(({ query }) => query.includes("pending_tables")), false);
   }
 
@@ -335,6 +349,8 @@ const run = async () => {
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
           if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows();
+          if (text.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
           if (text.includes("pg_advisory_xact_lock")) return [];
           if (text.includes("select poker_auto_class, poker_access_override")) {
             return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
@@ -388,6 +404,8 @@ const run = async () => {
             queries.push({ query: String(query), params });
             const text = String(query).toLowerCase();
           if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows();
+          if (text.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
 
             if (text.includes("pg_advisory_xact_lock")) return [];
             if (text.includes("select poker_auto_class, poker_access_override")) {
