@@ -1023,7 +1023,8 @@
       ],
       "omitted_effects": [
         "Production remains untouched; demand core, refill control kill switch/identity guard, pg_cron extension and ledger/pool state are preserved"
-      ]
+      ],
+      "replacement": "20261004114411_poker_demand_refill_production_scheduler_decommission.sql"
     }
   ],
   "replacement_migrations": [
@@ -1060,6 +1061,14 @@
       "sha256": "db23077155394845da289d9e1f59b50cbeae3f1400a1b609cffea1d9cc19a39b",
       "prerequisites": [
         "20260930211624_poker_bot_pool_refill_hourly.sql"
+      ]
+    },
+    {
+      "file": "20261004114411_poker_demand_refill_production_scheduler_decommission.sql",
+      "purpose": "§32 Production scheduler decommission after accepted demand rollout; exact Cron job/hourly wrapper only",
+      "sha256": "0984f91bfe20272e9df69d6871cb276d9100b6428b7d4d1d27ffdf4f3144d61c",
+      "prerequisites": [
+        "20261003183626_poker_demand_refill_production_contract.sql"
       ]
     }
   ],
