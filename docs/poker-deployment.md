@@ -612,3 +612,11 @@ A shared stage database may contain a historical backlog. A recently active cont
 - Bounded `holeCardsDeleted`, `phase1Deleted`, and `phase2Deleted` values were observed in `ws_action_history_cleanup_complete` logs.
 - No `ws_action_history_cleanup_failed` events were observed.
 - Preview was then configured for continuous retention with the policy documented above.
+
+### Human playable-tier rollout frontier
+
+`POKER_MAX_PLAYABLE_BUY_IN` defaults to `500` and must be a positive safe integer matching a tier in the configured `POKER_BUY_IN_TIERS_JSON` catalog (or the default canonical catalog). Invalid configuration fails closed with `poker_buy_in_tiers_config_invalid`.
+
+This is the human gameplay rollout frontier, not a bankroll cap. Once its normal unlock threshold is met (550 CH for 500 CH), the highest open tier remains playable at any larger bankroll. Setting the frontier to `1000` makes 1000 CH the uncapped top tier; 500 CH returns to the normal highest-plus-one-fallback progression rule. Future tiers remain visible in the full roadmap before rollout, but cannot replace the current playable tier or be selected by Quick Seat, including its automatic Create fallback.
+
+Configure the same frontier for Netlify and WS. `poker_bot_tier_policy.enabled` controls bot liquidity independently and does not open human tiers. Manual Create retains the #788 contract: configured tiers may be created, but fresh seating must pass JOIN eligibility. Financed rejoin/resume is unchanged. No database migration is required.

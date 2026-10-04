@@ -110,6 +110,20 @@ const assertCanonicalLockKey = (queries, expectedKey) => {
 };
 
 const run = async () => {
+  for (const mode of ["prefer_humans", "create"]) {
+    const queries = [], notifications = [];
+    const handler = makeHandler({ mode, queries, notifications, balance: 1_000_000, candidateBuyIn: 500 });
+    const response = await callQuickSeat(handler, { maxPlayers: 6 });
+    assert.equal(response.statusCode, 200);
+    const candidateQueries = queries.filter(({ query }) => query.includes("t.buy_in = any($4::int[])"));
+    assert.ok(candidateQueries.length > 0);
+    assert.ok(candidateQueries.every(({ params }) => JSON.stringify(params[3]) === "[500,100]"));
+    if (mode === "create") {
+      assert.equal(queries.find(({ query }) => query.includes("insert into public.poker_tables"))?.params[1], 500);
+      assert.equal(notifications[0].buyIn, 500);
+    } else assert.equal(JSON.parse(response.body).tableId, "table-human");
+  }
+
   for (const mode of ["prefer_humans", "already_seated", "create"]) {
     const queries = [];
     const handler = makeHandler({ poolSchema: false, mode, queries });

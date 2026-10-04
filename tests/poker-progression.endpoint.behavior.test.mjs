@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadPokerHandler } from "./helpers/poker-test-helpers.mjs";
 
+import { evaluatePokerProgression } from "../shared/poker-domain/poker-progression.mjs";
+
 const origin = "https://example.test";
 
 function makeHandler({ poolSchema = true, authResult, progression, calls, unsafe, checkWsBuyInCapability = async () => ({ ok: true }), klog = () => {} }) {
@@ -195,6 +197,37 @@ test("pre-migration progression/table access stays available without new schema 
       assert.equal(body.pokerAccess.effectiveClass, "NORMAL");
       assert.equal(body.tableAccess.allowed, true);
       assert.equal(body.tableAccess.rejoin, rejoin);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.CHIPS_ENABLED;
+    else process.env.CHIPS_ENABLED = previous;
+  }
+});
+
+test("wealthy table access follows the shared frontier and preserves rejoin above it", async () => {
+  const previous = process.env.CHIPS_ENABLED;
+  process.env.CHIPS_ENABLED = "1";
+  try {
+    const progression = evaluatePokerProgression({ balance: 1_000_000, tiers: [100, 500, 1000, 5000], maxPlayableBuyIn: 500 });
+    for (const [buyIn, rejoin, allowed] of [[500, false, true], [1000, false, false], [1000, true, true]]) {
+      const handler = makeHandler({
+        authResult: { valid: true, userId: "wealthy" }, progression,
+        calls: { tokens: [], progression: [] },
+        unsafe: async (sql) => {
+          const text = String(sql).toLowerCase();
+          if (text.includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+          if (text.includes("select id, status, buy_in, stakes")) return [{ id: "frontier-table", status: "OPEN", buy_in: buyIn, stakes: { sb: buyIn / 100, bb: buyIn / 50 } }];
+          if (text.includes("select 1 from public.poker_seats")) return rejoin ? [{ ok: 1 }] : [];
+          return [];
+        }
+      });
+      const response = await handler({ httpMethod: "GET", queryStringParameters: { tableId: "frontier-table" }, headers: { origin, authorization: "Bearer token" } });
+      assert.equal(response.statusCode, 200);
+      const body = JSON.parse(response.body);
+      assert.deepEqual(body.availableBuyIns, [500, 100]);
+      assert.equal(body.maxPlayableBuyIn, 500);
+      assert.equal(body.tableAccess.allowed, allowed);
+      assert.equal(body.tableAccess.reason, rejoin ? "rejoin" : allowed ? "available" : "buy_in_tier_locked");
     }
   } finally {
     if (previous === undefined) delete process.env.CHIPS_ENABLED;
