@@ -1,3 +1,4 @@
+import { supportsPokerHourlyRefillCaps } from "./_shared/admin-poker-policy-schema.mjs";
 import { loadLedgerCapacity as readLedgerCapacity, resolveLedgerDbWarningMb } from "./_shared/ledger-capacity.mjs";
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
 import {
@@ -149,13 +150,15 @@ function loadLedgerCapacity(env = process.env, runSql = executeSql) {
 
 async function loadPokerBotPolicySummary(runSql = executeSql) {
   try {
+    const hourlyRefillCapsSupported = await supportsPokerHourlyRefillCaps(runSql);
     const poolKeysSql = CANONICAL_POKER_BOT_POOL_KEYS.map((k) => `'${k}'`).join(", ");
     const [accessRows, tierRows, poolRows] = await Promise.all([
       runSql("select slow_threshold_ch, slow_hysteresis_bps, slow_recovery_threshold_ch, revision, updated_at, updated_by from public.poker_access_policy where id = 1 limit 1;"),
-      runSql("select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;"),
+      runSql(`select buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch, slow_refill_threshold_ch, slow_refill_amount_ch, ${hourlyRefillCapsSupported ? "normal_hourly_refill_cap_ch, slow_hourly_refill_cap_ch," : ""} revision, updated_at, updated_by from public.poker_bot_tier_policy order by buy_in asc;`),
       runSql(`select system_key, balance, status from public.chips_accounts where account_type = 'SYSTEM' and system_key in (${poolKeysSql}) order by system_key;`),
     ]);
     return {
+      hourlyRefillCapsSupported,
       access: accessRows?.[0] ? {
         slowThresholdCh: Number(accessRows[0].slow_threshold_ch),
         slowHysteresisBps: Number(accessRows[0].slow_hysteresis_bps ?? 500),
@@ -171,6 +174,10 @@ async function loadPokerBotPolicySummary(runSql = executeSql) {
         normalRefillAmountCh: Number(row.normal_refill_amount_ch),
         slowRefillThresholdCh: Number(row.slow_refill_threshold_ch),
         slowRefillAmountCh: Number(row.slow_refill_amount_ch),
+        ...(hourlyRefillCapsSupported ? {
+          normalHourlyRefillCapCh: row.normal_hourly_refill_cap_ch === null ? null : Number(row.normal_hourly_refill_cap_ch),
+          slowHourlyRefillCapCh: row.slow_hourly_refill_cap_ch === null ? null : Number(row.slow_hourly_refill_cap_ch),
+        } : {}),
         revision: Number(row.revision),
         updatedAt: row.updated_at || null,
         updatedBy: row.updated_by || null,

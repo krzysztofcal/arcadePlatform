@@ -225,6 +225,7 @@ async function seedBotsForJoin({
   fundingProvisioned = true,
   fundingReason = "BOT_SEED_BUY_IN",
   idempotencyPrefix = "bot-seed-buyin",
+  demandRefillFn = null,
   klog = () => {},
   random = Math.random
 }) {
@@ -272,6 +273,29 @@ async function seedBotsForJoin({
   if (toSeed <= 0) return [];
 
   const occupied = new Set(activeSeats.map((row) => normalizeSeatNo(row?.seat_no)).filter(Boolean));
+  const plannedSeats = [];
+  for (let seatNo = 1; seatNo <= maxPlayers && plannedSeats.length < toSeed; seatNo += 1) {
+    if (!occupied.has(seatNo)) plannedSeats.push(seatNo);
+  }
+  // §32: Attempt demand refill before seeding if pool class is known
+  if (typeof demandRefillFn === "function" && poolClass && plannedSeats.length > 0) {
+    try {
+      const refillResult = await demandRefillFn({
+        tx,
+        buyIn: normalizedBuyIn,
+        poolClass,
+        fundingDemandId: plannedSeats.map((seatNo) => `${idempotencyPrefix}:${tableId}:${seatNo}`).join("|"),
+        requiredDebitCh: normalizedBuyIn * plannedSeats.length,
+      });
+      if (refillResult?.status) {
+        klog("poker_demand_refill_seed", { tableId, poolClass, status: refillResult.status, poolKey: refillResult.poolKey || null });
+      }
+    } catch (refillError) {
+      // Demand refill failure must not block seeding — existing safe fallback handles pool exhaustion
+      klog("poker_demand_refill_seed_error", { tableId, poolClass, code: refillError?.code || "refill_error" });
+    }
+  }
+
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   const seededBots = [];
 

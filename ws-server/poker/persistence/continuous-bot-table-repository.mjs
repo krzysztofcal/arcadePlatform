@@ -1,3 +1,4 @@
+import { attemptDemandRefill } from "../../../shared/poker-domain/demand-refill.mjs";
 import { createPokerTableWithState } from "../../../netlify/functions/_shared/poker-table-init.mjs";
 import {
   applySeatsAndStacksToState,
@@ -154,6 +155,7 @@ async function createManagedTable(tx, { profile, botConfig, klog }) {
     fundingProvisioned: fundingEnabled,
     fundingReason: "BOT_SEED_BUY_IN",
     idempotencyPrefix: "managed-bot-seed-buyin",
+    demandRefillFn: poolSchema && fundingEnabled ? attemptDemandRefill : null,
     klog
   });
   const stateRows = await tx.unsafe(

@@ -1,3 +1,4 @@
+import { attemptDemandRefill } from "./demand-refill.mjs";
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
 import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
@@ -1076,6 +1077,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       poolClass: fundingPoolClass,
       fundingEnabled: tierFundingEnabled,
       fundingProvisioned: tierFundingEnabled,
+      demandRefillFn: tierFundingEnabled && fundingPoolClass ? attemptDemandRefill : null,
       klog
       });
       const expectedBotCountAfterSeed = seededBots.length;

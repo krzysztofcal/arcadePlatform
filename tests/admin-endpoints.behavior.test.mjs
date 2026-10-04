@@ -8,7 +8,7 @@ const { createAdminWsPreviewBotReactionHandler, parseBody: parseBotReactionBody 
 const { createAdminPokerLogControlHandler, parseBody: parsePokerLogControlBody } = await import("../netlify/functions/admin-poker-log-control.mjs");
 const { createAdminUserPokerAccessHandler } = await import("../netlify/functions/admin-user-poker-access.mjs");
 const { notifyWsPokerAccessMutation } = await import("../netlify/functions/_shared/poker-ws-runtime-notify.mjs");
-const { updatePokerPolicy } = await import("../netlify/functions/admin-poker-policy.mjs");
+const { updatePokerPolicy, loadPokerPolicy, createAdminPokerPolicyHandler } = await import("../netlify/functions/admin-poker-policy.mjs");
 
 function event(method, queryStringParameters = {}, body = null) {
   return {
@@ -1093,3 +1093,55 @@ test("admin-user-ledger uses the same runtime ledger-version resolver contract",
     "unavailable",
   );
 });
+
+
+for (const supported of [false, true]) {
+  test(`Admin policy GET and revision-checked tier PATCH support cap schema=${supported}`, async () => {
+    const row = { buy_in: 100, enabled: false, normal_refill_threshold_ch: 100, normal_refill_amount_ch: 500, slow_refill_threshold_ch: 100, slow_refill_amount_ch: 200, revision: 4, updated_by: "admin" };
+    if (supported) Object.assign(row, { normal_hourly_refill_cap_ch: 5000, slow_hourly_refill_cap_ch: null });
+    const queries = [];
+    const runSql = async (sql, args) => {
+      queries.push({ sql, args });
+      if (sql.includes("information_schema.columns")) return [{ supported }];
+      if (!supported) assert.doesNotMatch(sql, /hourly_refill_cap_ch/);
+      if (sql.includes("update public.poker_bot_tier_policy")) return [{ ...row, ...(supported ? { normal_hourly_refill_cap_ch: args[7], slow_hourly_refill_cap_ch: args[8] } : {}), revision: 5 }];
+      if (sql.includes("from public.poker_bot_tier_policy")) return [row];
+      return [];
+    };
+    const handler = createAdminPokerPolicyHandler({
+      env: { CHIPS_ENABLED: "1" }, requireAdminUser: async () => ({ userId: "admin" }),
+      loadPokerPolicy: () => loadPokerPolicy(runSql),
+      updatePokerPolicy: args => updatePokerPolicy({ ...args, runTransaction: fn => fn({ unsafe: runSql }) }),
+    });
+    const read = await handler(event("GET"));
+    assert.equal(read.statusCode, 200);
+    const policy = JSON.parse(read.body);
+    assert.equal(policy.hourlyRefillCapsSupported, supported);
+    assert.equal(policy.tiers[0].normalRefillAmountCh, 500);
+    if (supported) {
+      assert.equal(policy.tiers[0].normalHourlyRefillCapCh, 5000);
+      assert.equal(policy.tiers[0].slowHourlyRefillCapCh, null);
+    } else assert.equal("normalHourlyRefillCapCh" in policy.tiers[0], false);
+    const payload = { kind: "tier", buyIn: 100, enabled: false, expectedRevision: 4,
+      normal_refill_threshold_ch: 100, normal_refill_amount_ch: 500, slow_refill_threshold_ch: 100, slow_refill_amount_ch: 200 };
+    const patch = await handler({ ...event("PATCH"), body: JSON.stringify(payload) });
+    assert.equal(patch.statusCode, 200);
+    assert.equal(JSON.parse(patch.body).tier.revision, 5);
+    const update = queries.find(query => query.sql.includes("update public.poker_bot_tier_policy"));
+    assert.equal(update.args.length, supported ? 9 : 7);
+    if (supported) {
+      assert.deepEqual(update.args.slice(7), [5000, null]);
+      for (const caps of [[null, 2000], [3000, null]]) {
+        const changed = await handler({ ...event("PATCH"), body: JSON.stringify({ ...payload, normal_hourly_refill_cap_ch: caps[0], slow_hourly_refill_cap_ch: caps[1] }) });
+        assert.equal(changed.statusCode, 200);
+        const tier = JSON.parse(changed.body).tier;
+        assert.deepEqual([tier.normalHourlyRefillCapCh, tier.slowHourlyRefillCapCh], caps);
+      }
+    } else {
+      const rejected = await handler({ ...event("PATCH"), body: JSON.stringify({ ...payload, normal_hourly_refill_cap_ch: null }) });
+      assert.equal(rejected.statusCode, 400);
+      assert.equal(JSON.parse(rejected.body).error, "hourly_refill_caps_unsupported");
+      assert.equal(queries.filter(query => query.sql.includes("update public.poker_bot_tier_policy")).length, 1);
+    }
+  });
+}

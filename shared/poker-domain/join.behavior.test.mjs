@@ -132,6 +132,7 @@ test("shared join module imports without Netlify adapter dependency at module lo
     await fs.mkdir(stagedDir, { recursive: true });
     await fs.copyFile("shared/poker-domain/join.mjs", stagedJoin);
     await fs.copyFile("shared/poker-domain/bots.mjs", stagedBots);
+    await fs.copyFile("shared/poker-domain/demand-refill.mjs", path.join(stagedDir, "demand-refill.mjs"));
     await fs.copyFile("shared/poker-domain/table-buy-in.mjs", stagedTableBuyIn);
     await fs.copyFile("shared/poker-domain/table-economy.mjs", stagedTableEconomy);
     await fs.copyFile("shared/poker-domain/poker-progression.mjs", stagedProgression);

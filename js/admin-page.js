@@ -1639,12 +1639,25 @@
     tiers.forEach(function(tier){
       html.push('<form class="admin-adjust admin-surface" id="adminPokerTierPolicyForm-' + escapeHtml(tier.buyIn) + '" data-poker-buy-in="' + escapeHtml(tier.buyIn) + '"><fieldset><legend>Tier ' + escapeHtml(tier.buyIn) + '</legend>');
       html.push('<label class="admin-field"><span class="admin-field__label">Enabled</span><input name="enabled-' + escapeHtml(tier.buyIn) + '" type="checkbox"' + (tier.enabled ? " checked" : "") + '></label>');
-      [["normalRefillThresholdCh", "NORMAL threshold"], ["normalRefillAmountCh", "NORMAL amount"], ["slowRefillThresholdCh", "SLOW threshold"], ["slowRefillAmountCh", "SLOW amount"]].forEach(function(pair){
+      [["normalRefillThresholdCh", "NORMAL threshold (CH)"], ["normalRefillAmountCh", "NORMAL refill chunk (CH)"], ["slowRefillThresholdCh", "SLOW threshold (CH)"], ["slowRefillAmountCh", "SLOW refill chunk (CH)"]].forEach(function(pair){
         html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + '</span><input class="admin-input" name="' + pair[0] + '-' + escapeHtml(tier.buyIn) + '" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(tier[pair[0]] || "") + '"></label>');
+      });
+      if (summary.hourlyRefillCapsSupported === true) [["normalHourlyRefillCapCh", "NORMAL"], ["slowHourlyRefillCapCh", "SLOW"]].forEach(function(pair){
+        var unlimited = tier[pair[0]] === null;
+        var name = pair[0] + "-" + tier.buyIn;
+        html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + ' hourly liquidity cap (CH/h)</span><input class="admin-input" name="' + escapeHtml(name) + '" type="number" min="1" max="9007199254740991" step="1" value="' + (unlimited ? "" : escapeHtml(tier[pair[0]])) + '"' + (unlimited ? ' disabled' : ' required') + '></label>');
+        html.push('<label class="admin-field"><span><input type="checkbox" name="' + escapeHtml(name) + '-unlimited"' + (unlimited ? ' checked' : '') + '> ' + pair[1] + ' Unlimited</span></label>');
       });
       html.push('<input type="hidden" name="revision-' + escapeHtml(tier.buyIn) + '" value="' + escapeHtml(tier.revision || 1) + '"></fieldset><div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save tier policy</button></div><p class="admin-note" data-poker-tier-policy-status aria-live="polite">Tier changes are independent mutations.</p></form>');
     });
     nodes.opsRuntime.insertAdjacentHTML("beforeend", html.join(""));
+    nodes.opsRuntime.querySelectorAll('input[name$="-unlimited"]').forEach(function(toggle){
+      toggle.addEventListener("change", function(){
+        var cap = toggle.form.elements[toggle.name.replace(/-unlimited$/, "")];
+        cap.disabled = toggle.checked;
+        cap.required = !toggle.checked;
+      });
+    });
   }
 
   async function submitPokerAccessForm(event){
@@ -1828,11 +1841,18 @@
     if (status) status.textContent = "Saving…";
     try {
       try {
-        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({
+        var normalCapRaw = data["normalHourlyRefillCapCh-" + buyIn];
+        var slowCapRaw = data["slowHourlyRefillCapCh-" + buyIn];
+        var payload = {
           kind: "tier", buyIn: buyIn, enabled: data["enabled-" + buyIn] === "on", expectedRevision: data["revision-" + buyIn],
           normal_refill_threshold_ch: data["normalRefillThresholdCh-" + buyIn], normal_refill_amount_ch: data["normalRefillAmountCh-" + buyIn],
           slow_refill_threshold_ch: data["slowRefillThresholdCh-" + buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + buyIn]
-        }) });
+        };
+        if (form.elements["normalHourlyRefillCapCh-" + buyIn + "-unlimited"]) {
+          payload.normal_hourly_refill_cap_ch = data["normalHourlyRefillCapCh-" + buyIn + "-unlimited"] === "on" ? null : Number(normalCapRaw);
+          payload.slow_hourly_refill_cap_ch = data["slowHourlyRefillCapCh-" + buyIn + "-unlimited"] === "on" ? null : Number(slowCapRaw);
+        }
+        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify(payload) });
       } catch (err){
         if (err && err.code === "stale_revision"){
           var reloadOk = true;
@@ -2505,6 +2525,10 @@
     var throwOnError = Boolean(opts.throwOnError);
     if (!isSilent){
       setStatus(t("loading", "Loading..."), "info");
+      if (nodes.userDetail){
+        nodes.userDetail.innerHTML = '<h2 class="xp-card__title">User details</h2><p class="admin-empty">' + escapeHtml(t("loading", "Loading...")) + "</p>";
+        if (typeof nodes.userDetail.scrollIntoView === "function") nodes.userDetail.scrollIntoView({ block: "nearest" });
+      }
     }
     try {
       var payload = await apiFetch("/.netlify/functions/admin-user-details?userId=" + encodeURIComponent(userId), { method: "GET" });
@@ -2518,6 +2542,9 @@
         klog("admin_user_detail_load_failed", { userId: userId, code: err && err.code ? err.code : "request_failed" });
         if (throwOnError) throw err;
         return;
+      }
+      if (nodes.userDetail){
+        nodes.userDetail.innerHTML = '<h2 class="xp-card__title">User details</h2><p class="admin-empty">Could not load user details.</p>';
       }
       handleApiError(err, "Could not load user details.");
     }

@@ -199,12 +199,14 @@ const assertPokerBotQuarantineSchema = async (sql) => {
     select indexname, indexdef
     from pg_indexes
     where schemaname = 'public'
-      and indexname in ('poker_seats_user_id_active_human_idx', 'poker_tables_created_by_pending_standard_idx', 'chips_transactions_poker_pool_bucket_uidx');
+      and indexname in ('poker_seats_user_id_active_human_idx', 'poker_tables_created_by_pending_standard_idx', 'chips_transactions_poker_pool_refill_lookup_idx');
   `;
   const indexByName = new Map(indexRows.map((row) => [row.indexname, row.indexdef]));
   assert.match(indexByName.get("poker_seats_user_id_active_human_idx") || "", /\(user_id, table_id\)/i);
   assert.match(indexByName.get("poker_tables_created_by_pending_standard_idx") || "", /\(created_by, id\)/i);
-  assert.match(indexByName.get("chips_transactions_poker_pool_bucket_uidx") || "", /metadata/i);
+  assert.match(indexByName.get("chips_transactions_poker_pool_refill_lookup_idx") || "", /metadata/i);
+  assert.equal((await sql`select to_regclass('public.chips_transactions_poker_pool_bucket_uidx') as old;`)[0].old, null);
+  assert.doesNotMatch(indexByName.get("chips_transactions_poker_pool_refill_lookup_idx"), /CREATE UNIQUE INDEX/i);
   const tableIdIndexRows = await sql`
     select indexname, indexdef
     from pg_indexes
@@ -263,18 +265,25 @@ const assertPokerBotQuarantineSchema = async (sql) => {
   `;
   assert.deepEqual(refillControl.map((row) => [Number(row.id), row.enabled, row.expected_system_identifier]), [
     [1, false, "7656985631720456337"],
-  ], "Stage hourly refill control is a single dark row bound to canonical Stage identity");
-  const refillFunction = await sql`
-    select p.oid::regprocedure::text as signature, p.prosecdef, p.proconfig
-    from pg_proc p
-    where p.oid = 'public.poker_bot_pool_refill_hourly()'::regprocedure;
+  ], "Stage demand refill control remains the singleton kill switch bound to canonical Stage identity");
+  const refillFunctions = await sql`
+    select
+      to_regprocedure('public.poker_bot_pool_refill_demand(bigint,text,text,bigint)')::text as demand_function,
+      to_regprocedure('public.poker_bot_pool_refill_hourly()')::text as hourly_function;
   `;
-  assert.equal(refillFunction.length, 1);
-  assert.equal(refillFunction[0].prosecdef, false, "refill function must be SECURITY INVOKER");
-  assert.deepEqual(refillFunction[0].proconfig, ["search_path=\"\"", "lock_timeout=5s"]);
+  assert.equal(refillFunctions[0].demand_function, "poker_bot_pool_refill_demand(bigint,text,text,bigint)");
+  assert.equal(refillFunctions[0].hourly_function, null, "temporary hourly wrapper must be absent from final Stage schema");
+  const demandFunction = await sql`
+    select p.prosecdef, p.proconfig
+    from pg_proc p
+    where p.oid = 'public.poker_bot_pool_refill_demand(bigint,text,text,bigint)'::regprocedure;
+  `;
+  assert.equal(demandFunction.length, 1);
+  assert.equal(demandFunction[0].prosecdef, false, "demand refill function must be SECURITY INVOKER");
+  assert.deepEqual(demandFunction[0].proconfig, ["search_path=\"\"", "lock_timeout=5s", "statement_timeout=10s"]);
   for (const role of ["anon", "authenticated", "service_role"]) {
-    const acl = await sql.unsafe("select has_function_privilege($1, 'public.poker_bot_pool_refill_hourly()', 'EXECUTE') as allowed;", [role]);
-    assert.equal(acl[0].allowed, false, `${role} must not execute the refill function`);
+    const acl = await sql.unsafe("select has_function_privilege($1, 'public.poker_bot_pool_refill_demand(bigint,text,text,bigint)', 'EXECUTE') as allowed;", [role]);
+    assert.equal(acl[0].allowed, false, `${role} must not execute the demand refill function`);
     const tableAcl = await sql.unsafe("select has_table_privilege($1, 'public.poker_bot_refill_control', 'SELECT,INSERT,UPDATE,DELETE') as allowed;", [role]);
     assert.equal(tableAcl[0].allowed, false, `${role} must not access the refill control table`);
   }
@@ -283,12 +292,12 @@ const assertPokerBotQuarantineSchema = async (sql) => {
       select 1
       from pg_proc p
       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) privilege
-      where p.oid = 'public.poker_bot_pool_refill_hourly()'::regprocedure
+      where p.oid = 'public.poker_bot_pool_refill_demand(bigint,text,text,bigint)'::regprocedure
         and privilege.grantee = 0
         and privilege.privilege_type = 'EXECUTE'
     ) as allowed;
   `;
-  assert.equal(publicAcl[0].allowed, false, "PUBLIC must not execute the refill function");
+  assert.equal(publicAcl[0].allowed, false, "PUBLIC must not execute the demand refill function");
   const cronObjects = await sql`
     select
       exists (select 1 from pg_extension where extname = 'pg_cron') as cron_extension,
@@ -296,7 +305,7 @@ const assertPokerBotQuarantineSchema = async (sql) => {
       (select count(*)::int from public.chips_transactions where metadata ->> 'purpose' = 'poker_pool_refill') as refill_mints;
   `;
   assert.deepEqual(cronObjects.map((row) => [row.cron_extension, row.cron_job_table, Number(row.refill_mints)]), [[false, false, 0]],
-    "migration must stay dark: no pg_cron extension/job or refill MINT");
+    "final migration chain must not install pg_cron/job or mint during migration");
 };
 
 const runProductionEquivalentFixture = async (sql) => {

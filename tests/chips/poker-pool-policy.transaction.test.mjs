@@ -12,6 +12,8 @@ import {
   MAX_ACTIVE_POKER_TABLES,
   MAX_PENDING_POKER_TABLES,
 } from "../../shared/poker-domain/table-participation.mjs";
+import { updatePokerPolicy } from "../../netlify/functions/admin-poker-policy.mjs";
+import { attemptDemandRefill } from "../../shared/poker-domain/demand-refill.mjs";
 import { hasPokerPoolSchema } from "../../shared/poker-domain/bot-access.mjs";
 
 const dbUrl = process.env.POKER_POLICY_TEST_DB_URL || "";
@@ -20,7 +22,7 @@ const sourcePath = path.join(process.cwd(), "shared", "poker-domain", "table-par
 const migrationPath = path.join(process.cwd(), "supabase", "migrations", "20260927100000_poker_bot_quarantine_policy.sql");
 const tierCatalogMigrationPath = path.join(process.cwd(), "supabase", "migrations", "20260930075513_poker_bot_tier_catalog_expansion.sql");
 const hourlyRefillMigrationPath = path.join(process.cwd(), "supabase", "migrations", "20260930211623_poker_bot_pool_refill_hourly.sql");
-const refillLockTimeoutMigrationPath = path.join(process.cwd(), "supabase", "migrations", "20260930223409_poker_bot_pool_refill_lock_timeout.sql");
+const schedulerDecommissionMigrationFile = "supabase/migrations/20261004073000_poker_demand_refill_scheduler_decommission.sql";
 const ledgerFixtureMigrations = [
   "20251218213520_chips_ledger.sql",
   "20251218230000_chips_ledger_fixups.sql",
@@ -119,9 +121,9 @@ async function ensurePoolMigrationFixture(sql) {
   const schemaRows = await sql`select
     to_regclass('public.chips_accounts') as accounts,
     to_regclass('public.chips_transaction_idempotency') as registry,
-    to_regprocedure('public.poker_bot_pool_refill_hourly()') as refill_function;`;
-  if (schemaRows[0]?.refill_function && schemaRows[0]?.registry) {
-    await sql.unsafe(await fs.readFile(refillLockTimeoutMigrationPath, "utf8"));
+    to_regprocedure('public.poker_bot_pool_refill_demand(bigint,text,text,bigint)') as demand_function;`;
+  if (schemaRows[0]?.demand_function && schemaRows[0]?.registry) {
+    await applyDemandFixture(sql);
     return;
   }
   if (schemaRows[0]?.accounts) {
@@ -146,7 +148,20 @@ async function ensurePoolMigrationFixture(sql) {
   await sql.unsafe(await migrationSql());
   await sql.unsafe(await fs.readFile(tierCatalogMigrationPath, "utf8"));
   await sql.unsafe(await fs.readFile(hourlyRefillMigrationPath, "utf8"));
-  await sql.unsafe(await fs.readFile(refillLockTimeoutMigrationPath, "utf8"));
+  await applyDemandFixture(sql);
+}
+
+async function applyAtomicFixtureMigration(sql, file) {
+  const body = (await fs.readFile(file, "utf8")).replace(/^begin;\n/, "").replace(/\ncommit;\n$/, "");
+  await sql.begin(tx => tx.unsafe(body));
+}
+
+async function applyDemandFixture(sql) {
+  const columns = await sql`select 1 from information_schema.columns where table_schema='public' and table_name='poker_bot_tier_policy' and column_name='normal_hourly_refill_cap_ch';`;
+  if (!columns.length) await applyAtomicFixtureMigration(sql, "supabase/migrations/20261001200000_poker_demand_refill_caps.sql");
+  await sql.unsafe("drop index if exists public.chips_transactions_poker_pool_bucket_uidx;");
+  await applyAtomicFixtureMigration(sql, "supabase/migrations/20261003183317_poker_demand_refill_core.sql");
+  await applyAtomicFixtureMigration(sql, schedulerDecommissionMigrationFile);
 }
 
 function fixtureUuid(value) {
@@ -178,13 +193,15 @@ async function ensureFixture(sql) {
     to_regclass('public.poker_seats_user_id_active_human_idx') as active_index,
     to_regclass('public.poker_tables_created_by_pending_standard_idx') as pending_index,
     to_regclass('public.chips_transaction_idempotency') as idempotency_table,
-    to_regprocedure('public.poker_bot_pool_refill_hourly()') as refill_function;`;
+    to_regprocedure('public.poker_bot_pool_refill_demand(bigint,text,text,bigint)') as demand_function,
+    to_regprocedure('public.poker_bot_pool_refill_hourly()') as hourly_function;`;
   if (!rows[0]?.policy_table || !rows[0]?.active_index || !rows[0]?.pending_index) {
     await sql.unsafe(BASE_SCHEMA);
     await sql.unsafe(await migrationSql());
   }
   assert.ok(rows[0]?.idempotency_table, "run the disposable chips migration contract before pool refill tests");
-  assert.ok(rows[0]?.refill_function, "the hourly refill migration must be applied before pool refill tests");
+  assert.ok(rows[0]?.demand_function, "the demand refill core must be applied before pool refill tests");
+  assert.equal(rows[0]?.hourly_function, null, "the final fixture must not expose the temporary hourly wrapper");
   await sql.unsafe("drop trigger if exists fixture_fail_specific_poker_refill_entry_trg on public.chips_entries;");
   await sql.unsafe("drop function if exists public.fixture_fail_specific_poker_refill_entry();");
   await sql.unsafe(`
@@ -224,7 +241,8 @@ async function ensureFixture(sql) {
   await sql.unsafe("insert into auth.users (id) values ($1::uuid) on conflict (id) do nothing;", [fixtureUuid(2)]);
   const identityRows = await sql.unsafe("select system_identifier::text as value from pg_catalog.pg_control_system();");
   await sql.unsafe("update public.poker_bot_refill_control set enabled = false, expected_system_identifier = $1 where id = 1;", [identityRows[0].value]);
-  await sql.unsafe("update public.poker_bot_tier_policy set enabled = false;");
+  await sql.unsafe("update public.poker_bot_tier_policy set normal_refill_threshold_ch=2000, normal_refill_amount_ch=5000, slow_refill_threshold_ch=1000, slow_refill_amount_ch=2000, revision=1 where buy_in=100;");
+  await sql.unsafe("update public.poker_bot_tier_policy set enabled = false, normal_hourly_refill_cap_ch = null, slow_hourly_refill_cap_ch = slow_refill_amount_ch;");
 }
 
 async function withFixture(callback, { initialize = true } = {}) {
@@ -498,359 +516,6 @@ test("disposable PostgreSQL proves settled automatic SLOW races safely with Admi
   });
 });
 
-test("disposable PostgreSQL proves hourly ledger refill, exact mapping, idempotency and pool isolation", { skip: !dbUrl }, async () => {
-  await withFixture(async (sql) => {
-    const callRefill = async () => (await sql`select public.poker_bot_pool_refill_hourly() as summary;`)[0].summary;
-    const setTier = async (buyIn, enabled) => sql`
-      update public.poker_bot_tier_policy set enabled = ${enabled} where buy_in = ${buyIn};
-    `;
-    const refillRowsFor = async (systemKey) => sql`
-      select id, idempotency_key, payload_hash, metadata
-      from public.chips_transactions
-      where tx_type = 'MINT'::public.chips_tx_type
-        and metadata ->> 'purpose' = 'poker_pool_refill'
-        and metadata ->> 'bankrollSystemKey' = ${systemKey}
-      order by created_at, id;
-    `;
-
-    const identityRows = await sql.unsafe("select system_identifier::text as value from pg_catalog.pg_control_system();");
-    await sql`update public.poker_bot_refill_control set expected_system_identifier = 'wrong-database' where id = 1;`;
-    await assert.rejects(
-      () => callRefill(),
-      (error) => error?.code === "P1029" && /database_identity_mismatch/.test(error?.message || ""),
-      "database identity mismatch fails closed before refill processing",
-    );
-    assert.equal(Number((await sql`select count(*)::int as count from public.chips_transactions where metadata ->> 'purpose' = 'poker_pool_refill';`)[0].count), 0);
-    await sql`update public.poker_bot_refill_control set expected_system_identifier = ${identityRows[0].value} where id = 1;`;
-
-    await setTier(100, true);
-    const disabledSummary = await callRefill();
-    assert.equal(disabledSummary.status, "disabled", "global control is a default-off kill switch");
-    assert.equal(Number((await sql`select count(*)::int as count from public.chips_transactions where metadata ->> 'purpose' = 'poker_pool_refill';`)[0].count), 0);
-    await sql`update public.poker_bot_refill_control set enabled = true where id = 1;`;
-
-    await setTier(100, false);
-    const disabledTierSummary = await callRefill();
-    assert.equal(disabledTierSummary.pools.length, 0, "disabled tiers are not processed");
-    assert.equal(Number((await sql`select count(*)::int as count from public.chips_transactions where metadata ->> 'purpose' = 'poker_pool_refill';`)[0].count), 0);
-
-    await setTier(100, true);
-    await postFixtureSystemTransfer(sql, {
-      txType: "MINT",
-      idempotencyKey: "fixture-threshold-normal-100",
-      metadata: { purpose: "fixture_threshold" },
-      fromKey: "GENESIS",
-      toKey: "POKER_BOT_BANKROLL_100",
-      amount: 2000,
-    });
-    await postFixtureSystemTransfer(sql, {
-      txType: "MINT",
-      idempotencyKey: "fixture-threshold-slow-100",
-      metadata: { purpose: "fixture_threshold" },
-      fromKey: "GENESIS",
-      toKey: "POKER_BOT_SLOW_BANKROLL_100",
-      amount: 1000,
-    });
-    let thresholdSummary = await callRefill();
-    assert.deepEqual(thresholdSummary.pools.map((pool) => pool.status), ["no_op", "no_op"], "balance at threshold is a no-op for both pool classes");
-    await postFixtureSystemTransfer(sql, {
-      txType: "MINT",
-      idempotencyKey: "fixture-above-threshold-normal-100",
-      metadata: { purpose: "fixture_threshold" },
-      fromKey: "GENESIS",
-      toKey: "POKER_BOT_BANKROLL_100",
-      amount: 500,
-    });
-    thresholdSummary = await callRefill();
-    assert.deepEqual(thresholdSummary.pools.map((pool) => pool.status), ["no_op", "no_op"], "balance above threshold is a no-op");
-    assert.equal(Number((await sql`select count(*)::int as count from public.chips_transactions where metadata ->> 'purpose' = 'poker_pool_refill';`)[0].count), 0);
-
-    await postFixtureSystemTransfer(sql, {
-      txType: "BURN",
-      idempotencyKey: "fixture-spend-threshold-normal-100",
-      metadata: { purpose: "fixture_spend" },
-      fromKey: "POKER_BOT_BANKROLL_100",
-      toKey: "HOUSE",
-      amount: 2500,
-    });
-    await postFixtureSystemTransfer(sql, {
-      txType: "BURN",
-      idempotencyKey: "fixture-spend-threshold-slow-100",
-      metadata: { purpose: "fixture_spend" },
-      fromKey: "POKER_BOT_SLOW_BANKROLL_100",
-      toKey: "HOUSE",
-      amount: 1000,
-    });
-    const exactSummary = await callRefill();
-    assert.deepEqual(exactSummary.pools.map((pool) => [pool.systemKey, pool.amount, pool.status]), [
-      ["POKER_BOT_BANKROLL_100", 5000, "refilled"],
-      ["POKER_BOT_SLOW_BANKROLL_100", 2000, "refilled"],
-    ]);
-    const exactRows = await refillRowsFor("POKER_BOT_BANKROLL_100");
-    assert.equal(exactRows.length, 1);
-    assert.match(exactRows[0].idempotency_key, /^poker-pool-refill:POKER_BOT_BANKROLL_100:1:\d{4}-\d\d-\d\dT\d\d:00:00\.000Z$/);
-    assert.match(exactRows[0].payload_hash, /^[0-9a-f]{64}$/);
-    assert.deepEqual(exactRows[0].metadata, {
-      purpose: "poker_pool_refill",
-      bankrollSystemKey: "POKER_BOT_BANKROLL_100",
-      buyIn: 100,
-      poolClass: "NORMAL",
-      policyRevision: 1,
-      bucket: exactSummary.bucket,
-    });
-    const ledgerRows = await sql`
-      select t.tx_type::text as tx_type, t.metadata, t.idempotency_key, t.payload_hash,
-             count(e.id)::int as entry_count, coalesce(sum(e.amount), 0)::bigint as total,
-             count(distinct r.transaction_id)::int as registry_count,
-             min(e.entry_seq)::bigint as min_entry_seq, max(e.entry_seq)::bigint as max_entry_seq
-      from public.chips_transactions t
-      left join public.chips_entries e on e.transaction_id = t.id
-      left join public.chips_transaction_idempotency r on r.transaction_id = t.id
-      where t.id = ${exactRows[0].id}::uuid
-      group by t.id;
-    `;
-    assert.equal(ledgerRows[0].tx_type, "MINT");
-    assert.equal(Number(ledgerRows[0].entry_count), 2);
-    assert.equal(Number(ledgerRows[0].total), 0);
-    assert.equal(Number(ledgerRows[0].registry_count), 1, "the transaction insert trigger must create the idempotency registry row");
-    assert.ok(Number(ledgerRows[0].min_entry_seq) > 0 && Number(ledgerRows[0].max_entry_seq) > 0,
-      "the existing entry-sequence trigger assigns positive per-account sequences");
-    assert.equal(Number((await sql`select balance from public.chips_accounts where system_key = 'POKER_BOT_BANKROLL_100';`)[0].balance), 5000);
-    assert.equal(Number((await sql`select balance from public.chips_accounts where system_key = 'GENESIS';`)[0].balance), 1000000000 - 2000 - 500 - 1000 - 5000 - 2000);
-
-    await postFixtureSystemTransfer(sql, {
-      txType: "BURN",
-      idempotencyKey: "fixture-same-hour-spend-normal-100",
-      metadata: { purpose: "fixture_spend" },
-      fromKey: "POKER_BOT_BANKROLL_100",
-      toKey: "HOUSE",
-      amount: 5000,
-    });
-    const beforeSameHour = await refillRowsFor("POKER_BOT_BANKROLL_100");
-    const sameHourSummary = await callRefill();
-    assert.equal(sameHourSummary.pools.find((pool) => pool.systemKey === "POKER_BOT_BANKROLL_100").status, "replay");
-    assert.equal((await refillRowsFor("POKER_BOT_BANKROLL_100")).length, beforeSameHour.length, "same-hour depleted pool cannot receive a second MINT");
-    await Promise.all([callRefill(), callRefill()]);
-    assert.equal((await refillRowsFor("POKER_BOT_BANKROLL_100")).length, beforeSameHour.length, "concurrent same-hour calls cannot duplicate a pool MINT");
-
-    await postFixtureSystemTransfer(sql, {
-      txType: "MINT",
-      idempotencyKey: "fixture-prior-hour-normal-500",
-      metadata: {
-        purpose: "poker_pool_refill",
-        bankrollSystemKey: "POKER_BOT_BANKROLL",
-        buyIn: 500,
-        poolClass: "NORMAL",
-        policyRevision: 1,
-        bucket: new Date(Date.parse(exactSummary.bucket) - 60 * 60 * 1000).toISOString(),
-      },
-      fromKey: "GENESIS",
-      toKey: "POKER_BOT_BANKROLL",
-      amount: 10000,
-    });
-    await postFixtureSystemTransfer(sql, {
-      txType: "BURN",
-      idempotencyKey: "fixture-prior-hour-spend-normal-500",
-      metadata: { purpose: "fixture_spend" },
-      fromKey: "POKER_BOT_BANKROLL",
-      toKey: "HOUSE",
-      amount: 10000,
-    });
-    await setTier(500, true);
-    await postFixtureSystemTransfer(sql, {
-      txType: "MINT",
-      idempotencyKey: "fixture-prior-hour-slow-500",
-      metadata: {
-        purpose: "poker_pool_refill",
-        bankrollSystemKey: "POKER_BOT_SLOW_BANKROLL_500",
-        buyIn: 500,
-        poolClass: "SLOW",
-        policyRevision: 1,
-        bucket: new Date(Date.parse(exactSummary.bucket) - 60 * 60 * 1000).toISOString(),
-      },
-      fromKey: "GENESIS",
-      toKey: "POKER_BOT_SLOW_BANKROLL_500",
-      amount: 5000,
-    });
-    await postFixtureSystemTransfer(sql, {
-      txType: "BURN",
-      idempotencyKey: "fixture-prior-hour-spend-slow-500",
-      metadata: { purpose: "fixture_spend" },
-      fromKey: "POKER_BOT_SLOW_BANKROLL_500",
-      toKey: "HOUSE",
-      amount: 5000,
-    });
-    const nextHourSummary = await callRefill();
-    assert.deepEqual(nextHourSummary.pools.filter((pool) => pool.buyIn === 500).map((pool) => [pool.systemKey, pool.status]), [
-      ["POKER_BOT_BANKROLL", "refilled"],
-      ["POKER_BOT_SLOW_BANKROLL_500", "refilled"],
-    ], "prior-hour ledger rows do not block a later UTC bucket refill");
-    const normal500Rows = await refillRowsFor("POKER_BOT_BANKROLL");
-    assert.equal(normal500Rows.length, 2);
-    assert.equal(normal500Rows.some((row) => row.metadata.bucket === nextHourSummary.bucket), true);
-
-    await sql`update public.poker_bot_tier_policy set enabled = false;`;
-    await setTier(10000000, true);
-    const mappedSummary = await callRefill();
-    const mappingPairs = mappedSummary.pools
-      .filter((pool) => pool.buyIn === 10000000)
-      .map((pool) => [pool.poolClass, pool.systemKey, pool.status]);
-    assert.deepEqual(mappingPairs, [
-      ["NORMAL", "POKER_BOT_BANKROLL_10000000", "refilled"],
-      ["SLOW", "POKER_BOT_SLOW_BANKROLL_10000000", "refilled"],
-    ], "maximum canonical tier keeps exact NORMAL/SLOW pool keys");
-
-    await sql`update public.poker_bot_tier_policy set enabled = false;`;
-    await setTier(1000, true);
-    await setTier(5000, true);
-    await sql`delete from public.chips_accounts where account_type = 'SYSTEM' and system_key = 'POKER_BOT_BANKROLL_1000';`;
-    await sql`update public.chips_accounts set status = 'closed' where system_key = 'POKER_BOT_SLOW_BANKROLL_1000';`;
-    await sql`delete from public.poker_bot_tier_policy where buy_in = 250;`;
-    await sql`delete from public.chips_accounts where account_type = 'SYSTEM' and system_key = 'POKER_BOT_BANKROLL_250';`;
-    await sql`
-      insert into public.poker_bot_tier_policy (
-        buy_in, enabled, normal_refill_threshold_ch, normal_refill_amount_ch,
-        slow_refill_threshold_ch, slow_refill_amount_ch
-      ) values (250, true, 100, 200, 100, 200);
-    `;
-    await sql`insert into public.chips_accounts (account_type, system_key, status, balance) values ('SYSTEM', 'POKER_BOT_BANKROLL_250', 'active', 0);`;
-
-    await sql.unsafe(`
-      create function public.fixture_fail_specific_poker_refill_entry()
-      returns trigger
-      language plpgsql
-      as $fixture$
-      begin
-        if exists (
-          select 1 from public.chips_transactions as tx
-          where tx.id = new.transaction_id
-            and tx.metadata ->> 'bankrollSystemKey' = 'POKER_BOT_BANKROLL_5000'
-        ) then
-          raise exception using errcode = 'P9999', message = 'fixture_pool_entry_failure';
-        end if;
-        return new;
-      end;
-      $fixture$;
-      create trigger fixture_fail_specific_poker_refill_entry_trg
-      before insert on public.chips_entries
-      for each row execute function public.fixture_fail_specific_poker_refill_entry();
-    `);
-    const genesisBeforeIsolatedFailure = Number((await sql`select balance from public.chips_accounts where system_key = 'GENESIS';`)[0].balance);
-    const concurrentSummaries = await Promise.all([callRefill(), callRefill()]);
-    const isolatedSummary = concurrentSummaries.find((summary) => summary.status === "processed");
-    assert.ok(isolatedSummary, "one concurrent invocation must process independent eligible pools");
-    assert.equal(isolatedSummary.pools.find((pool) => pool.buyIn === 1000 && pool.poolClass === "NORMAL").status, "failed");
-    assert.equal(isolatedSummary.pools.find((pool) => pool.buyIn === 1000 && pool.poolClass === "SLOW").status, "failed");
-    assert.deepEqual(isolatedSummary.pools.filter((pool) => pool.buyIn === 5000).map((pool) => pool.status), ["failed", "refilled"], "a mid-ledger failure rolls back only its pool and does not block the independent SLOW pool");
-    assert.equal(isolatedSummary.pools.find((pool) => pool.buyIn === 5000 && pool.poolClass === "NORMAL").error, "fixture_pool_entry_failure");
-    assert.equal((await refillRowsFor("POKER_BOT_BANKROLL_5000")).length, 0, "the failed pool's transaction and idempotency registry entry roll back");
-    assert.equal((await refillRowsFor("POKER_BOT_SLOW_BANKROLL_5000")).length, 1, "the independent successful pool commits exactly once");
-    assert.equal(Number((await sql`select balance from public.chips_accounts where system_key = 'POKER_BOT_BANKROLL_5000';`)[0].balance), 0,
-      "the failed pool balance delta rolls back with its transaction");
-    assert.equal(Number((await sql`select balance from public.chips_accounts where system_key = 'POKER_BOT_SLOW_BANKROLL_5000';`)[0].balance), 50000);
-    const genesisAfterIsolatedFailure = Number((await sql`select balance from public.chips_accounts where system_key = 'GENESIS';`)[0].balance);
-    assert.equal(genesisBeforeIsolatedFailure - genesisAfterIsolatedFailure, 50000,
-      "only the independent committed pool debits GENESIS");
-    await sql.unsafe("drop trigger fixture_fail_specific_poker_refill_entry_trg on public.chips_entries;");
-    await sql.unsafe("drop function public.fixture_fail_specific_poker_refill_entry();");
-    assert.equal(isolatedSummary.pools.some((pool) => pool.buyIn === 250), false, "non-canonical enabled policy is ignored");
-    assert.equal((await refillRowsFor("POKER_BOT_BANKROLL_250")).length, 0, "the function never MINTs to an arbitrary SYSTEM account");
-    assert.equal((await refillRowsFor("POKER_BOT_BANKROLL_1000")).length, 0);
-    assert.equal((await refillRowsFor("POKER_BOT_SLOW_BANKROLL_1000")).length, 0);
-    await assert.rejects(
-      () => sql`update public.poker_bot_tier_policy set normal_refill_amount_ch = 0 where buy_in = 5000;`,
-      (error) => error?.code === "23514",
-      "malformed refill policy remains rejected by the policy CHECK constraint",
-    );
-  });
-});
-
-test("disposable PostgreSQL bounds a contended pool lock and commits an independent pool", { skip: !dbUrl }, async () => {
-  await withFixture(async (sql) => {
-    await sql`update public.poker_bot_refill_control set enabled = true where id = 1;`;
-    await sql`update public.poker_bot_tier_policy set enabled = (buy_in = 100);`;
-
-    const holder = postgres(dbUrl, { max: 1, idle_timeout: 0, connect_timeout: 5 });
-    let signalLockAcquired;
-    let rejectLockAcquisition;
-    let releaseHolder;
-    const lockAcquired = new Promise((resolve, reject) => {
-      signalLockAcquired = resolve;
-      rejectLockAcquisition = reject;
-    });
-    const holdTransaction = new Promise((resolve) => { releaseHolder = resolve; });
-    const lockTask = holder.begin(async (tx) => {
-      try {
-        const lockedRows = await tx`
-          select id from public.chips_accounts
-          where account_type = 'SYSTEM' and system_key = 'POKER_BOT_BANKROLL_100'
-          for update;
-        `;
-        assert.equal(lockedRows.length, 1, "the required NORMAL pool account exists in the disposable fixture");
-        signalLockAcquired();
-      } catch (error) {
-        rejectLockAcquisition(error);
-        throw error;
-      }
-      await holdTransaction;
-    });
-
-    try {
-      await lockAcquired;
-      await sql.unsafe("set lock_timeout = '0';");
-      await sql.unsafe("set statement_timeout = '8s';");
-      const summary = (await sql`select public.poker_bot_pool_refill_hourly() as summary;`)[0].summary;
-      assert.equal(summary.status, "processed");
-      const lockedPool = summary.pools.find((pool) => pool.systemKey === "POKER_BOT_BANKROLL_100");
-      assert.equal(lockedPool.status, "failed");
-      assert.equal(lockedPool.sqlState, "55P03", "the locked pool fails through PostgreSQL's bounded lock timeout");
-      const independentPool = summary.pools.find((pool) => pool.systemKey === "POKER_BOT_SLOW_BANKROLL_100");
-      assert.equal(independentPool.status, "refilled");
-      assert.equal(Number(independentPool.amount), 2000);
-
-      const committed = await sql`
-        select tx.id, tx.idempotency_key, entry.account_id, account.system_key, entry.amount
-        from public.chips_transactions as tx
-        join public.chips_entries as entry on entry.transaction_id = tx.id
-        join public.chips_accounts as account on account.id = entry.account_id
-        where tx.tx_type = 'MINT'::public.chips_tx_type
-          and tx.metadata ->> 'purpose' = 'poker_pool_refill'
-          and tx.metadata ->> 'bankrollSystemKey' = 'POKER_BOT_SLOW_BANKROLL_100';
-      `;
-      assert.equal(committed.length, 2, "the independent pool commits one MINT with its two ledger entries");
-      assert.equal(Number((await sql`
-        select count(*)::int as count
-        from public.chips_transactions
-        where tx_type = 'MINT'::public.chips_tx_type
-          and metadata ->> 'purpose' = 'poker_pool_refill'
-          and metadata ->> 'bankrollSystemKey' = 'POKER_BOT_SLOW_BANKROLL_100';
-      `)[0].count), 1, "the independent pool receives exactly one committed MINT");
-      assert.equal(new Set(committed.map((entry) => entry.id)).size, 1);
-      assert.equal(new Set(committed.map((entry) => entry.idempotency_key)).size, 1);
-      assert.equal(committed.reduce((sum, entry) => sum + Number(entry.amount), 0), 0, "the committed MINT is balanced");
-      assert.deepEqual(
-        committed.map((entry) => [entry.system_key, Number(entry.amount)]).sort(),
-        [["GENESIS", -2000], ["POKER_BOT_SLOW_BANKROLL_100", 2000]].sort(),
-      );
-      assert.equal(Number((await sql`select balance from public.chips_accounts where system_key = 'POKER_BOT_BANKROLL_100';`)[0].balance), 0,
-        "the failed pool remains unchanged");
-      assert.equal(Number((await sql`
-        select count(*)::int as count
-        from public.chips_transactions
-        where tx_type = 'MINT'::public.chips_tx_type
-          and metadata ->> 'purpose' = 'poker_pool_refill'
-          and metadata ->> 'bankrollSystemKey' = 'POKER_BOT_BANKROLL_100';
-      `)[0].count), 0, "the failed pool leaves no committed MINT");
-      assert.equal(Number((await sql`select balance from public.chips_accounts where system_key = 'POKER_BOT_SLOW_BANKROLL_100';`)[0].balance), 2000,
-        "the independent pool balance commits");
-    } finally {
-      releaseHolder();
-      await lockTask.catch(() => {});
-      await holder.end({ timeout: 5 });
-    }
-  });
-});
-
 test("local PostgreSQL EXPLAIN confirms bounded indexed active and pending access paths", { skip: !dbUrl }, async () => {
   await withFixture(async (sql) => {
     const targetUser = fixtureUuid(9000);
@@ -932,5 +597,98 @@ test("local PostgreSQL EXPLAIN confirms bounded indexed active and pending acces
       assert.equal(nodes.some((node) => node["Node Type"] === "Seq Scan" && /poker_(seats|tables)/i.test(String(node["Relation Name"] || ""))), false, "fresh count must not scan global seats/tables");
       assert.equal(nodes.some((node) => node["Node Type"] === "Limit" && Number(node["Actual Rows"]) > 5), false, "bounded count must stop at five qualifying rows");
     }
+  });
+});
+
+async function configureDemand(sql, { normal = null, slow = 250, chunk = 100 } = {}) {
+  await sql`update public.poker_bot_refill_control set enabled = true;`;
+  await sql.unsafe(`update public.poker_bot_tier_policy set enabled=true,
+    normal_refill_threshold_ch=100000, slow_refill_threshold_ch=100000,
+    normal_refill_amount_ch=$1, slow_refill_amount_ch=$1,
+    normal_hourly_refill_cap_ch=$2, slow_hourly_refill_cap_ch=$3 where buy_in=100;`, [chunk,normal,slow]);
+}
+async function demand(sql, id, poolClass = "NORMAL", debit = 1, buyIn = 100) {
+  return sql.begin(tx => attemptDemandRefill({ tx, buyIn, poolClass, fundingDemandId:id, requiredDebitCh:debit }));
+}
+async function usage(sql, poolClass = "NORMAL") {
+  const key = poolClass === "NORMAL" ? "POKER_BOT_BANKROLL_100" : "POKER_BOT_SLOW_BANKROLL_100";
+  const rows = await sql.unsafe(`select coalesce(sum(e.amount),0) as amount from public.chips_transactions t
+    join public.chips_entries e on e.transaction_id=t.id join public.chips_accounts a on a.id=e.account_id
+    where t.tx_type='MINT' and t.metadata->>'purpose'='poker_pool_refill' and a.system_key=$1 and e.amount>0;`, [key]);
+  return Number(rows[0].amount);
+}
+
+test("§32 PostgreSQL Unlimited NORMAL, finite NORMAL/SLOW, replay and concurrent distinct demands", { skip: !dbUrl }, async () => {
+  await withFixture(async sql => {
+    await configureDemand(sql);
+    for (let n=0;n<4;n++) assert.equal((await demand(sql,`unlimited:${n}`)).status,"refilled");
+    assert.equal(await usage(sql),400);
+    await sql`update public.poker_bot_tier_policy set normal_hourly_refill_cap_ch=550 where buy_in=100;`;
+    const results = await Promise.all(Array.from({length:8},(_,n)=>demand(sql,`finite:${n}`)));
+    assert.equal(results.filter(r=>r.status==="refilled").length,2);
+    assert.equal(await usage(sql),550);
+    assert.equal((await demand(sql,"unlimited:0")).status,"replay");
+    await sql`update public.poker_bot_tier_policy set revision=revision+1 where buy_in=100;`;
+    assert.equal((await demand(sql,"unlimited:0")).status,"replay");
+    for(let n=0;n<3;n++) assert.equal((await demand(sql,`slow:${n}`,"SLOW")).status,"refilled");
+    assert.equal((await demand(sql,"slow:3","SLOW")).status,"cap_exhausted");
+    assert.equal(await usage(sql,"SLOW"),250);
+    const balanced=await sql`select transaction_id from public.chips_entries group by transaction_id having sum(amount)<>0;`;
+    assert.equal(balanced.length,0);
+  });
+});
+
+test("§32 PostgreSQL new UTC bucket ignores prior-hour allowance without reset job", { skip: !dbUrl }, async () => {
+  await withFixture(async sql => {
+    await configureDemand(sql,{normal:100});
+    const bucket=(await sql`select to_char(date_trunc('hour',clock_timestamp() at time zone 'UTC')-interval '1 hour','YYYY-MM-DD"T"HH24:00:00.000"Z"') as bucket;`)[0].bucket;
+    await postFixtureSystemTransfer(sql,{txType:"MINT",idempotencyKey:"old-hour",metadata:{purpose:"poker_pool_refill",bankrollSystemKey:"POKER_BOT_BANKROLL_100",bucket},fromKey:"GENESIS",toKey:"POKER_BOT_BANKROLL_100",amount:100});
+    assert.equal((await demand(sql,"new-hour")).status,"refilled");
+    assert.equal(await usage(sql),200);
+  });
+});
+
+test("§32 PostgreSQL Admin finite/Unlimited live changes, omitted caps, revision and audit", { skip: !dbUrl }, async () => {
+  await withFixture(async sql => {
+    await configureDemand(sql,{normal:100,slow:100});
+    const actorId=fixtureUuid(2);
+    const patch=async extra=>{
+      const row=(await sql`select * from public.poker_bot_tier_policy where buy_in=100;`)[0];
+      return updatePokerPolicy({actorId,runTransaction:fn=>sql.begin(fn),body:{kind:"tier",buyIn:100,enabled:true,
+        expectedRevision:Number(row.revision),normal_refill_threshold_ch:100000,slow_refill_threshold_ch:100000,
+        normal_refill_amount_ch:100,slow_refill_amount_ch:100,...extra}});
+    };
+    assert.equal((await demand(sql,"finite-first")).status,"refilled");
+    const omitted=await patch({});
+    assert.equal(omitted.tier.normalHourlyRefillCapCh,100);
+    assert.equal(omitted.tier.slowHourlyRefillCapCh,100);
+    assert.equal((await demand(sql,"finite-exhausted")).status,"cap_exhausted");
+    await patch({normal_hourly_refill_cap_ch:null});
+    assert.equal((await demand(sql,"live-unlimited")).status,"refilled");
+    await patch({normal_hourly_refill_cap_ch:250});
+    assert.equal((await demand(sql,"live-finite")).amount,50);
+    assert.equal((await demand(sql,"live-finite-exhausted")).status,"cap_exhausted");
+    const row=(await sql`select * from public.poker_bot_tier_policy where buy_in=100;`)[0];
+    assert.equal(row.updated_by,actorId);
+    await assert.rejects(updatePokerPolicy({actorId,runTransaction:fn=>sql.begin(fn),body:{kind:"tier",buyIn:100,enabled:true,
+      expectedRevision:Number(row.revision)-1,normal_refill_threshold_ch:1,slow_refill_threshold_ch:1,normal_refill_amount_ch:1,slow_refill_amount_ch:1}}), /stale_revision/);
+  });
+});
+
+test("§32 PostgreSQL kill switch, identity, insufficient legal demand and exact class/tier isolation", { skip: !dbUrl }, async () => {
+  await withFixture(async sql => {
+    await configureDemand(sql,{normal:50,slow:50});
+    assert.equal((await demand(sql,"too-large","NORMAL",100)).status,"insufficient_allowance");
+    assert.equal(await usage(sql),0);
+    assert.equal((await demand(sql,"restricted","RESTRICTED")).status,"invalid_demand");
+    assert.equal((await demand(sql,"other-tier","NORMAL",1,500)).status,"tier_disabled");
+    await sql`update public.chips_accounts set status='frozen' where system_key='POKER_BOT_BANKROLL_100';`;
+    await assert.rejects(demand(sql,"inactive"),/pool_unprovisioned/);
+    assert.equal(await usage(sql,"SLOW"),0);
+    await sql`update public.poker_bot_refill_control set enabled=false;`;
+    assert.equal((await demand(sql,"disabled")).status,"disabled");
+    await sql`update public.poker_bot_refill_control set enabled=true,expected_system_identifier='wrong';`;
+    await assert.rejects(demand(sql,"identity"),/database_identity_mismatch/);
+    assert.equal(await usage(sql),0);
   });
 });

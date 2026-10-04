@@ -1826,3 +1826,188 @@ On any uncertain result: disable DB refill control, inspect current ledger/idemp
 The applied Stage migration `20260930211623_poker_bot_pool_refill_hourly.sql` is immutable. Add forward-only Stage migration `20260930223409_poker_bot_pool_refill_lock_timeout.sql` using the normal `supabase migration new` flow. It must preserve the current function body and add function-level `SET lock_timeout = '5s'` beside `SET search_path = ''`, so lock waits become catchable per-pool failures before the global statement timeout. Keep the correction economically dark: the existing control remains disabled, with no pg_cron extension/job or MINT. Update the existing unapplied Production P2 `20260930211624_poker_bot_pool_refill_hourly.sql` to the same final function definition; do not add another Production migration.
 
 Add one fundamental disposable PostgreSQL contention test using connection coordination rather than sleeps. One connection holds `FOR UPDATE` on an exact pool/account row while another invokes the function; the locked pool must report `failed` through its bounded timeout, while an independent pool commits exactly one balanced MINT. Preserve run-level advisory lock, hourly idempotency, ACL, exact 22-pool allowlist and all other decisions. No Production, pg_cron/control activation, VPS operation or unrelated runtime change is authorized.
+
+## Current authoritative §32 amendment
+
+## §32 Final refill model — demand-driven hourly liquidity caps; NULL = Unlimited; remove Cron
+
+This amendment **supersedes §31 wherever §31 retains an hourly Cron/prefill path**. The agreed target state has one refill authority only: authoritative poker funding demand.
+
+### Final product semantics
+
+Each enabled tier has independent live refill policy for NORMAL and SLOW:
+
+- existing `*_refill_threshold_ch`;
+- existing `*_refill_amount_ch` (refill chunk);
+- new nullable `*_hourly_refill_cap_ch`.
+
+Hourly cap semantics:
+
+- `NULL` = **Unlimited**;
+- positive bigint = maximum total fresh CH that may be MINTed into that exact tier/class bankroll during one UTC-hour bucket;
+- no magic integer sentinel (no INT_MAX/BIGINT_MAX);
+- existing carried balance does not consume the cap; only refill MINTs in the current hour do;
+- no clawback when an operator lowers a cap mid-hour.
+
+Defaults:
+
+- **NORMAL:** `normal_hourly_refill_cap_ch IS NULL` for every enabled tier;
+- **SLOW:** finite, initialized from the current intended hourly SLOW liquidity (initially the current `slow_refill_amount_ch` unless rollout evidence requires an explicit reviewed value).
+
+The mechanism is identical for NORMAL and SLOW. NORMAL is normally unbounded only because its default cap is Unlimited. An operator may set a finite NORMAL cap at any time.
+
+### Demand-only refill
+
+There is **no recurring refill scheduler in the final design**.
+
+A refill may be considered only when an authoritative positive bot-funding demand already exists: initial bot seed, replacement, managed top-up, or an equivalent existing positive bot-funding path.
+
+For each demand:
+
+1. resolve the exact tier and effective NORMAL/SLOW class;
+2. read/lock the current tier policy and exact SYSTEM bankroll in DB;
+3. if current balance is below the configured threshold **or** cannot cover the legal funding debit, evaluate refill;
+4. derive the current UTC-hour bucket from DB time;
+5. serialize cap accounting for the exact `pool + hour`;
+6. calculate CH already refilled into that pool in the current hour from authoritative refill ledger history;
+7. calculate remaining allowance:
+   - cap NULL => unlimited;
+   - finite cap => `max(0, cap - already_refilled_this_hour)`;
+8. if allowed, post at most one configured refill chunk, bounded by remaining allowance;
+9. retry/continue the original funding once;
+10. never loop refill-until-success.
+
+If the remaining finite allowance cannot make the legal funding debit possible, the request follows the existing safe no-funding/bounded-bankroll behavior; do not MINT a useless partial refill solely to make the pool larger.
+
+### Threshold remains
+
+Keep `normal_refill_threshold_ch` and `slow_refill_threshold_ch`.
+
+They now mean: **on a real bot-funding demand, refill early when the exact pool has fallen below this balance**, subject to the hourly cap.
+
+This preserves the existing operator control and avoids running the bankroll to exactly zero before a refill. There is still no timer/background refill when no bot funding is requested.
+
+### Idempotency / concurrency
+
+The current unique index `chips_transactions_poker_pool_bucket_uidx` (one refill per pool/hour) is incompatible with the new model and must be replaced.
+
+Requirements:
+
+- transaction/advisory serialization by exact `pool + UTC-hour`;
+- same funding demand retry => never double-MINT;
+- distinct legitimate funding demands => may create multiple refill MINTs in the same hour while allowance remains;
+- finite pool => aggregate refill amount in the hour can never exceed its cap, including concurrent requests;
+- demand idempotency derives from the authoritative funding idempotency identity plus exact pool/policy/bucket;
+- no separate hourly counter table unless implementation evidence shows ledger aggregation is insufficient; prefer the existing append-only ledger as source of truth;
+- add a suitable non-unique lookup/index for `purpose + pool + bucket` if needed for bounded aggregate lookup.
+
+Refill metadata must keep the hourly audit explicit: purpose, tier, pool class, exact bankroll key, UTC-hour bucket, policy revision, trigger=`demand`, amount and funding-demand identity.
+
+### Live Admin policy — no restart/deploy
+
+Extend the existing revision-checked per-tier Admin policy.
+
+For both NORMAL and SLOW expose:
+
+- refill threshold;
+- refill chunk;
+- hourly liquidity cap;
+- **Unlimited** toggle.
+
+Persist Unlimited as SQL NULL.
+
+The DB refill primitive must read the current tier policy on each refill decision. Therefore an Admin change becomes effective on the **next funding/refill decision** without:
+
+- WS restart;
+- service restart;
+- Cron restart;
+- code deploy.
+
+Examples:
+
+- NORMAL Unlimited -> 50,000 CH/h: next demand is bounded by the 50k current-hour cap.
+- finite 50k -> Unlimited: next demand is unbounded.
+- cap lowered below amount already refilled this hour: remaining allowance = 0 until next UTC hour.
+- cap raised mid-hour: only the additional difference becomes available.
+
+### Remove the scheduled refill architecture (YAGNI)
+
+Final state must remove the poker hourly scheduler rather than retain it as a backup.
+
+Remove/decommission:
+
+- exact Supabase Cron job `poker-bot-pool-refill-hourly`;
+- scheduled-only `public.poker_bot_pool_refill_hourly()` wrapper/function once runtime demand refill is proven;
+- scheduler-specific tests/docs/observability assumptions;
+- the old one-refill-per-pool/hour unique index.
+
+The currently installed `poker_bot_refill_control` may be retained only if it is deliberately reused as a global demand-refill kill switch. Do not keep it merely because Cron used it.
+
+At rollout time, re-check `cron.job`. If poker refill is still the only Cron consumer, the now-unused `pg_cron` extension may also be disabled/removed as final operational cleanup; never remove it blindly if another job has appeared.
+
+Current read-only baseline (2026-10-01): Stage and Production each have exactly one `cron.job`, named `poker-bot-pool-refill-hourly`.
+
+### Implementation / rollout plan
+
+**T101 — Forward-only policy migration**
+- Add nullable NORMAL/SLOW hourly-cap columns + constraints to `poker_bot_tier_policy`.
+- Seed NORMAL to NULL/Unlimited and SLOW to reviewed finite defaults.
+- Preserve existing thresholds/chunks/revision/audit fields.
+- Add Stage and separate Production migration equivalents.
+
+**T102 — Demand refill DB primitive**
+- Add one narrow class/tier-aware DB primitive callable only from the trusted poker DB runtime path.
+- Derive exact pool and refill amount from DB policy; caller cannot select arbitrary SYSTEM key or MINT amount.
+- Reuse balanced `GENESIS -> exact SYSTEM pool` ledger semantics.
+- Implement pool-hour locking, ledger-derived hourly usage, finite/unlimited evaluation and same-demand idempotency.
+- Keep one refill attempt per funding demand.
+
+**T103 — Safe transition from current Cron**
+- During migration/deploy overlap, prevent two independent refill authorities: either make the current hourly wrapper use the same new cap/idempotency primitive temporarily, or keep demand refill dark until the exact Cron job is disabled.
+- Do not run old Cron economics concurrently with active finite demand caps if that could exceed the cap.
+
+**T104 — Runtime integration**
+- Wire the helper into all authoritative positive bot funding paths: initial seed, replacement, managed top-up.
+- Preserve already-resolved NORMAL/SLOW class and exact tier.
+- RESTRICTED never refills.
+- No tier/class/TREASURY fallback.
+- Existing safe bounded-bankroll fallback remains when finite liquidity is exhausted.
+
+**T105 — Admin UX/API**
+- Add cap + Unlimited toggle for NORMAL and SLOW to the existing per-tier form.
+- Parse NULL explicitly; do not encode Unlimited as a magic max integer.
+- Keep revision conflict/audit behavior.
+- Rename amount labels to “refill chunk” if needed to distinguish them from hourly cap.
+
+**T106 — Tests**
+Prove at minimum:
+1. NORMAL NULL cap allows multiple distinct same-hour demand refills;
+2. finite NORMAL cannot exceed its cap;
+3. finite SLOW can refill on demand until cap exhaustion;
+4. next UTC hour provides a fresh allowance without a reset job;
+5. same-demand replay cannot double-MINT;
+6. concurrent distinct demands cannot exceed finite cap;
+7. threshold-triggered refill occurs only on real funding demand;
+8. no background/time-based MINT occurs with no demand;
+9. live Admin cap changes affect the next refill without restart;
+10. lowering/raising cap mid-hour has the agreed semantics;
+11. RESTRICTED/cross-tier/cross-class/TREASURY fallback remain impossible;
+12. ledger remains balanced/auditable;
+13. old one-per-hour index assumption is gone.
+
+**T107 — Stage rollout**
+- Apply schema/DB primitive with demand path dark or Cron sharing the new primitive.
+- Deploy exact WS SHA.
+- Exercise Unlimited NORMAL, finite NORMAL and finite SLOW.
+- Prove hour-boundary reset is derived from bucket/time, not a scheduled reset.
+- Change cap in Admin and prove the next demand uses it without restart.
+- Disable/remove the Stage poker Cron job after demand path acceptance.
+- Then remove the scheduled wrapper/dead scheduler artifacts.
+
+**T108 — Production rollout**
+- Apply reviewed Production equivalent.
+- Deploy exact reviewed WS SHA.
+- Activate demand refill only after DB/runtime compatibility checks.
+- Verify NORMAL default Unlimited and SLOW finite behavior read-only from ledger.
+- Disable/remove Production `poker-bot-pool-refill-hourly`.
+- Re-check for any other Cron jobs before considering removal of `pg_cron`.

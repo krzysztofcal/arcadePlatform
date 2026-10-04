@@ -223,25 +223,18 @@ bootstrap script, or a unit file.
 
 ## Poker bot pool refill
 
-Poker pool refills now run only through the database ledger function. The retired
-VPS dispatcher, systemd service/timer, and GitHub refill workflow are removed.
-The future scheduler contract is exactly one Supabase Cron job:
+Poker pool refills are demand-driven only. Positive authoritative bot-funding
+paths call the restricted database demand refill core; there is no recurring
+VPS, GitHub Actions, or Supabase Cron refill authority.
 
-- name: `poker-bot-pool-refill-hourly`
-- schedule: `0 * * * *`
-- command: `select public.poker_bot_pool_refill_hourly();`
+The singleton `poker_bot_refill_control` remains the backend-only global kill
+switch and database-identity guard used by the demand path. Stage §32 cleanup
+unschedules the exact `poker-bot-pool-refill-hourly` job and drops only the
+temporary `public.poker_bot_pool_refill_hourly()` wrapper. The `pg_cron`
+extension is left installed; unrelated jobs/extensions are never removed by
+this cleanup.
 
-The implementation migration creates a singleton `poker_bot_refill_control` row
-with `enabled=false` and the hourly function. Shared Stage may receive that
-migration automatically; it does not install `pg_cron`, create a job, or MINT.
-Cron activation and enabling the refill control require a separate owner GO.
-Production has a separate forward-only migration and remains untouched until its
-own authorization.
+Production remains untouched until its separate GO. Do not provision or
+recreate a poker-refill VPS timer, GitHub scheduler, PAT, database URL, or SQL
+dispatcher.
 
-The existing live VPS poker service/timer are currently disabled and inactive.
-After merge, remove the installed poker dispatcher/service/timer only with a
-separate owner GO. Never run `infra/vps/bootstrap.sh` on the existing VPS. The
-cleanup must leave `arcade-chips-ledger-dispatch.*`,
-`/home/copilot/.config/gh` (the `krzysztofcal` chips-cleanup identity), WS,
-Caddy, and unrelated timers untouched. Do not provision a poker-refill GitHub
-actor/config, PAT, database URL, or SQL on the VPS.

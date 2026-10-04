@@ -1,5 +1,8 @@
 # Data Model: NORMAL/SLOW per-tier pools with manual RESTRICTED
 
+> Current contract: issue #1018 [§32](https://github.com/krzysztofcal/arcadePlatform/issues/1018#issuecomment-5939585868) supersedes historical §29/§31 scheduler economics below. Final state is demand-only. Stage cutover is complete: the exact poker refill Cron job and temporary hourly wrapper are removed; `poker_bot_refill_control` remains the demand-path kill switch/database-identity guard. Production remains a separate GO.
+
+
 This is the accepted schema contract implemented by the immutable migration `20260927100000_poker_bot_quarantine_policy.sql`, now applied on shared Stage by DB Stage Apply PR (36310279719: 97→98 applied; 36310527312: 98 applied / 0 pending; both smoke PASS). The manual RESTRICTED amendment adds only forward-only migration `20260927110000_poker_force_restricted.sql`, which extends the existing override CHECK and is classified as awaiting a separate Production equivalent. T027 uses a separate disposable local fixture. Production is not migrated. [Spec](spec.md) and [contracts](contracts/bot-quarantine.md) define behavior. Use existing USER accounts, tables, seats, state and ledger; no new per-user budget, RESTRICTED bankroll, table marker or refill receipt entities.
 
 ## 1. Existing chips_accounts USER access fields
@@ -80,3 +83,11 @@ For every pool, the function locks and re-reads policy and account state; a bala
 The applied Stage migration remains immutable. Forward-only Stage correction `20260930223409_poker_bot_pool_refill_lock_timeout.sql` replaces only the function and sets `lock_timeout = '5s'` at function scope; this keeps lock contention inside the existing per-pool failure block. Its automatic Stage apply leaves the disabled control unchanged and creates no pg_cron/job/MINT. The existing Production P2 remains unapplied and includes the same final function setting.
 
 Production uses the prepared equivalent `20260930211624_poker_bot_pool_refill_hourly.sql` with expected system identifier `7575202818581710058`; it is not applied. Shared Stage automatic migration application may add only the dark schema/function. No balance, tier, table or profile activation occurs.
+
+## §32 current data model
+
+Tier policy adds nullable positive-safe bigint `normal_hourly_refill_cap_ch` and `slow_hourly_refill_cap_ch`. NORMAL initializes NULL; SLOW initializes from existing `slow_refill_amount_ch`. Threshold/chunk remain independent. Existing revision/actor/timestamp audit remains.
+
+The unique pool/hour index is replaced by `chips_transactions_poker_pool_refill_lookup_idx`, a non-unique partial pool/bucket lookup. Usage joins `chips_transactions.id -> chips_entries.transaction_id -> chips_accounts.id` via `account_id`, exact SYSTEM account/key and positive refill MINT entry. No counter table. Metadata records purpose, tier/class, pool key, DB UTC bucket, revision, trigger, amount and authoritative funding identity. Existing append-only registry/sequence/balanced-entry triggers are reused.
+
+`poker_bot_refill_control` is reused as the global demand-refill kill switch/database-identity guard. Final Stage exposes only trusted `public.poker_bot_pool_refill_demand(bigint,text,text,bigint)` for refill decisions; the temporary hourly wrapper is removed. See [plan.md](plan.md).

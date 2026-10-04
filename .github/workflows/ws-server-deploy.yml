@@ -66,7 +66,10 @@ jobs:
 
   deploy:
     needs: validate
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Temporary #1018 §32 / T108 gate: pushes validate only.
+    # Production migration + compatibility checks and separate owner GO must
+    # precede an exact-revision manual deploy; restore push deploys after rollout.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       WS_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-${{ github.run_id }}-${{ github.run_attempt }}
