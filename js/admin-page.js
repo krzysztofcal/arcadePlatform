@@ -1639,13 +1639,13 @@
     tiers.forEach(function(tier){
       html.push('<form class="admin-adjust admin-surface" id="adminPokerTierPolicyForm-' + escapeHtml(tier.buyIn) + '" data-poker-buy-in="' + escapeHtml(tier.buyIn) + '"><fieldset><legend>Tier ' + escapeHtml(tier.buyIn) + '</legend>');
       html.push('<label class="admin-field"><span class="admin-field__label">Enabled</span><input name="enabled-' + escapeHtml(tier.buyIn) + '" type="checkbox"' + (tier.enabled ? " checked" : "") + '></label>');
-      [["normalRefillThresholdCh", "NORMAL threshold"], ["normalRefillAmountCh", "NORMAL refill chunk"], ["slowRefillThresholdCh", "SLOW threshold"], ["slowRefillAmountCh", "SLOW refill chunk"]].forEach(function(pair){
+      [["normalRefillThresholdCh", "NORMAL threshold (CH)"], ["normalRefillAmountCh", "NORMAL refill chunk (CH)"], ["slowRefillThresholdCh", "SLOW threshold (CH)"], ["slowRefillAmountCh", "SLOW refill chunk (CH)"]].forEach(function(pair){
         html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + '</span><input class="admin-input" name="' + pair[0] + '-' + escapeHtml(tier.buyIn) + '" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(tier[pair[0]] || "") + '"></label>');
       });
       if (summary.hourlyRefillCapsSupported === true) [["normalHourlyRefillCapCh", "NORMAL"], ["slowHourlyRefillCapCh", "SLOW"]].forEach(function(pair){
         var unlimited = tier[pair[0]] === null;
         var name = pair[0] + "-" + tier.buyIn;
-        html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + ' hourly liquidity cap</span><input class="admin-input" name="' + escapeHtml(name) + '" type="number" min="1" max="9007199254740991" step="1" value="' + (unlimited ? "" : escapeHtml(tier[pair[0]])) + '"' + (unlimited ? ' disabled' : ' required') + '></label>');
+        html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + ' hourly liquidity cap (CH/h)</span><input class="admin-input" name="' + escapeHtml(name) + '" type="number" min="1" max="9007199254740991" step="1" value="' + (unlimited ? "" : escapeHtml(tier[pair[0]])) + '"' + (unlimited ? ' disabled' : ' required') + '></label>');
         html.push('<label class="admin-field"><span><input type="checkbox" name="' + escapeHtml(name) + '-unlimited"' + (unlimited ? ' checked' : '') + '> ' + pair[1] + ' Unlimited</span></label>');
       });
       html.push('<input type="hidden" name="revision-' + escapeHtml(tier.buyIn) + '" value="' + escapeHtml(tier.revision || 1) + '"></fieldset><div class="admin-inline-actions"><button class="admin-btn admin-btn--primary" type="submit">Save tier policy</button></div><p class="admin-note" data-poker-tier-policy-status aria-live="polite">Tier changes are independent mutations.</p></form>');
