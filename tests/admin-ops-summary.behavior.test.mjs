@@ -202,6 +202,7 @@ test("ledger capacity returns available:false without raw error on SQL failure",
 test("Ops poker tier summary preserves finite hourly caps and SQL NULL Unlimited after refresh", async () => {
   let tierQuery;
   const summary = await loadPokerBotPolicySummary(async (sql) => {
+    if (sql.includes("information_schema.columns")) return [{ supported: true }];
     if (!sql.includes("from public.poker_bot_tier_policy")) return [];
     tierQuery = sql;
     const policy = {
@@ -225,4 +226,23 @@ test("Ops poker tier summary preserves finite hourly caps and SQL NULL Unlimited
   ]);
   assert.match(tierQuery, /select[^;]*\bnormal_hourly_refill_cap_ch\b[^;]*from public\.poker_bot_tier_policy/i);
   assert.match(tierQuery, /select[^;]*\bslow_hourly_refill_cap_ch\b[^;]*from public\.poker_bot_tier_policy/i);
+});
+
+
+test("Ops policy remains available on pre-cap schema", async () => {
+  const queries = [];
+  const summary = await loadPokerBotPolicySummary(async sql => {
+    queries.push(sql);
+    if (sql.includes("information_schema.columns")) return [{ supported: false }];
+    assert.doesNotMatch(sql, /hourly_refill_cap_ch/);
+    if (sql.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 100, enabled: true, normal_refill_threshold_ch: 100, normal_refill_amount_ch: 500, slow_refill_threshold_ch: 100, slow_refill_amount_ch: 200, revision: 4 }];
+    if (sql.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 2000, slow_recovery_threshold_ch: 1900, revision: 1 }];
+    return [];
+  });
+  assert.notEqual(summary, null);
+  assert.equal(summary.hourlyRefillCapsSupported, false);
+  assert.equal(summary.tiers[0].normalRefillAmountCh, 500);
+  assert.equal(summary.access.slowThresholdCh, 2000);
+  assert.equal("normalHourlyRefillCapCh" in summary.tiers[0], false);
+  assert.equal(queries.length, 4);
 });

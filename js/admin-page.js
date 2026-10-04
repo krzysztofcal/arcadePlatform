@@ -1642,7 +1642,7 @@
       [["normalRefillThresholdCh", "NORMAL threshold"], ["normalRefillAmountCh", "NORMAL refill chunk"], ["slowRefillThresholdCh", "SLOW threshold"], ["slowRefillAmountCh", "SLOW refill chunk"]].forEach(function(pair){
         html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + '</span><input class="admin-input" name="' + pair[0] + '-' + escapeHtml(tier.buyIn) + '" type="number" min="1" max="9007199254740991" step="1" value="' + escapeHtml(tier[pair[0]] || "") + '"></label>');
       });
-      [["normalHourlyRefillCapCh", "NORMAL"], ["slowHourlyRefillCapCh", "SLOW"]].forEach(function(pair){
+      if (summary.hourlyRefillCapsSupported === true) [["normalHourlyRefillCapCh", "NORMAL"], ["slowHourlyRefillCapCh", "SLOW"]].forEach(function(pair){
         var unlimited = tier[pair[0]] === null;
         var name = pair[0] + "-" + tier.buyIn;
         html.push('<label class="admin-field"><span class="admin-field__label">' + pair[1] + ' hourly liquidity cap</span><input class="admin-input" name="' + escapeHtml(name) + '" type="number" min="1" max="9007199254740991" step="1" value="' + (unlimited ? "" : escapeHtml(tier[pair[0]])) + '"' + (unlimited ? ' disabled' : ' required') + '></label>');
@@ -1843,13 +1843,16 @@
       try {
         var normalCapRaw = data["normalHourlyRefillCapCh-" + buyIn];
         var slowCapRaw = data["slowHourlyRefillCapCh-" + buyIn];
-        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify({
+        var payload = {
           kind: "tier", buyIn: buyIn, enabled: data["enabled-" + buyIn] === "on", expectedRevision: data["revision-" + buyIn],
           normal_refill_threshold_ch: data["normalRefillThresholdCh-" + buyIn], normal_refill_amount_ch: data["normalRefillAmountCh-" + buyIn],
-          slow_refill_threshold_ch: data["slowRefillThresholdCh-" + buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + buyIn],
-          normal_hourly_refill_cap_ch: data["normalHourlyRefillCapCh-" + buyIn + "-unlimited"] === "on" ? null : Number(normalCapRaw),
-          slow_hourly_refill_cap_ch: data["slowHourlyRefillCapCh-" + buyIn + "-unlimited"] === "on" ? null : Number(slowCapRaw)
-        }) });
+          slow_refill_threshold_ch: data["slowRefillThresholdCh-" + buyIn], slow_refill_amount_ch: data["slowRefillAmountCh-" + buyIn]
+        };
+        if (form.elements["normalHourlyRefillCapCh-" + buyIn + "-unlimited"]) {
+          payload.normal_hourly_refill_cap_ch = data["normalHourlyRefillCapCh-" + buyIn + "-unlimited"] === "on" ? null : Number(normalCapRaw);
+          payload.slow_hourly_refill_cap_ch = data["slowHourlyRefillCapCh-" + buyIn + "-unlimited"] === "on" ? null : Number(slowCapRaw);
+        }
+        await apiFetch("/.netlify/functions/admin-poker-policy", { method: "PATCH", body: JSON.stringify(payload) });
       } catch (err){
         if (err && err.code === "stale_revision"){
           var reloadOk = true;
