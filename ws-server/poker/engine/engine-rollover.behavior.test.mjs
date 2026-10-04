@@ -102,22 +102,23 @@ test("managed settled top-up never displaces humans when capacity cannot reach t
   assert.deepEqual(result.coreState.members.filter((member) => member.userId.startsWith("human_")), members.slice(0, 4));
 });
 
-test("managed settled top-up uses the 500 CH table tier target", () => {
+for (const buyIn of [500,1000,10_000_000]) {
+test(`managed structural top-up uses canonical ${buyIn} target`, () => {
   const coreState = {
     roomId: "table_managed_high_tier",
     version: 4,
     maxSeats: 6,
     members: [{ userId: "human_a", seat: 1 }],
     seats: { human_a: 1 },
-    publicStacks: { human_a: 500 },
+    publicStacks: { human_a: buyIn },
     seatDetailsByUserId: { human_a: { isBot: false } }
   };
-  const settledState = { handId: "hand_managed_high_tier", phase: "SETTLED", stacks: { human_a: 500 } };
+  const settledState = { handId: "hand_managed_high_tier", phase: "SETTLED", stacks: { human_a: buyIn } };
   const result = topUpManagedBotsForNextHand({
     coreState,
     settledState,
     nextVersion: 5,
-    buyIn: 500,
+    buyIn: buyIn,
     minBotCount: 1,
     targetBotCount: 2,
     maxBotCount: 3
@@ -125,10 +126,12 @@ test("managed settled top-up uses the 500 CH table tier target", () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.topUpFundings.length, 2);
-  assert.equal(result.topUpFundings.every((funding) => funding.targetStack === 500 && funding.fundingDelta === 500), true);
+  assert.equal(result.topUpFundings.every((funding) => funding.targetStack === buyIn && funding.fundingDelta === buyIn), true);
   assert.equal(result.coreState.members.length, 3);
-  assert.equal(result.settledState.stacks[result.topUpFundings[0].botUserId], 500);
+  assert.equal(result.settledState.stacks[result.topUpFundings[0].botUserId], buyIn);
 });
+
+}
 
 function initialCore() {
   return {
@@ -424,7 +427,8 @@ test("replaceBrokeBotsForNextHand swaps too-short bot only after settlement", ()
   }]);
 });
 
-test("replacement planning uses the 500 CH table tier target", () => {
+for (const buyIn of [500,1000,10_000_000]) {
+test(`replacement planning uses canonical ${buyIn} target`, () => {
   const coreState = {
     roomId: "table_engine_high_tier",
     version: 30,
@@ -434,25 +438,27 @@ test("replacement planning uses the 500 CH table tier target", () => {
       human_a: { isBot: false },
       bot_old: { isBot: true, botProfile: "NORMAL" }
     },
-    publicStacks: { human_a: 500, bot_old: 0 }
+    publicStacks: { human_a: buyIn, bot_old: 0 }
   };
   const settledState = {
     handId: "settled_high_tier",
     phase: "SETTLED",
-    stacks: { human_a: 500, bot_old: 0 }
+    stacks: { human_a: buyIn, bot_old: 0 }
   };
   const result = replaceBrokeBotsForNextHand({
     coreState,
     settledState,
     nextVersion: 31,
-    buyIn: 500
+    buyIn: buyIn
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.replacementFundings.length, 1);
   const replacement = result.replacementFundings[0];
-  assert.equal(replacement.targetStack, 500);
-  assert.equal(replacement.fundingDelta, 500);
-  assert.equal(result.settledState.stacks[replacement.replacementBotUserId], 500);
+  assert.equal(replacement.targetStack, buyIn);
+  assert.equal(replacement.fundingDelta, buyIn);
+  assert.equal(result.settledState.stacks[replacement.replacementBotUserId], buyIn);
   assert.equal(result.coreState.members.some((member) => member.userId === "bot_old"), false);
 });
+
+}

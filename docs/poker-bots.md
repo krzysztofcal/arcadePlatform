@@ -80,9 +80,9 @@ Seat snapshots include bot-specific fields that are persisted and returned by ta
 Bots follow the same funds safety model as human seats:
 
 - buy-in uses `TABLE_BUY_IN` into table escrow,
-- 100 CH bot seed/replacement funding uses the currently configured legacy bot `SYSTEM` source (default `TREASURY`), while 500 CH funding uses the fixed `POKER_BOT_BANKROLL` SYSTEM account,
+- initial seed, replacement and managed top-up funding requires an Enabled canonical tier and both exact NORMAL/SLOW SYSTEM pools provisioned and active. `getBotFundingSystemKeyForBuyIn(buyIn, { poolClass })` selects the resolved class pool: NORMAL 500 retains `POKER_BOT_BANKROLL`; other NORMAL tiers use `POKER_BOT_BANKROLL_<buyIn>`, and SLOW uses `POKER_BOT_SLOW_BANKROLL_<buyIn>`. CONTINUOUS_BOT remains 100 CH and uses only its NORMAL pool,
 - a broke bot replacement preserves the old residual stack and funds only the delta to the table buy-in into table `ESCROW`,
-- 500 CH bot funding is bounded by the one-time `1,000,000 CH` `POKER_BOT_BANKROLL` allocation; exhaustion never falls back to `TREASURY` or mints more chips,
+- demand refill uses the existing audited/idempotent DB primitive for the exact tier/class pool before legal funding demand, subject to Enabled policy, provisioned pools, refill threshold/amount and hourly cap (NULL means unlimited). Disabled, unprovisioned or unknown funding fails closed. Exhaustion/refill failure never falls back to another tier/class or `TREASURY`,
 - replacement funding and the poker-state CAS commit in one database transaction before the replacement becomes visible in WS runtime,
 - replacement retries reuse a deterministic table/version/seat idempotency key and cannot create a second ledger credit after restore,
 - cash-out uses `TABLE_CASH_OUT` out of escrow,

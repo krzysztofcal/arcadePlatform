@@ -67,10 +67,10 @@ function withLockedState(args, { validateStateForStorage = () => true } = {}) {
         const wrappedTx = Object.create(tx || null);
         wrappedTx.unsafe = async (sql, params = []) => {
           if (String(sql).includes("to_regclass")) return [{ available: args?.poolSchema !== false }];
-          if (String(sql).includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows(args?.enabledBuyIns);
-          if (String(sql).includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
+          if (String(sql).includes("from public.poker_bot_tier_policy")) return args?.tierPolicyRows || pokerTierPolicyRows(args?.enabledBuyIns);
+          if (String(sql).includes("system_key = any")) return params[0].filter(key => key !== args?.missingPoolKey).map((system_key) => ({ system_key }));
           if (String(sql).includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 }];
-          if (String(sql).includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+          if (String(sql).includes("select poker_auto_class, poker_access_override")) return [{ poker_auto_class: args?.autoClass || "NORMAL", poker_access_override: args?.accessOverride || "AUTO", poker_access_revision: 1 }];
           const rows = await tx.unsafe(sql, params);
           if (String(sql).includes("from public.poker_tables") && Array.isArray(rows)) {
             return rows.map((row) => {
@@ -1110,7 +1110,13 @@ test("fresh join rejects a 500 CH tier when bankroll is 549 CH", async () => wit
   assert.deepEqual(writes, []);
 }));
 
-test("wealthy fresh join to 1000 CH is blocked while its policy is disabled before any writes", async () => withBotsDisabled(async () => {
+for (const [label,policyOptions] of [
+  ["disabled",{}],
+  ["unknown",{tierPolicyRows:[]}],
+  ["missing NORMAL pool",{enabledBuyIns:[1000],missingPoolKey:"POKER_BOT_BANKROLL_1000"}],
+  ["missing SLOW pool",{enabledBuyIns:[1000],missingPoolKey:"POKER_BOT_SLOW_BANKROLL_1000"}]
+]) {
+test(`fresh JOIN 1000 denies ${label} before any writes/funding`, async () => withBotEnv(async () => {
   const writes = [];
   await assert.rejects(
     () => executePokerJoinAuthoritative(withStorageValidator({
@@ -1128,6 +1134,7 @@ test("wealthy fresh join to 1000 CH is blocked while its policy is disabled befo
       userId: "u-tier-locked",
       requestId: "join-tier-locked",
       buyIn: 1000,
+      ...policyOptions,
       progressionBalance: 1_000_000,
       progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500,1000,5000]" },
       postTransactionFn: async () => { writes.push("ledger_buyin"); return { ok: true }; }
@@ -1142,6 +1149,8 @@ test("wealthy fresh join to 1000 CH is blocked while its policy is disabled befo
   );
   assert.deepEqual(writes, []);
 }));
+
+}
 
 test("active rejoin succeeds on a disabled tier and below the bankroll threshold without reading progression", async () => withBotsDisabled(async () => {
   let progressionReads = 0;
@@ -2265,12 +2274,13 @@ test("pre-migration first human JOIN preserves historical 100 CH funding provena
   }
 }));
 
-test("first human authoritative join on the 500 CH tier seeds bots from the bounded bankroll", async () => withBotEnv(async () => {
-  process.env.POKER_BOTS_MAX_PER_TABLE = "5";
+for (const [buyIn, poolClass, systemKey] of [[500,"NORMAL","POKER_BOT_BANKROLL"],[1000,"NORMAL","POKER_BOT_BANKROLL_1000"],[1000,"SLOW","POKER_BOT_SLOW_BANKROLL_1000"],[10_000_000,"NORMAL","POKER_BOT_BANKROLL_10000000"]]) {
+test(`fresh ${poolClass} JOIN ${buyIn} seeds exact canonical class pool`, async () => withBotEnv(async () => {
+  process.env.POKER_BOTS_MAX_PER_TABLE = "2";
   const originalRandom = Math.random;
   Math.random = () => 0;
   const store = {
-    table: { id: "t-bounded-bots", status: "OPEN", max_players: 6, buy_in: 500, stakes: '{"sb":5,"bb":10}' },
+    table: { id: "t-bounded-bots", status: "OPEN", max_players: 6, buy_in: buyIn, is_slow_only: poolClass === "SLOW", stakes: calculateCanonicalPokerStakes(buyIn) },
     seatRows: [],
     stateRow: { version: 3, state: { tableId: "t-bounded-bots", seats: [], stacks: {} } },
     ledgerCalls: []
@@ -2323,7 +2333,10 @@ test("first human authoritative join on the 500 CH tier seeds bots from the boun
       userId: "human_1",
       requestId: "join-bounded-bots",
       seatNo: 1,
-      buyIn: 500,
+      buyIn,
+      autoClass: "NORMAL",
+      accessOverride: poolClass === "SLOW" ? "FORCE_SLOW" : "AUTO",
+      tierPolicyRows: [{ ...pokerTierPolicyRows([1000])[2], buy_in: buyIn }],
       postTransactionFn: async (payload) => {
         store.ledgerCalls.push(payload);
         return { ok: true };
@@ -2335,12 +2348,14 @@ test("first human authoritative join on the 500 CH tier seeds bots from the boun
     assert.equal(result.snapshot.seats.length, 3);
     assert.equal(store.seatRows.filter((seat) => seat.is_bot).length, 2);
     assert.equal(store.ledgerCalls.length, 3);
-    assert.equal(store.ledgerCalls.filter((call) => call.entries.some((entry) => entry.accountType === "SYSTEM" && entry.systemKey === "POKER_BOT_BANKROLL" && entry.amount === -500)).length, 2);
-    assert.equal(store.ledgerCalls.some((call) => call.entries.some((entry) => entry.accountType === "SYSTEM" && entry.systemKey === "TREASURY")), false);
+    assert.equal(store.ledgerCalls.filter((call) => call.entries.some((entry) => entry.accountType === "SYSTEM" && entry.systemKey === systemKey && entry.amount === -buyIn)).length, 2);
+    assert.deepEqual(store.ledgerCalls.flatMap(call => call.entries.filter(entry => entry.accountType === "SYSTEM" && entry.amount < 0).map(entry => entry.systemKey)), [systemKey, systemKey]);
   } finally {
     Math.random = originalRandom;
   }
 }));
+
+}
 
 test("500 CH join remains successful with partial bot seed when bounded bankroll is exhausted", async () => withBotEnv(async () => {
   process.env.POKER_BOTS_MAX_PER_TABLE = "5";

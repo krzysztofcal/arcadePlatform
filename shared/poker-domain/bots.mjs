@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   getBotFundingSystemKeyForBuyIn,
-  isBotFundingAllowedForBuyIn,
   MAX_POKER_STAKE_CHIPS
 } from "./table-economy.mjs";
 
@@ -242,7 +241,6 @@ async function seedBotsForJoin({
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("invalid_bot_buy_in");
   }
-  if (!isBotFundingAllowedForBuyIn(normalizedBuyIn)) return [];
   const fundingOptions = {
     legacySystemKey: cfg.bankrollSystemKey,
     ...(poolClass ? { poolClass } : {})

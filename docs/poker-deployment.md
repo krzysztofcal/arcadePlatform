@@ -47,12 +47,12 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BOTS_ENABLED` (`0`/`1`)
 - `POKER_BOTS_MAX_PER_TABLE` (default: `2`)
 - `POKER_BOT_PROFILE_DEFAULT` (default: `TRIVIAL`)
-- `POKER_BOT_BANKROLL_SYSTEM_KEY` (legacy 100 CH source override; default: `TREASURY`; it never overrides the fixed 500 CH source `POKER_BOT_BANKROLL`)
-- The fixed 500 CH bot bankroll is seeded once by migration with `1,000,000 CH` from `GENESIS` and is never automatically replenished.
+- `POKER_BOT_BANKROLL_SYSTEM_KEY` (legacy callers without `poolClass` only; ignored by schema-backed exact pool funding)
+- NORMAL 500 retains `POKER_BOT_BANKROLL`, historically seeded by migration with `1,000,000 CH` from `GENESIS`. Current demand refill follows the tier/class policy and hourly caps.
 - Optional later: `POKER_BOTS_MAX_ACTIONS_PER_POLL`
 
 Operational notes:
-- Before deploying the runtime to Stage, WS Preview, or production, apply `supabase/migrations/20260810100000_poker_bot_bankroll.sql` to that environment. It creates the active `SYSTEM/POKER_BOT_BANKROLL` account and performs the one-time idempotent `GENESIS -1,000,000` / `POKER_BOT_BANKROLL +1,000,000` allocation. Verify the account and seed transaction before enabling 500 CH bot funding; do not substitute `TREASURY` or edit balances directly.
+- Before deploying the runtime to Stage, WS Preview, or production, apply `supabase/migrations/20260810100000_poker_bot_bankroll.sql` to that environment. It creates the active `SYSTEM/POKER_BOT_BANKROLL` account and performs the one-time idempotent `GENESIS -1,000,000` / `POKER_BOT_BANKROLL +1,000,000` allocation. Verify the historical seed transaction and both exact active NORMAL/SLOW accounts before enabling a canonical tier. NORMAL 500 retains this account; other NORMAL keys are `POKER_BOT_BANKROLL_<buyIn>`, and SLOW keys are `POKER_BOT_SLOW_BANKROLL_<buyIn>`, as resolved by `getBotFundingSystemKeyForBuyIn`. Do not substitute `TREASURY` or edit balances directly.
 - Before production rollout, run a read-only preflight for every active table's `buy_in` + `stakes` pair. List the complete set with:
 
   ```sql
@@ -111,15 +111,15 @@ Operational notes:
   where profile_key = 'CONTINUOUS_BOT_DEFAULT';
   ```
 
-  It must be `1/2`. The configured catalog must include every active table `buy_in` and `100` CH while continuous tables use their fixed `100` CH buy-in; values must fit the PostgreSQL `integer` range and generate blinds no larger than `1,000,000` CH.
+  It must be `1/2`. The canonical catalog must include every active table `buy_in`; continuous tables use their fixed `100` CH buy-in; values must fit the PostgreSQL `integer` range and generate blinds no larger than `1,000,000` CH.
 - Roll out the Netlify and WS revisions together; run the non-default-tier smoke only after both revisions report the same release SHA.
 - Bot runtime is guarded by `POKER_BOTS_ENABLED`.
-- Initial humans and manual rebuys use the table's persisted `buy_in` value. Initial bot seed funding, replacement funding, and managed top-ups use the legacy configured source at `100` CH and the fixed bounded `POKER_BOT_BANKROLL` source at `500` CH; every other tier is human-only. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
+- Initial humans and manual rebuys use the table's persisted `buy_in` value. Initial bot seed funding, replacement funding and managed top-ups require an Enabled canonical tier and both exact active NORMAL/SLOW pools. The existing resolver selects only the resolved class/tier key; no higher canonical tier is inherently human-only. The retired `POKER_BOT_BUYIN_BB` setting is ignored so table stakes or bot-only configuration cannot make stacks diverge from the table buy-in.
 - Values above are Netlify runtime config env vars (not secrets unless explicitly sensitive).
 - Bot/gameplay orchestration runs server-side in WS runtime (no client-side bot scripts).
-- `100` CH bot replacement funding continues to use the existing configured source (default `TREASURY`); `500` CH replacement and managed top-up funding uses the fixed `POKER_BOT_BANKROLL` account seeded by the migration, with no automatic replenishment or `TREASURY` fallback. The separate managed-profile correction migration only restores `CONTINUOUS_BOT_DEFAULT` to canonical `1/2` blinds and preserves its other settings.
+- Demand refill uses the existing audited/idempotent DB primitive before legal seed/replacement/top-up funding demand, with the exact tier/class policy threshold, refill amount and hourly cap (NULL means unlimited). Disabled, unprovisioned or unknown funding fails closed; there is no cross-tier/class or `TREASURY` fallback. The separate managed-profile correction migration only restores `CONTINUOUS_BOT_DEFAULT` to canonical `1/2` blinds and preserves its other settings.
 - Replacement funding is an internal `SYSTEM -> ESCROW` transaction with `created_by = NULL` and closed bot/replacement metadata. It does not depend on `POKER_SYSTEM_ACTOR_USER_ID`. Terminal bot cash-out resolves the destination SYSTEM account from that actual funding provenance instead of using an actor identity or creating a USER account for the bot UUID.
-- A legacy-source replacement failure retains the existing bounded retry behavior. When the fixed `500` CH bankroll is exhausted, the runtime rolls back the funded candidate once, commits the same rollover without new bot funding when the engine can continue, and does not schedule a permanent retry loop. Monitor `ws_settled_rollover_persist_failed` and the bounded-bankroll fallback event for controlled failures.
+- Legacy callers without a class retain their existing bounded retry behavior. When an exact pool remains exhausted after demand refill, the runtime rolls back the funded candidate once, commits the same rollover without new bot funding when the engine can continue, and does not schedule a permanent retry loop. Monitor `ws_settled_rollover_persist_failed` and the bounded-bankroll fallback event for controlled failures.
 
 ### Local development
 
