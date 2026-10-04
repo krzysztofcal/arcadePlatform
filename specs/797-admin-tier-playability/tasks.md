@@ -17,5 +17,7 @@
 
 ## Handoff
 - [x] T008 Replace deployment ENV instructions and document breaking impacts.
-- [ ] T009 Run targeted fundamental tests and required CI; review whole diff, simplify and record all departures from #1038.
-- [ ] T010 Create draft PR/Netlify Preview; exact-SHA WS Preview deploy, verify metadata and focused Stage smoke through existing Admin live toggle; Stage rollout target only. No Production change/deploy/merge.
+- [x] T009 Run targeted fundamental tests and required CI; review whole diff, simplify and record all departures from #1038.
+- [x] T010 Create draft PR/Netlify Preview; exact-SHA WS Preview deploy, verify metadata and focused Stage smoke through existing Admin live toggle; Stage rollout target only. No Production change/deploy/merge.
+
+Evidence and departures: [review.md](review.md). Production rollout intentionally remains pending separate authorization.
