@@ -80,13 +80,7 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
   }
 
-  let tiers;
-  try {
-    tiers = resolvePokerBuyInTiers();
-  } catch (error) {
-    klog("poker_create_table_buy_in_config_invalid", { code: error?.code || "unknown_error" });
-    return { statusCode: 500, headers: mergeHeaders(cors), body: JSON.stringify({ error: "poker_buy_in_config_invalid" }) };
-  }
+  const tiers = resolvePokerBuyInTiers();
   if (!isConfiguredPokerBuyIn(buyIn, tiers)) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in_tier" }) };
   }

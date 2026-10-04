@@ -33,7 +33,7 @@ No active tier; missing schema; failed cache refresh; malformed policy; unknown/
 ## Requirements
 
 ### Functional Requirements
-- FR-001: Remove `POKER_MAX_PLAYABLE_BUY_IN` and its resolver/defaults as runtime/product gates.
+- FR-001: Remove `POKER_MAX_PLAYABLE_BUY_IN` and its resolver/defaults as runtime/product gates. Playability catalog comes only from `CANONICAL_POKER_BUY_IN_TIERS`; legacy `POKER_BUY_IN_TIERS_JSON` cannot narrow it or require ENV deployment for activation.
 - FR-002: Existing `public.poker_bot_tier_policy.enabled` is the sole operational tier activation gate, subject to exact pre-provisioned NORMAL/SLOW pools and existing bankroll/class rules.
 - FR-003: `shared/poker-domain/poker-progression.mjs` remains the single progression/admission engine; full catalog milestones stay visible, availability is highest enabled unlocked tier plus previous enabled unlocked tier.
 - FR-004: Create, JOIN, Quick Seat and table preflight must agree on activation; manual Create keeps #788's separation from bankroll JOIN requirements, but now requires an active operator tier.

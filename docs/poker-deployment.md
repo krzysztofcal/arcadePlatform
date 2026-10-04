@@ -50,7 +50,6 @@ Set these as Netlify environment variables (Site settings -> Environment variabl
 - `POKER_BOT_BANKROLL_SYSTEM_KEY` (legacy 100 CH source override; default: `TREASURY`; it never overrides the fixed 500 CH source `POKER_BOT_BANKROLL`)
 - The fixed 500 CH bot bankroll is seeded once by migration with `1,000,000 CH` from `GENESIS` and is never automatically replenished.
 - Optional later: `POKER_BOTS_MAX_ACTIONS_PER_POLL`
-- `POKER_BUY_IN_TIERS_JSON` (shared ordered buy-in tier catalog; omitted uses the built-in catalog)
 
 Operational notes:
 - Before deploying the runtime to Stage, WS Preview, or production, apply `supabase/migrations/20260810100000_poker_bot_bankroll.sql` to that environment. It creates the active `SYSTEM/POKER_BOT_BANKROLL` account and performs the one-time idempotent `GENESIS -1,000,000` / `POKER_BOT_BANKROLL +1,000,000` allocation. Verify the account and seed transaction before enabling 500 CH bot funding; do not substitute `TREASURY` or edit balances directly.
@@ -615,7 +614,7 @@ A shared stage database may contain a historical backlog. A recently active cont
 
 ### Live tier activation through Poker Admin
 
-`poker_bot_tier_policy.enabled` (Poker Admin → Enabled) is the single operational gate for both human playability and bot funding. There is no ENV frontier. Operators change activation live through the existing audited Admin policy endpoint, without a deploy or restart. A valid policy and both existing active SYSTEM accounts (the exact NORMAL/SLOW keys from `getBotFundingSystemKeyForBuyIn`; NORMAL 500 retains `POKER_BOT_BANKROLL`) are required; missing, disabled, invalid or expired evidence fails closed. Never provision pools or change balances directly to activate a tier.
+`poker_bot_tier_policy.enabled` (Poker Admin → Enabled) is the single operational gate for both human playability and bot funding. Playability uses only `CANONICAL_POKER_BUY_IN_TIERS` as its catalog; no ENV value can narrow it. Operators change activation live through the existing audited Admin policy endpoint, without a deploy or restart. A valid policy and both existing active SYSTEM accounts (the exact NORMAL/SLOW keys from `getBotFundingSystemKeyForBuyIn`; NORMAL 500 retains `POKER_BOT_BANKROLL`) are required; missing, disabled, invalid or expired evidence fails closed. Never provision pools or change balances directly to activate a tier.
 
 The Stage rollout target is 100, 500 and 1000 Enabled, with 5000+ Disabled. The Production target is the same, but applying it requires separate Production authorization. Preserve existing refill settings, caps, thresholds and access overrides when changing Enabled.
 
@@ -623,4 +622,4 @@ Bankroll thresholds still apply: 549 CH cannot unlock 500; 550 CH can; 1099 CH c
 
 Manual Create checks activation but keeps the #788 bankroll-independent creation contract. Fresh JOIN rechecks authoritative activation and bankroll; financed rejoin/resume remains legal after disabling a tier. WS reuses the existing 25-second policy refresh and 30-second expiry, including for tiers with no active table; funding does not query per hand. Unknown or expired snapshots deny funding, with no TREASURY or cross-tier/class fallback. No new schema, pool, scheduler or flag is required.
 
-**Breaking impact:** Enabled expands from a bot-funding gate to a shared playability + bot-funding gate. Disabled or unprovisioned tiers can no longer accept manual Create or fresh human JOIN. Deployments without the existing policy schema now fail closed for fresh admission and bot funding. The progression response replaces the former frontier field with `enabledBuyIns` and per-tier `enabled`; callers must use `availableBuyIns` for playable decisions.
+**Breaking impact:** Legacy ENV catalog overrides are ignored. Enabled expands from a bot-funding gate to a shared playability + bot-funding gate. Disabled or unprovisioned tiers can no longer accept manual Create or fresh human JOIN. Deployments without the existing policy schema now fail closed for fresh admission and bot funding. The progression response replaces the former frontier field with `enabledBuyIns` and per-tier `enabled`; callers must use `availableBuyIns` for playable decisions.

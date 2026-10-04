@@ -354,7 +354,7 @@ test("preview profile with desired count five creates canonical 100 CH tables", 
   assert.deepEqual(JSON.parse(tableInsertParams?.[0]), { sb: 1, bb: 2 });
 });
 
-test("reconcile rejects a buy-in catalog that cannot serve fixed 100 CH continuous tables", async () => {
+test("legacy catalog ENV cannot gate fixed canonical 100 CH continuous tables", async () => {
   let beginCalled = false;
   const repository = createContinuousBotTableRepository({
     env: {
@@ -364,15 +364,14 @@ test("reconcile rejects a buy-in catalog that cannot serve fixed 100 CH continuo
     },
     beginSql: async (run) => {
       beginCalled = true;
-      return run({ unsafe: async () => [] });
+      return run({ unsafe: async (sql) => sql.includes("to_regclass") ? [{ available: false }] : sql.includes("poker_managed_table_profiles") ? [{ ...PROFILE }] : [] });
     }
   });
 
   const result = await repository.reconcile();
 
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "poker_buy_in_tiers_config_invalid");
-  assert.equal(beginCalled, false);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(beginCalled, true);
 });
 
 test("requestRetirement persists a due rotation for the exact managed table", async () => {

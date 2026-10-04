@@ -199,7 +199,7 @@ test("fresh join locks the bankroll row before posting the table buy-in", async 
       buyIn,
       enabledBuyIns,
       progressionBalance: balance,
-      progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500,1000,5000]" },
+      progressionEnv: { POKER_BUY_IN_TIERS_JSON: "[100,500]" },
       postTransactionFn: async () => {
         events.push("postTransaction");
         return { ok: true };

@@ -3,11 +3,7 @@ import {
   calculateCanonicalPokerStakes,
   CANONICAL_POKER_BUY_IN_TIERS,
   DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
-  isCanonicalPokerBuyIn,
 } from "./table-economy.mjs";
-
-const BUY_IN_TIERS_ENV = "POKER_BUY_IN_TIERS_JSON";
-const POSTGRES_INTEGER_MAX = 2_147_483_647;
 
 export const DEFAULT_POKER_BUY_IN_TIERS = CANONICAL_POKER_BUY_IN_TIERS;
 
@@ -36,35 +32,8 @@ function normalizeBalance(value) {
   return balance;
 }
 
-export function resolvePokerBuyInTiers(env = process.env) {
-  const raw = env && Object.prototype.hasOwnProperty.call(env, BUY_IN_TIERS_ENV)
-    ? env[BUY_IN_TIERS_ENV]
-    : undefined;
-  if (raw === undefined) {
-    return [...DEFAULT_POKER_BUY_IN_TIERS];
-  }
-  if (typeof raw !== "string" || !raw.trim()) throw configError();
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw configError();
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) throw configError();
-  const tiers = parsed.map((value) => {
-    try {
-      const normalized = normalizePositiveSafeInteger(value, "poker_buy_in_tiers_config_invalid");
-      if (normalized > POSTGRES_INTEGER_MAX) throw configError();
-      if (!isCanonicalPokerBuyIn(normalized)) throw configError();
-      return normalized;
-    } catch {
-      throw configError();
-    }
-  });
-  const normalizedTiers = [...new Set(tiers)].sort((left, right) => left - right);
-  if (!normalizedTiers.includes(DEFAULT_CASH_TABLE_BUY_IN_CHIPS)) throw configError();
-  return normalizedTiers;
+export function resolvePokerBuyInTiers() {
+  return [...CANONICAL_POKER_BUY_IN_TIERS];
 }
 
 export function calculateUnlockBankroll(buyIn) {
@@ -146,8 +115,8 @@ limit 1${lockClause};
   return rows?.[0] ? normalizeBalance(rows[0].balance) : 0;
 }
 
-export async function readPokerProgression(tx, { userId, env = process.env, lock = false } = {}) {
-  const tiers = resolvePokerBuyInTiers(env);
+export async function readPokerProgression(tx, { userId, lock = false } = {}) {
+  const tiers = resolvePokerBuyInTiers();
   const tierPolicySnapshot = await readPokerTierPolicySnapshot(tx);
   const enabledBuyIns = resolvePokerEnabledBuyIns(tierPolicySnapshot, tiers);
   const balance = await readPokerBankroll(tx, { userId, lock });

@@ -21,3 +21,9 @@
 - [x] T010 Create draft PR/Netlify Preview; exact-SHA WS Preview deploy, verify metadata and focused Stage smoke through existing Admin live toggle; Stage rollout target only. No Production change/deploy/merge.
 
 Evidence and departures: [review.md](review.md). Production rollout intentionally remains pending separate authorization.
+
+## P1 review correction
+- [x] T011 Reproduce legacy [100,500] ENV blocking Enabled 1000 in existing reader/JOIN fundamental suites.
+- [x] T012 Make catalog canonical-only; remove obsolete ENV parsing/dead validation and deployment instruction.
+- [x] T013 Run targeted fundamental tests under legacy ENV, full suite and re-review the whole diff against #1038.
+- [ ] T014 Record new exact-SHA WS Preview deploy, narrow regression smoke and required CI; update existing draft PR only.

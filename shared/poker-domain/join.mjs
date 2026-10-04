@@ -924,7 +924,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         throw makeError("restricted_table_required");
       }
 
-      const tiers = resolvePokerBuyInTiers(env);
+      const tiers = resolvePokerBuyInTiers();
       const enabledBuyIns = resolvePokerEnabledBuyIns(joinAccess.tierPolicySnapshot, tiers);
       const bankroll = bankrollForAccess;
       const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers, enabledBuyIns });

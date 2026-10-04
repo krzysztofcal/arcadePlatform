@@ -13,7 +13,7 @@ PASS before research and after design: central domain engine, exact WS authority
 
 ## Project Structure and Changes
 1. `shared/poker-domain/bot-access.mjs`: add batched transaction-local `readPokerTierPolicySnapshot()` and fresh exact-pool activation predicate. Keep existing single-tier readers/normalizer for other consumers; unknown/missing schema produces no enabled tiers.
-2. `shared/poker-domain/poker-progression.mjs`: remove resolver/ceiling; accept `enabledBuyIns` in `evaluatePokerProgression()`/`evaluatePokerBuyInAccess()`. Select highest + previous enabled unlocked indexes; expose activation in roadmap and active buy-ins. `readPokerProgression()` loads/reuses the snapshot; no duplicate eligibility engine.
+2. `shared/poker-domain/poker-progression.mjs`: remove frontier resolver/ceiling and simplify `resolvePokerBuyInTiers()` to a canonical catalog copy with no ENV override; accept `enabledBuyIns` in `evaluatePokerProgression()`/`evaluatePokerBuyInAccess()`. Select highest + previous enabled unlocked indexes; expose activation in roadmap and active buy-ins. `readPokerProgression()` loads/reuses the snapshot; no duplicate eligibility engine.
 3. `shared/poker-domain/join.mjs`: replace its existing two requested-tier policy/provisioning reads in `resolveJoinAccess()` with the batched snapshot (same two data reads); retain selected policy/provisioning for existing bot seeding. Rejoin stays before new-play checks.
 4. `netlify/functions/poker-create-table.mjs`: operator activation check inside transaction before table creation; retain manual Create's bankroll independence.
 5. `netlify/functions/poker-quick-seat.mjs`: pass progression enabled tiers into existing shared access check; automatic creation remains `availableBuyIns[0]`. `netlify/functions/poker-progression.mjs` continues consuming availability and earlier rejoin path.
@@ -24,3 +24,6 @@ PASS before research and after design: central domain engine, exact WS authority
 
 ## Verification
 Extend existing progression, bot-access, JOIN, Create, Quick Seat, endpoint and table-manager snapshot suites. Run targeted fundamental tests, full required CI and Netlify Preview. Review complete diff against #1038. Deploy exact latest runtime SHA to WS Preview, verify RELEASE_SHA == DEPLOY_REF, smoke authenticated live 1000 disable/enable/disable plus bankroll boundary, then leave Stage at 100/500/1000 enabled and higher disabled through existing Admin API. No account provisioning/direct-balance edits. Production remains pending separate authorization. Draft PR only, no merge.
+
+## P1 review correction
+Remove only the remaining legacy ENV catalog gate, including dead catalog-validation branches in manual Create and continuous-table reconciliation. Extend existing reader/JOIN regressions with legacy [100,500]; run existing fundamental suites under that process ENV. No policy, class, funding/refill/cap or accounting changes. Re-review the whole issue diff, exact-SHA WS Preview deploy and narrow regression smoke; Production remains untouched.

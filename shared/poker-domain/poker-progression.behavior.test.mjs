@@ -82,33 +82,6 @@ test("the 100 CH tier unlocks at exactly 100 CH while higher tiers keep their bu
   assert.equal(atMinimum.tiers.find((tier) => tier.buyIn === 1_000)?.unlockBankroll, 1_100);
 });
 
-test("progression accepts a sorted deduplicated configured catalog and rejects invalid configuration", () => {
-  assert.deepEqual(resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[500, 100, 500]" }), [100, 500]);
-  assert.throws(
-    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[100, 1.5]" }),
-    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
-  );
-  assert.throws(
-    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[100, 125]" }),
-    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
-  );
-  assert.throws(
-    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[]" }),
-    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
-  );
-  assert.throws(
-    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[500, 1000]" }),
-    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
-  );
-  assert.throws(
-    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[100, 2147483648]" }),
-    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
-  );
-  assert.throws(
-    () => resolvePokerBuyInTiers({ POKER_BUY_IN_TIERS_JSON: "[100, 100000000]" }),
-    (error) => error?.code === "poker_buy_in_tiers_config_invalid"
-  );
-});
 
 test("authoritative bankroll reads can lock the account row for the join transaction", async () => {
   let query = "";
@@ -144,7 +117,7 @@ test("enabled tiers keep the highest playable tier uncapped and skip disabled fa
 });
 
 
-test("progression reader uses enabled provisioned policy and propagates the same access decision", async () => {
+test("legacy subset ENV cannot block Enabled 1000 or truncate the canonical roadmap", async () => {
   for (const enabled of [false, true]) {
     const result = await readPokerProgression({ unsafe: async (sql, params) => {
       if (sql.includes("to_regclass")) return [{ available: true }];
@@ -156,7 +129,7 @@ test("progression reader uses enabled provisioned policy and propagates the same
       if (sql.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
       if (sql.includes("select balance")) return [{ balance: 1_000_000 }];
       throw new Error("unexpected query");
-    } }, { userId: "wealthy", env: {} });
+    } }, { userId: "wealthy", env: { POKER_BUY_IN_TIERS_JSON: "[100,500]" } });
     assert.deepEqual(result.availableBuyIns, enabled ? [1000, 500] : [500, 100]);
     assert.deepEqual(result.enabledBuyIns, enabled ? [100, 500, 1000] : [100, 500]);
     assert.equal(result.tiers.length, 11);
