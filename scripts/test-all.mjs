@@ -154,8 +154,6 @@ run("node", ["tests/i18n.behavior.test.mjs"], "i18n-behavior");
 run("node", ["tests/static-html.behavior.test.mjs"], "static-html-behavior");
 run("node", ["tests/csp-inline-hashes.behavior.test.mjs"], "csp-inline-hashes-behavior");
 run("node", ["tests/test-all.runner-registration.guard.test.mjs"], "test-all-runner-registration-guard");
-run("node", ["--test", "ws-tests/vps-maintenance.behavior.test.mjs"], "vps-maintenance-behavior");
-run("node", ["--test", "ws-tests/vps-maintenance.installation.guard.test.mjs"], "vps-maintenance-installation-guard");
 run("node", ["tests/poker-runtime-docs.behavior.test.mjs"], "poker-runtime-docs-behavior");
 run("node", ["tests/poker-http-retired-contract.guard.test.mjs"], "poker-http-retired-contract-guard");
 run("node", ["tests/poker-get-table-retired-implementation.guard.test.mjs"], "poker-get-table-retired-implementation-guard");
@@ -168,7 +166,6 @@ run("node", ["tests/db-stage-workflows.guard.test.mjs"], "db-stage-workflows-gua
 run("node", ["tests/chips-economy-reset-cli.contract.test.mjs"], "chips-economy-reset-cli-contract");
 run("node", ["tests/ch-economy-network-maintenance.behavior.test.mjs"], "ch-economy-network-maintenance-behavior");
 
-try { run("npm", ["run", "-s", "lint:games"], "unit"); } catch { /* optional */ }
 
 if (has("CLI")) {
   try { run("npm", ["run", "-s", "test:cli"], "cli"); } catch { console.warn("⚠ no test:cli"); }

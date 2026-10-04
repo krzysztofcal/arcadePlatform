@@ -2,14 +2,8 @@ name: Infra VPS
 
 on:
   pull_request:
-    paths:
-      - "infra/vps/**"
-      - ".github/workflows/infra-vps.yml"
   push:
-    branches:
-      - "main"
-    paths:
-      - "infra/vps/Caddyfile"
+    branches: [ main ]
   workflow_dispatch:
 
 concurrency:
@@ -17,14 +11,55 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  impact:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      core: ${{ steps.paths.outputs.core }}
+      web: ${{ steps.paths.outputs.web }}
+      chips_db: ${{ steps.paths.outputs.chips_db }}
+      ws_poker: ${{ steps.paths.outputs.ws_poker }}
+      games: ${{ steps.paths.outputs.games }}
+      infra: ${{ steps.paths.outputs.infra }}
+      deploy_ws: ${{ steps.paths.outputs.deploy_ws }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Classify changed paths
+        id: paths
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci-impact.mjs --github-output "$GITHUB_OUTPUT"
+
   validate:
-    if: github.event_name == 'pull_request'
+    needs: impact
+    if: ${{ needs.impact.outputs.infra == 'true' }}
+    outputs:
+      caddy: ${{ steps.caddy.outputs.changed }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect existing Caddy deploy surface
+        id: caddy
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          changed=false
+          if [ "${GITHUB_EVENT_NAME}" = push ] && git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- infra/vps/Caddyfile | grep -q .; then
+            changed=true
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -38,8 +73,29 @@ jobs:
           node --test ws-tests/vps-maintenance.behavior.test.mjs
           node --test ws-tests/vps-maintenance.installation.guard.test.mjs
 
+      - name: Run infra VPS workflow guard test
+        run: node --test ws-tests/infra-vps-workflow.guard.test.mjs
+
+      - name: Run infra VPS Caddy guard test
+        run: node --test ws-tests/infra-vps-caddy.guard.test.mjs
+
+      - name: Run infra VPS smoke-check structure behavior test
+        run: node --test ws-tests/infra-vps-workflow.smokecheck-structure.behavior.test.mjs
+
+      - name: Run infra VPS WS smoke-check deps guard test
+        run: node --test ws-tests/infra-vps-workflow.ws-smokecheck-deps.guard.test.mjs
+
+      - name: Run infra VPS concurrency guard test
+        run: node --test ws-tests/infra-vps-workflow.concurrency.guard.test.mjs
+
+      - name: Run infra VPS bash exit propagation guard test
+        run: node --test ws-tests/infra-vps-workflow.bash-exit-propagation.guard.test.mjs
+
+
+
   apply:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.validate.outputs.caddy == 'true')
     runs-on: ubuntu-latest
     env:
       INFRA_REMOTE_TMP_DIR: /tmp/arcadeplatform-infra-${{ github.run_id }}-${{ github.run_attempt }}

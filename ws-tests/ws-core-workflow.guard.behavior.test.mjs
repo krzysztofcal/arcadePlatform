@@ -16,15 +16,15 @@ test("PR workflow includes WS core behavior test command", () => {
 });
 
 test("deploy workflow includes WS core behavior test command", () => {
-  const text = workflowText(".github/workflows/ws-deploy.yml");
+  const text = workflowText(".github/workflows/ws-server-deploy.yml");
   assert.ok(text.includes(CORE_TEST_COMMAND));
 });
 
 test("workflow ordering runs server behavior, then core behavior, before deploy workflow guards", () => {
   const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
-  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-server-deploy.yml");
 
-  for (const text of [prWorkflow, deployWorkflow]) {
+  for (const text of [deployWorkflow]) {
     const serverIndex = text.indexOf(SERVER_TEST_COMMAND);
     const coreIndex = text.indexOf(CORE_TEST_COMMAND);
     const deployGuardIndex = text.indexOf(DEPLOY_WORKFLOW_GUARD_COMMAND);

@@ -16,7 +16,7 @@ function leadingSpaces(line) {
 }
 
 function stepsBlock(text) {
-  const normalized = normalizeNewlines(text);
+  const normalized = normalizeNewlines(text).slice(normalizeNewlines(text).indexOf("  ws-harness:"));
   const lines = normalized.split("\n");
 
   const stepsLineIndex = lines.findIndex((line) => /^\s*steps:\s*(#.*)?$/.test(line));
@@ -103,7 +103,7 @@ function assertRequiredOrder(text) {
   assert.notEqual(joinRuntimeBehavior, -1);
   assert.notEqual(dockerBuildContract, -1);
   assert.notEqual(behavior, -1);
-  assert.notEqual(infraVpcCaddyGuard, -1);
+  assert.equal(infraVpcCaddyGuard, -1);
   assert.notEqual(imageCheck, -1);
   assert.notEqual(containerCheck, -1);
   assert.equal(install < runtimeDepsGuard, true);
@@ -113,21 +113,16 @@ function assertRequiredOrder(text) {
   assert.equal(pokerV2Live < joinRuntimeBehavior, true);
   assert.equal(joinRuntimeBehavior < dockerBuildContract, true);
   assert.equal(dockerBuildContract < behavior, true);
-  assert.equal(behavior < infraVpcCaddyGuard, true);
-  assert.equal(infraVpcCaddyGuard < imageCheck, true);
+  assert.equal(behavior < imageCheck, true);
   assert.equal(imageCheck < containerCheck, true);
 }
 
-test("ws pr workflow is pull_request-only with ws-related path filters", () => {
+test("ws pr workflow is pull_request-only with classifier routing", () => {
   const text = workflowText();
   assert.match(text, /on:\s*\n\s*pull_request:/);
-  assert.match(text, /paths:\s*\n\s*-\s*"ws-server\/\*\*"/);
-  assert.match(text, /"ws-tests\/\*\*"/);
-  assert.match(text, /"shared\/\*\*"/);
-  assert.match(text, /"infra\/vps\/\*\*"/);
-  assert.match(text, /"docs\/poker-deployment\.md"/);
-  assert.match(text, /"\.github\/workflows\/infra-vps\.yml"/);
-  assert.doesNotMatch(text, /push:/);
+  assert.match(text, /needs\.impact\.outputs\.ws_poker == 'true'/);
+  assert.match(text, /scripts\/ci-impact\.mjs/);
+  assert.doesNotMatch(text, /push:|paths:/);
 });
 
 test("ws pr workflow runs required harness checks in expected order", () => {
@@ -202,6 +197,6 @@ test("ws pr workflow runs ws-server deploy harness tests", () => {
   assert.match(text, /node --test ws-tests\/ws-join-runtime\.behavior\.test\.mjs/);
   assert.match(text, /WS reconnect\/resync regression tests/);
   assert.match(text, /node --test ws-server\/poker\/reconnect\/resync\.behavior\.test\.mjs/);
-  assert.match(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
-  assert.match(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test ws-tests\/ws-server-deploy-artifact-path\.test\.mjs/);
+  assert.doesNotMatch(text, /node --test ws-tests\/ws-server-deploy-rollout\.test\.mjs/);
 });

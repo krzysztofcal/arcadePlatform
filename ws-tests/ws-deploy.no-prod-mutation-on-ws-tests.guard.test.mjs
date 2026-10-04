@@ -1,25 +1,10 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import fs from "node:fs";
-
-function workflowText() {
-  return fs.readFileSync(".github/workflows/ws-deploy.yml", "utf8");
-}
-
-function pushBlock(text) {
-  const match = text.match(/on:\n[\s\S]*?push:\n([\s\S]*?)\n\w/);
-  return match ? match[1] : "";
-}
-
-test("ws-deploy never contains production mutation steps", () => {
-  const text = workflowText();
-  const push = pushBlock(text);
-
-  assert.match(push, /"ws-tests\/\*\*"/);
-  assert.match(push, /"ws-server\/\*\*"/);
-
-  assert.doesNotMatch(text, /docker\/login-action@/);
-  assert.doesNotMatch(text, /docker\/build-push-action@/);
-  assert.doesNotMatch(text, /appleboy\/ssh-action@/);
-  assert.doesNotMatch(text, /appleboy\/scp-action@/);
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { classifyCiImpact } from '../scripts/ci-impact.mjs';
+test('WS contract tests do not authorize Production mutation', () => {
+  for (const path of ['ws-tests/ws-join-runtime.behavior.test.mjs', 'tests/poker-ws-client.test.mjs', 'docs/ws-poker-protocol.md']) {
+    const impact = classifyCiImpact([path]);
+    assert.equal(impact.ws_poker, true);
+    assert.equal(impact.deploy_ws, false);
+  }
 });

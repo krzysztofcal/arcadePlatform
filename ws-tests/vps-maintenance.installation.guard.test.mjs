@@ -83,17 +83,13 @@ test('recovery documentation requires a read-only owner review before separately
   assert.match(documentation, /\.env.*active services.*outside the cleanup boundary/is);
 });
 
-test('all relevant validation entry points run both maintenance tests', () => {
-  const registrations = [
-    'scripts/test-all.mjs',
-    '.github/workflows/infra-vps.yml',
-    '.github/workflows/ws-pr-checks.yml',
-    '.github/workflows/ws-deploy.yml',
-    '.github/workflows/ws-server-deploy.yml',
-  ].map((file) => read(file));
-
-  for (const source of registrations) {
-    assert.match(source, /ws-tests\/vps-maintenance\.behavior\.test\.mjs/);
-    assert.match(source, /ws-tests\/vps-maintenance\.installation\.guard\.test\.mjs/);
+test('infra owns maintenance validation once per workflow event', () => {
+  const infra = read('.github/workflows/infra-vps.yml');
+  for (const name of ['behavior', 'installation.guard']) {
+    const command = `node --test ws-tests/vps-maintenance.${name}.test.mjs`;
+    assert.equal(infra.split(command).length - 1, 1);
+    for (const file of ['scripts/test-all.mjs', '.github/workflows/ws-pr-checks.yml', '.github/workflows/ws-server-deploy.yml']) {
+      assert.equal(read(file).includes(`ws-tests/vps-maintenance.${name}.test.mjs`), false, file);
+    }
   }
 });

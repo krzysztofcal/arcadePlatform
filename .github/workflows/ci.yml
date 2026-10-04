@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   actionlint:
     name: actionlint
@@ -18,42 +21,45 @@ jobs:
         with:
           args: -color -shellcheck= -pyflakes=
 
+  impact:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      core: ${{ steps.paths.outputs.core }}
+      web: ${{ steps.paths.outputs.web }}
+      chips_db: ${{ steps.paths.outputs.chips_db }}
+      ws_poker: ${{ steps.paths.outputs.ws_poker }}
+      games: ${{ steps.paths.outputs.games }}
+      infra: ${{ steps.paths.outputs.infra }}
+      deploy_ws: ${{ steps.paths.outputs.deploy_ws }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Classify changed paths
+        id: paths
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci-impact.mjs --github-output "$GITHUB_OUTPUT"
+
   verify:
+    needs: impact
+    if: ${{ needs.impact.outputs.web == 'true' || needs.impact.outputs.games == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
-      - name: Detect Playwright-relevant changes
-        id: playwright_changes
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
-          git diff --name-only --no-renames "$PR_BASE_SHA" "$GITHUB_SHA" \
-            | node scripts/should-run-playwright.mjs --github-output "$GITHUB_OUTPUT"
       - name: Structural guards
         run: npm run ci:guards
-      - name: Install dependencies
-        run: npm ci || npm i
-      - name: Install Playwright Browsers
-        if: ${{ github.event_name != 'pull_request' || steps.playwright_changes.outputs.required == 'true' }}
-        run: npx playwright install --with-deps chromium
-      - name: Unit checks
-        run: npm run test:unit
-      - name: Playwright E2E tests
-        if: ${{ github.event_name != 'pull_request' || steps.playwright_changes.outputs.required == 'true' }}
-        run: npm run test:e2e
-        env:
-          PLAYWRIGHT: 1
-          PLAYWRIGHT_BROWSER: chromium
 
   chips-integration:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CHIPS_INTEGRATION_ENABLED == '1' }}
-    needs: verify
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CHIPS_INTEGRATION_ENABLED == '1' && needs.impact.outputs.chips_db == 'true' }}
+    needs: impact
     runs-on: ubuntu-latest
     steps:
       - name: Chips integration preflight (skip if secrets missing)

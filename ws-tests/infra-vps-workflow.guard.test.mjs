@@ -23,42 +23,16 @@ function remoteBash(text) {
   return text.slice(start, end);
 }
 
-test("infra VPS path filters keep PR validation broad and production apply narrow", () => {
+test("infra routes validation conservatively while retaining the Caddy-only push apply surface", () => {
   const text = workflowText();
-  const prStart = text.indexOf("  pull_request:");
-  const pushStart = text.indexOf("  push:");
-  const dispatchStart = text.indexOf("  workflow_dispatch:");
-
-  assert.notEqual(prStart, -1);
-  assert.notEqual(pushStart, -1);
-  assert.notEqual(dispatchStart, -1);
-
-  const prPaths = text.slice(prStart, pushStart);
-  const pushPaths = text.slice(pushStart, dispatchStart);
-
-  function pathEntries(section) {
-    const lines = section.split("\n");
-    const pathsIndex = lines.findIndex((line) => line.trim() === "paths:");
-    assert.notEqual(pathsIndex, -1);
-    const entries = [];
-    for (const line of lines.slice(pathsIndex + 1)) {
-      const match = line.match(/^\s+- "([^"]+)"$/);
-      if (!match) break;
-      entries.push(match[1]);
-    }
-    return entries;
-  }
-
-  assert.deepEqual(pathEntries(prPaths), ["infra/vps/**", ".github/workflows/infra-vps.yml"]);
-  assert.deepEqual(pathEntries(pushPaths), ["infra/vps/Caddyfile"]);
+  assert.match(text, /needs\.impact\.outputs\.infra == 'true'/);
+  assert.match(text, /git diff --name-only "\$BEFORE_SHA" "\$GITHUB_SHA" -- infra\/vps\/Caddyfile/);
+  assert.match(text, /apply:\n    needs: validate/);
+  assert.match(text, /needs\.validate\.outputs\.caddy == 'true'/);
 });
 
-test("infra VPS guard coverage includes the unified Caddy contract test", () => {
-  const prWorkflow = fs.readFileSync(".github/workflows/ws-pr-checks.yml", "utf8");
-  assert.ok(prWorkflow.includes('"infra/vps/**"'));
-  assert.ok(prWorkflow.includes('"docs/poker-deployment.md"'));
-  assert.ok(prWorkflow.includes('".github/workflows/infra-vps.yml"'));
-  assert.ok(prWorkflow.includes("node --test ws-tests/infra-vps-caddy.guard.test.mjs"));
+test("infra VPS owns the unified Caddy contract test", () => {
+  assert.ok(workflowText().includes("node --test ws-tests/infra-vps-caddy.guard.test.mjs"));
 });
 
 test("infra VPS workflow keeps contents: read permissions", () => {
