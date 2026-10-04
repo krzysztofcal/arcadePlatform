@@ -508,7 +508,7 @@ function applyAuthoritativeSeatRowsToState(state, { tableId, seatEntries = [], f
   };
 }
 
-const LIVE_JOIN_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"]);
+const LIVE_JOIN_PHASES = new Set(["POSTING_BLINDS", "PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN", "SETTLED"]);
 
 function joinStatusForState(state, userId) {
   return state?.waitingForNextHandByUserId?.[userId] === true ? "WAITING_NEXT_HAND" : "ACTIVE";
