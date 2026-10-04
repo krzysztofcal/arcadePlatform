@@ -282,7 +282,7 @@ On WS process bootstrap or authoritative table restore, an active table restored
   - verify a CAS/version conflict makes zero ledger calls;
   - verify replay of the same table/version/seat is already applied or rejected without a second funding transaction;
   - recreate writer/manager instances over the same committed harness state to simulate process restart, then verify restored advanced state prevents replacement retry from funding again.
-- `scripts/test-all.mjs`, `.github/workflows/ws-pr-checks.yml`, and `.github/workflows/ws-deploy.yml`
+- `scripts/test-all.mjs`, `.github/workflows/ws-pr-checks.yml`, and `.github/workflows/ws-server-deploy.yml`
   - register the existing persisted-state-writer suite alongside the already registered rollover and table-manager suites so these invariants run locally, on PRs, and before WS deployment;
   - do not add a database service, Playwright scenario, broad poker suite, or new test framework.
 

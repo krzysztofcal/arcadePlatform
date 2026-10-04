@@ -1,108 +1,122 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { shouldRunPlaywrightForPaths } from '../scripts/should-run-playwright.mjs';
+import { classifyCiImpact, normalizePath } from '../scripts/ci-impact.mjs';
 
-const ciSrc = fs.readFileSync('.github/workflows/ci.yml', 'utf8');
-const testsSrc = fs.readFileSync('.github/workflows/tests.yml', 'utf8');
-const matrixSrc = fs.readFileSync('.github/workflows/playwright-matrix.yml', 'utf8');
+const read = name => fs.readFileSync(`.github/workflows/${name}.yml`, 'utf8');
+const domains = ['core', 'web', 'chips_db', 'ws_poker', 'games', 'infra'];
 
-test('workflow policy keeps playwright install --with-deps', () => {
-  assert.match(ciSrc, /playwright install --with-deps/);
-  assert.match(testsSrc, /playwright install --with-deps/);
-  assert.match(matrixSrc, /playwright install --with-deps/);
+test('representative changes select only their owned domains', () => {
+  const cases = [
+    ['docs/ci.md', []], ['README.md', []],
+    ['supabase/migrations/fixture.sql', ['chips_db']],
+    ['tests/chips/fixture.test.mjs', ['chips_db']],
+    ['tests/chips-economy-reset-cli.contract.test.mjs', ['core', 'chips_db']],
+    ['games-open/mines/index.html', ['core', 'web', 'games']],
+    ['scripts/ops/chips-ledger-stage-automation.mjs', ['chips_db']],
+    ['js/consent.js', ['core', 'web']],
+    ['tests/e2e/consent-footer.spec.js', ['web']],
+    ['js/games.json', ['games']],
+    ['ws-server/poker/handlers/join.mjs', ['core', 'ws_poker']],
+    ['tests/poker-ws-client.test.mjs', ['core', 'web', 'ws_poker']],
+    ['tests/poker-v2-live.behavior.test.mjs', ['core', 'web', 'ws_poker']],
+    ['infra/vps/Caddyfile', ['infra']],
+    ['ws-tests/vps-maintenance.behavior.test.mjs', ['infra']],
+    ['ws-tests/fixtures/vps-maintenance-function-driver.sh', ['infra']],
+    ['docs/vps-disaster-recovery.md', ['infra']],
+    ['docs/vps-disaster-recovery-inventory.md', ['infra']],
+    ['docs/poker-deployment.md', ['core', 'ws_poker']],
+  ];
+  for (const [path, expected] of cases) {
+    const result = classifyCiImpact([path]);
+    assert.deepEqual(domains.filter(d => result[d]), expected, path);
+  }
+  assert.equal(normalizePath(' ./js\\consent.js '), 'js/consent.js');
 });
 
-test('tests job gates only Playwright steps on PR paths', () => {
-  const detectionStep = testsSrc.match(
-    /- name: Detect Playwright-relevant changes[\s\S]*?(?=\n\s+- name:)/,
-  )?.[0] || '';
-  assert.match(detectionStep, /id: playwright_changes/);
-  assert.match(detectionStep, /github\.event_name == 'pull_request'/);
-  assert.match(detectionStep, /git fetch --no-tags --depth=1 origin "\$PR_BASE_SHA"/);
-  assert.match(detectionStep, /git diff --name-only --no-renames "\$PR_BASE_SHA" "\$GITHUB_SHA"/);
-  assert.match(detectionStep, /node scripts\/should-run-playwright\.mjs --github-output "\$GITHUB_OUTPUT"/);
-
-  const browserStep = (name) => testsSrc.match(
-    new RegExp(`- name: ${name}[\\s\\S]*?(?=\\n\\s+- name:|\\s*$)`),
-  )?.[0] || '';
-  for (const step of [
-    browserStep('Install Playwright Browsers'),
-    browserStep('Run Playwright tests'),
-  ]) {
-    assert.match(step, /github\.event_name != 'pull_request'/);
-    assert.match(step, /steps\.playwright_changes\.outputs\.required == 'true'/);
+test('empty, unknown, shared and CI inputs fail safe; unions retain all affected domains', () => {
+  for (const paths of [[], ['unexpected/new.file'], ['shared/profile-avatar-projection.mjs'],
+    ['netlify/functions/_shared/xp-identity.mjs'],
+    ['package.json'], ['package-lock.json'], ['scripts/test-all.mjs'],
+    ['scripts/ci-impact.mjs'], ['.github/workflows/tests.yml']]) {
+    const result = classifyCiImpact(paths);
+    assert.ok(domains.every(d => result[d]), JSON.stringify(paths));
   }
-
-  const testsJobStart = testsSrc.indexOf('\n  tests:\n');
-  assert.ok(testsJobStart >= 0, 'tests job must exist');
-  const testsJobHeader = testsSrc.slice(testsJobStart, testsJobStart + 120);
-  assert.doesNotMatch(testsJobHeader, /\n    if:/, 'tests job must not be path-skipped');
-  for (const name of [
-    'Native JSONB integration test',
-    'Action-history cleanup PostgreSQL integration test',
-    'Closed-table cleanup PostgreSQL integration test',
-    'Validate games catalog',
-  ]) {
-    const step = browserStep(name);
-    assert.ok(step, `integration step must exist: ${name}`);
-    assert.doesNotMatch(step, /\n\s+if:/, `${name} must remain unconditional`);
-  }
+  assert.equal(classifyCiImpact(['docs/notes.md', 'js/consent.js']).web, true);
 });
 
-test('CI verify gates browser work without skipping structural or unit checks', () => {
-  const detectionStep = ciSrc.match(
-    /- name: Detect Playwright-relevant changes[\s\S]*?(?=\n\s+- name:)/,
-  )?.[0] || '';
-  assert.match(detectionStep, /id: playwright_changes/);
-  assert.match(detectionStep, /github\.event_name == 'pull_request'/);
-  assert.match(detectionStep, /git diff --name-only --no-renames "\$PR_BASE_SHA" "\$GITHUB_SHA"/);
-  assert.match(detectionStep, /node scripts\/should-run-playwright\.mjs --github-output "\$GITHUB_OUTPUT"/);
-
-  for (const name of ['Install Playwright Browsers', 'Playwright E2E tests']) {
-    const step = ciSrc.match(
-      new RegExp(`- name: ${name}[\\s\\S]*?(?=\\n\\s+- name:|\\s*$)`),
-    )?.[0] || '';
-    assert.match(step, /github\.event_name != 'pull_request'/);
-    assert.match(step, /steps\.playwright_changes\.outputs\.required == 'true'/);
-  }
-
-  for (const name of ['Structural guards', 'Unit checks']) {
-    const step = ciSrc.match(
-      new RegExp(`- name: ${name}[\\s\\S]*?(?=\\n\\s+- name:|\\s*$)`),
-    )?.[0] || '';
-    assert.ok(step, `CI step must exist: ${name}`);
-    assert.doesNotMatch(step, /\n\s+if:/, `${name} must remain unconditional`);
-  }
-  const verifyStart = ciSrc.indexOf('\n  verify:\n');
-  assert.ok(verifyStart >= 0, 'CI verify job must exist');
-  assert.doesNotMatch(ciSrc.slice(verifyStart, verifyStart + 100), /\n    if:/, 'CI verify job must not be path-skipped');
+test('generic Chromium has one owner and never reruns the core harness', () => {
+  const ci = read('ci');
+  const tests = read('tests');
+  assert.doesNotMatch(ci, /playwright install|npm run test:e2e|npm run test:unit/);
+  assert.match(tests, /playwright install --with-deps chromium/);
+  assert.equal((tests.match(/run: npm run test:e2e/g) || []).length, 1);
+  assert.equal((tests.match(/run: npm test\n/g) || []).length, 1);
+  assert.doesNotMatch(tests, /PLAYWRIGHT=1 npm test/);
+  assert.match(tests, /needs\.impact\.outputs\.web == 'true'/);
+  assert.match(read('playwright-matrix'), /playwright install --with-deps/);
 });
 
-test('Playwright path policy fails safe for web/E2E changes and skips non-web-only changes', () => {
-  assert.equal(shouldRunPlaywrightForPaths([]), true, 'unknown/empty diff must retain browser coverage');
-  assert.equal(shouldRunPlaywrightForPaths([
-    '.github/workflows/tests.yml',
-    'scripts/ops/chips-ledger-stage-automation.mjs',
-    'tests/chips/chips-ledger-stage-cleanup-orchestration.test.mjs',
-    'docs/ci-notes.md',
-  ]), false);
-  assert.equal(shouldRunPlaywrightForPaths(['docs/fixture.html']), false);
-  assert.equal(shouldRunPlaywrightForPaths(['README.md']), true, 'unknown paths must retain browser coverage');
+test('actionlint keeps its universal PR context and mutation workflow validation stays independent', () => {
+  const ci = read('ci');
+  assert.match(ci, /on:\n  pull_request:\n/);
+  assert.match(ci, /actionlint:\n    name: actionlint\n    if: \$\{\{ github.event_name == 'pull_request' \}\}/);
+  assert.match(read('db-stage-apply-pr'), /node scripts\/check-db-migrations.mjs/);
+});
 
-  for (const path of [
-    'index.html',
-    'js/ui/favorite-button.js',
-    'poker/table-v2.html',
-    'netlify/functions/poker-get-table.mjs',
-    'ws-server/poker/handlers/join.mjs',
-    'tests/e2e-ui.spec.ts',
-    'playwright.config.ts',
-    'playwright.config.mjs',
-    'package.json',
-    'package-lock.json',
-    'src/components/Button.tsx',
-  ]) {
-    assert.equal(shouldRunPlaywrightForPaths([path]), true, `web/E2E path must run Playwright: ${path}`);
+test('test-only WS changes validate without enabling Production deployment', () => {
+  for (const path of ['ws-tests/ws-lockfile-integrity.test.mjs', 'tests/poker-ws-client.test.mjs']) {
+    const result = classifyCiImpact([path]);
+    assert.equal(result.ws_poker, true);
+    assert.equal(result.deploy_ws, false);
   }
+  assert.equal(classifyCiImpact(['ws-server/server.mjs']).deploy_ws, true);
+  assert.equal(classifyCiImpact(['shared/profile-avatar-projection.mjs']).deploy_ws, true);
+  assert.equal(classifyCiImpact(['.github/workflows/ws-server-deploy.yml']).deploy_ws, true);
+  assert.equal(classifyCiImpact([]).deploy_ws, false);
+});
+
+test('classifier CLI uses explicit PR/push ranges and fails safe on a missing range/manual event', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const directory = fs.mkdtempSync(path.join(tmpdir(), 'ci-impact-'));
+  const script = path.resolve('scripts/ci-impact.mjs');
+  const git = args => {
+    const r = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  try {
+    git(['init', '-q']);
+    git(['config', 'user.name', 'CI fixture']);
+    git(['config', 'user.email', 'fixture@example.test']);
+    fs.writeFileSync(path.join(directory, 'README.md'), 'baseline');
+    git(['add', '.']); git(['commit', '-qm', 'base']);
+    const base = git(['rev-parse', 'HEAD']);
+    fs.mkdirSync(path.join(directory, 'docs'));
+    fs.writeFileSync(path.join(directory, 'docs', 'notes.md'), 'docs');
+    git(['add', '.']); git(['commit', '-qm', 'docs']);
+    const head = git(['rev-parse', 'HEAD']);
+    for (const event of ['pull_request', 'push', 'workflow_dispatch']) {
+      const output = path.join(directory, `${event}.out`);
+      const r = spawnSync(process.execPath, [script, '--github-output', output], {
+        cwd: directory, encoding: 'utf8',
+        env: { ...process.env, GITHUB_EVENT_NAME: event, CI_BASE_SHA: base, CI_HEAD_SHA: head },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      const result = Object.fromEntries(fs.readFileSync(output, 'utf8').trim().split('\n').map(l => l.split('=')));
+      assert.ok(domains.every(d => result[d] === (event === 'workflow_dispatch' ? 'true' : 'false')));
+      assert.equal(result.deploy_ws, event === 'workflow_dispatch' ? 'true' : 'false');
+    }
+    const output = path.join(directory, 'missing.out');
+    const r = spawnSync(process.execPath, [script, '--github-output', output], {
+      cwd: directory, encoding: 'utf8',
+      env: { ...process.env, GITHUB_EVENT_NAME: 'push', CI_BASE_SHA: 'missing', CI_HEAD_SHA: head },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const text = fs.readFileSync(output, 'utf8');
+    for (const d of domains) assert.ok(text.includes(`${d}=true\n`));
+    assert.match(text, /deploy_ws=false/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

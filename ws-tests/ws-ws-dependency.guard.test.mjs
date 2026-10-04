@@ -358,13 +358,9 @@ test("ws dependency guard detects forbidden bridge import", async () => {
 });
 
 
-test("workflow trigger boundary includes shared join and netlify helper surfaces", () => {
-  const prWorkflow = fs.readFileSync(".github/workflows/ws-pr-checks.yml", "utf8");
-  const deployWorkflow = fs.readFileSync(".github/workflows/ws-deploy.yml", "utf8");
-
-  for (const text of [prWorkflow, deployWorkflow]) {
-    assert.match(text, /"shared\/\*\*"/);
-    assert.match(text, /"netlify\/functions\/_shared\/\*\*"/);
-    assert.match(text, /"docs\/ws-poker-protocol\.md"/);
+test("workflow routing covers shared join and netlify helper surfaces", async () => {
+  const { classifyCiImpact } = await import('../scripts/ci-impact.mjs');
+  for (const path of ['shared/poker-domain/join.mjs', 'netlify/functions/_shared/chips-ledger.mjs', 'docs/ws-poker-protocol.md']) {
+    assert.equal(classifyCiImpact([path]).ws_poker, true, path);
   }
 });

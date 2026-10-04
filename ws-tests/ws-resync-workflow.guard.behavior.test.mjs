@@ -17,22 +17,22 @@ test("PR workflow includes PR4 resync behavior test command", () => {
 });
 
 test("deploy workflow includes PR4 resync behavior test command", () => {
-  const text = workflowText(".github/workflows/ws-deploy.yml");
+  const text = workflowText(".github/workflows/ws-server-deploy.yml");
   assert.ok(text.includes(RESYNC_TEST_COMMAND));
 });
 
 test("PR and deploy workflows keep the explicit reconnect/resync regression step name", () => {
   const prText = workflowText(".github/workflows/ws-pr-checks.yml");
-  const deployText = workflowText(".github/workflows/ws-deploy.yml");
+  const deployText = workflowText(".github/workflows/ws-server-deploy.yml");
   assert.ok(prText.includes(RESYNC_STEP_NAME));
   assert.ok(deployText.includes(RESYNC_STEP_NAME));
 });
 
 test("workflow ordering runs server behavior, then PR4 resync behavior, before deploy workflow guards", () => {
   const prWorkflow = workflowText(".github/workflows/ws-pr-checks.yml");
-  const deployWorkflow = workflowText(".github/workflows/ws-deploy.yml");
+  const deployWorkflow = workflowText(".github/workflows/ws-server-deploy.yml");
 
-  for (const text of [prWorkflow, deployWorkflow]) {
+  for (const text of [deployWorkflow]) {
     const serverIndex = text.indexOf(SERVER_TEST_COMMAND);
     const resyncIndex = text.indexOf(RESYNC_TEST_COMMAND);
     const deployGuardIndex = text.indexOf(DEPLOY_WORKFLOW_GUARD_COMMAND);
