@@ -7,7 +7,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  impact:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      core: ${{ steps.paths.outputs.core }}
+      web: ${{ steps.paths.outputs.web }}
+      chips_db: ${{ steps.paths.outputs.chips_db }}
+      ws_poker: ${{ steps.paths.outputs.ws_poker }}
+      games: ${{ steps.paths.outputs.games }}
+      infra: ${{ steps.paths.outputs.infra }}
+      deploy_ws: ${{ steps.paths.outputs.deploy_ws }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Classify changed paths
+        id: paths
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci-impact.mjs --github-output "$GITHUB_OUTPUT"
+
   chips-retention-integration:
+    needs: impact
+    if: ${{ needs.impact.outputs.chips_db == 'true' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -85,6 +112,14 @@ jobs:
           create extension if not exists pgcrypto with schema extensions;
           SQL
 
+      - name: Poker refill scheduler removal guard
+        run: node tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs
+
+      - name: Reset CLI PostgreSQL contracts
+        run: node --test tests/chips-economy-reset-cli.contract.test.mjs
+        env:
+          CHIPS_RESET_CLI_TEST_DB_URL: ${{ env.CHIPS_MIGRATIONS_TEST_DB_URL }}
+
       - name: Apply migrations and run migration contracts
         run: node tests/chips/chips.migration.test.mjs
 
@@ -106,7 +141,27 @@ jobs:
       - name: Run disposable PostgreSQL poker pool refill contracts
         run: node --test tests/chips/poker-pool-policy.transaction.test.mjs
 
-  tests:
+  core:
+    needs: impact
+    if: ${{ needs.impact.outputs.core == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci || npm i
+      - name: Install WS runtime dependencies for core contracts
+        run: npm ci --prefix ws-server --omit=dev
+      - name: Run core tests once
+        run: npm test
+
+  ws-persistence-integration:
+    needs: impact
+    if: ${{ needs.impact.outputs.ws_poker == 'true' || needs.impact.outputs.chips_db == 'true' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -127,51 +182,37 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Detect Playwright-relevant changes
-        id: playwright_changes
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
-          git diff --name-only --no-renames "$PR_BASE_SHA" "$GITHUB_SHA" \
-            | node scripts/should-run-playwright.mjs --github-output "$GITHUB_OUTPUT"
-
       - name: Install dependencies
         run: npm ci || npm i
-
-      - name: Poker refill scheduler removal guard
-        run: node tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs
-
       - name: Install WS server runtime dependencies
         run: npm ci --prefix ws-server --omit=dev
-
       - name: Native JSONB integration test
         run: node --test ws-server/poker/persistence/native-jsonb.integration.test.mjs
-
       - name: Action-history cleanup PostgreSQL integration test
         run: node --test ws-server/poker/persistence/action-history-cleanup.integration.test.mjs
-
       - name: Closed-table cleanup PostgreSQL integration test
         run: node --test ws-server/poker/persistence/closed-table-cleanup.integration.test.mjs
 
-      - name: Validate games catalog
-        run: npm run lint:games
-
+  playwright:
+    needs: impact
+    if: ${{ needs.impact.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci || npm i
       - name: Install Playwright Browsers
-        if: ${{ github.event_name != 'pull_request' || steps.playwright_changes.outputs.required == 'true' }}
         run: npx playwright install --with-deps chromium
-
       - name: Run Playwright tests
-        if: ${{ github.event_name != 'pull_request' || steps.playwright_changes.outputs.required == 'true' }}
-        run: PLAYWRIGHT=1 npm test
+        run: npm run test:e2e
         env:
           PLAYWRIGHT_BROWSER: chromium

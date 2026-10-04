@@ -2,14 +2,49 @@ name: Validate games catalog
 
 on:
   pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
+  impact:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      core: ${{ steps.paths.outputs.core }}
+      web: ${{ steps.paths.outputs.web }}
+      chips_db: ${{ steps.paths.outputs.chips_db }}
+      ws_poker: ${{ steps.paths.outputs.ws_poker }}
+      games: ${{ steps.paths.outputs.games }}
+      infra: ${{ steps.paths.outputs.infra }}
+      deploy_ws: ${{ steps.paths.outputs.deploy_ws }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Classify changed paths
+        id: paths
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci-impact.mjs --github-output "$GITHUB_OUTPUT"
+
   validate:
+    needs: impact
+    if: ${{ needs.impact.outputs.games == 'true' }}
     name: Validate js/games.json
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Validate Node catalog contracts
+        run: npm run lint:games
 
       - name: Set up Python
         uses: actions/setup-python@v5

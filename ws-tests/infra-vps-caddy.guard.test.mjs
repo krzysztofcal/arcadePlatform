@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 const CADDYFILE_PATH = "infra/vps/Caddyfile";
 const PREVIEW_EXAMPLE_PATH = "infra/vps/Caddyfile.preview.example";
-const WS_PR_WORKFLOW_PATH = ".github/workflows/ws-pr-checks.yml";
+const INFRA_WORKFLOW_PATH = ".github/workflows/infra-vps.yml";
 
 function caddyfileText() {
   return fs.readFileSync(CADDYFILE_PATH, "utf8");
@@ -66,7 +66,7 @@ test("infra/vps/Caddyfile is the unified prod+preview WS source of truth", () =>
   assert.doesNotMatch(text, /path \/internal\/admin\/\*/);
 });
 
-test("WS PR harness runs the unified infra VPS Caddy guard", () => {
-  const workflow = fs.readFileSync(WS_PR_WORKFLOW_PATH, "utf8");
+test("Infra validation runs the unified infra VPS Caddy guard", () => {
+  const workflow = fs.readFileSync(INFRA_WORKFLOW_PATH, "utf8");
   assert.ok(workflow.includes("node --test ws-tests/infra-vps-caddy.guard.test.mjs"));
 });

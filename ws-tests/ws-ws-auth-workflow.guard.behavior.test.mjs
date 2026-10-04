@@ -20,7 +20,7 @@ test("PR workflow runs ws-server behavior test before ws auth token mint doc cov
 });
 
 test("deploy workflow runs ws-server behavior test before ws auth token mint doc coverage", () => {
-  const text = workflowText(".github/workflows/ws-deploy.yml");
+  const text = workflowText(".github/workflows/ws-server-deploy.yml");
   const behaviorIndex = text.indexOf(SERVER_TEST_COMMAND);
   const mintDocIndex = text.indexOf(MINT_DOC_TEST_COMMAND);
 
