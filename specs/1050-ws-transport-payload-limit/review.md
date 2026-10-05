@@ -24,9 +24,10 @@ Intentional transport-level hardening: frames larger than 32 KiB are now rejecte
 
 ### Test Quality & Deterministic Proof
 The protocol test in `ws-server/poker.protocol.behavior.test.mjs` explicitly proves that oversized frames are terminated by transport before `processMessage()`:
-1. Captured server stdout proves the transport `RangeError` is emitted (`[klog] ws_error {"message":"Max payload size exceeded"}`), which `processMessage()` never emits.
-2. An oversized binary frame is closed with `1009` by transport, whereas `processMessage()` would have intercepted `isBinary` at line 4750 and returned `INVALID_ENVELOPE` without closing with `1009`.
-3. Normal conforming frames (< 32 KiB) continue to function and respond with `pong`.
+1. Oversized text frame (> 32 KiB) is closed with `1009` with bounded wait, receiving no application error frame (`maybeTextFrame === null`).
+2. An oversized binary frame (> 32 KiB) is proven not to receive an application envelope response (`maybeBinaryFrame === null`), and closes with bounded `1009`. If `processMessage()` were reached, `isBinary` at line 4750 would have returned `INVALID_ENVELOPE` without closing with `1009`.
+3. Bounded timeouts on `close` promises guarantee fast failure instead of hanging test execution in case of regression.
+4. Normal conforming frames (< 32 KiB) continue to function and respond with `pong`.
 
 ## Runtime Verification
 - [WS Preview Deploy run 37317500889](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37317500889) succeeded for exact runtime SHA `8633d75a22fc6f562af39cd0aee39838d11a18f1`.

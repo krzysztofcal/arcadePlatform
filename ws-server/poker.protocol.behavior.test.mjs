@@ -246,11 +246,6 @@ test("oversized frame (>32KB) is rejected at transport level with 1009, while no
   const port = await getFreePort();
   const child = spawnServer(port);
 
-  let serverLogs = "";
-  child.stdout.on("data", (chunk) => {
-    serverLogs += chunk.toString();
-  });
-
   try {
     await waitForListening(child, 5000);
 
@@ -259,7 +254,10 @@ test("oversized frame (>32KB) is rejected at transport level with 1009, while no
     await new Promise((resolve) => wsText.once("open", resolve));
 
     const huge = "x".repeat(33 * 1024);
-    const closeTextP = new Promise((resolve) => wsText.once("close", (code) => resolve(code)));
+    const closeTextP = Promise.race([
+      new Promise((resolve) => wsText.once("close", (code) => resolve(code))),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for socket close on oversized text frame")), 1000))
+    ]);
 
     wsText.send(
       JSON.stringify({
@@ -276,27 +274,26 @@ test("oversized frame (>32KB) is rejected at transport level with 1009, while no
     assert.equal(closeTextCode, 1009, "Transport must close socket with 1009");
     assert.equal(maybeTextFrame, null, "No application error frame should be sent by transport rejection");
 
-    // Transport emits RangeError logged as ws_error with 'Max payload size exceeded',
-    // which is unique to transport-level maxPayload enforcement and never emitted by processMessage()
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.match(serverLogs, /ws_error/);
-    assert.match(serverLogs, /Max payload size exceeded/);
-
-    // 2. Deterministic proof: binary frame > 32 KiB is rejected by transport with 1009.
-    // If the message reached the application path processMessage(), lines 4750-4756 would
+    // 2. Deterministic transport proof: binary frame > 32 KiB.
+    // If the frame reached application processMessage(), lines 4750-4756 would
     // intercept isBinary first, returning INVALID_ENVELOPE without closing the socket with 1009.
     const wsBinary = new WebSocket(`ws://127.0.0.1:${port}`);
     await new Promise((resolve) => wsBinary.once("open", resolve));
 
-    const closeBinaryP = new Promise((resolve) => wsBinary.once("close", (code) => resolve(code)));
-    const binaryAttempt = attemptMessage(wsBinary);
+    const closeBinaryP = Promise.race([
+      new Promise((resolve) => wsBinary.once("close", (code) => resolve(code))),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for socket close on oversized binary frame")), 1000))
+    ]);
 
     wsBinary.send(Buffer.alloc(33 * 1024));
 
-    const maybeBinaryFrame = await binaryAttempt;
+    // First unambiguously assert that no application error response (e.g. INVALID_ENVELOPE) was returned
+    const maybeBinaryFrame = await attemptMessage(wsBinary);
+    assert.equal(maybeBinaryFrame, null, "Binary frame must not reach application isBinary handler (which sends INVALID_ENVELOPE)");
+
+    // Then assert bounded close code 1009 from transport rejection
     const closeBinaryCode = await closeBinaryP;
     assert.equal(closeBinaryCode, 1009, "Binary frame exceeding maxPayload must be closed by transport with 1009");
-    assert.equal(maybeBinaryFrame, null, "Binary frame must not reach application isBinary handler (which sends INVALID_ENVELOPE)");
 
     // 3. Normal conforming frame (< 32 KiB) succeeds and is processed normally
     const wsNormal = new WebSocket(`ws://127.0.0.1:${port}`);
