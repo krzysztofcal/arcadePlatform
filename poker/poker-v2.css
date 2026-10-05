@@ -663,11 +663,21 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 @media (prefers-reduced-motion:reduce){
 .poker-celebration{display:none!important;}
 }
-.poker-gift-shop { position: absolute; top: 48px; right: 0; z-index: 80; display: grid; gap: 12px; width: min(300px, calc(100vw - 24px)); padding: 16px; border: 1px solid #725735; border-radius: 12px; background: #16251f; color: #fff; box-shadow: 0 8px 30px #0008; }
+.poker-gift-shop { position: absolute; top: 48px; right: 0; z-index: 80; display: grid; gap: 12px; width: min(340px, calc(100vw - 24px)); max-height: calc(100dvh - 100px); overflow-y: auto; padding: 16px; border: 1px solid #725735; border-radius: 12px; background: #16251f; color: #fff; box-shadow: 0 8px 30px #0008; }
 .poker-gift-shop[hidden] { display: none; }
 .poker-gift-shop__header { display: flex; justify-content: space-between; align-items: center; }
-.poker-gift-shop label { display: grid; gap: 5px; }
-.poker-gift-shop select { width: 100%; min-height: 40px; background: #22382f; color: #fff; border: 1px solid #725735; border-radius: 6px; }
+.poker-gift-shop__field { display: grid; gap: 8px; font-size: 13px; }
+.poker-gift-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.poker-gift-choice { min-height: 44px; padding: 10px 8px; border: 1px solid #725735; border-radius: 8px; background: #22382f; color: #fff; font: inherit; cursor: pointer; text-align: left; }
+.poker-gift-choice[aria-pressed="true"] { border-color: #f0c66e; background: #40503a; box-shadow: inset 0 0 0 1px #f0c66e; }
+.poker-gift-choice:focus-visible { outline: 2px solid #f0c66e; outline-offset: 2px; }
+.poker-gift-choice:disabled { opacity: .5; cursor: not-allowed; }
+.poker-gift-shop[aria-busy="true"] .poker-gift-choice { cursor: progress; }
+.poker-gift-recipients { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; padding: 3px; }
+.poker-gift-recipient { display: flex; align-items: center; gap: 10px; width: 100%; }
+.poker-gift-recipient__avatar { display: grid; place-items: center; position: relative; overflow: hidden; flex: 0 0 32px; height: 32px; border-radius: 50%; background: #16251f; }
+.poker-gift-recipient__label { min-width: 0; overflow-wrap: anywhere; }
+.poker-gift-shop-button--locked { opacity: .5; cursor: not-allowed; text-decoration: line-through; }
 .poker-gift-shop p { margin: 0; font-size: 12px; }
 .poker-gift-badges { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); white-space: nowrap; background: #102018ed; border-radius: 6px; padding: 2px 4px; font-size: 12px; z-index: 5; }
 .poker-gift-fly { position: fixed; pointer-events: none; z-index: 100; font-size: 30px; animation: poker-gift-flight 750ms ease-out forwards; }

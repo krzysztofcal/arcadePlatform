@@ -408,3 +408,107 @@ Unchanged:
 Implementation reconciliation: T003 requires updating hardcoded inventory counts in scripts/check-db-migrations.mjs (54 missing, 33 needs-production-equivalent). No unrelated tooling changes.
 
 T012 requires registering the two focused gift suites in scripts/test-all.mjs and classifying the two gift diagnostics in ws-server/poker/observability/poker-log-policy.mjs. Existing vitest-only tests/chips-ledger.test.mjs is not runnable with installed repo dependencies; extend the existing Node canonical-ledger suite tests/chips-ledger.human.buyin.unit.test.mjs instead. Receipt migration constraints/RLS/indexes are exercised with existing PGlite in the focused domain suite; external migration DB suite remains gated by CHIPS_MIGRATIONS_TEST_DB_URL. No new framework/dependency.
+
+
+## Manual smoke amendment — custom Gift Shop UI and HUD dependency
+
+Manual authenticated smoke found three presentation requirements that must be addressed before #1042 can complete.
+
+### Confirmed defect
+
+Persistent received gifts are currently appended inside `.poker-seat-avatar`, while that element has `overflow:hidden`. The badge is positioned at `top:100%`, so the received-gift indicator is clipped. Do **not** fix this with another z-index/offset patch.
+
+The stable three-slot received-gift presentation is now owned by #1048 — **Poker Table HUD: collision-free seat layout and CH account HUD**.
+
+#1042 remains responsible for gift state/delivery and must consume the stable gift slots from #1048 before final acceptance/merge.
+
+### T012A — Replace native gift selector with custom Gift picker
+
+Update:
+
+- `poker/table-v2.html`
+- `poker/poker-v2.js::bindGiftShop()`
+- `poker/poker-v2.js::syncGiftShop()`
+- `poker/poker-v2.css`
+- `js/i18n.js` only if new accessible copy is required
+
+Requirements:
+
+- remove the native `<select id="pokerGiftSelect">`;
+- render the six existing V1 gifts as Arcade-styled custom selectable items/cards using ordinary buttons/list semantics;
+- each item shows emoji, localized name and CH price;
+- one selected gift at a time;
+- selected/disabled/pending states are visually explicit;
+- keyboard/focus behavior must remain accessible;
+- server catalog remains authoritative; this is presentation only;
+- do not add a UI framework or new dependency.
+
+### T012B — Replace native recipient selector with custom player list
+
+Update the same existing Gift Shop code; do not create a second recipient system.
+
+Requirements:
+
+- remove the native `<select id="pokerGiftRecipient">`;
+- render a custom Arcade-styled recipient list from current authoritative `state.seats`;
+- show enough identity to distinguish seats: existing avatar/display name/seat number using already available presentation data;
+- self, human and bot targets remain valid exactly as the existing backend contract allows;
+- one selected recipient at a time;
+- stale/removed seats disappear on normal `syncGiftShop()` refresh;
+- changing gift/recipient still clears uncertain retry identity exactly as current code does;
+- purchase payload remains only `giftKey + targetSeatNo`.
+
+### T012C — Guest-visible disabled Gift Shop
+
+Current code hides `#pokerGiftShopButton` whenever `giftShopAvailable()` is false. Change only the guest/signed-out presentation policy:
+
+- guest/signed-out Poker Table still displays the Gift Shop control;
+- control is visibly disabled/locked/struck-through rather than disappearing;
+- tooltip/accessibility copy explains that Gift Shop is available only to signed-in players;
+- clicking/activating it must not open the purchase panel or send WS traffic;
+- authenticated but temporarily unavailable states such as reconnect/pending seat may remain controlled by existing availability logic;
+- no backend/auth relaxation: guests still cannot call a successful `gift_send`.
+
+### T012D — Integrate persistent received gifts with #1048 HUD
+
+Do not implement a competing layout inside #1042.
+
+After #1048 exposes the stable per-seat gift-slot container/anchor:
+
+- change `renderGiftBadges()` to render into that dedicated seat HUD gift area, not inside `.poker-seat-avatar`;
+- preserve existing `giftsBySeat`, `table_gift_state`, replay suppression and exact participation recovery;
+- use exactly three visible stable slots;
+- duplicate gift types remain aggregated (for example `🍺 ×4`);
+- additional types use the already accepted compact overflow representation;
+- ordinary seat re-render/reconnect must rebind to the new HUD slot without losing authoritative gift state.
+
+#1042 is blocked from final merge until #1048 provides this stable placement and the integrated Gift Shop smoke passes.
+
+### Verification after correction
+
+Do not add broad UI/CSS/JSP tests.
+
+Run existing required/fundamental checks, then perform real Deploy Preview / WS Preview smoke for:
+
+- custom gift picker on desktop/mobile;
+- custom recipient list including self/human/bot;
+- guest-visible disabled/locked Gift Shop with explanatory tooltip;
+- successful purchase still charges the exact server-authoritative amount;
+- existing cooldown/insufficient-CH/retry behavior unchanged;
+- after #1048 integration, gifts remain visibly present in the three reserved HUD slots through ordinary renders/reconnect;
+- leave/rejoin still clears previous participation gifts;
+- no overlap with avatar/cards/dealer/stack in representative HUD layouts.
+
+If the correction touches only browser presentation before #1048, WS redeploy is not needed unless `ws-server/**`, shared WS runtime dependencies, protocol, or deployable runtime configuration change. A browser Deploy Preview smoke is still required.
+
+### Task status amendment
+
+- [ ] **T012A — Custom gift picker**
+- [ ] **T012B — Custom recipient picker**
+- [ ] **T012C — Guest-visible disabled Gift Shop**
+- [ ] **T012D — Consume #1048 stable three-slot gift HUD**
+- [ ] **T013 — Final authenticated Stage smoke after T012A–T012D**
+- [ ] **T014 — Production owner GO/schema apply**
+- [ ] **T015 — Final handoff / merge-ready gate**
+
+Existing T001–T012 implementation work remains valid; these are smoke-discovered corrective tasks, not a rewrite of the gift accounting/WS mechanism.

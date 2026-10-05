@@ -25,3 +25,7 @@ Review correction: the existing seat protocol does not expose joined_at. Keep it
 The canonical ledger import is lazy after DB availability/auth validation, matching existing shared-domain adapters and keeping file-backed WS startup compatible with WS-package-only CI dependencies. Deploy packages already include root shared/ledger/dependencies.
 
 Review P1 correction: only new purchases broadcast table_gift. Exact replay is accepted with current table_gift_state and no animation. This is a minimal WS fanout guard; canonical ledger/receipt idempotency remains unchanged, with no outbox or delivery framework.
+
+## Manual smoke amendment implementation
+
+T012A–C modify only table-v2.html, poker-v2.js, poker-v2.css and accessible copy in i18n.js. Group ordinary buttons with aria-pressed and native Tab/Enter/Space; keep selections inside existing Gift Shop DOM, reuse renderSeatAvatar and getDisplayName, reconcile recipient buttons from state.seats without a player cache. Preserve focus by retaining existing buttons on normal sync. Selection changes reset giftRetry; pending disables choices/send. Guest control is visible/locked with aria-disabled and click guard; authenticated availability remains existing. T012D is blocked on #1048, with no badge layout change. Constitution Check: no new UI/CSS/JSP test suites, dependencies, configuration or migration changes. Browser Deploy Preview inspection is required; no WS redeploy for presentation-only changes. Final T013 smoke follows #1048 integration, T014 remains owner-gated.

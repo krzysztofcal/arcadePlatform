@@ -4371,22 +4371,41 @@
   function syncGiftShop(){
     if (!els.giftShopButton) return;
     var available = giftShopAvailable();
-    els.giftShopButton.hidden = !available;
-    els.giftShopButton.title = t('pokerGiftShop', 'Gift Shop');
-    els.giftShopButton.setAttribute('aria-label', t('pokerGiftShop', 'Gift Shop'));
+    var locked = isGuestMode || !isSignedIn();
+    var copy = locked ? t('pokerGiftSignInRequired', 'Gift Shop is available only to signed-in players') : t('pokerGiftShop', 'Gift Shop');
+    els.giftShopButton.hidden = !locked && !available;
+    els.giftShopButton.classList.toggle('poker-gift-shop-button--locked', locked);
+    els.giftShopButton.setAttribute('aria-disabled', String(!available));
+    els.giftShopButton.title = copy;
+    els.giftShopButton.setAttribute('aria-label', copy);
+    els.giftShop.setAttribute('aria-busy', String(giftPending));
     if (!available) { els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); }
-    Array.prototype.forEach.call(els.giftSelect.options, function(option){
-      var gift = giftByKey(option.value);
-      option.textContent = gift ? gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH' : t('pokerGiftChoose', 'Choose a gift');
+    giftCatalog.forEach(function(gift){
+      var button = els.giftSelect.querySelector('[data-gift-key="' + gift.key + '"]');
+      button.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH';
+      button.setAttribute('aria-pressed', String(els.giftSelect.dataset.value === gift.key));
+      button.disabled = !available || giftPending;
     });
-    var selected = els.giftRecipient.value;
-    els.giftRecipient.innerHTML = '';
-    var placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = t('pokerGiftRecipient', 'Recipient'); els.giftRecipient.appendChild(placeholder);
-    giftEligibleSeats().forEach(function(seat){ var option = document.createElement('option'); option.value = String(seat.seatNo); option.textContent = 'S' + seat.seatNo + ' · ' + getDisplayName(seat); els.giftRecipient.appendChild(option); });
-    els.giftRecipient.value = selected;
-    els.giftSend.disabled = !available || giftPending || !giftByKey(els.giftSelect.value) || !els.giftRecipient.value;
-    els.giftSelect.disabled = giftPending;
-    els.giftRecipient.disabled = giftPending;
+    var seats = giftEligibleSeats();
+    Array.prototype.slice.call(els.giftRecipient.children).forEach(function(button){
+      if (!seats.some(function(seat){ return String(seat.seatNo) === button.dataset.seatNo; })) button.remove();
+    });
+    if (!seats.some(function(seat){ return String(seat.seatNo) === els.giftRecipient.dataset.value; })) { els.giftRecipient.dataset.value = ''; giftRetry = null; }
+    seats.forEach(function(seat){
+      var seatNo = String(seat.seatNo);
+      var button = els.giftRecipient.querySelector('[data-seat-no="' + seatNo + '"]');
+      if (!button) {
+        button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice poker-gift-recipient'; button.dataset.seatNo = seatNo;
+        var avatar = document.createElement('span'); avatar.className = 'poker-gift-recipient__avatar'; avatar.setAttribute('aria-hidden', 'true'); button.appendChild(avatar);
+        var label = document.createElement('span'); label.className = 'poker-gift-recipient__label'; button.appendChild(label);
+        els.giftRecipient.appendChild(button);
+      }
+      renderSeatAvatar(button.firstChild, seat);
+      button.lastChild.textContent = getDisplayName(seat) + ' · S' + seatNo;
+      button.setAttribute('aria-pressed', String(els.giftRecipient.dataset.value === seatNo));
+      button.disabled = !available || giftPending;
+    });
+    els.giftSend.disabled = !available || giftPending || !giftByKey(els.giftSelect.dataset.value) || !els.giftRecipient.dataset.value;
   }
   function bindGiftShop(){
     ['giftShopButton', 'giftShop', 'giftSelect', 'giftRecipient', 'giftSend', 'giftMessage', 'giftClose'].forEach(function(key){
@@ -4395,18 +4414,33 @@
     });
     if (!els.giftShopButton) return;
     els.giftNotice = document.getElementById('pokerGiftNotice');
-    var placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = t('pokerGiftChoose', 'Choose a gift'); els.giftSelect.appendChild(placeholder);
-    giftCatalog.forEach(function(gift){ var option = document.createElement('option'); option.value = gift.key; option.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH'; els.giftSelect.appendChild(option); });
-    els.giftShopButton.addEventListener('click', function(){ syncGiftShop(); els.giftShop.hidden = !els.giftShop.hidden; els.giftShopButton.setAttribute('aria-expanded', String(!els.giftShop.hidden)); });
+    giftCatalog.forEach(function(gift){ var button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice'; button.dataset.giftKey = gift.key; els.giftSelect.appendChild(button); });
+    els.giftShopButton.addEventListener('click', function(){
+      syncGiftShop();
+      if (!giftShopAvailable()) return;
+      els.giftShop.hidden = !els.giftShop.hidden;
+      els.giftShopButton.setAttribute('aria-expanded', String(!els.giftShop.hidden));
+      if (!els.giftShop.hidden) els.giftSelect.querySelector('button').focus();
+    });
     function close(){ els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); els.giftShopButton.focus(); }
     els.giftClose.addEventListener('click', close);
     els.giftShop.addEventListener('keydown', function(event){ if (event.key === 'Escape') close(); });
-    els.giftSelect.addEventListener('change', function(){ giftRetry = null; syncGiftShop(); });
-    els.giftRecipient.addEventListener('change', function(){ giftRetry = null; syncGiftShop(); });
+    els.giftSelect.addEventListener('click', function(event){
+      var button = event.target.closest('[data-gift-key]');
+      if (!button || button.disabled || !giftShopAvailable()) return;
+      if (els.giftSelect.dataset.value !== button.dataset.giftKey) giftRetry = null;
+      els.giftSelect.dataset.value = button.dataset.giftKey; syncGiftShop();
+    });
+    els.giftRecipient.addEventListener('click', function(event){
+      var button = event.target.closest('[data-seat-no]');
+      if (!button || button.disabled || !giftShopAvailable()) return;
+      if (els.giftRecipient.dataset.value !== button.dataset.seatNo) giftRetry = null;
+      els.giftRecipient.dataset.value = button.dataset.seatNo; syncGiftShop();
+    });
     els.giftSend.addEventListener('click', function(){
-      if (els.giftSend.disabled || !wsClient) return;
-      var key = els.giftSelect.value;
-      var seatNo = Number(els.giftRecipient.value);
+      if (els.giftSend.disabled || !wsClient || !giftShopAvailable()) return;
+      var key = els.giftSelect.dataset.value;
+      var seatNo = Number(els.giftRecipient.dataset.value);
       var retry = giftRetry && giftRetry.key === key && giftRetry.seatNo === seatNo ? giftRetry : { key: key, seatNo: seatNo, requestId: 'gift_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10) };
       giftRetry = retry;
       giftPending = true; syncGiftShop();

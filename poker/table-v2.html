@@ -89,8 +89,8 @@
             <button type="button" class="poker-live-btn" id="pokerGiftShopButton" aria-controls="pokerGiftShop" aria-expanded="false" hidden>🎁</button>
             <section class="poker-gift-shop" id="pokerGiftShop" aria-labelledby="pokerGiftTitle" hidden>
               <div class="poker-gift-shop__header"><strong id="pokerGiftTitle" data-i18n="pokerGiftShop">Gift Shop</strong><button type="button" id="pokerGiftClose" aria-label="Close">×</button></div>
-              <label><span data-i18n="pokerGiftChoose">Choose a gift</span><select id="pokerGiftSelect"></select></label>
-              <label><span data-i18n="pokerGiftRecipient">Recipient</span><select id="pokerGiftRecipient"></select></label>
+              <div class="poker-gift-shop__field"><span id="pokerGiftChooseLabel" data-i18n="pokerGiftChoose">Choose a gift</span><div id="pokerGiftSelect" class="poker-gift-picker" role="group" aria-labelledby="pokerGiftChooseLabel"></div></div>
+              <div class="poker-gift-shop__field"><span id="pokerGiftRecipientLabel" data-i18n="pokerGiftRecipient">Recipient</span><div id="pokerGiftRecipient" class="poker-gift-recipients" role="group" aria-labelledby="pokerGiftRecipientLabel"></div></div>
               <button type="button" class="poker-live-btn" id="pokerGiftSend" data-i18n="pokerGiftSend" disabled>Send</button>
               <p id="pokerGiftMessage" role="status" aria-live="polite"></p>
             </section>

@@ -2,6 +2,7 @@
 (function(){
   const dict = {
     pokerGiftShop: { en: 'Gift Shop', pl: 'Sklep z prezentami' },
+    pokerGiftSignInRequired: { en: 'Gift Shop is available only to signed-in players', pl: 'Sklep z prezentami dostępny tylko dla zalogowanych graczy' },
     pokerGiftChoose: { en: 'Choose a gift', pl: 'Wybierz prezent' },
     pokerGiftRecipient: { en: 'Recipient', pl: 'Odbiorca' },
     pokerGiftSend: { en: 'Send', pl: 'Wyślij' },
