@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import net from "node:net";
 import WebSocket from "ws";
 
@@ -44,6 +45,13 @@ function waitForListening(proc, timeoutMs) {
 function waitForExit(proc) {
   if (proc.exitCode !== null) return Promise.resolve();
   return new Promise((resolve) => proc.once("exit", resolve));
+}
+
+function spawnServer(port, env = {}) {
+  return spawn(process.execPath, ["ws-server/server.mjs"], {
+    env: { ...process.env, PORT: String(port), WS_POKER_LOG_LEVEL: process.env.WS_POKER_LOG_LEVEL || "INFO", ...env },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
 }
 
 
@@ -119,10 +127,7 @@ function nextMessage(ws) {
 
 test("invalid JSON returns INVALID_ENVELOPE", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -142,10 +147,7 @@ test("invalid JSON returns INVALID_ENVELOPE", async () => {
 
 test("unsupported version returns UNSUPPORTED_VERSION and closes", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -182,10 +184,7 @@ test("unsupported version returns UNSUPPORTED_VERSION and closes", async () => {
 
 test("unsupported version closes with 1002 even if error frame is not observed by client", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -214,10 +213,7 @@ test("unsupported version closes with 1002 even if error frame is not observed b
 
 test("unsupported version close listener registered first always resolves", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -247,22 +243,24 @@ test("unsupported version close listener registered first always resolves", asyn
   }
 });
 
-test("frame >32KB returns FRAME_TOO_LARGE", async () => {
+test("oversized frame (>32KB) is rejected at transport level with 1009, while normal frame succeeds", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-    await new Promise((resolve) => ws.once("open", resolve));
+
+    // 1. Text frame > 32 KiB is rejected at transport level with close code 1009
+    const wsText = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsText.once("open", resolve));
 
     const huge = "x".repeat(33 * 1024);
-    const closeP = new Promise((resolve) => ws.once("close", (code) => resolve(code)));
+    const closeTextP = Promise.race([
+      new Promise((resolve) => wsText.once("close", (code) => resolve(code))),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for socket close on oversized text frame")), 1000))
+    ]);
 
-    ws.send(
+    wsText.send(
       JSON.stringify({
         version: "1.0",
         type: "ping",
@@ -272,14 +270,50 @@ test("frame >32KB returns FRAME_TOO_LARGE", async () => {
       })
     );
 
-    const maybeFrame = await attemptMessage(ws);
-    const close = await closeP;
-    assert.equal(close, 1009);
+    const maybeTextFrame = await attemptMessage(wsText);
+    const closeTextCode = await closeTextP;
+    assert.equal(closeTextCode, 1009, "Transport must close socket with 1009");
+    assert.equal(maybeTextFrame, null, "No application error frame should be sent by transport rejection");
 
-    if (maybeFrame !== null) {
-      assert.equal(maybeFrame.type, "error");
-      assert.equal(maybeFrame.payload.code, "FRAME_TOO_LARGE");
-    }
+    // 2. Deterministic transport proof: binary frame > 32 KiB.
+    // If the frame reached application processMessage(), lines 4750-4756 would
+    // intercept isBinary first, returning INVALID_ENVELOPE without closing the socket with 1009.
+    const wsBinary = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsBinary.once("open", resolve));
+
+    const closeBinaryP = Promise.race([
+      new Promise((resolve) => wsBinary.once("close", (code) => resolve(code))),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for socket close on oversized binary frame")), 1000))
+    ]);
+
+    wsBinary.send(Buffer.alloc(33 * 1024));
+
+    // First unambiguously assert that no application error response (e.g. INVALID_ENVELOPE) was returned
+    const maybeBinaryFrame = await attemptMessage(wsBinary);
+    assert.equal(maybeBinaryFrame, null, "Binary frame must not reach application isBinary handler (which sends INVALID_ENVELOPE)");
+
+    // Then assert bounded close code 1009 from transport rejection
+    const closeBinaryCode = await closeBinaryP;
+    assert.equal(closeBinaryCode, 1009, "Binary frame exceeding maxPayload must be closed by transport with 1009");
+
+    // 3. Normal conforming frame (< 32 KiB) succeeds and is processed normally
+    const wsNormal = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsNormal.once("open", resolve));
+
+    wsNormal.send(
+      JSON.stringify({
+        version: "1.0",
+        type: "ping",
+        ts: "2026-02-28T00:00:00Z",
+        requestId: "req-normal",
+        payload: { clientTime: "123456789" }
+      })
+    );
+
+    const normalAck = await nextMessage(wsNormal);
+    assert.equal(normalAck.type, "pong");
+    assert.equal(normalAck.requestId, "req-normal");
+    wsNormal.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
@@ -288,10 +322,7 @@ test("frame >32KB returns FRAME_TOO_LARGE", async () => {
 
 test("connection closes after repeated protocol violations but allows recovery after single violation", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -331,3 +362,120 @@ test("connection closes after repeated protocol violations but allows recovery a
     await waitForExit(child);
   }
 });
+
+test("message backlog bound (16) closes socket with 1002 and drops excess frames while conforming messages succeed in order", async () => {
+  const port = await getFreePort();
+  const child = spawnServer(port, { WS_TEST_PROCESS_MESSAGE_DELAY_MS: "50" });
+  const serverLogs = [];
+  child.stdout.on("data", (chunk) => serverLogs.push(String(chunk)));
+
+  try {
+    await waitForListening(child, 5000);
+
+    // 1. Conforming ordered messages succeed in order
+    const wsOrder = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsOrder.once("open", resolve));
+
+    wsOrder.send(
+      JSON.stringify({
+        version: "1.0",
+        type: "hello",
+        requestId: "req-hello",
+        ts: "2026-02-28T00:00:00Z",
+        payload: { supportedVersions: ["1.0"] }
+      })
+    );
+    const helloAck = await nextMessage(wsOrder);
+    assert.equal(helloAck.type, "helloAck");
+
+    for (let i = 0; i < 3; i++) {
+      wsOrder.send(
+        JSON.stringify({
+          version: "1.0",
+          type: "ping",
+          requestId: `ping-${i}`,
+          ts: "2026-02-28T00:00:00Z",
+          payload: { clientTime: String(i) }
+        })
+      );
+      const ack = await nextMessage(wsOrder);
+      assert.equal(ack.type, "pong");
+      assert.equal(ack.requestId, `ping-${i}`);
+    }
+    wsOrder.close();
+
+    // 2. Controlled burst flood:
+    // With 50ms processing delay per frame, sending 25 frames rapidly builds up
+    // the in-flight backlog. Once pendingMessages reaches 16, the 17th frame triggers
+    // backlog overflow, closes socket with 1002, and excess frames are never executed.
+    const wsBurst = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsBurst.once("open", resolve));
+
+    let burstReceived = 0;
+    wsBurst.on("message", () => {
+      burstReceived++;
+    });
+
+    const closeP = Promise.race([
+      new Promise((resolve) => wsBurst.once("close", (code) => resolve(code))),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out waiting for socket close on burst flood")), 3000)
+      )
+    ]);
+
+    for (let i = 0; i < 25; i++) {
+      wsBurst.send(
+        JSON.stringify({
+          version: "1.0",
+          type: "ping",
+          requestId: `burst-${i}`,
+          ts: "2026-02-28T00:00:00Z",
+          payload: { clientTime: String(i) }
+        })
+      );
+    }
+
+    const closeCode = await closeP;
+    assert.equal(closeCode, 1002, "Socket must be closed with 1002 on backlog overflow");
+    assert.ok(burstReceived <= 16, `Excess frames must not be processed (received ${burstReceived} frames)`);
+
+    assert.ok(
+      serverLogs.some((line) => line.includes("ws_message_backlog_overflow")),
+      "Server must log ws_message_backlog_overflow"
+    );
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("unauthenticated message handling is decoupled from global maintenance sweeps", async () => {
+  const serverSource = await fs.readFile(new URL("./server.mjs", import.meta.url), "utf8");
+
+  // Invariant 1: processMessage hot path does not execute global maintenance sweeps
+  const processMessageMatch = serverSource.match(/async function processMessage\(msg, isBinary\) \{([\s\S]*?)\n  \}/);
+  assert.ok(processMessageMatch, "processMessage function must exist in server.mjs");
+  const processMessageBody = processMessageMatch[1];
+
+  assert.doesNotMatch(processMessageBody, /sweepExpiredSessionsOnly\(\)/, "processMessage must not run sweepExpiredSessionsOnly");
+  assert.doesNotMatch(processMessageBody, /sweepDisconnectCleanupAndBroadcast\(\)/, "processMessage must not run sweepDisconnectCleanupAndBroadcast");
+  assert.doesNotMatch(processMessageBody, /sweepTurnTimeoutsAndBroadcast\(\)/, "processMessage must not run sweepTurnTimeoutsAndBroadcast");
+
+  // Invariant 2: cleanupConnectionOnce does not execute global maintenance sweeps
+  const cleanupMatch = serverSource.match(/const cleanupConnectionOnce = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(cleanupMatch, "cleanupConnectionOnce function must exist in server.mjs");
+  const cleanupBody = cleanupMatch[1];
+  assert.doesNotMatch(cleanupBody, /sweepExpiredSessionsOnly\(\)/, "cleanupConnectionOnce must not run sweepExpiredSessionsOnly");
+  assert.doesNotMatch(cleanupBody, /sweepDisconnectCleanupAndBroadcast\(\)/, "cleanupConnectionOnce must not run sweepDisconnectCleanupAndBroadcast");
+
+  // Invariant 3: sweepExpiredSessionsOnly is invoked periodically in sweepTransportWatchdog
+  const watchdogMatch = serverSource.match(/function sweepTransportWatchdog\(\) \{([\s\S]*?)\n\}/);
+  assert.ok(watchdogMatch, "sweepTransportWatchdog must exist");
+  assert.match(watchdogMatch[1], /sweepExpiredSessionsOnly\(\)/, "sweepTransportWatchdog must call sweepExpiredSessionsOnly");
+
+  // Invariant 4: dedicated periodic sweep timers remain scheduled
+  assert.match(serverSource, /timeoutSweepTimer\s*=\s*setInterval/, "timeoutSweepTimer must be scheduled");
+  assert.match(serverSource, /disconnectCleanupTimer\s*=\s*setInterval/, "disconnectCleanupTimer must be scheduled");
+  assert.match(serverSource, /transportWatchdogTimer\s*=\s*setInterval/, "transportWatchdogTimer must be scheduled");
+});
+
