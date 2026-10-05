@@ -27,3 +27,5 @@ T012 requires registering the two focused gift suites in scripts/test-all.mjs an
 ## Gate progress
 
 T013 partial: Stage apply and exact-SHA WS Preview Deploy succeeded for `eb4144882028f44233609ade15b1323b553e9564`; installed metadata/health checks passed. Authenticated Stage gift smoke remains pending (no credentials here). T014 Production-equivalent schema and manifest are prepared, not applied; separate owner GO is required. T015 evidence is recorded in review.md and draft PR #1047, but final completion remains gated by required runtime smoke/Production handoff. No merge.
+
+PR #1047 review correction: replay is accepted/state-only, never another table_gift. Latest exact-SHA Preview deploy for `03c7ab5b80698b82e8f3a46e9bf442615318c24f` succeeded: https://github.com/krzysztofcal/arcadePlatform/actions/runs/37269427509. T013 still pending authenticated Stage smoke; T014 Production owner GO/schema apply pending; T015 final handoff pending. Live #1042 synchronized with the same status/task progress.
