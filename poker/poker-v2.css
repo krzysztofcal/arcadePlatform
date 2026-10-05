@@ -397,7 +397,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-community-cards{position:absolute;left:50%;bottom:0;transform:translateX(-50%);display:flex;gap:3px;}
 .poker-community-cards .poker-card{width:26px;height:40px;font-size:16px;border-radius:4px;}
 .poker-community-cards .poker-card small{font-size:8px;margin-top:1px;}
-.poker-scene[data-orientation="landscape"] .poker-center-layer{left:370px;top:121px;width:300px;height:108px;}
+.poker-scene[data-orientation="landscape"] .poker-center-layer{left:370px;top:121px;width:300px;height:132px;}
 .poker-scene[data-orientation="landscape"] .poker-community-cards .poker-card{width:42px;height:58px;font-size:24px;}
 .poker-scene[data-orientation="landscape"] .poker-community-cards .poker-card small{font-size:10px;}
 .poker-scene[data-orientation="landscape"] .poker-community-cards{gap:5px;}
