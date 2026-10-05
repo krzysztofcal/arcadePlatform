@@ -454,7 +454,8 @@ Requirements:
 - show enough identity to distinguish seats: existing avatar/display name/seat number using already available presentation data;
 - self, human and bot targets remain valid exactly as the existing backend contract allows;
 - one selected recipient at a time;
-- stale/removed seats disappear on normal `syncGiftShop()` refresh;
+- reconcile recipient buttons by `seatNo + userId` (store both data attributes); stale/removed/replaced occupants disappear on normal `syncGiftShop()` refresh;
+- when the selected occupant changes, clear recipient selection and its uncertain giftRetry; create a new button/avatar, preserving renderSeatAvatar's fresh-element assumption;
 - changing gift/recipient still clears uncertain retry identity exactly as current code does;
 - purchase payload remains only `giftKey + targetSeatNo`.
 
