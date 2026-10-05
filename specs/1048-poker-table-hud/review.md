@@ -11,3 +11,5 @@ Passed syntax, check:all, ci:guards, check:csp-inline; existing static HTML chec
 Real Deploy Preview visual verification pending. No WS Preview Deploy required: no WS/shared runtime/protocol/config change.
 
 First real preview probe detected 1.35px horizontal overflow at 390px, caused by the inherited decorative background scale(1.05). Remove that scale instead of clipping gameplay/UI. Rerun the matrix on the new preview revision. Fundamental sum test lives in the existing Poker V2 suite so required CI executes it.
+
+Second preview pass: desktop, 390px and 320px portrait matrices passed. Landscape revealed a superseded header left/top rule retained beneath its comment; remove the old rule. The existing Preview FX control also overlaid CH HUD at 320px; mount that existing control in the header flow rather than its old fixed rail. No new behavior/UI control.

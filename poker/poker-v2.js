@@ -644,7 +644,8 @@
     });
     controls.appendChild(button);
     controls.appendChild(panel);
-    els.screen.appendChild(controls);
+    var tools = els.accountHud && els.accountHud.parentNode || els.screen;
+    tools.appendChild(controls);
     els.celebrationPreviewMode = mode;
     els.celebrationPreviewTarget = target;
     els.celebrationPreviewHint = hint;
