@@ -20,3 +20,6 @@ The global XP checker requires a badge even where its config excludes Poker Tabl
 Existing Poker V2 checks are required by WS PR validation despite this change being browser-only. Adapt existing descendant selectors and DOM move emulation to semantic containers, retain fundamental snapshot/reconnect/card privacy/stack/settlement/reaction behavior assertions, and remove obsolete pixel offsets/chip-art/XP navigation assertions. No new presentation tests.
 
 Quick-action anchor reserves a 44px area. On narrow seats it gets a dedicated full-width row, so #1047 can mount an accessible button without overflowing avatar/dealer areas.
+
+## Review P1/P2 correction
+Use document.addEventListener for the canonical chips:tx-complete contract. Keep lastRenderedWallet only as identity-scoped presentation history, never as a source of balance. After guarded fetched results, animate only a changed valid wallet following a prior valid render. Clear pulse on new refresh/identity and animationend; clear history on identity/sign-out. First load/error and reduced motion do not animate. Verify externally on real preview with document dispatch; no new UI tests or WS deploy. Earlier window-dispatch refresh evidence is invalid and superseded.

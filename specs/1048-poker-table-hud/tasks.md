@@ -9,3 +9,7 @@
 - [x] T007 Self-review and create independent draft PR to main.
 - [ ] T008 Real Deploy Preview visual matrix: 20/20 plus four real guest sessions complete; controlled signed-in CH view/tx/error/sign-out passed. Actual authenticated Stage account reads remain pending (no session available).
 - [x] T009 Final evidence and #1047 T012D/T012E integration handoff; never merge.
+
+- [x] T010 Review P1: consume existing document chips:tx-complete event; no bridge/new event.
+- [x] T011 Review P2: authoritative wallet change pulse; identity reset, first/error/reduced-motion exclusions, stale guards retained.
+- [ ] T012 Review preview: verify document dispatch refetch + pulse/exclusions on real Deploy Preview.

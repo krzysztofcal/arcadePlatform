@@ -201,6 +201,7 @@
   var renderedSeatHud = {};
   var accountHudIdentity = null;
   var accountHudGeneration = 0;
+  var lastRenderedWallet = null;
   var renderedSeatBetAnchors = {};
   var renderedSeatStackAnchors = {};
   var loadedSeatAvatarUrls = Object.create(null);
@@ -4762,6 +4763,8 @@
     if (identity !== accountHudIdentity){
       accountHudIdentity = identity;
       accountHudGeneration++;
+      lastRenderedWallet = null;
+      els.accountHud.classList.remove('poker-account-hud--wallet-change');
       els.accountHud.textContent = '';
       if (identity) refreshAccountHud();
     }
@@ -4772,6 +4775,7 @@
     var identity = accountHudContext();
     if (!identity || !els.accountHud) return;
     var generation = ++accountHudGeneration;
+    els.accountHud.classList.remove('poker-account-hud--wallet-change');
     els.accountHud.textContent = 'Wallet … CH · Other tables … CH';
     els.accountHud.setAttribute('aria-busy', 'true');
     var wallet = null;
@@ -4787,6 +4791,12 @@
     els.accountHud.textContent = 'Wallet ' + (wallet == null ? '—' : formatNumber(wallet)) + ' CH · Other tables ' + (other == null ? '—' : formatNumber(other)) + ' CH';
     els.accountHud.title = wallet == null || other == null ? 'Account balance unavailable' : '';
     els.accountHud.setAttribute('aria-busy', 'false');
+    if (wallet != null){
+      if (lastRenderedWallet != null && wallet !== lastRenderedWallet && !prefersReducedMotion()){
+        els.accountHud.classList.add('poker-account-hud--wallet-change');
+      }
+      lastRenderedWallet = wallet;
+    }
   }
 
   function renderInfoPanel(){
@@ -6514,7 +6524,10 @@
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches) clearCelebration(); });
     renderSocialPreferences();
-    window.addEventListener('chips:tx-complete', refreshAccountHud);
+    document.addEventListener('chips:tx-complete', refreshAccountHud);
+    if (els.accountHud) els.accountHud.addEventListener('animationend', function(event){
+      if (event.target === els.accountHud) els.accountHud.classList.remove('poker-account-hud--wallet-change');
+    });
     document.addEventListener('langchange', function(){ buildReactionMenu(); renderSocialPreferences(); render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
     if (!tableId){
