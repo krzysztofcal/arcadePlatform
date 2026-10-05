@@ -15,9 +15,9 @@ Execute sequentially T001–T015; each depends on the preceding task. Stage auto
 - [x] **T010 — Fundamental accounting/migration tests.** Extend migration/ledger suites for receipt contract, RLS/indexes and exact USER→GENESIS BURN/no-recipient-credit invariants.
 - [x] **T011 — Fundamental domain/WS tests.** Add only the focused gift purchase/handler/runtime cases listed above. No UI/CSS/glue suite.
 - [x] **T012 — Full verification/refactor.** Run focused + required repo checks; review/refactor touched code for the smallest implementation; verify no second ledger/payment/event framework and no gameplay mutation.
-- [ ] **T012A — Custom gift picker.** Six existing gifts as Arcade buttons, localized name/emoji/CH price, exclusive selection, disabled/pending and native keyboard focus. Server prices remain authoritative.
-- [ ] **T012B — Custom recipient picker.** Current state.seats only; reuse avatar/name/seat presentation, exclusive selection, stale-seat removal and existing giftRetry reset. No payload/model change.
-- [ ] **T012C — Guest-visible disabled Gift Shop.** Locked visible guest/signed-out control with localized explanation; no opening/send; unchanged authenticated availability/auth.
+- [x] **T012A — Custom gift picker.** Six existing gifts as Arcade buttons, localized name/emoji/CH price, exclusive selection, disabled/pending and native keyboard focus. Server prices remain authoritative.
+- [x] **T012B — Custom recipient picker.** Current state.seats only; reuse avatar/name/seat presentation, exclusive selection, stale-seat removal and existing giftRetry reset. No payload/model change.
+- [x] **T012C — Guest-visible disabled Gift Shop.** Locked visible guest/signed-out control with localized explanation; no opening/send; unchanged authenticated availability/auth.
 - [ ] **T012D — Consume #1048 stable three-slot gift HUD.** BLOCKED on #1048; no avatar overflow/z-index/offset workaround. Preserve gift state/recovery.
 - [ ] **T013 — Exact-SHA Preview gate.** Deploy latest runtime-affecting SHA with WS Preview Deploy, verify release metadata/health, then perform the mandatory Stage smoke above.
 - [ ] **T014 — Production handoff.** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.

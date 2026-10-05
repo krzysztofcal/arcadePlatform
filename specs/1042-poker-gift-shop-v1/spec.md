@@ -503,10 +503,10 @@ If the correction touches only browser presentation before #1048, WS redeploy is
 
 ### Task status amendment
 
-- [ ] **T012A — Custom gift picker**
-- [ ] **T012B — Custom recipient picker**
-- [ ] **T012C — Guest-visible disabled Gift Shop**
-- [ ] **T012D — Consume #1048 stable three-slot gift HUD**
+- [x] **T012A — Custom gift picker**
+- [x] **T012B — Custom recipient picker**
+- [x] **T012C — Guest-visible disabled Gift Shop**
+- [ ] **T012D — Consume #1048 stable three-slot gift HUD** — BLOCKED on #1048
 - [ ] **T013 — Final authenticated Stage smoke after T012A–T012D**
 - [ ] **T014 — Production owner GO/schema apply**
 - [ ] **T015 — Final handoff / merge-ready gate**
