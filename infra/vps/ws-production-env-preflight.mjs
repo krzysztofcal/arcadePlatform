@@ -102,7 +102,7 @@ export function defaultQuerySystemIdentifier(dbUrl) {
     env.PGSSLMODE = sslmode;
   }
 
-  const result = spawnSync("/usr/bin/psql", args, {
+  const result = spawnSync(PSQL_BIN, args, {
     env,
     timeout: 15000,
     encoding: "utf8"
@@ -164,12 +164,18 @@ export function runPreflight({
       reject("production env file must not define legacy WS_BOT_REACTION_MIN_MS or WS_BOT_REACTION_MAX_MS");
     }
 
-    const supabaseUrl = values.SUPABASE_URL || values.SUPABASE_URL_V2 || "";
-    if (!supabaseUrl.includes(`://${CANONICAL_PROD_PROJECT_REF}.supabase.co`)) {
-      reject("production env SUPABASE_URL must target canonical production project ref otbqfijerkieoxwpxjnm");
+    const rawSupabaseUrl = values.SUPABASE_URL || values.SUPABASE_URL_V2 || "";
+    let parsedSupabaseUrl;
+    try {
+      parsedSupabaseUrl = new URL(rawSupabaseUrl);
+    } catch {
+      reject("production env SUPABASE_URL must be a valid URL");
     }
-    if (supabaseUrl.includes(STAGE_PROJECT_REF)) {
-      reject("production env SUPABASE_URL must not target Stage project ref");
+    if (parsedSupabaseUrl.protocol !== "https:") {
+      reject("production env SUPABASE_URL must use https: protocol");
+    }
+    if (parsedSupabaseUrl.hostname !== `${CANONICAL_PROD_PROJECT_REF}.supabase.co`) {
+      reject("production env SUPABASE_URL must target canonical production project ref otbqfijerkieoxwpxjnm");
     }
 
     const dbUrl = values.SUPABASE_DB_URL;

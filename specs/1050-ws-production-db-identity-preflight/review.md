@@ -16,11 +16,11 @@ Finding P1 #3 from GitHub issue #1050:
    - Requires non-empty `SUPABASE_DB_URL`, `SUPABASE_URL`, `POKER_WS_INTERNAL_TOKEN`, `PORT=3000`, and `WS_AUTHORITATIVE_JOIN_ENABLED=1`.
    - Rejects legacy reaction settings (`WS_BOT_REACTION_MIN_MS`, `WS_BOT_REACTION_MAX_MS`).
    - Binds to canonical Production project ref `otbqfijerkieoxwpxjnm` independently of mutable env input.
-   - Verifies `SUPABASE_URL` targets `://otbqfijerkieoxwpxjnm.supabase.co`.
+   - Verifies `SUPABASE_URL` via exact URL parsing: `protocol === "https:"` and exact `hostname === "otbqfijerkieoxwpxjnm.supabase.co"` (rejecting suffix/subdomain spoofs, invalid URLs, or non-https schemes).
    - Verifies `SUPABASE_DB_URL` targets `otbqfijerkieoxwpxjnm` (supporting pooler format `postgres.otbqfijerkieoxwpxjnm` and direct formats).
    - Strictly rejects Stage project ref `krydukthwdvccggbyjfw` or mixed configurations.
    - Parses `SUPABASE_DB_URL` into components (`host`, `port`, `user`, `password`, `database`, `sslmode`).
-   - Executes read-only DB identity query `select system_identifier from pg_control_system();` via exact `/usr/bin/psql` (avoiding ambient PATH lookup in privileged boundary).
+   - Executes read-only DB identity query `select system_identifier from pg_control_system();` via single-source `PSQL_BIN` (`/usr/bin/psql`, avoiding ambient PATH lookup in privileged boundary).
    - Passes DB password strictly via `PGPASSWORD` subprocess environment variable; command line arguments (`argv`) contain only non-secret flags (`-h`, `-p`, `-U`, `-d`, `-X`, `-Atq`, `-v ON_ERROR_STOP=1`, `-c`).
    - Redacts all passwords and connection credentials from stdout/stderr via `sanitizeOutput`.
    - Asserts the returned identifier matches canonical Production `7575202818581710058`.
@@ -44,13 +44,14 @@ Finding P1 #3 from GitHub issue #1050:
 
 ## Automated Verification
 - **Targeted Test Suites**:
-  - `node --test ws-tests/ws-production-env-preflight.behavior.test.mjs` (17/17 pass):
+  - `node --test ws-tests/ws-production-env-preflight.behavior.test.mjs` (18/18 pass):
     - `parseEnv` parses assignments and trims quotes -> PASS
     - `parseDbUrl` parses pooler and direct connection strings correctly -> PASS
     - `sanitizeOutput` redacts secret passwords and connection URI credentials -> PASS
-    - `defaultQuerySystemIdentifier` invokes `/usr/bin/psql` directly and ignores ambient PATH -> PASS
+    - `defaultQuerySystemIdentifier` uses `PSQL_BIN` (`/usr/bin/psql`) directly -> PASS
     - Valid canonical Production env + correct DB system identifier (`7575202818581710058`) -> PASS
     - Direct DB URL format -> PASS
+    - `SUPABASE_URL` requires exact canonical hostname and https protocol -> PASS
     - Stage `SUPABASE_URL` -> FAIL
     - Stage `SUPABASE_DB_URL` -> FAIL
     - Mixed Production URL + Stage DB -> FAIL

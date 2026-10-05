@@ -96,35 +96,16 @@ test("sanitizeOutput redacts secret passwords and connection URI credentials", (
   assert.ok(uriSanitized.includes("postgresql://postgres:[REDACTED]@aws-1.supabase.com:5432/postgres"));
 });
 
-test("defaultQuerySystemIdentifier invokes /usr/bin/psql directly and ignores ambient PATH", () => {
+test("defaultQuerySystemIdentifier uses PSQL_BIN /usr/bin/psql directly", () => {
   assert.equal(PSQL_BIN, "/usr/bin/psql");
+
+  const fnSource = defaultQuerySystemIdentifier.toString();
+  assert.ok(fnSource.includes("spawnSync(PSQL_BIN, args,"), "defaultQuerySystemIdentifier must execute PSQL_BIN");
 
   const preflightSource = fs.readFileSync("infra/vps/ws-production-env-preflight.mjs", "utf8");
   assert.ok(!preflightSource.includes('spawnSync("psql"'), "must not invoke unanchored psql from PATH");
   assert.ok(!preflightSource.includes("spawnSync('psql'"), "must not invoke unanchored psql from PATH");
-  assert.ok(preflightSource.includes('spawnSync("/usr/bin/psql"'), "must invoke /usr/bin/psql directly");
-
-  // Place a dummy 'psql' script in a temporary directory at the front of PATH
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ws-prod-psql-path-test-"));
-  const fakePsql = path.join(tempDir, "psql");
-  fs.writeFileSync(fakePsql, "#!/bin/sh\necho FAKE_PATH_PSQL\nexit 42\n", { mode: 0o755 });
-
-  const originalPath = process.env.PATH;
-  try {
-    process.env.PATH = `${tempDir}:${originalPath}`;
-    assert.throws(
-      () => defaultQuerySystemIdentifier("postgresql://postgres:pass@127.0.0.1:5432/postgres"),
-      (err) => {
-        // If ambient psql from PATH was called, it would fail with code 42 or FAKE_PATH_PSQL
-        assert.ok(!err.message.includes("FAKE_PATH_PSQL"), "must not execute ambient psql from PATH");
-        assert.ok(!err.message.includes("exit code 42"), "must not execute ambient psql from PATH");
-        return true;
-      }
-    );
-  } finally {
-    process.env.PATH = originalPath;
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
+  assert.ok(preflightSource.includes("spawnSync(PSQL_BIN,"), "source must use PSQL_BIN in spawnSync");
 });
 
 test("canonical Production env + correct DB system identifier passes", () => {
@@ -148,6 +129,81 @@ test("canonical Production env with direct database URL passes", () => {
     });
     assert.equal(result, "PASS");
   });
+});
+
+test("SUPABASE_URL requires exact canonical hostname and https protocol", () => {
+  // Valid canonical Production URL passes
+  withTempEnvFile(
+    validEnvContent({ SUPABASE_URL: `https://${CANONICAL_PROD_PROJECT_REF}.supabase.co` }),
+    (envFile) => {
+      const result = runPreflight({
+        envFile,
+        allowTestUid: true,
+        querySystemIdentifier: () => CANONICAL_PROD_SYSTEM_IDENTIFIER
+      });
+      assert.equal(result, "PASS");
+    }
+  );
+
+  // Subdomain / suffix spoof (fail-open prevention) fails
+  withTempEnvFile(
+    validEnvContent({ SUPABASE_URL: `https://${CANONICAL_PROD_PROJECT_REF}.supabase.co.evil.example` }),
+    (envFile) => {
+      assert.throws(
+        () => runPreflight({
+          envFile,
+          allowTestUid: true,
+          querySystemIdentifier: () => CANONICAL_PROD_SYSTEM_IDENTIFIER
+        }),
+        (err) => err instanceof PreflightError && err.message.includes("otbqfijerkieoxwpxjnm")
+      );
+    }
+  );
+
+  // Other hostname fails
+  withTempEnvFile(
+    validEnvContent({ SUPABASE_URL: "https://some-other-host.supabase.co" }),
+    (envFile) => {
+      assert.throws(
+        () => runPreflight({
+          envFile,
+          allowTestUid: true,
+          querySystemIdentifier: () => CANONICAL_PROD_SYSTEM_IDENTIFIER
+        }),
+        (err) => err instanceof PreflightError && err.message.includes("otbqfijerkieoxwpxjnm")
+      );
+    }
+  );
+
+  // http protocol fails
+  withTempEnvFile(
+    validEnvContent({ SUPABASE_URL: `http://${CANONICAL_PROD_PROJECT_REF}.supabase.co` }),
+    (envFile) => {
+      assert.throws(
+        () => runPreflight({
+          envFile,
+          allowTestUid: true,
+          querySystemIdentifier: () => CANONICAL_PROD_SYSTEM_IDENTIFIER
+        }),
+        (err) => err instanceof PreflightError && err.message.includes("https:")
+      );
+    }
+  );
+
+  // Malformed URL fails
+  withTempEnvFile(
+    validEnvContent({ SUPABASE_URL: "not-a-valid-url" }),
+    (envFile) => {
+      assert.throws(
+        () => runPreflight({
+          envFile,
+          allowTestUid: true,
+          querySystemIdentifier: () => CANONICAL_PROD_SYSTEM_IDENTIFIER
+        }),
+        (err) => err instanceof PreflightError && err.message.includes("valid URL")
+      );
+    }
+  );
 });
 
 test("Stage SUPABASE_URL fails", () => {

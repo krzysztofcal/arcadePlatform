@@ -29,7 +29,7 @@ So that a misconfigured or mixed environment (e.g. Production URL with Stage DB 
    - Canonical Production PostgreSQL system identifier: `7575202818581710058`.
    - Neither value may be derived or read from mutable input.
 5. **URL & DB URL Target Verification**:
-   - `SUPABASE_URL` must target canonical production: `://${CANONICAL_PROD_PROJECT_REF}.supabase.co`.
+   - `SUPABASE_URL` must be a valid URL with `protocol === "https:"` and exact `hostname === "otbqfijerkieoxwpxjnm.supabase.co"`.
    - `SUPABASE_DB_URL` must target canonical production: `postgres.${CANONICAL_PROD_PROJECT_REF}` (pooler) or `.${CANONICAL_PROD_PROJECT_REF}.` / `//${CANONICAL_PROD_PROJECT_REF}.` (direct).
    - Any mixed configuration (e.g. Production URL + Stage DB `krydukthwdvccggbyjfw`, or Stage URL + Production DB) must fail-closed immediately.
 6. **Read-Only Database Identity Check & Credential Safety**:
