@@ -149,3 +149,5 @@ This is a browser presentation change only: no WS, protocol, ledger, migrations,
 ## Implementation status
 
 Independent draft PR #1049 implements the browser HUD and anchors. Preview SHA 2a9e07525a81efc9a2b6820efba1d0c7b1b09556 passed the 20-case real preview visual matrix and four real guest sessions. Signed-in view/refresh/error behavior used controlled ChipsClient responses; real authenticated Stage reads remain pending. See review.md and preview-evidence.json. No WS deploy or database mutation. Not merge-ready; #1047 integration remains separate.
+
+Review P1/P2 correction: browser SHA 696b92fe0dcba4d1820dc1aabcea0f47467e7173 subscribes to the canonical document event and applies a 700ms highlight only for changed, valid authoritative wallet results in the same identity. First/error/reduced-motion/identity-reset exclusions verified on real preview using controlled ChipsClient reads. Earlier window event account evidence is superseded by wallet-review-evidence.json; actual authenticated Stage remains pending.

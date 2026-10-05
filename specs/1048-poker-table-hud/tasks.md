@@ -12,4 +12,4 @@
 
 - [x] T010 Review P1: consume existing document chips:tx-complete event; no bridge/new event.
 - [x] T011 Review P2: authoritative wallet change pulse; identity reset, first/error/reduced-motion exclusions, stale guards retained.
-- [ ] T012 Review preview: verify document dispatch refetch + pulse/exclusions on real Deploy Preview.
+- [x] T012 Review preview: verify document dispatch refetch + pulse/exclusions on real Deploy Preview.

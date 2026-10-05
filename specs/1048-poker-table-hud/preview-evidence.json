@@ -100,7 +100,8 @@
     "txRefresh": {
       "wallet": 2,
       "projection": 2
-    }
+    },
+    "reviewCorrection": "Historical window-dispatch probe; does not validate the canonical document event. Superseded for account refresh by wallet-review-evidence.json. Layout/guest evidence remains valid."
   },
   {
     "name": "mobile",
@@ -199,7 +200,8 @@
     "txRefresh": {
       "wallet": 2,
       "projection": 2
-    }
+    },
+    "reviewCorrection": "Historical window-dispatch probe; does not validate the canonical document event. Superseded for account refresh by wallet-review-evidence.json. Layout/guest evidence remains valid."
   },
   {
     "name": "small-mobile",
@@ -298,7 +300,8 @@
     "txRefresh": {
       "wallet": 2,
       "projection": 2
-    }
+    },
+    "reviewCorrection": "Historical window-dispatch probe; does not validate the canonical document event. Superseded for account refresh by wallet-review-evidence.json. Layout/guest evidence remains valid."
   },
   {
     "name": "mobile-landscape",
@@ -397,13 +400,15 @@
     "txRefresh": {
       "wallet": 2,
       "projection": 2
-    }
+    },
+    "reviewCorrection": "Historical window-dispatch probe; does not validate the canonical document event. Superseded for account refresh by wallet-review-evidence.json. Layout/guest evidence remains valid."
   },
   {
     "containmentReview": "20/20 repeated scenarios also verify every semantic HUD area stays inside its seat article",
     "accountError": "failed wallet/projection reads show Wallet — CH · Other tables — CH; no invented zero",
     "accountSignOut": "immediately hides authenticated HUD",
-    "method": "Real Netlify Deploy Preview assets; guest sessions use real preview WS. Signed-in visual state and ChipsClient responses are controlled browser-only fixtures, not authenticated Stage account reads. Netlify collaboration chrome excluded from screenshots; no probes committed."
+    "method": "Real Netlify Deploy Preview assets; guest sessions use real preview WS. Signed-in visual state and ChipsClient responses are controlled browser-only fixtures, not authenticated Stage account reads. Netlify collaboration chrome excluded from screenshots; no probes committed.",
+    "reviewCorrection": "Historical window-dispatch probe; does not validate the canonical document event. Superseded for account refresh by wallet-review-evidence.json. Layout/guest evidence remains valid."
   },
   {
     "normalMotionAndAuthRace": [
@@ -421,6 +426,7 @@
         "scrollWidth": 390,
         "staleAfterSignOut": "late held reads do not restore authenticated HUD or values"
       }
-    ]
+    ],
+    "reviewCorrection": "Historical window-dispatch probe; does not validate the canonical document event. Superseded for account refresh by wallet-review-evidence.json. Layout/guest evidence remains valid."
   }
 ]
