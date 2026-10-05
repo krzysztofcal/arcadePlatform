@@ -280,3 +280,7 @@ Current layout remains unaccepted. Remove persistent ACTIVE and visible opponent
 Keep accepted second-pass presentation, including OPEN plus Seat N. Restore large --own for hero special hand only; non-hero remains compact above avatar, ordinary reactions/payout remain owner-centered. Fixed top reservation: 40px wide, 64px narrow portrait, ellipsis without runtime height changes. Move portrait non-hero centers toward perimeter, nearby remaining-stack anchors without changing bet anchors/accounting. Casino CSS dealer/card-back polish only; pot outer scale .5 matches player .5 while preserving center lane.
 
 Private cards: omitted fields on same-hand/same-seat refresh retain the dealt cards; explicit arrays remain authoritative. Different/null hand, changed/lost seat, WAITING_NEXT_HAND/OUT_OF_CHIPS clear; identity resets use existing live-state lifecycle. No WS change, endpoint or unbounded cache. Fundamental existing snapshot test covers preservation and clears. Narrow Preview only; owner visual and authenticated Stage gates pending.
+
+## Fresh-JOIN presentation correction (2026-10-05)
+
+Ordinary authoritative WAITING_NEXT_HAND after JOIN is a reserved seat, not a bust/sitout. Use existing normal banner/NEXT HAND presentation, with neutral Joining next hand turn copy. Rebuy panel requires OUT_OF_CHIPS + canRebuy, or waiting with an existing real rebuyOperation. Keep real rebuy recovery and no waiting preactions. Browser-only: no WS/backend/#1055 changes, no new UI test or state source. Owner preview smoke and authenticated CH gate remain pending.

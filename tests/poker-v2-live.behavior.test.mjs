@@ -2494,7 +2494,7 @@ test('poker v2 renders authoritative out-of-chips state with stable disabled act
 
   ws.onSnapshot(snapshot({ status: 'WAITING_NEXT_HAND', stack: 500, canRebuy: false }));
   await harness.flush();
-  assert.equal(harness.elements.pokerV2TurnText.textContent, 'Funded · Joining next hand');
+  assert.equal(harness.elements.pokerV2TurnText.textContent, 'Joining next hand');
   assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'waiting snapshot must not reopen an accepted rebuy prompt');
   assert.equal(harness.elements.pokerV2RebuyBtn.hidden, true);
 });

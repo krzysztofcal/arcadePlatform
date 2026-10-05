@@ -4590,7 +4590,7 @@
 
   function isPlayerSittingOut(){
     var status = currentPlayerStatus();
-    return status === 'OUT_OF_CHIPS' || status === 'WAITING_NEXT_HAND';
+    return status === 'OUT_OF_CHIPS';
   }
 
   function refreshRebuyBalance(){
@@ -4613,7 +4613,7 @@
     var playerState = state.playerState || null;
     var outOfChips = !!playerState && playerState.status === 'OUT_OF_CHIPS';
     var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
-    var show = ((outOfChips && playerState.canRebuy === true) || waiting) && !rebuyPanelDismissed;
+    var show = ((outOfChips && playerState.canRebuy === true) || (waiting && !!rebuyOperation)) && !rebuyPanelDismissed;
     if (els.rebuyBtn) els.rebuyBtn.hidden = waiting;
     els.rebuyPanel.hidden = !show;
     if (!show) return;
@@ -4730,7 +4730,7 @@
       if (currentPlayerStatus() === 'OUT_OF_CHIPS'){
         els.turnText.textContent = 'Out of chips · Sitting out';
       } else if (currentPlayerStatus() === 'WAITING_NEXT_HAND'){
-        els.turnText.textContent = 'Funded · Joining next hand';
+        els.turnText.textContent = 'Joining next hand';
       } else if (isUsersTurn()){
         els.turnText.textContent = 'Your turn.';
       } else if (state.turnUserId){
@@ -4935,7 +4935,7 @@
     var stackAmount = resolveStack(state.currentUserId);
     var amountBounds = resolveAmountBounds(amountAction, stackAmount);
     var playerSittingOut = isPlayerSittingOut();
-    var preactionMode = !!(signedIn && seated && liveReady && activeHand && !usersTurn && !isCurrentUserFolded() && !playerSittingOut);
+    var preactionMode = !!(signedIn && seated && liveReady && activeHand && !usersTurn && !isCurrentUserFolded() && !playerSittingOut && currentPlayerStatus() !== 'WAITING_NEXT_HAND');
     var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
     var preactionPrimary = resolvePrimaryAction(projectedAllowed);
     var preactionAmountAction = resolveAmountAction(projectedAllowed);
