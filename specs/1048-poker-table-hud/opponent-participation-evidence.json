@@ -1,0 +1,67 @@
+{
+  "runtimeSha": "b4d23bb31de35627375b253eb3337edd7bcd6321",
+  "remoteJsCssMatchCheckout": true,
+  "method": "Two narrow real Deploy Preview cases; controlled stateSnapshot through mergeSnapshot with public per-round membership, not real authenticated Stage verification. No collision matrix; Netlify toolbar excluded.",
+  "records": [
+    {
+      "name": "portrait",
+      "build": "b4d23bb31de35627375b253eb3337edd7bcd6321",
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "clientHeight": 844,
+      "indicators": [
+        {
+          "user": "hud-user-2",
+          "count": "2"
+        },
+        {
+          "user": "hud-user-3",
+          "count": "2"
+        },
+        {
+          "user": "hud-user-4",
+          "count": "0"
+        },
+        {
+          "user": "hud-user-5",
+          "count": "0"
+        },
+        {
+          "user": "hud-user-6",
+          "count": "0"
+        }
+      ]
+    },
+    {
+      "name": "landscape",
+      "build": "b4d23bb31de35627375b253eb3337edd7bcd6321",
+      "scrollWidth": 844,
+      "clientWidth": 844,
+      "scrollHeight": 390,
+      "clientHeight": 390,
+      "indicators": [
+        {
+          "user": "hud-user-2",
+          "count": "2"
+        },
+        {
+          "user": "hud-user-3",
+          "count": "2"
+        },
+        {
+          "user": "hud-user-4",
+          "count": "0"
+        },
+        {
+          "user": "hud-user-5",
+          "count": "0"
+        },
+        {
+          "user": "hud-user-6",
+          "count": "0"
+        }
+      ]
+    }
+  ]
+}

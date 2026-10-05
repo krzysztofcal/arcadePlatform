@@ -22,4 +22,4 @@ Earlier T003/T008 seat-grid implementation and 20/20 evidence are superseded by 
 ## P1 participation correction
 
 - [x] P001 Reuse public per-round hand membership and minimally extend existing fundamental snapshot semantics assertions.
-- [ ] P002 Required checks, self-review and narrow portrait/landscape Preview sanity; keep owner smoke pending.
+- [x] P002 Required checks, self-review and narrow portrait/landscape Preview sanity; keep owner smoke pending.

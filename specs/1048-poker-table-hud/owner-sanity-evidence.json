@@ -75,5 +75,6 @@
   "actualAuthenticatedStageVerification": "pending",
   "netlifyCollaborationToolbar": "excluded from product sanity/screenshots",
   "requiredChecks": "syntax/check:all/ci:guards/CSP/diff passed; focused existing suite 121/121",
-  "probeScope": "four viewport sanity cases only; no collision matrix or new repo UI tests"
+  "probeScope": "four viewport sanity cases only; no collision matrix or new repo UI tests",
+  "opponentCardSemantics": "Prior layout sanity only; opponent count semantics superseded by opponent-participation-evidence.json. CSS, HTML and layout anchors unchanged."
 }
