@@ -1,0 +1,408 @@
+[
+  {
+    "runtimeSourceMatches": "2a9e07525a81efc9a2b6820efba1d0c7b1b09556",
+    "sha256": "29f279728299c9b4c72a508bf9dd4c365619fe184dd76e77c688a1a0d7e3b612"
+  },
+  {
+    "name": "desktop",
+    "realGuest": "joined, no authenticated balances",
+    "received": [
+      "helloAck",
+      "authOk",
+      "commandResult",
+      "table_state",
+      "stateSnapshot"
+    ],
+    "errors": []
+  },
+  {
+    "name": "desktop",
+    "max": 2,
+    "occupied": 2,
+    "dealer": 1,
+    "mode": "visible",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 1440,
+      "viewport": 1440,
+      "heroCards": false,
+      "slots": 6,
+      "quickSlots": 2
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "desktop",
+    "max": 6,
+    "occupied": 2,
+    "dealer": 2,
+    "mode": "folded",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 1440,
+      "viewport": 1440,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "desktop",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 4,
+    "mode": "visible",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 1440,
+      "viewport": 1440,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "desktop",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 2,
+    "mode": "settlement",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 1440,
+      "viewport": 1440,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "desktop",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 6,
+    "mode": "hidden",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 1440,
+      "viewport": 1440,
+      "heroCards": true,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "desktop",
+    "txRefresh": {
+      "wallet": 2,
+      "projection": 2
+    }
+  },
+  {
+    "name": "mobile",
+    "realGuest": "joined, no authenticated balances",
+    "received": [
+      "helloAck",
+      "authOk",
+      "commandResult",
+      "table_state",
+      "stateSnapshot"
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile",
+    "max": 2,
+    "occupied": 2,
+    "dealer": 1,
+    "mode": "visible",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 390,
+      "viewport": 390,
+      "heroCards": false,
+      "slots": 6,
+      "quickSlots": 2
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile",
+    "max": 6,
+    "occupied": 2,
+    "dealer": 2,
+    "mode": "folded",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 390,
+      "viewport": 390,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 4,
+    "mode": "visible",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 390,
+      "viewport": 390,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 2,
+    "mode": "settlement",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 390,
+      "viewport": 390,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 6,
+    "mode": "hidden",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 390,
+      "viewport": 390,
+      "heroCards": true,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile",
+    "txRefresh": {
+      "wallet": 2,
+      "projection": 2
+    }
+  },
+  {
+    "name": "small-mobile",
+    "realGuest": "joined, no authenticated balances",
+    "received": [
+      "helloAck",
+      "authOk",
+      "commandResult",
+      "table_state",
+      "stateSnapshot"
+    ],
+    "errors": []
+  },
+  {
+    "name": "small-mobile",
+    "max": 2,
+    "occupied": 2,
+    "dealer": 1,
+    "mode": "visible",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 320,
+      "viewport": 320,
+      "heroCards": false,
+      "slots": 6,
+      "quickSlots": 2
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "small-mobile",
+    "max": 6,
+    "occupied": 2,
+    "dealer": 2,
+    "mode": "folded",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 320,
+      "viewport": 320,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "small-mobile",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 4,
+    "mode": "visible",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 320,
+      "viewport": 320,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "small-mobile",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 2,
+    "mode": "settlement",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 320,
+      "viewport": 320,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "small-mobile",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 6,
+    "mode": "hidden",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 320,
+      "viewport": 320,
+      "heroCards": true,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "small-mobile",
+    "txRefresh": {
+      "wallet": 2,
+      "projection": 2
+    }
+  },
+  {
+    "name": "mobile-landscape",
+    "realGuest": "joined, no authenticated balances",
+    "received": [
+      "helloAck",
+      "authOk",
+      "commandResult",
+      "table_state",
+      "stateSnapshot"
+    ],
+    "errors": []
+  },
+  {
+    "name": "mobile-landscape",
+    "max": 2,
+    "occupied": 2,
+    "dealer": 1,
+    "mode": "visible",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 844,
+      "viewport": 844,
+      "heroCards": false,
+      "slots": 6,
+      "quickSlots": 2
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile-landscape",
+    "max": 6,
+    "occupied": 2,
+    "dealer": 2,
+    "mode": "folded",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 844,
+      "viewport": 844,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile-landscape",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 4,
+    "mode": "visible",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 844,
+      "viewport": 844,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile-landscape",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 2,
+    "mode": "settlement",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 844,
+      "viewport": 844,
+      "heroCards": false,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile-landscape",
+    "max": 6,
+    "occupied": 6,
+    "dealer": 6,
+    "mode": "hidden",
+    "metrics": {
+      "issues": [],
+      "scrollWidth": 844,
+      "viewport": 844,
+      "heroCards": true,
+      "slots": 18,
+      "quickSlots": 6
+    },
+    "fixtureErrors": []
+  },
+  {
+    "name": "mobile-landscape",
+    "txRefresh": {
+      "wallet": 2,
+      "projection": 2
+    }
+  },
+  {
+    "containmentReview": "20/20 repeated scenarios also verify every semantic HUD area stays inside its seat article",
+    "accountError": "failed wallet/projection reads show Wallet — CH · Other tables — CH; no invented zero",
+    "accountSignOut": "immediately hides authenticated HUD",
+    "method": "Real Netlify Deploy Preview assets; guest sessions use real preview WS. Signed-in visual state and ChipsClient responses are controlled browser-only fixtures, not authenticated Stage account reads. Netlify collaboration chrome excluded from screenshots; no probes committed."
+  }
+]

@@ -145,3 +145,7 @@ Follow `agents.md` and `skills.md`.
 Independent branch from main 4f798bdd56dba0e11b34e8982895650920ec6944. #1047 is not a base. Existing seat/avatar/card/chip/reaction renderers consume authoritative WS state; their positioning currently uses unrelated percentage offsets. Table XP scripts serve only its badge. ChipsClient is intentionally absent under the obsolete static HTML assertion.
 
 This is a browser presentation change only: no WS, protocol, ledger, migrations, payment or gift behavior. No Stage/Production database mutation. Material visual breaking change; gameplay and XP elsewhere unchanged.
+
+## Implementation status
+
+Independent draft PR #1049 implements the browser HUD and anchors. Preview SHA 2a9e07525a81efc9a2b6820efba1d0c7b1b09556 passed the 20-case real preview visual matrix and four real guest sessions. Signed-in view/refresh/error behavior used controlled ChipsClient responses; real authenticated Stage reads remain pending. See review.md and preview-evidence.json. No WS deploy or database mutation. Not merge-ready; #1047 integration remains separate.

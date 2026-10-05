@@ -6,6 +6,6 @@
 - [x] T004 Reserve exactly three gift anchors and one quick-action anchor per seat; no gift behavior.
 - [x] T005 Replace table XP badge with authoritative authenticated CH HUD and shared tx refresh.
 - [x] T006 Update obsolete static assertion; run required checks and focused fundamental checks.
-- [ ] T007 Self-review and create independent draft PR to main.
-- [ ] T008 Real Deploy Preview desktop/mobile visual matrix and signed-in/guest account evidence.
-- [ ] T009 Final evidence and #1047 T012D/T012E integration handoff; never merge.
+- [x] T007 Self-review and create independent draft PR to main.
+- [ ] T008 Real Deploy Preview visual matrix: 20/20 plus four real guest sessions complete; controlled signed-in CH view/tx/error/sign-out passed. Actual authenticated Stage account reads remain pending (no session available).
+- [x] T009 Final evidence and #1047 T012D/T012E integration handoff; never merge.

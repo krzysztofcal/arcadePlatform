@@ -1,15 +1,32 @@
 # Review and evidence
 
-Baseline main: 4f798bdd56dba0e11b34e8982895650920ec6944; separate branch feat/1048-poker-table-hud.
+Status: implementation ready, awaiting authenticated Stage verification. Draft [#1049](https://github.com/krzysztofcal/arcadePlatform/pull/1049), never merged.
 
-## Self-review
-Browser presentation only. No protocol, WS runtime, ledger, purchase, settlement calculation, bot bankroll or XP system changes. Current stack resolves through existing authoritative resolveStack; previous chip art becomes bounded numeric stack/bet presentation, preserving chip animation anchors measured from actual DOM. Private-card visibility and reaction lifecycle/occupant checks retained. Account refresh uses existing ChipsClient reads, safe-integer validation, current-table exclusion, auth/table identity plus request generation to suppress stale replies. No invented zero on missing projection/error. Three gift slots outside avatar and one quick-action container; no dormant gift behavior.
+## Baseline and self-review
+Independent branch from main `4f798bdd56dba0e11b34e8982895650920ec6944`; #1047 is not the base. Live #786/#1042 integration requirements reconciled: payment, no-self and Quick Gift behavior remain owned by #1042.
 
-## Validation
-Passed syntax, check:all, ci:guards, check:csp-inline; existing static HTML checks and fundamental Other tables calculation. Existing required Poker V2 suite: 121/121 passing after adapting old DOM selectors and removing obsolete layout/XP assertions. No new UI/CSS/JSP tests, dependencies or inline scripts. Existing lifecycle waiver warnings unchanged.
+Browser presentation only. No WS/shared runtime/protocol/config, ledger, purchase, settlement calculation, bot bankroll or XP system changes. Existing authoritative `resolveStack`, private-card visibility, reveal timing and reaction occupant/lifecycle checks retained. Chips become bounded numeric stack/bet presentation; existing fly animations use measured DOM anchors. Material visual change: grid seats plus header/controls in flow; narrow/short viewports scroll vertically. Existing Preview FX control moves into header flow. No new inline scripts, dependencies, frameworks or balance cache.
 
-Real Deploy Preview visual verification pending. No WS Preview Deploy required: no WS/shared runtime/protocol/config change.
+Account refresh uses only existing ChipsClient reads, safe-integer validation, current-table exclusion and auth/table identity plus request generation to suppress stale responses. Missing/error projection yields unavailable, not zero. No local subtraction or gift-specific refresh path.
 
-First real preview probe detected 1.35px horizontal overflow at 390px, caused by the inherited decorative background scale(1.05). Remove that scale instead of clipping gameplay/UI. Rerun the matrix on the new preview revision. Fundamental sum test lives in the existing Poker V2 suite so required CI executes it.
+## Required verification
+Passed syntax, check:all, ci:guards, check:csp-inline, migration validation (read-only), diff whitespace review. Existing Poker V2 suite including fundamental Other tables calculation plus static HTML checks: **123/123**. Required GitHub core, Playwright, WS harness, CodeQL and structural validation passed on `2a9e075`.
 
-Second preview pass: desktop, 390px and 320px portrait matrices passed. Landscape revealed a superseded header left/top rule retained beneath its comment; remove the old rule. The existing Preview FX control also overlaid CH HUD at 320px; mount that existing control in the header flow rather than its old fixed rail. No new behavior/UI control.
+Existing tests were adapted to new semantic containers and browser DOM move semantics; stale offset/chip-art/XP navigation assertions removed. Exact-path XP checker exemption is limited to Poker Table. No new UI/CSS/JSP tests. Existing lifecycle waiver warnings unchanged.
+
+## Real Deploy Preview
+[Preview](https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html), browser SHA **`2a9e07525a81efc9a2b6820efba1d0c7b1b09556`**. Generated BUILD_INFO confirmed SHA; served JS/CSS bytes match this checkout. Evidence: [preview-evidence.json](preview-evidence.json).
+
+20/20 scenarios passed at 1440×1000, 390×844, 320×640 and 844×390: maxSeats=2 with two occupants, six slots with two occupants, all six occupied, dealer at hero/top/side, visible/revealed/folded/next-hand hidden cards, action/best-hand/settlement and reaction/context social presentation. Three populated gift placeholders and quick-action placeholders exercised anchors only, with no purchase behavior. Measured zero overlapping semantic areas, avatars/dealer/quick anchors, seats/board/header/controls; no horizontal overflow. Repeated containment check: all semantic areas remain inside their seat articles. Screenshots visually reviewed. Existing decorative scale and superseded landscape header offsets found by smoke were removed; no z-index/overflow patch.
+
+Four real guest sessions joined the preview WS, receiving helloAck/authOk/commandResult/table_state/stateSnapshot, with no authenticated account values and no JS errors. Controlled signed-in visual checks show Wallet 420 CH · Other tables 100 CH, excluding the current 1235 stack. chips:tx-complete fetches both again and shows authoritative 399, failed reads display —, sign-out hides values. Controlled fixtures do **not** verify real authenticated Stage account reads. Netlify collaboration toolbar excluded from screenshots; preview probes exist only outside the repo.
+
+Actual authenticated Stage balance/projection and tx refresh remain an owner/manual gate; draft/not merge-ready. No WS Preview Deploy needed; no Production mutation or owner GO requested.
+
+## #1047 T012D/T012E contract
+- Article: `.poker-seat[data-seat-no][data-user-id]`, authoritative occupant identity.
+- Received gifts: `[data-poker-gift-slots]` contains exactly three `[data-poker-gift-slot="0"]`, `"1"`, `"2"`; outside `.poker-seat-avatar` and its overflow:hidden.
+- Quick action: exactly one `[data-poker-quick-action-slot]`, outside avatar; 44px reserved area, dedicated full-width row on narrow seats.
+- Containers are recreated by renderSeats. #1047 must repopulate/reconcile after render and match seatNo + userId; owner replacement/removal invalidates its target/retry as already specified there.
+- #1047 mounts received state/badges and the other-occupied-seat Quick Gift button/picker. It retains one existing purchase/retry/cooldown/sendGift path and no-self enforcement. It dispatches existing chips:tx-complete; #1048 refreshes both account reads through one path.
+- Integrate #1047 only after owner integration of #1048 into main. #1042 T012D/E2 remain blocked until those anchors are on main; T013 and Production T014 gates are unaffected.
