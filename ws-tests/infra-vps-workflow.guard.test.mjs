@@ -176,6 +176,7 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   assert.match(bootstrap, /-g arcade-deploy -m 2775/);
   assert.match(bootstrap, /install -o root -g arcade-deploy -m 0664 "\$REPO_ROOT\/infra\/vps\/Caddyfile" \/etc\/caddy\/Caddyfile/);
   assert.match(bootstrap, /ws-preview-env-preflight\.mjs/);
+  assert.match(bootstrap, /ws-production-env-preflight\.mjs/);
   assert.match(bootstrap, /\[\[ ! -x \/usr\/bin\/node \]\]/);
   assert.match(bootstrap, /\/usr\/bin\/node --version/);
   assert.match(bootstrap, /visudo -cf/);
@@ -185,6 +186,7 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   assert.match(sudoers, /restart ws-server-preview\.service/);
   assert.match(sudoers, /reload caddy\.service/);
   assert.match(sudoers, /arcade-ws-preview-env-preflight ""/);
+  assert.match(sudoers, /arcade-ws-production-env-preflight ""/);
   assert.doesNotMatch(sudoers, /arcade ALL=/);
   const sudoersCommands = sudoers.replace(/^#.*$/gm, "");
   assert.doesNotMatch(sudoersCommands, /(?:^|[ /])(bash|sh|node|python|tar|rsync|cp|mv|rm|install)(?:["\s]|$)/m);
