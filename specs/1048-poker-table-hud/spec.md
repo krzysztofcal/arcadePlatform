@@ -1,153 +1,258 @@
-# #1048 — Poker Table HUD
-
-Source: live GitHub issue #1048; reconciled 2026-10-05.
+# #1048 — live specification
 
 ## Goal
 
-Redesign Poker Table presentation so every seat and account-level HUD element has a stable reserved place and cosmetic/social features can be added without overlapping cards, dealer button, stack, avatar, reactions or gifts.
+Fix Poker Table HUD collisions **without redesigning the table**.
 
-This issue was discovered during #1042 Gift Shop V1 smoke: gift badges were rendered inside `.poker-seat-avatar`, which has `overflow:hidden`, so the persistent received-gift UI was clipped. More broadly, the current table relies on independently positioned elements that can visually collide.
+The existing Poker V2 visual design, table/felt, assets, chip graphics, community-card presentation and overall composition are the baseline. The change should make the six player HUDs deterministic and collision-free while preserving the current look.
 
-## Problems to solve
+Manual smoke of draft PR #1049 on 2026-10-05 rejected its first layout direction: the table became vertically scrollable, seats became large framed/card-like panels, chip presentation changed materially, and the whole table composition moved away from the existing design. That direction is **not accepted** and must be reworked.
 
-- Dealer `D` can overlap seat information.
-- Cards, stack/chips, avatar-adjacent UI, reactions and future cosmetics can compete for the same visual space.
-- Gift Shop needs three persistent received-gift slots per occupied seat.
-- Poker Table currently shows XP, which is not useful table context.
-- Signed-in poker users should instead see account CH context consistent with the existing account/topbar projection.
+## Hard acceptance rule: one viewport, no scrolling
 
-## Seat HUD direction
+The complete playable table must fit inside a single viewport in both:
 
-Each seat must become a bounded layout with predefined semantic slots rather than adding arbitrary absolute offsets for every new feature.
+- portrait/mobile;
+- landscape/mobile;
+- supported desktop widths.
 
-At minimum reserve stable areas for:
+There must be **no vertical or horizontal page scrolling to play the table**.
 
-- hole cards;
-- dealer button;
-- avatar;
-- nickname/status;
-- authoritative poker stack;
-- three received-gift slots;
-- a small per-seat quick-action slot for contextual actions such as #1042 Quick Gift;
-- reaction / contextual social UI;
-- current action / best-hand / settlement presentation where applicable.
+The layout must reserve space for the top table HUD, poker table/scene and bottom action controls so they cannot push one another outside the viewport or overlap. Scale/spacing may adapt to the viewport, but the user must always see the whole playable table at once.
 
-Exact orientation may differ for top/bottom/side seats, but components must not overlap at supported table sizes or responsive breakpoints.
+## Preserve the current Poker V2 design
 
-The three gift slots are part of this HUD contract. #1042 may keep gift state/delivery, but its final persistent badges depend on this issue rather than another z-index/offset patch.
+Do not redesign unrelated table UI.
 
-The per-seat quick-action slot is also part of this HUD contract. #1042 owns Quick Gift behavior, target validation and purchase flow; #1048 only guarantees a stable collision-free place beside each occupied seat. Do not implement Quick Gift as another free-floating absolute overlay.
+Preserve, unless a tiny placement adjustment is required for collision avoidance:
 
-## Account HUD
+- existing poker table/felt appearance and assets;
+- existing avatars and avatar art;
+- existing card art;
+- existing chip graphics / chip-stack presentation;
+- existing community cards;
+- existing action controls;
+- existing pot presentation;
+- existing best-hand presentation;
+- existing reactions/settlement/celebration visuals;
+- current overall visual language.
 
-Remove the Poker Table XP badge.
+Do **not** add large frames, cards, panels or boxes around each player HUD. A seat control should visually remain part of the poker table, not become a separate rectangular card.
 
-For authenticated users show poker-relevant CH context using existing mechanisms:
+Do not replace graphical chip stacks with plain stack/bet text panels.
 
-- wallet CH from `ChipsClient.fetchBalance()`;
-- authoritative poker table projection from `ChipsClient.fetchPokerProjection()`.
+## Six deterministic seat controls
 
-Do not create another balance endpoint.
+Treat the six poker positions conceptually like six fixed reusable user controls:
 
-The current-table stack remains visible at the player's seat. The account HUD should therefore present wallet CH and CH committed to **other** tables without double-counting the current stack.
+- Seat 1 / hero;
+- Seat 2;
+- Seat 3;
+- Seat 4;
+- Seat 5;
+- Seat 6.
 
-Example:
+Each control may have a different orientation appropriate to its physical position around the table, but its internal anchors must be deterministic. Do not continuously calculate arbitrary free-floating positions from current content.
 
-`Wallet 400 CH · Other tables 500 CH`
+The six controls must be placed around the table so their reserved areas do not overlap each other, the community-card area or the player action controls.
 
-After a Gift Shop purchase, reuse the existing `chips:tx-complete` refresh path. Animate the visible wallet change only toward the newly fetched authoritative balance; never treat a client-side subtraction as source of truth.
+Default implementation should refine Poker V2 rather than create a second poker implementation. A new table-v3 is allowed only if repo review shows that it is materially simpler and avoids duplicate gameplay/state logic; do not create a parallel poker runtime or duplicate WS/gameplay code.
 
-For guest mode, do not show authenticated wallet/account balances.
+## Required per-seat anatomy
+
+For every occupied seat, define fixed semantic anchors.
+
+### Avatar
+
+- Avatar is the visual center of the seat HUD.
+- Avatar placement inside that seat control is stable.
+
+### Player name and seat marker
+
+- Player name is always directly below the avatar.
+- Seat marker/number has one defined place and must not cover the avatar/name/cards/chips.
+
+### Received gifts
+
+- Exactly three persistent received-gift slots.
+- They sit around the avatar circumference at predefined fixed positions and a consistent radius from the avatar center.
+- Their positions do not move based on content.
+- They must live outside the avatar clipping region.
+- #1042 owns gift state/content; #1048 owns these anchors.
+
+### Quick Gift action
+
+- Reserve one small stable Quick Gift action anchor for #1042.
+- It should sit at a defined avatar corner/adjacent position.
+- It must never cover cards, player name, action badge, received gifts, dealer chip or stack.
+- #1048 provides placement only; #1042 owns behavior.
+
+### Action/status badge
+
+- ACTIVE/FOLDED/CALL/RAISE/etc. presentation must have a predictable location around the avatar.
+- Prefer a fixed corner/anchor.
+- It may use a small seat-specific alternate position if that is the simplest way to avoid a genuine collision, but it must remain deterministic rather than free-floating.
+
+### Private cards
+
+- Opponent private/back cards have a fixed anchor relative to that seat control.
+- Hero private cards remain larger than opponents' cards as in the existing design.
+- Do not move cards into large seat panels.
+
+### Player chips / stack
+
+- The player's graphical chip stack remains **on the felt/table near the player**.
+- It may use a seat-specific table-side position and may move within a small predefined safe area if necessary.
+- It must not cover avatar/cards/dealer/gifts/action badge.
+- The numeric stack value must always appear directly below the graphical player chip stack.
+
+### Dealer button
+
+- Dealer `D` remains on the felt near the relevant player's avatar.
+- It may use a seat-specific safe position.
+- It must never cover another player element.
+
+### Reactions / settlement / social UI
+
+Reuse existing visual behavior but attach it to defined seat anchors so it cannot collide with the critical HUD elements above.
+
+## Table center contract
+
+The table center has its own protected area.
+
+From top to bottom:
+
+1. pot amount;
+2. chips currently committed to the hand/pot;
+3. community cards.
+
+Nothing from a player seat may cover this center lane.
+
+Keep the existing graphical style/assets where available.
+
+## Hero best-hand area
+
+For the main player:
+
+- keep the current best-hand name and five-card best-hand presentation;
+- place it in a dedicated safe area to the **left of the hero**;
+- it must not overlap hero avatar, private cards, chip stack, dealer button or action controls.
+
+## Player action controls
+
+Fold/Check/Call/Bet/Raise/All-in/slider controls get a dedicated bottom area.
+
+They must never overlap any of the six seat controls.
+
+The table/seat region and action-control region must be laid out together so the complete experience fits one viewport.
+
+## Account CH HUD
+
+Keep the accepted account-HUD requirement:
+
+- remove Poker Table XP badge;
+- authenticated users show `Wallet <balance> CH · Other tables <sum> CH`;
+- reuse `ChipsClient.fetchBalance()` and `ChipsClient.fetchPokerProjection()`;
+- exclude the current table from `Other tables`;
+- guest/signed-out users see no authenticated balances;
+- reuse canonical `document` `chips:tx-complete` refresh;
+- animate only a changed, newly fetched authoritative wallet value;
+- reduced motion disables the animation;
+- never locally subtract a gift price or create another balance source/cache/API.
 
 ## Gift Shop dependency
 
-- #1042 continues to own gift purchase/delivery, gift state, animation and shop UI.
-- This HUD issue owns the stable three-slot seat placement for persistent received gifts.
-- This HUD issue also owns the stable per-seat quick-action placement consumed by #1042 Quick Gift.
-- #1042 must not be merged while its required persistent gift presentation is visually broken. Either this issue is implemented first/alongside it, or #1042 remains blocked until the new seat slots are available.
+- #1042 owns gift purchase/delivery/state/animation/picker/retry/cooldown/no-self behavior.
+- #1048 owns only stable seat/HUD placement including exactly three received-gift anchors and one Quick Gift anchor.
+- After #1048 is merged, #1047 will integrate T012D/T012E into these anchors.
+- Do not implement temporary free-floating gift overlays.
 
 ## Scope
+
+Primary files:
 
 - `poker/table-v2.html`
 - `poker/poker-v2.js`
 - `poker/poker-v2.css`
-- existing CH/account UI clients where reuse is required, especially `js/chips/client.js`
+- existing CH/account UI client reuse, especially `js/chips/client.js`
 - existing i18n only where visible copy changes
 
-## Reuse
+Do not create a new layout framework, animation framework, state source, wallet API or balance cache.
 
-Reuse:
+## Verification
 
-- current Poker V2 seat rendering/state;
-- existing `ChipsClient.fetchBalance()`;
-- existing `ChipsClient.fetchPokerProjection()`;
-- existing `chips:tx-complete` event;
-- current table stack from authoritative poker snapshot/state;
-- existing reaction/settlement presentation anchors where practical.
+This is primarily visual/HUD work. Do not add broad CSS/layout/JSP tests.
 
-Do not create:
+Only add/retain fundamental deterministic tests for non-trivial pure logic, such as the existing Other tables calculation.
 
-- another wallet/account API;
-- another poker state source;
-- generic layout framework;
-- new animation framework;
-- new balance cache.
+Real Deploy Preview verification must include at least:
 
-## Fundamental verification
+- 6 occupied seats and representative partial occupancy;
+- dealer at hero/top/left/right seat positions;
+- visible/folded/hidden cards;
+- action/status badges;
+- graphical player chip stacks plus stack labels;
+- center pot/bet/community-card lane;
+- hero best-hand area;
+- three gift anchors per occupied seat;
+- Quick Gift anchor;
+- reactions/settlement state;
+- signed-in CH HUD and guest state;
+- portrait mobile;
+- landscape mobile;
+- desktop.
 
-This is primarily a visual/HUD change. Do not add broad CSS/layout/JSP tests.
+Acceptance requires:
 
-Fundamental code tests are only warranted for any non-trivial CH projection calculation such as "other tables" if it is extracted as pure logic.
-
-Required verification is real Deploy Preview / WS Preview across representative:
-
-- 2/6-seat occupancy patterns;
-- hero/top/side seat positions;
-- dealer button positions;
-- cards visible/hidden/folded;
-- gifts in all three slots;
-- per-seat quick-action control beside other occupied seats without covering avatar/cards/dealer/stack/gifts;
-- reaction/best-hand/action state;
-- desktop and mobile widths;
-- reduced motion;
-- wallet CH update after an authoritative gift purchase refresh.
-
-No element listed above may cover another critical seat element.
+- **zero page scroll in portrait and landscape**;
+- whole playable table visible in one viewport;
+- no seat-control overlap;
+- no overlap with center community-card/pot area;
+- no overlap with bottom action controls;
+- no new large seat frames/cards;
+- existing table look/assets preserved.
 
 ## Out of scope
 
-- Gift purchase/accounting itself (#1042).
-- Persistent gift profile collections (#1043).
-- New avatar content packs (#1041).
-- New reactions.
-- Generic Poker Table redesign unrelated to collision-free HUD placement.
-- XP system changes outside Poker Table.
+- Gift purchase/accounting (#1042).
+- Persistent gift collections/history (#1043).
+- Social gift leaderboards (#1044).
+- Bot gifting (#1045).
+- New avatar packs (#1041).
+- Poker rules/engine changes.
+- WS gameplay changes.
+- Generic visual redesign unrelated to collision prevention.
+- XP changes outside Poker Table.
 
 ## Breaking impact
 
-Visible Poker Table layout changes materially. Poker rules, WS gameplay state, stacks, ledger accounting and settlement semantics must remain unchanged.
+The intended breaking impact is limited to deterministic placement of Poker Table HUD elements and replacing the table XP badge with account CH context.
+
+Poker rules, WS authoritative state, stack/accounting semantics, ledger, settlement, table lifecycle and XP outside Poker Table must remain unchanged.
 
 ## Implementation constraints
 
 Follow `agents.md` and `skills.md`.
 
-- Keep implementation minimal and reuse existing elements/functions.
+- Keep the implementation minimal and reuse existing elements/functions/assets.
+- Prefer correcting/reverting the rejected #1049 layout over layering fixes on top of it.
 - JS must remain JSP-compatible.
 - CSS must keep one physical line per selector.
 - Use `klog`, never `console.log`.
 - Any new inline/browser script requires CSP SHA update.
 - Write only fundamental deterministic tests.
-- WS-affecting changes require exact-SHA WS Preview; browser-only changes still require real preview visual smoke.
+- Browser-only work needs real Deploy Preview visual smoke; WS-affecting work requires exact-SHA WS Preview Deploy.
+- Double-check/refactor before handoff.
+- Explicitly call out any breaking impact.
 
+## Current implementation status
 
-## Baseline and scope
+Draft PR #1049 remains the implementation vehicle, but its first seat-grid/panel layout is **rejected by manual owner smoke and is not acceptance evidence**.
 
-Independent branch from main 4f798bdd56dba0e11b34e8982895650920ec6944. #1047 is not a base. Existing seat/avatar/card/chip/reaction renderers consume authoritative WS state; their positioning currently uses unrelated percentage offsets. Table XP scripts serve only its badge. ChipsClient is intentionally absent under the obsolete static HTML assertion.
+The previously recorded 20/20 collision matrix is superseded because it did not enforce the key product requirement that the whole table remain visually equivalent to the existing Poker V2 composition and fit in one viewport without scrolling.
 
-This is a browser presentation change only: no WS, protocol, ledger, migrations, payment or gift behavior. No Stage/Production database mutation. Material visual breaking change; gameplay and XP elsewhere unchanged.
+The corrected #1049 must be reworked against this issue before any merge-readiness decision. Do not merge the current layout.
 
-## Implementation status
+## Reconciliation for owner smoke FAIL
 
-Independent draft PR #1049 implements the browser HUD and anchors. Preview SHA 2a9e07525a81efc9a2b6820efba1d0c7b1b09556 passed the 20-case real preview visual matrix and four real guest sessions. Signed-in view/refresh/error behavior used controlled ChipsClient responses; real authenticated Stage reads remain pending. See review.md and preview-evidence.json. No WS deploy or database mutation. Not merge-ready; #1047 integration remains separate.
-
-Review P1/P2 correction: browser SHA 696b92fe0dcba4d1820dc1aabcea0f47467e7173 subscribes to the canonical document event and applies a 700ms highlight only for changed, valid authoritative wallet results in the same identity. First/error/reduced-motion/identity-reset exclusions verified on real preview using controlled ChipsClient reads. Earlier window event account evidence is superseded by wallet-review-evidence.json; actual authenticated Stage remains pending.
+The earlier PR #1049 seat-grid/card-panel implementation and its 20/20 preview matrix are SUPERSEDED and REJECTED by manual owner smoke. Those checks did not establish one-viewport acceptance. Preserve accepted CH Account HUD corrections, but replace the rejected layout with the existing Poker V2 visual skin and deterministic table-local SeatHud anchors. No new poker runtime or Gift Shop behavior. Current baseline main: 4f798bdd56dba0e11b34e8982895650920ec6944. Draft #1049 remains not merge-ready until the owner verifies the replacement layout and actual authenticated Stage reads.

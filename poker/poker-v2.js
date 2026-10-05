@@ -79,7 +79,6 @@
     yellow: true
   };
   var CHIP_STACK_MAX_HEIGHT = 5;
-  var HERO_SEAT_STACK_VISUAL = { width: 112, height: 82, scale: 0.62 };
   var LAST_ACTION_LABEL = {
     fold: 'Fold',
     check: 'Check',
@@ -124,14 +123,6 @@
     { key: 'ambient_your_move', emoji: '💬', label: 'Your move.', humanSelectable: false },
     { key: 'ambient_lets_play', emoji: '💬', label: "Let's play.", humanSelectable: false },
     { key: 'ambient_thinking', emoji: '🤔', label: 'Thinking...', humanSelectable: false }
-  ];
-  var seatAnchors = [
-    { x: 50, y: 10 },
-    { x: 86, y: 28 },
-    { x: 84, y: 67 },
-    { x: 50, y: 92 },
-    { x: 16, y: 67 },
-    { x: 14, y: 28 }
   ];
   var demoState = {
     mode: 'demo',
@@ -3549,16 +3540,6 @@
     return 1;
   }
 
-  function getSeatAnchor(index, total){
-    if (total === 6 && seatAnchors[index]) return seatAnchors[index];
-    var angle = (-90 + (360 / total) * index) * (Math.PI / 180);
-    var rx = 36;
-    var ry = 41;
-    return {
-      x: 50 + Math.cos(angle) * rx,
-      y: 51 + Math.sin(angle) * ry
-    };
-  }
 
   function getDisplayName(seat){
     if (!seat) return 'Open seat';
@@ -3669,30 +3650,7 @@
     return null;
   }
 
-  function getSeatActionBadgePosition(slotIndex, hero){
-    var radius = hero ? 48 : 38;
-    var centerX = 50;
-    var centerY = hero ? 48 : 38;
-    var distance = radius + 8;
-    var x = centerX;
-    var y = centerY;
-    if (hero) return { left: '38px', top: '-28px' };
-    if (slotIndex === 0) y -= distance;
-    else if (slotIndex === 1) { x += distance; y -= 4; }
-    else if (slotIndex === 2) { x += distance; y += 4; }
-    else if (slotIndex === 3) y += distance;
-    else if (slotIndex === 4) { x -= distance; y += 4; }
-    else if (slotIndex === 5) { x -= distance; y -= 4; }
-    return { left: x + 'px', top: y + 'px' };
-  }
 
-  function getSeatStatusBadgePosition(slotIndex, hero){
-    var actionPosition = getSeatActionBadgePosition(slotIndex, hero);
-    return {
-      left: actionPosition.left,
-      top: (parseFloat(actionPosition.top) + 24) + 'px'
-    };
-  }
 
   function shortId(value){
     var text = typeof value === 'string' ? value.trim() : '';
@@ -3930,50 +3888,105 @@
     return Math.max(min, Math.min(max, value));
   }
 
-  function formatScenePercent(value){
-    return (Math.round(value * 10) / 10) + '%';
+
+  // Design coordinates belong to the table, never to measured seat content.
+  // Physical variants: top, upper right, lower right, hero, lower left, upper left.
+  var seatSceneGeometry = {
+    portrait: { width:360, height:660, seats:[
+      {avatar:[180,65],cards:[255,60],stack:[278,110],bet:[235,134],dealer:[124,102],action:[117,132],presentation:[65,56,100,52],social:[62,101,70,18]},
+      {avatar:[300,195],cards:[300,288],stack:[220,178],bet:[266,194],dealer:[220,111],presentation:[300,322,92,32],social:[220,220,80,18]},
+      {avatar:[300,390],cards:[300,483],stack:[226,413],bet:[266,389],dealer:[240,352],presentation:[226,484,70,42],social:[226,452,80,18]},
+      {avatar:[180,548],cards:[282,618],stack:[268,534],bet:[180,470],dealer:[236,570],bestHand:[70,590,98,90],presentation:[70,532,98,22],social:[70,648,98,18]},
+      {avatar:[60,390],cards:[60,483],stack:[134,413],bet:[94,389],dealer:[120,352],presentation:[134,484,70,42],social:[134,452,80,18]},
+      {avatar:[60,195],cards:[60,288],stack:[140,178],bet:[94,194],dealer:[175,178],presentation:[60,322,92,32],social:[140,220,80,18]}
+    ]},
+    landscape: { width:1040, height:390, seats:[
+      {avatar:[520,50],cards:[620,50],stack:[710,50],bet:[620,96],dealer:[440,80],action:[440,112],presentation:[350,28,120,44],social:[370,93,90,18]},
+      {avatar:[925,90],cards:[845,90],stack:[760,90],bet:[813,120],dealer:[810,90],presentation:[925,188,110,38],social:[780,149,100,20]},
+      {avatar:[925,265],cards:[845,265],stack:[760,253],bet:[832,219],dealer:[810,265],presentation:[800,310,110,44],social:[865,355,112,24]},
+      {avatar:[520,298],cards:[648,334],stack:[620,260],bet:[440,242],dealer:[575,368],bestHand:[375,327,90,62],presentation:[375,278,90,24],social:[660,383,100,14]},
+      {avatar:[115,265],cards:[195,265],stack:[280,253],bet:[208,219],dealer:[230,265],presentation:[240,310,110,44],social:[175,355,112,24]},
+      {avatar:[115,90],cards:[195,90],stack:[280,90],bet:[227,120],dealer:[230,90],presentation:[115,188,110,38],social:[260,149,100,20]}
+    ]}
+  };
+  var seatSceneOrientation = 'portrait';
+
+  function fitTableScene(){
+    if (!els.scene || !els.sceneViewport) return;
+    seatSceneOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+    var geometry = seatSceneGeometry[seatSceneOrientation];
+    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / geometry.height);
+    if (!Number.isFinite(scale) || scale <= 0) return;
+    els.scene.dataset.orientation = seatSceneOrientation;
+    els.scene.style.width = geometry.width + 'px';
+    els.scene.style.height = geometry.height + 'px';
+    els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
   }
 
-  function getSeatAvatarAnchorFromRect(seatNo){
-    if (!els.scene || !renderedSeatAvatars[seatNo]) return null;
-    if (typeof els.scene.getBoundingClientRect !== 'function' || typeof renderedSeatAvatars[seatNo].getBoundingClientRect !== 'function') return null;
-    var sceneRect = els.scene.getBoundingClientRect();
-    var avatarRect = renderedSeatAvatars[seatNo].getBoundingClientRect();
-    if (!sceneRect || !avatarRect || sceneRect.width <= 0 || sceneRect.height <= 0 || avatarRect.width <= 0 || avatarRect.height <= 0) return null;
-    var centerX = ((avatarRect.left + avatarRect.width / 2) - sceneRect.left) / sceneRect.width * 100;
-    var centerY = ((avatarRect.top + avatarRect.height / 2) - sceneRect.top) / sceneRect.height * 100;
-    var radiusX = (avatarRect.width / 2) / sceneRect.width * 100;
-    var radiusY = (avatarRect.height / 2) / sceneRect.height * 100;
-    return {
-      x: centerX,
-      y: centerY,
-      radiusX: radiusX,
-      radiusY: radiusY,
-      sceneWidth: sceneRect.width,
-      sceneHeight: sceneRect.height
-    };
+  function seatPhysicalSlot(index, total){
+    var variants = {2:[0,3],3:[5,1,3],4:[0,1,3,5],5:[0,1,3,4,5]};
+    return variants[total] ? variants[total][index] : index;
+  }
+
+  function placeSeatNode(node, hud, point, width, height){
+    if (!node || !point) return;
+    node.setAttribute('data-seat-anchor','');
+    node.style.left = (point[0] - hud.origin[0]) + 'px';
+    node.style.top = (point[1] - hud.origin[1]) + 'px';
+    if (width) node.style.width = width + 'px';
+    if (height) node.style.height = height + 'px';
+  }
+
+  function configureSeatHud(article, hud, slot, hero){
+    var portrait = seatSceneOrientation === 'portrait';
+    var config = seatSceneGeometry[seatSceneOrientation].seats[slot];
+    hud.config = config;
+    hud.origin = [config.avatar[0] - 46, config.avatar[1] - 50];
+    article.style.left = hud.origin[0] + 'px';
+    article.style.top = hud.origin[1] + 'px';
+    article.dataset.seatVariant = ['top','upper-right','lower-right','hero','lower-left','upper-left'][slot];
+    hud.avatarSize = hero ? (portrait ? 72 : 80) : (portrait ? 52 : 56);
+    hud.name = [config.avatar[0],config.avatar[1] + (hero ? (portrait ? 45 : 49) : (portrait ? 35 : 38))];
+    hud.status = [hud.name[0],hud.name[1] + 16];
+    hud.action = config.action || [hud.name[0],hud.status[1] + 16];
+    var corner = hero ? 50 : (portrait ? 34 : 40);
+    var quick = [config.avatar[0] + corner,config.avatar[1] + (hero ? 30 : 20)];
+    var marker = [config.avatar[0] - corner,config.avatar[1] + (hero ? 30 : 20)];
+    if (hero && portrait){quick=[134,576];marker=[230,552];}
+    hud.marker = marker;
+    placeSeatNode(hud.quickAction,hud,quick,16,16);
+    placeSeatNode(hud.dealer,hud,config.dealer,20,20);
+    placeSeatNode(hud.cards,hud,config.cards,hero ? 110 : 48,hero ? 80 : 34);
+    placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
+    placeSeatNode(hud.bet,hud,config.bet,22,20);
+    ['presentation','social','bestHand'].forEach(function(role){
+      var point=config[role];
+      if (point) placeSeatNode(hud[role],hud,point,point[2],point[3]);
+    });
+    var radius = hero ? (portrait ? 52 : 58) : 42;
+    [-150,-90,-30].forEach(function(angle,index){
+      var radians=angle*Math.PI/180;
+      placeSeatNode(hud.gifts.children[index],hud,[config.avatar[0]+Math.cos(radians)*radius,config.avatar[1]+Math.sin(radians)*radius],16,16);
+    });
+  }
+
+  function getSeatAvatarAnchor(seatNo){
+    var hud = renderedSeatHud[seatNo];
+    if (!hud) return null;
+    var geometry=seatSceneGeometry[seatSceneOrientation];
+    return {x:hud.config.avatar[0]/geometry.width*100,y:hud.config.avatar[1]/geometry.height*100,radiusX:hud.avatarSize/2/geometry.width*100,radiusY:hud.avatarSize/2/geometry.height*100,sceneWidth:geometry.width,sceneHeight:geometry.height};
   }
 
   function syncRenderedSeatAnchorsFromLayout(){
     Object.keys(renderedSeatAvatars).forEach(function(seatNo){
-      var measured = getSeatAvatarAnchorFromRect(Number(seatNo));
-      if (!measured) return;
-      renderedSeatAnchors[seatNo] = {
-        x: measured.x,
-        y: measured.y
-      };
+      var anchor = getSeatAvatarAnchor(Number(seatNo));
+      if (anchor) renderedSeatAnchors[seatNo] = {x:anchor.x,y:anchor.y};
     });
   }
 
   function refreshLayoutPresentation(){
     layoutRefreshTimer = null;
-    syncRenderedSeatAnchorsFromLayout();
-    positionHeroCards();
-    renderSeatChips();
-    renderDealerChip();
-    renderReactionBubbles();
-    positionCelebration();
-    refreshCelebrationPreview();
+    render();
   }
 
   function scheduleLayoutPresentationRefresh(){
@@ -3993,103 +4006,12 @@
     els.joinBtn.hidden = !canJoin;
   }
 
-  function resolveSeatChipDirections(anchor){
-    var dx = anchor.x - 50;
-    var dy = anchor.y - 50;
-    var horizontal = Math.abs(dx) >= Math.abs(dy);
-    if (horizontal){
-      var sideX = dx >= 0 ? -1 : 1;
-      return {
-        bet: { x: sideX, y: -0.42 },
-        stack: { x: sideX, y: 0.42 }
-      };
-    }
-    var sideY = dy >= 0 ? -1 : 1;
-    return {
-      bet: { x: -0.42, y: sideY },
-      stack: { x: 0.42, y: sideY }
-    };
-  }
-
-  function normalizeDirection(vector){
-    var length = Math.sqrt(vector.x * vector.x + vector.y * vector.y) || 1;
-    return {
-      x: vector.x / length,
-      y: vector.y / length
-    };
-  }
-
-  function keepSeatChipOutOfCenterLane(point, source){
-    var centerLane = { left: 33, right: 67, top: 31, bottom: 57 };
-    if (point.x < centerLane.left || point.x > centerLane.right || point.y < centerLane.top || point.y > centerLane.bottom) return point;
-    var dx = source.x - 50;
-    var dy = source.y - 50;
-    if (Math.abs(dx) >= Math.abs(dy)){
-      point.x = dx >= 0 ? centerLane.right + 3 : centerLane.left - 3;
-    } else {
-      point.y = dy >= 0 ? centerLane.bottom + 3 : centerLane.top - 3;
-    }
-    return point;
-  }
-
-  function resolveVisualHalfPercent(source, axis, fallback){
-    if (!source) return fallback;
-    var sceneSize = axis === 'x' ? source.sceneWidth : source.sceneHeight;
-    var visualSize = axis === 'x' ? HERO_SEAT_STACK_VISUAL.width : HERO_SEAT_STACK_VISUAL.height;
-    if (!Number.isFinite(sceneSize) || sceneSize <= 0) return fallback;
-    return ((visualSize * HERO_SEAT_STACK_VISUAL.scale) / 2) / sceneSize * 100;
-  }
-
-  function resolveHeroSeatStackPoint(source){
-    var halfX = resolveVisualHalfPercent(source, 'x', 8);
-    var halfY = resolveVisualHalfPercent(source, 'y', 4);
-    var gapX = source.sceneWidth ? Math.max(2, 4 / source.sceneWidth * 100) : 2;
-    var point = {
-      x: source.x + source.radiusX + halfX + gapX,
-      y: source.y + Math.min(1.6, source.radiusY * 0.15)
-    };
-    point.x = clampNumber(point.x, 10, 90);
-    point.y = clampNumber(point.y, 12 + halfY, 86);
-    return point;
-  }
-
-  function resolveSeatChipPoint(source, direction, gap){
-    var unit = normalizeDirection(direction);
-    var edgeDistance = Math.sqrt(Math.pow(unit.x * source.radiusX, 2) + Math.pow(unit.y * source.radiusY, 2));
-    var chipGap = Number.isFinite(gap) ? gap : 7;
-    var point = {
-      x: source.x + unit.x * (edgeDistance + chipGap),
-      y: source.y + unit.y * (edgeDistance + chipGap)
-    };
-    point = keepSeatChipOutOfCenterLane(point, source);
-    point.x = clampNumber(point.x, 10, 90);
-    point.y = clampNumber(point.y, 12, 88);
-    return point;
-  }
-
-  function getSeatChipAnchor(anchor, seat){
-    var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : null;
-    var source = getSeatAvatarAnchorFromRect(seatNo) || { x: anchor.x, y: anchor.y, radiusX: 8, radiusY: 5 };
-    var directions = resolveSeatChipDirections(source);
-    var stackDirection = directions.stack;
-    var stackGap = 4;
-    var isLandscapePokerLayout = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width:560px) and (orientation:landscape)').matches;
-    if (isLandscapePokerLayout && renderedSeatSlots[seatNo] === 0){
-      stackDirection = { x: 1, y: 0 };
-      stackGap = source.sceneHeight && source.sceneHeight < 220 ? 4 : 0;
-    }
-    return {
-      bet: resolveSeatChipPoint(source, directions.bet),
-      stack: isCurrentUserSeat(seat) ? resolveHeroSeatStackPoint(source) : resolveSeatChipPoint(source, stackDirection, stackGap)
-    };
-  }
-
   function seatHudAnchor(node){
-    if (!node || !els.scene) return null;
-    var scene = els.scene.getBoundingClientRect();
-    var rect = node.getBoundingClientRect();
-    if (!scene.width || !scene.height) return null;
-    return { x: (rect.left + rect.width / 2 - scene.left) / scene.width * 100, y: (rect.top + rect.height / 2 - scene.top) / scene.height * 100 };
+    if (!node) return null;
+    var hud=renderedSeatHud[node.dataset.seatNo];
+    var point=hud && hud.config[node.dataset.seatHud];
+    var geometry=seatSceneGeometry[seatSceneOrientation];
+    return point ? {x:point[0]/geometry.width*100,y:point[1]/geometry.height*100} : null;
   }
 
   function renderSeatChips(){
@@ -4098,19 +4020,18 @@
     state.seats.forEach(function(seat){
       var hud = seat && renderedSeatHud[seat.seatNo];
       if (!hud || !seat.userId) return;
-      hud.chips.innerHTML = '';
-      var stack = document.createElement('div');
-      stack.className = 'poker-seat-stack';
+      hud.stack.innerHTML = '';
+      hud.bet.innerHTML = '';
       var amount = resolveStack(seat.userId);
-      stack.textContent = amount == null ? 'Stack —' : formatNumber(amount) + ' CH';
-      hud.chips.appendChild(stack);
-      var bet = document.createElement('div');
-      bet.className = 'poker-seat-committed';
-      var committed = Math.max(0, Number(seatCommittedByUserId[seat.userId]) || 0);
-      bet.textContent = committed > 0 ? 'Bet ' + formatNumber(committed) : '';
-      hud.chips.appendChild(bet);
-      renderedSeatStackAnchors[seat.seatNo] = seatHudAnchor(stack);
-      renderedSeatBetAnchors[seat.seatNo] = seatHudAnchor(bet);
+      if (amount != null){
+        var stack = createChipStackVisual(amount,isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack');
+        appendSeatStackAmountLabel(stack,amount);
+        hud.stack.appendChild(stack);
+      }
+      var committed = Math.max(0,Number(seatCommittedByUserId[seat.userId]) || 0);
+      if (committed > 0) hud.bet.appendChild(createChipStackVisual(committed,'seat-bet'));
+      renderedSeatStackAnchors[seat.seatNo] = seatHudAnchor(hud.stack);
+      renderedSeatBetAnchors[seat.seatNo] = seatHudAnchor(hud.bet);
     });
   }
 
@@ -4305,7 +4226,6 @@
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
       var waitingNextHand = !!(seat && String(seat.status || '').toUpperCase() === 'WAITING_NEXT_HAND');
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
-      var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')
@@ -4318,10 +4238,11 @@
       article.dataset.seatNo = String(seat ? seat.seatNo : i + offset);
       article.dataset.userId = seat && seat.userId || '';
       var hud = {};
-      ['identity', 'portrait', 'cards', 'chips', 'presentation', 'social', 'gifts'].forEach(function(area){
+      ['identity', 'portrait', 'cards', 'stack', 'bet', 'presentation', 'social', 'gifts', 'bestHand'].forEach(function(area){
         var node = document.createElement('div');
         node.className = 'poker-seat-hud-' + area;
         node.dataset.seatHud = area;
+        node.dataset.seatNo = article.dataset.seatNo;
         hud[area] = node;
         article.appendChild(node);
       });
@@ -4338,9 +4259,10 @@
         giftSlot.setAttribute('data-poker-gift-slot', String(giftIndex));
         hud.gifts.appendChild(giftSlot);
       }
+      configureSeatHud(article,hud,seatPhysicalSlot(rotatedIndex,state.maxSeats),hero);
       if (seat) renderedSeatHud[seat.seatNo] = hud;
       if (seat && Number.isInteger(seat.seatNo)) {
-        renderedSeatAnchors[seat.seatNo] = anchor;
+        renderedSeatAnchors[seat.seatNo] = getSeatAvatarAnchor(seat.seatNo);
         renderedSeatSlots[seat.seatNo] = rotatedIndex;
       }
 
@@ -4400,16 +4322,18 @@
       status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
       if (waitingNextHand) status.textContent = 'NEXT HAND';
 
+      placeSeatNode(avatar,hud,hud.config.avatar,hud.avatarSize,hud.avatarSize);
       hud.portrait.appendChild(avatar);
       hud.portrait.appendChild(hud.quickAction);
-      if (autoRebuyIndicator) hud.identity.appendChild(autoRebuyIndicator);
+      if (autoRebuyIndicator){placeSeatNode(autoRebuyIndicator,hud,[hud.marker[0],hud.marker[1]+16],14,14);hud.identity.appendChild(autoRebuyIndicator);}
       if (autoRebuyAvatarToast) hud.presentation.appendChild(autoRebuyAvatarToast);
-      if (seatNumber) hud.identity.appendChild(seatNumber);
+      if (seatNumber){placeSeatNode(seatNumber,hud,hud.marker,16,14);hud.identity.appendChild(seatNumber);}
       if (seat && lastAction){
         var actionBadge = document.createElement('div');
         actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + lastAction.replace(/_/g, '-');
         actionBadge.textContent = LAST_ACTION_LABEL[lastAction] || lastAction;
-        hud.presentation.appendChild(actionBadge);
+        placeSeatNode(actionBadge,hud,hud.action,64,12);
+        article.appendChild(actionBadge);
       }
       var seatSettlementAwards = seat ? getSeatSettlementAwards(seat.userId) : [];
       var seatHasShowdownSummary = !!(seat && shouldShowShowdownHandSummary(seat) && getWinnerHandSummary(seat));
@@ -4427,6 +4351,8 @@
         hud.presentation.appendChild(settlementBadge);
       }
       if (cards.children.length) hud.cards.appendChild(cards);
+      placeSeatNode(name,hud,hud.name,hero ? 88 : 76,14);
+      placeSeatNode(status,hud,hud.status,76,12);
       hud.identity.appendChild(name);
       hud.identity.appendChild(status);
       if (hero && heroBestHand){
@@ -4443,7 +4369,7 @@
           chip.textContent = normalized ? (normalized.r + SUIT_SYMBOLS[normalized.s]) : '?';
           bestHand.appendChild(chip);
         });
-        hud.presentation.appendChild(bestHand);
+        hud.bestHand.appendChild(bestHand);
       }
       els.seatLayer.appendChild(article);
     }
@@ -5225,6 +5151,7 @@
   }
 
   function render(){
+    fitTableScene();
     if (els.celebrationPreview) els.celebrationPreview.hidden = !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate;
     if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
     renderCommunityCards();
@@ -5242,6 +5169,7 @@
     renderClosedTableNotice();
     positionCelebration();
     refreshCelebrationPreview();
+    fitTableScene();
   }
 
   function setError(message){
@@ -5955,6 +5883,7 @@
   function selectElements(){
     els.screen = document.getElementById('pokerTableScreen');
     if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
+    els.sceneViewport = document.getElementById('pokerSceneViewport');
     if (typeof document.querySelector === 'function') els.centerLayer = document.querySelector('.poker-center-layer');
     if (!els.scene) els.scene = els.screen;
     els.accountHud = document.getElementById('pokerAccountHud');
@@ -6508,6 +6437,9 @@
 
   function init(){
     selectElements();
+    if (els.sceneViewport && typeof window.ResizeObserver === 'function'){
+      new window.ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
+    }
     suggestedSeatNoParam = readSeatParam();
     shouldAutoJoin = readAutoJoinParam();
     bindMenu();

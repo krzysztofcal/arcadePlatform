@@ -1,54 +1,57 @@
 {
-  "browserSha": "696b92fe0dcba4d1820dc1aabcea0f47467e7173",
-  "method": "Real Deploy Preview; controlled signed-in state and ChipsClient responses. Canonical document.dispatchEvent, no window bridge. Not real authenticated Stage verification.",
-  "records": [
-    {
-      "name": "desktop",
-      "viewport": {
-        "width": 1440,
-        "height": 1000
+  "status": "SUPERSEDED layout evidence: owner manual smoke FAIL; retained wallet evidence covers account behavior only",
+  "historicalEvidence": {
+    "browserSha": "696b92fe0dcba4d1820dc1aabcea0f47467e7173",
+    "method": "Real Deploy Preview; controlled signed-in state and ChipsClient responses. Canonical document.dispatchEvent, no window bridge. Not real authenticated Stage verification.",
+    "records": [
+      {
+        "name": "desktop",
+        "viewport": {
+          "width": 1440,
+          "height": 1000
+        },
+        "motion": "no-preference",
+        "initial": "500, no pulse; one fetch each",
+        "documentEvent": "475, two fetches each; Other tables remains 100",
+        "animation": "poker-wallet-change",
+        "unchanged": "no pulse",
+        "failedWallet": "\u2014, no pulse",
+        "changedIdentity": "900, no cross-user pulse",
+        "signOut": "hidden/empty; held stale responses do not restore value or animation",
+        "errors": []
       },
-      "motion": "no-preference",
-      "initial": "500, no pulse; one fetch each",
-      "documentEvent": "475, two fetches each; Other tables remains 100",
-      "animation": "poker-wallet-change",
-      "unchanged": "no pulse",
-      "failedWallet": "—, no pulse",
-      "changedIdentity": "900, no cross-user pulse",
-      "signOut": "hidden/empty; held stale responses do not restore value or animation",
-      "errors": []
-    },
-    {
-      "name": "mobile",
-      "viewport": {
-        "width": 390,
-        "height": 844
+      {
+        "name": "mobile",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "motion": "no-preference",
+        "initial": "500, no pulse; one fetch each",
+        "documentEvent": "475, two fetches each; Other tables remains 100",
+        "animation": "poker-wallet-change",
+        "unchanged": "no pulse",
+        "failedWallet": "\u2014, no pulse",
+        "changedIdentity": "900, no cross-user pulse",
+        "signOut": "hidden/empty; held stale responses do not restore value or animation",
+        "errors": []
       },
-      "motion": "no-preference",
-      "initial": "500, no pulse; one fetch each",
-      "documentEvent": "475, two fetches each; Other tables remains 100",
-      "animation": "poker-wallet-change",
-      "unchanged": "no pulse",
-      "failedWallet": "—, no pulse",
-      "changedIdentity": "900, no cross-user pulse",
-      "signOut": "hidden/empty; held stale responses do not restore value or animation",
-      "errors": []
-    },
-    {
-      "name": "reduced-motion",
-      "viewport": {
-        "width": 390,
-        "height": 844
-      },
-      "motion": "reduce",
-      "initial": "500, no pulse; one fetch each",
-      "documentEvent": "475, two fetches each; Other tables remains 100",
-      "animation": "none",
-      "unchanged": "no pulse",
-      "failedWallet": "—, no pulse",
-      "changedIdentity": "900, no cross-user pulse",
-      "signOut": "hidden/empty; held stale responses do not restore value or animation",
-      "errors": []
-    }
-  ]
+      {
+        "name": "reduced-motion",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "motion": "reduce",
+        "initial": "500, no pulse; one fetch each",
+        "documentEvent": "475, two fetches each; Other tables remains 100",
+        "animation": "none",
+        "unchanged": "no pulse",
+        "failedWallet": "\u2014, no pulse",
+        "changedIdentity": "900, no cross-user pulse",
+        "signOut": "hidden/empty; held stale responses do not restore value or animation",
+        "errors": []
+      }
+    ]
+  }
 }

@@ -2424,8 +2424,11 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   await harness.flush();
 
   const seat = harness.elements.pokerSeatLayer.children.find((node) => node.dataset.userId === 'user-1');
-  assert.equal(findSeatChild(seat, 'poker-seat-committed').textContent, 'Bet 9');
-  assert.equal(findSeatChild(seat, 'poker-seat-stack').textContent, '124 CH');
+  const betStack = descendants(seat).find((node) => node.className.includes('poker-chip-visual-stack--seat-bet'));
+  const seatStack = descendants(seat).find((node) => node.className.includes('poker-chip-visual-stack--hero-seat-stack'));
+  assert.equal(betStack.getAttribute('data-amount'), '9');
+  assert.equal(seatStack.getAttribute('data-amount'), '124');
+  assert.equal(findSeatChild(seatStack, 'poker-chip-stack-label').textContent, '124');
 });
 
 test('poker v2 keeps zero stack labels visible without rendering chips', async () => {
@@ -2462,9 +2465,12 @@ test('poker v2 keeps zero stack labels visible without rendering chips', async (
   });
   await harness.flush();
 
-  const stacks = descendants(harness.elements.pokerSeatLayer).filter((node) => node.className === 'poker-seat-stack');
+  const stacks = descendants(harness.elements.pokerSeatLayer).filter((node) => node.className.includes('poker-chip-visual-stack--seat-stack') || node.className.includes('poker-chip-visual-stack--hero-seat-stack'));
   assert.equal(stacks.length, 2);
-  for (const stack of stacks) assert.equal(stack.textContent, '0 CH');
+  for (const stack of stacks){
+    assert.equal(stack.getAttribute('data-amount'), '0');
+    assert.equal(findSeatChild(stack, 'poker-chip-stack-label').textContent, '0');
+  }
 });
 
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
