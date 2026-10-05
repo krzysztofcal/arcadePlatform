@@ -358,8 +358,8 @@ html,body{height:100%;overflow:hidden;}
 .poker-seat-hud-identity,.poker-seat-hud-portrait,.poker-seat-hud-gifts{display:contents;}
 [data-seat-anchor]{position:absolute;right:auto;bottom:auto;transform:translate(-50%,-50%);margin:0;}
 .poker-seat .poker-seat-avatar{margin:0;padding-bottom:5px;}
-.poker-seat-name{font-size:11px;font-weight:700;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.poker-seat-status{display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,223,180,.32);border-radius:999px;background:rgba(12,20,31,.85);color:#b9c6dc;font-size:7px;font-weight:700;line-height:10px;white-space:nowrap;}
+.poker-seat-name{font-size:14px;font-weight:700;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.poker-seat-status{display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,223,180,.32);border-radius:999px;background:rgba(12,20,31,.85);color:#b9c6dc;font-size:9px;font-weight:700;line-height:10px;white-space:nowrap;}
 .poker-seat-number{display:flex;align-items:center;justify-content:center;padding:0;border:1px solid rgba(255,223,180,.48);border-radius:5px;background:rgba(18,22,30,.88);color:#efd49b;font-size:7px;font-weight:800;line-height:1;}
 .poker-seat-hud-quick-action,.poker-seat-gift-slot{display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;}
 .poker-seat-hud-quick-action > *{max-width:100%;max-height:100%;}
@@ -390,7 +390,7 @@ html,body{height:100%;overflow:hidden;}
 .poker-dealer-chip{display:flex;align-items:center;justify-content:center;width:20px;height:20px;border:2px solid #bda56e;border-radius:50%;background:#faf5e9;color:#191919;font-size:10px;font-weight:800;}
 .poker-seat-hud-stack .poker-chip-visual-stack{left:50%;top:30%;transform:translate(-50%,-50%) scale(.5);}
 .poker-seat-hud-bet .poker-chip-visual-stack{left:50%;top:50%;transform:translate(-50%,-50%) scale(.2);}
-.poker-seat-hud-stack .poker-chip-stack-label{font-size:18px;padding:4px 8px;bottom:-26px;}
+.poker-seat-hud-stack .poker-chip-stack-label{font-size:24px;padding:4px 8px;bottom:-32px;}
 .poker-center-layer{position:absolute;left:108px;top:232px;width:144px;height:108px;text-align:center;}
 .poker-pot-pill{position:absolute;left:50%;top:1px;transform:translateX(-50%);height:18px;padding:2px 9px;border-radius:999px;border:1px solid rgba(255,220,177,.26);background:rgba(7,13,24,.9);color:#ffe5b1;font-size:12px;font-weight:700;line-height:12px;white-space:nowrap;}
 .poker-pot-chip-stack{position:absolute;left:50%;top:33px;width:112px;height:82px;transform:translateX(-50%) scale(.42);transform-origin:top center;}
