@@ -349,7 +349,7 @@ function createHarness(options = {}){
 
   vm.createContext(sandbox);
   const closureEnd = source.lastIndexOf('})();');
-  const privacySource = source.slice(0, closureEnd) + 'window.__getSeatRevealCardsForTest = getSeatRevealCards;\n' + source.slice(closureEnd);
+  const privacySource = source.slice(0, closureEnd) + 'window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
   vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
@@ -404,6 +404,7 @@ async function flush(){
     rebuyRequestIds,
     reactionPayloads,
     targetedReactionPayloads,
+    getOpponentHeldCards(userId){ return sandbox.window.__opponentHeldCardsForTest(userId); },
     getRevealedCards(userId){ return JSON.parse(JSON.stringify(sandbox.window.__getSeatRevealCardsForTest({ userId }))); },
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
@@ -1916,10 +1917,11 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
         tableId: 'table-1',
         status: 'OPEN',
         maxSeats: 6,
-        members: [{ userId: 'user-1', seat: 4, status: 'WAITING_NEXT_HAND' }]
+        members: [{ userId: 'user-1', seat: 4, status: 'WAITING_NEXT_HAND' }, { userId: 'active', seat: 1, status: 'ACTIVE' }, { userId: 'folded', seat: 2, status: 'FOLDED' }, { userId: 'busted', seat: 3, status: 'OUT_OF_CHIPS' }, { userId: 'outside', seat: 5, status: 'ACTIVE' }]
       },
       public: {
         hand: { handId: 'hand-live', status: 'TURN', dealerSeatNo: 2 },
+        betThisRoundByUserId: { active: 0, folded: 0 },
         turn: { userId: 'bot-1' },
         board: [],
         pot: { total: 15, sidePots: [] },
@@ -1933,6 +1935,12 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
     }
   });
   await harness.flush();
+
+  assert.equal(harness.getOpponentHeldCards('active'), 2, 'zero-bet active participant was dealt in');
+  assert.equal(harness.getOpponentHeldCards('folded'), 2, 'fold does not undo being dealt in');
+  assert.equal(harness.getOpponentHeldCards('user-1'), 0, 'waiting seat is outside the hand');
+  assert.equal(harness.getOpponentHeldCards('busted'), 0, 'out-of-chips nonparticipant has no dealt cards');
+  assert.equal(harness.getOpponentHeldCards('outside'), 0, 'seat status ACTIVE alone is not participation');
 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   assert.ok(heroSeat);

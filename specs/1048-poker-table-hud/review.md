@@ -6,7 +6,7 @@ Both earlier layouts remain unaccepted: the initial seat-grid/card-panel FAILED 
 
 - Hero best hand again uses the original capsule styling and label, with all five symbols in one horizontal row. No grid.
 - Action controls are a compact lower-right rail with vertical amount slider. Hero is shifted left; the scene uses the space below the header rather than losing a full-width action row. Static portrait/landscape seat variants reserve that corner.
-- Action/status badges sit on avatar edges. Non-hero hole-card controls are replaced by tiny facedown count indicators; hero cards remain larger. Public Hold'em state supplies zero for waiting/folded seats and two for active seats; this UI does not invent private card ranks/suits.
+- Action/status badges sit on avatar edges. Non-hero hole-card controls are replaced by tiny facedown count indicators; hero cards remain larger. Existing public betThisRoundByUserId membership identifies dealt-in participants, including zero bets and FOLDED users. Waiting/out-of-hand seats show 0; confirmed participants show 2. No hypothetical 1 or private ranks/suits are invented.
 - Reaction/history popups are absolute to their buttons. The old portrait fixed + top:100% rule put the history at y=852 in an 844px viewport despite a successful click. The lower history z-index override is removed so canonical social stacking stays above Preview FX.
 - Existing Nice Hand affordance uses the avatar-edge quick-action anchor. Targeted effects use sender and recipient avatar centers, not social bubble anchors.
 
@@ -43,3 +43,7 @@ Controlled six-seat state and ChipsClient replies are used for screenshots; thes
 | History popup | [Clickable history](evidence/owner-history.png) |
 
 Owner must now assess the visual layout manually. Actual authenticated Stage verification also remains pending. PR #1049 stays draft / not merge-ready. No merge, WS redeploy or Production mutation.
+
+## P1 opponent indicator participation correction
+
+The old handId + !folded inference was wrong. The public snapshot does not expose engine handSeats; existing betThisRoundByUserId is initialized for every hand participant and reset from getSeatsForHand, including folded and zero-bet players. Indicator uses only its key membership, with waiting/out-of-chips excluded. Full snapshots and hand changes clear stale membership if the field is absent; partial frames preserve it only within the same hand. The existing reserved-seat snapshot test now asserts active/folded → 2 and waiting/out-of-hand → 0 through the pure helper, not DOM/layout assertions. Layout/assets/rail/CH/social/animation endpoints remain untouched. Required checks and a narrow two-viewport Preview sanity follow; owner manual portrait/landscape smoke remains pending.

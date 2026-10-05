@@ -770,6 +770,7 @@
       handId: null,
       lastBettingRoundActionByUserId: {},
       foldedByUserId: {},
+      betThisRoundByUserId: {},
       legalActions: [],
       actionConstraints: {},
       currentUserId: nextUserId || null,
@@ -2333,6 +2334,7 @@
     var showdownField = readSnapshotField(payload, publicObj, 'showdown');
     var handSettlementField = readSnapshotField(payload, publicObj, 'handSettlement');
     var foldedUsersField = readSnapshotField(payload, publicObj, 'foldedByUserId');
+    var handBetsField = readSnapshotField(payload, publicObj, 'betThisRoundByUserId');
     var settlementRevealDueAtField = readSnapshotField(payload, publicObj, 'settlementRevealDueAt');
     var playerStateField = hasOwn(payload, 'private') && isObject(payload.private) && hasOwn(payload.private, 'playerState')
       ? { present: true, value: payload.private.playerState }
@@ -2435,6 +2437,7 @@
     // lost their seat during a reconnect) or a hand-id change must clear any
     // stale cards from a previous hand/session instead of retaining them.
     var handIdChanged = !!(state.handId && previousHandId && state.handId !== previousHandId);
+    if (authoritativeFull || handIdChanged || handBetsField.present) state.betThisRoundByUserId = normalizeNumericUserMap(handBetsField.value) || {};
     if (handIdChanged && !foldedUsersField.present) state.foldedByUserId = Object.create(null);
     if (authoritativeFull || foldedUsersField.present) state.foldedByUserId = normalizeFoldedByUserId(foldedUsersField.value);
     if (nextHeroCards && nextHeroCards.length >= 2){
@@ -3701,6 +3704,13 @@
     return !!(sticky && Array.isArray(sticky.showdownWinnerUserIds) && sticky.showdownWinnerUserIds.indexOf(seat.userId) !== -1);
   }
 
+  function getOpponentHeldCardCount(seat, handId, handBets){
+    if (!seat || !handId || seat.status === 'WAITING_NEXT_HAND' || seat.status === 'OUT_OF_CHIPS') return 0;
+    // The public per-round map is initialized for every dealt-in user (including
+    // zero bets), and keeps folded participants. It is not a hole-card count.
+    return isObject(handBets) && hasOwn(handBets, seat.userId) ? 2 : 0;
+  }
+
   function getSeatRevealCards(seat){
     if (!seat || typeof seat.userId !== 'string') return null;
     var revealed = state.revealedShowdownCardsByUserId && state.revealedShowdownCardsByUserId[seat.userId];
@@ -4299,7 +4309,7 @@
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
       if (!hero && seat && seat.userId){
-        var heldCards = !waitingNextHand && !folded && state.handId ? 2 : 0;
+        var heldCards = getOpponentHeldCardCount(seat, state.handId, state.betThisRoundByUserId);
         cards.setAttribute('aria-label', heldCards + ' cards held');
         for (var cardIndex = 0; cardIndex < heldCards; cardIndex++){
           var cardBack = document.createElement('span');

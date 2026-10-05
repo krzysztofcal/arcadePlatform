@@ -266,3 +266,7 @@ Required local checks and focused existing fundamental suite (123/123) passed. R
 ## Latest owner corrections — supersedes replacement layout acceptance evidence
 
 Owner review rejected the a19e4e2 replacement as final: restore single-row hero best-hand symbols, lower-right action rail with hero shifted left, use more viewport space, restore reaction/history popup interaction, move action badges and targeted social affordances to avatar edges, and replace opponent hole-card controls with compact 0/1/2 indicators. Targeted effects use sender/recipient avatar centers; #1047 gift integration must use those same centers. Keep CH account behavior, gameplay/privacy/settlement logic and purchase flow untouched. Narrow real Preview sanity/screenshots only; no expanded geometry matrix. Both previous layout matrices are historical and do not establish owner acceptance. Owner visual smoke and real authenticated Stage verification remain pending.
+
+## P1 opponent participation semantics
+
+Reuse the existing public betThisRoundByUserId membership (all current-hand users, zero values included); handSeats is not transmitted by the current public read model. Folded participants remain 2. Waiting/out-of-hand/out-of-chips seats outside the hand remain 0. No inferred 1, new WS field, endpoint or engine eligibility implementation. Snapshot merge must clear stale membership on full snapshots/hand change. No layout, asset, account, social or animation-anchor changes.
