@@ -4986,8 +4986,8 @@ wss.on("connection", (ws) => {
         sendCommandResult(ws, connState, { requestId: frame.requestId, tableId,
           status: outcome.ok ? "accepted" : "rejected", ...(outcome.ok ? {} : { reason: outcome.code }) });
         if (outcome.ok) {
-          broadcastGiftFrame(tableId, "table_gift", outcome.event);
-          // Correct clients that recovered counts before an old request was replayed.
+          if (outcome.replayed !== true) broadcastGiftFrame(tableId, "table_gift", outcome.event);
+          // Reconcile durable badges on both new purchases and state-only replays.
           const recovered = await giftAdapter.loadActiveGiftSummary(tableId);
           if (recovered) broadcastGiftFrame(tableId, "table_gift_state", recovered);
         }

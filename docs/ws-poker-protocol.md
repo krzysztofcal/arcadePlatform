@@ -397,7 +397,7 @@ Client resync expectation:
 
 `gift_send` is a protected requestId-required command. Payload: `{ tableId, giftKey, targetSeatNo }` only. Buyer must have identityMode `user`, be associated with the table and occupy an ACTIVE human seat. Self, human and bot recipients are valid. Catalog prices are authoritative: coffee 10, beer 25, whisky 50, pizza 100, cake 250, diamond 1000 CH. Per-buyer/table cooldown is 3000 ms. Client prices, recipient IDs and payment references are rejected.
 
-The existing `commandResult` reports accepted/rejected. Rejections use `gift_shop_unavailable`, `gift_invalid`, `gift_target_unavailable`, `gift_rate_limited`, `gift_insufficient_chips`, `gift_idempotency_conflict`, `gift_purchase_failed`, `not_seated`, or `invalid_sender`. Reuse requestId after uncertain transport failure. Exact replay burns no additional CH and rebroadcasts the same receipt eventId; changed gift/target is a conflict.
+The existing `commandResult` reports accepted/rejected. Rejections use `gift_shop_unavailable`, `gift_invalid`, `gift_target_unavailable`, `gift_rate_limited`, `gift_insufficient_chips`, `gift_idempotency_conflict`, `gift_purchase_failed`, `not_seated`, or `invalid_sender`. Reuse requestId after uncertain transport failure. Exact replay burns no additional CH, returns accepted and broadcasts current `table_gift_state`, without another `table_gift` or animation; changed gift/target is a conflict.
 
 Additive, non-stream frames (normal envelope, table roomId):
 

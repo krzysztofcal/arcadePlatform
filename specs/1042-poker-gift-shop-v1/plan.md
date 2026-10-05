@@ -23,3 +23,5 @@ Gift table/seat row locks use NOWAIT: current gameplay persistence can project s
 Review correction: the existing seat protocol does not expose joined_at. Keep it private and broadcast current receipt aggregates to all table connections after every accepted authenticated join (including same-user rejoin). This clears old participation badges even when an observer missed the intermediate absence. Browser clears disappeared/changed owners locally; DB exact participation joins remain final authority. Recovery is scheduled without awaiting it on gameplay lifecycle paths, and resume recovery follows replay frames.
 
 The canonical ledger import is lazy after DB availability/auth validation, matching existing shared-domain adapters and keeping file-backed WS startup compatible with WS-package-only CI dependencies. Deploy packages already include root shared/ledger/dependencies.
+
+Review P1 correction: only new purchases broadcast table_gift. Exact replay is accepted with current table_gift_state and no animation. This is a minimal WS fanout guard; canonical ledger/receipt idempotency remains unchanged, with no outbox or delivery framework.

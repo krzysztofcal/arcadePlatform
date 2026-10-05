@@ -27,3 +27,9 @@ Required runtime evidence (to record after publication): Stage migration apply, 
 Subsequent commits only record this evidence in SpecKit. A diff against the runtime SHA must contain only specs/**; no runtime/deployable/configuration change is permitted without redeploy and smoke.
 
 Status: implementation ready, awaiting manual runtime verification. T013 remains incomplete until the mandatory authenticated smoke is confirmed; T014 Production handoff is prepared, owner-gated; final completion gate T015 remains pending those required outcomes. Do not merge.
+
+## PR #1047 review correction (2026-10-05 UTC)
+
+P1: author diff review confirms the only runtime change is guarding table_gift with outcome.replayed !== true; accepted response and current table_gift_state remain common to new/replayed purchases. Ledger, receipt atomicity, gameplay and schema are unchanged. No delivery framework/outbox or breaking envelope change. Existing fundamental socket test fails before the fix (2 events vs 1), then passes: one event on first purchase, accepted replay/current state with no second event. Its financial adapter is mocked with one BURN/receipt counter; focused PGlite purchase tests separately prove real SQL receipt cardinality and transactional BURN replay behavior.
+
+Follow-up validation: focused gift purchase/migration/handler 12/12; selected real WS gift test 1/1; canonical Node ledger suite passes. Syntax, check:all, ci:guards, CSP, migration guard and diff whitespace pass. No full local suites or new dependencies. P2: live #1042 updated through GitHub connector: status implementation ready, awaiting manual runtime verification; T001–T012 checked, T013 authenticated Stage smoke pending, T014 Production owner GO/schema apply pending, T015 final handoff pending. Previous WS deploy is superseded by this runtime correction; new exact-SHA evidence follows.

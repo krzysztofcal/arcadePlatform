@@ -1,7 +1,7 @@
 # Poker Gift Shop V1 — SpecKit implementation plan
 
 **Parent:** #786
-**Source status at import:** Accepted plan; implementation not started
+**Status:** implementation ready, awaiting manual runtime verification
 
 Implementation progress and validation are tracked in tasks.md and review.md.
 **Scope:** one complete V1 vertical slice: Poker V2 UI → authoritative WS purchase → CH BURN → durable receipt → table gift event → session-visible gift badges.
@@ -180,9 +180,11 @@ Update `ws-server/server.mjs`:
 - never accept client `priceCh`, recipient userId, payment source or payment reference;
 - call the purchase adapter;
 - send normal `commandResult`;
-- on accepted **new or idempotently replayed** purchase, broadcast the same stable event:
+- on accepted **new** purchase only (`outcome.replayed !== true`), broadcast:
   - `table_gift: { eventId, senderSeatNo, recipientSeatNo, giftKey }`
-- duplicate network broadcast is harmless because `eventId` is stable and clients dedupe; this recovers the crash window "DB committed, process died before first broadcast".
+- an idempotent replay returns `commandResult=accepted` with zero new BURN/receipt and **no `table_gift` or animation**;
+- both new purchases and replay load/broadcast current `table_gift_state` to reconcile durable session badges;
+- client eventId dedupe is supplementary; server replay suppression prevents replaying an old animation after reload, cache eviction or seat reassignment. A commit-before-broadcast crash recovers badges through current state, without replaying the animation or introducing an outbox.
 - do not write gift events to poker `streamLog` or gameplay persistence.
 
 Add read-model recovery frame:
@@ -312,7 +314,7 @@ Cover:
 Add/extend only critical runtime tests:
 
 - `ws-server/poker/handlers/gift.behavior.test.mjs` for command validation/reasons;
-- nearest focused cases in `ws-server/server.behavior.test.mjs` for accepted purchase → `commandResult` + `table_gift`, stable replay eventId, and `table_gift_state` recovery.
+- nearest focused cases in `ws-server/server.behavior.test.mjs` for accepted purchase → `commandResult` + `table_gift`, one BURN/receipt, no second event on accepted replay, and current `table_gift_state` recovery.
 
 Do not add tests asserting HTML structure, CSS classes, animation pixels or modal layout.
 
@@ -342,18 +344,18 @@ Because this changes `ws-server/**` and the WS/browser protocol:
 
 ## Task breakdown
 
-- [ ] **T001 — SpecKit baseline reconciliation.** Re-read live #1042, #786, `agents.md`, `skills.md`, current ledger/WS/Poker V2 code; create/update `specs/1042-poker-gift-shop-v1/` artifacts from this accepted issue without broadening scope.
-- [ ] **T002 — Catalog contract.** Add `shared/poker-domain/gift-catalog.mjs` with exactly the six accepted keys/prices and small normalization helpers.
-- [ ] **T003 — Receipt migration.** Generate the forward-only `poker_gift_purchases` Stage migration, RLS and two narrow indexes; update current Production migration inventory/manifest as required. Declare shared Stage auto-apply effect. No data/CH mutation.
-- [ ] **T004 — Purchase core.** Add `shared/poker-domain/gift-purchase.mjs::executePokerGiftPurchase()` with advisory cooldown/idempotency lock, active seat/participation validation, atomic existing-ledger BURN and receipt.
-- [ ] **T005 — WS persistence adapter.** Add gift purchase deps/adapter, known-error mapping and active-participation gift summary loader. Guest/file-store path fails closed with zero DB mutation.
-- [ ] **T006 — WS handler/protocol.** Add `handleGiftSendCommand`, `gift_send`, `table_gift`, `table_gift_state`; wire protected/requestId lists, broadcast and subscription/join/resync recovery in `ws-server/server.mjs`.
-- [ ] **T007 — Browser WS client.** Extend `poker/poker-ws-client.js` with `sendGift`, `onGift`, `onGiftState`; preserve one socket and JSP globals.
-- [ ] **T008 — V1 UI.** Add Gift Shop control/panel in `poker/table-v2.html`; implement catalog/recipient selection, purchase state, gift event/state handlers, bounded event dedupe/animation queue and avatar gift aggregates in `poker/poker-v2.js`.
-- [ ] **T009 — CSS/i18n.** Add minimal responsive/reduced-motion gift styles in `poker/poker-v2.css` (one line per selector) and PL/EN strings in `js/i18n.js`. No asset/CDN/audio work.
-- [ ] **T010 — Fundamental accounting/migration tests.** Extend migration/ledger suites for receipt contract, RLS/indexes and exact USER→GENESIS BURN/no-recipient-credit invariants.
-- [ ] **T011 — Fundamental domain/WS tests.** Add only the focused gift purchase/handler/runtime cases listed above. No UI/CSS/glue suite.
-- [ ] **T012 — Full verification/refactor.** Run focused + required repo checks; review/refactor touched code for the smallest implementation; verify no second ledger/payment/event framework and no gameplay mutation.
+- [x] **T001 — SpecKit baseline reconciliation.** Re-read live #1042, #786, `agents.md`, `skills.md`, current ledger/WS/Poker V2 code; create/update `specs/1042-poker-gift-shop-v1/` artifacts from this accepted issue without broadening scope.
+- [x] **T002 — Catalog contract.** Add `shared/poker-domain/gift-catalog.mjs` with exactly the six accepted keys/prices and small normalization helpers.
+- [x] **T003 — Receipt migration.** Generate the forward-only `poker_gift_purchases` Stage migration, RLS and two narrow indexes; update current Production migration inventory/manifest as required. Declare shared Stage auto-apply effect. No data/CH mutation.
+- [x] **T004 — Purchase core.** Add `shared/poker-domain/gift-purchase.mjs::executePokerGiftPurchase()` with advisory cooldown/idempotency lock, active seat/participation validation, atomic existing-ledger BURN and receipt.
+- [x] **T005 — WS persistence adapter.** Add gift purchase deps/adapter, known-error mapping and active-participation gift summary loader. Guest/file-store path fails closed with zero DB mutation.
+- [x] **T006 — WS handler/protocol.** Add `handleGiftSendCommand`, `gift_send`, `table_gift`, `table_gift_state`; wire protected/requestId lists, broadcast and subscription/join/resync recovery in `ws-server/server.mjs`.
+- [x] **T007 — Browser WS client.** Extend `poker/poker-ws-client.js` with `sendGift`, `onGift`, `onGiftState`; preserve one socket and JSP globals.
+- [x] **T008 — V1 UI.** Add Gift Shop control/panel in `poker/table-v2.html`; implement catalog/recipient selection, purchase state, gift event/state handlers, bounded event dedupe/animation queue and avatar gift aggregates in `poker/poker-v2.js`.
+- [x] **T009 — CSS/i18n.** Add minimal responsive/reduced-motion gift styles in `poker/poker-v2.css` (one line per selector) and PL/EN strings in `js/i18n.js`. No asset/CDN/audio work.
+- [x] **T010 — Fundamental accounting/migration tests.** Extend migration/ledger suites for receipt contract, RLS/indexes and exact USER→GENESIS BURN/no-recipient-credit invariants.
+- [x] **T011 — Fundamental domain/WS tests.** Add only the focused gift purchase/handler/runtime cases listed above. No UI/CSS/glue suite.
+- [x] **T012 — Full verification/refactor.** Run focused + required repo checks; review/refactor touched code for the smallest implementation; verify no second ledger/payment/event framework and no gameplay mutation.
 - [ ] **T013 — Exact-SHA Preview gate.** Deploy latest runtime-affecting SHA with WS Preview Deploy, verify release metadata/health, then perform the mandatory Stage smoke above.
 - [ ] **T014 — Production handoff.** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.
 - [ ] **T015 — Final handoff.** Record exact runtime SHA, Stage migration/apply evidence, CI, WS Preview deploy, smoke evidence, any Production schema status and breaking impacts. Only call merge-ready when repository Definition of Done is satisfied.
