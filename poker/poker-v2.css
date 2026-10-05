@@ -17,7 +17,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat-target-reaction-flyout{position:absolute;left:0;top:0;z-index:103;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid rgba(255,223,180,0.5);border-radius:50%;background:linear-gradient(180deg,rgba(111,77,184,0.98),rgba(61,39,113,0.98));box-shadow:0 7px 16px rgba(0,0,0,0.42);font-size:1.05rem;line-height:1;transform:translate(calc(-50% + var(--reaction-delta-x)),calc(-50% + var(--reaction-delta-y))) scale(1);}
 .poker-seat-target-reaction-flyout--enter{animation:poker-target-reaction-flyout 720ms cubic-bezier(.22,.8,.28,1) both;}
 @keyframes poker-reaction-bubble-lifecycle{0%{opacity:0;transform:scale(.72);}10%{opacity:1;}16%,86%{opacity:1;transform:scale(1);}100%{opacity:0;transform:scale(.98);}}
-@keyframes poker-reaction-float{0%{opacity:0;transform:translate(-50%,4px) scale(.76);}18%{opacity:1;}100%{opacity:0;transform:translate(-50%,-38px) scale(1.04);}}
+@keyframes poker-reaction-float{0%{opacity:0;transform:scale(.76);}18%{opacity:1;transform:scale(1);}100%{opacity:0;transform:scale(.98);}}
 @keyframes poker-target-reaction-flyout{0%{opacity:0;transform:translate(-50%,-50%) scale(.62);}18%{opacity:1;}100%{opacity:1;transform:translate(calc(-50% + var(--reaction-delta-x)),calc(-50% + var(--reaction-delta-y))) scale(1);}}
 .poker-seat-settlement-award{line-height:1.15; white-space:nowrap; color:#ffe7b4;}
 .poker-seat-settlement-award--return{color:#bcefd8;}
@@ -382,9 +382,9 @@ html,body{height:100%;overflow:hidden;}
 .poker-seat--hero .poker-seat-best-hand-label{text-align:center;}
 .poker-seat-best-hand-card{display:flex;align-items:center;justify-content:center;height:20px;border-radius:999px;background:rgba(245,248,255,.96);color:#0f172a;font-size:9px;font-weight:700;box-shadow:0 3px 7px rgba(0,0,0,.24);}
 .poker-seat-hud-social{display:flex;align-items:center;justify-content:center;gap:3px;pointer-events:auto;}
-.poker-seat-social-reaction{display:flex;align-items:center;justify-content:center;max-width:100%;}
-.poker-seat-reaction-bubble{--reaction-bubble-x:0;position:relative;padding:3px 5px;max-width:100%;border:1px solid rgba(255,223,180,.34);border-radius:999px;background:rgba(7,13,24,.94);box-shadow:0 7px 16px rgba(0,0,0,.38);color:#fff4dc;font-size:9px;font-weight:700;line-height:12px;white-space:nowrap;}
-.poker-seat-reaction-float{display:none;}
+.poker-seat-social-reaction{display:flex;align-items:center;justify-content:center;max-width:100%;min-width:0;}
+.poker-seat-reaction-bubble{--reaction-bubble-x:0;position:relative;padding:3px 5px;max-width:100%;border:1px solid rgba(255,223,180,.34);border-radius:999px;background:rgba(7,13,24,.94);box-shadow:0 7px 16px rgba(0,0,0,.38);color:#fff4dc;font-size:9px;font-weight:700;line-height:12px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+.poker-seat-reaction-float{position:relative;flex:none;width:12px;height:12px;font-size:11px;line-height:12px;pointer-events:none;animation:poker-reaction-float 1000ms ease-out both;}
 .poker-seat-target-reaction{min-width:18px;min-height:18px;padding:1px 4px;border:1px solid rgba(255,223,180,.46);border-radius:999px;background:linear-gradient(180deg,rgba(111,77,184,.98),rgba(61,39,113,.98));font-size:12px;line-height:1;cursor:pointer;}
 .poker-auto-rebuy-indicator{display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(8,16,26,.9);color:#bcefd8;font-size:10px;}
 .poker-auto-rebuy-toast--avatar{padding:2px 4px;font-size:8px;}

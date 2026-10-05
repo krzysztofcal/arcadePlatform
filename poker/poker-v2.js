@@ -3893,7 +3893,7 @@
   var seatSceneGeometry = {
     portrait: { width:360, height:660, seats:[
       {avatar:[180,65],cards:[255,60],stack:[278,110],bet:[235,134],dealer:[124,102],action:[117,132],presentation:[65,56,100,52],social:[62,101,70,18]},
-      {avatar:[300,195],cards:[300,288],stack:[220,178],bet:[266,194],dealer:[220,111],presentation:[300,322,92,32],social:[220,220,80,18]},
+      {avatar:[300,195],cards:[300,288],stack:[220,178],bet:[266,194],dealer:[262,280],presentation:[300,322,92,32],social:[220,220,80,18]},
       {avatar:[300,390],cards:[300,483],stack:[226,413],bet:[266,389],dealer:[240,352],presentation:[226,484,70,42],social:[226,452,80,18]},
       {avatar:[180,548],cards:[282,618],stack:[268,534],bet:[180,470],dealer:[236,570],bestHand:[70,590,98,90],presentation:[70,532,98,22],social:[70,648,98,18]},
       {avatar:[60,390],cards:[60,483],stack:[134,413],bet:[94,389],dealer:[120,352],presentation:[134,484,70,42],social:[134,452,80,18]},
