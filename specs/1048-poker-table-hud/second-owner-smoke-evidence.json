@@ -1,0 +1,127 @@
+{
+  "runtimeSha": "235a5e05793078577c803837b6ffeec971109dea",
+  "remoteJsCssMatchCheckout": true,
+  "method": "Narrow real Deploy Preview with controlled snapshot/balance fixtures; no authenticated Stage verification or collision matrix.",
+  "records": [
+    {
+      "name": "portrait",
+      "build": "235a5e05793078577c803837b6ffeec971109dea",
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "clientHeight": 844,
+      "avatarWidths": [
+        74.80000305175781,
+        74.80000305175781,
+        74.80000305175781,
+        74.80000305175781,
+        74.80001831054688,
+        74.80001831054688
+      ],
+      "activeBadges": 0,
+      "numericCountLabels": 0,
+      "bestHand": [
+        {
+          "text": "A♦",
+          "color": "rgb(185, 28, 28)",
+          "width": 16.622222900390625,
+          "height": 24.933349609375,
+          "top": 732.9293212890625
+        },
+        {
+          "text": "A♥",
+          "color": "rgb(185, 28, 28)",
+          "width": 16.622222900390625,
+          "height": 24.933349609375,
+          "top": 732.9293212890625
+        },
+        {
+          "text": "A♠",
+          "color": "rgb(17, 17, 17)",
+          "width": 16.622222900390625,
+          "height": 24.933349609375,
+          "top": 732.9293212890625
+        },
+        {
+          "text": "K♦",
+          "color": "rgb(185, 28, 28)",
+          "width": 16.622222900390625,
+          "height": 24.933349609375,
+          "top": 732.9293212890625
+        },
+        {
+          "text": "Q♥",
+          "color": "rgb(185, 28, 28)",
+          "width": 16.622222900390625,
+          "height": 24.933349609375,
+          "top": 732.9293212890625
+        }
+      ],
+      "ownerCenterDelta": 0.000003814697265625,
+      "transientBottom": 487.3944396972656,
+      "avatarTop": 493.6277770996094,
+      "reactionChatClickable": true,
+      "shakeReturnsToBase": true
+    },
+    {
+      "name": "landscape",
+      "build": "235a5e05793078577c803837b6ffeec971109dea",
+      "scrollWidth": 844,
+      "clientWidth": 844,
+      "scrollHeight": 390,
+      "clientHeight": 390,
+      "avatarWidths": [
+        63.692291259765625,
+        63.69230651855469,
+        63.69230651855469,
+        63.69232177734375,
+        63.69232177734375,
+        63.69232177734375
+      ],
+      "activeBadges": 0,
+      "numericCountLabels": 0,
+      "bestHand": [
+        {
+          "text": "A♦",
+          "color": "rgb(185, 28, 28)",
+          "width": 12.738449096679688,
+          "height": 19.107696533203125,
+          "top": 323.4329833984375
+        },
+        {
+          "text": "A♥",
+          "color": "rgb(185, 28, 28)",
+          "width": 12.738449096679688,
+          "height": 19.107696533203125,
+          "top": 323.4329833984375
+        },
+        {
+          "text": "A♠",
+          "color": "rgb(17, 17, 17)",
+          "width": 12.73846435546875,
+          "height": 19.107696533203125,
+          "top": 323.4329833984375
+        },
+        {
+          "text": "K♦",
+          "color": "rgb(185, 28, 28)",
+          "width": 12.73846435546875,
+          "height": 19.107696533203125,
+          "top": 323.4329833984375
+        },
+        {
+          "text": "Q♥",
+          "color": "rgb(185, 28, 28)",
+          "width": 12.73846435546875,
+          "height": 19.107696533203125,
+          "top": 323.4329833984375
+        }
+      ],
+      "ownerCenterDelta": 0.00000762939453125,
+      "transientBottom": 238.10769653320312,
+      "avatarTop": 242.88461303710938,
+      "reactionChatClickable": true,
+      "shakeReturnsToBase": true
+    }
+  ]
+}

@@ -28,4 +28,4 @@ Earlier T003/T008 seat-grid implementation and 20/20 evidence are superseded by 
 
 - [x] S001 Read live second owner feedback, repo rules and PR diff; refine existing HUD presentation without redesign.
 - [x] S002 Unify occupied avatars, remove ACTIVE/count labels, OPEN content, aligned controls, narrow suit-colored best hand and owner-centered transient UI; preserve motion anchors.
-- [ ] S003 Required/fundamental checks, self-review and narrow real Preview evidence/screenshots; owner visual acceptance and authenticated Stage remain pending.
+- [x] S003 Required/fundamental checks, self-review and narrow real Preview evidence/screenshots; owner visual acceptance and authenticated Stage remain pending.
