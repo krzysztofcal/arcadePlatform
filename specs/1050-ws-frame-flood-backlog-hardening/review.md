@@ -48,5 +48,13 @@ Finding P1 #2 from GitHub issue #1050:
   - `npm run check:all`: Lifecycle OK (169 files), Badge OK (53 pages), XP guard OK, transport guard OK.
   - `npm run test:unit`: Games validation OK.
 
+## Preview Verification
+- **WS Preview Deploy**: [Run 37332388202](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37332388202) succeeded for exact runtime SHA `beb7e86d408c4f0fc7f667147efe68fd9a158011`.
+- **Health check**: `https://ws-preview.kcswh.pl/healthz` returned `ok`.
+- **Live WS Smoke**: Executed against `wss://ws-preview.kcswh.pl/ws`:
+  - Conforming `ping` returned expected `pong` (`requestId: preview-smoke-round2`).
+  - Burst frame flood (>16 in-flight frames) was terminated with protocol error close code `1002`, and excess frames were dropped.
+
 ## Breaking Impact
 Zero breaking impact for conforming clients. Conforming clients send sequential commands or small pipelined requests (well below the limit of 16 concurrent un-acknowledged frames). Malicious or abusive clients attempting to flood frames without waiting for responses are rejected with close code 1002.
+
