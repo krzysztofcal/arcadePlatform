@@ -3897,7 +3897,7 @@
       {avatar:[300,390],cards:[300,483],stack:[226,413],bet:[258,389],dealer:[240,352],presentation:[226,484,70,42],social:[226,452,80,18]},
       {avatar:[180,548],cards:[282,618],stack:[268,534],bet:[180,470],dealer:[236,570],bestHand:[70,590,98,90],presentation:[70,532,98,22],social:[70,648,98,18]},
       {avatar:[60,390],cards:[60,483],stack:[134,413],bet:[102,389],dealer:[120,352],presentation:[134,484,70,42],social:[134,452,80,18]},
-      {avatar:[60,195],cards:[60,288],stack:[140,178],bet:[155,140],dealer:[98,280],presentation:[60,322,92,32],social:[140,220,80,18]}
+      {avatar:[60,195],cards:[60,288],stack:[140,178],bet:[175,140],dealer:[98,280],presentation:[60,322,92,32],social:[140,220,80,18]}
     ]},
     landscape: { width:1040, height:390, seats:[
       {avatar:[520,50],cards:[620,50],stack:[680,50],bet:[620,96],dealer:[440,80],action:[440,112],presentation:[350,28,120,44],social:[370,93,90,18]},
