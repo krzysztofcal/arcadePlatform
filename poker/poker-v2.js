@@ -383,7 +383,9 @@
     var width = 120;
     var center = anchor.avatar.left + anchor.avatar.width / 2;
     els.celebration.style.left = center + 'px';
-    els.celebration.style.top = (anchor.avatar.top - 6) + 'px';
+    var stackOffset = (getSeatSettlementAwards(celebration.userId).length ? 32 : 0)
+      + (reactionBubblesBySeatNo[anchor.seatNo] ? 18 : 0);
+    els.celebration.style.top = (anchor.avatar.top - 6 - stackOffset) + 'px';
     els.celebration.style.width = width + 'px';
     els.celebration.style.setProperty('--compact-font', width / 12 + 'px');
     return true;
@@ -3888,7 +3890,7 @@
       {avatar:[60,195],stack:[140,178],bet:[175,140],dealer:[98,280]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[520,80],stack:[680,50],bet:[620,96],dealer:[440,80]},
+      {avatar:[520,50],stack:[680,50],bet:[620,96],dealer:[440,80]},
       {avatar:[925,90],stack:[760,90],bet:[813,120],dealer:[810,90]},
       {avatar:[740,265],stack:[835,145],bet:[832,219],dealer:[795,250]},
       {avatar:[430,298],cards:[558,334],stack:[530,267],bet:[440,242],dealer:[490,368],bestHand:[280,327,200,44]},
@@ -4337,7 +4339,7 @@
       if (cards.children.length) hud.cards.appendChild(cards);
       placeSeatNode(name,hud,hud.name,hero ? 88 : 76,14);
       hud.identity.appendChild(name);
-      if (seat && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
+      if (seat && !visibleAction && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
         var status = document.createElement('div');
         status.className = 'poker-seat-status';
         status.textContent = waitingNextHand ? 'NEXT HAND' : 'OUT OF CHIPS';
