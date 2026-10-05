@@ -39,4 +39,4 @@ Earlier T003/T008 seat-grid implementation and 20/20 evidence are superseded by 
 ## Fresh-JOIN WAITING_NEXT_HAND correction
 
 - [x] J001 Keep ordinary JOIN waiting out of sitout/rebuy UI; preserve actual OUT_OF_CHIPS/rebuy and waiting preaction guard.
-- [ ] J002 Required/focused checks, whole-PR self-review and narrow real Deploy Preview verification; owner smoke pending.
+- [x] J002 Required/focused checks, whole-PR self-review and narrow real Deploy Preview verification; owner smoke pending.

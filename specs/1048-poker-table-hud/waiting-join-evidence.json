@@ -1,0 +1,74 @@
+{
+  "sha": "77fd798b0eff0846cf735006689d83280f5a7644",
+  "method": "Real Deploy Preview with controlled existing client-state fixtures; no authenticated Stage verification.",
+  "results": [
+    {
+      "name": "portrait",
+      "waiting": {
+        "sittingOut": false,
+        "panelHidden": true,
+        "banner": "Seat reserved · Joining next hand",
+        "turn": "Joining next hand",
+        "preactionHidden": true,
+        "rebuyDisabled": false
+      },
+      "bust": {
+        "sittingOut": true,
+        "panelHidden": false,
+        "banner": "Joined",
+        "turn": "Out of chips · Sitting out",
+        "preactionHidden": false,
+        "rebuyDisabled": false
+      },
+      "rebuy": {
+        "sittingOut": false,
+        "panelHidden": false,
+        "banner": "Seat reserved · Joining next hand",
+        "turn": "Joining next hand",
+        "preactionHidden": true,
+        "rebuyDisabled": true
+      },
+      "scroll": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "sha": "77fd798b0eff0846cf735006689d83280f5a7644"
+      }
+    },
+    {
+      "name": "landscape",
+      "waiting": {
+        "sittingOut": false,
+        "panelHidden": true,
+        "banner": "Seat reserved · Joining next hand",
+        "turn": "Joining next hand",
+        "preactionHidden": true,
+        "rebuyDisabled": false
+      },
+      "bust": {
+        "sittingOut": true,
+        "panelHidden": false,
+        "banner": "Joined",
+        "turn": "Out of chips · Sitting out",
+        "preactionHidden": false,
+        "rebuyDisabled": false
+      },
+      "rebuy": {
+        "sittingOut": false,
+        "panelHidden": false,
+        "banner": "Seat reserved · Joining next hand",
+        "turn": "Joining next hand",
+        "preactionHidden": true,
+        "rebuyDisabled": true
+      },
+      "scroll": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390,
+        "sha": "77fd798b0eff0846cf735006689d83280f5a7644"
+      }
+    }
+  ]
+}
