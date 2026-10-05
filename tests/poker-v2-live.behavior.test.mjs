@@ -6117,3 +6117,16 @@ test('bot-only all-in loss reaction catalog entries resolve emoji/labels, humanS
   }
 });
 
+
+test('Other tables excludes the current authoritative stack and rejects unavailable values', () => {
+  const source = fs.readFileSync(path.resolve('poker/poker-v2.js'), 'utf8');
+  const functionSource = source.slice(source.indexOf('  function sumOtherTableStacks('), source.indexOf('  function accountHudContext('));
+  const sum = vm.runInNewContext(functionSource + '\nsumOtherTableStacks');
+  assert.equal(sum([{ tableId: 'here', stack: 900 }, { tableId: 'other', stack: 75 }, { tableId: 'bot-table', stack: 25 }], 'here'), 100);
+  assert.equal(sum([], 'here'), 0);
+  assert.equal(sum([{ tableId: 'other', stack: 0 }], 'here'), 0);
+  assert.equal(sum(null, 'here'), null);
+  assert.equal(sum([{ tableId: 'other', stack: null }], 'here'), null);
+  assert.equal(sum([{ tableId: 'other', stack: -1 }], 'here'), null);
+  assert.equal(sum([{ tableId: 'other', stack: Number.MAX_SAFE_INTEGER }, { tableId: 'third', stack: 1 }], 'here'), null);
+});
