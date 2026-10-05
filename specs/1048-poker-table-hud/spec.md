@@ -256,3 +256,9 @@ The corrected #1049 must be reworked against this issue before any merge-readine
 ## Reconciliation for owner smoke FAIL
 
 The earlier PR #1049 seat-grid/card-panel implementation and its 20/20 preview matrix are SUPERSEDED and REJECTED by manual owner smoke. Those checks did not establish one-viewport acceptance. Preserve accepted CH Account HUD corrections, but replace the rejected layout with the existing Poker V2 visual skin and deterministic table-local SeatHud anchors. No new poker runtime or Gift Shop behavior. Current baseline main: 4f798bdd56dba0e11b34e8982895650920ec6944. Draft #1049 remains not merge-ready until the owner verifies the replacement layout and actual authenticated Stage reads.
+
+## Replacement implementation handoff
+
+Current browser runtime: 969bcee9e570722edd42deb6ef1a9d4b463ada27. Existing draft #1049 now implements the owner-directed Poker V2 anchor layout, retains accepted CH HUD and provides three circular gift anchors plus one quick-action anchor without gift behavior. Live #1048 evidence/status and PR description updated. See review.md, replacement-preview-evidence.json and evidence/ screenshots. Old seat-grid/card-panel and 20/20 evidence remain explicitly superseded by owner smoke FAIL.
+
+Required local checks and focused existing fundamental suite (123/123) passed. Real preview: 40 reduced-motion + four normal-motion geometry cases, both document scroll inequalities, zero detected critical collisions/out-of-scene clipping; four actual guest sessions and controlled signed-in wallet event/pulse checks. Actual authenticated Stage and owner smoke of this replacement remain pending. No WS deploy, Production mutation or merge. Not merge-ready.

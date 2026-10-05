@@ -1,0 +1,2584 @@
+{
+  "status": "Replacement implemented; automated evidence is not owner acceptance. Draft/not merge-ready; owner layout smoke and actual authenticated Stage verification pending.",
+  "supersedes": "Initial #1049 seat-grid/card-panel and old 20/20 matrix: manual owner smoke FAIL.",
+  "browserSha": "969bcee9e570722edd42deb6ef1a9d4b463ada27",
+  "preview": "https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html",
+  "sourceMatch": {
+    "buildInfoCommitHash": "969bcee9e570722edd42deb6ef1a9d4b463ada27",
+    "jsSha256": "3ae3313d1d413b27d9ff2adb81e768bd9d87cadabe8e881c49d25b61ee74b788",
+    "cssSha256": "85b1a879c06f6259c91c9575af63b766261afbee5a85be81ed27aaadd4912cc9",
+    "remoteJsCssMatchCheckout": true
+  },
+  "method": "Real remote Deploy Preview, source-checked browser closure hook injects controlled authoritative-state fixtures and ChipsClient replies. Gift/quick contents are probe-only placeholders. Real guest sessions use unmodified deployed runtime. Not a real signed-in Stage session. External probe remains outside repository test suite.",
+  "checks": [
+    "document scrollWidth <= clientWidth",
+    "document scrollHeight <= clientHeight",
+    "critical actual bounding boxes do not overlap",
+    "all critical boxes fit scene viewport; clipping cannot mask viewport failure",
+    "seat reserved anchors stay outside protected center lane and bottom action area",
+    "top controls stay inside header; bottom controls stay inside action area",
+    "exactly three gift slots per seat have common measured radius",
+    "hero best-hand renders exactly five cards when available"
+  ],
+  "criticalNodes": "Avatar, name/status/seat marker, gift/quick anchors, action, settlement badge/summary, best hand, reaction/context action, individual rotated hero cards, opponent cards, actual chip images and stack labels, dealer, pot and community cards. Chip-on-chip overlap inside graphical stacks is intentional. Header/action controls checked separately. Decorative shadows/ripples are not collision boxes.",
+  "externalProbeSha256": "afd1a3faf1fd43b65c598a942d2cdb500c5df7388f5457cf346f7d71fb46faea",
+  "reducedMotionMatrix": [
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 1,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 4,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 6,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 5,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "android",
+      "max": 2,
+      "occupied": 2,
+      "dealer": 1,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 35,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 2,
+      "dealer": 2,
+      "mode": "folded",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 47,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "settlement",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 107,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 6,
+      "mode": "hidden",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 101,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 92.66665649414062,
+        "right": 382,
+        "bottom": 778.3334045410156,
+        "width": 374,
+        "height": 685.666748046875
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 780,
+        "width": 374,
+        "height": 689
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 786,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 50
+      }
+    },
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 3,
+      "mode": "stress",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 155,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 1,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 4,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 6,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 5,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 2,
+      "occupied": 2,
+      "dealer": 1,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 35,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 2,
+      "dealer": 2,
+      "mode": "folded",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 47,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "settlement",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 107,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 6,
+      "mode": "hidden",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 101,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 30.727279663085938,
+        "top": 102.00001525878906,
+        "right": 289.27268981933594,
+        "bottom": 576.0000152587891,
+        "width": 258.54541015625,
+        "height": 474
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 576,
+        "width": 304,
+        "height": 474
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 582,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 50
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 3,
+      "mode": "stress",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 155,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 1,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 4,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 6,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 5,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 2,
+      "occupied": 2,
+      "dealer": 1,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 35,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 2,
+      "dealer": 2,
+      "mode": "folded",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 47,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "settlement",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 107,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 6,
+      "mode": "hidden",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 101,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 115.33331298828125,
+        "top": 99.99999237060547,
+        "right": 728.6666870117188,
+        "bottom": 329.99999237060547,
+        "width": 613.3333740234375,
+        "height": 230
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 330,
+        "width": 828,
+        "height": 230
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 336,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 46
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 3,
+      "mode": "stress",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 155,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 1,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 4,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 6,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 5,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 105,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 2,
+      "occupied": 2,
+      "dealer": 1,
+      "mode": "visible",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 35,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 2,
+      "dealer": 2,
+      "mode": "folded",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 47,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "settlement",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 107,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 6,
+      "mode": "hidden",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 101,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 253,
+        "right": 1432,
+        "bottom": 787,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 940,
+        "width": 1424,
+        "height": 840
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 946,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 46
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 3,
+      "mode": "stress",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 155,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    }
+  ],
+  "normalMotion": [
+    {
+      "name": "android",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "settlement",
+      "page": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 107,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 16.363632202148438,
+        "top": 91,
+        "right": 373.63633728027344,
+        "bottom": 746,
+        "width": 357.272705078125,
+        "height": 655
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 91,
+        "right": 382,
+        "bottom": 746,
+        "width": 374,
+        "height": 655
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 382,
+        "bottom": 85,
+        "width": 374,
+        "height": 77
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 752,
+        "right": 382,
+        "bottom": 836,
+        "width": 374,
+        "height": 84
+      }
+    },
+    {
+      "name": "small",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "settlement",
+      "page": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 107,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 40,
+        "top": 102,
+        "right": 280,
+        "bottom": 542,
+        "width": 240,
+        "height": 440
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 102,
+        "right": 312,
+        "bottom": 542,
+        "width": 304,
+        "height": 440
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 312,
+        "bottom": 96,
+        "width": 304,
+        "height": 88
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 8,
+        "top": 548,
+        "right": 312,
+        "bottom": 632,
+        "width": 304,
+        "height": 84
+      }
+    },
+    {
+      "name": "landscape",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "settlement",
+      "page": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 107,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 118,
+        "top": 99.99999237060547,
+        "right": 726,
+        "bottom": 327.99999237060547,
+        "width": 608,
+        "height": 228
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 836,
+        "bottom": 328,
+        "width": 828,
+        "height": 228
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 836,
+        "bottom": 94,
+        "width": 828,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 42,
+        "top": 334,
+        "right": 802,
+        "bottom": 382,
+        "width": 760,
+        "height": 48
+      }
+    },
+    {
+      "name": "desktop",
+      "max": 6,
+      "occupied": 6,
+      "dealer": 2,
+      "mode": "settlement",
+      "page": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000
+      },
+      "collisions": 0,
+      "criticalElementsChecked": 107,
+      "heroBestHandCards": 5,
+      "equalGiftRadius": true,
+      "scene": {
+        "key": "poker-scene",
+        "left": 8,
+        "top": 252,
+        "right": 1432,
+        "bottom": 786,
+        "width": 1424,
+        "height": 534
+      },
+      "sceneViewport": {
+        "key": "poker-scene-viewport",
+        "left": 8,
+        "top": 100,
+        "right": 1432,
+        "bottom": 938,
+        "width": 1424,
+        "height": 838
+      },
+      "header": {
+        "key": "poker-live-panel",
+        "left": 8,
+        "top": 8,
+        "right": 1432,
+        "bottom": 94,
+        "width": 1424,
+        "height": 86
+      },
+      "actionArea": {
+        "key": "poker-action-bar",
+        "left": 340,
+        "top": 944,
+        "right": 1100,
+        "bottom": 992,
+        "width": 760,
+        "height": 48
+      }
+    }
+  ],
+  "realGuests": [
+    {
+      "name": "android",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "metrics": {
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scene": {
+          "top": 56,
+          "bottom": 730,
+          "left": 11.18182373046875,
+          "right": 378.81817626953125
+        },
+        "actions": {
+          "top": 736,
+          "bottom": 836
+        },
+        "occupied": 4,
+        "balanceHidden": true,
+        "build": "969bcee9e570722edd42deb6ef1a9d4b463ada27"
+      },
+      "frames": [
+        "helloAck",
+        "authOk",
+        "commandResult",
+        "table_state",
+        "stateSnapshot"
+      ],
+      "errors": []
+    },
+    {
+      "name": "small",
+      "viewport": {
+        "width": 320,
+        "height": 640
+      },
+      "metrics": {
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "scrollHeight": 640,
+        "clientHeight": 640,
+        "scene": {
+          "top": 77,
+          "bottom": 526,
+          "left": 37.54545593261719,
+          "right": 282.45452880859375
+        },
+        "actions": {
+          "top": 532,
+          "bottom": 632
+        },
+        "occupied": 4,
+        "balanceHidden": true,
+        "build": "969bcee9e570722edd42deb6ef1a9d4b463ada27"
+      },
+      "frames": [
+        "helloAck",
+        "authOk",
+        "commandResult",
+        "table_state",
+        "stateSnapshot"
+      ],
+      "errors": []
+    },
+    {
+      "name": "landscape",
+      "viewport": {
+        "width": 844,
+        "height": 390
+      },
+      "metrics": {
+        "scrollWidth": 844,
+        "clientWidth": 844,
+        "scrollHeight": 390,
+        "clientHeight": 390,
+        "scene": {
+          "top": 56,
+          "bottom": 312,
+          "left": 80.66665649414062,
+          "right": 763.3334045410156
+        },
+        "actions": {
+          "top": 318,
+          "bottom": 382
+        },
+        "occupied": 4,
+        "balanceHidden": true,
+        "build": "969bcee9e570722edd42deb6ef1a9d4b463ada27"
+      },
+      "frames": [
+        "helloAck",
+        "authOk",
+        "commandResult",
+        "table_state",
+        "stateSnapshot"
+      ],
+      "errors": []
+    },
+    {
+      "name": "desktop",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "metrics": {
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 1000,
+        "clientHeight": 1000,
+        "scene": {
+          "top": 222,
+          "bottom": 756,
+          "left": 8,
+          "right": 1432
+        },
+        "actions": {
+          "top": 928,
+          "bottom": 992
+        },
+        "occupied": 4,
+        "balanceHidden": true,
+        "build": "969bcee9e570722edd42deb6ef1a9d4b463ada27"
+      },
+      "frames": [
+        "helloAck",
+        "authOk",
+        "commandResult",
+        "table_state",
+        "stateSnapshot"
+      ],
+      "errors": []
+    }
+  ],
+  "wallet": {
+    "browserSha": "969bcee9e570722edd42deb6ef1a9d4b463ada27",
+    "method": "Real Deploy Preview; controlled signed-in state and ChipsClient responses. Canonical document.dispatchEvent, no window bridge. Not real authenticated Stage verification.",
+    "records": [
+      {
+        "name": "desktop",
+        "viewport": {
+          "width": 1440,
+          "height": 1000
+        },
+        "motion": "no-preference",
+        "initial": "500, no pulse; one fetch each",
+        "documentEvent": "475, two fetches each; Other tables remains 100",
+        "animation": "poker-wallet-change",
+        "unchanged": "no pulse",
+        "failedWallet": "\u2014, no pulse",
+        "changedIdentity": "900, no cross-user pulse",
+        "signOut": "hidden/empty; held stale responses do not restore value or animation",
+        "errors": []
+      },
+      {
+        "name": "mobile",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "motion": "no-preference",
+        "initial": "500, no pulse; one fetch each",
+        "documentEvent": "475, two fetches each; Other tables remains 100",
+        "animation": "poker-wallet-change",
+        "unchanged": "no pulse",
+        "failedWallet": "\u2014, no pulse",
+        "changedIdentity": "900, no cross-user pulse",
+        "signOut": "hidden/empty; held stale responses do not restore value or animation",
+        "errors": []
+      },
+      {
+        "name": "reduced-motion",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "motion": "reduce",
+        "initial": "500, no pulse; one fetch each",
+        "documentEvent": "475, two fetches each; Other tables remains 100",
+        "animation": "none",
+        "unchanged": "no pulse",
+        "failedWallet": "\u2014, no pulse",
+        "changedIdentity": "900, no cross-user pulse",
+        "signOut": "hidden/empty; held stale responses do not restore value or animation",
+        "errors": []
+      }
+    ]
+  },
+  "requiredLocalChecks": {
+    "syntax": "passed, 221 files",
+    "check:all": "passed",
+    "ci:guards": "passed",
+    "check:csp-inline": "passed, 52 documents",
+    "focusedFundamental": "123 passed, 0 failed",
+    "diffCheck": "passed"
+  },
+  "screenshots": [
+    "evidence/android-hero-dealer.png",
+    "evidence/android-top-dealer.png",
+    "evidence/android-settlement.png",
+    "evidence/android-real-guest.png",
+    "evidence/small-hero-dealer.png",
+    "evidence/small-top-dealer.png",
+    "evidence/small-settlement.png",
+    "evidence/small-real-guest.png",
+    "evidence/landscape-hero-dealer.png",
+    "evidence/landscape-top-dealer.png",
+    "evidence/landscape-settlement.png",
+    "evidence/landscape-real-guest.png",
+    "evidence/desktop-hero-dealer.png",
+    "evidence/desktop-top-dealer.png",
+    "evidence/desktop-settlement.png",
+    "evidence/desktop-real-guest.png"
+  ],
+  "wsPreviewDeploy": "Not required: no WS/shared runtime/protocol/config diff.",
+  "pending": [
+    "owner manual smoke of replacement layout",
+    "actual authenticated Stage balance/projection/transaction verification"
+  ]
+}
