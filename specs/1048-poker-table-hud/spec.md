@@ -274,3 +274,9 @@ Reuse the existing public betThisRoundByUserId membership (all current-hand user
 ## Second owner smoke correction
 
 Current layout remains unaccepted. Remove persistent ACTIVE and visible opponent count labels; empty avatar contains OPEN. Share occupied-avatar size, preserve meaningful edge states. Use one aligned action visual template and narrow single-row five-card best hand with red H/D and black S/C. Player-owned reaction, payout and special celebration center above owner avatar; motion preserves anchored transforms. Keep avatar-center targeted endpoints and edge quick affordance. No CH/backend/gameplay/purchase changes or broad geometry/UI tests.
+
+## Third manual owner smoke corrections
+
+Keep accepted second-pass presentation, including OPEN plus Seat N. Restore large --own for hero special hand only; non-hero remains compact above avatar, ordinary reactions/payout remain owner-centered. Fixed top reservation: 40px wide, 64px narrow portrait, ellipsis without runtime height changes. Move portrait non-hero centers toward perimeter, nearby remaining-stack anchors without changing bet anchors/accounting. Casino CSS dealer/card-back polish only; pot outer scale .5 matches player .5 while preserving center lane.
+
+Private cards: omitted fields on same-hand/same-seat refresh retain the dealt cards; explicit arrays remain authoritative. Different/null hand, changed/lost seat, WAITING_NEXT_HAND/OUT_OF_CHIPS clear; identity resets use existing live-state lifecycle. No WS change, endpoint or unbounded cache. Fundamental existing snapshot test covers preservation and clears. Narrow Preview only; owner visual and authenticated Stage gates pending.

@@ -22,3 +22,7 @@ Seat articles carry data-seat-no + data-user-id. Exactly three data-poker-gift-s
 ## Second owner smoke correction plan
 
 Refine renderSeats/configureSeatHud and existing CSS only: shared occupied size, minimal OPEN, meaningful badges; transient owner column, anchored avatar motion, aligned action controls and narrow best-hand symbols. Preserve action-rail placement, scene scaling, CH and protocol. Verify focused fundamental suite and required guards, then two real Preview orientations with screenshots; manual owner and authenticated Stage gates stay pending.
+
+## Third smoke plan
+
+Refine existing positionCelebration/class selection, mergeSnapshot lifecycle guards and static scene geometry. Fixed CSS header rows and presentation polish; preserve gameplay/account HUD/committed chip anchors. Extend existing private-card snapshot test, run required guards, narrow real Preview portrait/landscape and screenshots. Browser-only; no WS deploy or broad collision suite.

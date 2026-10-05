@@ -371,6 +371,7 @@
 
   function positionCelebration(){
     if (!celebration || celebration.anchorLost) return false;
+    if (celebration.own) return true;
     var targetSeats = state.seats.filter(function(seat){ return seat && seat.userId === celebration.userId; });
     if (targetSeats.length !== 1){ clearCelebration(); return false; }
     if (targetSeats[0].seatNo !== celebration.targetSeatNo){ clearCelebration(); return false; }
@@ -464,13 +465,14 @@
       if (!selection.cards) return;
     }
     var own = demo ? options.mode !== 'other' : !!state.currentUserId && selection.userId === state.currentUserId;
-    var targetAnchor = celebrationSeatRect(selection.userId);
-    if (!targetAnchor) return;
-    celebration = { demo: demo, own: own, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId,
+    var heroSpecialHand = own && (selection.kind === 'hand' || selection.kind === 'royal');
+    var targetAnchor = heroSpecialHand ? null : celebrationSeatRect(selection.userId);
+    if (!heroSpecialHand && !targetAnchor) return;
+    celebration = { demo: demo, own: heroSpecialHand, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId,
       exiting: false, started: false, anchorLost: false, endsAtMs: Date.now() + duration + celebrationExitDuration() };
     var overlay = els.celebration;
     var visualKind = selection.kind === 'hand' ? 'royal' : selection.kind;
-    overlay.className = 'poker-celebration poker-celebration--' + visualKind + ' poker-celebration--other';
+    overlay.className = 'poker-celebration poker-celebration--' + visualKind + (heroSpecialHand ? ' poker-celebration--own' : ' poker-celebration--other');
     if (!positionCelebration()){ clearCelebration(); return; }
     overlay.style.setProperty('--celebration-duration', duration + 'ms');
     overlay.hidden = false;
@@ -2292,6 +2294,7 @@
     var previousHandId = state.handId;
     var previousPhase = state.phase;
     var previousSeatNo = state.youSeat;
+    var previousCardSeat = deriveCurrentSeat();
     var previousPresentation = state.settlementPresentation;
     var previousStateVersion = Number(state.stateVersion) || 0;
     var frameKind = frame && typeof frame.kind === 'string' ? frame.kind : 'stateSnapshot';
@@ -2387,6 +2390,7 @@
 
     if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
     if (typeof handObj.handId === 'string' && handObj.handId) state.handId = handObj.handId;
+    else if (hasOwn(handObj, 'handId') && handObj.handId == null) state.handId = null;
     if (Number.isInteger(payload.dealerSeat)) state.dealerSeat = payload.dealerSeat;
     else if (Number.isInteger(payload.dealerSeatNo)) state.dealerSeat = payload.dealerSeatNo;
     else if (Number.isInteger(handObj.dealerSeat)) state.dealerSeat = handObj.dealerSeat;
@@ -2412,24 +2416,17 @@
     var nextHeroCards = null;
     if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
     else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
-    // Private hole cards belong to the current hand and current seat only.
-    // An authoritative full snapshot without new private cards (e.g. the user
-    // lost their seat during a reconnect) or a hand-id change must clear any
-    // stale cards from a previous hand/session instead of retaining them.
-    var handIdChanged = !!(state.handId && previousHandId && state.handId !== previousHandId);
+    var handIdChanged = state.handId !== previousHandId;
     if (authoritativeFull || handIdChanged || handBetsField.present) state.betThisRoundByUserId = normalizeNumericUserMap(handBetsField.value) || {};
     if (handIdChanged && !foldedUsersField.present) state.foldedByUserId = Object.create(null);
     if (authoritativeFull || foldedUsersField.present) state.foldedByUserId = normalizeFoldedByUserId(foldedUsersField.value);
-    if (nextHeroCards && nextHeroCards.length >= 2){
-      state.heroCards = nextHeroCards.slice(0, 2);
-    } else if (authoritativeFull || handIdChanged){
-      state.heroCards = [];
-    }
 
     var seatFieldPresent = hasOwn(payload, 'youSeat') || hasOwn(youObj, 'seat');
     if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
     else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
-    else if (payload.youSeat == null && youObj.seat == null) state.youSeat = null;
+    else if (seatFieldPresent) state.youSeat = null;
+    if ((Array.isArray(payload.seats) || Array.isArray(publicObj.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers))
+      && !state.seats.some(isCurrentUserSeat)) state.youSeat = null;
     if (seatFieldPresent && previousSeatNo !== state.youSeat){
       resetWinStreakSession();
       clearCelebration();
@@ -2437,6 +2434,16 @@
 
     if (playerStateField.present) state.playerState = normalizePlayerState(playerStateField.value);
     else if (authoritativeFull) state.playerState = null;
+    var cardSeat = deriveCurrentSeat();
+    var cardsOutOfHand = !state.handId || !cardSeat || cardSeat.status === 'WAITING_NEXT_HAND' || cardSeat.status === 'OUT_OF_CHIPS'
+      || (state.playerState && (state.playerState.status === 'WAITING_NEXT_HAND' || state.playerState.status === 'OUT_OF_CHIPS'));
+    var cardSeatChanged = !previousCardSeat || !cardSeat || previousCardSeat.seatNo !== cardSeat.seatNo
+      || previousCardSeat.userId !== cardSeat.userId;
+    // Omitted private cards do not revoke a same-hand, same-seat deal. Explicit
+    // cards (including empty) remain authoritative; lifecycle boundaries clear.
+    if (cardsOutOfHand) state.heroCards = [];
+    else if (nextHeroCards) state.heroCards = nextHeroCards.length >= 2 ? nextHeroCards.slice(0, 2) : [];
+    else if (handIdChanged || cardSeatChanged) state.heroCards = [];
     if (!state.playerState || (state.playerState.status !== 'OUT_OF_CHIPS' && state.playerState.status !== 'WAITING_NEXT_HAND')) {
       rebuyPanelDismissed = false;
       autoRebuyAttemptedForCurrentBust = false;
@@ -3882,20 +3889,20 @@
   // Physical variants: top, upper right, lower right, hero, lower left, upper left.
   var seatSceneGeometry = {
     portrait: { width:360, height:650, seats:[
-      {avatar:[180,100],stack:[278,110],bet:[235,134],dealer:[124,102]},
-      {avatar:[300,195],stack:[220,178],bet:[205,140],dealer:[262,280]},
-      {avatar:[300,355],stack:[220,365],bet:[258,389],dealer:[180,390]},
-      {avatar:[150,500],cards:[154,615],stack:[204,438],bet:[185,445],dealer:[207,523],bestHand:[50,580,90,40]},
-      {avatar:[60,390],stack:[134,413],bet:[102,389],dealer:[120,352]},
-      {avatar:[60,195],stack:[140,178],bet:[175,140],dealer:[98,280]}
+      {avatar:[180,80],stack:[258,100],bet:[235,134],dealer:[124,102]},
+      {avatar:[306,175],stack:[236,190],bet:[205,140],dealer:[262,280]},
+      {avatar:[306,375],stack:[236,390],bet:[258,389],dealer:[180,390]},
+      {avatar:[150,500],cards:[154,615],stack:[150,437],bet:[185,445],dealer:[207,523],bestHand:[50,580,90,40]},
+      {avatar:[60,410],stack:[130,425],bet:[102,389],dealer:[120,352]},
+      {avatar:[60,175],stack:[130,190],bet:[175,140],dealer:[98,280]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[520,50],stack:[680,50],bet:[620,96],dealer:[440,80]},
-      {avatar:[925,90],stack:[760,90],bet:[813,120],dealer:[810,90]},
-      {avatar:[740,265],stack:[835,145],bet:[832,219],dealer:[795,250]},
-      {avatar:[430,298],cards:[558,334],stack:[530,267],bet:[440,242],dealer:[490,368],bestHand:[280,327,200,44]},
-      {avatar:[115,265],stack:[280,253],bet:[208,219],dealer:[230,265]},
-      {avatar:[115,90],stack:[280,90],bet:[227,120],dealer:[230,90]}
+      {avatar:[520,50],stack:[607,52],bet:[620,96],dealer:[440,80]},
+      {avatar:[925,90],stack:[840,92],bet:[813,120],dealer:[810,90]},
+      {avatar:[740,265],stack:[740,193],bet:[832,219],dealer:[795,250]},
+      {avatar:[430,298],cards:[558,334],stack:[490,242],bet:[440,242],dealer:[490,368],bestHand:[280,327,200,44]},
+      {avatar:[115,265],stack:[203,266],bet:[208,219],dealer:[230,265]},
+      {avatar:[115,90],stack:[203,92],bet:[227,120],dealer:[230,90]}
     ]}
   };
   var seatSceneOrientation = 'portrait';

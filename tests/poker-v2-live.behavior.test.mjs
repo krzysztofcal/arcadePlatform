@@ -349,7 +349,7 @@ function createHarness(options = {}){
 
   vm.createContext(sandbox);
   const closureEnd = source.lastIndexOf('})();');
-  const privacySource = source.slice(0, closureEnd) + 'window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
+  const privacySource = source.slice(0, closureEnd) + 'window.__heroCardsForTest = function(){ return state.heroCards; }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
   vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
@@ -405,6 +405,7 @@ async function flush(){
     reactionPayloads,
     targetedReactionPayloads,
     getOpponentHeldCards(userId){ return sandbox.window.__opponentHeldCardsForTest(userId); },
+    getHeroCards(){ return JSON.parse(JSON.stringify(sandbox.window.__heroCardsForTest())); },
     getRevealedCards(userId){ return JSON.parse(JSON.stringify(sandbox.window.__getSeatRevealCardsForTest({ userId }))); },
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
@@ -5829,7 +5830,7 @@ test('poker v2 shows the current slider amount on Bet/Raise buttons', async () =
   assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise (120)', 'RAISE label must follow the slider');
 });
 
-test('poker v2 clears stale private hole cards when a full snapshot removes the user seat', async () => {
+test('poker v2 preserves same-hand private cards and clears on hand or seat lifecycle boundaries', async () => {
   const { harness, ws } = await bootSeatedHarness();
 
   // Seated with private cards in an active hand.
@@ -5848,6 +5849,23 @@ test('poker v2 clears stale private hole cards when a full snapshot removes the 
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
   assert.ok(harness.elements.pokerHeroCards.children.every((child) => !/poker-card--back/.test(child.className)), 'seated user should see face-up cards');
 
+  const receivedCards = harness.getHeroCards();
+  for (const kind of ['statePatch', 'table_state', 'stateSnapshot']) {
+    const update = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: ['As', 'Kd', '3h'], potTotal: 42,
+      actions: [], constraints: {}, stateVersion: 40, turnUserId: 'villain-1', holeCards: null });
+    update.kind = kind;
+    ws.onSnapshot(update);
+    await harness.flush();
+    assert.deepEqual(harness.getHeroCards(), receivedCards, kind + ' must preserve same-hand same-seat cards');
+  }
+  ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-new', phase: 'PREFLOP', board: [], potTotal: 3,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: null }));
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), [], 'new hand clears previous private cards while still seated');
+  ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: ['As', 'Kd', '3h'], potTotal: 42,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] }));
+  await harness.flush();
+
   // Reconnect full authoritative snapshot: the user no longer has a seat and
   // the private branch is absent — stale cards must be cleared from state.
   ws.onSnapshot(amountSnapshot({
@@ -5864,6 +5882,7 @@ test('poker v2 clears stale private hole cards when a full snapshot removes the 
   }));
   await harness.flush();
   assert.equal(harness.elements.pokerHeroCards.hidden, true, 'hero cards must be hidden without a seat');
+  assert.deepEqual(harness.getHeroCards(), [], 'seat loss clears private state');
 
   // A new hand where the user is seated again but has no private cards yet:
   // the stale 3C/7S must never reappear — only the standard face-down

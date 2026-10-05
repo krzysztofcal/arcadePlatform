@@ -29,3 +29,9 @@ Earlier T003/T008 seat-grid implementation and 20/20 evidence are superseded by 
 - [x] S001 Read live second owner feedback, repo rules and PR diff; refine existing HUD presentation without redesign.
 - [x] S002 Unify occupied avatars, remove ACTIVE/count labels, OPEN content, aligned controls, narrow suit-colored best hand and owner-centered transient UI; preserve motion anchors.
 - [x] S003 Required/fundamental checks, self-review and narrow real Preview evidence/screenshots; owner visual acceptance and authenticated Stage remain pending.
+
+## Third manual smoke
+
+- [x] U001 Reconcile live third-pass feedback; trace snapshot/private-card frame paths before smallest browser fix.
+- [x] U002 Restore hero special --own, fixed HUD reservation, portrait perimeter/nearby stacks and dealer/card-back/pot polish.
+- [ ] U003 Fundamental private-card persistence/lifecycle test and required checks; narrow Preview/self-review/screenshots; stop for owner smoke.
