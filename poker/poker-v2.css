@@ -332,7 +332,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-celebration{display:none!important;}
 }
 /* One viewport: header and actions own rows; only the fixed table composition scales. */
-html,body{height:100%;overflow:hidden;}
+html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-table-screen{position:relative;min-height:0;padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));overflow:hidden;background:radial-gradient(circle at 50% -10%, rgba(235,176,91,0.24), rgba(8,9,14,0.92) 48%), radial-gradient(circle at 50% 120%, rgba(20,117,68,0.2), rgba(6,8,12,0.96) 46%), #05070c;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:6px;}
 .poker-live-panel{position:relative;z-index:19;min-width:0;width:100%;padding-left:50px;}
 .poker-live-topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;}
