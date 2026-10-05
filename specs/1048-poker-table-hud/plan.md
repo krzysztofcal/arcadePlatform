@@ -18,3 +18,5 @@ Each seat article carries data-seat-no and data-user-id. Three data-poker-gift-s
 The global XP checker requires a badge even where its config excludes Poker Table. Add a single exact-path exemption in scripts/check-xpbadge.js. Two existing CSS assertions require the removed fixed action rail and targeted reaction offsets; remove these obsolete assertions rather than add new UI tests. No broader checker or test changes.
 
 Existing Poker V2 checks are required by WS PR validation despite this change being browser-only. Adapt existing descendant selectors and DOM move emulation to semantic containers, retain fundamental snapshot/reconnect/card privacy/stack/settlement/reaction behavior assertions, and remove obsolete pixel offsets/chip-art/XP navigation assertions. No new presentation tests.
+
+Quick-action anchor reserves a 44px area. On narrow seats it gets a dedicated full-width row, so #1047 can mount an accessible button without overflowing avatar/dealer areas.

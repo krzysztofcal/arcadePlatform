@@ -543,9 +543,9 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-seat-hud-identity{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:3px;min-height:34px;min-width:0;}
 .poker-seat-name{width:100%;font-size:.75rem;font-weight:700;line-height:1.2;overflow-wrap:anywhere;white-space:normal;}
 .poker-seat-status,.poker-seat-number{position:static;transform:none;font-size:.55rem;line-height:1.2;white-space:normal;}
-.poker-seat-hud-portrait{display:grid;grid-template-columns:24px minmax(0,1fr) 28px;align-items:center;gap:2px;}
+.poker-seat-hud-portrait{display:grid;grid-template-columns:24px minmax(0,1fr) 44px;align-items:center;gap:2px;}
 .poker-seat .poker-seat-avatar{width:64px;height:64px;max-width:100%;margin:0 auto;padding-bottom:6px;font-size:.7rem;}
-.poker-seat-hud-dealer,.poker-seat-hud-quick-action{display:flex;align-items:center;justify-content:center;min-width:0;min-height:28px;}
+.poker-seat-hud-dealer,.poker-seat-hud-quick-action{display:flex;align-items:center;justify-content:center;min-width:0;min-height:44px;}
 .poker-dealer-chip{position:static;display:flex;align-items:center;justify-content:center;width:24px;height:24px;transform:none;border-radius:50%;background:#faf5e9;color:#191919;font-size:.7rem;font-weight:800;border:2px solid #bda56e;}
 .poker-seat-hud-cards{min-height:54px;display:flex;justify-content:center;align-items:center;min-width:0;}
 .poker-seat-cards,.poker-hero-cards{position:static;display:flex;justify-content:center;gap:4px;margin:0;transform:none;}
@@ -583,7 +583,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 @media (max-width:600px){
 .poker-scene{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:8px 4px;padding:8px 0;}
 .poker-seat{padding:4px;gap:3px;border-radius:12px;}
-.poker-seat-hud-portrait{grid-template-columns:20px minmax(0,1fr) 20px;gap:1px;}
+.poker-seat-hud-portrait{grid-template-columns:20px minmax(0,1fr);gap:1px;}
+.poker-seat-hud-quick-action{grid-column:1 / -1;min-height:44px;}
 .poker-seat .poker-seat-avatar{width:44px;height:44px;font-size:.6rem;padding-bottom:4px;}
 .poker-dealer-chip{width:20px;height:20px;font-size:.6rem;}
 .poker-seat .poker-card{width:28px;height:39px;font-size:.9rem;}
