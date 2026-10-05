@@ -1,5 +1,5 @@
 {
-  "status": "Replacement implemented; automated evidence is not owner acceptance. Draft/not merge-ready; owner layout smoke and actual authenticated Stage verification pending.",
+  "status": "SUPERSEDED by latest owner corrections. Owner reviewed replacement a19e4e2 and did not accept it. Old 40+4 geometry matrix is historical, not current visual acceptance evidence.",
   "supersedes": "Initial #1049 seat-grid/card-panel and old 20/20 matrix: manual owner smoke FAIL.",
   "browserSha": "a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb",
   "preview": "https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html",
@@ -2580,5 +2580,6 @@
   "pending": [
     "owner manual smoke of replacement layout",
     "actual authenticated Stage balance/projection/transaction verification"
-  ]
+  ],
+  "supersededBy": "owner-sanity-evidence.json and current owner review.md"
 }

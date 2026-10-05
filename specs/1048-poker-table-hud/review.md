@@ -1,42 +1,45 @@
-# Review and evidence — replacement awaiting owner smoke
+# Owner corrections — implementation ready, awaiting manual visual smoke
 
-The initial #1049 seat-grid/card-panel design FAILED manual owner smoke. Its old 20/20 layout evidence is SUPERSEDED, not acceptance. The earlier wallet P1/P2 checks validate only the retained account contract, not this replacement geometry.
+Both earlier layouts remain unaccepted: the initial seat-grid/card-panel FAILED owner smoke; the replacement at a19e4e2 still needed correction. Old 20/20 and 40+4 matrices are superseded, not acceptance evidence.
 
-## Scope and self-review
-Branch started independently from main 4f798bdd56dba0e11b34e8982895650920ec6944, existing draft #1049. Final live main reconciliation: a69bcd0ffbc3d2f25720d4f3271e08adac6adac5 adds #1051 WS transport changes only; no HUD/file overlap. Browser runtime SHA CI passed core/playwright/ws-harness/persistence and required guards; later commits contain documentation/evidence only. No #1047 purchase code copied. Legacy body min-height:100vh is reset for the dynamic viewport; no page-scroll sizing. One existing Poker V2 renderer and runtime; portrait/landscape static geometry each define six physical seat variants. Scale uses only available scene viewport dimensions. Header and actions own rows; the table composition scales together. Existing felt, avatar/card/chip/dealer/badge/reaction assets remain; no seat panels, textual replacement stacks or long scrolling table.
+## What changed
 
-Graphical stacks and directly-below numeric labels consume existing resolveStack and createChipStackVisual. Upper committed chips use a separate predefined felt lane; lower side chips have reserved clearance from the avatar. The final probe includes high-value committed bets after all image assets load, covering the full graphical ranges rather than unloaded image boxes. Private-card privacy, authoritative dealer/state/settlement, reveal timing, action commands and reaction occupant checks remain. Fixed roles reserve center lane and hero left best-hand name + exactly five cards. Gift anchors have equal radius and predefined angles outside the clipped avatar; quick action is an empty anchor only.
+- Hero best hand again uses the original capsule styling and label, with all five symbols in one horizontal row. No grid.
+- Action controls are a compact lower-right rail with vertical amount slider. Hero is shifted left; the scene uses the space below the header rather than losing a full-width action row. Static portrait/landscape seat variants reserve that corner.
+- Action/status badges sit on avatar edges. Non-hero hole-card controls are replaced by tiny facedown count indicators; hero cards remain larger. Public Hold'em state supplies zero for waiting/folded seats and two for active seats; this UI does not invent private card ranks/suits.
+- Reaction/history popups are absolute to their buttons. The old portrait fixed + top:100% rule put the history at y=852 in an 844px viewport despite a successful click. The lower history z-index override is removed so canonical social stacking stays above Preview FX.
+- Existing Nice Hand affordance uses the avatar-edge quick-action anchor. Targeted effects use sender and recipient avatar centers, not social bubble anchors.
 
-Retained account HUD uses existing ChipsClient, canonical document event, authoritative refetch, identity/generation guards, Other tables exclusion and wallet pulse. No balance subtraction, service/cache/endpoint, XP elsewhere, new inline scripts or dependencies. Browser-only; no WS/shared runtime/protocol/config, ledger, schema, bot bankroll or gameplay mutation. No WS Preview Deploy required. Visible anchor placement is a breaking presentation change; rules/state remain unchanged.
+## Intentionally unchanged
 
-## Verification
-Syntax, check:all, ci:guards, CSP and diff checks passed; focused existing fundamental suite: 123/123. Latest browser runtime CI is tracked on the PR. No new broad UI/CSS/JSP tests. External geometry probes and screenshots are evidence only and remain outside the test suite. The Netlify collaboration toolbar is excluded from product screenshots/probes. Automated checks cannot substitute for the owner's manual smoke.
+One Poker V2 runtime/renderer and original assets. No table-v3, purchases, gift_send, retry/cooldown, new catalog/service/dependency, WS/backend/protocol/config, accounting, poker actions/rules, settlement/reveal logic, stacks, bot bankroll or XP outside Poker Table changes. table-v2.html and accepted CH HUD logic remain unchanged in this correction: existing ChipsClient, canonical document event, authoritative refresh, identity/generation guards, Other tables exclusion and wallet pulse. No new inline script; CSP guard passed.
 
-## #1047 T012D/T012E integration
-- `.poker-seat[data-seat-no][data-user-id]` retains authoritative occupant identity. `data-seat-variant` identifies top/upper-right/lower-right/hero/lower-left/upper-left geometry.
-- `[data-poker-gift-slots]` contains exactly three `[data-poker-gift-slot="0"]`, `"1"`, `"2"`; all outside `.poker-seat-avatar`. Each slot is 16 design pixels on the avatar's common radius at −150°, −90°, −30°. Hero radius is 52 portrait / 58 landscape; other seats 42.
-- Exactly one `[data-poker-quick-action-slot]` per seat, 16 design pixels at a fixed avatar corner. Table scene scales these anchors together. Empty in #1049; no dormant purchase/picker behavior.
-- Containers are recreated by renderSeats. #1047 must reconcile/repopulate on render using seatNo + userId and invalidate removed/replaced targets. Its existing one purchase/retry/cooldown/sendGift path remains separate.
-- Existing document chips:tx-complete refreshes both authoritative account reads. Integration happens after owner merge of #1048; no merge here.
+## #1047 integration contract
 
-## Pending gates
-Owner manual smoke of replacement layout; actual authenticated Stage balance/projection/transaction verification. Keep #1049 draft / not merge-ready. #1047 T012D/E2 and its final smoke/Production gates are unchanged.
+Seat identity remains `.poker-seat[data-seat-no][data-user-id]`. Exactly three `[data-poker-gift-slot]` anchors are outside the clipped avatar on predefined equal-radius positions. `[data-poker-quick-action-slot]` is on the avatar edge; it hosts the existing contextual Nice Hand affordance during settlement, so later gift integration must preserve/coordinate that content. No gift behavior was copied here.
 
-## Replacement preview evidence
+`[data-poker-avatar-center]` identifies the actual avatar element. `getSeatAvatarAnchor()` / `renderedSeatAnchors` give its center in table-local normalized coordinates and are the endpoints for targeted animation. #1047 must use these centers for gift travel as well; gift animation/purchase integration remains in #1047.
 
-Browser runtime SHA **`a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb`** on [real Deploy Preview](https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html). BUILD_INFO full SHA and served JS/CSS match this checkout. [replacement-preview-evidence.json](replacement-preview-evidence.json) supersedes old layout evidence.
+## Checks and self-review
 
-External probe: 40 reduced-motion cases plus four normal-motion cases. Viewports: 390×844, 320×640, 844×390, 1440×1000. Full six seats, maxSeats=2/two occupants, six slots/two occupants; all dealer positions; visible/back/folded/next-hand-hidden cards; action/status, hero five-card best hand, graphical seat/bet/pot chips and exact stack labels, gifts/quick placeholders, reactions/settlement, long nicknames and 999,999 stacks/pot/committed bets. Every recorded case satisfies both document scroll inequalities; zero detected critical collisions/out-of-scene clipping. Top and bottom controls are checked as well as seat anchors and protected center. Normal-motion reaction stays within its social anchor.
+Required syntax, check:all, ci:guards, CSP and diff checks passed. Focused existing tests: 121/121. Removed two obsolete layout tests with no meaningful remaining assertions. Reveal/privacy tests now check the authoritative reveal function through test-only closure access instead of removed opponent card DOM; no new UI/CSS/JSP test or production test hook.
 
-Four actual guest sessions on the deployed runtime joined with helloAck/authOk/commandResult/table_state/stateSnapshot, four occupied seats, no page scroll, no authenticated values and zero JS errors. Controlled signed-in account checks on this same preview verify initial 500 (no pulse), canonical document event → authoritative refetch 475 (pulse only with normal motion), unchanged/error/reduced-motion exclusions, identity reset and stale sign-out responses. These controlled checks do not verify a real authenticated Stage account.
+Self-review checked authoritative state/CH preservation, popup stacking, static placement, avatar-center endpoints, one renderer, JSP compatibility, logging and CSS one physical line per selector. Breaking impact: HUD placements, lower-right action rail and compact opponent indicators visibly change; full-size opponent hole-card controls no longer render. Authoritative showdown reveal/settlement summaries still use existing state and logic.
 
-Manual screenshot inspection found and corrected the old Preview FX offset before this final evidence: its button now stays in header flow. Readability of scaled name/stack labels was checked at 320×640. Screenshots use controlled snapshots/account responses and gift/quick placeholders unless explicitly marked real guest; no purchase behavior was installed.
+## Narrow real Deploy Preview
 
-| Viewport | Hero dealer / six occupied | Top dealer | Settlement / left dealer | Real guest |
-| --- | --- | --- | --- | --- |
-| 390×844 | [Screenshot](evidence/android-hero-dealer.png) | [Screenshot](evidence/android-top-dealer.png) | [Screenshot](evidence/android-settlement.png) | [Screenshot](evidence/android-real-guest.png) |
-| 320×640 | [Screenshot](evidence/small-hero-dealer.png) | [Screenshot](evidence/small-top-dealer.png) | [Screenshot](evidence/small-settlement.png) | [Screenshot](evidence/small-real-guest.png) |
-| 844×390 | [Screenshot](evidence/landscape-hero-dealer.png) | [Screenshot](evidence/landscape-top-dealer.png) | [Screenshot](evidence/landscape-settlement.png) | [Screenshot](evidence/landscape-real-guest.png) |
-| 1440×1000 | [Screenshot](evidence/desktop-hero-dealer.png) | [Screenshot](evidence/desktop-top-dealer.png) | [Screenshot](evidence/desktop-settlement.png) | [Screenshot](evidence/desktop-real-guest.png) |
+Runtime SHA `916569cdcc0b1f1d2b996d5fc73bc54730415d11` on [Deploy Preview](https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html). BUILD_INFO and served JS/CSS matched the checkout. [owner-sanity-evidence.json](owner-sanity-evidence.json) records only four sanity cases: six seats, portrait/landscape/desktop, no page scroll, one-row best hand, no full opponent controls, real pointer clicks opening in-viewport reaction/history popups, history hit target above Preview FX, and targeted avatar-center endpoints. No extended collision probe.
 
-Automated geometry and screenshots are review evidence, not owner acceptance. **Owner smoke of the replacement layout and real authenticated Stage verification remain pending. Draft / not merge-ready. No merge, WS redeploy or Production mutation.**
+The composition uses more space: portrait width ≈374 vs357px, small portrait ≈294 vs240px, landscape 828 vs608px in the previous replacement fixtures. Desktop remains width-limited at 1424px. No portrait/landscape page scroll: scrollWidth equals clientWidth and scrollHeight equals clientHeight in all recorded cases.
+
+Controlled six-seat state and ChipsClient replies are used for screenshots; these are not a real authenticated Stage account. Netlify collaboration toolbar is excluded from product screenshots. Accepted account behavior was retained, not replaced by fixture logic in production.
+
+| Viewport | Screenshot |
+| --- | --- |
+| 390×844 | [Portrait](evidence/owner-portrait.png) |
+| 320×640 | [Small portrait](evidence/owner-small.png) |
+| 844×390 | [Landscape](evidence/owner-landscape.png) |
+| 1440×1000 | [Desktop](evidence/owner-desktop.png) |
+| History popup | [Clickable history](evidence/owner-history.png) |
+
+Owner must now assess the visual layout manually. Actual authenticated Stage verification also remains pending. PR #1049 stays draft / not merge-ready. No merge, WS redeploy or Production mutation.

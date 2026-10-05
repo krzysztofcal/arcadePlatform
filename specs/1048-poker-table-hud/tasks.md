@@ -14,7 +14,7 @@ Earlier T003/T008 seat-grid implementation and 20/20 evidence are superseded by 
 
 ## Latest owner correction tasks
 
-- [ ] C001 Restore single-row best hand and lower-right action rail; enlarge scene; shift hero left.
-- [ ] C002 Restore popup clickability; avatar-edge badges/cards/social affordance and avatar-center effect endpoints.
-- [ ] C003 Remove empty layout tests; retain fundamental privacy, gameplay and Other tables checks.
-- [ ] C004 Narrow real Deploy Preview sanity/screenshots, self-review and draft handoff; owner acceptance pending.
+- [x] C001 Restore single-row best hand and lower-right action rail; enlarge scene; shift hero left.
+- [x] C002 Restore popup clickability; avatar-edge badges/cards/social affordance and avatar-center effect endpoints.
+- [x] C003 Remove empty layout tests; retain fundamental privacy, gameplay and Other tables checks.
+- [x] C004 Narrow real Deploy Preview sanity/screenshots, self-review and draft handoff; owner acceptance pending.
