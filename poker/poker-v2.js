@@ -6334,6 +6334,7 @@
     resetQueuedPreactionState();
     state = createEmptyLiveState(tableId, null);
     state.statusText = LIVE_STATUS_COPY.auth;
+    markBootReady();
     render();
   }
 
