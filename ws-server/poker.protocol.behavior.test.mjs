@@ -246,15 +246,22 @@ test("oversized frame (>32KB) is rejected at transport level with 1009, while no
   const port = await getFreePort();
   const child = spawnServer(port);
 
+  let serverLogs = "";
+  child.stdout.on("data", (chunk) => {
+    serverLogs += chunk.toString();
+  });
+
   try {
     await waitForListening(child, 5000);
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-    await new Promise((resolve) => ws.once("open", resolve));
+
+    // 1. Text frame > 32 KiB is rejected at transport level with close code 1009
+    const wsText = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsText.once("open", resolve));
 
     const huge = "x".repeat(33 * 1024);
-    const closeP = new Promise((resolve) => ws.once("close", (code) => resolve(code)));
+    const closeTextP = new Promise((resolve) => wsText.once("close", (code) => resolve(code)));
 
-    ws.send(
+    wsText.send(
       JSON.stringify({
         version: "1.0",
         type: "ping",
@@ -264,11 +271,34 @@ test("oversized frame (>32KB) is rejected at transport level with 1009, while no
       })
     );
 
-    const maybeFrame = await attemptMessage(ws);
-    const close = await closeP;
-    assert.equal(close, 1009);
-    assert.equal(maybeFrame, null);
+    const maybeTextFrame = await attemptMessage(wsText);
+    const closeTextCode = await closeTextP;
+    assert.equal(closeTextCode, 1009, "Transport must close socket with 1009");
+    assert.equal(maybeTextFrame, null, "No application error frame should be sent by transport rejection");
 
+    // Transport emits RangeError logged as ws_error with 'Max payload size exceeded',
+    // which is unique to transport-level maxPayload enforcement and never emitted by processMessage()
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.match(serverLogs, /ws_error/);
+    assert.match(serverLogs, /Max payload size exceeded/);
+
+    // 2. Deterministic proof: binary frame > 32 KiB is rejected by transport with 1009.
+    // If the message reached the application path processMessage(), lines 4750-4756 would
+    // intercept isBinary first, returning INVALID_ENVELOPE without closing the socket with 1009.
+    const wsBinary = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsBinary.once("open", resolve));
+
+    const closeBinaryP = new Promise((resolve) => wsBinary.once("close", (code) => resolve(code)));
+    const binaryAttempt = attemptMessage(wsBinary);
+
+    wsBinary.send(Buffer.alloc(33 * 1024));
+
+    const maybeBinaryFrame = await binaryAttempt;
+    const closeBinaryCode = await closeBinaryP;
+    assert.equal(closeBinaryCode, 1009, "Binary frame exceeding maxPayload must be closed by transport with 1009");
+    assert.equal(maybeBinaryFrame, null, "Binary frame must not reach application isBinary handler (which sends INVALID_ENVELOPE)");
+
+    // 3. Normal conforming frame (< 32 KiB) succeeds and is processed normally
     const wsNormal = new WebSocket(`ws://127.0.0.1:${port}`);
     await new Promise((resolve) => wsNormal.once("open", resolve));
 

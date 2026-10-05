@@ -22,6 +22,12 @@ Intentional transport-level hardening: frames larger than 32 KiB are now rejecte
 - `node --test ws-server/poker.protocol.behavior.test.mjs` passed (6/6 tests).
 - `node --test ws-server/poker.hello-ping.behavior.test.mjs ws-server/poker.unknown-type.behavior.test.mjs` passed (2/2 tests).
 
+### Test Quality & Deterministic Proof
+The protocol test in `ws-server/poker.protocol.behavior.test.mjs` explicitly proves that oversized frames are terminated by transport before `processMessage()`:
+1. Captured server stdout proves the transport `RangeError` is emitted (`[klog] ws_error {"message":"Max payload size exceeded"}`), which `processMessage()` never emits.
+2. An oversized binary frame is closed with `1009` by transport, whereas `processMessage()` would have intercepted `isBinary` at line 4750 and returned `INVALID_ENVELOPE` without closing with `1009`.
+3. Normal conforming frames (< 32 KiB) continue to function and respond with `pong`.
+
 ## Runtime Verification
 - [WS Preview Deploy run 37317500889](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37317500889) succeeded for exact runtime SHA `8633d75a22fc6f562af39cd0aee39838d11a18f1`.
 - Release metadata verified: `releaseSha=8633d75a22fc6f562af39cd0aee39838d11a18f1`, `deployRef=8633d75a22fc6f562af39cd0aee39838d11a18f1`, `environment=preview`.
@@ -29,4 +35,5 @@ Intentional transport-level hardening: frames larger than 32 KiB are now rejecte
 - Live WebSocket smoke against `wss://ws-preview.kcswh.pl/ws`:
   - Conforming frame (`ping` / `clientTime="smoke-test"`) succeeded with expected `pong` (`preview-smoke-ping`).
   - Oversized frame (> 32 KiB) was rejected at the transport boundary with WebSocket close code `1009`.
+- Diff since `8633d75a` contains only test/spec/docs changes; runtime/deployable artifacts and server configuration are unchanged, so previous exact-SHA Preview verification remains valid per `agents.md`.
 
