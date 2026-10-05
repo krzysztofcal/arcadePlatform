@@ -46,6 +46,13 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
+function spawnServer(port) {
+  return spawn(process.execPath, ["ws-server/server.mjs"], {
+    env: { ...process.env, PORT: String(port), WS_POKER_LOG_LEVEL: process.env.WS_POKER_LOG_LEVEL || "INFO" },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
 
 function attemptMessage(ws, timeoutMs = 300) {
   return new Promise((resolve, reject) => {
@@ -119,10 +126,7 @@ function nextMessage(ws) {
 
 test("invalid JSON returns INVALID_ENVELOPE", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -142,10 +146,7 @@ test("invalid JSON returns INVALID_ENVELOPE", async () => {
 
 test("unsupported version returns UNSUPPORTED_VERSION and closes", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -182,10 +183,7 @@ test("unsupported version returns UNSUPPORTED_VERSION and closes", async () => {
 
 test("unsupported version closes with 1002 even if error frame is not observed by client", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -214,10 +212,7 @@ test("unsupported version closes with 1002 even if error frame is not observed b
 
 test("unsupported version close listener registered first always resolves", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
@@ -247,22 +242,24 @@ test("unsupported version close listener registered first always resolves", asyn
   }
 });
 
-test("frame >32KB returns FRAME_TOO_LARGE", async () => {
+test("oversized frame (>32KB) is rejected at transport level with 1009, while normal frame succeeds", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-    await new Promise((resolve) => ws.once("open", resolve));
+
+    // 1. Text frame > 32 KiB is rejected at transport level with close code 1009
+    const wsText = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsText.once("open", resolve));
 
     const huge = "x".repeat(33 * 1024);
-    const closeP = new Promise((resolve) => ws.once("close", (code) => resolve(code)));
+    const closeTextP = Promise.race([
+      new Promise((resolve) => wsText.once("close", (code) => resolve(code))),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for socket close on oversized text frame")), 1000))
+    ]);
 
-    ws.send(
+    wsText.send(
       JSON.stringify({
         version: "1.0",
         type: "ping",
@@ -272,14 +269,50 @@ test("frame >32KB returns FRAME_TOO_LARGE", async () => {
       })
     );
 
-    const maybeFrame = await attemptMessage(ws);
-    const close = await closeP;
-    assert.equal(close, 1009);
+    const maybeTextFrame = await attemptMessage(wsText);
+    const closeTextCode = await closeTextP;
+    assert.equal(closeTextCode, 1009, "Transport must close socket with 1009");
+    assert.equal(maybeTextFrame, null, "No application error frame should be sent by transport rejection");
 
-    if (maybeFrame !== null) {
-      assert.equal(maybeFrame.type, "error");
-      assert.equal(maybeFrame.payload.code, "FRAME_TOO_LARGE");
-    }
+    // 2. Deterministic transport proof: binary frame > 32 KiB.
+    // If the frame reached application processMessage(), lines 4750-4756 would
+    // intercept isBinary first, returning INVALID_ENVELOPE without closing the socket with 1009.
+    const wsBinary = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsBinary.once("open", resolve));
+
+    const closeBinaryP = Promise.race([
+      new Promise((resolve) => wsBinary.once("close", (code) => resolve(code))),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for socket close on oversized binary frame")), 1000))
+    ]);
+
+    wsBinary.send(Buffer.alloc(33 * 1024));
+
+    // First unambiguously assert that no application error response (e.g. INVALID_ENVELOPE) was returned
+    const maybeBinaryFrame = await attemptMessage(wsBinary);
+    assert.equal(maybeBinaryFrame, null, "Binary frame must not reach application isBinary handler (which sends INVALID_ENVELOPE)");
+
+    // Then assert bounded close code 1009 from transport rejection
+    const closeBinaryCode = await closeBinaryP;
+    assert.equal(closeBinaryCode, 1009, "Binary frame exceeding maxPayload must be closed by transport with 1009");
+
+    // 3. Normal conforming frame (< 32 KiB) succeeds and is processed normally
+    const wsNormal = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsNormal.once("open", resolve));
+
+    wsNormal.send(
+      JSON.stringify({
+        version: "1.0",
+        type: "ping",
+        ts: "2026-02-28T00:00:00Z",
+        requestId: "req-normal",
+        payload: { clientTime: "123456789" }
+      })
+    );
+
+    const normalAck = await nextMessage(wsNormal);
+    assert.equal(normalAck.type, "pong");
+    assert.equal(normalAck.requestId, "req-normal");
+    wsNormal.close();
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
@@ -288,10 +321,7 @@ test("frame >32KB returns FRAME_TOO_LARGE", async () => {
 
 test("connection closes after repeated protocol violations but allows recovery after single violation", async () => {
   const port = await getFreePort();
-  const child = spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
+  const child = spawnServer(port);
 
   try {
     await waitForListening(child, 5000);

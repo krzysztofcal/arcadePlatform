@@ -4733,7 +4733,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: MAX_FRAME_BYTES });
 
 wss.on("connection", (ws) => {
   const connState = createConnState(nowTs);
