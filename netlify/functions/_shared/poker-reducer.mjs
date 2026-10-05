@@ -420,6 +420,13 @@ const resetToNextHand = (state, options = {}) => {
   const nextPendingAutoSitOutByUserId = {};
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, seats);
   const seatedUserIds = orderedSeats.map((seat) => seat.userId).filter(Boolean);
+  const missedTurnsByUserId = {};
+  for (const userId of seatedUserIds) {
+    const missed = state.missedTurnsByUserId?.[userId];
+    if (!leftTableByUserId[userId] && Number.isInteger(missed) && missed >= 0) {
+      missedTurnsByUserId[userId] = missed;
+    }
+  }
   if (seatedUserIds.length === 0) {
     return {
       state: stampTurnTimer(
@@ -428,7 +435,7 @@ const resetToNextHand = (state, options = {}) => {
           handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
-          missedTurnsByUserId: {},
+          missedTurnsByUserId,
         },
         Date.now()
       ),
@@ -449,7 +456,7 @@ const resetToNextHand = (state, options = {}) => {
           handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
-          missedTurnsByUserId: {},
+          missedTurnsByUserId,
         },
         Date.now()
       ),
@@ -480,7 +487,7 @@ const resetToNextHand = (state, options = {}) => {
           handSeats: null,
           sitOutByUserId: nextSitOutByUserId,
           pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
-          missedTurnsByUserId: {},
+          missedTurnsByUserId,
         },
         Date.now()
       ),
@@ -520,7 +527,7 @@ const resetToNextHand = (state, options = {}) => {
     sidePots: null,
     currentBet: 0,
     lastRaiseSize: null,
-    missedTurnsByUserId: {},
+    missedTurnsByUserId,
     sitOutByUserId: nextSitOutByUserId,
     pendingAutoSitOutByUserId: nextPendingAutoSitOutByUserId,
     leftTableByUserId,
