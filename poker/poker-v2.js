@@ -3898,11 +3898,11 @@
     ]},
     landscape: { width:1040, height:390, seats:[
       {avatar:[520,50],stack:[607,52],bet:[620,96],dealer:[440,80]},
-      {avatar:[925,90],stack:[840,92],bet:[813,120],dealer:[810,90]},
+      {avatar:[925,90],stack:[855,144],bet:[813,120],dealer:[810,90]},
       {avatar:[740,265],stack:[740,193],bet:[832,219],dealer:[795,250]},
       {avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,368],bestHand:[280,327,200,44]},
-      {avatar:[115,265],stack:[203,266],bet:[208,219],dealer:[230,265]},
-      {avatar:[115,90],stack:[203,92],bet:[227,120],dealer:[230,90]}
+      {avatar:[115,265],stack:[185,247],bet:[208,219],dealer:[230,265]},
+      {avatar:[115,90],stack:[185,144],bet:[227,120],dealer:[230,90]}
     ]}
   };
   var seatSceneOrientation = 'portrait';
