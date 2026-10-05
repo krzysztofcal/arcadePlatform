@@ -135,6 +135,7 @@ test("shared join module imports without Netlify adapter dependency at module lo
   try {
     await fs.mkdir(stagedDir, { recursive: true });
     await fs.copyFile("shared/poker-domain/join.mjs", stagedJoin);
+    await fs.copyFile("shared/poker-domain/poker-missed-turns.mjs", path.join(stagedDir, "poker-missed-turns.mjs"));
     await fs.copyFile("shared/poker-domain/bots.mjs", stagedBots);
     await fs.copyFile("shared/poker-domain/demand-refill.mjs", path.join(stagedDir, "demand-refill.mjs"));
     await fs.copyFile("shared/poker-domain/table-buy-in.mjs", stagedTableBuyIn);
@@ -823,6 +824,7 @@ test("existing financed FORCE_RESTRICTED rejoin remains legal without a new debi
   const tableId = "00000000-0000-4000-8000-0000000000fa";
   const userId = "00000000-0000-4000-8000-0000000000fb";
   let postTransactionCalls = 0;
+  let penaltyWrite = null;
   const result = await executePokerJoinAuthoritative({
     beginSql: async (fn) => fn({
       unsafe: async (sql) => {
@@ -843,7 +845,10 @@ test("existing financed FORCE_RESTRICTED rejoin remains legal without a new debi
           return [{ version: 3, state: {
             tableId,
             seats: [{ userId, seatNo: 1, status: "ACTIVE" }],
-            stacks: { [userId]: 100 }
+            stacks: { [userId]: 100 },
+            missedTurnsByUserId: { [userId]: 2 },
+            pendingAutoSitOutByUserId: { [userId]: true },
+            sitOutByUserId: { [userId]: true }
           } }];
         }
         return [];
@@ -858,7 +863,7 @@ test("existing financed FORCE_RESTRICTED rejoin remains legal without a new debi
       const rows = await tx.unsafe("select version, state from public.poker_state where table_id = $1 for update;", [tableId]);
       return { ok: true, version: rows[0].version, state: rows[0].state };
     },
-    updateStateLocked: async () => ({ ok: true, newVersion: 4 }),
+    updateStateLocked: async (_tx, { nextState }) => { penaltyWrite = nextState; return { ok: true, newVersion: 4 }; },
     validateStateForStorage: () => true,
     env: { POKER_BUY_IN_TIERS_JSON: JSON.stringify([100]) }
   });
@@ -866,6 +871,10 @@ test("existing financed FORCE_RESTRICTED rejoin remains legal without a new debi
   assert.equal(result.rejoin, true);
   assert.equal(result.stack, 100);
   assert.equal(postTransactionCalls, 0);
+  assert.deepEqual(penaltyWrite.missedTurnsByUserId, {});
+  assert.deepEqual(penaltyWrite.pendingAutoSitOutByUserId, {});
+  assert.deepEqual(penaltyWrite.sitOutByUserId, {});
+  assert.equal(penaltyWrite.stacks[userId], 100);
 }));
 
 test("fresh FORCE_RESTRICTED join rejects SLOW-only and CONTINUOUS_BOT targets before buy-in", async () => withBotsDisabled(async () => {

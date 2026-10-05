@@ -1,15 +1,10 @@
-# Tasks #1054
+# Active tasks — supersedes original rollover plan
 
-- [x] T001 Cross-hand inactivity regression
-- [ ] T002 Settled fresh-JOIN rollover regression
-- [ ] T003 Trace existing scheduling and persistence ownership
-- [x] T004 Preserve missed-turn evidence across hand boundaries
-- [ ] T005 Fix only the proven rollover ownership defect
-- [ ] T006 Remove false rebuy presentation for ordinary fresh JOIN waiting
-- [ ] T007 Focused verification
-- [ ] T008 Exact-SHA runtime verification
-- [ ] T009 Final review
+- [x] T101 — Keep/adjust the legacy mirror regression only as compatibility evidence.
+- [x] T102 — Implement missed-turn accounting in the authoritative timeout path.
+- [x] T103 — Preserve/reset authoritative inactivity state with existing lifecycle rules.
+- [x] T104 — Fundamental authoritative-engine regression.
+- [x] T105 — Persistence/runtime verification.
+- [ ] T106 — Exact-SHA Preview gate.
 
-T002 can follow T003 investigation if the existing fixture cannot reproduce the real stall. T006 is separate #1049 browser work; runtime changes remain here.
-
-T004 currently proves the two requested reducer mirrors only. Canonical WS engine-path reconciliation and T002/T003/T005 remain unresolved; this is not runtime-ready.
+Original T002/T003/T005 and rollover portion of T008 withdrawn. T001/T004 legacy compatibility evidence completed; not authoritative runtime proof. #1049 UI correction deferred to separate PR.

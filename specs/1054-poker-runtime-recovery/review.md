@@ -1,3 +1,35 @@
+# Active review — authoritative auto-sitout (2026-10-05)
+
+Draft PR #1055 is independent of #1049, based on origin/main 87f9153e. Latest owner Stage evidence supersedes the previous rollover concern. No scheduler/server.mjs changes are made.
+
+## Authoritative change
+
+Accepted human timeout increments the existing missed-turn field once inside applyCoreStateTurnTimeout, using the existing map helper and inactivity policy (threshold 2). The engine internal isTimeout flag prevents auto CHECK from being treated as manual activity; it is not a WS payload field. Deferred-leave actors and bots do not acquire human inactivity penalty. Current hand remains intact at pending threshold.
+
+buildNextHandStateFromSettled commits pending into sitOut before new-hand membership/dealer/turn/cards/blinds are selected. buildBootstrappedPokerState retains only valid currently seated/non-left inactivity entries. Durable stack preservation is unchanged; auto-sitout does not remove membership/seat or cash out.
+
+Accepted manual human actions clear count/pending/sitout. Existing authoritative JOIN mutation clears them without another ledger debit on rejoin. A returning out-of-hand player uses existing waiting-next-hand classification. Unchanged rejoin without penalty retains the old no-write shortcut.
+
+The existing pure missed-turn helper moved to shared/poker-domain/poker-missed-turns.mjs so shared JOIN does not import Netlify adapters at module load. Legacy import path re-exports the same existing API; new clearInactivityPenalty shares activity/rejoin reset rather than duplicating state mutation. Existing inactivity threshold policy is reused. No new writer, scheduler, dependency or inactivity timer.
+
+## Fundamental evidence
+
+New authoritative engine regression first failed on missing count (undefined !== 1). It now proves real timeout hand A -> settlement/rollover -> timeout hand B -> pending threshold -> next boundary sitout; seat/stack retained, no cards/turn/dealer participation or later blind. Same scenario verifies a successful manual action clears prior count and later timeout restarts at 1.
+
+Existing financed restricted rejoin test now confirms penalty deletion, retained stack and zero new ledger debit. Existing private-field persistence test now writes inactivity evidence via the real writer, loads it through adaptPersistedBootstrap and restores table-manager state, retaining count/pending/sitout. No new harness or UI suite.
+
+Focused suite: 207/207; existing real-socket JOIN suite: 8/8; runtime dependency guards: 21/21. Required syntax/check:all/ci:guards/CSP checks pass. Additional focused persistence suite result recorded in handoff. Four older legacy timeout failures remain baseline-only (see history below).
+
+## Gate and breaking impact
+
+T101–T105 implemented; T106 exact-SHA Preview + narrow authenticated smoke pending. Stage verification uses an isolated confirmed fixture user, normal welcome-bonus ledger grant and existing JOIN/action/leave flows. No direct balance/table edits, migrations or Production mutation/deploy.
+
+Intentional breaking behavior: unattended humans accumulate timeout evidence across hands and stop paying blinds after the existing threshold and safe boundary; actual manual activity/rejoin clears penalty. No intended changes to accounting, settlement, funding/access policies, transport or scheduler. Review confirms server.mjs, timeout persistence owner, ledger and protocol unchanged. Legacy mirror fixes retained only for still-used legacy paths, not as authoritative proof.
+
+---
+
+# Historical investigation — superseded by owner Stage evidence
+
 # Work in progress — 2026-10-05
 
 Base: origin/main `87f9153e`; isolated branch `fix/1054-poker-inactivity-rollover`. No changes transferred to #1049.

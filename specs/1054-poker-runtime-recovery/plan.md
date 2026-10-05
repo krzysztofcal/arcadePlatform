@@ -1,106 +1,115 @@
-# Plan #1054
+# Plan — authoritative inactivity correction
 
-## SpecKit implementation plan
+## Owner correction after Codex discovery + Stage evidence (2026-10-05)
 
-### Phase 1 — establish failing regressions before runtime changes
+This section **supersedes the earlier rollover diagnosis/tasks where they conflict**.
 
-- **T001 — Cross-hand inactivity regression**
-  - File: `tests/poker-sitout-policy.test.mjs`.
-  - Use the existing reducer/timeout helpers; do not create a new harness.
-  - Add one fundamental deterministic scenario that starts from a real hand, applies one timeout, crosses an actual `SETTLED -> advanceIfNeeded/resetToNextHand` boundary, then applies the next timeout in a later hand.
-  - The test must fail on current main because the first missed-turn count is lost.
-  - Assert only the contract: the existing threshold is reached, `pendingAutoSitOutByUserId[userId]` is set, and the next safe boundary converts it to `sitOutByUserId[userId] = true` so the player is excluded from later hand participation.
-  - Do not manually inject the second-hand starting count.
+### 1. The current smoke did NOT reproduce a SETTLED rollover stall
 
-- **T002 — Settled fresh-JOIN rollover regression**
-  - Primary file: `ws-tests/ws-join-runtime.behavior.test.mjs` or the smallest existing real-socket runtime test that already owns the SETTLED fresh-JOIN scenario.
-  - Reuse the existing fixture-backed real WS server/client path from #1033.
-  - Extend/adjust one scenario only after tracing the real failure so it reproduces the missing transition, rather than adding another synthetic happy-path duplicate.
-  - Required observable contract: fresh JOIN on `SETTLED` is acknowledged/published as `WAITING_NEXT_HAND`, then advances without any extra subscription/resync/reconnect/client command to a new hand where the human is `ACTIVE`/participating when eligible.
-  - If the current deterministic fixture cannot reproduce the real stall, do not guess at a fix: proceed to T003 and capture the exact runtime branch that stalls, then encode that branch in this same fundamental test.
+The owner smoke can now be tied to exact shared-Stage evidence:
 
-### Phase 2 — diagnose the real rollover stall at the existing ownership boundary
+- environment: Netlify Deploy Preview #1049 -> `wss://ws-preview.kcswh.pl/ws` -> shared Stage DB `krydukthwdvccggbyjfw`;
+- table: `13eb6933-31ba-4aa2-9338-06138b3fdd5a`;
+- lifecycle: `CONTINUOUS_BOT / CONTINUOUS_BOT_DEFAULT`;
+- hand `..._133_3` reached `SETTLED` at `2026-10-05T19:06:00.816569Z`;
+- the human TABLE_BUY_IN committed at `2026-10-05T19:06:00.967030Z`;
+- the same human is an authoritative participant in the immediately following hand `..._144_5`, later settling at `2026-10-05T19:07:24.169697Z` with seat 4 / starting stack 100.
 
-- **T003 — Trace existing scheduling and persistence ownership**
-  - File: `ws-server/server.mjs`.
-  - Trace only the existing chain:
-    - `broadcastStateSnapshots()` / state publication;
-    - `preparePublishedSettlementReveal()`;
-    - `maybeScheduleSettledRollover()`;
-    - `scheduleSettledRolloverTimer()`;
-    - `scheduleSettledRolloverRetry()`;
-    - `runSettledRolloverCommand()`;
-    - `persistMutatedState()` / conflict restore;
-    - `tableManager.prepareSettledHandRollover()` and `commitSettledHandRollover()`.
-  - Trace the successful authoritative JOIN path that inserts/funds the fresh human while the table is already `SETTLED`.
-  - Verify which exact branch can leave the same settled generation with no future timer/retry or with a retry tied to a stale generation key.
-  - Use existing `ws_settled_rollover_*` klog events. Add one narrowly scoped klog only if an otherwise terminal branch cannot be distinguished; no broad INFO logging.
-  - Do not introduce a second scheduler, polling loop, browser-triggered start-hand workaround, DB cron, or forced resync.
+Therefore the observed `Seat reserved · Joining next hand` / `WAITING_NEXT_HAND` state was a valid transient join-at-SETTLED state for this incident, not proof that reserve-seat or rollover failed. The contradictory rebuy/bust presentation remains a #1048/#1049 UI bug.
 
-### Phase 3 — minimal runtime fixes
+The historical Production rollover concern from #1033 remains historical/unproven here. Do **not** change rollover scheduling from this issue unless a separate deterministic/current reproduction proves an actual current defect.
 
-- **T004 — Preserve missed-turn evidence across hand boundaries**
-  - Files:
-    - `ws-server/poker/snapshot-runtime/poker-reducer.mjs::resetToNextHand()`;
-    - mirrored `netlify/functions/_shared/poker-reducer.mjs::resetToNextHand()`.
-  - Replace the unconditional next-hand `missedTurnsByUserId: {}` behavior with the smallest seat-scoped preservation needed for the existing inactivity policy.
-  - Keep entries only for users still in the authoritative seat universe; do not retain arbitrary stale user IDs.
-  - Preserve the current threshold and current manual-action reset semantics.
-  - When pending auto-sitout is committed at the safe hand boundary, the player's participation must remain excluded exactly through the existing `sitOutByUserId` mechanism; do not invent an eviction/cash-out path.
-  - Keep the mirrored reducer implementations behaviorally equivalent.
+Earlier T002/T003/T005 and the rollover part of T008 are withdrawn from the active implementation scope of #1054.
 
-- **T005 — Fix only the proven rollover ownership defect**
-  - Files determined by T003, expected to remain inside existing `ws-server/server.mjs` scheduling/retry code and/or the existing table-manager/persistence boundary.
-  - Preserve one settled-rollover scheduler and one per-table command queue.
-  - A retryable failure/unknown dependency must leave a future retry for the same still-current settled generation.
-  - A successful persisted/committed rollover must still publish once and schedule existing bot autoplay normally.
-  - Preserve settlement reveal delay, bot funding/access decisions, CAS conflict recovery, reconnect behavior and ledger semantics.
-  - Do not change JOIN funding merely to mask a rollover scheduling defect.
+### 2. Authoritative inactivity root cause is deeper than the legacy reducer reset
 
-### Phase 4 — Poker Table presentation correction remains in #1048/#1049
+Codex correctly found that current live WS gameplay does not use `ws-server/poker/snapshot-runtime/poker-reducer.mjs::resetToNextHand()` as the authoritative action/timeout path.
 
-- **T006 — Remove false rebuy presentation for ordinary fresh JOIN waiting**
-  - File: `poker/poker-v2.js::renderRebuyPanel()` in PR #1049 / #1048 scope.
-  - A plain `WAITING_NEXT_HAND` produced by fresh JOIN must not by itself show the rebuy panel.
-  - Keep the normal live banner/seat status (`Seat reserved · Joining next hand`, `NEXT HAND`).
-  - Preserve actual `OUT_OF_CHIPS` and pending/recovered rebuy behavior.
-  - Do not add a new UI rendering test for this simple glue; verify through the required manual Deploy Preview smoke.
-  - Do not mix T004/T005 runtime changes into the HUD PR; integrate #1049 with corrected main after #1054.
+Current authoritative path is:
 
-### Phase 5 — verification and handoff
+- `ws-server/poker/table/table-manager.mjs`;
+- `ws-server/poker/engine/poker-engine.mjs::applyCoreStateTurnTimeout()`;
+- `ws-server/poker/engine/poker-engine.mjs::applyCoreStateAction()`;
+- `ws-server/poker/shared/poker-action-reducer.mjs`;
+- `ws-server/poker/engine/poker-engine.mjs::buildNextHandStateFromSettled()`;
+- persistence through the existing `ws-server/poker/handlers/turn-timeout.mjs::handleTurnTimeoutCommand()` -> `persistMutatedState()` path.
 
-- **T007 — Focused verification**
-  - Run the changed fundamental inactivity test.
-  - Run the existing relevant sitout/timeout reducer tests.
-  - Run the focused real-socket SETTLED JOIN/rollover regression plus existing relevant JOIN/reconnect/rollover tests.
-  - Run required repository checks only; do not add broad suites or UI/CSS tests.
+The authoritative engine currently does not maintain `missedTurnsByUserId`, `pendingAutoSitOutByUserId` or `sitOutByUserId` across the live timeout/action/next-hand lifecycle. Fixing only the snapshot-runtime/Netlify reducer mirrors is therefore insufficient.
 
-- **T008 — Exact-SHA runtime verification**
-  - Because T004/T005 affect `ws-server/**` / authoritative poker runtime, deploy the exact latest runtime-affecting SHA using the existing manual **WS Preview Deploy** gate.
-  - Verify deployed SHA and health before calling the runtime fix ready.
-  - Perform one narrow authenticated Preview/Stage smoke for the exact two user-visible defects: fresh SETTLED JOIN advances automatically to the next hand; two missed turns across separate hands cause auto-sitout and later hands no longer consume blinds from that player.
+Historical intended contract from PRs #323/#325/#327/#329 must be preserved:
+
+- threshold remains exactly **2 missed timeout turns**;
+- timeout accounting is authoritative and deterministic;
+- successful manual activity clears stale missed-turn penalty;
+- join/rejoin clears stale missed-turn penalty;
+- auto-sitout affects future participation, not the current hand and not chips/cash-out;
+- sit-out player is skipped by future hand/turn eligibility;
+- do not remove the seat merely because of auto-sitout.
+
+### 3. Exact Stage evidence for the inactivity failure
+
+Same table and human show the production-like bug directly:
+
+Human: `7339c05e-5068-4ad1-a449-5f7b3bb8f2e0`.
+
+Later inactivity segment:
+
+- timeout FOLD at `2026-10-05T19:11:23.714907Z`, hand `..._225_5`;
+- timeout FOLD at `2026-10-05T19:12:37.349654Z`, different hand `..._244_5`;
+- no manual human action between those two timeout events;
+- after the second timeout, `HAND_SETTLED` v263 at `2026-10-05T19:13:22.654549Z` still lists the human as seat 4 participant with starting stack 98, ending stack 97 and contribution 1.
+
+Final persisted state also has no authoritative inactivity maps (`missedTurnsByUserId`, `pendingAutoSitOutByUserId`, `sitOutByUserId` absent/null).
+
+This is sufficient to treat authoritative auto-sitout as the active P1. No new owner reproduction is required before implementation.
+
+### 4. Revised active implementation plan
+
+- **T101 — Keep/adjust the legacy mirror regression only as compatibility evidence.**
+  - Review local commit `320c8a9a` once published in a Draft PR.
+  - Keep the two `resetToNextHand()` mirror changes only if they remain correct for code paths/tests that still use those reducers.
+  - Do not describe them as the runtime fix.
+
+- **T102 — Implement missed-turn accounting in the authoritative timeout path.**
+  - Primary: `ws-server/poker/engine/poker-engine.mjs::applyCoreStateTurnTimeout()` and existing engine state.
+  - After an accepted automatic timeout action, increment that actor's authoritative missed-turn count exactly once.
+  - Reuse the existing timeout command/idempotency boundary; replay must not increment twice.
+  - When the count reaches 2, mark the existing future-hand auto-sitout intent; do not alter the already-running hand merely because threshold was reached.
+
+- **T103 — Preserve/reset authoritative inactivity state with existing lifecycle rules.**
+  - `buildBootstrappedPokerState()` / `buildNextHandStateFromSettled()` and smallest related engine helpers must preserve only valid seated-user inactivity state across hand boundaries.
+  - At the safe next-hand boundary, pending auto-sitout becomes effective `sitOutByUserId` and that user is excluded from the new hand/dealer/turn/card participation while retaining their table seat/stack.
+  - Successful non-timeout human activity clears stale missed-turn penalty according to #325/#327 semantics.
+  - Existing authoritative JOIN/rejoin path must clear stale missed-turn/auto-sitout state for an actually returning player according to #327. Reuse the current JOIN state mutation boundary; do not add a second API or browser state.
+
+- **T104 — Fundamental authoritative-engine regression.**
+  - Add/extend the smallest current `ws-server/poker/engine` or `table-manager` behavior test, not only legacy reducer tests.
+  - Scenario: timeout in hand A -> count 1 -> real settled rollover -> timeout in hand B -> threshold 2/pending -> next hand boundary -> user excluded/sat out while seat and chips remain.
+  - Also verify one successful manual action clears a prior count so a later timeout starts again at 1.
+  - Use existing table-manager/engine harness; no broad suite/new framework.
+
+- **T105 — Persistence/runtime verification.**
+  - Existing `handleTurnTimeoutCommand()` / `persistMutatedState()` remains the persistence owner; no new writer.
+  - Verify persisted Poker state contains the inactivity evidence across timeout and rollover and restores correctly after runtime restore/reconnect.
+  - Only add a focused persistence/reconnect assertion if the existing fundamental engine test cannot prove this boundary.
+
+- **T106 — Exact-SHA Preview gate.**
+  - Publish the implementation as a Draft PR so the diff is reviewable.
+  - Run focused fundamental tests and required repo checks.
+  - Because the authoritative WS runtime changes, deploy the exact latest runtime-affecting SHA via existing **WS Preview Deploy**.
+  - Narrow authenticated smoke: leave a human unattended for two turns across different hands; after the safe boundary verify they stop participating/paying later blinds. Manual activity/rejoin must reset the penalty as specified.
   - No Production mutation/deploy without separate owner authorization.
 
-- **T009 — Final review**
-  - Re-review the complete diff against current main and #1054.
-  - Confirm no duplicate scheduler, second state source, wall-clock idle mechanism, DB cron, direct balance/table mutation or unrelated refactor was introduced.
-  - Report exact files changed, focused tests, exact WS Preview SHA/run, smoke result, and all breaking impacts.
-  - Keep #1049 draft until its separate owner visual smoke and the #1054 dependency are both satisfied.
+### 5. #1048/#1049 ownership
 
-### SpecKit notes
+The fresh JOIN presentation bug remains in #1048/#1049:
 
-- This is a complex task: use deep reasoning and ensure every requirement above is fulfilled completely.
-- Keep code as simple and condensed as possible; eliminate unnecessary complexity without changing required behavior.
-- Unless explicitly required, reuse existing packages, classes, functions, helpers, reducers, command queues, scheduler paths and test harnesses.
-- Explicitly highlight any breaking impact on another part of the system in the final handoff.
-- Any browser JavaScript must remain JSP-compatible.
-- Any CSS, if unexpectedly required, must keep one physical line per selector with no hard returns inside declarations.
-- Take time to double-check the whole diff and refactor before presenting the final implementation.
-- Write only fundamental deterministic tests; no broad UI/layout/JSP/simple-glue test expansion.
-- Use `klog`, never `console.log`.
-- If any inline script is added, add its SHA to the CSP allowlist. No inline script is expected for this fix.
-- Do not include Production mutation/deploy, schema migration, new scheduler, or unrelated cleanup in this work.
+- plain fresh-JOIN `WAITING_NEXT_HAND` must not open the bust/rebuy panel;
+- remove contradictory `Sitting out`, `Buy-in confirmed`, stale `Buy-in: Loading…` and duplicate funded messaging for a normal join;
+- preserve actual OUT_OF_CHIPS/rebuy recovery behavior.
+
+This simple UI correction is separate from #1054 authoritative inactivity work.
 
 
 ## Constitution Check
-Only fundamental deterministic reducer/runtime regressions, existing harnesses, no UI tests. T006 stays in #1049. No new dependency/tooling/ignore files/scheduler/migrations; no Production changes. Exact-SHA WS Preview and narrow authenticated smoke required, not merge-ready while pending.
+Only fundamental authoritative-engine lifecycle/activity regression and existing persistence/JOIN/timeout checks. No scheduler changes, UI tests, new framework/dependencies, writers or Production changes. #1049 remains separate.

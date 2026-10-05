@@ -1,3 +1,4 @@
+import { clearInactivityPenalty } from "./poker-missed-turns.mjs";
 import { attemptDemandRefill } from "./demand-refill.mjs";
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
@@ -643,7 +644,7 @@ async function syncStateSeatAndStack({ tx, tableId, userId, seatNo, fundedStackE
   const waitingProjection = markFreshJoinWaiting
     ? markFreshJoinWaitingForNextHand(merged.state, userId)
     : { state: merged.state, joinStatus: "ACTIVE" };
-  const nextState = waitingProjection.state;
+  const nextState = clearInactivityPenalty(waitingProjection.state, userId).nextState;
   const nextStateForStorage = sanitizeStateForStorage(nextState);
   if (!isStorageStateValid(validateStateForStorage, nextStateForStorage)) {
     throw makeError("state_invalid", "storage_state_validation_failed");
@@ -786,7 +787,8 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           [tableId, userId]
         );
         const persisted = await readPersistedSeatIdentity({ tx, tableId, userId });
-        if (stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
+        const reset = clearInactivityPenalty(stateRow.state, userId);
+        if (!reset.changed && stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
           if (!Number.isInteger(stateRow.version) || stateRow.version <= 0) {
             throw makeError("authoritative_state_invalid", "rejoin_state_version_invalid");
           }
@@ -816,7 +818,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           seatEntries: seatRows.map(asSeatSnapshot).filter(Boolean),
           fundedStackEntries: []
         });
-        const nextState = merged.state;
+        const nextState = markFreshJoinWaitingForNextHand(clearInactivityPenalty(merged.state, userId).nextState, userId).state;
         buildProjectedSnapshot({
           state: nextState,
           seatRows,

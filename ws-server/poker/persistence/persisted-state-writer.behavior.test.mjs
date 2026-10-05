@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createPersistedStateWriter } from "./persisted-state-writer.mjs";
 import { createTableManager } from "../table/table-manager.mjs";
+import { adaptPersistedBootstrap } from "../bootstrap/persisted-bootstrap-adapter.mjs";
 
 test("persisted state writer strips runtime private cards before file persistence", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "persisted-state-writer-"));
@@ -13,7 +14,7 @@ test("persisted state writer strips runtime private cards before file persistenc
     await fs.writeFile(filePath, JSON.stringify({
       tables: {
         t1: {
-          tableRow: { id: "t1", status: "OPEN" },
+          tableRow: { id: "t1", status: "OPEN", max_players: 6 },
           seatRows: [],
           stateRow: {
             version: 3,
@@ -49,6 +50,9 @@ test("persisted state writer strips runtime private cards before file persistenc
         communityDealt: 4,
         seats: [{ userId: "u1", seatNo: 1, status: "ACTIVE" }],
         stacks: { u1: 100 },
+        missedTurnsByUserId: { u1: 2 },
+        pendingAutoSitOutByUserId: { u1: true },
+        sitOutByUserId: {},
         holeCardsByUserId: { u1: ["AH", "AD"] },
         deck: ["TC"]
       }
@@ -61,6 +65,14 @@ test("persisted state writer strips runtime private cards before file persistenc
     assert.equal(Object.prototype.hasOwnProperty.call(storedState, "holeCardsByUserId"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(storedState, "deck"), false);
     assert.deepEqual(storedState.community, ["AS", "KS", "QS", "JD"]);
+    const restored = adaptPersistedBootstrap({ tableId: "t1", ...persisted.tables.t1 });
+    assert.equal(restored.ok, true, JSON.stringify(restored));
+    const manager = createTableManager();
+    manager.restoreTableFromPersisted("t1", restored.table);
+    const state = manager.persistedPokerState("t1");
+    assert.deepEqual(state.missedTurnsByUserId, { u1: 2 });
+    assert.deepEqual(state.pendingAutoSitOutByUserId, { u1: true });
+    assert.deepEqual(state.sitOutByUserId, {});
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
