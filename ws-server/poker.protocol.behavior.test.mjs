@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import net from "node:net";
 import WebSocket from "ws";
 
@@ -46,9 +47,9 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
-function spawnServer(port) {
+function spawnServer(port, env = {}) {
   return spawn(process.execPath, ["ws-server/server.mjs"], {
-    env: { ...process.env, PORT: String(port), WS_POKER_LOG_LEVEL: process.env.WS_POKER_LOG_LEVEL || "INFO" },
+    env: { ...process.env, PORT: String(port), WS_POKER_LOG_LEVEL: process.env.WS_POKER_LOG_LEVEL || "INFO", ...env },
     stdio: ["ignore", "pipe", "pipe"]
   });
 }
@@ -361,3 +362,120 @@ test("connection closes after repeated protocol violations but allows recovery a
     await waitForExit(child);
   }
 });
+
+test("message backlog bound (16) closes socket with 1002 and drops excess frames while conforming messages succeed in order", async () => {
+  const port = await getFreePort();
+  const child = spawnServer(port, { WS_TEST_PROCESS_MESSAGE_DELAY_MS: "50" });
+  const serverLogs = [];
+  child.stdout.on("data", (chunk) => serverLogs.push(String(chunk)));
+
+  try {
+    await waitForListening(child, 5000);
+
+    // 1. Conforming ordered messages succeed in order
+    const wsOrder = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsOrder.once("open", resolve));
+
+    wsOrder.send(
+      JSON.stringify({
+        version: "1.0",
+        type: "hello",
+        requestId: "req-hello",
+        ts: "2026-02-28T00:00:00Z",
+        payload: { supportedVersions: ["1.0"] }
+      })
+    );
+    const helloAck = await nextMessage(wsOrder);
+    assert.equal(helloAck.type, "helloAck");
+
+    for (let i = 0; i < 3; i++) {
+      wsOrder.send(
+        JSON.stringify({
+          version: "1.0",
+          type: "ping",
+          requestId: `ping-${i}`,
+          ts: "2026-02-28T00:00:00Z",
+          payload: { clientTime: String(i) }
+        })
+      );
+      const ack = await nextMessage(wsOrder);
+      assert.equal(ack.type, "pong");
+      assert.equal(ack.requestId, `ping-${i}`);
+    }
+    wsOrder.close();
+
+    // 2. Controlled burst flood:
+    // With 50ms processing delay per frame, sending 25 frames rapidly builds up
+    // the in-flight backlog. Once pendingMessages reaches 16, the 17th frame triggers
+    // backlog overflow, closes socket with 1002, and excess frames are never executed.
+    const wsBurst = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((resolve) => wsBurst.once("open", resolve));
+
+    let burstReceived = 0;
+    wsBurst.on("message", () => {
+      burstReceived++;
+    });
+
+    const closeP = Promise.race([
+      new Promise((resolve) => wsBurst.once("close", (code) => resolve(code))),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out waiting for socket close on burst flood")), 3000)
+      )
+    ]);
+
+    for (let i = 0; i < 25; i++) {
+      wsBurst.send(
+        JSON.stringify({
+          version: "1.0",
+          type: "ping",
+          requestId: `burst-${i}`,
+          ts: "2026-02-28T00:00:00Z",
+          payload: { clientTime: String(i) }
+        })
+      );
+    }
+
+    const closeCode = await closeP;
+    assert.equal(closeCode, 1002, "Socket must be closed with 1002 on backlog overflow");
+    assert.ok(burstReceived <= 16, `Excess frames must not be processed (received ${burstReceived} frames)`);
+
+    assert.ok(
+      serverLogs.some((line) => line.includes("ws_message_backlog_overflow")),
+      "Server must log ws_message_backlog_overflow"
+    );
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
+test("unauthenticated message handling is decoupled from global maintenance sweeps", async () => {
+  const serverSource = await fs.readFile(new URL("./server.mjs", import.meta.url), "utf8");
+
+  // Invariant 1: processMessage hot path does not execute global maintenance sweeps
+  const processMessageMatch = serverSource.match(/async function processMessage\(msg, isBinary\) \{([\s\S]*?)\n  \}/);
+  assert.ok(processMessageMatch, "processMessage function must exist in server.mjs");
+  const processMessageBody = processMessageMatch[1];
+
+  assert.doesNotMatch(processMessageBody, /sweepExpiredSessionsOnly\(\)/, "processMessage must not run sweepExpiredSessionsOnly");
+  assert.doesNotMatch(processMessageBody, /sweepDisconnectCleanupAndBroadcast\(\)/, "processMessage must not run sweepDisconnectCleanupAndBroadcast");
+  assert.doesNotMatch(processMessageBody, /sweepTurnTimeoutsAndBroadcast\(\)/, "processMessage must not run sweepTurnTimeoutsAndBroadcast");
+
+  // Invariant 2: cleanupConnectionOnce does not execute global maintenance sweeps
+  const cleanupMatch = serverSource.match(/const cleanupConnectionOnce = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(cleanupMatch, "cleanupConnectionOnce function must exist in server.mjs");
+  const cleanupBody = cleanupMatch[1];
+  assert.doesNotMatch(cleanupBody, /sweepExpiredSessionsOnly\(\)/, "cleanupConnectionOnce must not run sweepExpiredSessionsOnly");
+  assert.doesNotMatch(cleanupBody, /sweepDisconnectCleanupAndBroadcast\(\)/, "cleanupConnectionOnce must not run sweepDisconnectCleanupAndBroadcast");
+
+  // Invariant 3: sweepExpiredSessionsOnly is invoked periodically in sweepTransportWatchdog
+  const watchdogMatch = serverSource.match(/function sweepTransportWatchdog\(\) \{([\s\S]*?)\n\}/);
+  assert.ok(watchdogMatch, "sweepTransportWatchdog must exist");
+  assert.match(watchdogMatch[1], /sweepExpiredSessionsOnly\(\)/, "sweepTransportWatchdog must call sweepExpiredSessionsOnly");
+
+  // Invariant 4: dedicated periodic sweep timers remain scheduled
+  assert.match(serverSource, /timeoutSweepTimer\s*=\s*setInterval/, "timeoutSweepTimer must be scheduled");
+  assert.match(serverSource, /disconnectCleanupTimer\s*=\s*setInterval/, "disconnectCleanupTimer must be scheduled");
+  assert.match(serverSource, /transportWatchdogTimer\s*=\s*setInterval/, "transportWatchdogTimer must be scheduled");
+});
+
