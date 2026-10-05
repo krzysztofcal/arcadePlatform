@@ -187,7 +187,6 @@
   var autoRebuyConfirmOpen = false;
   var pendingAutoRebuyConfirmationBuyIn = null;
   var renderedSeatAnchors = {};
-  var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
   var renderedSeatHud = {};
   var accountHudIdentity = null;
@@ -3898,13 +3897,13 @@
       {avatar:[300,390],cards:[300,483],stack:[226,413],bet:[266,389],dealer:[240,352],presentation:[226,484,70,42],social:[226,452,80,18]},
       {avatar:[180,548],cards:[282,618],stack:[268,534],bet:[180,470],dealer:[236,570],bestHand:[70,590,98,90],presentation:[70,532,98,22],social:[70,648,98,18]},
       {avatar:[60,390],cards:[60,483],stack:[134,413],bet:[94,389],dealer:[120,352],presentation:[134,484,70,42],social:[134,452,80,18]},
-      {avatar:[60,195],cards:[60,288],stack:[140,178],bet:[94,194],dealer:[175,178],presentation:[60,322,92,32],social:[140,220,80,18]}
+      {avatar:[60,195],cards:[60,288],stack:[140,178],bet:[94,194],dealer:[98,280],presentation:[60,322,92,32],social:[140,220,80,18]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[520,50],cards:[620,50],stack:[710,50],bet:[620,96],dealer:[440,80],action:[440,112],presentation:[350,28,120,44],social:[370,93,90,18]},
+      {avatar:[520,50],cards:[620,50],stack:[680,50],bet:[620,96],dealer:[440,80],action:[440,112],presentation:[350,28,120,44],social:[370,93,90,18]},
       {avatar:[925,90],cards:[845,90],stack:[760,90],bet:[813,120],dealer:[810,90],presentation:[925,188,110,38],social:[780,149,100,20]},
       {avatar:[925,265],cards:[845,265],stack:[760,253],bet:[832,219],dealer:[810,265],presentation:[800,310,110,44],social:[865,355,112,24]},
-      {avatar:[520,298],cards:[648,334],stack:[620,260],bet:[440,242],dealer:[575,368],bestHand:[375,327,90,62],presentation:[375,278,90,24],social:[660,383,100,14]},
+      {avatar:[520,298],cards:[648,334],stack:[620,267],bet:[440,242],dealer:[575,368],bestHand:[375,327,90,62],presentation:[375,278,90,24],social:[660,383,100,14]},
       {avatar:[115,265],cards:[195,265],stack:[280,253],bet:[208,219],dealer:[230,265],presentation:[240,310,110,44],social:[175,355,112,24]},
       {avatar:[115,90],cards:[195,90],stack:[280,90],bet:[227,120],dealer:[230,90],presentation:[115,188,110,38],social:[260,149,100,20]}
     ]}
@@ -3974,10 +3973,10 @@
     var hud = renderedSeatHud[seatNo];
     if (!hud) return null;
     var geometry=seatSceneGeometry[seatSceneOrientation];
-    return {x:hud.config.avatar[0]/geometry.width*100,y:hud.config.avatar[1]/geometry.height*100,radiusX:hud.avatarSize/2/geometry.width*100,radiusY:hud.avatarSize/2/geometry.height*100,sceneWidth:geometry.width,sceneHeight:geometry.height};
+    return {x:hud.config.avatar[0]/geometry.width*100,y:hud.config.avatar[1]/geometry.height*100};
   }
 
-  function syncRenderedSeatAnchorsFromLayout(){
+  function syncRenderedSeatAnchors(){
     Object.keys(renderedSeatAvatars).forEach(function(seatNo){
       var anchor = getSeatAvatarAnchor(Number(seatNo));
       if (anchor) renderedSeatAnchors[seatNo] = {x:anchor.x,y:anchor.y};
@@ -4203,7 +4202,6 @@
     clearBotAvatarReactions();
     els.seatLayer.innerHTML = '';
     renderedSeatAnchors = {};
-    renderedSeatSlots = {};
     renderedSeatAvatars = {};
     renderedSeatHud = {};
     renderedSeatBetAnchors = {};
@@ -4263,7 +4261,6 @@
       if (seat) renderedSeatHud[seat.seatNo] = hud;
       if (seat && Number.isInteger(seat.seatNo)) {
         renderedSeatAnchors[seat.seatNo] = getSeatAvatarAnchor(seat.seatNo);
-        renderedSeatSlots[seat.seatNo] = rotatedIndex;
       }
 
       var avatar = document.createElement('div');
@@ -4373,7 +4370,7 @@
       }
       els.seatLayer.appendChild(article);
     }
-    syncRenderedSeatAnchorsFromLayout();
+    syncRenderedSeatAnchors();
     scheduleTargetedReactionDismiss();
     renderReactionBubbles();
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
@@ -4395,19 +4392,6 @@
     reactionRenderNodes.push(node);
   }
 
-  function getReactionBubblePlacementClass(seatNo){
-    var slotIndex = Number.isInteger(renderedSeatSlots[seatNo]) ? renderedSeatSlots[seatNo] : null;
-    if (slotIndex === 0) return ' poker-reaction-anchor--top';
-    if (slotIndex === 1 || slotIndex === 2) return ' poker-reaction-anchor--right';
-    if (slotIndex === 4 || slotIndex === 5) return ' poker-reaction-anchor--left';
-    if (slotIndex === 3){
-      var currentSeat = deriveCurrentSeat();
-      return currentSeat && currentSeat.seatNo === Number(seatNo)
-        ? ' poker-reaction-anchor--hero'
-        : ' poker-reaction-anchor--bottom';
-    }
-    return '';
-  }
 
   function renderRegularReactionBubble(seatNo, reactionBubble, reactionEntry, anchor){
     var reducedMotion = prefersReducedMotion();

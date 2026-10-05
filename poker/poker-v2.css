@@ -395,7 +395,7 @@ html,body{height:100%;overflow:hidden;}
 .poker-seat-hud-stack .poker-chip-stack-label{font-size:18px;padding:4px 8px;bottom:-26px;}
 .poker-center-layer{position:absolute;left:108px;top:232px;width:144px;height:108px;text-align:center;}
 .poker-pot-pill{position:absolute;left:50%;top:1px;transform:translateX(-50%);height:18px;padding:2px 9px;border-radius:999px;border:1px solid rgba(255,220,177,.26);background:rgba(7,13,24,.9);color:#ffe5b1;font-size:12px;font-weight:700;line-height:12px;white-space:nowrap;}
-.poker-pot-chip-stack{position:absolute;left:50%;top:23px;width:112px;height:82px;transform:translateX(-50%) scale(.42);transform-origin:top center;}
+.poker-pot-chip-stack{position:absolute;left:50%;top:33px;width:112px;height:82px;transform:translateX(-50%) scale(.42);transform-origin:top center;}
 .poker-community-cards{position:absolute;left:50%;bottom:0;transform:translateX(-50%);display:flex;gap:3px;}
 .poker-community-cards .poker-card{width:26px;height:40px;font-size:16px;border-radius:4px;}
 .poker-community-cards .poker-card small{font-size:8px;margin-top:1px;}
@@ -433,4 +433,4 @@ html,body{height:100%;overflow:hidden;}
 .poker-seat-action-badge--raise{background:linear-gradient(180deg, rgba(214,116,25,0.96), rgba(140,72,16,0.96));color:#fff0d7;}
 .poker-seat-action-badge--all-in{background:linear-gradient(180deg, rgba(220,179,30,0.98), rgba(156,114,14,0.98));color:#2f2304;}
 .poker-scene[data-orientation="landscape"] .poker-center-layer .poker-settlement-summary{left:-70px;top:60px;max-height:42px;margin:0;}
-.poker-scene[data-orientation="landscape"] .poker-pot-chip-stack{top:20px;transform:translateX(-50%) scale(.34);}
+.poker-scene[data-orientation="landscape"] .poker-pot-chip-stack{top:27px;transform:translateX(-50%) scale(.26);}
