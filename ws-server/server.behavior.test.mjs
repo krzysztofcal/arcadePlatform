@@ -9094,7 +9094,7 @@ export async function load(url, context, nextLoad) {
 }
 `, 'gift-adapter-loader.mjs');
   const register = await writeTestModule(`import { register } from 'node:module'; register(${JSON.stringify(new URL('file://' + loader.filePath).href)}, import.meta.url);`, 'gift-register.mjs');
-  const fixtures = { [tableId]: { tableRow: { id: tableId, max_players: 6, status: 'OPEN' }, seatRows: [{ user_id: userId, seat_no: 1, status: 'ACTIVE', is_bot: false }], stateRow: { version: 0, state: {} } } };
+  const fixtures = { [tableId]: { tableRow: { id: tableId, max_players: 6, status: 'OPEN' }, seatRows: [{ user_id: userId, seat_no: 1, status: 'ACTIVE', is_bot: false }, { user_id: '00000000-0000-4000-8000-000000000003', seat_no: 2, status: 'ACTIVE', is_bot: false }], stateRow: { version: 0, state: {} } } };
   const { port, child } = await createServer({ nodeArgs: ['--import', register.filePath], env: { WS_AUTH_REQUIRED: '1', WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: '', WS_TEST_GIFT_COUNTS_FILE: register.dir + '/counts.json', ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
   try {
     await waitForListening(child, 5000);
@@ -9108,7 +9108,7 @@ export async function load(url, context, nextLoad) {
     sendFrame(ws, { version: '1.0', type: 'table_join', requestId: 'gift-join', ts: '2026-10-04T12:00:00Z', payload: { tableId } });
     const [join, initial] = await joinFrames; assert.equal(join.payload.status, 'accepted'); assert.deepEqual(initial.payload, { seats: [] });
     assert.deepEqual((await observerJoinRecovery).payload, { seats: [] });
-    const command = { version: '1.0', type: 'gift_send', requestId: 'gift-buy', ts: '2026-10-04T12:00:00Z', payload: { tableId, giftKey: 'beer', targetSeatNo: 1 } };
+    const command = { version: '1.0', type: 'gift_send', requestId: 'gift-buy', ts: '2026-10-04T12:00:00Z', payload: { tableId, giftKey: 'beer', targetSeatNo: 2 } };
     const events = [];
     const captureGift = (raw) => { const frame = JSON.parse(raw.toString()); if (frame.type === 'table_gift') events.push(frame); };
     ws.on('message', captureGift);
@@ -9116,8 +9116,8 @@ export async function load(url, context, nextLoad) {
     sendFrame(ws, command);
     const [firstAck, event, firstState] = await firstResponses;
     assert.equal(firstAck.payload.status, 'accepted');
-    assert.deepEqual(event.payload, { eventId: '00000000-0000-4000-8000-000000000104', senderSeatNo: 1, recipientSeatNo: 1, giftKey: 'beer' });
-    const expectedState = { seats: [{ seatNo: 1, gifts: [{ giftKey: 'beer', count: 1 }] }] };
+    assert.deepEqual(event.payload, { eventId: '00000000-0000-4000-8000-000000000104', senderSeatNo: 1, recipientSeatNo: 2, giftKey: 'beer' });
+    const expectedState = { seats: [{ seatNo: 2, gifts: [{ giftKey: 'beer', count: 1 }] }] };
     assert.deepEqual(firstState.payload, expectedState);
     const replayResponses = Promise.all([nextCommandResultForRequest(ws, 'gift-buy'), nextMessageOfType(ws, 'table_gift_state')]);
     sendFrame(ws, command);
@@ -9130,13 +9130,13 @@ export async function load(url, context, nextLoad) {
     ws.off('message', captureGift);
     const recovered = nextMessageOfType(ws, 'table_gift_state');
     sendFrame(ws, { version: '1.0', type: 'resync', requestId: 'gift-resync', ts: '2026-10-04T12:00:00Z', payload: { tableId } });
-    assert.deepEqual((await recovered).payload, { seats: [{ seatNo: 1, gifts: [{ giftKey: 'beer', count: 1 }] }] });
+    assert.deepEqual((await recovered).payload, { seats: [{ seatNo: 2, gifts: [{ giftKey: 'beer', count: 1 }] }] });
     // A same-user join must reconcile every observer even if no intermediate empty seat was rendered.
     const rejoinRecovery = Promise.all([nextMessageOfType(observer, 'table_gift_state'), nextCommandResultForRequest(ws, 'gift-rejoin')]);
     sendFrame(ws, { version: '1.0', type: 'table_join', requestId: 'gift-rejoin', ts: '2026-10-04T12:00:00Z', payload: { tableId } });
     const [observerState, rejoin] = await rejoinRecovery;
     assert.equal(rejoin.payload.status, 'accepted');
-    assert.deepEqual(observerState.payload, { seats: [{ seatNo: 1, gifts: [{ giftKey: 'beer', count: 1 }] }] });
+    assert.deepEqual(observerState.payload, { seats: [{ seatNo: 2, gifts: [{ giftKey: 'beer', count: 1 }] }] });
     observer.close(); ws.close();
   } finally { child.kill('SIGTERM'); await waitForExit(child); await fs.rm(loader.dir, { recursive: true, force: true }); await fs.rm(register.dir, { recursive: true, force: true }); }
 });

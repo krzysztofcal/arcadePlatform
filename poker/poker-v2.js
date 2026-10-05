@@ -4287,7 +4287,7 @@
   var giftRetry = null;
   function giftByKey(key){ return giftCatalog.filter(function(gift){ return gift.key === key; })[0] || null; }
   function giftName(gift){ return t('pokerGift_' + gift.key, gift.key); }
-  function giftEligibleSeats(){ return state.seats.filter(function(seat){ return seat && seat.userId && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''); }); }
+  function giftEligibleSeats(){ return state.seats.filter(function(seat){ return seat && seat.userId && !isCurrentUserSeat(seat) && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''); }); }
   function giftShopAvailable(){ var seat = deriveCurrentSeat(); return !isGuestMode && isSignedIn() && seat && !seat.isBot && isWsReady() && !state.reconnectGate; }
   function renderGiftBadges(){
     state.seats.forEach(function(seat){

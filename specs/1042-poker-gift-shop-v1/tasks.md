@@ -19,7 +19,8 @@ Execute sequentially T001–T015; each depends on the preceding task. Stage auto
 - [x] **T012B — Custom recipient picker.** Current state.seats only; reuse avatar/name/seat presentation, exclusive selection, stale-seat removal and existing giftRetry reset. No payload/model change.
 - [x] **T012C — Guest-visible disabled Gift Shop.** Locked visible guest/signed-out control with localized explanation; no opening/send; unchanged authenticated availability/auth.
 - [ ] **T012D — Consume #1048 stable three-slot gift HUD.** BLOCKED on #1048; no avatar overflow/z-index/offset workaround. Preserve gift state/recovery.
-- [ ] **T013 — Exact-SHA Preview gate.** Deploy latest runtime-affecting SHA with WS Preview Deploy, verify release metadata/health, then perform the mandatory Stage smoke above.
+- [ ] **T012E — Quick Gift per seat + no self-gifting.** E1 implemented and verified; E2 BLOCKED on #1048 stable quick-action slot. One existing WS/catalog/retry/purchase flow; no dormant UI.
+- [ ] **T013 — Final Preview gate after T012D + T012E.** Deploy latest runtime-affecting SHA with WS Preview Deploy, verify release metadata/health, then perform final authenticated Stage smoke after HUD/Quick Gift integration.
 - [ ] **T014 — Production handoff.** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.
 - [ ] **T015 — Final handoff.** Record exact runtime SHA, Stage migration/apply evidence, CI, WS Preview deploy, smoke evidence, any Production schema status and breaking impacts. Only call merge-ready when repository Definition of Done is satisfied.
 

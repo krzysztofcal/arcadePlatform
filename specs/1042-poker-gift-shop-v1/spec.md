@@ -20,7 +20,7 @@ V1 is intentionally small:
 | `diamond` | 💎 Diamond | 1,000 CH |
 
 - Buyer: authenticated, seated **human account** only. Guest sessions cannot purchase.
-- Recipient: one currently ACTIVE seat at the same table; self, another human, or a bot are valid.
+- Recipient: one currently ACTIVE seat at the same table; another human or bot is valid; self-gifting is rejected.
 - Whole-table gifts are **not** V1.
 - Cooldown: **3,000 ms per buyer per table**, enforced authoritatively.
 - Presentation: emoji-based V1; no premium image asset set yet.
@@ -126,7 +126,7 @@ Required order:
 5. Check latest committed purchase for that buyer/table; reject `gift_rate_limited` inside 3,000 ms.
 6. Lock/read the OPEN table and the ACTIVE sender/recipient seat rows in deterministic seat order.
 7. Require sender row to match `buyerUserId`, be human (`is_bot=false`), and capture exact `joined_at`.
-8. Require recipient seat to exist ACTIVE at the same table; self, human and bot targets are accepted; capture exact `user_id` and `joined_at`.
+8. Require recipient seat to exist ACTIVE at the same table; other humans and bots are accepted; reject recipient.user_id === sender.user_id as gift_target_unavailable before postTransaction (zero BURN/receipt); capture exact `user_id` and `joined_at`.
 9. Call the existing `postTransaction()` inside the same SQL transaction:
    - `txType: "BURN"`;
    - `userId: buyerUserId`;
@@ -219,7 +219,7 @@ UI behavior:
 
 - Add one 🎁 Gift Shop control in the existing top-right social rail, visible only to an authenticated seated human account.
 - Small hidden panel/modal with the six accepted gifts and CH prices.
-- Recipient selector is built only from the current authoritative rendered seat list; self, humans and bots allowed.
+- Recipient selector is built only from the current authoritative rendered seat list; other humans and bots allowed; exclude the current user.
 - Disable Send until one valid gift and one valid current recipient are selected.
 - While one purchase is pending, prevent duplicate click; a server rate-limit result keeps UI controlled.
 - On accepted purchase dispatch the existing `chips:tx-complete` DOM event so the global chip badge refreshes; do not add another balance endpoint.
@@ -299,7 +299,7 @@ Add one focused deterministic suite only if no existing suite fits cleanly:
 
 Cover:
 
-- valid human → self/human/bot purchase;
+- valid human → other human/bot purchase; self-target rejects before postTransaction with zero BURN/receipt;
 - server catalog price overrides any absent/client notion of price;
 - stale/inactive recipient rejection;
 - guest/non-human buyer rejection at boundary;
@@ -329,7 +329,7 @@ Because this changes `ws-server/**` and the WS/browser protocol:
 5. Verify installed `RELEASE_SHA == DEPLOY_REF`.
 6. Mandatory authenticated Deploy Preview → WS Preview Stage smoke:
    - open Gift Shop at a normal seated human table;
-   - send each representative cheap/premium gift to human/self/bot;
+   - send each representative cheap/premium gift to other human/bot; confirm self-target rejection;
    - confirm exact CH decrement and balanced BURN ledger;
    - insufficient-CH rejection;
    - immediate duplicate/retry cannot double-burn or double-count;
@@ -452,7 +452,7 @@ Requirements:
 - remove the native `<select id="pokerGiftRecipient">`;
 - render a custom Arcade-styled recipient list from current authoritative `state.seats`;
 - show enough identity to distinguish seats: existing avatar/display name/seat number using already available presentation data;
-- self, human and bot targets remain valid exactly as the existing backend contract allows;
+- other human and bot targets remain valid; own seat is excluded, and backend rejects new self-target purchases;
 - one selected recipient at a time;
 - reconcile recipient buttons by `seatNo + userId` (store both data attributes); stale/removed/replaced occupants disappear on normal `syncGiftShop()` refresh;
 - when the selected occupant changes, clear recipient selection and its uncertain giftRetry; create a new button/avatar, preserving renderSeatAvatar's fresh-element assumption;
@@ -492,7 +492,7 @@ Do not add broad UI/CSS/JSP tests.
 Run existing required/fundamental checks, then perform real Deploy Preview / WS Preview smoke for:
 
 - custom gift picker on desktop/mobile;
-- custom recipient list including self/human/bot;
+- custom recipient list excluding self and allowing other human/bot targets;
 - guest-visible disabled/locked Gift Shop with explanatory tooltip;
 - successful purchase still charges the exact server-authoritative amount;
 - existing cooldown/insufficient-CH/retry behavior unchanged;
@@ -508,8 +508,52 @@ If the correction touches only browser presentation before #1048, WS redeploy is
 - [x] **T012B — Custom recipient picker**
 - [x] **T012C — Guest-visible disabled Gift Shop**
 - [ ] **T012D — Consume #1048 stable three-slot gift HUD** — BLOCKED on #1048
-- [ ] **T013 — Final authenticated Stage smoke after T012A–T012D**
+- [ ] **T013 — Final authenticated Stage smoke after T012A–T012E**
 - [ ] **T014 — Production owner GO/schema apply**
 - [ ] **T015 — Final handoff / merge-ready gate**
 
 Existing T001–T012 implementation work remains valid; these are smoke-discovered corrective tasks, not a rewrite of the gift accounting/WS mechanism.
+
+
+## T012E — Quick Gift per seat + no self-gifting
+
+This is one shared gift purchase flow, not a second shop/payment path.
+
+#### E1 — No self-gifting
+
+Implement immediately in the existing #1047 branch:
+
+- `shared/poker-domain/gift-purchase.mjs::executePokerGiftPurchase()` must reject when the ACTIVE recipient resolves to the same buyer/current sender participation, before `postTransaction()`;
+- use a small stable controlled reason (prefer existing `gift_target_unavailable` if that keeps the public contract minimal; add a new public reason only if genuinely needed);
+- rejection must produce **zero BURN and zero receipt**;
+- `poker/poker-v2.js::giftEligibleSeats()` / recipient reconciliation must exclude the current user's own seat;
+- main Gift Shop must therefore list only other occupied humans/bots;
+- add/adjust only the focused purchase-domain fundamental test for self-gift rejection. Do not add a UI test.
+
+#### E2 — Per-seat Quick Gift
+
+Behavior remains owned by #1042 but visual placement depends on #1048.
+
+After #1048 exposes a stable per-seat quick-action slot:
+
+- show a small 🎁 quick-action button beside every **other** occupied seat for an authenticated seated human buyer;
+- never show the button beside the buyer's own avatar;
+- targets may be another human or bot;
+- guests/signed-out users do not get active per-seat purchase actions;
+- clicking 🎁 opens a small custom six-gift picker anchored in the reserved seat quick-action area;
+- picker shows the same emoji/localized name/server-mirrored CH prices as the main Gift Shop;
+- clicking one gift sends it **immediately** to that seat — no second recipient step and no extra Send confirmation;
+- if target occupant disappears/changes, close the quick picker and invalidate any target-scoped retry identity;
+- pending/cooldown/insufficient-CH/stale-target feedback reuses the existing Gift Shop behavior.
+
+Refactor only as much as necessary so both entry points call one existing purchase helper in `poker/poker-v2.js` (for example one internal function taking `giftKey + targetSeatNo`). Keep exactly one request-id/idempotency/retry path, one `wsClient.sendGift()` path, one `chips:tx-complete` refresh path and one error mapping.
+
+Do not create:
+
+- a second WS command;
+- another gift catalog;
+- a second retry state machine;
+- a separate payment/purchase service;
+- a temporary absolute-position/z-index overlay while #1048 is pending.
+
+Quick Gift placement is blocked on #1048; E1 no-self can and should be completed now.

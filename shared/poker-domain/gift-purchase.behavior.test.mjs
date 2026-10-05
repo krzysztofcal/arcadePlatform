@@ -40,7 +40,7 @@ async function fixture({ funds = 10000, failReceipt = false, ledgerFailure = fal
   const buy = (extra = {}) => executePokerGiftPurchase({ beginSql, postTransaction, tableId, buyerUserId, requestId: 'gift-1', giftKey: 'beer', recipientSeatNo: 2, ...extra });
   return { db, beginSql, buy };
 }
-for (const recipientSeatNo of [1, 2, 3]) test(`human sends to seat ${recipientSeatNo}: exact BURN, receipt and stable replay`, async () => {
+for (const recipientSeatNo of [2, 3]) test(`human sends to seat ${recipientSeatNo}: exact BURN, receipt and stable replay`, async () => {
   const f = await fixture();
   try {
     const first = await f.buy({ recipientSeatNo });
@@ -55,6 +55,20 @@ for (const recipientSeatNo of [1, 2, 3]) test(`human sends to seat ${recipientSe
     await assert.rejects(f.buy({ requestId: 'new' }), { code: 'gift_rate_limited' });
     await f.db.exec("update poker_gift_purchases set created_at = clock_timestamp() - interval '3 seconds'");
     assert.equal((await f.buy({ requestId: 'new' })).ok, true);
+  } finally { await f.db.close(); }
+});
+test('self gift rejects before postTransaction with zero BURN and receipt', async () => {
+  const f = await fixture();
+  let ledgerCalls = 0;
+  try {
+    await assert.rejects(f.buy({ recipientSeatNo: 1, postTransaction: () => {
+      ledgerCalls += 1;
+      assert.fail('self gift must not call postTransaction');
+    } }), { code: 'gift_target_unavailable' });
+    assert.equal(ledgerCalls, 0);
+    assert.equal((await f.db.query('select * from test_burns')).rows.length, 0);
+    assert.equal((await f.db.query('select * from poker_gift_purchases')).rows.length, 0);
+    assert.equal(Number((await f.db.query('select balance from test_balances')).rows[0].balance), 10000);
   } finally { await f.db.close(); }
 });
 for (const options of [{ funds: 0 }, { failReceipt: true }, { ledgerFailure: true }]) test(`atomic rollback ${JSON.stringify(options)}`, async () => {

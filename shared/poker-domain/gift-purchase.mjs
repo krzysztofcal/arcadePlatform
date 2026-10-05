@@ -38,7 +38,7 @@ export async function executePokerGiftPurchase({ beginSql, postTransaction, tabl
     if (!sender) fail('not_seated');
     if (sender.is_bot !== false) fail('invalid_sender');
     const recipient = seats.find((seat) => Number(seat.seat_no) === recipientSeatNo && seat.status === 'ACTIVE');
-    if (!recipient) fail('gift_target_unavailable');
+    if (!recipient || recipient.user_id === sender.user_id) fail('gift_target_unavailable');
     // SQL-formatted participation preserves Postgres microseconds; JS Date would truncate them.
     if (!sender.participation || !recipient.participation) fail('gift_purchase_failed');
     const ledger = await postTransaction({ tx, txType: 'BURN', userId: buyerUserId, createdBy: buyerUserId,
