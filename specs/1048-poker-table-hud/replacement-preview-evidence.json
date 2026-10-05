@@ -1,15 +1,15 @@
 {
   "status": "Replacement implemented; automated evidence is not owner acceptance. Draft/not merge-ready; owner layout smoke and actual authenticated Stage verification pending.",
   "supersedes": "Initial #1049 seat-grid/card-panel and old 20/20 matrix: manual owner smoke FAIL.",
-  "browserSha": "969bcee9e570722edd42deb6ef1a9d4b463ada27",
+  "browserSha": "a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb",
   "preview": "https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html",
   "sourceMatch": {
-    "buildInfoCommitHash": "969bcee9e570722edd42deb6ef1a9d4b463ada27",
-    "jsSha256": "3ae3313d1d413b27d9ff2adb81e768bd9d87cadabe8e881c49d25b61ee74b788",
-    "cssSha256": "85b1a879c06f6259c91c9575af63b766261afbee5a85be81ed27aaadd4912cc9",
+    "buildInfoCommitHash": "a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb",
+    "jsSha256": "da6a6360c3e327e7deedb0d28ffb86a0eb2c8f179c6c49c389255dca962286c8",
+    "cssSha256": "97caa75ca1cd3d5ee702ba2a64de0744f0a2787e4975021929384d87b9c3aee4",
     "remoteJsCssMatchCheckout": true
   },
-  "method": "Real remote Deploy Preview, source-checked browser closure hook injects controlled authoritative-state fixtures and ChipsClient replies. Gift/quick contents are probe-only placeholders. Real guest sessions use unmodified deployed runtime. Not a real signed-in Stage session. External probe remains outside repository test suite.",
+  "method": "Real remote Deploy Preview, source-checked browser closure hook with all scene images loaded injects controlled authoritative-state fixtures and ChipsClient replies. Gift/quick contents are probe-only placeholders. Real guest sessions use unmodified deployed runtime. Netlify collaboration toolbar script is excluded from product screenshots/probe. Not a real signed-in Stage session. External probe remains outside repository test suite.",
   "checks": [
     "document scrollWidth <= clientWidth",
     "document scrollHeight <= clientHeight",
@@ -21,7 +21,7 @@
     "hero best-hand renders exactly five cards when available"
   ],
   "criticalNodes": "Avatar, name/status/seat marker, gift/quick anchors, action, settlement badge/summary, best hand, reaction/context action, individual rotated hero cards, opponent cards, actual chip images and stack labels, dealer, pot and community cards. Chip-on-chip overlap inside graphical stacks is intentional. Header/action controls checked separately. Decorative shadows/ripples are not collision boxes.",
-  "externalProbeSha256": "afd1a3faf1fd43b65c598a942d2cdb500c5df7388f5457cf346f7d71fb46faea",
+  "externalProbeSha256": "86bb5056abcafcecc794002c5a4370e952b580a2310a84c43518adac8c7d6524",
   "reducedMotionMatrix": [
     {
       "name": "android",
@@ -513,7 +513,7 @@
         "clientHeight": 844
       },
       "collisions": 0,
-      "criticalElementsChecked": 155,
+      "criticalElementsChecked": 199,
       "heroBestHandCards": 5,
       "equalGiftRadius": true,
       "scene": {
@@ -1043,7 +1043,7 @@
         "clientHeight": 640
       },
       "collisions": 0,
-      "criticalElementsChecked": 155,
+      "criticalElementsChecked": 199,
       "heroBestHandCards": 5,
       "equalGiftRadius": true,
       "scene": {
@@ -1573,7 +1573,7 @@
         "clientHeight": 390
       },
       "collisions": 0,
-      "criticalElementsChecked": 155,
+      "criticalElementsChecked": 199,
       "heroBestHandCards": 5,
       "equalGiftRadius": true,
       "scene": {
@@ -2103,7 +2103,7 @@
         "clientHeight": 1000
       },
       "collisions": 0,
-      "criticalElementsChecked": 155,
+      "criticalElementsChecked": 199,
       "heroBestHandCards": 5,
       "equalGiftRadius": true,
       "scene": {
@@ -2382,7 +2382,7 @@
         },
         "occupied": 4,
         "balanceHidden": true,
-        "build": "969bcee9e570722edd42deb6ef1a9d4b463ada27"
+        "build": "a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb"
       },
       "frames": [
         "helloAck",
@@ -2416,7 +2416,7 @@
         },
         "occupied": 4,
         "balanceHidden": true,
-        "build": "969bcee9e570722edd42deb6ef1a9d4b463ada27"
+        "build": "a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb"
       },
       "frames": [
         "helloAck",
@@ -2450,7 +2450,7 @@
         },
         "occupied": 4,
         "balanceHidden": true,
-        "build": "969bcee9e570722edd42deb6ef1a9d4b463ada27"
+        "build": "a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb"
       },
       "frames": [
         "helloAck",
@@ -2484,7 +2484,7 @@
         },
         "occupied": 4,
         "balanceHidden": true,
-        "build": "969bcee9e570722edd42deb6ef1a9d4b463ada27"
+        "build": "a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb"
       },
       "frames": [
         "helloAck",
@@ -2497,7 +2497,7 @@
     }
   ],
   "wallet": {
-    "browserSha": "969bcee9e570722edd42deb6ef1a9d4b463ada27",
+    "browserSha": "a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb",
     "method": "Real Deploy Preview; controlled signed-in state and ChipsClient responses. Canonical document.dispatchEvent, no window bridge. Not real authenticated Stage verification.",
     "records": [
       {

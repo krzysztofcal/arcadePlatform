@@ -259,6 +259,6 @@ The earlier PR #1049 seat-grid/card-panel implementation and its 20/20 preview m
 
 ## Replacement implementation handoff
 
-Current browser runtime: 969bcee9e570722edd42deb6ef1a9d4b463ada27. Existing draft #1049 now implements the owner-directed Poker V2 anchor layout, retains accepted CH HUD and provides three circular gift anchors plus one quick-action anchor without gift behavior. Live #1048 evidence/status and PR description updated. See review.md, replacement-preview-evidence.json and evidence/ screenshots. Old seat-grid/card-panel and 20/20 evidence remain explicitly superseded by owner smoke FAIL.
+Current browser runtime: a19e4e272a1fa9313d90e8d3554cf82bef1bf6bb. Existing draft #1049 now implements the owner-directed Poker V2 anchor layout, retains accepted CH HUD and provides three circular gift anchors plus one quick-action anchor without gift behavior. Live #1048 evidence/status and PR description updated. See review.md, replacement-preview-evidence.json and evidence/ screenshots. Old seat-grid/card-panel and 20/20 evidence remain explicitly superseded by owner smoke FAIL.
 
 Required local checks and focused existing fundamental suite (123/123) passed. Real preview: 40 reduced-motion + four normal-motion geometry cases, both document scroll inequalities, zero detected critical collisions/out-of-scene clipping; four actual guest sessions and controlled signed-in wallet event/pulse checks. Actual authenticated Stage and owner smoke of this replacement remain pending. No WS deploy, Production mutation or merge. Not merge-ready.
