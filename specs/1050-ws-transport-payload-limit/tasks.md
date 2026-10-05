@@ -7,4 +7,4 @@
 - [x] T005 Run all required repo checks (`npm run check:all`, `npm run test:quick`, WS behavior tests).
 - [x] T006 Perform exact-SHA WS Preview Deploy and narrow runtime smoke test.
 - [x] T007 Review whole diff, simplify, and record evidence.
-- [ ] T008 Create draft PR linked to #1050 with root cause, fix scope, test evidence, breaking impact, and Preview smoke results.
+- [x] T008 Create draft PR linked to #1050 with root cause, fix scope, test evidence, breaking impact, and Preview smoke results ([PR #1051](https://github.com/krzysztofcal/arcadePlatform/pull/1051)).
