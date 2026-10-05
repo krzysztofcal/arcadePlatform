@@ -49,7 +49,7 @@ assert.match(tableV2Html, /id="pokerV2AutoRebuyBalanceToast"/, 'poker table v2 s
 assert.match(tableV2Html, /id="pokerV2AutoRebuyConfirmModal"/, 'poker table v2 should render an auto-rebuy confirmation modal');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyConfirmYes"[^>]*>Confirm</, 'auto-rebuy confirmation should provide a Confirm action');
 assert.match(tableV2Html, /id="pokerV2AutoRebuyConfirmCancel"[^>]*>Cancel</, 'auto-rebuy confirmation should provide a Cancel action');
-assert.doesNotMatch(tableV2Html, /(?:topbar\.js|js\/chips\/client\.js)/, 'poker table v2 should keep the topbar and chips client out of its runtime');
+assert.doesNotMatch(tableV2Html, /topbar\.js/, 'poker table v2 should keep the topbar out of its runtime');
 assert.match(indexHtml, /Create account or sign in/, 'poker lobby signed-out CTA should not promise the welcome bonus before eligibility is known');
 assert.match(indexHtml, /id="pokerWelcomeBonusBanner"/, 'poker lobby should render an eligible-user welcome bonus banner');
 assert.match(indexHtml, /Claim bonus/, 'poker lobby welcome bonus banner should include a claim CTA');
@@ -65,12 +65,10 @@ assert.match(tableV2Html, /id="pokerReactionLayer"/, 'poker table v2 should rend
 assert.equal(tableV2Html.indexOf('id="pokerDealerChip"') < tableV2Html.indexOf('class="poker-center-layer"'), true, 'dealer chip should not live inside the center layer');
 assert.match(tableV2Css, /\.poker-menu-panel\[hidden\]\{display:none;\}/, 'poker table v2 menu should hard-hide when hidden attribute is present');
 assert.match(tableV2Css, /\.poker-closed-table-modal\{z-index:65;\}/, 'poker table v2 should style the closed-table redirect notice');
-assert.match(tableV2Css, /\.poker-action-bar\{position:fixed; right:max\(10px, env\(safe-area-inset-right\)\); bottom:max\(10px, env\(safe-area-inset-bottom\)\); width:min\(33vw, 196px\); display:grid; grid-template-columns:40px minmax\(0, 1fr\);/, 'poker table v2 action rail should dock to the bottom-right with a left-side vertical amount slider');
 assert.match(tableV2Css, /\.poker-social-settings\{[^}]*right:calc\(env\(safe-area-inset-right\) \+ 8px\)[^}]*max-height:min\(420px,/, 'table settings should use a responsive viewport-safe popup surface');
 assert.match(tableV2Css, /\.poker-auto-rebuy-indicator\{/, 'poker table v2 should style the compact auto-rebuy indicator');
 assert.match(tableV2Css, /\.poker-auto-rebuy-toast--balance\{position:fixed;/, 'poker table v2 should style the table-side auto-rebuy toast');
 assert.match(tableV2Css, /\.poker-reaction-layer\{position:absolute; inset:0; z-index:100; pointer-events:none;\}/, 'reaction bubbles should render in a non-interactive layer above scene effects');
-assert.match(tableV2Css, /\.poker-seat-target-reaction\{[^}]*left:-52px;top:-38px;z-index:102;/, 'targeted reaction control should sit above the winner avatar and settlement overlays');
 assert.match(tableV2Css, /\.poker-seat-target-reaction-flyout\{[^}]*z-index:103;/, 'targeted reaction flight should remain above the other scene layers');
 assert.doesNotMatch(tableV2Css, /\.poker-seat--hero \.poker-seat-avatar\{[^}]*border-color:/, 'hero avatar should not keep an always-on active ring');
 assert.match(tableV2Css, /\.poker-seat--hero\.poker-seat--active \.poker-seat-avatar\{border-color:rgba\(84,245,152,0\.88\);/, 'hero avatar should turn green only on the active turn');

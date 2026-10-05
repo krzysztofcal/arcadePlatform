@@ -198,6 +198,9 @@
   var renderedSeatAnchors = {};
   var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
+  var renderedSeatHud = {};
+  var accountHudIdentity = null;
+  var accountHudGeneration = 0;
   var renderedSeatBetAnchors = {};
   var renderedSeatStackAnchors = {};
   var loadedSeatAvatarUrls = Object.create(null);
@@ -4079,34 +4082,33 @@
     };
   }
 
+  function seatHudAnchor(node){
+    if (!node || !els.scene) return null;
+    var scene = els.scene.getBoundingClientRect();
+    var rect = node.getBoundingClientRect();
+    if (!scene.width || !scene.height) return null;
+    return { x: (rect.left + rect.width / 2 - scene.left) / scene.width * 100, y: (rect.top + rect.height / 2 - scene.top) / scene.height * 100 };
+  }
+
   function renderSeatChips(){
-    if (!els.seatChipLayer) return;
-    els.seatChipLayer.innerHTML = '';
     renderedSeatBetAnchors = {};
     renderedSeatStackAnchors = {};
     state.seats.forEach(function(seat){
-      if (!seat || !Number.isInteger(seat.seatNo) || !seat.userId) return;
-      var anchor = renderedSeatAnchors[seat.seatNo];
-      var slot = renderedSeatSlots[seat.seatNo];
-      if (!anchor || !Number.isInteger(slot)) return;
-      var chipAnchor = getSeatChipAnchor(anchor, seat);
-      renderedSeatBetAnchors[seat.seatNo] = chipAnchor.bet;
-      renderedSeatStackAnchors[seat.seatNo] = chipAnchor.stack;
+      var hud = seat && renderedSeatHud[seat.seatNo];
+      if (!hud || !seat.userId) return;
+      hud.chips.innerHTML = '';
+      var stack = document.createElement('div');
+      stack.className = 'poker-seat-stack';
+      var amount = resolveStack(seat.userId);
+      stack.textContent = amount == null ? 'Stack —' : formatNumber(amount) + ' CH';
+      hud.chips.appendChild(stack);
+      var bet = document.createElement('div');
+      bet.className = 'poker-seat-committed';
       var committed = Math.max(0, Number(seatCommittedByUserId[seat.userId]) || 0);
-      if (committed > 0){
-        var betStack = createChipStackVisual(committed, 'seat-bet');
-        betStack.style.left = chipAnchor.bet.x + '%';
-        betStack.style.top = chipAnchor.bet.y + '%';
-        els.seatChipLayer.appendChild(betStack);
-      }
-      var stackAmount = resolveStack(seat.userId);
-      if (stackAmount != null){
-        var seatStack = createChipStackVisual(stackAmount, isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack');
-        appendSeatStackAmountLabel(seatStack, stackAmount);
-        seatStack.style.left = chipAnchor.stack.x + '%';
-        seatStack.style.top = chipAnchor.stack.y + '%';
-        els.seatChipLayer.appendChild(seatStack);
-      }
+      bet.textContent = committed > 0 ? 'Bet ' + formatNumber(committed) : '';
+      hud.chips.appendChild(bet);
+      renderedSeatStackAnchors[seat.seatNo] = seatHudAnchor(stack);
+      renderedSeatBetAnchors[seat.seatNo] = seatHudAnchor(bet);
     });
   }
 
@@ -4280,6 +4282,7 @@
     renderedSeatAnchors = {};
     renderedSeatSlots = {};
     renderedSeatAvatars = {};
+    renderedSeatHud = {};
     renderedSeatBetAnchors = {};
     renderedSeatStackAnchors = {};
     var offset = getSeatNumberingOffset();
@@ -4301,10 +4304,6 @@
       var waitingNextHand = !!(seat && String(seat.status || '').toUpperCase() === 'WAITING_NEXT_HAND');
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
       var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
-      if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
-      else if (rotatedIndex === 1 && state.maxSeats >= 6) anchor = { x: 80, y: 29 };
-      else if (rotatedIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
-      else if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')
@@ -4314,8 +4313,30 @@
         + (waitingNextHand ? ' poker-seat--waiting-next-hand' : '')
         + (!seat ? ' poker-seat--empty' : '');
       article.dataset.pokerSlot = String(rotatedIndex);
-      article.style.left = anchor.x + '%';
-      article.style.top = anchor.y + '%';
+      article.dataset.seatNo = String(seat ? seat.seatNo : i + offset);
+      article.dataset.userId = seat && seat.userId || '';
+      var hud = {};
+      ['identity', 'portrait', 'cards', 'chips', 'presentation', 'social', 'gifts'].forEach(function(area){
+        var node = document.createElement('div');
+        node.className = 'poker-seat-hud-' + area;
+        node.dataset.seatHud = area;
+        hud[area] = node;
+        article.appendChild(node);
+      });
+      hud.dealer = document.createElement('div');
+      hud.dealer.className = 'poker-seat-hud-dealer';
+      hud.quickAction = document.createElement('div');
+      hud.quickAction.className = 'poker-seat-hud-quick-action';
+      hud.quickAction.setAttribute('data-poker-quick-action-slot', '');
+      hud.portrait.appendChild(hud.dealer);
+      hud.gifts.setAttribute('data-poker-gift-slots', '');
+      for (var giftIndex = 0; giftIndex < 3; giftIndex++){
+        var giftSlot = document.createElement('span');
+        giftSlot.className = 'poker-seat-gift-slot';
+        giftSlot.setAttribute('data-poker-gift-slot', String(giftIndex));
+        hud.gifts.appendChild(giftSlot);
+      }
+      if (seat) renderedSeatHud[seat.seatNo] = hud;
       if (seat && Number.isInteger(seat.seatNo)) {
         renderedSeatAnchors[seat.seatNo] = anchor;
         renderedSeatSlots[seat.seatNo] = rotatedIndex;
@@ -4373,25 +4394,20 @@
       name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
 
       var status = document.createElement('div');
-      var statusPosition = getSeatStatusBadgePosition(rotatedIndex, hero);
       status.className = 'poker-seat-status';
       status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
       if (waitingNextHand) status.textContent = 'NEXT HAND';
-      status.style.left = statusPosition.left;
-      status.style.top = statusPosition.top;
 
-      article.appendChild(avatar);
-      if (autoRebuyIndicator) article.appendChild(autoRebuyIndicator);
-      if (autoRebuyAvatarToast) article.appendChild(autoRebuyAvatarToast);
-      if (seatNumber) article.appendChild(seatNumber);
+      hud.portrait.appendChild(avatar);
+      hud.portrait.appendChild(hud.quickAction);
+      if (autoRebuyIndicator) hud.identity.appendChild(autoRebuyIndicator);
+      if (autoRebuyAvatarToast) hud.presentation.appendChild(autoRebuyAvatarToast);
+      if (seatNumber) hud.identity.appendChild(seatNumber);
       if (seat && lastAction){
         var actionBadge = document.createElement('div');
-        var badgePosition = getSeatActionBadgePosition(rotatedIndex, hero);
         actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + lastAction.replace(/_/g, '-');
         actionBadge.textContent = LAST_ACTION_LABEL[lastAction] || lastAction;
-        actionBadge.style.left = badgePosition.left;
-        actionBadge.style.top = badgePosition.top;
-        article.appendChild(actionBadge);
+        hud.presentation.appendChild(actionBadge);
       }
       var seatSettlementAwards = seat ? getSeatSettlementAwards(seat.userId) : [];
       var seatHasShowdownSummary = !!(seat && shouldShowShowdownHandSummary(seat) && getWinnerHandSummary(seat));
@@ -4406,11 +4422,11 @@
           settlementBadge.appendChild(awardRow);
         });
         appendShowdownHandSummary(settlementBadge, seat);
-        article.appendChild(settlementBadge);
+        hud.presentation.appendChild(settlementBadge);
       }
-      if (cards.children.length) article.appendChild(cards);
-      article.appendChild(name);
-      article.appendChild(status);
+      if (cards.children.length) hud.cards.appendChild(cards);
+      hud.identity.appendChild(name);
+      hud.identity.appendChild(status);
       if (hero && heroBestHand){
         var bestHand = document.createElement('div');
         bestHand.className = 'poker-seat-best-hand';
@@ -4425,7 +4441,7 @@
           chip.textContent = normalized ? (normalized.r + SUIT_SYMBOLS[normalized.s]) : '?';
           bestHand.appendChild(chip);
         });
-        article.appendChild(bestHand);
+        hud.presentation.appendChild(bestHand);
       }
       els.seatLayer.appendChild(article);
     }
@@ -4475,10 +4491,10 @@
       bubble.setAttribute('role', 'status');
       anchorNode.appendChild(bubble);
     }
-    if (!anchorNode.parentNode) els.reactionLayer.appendChild(anchorNode);
-    anchorNode.className = 'poker-reaction-anchor' + getReactionBubblePlacementClass(seatNo);
-    anchorNode.style.left = anchor.x + '%';
-    anchorNode.style.top = anchor.y + '%';
+    var hud = renderedSeatHud[seatNo];
+    if (!hud) return;
+    hud.social.appendChild(anchorNode);
+    anchorNode.className = 'poker-seat-social-reaction';
     var bubbleNode = anchorNode.children && anchorNode.children[0];
     if (!bubbleNode){
       clearReactionBubble(seatNo);
@@ -4520,8 +4536,8 @@
     Object.keys(targetedReactionEffectsById).forEach(function(effectId){
       var effect = targetedReactionEffectsById[effectId];
       var entry = effect ? findReactionEntry(effect.reactionKey) : null;
-      var senderAnchor = effect && renderedSeatAnchors[effect.senderSeatNo];
-      var targetAnchor = effect && renderedSeatAnchors[effect.targetSeatNo];
+      var senderAnchor = effect && seatHudAnchor(renderedSeatHud[effect.senderSeatNo] && renderedSeatHud[effect.senderSeatNo].social);
+      var targetAnchor = effect && seatHudAnchor(renderedSeatHud[effect.targetSeatNo] && renderedSeatHud[effect.targetSeatNo].social);
       if (!effect || !entry || !senderAnchor || !targetAnchor){
         clearTargetedReactionEffect(effectId);
         return;
@@ -4566,9 +4582,7 @@
       var anchor = renderedSeatAnchors[offer.targetSeatNo];
       if (!anchor) return;
       var anchorNode = document.createElement('div');
-      anchorNode.className = 'poker-reaction-anchor';
-      anchorNode.style.left = anchor.x + '%';
-      anchorNode.style.top = anchor.y + '%';
+      anchorNode.className = 'poker-seat-social-reaction';
       var button = document.createElement('button');
       button.type = 'button';
       button.className = 'poker-seat-target-reaction';
@@ -4581,7 +4595,9 @@
         sendTargetedReaction(offer.targetSeatNo, offer.handId);
       });
       anchorNode.appendChild(button);
-      appendReactionRenderNode(anchorNode);
+      var hud = renderedSeatHud[offer.targetSeatNo];
+      if (hud) hud.social.appendChild(anchorNode);
+      reactionRenderNodes.push(anchorNode);
     });
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNoKey){
       var seatNo = Number(seatNoKey);
@@ -4635,105 +4651,17 @@
 
   function positionHeroCards(){
     if (!els.heroCards) return;
-    if (els.heroCards.classList && typeof els.heroCards.classList.remove === 'function') els.heroCards.classList.remove('poker-hero-cards--docked');
-    els.heroCards.style.removeProperty('left');
-    els.heroCards.style.removeProperty('top');
-    els.heroCards.style.removeProperty('bottom');
-    var heroSeat = deriveCurrentSeat();
-    if (!heroSeat || !Number.isInteger(heroSeat.seatNo)){
-      return;
-    }
-    var anchor = getSeatAvatarAnchorFromRect(heroSeat.seatNo);
-    if (!anchor || anchor.sceneWidth <= 0 || anchor.sceneHeight <= 0){
-      return;
-    }
-    var cardWidthPx = anchor.sceneWidth >= 470 ? 50 : 46;
-    var cardHeightPx = anchor.sceneWidth >= 470 ? 68 : 63;
-    var cardsWidth = ((cardWidthPx * 2) + 9) / anchor.sceneWidth * 100;
-    var cardsHalfHeight = (cardHeightPx / anchor.sceneHeight * 100) / 2;
-    var cardHalfHeightOffsetX = (cardHeightPx / 2) / anchor.sceneWidth * 100;
-    var cardHalfHeightOffsetY = (cardHeightPx / 2) / anchor.sceneHeight * 100;
-    var gapX = Math.max(10, Math.round(anchor.sceneWidth * 0.02)) / anchor.sceneWidth * 100;
-    var gapY = Math.max(6, Math.round(anchor.sceneHeight * 0.01)) / anchor.sceneHeight * 100;
-    var left = clampNumber(anchor.x + anchor.radiusX + gapX - cardHalfHeightOffsetX, 1.5, 98.5 - cardsWidth);
-    var centerY = clampNumber(anchor.y + (anchor.radiusY * 0.42) + gapY + cardHalfHeightOffsetY, cardsHalfHeight + 1.5, 100);
-    if (els.heroCards.classList && typeof els.heroCards.classList.add === 'function') els.heroCards.classList.add('poker-hero-cards--docked');
-    els.heroCards.style.left = formatScenePercent(left);
-    els.heroCards.style.top = formatScenePercent(centerY);
-    els.heroCards.style.bottom = 'auto';
+    var seat = deriveCurrentSeat();
+    var hud = seat && renderedSeatHud[seat.seatNo];
+    if (hud) hud.cards.appendChild(els.heroCards);
+    else els.heroCards.hidden = true;
   }
 
   function renderDealerChip(){
     if (!els.dealerChip) return;
-    var targetSeatNo = Number.isInteger(state.dealerSeat) ? state.dealerSeat : null;
-    if (!Number.isInteger(targetSeatNo)){
-      els.dealerChip.hidden = true;
-      return;
-    }
-    var heroSeat = deriveCurrentSeat();
-    var heroHasDealerChip = !!(heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === targetSeatNo);
-    var scene = els.dealerChip.parentElement || null;
-    var avatarEl = renderedSeatAvatars[targetSeatNo] || null;
-    if (scene && avatarEl && typeof scene.getBoundingClientRect === 'function' && typeof avatarEl.getBoundingClientRect === 'function'){
-      var sceneRect = scene.getBoundingClientRect();
-      var avatarRect = avatarEl.getBoundingClientRect();
-      var chipRect = els.dealerChip.getBoundingClientRect();
-      if (sceneRect.width > 0 && sceneRect.height > 0 && avatarRect.width > 0 && avatarRect.height > 0){
-        var avatarCenterX = (avatarRect.left - sceneRect.left) + avatarRect.width / 2;
-        var avatarCenterY = (avatarRect.top - sceneRect.top) + avatarRect.height / 2;
-        var sceneCenterX = sceneRect.width / 2;
-        var sceneCenterY = sceneRect.height / 2;
-        var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
-        var chipRadius = Math.min(chipRect.width || 34, chipRect.height || 34) / 2;
-        if (heroHasDealerChip){
-          els.dealerChip.hidden = false;
-          els.dealerChip.style.left = Math.round(avatarCenterX + avatarRadius + chipRadius - 2) + 'px';
-          els.dealerChip.style.top = Math.round(avatarCenterY) + 'px';
-          return;
-        }
-        var deltaX = sceneCenterX - avatarCenterX;
-        var deltaY = sceneCenterY - avatarCenterY;
-        var magnitude = Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
-        if (magnitude > 0){
-          var unitX = deltaX / magnitude;
-          var unitY = deltaY / magnitude;
-          var contactDistance = avatarRadius + chipRadius - 2;
-          var chipLeftPx = avatarCenterX + (unitX * contactDistance);
-          var chipTopPx = avatarCenterY + (unitY * contactDistance);
-          els.dealerChip.hidden = false;
-          els.dealerChip.style.left = Math.round(chipLeftPx) + 'px';
-          els.dealerChip.style.top = Math.round(chipTopPx) + 'px';
-          return;
-        }
-      }
-    }
-    var anchor = renderedSeatAnchors[targetSeatNo] || null;
-    var slotIndex = Number.isInteger(renderedSeatSlots[targetSeatNo]) ? renderedSeatSlots[targetSeatNo] : null;
-    if (!anchor || slotIndex == null){
-      var offset = getSeatNumberingOffset();
-      var index = Math.max(0, targetSeatNo - offset);
-      slotIndex = rotateSeatIndex(index, Math.max(state.maxSeats, 1));
-      anchor = getSeatAnchor(slotIndex, Math.max(state.maxSeats, 1));
-      if (slotIndex === 1 && state.maxSeats >= 6) anchor = { x: 80, y: 29 };
-      else if (slotIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
-      else if (slotIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
-      var heroSeat = deriveCurrentSeat();
-      if (heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === targetSeatNo && state.maxSeats >= 4){
-        anchor = { x: 34, y: 91 };
-        slotIndex = 3;
-      }
-    }
-    var chipOffset = { x: 0, y: 7 };
-    if (heroHasDealerChip) chipOffset = { x: 20, y: 0 };
-    else if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
-    else if (slotIndex === 1) chipOffset = { x: -8, y: 8 };
-    else if (slotIndex === 2) chipOffset = { x: -8, y: 7 };
-    else if (slotIndex === 3) chipOffset = { x: -32, y: 3 };
-    else if (slotIndex === 4) chipOffset = { x: 8, y: 7 };
-    else if (slotIndex === 5) chipOffset = { x: 8, y: 8 };
-    els.dealerChip.hidden = false;
-    els.dealerChip.style.left = (anchor.x + chipOffset.x) + '%';
-    els.dealerChip.style.top = (anchor.y + chipOffset.y) + '%';
+    var hud = renderedSeatHud[state.dealerSeat];
+    els.dealerChip.hidden = !hud;
+    if (hud) hud.dealer.appendChild(els.dealerChip);
   }
 
   function isWsReady(){
@@ -4808,6 +4736,58 @@
     return statusText;
   }
 
+  function sumOtherTableStacks(tables, tableId){
+    if (!Array.isArray(tables)) return null;
+    var total = 0;
+    for (var i = 0; i < tables.length; i++){
+      var table = tables[i];
+      if (!table || !table.tableId) return null;
+      if (table.tableId === tableId) continue;
+      if (!Number.isSafeInteger(table.stack) || table.stack < 0) return null;
+      total += table.stack;
+      if (!Number.isSafeInteger(total)) return null;
+    }
+    return total;
+  }
+
+  function accountHudContext(){
+    return !isGuestMode && state.mode === 'live' && isSignedIn() ? state.currentUserId + ':' + state.tableId : null;
+  }
+
+  function syncAccountHud(){
+    if (!els.accountHud) return;
+    var identity = accountHudContext();
+    els.accountHud.hidden = !identity;
+    if (identity !== accountHudIdentity){
+      accountHudIdentity = identity;
+      accountHudGeneration++;
+      els.accountHud.textContent = '';
+      if (identity) refreshAccountHud();
+    }
+  }
+
+  async function refreshAccountHud(){
+    syncAccountHud();
+    var identity = accountHudContext();
+    if (!identity || !els.accountHud) return;
+    var generation = ++accountHudGeneration;
+    els.accountHud.textContent = 'Wallet … CH · Other tables … CH';
+    els.accountHud.setAttribute('aria-busy', 'true');
+    var wallet = null;
+    var other = null;
+    try {
+      var client = window.ChipsClient;
+      var results = await Promise.allSettled([client.fetchBalance(), client.fetchPokerProjection()]);
+      var balance = results[0].status === 'fulfilled' && results[0].value;
+      if (balance && Number.isSafeInteger(balance.balance) && balance.balance >= 0) wallet = balance.balance;
+      if (results[1].status === 'fulfilled') other = sumOtherTableStacks(results[1].value && results[1].value.tables, state.tableId);
+    } catch (_err){}
+    if (generation !== accountHudGeneration || identity !== accountHudContext()) return;
+    els.accountHud.textContent = 'Wallet ' + (wallet == null ? '—' : formatNumber(wallet)) + ' CH · Other tables ' + (other == null ? '—' : formatNumber(other)) + ' CH';
+    els.accountHud.title = wallet == null || other == null ? 'Account balance unavailable' : '';
+    els.accountHud.setAttribute('aria-busy', 'false');
+  }
+
   function renderInfoPanel(){
     if (els.liveStatus) els.liveStatus.textContent = resolveLiveBannerStatus();
     if (els.tableMeta) {
@@ -4834,7 +4814,7 @@
         els.turnText.textContent = 'Waiting for action';
       }
     }
-    if (els.xpBadge) els.xpBadge.hidden = !!isGuestMode;
+    syncAccountHud();
     renderRebuyPanel();
   }
 
@@ -5642,7 +5622,7 @@
   }
 
   function normalizeLeaveDestination(destination){
-    return destination === '/xp.html' ? '/xp.html' : '/poker/';
+    return '/poker/';
   }
 
   function navigateToDestination(destination){
@@ -5776,7 +5756,6 @@
       });
     }
     bindDestinationLink(els.lobbyLink, '/poker/');
-    bindDestinationLink(els.xpBadge, '/xp.html');
     function toggleSocialSettings(trigger){
       var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
       closeMenu();
@@ -5967,7 +5946,7 @@
     if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
     if (typeof document.querySelector === 'function') els.centerLayer = document.querySelector('.poker-center-layer');
     if (!els.scene) els.scene = els.screen;
-    els.xpBadge = document.getElementById('xpBadge');
+    els.accountHud = document.getElementById('pokerAccountHud');
     els.autoRebuyBalanceToast = document.getElementById('pokerV2AutoRebuyBalanceToast');
     els.bootSplash = document.getElementById('pokerBootSplash');
     els.menuToggle = document.getElementById('pokerMenuToggle');
@@ -6534,6 +6513,7 @@
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches) clearCelebration(); });
     renderSocialPreferences();
+    window.addEventListener('chips:tx-complete', refreshAccountHud);
     document.addEventListener('langchange', function(){ buildReactionMenu(); renderSocialPreferences(); render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
     if (!tableId){

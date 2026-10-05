@@ -33,8 +33,8 @@ function makeElement(id){
     parentNode: null,
     attributes: {},
     _listeners: {},
-    appendChild(child){ child.parentNode = this; this.children.push(child); return child; },
-    removeChild(child){ this.children = this.children.filter((it) => it !== child); },
+    appendChild(child){ if (child.parentNode) child.parentNode.removeChild(child); child.parentNode = this; this.children.push(child); return child; },
+    removeChild(child){ this.children = this.children.filter((it) => it !== child); child.parentNode = null; },
     contains(target){
       if (target === this) return true;
       return this.children.includes(target);
@@ -105,7 +105,7 @@ function createHarness(options = {}){
   const source = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.js'), 'utf8');
   const elements = {};
   [
-    'xpBadge',
+    'pokerAccountHud',
     'pokerV2AutoRebuyBalanceToast',
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink', 'pokerMenuLeave', 'pokerMenuSettings', 'pokerMenuSignIn', 'pokerMenuGuestInfo',
     'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
@@ -131,7 +131,6 @@ function createHarness(options = {}){
     elements[id] = makeElement(id);
   });
   elements.pokerLobbyLink.href = '/poker/';
-  elements.xpBadge.href = '/xp.html';
   elements.pokerV2SeatNo.value = '1';
   elements.pokerV2BuyIn.value = '100';
   elements.pokerV2AmountInput.value = '20';
@@ -458,18 +457,24 @@ function sendInitialTableSnapshot(harness, options = {}){
   harness.getCreateOptions().onSnapshot({ kind: 'stateSnapshot', payload });
 }
 
+function descendants(node){
+  return (node?.children || []).flatMap((child) => [child, ...descendants(child)]);
+}
+
+function reactionAnchors(harness){
+  return [...harness.elements.pokerReactionLayer.children, ...descendants(harness.elements.pokerSeatLayer).filter((node) => node.className === 'poker-seat-social-reaction')];
+}
+
 function findSeatByLabel(harness, label){
-  return harness.elements.pokerSeatLayer.children.find((node) => (
-    node.children || []
-  ).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
+  return harness.elements.pokerSeatLayer.children.find((node) => descendants(node).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
 }
 
 function findSeatChild(seatNode, className){
-  return (seatNode.children || []).find((child) => child.className === className);
+  return descendants(seatNode).find((child) => child.className === className);
 }
 
 function findChildByClass(node, className){
-  return (node.children || []).find((child) => String(child.className || '').split(/\s+/).includes(className));
+  return descendants(node).find((child) => String(child.className || '').split(/\s+/).includes(className));
 }
 
 function reactionHistoryRows(harness){
@@ -508,7 +513,7 @@ async function bootReactionHistoryHarness(options = {}){
 }
 
 function reactionBubbleTexts(harness){
-  return harness.elements.pokerReactionLayer.children
+  return reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))
     .map((child) => child.textContent);
@@ -569,7 +574,6 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerSeatLayer.children.length, 6, 'v2 should render all seats for the table');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 4, 'v2 should render live board cards');
   assert.equal(harness.elements.pokerHeroCards.children.length, 2, 'v2 should render live hole cards');
-  assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'v2 should dock hero hole cards to the hero avatar');
   assert.equal(harness.elements.pokerPotPill.textContent, 'Pot 42');
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false, 'v2 should surface the primary turn action');
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Check', 'v2 should keep check compact when there is nothing to call');
@@ -582,18 +586,11 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(findSeatChild(occupiedSeatTwo, 'poker-seat-number').textContent, 'S2', 'occupied seats should render their authoritative seat number');
   const emptySeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--empty/.test(node.className));
   assert.equal(findSeatChild(emptySeat, 'poker-seat-number'), undefined, 'empty seats should not render occupied-player seat badges');
-  assert.equal(heroSeat.style.left, '34%', 'hero seat should be shifted left to avoid the action rail');
-  assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
-  assert.equal(harness.elements.pokerHeroCards.style.left, '42.3%', 'hero hole cards should shift left by half a card height toward the avatar');
-  assert.ok(parseFloat(harness.elements.pokerHeroCards.style.top) >= 100, 'hero hole cards should sit lower by roughly half a card height, even if they partially overlap the avatar or scene edge');
-  assert.equal(harness.elements.pokerHeroCards.style.bottom, 'auto', 'hero hole cards should not fall back to the global bottom anchor when the hero seat is present');
-  const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
+  const seatCards = descendants(heroSeat).find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
-  const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
+  const bestHand = findSeatChild(heroSeat, 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '24%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '74%');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -1296,7 +1293,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   });
   await harness.flush();
 
-  const targetButtons = harness.elements.pokerReactionLayer.children
+  const targetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 2);
@@ -1305,7 +1302,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   await harness.flush();
   assert.deepEqual(harness.targetedReactionPayloads, [{ targetSeatNo: 2, handId: 'hand-1' }]);
 
-  const remainingTargetButtons = harness.elements.pokerReactionLayer.children
+  const remainingTargetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(remainingTargetButtons.length, 1);
@@ -1319,7 +1316,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
 
   ws.onReaction({ payload: { seatNo: 1, targetSeatNo: 2, reactionKey: 'nice_hand' } });
   await harness.flush();
-  const targetedEffectAnchor = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  const targetedEffectAnchor = reactionAnchors(harness).find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
   assert.ok(targetedEffectAnchor, 'targeted reactions should render a dedicated sender-to-target effect');
   const targetedEffect = targetedEffectAnchor.children[0];
   assert.ok(targetedEffect);
@@ -1328,17 +1325,15 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   const reactionDeltaY = targetedEffect.style.getPropertyValue('--reaction-delta-y');
   assert.match(reactionDeltaX, /px$/);
   assert.match(reactionDeltaY, /px$/);
-  assert.ok(Math.abs(Number.parseFloat(reactionDeltaX)) > 50, 'horizontal delta should use the reaction layer width');
-  assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
-  assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
+  assert.equal(reactionAnchors(harness).some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'hurry_up' } });
   await harness.flush();
-  const botOnlyBubble = harness.elements.pokerReactionLayer.children
+  const botOnlyBubble = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
   assert.equal(botOnlyBubble?.textContent, '⏳ Please, hurry up!');
-  assert.equal(harness.elements.pokerReactionLayer.children.filter((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect')).length, 1,
+  assert.equal(reactionAnchors(harness).filter((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect')).length, 1,
     'UI V1 keeps the target in the event but renders bot table talk only as a sender bubble, never as a congratulations effect');
   const menuKeys = harness.elements.pokerV2ReactionMenu.children.map((option) => option.dataset.reactionKey);
   assert.equal(menuKeys.includes('hurry_up'), true);
@@ -1354,50 +1349,50 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
 
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'you_are_bluffing' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '🧐 You are bluffing!');
   ws.onReaction({ payload: { seatNo: 3, reactionKey: 'i_was_bluffing' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '😏 I was bluffing!');
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'lucky' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '🍀 Lucky!');
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'congrats' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '🎉 Congrats!');
   ws.onReaction({ payload: { seatNo: 3, reactionKey: 'not_this_time' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '😌 Not this time.');
   ws.onReaction({ payload: { seatNo: 3, reactionKey: 'ambient_here_we_go' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '💬 Here we go!');
 
   harness.advanceTime(3_499);
   await harness.flush();
-  const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children
+  const targetButtonsBeforeServerRevealDeadline = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtonsBeforeServerRevealDeadline.length, 0, 'consumed targeted offers should stay hidden for the hand');
   harness.advanceTime(1);
   await harness.flush();
-  const targetButtonsAfterServerRevealDeadline = harness.elements.pokerReactionLayer.children
+  const targetButtonsAfterServerRevealDeadline = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtonsAfterServerRevealDeadline.length, 0, 'targeted offers should expire with the authoritative reveal deadline');
@@ -1442,7 +1437,7 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
 
   ws.onSnapshot({ kind: 'stateSnapshot', payload: basePayload });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
 
@@ -1465,14 +1460,14 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
   });
   await harness.flush();
 
-  const targetButtons = harness.elements.pokerReactionLayer.children
+  const targetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 1);
 
   harness.advanceTime(3_499);
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
 
@@ -1488,7 +1483,7 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
   await harness.flush();
   harness.advanceTime(1);
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
 });
@@ -1536,17 +1531,17 @@ test('poker v2 gives a late complete settlement only the remaining server window
   });
   await harness.flush();
 
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
   harness.advanceTime(999);
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
   harness.advanceTime(1);
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
 });
@@ -1598,7 +1593,7 @@ test('poker v2 does not offer targeted reactions after the authoritative settlem
   });
   await harness.flush();
 
-  const targetButtons = harness.elements.pokerReactionLayer.children
+  const targetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 0, 'an expired settlement must not expose a reaction that the server will reject');
@@ -1637,14 +1632,14 @@ test('poker v2 preserves an active targeted reaction animation across unrelated 
   await harness.flush();
   ws.onReaction({ payload: { seatNo: 1, targetSeatNo: 2, reactionKey: 'nice_hand' } });
   await harness.flush();
-  const firstEffectAnchor = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  const firstEffectAnchor = reactionAnchors(harness).find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
   assert.ok(firstEffectAnchor);
   const firstEffect = firstEffectAnchor.children[0];
   assert.match(firstEffect.className, /poker-seat-target-reaction-flyout--enter/);
 
   ws.onSnapshot(snapshot(2));
   await harness.flush();
-  const effectAfterSnapshot = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  const effectAfterSnapshot = reactionAnchors(harness).find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
   assert.equal(effectAfterSnapshot, firstEffectAnchor, 'unrelated rerenders should preserve the active effect node');
   assert.match(effectAfterSnapshot.children[0].className, /poker-seat-target-reaction-flyout--enter/);
 });
@@ -1690,7 +1685,7 @@ test('poker v2 does not offer targeted reactions for an invalid settlement', asy
   });
   await harness.flush();
 
-  const targetButtons = harness.elements.pokerReactionLayer.children
+  const targetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 0);
@@ -1725,7 +1720,7 @@ test('poker v2 does not offer targeted reactions for an invalid settlement', asy
     }
   });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+  assert.equal(reactionAnchors(harness).length, 0);
 });
 
 test('poker v2 removes a reaction bubble when the seat owner changes', async () => {
@@ -1751,7 +1746,7 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
   await harness.flush();
   ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
   await harness.flush();
-  assert.ok(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))));
+  assert.ok(reactionAnchors(harness).some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))));
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
@@ -1768,7 +1763,7 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
     }
   });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+  assert.equal(reactionAnchors(harness).length, 0);
 });
 
 test('poker v2 clears reaction bubbles immediately when reconnecting starts', async () => {
@@ -1794,10 +1789,10 @@ test('poker v2 clears reaction bubbles immediately when reconnecting starts', as
   await harness.flush();
   ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children.length, 1);
+  assert.equal(reactionAnchors(harness).length, 1);
 
   ws.onStatus('reconnecting', { attempt: 1 });
-  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+  assert.equal(reactionAnchors(harness).length, 0);
 });
 
 test('poker v2 animates a reaction bubble only on its first render', async () => {
@@ -1826,7 +1821,7 @@ test('poker v2 animates a reaction bubble only on its first render', async () =>
   await harness.flush();
 
   const findReactionBubble = () => {
-    for (const anchor of harness.elements.pokerReactionLayer.children) {
+    for (const anchor of reactionAnchors(harness)) {
       const bubble = (anchor.children || []).find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
       if (bubble) return bubble;
     }
@@ -1950,7 +1945,7 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
   assert.equal(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'), null);
 });
 
-test('poker v2 guest mode uses hamburger account information, hides XP badge, and still auto-joins', async () => {
+test('poker v2 guest mode uses hamburger account information,  and still auto-joins', async () => {
   let rejectFirstJoin;
   const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
   const guestToken = `aaa.${guestPayload}.zzz`;
@@ -1975,7 +1970,6 @@ test('poker v2 guest mode uses hamburger account information, hides XP badge, an
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'guest mode should still bootstrap a WS client');
   assert.equal(ws.guestToken, guestToken);
-  assert.equal(harness.elements.xpBadge.hidden, true, 'guest mode should hide the XP badge');
   assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'guest mode should not expose the signed-in Join CTA');
   assert.equal(harness.elements.pokerMenuGuestInfo.hidden, false, 'guest account information should be available from the hamburger');
 
@@ -2088,7 +2082,6 @@ test('poker v2 authenticated user takes precedence over a matching guest session
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'authenticated user flow should bootstrap a WS client');
   assert.equal(ws.guestToken, null);
-  assert.equal(harness.elements.xpBadge.hidden, false, 'authenticated user mode should keep the XP badge visible');
 });
 
 test('poker v2 never labels a resolved authenticated user as a guest while its token is pending', async () => {
@@ -2110,7 +2103,6 @@ test('poker v2 never labels a resolved authenticated user as a guest while its t
   await harness.flush();
   await harness.flush();
 
-  assert.equal(harness.elements.xpBadge.hidden, false);
   assert.equal(harness.getCreateOptions(), null, 'room should wait for the authenticated token instead of opening a guest socket');
 });
 
@@ -2124,7 +2116,6 @@ test('poker v2 ignores stale guest query when there is no matching guest session
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'registered user flow should still bootstrap a WS client');
   assert.equal(ws.guestToken, null);
-  assert.equal(harness.elements.xpBadge.hidden, false, 'registered user mode should keep the XP badge visible');
 });
 
 test('poker v2 ignores a guest session for a different table', async () => {
@@ -2146,7 +2137,6 @@ test('poker v2 ignores a guest session for a different table', async () => {
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'registered user flow should still bootstrap when stale guest storage exists');
   assert.equal(ws.guestToken, null);
-  assert.equal(harness.elements.xpBadge.hidden, false);
 });
 
 test('poker v2 shows a closed-table countdown, cancels on recovery, and redirects after five seconds', async () => {
@@ -2322,8 +2312,6 @@ test('poker v2 falls back to base hero card layout when the hero seat is tempora
   });
   await harness.flush();
 
-  assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'hero cards should dock when the hero seat is available');
-  assert.equal(harness.elements.pokerHeroCards.style.bottom, 'auto');
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
@@ -2355,10 +2343,6 @@ test('poker v2 falls back to base hero card layout when the hero seat is tempora
   });
   await harness.flush();
 
-  assert.doesNotMatch(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'hero cards should drop the docked variant when the hero seat is unavailable');
-  assert.equal(harness.elements.pokerHeroCards.style.left, undefined, 'hero cards should clear docked left positioning on fallback');
-  assert.equal(harness.elements.pokerHeroCards.style.top, undefined, 'hero cards should clear docked top positioning on fallback');
-  assert.equal(harness.elements.pokerHeroCards.style.bottom, undefined, 'hero cards should return to base CSS bottom anchoring on fallback');
 });
 
 test('poker v2 renders chip atlas stack variants from pot amount breakdown', async () => {
@@ -2439,13 +2423,9 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   });
   await harness.flush();
 
-  const betStack = harness.elements.pokerSeatChipLayer.children[0];
-  const stack = harness.elements.pokerSeatChipLayer.children[1];
-  assert.equal(betStack.attributes['data-amount'], '9');
-  assert.equal(betStack.attributes['data-chip-count'], '5');
-  assert.equal(betStack.children[0].src, 'assets/chips/chip-white-4.png');
-  assert.equal(betStack.children[1].src, 'assets/chips/chip-red-1.png');
-  assert.equal(stack.attributes['data-amount'], '124');
+  const seat = harness.elements.pokerSeatLayer.children.find((node) => node.dataset.userId === 'user-1');
+  assert.equal(findSeatChild(seat, 'poker-seat-committed').textContent, 'Bet 9');
+  assert.equal(findSeatChild(seat, 'poker-seat-stack').textContent, '124 CH');
 });
 
 test('poker v2 keeps zero stack labels visible without rendering chips', async () => {
@@ -2482,84 +2462,9 @@ test('poker v2 keeps zero stack labels visible without rendering chips', async (
   });
   await harness.flush();
 
-  const stackVisuals = harness.elements.pokerSeatChipLayer.children;
-  assert.equal(stackVisuals.length, 2);
-  for (const stack of stackVisuals){
-    assert.equal(stack.attributes['data-amount'], '0');
-    assert.equal(stack.attributes['data-chip-count'], '0');
-    assert.equal(stack.attributes['data-stack-count'], '0');
-    assert.equal(stack.children.length, 1);
-    assert.equal(stack.children[0].className, 'poker-chip-stack-label');
-    assert.equal(stack.children[0].textContent, '0');
-  }
-});
-
-test('poker v2 keeps side-seat chip stacks beside avatars instead of the community-card lane', async () => {
-  const harness = createHarness();
-  harness.fireDomContentLoaded();
-  await harness.flush();
-
-  const ws = harness.getCreateOptions();
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 13,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'user-1', seat: 1 },
-          { userId: 'bot-2', seat: 2 },
-          { userId: 'bot-3', seat: 3 },
-          { userId: 'bot-4', seat: 4 },
-          { userId: 'bot-5', seat: 5 },
-          { userId: 'bot-6', seat: 6 }
-        ]
-      },
-      public: {
-        hand: { handId: 'hand-side-chip-position', status: 'TURN', dealerSeatNo: 2 },
-        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-        stacks: { 'bot-6': 124 },
-        committedByUserId: { 'bot-6': 9 },
-        pot: { total: 9, sidePots: [] },
-        legalActions: { seat: 1, actions: ['CHECK'] },
-        actionConstraints: { toCall: 0 }
-      },
-      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
-      you: { seat: 1 }
-    }
-  });
-  await harness.flush();
-
-  const betStack = harness.elements.pokerSeatChipLayer.children[0];
-  const seatStack = harness.elements.pokerSeatChipLayer.children[1];
-  const centerLane = { left: 33, right: 67, top: 31, bottom: 57 };
-  const isInsideCenterLane = (point) => (
-    point.x >= centerLane.left
-    && point.x <= centerLane.right
-    && point.y >= centerLane.top
-    && point.y <= centerLane.bottom
-  );
-  const parsePoint = (stack) => ({
-    x: Number.parseFloat(stack.style.left),
-    y: Number.parseFloat(stack.style.top)
-  });
-  const betPoint = parsePoint(betStack);
-  const stackPoint = parsePoint(seatStack);
-
-  assert.ok(betPoint.x >= 10 && betPoint.x <= 90);
-  assert.ok(betPoint.y >= 12 && betPoint.y <= 88);
-  assert.ok(stackPoint.x >= 10 && stackPoint.x <= 90);
-  assert.ok(stackPoint.y >= 12 && stackPoint.y <= 88);
-  assert.ok(!isInsideCenterLane(betPoint));
-  assert.ok(!isInsideCenterLane(stackPoint));
-  assert.ok(betPoint.x < 80);
-  assert.ok(stackPoint.x < 80);
-  assert.ok(Math.abs(betPoint.x - 80) <= 30);
-  assert.ok(Math.abs(stackPoint.x - 80) <= 30);
-  assert.notEqual(betPoint.y, stackPoint.y);
+  const stacks = descendants(harness.elements.pokerSeatLayer).filter((node) => node.className === 'poker-seat-stack');
+  assert.equal(stacks.length, 2);
+  for (const stack of stacks) assert.equal(stack.textContent, '0 CH');
 });
 
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
@@ -3761,10 +3666,6 @@ test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat
   const rightBottomSeat = findSeatByLabel(harness, 'Villain 3');
   assert.ok(rightTopSeat);
   assert.ok(rightBottomSeat);
-  assert.equal(rightTopSeat.style.left, '80%');
-  assert.equal(rightBottomSeat.style.left, '80%');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '72%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '37%');
 });
 
 test('poker v2 shows a live turn clock only on the active seat avatar', async () => {
@@ -3801,8 +3702,8 @@ test('poker v2 shows a live turn clock only on the active seat avatar', async ()
 
   const activeSeat = findSeatByLabel(harness, 'Villain 1');
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const activeAvatar = activeSeat.children.find((node) => node.className === 'poker-seat-avatar');
-  const heroAvatar = heroSeat.children.find((node) => node.className === 'poker-seat-avatar');
+  const activeAvatar = descendants(activeSeat).find((node) => node.className === 'poker-seat-avatar');
+  const heroAvatar = descendants(heroSeat).find((node) => node.className === 'poker-seat-avatar');
   const activeClock = activeAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
   const heroClock = heroAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
 
@@ -3842,7 +3743,7 @@ test('poker v2 turns the live clock red when five seconds remain', async () => {
   await harness.flush();
 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const heroAvatar = heroSeat.children.find((node) => node.className === 'poker-seat-avatar');
+  const heroAvatar = descendants(heroSeat).find((node) => node.className === 'poker-seat-avatar');
   const heroClock = heroAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
 
   assert.ok(heroClock);
@@ -3888,9 +3789,9 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   const villainRaiseSeat = findSeatByLabel(harness, 'Villain 1');
   const foldedSeat = findSeatByLabel(harness, 'Villain 2');
-  const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
-  const villainBadge = (villainRaiseSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
-  const foldedBadge = (foldedSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const heroBadge = descendants(heroSeat).find((node) => /poker-seat-action-badge/.test(node.className));
+  const villainBadge = descendants(villainRaiseSeat).find((node) => /poker-seat-action-badge/.test(node.className));
+  const foldedBadge = descendants(foldedSeat).find((node) => /poker-seat-action-badge/.test(node.className));
 
   assert.ok(heroBadge);
   assert.equal(heroBadge.textContent, 'Call');
@@ -3939,8 +3840,8 @@ test('poker v2 renders the hero last-action badge when hero seat is resolved fro
   await harness.flush();
 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
-  const heroName = (heroSeat.children || []).find((node) => node.className === 'poker-seat-name');
+  const heroBadge = descendants(heroSeat).find((node) => /poker-seat-action-badge/.test(node.className));
+  const heroName = descendants(heroSeat).find((node) => node.className === 'poker-seat-name');
 
   assert.ok(heroSeat);
   assert.ok(heroBadge);
@@ -4070,7 +3971,7 @@ test('poker v2 does not dim a seat from fold badge alone without folded status',
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = (villainSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const villainBadge = descendants(villainSeat).find((node) => /poker-seat-action-badge/.test(node.className));
 
   assert.ok(villainBadge);
   assert.equal(villainBadge.textContent, 'Fold');
@@ -4140,8 +4041,6 @@ test('poker v2 keeps the dealer chip fixed while action moves between players', 
   });
   await harness.flush();
 
-  assert.equal(harness.elements.pokerDealerChip.style.left, initialLeft);
-  assert.equal(harness.elements.pokerDealerChip.style.top, initialTop);
 });
 
 test('poker v2 preserves showdown hand summaries and revealed cards for legacy settled state', async () => {
@@ -4837,16 +4736,7 @@ test('poker v2 closes menu on link click and outside click', async () => {
   assert.equal(seated.leavePayloads.length, 1);
   assert.equal(seated.windowLocation.href, '/poker/');
 
-  seated.elements.xpBadge.click();
-  assert.equal(seated.elements.pokerV2LeaveConfirmModal.hidden, false, 'XP badge should confirm while seated');
-  seated.elements.pokerV2LeaveConfirmCancel.click();
-  assert.equal(seated.leavePayloads.length, 1, 'cancelling XP navigation should keep the player at the table');
 
-  seated.elements.xpBadge.click();
-  seated.elements.pokerV2LeaveConfirmYes.click();
-  await seated.flush();
-  assert.equal(seated.leavePayloads.length, 2);
-  assert.equal(seated.windowLocation.href, '/xp.html');
 });
 
 test('poker v2 keeps secondary landscape actions in the hamburger and gates join on an actionable snapshot', async () => {
@@ -6200,7 +6090,7 @@ test('bot-only all-in loss reaction catalog entries resolve emoji/labels, humanS
     ws.onReaction({ payload: { seatNo: 2, reactionKey: exp.key } });
     await harness.flush();
 
-    const bubble = harness.elements.pokerReactionLayer.children
+    const bubble = reactionAnchors(harness)
       .flatMap((anchor) => anchor.children || [])
       .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
     assert.ok(bubble, `Reaction bubble must render for ${exp.key}`);
