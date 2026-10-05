@@ -8,4 +8,4 @@
 - [x] T006 Update existing guard tests (`ws-tests/infra-vps-workflow.guard.test.mjs`, `ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs`).
 - [x] T007 Run targeted test suites and repo checks (`npm run check:all`, `npm run test:quick`, `npm run test:unit`).
 - [x] T008 Review whole diff, simplify, and document verification evidence in `specs/1050-ws-production-db-identity-preflight/review.md`.
-- [ ] T009 Create draft PR linked to #1050 with root cause, fix scope, test evidence, breaking impact, and fail-closed notice.
+- [x] T009 Create draft PR linked to #1050 with root cause, fix scope, test evidence, breaking impact, and fail-closed notice.
