@@ -8,4 +8,4 @@
 - [x] T006 Run all targeted tests and repo checks (`npm run check:all`, `npm run test:quick`, WS behavior suites).
 - [x] T007 Deploy exact runtime SHA via `WS Preview Deploy` and execute narrow runtime smoke.
 - [x] T008 Review whole diff, simplify, and update review evidence.
-- [ ] T009 Create draft PR linked to #1050 with root cause, fix scope, test evidence, breaking impact, and Preview smoke results.
+- [x] T009 Create draft PR linked to #1050 with root cause, fix scope, test evidence, breaking impact, and Preview smoke results.

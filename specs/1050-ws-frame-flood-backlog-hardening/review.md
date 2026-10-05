@@ -56,5 +56,6 @@ Finding P1 #2 from GitHub issue #1050:
   - Burst frame flood (>16 in-flight frames) was terminated with protocol error close code `1002`, and excess frames were dropped.
 
 ## Breaking Impact
-Zero breaking impact for conforming clients. Conforming clients send sequential commands or small pipelined requests (well below the limit of 16 concurrent un-acknowledged frames). Malicious or abusive clients attempting to flood frames without waiting for responses are rejected with close code 1002.
+- Brak wpływu na normalnych conforming Arcade clients (klienci wysyłają sekwencyjne komendy lub małe serie zapytań poniżej limitu 16 oczekujących ramek).
+- Intentional breaking behavior dla klienta, który przekracza 16 jednocześnie pending frames / flooduje połączenie — taki socket zostaje natychmiast zamknięty kodem 1002 (Protocol Error), a nadmiarowe ramki są odrzucane.
 
