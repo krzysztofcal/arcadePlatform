@@ -22,9 +22,23 @@ Focused suite: 207/207; existing real-socket JOIN suite: 8/8; runtime dependency
 
 ## Gate and breaking impact
 
-T101–T105 implemented; T106 exact-SHA Preview + narrow authenticated smoke pending. Stage verification uses an isolated confirmed fixture user, normal welcome-bonus ledger grant and existing JOIN/action/leave flows. No direct balance/table edits, migrations or Production mutation/deploy.
+T101–T106 implemented and verified; Draft PR remains awaiting owner runtime review. Stage verification uses an isolated confirmed fixture user, normal welcome-bonus ledger grant and existing JOIN/action/leave flows. No direct balance/table edits, migrations or Production mutation/deploy.
 
 Intentional breaking behavior: unattended humans accumulate timeout evidence across hands and stop paying blinds after the existing threshold and safe boundary; actual manual activity/rejoin clears penalty. No intended changes to accounting, settlement, funding/access policies, transport or scheduler. Review confirms server.mjs, timeout persistence owner, ledger and protocol unchanged. Legacy mirror fixes retained only for still-used legacy paths, not as authoritative proof.
+
+## Exact-SHA authenticated Stage evidence
+
+- Runtime SHA: `c8e4863b748b9ccd97e170b066c8256018981253`.
+- [WS Preview Deploy run 37379420286](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37379420286): success. Preview metadata confirms `RELEASE_SHA == DEPLOY_REF`; local and public `/healthz` OK.
+- Real path: Deploy Preview #1049 -> `ws-preview.kcswh.pl` -> Stage `krydukthwdvccggbyjfw`; isolated fixture table `90ba325a-2b13-45cb-9928-63fa293eab55`, human `ca8d3985-27eb-40f5-83e3-2e57ae9ae9f4`, two bots. Confirmed fixture account used actual password sign-in, normal welcome bonus, create-table and authenticated WS commands. No injected timeout count or direct database writes.
+- First unattended sequence: timeout FOLD in `_1_3` at 22:00:34.558473Z, next-hand timeout CHECK in `_11_3` at 22:01:28.951577Z. Additional same-hand timeouts remain legitimate; next `_21_2` excludes the human and retains stack 98 CH.
+- Rejoin accepted at 22:03:11.745Z (`WAITING_NEXT_HAND`), next `_30_3` includes human; durable version 30 has empty missed/pending/sitout maps and retained stack 98 CH. Exactly one human table buy-in transaction remained after rejoin.
+- Timeout FOLD at 22:03:36.436658Z leaves count 1. Count survives next `_39_3`; accepted manual FOLD at 22:04:22.916999Z clears all three penalty maps (durable version 45).
+- Fresh timeout FOLD at 22:05:06.089665Z in `_49_3` restarts count at 1. Next-hand timeout FOLD at 22:05:51.448962Z in `_58_3` reaches exactly 2. Durable version 62: `missed=2`, `pending=true`, no sitout yet, human still in current hand seats, stack 95 CH.
+- Next boundary `_67_2` (version 67): `missed=2`, pending empty, `sitout=true`, human absent from hand seats, stack 95 CH. No manual activity between these two timeout FOLDs. Further `_69_2` (version 76) still excludes the human and retains stack 95 CH, proving no later blind debit. Public WS stream and read-only persisted state/action audits correlate.
+- Checks: focused 207/207; real-socket JOIN 8/8; additional persistence/engine/legacy 35/35; runtime dependency guards 21/21. Syntax, check:all, ci:guards, CSP and PR CI pass, including WS harness and persistence integration. Four historical legacy failures reproduced on pristine main remain outside scope.
+
+Full diff review: no scheduler, `server.mjs`, persistence writer, ledger, funding calculation, WS protocol, browser/UI, assets, inline script, dependencies or runtime config changes. Both legacy reset patches preserve valid seated/non-left counters and clean stale evidence; they are compatibility fixes, not the authoritative runtime solution. Later evidence-only commits do not invalidate this deployment.
 
 ---
 
