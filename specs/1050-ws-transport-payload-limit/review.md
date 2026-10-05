@@ -21,3 +21,12 @@ Intentional transport-level hardening: frames larger than 32 KiB are now rejecte
 - `npm run test:unit` passed.
 - `node --test ws-server/poker.protocol.behavior.test.mjs` passed (6/6 tests).
 - `node --test ws-server/poker.hello-ping.behavior.test.mjs ws-server/poker.unknown-type.behavior.test.mjs` passed (2/2 tests).
+
+## Runtime Verification
+- [WS Preview Deploy run 37317500889](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37317500889) succeeded for exact runtime SHA `8633d75a22fc6f562af39cd0aee39838d11a18f1`.
+- Release metadata verified: `releaseSha=8633d75a22fc6f562af39cd0aee39838d11a18f1`, `deployRef=8633d75a22fc6f562af39cd0aee39838d11a18f1`, `environment=preview`.
+- Local healthz (`http://127.0.0.1:3001/healthz`) and public healthz (`https://ws-preview.kcswh.pl/healthz`) returned `ok`.
+- Live WebSocket smoke against `wss://ws-preview.kcswh.pl/ws`:
+  - Conforming frame (`ping` / `clientTime="smoke-test"`) succeeded with expected `pong` (`preview-smoke-ping`).
+  - Oversized frame (> 32 KiB) was rejected at the transport boundary with WebSocket close code `1009`.
+
