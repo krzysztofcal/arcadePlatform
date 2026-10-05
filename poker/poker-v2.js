@@ -4388,19 +4388,24 @@
     });
     var seats = giftEligibleSeats();
     Array.prototype.slice.call(els.giftRecipient.children).forEach(function(button){
-      if (!seats.some(function(seat){ return String(seat.seatNo) === button.dataset.seatNo; })) button.remove();
+      if (!seats.some(function(seat){ return String(seat.seatNo) === button.dataset.seatNo && String(seat.userId) === button.dataset.userId; })) {
+        if (els.giftRecipient.dataset.value === button.dataset.seatNo) els.giftRecipient.dataset.value = '';
+        if (giftRetry && String(giftRetry.seatNo) === button.dataset.seatNo) giftRetry = null;
+        button.remove();
+      }
     });
     if (!seats.some(function(seat){ return String(seat.seatNo) === els.giftRecipient.dataset.value; })) { els.giftRecipient.dataset.value = ''; giftRetry = null; }
     seats.forEach(function(seat){
       var seatNo = String(seat.seatNo);
       var button = els.giftRecipient.querySelector('[data-seat-no="' + seatNo + '"]');
+      var avatar = document.createElement('span'); avatar.className = 'poker-gift-recipient__avatar'; avatar.setAttribute('aria-hidden', 'true');
+      renderSeatAvatar(avatar, seat);
       if (!button) {
-        button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice poker-gift-recipient'; button.dataset.seatNo = seatNo;
-        var avatar = document.createElement('span'); avatar.className = 'poker-gift-recipient__avatar'; avatar.setAttribute('aria-hidden', 'true'); button.appendChild(avatar);
+        button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice poker-gift-recipient'; button.dataset.seatNo = seatNo; button.dataset.userId = String(seat.userId);
+        button.appendChild(avatar);
         var label = document.createElement('span'); label.className = 'poker-gift-recipient__label'; button.appendChild(label);
         els.giftRecipient.appendChild(button);
-      }
-      renderSeatAvatar(button.firstChild, seat);
+      } else button.replaceChild(avatar, button.firstChild);
       button.lastChild.textContent = getDisplayName(seat) + ' · S' + seatNo;
       button.setAttribute('aria-pressed', String(els.giftRecipient.dataset.value === seatNo));
       button.disabled = !available || giftPending;
