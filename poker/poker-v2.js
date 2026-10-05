@@ -358,9 +358,9 @@
     if (seats.length !== 1) return null;
     var avatar = renderedSeatAvatars[seats[0].seatNo];
     if (!avatar || avatar.dataset.userId !== userId || !avatar.isConnected || typeof avatar.getBoundingClientRect !== 'function'
-      || !avatar.parentNode || typeof avatar.parentNode.getBoundingClientRect !== 'function') return null;
+      || !avatar.closest || !avatar.closest('.poker-seat')) return null;
     var rect = avatar.getBoundingClientRect();
-    var seat = avatar.parentNode.getBoundingClientRect();
+    var seat = avatar.closest('.poker-seat').getBoundingClientRect();
     if (!rect || !seat || !Number.isFinite(rect.left) || !Number.isFinite(rect.top) || !Number.isFinite(rect.right) || !Number.isFinite(rect.bottom)
       || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)
       || !Number.isFinite(seat.left) || !Number.isFinite(seat.right) || !Number.isFinite(seat.width) || !Number.isFinite(seat.height)
@@ -371,7 +371,6 @@
 
   function positionCelebration(){
     if (!celebration || celebration.anchorLost) return false;
-    if (celebration.own) return true;
     var targetSeats = state.seats.filter(function(seat){ return seat && seat.userId === celebration.userId; });
     if (targetSeats.length !== 1){ clearCelebration(); return false; }
     if (targetSeats[0].seatNo !== celebration.targetSeatNo){ clearCelebration(); return false; }
@@ -380,32 +379,11 @@
     var anchor = celebrationSeatRect(celebration.userId);
     if (!anchor) return celebration.started ? fadeLostCelebrationAnchor() : false;
     if (anchor.seatNo !== celebration.targetSeatNo){ clearCelebration(); return false; }
-    // Stay beside the whole seat, leaving its avatar, name and payout readable.
-    var rightSpace = window.innerWidth - anchor.seat.right - 16;
-    var leftSpace = anchor.seat.left - 16;
-    var onRight = rightSpace >= leftSpace;
-    var width = Math.min(160, onRight ? rightSpace : leftSpace);
-    if (width < 80 || !Number.isFinite(window.innerHeight) || window.innerHeight - 108 < 8){
-      return celebration.started ? fadeLostCelebrationAnchor() : false;
-    }
-    var left = onRight ? anchor.seat.right + 8 : anchor.seat.left - width - 8;
-    var top = Math.max(8, Math.min(window.innerHeight - 108, anchor.avatar.top + anchor.avatar.height / 2 - 50));
-    if (els.settlementSummary && !els.settlementSummary.hidden){
-      var summary = els.settlementSummary.getBoundingClientRect();
-      if (!summary || !Number.isFinite(summary.left) || !Number.isFinite(summary.right) || !Number.isFinite(summary.top) || !Number.isFinite(summary.bottom)){
-        return celebration.started ? fadeLostCelebrationAnchor() : false;
-      }
-      if (left < summary.right && left + width > summary.left && top < summary.bottom && top + 100 > summary.top){
-        var above = summary.top - 108;
-        var below = summary.bottom + 8;
-        var fitsAbove = above >= 8;
-        var fitsBelow = below + 100 <= window.innerHeight - 8;
-        if (!fitsAbove && !fitsBelow) return celebration.started ? fadeLostCelebrationAnchor() : false;
-        top = fitsAbove && (!fitsBelow || Math.abs(above - top) <= Math.abs(below - top)) ? above : below;
-      }
-    }
-    els.celebration.style.left = left + 'px';
-    els.celebration.style.top = top + 'px';
+    // Player notifications stay directly above their owner, never beside another seat.
+    var width = 120;
+    var center = anchor.avatar.left + anchor.avatar.width / 2;
+    els.celebration.style.left = center + 'px';
+    els.celebration.style.top = (anchor.avatar.top - 6) + 'px';
     els.celebration.style.width = width + 'px';
     els.celebration.style.setProperty('--compact-font', width / 12 + 'px');
     return true;
@@ -484,13 +462,13 @@
       if (!selection.cards) return;
     }
     var own = demo ? options.mode !== 'other' : !!state.currentUserId && selection.userId === state.currentUserId;
-    var targetAnchor = own ? null : celebrationSeatRect(selection.userId);
-    if (!own && !targetAnchor) return;
+    var targetAnchor = celebrationSeatRect(selection.userId);
+    if (!targetAnchor) return;
     celebration = { demo: demo, own: own, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId,
       exiting: false, started: false, anchorLost: false, endsAtMs: Date.now() + duration + celebrationExitDuration() };
     var overlay = els.celebration;
     var visualKind = selection.kind === 'hand' ? 'royal' : selection.kind;
-    overlay.className = 'poker-celebration poker-celebration--' + visualKind + (own ? ' poker-celebration--own' : ' poker-celebration--other');
+    overlay.className = 'poker-celebration poker-celebration--' + visualKind + ' poker-celebration--other';
     if (!positionCelebration()){ clearCelebration(); return; }
     overlay.style.setProperty('--celebration-duration', duration + 'ms');
     overlay.hidden = false;
@@ -3902,20 +3880,20 @@
   // Physical variants: top, upper right, lower right, hero, lower left, upper left.
   var seatSceneGeometry = {
     portrait: { width:360, height:650, seats:[
-      {avatar:[180,65],stack:[278,110],bet:[235,134],dealer:[124,102],presentation:[65,56,100,52],social:[62,101,70,18]},
-      {avatar:[300,195],stack:[220,178],bet:[205,140],dealer:[262,280],presentation:[300,322,92,32],social:[220,220,80,18]},
-      {avatar:[300,355],stack:[220,365],bet:[258,389],dealer:[180,390],presentation:[200,430,70,42],social:[200,455,70,18]},
-      {avatar:[150,500],cards:[154,615],stack:[204,438],bet:[185,445],dealer:[207,523],bestHand:[50,580,90,40],presentation:[65,526,98,22],social:[65,646,98,18]},
-      {avatar:[60,390],stack:[134,413],bet:[102,389],dealer:[120,352],presentation:[134,484,70,42],social:[134,452,80,18]},
-      {avatar:[60,195],stack:[140,178],bet:[175,140],dealer:[98,280],presentation:[60,322,92,32],social:[140,220,80,18]}
+      {avatar:[180,100],stack:[278,110],bet:[235,134],dealer:[124,102]},
+      {avatar:[300,195],stack:[220,178],bet:[205,140],dealer:[262,280]},
+      {avatar:[300,355],stack:[220,365],bet:[258,389],dealer:[180,390]},
+      {avatar:[150,500],cards:[154,615],stack:[204,438],bet:[185,445],dealer:[207,523],bestHand:[50,580,90,40]},
+      {avatar:[60,390],stack:[134,413],bet:[102,389],dealer:[120,352]},
+      {avatar:[60,195],stack:[140,178],bet:[175,140],dealer:[98,280]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[520,50],stack:[680,50],bet:[620,96],dealer:[440,80],presentation:[350,28,120,44],social:[370,93,90,18]},
-      {avatar:[925,90],stack:[760,90],bet:[813,120],dealer:[810,90],presentation:[925,188,110,38],social:[780,149,100,20]},
-      {avatar:[740,265],stack:[835,145],bet:[832,219],dealer:[795,250],presentation:[740,200,84,32],social:[740,355,112,24]},
-      {avatar:[430,298],cards:[558,334],stack:[530,267],bet:[440,242],dealer:[490,368],bestHand:[280,327,200,44],presentation:[280,278,90,24],social:[620,383,100,14]},
-      {avatar:[115,265],stack:[280,253],bet:[208,219],dealer:[230,265],presentation:[240,310,110,44],social:[175,355,112,24]},
-      {avatar:[115,90],stack:[280,90],bet:[227,120],dealer:[230,90],presentation:[115,188,110,38],social:[260,149,100,20]}
+      {avatar:[520,80],stack:[680,50],bet:[620,96],dealer:[440,80]},
+      {avatar:[925,90],stack:[760,90],bet:[813,120],dealer:[810,90]},
+      {avatar:[740,265],stack:[835,145],bet:[832,219],dealer:[795,250]},
+      {avatar:[430,298],cards:[558,334],stack:[530,267],bet:[440,242],dealer:[490,368],bestHand:[280,327,200,44]},
+      {avatar:[115,265],stack:[280,253],bet:[208,219],dealer:[230,265]},
+      {avatar:[115,90],stack:[280,90],bet:[227,120],dealer:[230,90]}
     ]}
   };
   var seatSceneOrientation = 'portrait';
@@ -3954,11 +3932,10 @@
     article.style.left = hud.origin[0] + 'px';
     article.style.top = hud.origin[1] + 'px';
     article.dataset.seatVariant = ['top','upper-right','lower-right','hero','lower-left','upper-left'][slot];
-    hud.avatarSize = hero ? (portrait ? 72 : 80) : (portrait ? 52 : 56);
-    hud.name = [config.avatar[0],config.avatar[1] + (hero ? (portrait ? 51 : 55) : 44)];
-    hud.status = [config.avatar[0],config.avatar[1] - hud.avatarSize / 2];
+    hud.avatarSize = portrait ? 72 : 80;
+    hud.name = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2 + 15];
     hud.action = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2];
-    var corner = hero ? 50 : (portrait ? 34 : 40);
+    var corner = portrait ? 46 : 50;
     var quick = [config.avatar[0] + corner,config.avatar[1] + (hero ? 12 : 8)];
     var marker = [config.avatar[0] - corner,config.avatar[1] + (hero ? 20 : 28)];
     hud.marker = marker;
@@ -3967,11 +3944,15 @@
     placeSeatNode(hud.cards,hud,hero ? config.cards : [config.avatar[0] - corner,config.avatar[1] + 8],hero ? 110 : 26,hero ? 80 : 14);
     placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
     placeSeatNode(hud.bet,hud,config.bet,22,20);
-    ['presentation','social','bestHand'].forEach(function(role){
+    ['bestHand'].forEach(function(role){
       var point=config[role];
       if (point) placeSeatNode(hud[role],hud,point,point[2],point[3]);
     });
-    var radius = hero ? (portrait ? 52 : 58) : 42;
+    // All player-owned transient content shares one column above the avatar.
+    placeSeatNode(hud.presentation,hud,[config.avatar[0],config.avatar[1] - hud.avatarSize / 2 - 6],100);
+    hud.presentation.classList.add('poker-seat-hud-transient');
+    hud.presentation.appendChild(hud.social);
+    var radius = portrait ? 52 : 58;
     [-150,-90,-30].forEach(function(angle,index){
       var radians=angle*Math.PI/180;
       placeSeatNode(hud.gifts.children[index],hud,[config.avatar[0]+Math.cos(radians)*radius,config.avatar[1]+Math.sin(radians)*radius],16,16);
@@ -4276,7 +4257,8 @@
       avatar.className = 'poker-seat-avatar';
       avatar.setAttribute('data-poker-avatar-center', '');
       avatar.dataset.userId = seat && seat.userId || '';
-      renderSeatAvatar(avatar, seat);
+      if (seat) renderSeatAvatar(avatar, seat);
+      else { avatar.classList.add('poker-seat-avatar--open'); avatar.textContent = 'OPEN'; }
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
       if (active) updateSeatTurnClock(avatar, getTurnClockState());
 
@@ -4317,20 +4299,11 @@
           cardBack.setAttribute('aria-hidden', 'true');
           cards.appendChild(cardBack);
         }
-        var cardCount = document.createElement('span');
-        cardCount.className = 'poker-seat-card-count';
-        cardCount.textContent = String(heldCards);
-        cards.appendChild(cardCount);
       }
 
       var name = document.createElement('div');
       name.className = 'poker-seat-name';
       name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
-
-      var status = document.createElement('div');
-      status.className = 'poker-seat-status';
-      status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
-      if (waitingNextHand) status.textContent = 'NEXT HAND';
 
       placeSeatNode(avatar,hud,hud.config.avatar,hud.avatarSize,hud.avatarSize);
       hud.portrait.appendChild(avatar);
@@ -4338,10 +4311,11 @@
       if (autoRebuyIndicator){placeSeatNode(autoRebuyIndicator,hud,[hud.marker[0],hud.marker[1]+16],14,14);hud.identity.appendChild(autoRebuyIndicator);}
       if (autoRebuyAvatarToast) hud.presentation.appendChild(autoRebuyAvatarToast);
       if (seatNumber){placeSeatNode(seatNumber,hud,hud.marker,16,14);hud.identity.appendChild(seatNumber);}
-      if (seat && lastAction){
+      var visibleAction = lastAction || (folded ? 'fold' : null);
+      if (seat && visibleAction){
         var actionBadge = document.createElement('div');
-        actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + lastAction.replace(/_/g, '-');
-        actionBadge.textContent = LAST_ACTION_LABEL[lastAction] || lastAction;
+        actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + visibleAction.replace(/_/g, '-');
+        actionBadge.textContent = LAST_ACTION_LABEL[visibleAction] || visibleAction;
         placeSeatNode(actionBadge,hud,hud.action,64,12);
         article.appendChild(actionBadge);
       }
@@ -4362,9 +4336,14 @@
       }
       if (cards.children.length) hud.cards.appendChild(cards);
       placeSeatNode(name,hud,hud.name,hero ? 88 : 76,14);
-      placeSeatNode(status,hud,hud.status,hero ? 64 : 52,10);
       hud.identity.appendChild(name);
-      hud.identity.appendChild(status);
+      if (seat && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
+        var status = document.createElement('div');
+        status.className = 'poker-seat-status';
+        status.textContent = waitingNextHand ? 'NEXT HAND' : 'OUT OF CHIPS';
+        placeSeatNode(status,hud,hud.action,64,12);
+        hud.identity.appendChild(status);
+      }
       if (hero && heroBestHand){
         var bestHand = document.createElement('div');
         bestHand.className = 'poker-seat-best-hand';

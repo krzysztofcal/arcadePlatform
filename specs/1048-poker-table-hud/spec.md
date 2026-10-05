@@ -270,3 +270,7 @@ Owner review rejected the a19e4e2 replacement as final: restore single-row hero 
 ## P1 opponent participation semantics
 
 Reuse the existing public betThisRoundByUserId membership (all current-hand users, zero values included); handSeats is not transmitted by the current public read model. Folded participants remain 2. Waiting/out-of-hand/out-of-chips seats outside the hand remain 0. No inferred 1, new WS field, endpoint or engine eligibility implementation. Snapshot merge must clear stale membership on full snapshots/hand change. No layout, asset, account, social or animation-anchor changes.
+
+## Second owner smoke correction
+
+Current layout remains unaccepted. Remove persistent ACTIVE and visible opponent count labels; empty avatar contains OPEN. Share occupied-avatar size, preserve meaningful edge states. Use one aligned action visual template and narrow single-row five-card best hand with red H/D and black S/C. Player-owned reaction, payout and special celebration center above owner avatar; motion preserves anchored transforms. Keep avatar-center targeted endpoints and edge quick affordance. No CH/backend/gameplay/purchase changes or broad geometry/UI tests.

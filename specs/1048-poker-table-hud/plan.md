@@ -18,3 +18,7 @@ Required syntax/check:all/ci:guards/CSP and focused existing fundamental tests. 
 
 ## #1047 integration
 Seat articles carry data-seat-no + data-user-id. Exactly three data-poker-gift-slot children in data-poker-gift-slots, outside avatar, and one data-poker-quick-action-slot. Rebuilt by renderSeats; #1047 must repopulate/reconcile occupant-scoped content. No purchase, retry, cooldown, no-self or picker logic here.
+
+## Second owner smoke correction plan
+
+Refine renderSeats/configureSeatHud and existing CSS only: shared occupied size, minimal OPEN, meaningful badges; transient owner column, anchored avatar motion, aligned action controls and narrow best-hand symbols. Preserve action-rail placement, scene scaling, CH and protocol. Verify focused fundamental suite and required guards, then two real Preview orientations with screenshots; manual owner and authenticated Stage gates stay pending.
