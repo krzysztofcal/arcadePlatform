@@ -78,10 +78,19 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
     return [...socketsByUserId.keys()];
   }
 
-  function rebindSession({ sessionId, userId, ws }) {
+  function rebindSession({ sessionId, userId, ws, nowMs = Date.now() }) {
     const session = sessionForId(sessionId);
     if (!session) {
       return { ok: false, reason: "unknown_session" };
+    }
+
+    if (!socketBySessionId.has(sessionId)) {
+      const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+      const ageMs = now - lastSeenMs(session);
+      if (ageMs >= sessionTtlMs) {
+        sessionById.delete(sessionId);
+        return { ok: false, reason: "unknown_session" };
+      }
     }
 
     if (session.userId !== userId) {

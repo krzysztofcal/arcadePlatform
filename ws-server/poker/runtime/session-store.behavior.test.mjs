@@ -74,7 +74,54 @@ test("cleanup keeps fresh session rebindable", () => {
   assert.deepEqual(removed, []);
   assert.equal(store.sessionForId("sess_fresh"), session);
 
-  const rebound = store.rebindSession({ sessionId: "sess_fresh", userId: "user_1", ws: { id: "y" } });
+  const rebound = store.rebindSession({
+    sessionId: "sess_fresh",
+    userId: "user_1",
+    ws: { id: "y" },
+    nowMs: Date.parse("2026-02-28T00:00:01.000Z")
+  });
   assert.equal(rebound.ok, true);
   assert.equal(rebound.session, session);
 });
+
+test("rebindSession lazily expires inactive session whose lastSeenAt exceeded ttl without global sweep", () => {
+  const store = createSessionStore({ sessionTtlMs: 1000 });
+  const session = createSession({ sessionId: "sess_lazy_expired", nowTs: () => "2026-02-28T00:00:00.000Z" });
+  session.userId = "user_1";
+  store.registerSession({ session });
+
+  const rebound = store.rebindSession({
+    sessionId: "sess_lazy_expired",
+    userId: "user_1",
+    ws: { id: "z" },
+    nowMs: Date.parse("2026-02-28T00:00:02.000Z")
+  });
+
+  assert.equal(rebound.ok, false);
+  assert.equal(rebound.reason, "unknown_session");
+  assert.equal(store.sessionForId("sess_lazy_expired"), null, "expired session must be deleted from registry");
+});
+
+test("rebindSession does not expire active session even if age exceeded ttl", () => {
+  const store = createSessionStore({ sessionTtlMs: 1000 });
+  const session = createSession({ sessionId: "sess_active_old", nowTs: () => "2026-02-28T00:00:00.000Z" });
+  session.userId = "user_1";
+  store.registerSession({ session });
+
+  const socketA = { id: "a" };
+  const socketB = { id: "b" };
+  store.trackConnection({ ws: socketA, userId: "user_1", sessionId: "sess_active_old" });
+
+  const rebound = store.rebindSession({
+    sessionId: "sess_active_old",
+    userId: "user_1",
+    ws: socketB,
+    nowMs: Date.parse("2026-02-28T00:00:05.000Z")
+  });
+
+  assert.equal(rebound.ok, true);
+  assert.equal(rebound.session, session);
+  assert.equal(rebound.priorSocket, socketA);
+  assert.equal(store.sessionForId("sess_active_old"), session);
+});
+

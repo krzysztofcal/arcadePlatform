@@ -4750,6 +4750,15 @@ wss.on("connection", (ws) => {
     if (connState.transportTerminationStarted === true) {
       return;
     }
+    if (process.env.WS_TEST_PROCESS_MESSAGE_DELAY_MS) {
+      const delayMs = Number(process.env.WS_TEST_PROCESS_MESSAGE_DELAY_MS);
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    if (connState.transportTerminationStarted === true) {
+      return;
+    }
     if (isBinary) {
       sendError(ws, connState, {
         code: "INVALID_ENVELOPE",
@@ -5854,8 +5863,6 @@ wss.on("connection", (ws) => {
         enqueueDisconnectCleanupCandidate({ tableId: update.tableId, userId: update.disconnectedUserId });
       }
     }
-    sweepExpiredSessionsOnly();
-    void sweepDisconnectCleanupAndBroadcast();
   };
 
   ws.on("error", (err) => {
