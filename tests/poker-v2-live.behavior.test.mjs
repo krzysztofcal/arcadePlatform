@@ -348,7 +348,9 @@ function createHarness(options = {}){
   });
 
   vm.createContext(sandbox);
-  vm.runInContext(source, sandbox, { filename: 'poker/poker-v2.js' });
+  const closureEnd = source.lastIndexOf('})();');
+  const privacySource = source.slice(0, closureEnd) + 'window.__getSeatRevealCardsForTest = getSeatRevealCards;\n' + source.slice(closureEnd);
+  vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
     await Promise.resolve();
@@ -402,6 +404,7 @@ async function flush(){
     rebuyRequestIds,
     reactionPayloads,
     targetedReactionPayloads,
+    getRevealedCards(userId){ return JSON.parse(JSON.stringify(sandbox.window.__getSeatRevealCardsForTest({ userId }))); },
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
     fireDocumentEvent,
@@ -2278,73 +2281,6 @@ test('poker v2 shows compact call amount in the primary action label', async () 
   assert.equal(harness.elements.pokerV2AmountValue.textContent, '2k');
 });
 
-test('poker v2 falls back to base hero card layout when the hero seat is temporarily unavailable', async () => {
-  const harness = createHarness();
-  harness.fireDomContentLoaded();
-  await harness.flush();
-
-  const ws = harness.getCreateOptions();
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 2,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'user-1', seat: 1, displayName: 'Hero' },
-          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
-        ]
-      },
-      public: {
-        hand: { handId: 'hand-hero', status: 'TURN', dealerSeatNo: 2 },
-        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-        board: ['As', 'Kd', '3h'],
-        pot: { total: 42, sidePots: [] },
-        legalActions: { seat: 1, actions: ['FOLD', 'CHECK', 'BET'] },
-        actionConstraints: { toCall: 0, maxBetAmount: 120 }
-      },
-      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
-      you: { seat: 1 }
-    }
-  });
-  await harness.flush();
-
-
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 3,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
-        ]
-      },
-      public: {
-        seats: [
-          { userId: 'villain-1', seatNo: 2, status: 'ACTIVE' }
-        ],
-        hand: { handId: 'hand-hero', status: 'TURN', dealerSeatNo: 2 },
-        turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
-        board: ['As', 'Kd', '3h'],
-        pot: { total: 42, sidePots: [] },
-        legalActions: { seat: null, actions: [] },
-        actionConstraints: { toCall: null, maxBetAmount: null }
-      },
-      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
-      you: null
-    }
-  });
-  await harness.flush();
-
-});
-
 test('poker v2 renders chip atlas stack variants from pot amount breakdown', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
@@ -3635,45 +3571,6 @@ test('poker v2 retries the same reconnect seat after a transient join failure', 
   });
 });
 
-test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat', async () => {
-  const harness = createHarness();
-  harness.fireDomContentLoaded();
-  await harness.flush();
-
-  const ws = harness.getCreateOptions();
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 4,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'villain-1', seat: 1, displayName: 'Villain 1' },
-          { userId: 'villain-2', seat: 2, displayName: 'Villain 2' },
-          { userId: 'villain-3', seat: 3, displayName: 'Villain 3' },
-          { userId: 'user-1', seat: 4, displayName: 'Hero' }
-        ]
-      },
-      public: {
-        hand: { handId: 'hand-3', status: 'TURN', dealerSeatNo: 2 },
-        turn: { userId: 'villain-2', deadlineAt: Date.now() + 5000 },
-        pot: { total: 12, sidePots: [] },
-        legalActions: { seat: 4, actions: [] }
-      },
-      you: { seat: 4 }
-    }
-  });
-  await harness.flush();
-
-  const rightTopSeat = findSeatByLabel(harness, 'Villain 2');
-  const rightBottomSeat = findSeatByLabel(harness, 'Villain 3');
-  assert.ok(rightTopSeat);
-  assert.ok(rightBottomSeat);
-});
-
 test('poker v2 shows a live turn clock only on the active seat avatar', async () => {
   const nowMs = 1_700_000_100_000;
   const harness = createHarness({ nowMs });
@@ -4098,7 +3995,7 @@ test('poker v2 preserves showdown hand summaries and revealed cards for legacy s
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
   const villainBadge = findSeatChild(villainSeat, 'poker-seat-settlement-badge');
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   const villainBadgeLabel = findSeatChild(villainBadge, 'poker-seat-settlement-hand-label');
   const villainBadgeCards = findSeatChild(villainBadge, 'poker-seat-settlement-hand-cards');
 
@@ -4106,18 +4003,13 @@ test('poker v2 preserves showdown hand summaries and revealed cards for legacy s
   assert.ok(villainBadgeLabel);
   assert.equal(villainBadgeLabel.textContent.length > 0, true);
   assert.equal(villainBadgeCards.children.length, 5);
-  assert.equal(villainCards.children.length, 2);
-  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.length, 2, 'authoritative reveal remains available');
   const losingSeat = findSeatByLabel(harness, 'Villain 2');
-  const losingCards = findSeatChild(losingSeat, 'poker-seat-cards');
-  assert.ok(losingCards);
-  assert.equal(losingCards.children.length, 2);
-  assert.equal(losingCards.children[0].className.includes('poker-card--back'), true);
-  assert.equal(losingCards.children[1].className.includes('poker-card--back'), true);
+  const losingCards = harness.getRevealedCards(losingSeat.dataset.userId);
+  assert.equal(losingCards, null, 'unrevealed/private cards remain unavailable');
 });
 
-test('poker v2 reveals showdown cards for compared losing players without winner badge', async () => {
+test('poker v2 preserves authoritative showdown reveal for compared losing players without inventing an award', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -4165,11 +4057,8 @@ test('poker v2 reveals showdown cards for compared losing players without winner
   await harness.flush();
 
   const losingSeat = findSeatByLabel(harness, 'Villain 2');
-  const losingCards = findSeatChild(losingSeat, 'poker-seat-cards');
-  assert.ok(losingCards);
-  assert.equal(losingCards.children.length, 2);
-  assert.equal(losingCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(losingCards.children[1].className.includes('poker-card--back'), false);
+  const losingCards = harness.getRevealedCards(losingSeat.dataset.userId);
+  assert.equal(losingCards.length, 2, 'authoritative reveal remains available');
   assert.equal(findSeatChild(losingSeat, 'poker-seat-settlement-badge'), undefined);
 });
 
@@ -4247,11 +4136,9 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
   assert.ok(findSeatChild(villainSeat, 'poker-seat-settlement-badge'));
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   assert.ok(villainCards);
-  assert.equal(villainCards.children.length, 2);
-  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.length, 2, 'authoritative reveal remains available');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 5);
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
 
@@ -4260,11 +4147,8 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
 
   const switchedVillainSeat = findSeatByLabel(harness, 'Villain 1');
   assert.equal(findSeatChild(switchedVillainSeat, 'poker-seat-settlement-badge'), undefined);
-  const switchedVillainCards = findSeatChild(switchedVillainSeat, 'poker-seat-cards');
-  assert.ok(switchedVillainCards);
-  assert.equal(switchedVillainCards.children.length, 2);
-  assert.equal(switchedVillainCards.children[0].className.includes('poker-card--back'), true);
-  assert.equal(switchedVillainCards.children[1].className.includes('poker-card--back'), true);
+  const switchedVillainCards = harness.getRevealedCards(switchedVillainSeat.dataset.userId);
+  assert.equal(switchedVillainCards, null, 'unrevealed/private cards remain unavailable');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 0);
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
 });
@@ -4435,13 +4319,12 @@ test('poker v2 does not switch away from the settled reveal scene before the loc
   assert.equal(harness.elements.pokerCommunityCards.children.length, 5, 'reveal board should stay visible until the local reveal window ends');
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
   assert.ok(findSeatChild(villainSeat, 'poker-seat-settlement-badge'));
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   assert.ok(villainCards);
-  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.length, 2, 'authoritative reveal remains available');
 });
 
-test('poker v2 keeps showdown participant cards hidden when the hand ends without showdown comparison', async () => {
+test('poker v2 withholds authoritative reveal when the hand ends without showdown comparison', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -4484,11 +4367,10 @@ test('poker v2 keeps showdown participant cards hidden when the hand ends withou
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
   const villainBadge = findSeatChild(villainSeat, 'poker-seat-settlement-badge');
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
 
   assert.equal(villainBadge, undefined, 'an all-folded legacy settlement must not invent an award badge');
-  assert.equal(villainCards.children[0].className, 'poker-card poker-card--back');
-  assert.equal(villainCards.children[1].className, 'poker-card poker-card--back');
+  assert.equal(villainCards, null, 'all-folded settlement must not reveal private cards');
 });
 
 test('poker v2 renders exact main, side, and returned awards and preserves them across omitted patch fields', async () => {

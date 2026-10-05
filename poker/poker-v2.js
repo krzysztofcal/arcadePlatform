@@ -3891,21 +3891,21 @@
   // Design coordinates belong to the table, never to measured seat content.
   // Physical variants: top, upper right, lower right, hero, lower left, upper left.
   var seatSceneGeometry = {
-    portrait: { width:360, height:660, seats:[
-      {avatar:[180,65],cards:[255,60],stack:[278,110],bet:[235,134],dealer:[124,102],action:[117,132],presentation:[65,56,100,52],social:[62,101,70,18]},
-      {avatar:[300,195],cards:[300,288],stack:[220,178],bet:[205,140],dealer:[262,280],presentation:[300,322,92,32],social:[220,220,80,18]},
-      {avatar:[300,390],cards:[300,483],stack:[226,413],bet:[258,389],dealer:[240,352],presentation:[226,484,70,42],social:[226,452,80,18]},
-      {avatar:[180,548],cards:[282,618],stack:[268,534],bet:[180,470],dealer:[236,570],bestHand:[70,590,98,90],presentation:[70,532,98,22],social:[70,648,98,18]},
-      {avatar:[60,390],cards:[60,483],stack:[134,413],bet:[102,389],dealer:[120,352],presentation:[134,484,70,42],social:[134,452,80,18]},
-      {avatar:[60,195],cards:[60,288],stack:[140,178],bet:[175,140],dealer:[98,280],presentation:[60,322,92,32],social:[140,220,80,18]}
+    portrait: { width:360, height:650, seats:[
+      {avatar:[180,65],stack:[278,110],bet:[235,134],dealer:[124,102],presentation:[65,56,100,52],social:[62,101,70,18]},
+      {avatar:[300,195],stack:[220,178],bet:[205,140],dealer:[262,280],presentation:[300,322,92,32],social:[220,220,80,18]},
+      {avatar:[300,355],stack:[220,365],bet:[258,389],dealer:[180,390],presentation:[200,430,70,42],social:[200,455,70,18]},
+      {avatar:[150,500],cards:[154,615],stack:[204,438],bet:[185,445],dealer:[207,523],bestHand:[50,580,90,40],presentation:[65,526,98,22],social:[65,646,98,18]},
+      {avatar:[60,390],stack:[134,413],bet:[102,389],dealer:[120,352],presentation:[134,484,70,42],social:[134,452,80,18]},
+      {avatar:[60,195],stack:[140,178],bet:[175,140],dealer:[98,280],presentation:[60,322,92,32],social:[140,220,80,18]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[520,50],cards:[620,50],stack:[680,50],bet:[620,96],dealer:[440,80],action:[440,112],presentation:[350,28,120,44],social:[370,93,90,18]},
-      {avatar:[925,90],cards:[845,90],stack:[760,90],bet:[813,120],dealer:[810,90],presentation:[925,188,110,38],social:[780,149,100,20]},
-      {avatar:[925,265],cards:[845,265],stack:[760,253],bet:[832,219],dealer:[810,265],presentation:[800,310,110,44],social:[865,355,112,24]},
-      {avatar:[520,298],cards:[648,334],stack:[620,267],bet:[440,242],dealer:[575,368],bestHand:[375,327,90,62],presentation:[375,278,90,24],social:[660,383,100,14]},
-      {avatar:[115,265],cards:[195,265],stack:[280,253],bet:[208,219],dealer:[230,265],presentation:[240,310,110,44],social:[175,355,112,24]},
-      {avatar:[115,90],cards:[195,90],stack:[280,90],bet:[227,120],dealer:[230,90],presentation:[115,188,110,38],social:[260,149,100,20]}
+      {avatar:[520,50],stack:[680,50],bet:[620,96],dealer:[440,80],presentation:[350,28,120,44],social:[370,93,90,18]},
+      {avatar:[925,90],stack:[760,90],bet:[813,120],dealer:[810,90],presentation:[925,188,110,38],social:[780,149,100,20]},
+      {avatar:[740,265],stack:[835,145],bet:[832,219],dealer:[795,250],presentation:[740,200,84,32],social:[740,355,112,24]},
+      {avatar:[430,298],cards:[558,334],stack:[530,267],bet:[440,242],dealer:[490,368],bestHand:[280,327,200,44],presentation:[280,278,90,24],social:[620,383,100,14]},
+      {avatar:[115,265],stack:[280,253],bet:[208,219],dealer:[230,265],presentation:[240,310,110,44],social:[175,355,112,24]},
+      {avatar:[115,90],stack:[280,90],bet:[227,120],dealer:[230,90],presentation:[115,188,110,38],social:[260,149,100,20]}
     ]}
   };
   var seatSceneOrientation = 'portrait';
@@ -3945,17 +3945,16 @@
     article.style.top = hud.origin[1] + 'px';
     article.dataset.seatVariant = ['top','upper-right','lower-right','hero','lower-left','upper-left'][slot];
     hud.avatarSize = hero ? (portrait ? 72 : 80) : (portrait ? 52 : 56);
-    hud.name = [config.avatar[0],config.avatar[1] + (hero ? (portrait ? 45 : 49) : (portrait ? 35 : 38))];
-    hud.status = [hud.name[0],hud.name[1] + 16];
-    hud.action = config.action || [hud.name[0],hud.status[1] + 16];
+    hud.name = [config.avatar[0],config.avatar[1] + (hero ? (portrait ? 51 : 55) : 44)];
+    hud.status = [config.avatar[0],config.avatar[1] - hud.avatarSize / 2];
+    hud.action = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2];
     var corner = hero ? 50 : (portrait ? 34 : 40);
-    var quick = [config.avatar[0] + corner,config.avatar[1] + (hero ? 30 : 20)];
-    var marker = [config.avatar[0] - corner,config.avatar[1] + (hero ? 30 : 20)];
-    if (hero && portrait){quick=[134,576];marker=[230,552];}
+    var quick = [config.avatar[0] + corner,config.avatar[1] + (hero ? 12 : 8)];
+    var marker = [config.avatar[0] - corner,config.avatar[1] + (hero ? 20 : 28)];
     hud.marker = marker;
     placeSeatNode(hud.quickAction,hud,quick,16,16);
     placeSeatNode(hud.dealer,hud,config.dealer,20,20);
-    placeSeatNode(hud.cards,hud,config.cards,hero ? 110 : 48,hero ? 80 : 34);
+    placeSeatNode(hud.cards,hud,hero ? config.cards : [config.avatar[0] - corner,config.avatar[1] + 8],hero ? 110 : 26,hero ? 80 : 14);
     placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
     placeSeatNode(hud.bet,hud,config.bet,22,20);
     ['presentation','social','bestHand'].forEach(function(role){
@@ -4265,6 +4264,7 @@
 
       var avatar = document.createElement('div');
       avatar.className = 'poker-seat-avatar';
+      avatar.setAttribute('data-poker-avatar-center', '');
       avatar.dataset.userId = seat && seat.userId || '';
       renderSeatAvatar(avatar, seat);
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
@@ -4298,16 +4298,19 @@
 
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
-      if (!hero && seat && seat.userId && !waitingNextHand){
-        var revealCards = getSeatRevealCards(seat);
-        if (revealCards){
-          revealCards.forEach(function(card){
-            cards.appendChild(createCard(card));
-          });
-        } else {
-          cards.appendChild(createCard(null, { faceDown: true }));
-          cards.appendChild(createCard(null, { faceDown: true }));
+      if (!hero && seat && seat.userId){
+        var heldCards = !waitingNextHand && !folded && state.handId ? 2 : 0;
+        cards.setAttribute('aria-label', heldCards + ' cards held');
+        for (var cardIndex = 0; cardIndex < heldCards; cardIndex++){
+          var cardBack = document.createElement('span');
+          cardBack.className = 'poker-seat-card-indicator';
+          cardBack.setAttribute('aria-hidden', 'true');
+          cards.appendChild(cardBack);
         }
+        var cardCount = document.createElement('span');
+        cardCount.className = 'poker-seat-card-count';
+        cardCount.textContent = String(heldCards);
+        cards.appendChild(cardCount);
       }
 
       var name = document.createElement('div');
@@ -4349,7 +4352,7 @@
       }
       if (cards.children.length) hud.cards.appendChild(cards);
       placeSeatNode(name,hud,hud.name,hero ? 88 : 76,14);
-      placeSeatNode(status,hud,hud.status,76,12);
+      placeSeatNode(status,hud,hud.status,hero ? 64 : 52,10);
       hud.identity.appendChild(name);
       hud.identity.appendChild(status);
       if (hero && heroBestHand){
@@ -4359,13 +4362,16 @@
         bestHandName.className = 'poker-seat-best-hand-label';
         bestHandName.textContent = formatViewerHandCategory(heroBestHand.category);
         bestHand.appendChild(bestHandName);
+        var bestHandCards = document.createElement('div');
+        bestHandCards.className = 'poker-seat-best-hand-cards';
         heroBestHand.cards.forEach(function(card){
           var chip = document.createElement('span');
           var normalized = normalizeCard(card);
           chip.className = 'poker-seat-best-hand-card' + (normalized && (normalized.s === 'H' || normalized.s === 'D') ? ' poker-seat-best-hand-card--red' : '');
           chip.textContent = normalized ? (normalized.r + SUIT_SYMBOLS[normalized.s]) : '?';
-          bestHand.appendChild(chip);
+          bestHandCards.appendChild(chip);
         });
+        bestHand.appendChild(bestHandCards);
         hud.bestHand.appendChild(bestHand);
       }
       els.seatLayer.appendChild(article);
@@ -4448,8 +4454,8 @@
     Object.keys(targetedReactionEffectsById).forEach(function(effectId){
       var effect = targetedReactionEffectsById[effectId];
       var entry = effect ? findReactionEntry(effect.reactionKey) : null;
-      var senderAnchor = effect && seatHudAnchor(renderedSeatHud[effect.senderSeatNo] && renderedSeatHud[effect.senderSeatNo].social);
-      var targetAnchor = effect && seatHudAnchor(renderedSeatHud[effect.targetSeatNo] && renderedSeatHud[effect.targetSeatNo].social);
+      var senderAnchor = effect && getSeatAvatarAnchor(effect.senderSeatNo);
+      var targetAnchor = effect && getSeatAvatarAnchor(effect.targetSeatNo);
       if (!effect || !entry || !senderAnchor || !targetAnchor){
         clearTargetedReactionEffect(effectId);
         return;
@@ -4508,7 +4514,7 @@
       });
       anchorNode.appendChild(button);
       var hud = renderedSeatHud[offer.targetSeatNo];
-      if (hud) hud.social.appendChild(anchorNode);
+      if (hud) hud.quickAction.appendChild(anchorNode);
       reactionRenderNodes.push(anchorNode);
     });
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNoKey){

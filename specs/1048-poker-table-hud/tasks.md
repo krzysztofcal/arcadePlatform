@@ -11,3 +11,10 @@ Earlier T003/T008 seat-grid implementation and 20/20 evidence are superseded by 
 - [x] R007 Real Deploy Preview geometry/collision matrix and screenshots for owner review.
 - [x] R008 Update live #1048 / existing draft #1049 evidence and handoff.
 - [ ] R009 Manual owner smoke of replacement layout and actual authenticated Stage verification; not merge-ready.
+
+## Latest owner correction tasks
+
+- [ ] C001 Restore single-row best hand and lower-right action rail; enlarge scene; shift hero left.
+- [ ] C002 Restore popup clickability; avatar-edge badges/cards/social affordance and avatar-center effect endpoints.
+- [ ] C003 Remove empty layout tests; retain fundamental privacy, gameplay and Other tables checks.
+- [ ] C004 Narrow real Deploy Preview sanity/screenshots, self-review and draft handoff; owner acceptance pending.
