@@ -19,12 +19,23 @@ Finding P1 #3 from GitHub issue #1050:
    - Verifies `SUPABASE_URL` targets `://otbqfijerkieoxwpxjnm.supabase.co`.
    - Verifies `SUPABASE_DB_URL` targets `otbqfijerkieoxwpxjnm` (supporting pooler format `postgres.otbqfijerkieoxwpxjnm` and direct formats).
    - Strictly rejects Stage project ref `krydukthwdvccggbyjfw` or mixed configurations.
-   - Executes read-only DB identity query: `select system_identifier from pg_control_system()`.
+   - Parses `SUPABASE_DB_URL` into components (`host`, `port`, `user`, `password`, `database`, `sslmode`).
+   - Executes read-only DB identity query `select system_identifier from pg_control_system();` via `psql`.
+   - Passes DB password strictly via `PGPASSWORD` subprocess environment variable; command line arguments (`argv`) contain only non-secret flags (`-h`, `-p`, `-U`, `-d`, `-X`, `-Atq`, `-v ON_ERROR_STOP=1`, `-c`).
+   - Redacts all passwords and connection credentials from stdout/stderr via `sanitizeOutput`.
    - Asserts the returned identifier matches canonical Production `7575202818581710058`.
    - Rejects any mismatch, connection failure, timeout, or missing database client.
-2. **Infrastructure Configuration**:
+   - Production CLI execution block contains no `process.env.WS_PREFLIGHT_*` seams; test parameters are passed via direct function parameters (`runPreflight({ envFile, allowTestUid, querySystemIdentifier })`).
+2. **Infrastructure Configuration & Existing-Host Staging**:
    - Updated `infra/vps/arcade-deploy.sudoers` to include `/usr/local/sbin/arcade-ws-production-env-preflight ""`.
-   - Updated `infra/vps/bootstrap.sh` to install the preflight script at `/usr/local/sbin/arcade-ws-production-env-preflight` with mode 0755 root:root.
+   - Updated `infra/vps/bootstrap.sh` to install the preflight script at `/usr/local/sbin/arcade-ws-production-env-preflight` with mode 0755 root:root for fresh host recovery.
+   - Created `infra/vps/stage-production-env-preflight.sh` for owner-approved existing-host staging:
+     - Validates prerequisites (`/etc/arcadeplatform/ws-server.env`, `/usr/bin/node`, `/usr/bin/psql`).
+     - Validates sudoers syntax with `visudo -cf`.
+     - Installs `/usr/local/sbin/arcade-ws-production-env-preflight` (`0755 root:root`) and `/etc/sudoers.d/arcade-deploy` (`0440 root:root`).
+     - Verifies read-only via `sudo -u copilot sudo -n /usr/local/sbin/arcade-ws-production-env-preflight` expecting `PASS`.
+     - Zero restarts, zero env modifications, zero DB mutations.
+   - Updated documentation in `docs/vps-disaster-recovery.md`, `docs/poker-deployment.md`, and `infra/vps/README.md`.
 3. **Deploy Workflow Integration (`.github/workflows/ws-server-deploy.yml`)**:
    - Executes `sudo -n /usr/local/sbin/arcade-ws-production-env-preflight` on the VPS before `/opt/ws-server/current` symlink switch and before `systemctl restart ws-server.service`.
    - Fails closed: any error terminates deployment without switching the release or restarting the service.
@@ -33,7 +44,10 @@ Finding P1 #3 from GitHub issue #1050:
 
 ## Automated Verification
 - **Targeted Test Suites**:
-  - `node --test ws-tests/ws-production-env-preflight.behavior.test.mjs` (13/13 pass):
+  - `node --test ws-tests/ws-production-env-preflight.behavior.test.mjs` (16/16 pass):
+    - `parseEnv` parses assignments and trims quotes -> PASS
+    - `parseDbUrl` parses pooler and direct connection strings correctly -> PASS
+    - `sanitizeOutput` redacts secret passwords and connection URI credentials -> PASS
     - Valid canonical Production env + correct DB system identifier (`7575202818581710058`) -> PASS
     - Direct DB URL format -> PASS
     - Stage `SUPABASE_URL` -> FAIL
@@ -44,7 +58,8 @@ Finding P1 #3 from GitHub issue #1050:
     - Symlinks, wrong file mode (e.g. 0644), or wrong owner -> FAIL
     - DB returning wrong `system_identifier` (e.g. Stage `7656985631720456337`) -> FAIL
     - DB query error or empty response -> FAIL
-    - CLI execution with exit code 0 on PASS and 1 on FAIL -> PASS
+    - CLI execution ignores `WS_PREFLIGHT_*` test env vars and rejects extra arguments -> PASS
+    - `stage-production-env-preflight.sh` has valid syntax and strictly verifies without restarts -> PASS
     - Workflow ordering guard in `ws-server-deploy.yml` -> PASS
   - `node --test ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs` (1/1 pass)
   - `node --test ws-tests/infra-vps-workflow.guard.test.mjs` (16/16 pass)

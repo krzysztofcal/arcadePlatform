@@ -7,7 +7,9 @@ import { spawnSync } from "node:child_process";
 import {
   runPreflight,
   PreflightError,
-  parseEnv
+  parseEnv,
+  parseDbUrl,
+  sanitizeOutput
 } from "../infra/vps/ws-production-env-preflight.mjs";
 
 const CANONICAL_PROD_PROJECT_REF = "otbqfijerkieoxwpxjnm";
@@ -52,6 +54,44 @@ test("parseEnv parses assignments and trims quotes", () => {
   assert.equal(env.FOO, "bar");
   assert.equal(env.QUOTED, "hello world");
   assert.equal(env.SINGLE, "single quoted");
+});
+
+test("parseDbUrl parses pooler and direct connection strings correctly", () => {
+  const pooler = parseDbUrl(
+    "postgresql://postgres.otbqfijerkieoxwpxjnm:my%20secret%40pass@aws-1-eu-west-3.pooler.supabase.com:6543/postgres?sslmode=require"
+  );
+  assert.equal(pooler.host, "aws-1-eu-west-3.pooler.supabase.com");
+  assert.equal(pooler.port, "6543");
+  assert.equal(pooler.user, "postgres.otbqfijerkieoxwpxjnm");
+  assert.equal(pooler.password, "my secret@pass");
+  assert.equal(pooler.database, "postgres");
+  assert.equal(pooler.sslmode, "require");
+
+  const direct = parseDbUrl(
+    "postgresql://postgres:secret%23pass@db.otbqfijerkieoxwpxjnm.supabase.co:5432/postgres"
+  );
+  assert.equal(direct.host, "db.otbqfijerkieoxwpxjnm.supabase.co");
+  assert.equal(direct.port, "5432");
+  assert.equal(direct.user, "postgres");
+  assert.equal(direct.password, "secret#pass");
+  assert.equal(direct.database, "postgres");
+  assert.equal(direct.sslmode, "");
+
+  assert.throws(() => parseDbUrl("not-a-valid-url"), (err) => err instanceof PreflightError);
+  assert.throws(() => parseDbUrl("postgresql://:mypass@localhost/postgres"), (err) => err instanceof PreflightError);
+});
+
+test("sanitizeOutput redacts secret passwords and connection URI credentials", () => {
+  const password = "super-secret-password-xyz";
+  const raw = `FATAL: password authentication failed for user "postgres" with password "${password}"`;
+  const sanitized = sanitizeOutput(raw, [password]);
+  assert.ok(!sanitized.includes(password), "must not include raw password");
+  assert.ok(sanitized.includes("[REDACTED]"), "must include [REDACTED]");
+
+  const uriRaw = "error connecting to postgresql://postgres:mysecret123@aws-1.supabase.com:5432/postgres";
+  const uriSanitized = sanitizeOutput(uriRaw);
+  assert.ok(!uriSanitized.includes("mysecret123"), "must not include URI password");
+  assert.ok(uriSanitized.includes("postgresql://postgres:[REDACTED]@aws-1.supabase.com:5432/postgres"));
 });
 
 test("canonical Production env + correct DB system identifier passes", () => {
@@ -239,42 +279,62 @@ test("DB identity check error or empty response fails", () => {
   });
 });
 
-test("CLI execution passes with valid env and fails with invalid identifier", () => {
-  withTempEnvFile(validEnvContent(), (envFile) => {
-    // PASS case
-    const passResult = spawnSync(
-      process.execPath,
-      ["infra/vps/ws-production-env-preflight.mjs"],
-      {
-        env: {
-          ...process.env,
-          WS_PREFLIGHT_TEST_ENV_FILE: envFile,
-          WS_PREFLIGHT_ALLOW_TEST_UID: "1",
-          WS_PREFLIGHT_MOCK_SYSTEM_IDENTIFIER: CANONICAL_PROD_SYSTEM_IDENTIFIER
-        },
-        encoding: "utf8"
-      }
+test("CLI execution ignores WS_PREFLIGHT_* test env vars and rejects extra arguments", () => {
+  // When running CLI directly, it must not allow test overrides through environment variables
+  const result = spawnSync(
+    process.execPath,
+    ["infra/vps/ws-production-env-preflight.mjs"],
+    {
+      env: {
+        ...process.env,
+        WS_PREFLIGHT_TEST_ENV_FILE: "/tmp/some-file",
+        WS_PREFLIGHT_ALLOW_TEST_UID: "1",
+        WS_PREFLIGHT_MOCK_SYSTEM_IDENTIFIER: CANONICAL_PROD_SYSTEM_IDENTIFIER
+      },
+      encoding: "utf8"
+    }
+  );
+  // In an unprivileged test environment, accessing /etc/arcadeplatform/ws-server.env fails closed
+  if (process.getuid() !== 0) {
+    assert.equal(result.status, 1, "CLI must exit with code 1 when unprivileged");
+    assert.ok(
+      result.stderr.includes("EACCES") || result.stderr.includes("owned by root:root") || result.stderr.includes("ENOENT"),
+      `stderr should indicate permission/path failure, got: ${result.stderr}`
     );
-    assert.equal(passResult.status, 0, `expected 0, got stdout: ${passResult.stdout}, stderr: ${passResult.stderr}`);
-    assert.equal(passResult.stdout.trim(), "PASS");
+  }
 
-    // FAIL case (wrong identifier)
-    const failResult = spawnSync(
-      process.execPath,
-      ["infra/vps/ws-production-env-preflight.mjs"],
-      {
-        env: {
-          ...process.env,
-          WS_PREFLIGHT_TEST_ENV_FILE: envFile,
-          WS_PREFLIGHT_ALLOW_TEST_UID: "1",
-          WS_PREFLIGHT_MOCK_SYSTEM_IDENTIFIER: STAGE_SYSTEM_IDENTIFIER
-        },
-        encoding: "utf8"
-      }
-    );
-    assert.equal(failResult.status, 1);
-    assert.match(failResult.stderr, /system identifier mismatch/);
-  });
+  // CLI rejects extra arguments
+  const extraArgResult = spawnSync(
+    process.execPath,
+    ["infra/vps/ws-production-env-preflight.mjs", "--unexpected-arg"],
+    { encoding: "utf8" }
+  );
+  assert.equal(extraArgResult.status, 1);
+  assert.match(extraArgResult.stderr, /unexpected arguments/);
+});
+
+test("stage-production-env-preflight.sh has valid syntax and strictly verifies without restarts", () => {
+  const scriptPath = "infra/vps/stage-production-env-preflight.sh";
+  assert.ok(fs.existsSync(scriptPath), "staging script must exist");
+
+  const syntaxCheck = spawnSync("bash", ["-n", scriptPath], { encoding: "utf8" });
+  assert.equal(syntaxCheck.status, 0, `bash syntax error: ${syntaxCheck.stderr}`);
+
+  const scriptContent = fs.readFileSync(scriptPath, "utf8");
+  assert.ok(scriptContent.includes('if [[ "$EUID" -ne 0 ]]; then'), "must enforce root execution");
+  assert.ok(scriptContent.includes("visudo -cf"), "must validate sudoers file syntax");
+  assert.ok(
+    scriptContent.includes("sudo -u copilot sudo -n"),
+    "must verify preflight via unprivileged sudo caller"
+  );
+  assert.ok(
+    !scriptContent.includes("systemctl restart"),
+    "staging script must NOT restart services"
+  );
+  assert.ok(
+    !scriptContent.includes("systemctl reload"),
+    "staging script must NOT reload services"
+  );
 });
 
 test("workflow guard confirms Production preflight is executed before current switch and restart in ws-server-deploy.yml", () => {

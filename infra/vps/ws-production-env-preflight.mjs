@@ -21,6 +21,17 @@ export function reject(reason) {
   throw new PreflightError(reason);
 }
 
+export function sanitizeOutput(rawText, sensitiveValues = []) {
+  let text = String(rawText || "");
+  for (const secret of sensitiveValues) {
+    if (secret && typeof secret === "string" && secret.length >= 2) {
+      text = text.split(secret).join("[REDACTED]");
+    }
+  }
+  text = text.replace(/:\/\/([^:]+):([^@]+)@/g, "://$1:[REDACTED]@");
+  return text.trim();
+}
+
 export function parseEnv(source) {
   const values = Object.create(null);
 
@@ -45,23 +56,64 @@ export function parseEnv(source) {
   return values;
 }
 
-export function defaultQuerySystemIdentifier(dbUrl) {
-  if (process.env.WS_PREFLIGHT_MOCK_SYSTEM_IDENTIFIER !== undefined) {
-    return process.env.WS_PREFLIGHT_MOCK_SYSTEM_IDENTIFIER;
+export function parseDbUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    reject("invalid database connection URL format");
   }
 
-  const result = spawnSync(
-    "psql",
-    [dbUrl, "-X", "-Atq", "-v", "ON_ERROR_STOP=1", "-c", "select system_identifier from pg_control_system();"],
-    { timeout: 15000, encoding: "utf8" }
-  );
+  const host = parsed.hostname;
+  const port = parsed.port || "5432";
+  const user = decodeURIComponent(parsed.username || "");
+  const password = decodeURIComponent(parsed.password || "");
+  const database = parsed.pathname ? parsed.pathname.replace(/^\//, "") : "postgres";
+
+  if (!host || !user) {
+    reject("database connection URL must specify host and user");
+  }
+
+  const sslmode = parsed.searchParams.get("sslmode") || "";
+
+  return { host, port, user, password, database, sslmode };
+}
+
+export function defaultQuerySystemIdentifier(dbUrl) {
+  const { host, port, user, password, database, sslmode } = parseDbUrl(dbUrl);
+
+  const args = [
+    "-h", host,
+    "-p", String(port),
+    "-U", user,
+    "-d", database,
+    "-X",
+    "-Atq",
+    "-v", "ON_ERROR_STOP=1",
+    "-c", "select system_identifier from pg_control_system();"
+  ];
+
+  const env = {
+    ...process.env,
+    PGPASSWORD: password
+  };
+  if (sslmode) {
+    env.PGSSLMODE = sslmode;
+  }
+
+  const result = spawnSync("psql", args, {
+    env,
+    timeout: 15000,
+    encoding: "utf8"
+  });
 
   if (result.error) {
-    reject(`failed to execute DB identity check: ${result.error.message}`);
+    const sanitizedError = sanitizeOutput(result.error.message, [password]);
+    reject(`failed to execute DB identity check: ${sanitizedError}`);
   }
 
   if (result.status !== 0) {
-    const stderr = (result.stderr || "").trim();
+    const stderr = sanitizeOutput(result.stderr || "", [password]);
     reject(`DB identity check failed with exit code ${result.status}${stderr ? `: ${stderr}` : ""}`);
   }
 
@@ -69,8 +121,8 @@ export function defaultQuerySystemIdentifier(dbUrl) {
 }
 
 export function runPreflight({
-  envFile = process.env.WS_PREFLIGHT_TEST_ENV_FILE || DEFAULT_ENV_FILE,
-  allowTestUid = process.env.WS_PREFLIGHT_ALLOW_TEST_UID === "1",
+  envFile = DEFAULT_ENV_FILE,
+  allowTestUid = false,
   querySystemIdentifier = defaultQuerySystemIdentifier
 } = {}) {
   let fd;

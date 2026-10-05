@@ -39,34 +39,53 @@ PASS:
    - Add `/usr/local/sbin/arcade-ws-production-env-preflight ""` to `ARCADE_DEPLOY_COMMANDS`.
 
 3. `infra/vps/bootstrap.sh`:
-   - Install `infra/vps/ws-production-env-preflight.mjs` to `/usr/local/sbin/arcade-ws-production-env-preflight` mode 0755 root:root.
+   - Install `infra/vps/ws-production-env-preflight.mjs` to `/usr/local/sbin/arcade-ws-production-env-preflight` mode 0755 root:root for fresh host recovery.
 
-4. `.github/workflows/ws-server-deploy.yml`:
+4. `infra/vps/stage-production-env-preflight.sh`:
+   - Owner-approved existing-host staging script.
+   - Requires root, verifies prerequisites on existing host.
+   - Validates sudoers syntax with `visudo -cf`.
+   - Installs `/usr/local/sbin/arcade-ws-production-env-preflight` (`0755 root:root`).
+   - Installs `/etc/sudoers.d/arcade-deploy` (`0440 root:root`) and checks with `visudo -c`.
+   - Performs read-only verification: `sudo -u copilot sudo -n /usr/local/sbin/arcade-ws-production-env-preflight` expecting `PASS`.
+   - Zero restarts, zero env edits, zero DB mutations.
+
+5. `.github/workflows/ws-server-deploy.yml`:
    - In `deploy` job, step `Atomic release switch + restart + health gate on VPS`:
      Execute `sudo -n /usr/local/sbin/arcade-ws-production-env-preflight` before switching `current` link and before `systemctl restart ws-server.service`.
    - In `validate` job:
      Run `node --test ws-tests/ws-production-env-preflight.behavior.test.mjs`.
 
-5. Tests:
-   - Create `ws-tests/ws-production-env-preflight.behavior.test.mjs`:
-     - Test 1: Canonical Production env + correct DB system identifier (`7575202818581710058`) -> PASS.
-     - Test 2: Stage SUPABASE_URL (`krydukthwdvccggbyjfw`) -> FAIL.
-     - Test 3: Stage SUPABASE_DB_URL (`krydukthwdvccggbyjfw`) -> FAIL.
-     - Test 4: Mixed Production URL + Stage DB -> FAIL.
-     - Test 5: Missing required fields / wrong port / wrong join -> FAIL.
-     - Test 6: Symlink, wrong uid, wrong gid, or wrong permissions mode -> FAIL.
-     - Test 7: DB returns different system_identifier (e.g. Stage `7656985631720456337`) -> FAIL.
-     - Test 8: DB identity check error / connection failure -> FAIL.
-     - Test 9: Workflow guard confirms preflight execution order before `current` switch and `systemctl restart ws-server.service`.
-   - Update existing guard tests:
+6. Documentation:
+   - `docs/vps-disaster-recovery.md`: add existing-host staging section.
+   - `docs/poker-deployment.md`: add production preflight helper to quick VPS check.
+   - `infra/vps/README.md`: add production preflight helper and staging script notes.
+
+7. Tests:
+   - `ws-tests/ws-production-env-preflight.behavior.test.mjs`:
+     - Test parseEnv.
+     - Test parseDbUrl (pooler and direct connection strings).
+     - Test sanitizeOutput (password and URI credential redaction).
+     - Test canonical Production env + correct DB system identifier (`7575202818581710058`) -> PASS.
+     - Test Stage SUPABASE_URL (`krydukthwdvccggbyjfw`) -> FAIL.
+     - Test Stage SUPABASE_DB_URL (`krydukthwdvccggbyjfw`) -> FAIL.
+     - Test Mixed Production URL + Stage DB -> FAIL.
+     - Test Missing required fields / wrong port / wrong join -> FAIL.
+     - Test Symlink, wrong uid, wrong gid, or wrong permissions mode -> FAIL.
+     - Test DB returns different system_identifier (e.g. Stage `7656985631720456337`) -> FAIL.
+     - Test DB identity check error / connection failure -> FAIL.
+     - Test CLI execution ignores WS_PREFLIGHT_* test env vars and rejects extra arguments -> PASS.
+     - Test staging script syntax and non-destructive properties -> PASS.
+     - Test Workflow guard confirms preflight execution order before `current` switch and `systemctl restart ws-server.service`.
+   - Existing guard tests:
      - `ws-tests/infra-vps-workflow.guard.test.mjs`: assert presence of `arcade-ws-production-env-preflight`.
      - `ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs`: assert presence of `sudo -n /usr/local/sbin/arcade-ws-production-env-preflight`.
 
-6. Verification:
+8. Verification:
    - Run targeted test suites: `node --test ws-tests/ws-production-env-preflight.behavior.test.mjs`.
    - Run related deploy guard suites.
    - Run repo checks: `npm run check:all`, `npm run test:quick`, `npm run test:unit`.
-   - Draft PR linked to #1050 (do not merge, do not perform unapproved production rollout).
+   - Draft PR linked to #1050 (keep in Draft until owner completes existing-host staging).
 
 ## Breaking Impact
 - Brak wpływu na poprawnie skonfigurowane środowisko produkcyjne (canonical Production URL, canonical Production DB URL oraz właściwy PostgreSQL system identifier przechodzą pomyślnie).

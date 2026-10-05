@@ -9,3 +9,6 @@
 - [x] T007 Run targeted test suites and repo checks (`npm run check:all`, `npm run test:quick`, `npm run test:unit`).
 - [x] T008 Review whole diff, simplify, and document verification evidence in `specs/1050-ws-production-db-identity-preflight/review.md`.
 - [x] T009 Create draft PR linked to #1050 with root cause, fix scope, test evidence, breaking impact, and fail-closed notice.
+- [x] T010 Implement existing-host staging script `infra/vps/stage-production-env-preflight.sh` and update documentation (`docs/vps-disaster-recovery.md`, `docs/poker-deployment.md`, `infra/vps/README.md`).
+- [x] T011 Isolate DB credentials: parse database URL, pass password strictly via `PGPASSWORD` subprocess environment (never in `psql` argv), sanitize error outputs.
+- [x] T012 Eliminate test seams from production CLI: CLI ignores `WS_PREFLIGHT_*` and strictly accesses `/etc/arcadeplatform/ws-server.env`; tests use direct function parameter injection.
