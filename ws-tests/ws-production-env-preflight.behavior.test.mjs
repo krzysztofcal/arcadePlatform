@@ -9,7 +9,9 @@ import {
   PreflightError,
   parseEnv,
   parseDbUrl,
-  sanitizeOutput
+  sanitizeOutput,
+  PSQL_BIN,
+  defaultQuerySystemIdentifier
 } from "../infra/vps/ws-production-env-preflight.mjs";
 
 const CANONICAL_PROD_PROJECT_REF = "otbqfijerkieoxwpxjnm";
@@ -92,6 +94,37 @@ test("sanitizeOutput redacts secret passwords and connection URI credentials", (
   const uriSanitized = sanitizeOutput(uriRaw);
   assert.ok(!uriSanitized.includes("mysecret123"), "must not include URI password");
   assert.ok(uriSanitized.includes("postgresql://postgres:[REDACTED]@aws-1.supabase.com:5432/postgres"));
+});
+
+test("defaultQuerySystemIdentifier invokes /usr/bin/psql directly and ignores ambient PATH", () => {
+  assert.equal(PSQL_BIN, "/usr/bin/psql");
+
+  const preflightSource = fs.readFileSync("infra/vps/ws-production-env-preflight.mjs", "utf8");
+  assert.ok(!preflightSource.includes('spawnSync("psql"'), "must not invoke unanchored psql from PATH");
+  assert.ok(!preflightSource.includes("spawnSync('psql'"), "must not invoke unanchored psql from PATH");
+  assert.ok(preflightSource.includes('spawnSync("/usr/bin/psql"'), "must invoke /usr/bin/psql directly");
+
+  // Place a dummy 'psql' script in a temporary directory at the front of PATH
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ws-prod-psql-path-test-"));
+  const fakePsql = path.join(tempDir, "psql");
+  fs.writeFileSync(fakePsql, "#!/bin/sh\necho FAKE_PATH_PSQL\nexit 42\n", { mode: 0o755 });
+
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = `${tempDir}:${originalPath}`;
+    assert.throws(
+      () => defaultQuerySystemIdentifier("postgresql://postgres:pass@127.0.0.1:5432/postgres"),
+      (err) => {
+        // If ambient psql from PATH was called, it would fail with code 42 or FAKE_PATH_PSQL
+        assert.ok(!err.message.includes("FAKE_PATH_PSQL"), "must not execute ambient psql from PATH");
+        assert.ok(!err.message.includes("exit code 42"), "must not execute ambient psql from PATH");
+        return true;
+      }
+    );
+  } finally {
+    process.env.PATH = originalPath;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("canonical Production env + correct DB system identifier passes", () => {

@@ -8,6 +8,7 @@ const DEFAULT_ENV_FILE = "/etc/arcadeplatform/ws-server.env";
 const CANONICAL_PROD_PROJECT_REF = "otbqfijerkieoxwpxjnm";
 const CANONICAL_PROD_SYSTEM_IDENTIFIER = "7575202818581710058";
 const STAGE_PROJECT_REF = "krydukthwdvccggbyjfw";
+export const PSQL_BIN = "/usr/bin/psql";
 
 const REQUIRED_NON_EMPTY = [
   "SUPABASE_DB_URL",
@@ -101,7 +102,7 @@ export function defaultQuerySystemIdentifier(dbUrl) {
     env.PGSSLMODE = sslmode;
   }
 
-  const result = spawnSync("psql", args, {
+  const result = spawnSync("/usr/bin/psql", args, {
     env,
     timeout: 15000,
     encoding: "utf8"
