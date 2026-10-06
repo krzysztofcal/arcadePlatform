@@ -1,0 +1,158 @@
+{
+  "runtimeSha": "34b98c9ee5d2840054031a72fde5beeb84453d18",
+  "preview": "https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html",
+  "method": "Real Deploy Preview, byte-matched JS/CSS/assets, controlled public-state fixture injected only into browser. Not authenticated Stage or owner acceptance. No repo UI suite.",
+  "productionFxCount": 0,
+  "viewports": [
+    {
+      "viewport": "portrait",
+      "scale": "1.038888888888889",
+      "fontSizes": {
+        ".poker-seat-name": "14px",
+        ".poker-chip-stack-label": "24px",
+        ".poker-pot-pill": "12px",
+        ".poker-room-event": "16px",
+        ".poker-room-status": "16px"
+      },
+      "actionBox": {
+        "left": 253.3125,
+        "top": 658,
+        "right": 382,
+        "bottom": 836,
+        "width": 128.6875,
+        "height": 178
+      },
+      "lowerRightActionCollisions": [],
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "clientHeight": 844,
+      "dealerSame": true,
+      "avatarSame": true,
+      "reactionClickable": true,
+      "chatClickable": true,
+      "actionClickable": true
+    },
+    {
+      "viewport": "small-portrait",
+      "scale": "0.7929155313351499",
+      "fontSizes": {
+        ".poker-seat-name": "14px",
+        ".poker-chip-stack-label": "24px",
+        ".poker-pot-pill": "12px",
+        ".poker-room-event": "16px",
+        ".poker-room-status": "16px"
+      },
+      "actionBox": {
+        "left": 206.40625,
+        "top": 454,
+        "right": 312,
+        "bottom": 632,
+        "width": 105.59375,
+        "height": 178
+      },
+      "lowerRightActionCollisions": [],
+      "scrollWidth": 320,
+      "clientWidth": 320,
+      "scrollHeight": 640,
+      "clientHeight": 640,
+      "dealerSame": true,
+      "avatarSame": true,
+      "reactionClickable": true,
+      "chatClickable": true,
+      "actionClickable": true
+    },
+    {
+      "viewport": "landscape",
+      "scale": "0.7961538461538461",
+      "fontSizes": {
+        ".poker-seat-name": "18px",
+        ".poker-chip-stack-label": "32px",
+        ".poker-pot-pill": "18px",
+        ".poker-room-event": "16px",
+        ".poker-room-status": "16px"
+      },
+      "actionBox": {
+        "left": 525.578125,
+        "top": 324,
+        "right": 836,
+        "bottom": 382,
+        "width": 310.421875,
+        "height": 58
+      },
+      "lowerRightActionCollisions": [],
+      "scrollWidth": 844,
+      "clientWidth": 844,
+      "scrollHeight": 390,
+      "clientHeight": 390,
+      "dealerSame": true,
+      "avatarSame": true,
+      "reactionClickable": true,
+      "chatClickable": true,
+      "actionClickable": true
+    },
+    {
+      "viewport": "compact-landscape",
+      "scale": "0.6",
+      "fontSizes": {
+        ".poker-seat-name": "18px",
+        ".poker-chip-stack-label": "32px",
+        ".poker-pot-pill": "18px",
+        ".poker-room-event": "16px",
+        ".poker-room-status": "16px"
+      },
+      "actionBox": {
+        "left": 158.40625,
+        "top": 288,
+        "right": 632,
+        "bottom": 352,
+        "width": 473.59375,
+        "height": 64
+      },
+      "lowerRightActionCollisions": [],
+      "scrollWidth": 640,
+      "clientWidth": 640,
+      "scrollHeight": 360,
+      "clientHeight": 360,
+      "dealerSame": true,
+      "avatarSame": true,
+      "reactionClickable": true,
+      "chatClickable": true,
+      "actionClickable": true
+    },
+    {
+      "viewport": "desktop-landscape",
+      "scale": "1.2153846153846153",
+      "fontSizes": {
+        ".poker-seat-name": "18px",
+        ".poker-chip-stack-label": "32px",
+        ".poker-pot-pill": "18px",
+        ".poker-room-event": "16px",
+        ".poker-room-status": "16px"
+      },
+      "actionBox": {
+        "left": 752,
+        "top": 638,
+        "right": 1272,
+        "bottom": 712,
+        "width": 520,
+        "height": 74
+      },
+      "lowerRightActionCollisions": [],
+      "scrollWidth": 1280,
+      "clientWidth": 1280,
+      "scrollHeight": 720,
+      "clientHeight": 720,
+      "dealerSame": true,
+      "avatarSame": true,
+      "reactionClickable": true,
+      "chatClickable": true,
+      "actionClickable": true
+    }
+  ],
+  "focused": "127/127 PASS",
+  "requiredLocal": "syntax/check:all/ci:guards/CSP/diff PASS",
+  "fullCI": "tracked in PR #1049 / live #1048",
+  "ownerSmoke": "pending",
+  "authenticatedStageCH": "pending"
+}
