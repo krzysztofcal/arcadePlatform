@@ -74,6 +74,7 @@ test("authoritative join adapter returns unavailable when locked-state validator
 
 test("authoritative join adapter forwards only shared-core supported args", async () => {
   let captured = null;
+  const access = { schemaBacked: true, automaticClass: "NORMAL", override: "AUTO", slowThresholdCh: 1000000000, policyRevision: 1 };
   const execute = createAuthoritativeJoinExecutor({
     env: { WS_DEFAULT_BUYIN: "25" },
     klog: () => {},
@@ -83,7 +84,7 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async (args) => {
         captured = args;
-        return { ok: true, seatNo: 2, rejoin: false, stack: 100, snapshot: makeSuccessSnapshot() };
+        return { ok: true, seatNo: 2, rejoin: false, stack: 100, snapshot: makeSuccessSnapshot(), access };
       }
     })
   });
@@ -93,6 +94,7 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
   assert.equal(result.seatNo, 2);
   assert.equal(result.rejoin, false);
   assert.equal(result.stack, 100);
+  assert.strictEqual(result.access, access);
   assert.deepEqual(Object.keys(captured || {}).sort(), ["beginSql", "env", "klog", "loadStateForUpdate", "postTransactionFn", "requestId", "tableId", "updateStateLocked", "userId", "validateStateForStorage"]);
   assert.equal(captured.validateStateForStorage, validateStateForStorage);
   assert.equal(Object.hasOwn(captured, "buyIn"), false);

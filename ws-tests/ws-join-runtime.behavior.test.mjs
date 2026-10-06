@@ -918,11 +918,20 @@ test("SETTLED boundary join publishes waiting then includes the human in next ha
     ws = await connectClient(port);
     await hello(ws);
     await auth(ws, makeHs256Jwt({ secret, sub: userId }));
+    const joinAccessFrames = [];
+    ws.on("message", raw => {
+      const frame = JSON.parse(String(raw));
+      if (frame.type === "poker_access" && frame.payload?.reason === "join_refresh") joinAccessFrames.push(frame);
+    });
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "boundary-join", ts: new Date().toISOString(), payload: { tableId, seatNo: 4, buyIn: 100 } });
     const ack = await nextCommandResultForRequest(ws, "boundary-join");
     assert.equal(ack.payload.status, "accepted", JSON.stringify(ack.payload));
     const waiting = await nextMessageMatching(ws, frame => frame.type === "table_state" && frame.payload?.hand?.status === "SETTLED");
     await t.test("A: fresh settled join acknowledges and publishes WAITING_NEXT_HAND", () => {
+      assert.equal(joinAccessFrames.length, 1);
+      assert.equal(joinAccessFrames[0].requestId, "boundary-join");
+      assert.equal(joinAccessFrames[0].payload.policyRevision, 1);
+      assert.equal(joinAccessFrames[0].payload.slowThresholdCh, 1000000000);
       assert.deepEqual({
         acknowledged: ack.payload.joinStatus,
         published: waiting.payload.seats.find(seat => seat.userId === userId).status
