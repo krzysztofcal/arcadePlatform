@@ -3939,7 +3939,7 @@
     seatSceneOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
     var geometry = seatSceneGeometry[seatSceneOrientation];
     // Reserve a table-local band for northern player transients, below chrome.
-    var topSafeArea = seatSceneOrientation === 'landscape' ? 136 : 64;
+    var topSafeArea = 64;
     var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
     if (!Number.isFinite(scale) || scale <= 0) return;
     if (els.screen) els.screen.style.setProperty('--poker-scene-scale', String(scale));
