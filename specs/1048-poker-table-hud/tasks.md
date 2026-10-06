@@ -47,3 +47,5 @@ Earlier T003/T008 seat-grid implementation and 20/20 evidence are superseded by 
 - [x] H002 Preserve known active same-hand/same-occupant pair through explicit empty frames; authoritative lifecycle/membership still clears.
 - [x] H003 Existing focused tests 121/121, syntax, check:all, ci:guards, CSP and diff whitespace pass; fix self-reviewed.
 - [ ] H004 Latest browser runtime SHA served by real Deploy Preview; owner authenticated smoke of table 42c2db29-f7fc-4860-a550-52f59cabea2f remains pending.
+
+H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8ee93971a`; owner smoke still pending. Existing WS disconnect-cleanup CI failure persists after one rerun and is documented in review.md; no WS changes added. Required local guards/focused checks remain PASS.
