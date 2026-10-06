@@ -24,8 +24,7 @@ PASS:
    - Metadata validation (`metadata.isFile()`, `metadata.uid === 0`, `metadata.gid === 0`, `(metadata.mode & 0o7777) === 0o600`).
    - Checks descriptor metadata before reading file contents.
    - Parses env values with strict regex.
-   - Requires non-empty `SUPABASE_DB_URL`, `SUPABASE_URL`, `POKER_WS_INTERNAL_TOKEN`.
-   - Requires `PORT=3000` and `WS_AUTHORITATIVE_JOIN_ENABLED=1`.
+   - Requires non-empty `SUPABASE_DB_URL`, `SUPABASE_URL`, `POKER_WS_INTERNAL_TOKEN`, and `WS_AUTHORITATIVE_JOIN_ENABLED=1` (`PORT=3000` is defined by systemd `ws-server.service` and is not required in `ws-server.env`).
    - Rejects legacy `WS_BOT_REACTION_MIN_MS` and `WS_BOT_REACTION_MAX_MS`.
    - Checks `SUPABASE_URL` contains `://otbqfijerkieoxwpxjnm.supabase.co`.
    - Checks `SUPABASE_DB_URL` contains `postgres.otbqfijerkieoxwpxjnm` (pooler) or `.otbqfijerkieoxwpxjnm.` / `//otbqfijerkieoxwpxjnm.` (direct).
@@ -70,7 +69,7 @@ PASS:
      - Test Stage SUPABASE_URL (`krydukthwdvccggbyjfw`) -> FAIL.
      - Test Stage SUPABASE_DB_URL (`krydukthwdvccggbyjfw`) -> FAIL.
      - Test Mixed Production URL + Stage DB -> FAIL.
-     - Test Missing required fields / wrong port / wrong join -> FAIL.
+     - Test Missing required fields / wrong join -> FAIL.
      - Test Symlink, wrong uid, wrong gid, or wrong permissions mode -> FAIL.
      - Test DB returns different system_identifier (e.g. Stage `7656985631720456337`) -> FAIL.
      - Test DB identity check error / connection failure -> FAIL.

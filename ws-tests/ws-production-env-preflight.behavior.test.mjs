@@ -33,7 +33,6 @@ function withTempEnvFile(content, callback, { mode = 0o600 } = {}) {
 
 function validEnvContent(overrides = {}) {
   const base = {
-    PORT: "3000",
     WS_AUTHORITATIVE_JOIN_ENABLED: "1",
     POKER_WS_INTERNAL_TOKEN: "valid-production-internal-token",
     SUPABASE_URL: `https://${CANONICAL_PROD_PROJECT_REF}.supabase.co`,
@@ -268,12 +267,11 @@ test("mixed Stage URL + Production DB fails", () => {
   });
 });
 
-test("missing required variables or bad ports fail", () => {
+test("missing required variables or invalid values fail", () => {
   for (const override of [
     { SUPABASE_DB_URL: undefined },
     { SUPABASE_URL: undefined },
     { POKER_WS_INTERNAL_TOKEN: undefined },
-    { PORT: "3001" },
     { WS_AUTHORITATIVE_JOIN_ENABLED: "0" },
     { WS_BOT_REACTION_MIN_MS: "100" }
   ]) {

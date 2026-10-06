@@ -156,7 +156,6 @@ export function runPreflight({
       if (!values[key]) reject(`production env file must define ${key}`);
     }
 
-    if (values.PORT !== "3000") reject("production env file must define PORT=3000");
     if (values.WS_AUTHORITATIVE_JOIN_ENABLED !== "1") {
       reject("production env file must define WS_AUTHORITATIVE_JOIN_ENABLED=1");
     }

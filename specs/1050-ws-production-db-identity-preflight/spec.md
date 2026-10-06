@@ -21,8 +21,8 @@ So that a misconfigured or mixed environment (e.g. Production URL with Stage DB 
    - `SUPABASE_DB_URL` (non-empty string).
    - `SUPABASE_URL` (non-empty string).
    - `POKER_WS_INTERNAL_TOKEN` (non-empty string).
-   - `PORT=3000`.
    - `WS_AUTHORITATIVE_JOIN_ENABLED=1`.
+   - `PORT=3000` is defined by systemd `ws-server.service` and is not required in `ws-server.env`.
    - Must not define legacy `WS_BOT_REACTION_MIN_MS` or `WS_BOT_REACTION_MAX_MS`.
 4. **Canonical Production Target Identity Binding**:
    - Canonical Production project ref: `otbqfijerkieoxwpxjnm`.
@@ -53,7 +53,7 @@ So that a misconfigured or mixed environment (e.g. Production URL with Stage DB 
 ## Acceptance Criteria
 - Production env preflight script is installed and runnable as a standalone root-owned node script.
 - Preflight rejects missing, non-regular, symlinked, wrong owner, or non-0600 env files.
-- Preflight rejects missing required fields, non-3000 port, or invalid join settings.
+- Preflight rejects missing required fields or invalid join settings.
 - Preflight rejects Stage Supabase URL, Stage DB URL, or mixed configurations.
 - Preflight passes DB password strictly via `PGPASSWORD` (never in `psql` argv) and sanitizes error outputs.
 - Preflight executes read-only database query `select system_identifier from pg_control_system()` and requires `7575202818581710058`.

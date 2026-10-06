@@ -13,7 +13,7 @@ Finding P1 #3 from GitHub issue #1050:
 1. **Production Environment Preflight Script (`infra/vps/ws-production-env-preflight.mjs`)**:
    - Reads strictly from the fixed `/etc/arcadeplatform/ws-server.env` (never from user input or verified env).
    - Enforces fail-closed file security contract: regular file, no symlinks (`O_NOFOLLOW | O_NONBLOCK`), root-owned (`uid === 0 && gid === 0`), and mode `0600`.
-   - Requires non-empty `SUPABASE_DB_URL`, `SUPABASE_URL`, `POKER_WS_INTERNAL_TOKEN`, `PORT=3000`, and `WS_AUTHORITATIVE_JOIN_ENABLED=1`.
+   - Requires non-empty `SUPABASE_DB_URL`, `SUPABASE_URL`, `POKER_WS_INTERNAL_TOKEN`, and `WS_AUTHORITATIVE_JOIN_ENABLED=1` (`PORT=3000` is defined by systemd `ws-server.service` and is not required in `ws-server.env`).
    - Rejects legacy reaction settings (`WS_BOT_REACTION_MIN_MS`, `WS_BOT_REACTION_MAX_MS`).
    - Binds to canonical Production project ref `otbqfijerkieoxwpxjnm` independently of mutable env input.
    - Verifies `SUPABASE_URL` via exact URL parsing: `protocol === "https:"` and exact `hostname === "otbqfijerkieoxwpxjnm.supabase.co"` (rejecting suffix/subdomain spoofs, invalid URLs, or non-https schemes).
