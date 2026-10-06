@@ -46,3 +46,7 @@ Reproduce partial-frame loss and exact DOM replacement in the existing fundament
 ## Unified presentation ownership correction
 
 Extend the existing deterministic live harness: scene dealer ownership/field-presence lifecycle, same-occupant avatar identity plus replacement load, common transient-layer ownership/order. Confirm RED before edits. Reuse renderedSeatAvatars for keyed avatar node reuse and seatSceneGeometry for dealer/stack anchors; retain fresh-element renderSeatAvatar contract. Add only one scene transient layer to table-v2.html/CSS above chip FX; relocate player content with equivalent table-local anchors. Narrow real Preview with six occupied seats validates portrait stack separation, full hero winning-pot/hand notification above chips, reaction/history clicks and no scroll. No backend/WS/CH/gift changes or broad layout tests.
+
+## Perimeter/scale implementation amendment
+
+Modify existing seatSceneGeometry, fitTableScene and configureSeatHud in poker/poker-v2.js. Preserve keyed/persistent ownership and logical-to-physical rotation. Modify only reaction text sizing/wrapping and landscape scene clipping in poker/poker-v2.css. Constitution check: this is geometry/CSS/simple glue; no new UI/layout tests. Run existing fundamental live/static tests and required guards. Verify real exact-browser-SHA Preview portrait/landscape, full long human/bot text, physical dealer proximity, affected lower-right/action separation, no page scroll and clickable controls. Save narrow evidence/screenshots; owner acceptance and authenticated CH remain pending.

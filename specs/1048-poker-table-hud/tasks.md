@@ -75,3 +75,12 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] O004 Existing focused checks/self-review and ownership audit; 127 focused cases PASS.
 - [x] O005 Latest runtime real Preview/screenshots/evidence; full CI status tracked in live PR checks.
 - [ ] O006 Owner smoke; authenticated Stage CH verification remains a later gate.
+
+## Perimeter/scale owner pass
+
+- [x] P001 Re-read live rules/full issue/current PR diff and reconcile superseded constraints.
+- [x] P002 Outward physical avatars, nearer dealer anchors, larger equal landscape avatars/composition; inward edge affordances.
+- [x] P003 Full wrapped human/bot reactions and northern central safe-lane presentation.
+- [x] P004 Existing fundamental checks and self-review; preserve all ownership fixes.
+- [ ] P005 Real latest-runtime Preview portrait/landscape/screenshots and live evidence.
+- [ ] P006 Owner manual smoke and authenticated Stage CH verification; Draft/not merge-ready.
