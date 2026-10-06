@@ -620,7 +620,7 @@
     });
     controls.appendChild(button);
     controls.appendChild(panel);
-    var tools = els.diagnostics || els.screen;
+    var tools = els.diagnostics && els.diagnostics.parentNode || els.screen;
     tools.appendChild(controls);
     els.celebrationPreviewMode = mode;
     els.celebrationPreviewTarget = target;
