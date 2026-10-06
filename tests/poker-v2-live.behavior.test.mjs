@@ -5843,6 +5843,7 @@ test('poker v2 retains the active deal through same-user auth pending and reconn
   ws.onSnapshot(dealt);
   await harness.flush();
   const cards = harness.getHeroCards();
+  const visibleChanges = harness.logs.filter((log) => log.kind === 'poker_hero_card_presentation_changed').length;
   ws.onStatus('reconnecting', {});
   ws.onStatus('resync', {});
   await harness.flush();
@@ -5857,12 +5858,18 @@ test('poker v2 retains the active deal through same-user auth pending and reconn
   harness.triggerAuthChange({ id: 'user-1' }, { access_token: token });
   await harness.flush();
   assert.deepEqual(harness.getHeroCards(), cards);
+  assert.equal(harness.logs.filter((log) => log.kind === 'poker_hero_card_presentation_changed').length, visibleChanges, 'transient transport/auth does not log a false visibility change');
   ws = harness.getCreateOptions();
   ws.onSnapshot(dealt);
   await harness.flush();
   harness.triggerAuthChange({ id: 'user-2' }, {});
   await harness.flush();
   assert.deepEqual(harness.getHeroCards(), [], 'different user clears the private deal');
+  const transition = harness.logs.filter((log) => log.kind === 'poker_hero_card_presentation_changed').at(-1).data;
+  assert.equal(transition.to, 'hidden');
+  assert.equal(transition.lifecycleTransition, 'auth_pending_identity');
+  assert.equal(transition.heroCardsLength, 0);
+  assert.equal(Object.hasOwn(transition, 'cards') || Object.hasOwn(transition, 'token'), false);
   harness.triggerAuthChange(null, null);
   await harness.flush();
   assert.deepEqual(harness.getHeroCards(), []);
