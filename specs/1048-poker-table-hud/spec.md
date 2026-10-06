@@ -339,3 +339,7 @@ Maintain accepted premium direction. Adjust only requested physical seats/remain
 ## Owner chip association / best-hand readability correction
 
 Landscape S1 chips/bet belong visually below its shifted name on felt, separate from common pot; portrait S5 chips near owner/name, Hero/S4 chips right/up outside avatar. Readable five-card best-hand symbols retain horizontal layout/card proportions and red/black suits. No state/amount/accounting/ownership/lifecycle/WS changes. Owner smoke and authenticated Stage CH gate remain pending.
+
+
+## Owner reaction word wrapping correction
+Normal human/bot reaction words remain intact: normal word wrapping, no hyphenation/ellipsis. Edge bubbles use a scene-safe inward offset and up to 220px width; only reaction content moves.

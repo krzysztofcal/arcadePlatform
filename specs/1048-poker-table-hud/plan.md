@@ -78,3 +78,7 @@ Final physical mapping assumption for this smoke: S1=top, S2=upper-right, S5=low
 Static physical anchors only: landscape top (S1) remaining-stack and committed bet below the relocated name, with center-pot clearance; portrait lower-left (S5) remaining chips close below owner; Hero/S4 remaining chips right/up outside avatar and separate committed bet. Increase best-hand symbol font9→11 while retaining five-card horizontal row/proportions and its dedicated left area. Verify rank10 red/black symbols via controlled Preview, plus no chip/avatar/card/rail overlap. No ownership, amounts/state, assets, gameplay/WS/CH/reaction/FX changes. Existing focused/required checks and narrow real Preview screenshots only; retain Draft and owner/Stage CH gates.
 
 Final chip anchors: landscape top stack[445,104],bet[430,148]; portrait lower-left stack[82,488]; Hero stack[208,437],bet[172,420]. Necessary rank10 fit: mini cards16x24→18x27,font9→11,slight letter spacing; portrait best-hand group[49,580,98,40] retains left edge/clearance, landscape group unchanged. No scene scale/avatar/dealer/action-anchor changes.
+
+
+## Owner reaction word wrapping correction
+configureSeatHud sets bounded bubble width/inward social offset; shared reaction CSS uses normal word breaking. Verify Interesujące zagranie with browser character-range line checks at edge seats, not a broad repo UI suite.

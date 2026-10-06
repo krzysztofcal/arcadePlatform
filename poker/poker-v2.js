@@ -4000,8 +4000,10 @@
     hud.presentation.classList.add('poker-seat-hud-transient');
     hud.presentation.appendChild(hud.social);
     var geometry = seatSceneGeometry[seatSceneOrientation];
-    var reactionWidth = Math.min(220, 2 * Math.min(config.avatar[0], geometry.width - config.avatar[0]) - 16);
+    var reactionWidth = Math.min(220, geometry.width - 16);
+    var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(config.avatar[0], geometry.width - reactionWidth / 2 - 8));
     hud.social.style.setProperty('--poker-reaction-width', reactionWidth + 'px');
+    hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - config.avatar[0]) + 'px');
     var radius = portrait ? 52 : 58;
     var giftAngles = leftSide ? [-100,-60,-20] : rightSide ? [-160,-120,-80] : [-150,-90,-30];
     giftAngles.forEach(function(angle,index){
