@@ -2436,13 +2436,18 @@
     else if (authoritativeFull) state.playerState = null;
     var cardSeat = deriveCurrentSeat();
     var cardsOutOfHand = !state.handId || !cardSeat || cardSeat.status === 'WAITING_NEXT_HAND' || cardSeat.status === 'OUT_OF_CHIPS'
+      || (handBetsField.present && !hasOwn(state.betThisRoundByUserId, cardSeat.userId))
       || (state.playerState && (state.playerState.status === 'WAITING_NEXT_HAND' || state.playerState.status === 'OUT_OF_CHIPS'));
     var cardSeatChanged = !previousCardSeat || !cardSeat || previousCardSeat.seatNo !== cardSeat.seatNo
       || previousCardSeat.userId !== cardSeat.userId;
-    // Omitted private cards do not revoke a same-hand, same-seat deal. Explicit
-    // cards (including empty) remain authoritative; lifecycle boundaries clear.
+    // An empty private projection cannot revoke an already received active deal.
+    // Retain only for the same hand/occupant with authoritative participation.
+    var keepActiveDeal = nextHeroCards && nextHeroCards.length === 0 && state.heroCards.length === 2
+      && !handIdChanged && !cardSeatChanged
+      && ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'].indexOf(state.phase) !== -1
+      && getOpponentHeldCardCount(cardSeat, state.handId, state.betThisRoundByUserId) === 2;
     if (cardsOutOfHand) state.heroCards = [];
-    else if (nextHeroCards) state.heroCards = nextHeroCards.length >= 2 ? nextHeroCards.slice(0, 2) : [];
+    else if (nextHeroCards && !keepActiveDeal) state.heroCards = nextHeroCards.length >= 2 ? nextHeroCards.slice(0, 2) : [];
     else if (handIdChanged || cardSeatChanged) state.heroCards = [];
     if (!state.playerState || (state.playerState.status !== 'OUT_OF_CHIPS' && state.playerState.status !== 'WAITING_NEXT_HAND')) {
       rebuyPanelDismissed = false;

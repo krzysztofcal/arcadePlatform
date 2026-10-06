@@ -40,3 +40,10 @@ Earlier T003/T008 seat-grid implementation and 20/20 evidence are superseded by 
 
 - [x] J001 Keep ordinary JOIN waiting out of sitout/rebuy UI; preserve actual OUT_OF_CHIPS/rebuy and waiting preaction guard.
 - [x] J002 Required/focused checks, whole-PR self-review and narrow real Deploy Preview verification; owner smoke pending.
+
+## Owner private-card flicker blocker
+
+- [x] H001 Reconcile live branch/main and trace empty private projection; add failing exact regression to existing private-card lifecycle case.
+- [x] H002 Preserve known active same-hand/same-occupant pair through explicit empty frames; authoritative lifecycle/membership still clears.
+- [x] H003 Existing focused tests 121/121, syntax, check:all, ci:guards, CSP and diff whitespace pass; fix self-reviewed.
+- [ ] H004 Latest browser runtime SHA served by real Deploy Preview; owner authenticated smoke of table 42c2db29-f7fc-4860-a550-52f59cabea2f remains pending.

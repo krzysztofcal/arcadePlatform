@@ -5858,11 +5858,40 @@ test('poker v2 preserves same-hand private cards and clears on hand or seat life
     await harness.flush();
     assert.deepEqual(harness.getHeroCards(), receivedCards, kind + ' must preserve same-hand same-seat cards');
   }
+  for (const kind of ['stateSnapshot', 'statePatch', 'table_state']) {
+    const update = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: ['As', 'Kd', '3h'], potTotal: 42,
+      actions: [], constraints: {}, stateVersion: 40, turnUserId: 'villain-1', holeCards: [] });
+    update.kind = kind;
+    update.payload.public.betThisRoundByUserId = { 'user-1': 0, 'villain-1': 0 };
+    ws.onSnapshot(update);
+    await harness.flush();
+    assert.deepEqual(harness.getHeroCards(), receivedCards, kind + ' empty private branch must preserve the active deal');
+  }
   ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-new', phase: 'PREFLOP', board: [], potTotal: 3,
-    actions: [], constraints: {}, stateVersion: 40, holeCards: null }));
+    actions: [], constraints: {}, stateVersion: 40, holeCards: [] }));
   await harness.flush();
   assert.deepEqual(harness.getHeroCards(), [], 'new hand clears previous private cards while still seated');
   ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: ['As', 'Kd', '3h'], potTotal: 42,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] }));
+  await harness.flush();
+
+  for (const boundary of ['WAITING_NEXT_HAND', 'OUT_OF_CHIPS', 'out-of-hand', 'seat-change']) {
+    const dealt = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+      actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] });
+    dealt.payload.public.betThisRoundByUserId = { 'user-1': 0 };
+    ws.onSnapshot(dealt);
+    await harness.flush();
+    const update = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+      actions: [], constraints: {}, stateVersion: 40, holeCards: [],
+      ...(boundary === 'seat-change' ? { youSeat: 2, members: [{ userId: 'user-1', seat: 2 }] } : {}) });
+    update.payload.public.betThisRoundByUserId = boundary === 'out-of-hand' ? { 'villain-1': 0 } : { 'user-1': 0 };
+    if (boundary === 'WAITING_NEXT_HAND' || boundary === 'OUT_OF_CHIPS') update.payload.private.playerState = { status: boundary, stack: 100 };
+    ws.onSnapshot(update);
+    await harness.flush();
+    assert.deepEqual(harness.getHeroCards(), [], boundary + ' clears despite empty private projection');
+  }
+
+  ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
     actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] }));
   await harness.flush();
 

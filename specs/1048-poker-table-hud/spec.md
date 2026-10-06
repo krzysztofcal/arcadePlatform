@@ -279,8 +279,17 @@ Current layout remains unaccepted. Remove persistent ACTIVE and visible opponent
 
 Keep accepted second-pass presentation, including OPEN plus Seat N. Restore large --own for hero special hand only; non-hero remains compact above avatar, ordinary reactions/payout remain owner-centered. Fixed top reservation: 40px wide, 64px narrow portrait, ellipsis without runtime height changes. Move portrait non-hero centers toward perimeter, nearby remaining-stack anchors without changing bet anchors/accounting. Casino CSS dealer/card-back polish only; pot outer scale .5 matches player .5 while preserving center lane.
 
-Private cards: omitted fields on same-hand/same-seat refresh retain the dealt cards; explicit arrays remain authoritative. Different/null hand, changed/lost seat, WAITING_NEXT_HAND/OUT_OF_CHIPS clear; identity resets use existing live-state lifecycle. No WS change, endpoint or unbounded cache. Fundamental existing snapshot test covers preservation and clears. Narrow Preview only; owner visual and authenticated Stage gates pending.
+Private cards: omitted fields on same-hand/same-seat refresh retain the dealt cards. The earlier explicit-empty revocation rule is superseded by the active-deal correction below. Different/null hand, changed/lost seat, WAITING_NEXT_HAND/OUT_OF_CHIPS clear; identity resets use existing live-state lifecycle. No WS change, endpoint or unbounded cache. Fundamental existing snapshot test covers preservation and clears. Narrow Preview only; owner visual and authenticated Stage gates pending.
 
 ## Fresh-JOIN presentation correction (2026-10-05)
 
 Ordinary authoritative WAITING_NEXT_HAND after JOIN is a reserved seat, not a bust/sitout. Use existing normal banner/NEXT HAND presentation, with neutral Joining next hand turn copy. Rebuy panel requires OUT_OF_CHIPS + canRebuy, or waiting with an existing real rebuyOperation. Keep real rebuy recovery and no waiting preactions. Browser-only: no WS/backend/#1055 changes, no new UI test or state source. Owner preview smoke and authenticated CH gate remain pending.
+
+
+## Owner blocker: transient empty private projection (2026-10-06)
+
+Stage table 42c2db29-f7fc-4860-a550-52f59cabea2f: owner confirmed durable pairs remain in poker_hole_cards, but resolvePrivateBranch normalizes temporarily absent runtime holeCardsByUserId to an empty array. Earlier omitted-only preservation is insufficient and its explicit-empty rule is superseded here.
+
+mergeSnapshot retains an existing pair for an explicit empty projection only when handId and seat occupant are unchanged, phase is PREFLOP/FLOP/TURN/RIVER/SHOWDOWN and existing public per-round membership confirms participation. Reuse getOpponentHeldCardCount and the existing state; no second cache, endpoint, backend or protocol change. Authoritative explicit loss of membership clears cards. New/null hand, changed/lost seat, WAITING_NEXT_HAND, OUT_OF_CHIPS, leave and existing identity/session reset continue to clear; nonempty private arrays remain authoritative. Folded participants retain their dealt cards.
+
+Implementation ready, awaiting owner manual runtime verification on Deploy Preview #1049. No unrelated HUD/layout/CH/reaction/asset change; no inline script or WS deploy required. Public breaking impact: none; same-hand empty projections no longer flicker a known active deal. No merge.

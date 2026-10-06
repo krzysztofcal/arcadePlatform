@@ -26,3 +26,7 @@ Refine renderSeats/configureSeatHud and existing CSS only: shared occupied size,
 ## Third smoke plan
 
 Refine existing positionCelebration/class selection, mergeSnapshot lifecycle guards and static scene geometry. Fixed CSS header rows and presentation polish; preserve gameplay/account HUD/committed chip anchors. Extend existing private-card snapshot test, run required guards, narrow real Preview portrait/landscape and screenshots. Browser-only; no WS deploy or broad collision suite.
+
+## Transient empty private projection correction
+
+Limit edits to poker/poker-v2.js::mergeSnapshot, one existing fundamental private-card lifecycle case and these SpecKit records. Guard retained pairs by unchanged hand/occupant, active phase and existing public participation; explicit nonparticipation clears. Reuse current state/membership method. Required/focused checks, full fix self-review, browser runtime SHA and Deploy Preview handoff for owner smoke; no backend/WS/shared runtime/protocol/config change or broad UI test.
