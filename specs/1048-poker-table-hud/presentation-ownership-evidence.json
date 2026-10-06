@@ -1,5 +1,5 @@
 {
-  "runtimeSha": "c3a76247250993cb85e54f9c24c53b84861e9449",
+  "runtimeSha": "de243756ffb58104e512e35d572a51d3859ac44a",
   "previewUrl": "https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html",
   "status": "implementation ready, awaiting owner manual runtime verification; draft/not merge-ready",
   "ownerStageTable": "9990516b-d3a7-4469-bd95-9fbdffcf3440",
@@ -15,6 +15,12 @@
         "case": "transient renderedSeatHud absence",
         "red": "retained pair hidden by positionHeroCards",
         "green": "scene-owned cards stay visible independently of HUD"
+      },
+      {
+        "case": "same-hand full frame omits participation and has empty private projection",
+        "baselineSha": "34995c08b0ec38c73a6d5a4207222198ad24ccb3",
+        "red": "known participation reset caused owned pair to become []",
+        "green": "omitted field retains known same-hand membership; explicit nonparticipation/new hand still clear"
       }
     ],
     "stageTrigger": "Exact Stage triggering event has not been captured; these are proven browser defects, not an assertion of the observed Stage event. Transition-only klog enables owner correlation.",
@@ -30,17 +36,20 @@
   },
   "preview": {
     "type": "Real Netlify Deploy Preview, controlled public/balance/celebration fixture; not authenticated Stage verification",
-    "buildCommitHash": "c3a76247250993cb85e54f9c24c53b84861e9449",
-    "servedJsSha256": "d1d70738223b19c5cb1b52f0dcf403b95631bcfb522a76f5f800cd2770350277",
-    "servedCssSha256": "b74a1b120bb453dc739cfb1aa67ba9fdfe66b9d602bdc9a8d6dd341e0604c233",
+    "buildCommitHash": "de243756ffb58104e512e35d572a51d3859ac44a",
+    "servedJsSha256": "fc09daaea1e984208cf2e3e69f2a925a699aa8cd8a1a2f6fdd1f25ada1c8e0c4",
+    "servedCssSha256": "5083813fee9c03ff57e5b96321cdad609f34b8b2c43719ddfb8e1d6fcc085a47",
     "sourceVerification": "Real served JS compared byte-for-byte before out-of-repo harness hook; served CSS byte-identical. Netlify HTML has its platform-managed deployment injection.",
     "cases": [
       {
         "name": "portrait",
         "special": {
           "hidden": false,
-          "top": 47.16944122314453,
-          "bottom": 126.125
+          "left": 132.66665649414062,
+          "right": 257.33331298828125,
+          "top": 57.56006622314453,
+          "bottom": 136.515625,
+          "chromeConflicts": []
         },
         "scrollWidth": 390,
         "clientWidth": 390,
@@ -56,9 +65,9 @@
         },
         "reaction": {
           "left": 161.75555419921875,
-          "top": 157.2954559326172,
+          "top": 167.6860809326172,
           "right": 215.7777862548828,
-          "bottom": 178.0732421875,
+          "bottom": 188.4638671875,
           "width": 54.02223205566406,
           "height": 20.777786254882812
         },
@@ -69,9 +78,9 @@
         },
         "hero": {
           "left": 110.85000610351562,
-          "top": 735.9566040039062,
+          "top": 746.3472290039062,
           "right": 225.12779235839844,
-          "bottom": 819.0676879882812,
+          "bottom": 829.4583129882812,
           "width": 114.27778625488281,
           "height": 83.111083984375
         },
@@ -88,8 +97,11 @@
         "name": "landscape",
         "special": {
           "hidden": false,
-          "top": 58.81166458129883,
-          "bottom": 106.78125
+          "left": 378.12335205078125,
+          "right": 465.87664794921875,
+          "top": 7.563533782958984,
+          "bottom": 63.140625,
+          "chromeConflicts": []
         },
         "scrollWidth": 844,
         "clientWidth": 844,
@@ -104,12 +116,12 @@
           "height": 36
         },
         "reaction": {
-          "left": 401.8022766113281,
-          "top": 125.72753143310547,
-          "right": 434.6235656738281,
-          "bottom": 138.35110473632812,
-          "width": 32.8212890625,
-          "height": 12.623573303222656
+          "left": 398.59912109375,
+          "top": 85.091064453125,
+          "right": 436.62554931640625,
+          "bottom": 99.71661376953125,
+          "width": 38.02642822265625,
+          "height": 14.62554931640625
         },
         "account": "Total 2k \u00b7 Poker 1k",
         "reads": {
@@ -117,12 +129,12 @@
           "projection": 1
         },
         "hero": {
-          "left": 411.26995849609375,
-          "top": 321.3929443359375,
-          "right": 480.6996154785156,
-          "bottom": 371.8872375488281,
-          "width": 69.42965698242188,
-          "height": 50.494293212890625
+          "left": 409.5682678222656,
+          "top": 311.787109375,
+          "right": 490.0088195800781,
+          "bottom": 370.289306640625,
+          "width": 80.4405517578125,
+          "height": 58.502197265625
         },
         "diagnosticsContainsMeta": true,
         "reactionClickable": true,
@@ -141,7 +153,8 @@
       "evidence/ownership-landscape.png",
       "evidence/ownership-landscape-diagnostics.png",
       "evidence/ownership-landscape-special.png"
-    ]
+    ],
+    "northernSafeArea": "Portrait: vertical separation, static84px logical band. Landscape: static64px band retains scale, transparent190px central chrome lane reserved for northern transients. No actual menu/account/Join/reaction/history intersections for north reaction+payout+special."
   },
   "selfReview": "Whole PR diff vs main reviewed: one seat renderer and deterministic geometry, private presentation ownership guarded by authoritative lifecycle, scene-owned cards/no second cache, privacy-safe transition logs, CHIP authoritative refresh/pulse/identity guards, gift anchors intact. No WS/shared/protocol/config, purchase, ledger/gameplay/settlement or dependency changes. No inline scripts. CSS one physical line per selector.",
   "breakingImpact": "Technical table status moved to Settings; account shows Total/Poker and sums all tables. Northern compact celebration scales with table and reserves a top band. No API/gameplay/accounting breaking change.",
@@ -149,5 +162,13 @@
     "owner portrait/landscape manual smoke and Stage card transition correlation",
     "authenticated Stage CH verification"
   ],
-  "wsPreviewDeploy": "not required: browser-only correction"
+  "wsPreviewDeploy": "not required: browser-only correction",
+  "ci": {
+    "runtimeSha": "de243756ffb58104e512e35d572a51d3859ac44a",
+    "status": "in progress at evidence checkpoint",
+    "testsRun": 37443345762,
+    "wsRun": 37443345544,
+    "ciRun": 37443345732,
+    "priorIterationAllGreen": "c3a76247250993cb85e54f9c24c53b84861e9449"
+  }
 }
