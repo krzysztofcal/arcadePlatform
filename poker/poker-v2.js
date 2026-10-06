@@ -3925,9 +3925,9 @@
     landscape: { width:1040, height:390, seats:[
       {avatar:[520,55],stack:[606,90],bet:[608,130],dealer:[450,35]},
       {avatar:[810,65],stack:[745,140],bet:[712,169],dealer:[872,85]},
-      {avatar:[940,150],stack:[828,190],bet:[755,217],dealer:[876,162]},
+      {avatar:[940,150],stack:[828,190],bet:[755,217],dealer:[1008,160]},
       {avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
-      {avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[158,175]},
+      {avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
       {avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
     ]}
   };
