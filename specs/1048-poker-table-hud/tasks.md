@@ -114,5 +114,5 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 
 - [x] S001 Reconcile rules/live issue/physical mapping and generic reaction-button padding.
 - [x] S002 Requested physical seat/stack/dealer anchors and icon centering; retain scale/ownership/semantics.
-- [ ] S003 Existing focused/required checks, self-review, exact browser Preview/screenshots and full CI.
+- [x] S003 Existing focused/required checks, self-review, exact browser Preview/screenshots and full CI.
 - [ ] S004 Owner smoke and authenticated Stage CH gate; Draft/not merge-ready.
