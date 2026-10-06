@@ -1,0 +1,293 @@
+{
+  "runtimeSha": "bee1e4fb4181dfab1a0406c8281a2ef8e912b12a",
+  "preview": "https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html",
+  "method": "Controlled Preview public-state fixture; served JS/CSS match committed source. Browser Range per character of Interesujące checks distinct line tops. Not authenticated Stage/owner acceptance. No repository UI suite.",
+  "red": [
+    {
+      "viewport": {
+        "width": 320,
+        "height": 640
+      },
+      "bubbles": [
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 23.618532180786133,
+          "right": 144.141695022583,
+          "width": 120.52316284179688,
+          "overflowWrap": "anywhere",
+          "wordBreak": "normal",
+          "scrollWidth": 150,
+          "clientWidth": 150
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 2,
+          "left": 23.618532180786133,
+          "right": 61.678476333618164,
+          "width": 38.05994415283203,
+          "overflowWrap": "anywhere",
+          "wordBreak": "normal",
+          "scrollWidth": 46,
+          "clientWidth": 46
+        }
+      ],
+      "scroll": {
+        "width": 320,
+        "clientWidth": 320,
+        "height": 640,
+        "clientHeight": 640
+      }
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "bubbles": [
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 16.311111450195312,
+          "right": 174.22222900390625,
+          "width": 157.91111755371094,
+          "overflowWrap": "anywhere",
+          "wordBreak": "normal",
+          "scrollWidth": 150,
+          "clientWidth": 150
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 2,
+          "left": 16.311111450195312,
+          "right": 66.17778015136719,
+          "width": 49.866668701171875,
+          "overflowWrap": "anywhere",
+          "wordBreak": "normal",
+          "scrollWidth": 46,
+          "clientWidth": 46
+        }
+      ],
+      "scroll": {
+        "width": 390,
+        "clientWidth": 390,
+        "height": 844,
+        "clientHeight": 844
+      }
+    },
+    {
+      "viewport": {
+        "width": 844,
+        "height": 390
+      },
+      "bubbles": [
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 296.20770263671875,
+          "right": 461.80767822265625,
+          "width": 165.5999755859375,
+          "overflowWrap": "anywhere",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 1,
+          "left": 103.53845977783203,
+          "right": 269.13846588134766,
+          "width": 165.60000610351562,
+          "overflowWrap": "anywhere",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        }
+      ],
+      "scroll": {
+        "width": 844,
+        "clientWidth": 844,
+        "height": 390,
+        "clientHeight": 390
+      }
+    }
+  ],
+  "green": [
+    {
+      "viewport": {
+        "width": 320,
+        "height": 640
+      },
+      "bubbles": [
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 23.618532180786133,
+          "right": 188.54496955871582,
+          "width": 164.9264373779297,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 1,
+          "left": 121.94005584716797,
+          "right": 286.8664779663086,
+          "width": 164.92642211914062,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 121.94005584716797,
+          "right": 286.8664779663086,
+          "width": 164.92642211914062,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 1,
+          "left": 23.618532180786133,
+          "right": 188.54496955871582,
+          "width": 164.9264373779297,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        }
+      ],
+      "scroll": {
+        "width": 320,
+        "clientWidth": 320,
+        "height": 640,
+        "clientHeight": 640
+      }
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "bubbles": [
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 16.311111450195312,
+          "right": 232.40000915527344,
+          "width": 216.08889770507812,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 1,
+          "left": 145.13333129882812,
+          "right": 361.22222900390625,
+          "width": 216.08889770507812,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 145.13333129882812,
+          "right": 361.22222900390625,
+          "width": 216.08889770507812,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 1,
+          "left": 16.311111450195312,
+          "right": 232.40000915527344,
+          "width": 216.08889770507812,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        }
+      ],
+      "scroll": {
+        "width": 390,
+        "clientWidth": 390,
+        "height": 844,
+        "clientHeight": 844
+      }
+    },
+    {
+      "viewport": {
+        "width": 844,
+        "height": 390
+      },
+      "bubbles": [
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 296.20770263671875,
+          "right": 461.80767822265625,
+          "width": 165.5999755859375,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 1,
+          "left": 641.7384643554688,
+          "right": 807.3384399414062,
+          "width": 165.5999755859375,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "💬 Interesujące zagranie — spokojnie rozważam następny ruch i obserwuję wszystkie żetony.",
+          "wordLines": 1,
+          "left": 654.4769287109375,
+          "right": 820.076904296875,
+          "width": 165.5999755859375,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        },
+        {
+          "text": "👋 Interesujące zagranie — dobrze przemyślany ruch przy stole.",
+          "wordLines": 1,
+          "left": 103.53845977783203,
+          "right": 269.13846588134766,
+          "width": 165.60000610351562,
+          "overflowWrap": "normal",
+          "wordBreak": "normal",
+          "scrollWidth": 206,
+          "clientWidth": 206
+        }
+      ],
+      "scroll": {
+        "width": 844,
+        "clientWidth": 844,
+        "height": 390,
+        "clientHeight": 390
+      }
+    }
+  ],
+  "localChecks": "focused 127/127; syntax; check:all; ci:guards; CSP; diff check PASS",
+  "ci": "latest GitHub CI tracked in issue/PR; owner smoke and authenticated Stage CH pending"
+}

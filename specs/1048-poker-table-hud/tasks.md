@@ -126,4 +126,4 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 
 
 ## Owner reaction word wrapping correction
-- [ ] R001 Normal-word wrapping and bounded edge bubble: controlled RED → GREEN browser regression, focused/required checks and Preview evidence.
+- [x] R001 Normal-word wrapping and bounded edge bubble: controlled RED → GREEN browser regression, focused/required checks and Preview evidence.
