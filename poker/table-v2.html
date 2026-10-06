@@ -67,15 +67,19 @@
         </label>
         <p class="poker-social-settings__hint" id="pokerAutoRebuyPreferenceHint">Automatically uses the current table buy-in from your account each time you run out of chips.</p>
       </div>
-    </section>
-
-    <section class="poker-live-panel">
-      <div class="poker-live-topbar">
+      <section class="poker-diagnostics" id="pokerDiagnostics" aria-labelledby="pokerDiagnosticsTitle">
+        <h3 id="pokerDiagnosticsTitle">Diagnostics</h3>
         <div class="poker-live-meta">
           <div class="poker-live-status" id="pokerV2LiveStatus">Connecting…</div>
           <div class="poker-live-table-meta" id="pokerV2TableMeta">Table</div>
           <div class="poker-live-turn" id="pokerV2TurnText">Waiting for action</div>
         </div>
+      </section>
+    </section>
+
+    <section class="poker-live-panel">
+      <div class="poker-live-topbar">
+        <div id="pokerAccountHud" class="poker-account-hud" role="status" aria-live="polite" hidden></div>
         <input type="hidden" id="pokerV2SeatNo" value="1">
         <input type="hidden" id="pokerV2BuyIn" value="100">
         <div class="poker-top-right-rail">
@@ -92,9 +96,9 @@
               </section>
             </div>
           </div>
-          <div id="pokerAccountHud" class="poker-account-hud" role="status" aria-live="polite" hidden></div>
         </div>
       </div>
+      <div class="poker-live-notice" id="pokerLiveNotice" role="status" hidden></div>
       <div class="poker-live-error" id="pokerV2ErrorText" hidden></div>
     </section>
 

@@ -204,6 +204,9 @@
   var autoJoinErrorActive = false;
   var reconnectSeatNo = null;
   var lastKnownCurrentSeatNo = null;
+  var heroPresentationState = null;
+  var heroFrameKind = null;
+  var heroLifecycleTransition = 'boot';
   var liveModeGeneration = 0;
   var authenticatedPreflightGeneration = 0;
   var authLifecycleGeneration = 0;
@@ -617,7 +620,7 @@
     });
     controls.appendChild(button);
     controls.appendChild(panel);
-    var tools = els.accountHud && els.accountHud.parentNode || els.screen;
+    var tools = els.diagnostics || els.screen;
     tools.appendChild(controls);
     els.celebrationPreviewMode = mode;
     els.celebrationPreviewTarget = target;
@@ -2299,6 +2302,7 @@
     var previousStateVersion = Number(state.stateVersion) || 0;
     var frameKind = frame && typeof frame.kind === 'string' ? frame.kind : 'stateSnapshot';
     var frameInitial = !!(frame && frame.initial);
+    heroFrameKind = frameKind;
     var authoritativeFull = frameKind === 'stateSnapshot' || (frameKind === 'table_state' && frameInitial);
     // Single source of truth for version tracking: never regress an applied version.
     var incomingVersion = Number(payload.stateVersion);
@@ -2350,7 +2354,20 @@
     else if (Number.isInteger(payload.maxSeats) && payload.maxSeats > 1) resolvedMaxSeats = payload.maxSeats;
     if (resolvedMaxSeats) state.maxSeats = resolvedMaxSeats;
 
+    var suppliedOwnSeat = hasOwn(payload, 'youSeat') ? payload.youSeat : hasOwn(youObj, 'seat') ? youObj.seat : undefined;
     var nextSeats = normalizeSeatRows(payload, state.seats, state.tableId);
+    var seatProjectionPresent = Array.isArray(payload.seats) || Array.isArray(tableObj.members)
+      || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats);
+    var currentParticipation = handBetsField.present ? handBetsField.value : state.betThisRoundByUserId;
+    // Ownership plus same-hand participation outrank an incomplete public projection.
+    if (seatProjectionPresent && !pendingLeaveNavigation && previousCardSeat
+      && (handObj.handId == null || handObj.handId === previousHandId)
+      && ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'].indexOf(handObj.status || state.phase) !== -1
+      && isObject(currentParticipation) && hasOwn(currentParticipation, state.currentUserId)
+      && suppliedOwnSeat === previousCardSeat.seatNo
+      && !nextSeats.some(function(seat){ return seat.seatNo === suppliedOwnSeat; })){
+      nextSeats.push(previousCardSeat);
+    }
     if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
       state.seats = nextSeats;
       var currentSeatAfterMerge = deriveCurrentSeat();
@@ -2427,6 +2444,10 @@
     else if (seatFieldPresent) state.youSeat = null;
     if ((Array.isArray(payload.seats) || Array.isArray(publicObj.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers))
       && !state.seats.some(isCurrentUserSeat)) state.youSeat = null;
+    if (seatFieldPresent && state.youSeat == null){
+      state.seats = state.seats.filter(function(seat){ return seat.userId !== state.currentUserId; });
+      lastKnownCurrentSeatNo = null;
+    }
     if (seatFieldPresent && previousSeatNo !== state.youSeat){
       resetWinStreakSession();
       clearCelebration();
@@ -3916,11 +3937,14 @@
     if (!els.scene || !els.sceneViewport) return;
     seatSceneOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
     var geometry = seatSceneGeometry[seatSceneOrientation];
-    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / geometry.height);
+    // Reserve a table-local band for northern player transients, below chrome.
+    var topSafeArea = seatSceneOrientation === 'landscape' ? 64 : 32;
+    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
     if (!Number.isFinite(scale) || scale <= 0) return;
     els.scene.dataset.orientation = seatSceneOrientation;
     els.scene.style.width = geometry.width + 'px';
     els.scene.style.height = geometry.height + 'px';
+    els.scene.style.top = (els.sceneViewport.clientHeight + topSafeArea * scale) / 2 + 'px';
     els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
   }
 
@@ -4543,39 +4567,53 @@
     });
   }
 
-  function renderHeroCards(){
-    if (!els.heroCards) return;
-    els.heroCards.innerHTML = '';
-    if (currentPlayerStatus() === 'WAITING_NEXT_HAND'){
-      els.heroCards.hidden = true;
-      return;
-    }
-    // Private cards are only rendered for an authoritatively seated user; a
-    // spectator/unseated viewer must never see the hero-card area.
-    if (!deriveCurrentSeat()){
-      els.heroCards.hidden = true;
-      return;
-    }
-    els.heroCards.hidden = false;
-    if (isCurrentUserFolded()) els.heroCards.className = 'poker-hero-cards poker-hero-cards--folded';
-    else els.heroCards.className = 'poker-hero-cards';
-    var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
-    if (!cards.length){
-      els.heroCards.appendChild(createCard(null, { faceDown: true }));
-      els.heroCards.appendChild(createCard(null, { faceDown: true }));
-      return;
-    }
-    cards.slice(0, 2).forEach(function(card){
-      els.heroCards.appendChild(createCard(card));
-    });
-  }
-
-  function positionHeroCards(){
+  function logHeroCardPresentation(reason){
     if (!els.heroCards) return;
     var seat = deriveCurrentSeat();
     var hud = seat && renderedSeatHud[seat.seatNo];
-    if (hud) hud.cards.appendChild(els.heroCards);
-    else els.heroCards.hidden = true;
+    var presentation = els.heroCards.hidden ? 'hidden' : state.heroCards.length === 2 ? 'visible' : 'placeholder';
+    var previous = heroPresentationState;
+    heroPresentationState = presentation;
+    if (previous == null || previous === presentation) return;
+    klog('poker_hero_card_presentation_changed', {
+      from: previous, to: presentation, reason: reason,
+      frameKind: heroFrameKind, stateVersion: state.stateVersion, handId: state.handId, phase: state.phase,
+      playerStatus: currentPlayerStatus(), heroCardsLength: state.heroCards.length,
+      youSeatPresent: Number.isInteger(state.youSeat), currentSeatPresent: !!seat, renderedHeroHudPresent: !!hud,
+      reconnectGate: !!state.reconnectGate, wsReady: isWsReady(), lifecycleTransition: heroLifecycleTransition
+    });
+  }
+
+  function renderHeroCards(){
+    if (!els.heroCards) return;
+    var seat = deriveCurrentSeat();
+    if (currentPlayerStatus() === 'WAITING_NEXT_HAND' || !seat){
+      els.heroCards.hidden = true;
+      els.heroCards.innerHTML = '';
+      return;
+    }
+    els.heroCards.hidden = false;
+    els.heroCards.className = 'poker-hero-cards' + (isCurrentUserFolded() ? ' poker-hero-cards--folded' : '');
+    var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
+    var children = els.heroCards.children;
+    var sameDeal = children.length === 2;
+    for (var i = 0; sameDeal && i < 2; i++){
+      var child = children[i];
+      sameDeal = cards.length === 2
+        ? child.children.length === 2 && child.children[0].textContent === cards[i].r && child.children[1].textContent === SUIT_SYMBOLS[cards[i].s]
+        : child.classList.contains('poker-card--back');
+    }
+    if (sameDeal) return;
+    els.heroCards.innerHTML = '';
+    for (var cardIndex = 0; cardIndex < 2; cardIndex++) els.heroCards.appendChild(createCard(cards[cardIndex] || null));
+  }
+
+  function positionHeroCards(){
+    if (!els.heroCards || !els.scene) return;
+    // The persistent deal belongs to the scene, never a disposable seat HUD.
+    if (els.heroCards.parentNode !== els.scene) els.scene.appendChild(els.heroCards);
+    var config = seatSceneGeometry[seatSceneOrientation].seats[3];
+    placeSeatNode(els.heroCards, { origin: [0, 0] }, config.cards, 110, 80);
   }
 
   function renderDealerChip(){
@@ -4657,13 +4695,12 @@
     return statusText;
   }
 
-  function sumOtherTableStacks(tables, tableId){
+  function sumPokerTableStacks(tables){
     if (!Array.isArray(tables)) return null;
     var total = 0;
     for (var i = 0; i < tables.length; i++){
       var table = tables[i];
       if (!table || !table.tableId) return null;
-      if (table.tableId === tableId) continue;
       if (!Number.isSafeInteger(table.stack) || table.stack < 0) return null;
       total += table.stack;
       if (!Number.isSafeInteger(total)) return null;
@@ -4695,20 +4732,22 @@
     if (!identity || !els.accountHud) return;
     var generation = ++accountHudGeneration;
     els.accountHud.classList.remove('poker-account-hud--wallet-change');
-    els.accountHud.textContent = 'Wallet … CH · Other tables … CH';
+    els.accountHud.textContent = 'Total … · Poker …';
     els.accountHud.setAttribute('aria-busy', 'true');
     var wallet = null;
-    var other = null;
+    var poker = null;
     try {
       var client = window.ChipsClient;
       var results = await Promise.allSettled([client.fetchBalance(), client.fetchPokerProjection()]);
       var balance = results[0].status === 'fulfilled' && results[0].value;
       if (balance && Number.isSafeInteger(balance.balance) && balance.balance >= 0) wallet = balance.balance;
-      if (results[1].status === 'fulfilled') other = sumOtherTableStacks(results[1].value && results[1].value.tables, state.tableId);
+      if (results[1].status === 'fulfilled') poker = sumPokerTableStacks(results[1].value && results[1].value.tables);
     } catch (_err){}
     if (generation !== accountHudGeneration || identity !== accountHudContext()) return;
-    els.accountHud.textContent = 'Wallet ' + (wallet == null ? '—' : formatNumber(wallet)) + ' CH · Other tables ' + (other == null ? '—' : formatNumber(other)) + ' CH';
-    els.accountHud.title = wallet == null || other == null ? 'Account balance unavailable' : '';
+    var total = wallet != null && poker != null && Number.isSafeInteger(wallet + poker) ? wallet + poker : null;
+    els.accountHud.textContent = 'Total ' + (total == null ? '—' : formatCompactAmount(total)) + ' · Poker ' + (poker == null ? '—' : formatCompactAmount(poker));
+    els.accountHud.title = total == null || poker == null ? 'CH account balance unavailable' : 'CH account balance';
+    els.accountHud.setAttribute('aria-label', 'CH account: ' + els.accountHud.textContent);
     els.accountHud.setAttribute('aria-busy', 'false');
     if (wallet != null){
       if (lastRenderedWallet != null && wallet !== lastRenderedWallet && !prefersReducedMotion()){
@@ -4720,9 +4759,13 @@
 
   function renderInfoPanel(){
     if (els.liveStatus) els.liveStatus.textContent = resolveLiveBannerStatus();
+    if (els.liveNotice){
+      els.liveNotice.hidden = !!state.errorText || !(state.mode === 'live' && (!isWsReady() || state.reconnectGate));
+      els.liveNotice.textContent = isGuestMode ? 'Connecting…' : isSignedIn() ? state.hasAppliedAuthoritativeSnapshot ? 'Reconnecting…' : 'Connecting…' : 'Sign in to join';
+    }
     if (els.tableMeta) {
       var parts = [];
-      if (state.tableId) parts.push('Table ' + shortId(state.tableId));
+      if (state.tableId) parts.push('Table ' + state.tableId);
       parts.push(state.phase || state.tableStatus || 'LOBBY');
       parts.push('Pot ' + formatNumber(state.potTotal || 0));
       els.tableMeta.textContent = parts.join(' • ');
@@ -4739,7 +4782,7 @@
       } else if (isUsersTurn()){
         els.turnText.textContent = 'Your turn.';
       } else if (state.turnUserId){
-        els.turnText.textContent = 'Acting: ' + shortId(state.turnUserId);
+        els.turnText.textContent = 'Acting: ' + state.turnUserId;
       } else {
         els.turnText.textContent = 'Waiting for action';
       }
@@ -5152,6 +5195,7 @@
     renderAutoRebuyFeedback();
     renderHeroCards();
     positionHeroCards();
+    logHeroCardPresentation(!deriveCurrentSeat() ? 'seat_absent' : !renderedSeatHud[deriveCurrentSeat().seatNo] ? 'hud_absent' : state.heroCards.length !== 2 ? 'deal_absent' : 'active_deal');
     renderSeatChips();
     renderPotChips();
     renderSettlementSummary();
@@ -5877,6 +5921,8 @@
     els.screen = document.getElementById('pokerTableScreen');
     if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
     els.sceneViewport = document.getElementById('pokerSceneViewport');
+    els.diagnostics = document.getElementById('pokerDiagnostics');
+    els.liveNotice = document.getElementById('pokerLiveNotice');
     if (typeof document.querySelector === 'function') els.centerLayer = document.querySelector('.poker-center-layer');
     if (!els.scene) els.scene = els.screen;
     els.accountHud = document.getElementById('pokerAccountHud');
@@ -6046,6 +6092,8 @@
   }
 
   function applySignedOutState(){
+    lastKnownCurrentSeatNo = null;
+    heroLifecycleTransition = 'signed_out';
     syncSocialPreferencesIdentity(null);
     clearRebuyOperation();
     hideAutoRebuyFeedback();
@@ -6058,6 +6106,9 @@
   }
 
   function applyAuthenticatedPendingState(user, options){
+    heroLifecycleTransition = user && String(user.id || '') === state.currentUserId ? 'auth_pending_same_user' : 'auth_pending_identity';
+    var preservingState = !!(user && state.mode === 'live' && state.hasAppliedAuthoritativeSnapshot
+      && String(user.id || '') === state.currentUserId && state.tableId === tableId);
     if (!user || !state.currentUserId || String(user.id || '') !== String(state.currentUserId)) clearRebuyOperation();
     syncReactionHistoryContext(tableId, user && user.id ? String(user.id) : null);
     syncSocialPreferencesIdentity(user && user.id ? String(user.id) : null);
@@ -6065,7 +6116,10 @@
     resetQueuedPreactionState();
     isGuestMode = false;
     currentGuestSession = null;
-    state = createEmptyLiveState(tableId, user && user.id ? String(user.id) : null);
+    if (!preservingState){
+      lastKnownCurrentSeatNo = null;
+      state = createEmptyLiveState(tableId, user && user.id ? String(user.id) : null);
+    } else state.reconnectGate = true;
     state.statusText = LIVE_STATUS_COPY.connecting;
     render();
     if (!(options && options.keepBootSplash === true)) markBootReady();
@@ -6238,6 +6292,7 @@
           resetWinStreakSession();
           if (els.celebrationPreview) els.celebrationPreview.hidden = true;
         }
+        heroLifecycleTransition = status;
         if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;
@@ -6367,6 +6422,7 @@
     var authApi = getAuthApi();
     if (!authApi || typeof authApi.onAuthChange !== 'function') return;
     authUnsubscribe = authApi.onAuthChange(function(_event, user, session){
+      heroLifecycleTransition = _event || 'auth_change';
       var lifecycleGeneration = ++authLifecycleGeneration;
       var tokenPromise = typeof session === 'undefined'
         ? getAccessToken()

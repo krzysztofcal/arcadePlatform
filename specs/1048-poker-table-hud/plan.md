@@ -30,3 +30,9 @@ Refine existing positionCelebration/class selection, mergeSnapshot lifecycle gua
 ## Transient empty private projection correction
 
 Limit edits to poker/poker-v2.js::mergeSnapshot, one existing fundamental private-card lifecycle case and these SpecKit records. Guard retained pairs by unchanged hand/occupant, active phase and existing public participation; explicit nonparticipation clears. Reuse current state/membership method. Required/focused checks, full fix self-review, browser runtime SHA and Deploy Preview handoff for owner smoke; no backend/WS/shared runtime/protocol/config change or broad UI test.
+
+## Current bounded correction plan
+
+Use existing browser model and authoritative ownership: same-user pending auth gates transport/actions instead of replacing a known model. Reconcile a missing public own-seat row only with explicit unchanged canonical you.seat, active same-hand participation and no pending leave; contradictory ownership/real lifecycle clears. Keep hero-card container in scene and reuse its identical DOM. No timeout debounce or second card cache. Extend existing lifecycle regression plus one deterministic auth lifecycle case; transition-only klog contains no private card/token data.
+
+Replace visible verbose header with fixed 36px row and move existing diagnostic nodes/Preview FX into Table Settings. Sum all existing projection stacks and format Total/Poker with existing compact formatter; no endpoint/cache/service. Minimal northern safe band in fitTableScene, unchanged seat geometry/action rail. Required guards/focused tests, full-PR review, exact browser SHA real Preview portrait/landscape screenshots, then stop for owner. No WS/shared/protocol/config changes or WS deploy.

@@ -349,7 +349,7 @@ function createHarness(options = {}){
 
   vm.createContext(sandbox);
   const closureEnd = source.lastIndexOf('})();');
-  const privacySource = source.slice(0, closureEnd) + 'window.__heroCardsForTest = function(){ return state.heroCards; }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
+  const privacySource = source.slice(0, closureEnd) + 'window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
   vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
@@ -406,6 +406,7 @@ async function flush(){
     targetedReactionPayloads,
     getOpponentHeldCards(userId){ return sandbox.window.__opponentHeldCardsForTest(userId); },
     getHeroCards(){ return JSON.parse(JSON.stringify(sandbox.window.__heroCardsForTest())); },
+    dropHeroHud(){ sandbox.window.__missingHeroHudForTest(); },
     getRevealedCards(userId){ return JSON.parse(JSON.stringify(sandbox.window.__getSeatRevealCardsForTest({ userId }))); },
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
@@ -5830,6 +5831,43 @@ test('poker v2 shows the current slider amount on Bet/Raise buttons', async () =
   assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise (120)', 'RAISE label must follow the slider');
 });
 
+test('poker v2 retains the active deal through same-user auth pending and reconnect but clears identity changes', async () => {
+  const harness = createHarness({ token: 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.initial', authUser: { id: 'user-1' } });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  await waitFor(() => harness.getCreateOptions() !== null);
+  let ws = harness.getCreateOptions();
+  const dealt = amountSnapshot({ handId: 'hand-auth-deal', phase: 'TURN', board: [], potTotal: 20,
+    actions: [], constraints: {}, stateVersion: 50, holeCards: ['3C', '7S'] });
+  dealt.payload.public.betThisRoundByUserId = { 'user-1': 0 };
+  ws.onSnapshot(dealt);
+  await harness.flush();
+  const cards = harness.getHeroCards();
+  ws.onStatus('reconnecting', {});
+  ws.onStatus('resync', {});
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), cards);
+  assert.equal(harness.elements.pokerHeroCards.hidden, false);
+  harness.triggerAuthChange({ id: 'user-1' }, {});
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), cards, 'same-user missing-token pending is not a deal revocation');
+  assert.equal(harness.elements.pokerHeroCards.hidden, false);
+  const token = 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.refresh';
+  harness.setAuthToken(token);
+  harness.triggerAuthChange({ id: 'user-1' }, { access_token: token });
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), cards);
+  ws = harness.getCreateOptions();
+  ws.onSnapshot(dealt);
+  await harness.flush();
+  harness.triggerAuthChange({ id: 'user-2' }, {});
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), [], 'different user clears the private deal');
+  harness.triggerAuthChange(null, null);
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), []);
+});
+
 test('poker v2 preserves same-hand private cards and clears on hand or seat lifecycle boundaries', async () => {
   const { harness, ws } = await bootSeatedHarness();
 
@@ -5850,6 +5888,16 @@ test('poker v2 preserves same-hand private cards and clears on hand or seat life
   assert.ok(harness.elements.pokerHeroCards.children.every((child) => !/poker-card--back/.test(child.className)), 'seated user should see face-up cards');
 
   const receivedCards = harness.getHeroCards();
+  harness.dropHeroHud();
+  assert.equal(harness.elements.pokerHeroCards.hidden, false, 'HUD remount does not revoke the owned deal');
+  const incomplete = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: [], members: [{ userId: 'villain-1', seat: 2 }] });
+  incomplete.payload.public.betThisRoundByUserId = { 'user-1': 0, 'villain-1': 0 };
+  ws.onSnapshot(incomplete);
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), receivedCards, 'canonical own seat survives incomplete public member projection');
+  assert.equal(harness.elements.pokerHeroCards.hidden, false);
+
   for (const kind of ['statePatch', 'table_state', 'stateSnapshot']) {
     const update = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: ['As', 'Kd', '3h'], potTotal: 42,
       actions: [], constraints: {}, stateVersion: 40, turnUserId: 'villain-1', holeCards: null });
@@ -5875,7 +5923,7 @@ test('poker v2 preserves same-hand private cards and clears on hand or seat life
     actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] }));
   await harness.flush();
 
-  for (const boundary of ['WAITING_NEXT_HAND', 'OUT_OF_CHIPS', 'out-of-hand', 'seat-change']) {
+  for (const boundary of ['WAITING_NEXT_HAND', 'OUT_OF_CHIPS', 'out-of-hand', 'seat-change', 'seat-loss']) {
     const dealt = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
       actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] });
     dealt.payload.public.betThisRoundByUserId = { 'user-1': 0 };
@@ -5883,7 +5931,7 @@ test('poker v2 preserves same-hand private cards and clears on hand or seat life
     await harness.flush();
     const update = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
       actions: [], constraints: {}, stateVersion: 40, holeCards: [],
-      ...(boundary === 'seat-change' ? { youSeat: 2, members: [{ userId: 'user-1', seat: 2 }] } : {}) });
+      ...(boundary === 'seat-change' ? { youSeat: 2, members: [{ userId: 'user-1', seat: 2 }] } : boundary === 'seat-loss' ? { youSeat: null } : {}) });
     update.payload.public.betThisRoundByUserId = boundary === 'out-of-hand' ? { 'villain-1': 0 } : { 'user-1': 0 };
     if (boundary === 'WAITING_NEXT_HAND' || boundary === 'OUT_OF_CHIPS') update.payload.private.playerState = { status: boundary, stack: 100 };
     ws.onSnapshot(update);
@@ -6062,15 +6110,15 @@ test('bot-only all-in loss reaction catalog entries resolve emoji/labels, humanS
 });
 
 
-test('Other tables excludes the current authoritative stack and rejects unavailable values', () => {
+test('Poker account projection sums every authoritative table stack and rejects unavailable values', () => {
   const source = fs.readFileSync(path.resolve('poker/poker-v2.js'), 'utf8');
-  const functionSource = source.slice(source.indexOf('  function sumOtherTableStacks('), source.indexOf('  function accountHudContext('));
-  const sum = vm.runInNewContext(functionSource + '\nsumOtherTableStacks');
-  assert.equal(sum([{ tableId: 'here', stack: 900 }, { tableId: 'other', stack: 75 }, { tableId: 'bot-table', stack: 25 }], 'here'), 100);
-  assert.equal(sum([], 'here'), 0);
-  assert.equal(sum([{ tableId: 'other', stack: 0 }], 'here'), 0);
-  assert.equal(sum(null, 'here'), null);
-  assert.equal(sum([{ tableId: 'other', stack: null }], 'here'), null);
-  assert.equal(sum([{ tableId: 'other', stack: -1 }], 'here'), null);
-  assert.equal(sum([{ tableId: 'other', stack: Number.MAX_SAFE_INTEGER }, { tableId: 'third', stack: 1 }], 'here'), null);
+  const functionSource = source.slice(source.indexOf('  function sumPokerTableStacks('), source.indexOf('  function accountHudContext('));
+  const sum = vm.runInNewContext(functionSource + '\nsumPokerTableStacks');
+  assert.equal(sum([{ tableId: 'here', stack: 900 }, { tableId: 'other', stack: 75 }, { tableId: 'bot-table', stack: 25 }]), 1000);
+  assert.equal(sum([]), 0);
+  assert.equal(sum([{ tableId: 'other', stack: 0 }]), 0);
+  assert.equal(sum(null), null);
+  assert.equal(sum([{ tableId: 'other', stack: null }]), null);
+  assert.equal(sum([{ tableId: 'other', stack: -1 }]), null);
+  assert.equal(sum([{ tableId: 'other', stack: Number.MAX_SAFE_INTEGER }, { tableId: 'third', stack: 1 }]), null);
 });
