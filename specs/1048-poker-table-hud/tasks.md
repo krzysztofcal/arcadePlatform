@@ -84,3 +84,12 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] P004 Existing fundamental checks and self-review; preserve all ownership fixes.
 - [x] P005 Real latest-runtime Preview portrait/landscape/screenshots and live evidence.
 - [ ] P006 Owner manual smoke and authenticated Stage CH verification; Draft/not merge-ready.
+
+## Landscape casino owner direction
+
+- [x] L001 Re-read live approved direction/reference/current landscape and write short composition plan.
+- [x] L002 Original room/dealer assets, coherent six physical slots, large table and compact rail; preserve portrait.
+- [x] L003 Top-right account node, restrained center/bottom public event copy; preserve gameplay/ownership/targeted Nice hand.
+- [x] L004 Preview FX exclusively in Diagnostics using existing PR Preview BUILD_INFO gate; Production absent.
+- [ ] L005 Fundamental/required checks, self-review and real latest-runtime Preview screenshots/evidence.
+- [ ] L006 Owner landscape smoke and authenticated Stage CH gate; retain Draft/not merge-ready.

@@ -50,3 +50,9 @@ Extend the existing deterministic live harness: scene dealer ownership/field-pre
 ## Perimeter/scale implementation amendment
 
 Modify existing seatSceneGeometry, fitTableScene and configureSeatHud in poker/poker-v2.js. Preserve keyed/persistent ownership and logical-to-physical rotation. Modify only reaction text sizing/wrapping and landscape scene clipping in poker/poker-v2.css. Constitution check: this is geometry/CSS/simple glue; no new UI/layout tests. Run existing fundamental live/static tests and required guards. Verify real exact-browser-SHA Preview portrait/landscape, full long human/bot text, physical dealer proximity, affected lower-right/action separation, no page scroll and clickable controls. Save narrow evidence/screenshots; owner acceptance and authenticated CH remain pending.
+
+## Landscape-only casino design plan
+
+One existing SeatHud renderer and six static physical variants; balanced top/upper-left/upper-right/left/right/hero perimeter. Original room SVG (emerald panels, gold arches, warm lamps) plus original fully clothed dealer WebP behind far table edge; existing card/chip art reused. Landscape CSS only for table/room, compact rail and event strips. fitTableScene reuses the same account node, moving it into right rail in landscape and back to original portrait parent on rotation. renderRoomMessages derives public messages/status; no authoritative model mutation. bindCelebrationPreview mounts solely in Diagnostics with unchanged BUILD_INFO guard.
+
+Constitution: UI/CSS/glue are preview-verified, no new broad UI test. Existing127 fundamental cases and required checks; narrow real Preview landscape844×390/desktop1280×720 plus portrait390×844 regression, targeted winner offer and FX Diagnostics/Production-signal checks. No WS deploy, schema/Production mutation, dependency, inline script or second poker runtime.

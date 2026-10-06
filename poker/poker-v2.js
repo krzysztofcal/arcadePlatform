@@ -620,8 +620,8 @@
     });
     controls.appendChild(button);
     controls.appendChild(panel);
-    var tools = els.diagnostics && els.diagnostics.parentNode || els.screen;
-    tools.appendChild(controls);
+    if (!els.diagnostics) return;
+    els.diagnostics.appendChild(controls);
     els.celebrationPreviewMode = mode;
     els.celebrationPreviewTarget = target;
     els.celebrationPreviewHint = hint;
@@ -3923,12 +3923,12 @@
       {avatar:[44,175],stack:[130,190],bet:[175,140],dealer:[96,135]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[520,50],stack:[607,52],bet:[620,96],dealer:[450,35]},
-      {avatar:[975,85],stack:[855,144],bet:[813,120],dealer:[915,45]},
-      {avatar:[760,85],stack:[865,110],bet:[860,155],dealer:[820,85]},
+      {avatar:[520,55],stack:[606,90],bet:[608,130],dealer:[450,35]},
+      {avatar:[810,65],stack:[745,140],bet:[712,169],dealer:[872,85]},
+      {avatar:[940,150],stack:[828,190],bet:[755,217],dealer:[876,162]},
       {avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
-      {avatar:[85,280],stack:[185,247],bet:[208,219],dealer:[145,240]},
-      {avatar:[85,95],stack:[185,144],bet:[227,120],dealer:[145,55]}
+      {avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[158,175]},
+      {avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
     ]}
   };
   var seatSceneOrientation = 'portrait';
@@ -3937,6 +3937,10 @@
     if (!els.scene || !els.sceneViewport) return;
     seatSceneOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
     var geometry = seatSceneGeometry[seatSceneOrientation];
+    if (els.accountHud && els.topRightRail && els.liveTopbar){
+      var accountParent = seatSceneOrientation === 'landscape' ? els.topRightRail : els.liveTopbar;
+      if (els.accountHud.parentNode !== accountParent) accountParent.insertBefore(els.accountHud, accountParent.firstChild);
+    }
     // Reserve a table-local band for northern player transients, below chrome.
     var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
     var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
@@ -5240,6 +5244,41 @@
     });
   }
 
+  // Ephemeral public room copy, never gameplay state or an engineering log.
+  var roomMessageHandId = null;
+  var roomMessageTableId = null;
+  var roomMessageUsers = [];
+  var roomMessageTimer = null;
+
+  function renderRoomMessages(){
+    if (!els.roomEvent || !els.roomStatus) return;
+    var seats = state.seats.filter(function(seat){ return !!seat.userId; });
+    var users = seats.map(function(seat){ return seat.userId; });
+    var sameTable = roomMessageTableId === state.tableId;
+    var joined = sameTable && roomMessageUsers.length ? seats.find(function(seat){ return roomMessageUsers.indexOf(seat.userId) < 0; }) : null;
+    var newHand = state.handId && state.handId !== roomMessageHandId;
+    var message = joined ? tf('pokerRoomPlayerJoined', { name: joined.displayName || t('pokerRoomPlayer', 'A player') }, '{name} joined the table')
+      : newHand ? t('pokerRoomNewHand', 'New hand · Good luck') : null;
+    if (!sameTable){
+      if (roomMessageTimer) window.clearTimeout(roomMessageTimer);
+      els.roomEvent.hidden = true;
+    }
+    roomMessageTableId = state.tableId;
+    roomMessageUsers = users;
+    roomMessageHandId = state.handId;
+    if (message){
+      if (roomMessageTimer) window.clearTimeout(roomMessageTimer);
+      els.roomEvent.textContent = message;
+      els.roomEvent.hidden = false;
+      roomMessageTimer = window.setTimeout(function(){ els.roomEvent.hidden = true; roomMessageTimer = null; }, 5000);
+    }
+    var playerStatus = String(state.playerState && state.playerState.status || '').toUpperCase();
+    els.roomStatus.textContent = seats.length < 2 ? t('pokerRoomWaiting', 'Waiting for more players')
+      : playerStatus === 'WAITING_NEXT_HAND' ? t('pokerRoomReserved', 'Seat reserved · Joining next hand')
+      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Next hand shortly')
+      : isUsersTurn() ? t('pokerRoomYourTurn', 'Your turn') : t('pokerRoomHandInProgress', 'Hand in progress');
+  }
+
   function render(){
     fitTableScene();
     if (els.celebrationPreview) els.celebrationPreview.hidden = !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate;
@@ -5258,6 +5297,7 @@
     renderControls();
     renderReactionHistory();
     renderClosedTableNotice();
+    renderRoomMessages();
     positionCelebration();
     refreshCelebrationPreview();
     fitTableScene();
@@ -5976,6 +6016,10 @@
     if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
     els.sceneViewport = document.getElementById('pokerSceneViewport');
     els.diagnostics = document.getElementById('pokerDiagnostics');
+    els.liveTopbar = document.querySelector('.poker-live-topbar');
+    els.topRightRail = document.querySelector('.poker-top-right-rail');
+    els.roomEvent = document.getElementById('pokerRoomEvent');
+    els.roomStatus = document.getElementById('pokerRoomStatus');
     els.liveNotice = document.getElementById('pokerLiveNotice');
     if (typeof document.querySelector === 'function') els.centerLayer = document.querySelector('.poker-center-layer');
     if (!els.scene) els.scene = els.screen;
