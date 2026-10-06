@@ -7,6 +7,7 @@ test("ws-server deploy workflow keeps only the exact production restart privileg
 
   assert.doesNotMatch(text, /sudo -n true/);
   assert.match(text, /systemctl cat ws-server\.service/);
+  assert.match(text, /sudo -n \/usr\/local\/sbin\/arcade-ws-production-env-preflight/);
   assert.match(text, /sudo -n \/usr\/bin\/systemctl restart ws-server\.service/);
   assert.doesNotMatch(text, /sudo -n (?:cat|test|rm|mkdir|tar|ln|mv|node|bash|rsync)\b/);
   assert.doesNotMatch(text, /sudo -n systemctl cat/);

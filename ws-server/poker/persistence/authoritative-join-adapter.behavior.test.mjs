@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isStateStorageValid } from "../snapshot-runtime/poker-state-utils.mjs";
 import { createAuthoritativeJoinExecutor } from "./authoritative-join-adapter.mjs";
+import { createTableManager } from "../table/table-manager.mjs";
 
 const validateStateForStorage = (state) =>
   isStateStorageValid(state, { requireNoDeck: true, requireHandSeed: false, requireCommunityDealt: false });
@@ -74,6 +75,11 @@ test("authoritative join adapter returns unavailable when locked-state validator
 
 test("authoritative join adapter forwards only shared-core supported args", async () => {
   let captured = null;
+  const access = {
+    schemaBacked: true, automaticClass: "NORMAL", override: "AUTO", effectiveClass: "NORMAL", revision: 1,
+    slowThresholdCh: 1000000000, slowHysteresisBps: 500, slowRecoveryThresholdCh: 950000000,
+    policyRevision: 1, loadedAtMs: 100, expiresAtMs: 30100
+  };
   const execute = createAuthoritativeJoinExecutor({
     env: { WS_DEFAULT_BUYIN: "25" },
     klog: () => {},
@@ -83,7 +89,7 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async (args) => {
         captured = args;
-        return { ok: true, seatNo: 2, rejoin: false, stack: 100, snapshot: makeSuccessSnapshot() };
+        return { ok: true, seatNo: 2, rejoin: false, stack: 100, snapshot: makeSuccessSnapshot(), access };
       }
     })
   });
@@ -93,6 +99,17 @@ test("authoritative join adapter forwards only shared-core supported args", asyn
   assert.equal(result.seatNo, 2);
   assert.equal(result.rejoin, false);
   assert.equal(result.stack, 100);
+  assert.strictEqual(result.access, access);
+  const manager = createTableManager();
+  assert.equal(manager.restoreTableFromPersisted("t1", {
+    coreState: { version: 1, roomId: "t1", maxSeats: 6, members: [{ userId: "u1", seat: 2 }], seats: { u1: 2 },
+      pokerState: { phase: "SETTLED", handId: "previous_hand", stacks: { u1: 100 } } }
+  }).ok, true);
+  assert.equal(manager.settledAccessStatus("t1", { nowMs: 100 }).known, false);
+  assert.equal(manager.cachePokerAccess("t1", "u1", result.access, {
+    ...result.access, revision: result.access.policyRevision
+  }, 100).ok, true);
+  assert.equal(manager.settledAccessStatus("t1", { nowMs: 100 }).known, true);
   assert.deepEqual(Object.keys(captured || {}).sort(), ["beginSql", "env", "klog", "loadStateForUpdate", "postTransactionFn", "requestId", "tableId", "updateStateLocked", "userId", "validateStateForStorage"]);
   assert.equal(captured.validateStateForStorage, validateStateForStorage);
   assert.equal(Object.hasOwn(captured, "buyIn"), false);
@@ -141,6 +158,7 @@ test("authoritative join adapter accepts complete authoritative snapshot without
   assert.equal(result.ok, true);
   assert.equal(result.seatNo, 1);
   assert.equal(result.stack, 200);
+  assert.equal(Object.hasOwn(result, "access"), false);
 });
 
 test("authoritative join adapter preserves explicit rejoin semantics", async () => {
