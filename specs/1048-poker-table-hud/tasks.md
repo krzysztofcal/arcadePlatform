@@ -56,5 +56,5 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] F002 Preserve same-user known model, reconcile explicit authoritative occupant ownership, retain scene-owned card DOM; keep lifecycle revocations. Transition-only privacy-safe klog.
 - [x] F003 Compact fixed-height chrome and Total/Poker CH badge; existing Settings Diagnostics and critical notices; minimal northern safe band.
 - [x] F004 Fundamental regressions GREEN and required checks; self-review.
-- [ ] F005 Real latest-SHA Preview portrait/landscape screenshots and live evidence/handoff.
+- [x] F005 Real latest-SHA Preview portrait/landscape screenshots and live evidence/handoff.
 - [ ] F006 Owner manual smoke including Stage flicker transition correlation; authenticated Stage CH verification. Draft/not merge-ready.
