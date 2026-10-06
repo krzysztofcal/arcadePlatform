@@ -337,11 +337,13 @@ The control does not read journald, store logs in Supabase, change poker state, 
 
 The narrow sudoers contract is versioned in `infra/vps/arcade-deploy.sudoers`.
 After Phase B staging it grants `copilot` only the exact Preview restart,
-Production restart, Caddy reload, and fixed env-preflight commands. It grants
+Production restart, Caddy reload, and fixed env-preflight commands
+(`/usr/local/sbin/arcade-ws-preview-env-preflight` and
+`/usr/local/sbin/arcade-ws-production-env-preflight`). It grants
 no shell, interpreter, archive, copy, remove, rsync, generic `systemctl`, or
 wildcard command. Production release filesystem operations and Caddy backup,
 write, and validation run as `copilot`; only the exact service restart/reload
-commands use `sudo`.
+and env preflight commands use `sudo`.
 Keep `/etc/sudoers.d/arcade-deploy` `root:root` mode `0440` and validate it with
 `visudo` before installation.
 
@@ -356,6 +358,7 @@ sudo -u copilot systemctl cat ws-server-preview.service >/dev/null && echo syste
 sudo -u copilot test -d /opt/arcade-ws-preview/ws-server && echo preview-app-ok
 sudo -l -U copilot
 sudo -u copilot sudo -n /usr/local/sbin/arcade-ws-preview-env-preflight >/dev/null && echo preview-env-preflight-ok
+sudo -u copilot sudo -n /usr/local/sbin/arcade-ws-production-env-preflight >/dev/null && echo production-env-preflight-ok
 ```
 
 ### Preview secrets

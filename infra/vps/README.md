@@ -49,14 +49,17 @@ bootstrap. The deploy group owns only application state:
 
 The Preview env file and Production env file remain `root:root` mode `0600`.
 Systemd units, `/etc/sudoers*`, the Preview root directory, and the fixed
-Preview env helper remain root-owned and are not group-writable. The helper is
-installed at `/usr/local/sbin/arcade-ws-preview-env-preflight`.
+preflight helpers remain root-owned and are not group-writable. The helpers are
+installed at `/usr/local/sbin/arcade-ws-preview-env-preflight` and
+`/usr/local/sbin/arcade-ws-production-env-preflight`.
 
 The versioned `/etc/sudoers.d/arcade-deploy` contract gives `copilot` only the
-exact Preview restart, Production restart, Caddy reload, and fixed Preview env
-preflight commands. It contains no shell, interpreter, archive, file
+exact Preview restart, Production restart, Caddy reload, and fixed Preview/Production
+env preflight commands. It contains no shell, interpreter, archive, file
 operation, generic `systemctl`, or wildcard grant. No runner `.credentials`
-file is part of the recovery source.
+file is part of the recovery source. On an existing host, use
+`infra/vps/stage-production-env-preflight.sh` to stage the production preflight
+helper and updated sudoers contract before activating the workflow.
 
 The production `WS_USER` GitHub Actions secret used by both the WS Server and
 Infra VPS workflows must resolve to `copilot` before either Phase B workflow is
