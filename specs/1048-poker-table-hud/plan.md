@@ -38,3 +38,7 @@ Use existing browser model and authoritative ownership: same-user pending auth g
 Replace visible verbose header with fixed 36px row and move existing diagnostic nodes/Preview FX into Table Settings. Sum all existing projection stacks and format Total/Poker with existing compact formatter; no endpoint/cache/service. Minimal northern safe band in fitTableScene, unchanged seat geometry/action rail. Required guards/focused tests, full-PR review, exact browser SHA real Preview portrait/landscape screenshots, then stop for owner. No WS/shared/protocol/config changes or WS deploy.
 
 Compact non-hero celebration inherits the same composition scale as its owning avatar; its fixed stacking margins scale with it. Static northern safe bands reserve the combined above-avatar column. Hero special remains the dedicated unscaled --own. No per-content layout measurement or scheduler.
+
+## Chip presentation correction
+
+Reproduce partial-frame loss and exact DOM replacement in the existing fundamental harness before the fix. Reuse field-presence resolution and the existing scene chip layer; reconcile occupants/roles and update only changed amounts. Preserve current table-local anchors, labels and chip-fly/settlement flow. Verify focused tests, required guards, real narrow Preview, then hand off Draft pending owner smoke.

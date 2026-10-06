@@ -1642,12 +1642,9 @@
 
   function extractSeatCommittedByUserId(payload){
     var publicObj = isObject(payload && payload.public) ? payload.public : {};
-    var next = normalizeNumericUserMap(payload && payload.committedByUserId)
-      || normalizeNumericUserMap(publicObj.committedByUserId)
-      || normalizeNumericUserMap(payload && payload.betThisRoundByUserId)
-      || normalizeNumericUserMap(publicObj.betThisRoundByUserId)
-      || {};
-    return next;
+    var committed = readSnapshotField(payload, publicObj, 'committedByUserId');
+    var field = committed.present ? committed : readSnapshotField(payload, publicObj, 'betThisRoundByUserId');
+    return field.present ? (normalizeNumericUserMap(field.value) || {}) : null;
   }
 
   function captureVisualSnapshot(){
@@ -2376,7 +2373,7 @@
         lastKnownCurrentSeatNo = currentSeatAfterMerge.seatNo;
       }
     }
-    seatCommittedByUserId = extractSeatCommittedByUserId(payload);
+    var nextCommitted = extractSeatCommittedByUserId(payload);
 
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
@@ -2421,7 +2418,11 @@
     if (turnObj.deadlineAt != null) state.turnDeadlineAt = Number(turnObj.deadlineAt);
     else if (turnObj.deadlineAt == null) state.turnDeadlineAt = null;
 
+    var handIdChanged = state.handId !== previousHandId;
+    if (nextCommitted !== null) seatCommittedByUserId = nextCommitted;
+    else if (handIdChanged) seatCommittedByUserId = {};
     if (Number.isFinite(Number(potObj.total))) state.potTotal = Number(potObj.total);
+    else if (handIdChanged) state.potTotal = 0;
 
     var boardSource = null;
     if (Array.isArray(payload.board)) boardSource = payload.board;
@@ -2434,7 +2435,6 @@
     var nextHeroCards = null;
     if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
     else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
-    var handIdChanged = state.handId !== previousHandId;
     if (handIdChanged || handBetsField.present) state.betThisRoundByUserId = normalizeNumericUserMap(handBetsField.value) || {};
     if (handIdChanged && !foldedUsersField.present) state.foldedByUserId = Object.create(null);
     if (authoritativeFull || foldedUsersField.present) state.foldedByUserId = normalizeFoldedByUserId(foldedUsersField.value);
@@ -4043,22 +4043,47 @@
     return point ? {x:point[0]/geometry.width*100,y:point[1]/geometry.height*100} : null;
   }
 
+  function syncChipVisual(container, amount, variant, showLabel){
+    var current = container.children[0];
+    var visible = amount != null && (showLabel || amount > 0);
+    if (visible && current && current.getAttribute('data-amount') === String(Math.floor(amount))
+        && current.classList.contains('poker-chip-visual-stack--' + variant)) return;
+    if (!visible && !current) return;
+    container.innerHTML = '';
+    if (!visible) return;
+    var visual = createChipStackVisual(amount, variant);
+    if (showLabel) appendSeatStackAmountLabel(visual, amount);
+    container.appendChild(visual);
+  }
+
   function renderSeatChips(){
     renderedSeatBetAnchors = {};
     renderedSeatStackAnchors = {};
+    if (!els.seatChipLayer) return;
+    // Static chips belong to the persistent scene layer, never the rebuilt HUD.
+    Array.from(els.seatChipLayer.children).forEach(function(node){
+      var occupied = state.seats.some(function(seat){
+        return seat.userId === node.dataset.userId && String(seat.seatNo) === node.dataset.seatNo;
+      });
+      if (!occupied) els.seatChipLayer.removeChild(node);
+    });
     state.seats.forEach(function(seat){
       var hud = seat && renderedSeatHud[seat.seatNo];
       if (!hud || !seat.userId) return;
-      hud.stack.innerHTML = '';
-      hud.bet.innerHTML = '';
-      var amount = resolveStack(seat.userId);
-      if (amount != null){
-        var stack = createChipStackVisual(amount,isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack');
-        appendSeatStackAmountLabel(stack,amount);
-        hud.stack.appendChild(stack);
-      }
-      var committed = Math.max(0,Number(seatCommittedByUserId[seat.userId]) || 0);
-      if (committed > 0) hud.bet.appendChild(createChipStackVisual(committed,'seat-bet'));
+      ['stack','bet'].forEach(function(role){
+        var container = Array.from(els.seatChipLayer.children).find(function(node){
+          return node.dataset.seatNo === String(seat.seatNo) && node.dataset.userId === seat.userId && node.dataset.seatHud === role;
+        });
+        if (!container){
+          container = hud[role];
+          container.dataset.userId = seat.userId;
+          els.seatChipLayer.appendChild(container);
+        }
+        hud[role] = container;
+        placeSeatNode(container,{origin:[0,0]},hud.config[role],role === 'stack' ? (seatSceneOrientation === 'portrait' ? 60 : 80) : 22,role === 'stack' ? 60 : 20);
+      });
+      syncChipVisual(hud.stack,resolveStack(seat.userId),isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack',true);
+      syncChipVisual(hud.bet,Math.max(0,Number(seatCommittedByUserId[seat.userId]) || 0),'seat-bet',false);
       renderedSeatStackAnchors[seat.seatNo] = seatHudAnchor(hud.stack);
       renderedSeatBetAnchors[seat.seatNo] = seatHudAnchor(hud.bet);
     });
@@ -4066,9 +4091,7 @@
 
   function renderPotChips(){
     if (!els.potChipStack) return;
-    els.potChipStack.innerHTML = '';
-    if ((Number(state.potTotal) || 0) <= 0) return;
-    els.potChipStack.appendChild(createChipStackVisual(state.potTotal, 'pot'));
+    syncChipVisual(els.potChipStack,Math.max(0,Number(state.potTotal) || 0),'pot',false);
   }
 
   function resolvePointFromPercent(anchor, rect){
@@ -4272,7 +4295,7 @@
         node.dataset.seatHud = area;
         node.dataset.seatNo = article.dataset.seatNo;
         hud[area] = node;
-        article.appendChild(node);
+        if (area !== 'stack' && area !== 'bet') article.appendChild(node);
       });
       hud.dealer = document.createElement('div');
       hud.dealer.className = 'poker-seat-hud-dealer';

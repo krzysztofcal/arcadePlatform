@@ -2341,6 +2341,72 @@ test('poker v2 renders chip atlas stack variants from pot amount breakdown', asy
   );
 });
 
+function staticChipVisuals(harness){
+  return descendants(harness.elements.pokerSeatLayer).concat(descendants(harness.elements.pokerSeatChipLayer))
+    .filter((node) => node.className.includes('poker-chip-visual-stack--'));
+}
+
+async function chipOwnershipHarness(){
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  harness.getCreateOptions().onSnapshot({kind:'stateSnapshot',payload:{tableId:'table-1',stateVersion:1,
+    table:{tableId:'table-1',status:'OPEN',maxSeats:6,members:[{userId:'user-1',seat:1},{userId:'villain-1',seat:2}]},
+    public:{hand:{handId:'chip-hand-A',status:'TURN'},stacks:{'user-1':124,'villain-1':80},
+      betThisRoundByUserId:{'user-1':4,'villain-1':5},committedByUserId:{'user-1':9,'villain-1':5},pot:{total:14}},
+    private:{holeCards:[{r:'Q',s:'S'},{r:'Q',s:'D'}]},you:{seat:1}}});
+  await harness.flush();
+  return harness;
+}
+
+async function chipFrame(harness, publicState){
+  harness.getCreateOptions().onSnapshot({kind:'statePatch',payload:{tableId:'table-1',public:publicState}});
+  await harness.flush();
+}
+
+function chipAmounts(harness){
+  return staticChipVisuals(harness).map((node)=>node.getAttribute('data-amount')).sort();
+}
+
+test('poker v2 preserves chip amounts in omitted same-hand partial frames', async () => {
+  const harness = await chipOwnershipHarness();
+  const amounts = chipAmounts(harness);
+  assert.deepEqual(amounts,['124','5','80','9']);
+  await chipFrame(harness,{hand:{handId:'chip-hand-A',status:'TURN'},turn:{userId:'villain-1'}});
+  assert.deepEqual(chipAmounts(harness),amounts);
+  assert.equal(harness.elements.pokerPotChipStack.children[0].getAttribute('data-amount'),'14');
+});
+
+test('poker v2 retains unchanged chip DOM and selectively updates authoritative amounts', async () => {
+  const harness = await chipOwnershipHarness();
+  const visuals = staticChipVisuals(harness);
+  const pot = harness.elements.pokerPotChipStack.children[0];
+  const images = visuals.map((node)=>node.children[0]);
+  await chipFrame(harness,{stacks:{'user-1':124,'villain-1':80},committedByUserId:{'user-1':9,'villain-1':5},pot:{total:14}});
+  const retained = staticChipVisuals(harness);
+  assert.equal(retained.length,visuals.length);
+  visuals.forEach((node,index)=>assert.strictEqual(retained[index],node,'unchanged chip DOM must remain mounted'));
+  assert.strictEqual(harness.elements.pokerPotChipStack.children[0],pot);
+  retained.forEach((node,index)=>assert.strictEqual(node.children[0],images[index]));
+  assert.equal(harness.elements.pokerSeatChipLayer.children.length,4);
+  await chipFrame(harness,{stacks:{'user-1':120,'villain-1':80},pot:{total:18}});
+  const changed = staticChipVisuals(harness);
+  visuals.filter((node)=>node.getAttribute('data-amount')!=='124').forEach((node)=>assert.ok(changed.includes(node)));
+  assert.ok(!changed.includes(visuals.find((node)=>node.getAttribute('data-amount')==='124')));
+  assert.notStrictEqual(harness.elements.pokerPotChipStack.children[0],pot);
+  await chipFrame(harness,{committedByUserId:{},betThisRoundByUserId:{'user-1':4,'villain-1':5}});
+  assert.deepEqual(chipAmounts(harness),['120','80'],'explicit empty committed map wins over bet fallback');
+  await chipFrame(harness,{committedByUserId:{'user-1':3},pot:{total:3}});
+  await chipFrame(harness,{hand:{handId:'chip-hand-B',status:'TURN'}});
+  assert.deepEqual(chipAmounts(harness),['120','80'],'new hand clears previous committed chips only');
+  assert.equal(harness.elements.pokerPotChipStack.children.length,0);
+  const oldOccupant = harness.elements.pokerSeatChipLayer.children.find((node)=>node.dataset.userId==='villain-1');
+  harness.getCreateOptions().onSnapshot({kind:'statePatch',payload:{table:{members:[{userId:'user-1',seat:1},{userId:'villain-2',seat:2}]},public:{stacks:{'user-1':120,'villain-2':80}}}});
+  await harness.flush();
+  assert.ok(!harness.elements.pokerSeatChipLayer.children.includes(oldOccupant),'seat reuse revokes old occupant DOM');
+  assert.equal(harness.elements.pokerSeatChipLayer.children.filter((node)=>node.dataset.userId==='villain-2').length,2);
+});
+
 test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
@@ -2370,8 +2436,8 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   await harness.flush();
 
   const seat = harness.elements.pokerSeatLayer.children.find((node) => node.dataset.userId === 'user-1');
-  const betStack = descendants(seat).find((node) => node.className.includes('poker-chip-visual-stack--seat-bet'));
-  const seatStack = descendants(seat).find((node) => node.className.includes('poker-chip-visual-stack--hero-seat-stack'));
+  const betStack = descendants(harness.elements.pokerSeatChipLayer).find((node) => node.className.includes('poker-chip-visual-stack--seat-bet'));
+  const seatStack = descendants(harness.elements.pokerSeatChipLayer).find((node) => node.className.includes('poker-chip-visual-stack--hero-seat-stack'));
   assert.equal(betStack.getAttribute('data-amount'), '9');
   assert.equal(seatStack.getAttribute('data-amount'), '124');
   assert.equal(findSeatChild(seatStack, 'poker-chip-stack-label').textContent, '124');
@@ -2411,7 +2477,7 @@ test('poker v2 keeps zero stack labels visible without rendering chips', async (
   });
   await harness.flush();
 
-  const stacks = descendants(harness.elements.pokerSeatLayer).filter((node) => node.className.includes('poker-chip-visual-stack--seat-stack') || node.className.includes('poker-chip-visual-stack--hero-seat-stack'));
+  const stacks = descendants(harness.elements.pokerSeatChipLayer).filter((node) => node.className.includes('poker-chip-visual-stack--seat-stack') || node.className.includes('poker-chip-visual-stack--hero-seat-stack'));
   assert.equal(stacks.length, 2);
   for (const stack of stacks){
     assert.equal(stack.getAttribute('data-amount'), '0');

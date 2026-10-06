@@ -58,3 +58,10 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] F004 Fundamental regressions GREEN and required checks; self-review.
 - [x] F005 Real latest-SHA Preview portrait/landscape screenshots and live evidence/handoff.
 - [ ] F006 Owner manual smoke including Stage flicker transition correlation; authenticated Stage CH verification. Draft/not merge-ready.
+
+## Owner chip flicker correction
+
+- [x] C001 Confirm RED: omitted partial bets disappear; unchanged chip nodes are replaced.
+- [x] C002 Persistent scene-owned chip DOM, field-presence/lifecycle semantics; selective amount/occupant updates.
+- [x] C003 Fundamental tests 124/124 and required checks; fix self-review.
+- [ ] C004 Latest runtime Preview sanity/evidence and full CI; owner chip smoke remains pending.
