@@ -64,4 +64,5 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] C001 Confirm RED: omitted partial bets disappear; unchanged chip nodes are replaced.
 - [x] C002 Persistent scene-owned chip DOM, field-presence/lifecycle semantics; selective amount/occupant updates.
 - [x] C003 Fundamental tests 124/124 and required checks; fix self-review.
-- [ ] C004 Latest runtime Preview sanity/evidence and full CI; owner chip smoke remains pending.
+- [x] C004 Latest runtime real Preview: identical served JS, portrait/landscape nodes/images and pot retained, unchanged values, no scroll; evidence/screenshots saved.
+- [ ] C005 Owner chip smoke and authenticated Stage CH verification; full CI status tracked in PR checks.

@@ -1,0 +1,98 @@
+{
+  "runtimeSha": "eda3095c994459944372f7dadbe1e316007d76c1",
+  "preview": "https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html",
+  "verification": "controlled fixture on real Preview, byte-identical served runtime; no authenticated Stage claim",
+  "redBaseline": "9dc0f45ef34458310289117e886c473e0c1922ae",
+  "red": {
+    "partialFrame": "bets 9/5 disappear while stacks remain 124/80",
+    "domOwnership": "unchanged amounts replace exact chip visual nodes",
+    "targetedFailures": 2
+  },
+  "green": {
+    "focusedPassed": 124,
+    "failed": 0,
+    "requiredChecks": [
+      "syntax",
+      "check:all",
+      "ci:guards",
+      "check:csp-inline",
+      "git diff --check"
+    ]
+  },
+  "viewports": [
+    {
+      "viewport": "portrait",
+      "amounts": [
+        "1235",
+        "15",
+        "0",
+        "1237",
+        "15",
+        "1238",
+        "15",
+        "1239",
+        "15",
+        "1240",
+        "15"
+      ],
+      "after": [
+        "1235",
+        "15",
+        "0",
+        "1237",
+        "15",
+        "1238",
+        "15",
+        "1239",
+        "15",
+        "1240",
+        "15"
+      ],
+      "sameNodes": true,
+      "samePot": true,
+      "wrappers": 12,
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "clientHeight": 844
+    },
+    {
+      "viewport": "landscape",
+      "amounts": [
+        "1235",
+        "15",
+        "0",
+        "1237",
+        "15",
+        "1238",
+        "15",
+        "1239",
+        "15",
+        "1240",
+        "15"
+      ],
+      "after": [
+        "1235",
+        "15",
+        "0",
+        "1237",
+        "15",
+        "1238",
+        "15",
+        "1239",
+        "15",
+        "1240",
+        "15"
+      ],
+      "sameNodes": true,
+      "samePot": true,
+      "wrappers": 12,
+      "scrollWidth": 844,
+      "clientWidth": 844,
+      "scrollHeight": 390,
+      "clientHeight": 390
+    }
+  ],
+  "ownerChipSmoke": "pending",
+  "authenticatedStageCH": "pending"
+}
