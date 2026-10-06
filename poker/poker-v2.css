@@ -379,7 +379,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-seat-best-hand{display:flex;flex-direction:column;align-items:flex-end;gap:4px;width:100%;}
 .poker-seat-best-hand-label{max-width:100%;padding:3px 6px;border-radius:10px;background:rgba(7,16,28,.82);border:1px solid rgba(255,223,180,.22);color:#f5e7c2;font-size:9px;font-weight:700;line-height:1.15;text-transform:uppercase;text-align:right;}
 .poker-seat-best-hand-cards{display:flex;flex-wrap:nowrap;justify-content:flex-end;gap:2px;width:100%;}
-.poker-seat-best-hand-card{display:flex;align-items:center;justify-content:center;flex:0 0 16px;min-width:0;height:24px;border-radius:3px;background:rgba(245,248,255,.96);color:#111;font-size:9px;font-weight:700;box-shadow:0 4px 10px rgba(0,0,0,.28);}
+.poker-seat-best-hand-card{display:flex;align-items:center;justify-content:center;flex:0 0 18px;min-width:0;height:27px;border-radius:3px;background:rgba(245,248,255,.96);color:#111;font-size:11px;line-height:1;letter-spacing:-.6px;font-weight:700;box-shadow:0 4px 10px rgba(0,0,0,.28);}
 .poker-seat-hud-social{display:flex;align-items:center;justify-content:center;gap:3px;pointer-events:auto;}
 .poker-seat-social-reaction{display:flex;align-items:center;justify-content:center;max-width:100%;min-width:0;}
 .poker-seat-reaction-bubble{--reaction-bubble-x:0;position:relative;padding:3px 5px;max-width:100%;border:1px solid rgba(255,223,180,.34);border-radius:999px;background:rgba(7,13,24,.94);box-shadow:0 7px 16px rgba(0,0,0,.38);color:#fff4dc;font-size:9px;font-weight:700;line-height:12px;white-space:normal;min-width:0;overflow-wrap:anywhere;text-align:center;}

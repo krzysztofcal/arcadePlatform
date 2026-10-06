@@ -335,3 +335,7 @@ The latest owner pass extends approved premium landscape materials to portrait: 
 ## Small positioning polish — owner pass
 
 Maintain accepted premium direction. Adjust only requested physical seats/remaining chips/dealer D and reaction glyph centering; preserve semantics/ownership/assets/FX. Physical mapping for owner labels is top/upper-right/lower-left/upper-left, not logical-user-specific exceptions. Landscape northern HUD may occupy vacant center of chrome inside the viewport without clipping; no table scale/action rail redesign. Owner smoke and Stage CH gate remain pending.
+
+## Owner chip association / best-hand readability correction
+
+Landscape S1 chips/bet belong visually below its shifted name on felt, separate from common pot; portrait S5 chips near owner/name, Hero/S4 chips right/up outside avatar. Readable five-card best-hand symbols retain horizontal layout/card proportions and red/black suits. No state/amount/accounting/ownership/lifecycle/WS changes. Owner smoke and authenticated Stage CH gate remain pending.
