@@ -101,3 +101,11 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] V003 Existing focused tests 127/127 and required syntax/lifecycle/badge/CSP guards; self-review.
 - [x] V004 Publish exact browser runtime SHA and real Preview screenshots/evidence; full CI tracked below/in PR checks.
 - [ ] V005 Owner visual smoke and authenticated Stage CH gate; Draft/not merge-ready.
+
+## Premium portrait / landscape readability
+
+- [x] R001 Reconcile live rules/issue/diff and amend plan for newly authorized portrait scope.
+- [x] R002 Physical landscape seat/dealer reconciliation and readable font sizes.
+- [x] R003 Premium portrait table/room/same dealer, outward seats and northern opening; preserve lifecycle/controls.
+- [ ] R004 Existing focused/required checks, self-review, latest-runtime real Preview/screenshots and full CI.
+- [ ] R005 Owner smoke and authenticated Stage CH gate; Draft/not merge-ready.

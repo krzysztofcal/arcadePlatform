@@ -481,7 +481,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-seat-hud-transient .poker-seat-settlement-badge{order:-2;}
 .poker-seat-hud-transient .poker-auto-rebuy-toast--avatar{order:-1;}
 
-/* Original landscape casino composition; portrait presentation is unchanged. */
+/* Original premium casino composition with orientation-specific table geometry. */
 .poker-room-dealer,.poker-room-event,.poker-room-status{display:none;}
 .poker-diagnostics .poker-celebration-preview{position:static;margin-top:8px;}
 .poker-diagnostics .poker-celebration-preview__panel{position:static;width:100%;max-height:none;}
@@ -493,7 +493,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-scene[data-orientation="landscape"] .poker-table-shell{inset:64px 28px 34px;border-radius:48% / 44%;background:linear-gradient(180deg,#725039,#2c1c16 22%,#170e0b 70%,#6a442a);box-shadow:0 18px 32px #000b,inset 0 2px 2px #f8ddacaa,inset 0 -5px 8px #000c;}
 .poker-scene[data-orientation="landscape"] .poker-table-shell::before{inset:10px;border-radius:48% / 44%;background:linear-gradient(180deg,#61462b,#1d160f 50%,#45341f);}
 .poker-scene[data-orientation="landscape"] .poker-table-felt{inset:20px;border-radius:48% / 44%;background:radial-gradient(ellipse at 50% 35%,#197b61,#0b5340 58%,#052c22);box-shadow:inset 0 6px 16px #001c1680,inset 0 -8px 15px #001c16aa,0 0 0 1px #d9c69555;}
-.poker-room-dealer{display:block;position:absolute;left:635px;top:-60px;width:155px;height:185px;background:url('/poker/assets/scene/dealer-v2.webp') center top/contain no-repeat;pointer-events:none;}
+.poker-room-dealer{display:block;position:absolute;left:675px;top:-60px;width:155px;height:185px;background:url('/poker/assets/scene/dealer-v2.webp') center top/contain no-repeat;pointer-events:none;}
 .poker-room-event{display:block;position:absolute;left:485px;top:255px;width:200px;min-height:20px;padding:3px 10px;border-radius:18px;background:#07171266;color:#f1e3bd;font-size:11px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;pointer-events:none;}
 .poker-room-event[hidden]{display:none;}
 .poker-room-status{display:block;position:absolute;left:60px;right:auto;width:250px;bottom:20px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(90deg,transparent,#050c0bd9,transparent);color:#d3c6a9;font-size:11px;line-height:16px;pointer-events:none;}
@@ -524,4 +524,25 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-action-amount-input strong{font-size:11px;}
 .poker-action-buttons{gap:6px;}
 .poker-action-btn,.poker-action-toggle span{min-height:44px;font-size:11px;line-height:13px;}
+}
+
+/* Owner premium portrait scope and readable landscape typography. */
+@media (orientation:landscape){
+.poker-seat-name{font-size:18px;line-height:20px;}
+.poker-seat-hud-stack .poker-chip-stack-label{font-size:32px;}
+.poker-pot-pill{height:24px;font-size:18px;line-height:18px;}
+.poker-room-event{font-size:16px;line-height:20px;width:250px;left:485px;}
+.poker-room-status{font-size:16px;line-height:20px;height:26px;}
+.poker-seat-action-badge{font-size:9px;}
+.poker-seat-number{font-size:9px;}
+.poker-seat-best-hand-label{font-size:12px;}
+}
+@media (orientation:portrait){
+.poker-table-screen{background:linear-gradient(180deg,#050a0822,#02090677 55%,#020805aa),url('/poker/assets/scene/casino-room-v2.webp') center/cover no-repeat #07100b;}
+.poker-table-screen::before{opacity:.18;}
+.poker-scene[data-orientation="portrait"] .poker-table-shell{inset:84px 12px 70px;border-radius:46% 46% 43% 43% / 17% 17% 22% 22%;transform:perspective(900px) rotateX(12deg) rotateZ(-3deg);background:linear-gradient(180deg,#725039,#2c1c16 22%,#170e0b 70%,#6a442a);box-shadow:0 18px 32px #000b,inset 0 2px 2px #f8ddacaa,inset 0 -5px 8px #000c;}
+.poker-scene[data-orientation="portrait"] .poker-table-shell::before{inset:10px;border-radius:46% 46% 43% 43% / 17% 17% 22% 22%;background:linear-gradient(180deg,#61462b,#1d160f 50%,#45341f);}
+.poker-scene[data-orientation="portrait"] .poker-table-felt{inset:20px;border-radius:46% 46% 43% 43% / 17% 17% 22% 22%;background:radial-gradient(ellipse at 50% 35%,#197b61,#0b5340 58%,#052c22);box-shadow:inset 0 6px 16px #001c1680,inset 0 -8px 15px #001c16aa,0 0 0 1px #d9c69555;}
+.poker-room-dealer{display:block;position:absolute;left:164px;top:-30px;width:126px;height:150px;background:url('/poker/assets/scene/dealer-v2.webp') center top/contain no-repeat;pointer-events:none;}
+.poker-room-dealer::after{content:"";position:absolute;inset:0;z-index:1;background:inherit;clip-path:polygon(0 64%,30% 64%,30% 89%,70% 89%,70% 64%,100% 64%,100% 100%,0 100%);filter:drop-shadow(0 3px 2px #0008);pointer-events:none;}
 }
