@@ -121,5 +121,5 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 
 - [x] A001 Trace current physical stack/bet/best-hand presentation and update narrow plan.
 - [x] A002 Landscape top chips below name; portrait lower-left/Hero ownership anchors; readable mini symbols/rank10.
-- [ ] A003 Existing focused/required checks, self-review, exact Preview screenshots/evidence and full CI.
+- [x] A003 Existing focused/required checks, self-review, exact Preview screenshots/evidence and full CI.
 - [ ] A004 Owner smoke and authenticated Stage CH gate; Draft/not merge-ready.
