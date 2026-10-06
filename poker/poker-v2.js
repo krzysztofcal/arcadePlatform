@@ -2435,7 +2435,7 @@
     if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
     else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
     var handIdChanged = state.handId !== previousHandId;
-    if (authoritativeFull || handIdChanged || handBetsField.present) state.betThisRoundByUserId = normalizeNumericUserMap(handBetsField.value) || {};
+    if (handIdChanged || handBetsField.present) state.betThisRoundByUserId = normalizeNumericUserMap(handBetsField.value) || {};
     if (handIdChanged && !foldedUsersField.present) state.foldedByUserId = Object.create(null);
     if (authoritativeFull || foldedUsersField.present) state.foldedByUserId = normalizeFoldedByUserId(foldedUsersField.value);
 

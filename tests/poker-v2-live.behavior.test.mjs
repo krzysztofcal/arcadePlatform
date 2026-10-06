@@ -5922,6 +5922,12 @@ test('poker v2 preserves same-hand private cards and clears on hand or seat life
     await harness.flush();
     assert.deepEqual(harness.getHeroCards(), receivedCards, kind + ' empty private branch must preserve the active deal');
   }
+  const partialProjection = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: [] });
+  delete partialProjection.payload.public.betThisRoundByUserId;
+  ws.onSnapshot(partialProjection);
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), receivedCards, 'omitted same-hand participation is not an authoritative revocation');
   ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-new', phase: 'PREFLOP', board: [], potTotal: 3,
     actions: [], constraints: {}, stateVersion: 40, holeCards: [] }));
   await harness.flush();
