@@ -99,5 +99,5 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] V001 Re-read live rules/#1048/diff and compare horizontal landscape actions with current main.
 - [x] V002 Restore horizontal controls with Hero-safe responsive sizing; original dimensional dealer/luxury room art, landscape-only.
 - [x] V003 Existing focused tests 127/127 and required syntax/lifecycle/badge/CSP guards; self-review.
-- [ ] V004 Publish exact browser runtime SHA and real Preview screenshots/evidence; full CI.
+- [x] V004 Publish exact browser runtime SHA and real Preview screenshots/evidence; full CI tracked below/in PR checks.
 - [ ] V005 Owner visual smoke and authenticated Stage CH gate; Draft/not merge-ready.
