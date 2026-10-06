@@ -82,5 +82,5 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] P002 Outward physical avatars, nearer dealer anchors, larger equal landscape avatars/composition; inward edge affordances.
 - [x] P003 Full wrapped human/bot reactions and northern central safe-lane presentation.
 - [x] P004 Existing fundamental checks and self-review; preserve all ownership fixes.
-- [ ] P005 Real latest-runtime Preview portrait/landscape/screenshots and live evidence.
+- [x] P005 Real latest-runtime Preview portrait/landscape/screenshots and live evidence.
 - [ ] P006 Owner manual smoke and authenticated Stage CH verification; Draft/not merge-ready.
