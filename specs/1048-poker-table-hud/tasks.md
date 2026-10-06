@@ -93,3 +93,11 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] L004 Preview FX exclusively in Diagnostics using existing PR Preview BUILD_INFO gate; Production absent.
 - [x] L005 Fundamental/required checks, self-review and real latest-runtime Preview screenshots/evidence.
 - [ ] L006 Owner landscape smoke and authenticated Stage CH gate; retain Draft/not merge-ready.
+
+## Landscape visual polish
+
+- [x] V001 Re-read live rules/#1048/diff and compare horizontal landscape actions with current main.
+- [x] V002 Restore horizontal controls with Hero-safe responsive sizing; original dimensional dealer/luxury room art, landscape-only.
+- [x] V003 Existing focused tests 127/127 and required syntax/lifecycle/badge/CSP guards; self-review.
+- [ ] V004 Publish exact browser runtime SHA and real Preview screenshots/evidence; full CI.
+- [ ] V005 Owner visual smoke and authenticated Stage CH gate; Draft/not merge-ready.

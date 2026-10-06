@@ -323,7 +323,6 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 @keyframes poker-celebration-spark{0%{opacity:0;transform:translate(0,0) scale(.4);}20%{opacity:.85;}100%{opacity:0;transform:translate(var(--x),var(--y)) scale(.3);}}
 @keyframes poker-celebration-exit{from{opacity:.14;}to{opacity:0;}}
 @media (min-width:720px){
-
 }
 @media (orientation:landscape) and (max-height:600px){
 
@@ -488,22 +487,41 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-diagnostics .poker-celebration-preview__panel{position:static;width:100%;max-height:none;}
 .poker-diagnostics .poker-celebration-preview__panel[hidden]{display:none;}
 @media (orientation:landscape){
-.poker-table-screen{background:linear-gradient(180deg,#07100b22,#01060599),url('/poker/assets/scene/casino-room-v1.svg') center/cover no-repeat #07100b;}
+.poker-table-screen{background:linear-gradient(180deg,#050a0822,#02090677 55%,#020805aa),url('/poker/assets/scene/casino-room-v2.webp') center/cover no-repeat #07100b;}
 .poker-live-topbar{display:flex;justify-content:flex-end;}
 .poker-top-right-rail .poker-account-hud{flex:0 1 auto;margin-right:4px;max-width:190px;}
 .poker-scene[data-orientation="landscape"] .poker-table-shell{inset:64px 28px 34px;border-radius:48% / 44%;background:linear-gradient(180deg,#725039,#2c1c16 22%,#170e0b 70%,#6a442a);box-shadow:0 18px 32px #000b,inset 0 2px 2px #f8ddacaa,inset 0 -5px 8px #000c;}
 .poker-scene[data-orientation="landscape"] .poker-table-shell::before{inset:10px;border-radius:48% / 44%;background:linear-gradient(180deg,#61462b,#1d160f 50%,#45341f);}
 .poker-scene[data-orientation="landscape"] .poker-table-felt{inset:20px;border-radius:48% / 44%;background:radial-gradient(ellipse at 50% 35%,#197b61,#0b5340 58%,#052c22);box-shadow:inset 0 6px 16px #001c1680,inset 0 -8px 15px #001c16aa,0 0 0 1px #d9c69555;}
-.poker-room-dealer{display:block;position:absolute;left:610px;top:-50px;width:200px;height:200px;background:url('/poker/assets/scene/dealer-v1.webp') center top/contain no-repeat;pointer-events:none;}
+.poker-room-dealer{display:block;position:absolute;left:635px;top:-60px;width:155px;height:185px;background:url('/poker/assets/scene/dealer-v2.webp') center top/contain no-repeat;pointer-events:none;}
 .poker-room-event{display:block;position:absolute;left:485px;top:255px;width:200px;min-height:20px;padding:3px 10px;border-radius:18px;background:#07171266;color:#f1e3bd;font-size:11px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;pointer-events:none;}
 .poker-room-event[hidden]{display:none;}
-.poker-room-status{display:block;position:absolute;left:110px;right:195px;bottom:0;height:22px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(90deg,transparent,#050c0bd9,transparent);color:#d3c6a9;font-size:11px;line-height:16px;pointer-events:none;}
+.poker-room-status{display:block;position:absolute;left:60px;right:auto;width:250px;bottom:20px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:linear-gradient(90deg,transparent,#050c0bd9,transparent);color:#d3c6a9;font-size:11px;line-height:16px;pointer-events:none;}
 .poker-scene[data-orientation="landscape"] .poker-center-layer{top:121px;height:127px;}
-.poker-action-bar{width:142px;grid-template-columns:22px minmax(0,1fr);gap:4px;padding:5px;border-radius:14px;background:linear-gradient(180deg,#101811eb,#050a07f5);}
-.poker-action-buttons{gap:3px;}
-.poker-action-btn,.poker-action-toggle span{min-height:28px;font-size:10px;border-radius:9px;}
-.poker-action-toggle span{padding-left:21px;}
-.poker-action-amount-input{height:120px;gap:4px;}
-.poker-action-amount-input input{height:99px;width:20px;}
+.poker-table-screen::before{opacity:.18;}
+.poker-room-dealer::after{content:"";position:absolute;inset:0;z-index:1;background:inherit;clip-path:polygon(0 64%,30% 64%,30% 89%,70% 89%,70% 64%,100% 64%,100% 100%,0 100%);filter:drop-shadow(0 3px 2px #0008);pointer-events:none;}
+.poker-action-bar{left:auto;right:max(8px,env(safe-area-inset-right));bottom:max(8px,env(safe-area-inset-bottom));width:min(calc(100vw - 16px),70vw,520px);margin:0;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:20px;background:linear-gradient(180deg,#101811eb,#050a07f5);}
+.poker-action-amount-input{flex:0 0 104px;width:104px;height:56px;min-height:56px;align-self:stretch;flex-direction:row;justify-content:center;gap:6px;padding:6px 8px;}
+.poker-action-amount-input input{width:58px;height:26px;min-height:26px;writing-mode:horizontal-tb;direction:ltr;}
+.poker-action-amount-input strong{font-size:12px;}
+.poker-action-buttons{flex:1 1 auto;min-width:0;min-height:0;flex-direction:row;align-items:stretch;gap:8px;}
+.poker-action-btn,.poker-action-toggle{flex:1 1 0;min-width:0;}
+.poker-action-btn,.poker-action-toggle span{min-height:50px;border-radius:12px;font-size:12px;line-height:14px;}
+.poker-action-toggle span{justify-content:center;padding:0 5px 0 22px;}
+}
+@media (orientation:landscape) and (max-height:480px) and (min-width:720px){
+.poker-action-bar{width:calc(50vw - 110px * var(--poker-scene-scale,1) - 24px);min-width:280px;max-width:520px;gap:6px;padding:6px;}
+.poker-action-amount-input{flex-basis:72px;width:72px;height:44px;min-height:44px;gap:4px;padding:4px;}
+.poker-action-amount-input input{width:40px;height:26px;min-height:26px;}
 .poker-action-amount-input strong{font-size:11px;}
+.poker-action-buttons{gap:4px;}
+.poker-action-btn,.poker-action-toggle span{min-height:44px;font-size:11px;line-height:13px;}
+}
+@media (orientation:landscape) and (max-width:719px){
+.poker-action-bar{width:min(calc(100vw - 16px),74vw,520px);gap:6px;padding:6px 8px;}
+.poker-action-amount-input{flex-basis:92px;width:92px;height:50px;min-height:50px;gap:4px;padding:5px 6px;}
+.poker-action-amount-input input{width:50px;height:23px;min-height:23px;}
+.poker-action-amount-input strong{font-size:11px;}
+.poker-action-buttons{gap:6px;}
+.poker-action-btn,.poker-action-toggle span{min-height:44px;font-size:11px;line-height:13px;}
 }
