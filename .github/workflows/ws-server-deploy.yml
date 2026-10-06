@@ -237,6 +237,9 @@ jobs:
       - name: Run ws-server deploy sudo-preflight guard test
         run: node --test ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs
 
+      - name: Run ws-production-env-preflight behavior test
+        run: node --test ws-tests/ws-production-env-preflight.behavior.test.mjs
+
       - name: Run ws-server deploy runner-smoke behavior test
         run: node --test ws-tests/ws-server-deploy.runner-smoke.behavior.test.mjs
 
@@ -692,6 +695,8 @@ jobs:
               echo "deployment timestamp marker verification failed"
               exit 1
             fi
+
+            sudo -n /usr/local/sbin/arcade-ws-production-env-preflight
 
             ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
             mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"

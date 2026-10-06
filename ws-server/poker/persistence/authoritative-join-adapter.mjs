@@ -176,6 +176,7 @@ function normalizeSuccess(result, { tableId, userId, requestId }) {
     joinStatus: result.joinStatus === "WAITING_NEXT_HAND" ? "WAITING_NEXT_HAND" : "ACTIVE",
     requestId: requestId || null,
     seededBots,
+    ...(result.access ? { access: result.access } : {}),
     snapshot
   };
 }
