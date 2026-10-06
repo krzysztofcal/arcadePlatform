@@ -303,3 +303,7 @@ Visible 36px one-row chrome contains menu, compact CH account badge, conditional
 ## Owner chip flicker blocker (2026-10-06)
 
 Owner private-card smoke is PASS; chip smoke remains FAIL/pending. Static seat stack/bet visuals belong to the existing persistent pokerSeatChipLayer, keyed by seat/user/role. Unchanged amount/variant retains the exact visual and image DOM; pot likewise retains unchanged DOM. Same-hand omitted committed/bet fields preserve known presentation; explicit maps (including empty) override. New hand clears omitted hand-scoped bets/pot; remaining stacks preserve omitted values and respect explicit updates. No WS/backend/layout/assets changes.
+
+## Dealer/avatar/transient ownership pass (2026-10-06)
+
+Dealer remains a persistent scene-owned node positioned by logical seat -> current physical slot -> existing orientation geometry; same-hand omission preserves dealer, explicit change/null and new-hand boundary apply. Seat/avatar source reuse is keyed by seat + occupant + URL/default variant; new images retain fallback until their own load, and occupant/source changes replace nodes. Player notifications/reactions, avatar toast, action/waiting/out-of-chips badges and best-hand/quick-action anchors belong to a common scene-owned transient layer above static chips and chip FX; targeted reaction FX retain their existing layer. Settlement precedes rebuy toast/social within the vertical player transient stack. Only portrait physical lower-left stack changes, from [130,425] to [218,455]; no logical-seat exception or landscape changes.

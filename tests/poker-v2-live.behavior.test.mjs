@@ -111,7 +111,7 @@ function createHarness(options = {}){
     'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
     'pokerReactionBubblesPreference', 'pokerReactionHistoryPreference', 'pokerBotReactionsPreference',
     'pokerAutoRebuyPreference', 'pokerAutoRebuyPreferenceWrap', 'pokerAutoRebuyPreferenceHint',
-    'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
+    'pokerSeatLayer', 'pokerSeatTransientLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
@@ -349,7 +349,7 @@ function createHarness(options = {}){
 
   vm.createContext(sandbox);
   const closureEnd = source.lastIndexOf('})();');
-  const privacySource = source.slice(0, closureEnd) + 'window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
+  const privacySource = source.slice(0, closureEnd) + 'window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
   vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
@@ -407,6 +407,7 @@ async function flush(){
     getOpponentHeldCards(userId){ return sandbox.window.__opponentHeldCardsForTest(userId); },
     getHeroCards(){ return JSON.parse(JSON.stringify(sandbox.window.__heroCardsForTest())); },
     dropHeroHud(){ sandbox.window.__missingHeroHudForTest(); },
+    changeAvatarUrl(seatNo,url){ sandbox.window.__avatarUrlForTest(seatNo,url); },
     getRevealedCards(userId){ return JSON.parse(JSON.stringify(sandbox.window.__getSeatRevealCardsForTest({ userId }))); },
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
@@ -468,11 +469,15 @@ function descendants(node){
 }
 
 function reactionAnchors(harness){
-  return [...harness.elements.pokerReactionLayer.children, ...descendants(harness.elements.pokerSeatLayer).filter((node) => node.className === 'poker-seat-social-reaction')];
+  return [...harness.elements.pokerReactionLayer.children, ...descendants(harness.elements.pokerSeatLayer).concat(descendants(harness.elements.pokerSeatTransientLayer)).filter((node) => node.className === 'poker-seat-social-reaction')];
 }
 
 function findSeatByLabel(harness, label){
   return harness.elements.pokerSeatLayer.children.find((node) => descendants(node).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
+}
+
+function transientSeat(harness, seatNode){
+  return harness.elements.pokerSeatTransientLayer.children.find((node)=>node.dataset.seatNo===seatNode?.dataset.seatNo && node.dataset.userId===seatNode?.dataset.userId);
 }
 
 function findSeatChild(seatNode, className){
@@ -594,7 +599,7 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(findSeatChild(emptySeat, 'poker-seat-number'), undefined, 'empty seats should not render occupied-player seat badges');
   const seatCards = descendants(heroSeat).find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
-  const bestHand = findSeatChild(heroSeat, 'poker-seat-best-hand');
+  const bestHand = findSeatChild(transientSeat(harness, heroSeat), 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
 
@@ -1948,7 +1953,7 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
   assert.ok(heroSeat);
   assert.match(heroSeat.className, /poker-seat--waiting-next-hand/);
   assert.doesNotMatch(heroSeat.className, /poker-seat--folded/);
-  assert.equal(findSeatChild(heroSeat, 'poker-seat-status').textContent, 'NEXT HAND');
+  assert.equal(findSeatChild(transientSeat(harness, heroSeat), 'poker-seat-status').textContent, 'NEXT HAND');
   assert.equal(findSeatChild(heroSeat, 'poker-seat-cards'), undefined);
   assert.equal(harness.elements.pokerHeroCards.hidden, true);
   assert.equal(harness.elements.pokerV2FoldBtn.hidden, true);
@@ -2407,6 +2412,66 @@ test('poker v2 retains unchanged chip DOM and selectively updates authoritative 
   assert.equal(harness.elements.pokerSeatChipLayer.children.filter((node)=>node.dataset.userId==='villain-2').length,2);
 });
 
+test('poker v2 owns dealer in the scene through omitted projection and lifecycle changes', async () => {
+  const harness = await chipOwnershipHarness();
+  await chipFrame(harness,{hand:{handId:'chip-hand-A',status:'TURN',dealerSeatNo:2}});
+  const dealer = harness.elements.pokerDealerChip;
+  assert.strictEqual(dealer.parentNode,harness.elements.pokerTableScreen,'dealer must be scene-owned');
+  const left = dealer.style.left;
+  await chipFrame(harness,{hand:{handId:'chip-hand-A',status:'TURN'}});
+  assert.strictEqual(dealer.parentNode,harness.elements.pokerTableScreen);
+  assert.equal(dealer.hidden,false);
+  assert.equal(dealer.style.left,left);
+  harness.dropHeroHud();
+  assert.equal(dealer.hidden,false,'incomplete rendered HUD cannot hide a known dealer');
+  await chipFrame(harness,{hand:{dealerSeatNo:1}});
+  assert.notEqual(dealer.style.left,left);
+  await chipFrame(harness,{hand:{dealerSeatNo:null}});
+  assert.equal(dealer.hidden,true,'explicit null revokes dealer');
+  await chipFrame(harness,{hand:{dealerSeatNo:2}});
+  await chipFrame(harness,{hand:{handId:'chip-hand-B',status:'TURN'}});
+  assert.equal(dealer.hidden,true,'new hand cannot retain the old dealer');
+  await chipFrame(harness,{hand:{dealerSeatNo:1}});
+  assert.equal(dealer.hidden,false);
+  assert.strictEqual(dealer,harness.elements.pokerDealerChip);
+});
+
+test('poker v2 reuses the same occupant avatar image and waits for replacement load', async () => {
+  const harness = await chipOwnershipHarness();
+  await chipFrame(harness,{seats:[{userId:'user-1',seatNo:1},{userId:'bot-1',seatNo:2,isBot:true}]});
+  const avatar = ()=>descendants(harness.elements.pokerSeatLayer).find((node)=>node.classList.contains('poker-seat-avatar')&&node.dataset.userId==='bot-1');
+  const firstAvatar = avatar();
+  const firstImage = firstAvatar.children.find((node)=>node.className==='poker-seat-avatar__image');
+  firstImage._listeners.load.forEach((fn)=>fn());
+  await chipFrame(harness,{hand:{handId:'chip-hand-A',status:'TURN'}});
+  assert.strictEqual(avatar(),firstAvatar);
+  assert.strictEqual(avatar().children.find((node)=>node.className==='poker-seat-avatar__image'),firstImage);
+  const url = firstImage.src;
+  harness.changeAvatarUrl(2,'/poker/assets/avatars/bots/replacement.webp');
+  const replaced = avatar();
+  assert.notStrictEqual(replaced,firstAvatar);
+  assert.equal(replaced.children.find((node)=>node.className==='poker-seat-avatar__initials').hidden,false);
+  harness.changeAvatarUrl(2,url);
+  const restored = avatar();
+  assert.equal(restored.children.find((node)=>node.className==='poker-seat-avatar__initials').hidden,false,'previously loaded URL is not evidence that a new image is renderable');
+  restored.children.find((node)=>node.className==='poker-seat-avatar__image')._listeners.load.forEach((fn)=>fn());
+  assert.equal(restored.children.find((node)=>node.className==='poker-seat-avatar__initials').hidden,true);
+  await chipFrame(harness,{seats:[{userId:'user-1',seatNo:1},{userId:'bot-2',seatNo:2,isBot:true}]});
+  assert.ok(!descendants(harness.elements.pokerSeatLayer).includes(restored));
+});
+
+test('poker v2 puts player transient presentation above static chips and chip FX', async () => {
+  const harness = await chipOwnershipHarness();
+  const layer = harness.elements.pokerSeatTransientLayer;
+  assert.equal(layer.children.length,2);
+  assert.equal(descendants(harness.elements.pokerSeatLayer).filter((node)=>node.classList.contains('poker-seat-hud-transient')).length,0);
+  assert.equal(descendants(layer).filter((node)=>node.classList.contains('poker-seat-hud-transient')).length,2);
+  const css = fs.readFileSync('poker/poker-v2.css','utf8');
+  const level = (name)=>Number(css.match(new RegExp('\\.'+name+'\\{[^}]*z-index:(\\d+)'))[1]);
+  assert.ok(level('poker-seat-transient-layer')>level('poker-chip-fx-layer'));
+  assert.ok(level('poker-chip-fx-layer')>level('poker-seat-chip-layer'));
+});
+
 test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
@@ -2722,14 +2787,14 @@ test('poker v2 shows synchronized auto-rebuy feedback only after authoritative s
   assert.equal(JSON.parse(harness.getSessionStorage('poker:pendingRebuy:user-1:table-1')).source, 'auto');
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
   const pendingHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(pendingHeroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+  assert.equal(findChildByClass(transientSeat(harness, pendingHeroSeat), 'poker-auto-rebuy-toast--avatar'), undefined);
 
   resolveRebuy({ ok: true, buyIn: 500 });
   await harness.flush();
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, false);
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.textContent, '-500 CH');
   const successHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(successHeroSeat, 'poker-auto-rebuy-toast--avatar').textContent, 'Auto rebuy: +500 CH');
+  assert.equal(findChildByClass(transientSeat(harness, successHeroSeat), 'poker-auto-rebuy-toast--avatar').textContent, 'Auto rebuy: +500 CH');
 
   harness.advanceTime(2_999);
   await harness.flush();
@@ -2738,7 +2803,7 @@ test('poker v2 shows synchronized auto-rebuy feedback only after authoritative s
   await harness.flush();
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
   const expiredHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(expiredHeroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+  assert.equal(findChildByClass(transientSeat(harness, expiredHeroSeat), 'poker-auto-rebuy-toast--avatar'), undefined);
 });
 
 test('poker v2 keeps manual rebuy free of auto-rebuy feedback', async () => {
@@ -2761,7 +2826,7 @@ test('poker v2 keeps manual rebuy free of auto-rebuy feedback', async () => {
   await harness.flush();
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+  assert.equal(findChildByClass(transientSeat(harness, heroSeat), 'poker-auto-rebuy-toast--avatar'), undefined);
 });
 
 test('poker v2 classifies a manual retry of recovered auto-rebuy as manual', async () => {
@@ -2801,7 +2866,7 @@ test('poker v2 classifies a manual retry of recovered auto-rebuy as manual', asy
 
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+  assert.equal(findChildByClass(transientSeat(harness, heroSeat), 'poker-auto-rebuy-toast--avatar'), undefined);
 });
 
 test('poker v2 recovers an auto-rebuy success from a funded snapshot exactly once', async () => {
@@ -3768,9 +3833,9 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   const villainRaiseSeat = findSeatByLabel(harness, 'Villain 1');
   const foldedSeat = findSeatByLabel(harness, 'Villain 2');
-  const heroBadge = descendants(heroSeat).find((node) => /poker-seat-action-badge/.test(node.className));
-  const villainBadge = descendants(villainRaiseSeat).find((node) => /poker-seat-action-badge/.test(node.className));
-  const foldedBadge = descendants(foldedSeat).find((node) => /poker-seat-action-badge/.test(node.className));
+  const heroBadge = descendants(transientSeat(harness, heroSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
+  const villainBadge = descendants(transientSeat(harness, villainRaiseSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
+  const foldedBadge = descendants(transientSeat(harness, foldedSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
 
   assert.ok(heroBadge);
   assert.equal(heroBadge.textContent, 'Call');
@@ -3819,7 +3884,7 @@ test('poker v2 renders the hero last-action badge when hero seat is resolved fro
   await harness.flush();
 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const heroBadge = descendants(heroSeat).find((node) => /poker-seat-action-badge/.test(node.className));
+  const heroBadge = descendants(transientSeat(harness, heroSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
   const heroName = descendants(heroSeat).find((node) => node.className === 'poker-seat-name');
 
   assert.ok(heroSeat);
@@ -3950,7 +4015,7 @@ test('poker v2 does not dim a seat from fold badge alone without folded status',
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = descendants(villainSeat).find((node) => /poker-seat-action-badge/.test(node.className));
+  const villainBadge = descendants(transientSeat(harness, villainSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
 
   assert.ok(villainBadge);
   assert.equal(villainBadge.textContent, 'Fold');
@@ -4070,7 +4135,7 @@ test('poker v2 preserves showdown hand summaries and revealed cards for legacy s
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = findSeatChild(villainSeat, 'poker-seat-settlement-badge');
+  const villainBadge = findSeatChild(transientSeat(harness, villainSeat), 'poker-seat-settlement-badge');
   const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   const villainBadgeLabel = findSeatChild(villainBadge, 'poker-seat-settlement-hand-label');
   const villainBadgeCards = findSeatChild(villainBadge, 'poker-seat-settlement-hand-cards');
@@ -4135,7 +4200,7 @@ test('poker v2 preserves authoritative showdown reveal for compared losing playe
   const losingSeat = findSeatByLabel(harness, 'Villain 2');
   const losingCards = harness.getRevealedCards(losingSeat.dataset.userId);
   assert.equal(losingCards.length, 2, 'authoritative reveal remains available');
-  assert.equal(findSeatChild(losingSeat, 'poker-seat-settlement-badge'), undefined);
+  assert.equal(findSeatChild(transientSeat(harness, losingSeat), 'poker-seat-settlement-badge'), undefined);
 });
 
 test('poker v2 keeps the previous reveal visible for the full local window before switching to the next hand', async () => {
@@ -4211,7 +4276,7 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.ok(findSeatChild(villainSeat, 'poker-seat-settlement-badge'));
+  assert.ok(findSeatChild(transientSeat(harness, villainSeat), 'poker-seat-settlement-badge'));
   const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   assert.ok(villainCards);
   assert.equal(villainCards.length, 2, 'authoritative reveal remains available');
@@ -4222,7 +4287,7 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
   await harness.flush();
 
   const switchedVillainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.equal(findSeatChild(switchedVillainSeat, 'poker-seat-settlement-badge'), undefined);
+  assert.equal(findSeatChild(transientSeat(harness, switchedVillainSeat), 'poker-seat-settlement-badge'), undefined);
   const switchedVillainCards = harness.getRevealedCards(switchedVillainSeat.dataset.userId);
   assert.equal(switchedVillainCards, null, 'unrevealed/private cards remain unavailable');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 0);
@@ -4394,7 +4459,7 @@ test('poker v2 does not switch away from the settled reveal scene before the loc
 
   assert.equal(harness.elements.pokerCommunityCards.children.length, 5, 'reveal board should stay visible until the local reveal window ends');
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.ok(findSeatChild(villainSeat, 'poker-seat-settlement-badge'));
+  assert.ok(findSeatChild(transientSeat(harness, villainSeat), 'poker-seat-settlement-badge'));
   const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   assert.ok(villainCards);
   assert.equal(villainCards.length, 2, 'authoritative reveal remains available');
@@ -4442,7 +4507,7 @@ test('poker v2 withholds authoritative reveal when the hand ends without showdow
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = findSeatChild(villainSeat, 'poker-seat-settlement-badge');
+  const villainBadge = findSeatChild(transientSeat(harness, villainSeat), 'poker-seat-settlement-badge');
   const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
 
   assert.equal(villainBadge, undefined, 'an all-folded legacy settlement must not invent an award badge');
@@ -4493,9 +4558,9 @@ test('poker v2 renders exact main, side, and returned awards and preserves them 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   const playerBSeat = findSeatByLabel(harness, 'Player B');
   const playerCSeat = findSeatByLabel(harness, 'Player C');
-  assert.equal(findChildByClass(findSeatChild(heroSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+288 Main pot');
-  assert.equal(findChildByClass(findSeatChild(playerBSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+6 Side pot 1');
-  assert.equal(findChildByClass(findSeatChild(playerCSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award--return').textContent, '+1 Returned');
+  assert.equal(findChildByClass(findSeatChild(transientSeat(harness, heroSeat), 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+288 Main pot');
+  assert.equal(findChildByClass(findSeatChild(transientSeat(harness, playerBSeat), 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+6 Side pot 1');
+  assert.equal(findChildByClass(findSeatChild(transientSeat(harness, playerCSeat), 'poker-seat-settlement-badge'), 'poker-seat-settlement-award--return').textContent, '+1 Returned');
   assert.equal(/poker-seat--pot-winner/.test(playerCSeat.className), false, 'a return must not style the seat as a pot winner');
   assert.equal(harness.elements.pokerChipFxLayer.children.length, 0, 'initial settled snapshots stay static');
 

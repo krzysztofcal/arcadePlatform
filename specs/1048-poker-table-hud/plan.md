@@ -42,3 +42,7 @@ Compact non-hero celebration inherits the same composition scale as its owning a
 ## Chip presentation correction
 
 Reproduce partial-frame loss and exact DOM replacement in the existing fundamental harness before the fix. Reuse field-presence resolution and the existing scene chip layer; reconcile occupants/roles and update only changed amounts. Preserve current table-local anchors, labels and chip-fly/settlement flow. Verify focused tests, required guards, real narrow Preview, then hand off Draft pending owner smoke.
+
+## Unified presentation ownership correction
+
+Extend the existing deterministic live harness: scene dealer ownership/field-presence lifecycle, same-occupant avatar identity plus replacement load, common transient-layer ownership/order. Confirm RED before edits. Reuse renderedSeatAvatars for keyed avatar node reuse and seatSceneGeometry for dealer/stack anchors; retain fresh-element renderSeatAvatar contract. Add only one scene transient layer to table-v2.html/CSS above chip FX; relocate player content with equivalent table-local anchors. Narrow real Preview with six occupied seats validates portrait stack separation, full hero winning-pot/hand notification above chips, reaction/history clicks and no scroll. No backend/WS/CH/gift changes or broad layout tests.

@@ -66,3 +66,12 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] C003 Fundamental tests 124/124 and required checks; fix self-review.
 - [x] C004 Latest runtime real Preview: identical served JS, portrait/landscape nodes/images and pot retained, unchanged values, no scroll; evidence/screenshots saved.
 - [ ] C005 Owner chip smoke and authenticated Stage CH verification; full CI status tracked in PR checks.
+
+## Dealer/avatar/transient ownership pass
+
+- [x] O001 Reconcile live rules/PR/issue; three fundamental regressions RED on 307b95b9.
+- [x] O002 Scene-owned dealer, explicit/new-hand transitions; keyed avatar reuse and load-owned fallback.
+- [x] O003 Common high player transient layer, semantic notification order, physical lower-left portrait stack correction; no landscape redesign.
+- [x] O004 Existing focused checks/self-review and ownership audit; 127 focused cases PASS.
+- [ ] O005 Latest runtime real Preview/screenshots/evidence and full CI.
+- [ ] O006 Owner smoke; authenticated Stage CH verification remains a later gate.
