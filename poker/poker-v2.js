@@ -3915,16 +3915,16 @@
   // Physical variants: top, upper right, lower right, hero, lower left, upper left.
   var seatSceneGeometry = {
     portrait: { width:360, height:650, seats:[
-      {avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[160,55]},
+      {avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
       {avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
       {avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
       {avatar:[150,500],cards:[154,615],stack:[150,437],bet:[185,445],dealer:[204,492],bestHand:[50,580,90,40]},
-      {avatar:[38,410],stack:[208,455],bet:[102,389],dealer:[90,370]},
-      {avatar:[38,175],stack:[130,210],bet:[175,180],dealer:[90,135]}
+      {avatar:[38,410],stack:[172,390],bet:[102,389],dealer:[90,370]},
+      {avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[616,55],stack:[705,155],bet:[608,130],dealer:[546,35]},
-      {avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[968,85]},
+      {avatar:[472,12],stack:[590,85],bet:[608,130],dealer:[402,92]},
+      {avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[906,155]},
       {avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
       {avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
       {avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},

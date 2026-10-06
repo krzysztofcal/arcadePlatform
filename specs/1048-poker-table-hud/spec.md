@@ -331,3 +331,7 @@ Use original generated transparent dealer artwork with dimensional satin/lightin
 ## Owner scope amendment — premium portrait
 
 The latest owner pass extends approved premium landscape materials to portrait: same original v2 luxury room/dealer/outfit/pose, hands on north table rim, long-axis table with a more side-view perspective. Northern player moves sideways to leave dealer space; side players spread slightly. Landscape north/upper-right HUDs shift right by approximately one avatar diameter, readable typography increases. Preserve no-scroll, all ownership/reactions/FX/contextual Nice hand/gameplay contracts. This explicitly supersedes the previous portrait-unchanged limitation.
+
+## Small positioning polish — owner pass
+
+Maintain accepted premium direction. Adjust only requested physical seats/remaining chips/dealer D and reaction glyph centering; preserve semantics/ownership/assets/FX. Physical mapping for owner labels is top/upper-right/lower-left/upper-left, not logical-user-specific exceptions. Landscape northern HUD may occupy vacant center of chrome inside the viewport without clipping; no table scale/action rail redesign. Owner smoke and Stage CH gate remain pending.
