@@ -73,5 +73,5 @@ H004 publication portion verified for runtime `53e24169ed6bad0cef20b4adb86440e8e
 - [x] O002 Scene-owned dealer, explicit/new-hand transitions; keyed avatar reuse and load-owned fallback.
 - [x] O003 Common high player transient layer, semantic notification order, physical lower-left portrait stack correction; no landscape redesign.
 - [x] O004 Existing focused checks/self-review and ownership audit; 127 focused cases PASS.
-- [ ] O005 Latest runtime real Preview/screenshots/evidence and full CI.
+- [x] O005 Latest runtime real Preview/screenshots/evidence; full CI status tracked in live PR checks.
 - [ ] O006 Owner smoke; authenticated Stage CH verification remains a later gate.

@@ -1,0 +1,136 @@
+{
+  "runtimeSha": "56c98b5b4cf2bae201cdb17ca926f20471f42042",
+  "preview": "https://deploy-preview-1049--playkcswh.netlify.app/poker/table-v2.html",
+  "scope": "controlled fixture on real Deploy Preview; served JS byte-identical; no authenticated Stage claim",
+  "redBaseline": "307b95b90926593d31e91026258772dc03871e03",
+  "red": {
+    "targetedFailed": 3,
+    "causes": [
+      "dealer parent is disposable HUD",
+      "same occupant avatar/image replaced",
+      "player transient layer missing/under chips"
+    ]
+  },
+  "green": {
+    "focusedPassed": 127,
+    "requiredChecks": [
+      "syntax",
+      "check:all",
+      "ci:guards",
+      "check:csp-inline",
+      "git diff --check"
+    ]
+  },
+  "viewports": [
+    {
+      "viewport": "portrait",
+      "dealerScene": true,
+      "dealerSame": true,
+      "avatarSame": true,
+      "heroStack": {
+        "left": 134.74444580078125,
+        "top": 569.2166748046875,
+        "right": 192.92222595214844,
+        "bottom": 628.433349609375
+      },
+      "lowerLeftStack": {
+        "left": 205.38890075683594,
+        "top": 587.9166259765625,
+        "right": 263.5666809082031,
+        "bottom": 647.13330078125
+      },
+      "action": {
+        "left": 253.3125,
+        "top": 658,
+        "right": 382,
+        "bottom": 836,
+        "width": 128.6875,
+        "height": 178
+      },
+      "stackCollision": false,
+      "lowerStackActionCollision": false,
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "clientHeight": 844,
+      "reactionClickable": true,
+      "chatClickable": true,
+      "settlement": {
+        "text": "+175 Main potThree of a KindA\u2666A\u2665A\u2660K\u2666Q\u2665",
+        "visible": true,
+        "layerZ": 20,
+        "chipsZ": 4,
+        "fxZ": 12,
+        "topElementInside": true,
+        "box": {
+          "left": 111.8888931274414,
+          "top": 581.9430541992188,
+          "right": 215.7777862548828,
+          "bottom": 622.7194213867188
+        }
+      }
+    },
+    {
+      "viewport": "landscape",
+      "dealerScene": true,
+      "dealerSame": true,
+      "avatarSame": true,
+      "heroStack": {
+        "left": 280.13214111328125,
+        "top": 262.42584228515625,
+        "right": 321.0837097167969,
+        "bottom": 304.10870361328125
+      },
+      "lowerLeftStack": {
+        "left": 156.5462646484375,
+        "top": 253.65052795410156,
+        "right": 197.497802734375,
+        "bottom": 295.3333740234375
+      },
+      "action": {
+        "left": 640,
+        "top": 204,
+        "right": 836,
+        "bottom": 382,
+        "width": 196,
+        "height": 178
+      },
+      "stackCollision": false,
+      "lowerStackActionCollision": false,
+      "scrollWidth": 844,
+      "clientWidth": 844,
+      "scrollHeight": 390,
+      "clientHeight": 390,
+      "reactionClickable": true,
+      "chatClickable": true,
+      "settlement": {
+        "text": "+175 Main potThree of a KindA\u2666A\u2665A\u2660K\u2666Q\u2665",
+        "visible": true,
+        "layerZ": 20,
+        "chipsZ": 4,
+        "fxZ": 12,
+        "topElementInside": true,
+        "box": {
+          "left": 319.62115478515625,
+          "top": 250.9082489013672,
+          "right": 392.7489013671875,
+          "bottom": 279.61090087890625
+        }
+      }
+    }
+  ],
+  "portraitPhysicalLowerLeftStack": [
+    218,
+    455
+  ],
+  "layerOrder": {
+    "seat": 3,
+    "staticChips": 4,
+    "chipFX": 12,
+    "playerTransients": 20,
+    "targetedReactionFX": 100
+  },
+  "hitTestNote": "temporarily pointer-events:auto on badge for paint-order hit test only; restored immediately, no layout modification",
+  "ownerSmoke": "pending",
+  "authenticatedStageCH": "pending"
+}
