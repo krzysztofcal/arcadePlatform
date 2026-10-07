@@ -561,5 +561,5 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 
 /* Keep short-portrait Hero cards separate from the viewport-owned status. */
 @media (orientation:portrait) and (max-height:820px){
-.poker-scene[data-orientation="portrait"] .poker-hero-cards{transform:translate(-50%,calc(-50% - 9px));}
+.poker-scene[data-orientation="portrait"] .poker-hero-cards{transform:translate(-50%,calc(-50% - 14px));}
 }
