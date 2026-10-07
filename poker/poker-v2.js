@@ -79,7 +79,6 @@
     yellow: true
   };
   var CHIP_STACK_MAX_HEIGHT = 5;
-  var HERO_SEAT_STACK_VISUAL = { width: 112, height: 82, scale: 0.62 };
   var LAST_ACTION_LABEL = {
     fold: 'Fold',
     check: 'Check',
@@ -124,14 +123,6 @@
     { key: 'ambient_your_move', emoji: '💬', label: 'Your move.', humanSelectable: false },
     { key: 'ambient_lets_play', emoji: '💬', label: "Let's play.", humanSelectable: false },
     { key: 'ambient_thinking', emoji: '🤔', label: 'Thinking...', humanSelectable: false }
-  ];
-  var seatAnchors = [
-    { x: 50, y: 10 },
-    { x: 86, y: 28 },
-    { x: 84, y: 67 },
-    { x: 50, y: 92 },
-    { x: 16, y: 67 },
-    { x: 14, y: 28 }
   ];
   var demoState = {
     mode: 'demo',
@@ -196,11 +187,13 @@
   var autoRebuyConfirmOpen = false;
   var pendingAutoRebuyConfirmationBuyIn = null;
   var renderedSeatAnchors = {};
-  var renderedSeatSlots = {};
   var renderedSeatAvatars = {};
+  var renderedSeatHud = {};
+  var accountHudIdentity = null;
+  var accountHudGeneration = 0;
+  var lastRenderedWallet = null;
   var renderedSeatBetAnchors = {};
   var renderedSeatStackAnchors = {};
-  var loadedSeatAvatarUrls = Object.create(null);
   var seatCommittedByUserId = {};
   var suggestedSeatNoParam = null;
   var shouldAutoJoin = false;
@@ -210,6 +203,9 @@
   var autoJoinErrorActive = false;
   var reconnectSeatNo = null;
   var lastKnownCurrentSeatNo = null;
+  var heroPresentationState = null;
+  var heroFrameKind = null;
+  var heroLifecycleTransition = 'boot';
   var liveModeGeneration = 0;
   var authenticatedPreflightGeneration = 0;
   var authLifecycleGeneration = 0;
@@ -364,9 +360,9 @@
     if (seats.length !== 1) return null;
     var avatar = renderedSeatAvatars[seats[0].seatNo];
     if (!avatar || avatar.dataset.userId !== userId || !avatar.isConnected || typeof avatar.getBoundingClientRect !== 'function'
-      || !avatar.parentNode || typeof avatar.parentNode.getBoundingClientRect !== 'function') return null;
+      || !avatar.closest || !avatar.closest('.poker-seat')) return null;
     var rect = avatar.getBoundingClientRect();
-    var seat = avatar.parentNode.getBoundingClientRect();
+    var seat = avatar.closest('.poker-seat').getBoundingClientRect();
     if (!rect || !seat || !Number.isFinite(rect.left) || !Number.isFinite(rect.top) || !Number.isFinite(rect.right) || !Number.isFinite(rect.bottom)
       || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)
       || !Number.isFinite(seat.left) || !Number.isFinite(seat.right) || !Number.isFinite(seat.width) || !Number.isFinite(seat.height)
@@ -386,32 +382,14 @@
     var anchor = celebrationSeatRect(celebration.userId);
     if (!anchor) return celebration.started ? fadeLostCelebrationAnchor() : false;
     if (anchor.seatNo !== celebration.targetSeatNo){ clearCelebration(); return false; }
-    // Stay beside the whole seat, leaving its avatar, name and payout readable.
-    var rightSpace = window.innerWidth - anchor.seat.right - 16;
-    var leftSpace = anchor.seat.left - 16;
-    var onRight = rightSpace >= leftSpace;
-    var width = Math.min(160, onRight ? rightSpace : leftSpace);
-    if (width < 80 || !Number.isFinite(window.innerHeight) || window.innerHeight - 108 < 8){
-      return celebration.started ? fadeLostCelebrationAnchor() : false;
-    }
-    var left = onRight ? anchor.seat.right + 8 : anchor.seat.left - width - 8;
-    var top = Math.max(8, Math.min(window.innerHeight - 108, anchor.avatar.top + anchor.avatar.height / 2 - 50));
-    if (els.settlementSummary && !els.settlementSummary.hidden){
-      var summary = els.settlementSummary.getBoundingClientRect();
-      if (!summary || !Number.isFinite(summary.left) || !Number.isFinite(summary.right) || !Number.isFinite(summary.top) || !Number.isFinite(summary.bottom)){
-        return celebration.started ? fadeLostCelebrationAnchor() : false;
-      }
-      if (left < summary.right && left + width > summary.left && top < summary.bottom && top + 100 > summary.top){
-        var above = summary.top - 108;
-        var below = summary.bottom + 8;
-        var fitsAbove = above >= 8;
-        var fitsBelow = below + 100 <= window.innerHeight - 8;
-        if (!fitsAbove && !fitsBelow) return celebration.started ? fadeLostCelebrationAnchor() : false;
-        top = fitsAbove && (!fitsBelow || Math.abs(above - top) <= Math.abs(below - top)) ? above : below;
-      }
-    }
-    els.celebration.style.left = left + 'px';
-    els.celebration.style.top = top + 'px';
+    // Player notifications stay directly above their owner, never beside another seat.
+    var width = 120;
+    var center = anchor.avatar.left + anchor.avatar.width / 2;
+    els.celebration.style.left = center + 'px';
+    var stackOffset = (getSeatSettlementAwards(celebration.userId).length ? 32 : 0)
+      + (reactionBubblesBySeatNo[anchor.seatNo] ? 18 : 0);
+    var sceneScale = els.screen ? Number(els.screen.style.getPropertyValue('--poker-scene-scale')) || 1 : 1;
+    els.celebration.style.top = (anchor.avatar.top - (6 + stackOffset) * sceneScale) + 'px';
     els.celebration.style.width = width + 'px';
     els.celebration.style.setProperty('--compact-font', width / 12 + 'px');
     return true;
@@ -490,13 +468,14 @@
       if (!selection.cards) return;
     }
     var own = demo ? options.mode !== 'other' : !!state.currentUserId && selection.userId === state.currentUserId;
-    var targetAnchor = own ? null : celebrationSeatRect(selection.userId);
-    if (!own && !targetAnchor) return;
-    celebration = { demo: demo, own: own, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId,
+    var heroSpecialHand = own && (selection.kind === 'hand' || selection.kind === 'royal');
+    var targetAnchor = heroSpecialHand ? null : celebrationSeatRect(selection.userId);
+    if (!heroSpecialHand && !targetAnchor) return;
+    celebration = { demo: demo, own: heroSpecialHand, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId,
       exiting: false, started: false, anchorLost: false, endsAtMs: Date.now() + duration + celebrationExitDuration() };
     var overlay = els.celebration;
     var visualKind = selection.kind === 'hand' ? 'royal' : selection.kind;
-    overlay.className = 'poker-celebration poker-celebration--' + visualKind + (own ? ' poker-celebration--own' : ' poker-celebration--other');
+    overlay.className = 'poker-celebration poker-celebration--' + visualKind + (heroSpecialHand ? ' poker-celebration--own' : ' poker-celebration--other');
     if (!positionCelebration()){ clearCelebration(); return; }
     overlay.style.setProperty('--celebration-duration', duration + 'ms');
     overlay.hidden = false;
@@ -641,7 +620,8 @@
     });
     controls.appendChild(button);
     controls.appendChild(panel);
-    els.screen.appendChild(controls);
+    if (!els.diagnostics) return;
+    els.diagnostics.appendChild(controls);
     els.celebrationPreviewMode = mode;
     els.celebrationPreviewTarget = target;
     els.celebrationPreviewHint = hint;
@@ -775,6 +755,7 @@
       handId: null,
       lastBettingRoundActionByUserId: {},
       foldedByUserId: {},
+      betThisRoundByUserId: {},
       legalActions: [],
       actionConstraints: {},
       currentUserId: nextUserId || null,
@@ -1660,12 +1641,9 @@
 
   function extractSeatCommittedByUserId(payload){
     var publicObj = isObject(payload && payload.public) ? payload.public : {};
-    var next = normalizeNumericUserMap(payload && payload.committedByUserId)
-      || normalizeNumericUserMap(publicObj.committedByUserId)
-      || normalizeNumericUserMap(payload && payload.betThisRoundByUserId)
-      || normalizeNumericUserMap(publicObj.betThisRoundByUserId)
-      || {};
-    return next;
+    var committed = readSnapshotField(payload, publicObj, 'committedByUserId');
+    var field = committed.present ? committed : readSnapshotField(payload, publicObj, 'betThisRoundByUserId');
+    return field.present ? (normalizeNumericUserMap(field.value) || {}) : null;
   }
 
   function captureVisualSnapshot(){
@@ -2316,10 +2294,12 @@
     var previousHandId = state.handId;
     var previousPhase = state.phase;
     var previousSeatNo = state.youSeat;
+    var previousCardSeat = deriveCurrentSeat();
     var previousPresentation = state.settlementPresentation;
     var previousStateVersion = Number(state.stateVersion) || 0;
     var frameKind = frame && typeof frame.kind === 'string' ? frame.kind : 'stateSnapshot';
     var frameInitial = !!(frame && frame.initial);
+    heroFrameKind = frameKind;
     var authoritativeFull = frameKind === 'stateSnapshot' || (frameKind === 'table_state' && frameInitial);
     // Single source of truth for version tracking: never regress an applied version.
     var incomingVersion = Number(payload.stateVersion);
@@ -2338,6 +2318,7 @@
     var showdownField = readSnapshotField(payload, publicObj, 'showdown');
     var handSettlementField = readSnapshotField(payload, publicObj, 'handSettlement');
     var foldedUsersField = readSnapshotField(payload, publicObj, 'foldedByUserId');
+    var handBetsField = readSnapshotField(payload, publicObj, 'betThisRoundByUserId');
     var settlementRevealDueAtField = readSnapshotField(payload, publicObj, 'settlementRevealDueAt');
     var playerStateField = hasOwn(payload, 'private') && isObject(payload.private) && hasOwn(payload.private, 'playerState')
       ? { present: true, value: payload.private.playerState }
@@ -2370,7 +2351,20 @@
     else if (Number.isInteger(payload.maxSeats) && payload.maxSeats > 1) resolvedMaxSeats = payload.maxSeats;
     if (resolvedMaxSeats) state.maxSeats = resolvedMaxSeats;
 
+    var suppliedOwnSeat = hasOwn(payload, 'youSeat') ? payload.youSeat : hasOwn(youObj, 'seat') ? youObj.seat : undefined;
     var nextSeats = normalizeSeatRows(payload, state.seats, state.tableId);
+    var seatProjectionPresent = Array.isArray(payload.seats) || Array.isArray(tableObj.members)
+      || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats);
+    var currentParticipation = handBetsField.present ? handBetsField.value : state.betThisRoundByUserId;
+    // Ownership plus same-hand participation outrank an incomplete public projection.
+    if (seatProjectionPresent && !pendingLeaveNavigation && previousCardSeat
+      && (handObj.handId == null || handObj.handId === previousHandId)
+      && ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'].indexOf(handObj.status || state.phase) !== -1
+      && isObject(currentParticipation) && hasOwn(currentParticipation, state.currentUserId)
+      && suppliedOwnSeat === previousCardSeat.seatNo
+      && !nextSeats.some(function(seat){ return seat.seatNo === suppliedOwnSeat; })){
+      nextSeats.push(previousCardSeat);
+    }
     if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
       state.seats = nextSeats;
       var currentSeatAfterMerge = deriveCurrentSeat();
@@ -2378,7 +2372,7 @@
         lastKnownCurrentSeatNo = currentSeatAfterMerge.seatNo;
       }
     }
-    seatCommittedByUserId = extractSeatCommittedByUserId(payload);
+    var nextCommitted = extractSeatCommittedByUserId(payload);
 
     var nextStacks = normalizeStacks(payload);
     if (nextStacks) state.stacks = nextStacks;
@@ -2410,10 +2404,12 @@
 
     if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
     if (typeof handObj.handId === 'string' && handObj.handId) state.handId = handObj.handId;
-    if (Number.isInteger(payload.dealerSeat)) state.dealerSeat = payload.dealerSeat;
-    else if (Number.isInteger(payload.dealerSeatNo)) state.dealerSeat = payload.dealerSeatNo;
-    else if (Number.isInteger(handObj.dealerSeat)) state.dealerSeat = handObj.dealerSeat;
-    else if (Number.isInteger(handObj.dealerSeatNo)) state.dealerSeat = handObj.dealerSeatNo;
+    else if (hasOwn(handObj, 'handId') && handObj.handId == null) state.handId = null;
+    var handIdChanged = state.handId !== previousHandId;
+    var dealerField = readSnapshotField(payload, handObj, 'dealerSeat');
+    if (!dealerField.present) dealerField = readSnapshotField(payload, handObj, 'dealerSeatNo');
+    if (dealerField.present && (Number.isInteger(dealerField.value) || dealerField.value === null)) state.dealerSeat = dealerField.value;
+    else if (handIdChanged) state.dealerSeat = null;
 
     if (typeof turnObj.userId === 'string' && turnObj.userId) state.turnUserId = turnObj.userId;
     else if (turnObj.userId == null) state.turnUserId = null;
@@ -2422,7 +2418,10 @@
     if (turnObj.deadlineAt != null) state.turnDeadlineAt = Number(turnObj.deadlineAt);
     else if (turnObj.deadlineAt == null) state.turnDeadlineAt = null;
 
+    if (nextCommitted !== null) seatCommittedByUserId = nextCommitted;
+    else if (handIdChanged) seatCommittedByUserId = {};
     if (Number.isFinite(Number(potObj.total))) state.potTotal = Number(potObj.total);
+    else if (handIdChanged) state.potTotal = 0;
 
     var boardSource = null;
     if (Array.isArray(payload.board)) boardSource = payload.board;
@@ -2435,23 +2434,20 @@
     var nextHeroCards = null;
     if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
     else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
-    // Private hole cards belong to the current hand and current seat only.
-    // An authoritative full snapshot without new private cards (e.g. the user
-    // lost their seat during a reconnect) or a hand-id change must clear any
-    // stale cards from a previous hand/session instead of retaining them.
-    var handIdChanged = !!(state.handId && previousHandId && state.handId !== previousHandId);
+    if (handIdChanged || handBetsField.present) state.betThisRoundByUserId = normalizeNumericUserMap(handBetsField.value) || {};
     if (handIdChanged && !foldedUsersField.present) state.foldedByUserId = Object.create(null);
     if (authoritativeFull || foldedUsersField.present) state.foldedByUserId = normalizeFoldedByUserId(foldedUsersField.value);
-    if (nextHeroCards && nextHeroCards.length >= 2){
-      state.heroCards = nextHeroCards.slice(0, 2);
-    } else if (authoritativeFull || handIdChanged){
-      state.heroCards = [];
-    }
 
     var seatFieldPresent = hasOwn(payload, 'youSeat') || hasOwn(youObj, 'seat');
     if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
     else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
-    else if (payload.youSeat == null && youObj.seat == null) state.youSeat = null;
+    else if (seatFieldPresent) state.youSeat = null;
+    if ((Array.isArray(payload.seats) || Array.isArray(publicObj.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers))
+      && !state.seats.some(isCurrentUserSeat)) state.youSeat = null;
+    if (seatFieldPresent && state.youSeat == null){
+      state.seats = state.seats.filter(function(seat){ return seat.userId !== state.currentUserId; });
+      lastKnownCurrentSeatNo = null;
+    }
     if (seatFieldPresent && previousSeatNo !== state.youSeat){
       resetWinStreakSession();
       clearCelebration();
@@ -2459,6 +2455,21 @@
 
     if (playerStateField.present) state.playerState = normalizePlayerState(playerStateField.value);
     else if (authoritativeFull) state.playerState = null;
+    var cardSeat = deriveCurrentSeat();
+    var cardsOutOfHand = !state.handId || !cardSeat || cardSeat.status === 'WAITING_NEXT_HAND' || cardSeat.status === 'OUT_OF_CHIPS'
+      || (handBetsField.present && !hasOwn(state.betThisRoundByUserId, cardSeat.userId))
+      || (state.playerState && (state.playerState.status === 'WAITING_NEXT_HAND' || state.playerState.status === 'OUT_OF_CHIPS'));
+    var cardSeatChanged = !previousCardSeat || !cardSeat || previousCardSeat.seatNo !== cardSeat.seatNo
+      || previousCardSeat.userId !== cardSeat.userId;
+    // An empty private projection cannot revoke an already received active deal.
+    // Retain only for the same hand/occupant with authoritative participation.
+    var keepActiveDeal = nextHeroCards && nextHeroCards.length === 0 && state.heroCards.length === 2
+      && !handIdChanged && !cardSeatChanged
+      && ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'].indexOf(state.phase) !== -1
+      && getOpponentHeldCardCount(cardSeat, state.handId, state.betThisRoundByUserId) === 2;
+    if (cardsOutOfHand) state.heroCards = [];
+    else if (nextHeroCards && !keepActiveDeal) state.heroCards = nextHeroCards.length >= 2 ? nextHeroCards.slice(0, 2) : [];
+    else if (handIdChanged || cardSeatChanged) state.heroCards = [];
     if (!state.playerState || (state.playerState.status !== 'OUT_OF_CHIPS' && state.playerState.status !== 'WAITING_NEXT_HAND')) {
       rebuyPanelDismissed = false;
       autoRebuyAttemptedForCurrentBust = false;
@@ -3544,16 +3555,6 @@
     return 1;
   }
 
-  function getSeatAnchor(index, total){
-    if (total === 6 && seatAnchors[index]) return seatAnchors[index];
-    var angle = (-90 + (360 / total) * index) * (Math.PI / 180);
-    var rx = 36;
-    var ry = 41;
-    return {
-      x: 50 + Math.cos(angle) * rx,
-      y: 51 + Math.sin(angle) * ry
-    };
-  }
 
   function getDisplayName(seat){
     if (!seat) return 'Open seat';
@@ -3564,6 +3565,13 @@
   function getPublicDisplayName(seat){
     if (!seat) return 'Player';
     return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
+  }
+
+  function seatAvatarSource(seat){
+    if (!seat) return '';
+    if (seat.isBot && seat.botPresentation) return seat.botPresentation.avatarPath || '';
+    var avatar = seat.profile && seat.profile.avatar;
+    return avatar ? (avatar.type === 'uploaded' ? avatar.url : 'default:' + avatar.variant) : '';
   }
 
   function renderSeatAvatar(avatar, seat){
@@ -3588,22 +3596,15 @@
     if (!imageUrl && profileAvatar.type === 'uploaded') imageUrl = profileAvatar.url;
     if (!imageUrl) return;
 
-    if (loadedSeatAvatarUrls[imageUrl] === true){
-      fallback.hidden = true;
-      avatar.classList.add('poker-seat-avatar--image');
-    }
-
     var image = document.createElement('img');
     image.className = 'poker-seat-avatar__image';
     image.alt = '';
     image.decoding = 'async';
     image.addEventListener('load', function(){
-      loadedSeatAvatarUrls[imageUrl] = true;
       fallback.hidden = true;
       avatar.classList.add('poker-seat-avatar--image');
     }, { once: true });
     image.addEventListener('error', function(){
-      delete loadedSeatAvatarUrls[imageUrl];
       if (image.parentNode === avatar) avatar.removeChild(image);
       fallback.hidden = false;
       avatar.classList.remove('poker-seat-avatar--image');
@@ -3664,30 +3665,7 @@
     return null;
   }
 
-  function getSeatActionBadgePosition(slotIndex, hero){
-    var radius = hero ? 48 : 38;
-    var centerX = 50;
-    var centerY = hero ? 48 : 38;
-    var distance = radius + 8;
-    var x = centerX;
-    var y = centerY;
-    if (hero) return { left: '38px', top: '-28px' };
-    if (slotIndex === 0) y -= distance;
-    else if (slotIndex === 1) { x += distance; y -= 4; }
-    else if (slotIndex === 2) { x += distance; y += 4; }
-    else if (slotIndex === 3) y += distance;
-    else if (slotIndex === 4) { x -= distance; y += 4; }
-    else if (slotIndex === 5) { x -= distance; y -= 4; }
-    return { left: x + 'px', top: y + 'px' };
-  }
 
-  function getSeatStatusBadgePosition(slotIndex, hero){
-    var actionPosition = getSeatActionBadgePosition(slotIndex, hero);
-    return {
-      left: actionPosition.left,
-      top: (parseFloat(actionPosition.top) + 24) + 'px'
-    };
-  }
 
   function shortId(value){
     var text = typeof value === 'string' ? value.trim() : '';
@@ -3737,6 +3715,13 @@
     if (state.showdown && Array.isArray(state.showdown.winners) && state.showdown.winners.indexOf(seat.userId) !== -1) return true;
     var sticky = getActiveWinnerReveal();
     return !!(sticky && Array.isArray(sticky.showdownWinnerUserIds) && sticky.showdownWinnerUserIds.indexOf(seat.userId) !== -1);
+  }
+
+  function getOpponentHeldCardCount(seat, handId, handBets){
+    if (!seat || !handId || seat.status === 'WAITING_NEXT_HAND' || seat.status === 'OUT_OF_CHIPS') return 0;
+    // The public per-round map is initialized for every dealt-in user (including
+    // zero bets), and keeps folded participants. It is not a hole-card count.
+    return isObject(handBets) && hasOwn(handBets, seat.userId) ? 2 : 0;
   }
 
   function getSeatRevealCards(seat){
@@ -3925,50 +3910,130 @@
     return Math.max(min, Math.min(max, value));
   }
 
-  function formatScenePercent(value){
-    return (Math.round(value * 10) / 10) + '%';
+
+  // Design coordinates belong to the table, never to measured seat content.
+  // Physical variants: top, upper right, lower right, hero, lower left, upper left.
+  var seatSceneGeometry = {
+    portrait: { width:360, height:650, seats:[
+      {avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
+      {avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
+      {avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
+      {avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
+      {avatar:[38,410],stack:[82,488],bet:[102,389],dealer:[90,370]},
+      {avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
+    ]},
+    landscape: { width:1040, height:390, seats:[
+      {avatar:[472,12],stack:[445,104],bet:[430,148],dealer:[402,92]},
+      {avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[906,155]},
+      {avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
+      {avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
+      {avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
+      {avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
+    ]}
+  };
+  var seatSceneOrientation = 'portrait';
+
+  function fitTableScene(){
+    if (!els.scene || !els.sceneViewport) return;
+    seatSceneOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+    var geometry = seatSceneGeometry[seatSceneOrientation];
+    if (els.accountHud && els.topRightRail && els.liveTopbar){
+      var accountParent = seatSceneOrientation === 'landscape' ? els.topRightRail : els.liveTopbar;
+      if (els.accountHud.parentNode !== accountParent) accountParent.insertBefore(els.accountHud, accountParent.firstChild);
+    }
+    // Portrait status belongs to the visible viewport, not the transformed scene.
+    if (els.roomStatus){
+      var statusParent = seatSceneOrientation === 'portrait' ? els.sceneViewport : els.scene;
+      if (els.roomStatus.parentNode !== statusParent) statusParent.appendChild(els.roomStatus);
+    }
+    // Reserve a table-local band for northern player transients, below chrome.
+    var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
+    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
+    if (!Number.isFinite(scale) || scale <= 0) return;
+    if (els.screen) els.screen.style.setProperty('--poker-scene-scale', String(scale));
+    els.scene.dataset.orientation = seatSceneOrientation;
+    els.scene.style.width = geometry.width + 'px';
+    els.scene.style.height = geometry.height + 'px';
+    var sceneTop = (els.sceneViewport.clientHeight + topSafeArea * scale) / 2;
+    if (seatSceneOrientation === 'landscape' && window.innerHeight <= 500) sceneTop = (geometry.height / 2 + topSafeArea) * scale;
+    els.scene.style.top = sceneTop + 'px';
+    els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
   }
 
-  function getSeatAvatarAnchorFromRect(seatNo){
-    if (!els.scene || !renderedSeatAvatars[seatNo]) return null;
-    if (typeof els.scene.getBoundingClientRect !== 'function' || typeof renderedSeatAvatars[seatNo].getBoundingClientRect !== 'function') return null;
-    var sceneRect = els.scene.getBoundingClientRect();
-    var avatarRect = renderedSeatAvatars[seatNo].getBoundingClientRect();
-    if (!sceneRect || !avatarRect || sceneRect.width <= 0 || sceneRect.height <= 0 || avatarRect.width <= 0 || avatarRect.height <= 0) return null;
-    var centerX = ((avatarRect.left + avatarRect.width / 2) - sceneRect.left) / sceneRect.width * 100;
-    var centerY = ((avatarRect.top + avatarRect.height / 2) - sceneRect.top) / sceneRect.height * 100;
-    var radiusX = (avatarRect.width / 2) / sceneRect.width * 100;
-    var radiusY = (avatarRect.height / 2) / sceneRect.height * 100;
-    return {
-      x: centerX,
-      y: centerY,
-      radiusX: radiusX,
-      radiusY: radiusY,
-      sceneWidth: sceneRect.width,
-      sceneHeight: sceneRect.height
-    };
+  function seatPhysicalSlot(index, total){
+    var variants = {2:[0,3],3:[5,1,3],4:[0,1,3,5],5:[0,1,3,4,5]};
+    return variants[total] ? variants[total][index] : index;
   }
 
-  function syncRenderedSeatAnchorsFromLayout(){
+  function placeSeatNode(node, hud, point, width, height){
+    if (!node || !point) return;
+    node.setAttribute('data-seat-anchor','');
+    node.style.left = (point[0] - hud.origin[0]) + 'px';
+    node.style.top = (point[1] - hud.origin[1]) + 'px';
+    if (width) node.style.width = width + 'px';
+    if (height) node.style.height = height + 'px';
+  }
+
+  function configureSeatHud(article, hud, slot, hero){
+    var portrait = seatSceneOrientation === 'portrait';
+    var config = seatSceneGeometry[seatSceneOrientation].seats[slot];
+    hud.config = config;
+    hud.origin = [config.avatar[0] - 46, config.avatar[1] - 50];
+    article.style.left = hud.origin[0] + 'px';
+    article.style.top = hud.origin[1] + 'px';
+    article.dataset.seatVariant = ['top','upper-right','lower-right','hero','lower-left','upper-left'][slot];
+    hud.avatarSize = portrait ? 72 : 96;
+    hud.name = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2 + 15];
+    hud.action = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2];
+    var corner = portrait ? 46 : 60;
+    var leftSide = slot === 4 || slot === 5;
+    var rightSide = slot === 1 || slot === 2;
+    var edge = leftSide ? corner : -corner;
+    var quick = [config.avatar[0] + (rightSide ? -corner : corner),config.avatar[1] + (hero ? 12 : 8)];
+    var marker = [config.avatar[0] + edge,config.avatar[1] + (hero ? 20 : leftSide || rightSide ? 48 : 28)];
+    hud.marker = marker;
+    placeSeatNode(hud.quickAction,{origin:[0,0]},quick,16,16);
+    placeSeatNode(hud.cards,hud,hero ? config.cards : [config.avatar[0] + edge,config.avatar[1] + (leftSide || rightSide ? 28 : 8)],hero ? 110 : 26,hero ? 80 : 14);
+    placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
+    placeSeatNode(hud.bet,hud,config.bet,22,20);
+    ['bestHand'].forEach(function(role){
+      var point=config[role];
+      if (point) placeSeatNode(hud[role],{origin:[0,0]},point,point[2],point[3]);
+    });
+    // All player-owned transient content shares one column above the avatar.
+    placeSeatNode(hud.presentation,{origin:[0,0]},[config.avatar[0],config.avatar[1] - hud.avatarSize / 2 - 6],100);
+    hud.presentation.classList.add('poker-seat-hud-transient');
+    hud.presentation.appendChild(hud.social);
+    var geometry = seatSceneGeometry[seatSceneOrientation];
+    var reactionWidth = Math.min(220, geometry.width - 16);
+    var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(config.avatar[0], geometry.width - reactionWidth / 2 - 8));
+    hud.social.style.setProperty('--poker-reaction-width', reactionWidth + 'px');
+    hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - config.avatar[0]) + 'px');
+    var radius = portrait ? 52 : 58;
+    var giftAngles = leftSide ? [-100,-60,-20] : rightSide ? [-160,-120,-80] : [-150,-90,-30];
+    giftAngles.forEach(function(angle,index){
+      var radians=angle*Math.PI/180;
+      placeSeatNode(hud.gifts.children[index],hud,[config.avatar[0]+Math.cos(radians)*radius,config.avatar[1]+Math.sin(radians)*radius],16,16);
+    });
+  }
+
+  function getSeatAvatarAnchor(seatNo){
+    var hud = renderedSeatHud[seatNo];
+    if (!hud) return null;
+    var geometry=seatSceneGeometry[seatSceneOrientation];
+    return {x:hud.config.avatar[0]/geometry.width*100,y:hud.config.avatar[1]/geometry.height*100};
+  }
+
+  function syncRenderedSeatAnchors(){
     Object.keys(renderedSeatAvatars).forEach(function(seatNo){
-      var measured = getSeatAvatarAnchorFromRect(Number(seatNo));
-      if (!measured) return;
-      renderedSeatAnchors[seatNo] = {
-        x: measured.x,
-        y: measured.y
-      };
+      var anchor = getSeatAvatarAnchor(Number(seatNo));
+      if (anchor) renderedSeatAnchors[seatNo] = {x:anchor.x,y:anchor.y};
     });
   }
 
   function refreshLayoutPresentation(){
     layoutRefreshTimer = null;
-    syncRenderedSeatAnchorsFromLayout();
-    positionHeroCards();
-    renderSeatChips();
-    renderDealerChip();
-    renderReactionBubbles();
-    positionCelebration();
-    refreshCelebrationPreview();
+    render();
   }
 
   function scheduleLayoutPresentationRefresh(){
@@ -3988,133 +4053,63 @@
     els.joinBtn.hidden = !canJoin;
   }
 
-  function resolveSeatChipDirections(anchor){
-    var dx = anchor.x - 50;
-    var dy = anchor.y - 50;
-    var horizontal = Math.abs(dx) >= Math.abs(dy);
-    if (horizontal){
-      var sideX = dx >= 0 ? -1 : 1;
-      return {
-        bet: { x: sideX, y: -0.42 },
-        stack: { x: sideX, y: 0.42 }
-      };
-    }
-    var sideY = dy >= 0 ? -1 : 1;
-    return {
-      bet: { x: -0.42, y: sideY },
-      stack: { x: 0.42, y: sideY }
-    };
+  function seatHudAnchor(node){
+    if (!node) return null;
+    var hud=renderedSeatHud[node.dataset.seatNo];
+    var point=hud && hud.config[node.dataset.seatHud];
+    var geometry=seatSceneGeometry[seatSceneOrientation];
+    return point ? {x:point[0]/geometry.width*100,y:point[1]/geometry.height*100} : null;
   }
 
-  function normalizeDirection(vector){
-    var length = Math.sqrt(vector.x * vector.x + vector.y * vector.y) || 1;
-    return {
-      x: vector.x / length,
-      y: vector.y / length
-    };
-  }
-
-  function keepSeatChipOutOfCenterLane(point, source){
-    var centerLane = { left: 33, right: 67, top: 31, bottom: 57 };
-    if (point.x < centerLane.left || point.x > centerLane.right || point.y < centerLane.top || point.y > centerLane.bottom) return point;
-    var dx = source.x - 50;
-    var dy = source.y - 50;
-    if (Math.abs(dx) >= Math.abs(dy)){
-      point.x = dx >= 0 ? centerLane.right + 3 : centerLane.left - 3;
-    } else {
-      point.y = dy >= 0 ? centerLane.bottom + 3 : centerLane.top - 3;
-    }
-    return point;
-  }
-
-  function resolveVisualHalfPercent(source, axis, fallback){
-    if (!source) return fallback;
-    var sceneSize = axis === 'x' ? source.sceneWidth : source.sceneHeight;
-    var visualSize = axis === 'x' ? HERO_SEAT_STACK_VISUAL.width : HERO_SEAT_STACK_VISUAL.height;
-    if (!Number.isFinite(sceneSize) || sceneSize <= 0) return fallback;
-    return ((visualSize * HERO_SEAT_STACK_VISUAL.scale) / 2) / sceneSize * 100;
-  }
-
-  function resolveHeroSeatStackPoint(source){
-    var halfX = resolveVisualHalfPercent(source, 'x', 8);
-    var halfY = resolveVisualHalfPercent(source, 'y', 4);
-    var gapX = source.sceneWidth ? Math.max(2, 4 / source.sceneWidth * 100) : 2;
-    var point = {
-      x: source.x + source.radiusX + halfX + gapX,
-      y: source.y + Math.min(1.6, source.radiusY * 0.15)
-    };
-    point.x = clampNumber(point.x, 10, 90);
-    point.y = clampNumber(point.y, 12 + halfY, 86);
-    return point;
-  }
-
-  function resolveSeatChipPoint(source, direction, gap){
-    var unit = normalizeDirection(direction);
-    var edgeDistance = Math.sqrt(Math.pow(unit.x * source.radiusX, 2) + Math.pow(unit.y * source.radiusY, 2));
-    var chipGap = Number.isFinite(gap) ? gap : 7;
-    var point = {
-      x: source.x + unit.x * (edgeDistance + chipGap),
-      y: source.y + unit.y * (edgeDistance + chipGap)
-    };
-    point = keepSeatChipOutOfCenterLane(point, source);
-    point.x = clampNumber(point.x, 10, 90);
-    point.y = clampNumber(point.y, 12, 88);
-    return point;
-  }
-
-  function getSeatChipAnchor(anchor, seat){
-    var seatNo = seat && Number.isInteger(seat.seatNo) ? seat.seatNo : null;
-    var source = getSeatAvatarAnchorFromRect(seatNo) || { x: anchor.x, y: anchor.y, radiusX: 8, radiusY: 5 };
-    var directions = resolveSeatChipDirections(source);
-    var stackDirection = directions.stack;
-    var stackGap = 4;
-    var isLandscapePokerLayout = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width:560px) and (orientation:landscape)').matches;
-    if (isLandscapePokerLayout && renderedSeatSlots[seatNo] === 0){
-      stackDirection = { x: 1, y: 0 };
-      stackGap = source.sceneHeight && source.sceneHeight < 220 ? 4 : 0;
-    }
-    return {
-      bet: resolveSeatChipPoint(source, directions.bet),
-      stack: isCurrentUserSeat(seat) ? resolveHeroSeatStackPoint(source) : resolveSeatChipPoint(source, stackDirection, stackGap)
-    };
+  function syncChipVisual(container, amount, variant, showLabel){
+    var current = container.children[0];
+    var visible = amount != null && (showLabel || amount > 0);
+    if (visible && current && current.getAttribute('data-amount') === String(Math.floor(amount))
+        && current.classList.contains('poker-chip-visual-stack--' + variant)) return;
+    if (!visible && !current) return;
+    container.innerHTML = '';
+    if (!visible) return;
+    var visual = createChipStackVisual(amount, variant);
+    if (showLabel) appendSeatStackAmountLabel(visual, amount);
+    container.appendChild(visual);
   }
 
   function renderSeatChips(){
-    if (!els.seatChipLayer) return;
-    els.seatChipLayer.innerHTML = '';
     renderedSeatBetAnchors = {};
     renderedSeatStackAnchors = {};
+    if (!els.seatChipLayer) return;
+    // Static chips belong to the persistent scene layer, never the rebuilt HUD.
+    Array.from(els.seatChipLayer.children).forEach(function(node){
+      var occupied = state.seats.some(function(seat){
+        return seat.userId === node.dataset.userId && String(seat.seatNo) === node.dataset.seatNo;
+      });
+      if (!occupied) els.seatChipLayer.removeChild(node);
+    });
     state.seats.forEach(function(seat){
-      if (!seat || !Number.isInteger(seat.seatNo) || !seat.userId) return;
-      var anchor = renderedSeatAnchors[seat.seatNo];
-      var slot = renderedSeatSlots[seat.seatNo];
-      if (!anchor || !Number.isInteger(slot)) return;
-      var chipAnchor = getSeatChipAnchor(anchor, seat);
-      renderedSeatBetAnchors[seat.seatNo] = chipAnchor.bet;
-      renderedSeatStackAnchors[seat.seatNo] = chipAnchor.stack;
-      var committed = Math.max(0, Number(seatCommittedByUserId[seat.userId]) || 0);
-      if (committed > 0){
-        var betStack = createChipStackVisual(committed, 'seat-bet');
-        betStack.style.left = chipAnchor.bet.x + '%';
-        betStack.style.top = chipAnchor.bet.y + '%';
-        els.seatChipLayer.appendChild(betStack);
-      }
-      var stackAmount = resolveStack(seat.userId);
-      if (stackAmount != null){
-        var seatStack = createChipStackVisual(stackAmount, isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack');
-        appendSeatStackAmountLabel(seatStack, stackAmount);
-        seatStack.style.left = chipAnchor.stack.x + '%';
-        seatStack.style.top = chipAnchor.stack.y + '%';
-        els.seatChipLayer.appendChild(seatStack);
-      }
+      var hud = seat && renderedSeatHud[seat.seatNo];
+      if (!hud || !seat.userId) return;
+      ['stack','bet'].forEach(function(role){
+        var container = Array.from(els.seatChipLayer.children).find(function(node){
+          return node.dataset.seatNo === String(seat.seatNo) && node.dataset.userId === seat.userId && node.dataset.seatHud === role;
+        });
+        if (!container){
+          container = hud[role];
+          container.dataset.userId = seat.userId;
+          els.seatChipLayer.appendChild(container);
+        }
+        hud[role] = container;
+        placeSeatNode(container,{origin:[0,0]},hud.config[role],role === 'stack' ? (seatSceneOrientation === 'portrait' ? 60 : 80) : 22,role === 'stack' ? 60 : 20);
+      });
+      syncChipVisual(hud.stack,resolveStack(seat.userId),isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack',true);
+      syncChipVisual(hud.bet,Math.max(0,Number(seatCommittedByUserId[seat.userId]) || 0),'seat-bet',false);
+      renderedSeatStackAnchors[seat.seatNo] = seatHudAnchor(hud.stack);
+      renderedSeatBetAnchors[seat.seatNo] = seatHudAnchor(hud.bet);
     });
   }
 
   function renderPotChips(){
     if (!els.potChipStack) return;
-    els.potChipStack.innerHTML = '';
-    if ((Number(state.potTotal) || 0) <= 0) return;
-    els.potChipStack.appendChild(createChipStackVisual(state.potTotal, 'pot'));
+    syncChipVisual(els.potChipStack,Math.max(0,Number(state.potTotal) || 0),'pot',false);
   }
 
   function resolvePointFromPercent(anchor, rect){
@@ -4276,10 +4271,13 @@
     clearReactionBubblesWithChangedOwners();
     clearTargetedReactionEffectsWithChangedOwners();
     clearBotAvatarReactions();
+    var previousAvatars = renderedSeatAvatars;
     els.seatLayer.innerHTML = '';
+    if (els.seatNameLayer) els.seatNameLayer.innerHTML = '';
+    if (els.seatTransientLayer) els.seatTransientLayer.innerHTML = '';
     renderedSeatAnchors = {};
-    renderedSeatSlots = {};
     renderedSeatAvatars = {};
+    renderedSeatHud = {};
     renderedSeatBetAnchors = {};
     renderedSeatStackAnchors = {};
     var offset = getSeatNumberingOffset();
@@ -4300,11 +4298,6 @@
       var folded = !!(seat && /FOLD/i.test(seat.status || ''));
       var waitingNextHand = !!(seat && String(seat.status || '').toUpperCase() === 'WAITING_NEXT_HAND');
       var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
-      var anchor = getSeatAnchor(rotatedIndex, state.maxSeats);
-      if (hero && state.maxSeats >= 4) anchor = { x: 34, y: 91 };
-      else if (rotatedIndex === 1 && state.maxSeats >= 6) anchor = { x: 80, y: 29 };
-      else if (rotatedIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
-      else if (rotatedIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
       article.className = 'poker-seat'
         + (active ? ' poker-seat--active' : '')
         + (folded ? ' poker-seat--folded' : '')
@@ -4314,19 +4307,49 @@
         + (waitingNextHand ? ' poker-seat--waiting-next-hand' : '')
         + (!seat ? ' poker-seat--empty' : '');
       article.dataset.pokerSlot = String(rotatedIndex);
-      article.style.left = anchor.x + '%';
-      article.style.top = anchor.y + '%';
+      article.dataset.seatNo = String(seat ? seat.seatNo : i + offset);
+      article.dataset.userId = seat && seat.userId || '';
+      var hud = {};
+      ['identity', 'portrait', 'cards', 'stack', 'bet', 'presentation', 'social', 'gifts', 'bestHand'].forEach(function(area){
+        var node = document.createElement('div');
+        node.className = 'poker-seat-hud-' + area;
+        node.dataset.seatHud = area;
+        node.dataset.seatNo = article.dataset.seatNo;
+        hud[area] = node;
+        if (['stack','bet','presentation','social','bestHand'].indexOf(area) === -1) article.appendChild(node);
+      });
+      hud.quickAction = document.createElement('div');
+      hud.quickAction.className = 'poker-seat-hud-quick-action';
+      hud.quickAction.setAttribute('data-poker-quick-action-slot', '');
+      hud.gifts.setAttribute('data-poker-gift-slots', '');
+      for (var giftIndex = 0; giftIndex < 3; giftIndex++){
+        var giftSlot = document.createElement('span');
+        giftSlot.className = 'poker-seat-gift-slot';
+        giftSlot.setAttribute('data-poker-gift-slot', String(giftIndex));
+        hud.gifts.appendChild(giftSlot);
+      }
+      configureSeatHud(article,hud,seatPhysicalSlot(rotatedIndex,state.maxSeats),hero);
+      if (seat) renderedSeatHud[seat.seatNo] = hud;
       if (seat && Number.isInteger(seat.seatNo)) {
-        renderedSeatAnchors[seat.seatNo] = anchor;
-        renderedSeatSlots[seat.seatNo] = rotatedIndex;
+        renderedSeatAnchors[seat.seatNo] = getSeatAvatarAnchor(seat.seatNo);
       }
 
-      var avatar = document.createElement('div');
-      avatar.className = 'poker-seat-avatar';
+      var avatarSource = seatAvatarSource(seat);
+      var previousAvatar = seat && previousAvatars[seat.seatNo];
+      var reuseAvatar = previousAvatar && previousAvatar.dataset.userId === seat.userId && previousAvatar.dataset.avatarSource === avatarSource;
+      var avatar = reuseAvatar ? previousAvatar : document.createElement('div');
+      if (!reuseAvatar) avatar.className = 'poker-seat-avatar';
+      avatar.dataset.avatarSource = avatarSource;
+      avatar.setAttribute('data-poker-avatar-center', '');
       avatar.dataset.userId = seat && seat.userId || '';
-      renderSeatAvatar(avatar, seat);
+      if (seat && !reuseAvatar) renderSeatAvatar(avatar, seat);
+      else if (!seat) { avatar.classList.add('poker-seat-avatar--open'); avatar.textContent = 'OPEN'; }
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
-      if (active) updateSeatTurnClock(avatar, getTurnClockState());
+      if (reuseAvatar){
+        var initialsNode = Array.from(avatar.children).find(function(node){ return node.classList.contains('poker-seat-avatar__initials'); });
+        if (initialsNode) initialsNode.textContent = initials(getDisplayName(seat));
+      }
+      updateSeatTurnClock(avatar, active ? getTurnClockState() : null);
 
       var autoRebuyIndicator = null;
       if (showAutoRebuyIndicator){
@@ -4356,15 +4379,14 @@
 
       var cards = document.createElement('div');
       cards.className = 'poker-seat-cards';
-      if (!hero && seat && seat.userId && !waitingNextHand){
-        var revealCards = getSeatRevealCards(seat);
-        if (revealCards){
-          revealCards.forEach(function(card){
-            cards.appendChild(createCard(card));
-          });
-        } else {
-          cards.appendChild(createCard(null, { faceDown: true }));
-          cards.appendChild(createCard(null, { faceDown: true }));
+      if (!hero && seat && seat.userId){
+        var heldCards = getOpponentHeldCardCount(seat, state.handId, state.betThisRoundByUserId);
+        cards.setAttribute('aria-label', heldCards + ' cards held');
+        for (var cardIndex = 0; cardIndex < heldCards; cardIndex++){
+          var cardBack = document.createElement('span');
+          cardBack.className = 'poker-seat-card-indicator';
+          cardBack.setAttribute('aria-hidden', 'true');
+          cards.appendChild(cardBack);
         }
       }
 
@@ -4372,26 +4394,28 @@
       name.className = 'poker-seat-name';
       name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
 
-      var status = document.createElement('div');
-      var statusPosition = getSeatStatusBadgePosition(rotatedIndex, hero);
-      status.className = 'poker-seat-status';
-      status.textContent = seat ? String(seat.status || 'ACTIVE').replace(/_/g, ' ') : 'OPEN';
-      if (waitingNextHand) status.textContent = 'NEXT HAND';
-      status.style.left = statusPosition.left;
-      status.style.top = statusPosition.top;
-
-      article.appendChild(avatar);
-      if (autoRebuyIndicator) article.appendChild(autoRebuyIndicator);
-      if (autoRebuyAvatarToast) article.appendChild(autoRebuyAvatarToast);
-      if (seatNumber) article.appendChild(seatNumber);
-      if (seat && lastAction){
+      placeSeatNode(avatar,hud,hud.config.avatar,hud.avatarSize,hud.avatarSize);
+      hud.portrait.appendChild(avatar);
+      var transientSeat = document.createElement('div');
+      transientSeat.className = 'poker-seat-transient';
+      transientSeat.dataset.seatNo = article.dataset.seatNo;
+      transientSeat.dataset.userId = article.dataset.userId;
+      if (seat && els.seatTransientLayer){
+        transientSeat.appendChild(hud.presentation);
+        transientSeat.appendChild(hud.quickAction);
+        if (hero) transientSeat.appendChild(hud.bestHand);
+        els.seatTransientLayer.appendChild(transientSeat);
+      }
+      if (autoRebuyIndicator){placeSeatNode(autoRebuyIndicator,hud,[hud.marker[0],hud.marker[1]+16],14,14);hud.identity.appendChild(autoRebuyIndicator);}
+      if (autoRebuyAvatarToast) hud.presentation.appendChild(autoRebuyAvatarToast);
+      if (seatNumber){placeSeatNode(seatNumber,hud,hud.marker,16,14);hud.identity.appendChild(seatNumber);}
+      var visibleAction = lastAction || (folded ? 'fold' : null);
+      if (seat && visibleAction){
         var actionBadge = document.createElement('div');
-        var badgePosition = getSeatActionBadgePosition(rotatedIndex, hero);
-        actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + lastAction.replace(/_/g, '-');
-        actionBadge.textContent = LAST_ACTION_LABEL[lastAction] || lastAction;
-        actionBadge.style.left = badgePosition.left;
-        actionBadge.style.top = badgePosition.top;
-        article.appendChild(actionBadge);
+        actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + visibleAction.replace(/_/g, '-');
+        actionBadge.textContent = LAST_ACTION_LABEL[visibleAction] || visibleAction;
+        placeSeatNode(actionBadge,{origin:[0,0]},hud.action,64,12);
+        transientSeat.appendChild(actionBadge);
       }
       var seatSettlementAwards = seat ? getSeatSettlementAwards(seat.userId) : [];
       var seatHasShowdownSummary = !!(seat && shouldShowShowdownHandSummary(seat) && getWinnerHandSummary(seat));
@@ -4406,11 +4430,23 @@
           settlementBadge.appendChild(awardRow);
         });
         appendShowdownHandSummary(settlementBadge, seat);
-        article.appendChild(settlementBadge);
+        hud.presentation.appendChild(settlementBadge);
       }
-      if (cards.children.length) article.appendChild(cards);
-      article.appendChild(name);
-      article.appendChild(status);
+      if (cards.children.length) hud.cards.appendChild(cards);
+      var nameOwner = document.createElement('div');
+      nameOwner.className = folded ? 'poker-seat--folded' : '';
+      nameOwner.dataset.seatNo = article.dataset.seatNo;
+      nameOwner.dataset.userId = article.dataset.userId;
+      placeSeatNode(name,{origin:[0,0]},hud.name,seatSceneOrientation === 'landscape' ? 104 : hero ? 88 : 76,seatSceneOrientation === 'landscape' ? 20 : 14);
+      nameOwner.appendChild(name);
+      els.seatNameLayer.appendChild(nameOwner);
+      if (seat && !visibleAction && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
+        var status = document.createElement('div');
+        status.className = 'poker-seat-status';
+        status.textContent = waitingNextHand ? 'NEXT HAND' : 'OUT OF CHIPS';
+        placeSeatNode(status,{origin:[0,0]},hud.action,64,12);
+        transientSeat.appendChild(status);
+      }
       if (hero && heroBestHand){
         var bestHand = document.createElement('div');
         bestHand.className = 'poker-seat-best-hand';
@@ -4418,18 +4454,21 @@
         bestHandName.className = 'poker-seat-best-hand-label';
         bestHandName.textContent = formatViewerHandCategory(heroBestHand.category);
         bestHand.appendChild(bestHandName);
+        var bestHandCards = document.createElement('div');
+        bestHandCards.className = 'poker-seat-best-hand-cards';
         heroBestHand.cards.forEach(function(card){
           var chip = document.createElement('span');
           var normalized = normalizeCard(card);
           chip.className = 'poker-seat-best-hand-card' + (normalized && (normalized.s === 'H' || normalized.s === 'D') ? ' poker-seat-best-hand-card--red' : '');
           chip.textContent = normalized ? (normalized.r + SUIT_SYMBOLS[normalized.s]) : '?';
-          bestHand.appendChild(chip);
+          bestHandCards.appendChild(chip);
         });
-        article.appendChild(bestHand);
+        bestHand.appendChild(bestHandCards);
+        hud.bestHand.appendChild(bestHand);
       }
       els.seatLayer.appendChild(article);
     }
-    syncRenderedSeatAnchorsFromLayout();
+    syncRenderedSeatAnchors();
     scheduleTargetedReactionDismiss();
     renderReactionBubbles();
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
@@ -4451,19 +4490,6 @@
     reactionRenderNodes.push(node);
   }
 
-  function getReactionBubblePlacementClass(seatNo){
-    var slotIndex = Number.isInteger(renderedSeatSlots[seatNo]) ? renderedSeatSlots[seatNo] : null;
-    if (slotIndex === 0) return ' poker-reaction-anchor--top';
-    if (slotIndex === 1 || slotIndex === 2) return ' poker-reaction-anchor--right';
-    if (slotIndex === 4 || slotIndex === 5) return ' poker-reaction-anchor--left';
-    if (slotIndex === 3){
-      var currentSeat = deriveCurrentSeat();
-      return currentSeat && currentSeat.seatNo === Number(seatNo)
-        ? ' poker-reaction-anchor--hero'
-        : ' poker-reaction-anchor--bottom';
-    }
-    return '';
-  }
 
   function renderRegularReactionBubble(seatNo, reactionBubble, reactionEntry, anchor){
     var reducedMotion = prefersReducedMotion();
@@ -4475,10 +4501,10 @@
       bubble.setAttribute('role', 'status');
       anchorNode.appendChild(bubble);
     }
-    if (!anchorNode.parentNode) els.reactionLayer.appendChild(anchorNode);
-    anchorNode.className = 'poker-reaction-anchor' + getReactionBubblePlacementClass(seatNo);
-    anchorNode.style.left = anchor.x + '%';
-    anchorNode.style.top = anchor.y + '%';
+    var hud = renderedSeatHud[seatNo];
+    if (!hud) return;
+    hud.social.appendChild(anchorNode);
+    anchorNode.className = 'poker-seat-social-reaction';
     var bubbleNode = anchorNode.children && anchorNode.children[0];
     if (!bubbleNode){
       clearReactionBubble(seatNo);
@@ -4520,8 +4546,8 @@
     Object.keys(targetedReactionEffectsById).forEach(function(effectId){
       var effect = targetedReactionEffectsById[effectId];
       var entry = effect ? findReactionEntry(effect.reactionKey) : null;
-      var senderAnchor = effect && renderedSeatAnchors[effect.senderSeatNo];
-      var targetAnchor = effect && renderedSeatAnchors[effect.targetSeatNo];
+      var senderAnchor = effect && getSeatAvatarAnchor(effect.senderSeatNo);
+      var targetAnchor = effect && getSeatAvatarAnchor(effect.targetSeatNo);
       if (!effect || !entry || !senderAnchor || !targetAnchor){
         clearTargetedReactionEffect(effectId);
         return;
@@ -4566,9 +4592,7 @@
       var anchor = renderedSeatAnchors[offer.targetSeatNo];
       if (!anchor) return;
       var anchorNode = document.createElement('div');
-      anchorNode.className = 'poker-reaction-anchor';
-      anchorNode.style.left = anchor.x + '%';
-      anchorNode.style.top = anchor.y + '%';
+      anchorNode.className = 'poker-seat-social-reaction';
       var button = document.createElement('button');
       button.type = 'button';
       button.className = 'poker-seat-target-reaction';
@@ -4581,7 +4605,9 @@
         sendTargetedReaction(offer.targetSeatNo, offer.handId);
       });
       anchorNode.appendChild(button);
-      appendReactionRenderNode(anchorNode);
+      var hud = renderedSeatHud[offer.targetSeatNo];
+      if (hud) hud.quickAction.appendChild(anchorNode);
+      reactionRenderNodes.push(anchorNode);
     });
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNoKey){
       var seatNo = Number(seatNoKey);
@@ -4606,134 +4632,66 @@
     });
   }
 
-  function renderHeroCards(){
+  function logHeroCardPresentation(reason){
     if (!els.heroCards) return;
-    els.heroCards.innerHTML = '';
-    if (currentPlayerStatus() === 'WAITING_NEXT_HAND'){
-      els.heroCards.hidden = true;
-      return;
-    }
-    // Private cards are only rendered for an authoritatively seated user; a
-    // spectator/unseated viewer must never see the hero-card area.
-    if (!deriveCurrentSeat()){
-      els.heroCards.hidden = true;
-      return;
-    }
-    els.heroCards.hidden = false;
-    if (isCurrentUserFolded()) els.heroCards.className = 'poker-hero-cards poker-hero-cards--folded';
-    else els.heroCards.className = 'poker-hero-cards';
-    var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
-    if (!cards.length){
-      els.heroCards.appendChild(createCard(null, { faceDown: true }));
-      els.heroCards.appendChild(createCard(null, { faceDown: true }));
-      return;
-    }
-    cards.slice(0, 2).forEach(function(card){
-      els.heroCards.appendChild(createCard(card));
+    var seat = deriveCurrentSeat();
+    var hud = seat && renderedSeatHud[seat.seatNo];
+    var presentation = els.heroCards.hidden ? 'hidden' : state.heroCards.length === 2 ? 'visible' : 'placeholder';
+    var previous = heroPresentationState;
+    heroPresentationState = presentation;
+    if (previous == null || previous === presentation) return;
+    klog('poker_hero_card_presentation_changed', {
+      from: previous, to: presentation, reason: reason,
+      frameKind: heroFrameKind, stateVersion: state.stateVersion, handId: state.handId, phase: state.phase,
+      playerStatus: currentPlayerStatus(), heroCardsLength: state.heroCards.length,
+      youSeatPresent: Number.isInteger(state.youSeat), currentSeatPresent: !!seat, renderedHeroHudPresent: !!hud,
+      reconnectGate: !!state.reconnectGate, wsReady: isWsReady(), lifecycleTransition: heroLifecycleTransition
     });
   }
 
-  function positionHeroCards(){
+  function renderHeroCards(){
     if (!els.heroCards) return;
-    if (els.heroCards.classList && typeof els.heroCards.classList.remove === 'function') els.heroCards.classList.remove('poker-hero-cards--docked');
-    els.heroCards.style.removeProperty('left');
-    els.heroCards.style.removeProperty('top');
-    els.heroCards.style.removeProperty('bottom');
-    var heroSeat = deriveCurrentSeat();
-    if (!heroSeat || !Number.isInteger(heroSeat.seatNo)){
+    var seat = deriveCurrentSeat();
+    if (currentPlayerStatus() === 'WAITING_NEXT_HAND' || !seat){
+      els.heroCards.hidden = true;
+      els.heroCards.innerHTML = '';
       return;
     }
-    var anchor = getSeatAvatarAnchorFromRect(heroSeat.seatNo);
-    if (!anchor || anchor.sceneWidth <= 0 || anchor.sceneHeight <= 0){
-      return;
+    els.heroCards.hidden = false;
+    els.heroCards.className = 'poker-hero-cards' + (isCurrentUserFolded() ? ' poker-hero-cards--folded' : '');
+    var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
+    var children = els.heroCards.children;
+    var sameDeal = children.length === 2;
+    for (var i = 0; sameDeal && i < 2; i++){
+      var child = children[i];
+      sameDeal = cards.length === 2
+        ? child.children.length === 2 && child.children[0].textContent === cards[i].r && child.children[1].textContent === SUIT_SYMBOLS[cards[i].s]
+        : child.classList.contains('poker-card--back');
     }
-    var cardWidthPx = anchor.sceneWidth >= 470 ? 50 : 46;
-    var cardHeightPx = anchor.sceneWidth >= 470 ? 68 : 63;
-    var cardsWidth = ((cardWidthPx * 2) + 9) / anchor.sceneWidth * 100;
-    var cardsHalfHeight = (cardHeightPx / anchor.sceneHeight * 100) / 2;
-    var cardHalfHeightOffsetX = (cardHeightPx / 2) / anchor.sceneWidth * 100;
-    var cardHalfHeightOffsetY = (cardHeightPx / 2) / anchor.sceneHeight * 100;
-    var gapX = Math.max(10, Math.round(anchor.sceneWidth * 0.02)) / anchor.sceneWidth * 100;
-    var gapY = Math.max(6, Math.round(anchor.sceneHeight * 0.01)) / anchor.sceneHeight * 100;
-    var left = clampNumber(anchor.x + anchor.radiusX + gapX - cardHalfHeightOffsetX, 1.5, 98.5 - cardsWidth);
-    var centerY = clampNumber(anchor.y + (anchor.radiusY * 0.42) + gapY + cardHalfHeightOffsetY, cardsHalfHeight + 1.5, 100);
-    if (els.heroCards.classList && typeof els.heroCards.classList.add === 'function') els.heroCards.classList.add('poker-hero-cards--docked');
-    els.heroCards.style.left = formatScenePercent(left);
-    els.heroCards.style.top = formatScenePercent(centerY);
-    els.heroCards.style.bottom = 'auto';
+    if (sameDeal) return;
+    els.heroCards.innerHTML = '';
+    for (var cardIndex = 0; cardIndex < 2; cardIndex++) els.heroCards.appendChild(createCard(cards[cardIndex] || null));
+  }
+
+  function positionHeroCards(){
+    if (!els.heroCards || !els.scene) return;
+    // The persistent deal belongs to the scene, never a disposable seat HUD.
+    if (els.heroCards.parentNode !== els.scene) els.scene.appendChild(els.heroCards);
+    var config = seatSceneGeometry[seatSceneOrientation].seats[3];
+    placeSeatNode(els.heroCards, { origin: [0, 0] }, config.cards, 110, 80);
   }
 
   function renderDealerChip(){
     if (!els.dealerChip) return;
-    var targetSeatNo = Number.isInteger(state.dealerSeat) ? state.dealerSeat : null;
-    if (!Number.isInteger(targetSeatNo)){
-      els.dealerChip.hidden = true;
-      return;
-    }
-    var heroSeat = deriveCurrentSeat();
-    var heroHasDealerChip = !!(heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === targetSeatNo);
-    var scene = els.dealerChip.parentElement || null;
-    var avatarEl = renderedSeatAvatars[targetSeatNo] || null;
-    if (scene && avatarEl && typeof scene.getBoundingClientRect === 'function' && typeof avatarEl.getBoundingClientRect === 'function'){
-      var sceneRect = scene.getBoundingClientRect();
-      var avatarRect = avatarEl.getBoundingClientRect();
-      var chipRect = els.dealerChip.getBoundingClientRect();
-      if (sceneRect.width > 0 && sceneRect.height > 0 && avatarRect.width > 0 && avatarRect.height > 0){
-        var avatarCenterX = (avatarRect.left - sceneRect.left) + avatarRect.width / 2;
-        var avatarCenterY = (avatarRect.top - sceneRect.top) + avatarRect.height / 2;
-        var sceneCenterX = sceneRect.width / 2;
-        var sceneCenterY = sceneRect.height / 2;
-        var avatarRadius = Math.min(avatarRect.width, avatarRect.height) / 2;
-        var chipRadius = Math.min(chipRect.width || 34, chipRect.height || 34) / 2;
-        if (heroHasDealerChip){
-          els.dealerChip.hidden = false;
-          els.dealerChip.style.left = Math.round(avatarCenterX + avatarRadius + chipRadius - 2) + 'px';
-          els.dealerChip.style.top = Math.round(avatarCenterY) + 'px';
-          return;
-        }
-        var deltaX = sceneCenterX - avatarCenterX;
-        var deltaY = sceneCenterY - avatarCenterY;
-        var magnitude = Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
-        if (magnitude > 0){
-          var unitX = deltaX / magnitude;
-          var unitY = deltaY / magnitude;
-          var contactDistance = avatarRadius + chipRadius - 2;
-          var chipLeftPx = avatarCenterX + (unitX * contactDistance);
-          var chipTopPx = avatarCenterY + (unitY * contactDistance);
-          els.dealerChip.hidden = false;
-          els.dealerChip.style.left = Math.round(chipLeftPx) + 'px';
-          els.dealerChip.style.top = Math.round(chipTopPx) + 'px';
-          return;
-        }
-      }
-    }
-    var anchor = renderedSeatAnchors[targetSeatNo] || null;
-    var slotIndex = Number.isInteger(renderedSeatSlots[targetSeatNo]) ? renderedSeatSlots[targetSeatNo] : null;
-    if (!anchor || slotIndex == null){
-      var offset = getSeatNumberingOffset();
-      var index = Math.max(0, targetSeatNo - offset);
-      slotIndex = rotateSeatIndex(index, Math.max(state.maxSeats, 1));
-      anchor = getSeatAnchor(slotIndex, Math.max(state.maxSeats, 1));
-      if (slotIndex === 1 && state.maxSeats >= 6) anchor = { x: 80, y: 29 };
-      else if (slotIndex === 2 && state.maxSeats >= 6) anchor = { x: 80, y: 58 };
-      else if (slotIndex === 3 && state.maxSeats >= 4) anchor = { x: 52, y: 82 };
-      var heroSeat = deriveCurrentSeat();
-      if (heroSeat && Number.isInteger(heroSeat.seatNo) && heroSeat.seatNo === targetSeatNo && state.maxSeats >= 4){
-        anchor = { x: 34, y: 91 };
-        slotIndex = 3;
-      }
-    }
-    var chipOffset = { x: 0, y: 7 };
-    if (heroHasDealerChip) chipOffset = { x: 20, y: 0 };
-    else if (slotIndex === 0) chipOffset = { x: 8, y: 7 };
-    else if (slotIndex === 1) chipOffset = { x: -8, y: 8 };
-    else if (slotIndex === 2) chipOffset = { x: -8, y: 7 };
-    else if (slotIndex === 3) chipOffset = { x: -32, y: 3 };
-    else if (slotIndex === 4) chipOffset = { x: 8, y: 7 };
-    else if (slotIndex === 5) chipOffset = { x: 8, y: 8 };
-    els.dealerChip.hidden = false;
-    els.dealerChip.style.left = (anchor.x + chipOffset.x) + '%';
-    els.dealerChip.style.top = (anchor.y + chipOffset.y) + '%';
+    // Dealer ownership is independent of disposable/missing seat HUD projection.
+    if (els.dealerChip.parentNode !== els.scene) els.scene.appendChild(els.dealerChip);
+    var seatIndex = Number.isInteger(state.dealerSeat) ? state.dealerSeat - getSeatNumberingOffset() : -1;
+    var valid = seatIndex >= 0 && seatIndex < state.maxSeats;
+    els.dealerChip.hidden = !valid;
+    if (!valid) return;
+    var slot = seatPhysicalSlot(rotateSeatIndex(seatIndex,state.maxSeats),state.maxSeats);
+    var point = seatSceneGeometry[seatSceneOrientation].seats[slot].dealer;
+    placeSeatNode(els.dealerChip,{origin:[0,0]},point,20,20);
   }
 
   function isWsReady(){
@@ -4746,7 +4704,7 @@
 
   function isPlayerSittingOut(){
     var status = currentPlayerStatus();
-    return status === 'OUT_OF_CHIPS' || status === 'WAITING_NEXT_HAND';
+    return status === 'OUT_OF_CHIPS';
   }
 
   function refreshRebuyBalance(){
@@ -4769,7 +4727,7 @@
     var playerState = state.playerState || null;
     var outOfChips = !!playerState && playerState.status === 'OUT_OF_CHIPS';
     var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
-    var show = ((outOfChips && playerState.canRebuy === true) || waiting) && !rebuyPanelDismissed;
+    var show = ((outOfChips && playerState.canRebuy === true) || (waiting && !!rebuyOperation)) && !rebuyPanelDismissed;
     if (els.rebuyBtn) els.rebuyBtn.hidden = waiting;
     els.rebuyPanel.hidden = !show;
     if (!show) return;
@@ -4808,11 +4766,76 @@
     return statusText;
   }
 
+  function sumPokerTableStacks(tables){
+    if (!Array.isArray(tables)) return null;
+    var total = 0;
+    for (var i = 0; i < tables.length; i++){
+      var table = tables[i];
+      if (!table || !table.tableId) return null;
+      if (!Number.isSafeInteger(table.stack) || table.stack < 0) return null;
+      total += table.stack;
+      if (!Number.isSafeInteger(total)) return null;
+    }
+    return total;
+  }
+
+  function accountHudContext(){
+    return !isGuestMode && state.mode === 'live' && isSignedIn() ? state.currentUserId + ':' + state.tableId : null;
+  }
+
+  function syncAccountHud(){
+    if (!els.accountHud) return;
+    var identity = accountHudContext();
+    els.accountHud.hidden = !identity;
+    if (identity !== accountHudIdentity){
+      accountHudIdentity = identity;
+      accountHudGeneration++;
+      lastRenderedWallet = null;
+      els.accountHud.classList.remove('poker-account-hud--wallet-change');
+      els.accountHud.textContent = '';
+      if (identity) refreshAccountHud();
+    }
+  }
+
+  async function refreshAccountHud(){
+    syncAccountHud();
+    var identity = accountHudContext();
+    if (!identity || !els.accountHud) return;
+    var generation = ++accountHudGeneration;
+    els.accountHud.classList.remove('poker-account-hud--wallet-change');
+    els.accountHud.textContent = 'Wallet: … CH';
+    els.accountHud.setAttribute('aria-busy', 'true');
+    var wallet = null;
+    var poker = null;
+    try {
+      var client = window.ChipsClient;
+      var results = await Promise.allSettled([client.fetchBalance(), client.fetchPokerProjection()]);
+      var balance = results[0].status === 'fulfilled' && results[0].value;
+      if (balance && Number.isSafeInteger(balance.balance) && balance.balance >= 0) wallet = balance.balance;
+      if (results[1].status === 'fulfilled' && results[1].value && results[1].value.inPoker === true) poker = sumPokerTableStacks(results[1].value.tables);
+    } catch (_err){}
+    if (generation !== accountHudGeneration || identity !== accountHudContext()) return;
+    els.accountHud.textContent = 'Wallet: ' + (wallet == null ? '—' : formatCompactAmount(wallet)) + ' CH' + (poker > 0 ? ' · Poker: ' + formatCompactAmount(poker) + ' CH' : '');
+    els.accountHud.title = wallet == null ? 'CH account balance unavailable' : 'CH account balance';
+    els.accountHud.setAttribute('aria-label', 'CH account: ' + els.accountHud.textContent);
+    els.accountHud.setAttribute('aria-busy', 'false');
+    if (wallet != null){
+      if (lastRenderedWallet != null && wallet !== lastRenderedWallet && !prefersReducedMotion()){
+        els.accountHud.classList.add('poker-account-hud--wallet-change');
+      }
+      lastRenderedWallet = wallet;
+    }
+  }
+
   function renderInfoPanel(){
     if (els.liveStatus) els.liveStatus.textContent = resolveLiveBannerStatus();
+    if (els.liveNotice){
+      els.liveNotice.hidden = !!state.errorText || !(state.mode === 'live' && (!isWsReady() || state.reconnectGate));
+      els.liveNotice.textContent = isGuestMode ? 'Connecting…' : isSignedIn() ? state.hasAppliedAuthoritativeSnapshot ? 'Reconnecting…' : 'Connecting…' : 'Sign in to join';
+    }
     if (els.tableMeta) {
       var parts = [];
-      if (state.tableId) parts.push('Table ' + shortId(state.tableId));
+      if (state.tableId) parts.push('Table ' + state.tableId);
       parts.push(state.phase || state.tableStatus || 'LOBBY');
       parts.push('Pot ' + formatNumber(state.potTotal || 0));
       els.tableMeta.textContent = parts.join(' • ');
@@ -4825,16 +4848,16 @@
       if (currentPlayerStatus() === 'OUT_OF_CHIPS'){
         els.turnText.textContent = 'Out of chips · Sitting out';
       } else if (currentPlayerStatus() === 'WAITING_NEXT_HAND'){
-        els.turnText.textContent = 'Funded · Joining next hand';
+        els.turnText.textContent = 'Joining next hand';
       } else if (isUsersTurn()){
         els.turnText.textContent = 'Your turn.';
       } else if (state.turnUserId){
-        els.turnText.textContent = 'Acting: ' + shortId(state.turnUserId);
+        els.turnText.textContent = 'Acting: ' + state.turnUserId;
       } else {
         els.turnText.textContent = 'Waiting for action';
       }
     }
-    if (els.xpBadge) els.xpBadge.hidden = !!isGuestMode;
+    syncAccountHud();
     renderRebuyPanel();
   }
 
@@ -5030,7 +5053,7 @@
     var stackAmount = resolveStack(state.currentUserId);
     var amountBounds = resolveAmountBounds(amountAction, stackAmount);
     var playerSittingOut = isPlayerSittingOut();
-    var preactionMode = !!(signedIn && seated && liveReady && activeHand && !usersTurn && !isCurrentUserFolded() && !playerSittingOut);
+    var preactionMode = !!(signedIn && seated && liveReady && activeHand && !usersTurn && !isCurrentUserFolded() && !playerSittingOut && currentPlayerStatus() !== 'WAITING_NEXT_HAND');
     var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
     var preactionPrimary = resolvePrimaryAction(projectedAllowed);
     var preactionAmountAction = resolveAmountAction(projectedAllowed);
@@ -5233,7 +5256,43 @@
     });
   }
 
+  // Ephemeral public room copy, never gameplay state or an engineering log.
+  var roomMessageHandId = null;
+  var roomMessageTableId = null;
+  var roomMessageUsers = [];
+  var roomMessageTimer = null;
+
+  function renderRoomMessages(){
+    if (!els.roomEvent || !els.roomStatus) return;
+    var seats = state.seats.filter(function(seat){ return !!seat.userId; });
+    var users = seats.map(function(seat){ return seat.userId; });
+    var sameTable = roomMessageTableId === state.tableId;
+    var joined = sameTable && roomMessageUsers.length ? seats.find(function(seat){ return roomMessageUsers.indexOf(seat.userId) < 0; }) : null;
+    var newHand = state.handId && state.handId !== roomMessageHandId;
+    var message = joined ? tf('pokerRoomPlayerJoined', { name: joined.displayName || t('pokerRoomPlayer', 'A player') }, '{name} joined the table')
+      : newHand ? t('pokerRoomNewHand', 'New hand · Good luck') : null;
+    if (!sameTable){
+      if (roomMessageTimer) window.clearTimeout(roomMessageTimer);
+      els.roomEvent.hidden = true;
+    }
+    roomMessageTableId = state.tableId;
+    roomMessageUsers = users;
+    roomMessageHandId = state.handId;
+    if (message){
+      if (roomMessageTimer) window.clearTimeout(roomMessageTimer);
+      els.roomEvent.textContent = message;
+      els.roomEvent.hidden = false;
+      roomMessageTimer = window.setTimeout(function(){ els.roomEvent.hidden = true; roomMessageTimer = null; }, 5000);
+    }
+    var playerStatus = String(state.playerState && state.playerState.status || '').toUpperCase();
+    els.roomStatus.textContent = seats.length < 2 ? t('pokerRoomWaiting', 'Waiting for more players')
+      : playerStatus === 'WAITING_NEXT_HAND' ? t('pokerRoomReserved', 'Seat reserved · Joining next hand')
+      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Next hand shortly')
+      : isUsersTurn() ? t('pokerRoomYourTurn', 'Your turn') : t('pokerRoomHandInProgress', 'Hand in progress');
+  }
+
   function render(){
+    fitTableScene();
     if (els.celebrationPreview) els.celebrationPreview.hidden = !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate;
     if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
     renderCommunityCards();
@@ -5241,6 +5300,7 @@
     renderAutoRebuyFeedback();
     renderHeroCards();
     positionHeroCards();
+    logHeroCardPresentation(!deriveCurrentSeat() ? 'seat_absent' : !renderedSeatHud[deriveCurrentSeat().seatNo] ? 'hud_absent' : state.heroCards.length !== 2 ? 'deal_absent' : 'active_deal');
     renderSeatChips();
     renderPotChips();
     renderSettlementSummary();
@@ -5249,8 +5309,10 @@
     renderControls();
     renderReactionHistory();
     renderClosedTableNotice();
+    renderRoomMessages();
     positionCelebration();
     refreshCelebrationPreview();
+    fitTableScene();
   }
 
   function setError(message){
@@ -5642,7 +5704,7 @@
   }
 
   function normalizeLeaveDestination(destination){
-    return destination === '/xp.html' ? '/xp.html' : '/poker/';
+    return '/poker/';
   }
 
   function navigateToDestination(destination){
@@ -5776,7 +5838,6 @@
       });
     }
     bindDestinationLink(els.lobbyLink, '/poker/');
-    bindDestinationLink(els.xpBadge, '/xp.html');
     function toggleSocialSettings(trigger){
       var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
       closeMenu();
@@ -5965,9 +6026,16 @@
   function selectElements(){
     els.screen = document.getElementById('pokerTableScreen');
     if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
+    els.sceneViewport = document.getElementById('pokerSceneViewport');
+    els.diagnostics = document.getElementById('pokerDiagnostics');
+    els.liveTopbar = document.querySelector('.poker-live-topbar');
+    els.topRightRail = document.querySelector('.poker-top-right-rail');
+    els.roomEvent = document.getElementById('pokerRoomEvent');
+    els.roomStatus = document.getElementById('pokerRoomStatus');
+    els.liveNotice = document.getElementById('pokerLiveNotice');
     if (typeof document.querySelector === 'function') els.centerLayer = document.querySelector('.poker-center-layer');
     if (!els.scene) els.scene = els.screen;
-    els.xpBadge = document.getElementById('xpBadge');
+    els.accountHud = document.getElementById('pokerAccountHud');
     els.autoRebuyBalanceToast = document.getElementById('pokerV2AutoRebuyBalanceToast');
     els.bootSplash = document.getElementById('pokerBootSplash');
     els.menuToggle = document.getElementById('pokerMenuToggle');
@@ -5991,7 +6059,9 @@
     els.autoRebuyPreferenceLabel = document.querySelector ? document.querySelector('#pokerAutoRebuyPreferenceWrap label span') : null;
     els.autoRebuyPreferenceHint = document.getElementById('pokerAutoRebuyPreferenceHint');
     els.seatLayer = document.getElementById('pokerSeatLayer');
+    els.seatNameLayer = document.getElementById('pokerSeatNameLayer');
     els.seatChipLayer = document.getElementById('pokerSeatChipLayer');
+    els.seatTransientLayer = document.getElementById('pokerSeatTransientLayer');
     els.chipFxLayer = document.getElementById('pokerChipFxLayer');
     els.reactionLayer = document.getElementById('pokerReactionLayer');
     els.potPill = document.getElementById('pokerPotPill');
@@ -6134,6 +6204,8 @@
   }
 
   function applySignedOutState(){
+    lastKnownCurrentSeatNo = null;
+    heroLifecycleTransition = 'signed_out';
     syncSocialPreferencesIdentity(null);
     clearRebuyOperation();
     hideAutoRebuyFeedback();
@@ -6146,6 +6218,9 @@
   }
 
   function applyAuthenticatedPendingState(user, options){
+    heroLifecycleTransition = user && String(user.id || '') === state.currentUserId ? 'auth_pending_same_user' : 'auth_pending_identity';
+    var preservingState = !!(user && state.mode === 'live' && state.hasAppliedAuthoritativeSnapshot
+      && String(user.id || '') === state.currentUserId && state.tableId === tableId);
     if (!user || !state.currentUserId || String(user.id || '') !== String(state.currentUserId)) clearRebuyOperation();
     syncReactionHistoryContext(tableId, user && user.id ? String(user.id) : null);
     syncSocialPreferencesIdentity(user && user.id ? String(user.id) : null);
@@ -6153,7 +6228,10 @@
     resetQueuedPreactionState();
     isGuestMode = false;
     currentGuestSession = null;
-    state = createEmptyLiveState(tableId, user && user.id ? String(user.id) : null);
+    if (!preservingState){
+      lastKnownCurrentSeatNo = null;
+      state = createEmptyLiveState(tableId, user && user.id ? String(user.id) : null);
+    } else state.reconnectGate = true;
     state.statusText = LIVE_STATUS_COPY.connecting;
     render();
     if (!(options && options.keepBootSplash === true)) markBootReady();
@@ -6269,6 +6347,8 @@
         return;
       }
       var previousVisual = captureVisualSnapshot();
+      var previousAccountSeat = deriveCurrentSeat();
+      var previousAccountStack = previousAccountSeat ? resolveStack(state.currentUserId) : null;
       mergeSnapshot(payload, frame);
       if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
       reconcileRebuyOperationFromSnapshot(authoritativeSnapshot);
@@ -6302,6 +6382,10 @@
       if (!openedRecoveryGate) reconcileJoinOperationFromSnapshot(authoritativeSnapshot);
       maybeExecuteQueuedPreaction();
       render();
+      var currentAccountSeat = deriveCurrentSeat();
+      var currentAccountStack = currentAccountSeat ? resolveStack(state.currentUserId) : null;
+      if ((previousAccountSeat && previousAccountSeat.seatNo) !== (currentAccountSeat && currentAccountSeat.seatNo)
+        || previousAccountStack !== currentAccountStack) refreshAccountHud();
       var nextVisual = captureVisualSnapshot();
       animateChipDiff(previousVisual, nextVisual, frame);
       autoJoinSeat();
@@ -6326,6 +6410,7 @@
           resetWinStreakSession();
           if (els.celebrationPreview) els.celebrationPreview.hidden = true;
         }
+        heroLifecycleTransition = status;
         if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
           state.wsReady = false;
           state.statusText = LIVE_STATUS_COPY.connecting;
@@ -6455,6 +6540,7 @@
     var authApi = getAuthApi();
     if (!authApi || typeof authApi.onAuthChange !== 'function') return;
     authUnsubscribe = authApi.onAuthChange(function(_event, user, session){
+      heroLifecycleTransition = _event || 'auth_change';
       var lifecycleGeneration = ++authLifecycleGeneration;
       var tokenPromise = typeof session === 'undefined'
         ? getAccessToken()
@@ -6518,6 +6604,9 @@
 
   function init(){
     selectElements();
+    if (els.sceneViewport && typeof window.ResizeObserver === 'function'){
+      new window.ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
+    }
     suggestedSeatNoParam = readSeatParam();
     shouldAutoJoin = readAutoJoinParam();
     bindMenu();
@@ -6534,6 +6623,10 @@
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches) clearCelebration(); });
     renderSocialPreferences();
+    document.addEventListener('chips:tx-complete', refreshAccountHud);
+    if (els.accountHud) els.accountHud.addEventListener('animationend', function(event){
+      if (event.target === els.accountHud) els.accountHud.classList.remove('poker-account-hud--wallet-change');
+    });
     document.addEventListener('langchange', function(){ buildReactionMenu(); renderSocialPreferences(); render(); });
     var guestSessionCandidate = readGuestMode() ? readGuestSession() : null;
     if (!tableId){
