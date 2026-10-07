@@ -32,7 +32,7 @@ Both orientations preserve felt/normal seat UI < static chips < player names < c
 
 ## Portrait room event lines
 
-Portrait status remains the same viewport-owned persistent node; no box/font/anchor/text-source changes. Paint its existing gradient only below a4-visible-px inset (7px at portrait max-height:820px). Bound Hero-card shadows to inset and Hero-avatar paint to the existing4px halo, without moving/resizing HUD. Short-portrait Hero-card lift is8 scene px, below the measured safe upper limit (~8.9px at320×640 with6px glyph clearance); tall portrait card anchor/rotation/size and landscape are unchanged. Minimum6px clearance is measured from complete card visual footprint to painted status background; both upper and lower visual budgets matter, not card border boxes alone. No dynamic layout/collision engine, new state, WS or gameplay change.
+Portrait bottom status is text-only with fully transparent background; preserve the same viewport-owned node, box, width/font/bottom/text source and lifecycle. Restore pre-bounded-footprint Hero card outer shadow, avatar paint (no added clipping) and14-scene-px lift only at portrait max-height:820px. No card size/rotation/horizontal-center, seat geometry, center event, action bar, names or landscape changes. Transparent status paint replaces the rejected bounded-shadow/gradient-inset approach; no visual-gap workaround, dynamic layout, new state or backend/WS change.
 
 - [x] G003 Apply owner-approved short-portrait Hero-card lift 5→9 scene px only; retain bottom:0 and all other geometry. Verify exact-SHA Preview clipping, overlap and no-scroll acceptance.
 
@@ -42,3 +42,5 @@ Portrait status remains the same viewport-owned persistent node; no box/font/anc
 
 - [x] G006 Measure card-shadow and upper-HUD budgets; supersede unsafe14px lift with bounded portrait paint footprints and8px short-portrait lift. Preview acceptance includes painted background, name/avatar clearance, no scroll and unchanged landscape.
 - [ ] G007 Physical owner smoke of bounded-footprint correction; authenticated Stage CH gate remains pending.
+
+- [x] G008 Restore original card/avatar paint and14px short-portrait lift; make only portrait bottom-status background fully transparent. Bounded-footprint iteration rejected by physical owner smoke.
