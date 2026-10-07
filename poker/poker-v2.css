@@ -561,6 +561,6 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 
 /* Keep the status background inside short portrait viewports; normal tall portrait stays unchanged. */
 @media (orientation:portrait) and (max-height:820px){
-.poker-room-status{bottom:calc(-4px / var(--poker-scene-scale,1));}
+.poker-room-status{bottom:0;}
 .poker-scene[data-orientation="portrait"] .poker-hero-cards{transform:translate(-50%,calc(-50% - 5px));}
 }
