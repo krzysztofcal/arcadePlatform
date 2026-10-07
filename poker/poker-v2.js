@@ -3941,6 +3941,11 @@
       var accountParent = seatSceneOrientation === 'landscape' ? els.topRightRail : els.liveTopbar;
       if (els.accountHud.parentNode !== accountParent) accountParent.insertBefore(els.accountHud, accountParent.firstChild);
     }
+    // Portrait status belongs to the visible viewport, not the transformed scene.
+    if (els.roomStatus){
+      var statusParent = seatSceneOrientation === 'portrait' ? els.sceneViewport : els.scene;
+      if (els.roomStatus.parentNode !== statusParent) statusParent.appendChild(els.roomStatus);
+    }
     // Reserve a table-local band for northern player transients, below chrome.
     var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
     var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
