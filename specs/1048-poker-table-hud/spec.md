@@ -51,3 +51,5 @@ Both orientations preserve felt/normal seat UI < static chips < player names < c
 ## Portrait room event lines
 
 Portrait bottom status is text-only with fully transparent background; preserve the same viewport-owned node, box, width/font/bottom/text source and lifecycle. Restore pre-bounded-footprint Hero card outer shadow, avatar paint (no added clipping) and14-scene-px lift only at portrait max-height:820px. No card size/rotation/horizontal-center, seat geometry, center event, action bar, names or landscape changes. Transparent status paint replaces the rejected bounded-shadow/gradient-inset approach; no visual-gap workaround, dynamic layout, new state or backend/WS change.
+
+Portrait bottom status is docked left:0 and bottom:0 to pokerSceneViewport (inside existing page safe-area/padding), transparent/text-only. Preserve its existing safe right boundary before actions, typography and runtime text source. Hero cards including shadow/size/rotation/14px short-portrait lift, center log, names, action rail and landscape remain unchanged.

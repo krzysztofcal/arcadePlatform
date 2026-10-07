@@ -44,3 +44,5 @@ Portrait bottom status is text-only with fully transparent background; preserve 
 - [ ] G007 Physical owner smoke of bounded-footprint correction; authenticated Stage CH gate remains pending.
 
 - [x] G008 Restore original card/avatar paint and14px short-portrait lift; make only portrait bottom-status background fully transparent. Bounded-footprint iteration rejected by physical owner smoke.
+
+- [x] G009 Dock portrait bottom-status left edge to pokerSceneViewport with left:0; keep bottom:0 and safe right boundary. No new UI/glue tests; exact Preview checks required.
