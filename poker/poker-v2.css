@@ -563,3 +563,37 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 @media (orientation:portrait) and (max-height:820px){
 .poker-scene[data-orientation="portrait"] .poker-hero-cards{transform:translate(-50%,calc(-50% - 14px));}
 }
+
+/* Card presentation: replaceable back treatment, cosmetic scene-owned motion. */
+.poker-card--best-five{outline:2px solid #8ee9e5;outline-offset:1px;box-shadow:0 7px 14px #0005,0 0 9px #75e4df99;}
+.poker-card--back{background:repeating-linear-gradient(45deg,#182637 0 3px,#243b4c 3px 4px);border-color:#d4bd80;}
+.poker-card--back::before{border-color:#e8d6a4;box-shadow:inset 0 0 0 1px #152131;}
+.poker-seat-cards{gap:0;}
+.poker-seat-cards .poker-card{flex:0 0 21px;width:21px;height:29px;line-height:1;}
+.poker-seat-cards .poker-card:first-child{transform:rotate(-8deg);}
+.poker-seat-cards .poker-card:last-child{margin-left:-6px;transform:rotate(8deg);}
+.poker-card-fx-layer{position:absolute;inset:0;z-index:13;pointer-events:none;overflow:visible;}
+.poker-card-fx{position:absolute;display:flex;gap:0;transform:translate(-50%,-50%);pointer-events:none;}
+.poker-card-fx .poker-card,.poker-card-flip{flex:0 0 21px;width:21px;height:29px;border-radius:4px;font-size:.79rem;line-height:1;}
+.poker-card-fx .poker-card small{font-size:.42rem;margin-top:1px;}
+.poker-card-fx .poker-card--back::before{inset:3px;border-radius:2px;}
+.poker-card-fx > :first-child{rotate:-8deg;}
+.poker-card-fx > :last-child{rotate:8deg;}
+.poker-card-fx > :nth-child(2){margin-left:-6px;}
+.poker-card-fx--hero .poker-card{flex-basis:46px;width:46px;height:63px;font-size:1.2rem;}
+.poker-card-fx--hero .poker-card small{font-size:.8rem;}
+.poker-card-fx--hero{gap:8px;}
+.poker-card-fx--hero > :nth-child(2){margin-left:0;}
+.poker-card-fx--deal{animation:poker-card-deal 280ms ease-out both;}
+.poker-card-fx--muck{animation:poker-card-muck 800ms ease-out both;}
+.poker-card-flip{position:relative;perspective:240px;}
+.poker-card-flip .poker-card{position:absolute;inset:0;backface-visibility:hidden;animation:poker-card-flip-back 420ms ease-in-out both;}
+.poker-card-flip .poker-card:last-child{animation-name:poker-card-flip-face;}
+@keyframes poker-card-deal{from{opacity:0;transform:translate(-50%,-50%) rotate(-18deg) scale(.75);}15%{opacity:1;}to{opacity:0;transform:translate(calc(-50% + var(--card-dx)),calc(-50% + var(--card-dy))) rotate(0deg) scale(1);}}
+@keyframes poker-card-muck{from{opacity:1;transform:translate(-50%,-50%);}to{opacity:0;transform:translate(calc(-50% + var(--card-dx)),calc(-50% + var(--card-dy))) rotate(-16deg) scale(.7);}}
+@keyframes poker-card-flip-back{from{transform:rotateY(0deg);}to{transform:rotateY(180deg);}}
+@keyframes poker-card-flip-face{from{transform:rotateY(-180deg);}to{transform:rotateY(0deg);}}
+@media (prefers-reduced-motion:reduce){
+.poker-card-fx-layer{display:none;}
+.poker-card-fx,.poker-card-flip .poker-card{animation:none;}
+}
