@@ -53,3 +53,5 @@ Only the short-portrait status bottom changes from negative4px/scene-scale to0. 
 ## Owner-approved short-portrait separation
 
 In the existing portrait max-height:820px breakpoint only, lift Hero cards by 9 scene px instead of 5. Keep room status bottom:0, its width, actions, center log, names, tall portrait and landscape unchanged. Exact-SHA Deploy Preview verification checks complete parent containment, no status/card/action overlap and no page scroll at 320×640 and 390×760, with 390×844 and landscape sanity. Breaking impact: scoped visual separation only; no gameplay or runtime protocol change.
+
+Verification: browser runtime 0645b6333f52b88c1ed3a2879be55c2477945011 served by Deploy Preview #1049. Controlled real-browser smoke PASS at 320×640, 390×760, 390×844 and 844×390: all three normal status messages fully inside clipping ancestors, zero card/action overlap, zero page scroll, reaction/chat clickable. Focused tests 127/127 PASS; syntax, check:all, ci:guards, CSP and diff checks PASS. No tests added. Authenticated Stage CH and final owner review remain pending; PR stays Draft.
