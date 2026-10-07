@@ -3998,9 +3998,7 @@
     });
     // All player-owned transient content shares one column above the avatar.
     var isTopSeat = slot === 0;
-    var presentationTop = isTopSeat
-      ? (portrait ? Math.max(6, config.avatar[1] - hud.avatarSize / 2) : 4)
-      : (config.avatar[1] - hud.avatarSize / 2 - 6);
+    var presentationTop = config.avatar[1] - hud.avatarSize / 2 - (isTopSeat ? 4 : 6);
     placeSeatNode(hud.presentation,{origin:[0,0]},[config.avatar[0],presentationTop],100);
     hud.presentation.classList.add('poker-seat-hud-transient');
     if (isTopSeat) hud.presentation.classList.add('poker-seat-hud-transient--top');
