@@ -541,7 +541,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 @media (orientation:portrait){
 .poker-room-event{display:block;position:absolute;left:110px;top:386px;width:140px;min-height:18px;padding:2px 6px;border-radius:18px;background:#07171266;color:#f1e3bd;font-size:11px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;pointer-events:none;}
 .poker-room-event[hidden]{display:none;}
-.poker-room-status{display:block;position:absolute;left:8px;bottom:4px;width:94px;height:18px;border-radius:12px;background:linear-gradient(90deg,transparent,#050c0bd9,transparent);color:#d3c6a9;font-size:10px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;pointer-events:none;}
+.poker-room-status{display:block;position:absolute;left:4px;bottom:4px;width:90px;height:18px;border-radius:12px;background:linear-gradient(90deg,transparent,#050c0bd9,transparent);color:#d3c6a9;font-size:10px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;pointer-events:none;}
 .poker-table-screen{background:linear-gradient(180deg,#050a0822,#02090677 55%,#020805aa),url('/poker/assets/scene/casino-room-v2.webp') center/cover no-repeat #07100b;}
 .poker-table-screen::before{opacity:.18;}
 .poker-scene[data-orientation="portrait"] .poker-table-shell{inset:84px 12px 70px;border-radius:46% 46% 43% 43% / 17% 17% 22% 22%;transform:perspective(900px) rotateX(12deg) rotateZ(-3deg);background:linear-gradient(180deg,#725039,#2c1c16 22%,#170e0b 70%,#6a442a);box-shadow:0 18px 32px #000b,inset 0 2px 2px #f8ddacaa,inset 0 -5px 8px #000c;}
