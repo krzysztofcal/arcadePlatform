@@ -4792,7 +4792,7 @@
     if (!identity || !els.accountHud) return;
     var generation = ++accountHudGeneration;
     els.accountHud.classList.remove('poker-account-hud--wallet-change');
-    els.accountHud.textContent = 'Wallet: … CH · Poker: … CH';
+    els.accountHud.textContent = 'Wallet: … CH';
     els.accountHud.setAttribute('aria-busy', 'true');
     var wallet = null;
     var poker = null;
@@ -4801,11 +4801,11 @@
       var results = await Promise.allSettled([client.fetchBalance(), client.fetchPokerProjection()]);
       var balance = results[0].status === 'fulfilled' && results[0].value;
       if (balance && Number.isSafeInteger(balance.balance) && balance.balance >= 0) wallet = balance.balance;
-      if (results[1].status === 'fulfilled') poker = sumPokerTableStacks(results[1].value && results[1].value.tables);
+      if (results[1].status === 'fulfilled' && results[1].value && results[1].value.inPoker === true) poker = sumPokerTableStacks(results[1].value.tables);
     } catch (_err){}
     if (generation !== accountHudGeneration || identity !== accountHudContext()) return;
-    els.accountHud.textContent = 'Wallet: ' + (wallet == null ? '—' : formatCompactAmount(wallet)) + ' CH · Poker: ' + (poker == null ? '—' : formatCompactAmount(poker)) + ' CH';
-    els.accountHud.title = wallet == null || poker == null ? 'CH account balance unavailable' : 'CH account balance';
+    els.accountHud.textContent = 'Wallet: ' + (wallet == null ? '—' : formatCompactAmount(wallet)) + ' CH' + (poker > 0 ? ' · Poker: ' + formatCompactAmount(poker) + ' CH' : '');
+    els.accountHud.title = wallet == null ? 'CH account balance unavailable' : 'CH account balance';
     els.accountHud.setAttribute('aria-label', 'CH account: ' + els.accountHud.textContent);
     els.accountHud.setAttribute('aria-busy', 'false');
     if (wallet != null){
