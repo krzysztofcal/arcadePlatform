@@ -5,7 +5,7 @@
 - [x] T001 Reconcile live requirements and replace rejected panel/grid layouts with one existing renderer and deterministic physical variants.
 - [x] T002 Approved premium portrait/landscape composition, perimeter equal-size avatars, fixed compact chrome, protected center, Hero best hand and lower-right controls; one viewport.
 - [x] T003 Stable three gift slots/quick-action slot and avatar-center endpoints without gift purchase behavior.
-- [x] T004 CH Wallet/Poker badge (independent Wallet, Poker only for inPoker + positive valid all-table sum; hide zero/empty/error/invalid) with existing ChipsClient, document refresh, wallet pulse, identity/generation and unavailable guards; remove table-only XP.
+- [x] T004 CH Wallet/Poker badge (independent Wallet, Poker only for inPoker + positive valid all-table sum; hide zero/empty/error/invalid) with existing ChipsClient, document + authoritative own-seat/stack transition refresh, wallet pulse, identity/generation and unavailable guards; remove table-only XP.
 - [x] T005 Authoritative Hero deal presentation across transient same-hand projections/auth/reconnect; real lifecycle clears.
 - [x] T006 Persistent keyed chip/dealer/avatar nodes, partial-frame semantics and correct new-hand/explicit transitions.
 - [x] T007 High player-transient ownership, full human/bot words, anchored shake, contextual targeted Nice hand and dedicated Hero special celebration.

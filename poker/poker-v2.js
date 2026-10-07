@@ -6335,6 +6335,8 @@
         return;
       }
       var previousVisual = captureVisualSnapshot();
+      var previousAccountSeat = deriveCurrentSeat();
+      var previousAccountStack = previousAccountSeat ? resolveStack(state.currentUserId) : null;
       mergeSnapshot(payload, frame);
       if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
       reconcileRebuyOperationFromSnapshot(authoritativeSnapshot);
@@ -6368,6 +6370,10 @@
       if (!openedRecoveryGate) reconcileJoinOperationFromSnapshot(authoritativeSnapshot);
       maybeExecuteQueuedPreaction();
       render();
+      var currentAccountSeat = deriveCurrentSeat();
+      var currentAccountStack = currentAccountSeat ? resolveStack(state.currentUserId) : null;
+      if ((previousAccountSeat && previousAccountSeat.seatNo) !== (currentAccountSeat && currentAccountSeat.seatNo)
+        || previousAccountStack !== currentAccountStack) refreshAccountHud();
       var nextVisual = captureVisualSnapshot();
       animateChipDiff(previousVisual, nextVisual, frame);
       autoJoinSeat();
