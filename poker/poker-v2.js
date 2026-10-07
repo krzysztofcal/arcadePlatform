@@ -3946,17 +3946,13 @@
       var statusParent = seatSceneOrientation === 'portrait' ? els.sceneViewport : els.scene;
       if (els.roomStatus.parentNode !== statusParent) statusParent.appendChild(els.roomStatus);
     }
-    // Reserve a table-local band for northern player transients, below chrome.
-    var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
-    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
+    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / geometry.height);
     if (!Number.isFinite(scale) || scale <= 0) return;
     if (els.screen) els.screen.style.setProperty('--poker-scene-scale', String(scale));
     els.scene.dataset.orientation = seatSceneOrientation;
     els.scene.style.width = geometry.width + 'px';
     els.scene.style.height = geometry.height + 'px';
-    var sceneTop = (els.sceneViewport.clientHeight + topSafeArea * scale) / 2;
-    if (seatSceneOrientation === 'landscape' && window.innerHeight <= 500) sceneTop = (geometry.height / 2 + topSafeArea) * scale;
-    els.scene.style.top = sceneTop + 'px';
+    els.scene.style.top = '';
     els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
   }
 
