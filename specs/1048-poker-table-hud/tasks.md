@@ -16,8 +16,8 @@
 
 - [x] C001 Confirm v1 assets have no runtime/test references; remove unused v1 assets and all feature PNG/history JSON.
 - [x] C002 Consolidate four SpecKit documents to final contract; remove dead evidence references and historical pass journals. Accepted runtime/UI unchanged.
-- [ ] C003 Fresh focused/required checks and full CI; exact cleanup-SHA Deploy Preview portrait/landscape minimal sanity.
-- [ ] C004 Final review/handoff with changed-file counts, removed bytes, checks and cleanup SHA on GitHub.
+- [x] C003 Fresh focused/required checks and full CI; exact cleanup-SHA Deploy Preview portrait/landscape minimal sanity.
+- [x] C004 Final review/handoff with changed-file counts, removed bytes, checks and cleanup SHA on GitHub.
 
 ## Remaining gates
 
