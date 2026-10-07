@@ -49,3 +49,7 @@ Breaking impact: portrait active-event layering, short-portrait status/card vert
 ## Latest bottom:0 review correction
 
 Only the short-portrait status bottom changes from negative4px/scene-scale to0. Width, action controls, center message, name metrics, landscape and the existing5-scene-px card lift are unchanged as explicitly requested. The full status background/text must be checked within parent/clipping ancestors rather than window bounds only. Controlled candidate verification finds remaining actual card overlap on320×640 and390×760 after this mandated change; do not label smoke PASS or silently increase the protected card lift. Preserve the no-overlap acceptance requirement and report the conflict on live #1048/#1049 for owner reconciliation. No extra UI tests/runtime changes. Exact deployment/check results are recorded on GitHub. Draft/not merge-ready.
+
+## Owner-approved short-portrait separation
+
+In the existing portrait max-height:820px breakpoint only, lift Hero cards by 9 scene px instead of 5. Keep room status bottom:0, its width, actions, center log, names, tall portrait and landscape unchanged. Exact-SHA Deploy Preview verification checks complete parent containment, no status/card/action overlap and no page scroll at 320×640 and 390×760, with 390×844 and landscape sanity. Breaking impact: scoped visual separation only; no gameplay or runtime protocol change.
