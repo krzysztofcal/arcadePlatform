@@ -32,10 +32,13 @@ Both orientations preserve felt/normal seat UI < static chips < player names < c
 
 ## Portrait room event lines
 
-Portrait bottom status is the same persistent roomStatus element, reparented by fitTableScene() to pokerSceneViewport; landscape retains scene ownership. bottom:0 uses the untransformed clipping viewport, with scene-equivalent typography and a safe gap before unchanged actions. Center event, names and actions are unchanged. Use short-portrait 14-scene-px Hero-card lift (minimum measured integer lift giving approximately4–6 visible px clearance at320×640/390×760); tall portrait/landscape cards remain unchanged. No negative bottom or scene-relative status compensation.
+Portrait status remains the same viewport-owned persistent node; no box/font/anchor/text-source changes. Paint its existing gradient only below a4-visible-px inset (7px at portrait max-height:820px). Bound Hero-card shadows to inset and Hero-avatar paint to the existing4px halo, without moving/resizing HUD. Short-portrait Hero-card lift is8 scene px, below the measured safe upper limit (~8.9px at320×640 with6px glyph clearance); tall portrait card anchor/rotation/size and landscape are unchanged. Minimum6px clearance is measured from complete card visual footprint to painted status background; both upper and lower visual budgets matter, not card border boxes alone. No dynamic layout/collision engine, new state, WS or gameplay change.
 
 - [x] G003 Apply owner-approved short-portrait Hero-card lift 5→9 scene px only; retain bottom:0 and all other geometry. Verify exact-SHA Preview clipping, overlap and no-scroll acceptance.
 
 - [x] G004 Move portrait status to visible scene viewport; preserve landscape and verify card-lift necessity. Narrow exact-runtime Preview verification; physical owner Android smoke remains required.
 
 - [x] G005 Increase only short-portrait Hero-card lift9→14 scene px after rotated-card bounds show13px insufficient at320×640. Preserve owner-approved status anchoring and all other presentation.
+
+- [x] G006 Measure card-shadow and upper-HUD budgets; supersede unsafe14px lift with bounded portrait paint footprints and8px short-portrait lift. Preview acceptance includes painted background, name/avatar clearance, no scroll and unchanged landscape.
+- [ ] G007 Physical owner smoke of bounded-footprint correction; authenticated Stage CH gate remains pending.
