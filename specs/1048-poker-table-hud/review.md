@@ -2,7 +2,7 @@
 
 ## Final scope and decisions
 
-Existing Poker V2 runtime with approved premium portrait/landscape presentation and six deterministic physical HUD variants. Compact CH Total/Poker chrome replaces table XP; technical text and Preview-only FX live in existing Settings Diagnostics. Gift integration provides three external received slots, one avatar-edge quick slot and avatar-center motion endpoints only; purchase behavior remains in #1047.
+Existing Poker V2 runtime with approved premium portrait/landscape presentation and six deterministic physical HUD variants. Compact CH Wallet/Poker chrome replaces table XP; technical text and Preview-only FX live in existing Settings Diagnostics. Gift integration provides three external received slots, one avatar-edge quick slot and avatar-center motion endpoints only; purchase behavior remains in #1047.
 
 Cards, dealer, keyed chip and avatar images retain persistent scene ownership; partial same-hand omission cannot erase valid known presentation. Explicit authoritative values and genuine hand/seat/identity boundaries still apply. High transient layer keeps payout/best-hand/reactions above chips; Hero special celebration remains dedicated. Full human/bot reaction words wrap between words within scene-safe bounds. Existing actions/gameplay/privacy/settlement authority remains WS.
 
@@ -23,3 +23,7 @@ Controlled Preview evidence is not authenticated Stage verification or owner acc
 ## Breaking impact
 
 Overall PR: significant visual Poker Table HUD/premium composition changes, compact opponent indicators/chrome and CH replacing table XP. No API/gameplay/WS/ledger/settlement/XP-outside-table contract change. Cleanup itself has no runtime behavior or accepted-layout change; only unused assets and historical review files leave the deployable tree.
+
+## Current account-label correction
+
+Owner contract now matches global/lobby balance semantics: Wallet: <wallet> CH · Poker: <all authoritative table stacks> CH, including current table. Removed the combined Total calculation. Existing ChipsClient reads, independent allSettled outcomes, identity/generation guards, document transaction refresh, valid-wallet pulse and guest/error/loading behavior remain. Projection failure cannot replace a successful Wallet with unavailable or a fabricated amount. Runtime diff is label strings, removal of wallet+poker addition and corresponding title availability condition only; no CSS/HTML/layout/backend/service change. Existing fundamental sumPokerTableStacks regression covers all-table semantics; no new UI test/evidence artifacts. Required check results and latest SHA are tracked on live #1048/#1049. Breaking impact: account label semantics change only, no accounting mutation. Draft and authenticated Stage gate remain.
