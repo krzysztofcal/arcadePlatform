@@ -6314,6 +6314,11 @@ test('card FX claim only live authoritative deal/fold/reveal transitions once an
   const boundary=cardPresentationFrame('cards-c',6);boundary.payload.private.holeCards=[];
   ws.onSnapshot(boundary);
   assert.deepEqual(harness.getHeroCards(),[],'new hand revokes the previous private deal');
+  assert.deepEqual(harness.getBestFive(),[],'no private deal means no highlight');
+  const closed=cardPresentationFrame('cards-d',7);closed.payload.table.status='CLOSED';
+  ws.onSnapshot(closed);
+  assert.equal(harness.elements.pokerCardFxLayer.children.length,0,'closed table clears passengers and cannot start a deal');
+  assert.equal(harness.getCardClaims().key,null,'closed table prunes claims');
 });
 
 test('card FX initial/reconnect reveals and reduced motion never replay passengers', async () => {

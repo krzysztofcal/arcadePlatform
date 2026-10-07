@@ -684,6 +684,7 @@
   }
 
   function startClosedTableRedirect(reason){
+    clearCardFx(true);
     if (closedTableRedirectRemaining === CLOSED_TABLE_REDIRECT_SECONDS && closedTableRedirectReason === reason && closedTableRedirectTimer) {
       renderClosedTableNotice();
       return;
@@ -4344,6 +4345,7 @@
   }
 
   function animateCardDiff(previous, next, frame){
+    if (isClosedTableStatus(state.tableStatus) || closedTableRedirectRemaining > 0){ clearCardFx(true); return; }
     var transitions = claimCardTransitions(previous, next, !!frame.cardFxEligible && !prefersReducedMotion());
     if (!els.scene || !els.cardFxLayer) return;
     transitions.forEach(function(transition){
