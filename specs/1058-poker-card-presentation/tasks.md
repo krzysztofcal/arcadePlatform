@@ -11,4 +11,6 @@ Follow accepted plan sequentially T001–T010; T009 covers lifecycle/privacy onl
 - [x] T007 — Authoritative fold/muck motion
 - [x] T008 — CSS/card visual quality and future-skin compatibility
 - [x] T009 — Fundamental tests only
-- [ ] T010 — Preview verification and handoff
+- [x] T010 — Preview verification and handoff
+
+T010 controlled exact Deploy Preview complete; owner visual animation acceptance remains pending and is not implied by task completion. Full CI status is tracked live on the Draft PR.
