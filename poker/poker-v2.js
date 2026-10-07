@@ -3997,8 +3997,15 @@
       if (point) placeSeatNode(hud[role],{origin:[0,0]},point,point[2],point[3]);
     });
     // All player-owned transient content shares one column above the avatar.
-    placeSeatNode(hud.presentation,{origin:[0,0]},[config.avatar[0],config.avatar[1] - hud.avatarSize / 2 - 6],100);
+    var isTopSeat = slot === 0;
+    var presentationTop = isTopSeat
+      ? (portrait ? Math.max(6, config.avatar[1] - hud.avatarSize / 2) : 4)
+      : (config.avatar[1] - hud.avatarSize / 2 - 6);
+    placeSeatNode(hud.presentation,{origin:[0,0]},[config.avatar[0],presentationTop],100);
     hud.presentation.classList.add('poker-seat-hud-transient');
+    if (isTopSeat) hud.presentation.classList.add('poker-seat-hud-transient--top');
+    else hud.presentation.classList.remove('poker-seat-hud-transient--top');
+    hud.presentation.dataset.seatVariant = article.dataset.seatVariant;
     hud.presentation.appendChild(hud.social);
     var geometry = seatSceneGeometry[seatSceneOrientation];
     var reactionWidth = Math.min(220, geometry.width - 16);
@@ -4396,6 +4403,7 @@
       transientSeat.className = 'poker-seat-transient';
       transientSeat.dataset.seatNo = article.dataset.seatNo;
       transientSeat.dataset.userId = article.dataset.userId;
+      transientSeat.dataset.seatVariant = article.dataset.seatVariant;
       if (seat && els.seatTransientLayer){
         transientSeat.appendChild(hud.presentation);
         transientSeat.appendChild(hud.quickAction);
