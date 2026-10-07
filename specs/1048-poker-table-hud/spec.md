@@ -36,7 +36,7 @@ Preview FX is available only in Table Settings > Diagnostics on PR/Deploy Previe
 
 JSP-compatible IIFE JS, one physical CSS line per selector, klog only, no dependencies/second runtime/inline script. Preserve authoritative WS/gameplay, rules, stack/ledger, settlement, bot bankroll/progression and XP outside Poker Table. Browser-only scope; no WS deploy or Production mutation.
 
-Only existing fundamental deterministic tests (private lifecycle, partial-frame/DOM ownership, reaction/settlement and account pure logic) and required repo checks. No broad UI/CSS/JSP suite or collision matrix. Real Deploy Preview and owner visual review remain required; authenticated Stage CH verification is pending. Draft, not merge-ready; do not merge.
+Only existing fundamental deterministic tests (private lifecycle, partial-frame/DOM ownership, reaction/settlement and account pure logic) and required repo checks. No broad UI/CSS/JSP suite or collision matrix. Real Deploy Preview PASS, physical owner review PASS and authenticated Stage CH verification PASS on 2026-10-07. Final housekeeping is docs-only; no product/runtime acceptance blocker remains.
 
 Final tree keeps only spec.md, plan.md, tasks.md and review.md under this feature directory. No screenshots or historical evidence JSON are shipped; detailed iteration evidence stays on live GitHub/PR and in Git history.
 
@@ -53,3 +53,8 @@ Both orientations preserve felt/normal seat UI < static chips < player names < c
 Portrait bottom status is text-only with fully transparent background; preserve the same viewport-owned node, box, width/font/bottom/text source and lifecycle. Restore pre-bounded-footprint Hero card outer shadow, avatar paint (no added clipping) and14-scene-px lift only at portrait max-height:820px. No card size/rotation/horizontal-center, seat geometry, center event, action bar, names or landscape changes. Transparent status paint replaces the rejected bounded-shadow/gradient-inset approach; no visual-gap workaround, dynamic layout, new state or backend/WS change.
 
 Portrait bottom status is docked left:0 and bottom:0 to pokerSceneViewport (inside existing page safe-area/padding), transparent/text-only. Preserve its existing safe right boundary before actions, typography and runtime text source. Hero cards including shadow/size/rotation/14px short-portrait lift, center log, names, action rail and landscape remain unchanged.
+
+
+## Final acceptance — 2026-10-07
+
+Owner physical Android review PASS on runtime `6e3784b4aad34509a91af8378bf14b995af3c334`. The owner accepts the final portrait status/card presentation without further pixel-perfect tuning. Authenticated Stage CH gate PASS: Wallet matches lobby and the observed Poker value matches the current authoritative table stack; multi-table aggregation is covered by the existing fundamental test. G007 is superseded by G008/G009. Future card-presentation polish is tracked separately in #1058 and is not part of this feature.

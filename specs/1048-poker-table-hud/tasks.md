@@ -21,8 +21,8 @@
 
 ## Remaining gates
 
-- [ ] G001 Owner final review/manual acceptance; PR stays Draft and not merge-ready.
-- [ ] G002 Actual authenticated Stage CH verification.
+- [x] G001 Owner final review/manual acceptance PASS on physical Android (2026-10-07). Owner accepts the final portrait presentation, including the remaining minimal text/card visual touch; no further pixel-perfect runtime tuning requested.
+- [x] G002 Authenticated Stage CH verification PASS (2026-10-07): owner confirmed Wallet matches lobby; Poker matched the visible authoritative current-table stack during smoke, while multi-table aggregation remains covered by the existing fundamental test.
 
 No merge or Production deploy/mutation. Historical iteration details remain on live #1048/#1049 and in Git history, not additional repository evidence files.
 
@@ -41,7 +41,7 @@ Portrait bottom status is text-only with fully transparent background; preserve 
 - [x] G005 Increase only short-portrait Hero-card lift9→14 scene px after rotated-card bounds show13px insufficient at320×640. Preserve owner-approved status anchoring and all other presentation.
 
 - [x] G006 Measure card-shadow and upper-HUD budgets; supersede unsafe14px lift with bounded portrait paint footprints and8px short-portrait lift. Preview acceptance includes painted background, name/avatar clearance, no scroll and unchanged landscape.
-- [ ] G007 Physical owner smoke of bounded-footprint correction; authenticated Stage CH gate remains pending.
+- [x] G007 SUPERSEDED: bounded-footprint correction was rejected by physical owner smoke and replaced by G008/G009; it is not an outstanding acceptance gate.
 
 - [x] G008 Restore original card/avatar paint and14px short-portrait lift; make only portrait bottom-status background fully transparent. Bounded-footprint iteration rejected by physical owner smoke.
 

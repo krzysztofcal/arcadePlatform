@@ -78,4 +78,15 @@ Breaking impact: portrait status becomes text-only; cards/avatar return to their
 
 ## Portrait status viewport-left docking
 
-Replace the sole portrait scene-scaled left offset with left:0 against the existing pokerSceneViewport owner. Keep bottom:0, transparent paint, right/action gap, text source/typography and page safe areas. Cards/shadows/14px short lift, center event, names, actions and landscape are unchanged. Breaking impact: portrait bottom text starts at the game viewport left edge; visual only. Exact Preview evidence/checks on #1048/#1049; owner smoke and authenticated Stage CH gate remain pending. No new UI tests, WS deploy or merge.
+Replace the sole portrait scene-scaled left offset with left:0 against the existing pokerSceneViewport owner. Keep bottom:0, transparent paint, right/action gap, text source/typography and page safe areas. Cards/shadows/14px short lift, center event, names, actions and landscape are unchanged. Breaking impact: portrait bottom text starts at the game viewport left edge; visual only. Exact Preview evidence/checks on #1048/#1049. Final physical owner smoke and authenticated Stage CH gate are completed in the final acceptance below. No new UI tests or WS deploy.
+
+
+## Final owner acceptance and authenticated CH gate — 2026-10-07
+
+Final runtime SHA `6e3784b4aad34509a91af8378bf14b995af3c334` is owner-accepted on a physical Android device. The owner explicitly accepts the remaining minimal visual touch between the transparent bottom status text/card paint and does not want further pixel-perfect runtime tuning. Portrait/landscape composition, card shadow, viewport-owned bottom status, reaction/chat interaction and one-viewport behavior are accepted.
+
+Authenticated Stage CH verification is PASS: owner confirmed the Wallet value matches the Poker lobby. In the same authenticated smoke the Poker value matched the visible authoritative current-table stack; all-table positive aggregation remains covered by the existing fundamental test. No local-table arithmetic replaces the authoritative projection.
+
+No runtime change is part of this final housekeeping. G007 is historical/superseded by the owner-rejected bounded-footprint iteration and the accepted G008/G009 direction. #1058 owns future card-presentation polish (best-five highlighting, opponent card backs/showdown flip, deal/fold motion) and is explicitly outside #1048/#1049.
+
+Implementation acceptance gates are complete. PR may remain Draft only until the docs-only head/checks and metadata are refreshed; no product/runtime acceptance blocker remains.
