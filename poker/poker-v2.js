@@ -4268,6 +4268,7 @@
     clearBotAvatarReactions();
     var previousAvatars = renderedSeatAvatars;
     els.seatLayer.innerHTML = '';
+    if (els.seatNameLayer) els.seatNameLayer.innerHTML = '';
     if (els.seatTransientLayer) els.seatTransientLayer.innerHTML = '';
     renderedSeatAnchors = {};
     renderedSeatAvatars = {};
@@ -4427,8 +4428,13 @@
         hud.presentation.appendChild(settlementBadge);
       }
       if (cards.children.length) hud.cards.appendChild(cards);
-      placeSeatNode(name,hud,hud.name,seatSceneOrientation === 'landscape' ? 104 : hero ? 88 : 76,seatSceneOrientation === 'landscape' ? 20 : 14);
-      hud.identity.appendChild(name);
+      var nameOwner = document.createElement('div');
+      nameOwner.className = folded ? 'poker-seat--folded' : '';
+      nameOwner.dataset.seatNo = article.dataset.seatNo;
+      nameOwner.dataset.userId = article.dataset.userId;
+      placeSeatNode(name,{origin:[0,0]},hud.name,seatSceneOrientation === 'landscape' ? 104 : hero ? 88 : 76,seatSceneOrientation === 'landscape' ? 20 : 14);
+      nameOwner.appendChild(name);
+      els.seatNameLayer.appendChild(nameOwner);
       if (seat && !visibleAction && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
         var status = document.createElement('div');
         status.className = 'poker-seat-status';
@@ -6048,6 +6054,7 @@
     els.autoRebuyPreferenceLabel = document.querySelector ? document.querySelector('#pokerAutoRebuyPreferenceWrap label span') : null;
     els.autoRebuyPreferenceHint = document.getElementById('pokerAutoRebuyPreferenceHint');
     els.seatLayer = document.getElementById('pokerSeatLayer');
+    els.seatNameLayer = document.getElementById('pokerSeatNameLayer');
     els.seatChipLayer = document.getElementById('pokerSeatChipLayer');
     els.seatTransientLayer = document.getElementById('pokerSeatTransientLayer');
     els.chipFxLayer = document.getElementById('pokerChipFxLayer');

@@ -7,6 +7,7 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 .poker-table-felt{position:absolute; inset:28px; border-radius:44% / 29%; background:radial-gradient(circle at 50% 36%, rgba(56,174,123,0.25), rgba(11,85,61,0.04) 45%), radial-gradient(circle at 50% 52%, #0a5d44, #063a2b 66%, #03261b 100%); box-shadow:inset 0 10px 26px rgba(20,8,2,0.45), inset 0 -12px 22px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,225,179,0.09);}
 .poker-table-inner-ring{position:absolute; inset:49px 43px; border-radius:42% / 29%; border:2px solid rgba(2,36,28,0.55); box-shadow:inset 0 0 28px rgba(255,255,255,0.03);}
 .poker-seat-layer{position:absolute; inset:0; z-index:3;}
+.poker-seat-name-layer{position:absolute;inset:0;z-index:5;pointer-events:none;text-align:center;}
 .poker-seat-chip-layer{position:absolute; inset:0; z-index:4; pointer-events:none;}
 .poker-chip-fx-layer{position:absolute; inset:0; z-index:12; pointer-events:none; overflow:hidden;}
 .poker-seat-transient-layer{position:absolute;inset:0;z-index:20;pointer-events:none;text-align:center;}

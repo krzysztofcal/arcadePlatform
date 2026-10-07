@@ -43,3 +43,7 @@ Final tree keeps only spec.md, plan.md, tasks.md and review.md under this featur
 ## Breaking impact
 
 Poker Table presentation changes substantially: physical HUD anchors, premium composition, compact opponent indicators/chrome and CH instead of XP. Gameplay/API/WS/backend/accounting contracts remain unchanged. Final cleanup adds no behavior change and removes only unreferenced v1 artwork and historical review artifacts.
+
+## Player-name stacking contract
+
+Both orientations preserve felt/normal seat UI < static chips < player names < chip FX/player notifications/reactions/celebrations. Only names use the scene-owned name layer (z-index 5), between static chips (4) and effects (12/20/100). Existing avatar/seat layer (3), name coordinates, sizing and folded opacity remain unchanged. No new UI/CSS/glue tests; reuse existing checks and narrow portrait/landscape Preview visual smoke.

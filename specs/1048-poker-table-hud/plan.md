@@ -21,3 +21,7 @@ Confirm no runtime/test references to casino-room-v1.svg or dealer-v1.webp, then
 Existing focused tests plus syntax, check:all, ci:guards, CSP and diff checks; full GitHub CI. Verify final changed-file list and runtime byte identity against pre-cleanup HEAD. New exact cleanup SHA must be served by Deploy Preview because deleted scene assets change deployable contents. Minimal portrait/landscape sanity only: v2 room/dealer load, whole table/no scroll and action/reaction/chat targets work. No repeated matrix or broad owner smoke. Record final outcome on GitHub; no screenshots/evidence JSON in repository.
 
 Keep Draft for final owner review and authenticated Stage CH gate. Browser-only cleanup needs no WS deployment, database mutation or Production action. Gift #1047 consumes existing external three slots, avatar-edge quick slot and avatar-center endpoints after #1048 integration.
+
+## Player-name stacking contract
+
+Both orientations preserve felt/normal seat UI < static chips < player names < chip FX/player notifications/reactions/celebrations. Only names use the scene-owned name layer (z-index 5), between static chips (4) and effects (12/20/100). Existing avatar/seat layer (3), name coordinates, sizing and folded opacity remain unchanged. No new UI/CSS/glue tests; reuse existing checks and narrow portrait/landscape Preview visual smoke.

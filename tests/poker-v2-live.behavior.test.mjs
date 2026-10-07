@@ -111,7 +111,7 @@ function createHarness(options = {}){
     'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
     'pokerReactionBubblesPreference', 'pokerReactionHistoryPreference', 'pokerBotReactionsPreference',
     'pokerAutoRebuyPreference', 'pokerAutoRebuyPreferenceWrap', 'pokerAutoRebuyPreferenceHint',
-    'pokerSeatLayer', 'pokerSeatTransientLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
+    'pokerSeatLayer', 'pokerSeatNameLayer', 'pokerSeatTransientLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
@@ -473,7 +473,8 @@ function reactionAnchors(harness){
 }
 
 function findSeatByLabel(harness, label){
-  return harness.elements.pokerSeatLayer.children.find((node) => descendants(node).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
+  const owner = harness.elements.pokerSeatNameLayer.children.find((node) => descendants(node).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
+  return harness.elements.pokerSeatLayer.children.find((node) => owner && node.dataset.seatNo === owner.dataset.seatNo && node.dataset.userId === owner.dataset.userId);
 }
 
 function transientSeat(harness, seatNode){
@@ -3885,7 +3886,7 @@ test('poker v2 renders the hero last-action badge when hero seat is resolved fro
 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   const heroBadge = descendants(transientSeat(harness, heroSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
-  const heroName = descendants(heroSeat).find((node) => node.className === 'poker-seat-name');
+  const heroName = descendants(harness.elements.pokerSeatNameLayer).find((node) => node.className === 'poker-seat-name' && node.textContent === 'You');
 
   assert.ok(heroSeat);
   assert.ok(heroBadge);
