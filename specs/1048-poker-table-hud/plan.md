@@ -25,3 +25,7 @@ Keep Draft for final owner review and authenticated Stage CH gate. Browser-only 
 ## Player-name stacking contract
 
 Both orientations preserve felt/normal seat UI < static chips < player names < chip FX/player notifications/reactions/celebrations. Only names use the scene-owned name layer (z-index 5), between static chips (4) and effects (12/20/100). Existing avatar/seat layer (3), name coordinates, sizing and folded opacity remain unchanged. No new UI/CSS/glue tests; reuse existing checks and narrow portrait/landscape Preview visual smoke.
+
+## Portrait room event lines
+
+Portrait exposes the same existing roomEvent/roomStatus sources as landscape: one short centered felt event line and one short bottom-left status line. Only portrait overlay CSS changes; table/seat/name/chip/card/action/chrome geometry and landscape styles are unchanged. Preserve existing event timer, localized player-facing messages and hidden semantics; no debug logs, new state/source, backend or protocol. Use narrow real portrait/landscape Preview smoke and existing checks, no new UI/CSS/glue tests or repository screenshot artifacts.
