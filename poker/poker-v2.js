@@ -2885,19 +2885,25 @@
     return best;
   }
 
-  function heroBestFiveIdentities(){
+  function heroMadeHandIdentities(){
     if (!Array.isArray(state.heroCards) || state.heroCards.length !== 2) return [];
     var best = getHeroBestHand();
-    return best ? best.cards.map(function(card){ var value = normalizeCard(card); return value.r + value.s; }) : [];
+    if (!best || best.category === HAND_CATEGORY.HIGH_CARD) return [];
+    // The existing evaluator orders paired/trip/quad groups before their kickers.
+    var count = 5;
+    if (best.category === HAND_CATEGORY.PAIR) count = 2;
+    else if (best.category === HAND_CATEGORY.TWO_PAIR || best.category === HAND_CATEGORY.QUADS) count = 4;
+    else if (best.category === HAND_CATEGORY.TRIPS) count = 3;
+    return best.cards.slice(0, count).map(function(card){ var value = normalizeCard(card); return value.r + value.s; });
   }
 
-  function syncBestFiveHighlights(){
-    var best = heroBestFiveIdentities();
+  function syncMadeHandHighlights(){
+    var madeHand = heroMadeHandIdentities();
     [els.communityCards, els.heroCards].forEach(function(container){
       if (!container) return;
       Array.from(container.children).forEach(function(card){
-        if (best.indexOf(card.dataset.cardIdentity) !== -1) card.classList.add('poker-card--best-five');
-        else card.classList.remove('poker-card--best-five');
+        if (madeHand.indexOf(card.dataset.cardIdentity) !== -1) card.classList.add('poker-card--made-hand');
+        else card.classList.remove('poker-card--made-hand');
       });
     });
   }
@@ -5306,13 +5312,13 @@
     if (els.foldPreactionWrap) els.foldPreactionWrap.hidden = !preactionMode;
     if (els.foldPreaction) {
       els.foldPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'fold');
-      els.foldPreaction.disabled = !liveReady || controlsLocked || !isFoldAvailable();
+      els.foldPreaction.disabled = !preactionMode || !liveReady || controlsLocked || !isFoldAvailable();
       els.foldPreaction.dataset.slot = 'fold';
     }
     if (els.primaryPreactionWrap) els.primaryPreactionWrap.hidden = !preactionMode;
     if (els.primaryPreaction) {
       els.primaryPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'primary');
-      els.primaryPreaction.disabled = !liveReady || controlsLocked || !preactionPrimary;
+      els.primaryPreaction.disabled = !preactionMode || !liveReady || controlsLocked || !preactionPrimary;
       els.primaryPreaction.dataset.slot = 'primary';
       els.primaryPreaction.dataset.action = preactionPrimary || '';
     }
@@ -5327,7 +5333,7 @@
     if (els.amountPreactionWrap) els.amountPreactionWrap.hidden = !preactionMode;
     if (els.amountPreaction) {
       els.amountPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'amount');
-      els.amountPreaction.disabled = !liveReady || controlsLocked || !preactionAmountAction;
+      els.amountPreaction.disabled = !preactionMode || !liveReady || controlsLocked || !preactionAmountAction;
       els.amountPreaction.dataset.slot = 'amount';
       els.amountPreaction.dataset.action = preactionAmountAction || '';
     }
@@ -5335,7 +5341,7 @@
     if (els.allInPreactionWrap) els.allInPreactionWrap.hidden = !preactionMode;
     if (els.allInPreaction) {
       els.allInPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'allIn');
-      els.allInPreaction.disabled = !liveReady || controlsLocked || !preactionAllInAvailable;
+      els.allInPreaction.disabled = !preactionMode || !liveReady || controlsLocked || !preactionAllInAvailable;
       els.allInPreaction.dataset.slot = 'allIn';
     }
     if (els.amountInputWrap){
@@ -5456,7 +5462,7 @@
     renderAutoRebuyFeedback();
     renderHeroCards();
     positionHeroCards();
-    syncBestFiveHighlights();
+    syncMadeHandHighlights();
     logHeroCardPresentation(!deriveCurrentSeat() ? 'seat_absent' : !renderedSeatHud[deriveCurrentSeat().seatNo] ? 'hud_absent' : state.heroCards.length !== 2 ? 'deal_absent' : 'active_deal');
     renderSeatChips();
     renderPotChips();

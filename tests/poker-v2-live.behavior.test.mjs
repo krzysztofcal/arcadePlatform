@@ -349,7 +349,7 @@ function createHarness(options = {}){
 
   vm.createContext(sandbox);
   const closureEnd = source.lastIndexOf('})();');
-  const privacySource = source.slice(0, closureEnd) + 'window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__bestFiveForTest = function(){ return heroBestFiveIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
+  const privacySource = source.slice(0, closureEnd) + 'window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__madeHandForTest = function(){ return heroMadeHandIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
   vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
@@ -406,7 +406,7 @@ async function flush(){
     targetedReactionPayloads,
     getOpponentHeldCards(userId){ return sandbox.window.__opponentHeldCardsForTest(userId); },
     getCardClaims(){ return JSON.parse(JSON.stringify(sandbox.window.__cardClaimsForTest())); },
-    getBestFive(){ return JSON.parse(JSON.stringify(sandbox.window.__bestFiveForTest())); },
+    getMadeHand(){ return JSON.parse(JSON.stringify(sandbox.window.__madeHandForTest())); },
     getHeroCards(){ return JSON.parse(JSON.stringify(sandbox.window.__heroCardsForTest())); },
     dropHeroHud(){ sandbox.window.__missingHeroHudForTest(); },
     changeAvatarUrl(seatNo,url){ sandbox.window.__avatarUrlForTest(seatNo,url); },
@@ -3434,7 +3434,17 @@ test('poker v2 enables only legal actions without removing or moving the other b
   assert.equal(harness.elements.pokerV2AmountBtn.disabled, true);
   assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
   assert.equal(harness.elements.pokerV2AllInBtn.disabled, true);
+  const slots = ['Fold', 'Primary', 'Amount', 'AllIn'];
+  slots.forEach((slot, index) => {
+    assert.strictEqual(harness.elements['pokerV2' + slot + 'Btn'], buttonsBeforeTurn[index], 'mode switch retains each immediate control');
+    assert.equal(harness.elements['pokerV2' + slot + 'PreactionWrap'].hidden, true, 'no checkbox presentation on Hero turn');
+    assert.equal(harness.elements['pokerV2' + slot + 'Preaction'].disabled, true, 'hidden pre-action cannot queue on Hero turn');
+  });
   assert.equal(harness.actPayloads.length, 0);
+  harness.elements.pokerV2PrimaryBtn.click();
+  await harness.flush();
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(harness.actPayloads[0].action, 'CHECK', 'uses existing immediate action path');
 });
 
 test('poker v2 sends authoritative maxRaiseTo for all-in even when the active opponent stack is smaller', async () => {
@@ -6282,12 +6292,38 @@ function cardPresentationFrame(handId, version, { initial = false, folded = [], 
   return frame;
 }
 
+test('Hero made-hand identities exclude High Card and kickers and allow board-only figures', async (t) => {
+  const { harness, ws } = await bootSeatedHarness();
+  const cases = [
+    { name: 'High Card', hole: ['As','Kd'], board: ['Qs','9c','7h','4d','2s'], expected: [] },
+    { name: 'Pair', hole: ['Ah','9c'], board: ['Ad','Ks','Qh','7d','2c'], expected: ['AH','AD'] },
+    { name: 'Two Pair', hole: ['Ah','Kc'], board: ['Ad','Ks','Qh','7d','2c'], expected: ['AH','AD','KC','KS'] },
+    { name: 'Trips', hole: ['Ah','Ac'], board: ['Ad','Ks','Qh','7d','2c'], expected: ['AH','AC','AD'] },
+    { name: 'Straight', hole: ['9h','8c'], board: ['7d','6s','5h','Kd','2c'], expected: ['9H','8C','7D','6S','5H'] },
+    { name: 'Flush', hole: ['Ah','9h'], board: ['Kh','7h','3h','Qd','2c'], expected: ['AH','9H','KH','7H','3H'] },
+    { name: 'Full House', hole: ['Ah','Ac'], board: ['Ad','Ks','Kc','7d','2c'], expected: ['AH','AC','AD','KS','KC'] },
+    { name: 'Quads', hole: ['Ah','Ac'], board: ['Ad','As','Kh','7d','2c'], expected: ['AH','AC','AD','AS'] },
+    { name: 'Straight Flush', hole: ['9h','8h'], board: ['7h','6h','5h','Kd','2c'], expected: ['9H','8H','7H','6H','5H'] },
+    { name: 'Royal Flush', hole: ['Js','Ts'], board: ['As','Ks','Qs','7d','2c'], expected: ['JS','10S','AS','KS','QS'] },
+    { name: 'board-only Pair', hole: ['Qc','9d'], board: ['As','Ah','Ks','7d','2c'], expected: ['AS','AH'] },
+    { name: 'board-only Straight', hole: ['2c','3d'], board: ['9h','8c','7d','6s','5h'], expected: ['9H','8C','7D','6S','5H'] }
+  ];
+  for (const [index, fixture] of cases.entries()) {
+    await t.test(fixture.name, () => {
+      ws.onSnapshot(amountSnapshot({ handId: 'made-hand-' + index, phase: 'RIVER', board: fixture.board,
+        stateVersion: index + 1, holeCards: fixture.hole,
+        members: [{ userId: 'user-1', seat: 1, status: 'ACTIVE' }] }));
+      assert.deepEqual(harness.getMadeHand().sort(), fixture.expected.slice().sort());
+    });
+  }
+});
+
 test('card FX claim only live authoritative deal/fold/reveal transitions once and retain Hero privacy lifecycle', async () => {
   const {harness,ws}=await bootSeatedHarness();
   ws.onSnapshot(cardPresentationFrame('cards-a',1,{initial:true}));
   assert.equal(harness.getCardClaims().deal,true,'initial baseline consumes old deal');
   assert.equal(harness.elements.pokerCardFxLayer.children.length,0,'initial snapshot has no motion');
-  assert.deepEqual(harness.getBestFive().sort(),['AS','JS','KS','QS','10S'].sort(),'uses existing best-five evaluator');
+  assert.deepEqual(harness.getMadeHand().sort(),['AS','JS','KS','QS','10S'].sort(),'uses existing best-five evaluator');
   assert.equal(harness.getRevealedCards('villain-1'),null,'unrevealed opponent has no faces');
   ws.onSnapshot(cardPresentationFrame('cards-b',2));
   const dealNodes=harness.elements.pokerCardFxLayer.children.slice();
@@ -6314,7 +6350,7 @@ test('card FX claim only live authoritative deal/fold/reveal transitions once an
   const boundary=cardPresentationFrame('cards-c',6);boundary.payload.private.holeCards=[];
   ws.onSnapshot(boundary);
   assert.deepEqual(harness.getHeroCards(),[],'new hand revokes the previous private deal');
-  assert.deepEqual(harness.getBestFive(),[],'no private deal means no highlight');
+  assert.deepEqual(harness.getMadeHand(),[],'no private deal means no highlight');
   const closed=cardPresentationFrame('cards-d',7);closed.payload.table.status='CLOSED';
   ws.onSnapshot(closed);
   assert.equal(harness.elements.pokerCardFxLayer.children.length,0,'closed table clears passengers and cannot start a deal');

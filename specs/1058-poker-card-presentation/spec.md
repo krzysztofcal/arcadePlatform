@@ -10,25 +10,27 @@ Owner reference screenshots show several card-specific interactions that make th
 
 Dependency: implement **after #1049**. Do not extend #1049 with this scope.
 
-## 1. Highlight the five cards used by Hero's current best hand
+## 1. Highlight only the cards forming Hero's made hand
 
-Owner request:
-- Visually match the Hero private cards and community cards that form the current best five-card poker hand.
-- Highlight those cards with a clear but tasteful border/glow, similar to the cyan/bright outline shown in the reference screenshots.
-- Both board cards and Hero private cards may be highlighted when they are part of the best five.
+Amendment: [owner visual-smoke correction, 2026-10-08](https://github.com/krzysztofcal/arcadePlatform/issues/1058#issuecomment-6062594479). This supersedes the original instruction to highlight all best-five cards.
 
-Implementation analysis:
-- This should be a relatively small/high-value feature.
-- Poker V2 already has `getHeroBestHand()`, which combines Hero hole cards + community cards and uses the existing evaluator to return the five cards of the current best hand.
-- Reuse that evaluator result; do not introduce a second poker-hand evaluator or infer hidden opponent cards.
-- Apply only a presentation class/state to the already-rendered cards.
-- No highlight when there is not yet a valid five-card evaluated hand or Hero's authoritative private cards are unavailable.
-- Preserve existing card readability, suit colors, fold treatment and reduced-motion/accessibility behavior. The highlight itself need not animate.
+Reuse `getHeroBestHand()` and its existing evaluated category/selected best five. Derive the minimal figure subset from that result; do not introduce another evaluator or change hand ranking.
 
-Acceptance:
-- Exactly the cards belonging to Hero's evaluated best five are highlighted.
-- Unused Hero/board cards remain visually normal.
-- No gameplay, WS, protocol or evaluator changes.
+| Evaluated category | Highlight |
+| --- | --- |
+| High Card | None |
+| Pair | The two paired cards |
+| Two Pair | The four paired cards |
+| Trips | The three matching cards |
+| Straight | All five straight cards |
+| Flush | All five flush cards |
+| Full House | All five cards |
+| Quads | The four matching cards, excluding the kicker |
+| Straight Flush / Royal Flush | All five cards |
+
+Cards may come from any Hero + board combination. Hero need not contribute: a figure entirely on the board highlights the corresponding board cards. Kickers and unused cards remain normal.
+
+Apply only the existing border/glow presentation to already-rendered cards, using made-hand naming for highlight helpers/classes. Preserve card readability, suit colors, fold treatment, reduced motion and persistent Hero nodes. No highlight without a valid evaluated five-card hand or authoritative Hero private cards. No gameplay, winner, WS, protocol or evaluator changes.
 
 ## 2. Improve opponent private-card presentation and add authoritative showdown flip
 
@@ -92,6 +94,12 @@ Acceptance:
 - One authoritative fold transition -> one discard/muck animation.
 - No stale-card lifecycle regression, no hidden-card leak and no replay on resync.
 
+## Owner amendment: action / pre-action presentation — 2026-10-08
+
+[Latest owner requirement](https://github.com/krzysztofcal/arcadePlatform/issues/1058#issuecomment-6062733792): off-turn controls show the checkbox and queue the existing pre-action. On Hero's authoritative active turn, hide checkbox presentation and use existing immediate Fold / Check-or-Call / Raise-or-Bet / All-in controls. Hidden pre-actions are disabled. Keep the existing action model and availability/keyboard semantics.
+
+Reserve identical label padding and dimensions in both modes; no control, text or neighbor moves when modes switch. Retain existing DOM controls/order. Fundamental tests cover waiting/queueing, active-turn immediate execution and retained structure; verify layout stability externally on real Preview, without pixel/layout test suites.
+
 ## Card backs are part of the future table-skin visual language
 
 Owner explicitly likes the idea that card backs should become part of a future table skin/theme.
@@ -126,7 +134,7 @@ No backend/WS/protocol change unless repo review proves an authoritative event/d
 
 ## Suggested implementation order
 
-1. Best-five Hero/board highlighting.
+1. Made-hand Hero/board highlighting.
 2. Improved opponent card backs.
 3. Authoritative showdown flip.
 4. Deal animation.
@@ -137,7 +145,7 @@ This order deliberately gets the low-risk/high-value visual improvements in firs
 ## Testing / verification
 
 Write only fundamental deterministic tests:
-- best-five marking uses the existing evaluator result;
+- made-hand selection uses the existing evaluator result: fundamental cases for every category above and board-only figures, excluding High Card and kickers;
 - authoritative opponent reveal transitions only once and never leaks unrevealed cards;
 - deal FX starts only on a genuine new-hand/dealt transition and does not replay on same-hand/reconnect/resync;
 - fold FX starts only on a genuine authoritative fold transition;
@@ -146,7 +154,7 @@ Write only fundamental deterministic tests:
 Do not add broad CSS/layout/screenshot/JSP test matrices.
 
 Use real Deploy Preview visual smoke for portrait + landscape, including:
-- best-five highlight;
+- made-hand highlight, including board-only figures and excluded kickers;
 - normal opponent card backs;
 - one real/fixture authoritative showdown reveal;
 - one new-hand deal;

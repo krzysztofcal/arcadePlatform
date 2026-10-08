@@ -16,20 +16,20 @@ Do **not** add a WS field, backend endpoint, DB change, dependency or second pok
 
 Use one new scene-owned cosmetic card-FX layer for **deal, showdown flip and fold/muck motion only**. Persistent/static card DOM remains the authoritative rendered end state. Animations are passengers and must never gate actions, timers or WS state.
 
-### T001 — Best-five highlight without disturbing persistent Hero cards
+### T001 — Made-hand highlight without disturbing persistent Hero cards
 
 **Files:** `poker/poker-v2.js`, `poker/poker-v2.css`.
 
 - Reuse `getHeroBestHand()` / `evaluateViewerBestHand()`; do not create another evaluator.
-- Add one small helper that converts the returned five cards to canonical card identities and applies/removes a presentation class on:
+- Add one small helper that selects the minimal made-hand subset of the returned best five by evaluated category, then converts it to canonical card identities and applies/removes a presentation class on:
   - `#pokerCommunityCards .poker-card`;
   - `#pokerHeroCards .poker-card`.
 - Invoke the highlight sync after `renderCommunityCards()` and `renderHeroCards()` have established their current DOM.
 - Important: `renderHeroCards()` intentionally returns early for the same two-card deal. Therefore highlight updates must **not depend on rebuilding Hero cards**; a board street change must still update which unchanged Hero cards are highlighted.
 - Highlight only when Hero has two authoritative cards and `getHeroBestHand()` returns exactly five cards. Otherwise clear the class.
-- CSS: one subtle bright/cyan-gold-compatible border/glow class (for example `poker-card--best-five`) that does not change card dimensions or layout.
+- CSS: one subtle bright/cyan-gold-compatible border/glow class (for example `poker-card--made-hand`) that does not change card dimensions or layout.
 
-Acceptance: exactly the evaluated best five are highlighted; unused board/Hero cards are normal; no evaluator/gameplay change.
+Acceptance: High Card → none; Pair → 2; Two Pair → 4; Trips → 3; Straight/Flush/Full House/Straight Flush/Royal Flush → 5; Quads → 4. Exclude kickers. Permit board-only figures. The existing evaluator orders matching groups before kickers; use its selected cards, without changing ranking or evaluating again.
 
 ### T002 — Replace tiny opponent indicators with readable overlapping card pairs
 
@@ -122,9 +122,10 @@ Acceptance: authoritative losing/winning compared players can show their real re
 
 **File:** `tests/poker-v2-live.behavior.test.mjs`.
 
-Extend the existing harness only for lifecycle/privacy invariants that are fundamental. Do **not** add CSS/layout/screenshot/JSP tests.
+Extend the existing harness only for fundamental made-hand selection and lifecycle/privacy invariants. Do **not** add CSS/layout/screenshot/JSP tests.
 
 Required deterministic cases:
+- category-specific minimal figure selection for every amended category, including board-only Pair and Straight; no High Card/kicker highlights;
 - already-received Hero cards remain in `state.heroCards` across authoritative fold presentation and still clear only at existing real hand/seat lifecycle boundaries;
 - opponent face cards are sourced only from existing authoritative showdown reveal data; no reveal data means no face-card presentation;
 - a live new-hand transition can claim deal FX once, while initial snapshot/reconnect/resync and duplicate same-hand frames do not;
@@ -139,7 +140,7 @@ No WS Preview Deploy is expected because the reviewed plan is browser-only. If i
 
 For the real Netlify Deploy Preview:
 - portrait physical/small mobile sanity and landscape sanity;
-- best-five highlight changes correctly from flop/turn/river without rebuilding/losing Hero cards;
+- made-hand highlight changes correctly from flop/turn/river without rebuilding/losing Hero cards;
 - opponent pair is readable, attractively overlapped/rotated and collision-free;
 - real/controlled authoritative showdown shows one flip then stable revealed faces;
 - new hand shows one fast two-round deal from the visual woman dealer;
@@ -170,7 +171,7 @@ No other file should be changed without a concrete repo-proven need.
 
 Expected impact is **presentation-only**:
 - opponent cards become larger/readable and may show authoritative showdown faces;
-- Hero/board best-five cards gain a highlight;
+- Hero/board cards forming the made hand gain a highlight, excluding High Card and kickers;
 - deal/fold/showdown acquire cosmetic motion;
 - folded cards may become visually mucked/hidden while authoritative state remains retained.
 
@@ -191,4 +192,8 @@ No intended gameplay, WS, protocol, ledger/accounting, bot, table lifecycle or C
 
 ## Constitution Check
 
-PASS: browser-only existing IIFE/card/evaluator/visual snapshot/SeatHud mechanisms. No dependencies, generic tooling/ignore changes, inline scripts, WS/protocol/accounting/DB changes. T009 only fundamental lifecycle/privacy tests in the existing harness; T010 external Preview evidence, no broad UI/CSS/layout tests or committed screenshot collection. Owner animation smoke remains gate.
+PASS: browser-only existing IIFE/card/evaluator/visual snapshot/SeatHud mechanisms. No dependencies, generic tooling/ignore changes, inline scripts, WS/protocol/accounting/DB changes. T009 only fundamental category-selection/lifecycle/privacy tests in the existing harness; T010 external Preview evidence, no broad UI/CSS/layout tests or committed screenshot collection. Owner animation smoke remains gate.
+
+## Latest owner amendment: action/pre-action modes
+
+Reuse renderControls authoritative preactionMode/usersTurn and existing button/checkbox handlers. Keep the existing sibling buttons/labels and hidden mode switching; disable hidden checkbox inputs and give immediate buttons the same reserved checkbox padding, alignment, font and dimensions as pre-action spans. No replacement/reordering, new action model or rule changes. Extend existing fundamental mode-transition coverage; verify no shift externally on Preview.
