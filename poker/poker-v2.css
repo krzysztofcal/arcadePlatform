@@ -335,8 +335,8 @@ body{margin:0; min-height:100vh; font-family:Poppins, sans-serif; background:#06
 }
 /* One viewport: the table uses the remaining header space; seat geometry reserves the lower-right action corner. */
 html,body{height:100%;min-height:0;overflow:hidden;}
-.poker-table-screen{position:relative;min-height:0;padding:0;overflow:hidden;background:radial-gradient(circle at 50% -10%, rgba(235,176,91,0.24), rgba(8,9,14,0.92) 48%), radial-gradient(circle at 50% 120%, rgba(20,117,68,0.2), rgba(6,8,12,0.96) 46%), #05070c;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr);gap:6px;}
-.poker-live-panel{position:relative;z-index:19;min-width:0;width:100%;padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) 0 calc(max(8px,env(safe-area-inset-left)) + 50px);}
+.poker-table-screen{position:relative;min-height:0;padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));overflow:hidden;background:radial-gradient(circle at 50% -10%, rgba(235,176,91,0.24), rgba(8,9,14,0.92) 48%), radial-gradient(circle at 50% 120%, rgba(20,117,68,0.2), rgba(6,8,12,0.96) 46%), #05070c;height:100dvh;display:grid;grid-template-rows:36px minmax(0,1fr);gap:6px;}
+.poker-live-panel{position:relative;z-index:19;min-width:0;width:100%;padding-left:50px;}
 .poker-live-topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;}
 .poker-live-meta{display:grid;gap:2px;min-width:0;}
 .poker-live-status{font-size:12px;font-weight:700;color:#f8efd6;line-height:14px;}
@@ -462,7 +462,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-live-meta{display:grid;gap:4px;max-width:none;overflow-wrap:anywhere;}
 .poker-diagnostics .poker-live-status,.poker-diagnostics .poker-live-table-meta,.poker-diagnostics .poker-live-turn{font-size:11px;}
 .poker-social-settings .poker-celebration-preview{margin-top:8px;}
-.poker-live-error,.poker-live-notice{position:absolute;top:100%;left:max(8px,env(safe-area-inset-left));right:auto;max-width:100px;padding:4px 6px;border-radius:6px;background:rgba(9,16,21,.94);font-size:10px;line-height:13px;overflow-wrap:anywhere;}
+.poker-live-error,.poker-live-notice{position:absolute;top:100%;left:0;right:auto;max-width:100px;padding:4px 6px;border-radius:6px;background:rgba(9,16,21,.94);font-size:10px;line-height:13px;overflow-wrap:anywhere;}
 .poker-live-notice{color:#e8d3a0;}
 .poker-live-notice[hidden]{display:none;}
 @media (orientation:landscape){
