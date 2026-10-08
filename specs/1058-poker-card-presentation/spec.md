@@ -180,3 +180,7 @@ If the implementation changes `ws-server/**`, WS runtime deps under `shared/**`,
 [Latest owner amendment](https://github.com/krzysztofcal/arcadePlatform/issues/1058#issuecomment-6063949580): animate authoritative same-hand board 0→3 as three ordered dealer-to-slot deals; 3→4 only the fourth card; 4→5 only the fifth. Reuse poker-card-fx-layer, existing card primitives and claims. Final authoritative state renders independently; FX never gates gameplay. Initial/reconnect/resync populated board and reduced motion skip historical motion. Duplicate frames cannot replay; hand/table identity boundaries reset claims. Preserve all accepted highlights, other card FX, private lifecycle, controls, geometry and WS/gameplay contracts.
 
 Fundamental transition tests only: 0→3, 3→4, 4→5, duplicates and initial/reconnect/resync/reduced-motion suppression. Verify trajectory/order on real Preview portrait and landscape outside the repo; no timing/pixel/CSS matrices.
+
+## Final owner-smoke corrections
+
+Back to lobby → Yes must use existing leave/queued leave, retry/reconnect and confirmed removal flow before returning to /poker/. Trace the actual failure rather than bypassing leave. Add one fundamental full-flow regression; preserve server semantics. Short landscape must keep the northern settlement/hand/reaction column inside the clipped screen without covering the avatar. Keep scene anchors/geometry and portrait/normal landscape intact. Verify short 1000×300 and normal portrait/landscape externally; no pixel/CSS test matrices.

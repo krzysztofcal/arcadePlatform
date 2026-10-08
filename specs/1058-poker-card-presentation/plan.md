@@ -203,3 +203,9 @@ Reuse renderControls authoritative preactionMode/usersTurn and existing button/c
 Extend captureVisualSnapshot with a copy of authoritative communityCards. Extend cardFxClaims with bounded street claims for lengths 3/4/5; consume populated streets on ineligible baselines. claimCardTransitions accepts only unchanged-prefix, same-context/hand 0→3, 3→4, 4→5 transitions. animateCardDiff uses rendered room-dealer origin and each rendered community slot, spawning ordered copies through spawnCardFx and existing deal keyframes. renderCommunityCards preserves pending cosmetic masks on active copies; existing timer/clearCardFx restores final static cards, including recovery/teardown. No authoritative card mutation or timing gate.
 
 Constitution Check PASS: browser-only, same IIFE/layer/primitives/claims, no dependencies/config/HTML/WS changes. Fundamental transition/replay tests in existing behavior harness only. Preview trajectory/order evidence external; no CSS/pixel/timing suites.
+
+## Final owner-smoke diagnosis and plan
+
+Trace bindDestinationLink, leaveConfirmYes, leaveAndReturnToLobby, queued/acknowledged sendLeave, pending destination/recovery and navigation. Current ready-client Preview path navigates correctly; collect the failing connection/error state before altering leave behavior. Add fundamental full-flow coverage for active-table lobby confirmation and leave completion.
+
+The retained landscape safe band is 24 scene px, insufficient for a northern award + hand summary + reaction stack in compact landscape. Reuse the existing 84 scene-px reserve in the existing <=500px compact landscape branch; retain all scene/SeatHud anchors and taller-landscape/portrait behavior. Verify supported short/normal views externally; no geometry/pixel/CSS tests. Constitution Check PASS: browser-only scoped fixes, no new action/leave/geometry subsystem, fundamental leave lifecycle coverage only.

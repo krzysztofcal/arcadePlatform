@@ -30,3 +30,9 @@ Original best-five acceptance is superseded by the latest #1058 amendment. Earli
 - [x] T015 — Fundamental RED/GREEN board-street and suppression cases in existing harness
 - [x] T016 — Extend existing snapshot/claims/card FX for ordered dealer-to-community-slot motion and safe cleanup
 - [x] T017 — Required checks, self-review, exact Preview portrait/landscape trajectory/order smoke and Draft handoff
+
+## Final owner-smoke corrections
+
+- [ ] T018 — Diagnose failing lobby-confirmed leave and add fundamental full-flow regression; preserve retry/reconnect
+- [x] T019 — Preserve northern transient headroom in compact landscape and externally verify short/normal landscape + portrait
+- [ ] T020 — Required checks/CI, self-review, exact Preview and Draft handoff

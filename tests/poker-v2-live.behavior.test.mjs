@@ -6424,3 +6424,22 @@ test('community FX skips initial/reconnect/resync populated boards and reduced m
     }
   }
 });
+
+test('active-table Back to lobby Yes sends leave and navigates only after leave completion', async () => {
+  let completeLeave;
+  const harness = createHarness({ sendLeave(){ return new Promise(resolve => { completeLeave = resolve; }); } });
+  harness.fireDomContentLoaded(); await harness.flush();
+  harness.getCreateOptions().onSnapshot(communityDealFrame('lobby-leave', 1, ['As','Ks','Qs'], true));
+  await harness.flush();
+  harness.elements.pokerMenuToggle.click();
+  harness.elements.pokerLobbyLink.click();
+  assert.equal(harness.elements.pokerV2LeaveConfirmModal.hidden, false);
+  assert.equal(harness.leavePayloads.length, 0, 'confirmation is required');
+  harness.elements.pokerV2LeaveConfirmYes.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2LeaveConfirmModal.hidden, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.leavePayloads)), [{ tableId: 'table-1' }]);
+  assert.equal(harness.windowLocation.href, '', 'fallback waits for correct leave completion');
+  completeLeave({ ok: true }); await harness.flush();
+  assert.equal(harness.windowLocation.href, '/poker/');
+});
