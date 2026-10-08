@@ -4041,7 +4041,7 @@
     var giftAngles = leftSide ? [-100,-60,-20] : rightSide ? [-160,-120,-80] : [-150,-90,-30];
     giftAngles.forEach(function(angle,index){
       var radians=angle*Math.PI/180;
-      var giftPoint = dockedTop ? [[avatar[0]-corner-22,avatar[1]+65],[avatar[0]-corner-2,avatar[1]+93],[avatar[0]+corner,avatar[1]+65]][index] : [avatar[0]+Math.cos(radians)*radius,avatar[1]+Math.sin(radians)*radius];
+      var giftPoint = dockedTop ? [[avatar[0]-corner-22,avatar[1]+107],[avatar[0]-corner-2,avatar[1]+107],[avatar[0]+corner+20,avatar[1]+102]][index] : [avatar[0]+Math.cos(radians)*radius,avatar[1]+Math.sin(radians)*radius];
       placeSeatNode(hud.gifts.children[index],hud,giftPoint,16,16);
     });
   }
@@ -4725,7 +4725,7 @@
     if (seatSceneOrientation === 'portrait' && slot === 0 && topSeatDockOffset > 0){
       // Attach D beside the docked name, outside neighboring HUDs and the pot label.
       var avatarPoint = seatSceneGeometry.portrait.seats[0].avatar;
-      dealerPoint = [(seatSceneGeometry.portrait.seats[5].stack[0] + seatSceneGeometry.portrait.seats[1].stack[0]) / 2 - 46, avatarPoint[1] + topSeatDockOffset + 73];
+      dealerPoint = [(seatSceneGeometry.portrait.seats[5].stack[0] + seatSceneGeometry.portrait.seats[1].stack[0]) / 2 - 46, avatarPoint[1] + topSeatDockOffset + 84];
     }
     placeSeatNode(els.dealerChip,{origin:[0,0]},dealerPoint,20,20);
   }
