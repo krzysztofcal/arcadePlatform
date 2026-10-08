@@ -4041,7 +4041,7 @@
     var giftAngles = leftSide ? [-100,-60,-20] : rightSide ? [-160,-120,-80] : [-150,-90,-30];
     giftAngles.forEach(function(angle,index){
       var radians=angle*Math.PI/180;
-      var giftPoint = dockedTop ? [[avatar[0]-corner-22,avatar[1]+107],[avatar[0]-corner-2,avatar[1]+107],[avatar[0]+corner+20,avatar[1]+102]][index] : [avatar[0]+Math.cos(radians)*radius,avatar[1]+Math.sin(radians)*radius];
+      var giftPoint = dockedTop ? [avatar[0]+(index-1)*16,avatar[1]-12] : [avatar[0]+Math.cos(radians)*radius,avatar[1]+Math.sin(radians)*radius];
       placeSeatNode(hud.gifts.children[index],hud,giftPoint,16,16);
     });
   }
