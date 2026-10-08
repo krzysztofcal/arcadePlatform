@@ -3966,9 +3966,9 @@
       var sceneTop = Math.min((viewportHeight - sceneHeight) / 2, viewportHeight - sceneHeight - bottomStatusSpace);
       els.scene.style.top = (sceneTop + sceneHeight / 2) + 'px';
       if (sceneTop < 0){
-        // Dock into the existing left-side lane, above the community cards.
+        // Dock in the gap between neighboring felt chips, above the pot and board.
         // This layout breakpoint and offset never depend on transient contents.
-        var dockAvatarY = geometry.seats[5].avatar[1] - 26;
+        var dockAvatarY = geometry.seats[5].bet[1];
         topSeatDockOffset = dockAvatarY - geometry.seats[0].avatar[1];
       }
     }
@@ -3993,28 +3993,30 @@
     var portrait = seatSceneOrientation === 'portrait';
     var config = seatSceneGeometry[seatSceneOrientation].seats[slot];
     hud.config = config;
-    var avatar = [config.avatar[0], config.avatar[1] + (portrait && slot === 0 ? topSeatDockOffset : 0)];
+    var dockedTop = portrait && slot === 0 && topSeatDockOffset > 0;
+    hud.dockedTop = dockedTop;
+    var avatar = [dockedTop ? (seatSceneGeometry.portrait.seats[5].stack[0] + seatSceneGeometry.portrait.seats[1].stack[0]) / 2 : config.avatar[0], config.avatar[1] + (dockedTop ? topSeatDockOffset : 0)];
     hud.avatarAnchor = avatar;
-    // Docked transients use the left column; keep this owner's chips on exposed felt.
-    hud.feltAnchors = portrait && slot === 0 && topSeatDockOffset > 0
-      ? { stack:[seatSceneGeometry.portrait.seats[1].stack[0],config.stack[1]], bet:[seatSceneGeometry.portrait.seats[1].bet[0],config.bet[1]] }
+    // Keep docked top-seat chips in the exposed lane left of its transient column.
+    hud.feltAnchors = dockedTop
+      ? { stack:[seatSceneGeometry.portrait.seats[5].avatar[0],config.stack[1]], bet:[seatSceneGeometry.portrait.seats[5].avatar[0],config.bet[1]] }
       : config;
     hud.origin = [config.avatar[0] - 46, config.avatar[1] - 50];
     article.style.left = hud.origin[0] + 'px';
     article.style.top = hud.origin[1] + 'px';
     article.dataset.seatVariant = ['top','upper-right','lower-right','hero','lower-left','upper-left'][slot];
-    hud.avatarSize = portrait ? 72 : 96;
+    hud.avatarSize = dockedTop ? 48 : portrait ? 72 : 96;
     hud.name = [avatar[0],avatar[1] + hud.avatarSize / 2 + 15];
     hud.action = [avatar[0],avatar[1] + hud.avatarSize / 2];
     var corner = portrait ? 46 : 60;
     var leftSide = slot === 4 || slot === 5;
     var rightSide = slot === 1 || slot === 2;
     var edge = leftSide ? corner : -corner;
-    var quick = [avatar[0] + (rightSide ? -corner : corner),avatar[1] + (hero ? 12 : 8)];
-    var marker = [avatar[0] + edge,avatar[1] + (hero ? 20 : leftSide || rightSide ? 48 : 28)];
+    var quick = [avatar[0] + (dockedTop ? corner + 20 : rightSide ? -corner : corner),avatar[1] + (dockedTop ? 82 : hero ? 12 : 8)];
+    var marker = [avatar[0] + (dockedTop ? corner : edge),avatar[1] + (dockedTop ? 82 : hero ? 20 : leftSide || rightSide ? 48 : 28)];
     hud.marker = marker;
     placeSeatNode(hud.quickAction,{origin:[0,0]},quick,16,16);
-    placeSeatNode(hud.cards,hud,hero ? config.cards : [avatar[0] + edge,avatar[1] + (leftSide || rightSide ? 28 : 8)],hero ? 110 : 26,hero ? 80 : 14);
+    placeSeatNode(hud.cards,hud,hero ? config.cards : [avatar[0] + (dockedTop ? corner : edge),avatar[1] + (dockedTop ? 42 : leftSide || rightSide ? 28 : 8)],hero ? 110 : 26,hero ? 80 : 14);
     placeSeatNode(hud.stack,hud,hud.feltAnchors.stack,portrait ? 60 : 80,60);
     placeSeatNode(hud.bet,hud,hud.feltAnchors.bet,22,20);
     ['bestHand'].forEach(function(role){
@@ -4024,14 +4026,14 @@
     // All player-owned transient content shares one column above the avatar.
     var isTopSeat = slot === 0;
     var presentationTop = avatar[1] - hud.avatarSize / 2 - (isTopSeat ? 4 : 6);
-    placeSeatNode(hud.presentation,{origin:[0,0]},[avatar[0],presentationTop],portrait && isTopSeat && topSeatDockOffset > 0 ? 180 : 100);
+    placeSeatNode(hud.presentation,{origin:[0,0]},[avatar[0],presentationTop],portrait && isTopSeat && topSeatDockOffset > 0 ? 160 : 100);
     hud.presentation.classList.add('poker-seat-hud-transient');
     if (isTopSeat) hud.presentation.classList.add('poker-seat-hud-transient--top');
     else hud.presentation.classList.remove('poker-seat-hud-transient--top');
     hud.presentation.dataset.seatVariant = article.dataset.seatVariant;
     hud.presentation.appendChild(hud.social);
     var geometry = seatSceneGeometry[seatSceneOrientation];
-    var reactionWidth = Math.min(220, geometry.width - 16);
+    var reactionWidth = Math.min(dockedTop ? 160 : 220, geometry.width - 16);
     var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(avatar[0], geometry.width - reactionWidth / 2 - 8));
     hud.social.style.setProperty('--poker-reaction-width', reactionWidth + 'px');
     hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - avatar[0]) + 'px');
@@ -4039,7 +4041,8 @@
     var giftAngles = leftSide ? [-100,-60,-20] : rightSide ? [-160,-120,-80] : [-150,-90,-30];
     giftAngles.forEach(function(angle,index){
       var radians=angle*Math.PI/180;
-      placeSeatNode(hud.gifts.children[index],hud,[avatar[0]+Math.cos(radians)*radius,avatar[1]+Math.sin(radians)*radius],16,16);
+      var giftPoint = dockedTop ? [[avatar[0]-corner-22,avatar[1]+65],[avatar[0]-corner-2,avatar[1]+93],[avatar[0]+corner,avatar[1]+65]][index] : [avatar[0]+Math.cos(radians)*radius,avatar[1]+Math.sin(radians)*radius];
+      placeSeatNode(hud.gifts.children[index],hud,giftPoint,16,16);
     });
   }
 
@@ -4082,7 +4085,7 @@
   function seatHudAnchor(node){
     if (!node) return null;
     var hud=renderedSeatHud[node.dataset.seatNo];
-    var point=hud && hud.config[node.dataset.seatHud];
+    var point=hud && hud.feltAnchors[node.dataset.seatHud];
     var geometry=seatSceneGeometry[seatSceneOrientation];
     return point ? {x:point[0]/geometry.width*100,y:point[1]/geometry.height*100} : null;
   }
@@ -4441,7 +4444,7 @@
         var actionBadge = document.createElement('div');
         actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + visibleAction.replace(/_/g, '-');
         actionBadge.textContent = LAST_ACTION_LABEL[visibleAction] || visibleAction;
-        placeSeatNode(actionBadge,{origin:[0,0]},hud.action,64,12);
+        placeSeatNode(actionBadge,{origin:[0,0]},hud.action,hud.dockedTop ? 48 : 64,12);
         transientSeat.appendChild(actionBadge);
       }
       var seatSettlementAwards = seat ? getSeatSettlementAwards(seat.userId) : [];
@@ -4464,14 +4467,14 @@
       nameOwner.className = folded ? 'poker-seat--folded' : '';
       nameOwner.dataset.seatNo = article.dataset.seatNo;
       nameOwner.dataset.userId = article.dataset.userId;
-      placeSeatNode(name,{origin:[0,0]},hud.name,seatSceneOrientation === 'landscape' ? 104 : hero ? 88 : 76,seatSceneOrientation === 'landscape' ? 20 : 14);
+      placeSeatNode(name,{origin:[0,0]},hud.name,seatSceneOrientation === 'landscape' ? 104 : hero ? 88 : hud.dockedTop ? 48 : 76,seatSceneOrientation === 'landscape' ? 20 : 14);
       nameOwner.appendChild(name);
       els.seatNameLayer.appendChild(nameOwner);
       if (seat && !visibleAction && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
         var status = document.createElement('div');
         status.className = 'poker-seat-status';
         status.textContent = waitingNextHand ? 'NEXT HAND' : 'OUT OF CHIPS';
-        placeSeatNode(status,{origin:[0,0]},hud.action,64,12);
+        placeSeatNode(status,{origin:[0,0]},hud.action,hud.dockedTop ? 48 : 64,12);
         transientSeat.appendChild(status);
       }
       if (hero && heroBestHand){
@@ -4720,9 +4723,9 @@
     var point = seatSceneGeometry[seatSceneOrientation].seats[slot].dealer;
     var dealerPoint = point;
     if (seatSceneOrientation === 'portrait' && slot === 0 && topSeatDockOffset > 0){
-      // Attach D beside the docked name, clear of the neighboring seat marker and board.
+      // Attach D beside the docked name, outside neighboring HUDs and the pot label.
       var avatarPoint = seatSceneGeometry.portrait.seats[0].avatar;
-      dealerPoint = [avatarPoint[0] + 72 / 2 + 20, avatarPoint[1] + topSeatDockOffset + 72 / 2 + 20];
+      dealerPoint = [(seatSceneGeometry.portrait.seats[5].stack[0] + seatSceneGeometry.portrait.seats[1].stack[0]) / 2 - 46, avatarPoint[1] + topSeatDockOffset + 73];
     }
     placeSeatNode(els.dealerChip,{origin:[0,0]},dealerPoint,20,20);
   }
