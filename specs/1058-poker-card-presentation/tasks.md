@@ -41,6 +41,6 @@ Original best-five acceptance is superseded by the latest #1058 amendment. Earli
 
 - [x] T021 — Anchor all portrait reactions near their avatars using existing placement; preserve landscape reactions
 - [x] T022 — Replace global compact-landscape shrink with local northern transient placement and accepted fitting
-- [ ] T023 — Existing checks, self-review and exact Preview smoke across requested views; close stale-tab leave diagnosis
+- [x] T023 — Existing checks, self-review and exact Preview smoke across requested views; close stale-tab leave diagnosis
 
 T018 closed per owner clarification: isolated stale/hung errored tab, normal leave flow verified, no runtime workaround. T019 reserve solution superseded by T022 after owner observed global scene shrink.
