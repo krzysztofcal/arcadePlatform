@@ -19,8 +19,8 @@ T010 controlled exact Deploy Preview complete; owner visual animation acceptance
 
 Original best-five acceptance is superseded by the latest #1058 amendment. Earlier Preview evidence does not accept the amended highlight behavior. Other card presentation/motion scope remains unchanged.
 
-- [ ] T011 — Derive minimal made-hand identities from existing category/selected best five; rename highlight helpers/class
-- [ ] T012 — Fundamental category and board-only tests; run existing required checks
-- [ ] T013 — Self-review against amendment and update Draft PR/Preview handoff; owner re-smoke pending
+- [x] T011 — Derive minimal made-hand identities from existing category/selected best five; rename highlight helpers/class
+- [x] T012 — Fundamental category and board-only tests; run existing required checks
+- [x] T013 — Self-review against amendment and update Draft PR/Preview handoff; owner re-smoke pending
 
-- [ ] T014 — Latest owner amendment: disable inactive pre-actions, align both mode footprints, fundamental interaction/structure coverage and external Preview verification
+- [x] T014 — Latest owner amendment: disable inactive pre-actions, align both mode footprints, fundamental interaction/structure coverage and external Preview verification
