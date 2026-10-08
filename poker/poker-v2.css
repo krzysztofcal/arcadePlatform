@@ -623,7 +623,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 }
 
 .poker-seat-gift-slot { white-space: nowrap; font-size: 11px; color: #fff; text-shadow: 0 1px 2px #000; }
-.poker-quick-gift-button { position: absolute; bottom: 18px; left: 0; width: 16px; height: 16px; pointer-events: auto; flex-shrink: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.poker-quick-gift-button { position: absolute; bottom: 18px; left: var(--poker-quick-gift-offset, 0px); width: 16px; height: 16px; pointer-events: auto; flex-shrink: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .poker-quick-gift-button:focus-visible { outline: 2px solid #f0c66e; }
 .poker-seat-hud-quick-action > .poker-quick-gift-picker { max-width: none; max-height: none; pointer-events: auto; position: absolute; transform: none; width: 220px; padding: 8px; border: 1px solid #725735; border-radius: 8px; background: #16251f; box-shadow: 0 8px 30px #0008; z-index: 80; }
 .poker-quick-gift-picker[hidden] { display: none; }

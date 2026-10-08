@@ -402,6 +402,9 @@ The existing `commandResult` reports accepted/rejected. Rejections use `gift_sho
 Additive, non-stream frames (normal envelope, table roomId):
 
 - `table_gift`: `{ eventId, senderSeatNo, recipientSeatNo, giftKey }`. Clients dedupe the stable receipt UUID with a bounded set.
-- `table_gift_state`: `{ seats: [{ seatNo, gifts: [{ giftKey, count }] }] }`. Replaces cosmetic aggregates after authenticated join/subscription/resync/resume. Receipts attach only to current ACTIVE recipient user/seat/exact joined_at. Accepted joins refresh all associated table clients, including observers of same-user rejoin. Each successful purchase/replay is followed by this frame to reconcile clients that recovered counts before retrying.
+- `table_gift_state`: `{ seats: [{ seatNo, userId, gifts: [{ giftKey, count }], recentGifts: [{ eventId, giftKey }] }] }`. Replaces cosmetic aggregates after authenticated join/subscription/resync/resume. Receipts attach only to current ACTIVE recipient user/seat/exact joined_at. Accepted joins refresh all associated table clients, including observers of same-user rejoin. Each successful purchase/replay is followed by this frame to reconcile clients that recovered counts before retrying.
 
 Gifts never enter gameplay state, snapshots or streamLog. File-backed and guest purchase paths fail closed without DB writes. CH BURN and durable receipt commit in one transaction: USER -price, SYSTEM/GENESIS +price, no recipient credit.
+
+
+Persistent Gift HUD correction: `gifts` retains the legacy per-type aggregate. Additive `recentGifts` contains at most three purchases (duplicates allowed), newest first by receipt `created_at DESC, id DESC`; `userId` identifies the current recipient. New HUD replaces slots from this list, rejects summaries for a changed occupant and retains state through hand renders; older clients may continue reading `gifts`. Recovery uses exact recipient user/seat/joined_at, with SQL-bound text timestamps preserving microseconds at purchase. No stream/replay/purchase command or cooldown/accounting change. Historical malformed millisecond-only receipts are not approximately matched to another participation.

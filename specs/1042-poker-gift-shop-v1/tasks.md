@@ -64,3 +64,12 @@ Integration verification complete for runtime `8898a8673e1774a1667de27142bf5cbeb
 - [x] Existing fundamental/browser/client checks, controlled red/green probe, independent diff review; update existing Draft #1047/SpecKit.
 
 Authenticated Stage smoke/Production GO remain pending; no new UI suite, WS protocol/schema/migration changes or Production deployment.
+
+
+## Persistent Gift HUD manual FAIL — correction tasks
+
+- [x] T001 — Read-only Stage receipt/seat comparison, postgres serializer and WS/event/state path; check Firefox slot visibility.
+- [x] T002 — Preserve timestamp precision; restore newest three purchases with additive state fields and recipient ownership validation, no accounting/schema changes.
+- [ ] T003 — Fundamental regression, Gift Shop/WS/browser/client/ledger/repo checks, diff review, exact-SHA Preview deployment and conditional authenticated Stage smoke.
+
+Manual authenticated persistent HUD smoke remains FAIL/unverified until all three slots are confirmed; keep Draft/not merge-ready and Production GO pending.

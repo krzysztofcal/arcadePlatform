@@ -569,3 +569,8 @@ No WS gift vocabulary/accounting/replay change, no migration edits, no new UI/CS
 ## P1 — Retry recipient identity correction (2026-10-08)
 
 Local `giftRetry` must retain `key`, `seatNo`, recipient `userId` and `requestId`. Both purchase entry points reuse the request identity only while gift/seat/occupant match. A replaced or departed recipient invalidates that target's retry and selection; same recipient after uncertain transport keeps requestId, unrelated seat changes do not invalidate it. Send preflight rejects a stale recipient retry before any WS call. Payload remains giftKey + targetSeatNo; no userId protocol field, WS/accounting/schema/migration/cooldown/replay change. Fundamental existing suites plus a temporary controlled presentation probe verify the correction; no new UI/CSS/JSP suite.
+
+
+## Persistent Gift HUD correction — latest three purchases
+
+Supersedes aggregated-type visual slots: show the three most recent purchases (duplicates occupy separate slots), newest first, during the current recipient participation. Keep legacy aggregate `gifts` in table_gift_state and add `userId` plus `recentGifts: [{eventId,giftKey}]`. Query receipts by exact user/seat/joined_at; never resurrect previous participation. Preserve microseconds across the postgres driver by binding participation as text and casting inside SQL. No schema/migration or accounting change. Existing incorrectly truncated receipts are not repaired or matched approximately. Current authenticated manual HUD smoke is FAIL until verified on the corrected runtime.

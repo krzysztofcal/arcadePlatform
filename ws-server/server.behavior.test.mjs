@@ -9087,7 +9087,7 @@ export async function load(url, context, nextLoad) {
           }
           return { ok: true, replayed, event: receipt };
         },
-        async loadActiveGiftSummary() { return { seats: receipt ? [{ seatNo: receipt.recipientSeatNo, gifts: [{ giftKey: receipt.giftKey, count: 1 }] }] : [] }; }
+        async loadActiveGiftSummary() { return { seats: receipt ? [{ seatNo: receipt.recipientSeatNo, userId: '00000000-0000-4000-8000-000000000003', gifts: [{ giftKey: receipt.giftKey, count: 1 }], recentGifts: [{ eventId: receipt.eventId, giftKey: receipt.giftKey }] }] : [] }; }
       };
     }
   \` };
@@ -9117,7 +9117,7 @@ export async function load(url, context, nextLoad) {
     const [firstAck, event, firstState] = await firstResponses;
     assert.equal(firstAck.payload.status, 'accepted');
     assert.deepEqual(event.payload, { eventId: '00000000-0000-4000-8000-000000000104', senderSeatNo: 1, recipientSeatNo: 2, giftKey: 'beer' });
-    const expectedState = { seats: [{ seatNo: 2, gifts: [{ giftKey: 'beer', count: 1 }] }] };
+    const expectedState = { seats: [{ seatNo: 2, userId: '00000000-0000-4000-8000-000000000003', gifts: [{ giftKey: 'beer', count: 1 }], recentGifts: [{ eventId: '00000000-0000-4000-8000-000000000104', giftKey: 'beer' }] }] };
     assert.deepEqual(firstState.payload, expectedState);
     const replayResponses = Promise.all([nextCommandResultForRequest(ws, 'gift-buy'), nextMessageOfType(ws, 'table_gift_state')]);
     sendFrame(ws, command);
@@ -9130,13 +9130,13 @@ export async function load(url, context, nextLoad) {
     ws.off('message', captureGift);
     const recovered = nextMessageOfType(ws, 'table_gift_state');
     sendFrame(ws, { version: '1.0', type: 'resync', requestId: 'gift-resync', ts: '2026-10-04T12:00:00Z', payload: { tableId } });
-    assert.deepEqual((await recovered).payload, { seats: [{ seatNo: 2, gifts: [{ giftKey: 'beer', count: 1 }] }] });
+    assert.deepEqual((await recovered).payload, { seats: [{ seatNo: 2, userId: '00000000-0000-4000-8000-000000000003', gifts: [{ giftKey: 'beer', count: 1 }], recentGifts: [{ eventId: '00000000-0000-4000-8000-000000000104', giftKey: 'beer' }] }] });
     // A same-user join must reconcile every observer even if no intermediate empty seat was rendered.
     const rejoinRecovery = Promise.all([nextMessageOfType(observer, 'table_gift_state'), nextCommandResultForRequest(ws, 'gift-rejoin')]);
     sendFrame(ws, { version: '1.0', type: 'table_join', requestId: 'gift-rejoin', ts: '2026-10-04T12:00:00Z', payload: { tableId } });
     const [observerState, rejoin] = await rejoinRecovery;
     assert.equal(rejoin.payload.status, 'accepted');
-    assert.deepEqual(observerState.payload, { seats: [{ seatNo: 2, gifts: [{ giftKey: 'beer', count: 1 }] }] });
+    assert.deepEqual(observerState.payload, { seats: [{ seatNo: 2, userId: '00000000-0000-4000-8000-000000000003', gifts: [{ giftKey: 'beer', count: 1 }], recentGifts: [{ eventId: '00000000-0000-4000-8000-000000000104', giftKey: 'beer' }] }] });
     observer.close(); ws.close();
   } finally { child.kill('SIGTERM'); await waitForExit(child); await fs.rm(loader.dir, { recursive: true, force: true }); await fs.rm(register.dir, { recursive: true, force: true }); }
 });

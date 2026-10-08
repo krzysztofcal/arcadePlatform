@@ -4026,6 +4026,7 @@
     var marker = [config.avatar[0] + edge,config.avatar[1] + (hero ? 20 : leftSide || rightSide ? 48 : 28)];
     hud.marker = marker;
     placeSeatNode(hud.quickAction,{origin:[0,0]},quick,16,16);
+    hud.quickAction.style.setProperty('--poker-quick-gift-offset', (rightSide ? -20 : 20) + 'px');
     hud.cardPoint = hero ? config.cards : [config.avatar[0] + edge,config.avatar[1] + (leftSide || rightSide ? 28 : 8)];
     placeSeatNode(hud.cards,hud,hud.cardPoint,hero ? 110 : 36,hero ? 80 : 30);
     placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
@@ -4501,13 +4502,11 @@
     state.seats.forEach(function(seat){
       var hud = renderedSeatHud[seat.seatNo];
       if (!hud || !seat.userId) return;
-      var counts = giftsBySeat[seat.seatNo] || {};
-      var gifts = giftCatalog.filter(function(gift){ return counts[gift.key] > 0; });
+      var gifts = giftsBySeat[seat.seatNo] || [];
       Array.prototype.forEach.call(hud.gifts.children, function(slot, index){
-        var gift = gifts[index];
-        slot.textContent = gift ? gift.emoji + (counts[gift.key] > 1 ? ' ×' + counts[gift.key] : '') : '';
-        if (gift && index === 2 && gifts.length > 3) slot.textContent += ' +' + (gifts.length - 3);
-        slot.title = gift ? (index === 2 ? gifts.slice(2) : [gift]).map(function(item){ return giftName(item) + ' ×' + counts[item.key]; }).join(', ') : '';
+        var gift = gifts[index] && giftByKey(gifts[index].giftKey);
+        slot.textContent = gift ? gift.emoji : '';
+        slot.title = gift ? giftName(gift) : '';
       });
     });
   }
@@ -4530,11 +4529,13 @@
     syncGiftOwners();
     giftsBySeat = {};
     payload.seats.forEach(function(seat){
-      if (!Number.isInteger(seat.seatNo) || !giftOwners[seat.seatNo] || !Array.isArray(seat.gifts)) return;
-      var counts = {};
-      seat.gifts.forEach(function(gift){ if (giftByKey(gift.giftKey) && Number.isSafeInteger(gift.count) && gift.count > 0) counts[gift.giftKey] = gift.count; });
-      giftsBySeat[seat.seatNo] = counts;
+      if (!Number.isInteger(seat.seatNo) || !giftOwners[seat.seatNo]
+          || (seat.userId && seat.userId !== giftOwners[seat.seatNo])) return;
+      var recent = Array.isArray(seat.recentGifts) ? seat.recentGifts : (Array.isArray(seat.gifts) ? seat.gifts : []);
+      giftsBySeat[seat.seatNo] = recent.filter(function(gift){ return gift && giftByKey(gift.giftKey); }).slice(0, 3);
+      giftsBySeat[seat.seatNo].forEach(function(gift){ if (gift.eventId) giftEventIds.add(gift.eventId); });
     });
+    while (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
     renderGiftBadges();
   }
   function playNextGift(){
@@ -4565,8 +4566,8 @@
     if (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
     syncGiftOwners();
     if (!giftOwners[event.recipientSeatNo]) return;
-    var counts = giftsBySeat[event.recipientSeatNo] || (giftsBySeat[event.recipientSeatNo] = {});
-    counts[event.giftKey] = (counts[event.giftKey] || 0) + 1;
+    var recent = giftsBySeat[event.recipientSeatNo] || [];
+    giftsBySeat[event.recipientSeatNo] = [{ eventId: event.eventId, giftKey: event.giftKey }].concat(recent).slice(0, 3);
     renderGiftBadges();
     if (els.giftNotice) {
       els.giftNotice.textContent = gift.emoji + ' ' + t('pokerGiftSent', 'Gift sent') + ' · S' + event.recipientSeatNo;

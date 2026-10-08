@@ -39,7 +39,7 @@ export async function executePokerGiftPurchase({ beginSql, postTransaction, tabl
     if (sender.is_bot !== false) fail('invalid_sender');
     const recipient = seats.find((seat) => Number(seat.seat_no) === recipientSeatNo && seat.status === 'ACTIVE');
     if (!recipient || recipient.user_id === sender.user_id) fail('gift_target_unavailable');
-    // SQL-formatted participation preserves Postgres microseconds; JS Date would truncate them.
+    // Bind SQL-formatted participation as text: the driver serializes timestamp parameters through JS Date.
     if (!sender.participation || !recipient.participation) fail('gift_purchase_failed');
     const ledger = await postTransaction({ tx, txType: 'BURN', userId: buyerUserId, createdBy: buyerUserId,
       idempotencyKey: purchaseKey,
@@ -50,7 +50,7 @@ export async function executePokerGiftPurchase({ beginSql, postTransaction, tabl
     const [receipt] = await tx.unsafe(`insert into public.poker_gift_purchases
       (purchase_key, payment_source, payment_reference, buyer_user_id, sender_seat_no, sender_joined_at,
        recipient_user_id, recipient_seat_no, recipient_joined_at, table_id, gift_key, amount_ch, created_at)
-      values ($1, 'CH', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, clock_timestamp()) returning *;`,
+      values ($1, 'CH', $2, $3, $4, $5::text::timestamptz, $6, $7, $8::text::timestamptz, $9, $10, $11, clock_timestamp()) returning *;`,
       [purchaseKey, String(ledger.transaction.id), buyerUserId, sender.seat_no, sender.participation,
         recipient.user_id, recipientSeatNo, recipient.participation, tableId, giftKey, gift.priceCh]);
     if (!receipt) fail('gift_purchase_failed');
@@ -59,17 +59,27 @@ export async function executePokerGiftPurchase({ beginSql, postTransaction, tabl
 }
 
 export async function loadActiveGiftSummary(tx, tableId) {
-  const rows = await tx.unsafe(`select s.seat_no, g.gift_key, count(*)::int as count
+  const rows = await tx.unsafe(`with matched as (
+    select s.seat_no, s.user_id, g.id, g.gift_key,
+      row_number() over (partition by s.seat_no order by g.created_at desc, g.id desc) as position
     from public.poker_seats s join public.poker_gift_purchases g
       on g.table_id = s.table_id and g.recipient_user_id = s.user_id
       and g.recipient_seat_no = s.seat_no and g.recipient_joined_at = s.joined_at
     where s.table_id = $1 and s.status = 'ACTIVE'
-    group by s.seat_no, g.gift_key order by s.seat_no, g.gift_key;`, [tableId]);
+  ) select seat_no, user_id, gift_key, count(*)::int as count,
+    jsonb_agg(jsonb_build_object('eventId', id, 'giftKey', gift_key, 'position', position))
+      filter (where position <= 3) as recent_gifts
+    from matched group by seat_no, user_id, gift_key order by seat_no, gift_key;`, [tableId]);
   const seats = [];
   for (const row of rows) {
     let seat = seats.find((item) => item.seatNo === Number(row.seat_no));
-    if (!seat) { seat = { seatNo: Number(row.seat_no), gifts: [] }; seats.push(seat); }
+    if (!seat) { seat = { seatNo: Number(row.seat_no), userId: row.user_id, gifts: [], recentGifts: [] }; seats.push(seat); }
     seat.gifts.push({ giftKey: row.gift_key, count: Number(row.count) });
+    seat.recentGifts.push(...(row.recent_gifts || []));
+  }
+  for (const seat of seats) {
+    seat.recentGifts = seat.recentGifts.sort((a, b) => a.position - b.position)
+      .map(({ eventId, giftKey }) => ({ eventId, giftKey }));
   }
   return { seats };
 }

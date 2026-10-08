@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import postgres from 'postgres';
 import { PGlite } from '@electric-sql/pglite';
 import { executePokerGiftPurchase, loadActiveGiftSummary } from './gift-purchase.mjs';
 import { GIFT_CATALOG } from './gift-catalog.mjs';
@@ -9,7 +10,7 @@ const tableId = '00000000-0000-4000-8000-000000000001';
 const buyerUserId = '00000000-0000-4000-8000-000000000002';
 const humanId = '00000000-0000-4000-8000-000000000003';
 const botId = '00000000-0000-4000-8000-000000000004';
-async function fixture({ funds = 10000, failReceipt = false, ledgerFailure = false } = {}) {
+async function fixture({ funds = 10000, failReceipt = false, ledgerFailure = false, driverTimestampBinding = false } = {}) {
   const db = new PGlite();
   await db.exec(`create role anon; create role authenticated; create role service_role;
     create table poker_tables (id uuid primary key, status text);
@@ -24,6 +25,13 @@ async function fixture({ funds = 10000, failReceipt = false, ledgerFailure = fal
   await db.exec(await fs.readFile(new URL('../../supabase/migrations/20261004220956_poker_gift_purchases.sql', import.meta.url), 'utf8'));
   const beginSql = (fn) => db.transaction((sql) => fn({ unsafe: async (q, args = []) => {
     if (failReceipt && q.startsWith('insert into public.poker_gift_purchases')) throw new Error('receipt failed');
+    // Model postgres-js inferred timestamp binding, including its actual Date serializer.
+    if (driverTimestampBinding && q.startsWith('insert into public.poker_gift_purchases')) {
+      const client = postgres();
+      args = args.map((value, index) => [4, 7].includes(index) && !q.includes('$' + (index + 1) + '::text')
+        ? client.options.serializers[1184](value) : value);
+      await client.end();
+    }
     return (await sql.query(q, args)).rows;
   } }));
   const postTransaction = async (payload) => {
@@ -50,7 +58,7 @@ for (const recipientSeatNo of [2, 3]) test(`human sends to seat ${recipientSeatN
     const [receipt] = (await f.db.query('select * from poker_gift_purchases')).rows;
     assert.equal(Number(receipt.amount_ch), 25); assert.equal(receipt.payment_source, 'CH');
     assert.equal((await f.db.query("select to_char(recipient_joined_at, 'US') as us from poker_gift_purchases")).rows[0].us, '123456');
-    assert.deepEqual(await f.beginSql(tx => loadActiveGiftSummary(tx, tableId)), { seats: [{ seatNo: recipientSeatNo, gifts: [{ giftKey: 'beer', count: 1 }] }] });
+    assert.deepEqual(await f.beginSql(tx => loadActiveGiftSummary(tx, tableId)), { seats: [{ seatNo: recipientSeatNo, userId: recipientSeatNo === 2 ? humanId : botId, gifts: [{ giftKey: 'beer', count: 1 }], recentGifts: [{ eventId: first.event.eventId, giftKey: 'beer' }] }] });
     await assert.rejects(f.buy({ giftKey: 'coffee' }), { code: 'gift_idempotency_conflict' });
     await assert.rejects(f.buy({ requestId: 'new' }), { code: 'gift_rate_limited' });
     await f.db.exec("update poker_gift_purchases set created_at = clock_timestamp() - interval '3 seconds'");
@@ -110,4 +118,37 @@ test('invalid IDs/catalog/seat fail before SQL and catalog is exactly V1', async
   assert.deepEqual(GIFT_CATALOG.map(gift => [gift.giftKey, gift.priceCh]), [['coffee',10],['beer',25],['whisky',50],['pizza',100],['cake',250],['diamond',1000]]);
   const base = { tableId, buyerUserId, requestId: 'r1', giftKey: 'beer', recipientSeatNo: 2, beginSql: () => assert.fail('SQL must not run') };
   for (const patch of [{ tableId: 'bad' }, { buyerUserId: 'guest' }, { requestId: '' }, { requestId: 'r'.repeat(129) }, { giftKey: 'fireworks' }, { recipientSeatNo: '2' }, { recipientSeatNo: 0 }]) await assert.rejects(executePokerGiftPurchase({ ...base, ...patch }), { code: 'gift_invalid' });
+});
+
+
+test('receipt recovery returns three latest purchases, duplicates included, for current occupant only', async () => {
+  const f = await fixture();
+  try {
+    const events = [];
+    for (const [index, giftKey] of ['beer', 'coffee', 'beer', 'pizza'].entries()) {
+      await f.db.exec("update poker_gift_purchases set created_at = created_at - interval '4 seconds'");
+      events.unshift((await f.buy({ giftKey, requestId: 'recent-' + index })).event);
+    }
+    const summary = await f.beginSql(tx => loadActiveGiftSummary(tx, tableId));
+    assert.equal(summary.seats[0].userId, humanId);
+    assert.deepEqual(summary.seats[0].recentGifts, events.slice(0, 3).map(event => ({ eventId: event.eventId, giftKey: event.giftKey })));
+    assert.deepEqual(await f.beginSql(tx => loadActiveGiftSummary(tx, tableId)), summary);
+    await f.db.exec("update poker_seats set user_id = '00000000-0000-4000-8000-000000000005' where seat_no = 2");
+    assert.deepEqual(await f.beginSql(tx => loadActiveGiftSummary(tx, tableId)), { seats: [] });
+  } finally { await f.db.close(); }
+});
+
+
+test('postgres timestamp binding preserves exact receipt participation for recovery', async () => {
+  const f = await fixture({ driverTimestampBinding: true });
+  try {
+    const purchase = await f.buy();
+    const rows = await f.db.query(`select g.sender_joined_at = sender.joined_at as same_sender,
+      g.recipient_joined_at = recipient.joined_at as same_recipient from poker_gift_purchases g
+      join poker_seats sender on sender.seat_no = g.sender_seat_no
+      join poker_seats recipient on recipient.seat_no = g.recipient_seat_no`);
+    assert.deepEqual(rows.rows, [{ same_sender: true, same_recipient: true }]);
+    const summary = await f.beginSql(tx => loadActiveGiftSummary(tx, tableId));
+    assert.deepEqual(summary.seats[0].recentGifts, [{ eventId: purchase.event.eventId, giftKey: 'beer' }]);
+  } finally { await f.db.close(); }
 });
