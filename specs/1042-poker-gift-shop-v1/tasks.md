@@ -70,6 +70,9 @@ Authenticated Stage smoke/Production GO remain pending; no new UI suite, WS prot
 
 - [x] T001 — Read-only Stage receipt/seat comparison, postgres serializer and WS/event/state path; check Firefox slot visibility.
 - [x] T002 — Preserve timestamp precision; restore newest three purchases with additive state fields and recipient ownership validation, no accounting/schema changes.
-- [ ] T003 — Fundamental regression, Gift Shop/WS/browser/client/ledger/repo checks, diff review, exact-SHA Preview deployment and conditional authenticated Stage smoke.
+- [x] T003 — Fundamental regression, Gift Shop/WS/browser/client/ledger/repo checks, diff review and exact-SHA Preview deployment. Conditional authenticated Stage smoke unavailable (no browser login); acceptance gate remains unchecked/FAIL.
 
 Manual authenticated persistent HUD smoke remains FAIL/unverified until all three slots are confirmed; keep Draft/not merge-ready and Production GO pending.
+
+
+Corrected runtime SHA `2c9976d4a01bd143898422208644840e7ec1efad`: WS Preview Deploy run 37853558761 success, installed RELEASE_SHA == DEPLOY_REF and health verified; Netlify same SHA. Full npm test exit 0 (144 runner groups), WS/reconnect 160/160, browser/client 170/170, Gift Shop 14/14. Current CI linked from PR #1047. Authenticated persistent HUD smoke remains FAIL/unverified; T013/Production T014/final acceptance T015 still pending.
