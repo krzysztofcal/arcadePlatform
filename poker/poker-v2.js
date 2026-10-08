@@ -3946,7 +3946,9 @@
       var statusParent = seatSceneOrientation === 'portrait' ? els.sceneViewport : els.scene;
       if (els.roomStatus.parentNode !== statusParent) statusParent.appendChild(els.roomStatus);
     }
-    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / geometry.height);
+    var portrait = seatSceneOrientation === 'portrait';
+    var widthScale = els.sceneViewport.clientWidth / geometry.width;
+    var scale = portrait ? widthScale : Math.min(widthScale, els.sceneViewport.clientHeight / geometry.height);
     if (!Number.isFinite(scale) || scale <= 0) return;
     if (els.screen) els.screen.style.setProperty('--poker-scene-scale', String(scale));
     els.scene.dataset.orientation = seatSceneOrientation;
@@ -3954,6 +3956,30 @@
     els.scene.style.height = geometry.height + 'px';
     els.scene.style.top = '';
     els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
+    els.scene.style.setProperty('--poker-hero-overflow-lift', '0px');
+    if (portrait){
+      // Keep the top seat's upward-growing UI below chrome without shrinking the table.
+      var sceneTop = Math.max(0, (els.sceneViewport.clientHeight - geometry.height * scale) / 2);
+      var topTransient = els.scene.querySelector('.poker-seat-hud-transient--top');
+      if (topTransient){
+        var transientHeight = topTransient.getBoundingClientRect().height;
+        var transientAnchor = parseFloat(topTransient.style.top) || 0;
+        sceneTop = Math.max(sceneTop, transientHeight - transientAnchor * scale);
+      }
+      els.scene.style.top = (sceneTop + geometry.height * scale / 2) + 'px';
+      // A width-sized scene can exceed the viewport: lift only the persistent deal.
+      // Measure the rotated cards, preserving the existing short-portrait lift.
+      if (els.heroCards && !els.heroCards.hidden){
+        var cardsBottom = 0;
+        Array.prototype.forEach.call(els.heroCards.children, function(card){
+          cardsBottom = Math.max(cardsBottom, card.getBoundingClientRect().bottom);
+        });
+        var viewportBottom = els.sceneViewport.getBoundingClientRect().bottom;
+        var statusHeight = els.roomStatus ? els.roomStatus.getBoundingClientRect().height : 0;
+        var lift = Math.max(0, cardsBottom - (viewportBottom - statusHeight - 8));
+        els.scene.style.setProperty('--poker-hero-overflow-lift', (lift / scale) + 'px');
+      }
+    }
   }
 
   function seatPhysicalSlot(index, total){
