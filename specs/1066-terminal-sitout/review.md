@@ -13,3 +13,10 @@ Focused existing accounting/cleanup/leave/human-stack suites: 46/46 PASS. check:
 Breaking impacts: no schema/protocol/API changes. Existing shared terminal callers can now close the previously blocked unambiguous SETTLED sit-out ownership case. Non-sit-out, INACTIVE, left, malformed/missing hand collection, occupied/mismatched seat and ambiguous identity cases retain existing rejection path; no general missing-seat forgiveness.
 
 No Production writes/deploy/cleanup and no merge. Incident table remains for separately authorized post-deployment automatic janitor smoke. Draft, implementation ready, awaiting manual runtime verification.
+
+## Verified runtime handoff
+Issue #1066; Draft PR https://github.com/krzysztofcal/arcadePlatform/pull/1067. Runtime SHA `4fee63bcab4700e2e31f4085c1c4722d1df2e7e0`. Full npm test PASS (143 runner checkpoints). Its first broad run lacked local ws; reused existing temporary WS dependencies and reran successfully, no dependency manifests changed. All applicable runtime-head CI checks PASS (30 records; no pending/failing checks).
+
+WS Preview Deploy https://github.com/krzysztofcal/arcadePlatform/actions/runs/37828286230 SUCCESS for exact runtime SHA, workflow ref main. Preview release-metadata has this application SHA, deployed shared terminal-close bytes match, https://ws-preview.kcswh.pl/healthz returns ok; preview journal confirms service start. This is deployment/health evidence, not authenticated gameplay acceptance. Later handoff-only docs preserve runtime bytes by diff.
+
+Production ws-server PID remains 2806958 with start time 2026-10-06 01:13:22 UTC; no Production deployment or data mutation performed. The incident table was never cleaned manually. Implementation ready, awaiting manual runtime verification; Draft, not merge-ready, no merge.
