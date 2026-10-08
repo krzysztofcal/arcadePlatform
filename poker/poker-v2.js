@@ -3932,6 +3932,7 @@
     ]}
   };
   var seatSceneOrientation = 'portrait';
+  var topSeatDockOffset = 0;
 
   function fitTableScene(){
     if (!els.scene || !els.sceneViewport) return;
@@ -3956,30 +3957,22 @@
     els.scene.style.height = geometry.height + 'px';
     els.scene.style.top = '';
     els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
-    els.scene.style.setProperty('--poker-hero-overflow-lift', '0px');
+    topSeatDockOffset = 0;
     if (portrait){
-      // Keep the top seat's upward-growing UI below chrome without shrinking the table.
-      var sceneTop = Math.max(0, (els.sceneViewport.clientHeight - geometry.height * scale) / 2);
-      var topTransient = els.scene.querySelector('.poker-seat-hud-transient--top');
-      if (topTransient){
-        var transientHeight = topTransient.getBoundingClientRect().height;
-        var transientAnchor = parseFloat(topTransient.style.top) || 0;
-        sceneTop = Math.max(sceneTop, transientHeight - transientAnchor * scale);
-      }
-      els.scene.style.top = (sceneTop + geometry.height * scale / 2) + 'px';
-      // A width-sized scene can exceed the viewport: lift only the persistent deal.
-      // Measure the rotated cards, preserving the existing short-portrait lift.
-      if (els.heroCards && !els.heroCards.hidden){
-        var cardsBottom = 0;
-        Array.prototype.forEach.call(els.heroCards.children, function(card){
-          cardsBottom = Math.max(cardsBottom, card.getBoundingClientRect().bottom);
-        });
-        var viewportBottom = els.sceneViewport.getBoundingClientRect().bottom;
-        var statusHeight = els.roomStatus ? els.roomStatus.getBoundingClientRect().height : 0;
-        var lift = Math.max(0, cardsBottom - (viewportBottom - statusHeight - 8));
-        els.scene.style.setProperty('--poker-hero-overflow-lift', (lift / scale) + 'px');
+      // Crop decoration at the top, never move the persistent deal off its Hero anchor.
+      var sceneHeight = geometry.height * scale;
+      var viewportHeight = els.sceneViewport.clientHeight;
+      var bottomStatusSpace = window.innerHeight > 820 ? 18 * scale : 0;
+      var sceneTop = Math.min((viewportHeight - sceneHeight) / 2, viewportHeight - sceneHeight - bottomStatusSpace);
+      els.scene.style.top = (sceneTop + sceneHeight / 2) + 'px';
+      if (sceneTop < 0){
+        // Dock into the existing left-side lane, above the community cards.
+        // This layout breakpoint and offset never depend on transient contents.
+        var dockAvatarY = geometry.seats[5].avatar[1] - 8;
+        topSeatDockOffset = dockAvatarY - geometry.seats[0].avatar[1];
       }
     }
+    els.scene.dataset.topSeatDocked = topSeatDockOffset > 0 ? '1' : '0';
   }
 
   function seatPhysicalSlot(index, total){
@@ -4000,32 +3993,38 @@
     var portrait = seatSceneOrientation === 'portrait';
     var config = seatSceneGeometry[seatSceneOrientation].seats[slot];
     hud.config = config;
+    var avatar = [config.avatar[0], config.avatar[1] + (portrait && slot === 0 ? topSeatDockOffset : 0)];
+    hud.avatarAnchor = avatar;
+    // Docked transients use the left column; keep this owner's chips on exposed felt.
+    hud.feltAnchors = portrait && slot === 0 && topSeatDockOffset > 0
+      ? { stack:[seatSceneGeometry.portrait.seats[1].stack[0],config.stack[1]], bet:[seatSceneGeometry.portrait.seats[1].bet[0],config.bet[1]] }
+      : config;
     hud.origin = [config.avatar[0] - 46, config.avatar[1] - 50];
     article.style.left = hud.origin[0] + 'px';
     article.style.top = hud.origin[1] + 'px';
     article.dataset.seatVariant = ['top','upper-right','lower-right','hero','lower-left','upper-left'][slot];
     hud.avatarSize = portrait ? 72 : 96;
-    hud.name = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2 + 15];
-    hud.action = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2];
+    hud.name = [avatar[0],avatar[1] + hud.avatarSize / 2 + 15];
+    hud.action = [avatar[0],avatar[1] + hud.avatarSize / 2];
     var corner = portrait ? 46 : 60;
     var leftSide = slot === 4 || slot === 5;
     var rightSide = slot === 1 || slot === 2;
     var edge = leftSide ? corner : -corner;
-    var quick = [config.avatar[0] + (rightSide ? -corner : corner),config.avatar[1] + (hero ? 12 : 8)];
-    var marker = [config.avatar[0] + edge,config.avatar[1] + (hero ? 20 : leftSide || rightSide ? 48 : 28)];
+    var quick = [avatar[0] + (rightSide ? -corner : corner),avatar[1] + (hero ? 12 : 8)];
+    var marker = [avatar[0] + edge,avatar[1] + (hero ? 20 : leftSide || rightSide ? 48 : 28)];
     hud.marker = marker;
     placeSeatNode(hud.quickAction,{origin:[0,0]},quick,16,16);
-    placeSeatNode(hud.cards,hud,hero ? config.cards : [config.avatar[0] + edge,config.avatar[1] + (leftSide || rightSide ? 28 : 8)],hero ? 110 : 26,hero ? 80 : 14);
-    placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
-    placeSeatNode(hud.bet,hud,config.bet,22,20);
+    placeSeatNode(hud.cards,hud,hero ? config.cards : [avatar[0] + edge,avatar[1] + (leftSide || rightSide ? 28 : 8)],hero ? 110 : 26,hero ? 80 : 14);
+    placeSeatNode(hud.stack,hud,hud.feltAnchors.stack,portrait ? 60 : 80,60);
+    placeSeatNode(hud.bet,hud,hud.feltAnchors.bet,22,20);
     ['bestHand'].forEach(function(role){
       var point=config[role];
       if (point) placeSeatNode(hud[role],{origin:[0,0]},point,point[2],point[3]);
     });
     // All player-owned transient content shares one column above the avatar.
     var isTopSeat = slot === 0;
-    var presentationTop = config.avatar[1] - hud.avatarSize / 2 - (isTopSeat ? 4 : 6);
-    placeSeatNode(hud.presentation,{origin:[0,0]},[config.avatar[0],presentationTop],100);
+    var presentationTop = avatar[1] - hud.avatarSize / 2 - (isTopSeat ? 4 : 6);
+    placeSeatNode(hud.presentation,{origin:[0,0]},[avatar[0],presentationTop],portrait && isTopSeat && topSeatDockOffset > 0 ? 180 : 100);
     hud.presentation.classList.add('poker-seat-hud-transient');
     if (isTopSeat) hud.presentation.classList.add('poker-seat-hud-transient--top');
     else hud.presentation.classList.remove('poker-seat-hud-transient--top');
@@ -4033,14 +4032,14 @@
     hud.presentation.appendChild(hud.social);
     var geometry = seatSceneGeometry[seatSceneOrientation];
     var reactionWidth = Math.min(220, geometry.width - 16);
-    var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(config.avatar[0], geometry.width - reactionWidth / 2 - 8));
+    var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(avatar[0], geometry.width - reactionWidth / 2 - 8));
     hud.social.style.setProperty('--poker-reaction-width', reactionWidth + 'px');
-    hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - config.avatar[0]) + 'px');
+    hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - avatar[0]) + 'px');
     var radius = portrait ? 52 : 58;
     var giftAngles = leftSide ? [-100,-60,-20] : rightSide ? [-160,-120,-80] : [-150,-90,-30];
     giftAngles.forEach(function(angle,index){
       var radians=angle*Math.PI/180;
-      placeSeatNode(hud.gifts.children[index],hud,[config.avatar[0]+Math.cos(radians)*radius,config.avatar[1]+Math.sin(radians)*radius],16,16);
+      placeSeatNode(hud.gifts.children[index],hud,[avatar[0]+Math.cos(radians)*radius,avatar[1]+Math.sin(radians)*radius],16,16);
     });
   }
 
@@ -4048,7 +4047,7 @@
     var hud = renderedSeatHud[seatNo];
     if (!hud) return null;
     var geometry=seatSceneGeometry[seatSceneOrientation];
-    return {x:hud.config.avatar[0]/geometry.width*100,y:hud.config.avatar[1]/geometry.height*100};
+    return {x:hud.avatarAnchor[0]/geometry.width*100,y:hud.avatarAnchor[1]/geometry.height*100};
   }
 
   function syncRenderedSeatAnchors(){
@@ -4125,7 +4124,7 @@
           els.seatChipLayer.appendChild(container);
         }
         hud[role] = container;
-        placeSeatNode(container,{origin:[0,0]},hud.config[role],role === 'stack' ? (seatSceneOrientation === 'portrait' ? 60 : 80) : 22,role === 'stack' ? 60 : 20);
+        placeSeatNode(container,{origin:[0,0]},hud.feltAnchors[role],role === 'stack' ? (seatSceneOrientation === 'portrait' ? 60 : 80) : 22,role === 'stack' ? 60 : 20);
       });
       syncChipVisual(hud.stack,resolveStack(seat.userId),isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack',true);
       syncChipVisual(hud.bet,Math.max(0,Number(seatCommittedByUserId[seat.userId]) || 0),'seat-bet',false);
@@ -4421,7 +4420,7 @@
       name.className = 'poker-seat-name';
       name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
 
-      placeSeatNode(avatar,hud,hud.config.avatar,hud.avatarSize,hud.avatarSize);
+      placeSeatNode(avatar,hud,hud.avatarAnchor,hud.avatarSize,hud.avatarSize);
       hud.portrait.appendChild(avatar);
       var transientSeat = document.createElement('div');
       transientSeat.className = 'poker-seat-transient';
@@ -4499,8 +4498,6 @@
     syncRenderedSeatAnchors();
     scheduleTargetedReactionDismiss();
     renderReactionBubbles();
-    // Reactions can change top-seat clearance without a viewport resize.
-    if (seatSceneOrientation === 'portrait') fitTableScene();
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
       var reactionBubble = reactionBubblesBySeatNo[seatNo];
       if (reactionBubble) reactionBubble.animate = false;
@@ -4721,7 +4718,8 @@
     if (!valid) return;
     var slot = seatPhysicalSlot(rotateSeatIndex(seatIndex,state.maxSeats),state.maxSeats);
     var point = seatSceneGeometry[seatSceneOrientation].seats[slot].dealer;
-    placeSeatNode(els.dealerChip,{origin:[0,0]},point,20,20);
+    var dealerPoint = [point[0], point[1] + (seatSceneOrientation === 'portrait' && slot === 0 ? topSeatDockOffset : 0)];
+    placeSeatNode(els.dealerChip,{origin:[0,0]},dealerPoint,20,20);
   }
 
   function isWsReady(){
