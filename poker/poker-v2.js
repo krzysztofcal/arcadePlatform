@@ -4499,6 +4499,8 @@
     syncRenderedSeatAnchors();
     scheduleTargetedReactionDismiss();
     renderReactionBubbles();
+    // Reactions can change top-seat clearance without a viewport resize.
+    if (seatSceneOrientation === 'portrait') fitTableScene();
     Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
       var reactionBubble = reactionBubblesBySeatNo[seatNo];
       if (reactionBubble) reactionBubble.animate = false;
