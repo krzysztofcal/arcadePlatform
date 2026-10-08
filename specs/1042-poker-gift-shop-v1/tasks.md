@@ -54,3 +54,13 @@ These integration tasks supplement the original feature task IDs above.
 
 
 Integration verification complete for runtime `8898a8673e1774a1667de27142bf5cbebaf9a950`: local tests/checks + independent review + all runtime-SHA CI passed; WS Preview Deploy run 37845007258 succeeded with metadata/health gates. Full evidence in review.md. T013 remains unchecked for authenticated Stage smoke; T014 Production owner GO/schema and T015 final acceptance/handoff remain pending. No merge-ready declaration.
+
+
+## P1 — Recipient-bound Gift Shop retry
+
+- [x] Analyze sendSelectedGift/syncGiftOwners/syncGiftShop and reproduce missing recipient identity.
+- [x] Bind retry to seatNo + userId, reject stale recipient before send and clear target-scoped retry/selection on replacement/departure.
+- [x] Preserve unchanged recipient requestId and unrelated-seat retry; retain WS/idempotency/BURN/replay/cooldown semantics.
+- [x] Existing fundamental/browser/client checks, controlled red/green probe, independent diff review; update existing Draft #1047/SpecKit.
+
+Authenticated Stage smoke/Production GO remain pending; no new UI suite, WS protocol/schema/migration changes or Production deployment.

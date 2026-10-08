@@ -4517,8 +4517,11 @@
     state.seats.forEach(function(seat){ if (seat && seat.userId && !/LEFT|INACTIVE|EMPTY/.test(seat.status || '')) owners[seat.seatNo] = seat.userId; });
     Object.keys(giftOwners).forEach(function(seatNo){ if (giftOwners[seatNo] !== owners[seatNo]) delete giftsBySeat[seatNo]; });
     giftOwners = owners;
+    if (giftRetry && owners[giftRetry.seatNo] !== giftRetry.userId) {
+      if (els.giftRecipient && els.giftRecipient.dataset.value === String(giftRetry.seatNo)) els.giftRecipient.dataset.value = '';
+      giftRetry = null;
+    }
     if (quickGiftTarget && owners[quickGiftTarget.seatNo] !== quickGiftTarget.userId) {
-      if (giftRetry && giftRetry.seatNo === quickGiftTarget.seatNo) giftRetry = null;
       quickGiftTarget = null;
     }
   }
@@ -4577,6 +4580,7 @@
   }
   function syncGiftShop(){
     if (!els.giftShopButton) return;
+    syncGiftOwners();
     var available = giftShopAvailable();
     var locked = isGuestMode || !isSignedIn();
     var copy = locked ? t('pokerGiftSignInRequired', 'Gift Shop is available only to signed-in players') : t('pokerGiftShop', 'Gift Shop');
@@ -4603,7 +4607,7 @@
       }
     });
     if (els.giftRecipient.dataset.value && !seats.some(function(seat){ return String(seat.seatNo) === els.giftRecipient.dataset.value; })) els.giftRecipient.dataset.value = '';
-    if (giftRetry && !seats.some(function(seat){ return seat.seatNo === giftRetry.seatNo; })) giftRetry = null;
+    if (giftRetry && !seats.some(function(seat){ return seat.seatNo === giftRetry.seatNo && seat.userId === giftRetry.userId; })) giftRetry = null;
     seats.forEach(function(seat){
       var seatNo = String(seat.seatNo);
       var button = els.giftRecipient.querySelector('[data-seat-no="' + seatNo + '"]');
@@ -4659,9 +4663,14 @@
   }
 
   function sendSelectedGift(key, seatNo){
-    if (giftPending || !wsClient || !giftShopAvailable() || !giftByKey(key)
-        || !giftEligibleSeats().some(function(seat){ return seat.seatNo === seatNo; })) return;
-    var retry = giftRetry && giftRetry.key === key && giftRetry.seatNo === seatNo ? giftRetry : { key: key, seatNo: seatNo, requestId: 'gift_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10) };
+    if (giftPending || !wsClient || !giftShopAvailable() || !giftByKey(key)) return;
+    var recipient = giftEligibleSeats().filter(function(seat){ return seat.seatNo === seatNo; })[0];
+    if (!recipient || (giftRetry && giftRetry.seatNo === seatNo && giftRetry.userId !== recipient.userId)) {
+      syncGiftShop();
+      return;
+    }
+    var retry = giftRetry && giftRetry.key === key && giftRetry.seatNo === seatNo && giftRetry.userId === recipient.userId
+      ? giftRetry : { key: key, seatNo: seatNo, userId: recipient.userId, requestId: 'gift_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10) };
     giftRetry = retry;
     giftPending = true; syncGiftShop();
     wsClient.sendGift(key, seatNo, retry.requestId).then(function(){
