@@ -1,0 +1,2 @@
+# Data model
+No schema change. Locked poker_seats maps unique human/bot user_id to unique seat_no. state.seats/handSeats describe hand participants; state.stacks preserves funded nonparticipants. Missing human hand membership is allowed only for SETTLED with valid hand collections and explicit sit-out ACTIVE ownership with no conflicting seat/user mapping and no left flag. Amounts remain validated authoritative stacks; escrow sum and bot ledger provenance remain mandatory.
