@@ -368,7 +368,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-seat-hud-cards{display:flex;align-items:center;justify-content:center;}
 .poker-seat-cards{display:flex;justify-content:center;gap:2px;margin:0;}
 .poker-hero-cards{display:flex;gap:8px;justify-content:center;}
-.poker-scene[data-orientation="portrait"] .poker-hero-cards{transform:translate(-50%,calc(-50% - var(--poker-hero-overflow-lift,0px)));}
+.poker-scene[data-orientation="portrait"] .poker-hero-cards{z-index:6;transform:translate(-50%,calc(-50% - var(--poker-hero-overflow-lift,0px)));}
 .poker-hero-cards .poker-card{width:46px;height:63px;}
 .poker-hero-cards .poker-card:first-child{transform:rotate(-7deg);}
 .poker-hero-cards .poker-card:last-child{transform:rotate(7deg);}
