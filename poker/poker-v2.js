@@ -3946,13 +3946,17 @@
       var statusParent = seatSceneOrientation === 'portrait' ? els.sceneViewport : els.scene;
       if (els.roomStatus.parentNode !== statusParent) statusParent.appendChild(els.roomStatus);
     }
-    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / geometry.height);
+    // Reserve a table-local band for northern player transients, below chrome.
+    var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
+    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
     if (!Number.isFinite(scale) || scale <= 0) return;
     if (els.screen) els.screen.style.setProperty('--poker-scene-scale', String(scale));
     els.scene.dataset.orientation = seatSceneOrientation;
     els.scene.style.width = geometry.width + 'px';
     els.scene.style.height = geometry.height + 'px';
-    els.scene.style.top = '';
+    var sceneTop = (els.sceneViewport.clientHeight + topSafeArea * scale) / 2;
+    if (seatSceneOrientation === 'landscape' && window.innerHeight <= 500) sceneTop = (geometry.height / 2 + topSafeArea) * scale;
+    els.scene.style.top = sceneTop + 'px';
     els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
   }
 
@@ -3997,13 +4001,8 @@
       if (point) placeSeatNode(hud[role],{origin:[0,0]},point,point[2],point[3]);
     });
     // All player-owned transient content shares one column above the avatar.
-    var isTopSeat = slot === 0;
-    var presentationTop = config.avatar[1] - hud.avatarSize / 2 - (isTopSeat ? 4 : 6);
-    placeSeatNode(hud.presentation,{origin:[0,0]},[config.avatar[0],presentationTop],100);
+    placeSeatNode(hud.presentation,{origin:[0,0]},[config.avatar[0],config.avatar[1] - hud.avatarSize / 2 - 6],100);
     hud.presentation.classList.add('poker-seat-hud-transient');
-    if (isTopSeat) hud.presentation.classList.add('poker-seat-hud-transient--top');
-    else hud.presentation.classList.remove('poker-seat-hud-transient--top');
-    hud.presentation.dataset.seatVariant = article.dataset.seatVariant;
     hud.presentation.appendChild(hud.social);
     var geometry = seatSceneGeometry[seatSceneOrientation];
     var reactionWidth = Math.min(220, geometry.width - 16);
@@ -4401,7 +4400,6 @@
       transientSeat.className = 'poker-seat-transient';
       transientSeat.dataset.seatNo = article.dataset.seatNo;
       transientSeat.dataset.userId = article.dataset.userId;
-      transientSeat.dataset.seatVariant = article.dataset.seatVariant;
       if (seat && els.seatTransientLayer){
         transientSeat.appendChild(hud.presentation);
         transientSeat.appendChild(hud.quickAction);
