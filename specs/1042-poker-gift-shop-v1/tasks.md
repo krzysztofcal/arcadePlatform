@@ -48,6 +48,9 @@ These integration tasks supplement the original feature task IDs above.
 - [x] T002 — Preserve main HUD/scene/avatars/animations/lifecycle; consume three gift slots and Quick Gift anchor with one purchase/retry path.
 - [x] T003 — Review auto-merged WS/log policy against main; retain security, reconnect, janitor/lifecycle and gift replay/state/idempotency semantics.
 - [x] T004 — Review browser client/i18n/adapter/protocol/tests/Production inventory; applied Stage migration unchanged.
-- [ ] T005 — Existing fundamental/repo checks, final diff review, CI and exact-SHA WS Preview deployment evidence. Authenticated Stage smoke and Production schema GO remain separate outstanding gates.
+- [x] T005 — Existing fundamental/repo checks, final diff review, CI and exact-SHA WS Preview deployment evidence. Authenticated Stage smoke and Production schema GO remain separate outstanding gates.
 
 #1048 dependency is now resolved (CLOSED; #1049 MERGED), rather than a remaining code blocker. Final integrated Gift Shop visual/authenticated smoke remains outstanding. Historical deployment evidence above is superseded by the deployment recorded in review.md for this integration. PR stays Draft, no merge or Production action.
+
+
+Integration verification complete for runtime `8898a8673e1774a1667de27142bf5cbebaf9a950`: local tests/checks + independent review + all runtime-SHA CI passed; WS Preview Deploy run 37845007258 succeeded with metadata/health gates. Full evidence in review.md. T013 remains unchecked for authenticated Stage smoke; T014 Production owner GO/schema and T015 final acceptance/handoff remain pending. No merge-ready declaration.
