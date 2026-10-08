@@ -1,0 +1,57 @@
+# #1058 review
+
+Baseline main: 6c8ab3fad1570f7906a04dd09a05cf05c0fa36d2, merged #1049.
+
+Implementation T001–T010 complete; owner animation acceptance pending. One browser runtime, unchanged authoritative state/privacy and accepted geometry. Owner visual animation smoke is final gate; Draft, never merge.
+
+## Historical implementation evidence — superseded highlight semantics
+
+Eight scoped files only. Existing evaluator/reveal/participation/mergeSnapshot authority retained. Best-five sync runs after persistent Hero render even when same deal returns early. Compact pair uses the existing card anchor, enlarged to36×30 scene px without moving its center. Final authoritative faces render before FX. One bounded current table/viewer/seat/hand claim model suppresses initial/recovery/reduced-motion replay and duplicate fold/reveal. Cosmetic nodes/timers are scene-owned and cleared on transport/identity/hand/visibility teardown; none mutates game state. Hero fold stays dimmed with its owned deal retained.
+
+Correction to fixture: reveal is supplied via existing public.showdown.revealedShowdownParticipants, never a new field. Fundamental lifecycle/privacy cases RED against unchanged main (missing claim model), GREEN129/129 after implementation including existing static HTML/card/chip/reaction/settlement tests. No pixel/layout tests added. Syntax and repo guards/CSP PASS; no inline scripts, new dependencies or WS changes.
+
+Breaking impact: Hero/board best-five outline, larger readable opponent pair with authoritative public faces, cosmetic deal/flip/muck motion. Existing geometry, cards/shadows/status/actions/CH authority unchanged. Owner animation quality acceptance pending; Draft/not merge-ready.
+
+## Historical runtime Preview / T010
+
+Runtime SHA: `b35857372225099ab8495b7d8f734fedd3bfccf1`, Draft PR #1059. Real Netlify Preview: https://deploy-preview-1059--playkcswh.netlify.app/poker/table-v2.html . BUILD_INFO commitHash and served JS/CSS match this SHA. Browser-only; no WS deployment or Production action.
+
+External controlled snapshots delivered through existing processSnapshotFrame at390×844,320×640 and844×390 (six occupied seats), plus reduced-motion390×844. One new hand produces12 cosmetic cards/two rounds from actual rendered room-dealer element; all computed animation names are poker-card-deal. Duplicate frame preserves the same FX copies. Initial bootstrap starts none. Flop/turn/river highlight equals existing evaluator output, updates to five board cards on the river and preserves the same Hero card nodes. Opponent faces show only authoritative public.showdown.revealedShowdownParticipants via getSeatRevealCards; others remain two backs. One hidden→revealed transition produces one flip, duplicate does not. Authoritative Hero/opponent folds produce two muck copies without clearing Hero state; static folded state stays dimmed. Resync/reconnect render correct final state with no replay; reduced motion produces zero motion nodes while preserving final faces/cards/highlights. Closed-table lifecycle cancels all copies/claims (fundamental regression). No page scroll; status, action controls, reaction/chat and Wallet/Poker chrome remain intact. Screenshots visually reviewed externally; no evidence binaries/JSON or broad probes committed.
+
+Focused129/129 and syntax/check:all/ci:guards/CSP/diff PASS. Initial complete tests RED against baseline, GREEN after implementation. Exact runtime CI guards/CodeQL/catalog/validation PASS; full Tests/WS job state stays recorded live in #1059. Later documentation-only changes do not alter the verified runtime artifacts. Owner physical animation-quality smoke remains final gate; controlled public-state fixture does not assert authenticated Stage gameplay acceptance. Draft/not merge-ready, never merge.
+
+## Owner-smoke amendments — 2026-10-08
+
+Reviewed against #1058 comments 6062594479 (made-hand selection) and 6062733792 (action/pre-action modes). Original best-five highlight acceptance is superseded. `heroMadeHandIdentities()` derives only the figure from the unchanged evaluator category/ordered best five: High Card 0, Pair 2, Two Pair 4, Trips 3, Straight/Flush/Full House/Straight Flush/Royal Flush 5, Quads 4. Kickers excluded; board-only Pair and Straight covered. `syncMadeHandHighlights()` runs after persistent Hero rendering. CSS glow unchanged; highlight naming corrected.
+
+Existing authoritative turn/pre-action model and action handlers retained. Hidden pre-actions disabled; immediate buttons and pre-action spans share label padding/alignment, font and footprint. Existing DOM/order retained; no checkbox on immediate controls. Fundamental tests prove off-turn queueing and active-turn immediate CHECK, with unchanged control identities. No HTML, evaluator, animation, geometry, WS or gameplay edits in this amendment.
+
+RED: previous highlight implementation fails High Card/kicker/board-only Pair cases; inactive checkbox test also fails before correction. GREEN: 141/141 Poker V2 tests. check:all, ci:guards, CSP, test:quick, test:unit and diff checks PASS. Only fundamental category/interaction assertions added to existing harness; no CSS/layout/glue suites. Exact amended Preview verification is recorded in the PR handoff. Physical owner re-smoke remains required; Draft, no merge.
+
+Amended runtime Preview SHA: `77fd52e7dcc29482b84cc157eb0dab9083d2ce66`. BUILD_INFO and served JS/CSS match. External controlled snapshots at 390×844 and 844×390 confirm equal control/text bounding rects before/after authoritative mode transition, same DOM identities, checkbox decoration only off-turn and board-only Pair highlights exactly AS/AC. Screenshots reviewed outside repo. The visible checkbox regression was the `.poker-action-btn::before` decoration; that selector is removed while reserved padding remains. Matched font inheritance and wrapped-text alignment prevent text movement. Evaluator bytes match the pre-amendment head; no animation/card-presentation changes beyond these requested corrections. No outstanding self-review findings. Physical owner re-smoke pending; later docs-only commits preserve verified runtime bytes.
+
+## Community-card owner amendment — 2026-10-08
+
+Reviewed against comment 6063949580. Authoritative community cards are copied into the existing visual snapshot; bounded board claims live in cardFxClaims and reset with its hand/table/viewer context. Only same-context/hand unchanged-prefix 0→3, 3→4, 4→5 transitions animate. Populated ineligible snapshots consume historical streets. Existing frame eligibility and reduced-motion checks remain the only gates.
+
+Community copies use spawnCardFx, the existing layer/deal keyframes and rendered woman-dealer origin; target centers and card dimensions come from rendered board slots. Flop is ordered with short stagger; turn/river create one copy each. Static cards remain authoritative and preserve highlights; only an active cosmetic copy temporarily masks its matching slot. Duplicate renders retain this mask; existing timer/clearCardFx restores static visibility and removes copies on recovery/teardown. No gameplay waits or state writes.
+
+Fundamental tests RED on preceding runtime, GREEN 143/143 including existing Poker V2 tests. check:all/ci:guards/CSP/test:quick/test:unit/diff PASS. No evaluator, private-card, action/pre-action, other FX, geometry, HTML, WS/backend/configuration/dependency changes. Preview trajectory/order verification and owner re-smoke handoff follow below.
+
+Community runtime Preview SHA `c52e0fcb3108ab3bd42cfe04a533ae08c26258da`: BUILD_INFO and served JS/CSS match. External controlled six-seat Preview smoke at 390×844 portrait and 844×390 landscape: flop AS→KS→QS in ordered 0/70/140 ms sequence, turn only 7D, river only 2C; trajectories start at rendered woman's hands and end at actual slot centers. Duplicate frames retain copies without replay. Static target slots remain masked only during active copies, then all final cards are visible; resync renders final board immediately. Recordings and extracted sequences reviewed outside the repository, including actual in-flight cards in both orientations. Earlier made-hand/action-control corrections and private/showdown/fold/deal behavior remain covered by unchanged code and full fundamental regressions. No outstanding self-review findings; physical owner smoke of this new animation remains pending. Later docs/test-only commits preserve verified runtime bytes.
+
+## Final owner-smoke findings — superseded reserve
+
+The initial compact-landscape clipping fix increased the fitting reserve from 24 to 84 scene px. It prevented clipping but owner smoke identified the resulting global scale reduction. This reserve solution is superseded below.
+
+## Latest owner placement corrections
+
+Portrait reaction placement previously clamped a nominal 220px bubble to scene edges, moving edge-seat reactions inward even for short labels. Limit the portrait bubble width to available space around its existing avatar anchor; the existing clamp now retains that anchor. No avatar, stack, bet or seat movement; landscape reaction width unchanged.
+
+Restore the accepted landscape fitting reserve of 24 scene px (portrait still 84). Only the northern transient column in compact landscape uses an optional local geometry anchor beside its avatar, above the board. Full award/hand-summary/reaction content no longer needs a global fitting reserve. Other seat and normal-landscape anchors stay unchanged. No CSS, gameplay, WS, card FX, evaluator, action-control or leave runtime changes.
+
+Back to lobby is closed as a non-blocker per owner clarification: the isolated failure occurred on an old/stalled errored tab with disabled Leave table and could not be reproduced. Current normal ACK-driven leave/navigation flow is verified; the existing fundamental full-flow regression and retry/reconnect coverage pass. No speculative runtime workaround.
+
+Self-review: scoped placement only; no new tests or dependencies. 144/144 existing Poker V2 tests and check:all, ci:guards, CSP, test:quick, test:unit, diff checks PASS. Controlled browser smoke at 915×412, 844×390, 1000×300, 1000×650 and 390×844 confirms visible full northern content; all six portrait “Cześć” reactions are centered above their own avatars. The settlement stress fixture supplements rendered award rows externally; no fixture/evidence files enter the repo. Exact published Preview verification follows in the handoff. Physical owner acceptance remains pending; Draft, never merge.
+
+Published runtime Preview SHA `2f0da22d57e1e685a4703704a346915291bdc416`: BUILD_INFO and served JS/CSS byte parity PASS. Controlled published Preview at 915×412, 844×390, 1000×300, 1000×650 and 390×844 visually reviewed. Full northern column top/bottom in 1000×300: 85.97/128.31px, scale 0.58454; 844×390: 99.00/156.67px, scale 0.79615. Compact column is beside the avatar, above the board. All six portrait reactions verified with reduced and normal motion; short labels wrap within their avatar-local width when needed. Made-hand/action-mode Preview smoke and ordered flop/turn/river trajectory/claim/recovery smoke PASS in portrait/landscape. No new repo tests or runtime changes in this handoff; later docs-only head preserves these bytes. Physical owner smoke remains final gate.

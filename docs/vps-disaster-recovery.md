@@ -109,6 +109,38 @@ is present, it is a separate owner gate: approve and perform `daemon-reload`
 before service restart, or explicitly document why the pending unit-file
 change is unrelated. Do not silently proceed while the warning remains.
 
+## Existing-host Production DB identity preflight staging (#1050) — separate owner gate
+
+Finding P1 #3 from #1050 adds a fail-closed preflight helper
+`/usr/local/sbin/arcade-ws-production-env-preflight` and an expanded sudoers rule in
+`/etc/sudoers.d/arcade-deploy` allowing `copilot` to execute it without a password.
+
+Because `infra/vps/bootstrap.sh` is guarded for fresh VPS only and refuses to run
+on an existing host with runtime markers, and `infra-vps.yml` does not stage
+helper files or sudoers rules on existing hosts, an explicit owner-approved staging
+script is provided for existing hosts:
+
+```bash
+sudo ./infra/vps/stage-production-env-preflight.sh
+```
+
+This staging script:
+1. Verifies existing host prerequisites (`/etc/arcadeplatform/ws-server.env`, `/usr/bin/node`, `/usr/bin/psql`).
+2. Validates `infra/vps/arcade-deploy.sudoers` with `visudo -cf`.
+3. Installs the helper to `/usr/local/sbin/arcade-ws-production-env-preflight` (`0755 root:root`).
+4. Installs the sudoers file to `/etc/sudoers.d/arcade-deploy` (`0440 root:root`) and validates with `visudo -c`.
+5. Executes a read-only verification before activation:
+   `sudo -u copilot sudo -n /usr/local/sbin/arcade-ws-production-env-preflight` expecting `PASS`.
+6. Performs NO service restarts, NO environment modifications, and NO database mutations.
+
+**Pre-merge staging requirement:** PR #1053 must remain in Draft until this
+staging procedure is completed on the existing Production VPS. Merging PR #1053
+triggers `.github/workflows/ws-server-deploy.yml` on push to `main`, which
+immediately runs `sudo -n /usr/local/sbin/arcade-ws-production-env-preflight`
+before switching releases or restarting the service. Staging beforehand ensures
+zero downtime and prevents deploy failure.
+
+
 ## #994 rollout split — Preview before Production
 
 The least-privilege implementation is intentionally reviewed and merged in

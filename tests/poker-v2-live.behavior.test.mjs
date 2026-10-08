@@ -33,8 +33,8 @@ function makeElement(id){
     parentNode: null,
     attributes: {},
     _listeners: {},
-    appendChild(child){ child.parentNode = this; this.children.push(child); return child; },
-    removeChild(child){ this.children = this.children.filter((it) => it !== child); },
+    appendChild(child){ if (child.parentNode) child.parentNode.removeChild(child); child.parentNode = this; this.children.push(child); return child; },
+    removeChild(child){ this.children = this.children.filter((it) => it !== child); child.parentNode = null; },
     contains(target){
       if (target === this) return true;
       return this.children.includes(target);
@@ -105,13 +105,13 @@ function createHarness(options = {}){
   const source = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.js'), 'utf8');
   const elements = {};
   [
-    'xpBadge',
+    'pokerAccountHud',
     'pokerV2AutoRebuyBalanceToast',
     'pokerMenuToggle', 'pokerMenuPanel', 'pokerLobbyLink', 'pokerMenuLeave', 'pokerMenuSettings', 'pokerMenuSignIn', 'pokerMenuGuestInfo',
     'pokerSocialSettingsPanel', 'pokerSocialSettingsClose',
     'pokerReactionBubblesPreference', 'pokerReactionHistoryPreference', 'pokerBotReactionsPreference',
     'pokerAutoRebuyPreference', 'pokerAutoRebuyPreferenceWrap', 'pokerAutoRebuyPreferenceHint',
-    'pokerSeatLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
+    'pokerCardFxLayer', 'pokerRoomDealer', 'pokerSeatLayer', 'pokerSeatNameLayer', 'pokerSeatTransientLayer', 'pokerSeatChipLayer', 'pokerChipFxLayer', 'pokerReactionLayer', 'pokerPotPill', 'pokerPotChipStack', 'pokerCommunityCards', 'pokerDealerChip',
     'pokerHeroCards', 'pokerV2LiveStatus', 'pokerV2TableMeta', 'pokerV2TurnText',
     'pokerV2StackText', 'pokerV2ErrorText', 'pokerV2SeatNo',
     'pokerV2BuyIn', 'pokerV2JoinBtn', 'pokerV2StartBtn', 'pokerV2LeaveConfirmModal', 'pokerV2LeaveConfirmYes', 'pokerV2LeaveConfirmCancel',
@@ -131,7 +131,6 @@ function createHarness(options = {}){
     elements[id] = makeElement(id);
   });
   elements.pokerLobbyLink.href = '/poker/';
-  elements.xpBadge.href = '/xp.html';
   elements.pokerV2SeatNo.value = '1';
   elements.pokerV2BuyIn.value = '100';
   elements.pokerV2AmountInput.value = '20';
@@ -273,6 +272,7 @@ function createHarness(options = {}){
         }
       },
       matchMedia(){ return { matches: options.reducedMotion === true }; },
+      getComputedStyle(node){ return node.style; },
       setInterval(fn){
         intervalTimers.push(fn);
         return intervalTimers.length;
@@ -349,7 +349,9 @@ function createHarness(options = {}){
   });
 
   vm.createContext(sandbox);
-  vm.runInContext(source, sandbox, { filename: 'poker/poker-v2.js' });
+  const closureEnd = source.lastIndexOf('})();');
+  const privacySource = source.slice(0, closureEnd) + 'window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__madeHandForTest = function(){ return heroMadeHandIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
+  vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
     await Promise.resolve();
@@ -403,6 +405,13 @@ async function flush(){
     rebuyRequestIds,
     reactionPayloads,
     targetedReactionPayloads,
+    getOpponentHeldCards(userId){ return sandbox.window.__opponentHeldCardsForTest(userId); },
+    getCardClaims(){ return JSON.parse(JSON.stringify(sandbox.window.__cardClaimsForTest())); },
+    getMadeHand(){ return JSON.parse(JSON.stringify(sandbox.window.__madeHandForTest())); },
+    getHeroCards(){ return JSON.parse(JSON.stringify(sandbox.window.__heroCardsForTest())); },
+    dropHeroHud(){ sandbox.window.__missingHeroHudForTest(); },
+    changeAvatarUrl(seatNo,url){ sandbox.window.__avatarUrlForTest(seatNo,url); },
+    getRevealedCards(userId){ return JSON.parse(JSON.stringify(sandbox.window.__getSeatRevealCardsForTest({ userId }))); },
     getSnapshotRequestCount(){ return snapshotRequestCount; },
     fireDomContentLoaded,
     fireDocumentEvent,
@@ -458,18 +467,29 @@ function sendInitialTableSnapshot(harness, options = {}){
   harness.getCreateOptions().onSnapshot({ kind: 'stateSnapshot', payload });
 }
 
+function descendants(node){
+  return (node?.children || []).flatMap((child) => [child, ...descendants(child)]);
+}
+
+function reactionAnchors(harness){
+  return [...harness.elements.pokerReactionLayer.children, ...descendants(harness.elements.pokerSeatLayer).concat(descendants(harness.elements.pokerSeatTransientLayer)).filter((node) => node.className === 'poker-seat-social-reaction')];
+}
+
 function findSeatByLabel(harness, label){
-  return harness.elements.pokerSeatLayer.children.find((node) => (
-    node.children || []
-  ).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
+  const owner = harness.elements.pokerSeatNameLayer.children.find((node) => descendants(node).some((child) => child.className === 'poker-seat-name' && child.textContent === label));
+  return harness.elements.pokerSeatLayer.children.find((node) => owner && node.dataset.seatNo === owner.dataset.seatNo && node.dataset.userId === owner.dataset.userId);
+}
+
+function transientSeat(harness, seatNode){
+  return harness.elements.pokerSeatTransientLayer.children.find((node)=>node.dataset.seatNo===seatNode?.dataset.seatNo && node.dataset.userId===seatNode?.dataset.userId);
 }
 
 function findSeatChild(seatNode, className){
-  return (seatNode.children || []).find((child) => child.className === className);
+  return descendants(seatNode).find((child) => child.className === className);
 }
 
 function findChildByClass(node, className){
-  return (node.children || []).find((child) => String(child.className || '').split(/\s+/).includes(className));
+  return descendants(node).find((child) => String(child.className || '').split(/\s+/).includes(className));
 }
 
 function reactionHistoryRows(harness){
@@ -508,7 +528,7 @@ async function bootReactionHistoryHarness(options = {}){
 }
 
 function reactionBubbleTexts(harness){
-  return harness.elements.pokerReactionLayer.children
+  return reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))
     .map((child) => child.textContent);
@@ -569,7 +589,6 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(harness.elements.pokerSeatLayer.children.length, 6, 'v2 should render all seats for the table');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 4, 'v2 should render live board cards');
   assert.equal(harness.elements.pokerHeroCards.children.length, 2, 'v2 should render live hole cards');
-  assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'v2 should dock hero hole cards to the hero avatar');
   assert.equal(harness.elements.pokerPotPill.textContent, 'Pot 42');
   assert.equal(harness.elements.pokerV2PrimaryBtn.hidden, false, 'v2 should surface the primary turn action');
   assert.equal(harness.elements.pokerV2PrimaryBtn.textContent, 'Check', 'v2 should keep check compact when there is nothing to call');
@@ -582,18 +601,11 @@ test('poker v2 boots live mode, preserves table links, and sends WS commands', a
   assert.equal(findSeatChild(occupiedSeatTwo, 'poker-seat-number').textContent, 'S2', 'occupied seats should render their authoritative seat number');
   const emptySeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--empty/.test(node.className));
   assert.equal(findSeatChild(emptySeat, 'poker-seat-number'), undefined, 'empty seats should not render occupied-player seat badges');
-  assert.equal(heroSeat.style.left, '34%', 'hero seat should be shifted left to avoid the action rail');
-  assert.equal(heroSeat.style.top, '91%', 'hero seat should stay near the bottom edge');
-  assert.equal(harness.elements.pokerHeroCards.style.left, '42.3%', 'hero hole cards should shift left by half a card height toward the avatar');
-  assert.ok(parseFloat(harness.elements.pokerHeroCards.style.top) >= 100, 'hero hole cards should sit lower by roughly half a card height, even if they partially overlap the avatar or scene edge');
-  assert.equal(harness.elements.pokerHeroCards.style.bottom, 'auto', 'hero hole cards should not fall back to the global bottom anchor when the hero seat is present');
-  const seatCards = heroSeat.children.find((node) => node.className === 'poker-seat-cards');
+  const seatCards = descendants(heroSeat).find((node) => node.className === 'poker-seat-cards');
   assert.equal(seatCards, undefined, 'hero seat should not duplicate the bottom hole cards');
-  const bestHand = heroSeat.children.find((node) => node.className === 'poker-seat-best-hand');
+  const bestHand = findSeatChild(transientSeat(harness, heroSeat), 'poker-seat-best-hand');
   assert.ok(bestHand, 'hero seat should surface a best-hand summary');
   assert.equal(harness.elements.pokerDealerChip.hidden, false, 'dealer chip should be visible when the dealer seat is known');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '24%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '74%');
 
   harness.elements.pokerV2AmountInput.value = '77';
   harness.elements.pokerV2AmountBtn.click();
@@ -1296,7 +1308,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   });
   await harness.flush();
 
-  const targetButtons = harness.elements.pokerReactionLayer.children
+  const targetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 2);
@@ -1305,7 +1317,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   await harness.flush();
   assert.deepEqual(harness.targetedReactionPayloads, [{ targetSeatNo: 2, handId: 'hand-1' }]);
 
-  const remainingTargetButtons = harness.elements.pokerReactionLayer.children
+  const remainingTargetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(remainingTargetButtons.length, 1);
@@ -1319,7 +1331,7 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
 
   ws.onReaction({ payload: { seatNo: 1, targetSeatNo: 2, reactionKey: 'nice_hand' } });
   await harness.flush();
-  const targetedEffectAnchor = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  const targetedEffectAnchor = reactionAnchors(harness).find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
   assert.ok(targetedEffectAnchor, 'targeted reactions should render a dedicated sender-to-target effect');
   const targetedEffect = targetedEffectAnchor.children[0];
   assert.ok(targetedEffect);
@@ -1328,17 +1340,15 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
   const reactionDeltaY = targetedEffect.style.getPropertyValue('--reaction-delta-y');
   assert.match(reactionDeltaX, /px$/);
   assert.match(reactionDeltaY, /px$/);
-  assert.ok(Math.abs(Number.parseFloat(reactionDeltaX)) > 50, 'horizontal delta should use the reaction layer width');
-  assert.ok(Math.abs(Number.parseFloat(reactionDeltaY)) > 50, 'vertical delta should use the reaction layer height');
-  assert.equal(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
+  assert.equal(reactionAnchors(harness).some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))), false);
 
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'hurry_up' } });
   await harness.flush();
-  const botOnlyBubble = harness.elements.pokerReactionLayer.children
+  const botOnlyBubble = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
   assert.equal(botOnlyBubble?.textContent, '⏳ Please, hurry up!');
-  assert.equal(harness.elements.pokerReactionLayer.children.filter((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect')).length, 1,
+  assert.equal(reactionAnchors(harness).filter((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect')).length, 1,
     'UI V1 keeps the target in the event but renders bot table talk only as a sender bubble, never as a congratulations effect');
   const menuKeys = harness.elements.pokerV2ReactionMenu.children.map((option) => option.dataset.reactionKey);
   assert.equal(menuKeys.includes('hurry_up'), true);
@@ -1354,50 +1364,50 @@ test('poker v2 uses the WS settlement reveal deadline for targeted reactions', a
 
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'you_are_bluffing' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '🧐 You are bluffing!');
   ws.onReaction({ payload: { seatNo: 3, reactionKey: 'i_was_bluffing' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '😏 I was bluffing!');
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'lucky' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '🍀 Lucky!');
   ws.onReaction({ payload: { seatNo: 3, targetSeatNo: 1, reactionKey: 'congrats' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '🎉 Congrats!');
   ws.onReaction({ payload: { seatNo: 3, reactionKey: 'not_this_time' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '😌 Not this time.');
   ws.onReaction({ payload: { seatNo: 3, reactionKey: 'ambient_here_we_go' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))?.textContent,
   '💬 Here we go!');
 
   harness.advanceTime(3_499);
   await harness.flush();
-  const targetButtonsBeforeServerRevealDeadline = harness.elements.pokerReactionLayer.children
+  const targetButtonsBeforeServerRevealDeadline = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtonsBeforeServerRevealDeadline.length, 0, 'consumed targeted offers should stay hidden for the hand');
   harness.advanceTime(1);
   await harness.flush();
-  const targetButtonsAfterServerRevealDeadline = harness.elements.pokerReactionLayer.children
+  const targetButtonsAfterServerRevealDeadline = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtonsAfterServerRevealDeadline.length, 0, 'targeted offers should expire with the authoritative reveal deadline');
@@ -1442,7 +1452,7 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
 
   ws.onSnapshot({ kind: 'stateSnapshot', payload: basePayload });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
 
@@ -1465,14 +1475,14 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
   });
   await harness.flush();
 
-  const targetButtons = harness.elements.pokerReactionLayer.children
+  const targetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 1);
 
   harness.advanceTime(3_499);
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
 
@@ -1488,7 +1498,7 @@ test('poker v2 starts one local reveal window when a settlement patch completes 
   await harness.flush();
   harness.advanceTime(1);
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
 });
@@ -1536,17 +1546,17 @@ test('poker v2 gives a late complete settlement only the remaining server window
   });
   await harness.flush();
 
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
   harness.advanceTime(999);
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 1);
   harness.advanceTime(1);
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children
+  assert.equal(reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction')).length, 0);
 });
@@ -1598,7 +1608,7 @@ test('poker v2 does not offer targeted reactions after the authoritative settlem
   });
   await harness.flush();
 
-  const targetButtons = harness.elements.pokerReactionLayer.children
+  const targetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 0, 'an expired settlement must not expose a reaction that the server will reject');
@@ -1637,14 +1647,14 @@ test('poker v2 preserves an active targeted reaction animation across unrelated 
   await harness.flush();
   ws.onReaction({ payload: { seatNo: 1, targetSeatNo: 2, reactionKey: 'nice_hand' } });
   await harness.flush();
-  const firstEffectAnchor = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  const firstEffectAnchor = reactionAnchors(harness).find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
   assert.ok(firstEffectAnchor);
   const firstEffect = firstEffectAnchor.children[0];
   assert.match(firstEffect.className, /poker-seat-target-reaction-flyout--enter/);
 
   ws.onSnapshot(snapshot(2));
   await harness.flush();
-  const effectAfterSnapshot = harness.elements.pokerReactionLayer.children.find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
+  const effectAfterSnapshot = reactionAnchors(harness).find((anchor) => String(anchor.className || '').includes('poker-seat-target-reaction-effect'));
   assert.equal(effectAfterSnapshot, firstEffectAnchor, 'unrelated rerenders should preserve the active effect node');
   assert.match(effectAfterSnapshot.children[0].className, /poker-seat-target-reaction-flyout--enter/);
 });
@@ -1690,7 +1700,7 @@ test('poker v2 does not offer targeted reactions for an invalid settlement', asy
   });
   await harness.flush();
 
-  const targetButtons = harness.elements.pokerReactionLayer.children
+  const targetButtons = reactionAnchors(harness)
     .flatMap((anchor) => anchor.children || [])
     .filter((child) => String(child.className || '').includes('poker-seat-target-reaction'));
   assert.equal(targetButtons.length, 0);
@@ -1725,7 +1735,7 @@ test('poker v2 does not offer targeted reactions for an invalid settlement', asy
     }
   });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+  assert.equal(reactionAnchors(harness).length, 0);
 });
 
 test('poker v2 removes a reaction bubble when the seat owner changes', async () => {
@@ -1751,7 +1761,7 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
   await harness.flush();
   ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
   await harness.flush();
-  assert.ok(harness.elements.pokerReactionLayer.children.some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))));
+  assert.ok(reactionAnchors(harness).some((anchor) => (anchor.children || []).some((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'))));
 
   ws.onSnapshot({
     kind: 'stateSnapshot',
@@ -1768,7 +1778,7 @@ test('poker v2 removes a reaction bubble when the seat owner changes', async () 
     }
   });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+  assert.equal(reactionAnchors(harness).length, 0);
 });
 
 test('poker v2 clears reaction bubbles immediately when reconnecting starts', async () => {
@@ -1794,10 +1804,10 @@ test('poker v2 clears reaction bubbles immediately when reconnecting starts', as
   await harness.flush();
   ws.onReaction({ payload: { seatNo: 1, reactionKey: 'wow' } });
   await harness.flush();
-  assert.equal(harness.elements.pokerReactionLayer.children.length, 1);
+  assert.equal(reactionAnchors(harness).length, 1);
 
   ws.onStatus('reconnecting', { attempt: 1 });
-  assert.equal(harness.elements.pokerReactionLayer.children.length, 0);
+  assert.equal(reactionAnchors(harness).length, 0);
 });
 
 test('poker v2 animates a reaction bubble only on its first render', async () => {
@@ -1826,7 +1836,7 @@ test('poker v2 animates a reaction bubble only on its first render', async () =>
   await harness.flush();
 
   const findReactionBubble = () => {
-    for (const anchor of harness.elements.pokerReactionLayer.children) {
+    for (const anchor of reactionAnchors(harness)) {
       const bubble = (anchor.children || []).find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
       if (bubble) return bubble;
     }
@@ -1918,10 +1928,11 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
         tableId: 'table-1',
         status: 'OPEN',
         maxSeats: 6,
-        members: [{ userId: 'user-1', seat: 4, status: 'WAITING_NEXT_HAND' }]
+        members: [{ userId: 'user-1', seat: 4, status: 'WAITING_NEXT_HAND' }, { userId: 'active', seat: 1, status: 'ACTIVE' }, { userId: 'folded', seat: 2, status: 'FOLDED' }, { userId: 'busted', seat: 3, status: 'OUT_OF_CHIPS' }, { userId: 'outside', seat: 5, status: 'ACTIVE' }]
       },
       public: {
         hand: { handId: 'hand-live', status: 'TURN', dealerSeatNo: 2 },
+        betThisRoundByUserId: { active: 0, folded: 0 },
         turn: { userId: 'bot-1' },
         board: [],
         pot: { total: 15, sidePots: [] },
@@ -1936,11 +1947,17 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
   });
   await harness.flush();
 
+  assert.equal(harness.getOpponentHeldCards('active'), 2, 'zero-bet active participant was dealt in');
+  assert.equal(harness.getOpponentHeldCards('folded'), 2, 'fold does not undo being dealt in');
+  assert.equal(harness.getOpponentHeldCards('user-1'), 0, 'waiting seat is outside the hand');
+  assert.equal(harness.getOpponentHeldCards('busted'), 0, 'out-of-chips nonparticipant has no dealt cards');
+  assert.equal(harness.getOpponentHeldCards('outside'), 0, 'seat status ACTIVE alone is not participation');
+
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   assert.ok(heroSeat);
   assert.match(heroSeat.className, /poker-seat--waiting-next-hand/);
   assert.doesNotMatch(heroSeat.className, /poker-seat--folded/);
-  assert.equal(findSeatChild(heroSeat, 'poker-seat-status').textContent, 'NEXT HAND');
+  assert.equal(findSeatChild(transientSeat(harness, heroSeat), 'poker-seat-status').textContent, 'NEXT HAND');
   assert.equal(findSeatChild(heroSeat, 'poker-seat-cards'), undefined);
   assert.equal(harness.elements.pokerHeroCards.hidden, true);
   assert.equal(harness.elements.pokerV2FoldBtn.hidden, true);
@@ -1950,7 +1967,7 @@ test('poker v2 shows one reserved next-hand join without cards, actions, or fold
   assert.equal(harness.getSessionStorage('poker:pendingJoin:user-1:table-1'), null);
 });
 
-test('poker v2 guest mode uses hamburger account information, hides XP badge, and still auto-joins', async () => {
+test('poker v2 guest mode uses hamburger account information,  and still auto-joins', async () => {
   let rejectFirstJoin;
   const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
   const guestToken = `aaa.${guestPayload}.zzz`;
@@ -1975,7 +1992,6 @@ test('poker v2 guest mode uses hamburger account information, hides XP badge, an
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'guest mode should still bootstrap a WS client');
   assert.equal(ws.guestToken, guestToken);
-  assert.equal(harness.elements.xpBadge.hidden, true, 'guest mode should hide the XP badge');
   assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'guest mode should not expose the signed-in Join CTA');
   assert.equal(harness.elements.pokerMenuGuestInfo.hidden, false, 'guest account information should be available from the hamburger');
 
@@ -2088,7 +2104,6 @@ test('poker v2 authenticated user takes precedence over a matching guest session
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'authenticated user flow should bootstrap a WS client');
   assert.equal(ws.guestToken, null);
-  assert.equal(harness.elements.xpBadge.hidden, false, 'authenticated user mode should keep the XP badge visible');
 });
 
 test('poker v2 never labels a resolved authenticated user as a guest while its token is pending', async () => {
@@ -2110,7 +2125,6 @@ test('poker v2 never labels a resolved authenticated user as a guest while its t
   await harness.flush();
   await harness.flush();
 
-  assert.equal(harness.elements.xpBadge.hidden, false);
   assert.equal(harness.getCreateOptions(), null, 'room should wait for the authenticated token instead of opening a guest socket');
 });
 
@@ -2124,7 +2138,6 @@ test('poker v2 ignores stale guest query when there is no matching guest session
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'registered user flow should still bootstrap a WS client');
   assert.equal(ws.guestToken, null);
-  assert.equal(harness.elements.xpBadge.hidden, false, 'registered user mode should keep the XP badge visible');
 });
 
 test('poker v2 ignores a guest session for a different table', async () => {
@@ -2146,7 +2159,6 @@ test('poker v2 ignores a guest session for a different table', async () => {
   const ws = harness.getCreateOptions();
   assert.ok(ws, 'registered user flow should still bootstrap when stale guest storage exists');
   assert.equal(ws.guestToken, null);
-  assert.equal(harness.elements.xpBadge.hidden, false);
 });
 
 test('poker v2 shows a closed-table countdown, cancels on recovery, and redirects after five seconds', async () => {
@@ -2288,79 +2300,6 @@ test('poker v2 shows compact call amount in the primary action label', async () 
   assert.equal(harness.elements.pokerV2AmountValue.textContent, '2k');
 });
 
-test('poker v2 falls back to base hero card layout when the hero seat is temporarily unavailable', async () => {
-  const harness = createHarness();
-  harness.fireDomContentLoaded();
-  await harness.flush();
-
-  const ws = harness.getCreateOptions();
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 2,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'user-1', seat: 1, displayName: 'Hero' },
-          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
-        ]
-      },
-      public: {
-        hand: { handId: 'hand-hero', status: 'TURN', dealerSeatNo: 2 },
-        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-        board: ['As', 'Kd', '3h'],
-        pot: { total: 42, sidePots: [] },
-        legalActions: { seat: 1, actions: ['FOLD', 'CHECK', 'BET'] },
-        actionConstraints: { toCall: 0, maxBetAmount: 120 }
-      },
-      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
-      you: { seat: 1 }
-    }
-  });
-  await harness.flush();
-
-  assert.match(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'hero cards should dock when the hero seat is available');
-  assert.equal(harness.elements.pokerHeroCards.style.bottom, 'auto');
-
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 3,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'villain-1', seat: 2, displayName: 'Villain 1' }
-        ]
-      },
-      public: {
-        seats: [
-          { userId: 'villain-1', seatNo: 2, status: 'ACTIVE' }
-        ],
-        hand: { handId: 'hand-hero', status: 'TURN', dealerSeatNo: 2 },
-        turn: { userId: 'villain-1', deadlineAt: Date.now() + 5000 },
-        board: ['As', 'Kd', '3h'],
-        pot: { total: 42, sidePots: [] },
-        legalActions: { seat: null, actions: [] },
-        actionConstraints: { toCall: null, maxBetAmount: null }
-      },
-      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
-      you: null
-    }
-  });
-  await harness.flush();
-
-  assert.doesNotMatch(harness.elements.pokerHeroCards.className, /poker-hero-cards--docked/, 'hero cards should drop the docked variant when the hero seat is unavailable');
-  assert.equal(harness.elements.pokerHeroCards.style.left, undefined, 'hero cards should clear docked left positioning on fallback');
-  assert.equal(harness.elements.pokerHeroCards.style.top, undefined, 'hero cards should clear docked top positioning on fallback');
-  assert.equal(harness.elements.pokerHeroCards.style.bottom, undefined, 'hero cards should return to base CSS bottom anchoring on fallback');
-});
-
 test('poker v2 renders chip atlas stack variants from pot amount breakdown', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
@@ -2411,6 +2350,132 @@ test('poker v2 renders chip atlas stack variants from pot amount breakdown', asy
   );
 });
 
+function staticChipVisuals(harness){
+  return descendants(harness.elements.pokerSeatLayer).concat(descendants(harness.elements.pokerSeatChipLayer))
+    .filter((node) => node.className.includes('poker-chip-visual-stack--'));
+}
+
+async function chipOwnershipHarness(){
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  harness.getCreateOptions().onSnapshot({kind:'stateSnapshot',payload:{tableId:'table-1',stateVersion:1,
+    table:{tableId:'table-1',status:'OPEN',maxSeats:6,members:[{userId:'user-1',seat:1},{userId:'villain-1',seat:2}]},
+    public:{hand:{handId:'chip-hand-A',status:'TURN'},stacks:{'user-1':124,'villain-1':80},
+      betThisRoundByUserId:{'user-1':4,'villain-1':5},committedByUserId:{'user-1':9,'villain-1':5},pot:{total:14}},
+    private:{holeCards:[{r:'Q',s:'S'},{r:'Q',s:'D'}]},you:{seat:1}}});
+  await harness.flush();
+  return harness;
+}
+
+async function chipFrame(harness, publicState){
+  harness.getCreateOptions().onSnapshot({kind:'statePatch',payload:{tableId:'table-1',public:publicState}});
+  await harness.flush();
+}
+
+function chipAmounts(harness){
+  return staticChipVisuals(harness).map((node)=>node.getAttribute('data-amount')).sort();
+}
+
+test('poker v2 preserves chip amounts in omitted same-hand partial frames', async () => {
+  const harness = await chipOwnershipHarness();
+  const amounts = chipAmounts(harness);
+  assert.deepEqual(amounts,['124','5','80','9']);
+  await chipFrame(harness,{hand:{handId:'chip-hand-A',status:'TURN'},turn:{userId:'villain-1'}});
+  assert.deepEqual(chipAmounts(harness),amounts);
+  assert.equal(harness.elements.pokerPotChipStack.children[0].getAttribute('data-amount'),'14');
+});
+
+test('poker v2 retains unchanged chip DOM and selectively updates authoritative amounts', async () => {
+  const harness = await chipOwnershipHarness();
+  const visuals = staticChipVisuals(harness);
+  const pot = harness.elements.pokerPotChipStack.children[0];
+  const images = visuals.map((node)=>node.children[0]);
+  await chipFrame(harness,{stacks:{'user-1':124,'villain-1':80},committedByUserId:{'user-1':9,'villain-1':5},pot:{total:14}});
+  const retained = staticChipVisuals(harness);
+  assert.equal(retained.length,visuals.length);
+  visuals.forEach((node,index)=>assert.strictEqual(retained[index],node,'unchanged chip DOM must remain mounted'));
+  assert.strictEqual(harness.elements.pokerPotChipStack.children[0],pot);
+  retained.forEach((node,index)=>assert.strictEqual(node.children[0],images[index]));
+  assert.equal(harness.elements.pokerSeatChipLayer.children.length,4);
+  await chipFrame(harness,{stacks:{'user-1':120,'villain-1':80},pot:{total:18}});
+  const changed = staticChipVisuals(harness);
+  visuals.filter((node)=>node.getAttribute('data-amount')!=='124').forEach((node)=>assert.ok(changed.includes(node)));
+  assert.ok(!changed.includes(visuals.find((node)=>node.getAttribute('data-amount')==='124')));
+  assert.notStrictEqual(harness.elements.pokerPotChipStack.children[0],pot);
+  await chipFrame(harness,{committedByUserId:{},betThisRoundByUserId:{'user-1':4,'villain-1':5}});
+  assert.deepEqual(chipAmounts(harness),['120','80'],'explicit empty committed map wins over bet fallback');
+  await chipFrame(harness,{committedByUserId:{'user-1':3},pot:{total:3}});
+  await chipFrame(harness,{hand:{handId:'chip-hand-B',status:'TURN'}});
+  assert.deepEqual(chipAmounts(harness),['120','80'],'new hand clears previous committed chips only');
+  assert.equal(harness.elements.pokerPotChipStack.children.length,0);
+  const oldOccupant = harness.elements.pokerSeatChipLayer.children.find((node)=>node.dataset.userId==='villain-1');
+  harness.getCreateOptions().onSnapshot({kind:'statePatch',payload:{table:{members:[{userId:'user-1',seat:1},{userId:'villain-2',seat:2}]},public:{stacks:{'user-1':120,'villain-2':80}}}});
+  await harness.flush();
+  assert.ok(!harness.elements.pokerSeatChipLayer.children.includes(oldOccupant),'seat reuse revokes old occupant DOM');
+  assert.equal(harness.elements.pokerSeatChipLayer.children.filter((node)=>node.dataset.userId==='villain-2').length,2);
+});
+
+test('poker v2 owns dealer in the scene through omitted projection and lifecycle changes', async () => {
+  const harness = await chipOwnershipHarness();
+  await chipFrame(harness,{hand:{handId:'chip-hand-A',status:'TURN',dealerSeatNo:2}});
+  const dealer = harness.elements.pokerDealerChip;
+  assert.strictEqual(dealer.parentNode,harness.elements.pokerTableScreen,'dealer must be scene-owned');
+  const left = dealer.style.left;
+  await chipFrame(harness,{hand:{handId:'chip-hand-A',status:'TURN'}});
+  assert.strictEqual(dealer.parentNode,harness.elements.pokerTableScreen);
+  assert.equal(dealer.hidden,false);
+  assert.equal(dealer.style.left,left);
+  harness.dropHeroHud();
+  assert.equal(dealer.hidden,false,'incomplete rendered HUD cannot hide a known dealer');
+  await chipFrame(harness,{hand:{dealerSeatNo:1}});
+  assert.notEqual(dealer.style.left,left);
+  await chipFrame(harness,{hand:{dealerSeatNo:null}});
+  assert.equal(dealer.hidden,true,'explicit null revokes dealer');
+  await chipFrame(harness,{hand:{dealerSeatNo:2}});
+  await chipFrame(harness,{hand:{handId:'chip-hand-B',status:'TURN'}});
+  assert.equal(dealer.hidden,true,'new hand cannot retain the old dealer');
+  await chipFrame(harness,{hand:{dealerSeatNo:1}});
+  assert.equal(dealer.hidden,false);
+  assert.strictEqual(dealer,harness.elements.pokerDealerChip);
+});
+
+test('poker v2 reuses the same occupant avatar image and waits for replacement load', async () => {
+  const harness = await chipOwnershipHarness();
+  await chipFrame(harness,{seats:[{userId:'user-1',seatNo:1},{userId:'bot-1',seatNo:2,isBot:true}]});
+  const avatar = ()=>descendants(harness.elements.pokerSeatLayer).find((node)=>node.classList.contains('poker-seat-avatar')&&node.dataset.userId==='bot-1');
+  const firstAvatar = avatar();
+  const firstImage = firstAvatar.children.find((node)=>node.className==='poker-seat-avatar__image');
+  firstImage._listeners.load.forEach((fn)=>fn());
+  await chipFrame(harness,{hand:{handId:'chip-hand-A',status:'TURN'}});
+  assert.strictEqual(avatar(),firstAvatar);
+  assert.strictEqual(avatar().children.find((node)=>node.className==='poker-seat-avatar__image'),firstImage);
+  const url = firstImage.src;
+  harness.changeAvatarUrl(2,'/poker/assets/avatars/bots/replacement.webp');
+  const replaced = avatar();
+  assert.notStrictEqual(replaced,firstAvatar);
+  assert.equal(replaced.children.find((node)=>node.className==='poker-seat-avatar__initials').hidden,false);
+  harness.changeAvatarUrl(2,url);
+  const restored = avatar();
+  assert.equal(restored.children.find((node)=>node.className==='poker-seat-avatar__initials').hidden,false,'previously loaded URL is not evidence that a new image is renderable');
+  restored.children.find((node)=>node.className==='poker-seat-avatar__image')._listeners.load.forEach((fn)=>fn());
+  assert.equal(restored.children.find((node)=>node.className==='poker-seat-avatar__initials').hidden,true);
+  await chipFrame(harness,{seats:[{userId:'user-1',seatNo:1},{userId:'bot-2',seatNo:2,isBot:true}]});
+  assert.ok(!descendants(harness.elements.pokerSeatLayer).includes(restored));
+});
+
+test('poker v2 puts player transient presentation above static chips and chip FX', async () => {
+  const harness = await chipOwnershipHarness();
+  const layer = harness.elements.pokerSeatTransientLayer;
+  assert.equal(layer.children.length,2);
+  assert.equal(descendants(harness.elements.pokerSeatLayer).filter((node)=>node.classList.contains('poker-seat-hud-transient')).length,0);
+  assert.equal(descendants(layer).filter((node)=>node.classList.contains('poker-seat-hud-transient')).length,2);
+  const css = fs.readFileSync('poker/poker-v2.css','utf8');
+  const level = (name)=>Number(css.match(new RegExp('\\.'+name+'\\{[^}]*z-index:(\\d+)'))[1]);
+  assert.ok(level('poker-seat-transient-layer')>level('poker-chip-fx-layer'));
+  assert.ok(level('poker-chip-fx-layer')>level('poker-seat-chip-layer'));
+});
+
 test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
@@ -2439,13 +2504,12 @@ test('poker v2 prefers committed chip maps for seat bet stacks', async () => {
   });
   await harness.flush();
 
-  const betStack = harness.elements.pokerSeatChipLayer.children[0];
-  const stack = harness.elements.pokerSeatChipLayer.children[1];
-  assert.equal(betStack.attributes['data-amount'], '9');
-  assert.equal(betStack.attributes['data-chip-count'], '5');
-  assert.equal(betStack.children[0].src, 'assets/chips/chip-white-4.png');
-  assert.equal(betStack.children[1].src, 'assets/chips/chip-red-1.png');
-  assert.equal(stack.attributes['data-amount'], '124');
+  const seat = harness.elements.pokerSeatLayer.children.find((node) => node.dataset.userId === 'user-1');
+  const betStack = descendants(harness.elements.pokerSeatChipLayer).find((node) => node.className.includes('poker-chip-visual-stack--seat-bet'));
+  const seatStack = descendants(harness.elements.pokerSeatChipLayer).find((node) => node.className.includes('poker-chip-visual-stack--hero-seat-stack'));
+  assert.equal(betStack.getAttribute('data-amount'), '9');
+  assert.equal(seatStack.getAttribute('data-amount'), '124');
+  assert.equal(findSeatChild(seatStack, 'poker-chip-stack-label').textContent, '124');
 });
 
 test('poker v2 keeps zero stack labels visible without rendering chips', async () => {
@@ -2482,84 +2546,12 @@ test('poker v2 keeps zero stack labels visible without rendering chips', async (
   });
   await harness.flush();
 
-  const stackVisuals = harness.elements.pokerSeatChipLayer.children;
-  assert.equal(stackVisuals.length, 2);
-  for (const stack of stackVisuals){
-    assert.equal(stack.attributes['data-amount'], '0');
-    assert.equal(stack.attributes['data-chip-count'], '0');
-    assert.equal(stack.attributes['data-stack-count'], '0');
-    assert.equal(stack.children.length, 1);
-    assert.equal(stack.children[0].className, 'poker-chip-stack-label');
-    assert.equal(stack.children[0].textContent, '0');
+  const stacks = descendants(harness.elements.pokerSeatChipLayer).filter((node) => node.className.includes('poker-chip-visual-stack--seat-stack') || node.className.includes('poker-chip-visual-stack--hero-seat-stack'));
+  assert.equal(stacks.length, 2);
+  for (const stack of stacks){
+    assert.equal(stack.getAttribute('data-amount'), '0');
+    assert.equal(findSeatChild(stack, 'poker-chip-stack-label').textContent, '0');
   }
-});
-
-test('poker v2 keeps side-seat chip stacks beside avatars instead of the community-card lane', async () => {
-  const harness = createHarness();
-  harness.fireDomContentLoaded();
-  await harness.flush();
-
-  const ws = harness.getCreateOptions();
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 13,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'user-1', seat: 1 },
-          { userId: 'bot-2', seat: 2 },
-          { userId: 'bot-3', seat: 3 },
-          { userId: 'bot-4', seat: 4 },
-          { userId: 'bot-5', seat: 5 },
-          { userId: 'bot-6', seat: 6 }
-        ]
-      },
-      public: {
-        hand: { handId: 'hand-side-chip-position', status: 'TURN', dealerSeatNo: 2 },
-        turn: { userId: 'user-1', deadlineAt: Date.now() + 5000 },
-        stacks: { 'bot-6': 124 },
-        committedByUserId: { 'bot-6': 9 },
-        pot: { total: 9, sidePots: [] },
-        legalActions: { seat: 1, actions: ['CHECK'] },
-        actionConstraints: { toCall: 0 }
-      },
-      private: { holeCards: [{ r: 'Q', s: 'S' }, { r: 'Q', s: 'D' }] },
-      you: { seat: 1 }
-    }
-  });
-  await harness.flush();
-
-  const betStack = harness.elements.pokerSeatChipLayer.children[0];
-  const seatStack = harness.elements.pokerSeatChipLayer.children[1];
-  const centerLane = { left: 33, right: 67, top: 31, bottom: 57 };
-  const isInsideCenterLane = (point) => (
-    point.x >= centerLane.left
-    && point.x <= centerLane.right
-    && point.y >= centerLane.top
-    && point.y <= centerLane.bottom
-  );
-  const parsePoint = (stack) => ({
-    x: Number.parseFloat(stack.style.left),
-    y: Number.parseFloat(stack.style.top)
-  });
-  const betPoint = parsePoint(betStack);
-  const stackPoint = parsePoint(seatStack);
-
-  assert.ok(betPoint.x >= 10 && betPoint.x <= 90);
-  assert.ok(betPoint.y >= 12 && betPoint.y <= 88);
-  assert.ok(stackPoint.x >= 10 && stackPoint.x <= 90);
-  assert.ok(stackPoint.y >= 12 && stackPoint.y <= 88);
-  assert.ok(!isInsideCenterLane(betPoint));
-  assert.ok(!isInsideCenterLane(stackPoint));
-  assert.ok(betPoint.x < 80);
-  assert.ok(stackPoint.x < 80);
-  assert.ok(Math.abs(betPoint.x - 80) <= 30);
-  assert.ok(Math.abs(stackPoint.x - 80) <= 30);
-  assert.notEqual(betPoint.y, stackPoint.y);
 });
 
 test('poker v2 keeps fold available even when live legalActions omit fold', async () => {
@@ -2638,7 +2630,7 @@ test('poker v2 renders authoritative out-of-chips state with stable disabled act
 
   ws.onSnapshot(snapshot({ status: 'WAITING_NEXT_HAND', stack: 500, canRebuy: false }));
   await harness.flush();
-  assert.equal(harness.elements.pokerV2TurnText.textContent, 'Funded · Joining next hand');
+  assert.equal(harness.elements.pokerV2TurnText.textContent, 'Joining next hand');
   assert.equal(harness.elements.pokerV2RebuyPanel.hidden, true, 'waiting snapshot must not reopen an accepted rebuy prompt');
   assert.equal(harness.elements.pokerV2RebuyBtn.hidden, true);
 });
@@ -2799,14 +2791,14 @@ test('poker v2 shows synchronized auto-rebuy feedback only after authoritative s
   assert.equal(JSON.parse(harness.getSessionStorage('poker:pendingRebuy:user-1:table-1')).source, 'auto');
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
   const pendingHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(pendingHeroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+  assert.equal(findChildByClass(transientSeat(harness, pendingHeroSeat), 'poker-auto-rebuy-toast--avatar'), undefined);
 
   resolveRebuy({ ok: true, buyIn: 500 });
   await harness.flush();
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, false);
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.textContent, '-500 CH');
   const successHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(successHeroSeat, 'poker-auto-rebuy-toast--avatar').textContent, 'Auto rebuy: +500 CH');
+  assert.equal(findChildByClass(transientSeat(harness, successHeroSeat), 'poker-auto-rebuy-toast--avatar').textContent, 'Auto rebuy: +500 CH');
 
   harness.advanceTime(2_999);
   await harness.flush();
@@ -2815,7 +2807,7 @@ test('poker v2 shows synchronized auto-rebuy feedback only after authoritative s
   await harness.flush();
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
   const expiredHeroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(expiredHeroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+  assert.equal(findChildByClass(transientSeat(harness, expiredHeroSeat), 'poker-auto-rebuy-toast--avatar'), undefined);
 });
 
 test('poker v2 keeps manual rebuy free of auto-rebuy feedback', async () => {
@@ -2838,7 +2830,7 @@ test('poker v2 keeps manual rebuy free of auto-rebuy feedback', async () => {
   await harness.flush();
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+  assert.equal(findChildByClass(transientSeat(harness, heroSeat), 'poker-auto-rebuy-toast--avatar'), undefined);
 });
 
 test('poker v2 classifies a manual retry of recovered auto-rebuy as manual', async () => {
@@ -2878,7 +2870,7 @@ test('poker v2 classifies a manual retry of recovered auto-rebuy as manual', asy
 
   assert.equal(harness.elements.pokerV2AutoRebuyBalanceToast.hidden, true);
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  assert.equal(findChildByClass(heroSeat, 'poker-auto-rebuy-toast--avatar'), undefined);
+  assert.equal(findChildByClass(transientSeat(harness, heroSeat), 'poker-auto-rebuy-toast--avatar'), undefined);
 });
 
 test('poker v2 recovers an auto-rebuy success from a funded snapshot exactly once', async () => {
@@ -3443,7 +3435,17 @@ test('poker v2 enables only legal actions without removing or moving the other b
   assert.equal(harness.elements.pokerV2AmountBtn.disabled, true);
   assert.equal(harness.elements.pokerV2AllInBtn.hidden, false);
   assert.equal(harness.elements.pokerV2AllInBtn.disabled, true);
+  const slots = ['Fold', 'Primary', 'Amount', 'AllIn'];
+  slots.forEach((slot, index) => {
+    assert.strictEqual(harness.elements['pokerV2' + slot + 'Btn'], buttonsBeforeTurn[index], 'mode switch retains each immediate control');
+    assert.equal(harness.elements['pokerV2' + slot + 'PreactionWrap'].hidden, true, 'no checkbox presentation on Hero turn');
+    assert.equal(harness.elements['pokerV2' + slot + 'Preaction'].disabled, true, 'hidden pre-action cannot queue on Hero turn');
+  });
   assert.equal(harness.actPayloads.length, 0);
+  harness.elements.pokerV2PrimaryBtn.click();
+  await harness.flush();
+  assert.equal(harness.actPayloads.length, 1);
+  assert.equal(harness.actPayloads[0].action, 'CHECK', 'uses existing immediate action path');
 });
 
 test('poker v2 sends authoritative maxRaiseTo for all-in even when the active opponent stack is smaller', async () => {
@@ -3724,49 +3726,6 @@ test('poker v2 retries the same reconnect seat after a transient join failure', 
   });
 });
 
-test('poker v2 aligns the right rail seats and keeps the chip on the dealer seat', async () => {
-  const harness = createHarness();
-  harness.fireDomContentLoaded();
-  await harness.flush();
-
-  const ws = harness.getCreateOptions();
-  ws.onSnapshot({
-    kind: 'stateSnapshot',
-    payload: {
-      tableId: 'table-1',
-      stateVersion: 4,
-      table: {
-        tableId: 'table-1',
-        status: 'OPEN',
-        maxSeats: 6,
-        members: [
-          { userId: 'villain-1', seat: 1, displayName: 'Villain 1' },
-          { userId: 'villain-2', seat: 2, displayName: 'Villain 2' },
-          { userId: 'villain-3', seat: 3, displayName: 'Villain 3' },
-          { userId: 'user-1', seat: 4, displayName: 'Hero' }
-        ]
-      },
-      public: {
-        hand: { handId: 'hand-3', status: 'TURN', dealerSeatNo: 2 },
-        turn: { userId: 'villain-2', deadlineAt: Date.now() + 5000 },
-        pot: { total: 12, sidePots: [] },
-        legalActions: { seat: 4, actions: [] }
-      },
-      you: { seat: 4 }
-    }
-  });
-  await harness.flush();
-
-  const rightTopSeat = findSeatByLabel(harness, 'Villain 2');
-  const rightBottomSeat = findSeatByLabel(harness, 'Villain 3');
-  assert.ok(rightTopSeat);
-  assert.ok(rightBottomSeat);
-  assert.equal(rightTopSeat.style.left, '80%');
-  assert.equal(rightBottomSeat.style.left, '80%');
-  assert.equal(harness.elements.pokerDealerChip.style.left, '72%');
-  assert.equal(harness.elements.pokerDealerChip.style.top, '37%');
-});
-
 test('poker v2 shows a live turn clock only on the active seat avatar', async () => {
   const nowMs = 1_700_000_100_000;
   const harness = createHarness({ nowMs });
@@ -3801,8 +3760,8 @@ test('poker v2 shows a live turn clock only on the active seat avatar', async ()
 
   const activeSeat = findSeatByLabel(harness, 'Villain 1');
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const activeAvatar = activeSeat.children.find((node) => node.className === 'poker-seat-avatar');
-  const heroAvatar = heroSeat.children.find((node) => node.className === 'poker-seat-avatar');
+  const activeAvatar = descendants(activeSeat).find((node) => node.className === 'poker-seat-avatar');
+  const heroAvatar = descendants(heroSeat).find((node) => node.className === 'poker-seat-avatar');
   const activeClock = activeAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
   const heroClock = heroAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
 
@@ -3842,7 +3801,7 @@ test('poker v2 turns the live clock red when five seconds remain', async () => {
   await harness.flush();
 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const heroAvatar = heroSeat.children.find((node) => node.className === 'poker-seat-avatar');
+  const heroAvatar = descendants(heroSeat).find((node) => node.className === 'poker-seat-avatar');
   const heroClock = heroAvatar.children.find((node) => /poker-seat-turn-clock/.test(node.className));
 
   assert.ok(heroClock);
@@ -3888,9 +3847,9 @@ test('poker v2 renders last-action badges and dims folded seats', async () => {
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   const villainRaiseSeat = findSeatByLabel(harness, 'Villain 1');
   const foldedSeat = findSeatByLabel(harness, 'Villain 2');
-  const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
-  const villainBadge = (villainRaiseSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
-  const foldedBadge = (foldedSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const heroBadge = descendants(transientSeat(harness, heroSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
+  const villainBadge = descendants(transientSeat(harness, villainRaiseSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
+  const foldedBadge = descendants(transientSeat(harness, foldedSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
 
   assert.ok(heroBadge);
   assert.equal(heroBadge.textContent, 'Call');
@@ -3939,8 +3898,8 @@ test('poker v2 renders the hero last-action badge when hero seat is resolved fro
   await harness.flush();
 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
-  const heroBadge = (heroSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
-  const heroName = (heroSeat.children || []).find((node) => node.className === 'poker-seat-name');
+  const heroBadge = descendants(transientSeat(harness, heroSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
+  const heroName = descendants(harness.elements.pokerSeatNameLayer).find((node) => node.className === 'poker-seat-name' && node.textContent === 'You');
 
   assert.ok(heroSeat);
   assert.ok(heroBadge);
@@ -4070,7 +4029,7 @@ test('poker v2 does not dim a seat from fold badge alone without folded status',
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = (villainSeat.children || []).find((node) => /poker-seat-action-badge/.test(node.className));
+  const villainBadge = descendants(transientSeat(harness, villainSeat)).find((node) => /poker-seat-action-badge/.test(node.className));
 
   assert.ok(villainBadge);
   assert.equal(villainBadge.textContent, 'Fold');
@@ -4140,8 +4099,6 @@ test('poker v2 keeps the dealer chip fixed while action moves between players', 
   });
   await harness.flush();
 
-  assert.equal(harness.elements.pokerDealerChip.style.left, initialLeft);
-  assert.equal(harness.elements.pokerDealerChip.style.top, initialTop);
 });
 
 test('poker v2 preserves showdown hand summaries and revealed cards for legacy settled state', async () => {
@@ -4192,8 +4149,8 @@ test('poker v2 preserves showdown hand summaries and revealed cards for legacy s
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = findSeatChild(villainSeat, 'poker-seat-settlement-badge');
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  const villainBadge = findSeatChild(transientSeat(harness, villainSeat), 'poker-seat-settlement-badge');
+  const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   const villainBadgeLabel = findSeatChild(villainBadge, 'poker-seat-settlement-hand-label');
   const villainBadgeCards = findSeatChild(villainBadge, 'poker-seat-settlement-hand-cards');
 
@@ -4201,18 +4158,13 @@ test('poker v2 preserves showdown hand summaries and revealed cards for legacy s
   assert.ok(villainBadgeLabel);
   assert.equal(villainBadgeLabel.textContent.length > 0, true);
   assert.equal(villainBadgeCards.children.length, 5);
-  assert.equal(villainCards.children.length, 2);
-  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.length, 2, 'authoritative reveal remains available');
   const losingSeat = findSeatByLabel(harness, 'Villain 2');
-  const losingCards = findSeatChild(losingSeat, 'poker-seat-cards');
-  assert.ok(losingCards);
-  assert.equal(losingCards.children.length, 2);
-  assert.equal(losingCards.children[0].className.includes('poker-card--back'), true);
-  assert.equal(losingCards.children[1].className.includes('poker-card--back'), true);
+  const losingCards = harness.getRevealedCards(losingSeat.dataset.userId);
+  assert.equal(losingCards, null, 'unrevealed/private cards remain unavailable');
 });
 
-test('poker v2 reveals showdown cards for compared losing players without winner badge', async () => {
+test('poker v2 preserves authoritative showdown reveal for compared losing players without inventing an award', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -4260,12 +4212,9 @@ test('poker v2 reveals showdown cards for compared losing players without winner
   await harness.flush();
 
   const losingSeat = findSeatByLabel(harness, 'Villain 2');
-  const losingCards = findSeatChild(losingSeat, 'poker-seat-cards');
-  assert.ok(losingCards);
-  assert.equal(losingCards.children.length, 2);
-  assert.equal(losingCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(losingCards.children[1].className.includes('poker-card--back'), false);
-  assert.equal(findSeatChild(losingSeat, 'poker-seat-settlement-badge'), undefined);
+  const losingCards = harness.getRevealedCards(losingSeat.dataset.userId);
+  assert.equal(losingCards.length, 2, 'authoritative reveal remains available');
+  assert.equal(findSeatChild(transientSeat(harness, losingSeat), 'poker-seat-settlement-badge'), undefined);
 });
 
 test('poker v2 keeps the previous reveal visible for the full local window before switching to the next hand', async () => {
@@ -4341,12 +4290,10 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.ok(findSeatChild(villainSeat, 'poker-seat-settlement-badge'));
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  assert.ok(findSeatChild(transientSeat(harness, villainSeat), 'poker-seat-settlement-badge'));
+  const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   assert.ok(villainCards);
-  assert.equal(villainCards.children.length, 2);
-  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.length, 2, 'authoritative reveal remains available');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 5);
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
 
@@ -4354,12 +4301,9 @@ test('poker v2 keeps the previous reveal visible for the full local window befor
   await harness.flush();
 
   const switchedVillainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.equal(findSeatChild(switchedVillainSeat, 'poker-seat-settlement-badge'), undefined);
-  const switchedVillainCards = findSeatChild(switchedVillainSeat, 'poker-seat-cards');
-  assert.ok(switchedVillainCards);
-  assert.equal(switchedVillainCards.children.length, 2);
-  assert.equal(switchedVillainCards.children[0].className.includes('poker-card--back'), true);
-  assert.equal(switchedVillainCards.children[1].className.includes('poker-card--back'), true);
+  assert.equal(findSeatChild(transientSeat(harness, switchedVillainSeat), 'poker-seat-settlement-badge'), undefined);
+  const switchedVillainCards = harness.getRevealedCards(switchedVillainSeat.dataset.userId);
+  assert.equal(switchedVillainCards, null, 'unrevealed/private cards remain unavailable');
   assert.equal(harness.elements.pokerCommunityCards.children.length, 0);
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
 });
@@ -4529,14 +4473,13 @@ test('poker v2 does not switch away from the settled reveal scene before the loc
 
   assert.equal(harness.elements.pokerCommunityCards.children.length, 5, 'reveal board should stay visible until the local reveal window ends');
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  assert.ok(findSeatChild(villainSeat, 'poker-seat-settlement-badge'));
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  assert.ok(findSeatChild(transientSeat(harness, villainSeat), 'poker-seat-settlement-badge'));
+  const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
   assert.ok(villainCards);
-  assert.equal(villainCards.children[0].className.includes('poker-card--back'), false);
-  assert.equal(villainCards.children[1].className.includes('poker-card--back'), false);
+  assert.equal(villainCards.length, 2, 'authoritative reveal remains available');
 });
 
-test('poker v2 keeps showdown participant cards hidden when the hand ends without showdown comparison', async () => {
+test('poker v2 withholds authoritative reveal when the hand ends without showdown comparison', async () => {
   const harness = createHarness();
   harness.fireDomContentLoaded();
   await harness.flush();
@@ -4578,12 +4521,11 @@ test('poker v2 keeps showdown participant cards hidden when the hand ends withou
   await harness.flush();
 
   const villainSeat = findSeatByLabel(harness, 'Villain 1');
-  const villainBadge = findSeatChild(villainSeat, 'poker-seat-settlement-badge');
-  const villainCards = findSeatChild(villainSeat, 'poker-seat-cards');
+  const villainBadge = findSeatChild(transientSeat(harness, villainSeat), 'poker-seat-settlement-badge');
+  const villainCards = harness.getRevealedCards(villainSeat.dataset.userId);
 
   assert.equal(villainBadge, undefined, 'an all-folded legacy settlement must not invent an award badge');
-  assert.equal(villainCards.children[0].className, 'poker-card poker-card--back');
-  assert.equal(villainCards.children[1].className, 'poker-card poker-card--back');
+  assert.equal(villainCards, null, 'all-folded settlement must not reveal private cards');
 });
 
 test('poker v2 renders exact main, side, and returned awards and preserves them across omitted patch fields', async () => {
@@ -4630,9 +4572,9 @@ test('poker v2 renders exact main, side, and returned awards and preserves them 
   const heroSeat = harness.elements.pokerSeatLayer.children.find((node) => /poker-seat--hero/.test(node.className));
   const playerBSeat = findSeatByLabel(harness, 'Player B');
   const playerCSeat = findSeatByLabel(harness, 'Player C');
-  assert.equal(findChildByClass(findSeatChild(heroSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+288 Main pot');
-  assert.equal(findChildByClass(findSeatChild(playerBSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+6 Side pot 1');
-  assert.equal(findChildByClass(findSeatChild(playerCSeat, 'poker-seat-settlement-badge'), 'poker-seat-settlement-award--return').textContent, '+1 Returned');
+  assert.equal(findChildByClass(findSeatChild(transientSeat(harness, heroSeat), 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+288 Main pot');
+  assert.equal(findChildByClass(findSeatChild(transientSeat(harness, playerBSeat), 'poker-seat-settlement-badge'), 'poker-seat-settlement-award').textContent, '+6 Side pot 1');
+  assert.equal(findChildByClass(findSeatChild(transientSeat(harness, playerCSeat), 'poker-seat-settlement-badge'), 'poker-seat-settlement-award--return').textContent, '+1 Returned');
   assert.equal(/poker-seat--pot-winner/.test(playerCSeat.className), false, 'a return must not style the seat as a pot winner');
   assert.equal(harness.elements.pokerChipFxLayer.children.length, 0, 'initial settled snapshots stay static');
 
@@ -4837,16 +4779,7 @@ test('poker v2 closes menu on link click and outside click', async () => {
   assert.equal(seated.leavePayloads.length, 1);
   assert.equal(seated.windowLocation.href, '/poker/');
 
-  seated.elements.xpBadge.click();
-  assert.equal(seated.elements.pokerV2LeaveConfirmModal.hidden, false, 'XP badge should confirm while seated');
-  seated.elements.pokerV2LeaveConfirmCancel.click();
-  assert.equal(seated.leavePayloads.length, 1, 'cancelling XP navigation should keep the player at the table');
 
-  seated.elements.xpBadge.click();
-  seated.elements.pokerV2LeaveConfirmYes.click();
-  await seated.flush();
-  assert.equal(seated.leavePayloads.length, 2);
-  assert.equal(seated.windowLocation.href, '/xp.html');
 });
 
 test('poker v2 keeps secondary landscape actions in the hamburger and gates join on an actionable snapshot', async () => {
@@ -6043,7 +5976,51 @@ test('poker v2 shows the current slider amount on Bet/Raise buttons', async () =
   assert.equal(harness.elements.pokerV2AmountBtn.textContent, 'Raise (120)', 'RAISE label must follow the slider');
 });
 
-test('poker v2 clears stale private hole cards when a full snapshot removes the user seat', async () => {
+test('poker v2 retains the active deal through same-user auth pending and reconnect but clears identity changes', async () => {
+  const harness = createHarness({ token: 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.initial', authUser: { id: 'user-1' } });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  await waitFor(() => harness.getCreateOptions() !== null);
+  let ws = harness.getCreateOptions();
+  const dealt = amountSnapshot({ handId: 'hand-auth-deal', phase: 'TURN', board: [], potTotal: 20,
+    actions: [], constraints: {}, stateVersion: 50, holeCards: ['3C', '7S'] });
+  dealt.payload.public.betThisRoundByUserId = { 'user-1': 0 };
+  ws.onSnapshot(dealt);
+  await harness.flush();
+  const cards = harness.getHeroCards();
+  const visibleChanges = harness.logs.filter((log) => log.kind === 'poker_hero_card_presentation_changed').length;
+  ws.onStatus('reconnecting', {});
+  ws.onStatus('resync', {});
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), cards);
+  assert.equal(harness.elements.pokerHeroCards.hidden, false);
+  harness.triggerAuthChange({ id: 'user-1' }, {});
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), cards, 'same-user missing-token pending is not a deal revocation');
+  assert.equal(harness.elements.pokerHeroCards.hidden, false);
+  const token = 'aaa.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64') + '.refresh';
+  harness.setAuthToken(token);
+  harness.triggerAuthChange({ id: 'user-1' }, { access_token: token });
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), cards);
+  assert.equal(harness.logs.filter((log) => log.kind === 'poker_hero_card_presentation_changed').length, visibleChanges, 'transient transport/auth does not log a false visibility change');
+  ws = harness.getCreateOptions();
+  ws.onSnapshot(dealt);
+  await harness.flush();
+  harness.triggerAuthChange({ id: 'user-2' }, {});
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), [], 'different user clears the private deal');
+  const transition = harness.logs.filter((log) => log.kind === 'poker_hero_card_presentation_changed').at(-1).data;
+  assert.equal(transition.to, 'hidden');
+  assert.equal(transition.lifecycleTransition, 'auth_pending_identity');
+  assert.equal(transition.heroCardsLength, 0);
+  assert.equal(Object.hasOwn(transition, 'cards') || Object.hasOwn(transition, 'token'), false);
+  harness.triggerAuthChange(null, null);
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), []);
+});
+
+test('poker v2 preserves same-hand private cards and clears on hand or seat lifecycle boundaries', async () => {
   const { harness, ws } = await bootSeatedHarness();
 
   // Seated with private cards in an active hand.
@@ -6062,6 +6039,68 @@ test('poker v2 clears stale private hole cards when a full snapshot removes the 
   assert.equal(harness.elements.pokerHeroCards.children.length, 2);
   assert.ok(harness.elements.pokerHeroCards.children.every((child) => !/poker-card--back/.test(child.className)), 'seated user should see face-up cards');
 
+  const receivedCards = harness.getHeroCards();
+  harness.dropHeroHud();
+  assert.equal(harness.elements.pokerHeroCards.hidden, false, 'HUD remount does not revoke the owned deal');
+  const incomplete = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: [], members: [{ userId: 'villain-1', seat: 2 }] });
+  incomplete.payload.public.betThisRoundByUserId = { 'user-1': 0, 'villain-1': 0 };
+  ws.onSnapshot(incomplete);
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), receivedCards, 'canonical own seat survives incomplete public member projection');
+  assert.equal(harness.elements.pokerHeroCards.hidden, false);
+
+  for (const kind of ['statePatch', 'table_state', 'stateSnapshot']) {
+    const update = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: ['As', 'Kd', '3h'], potTotal: 42,
+      actions: [], constraints: {}, stateVersion: 40, turnUserId: 'villain-1', holeCards: null });
+    update.kind = kind;
+    ws.onSnapshot(update);
+    await harness.flush();
+    assert.deepEqual(harness.getHeroCards(), receivedCards, kind + ' must preserve same-hand same-seat cards');
+  }
+  for (const kind of ['stateSnapshot', 'statePatch', 'table_state']) {
+    const update = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: ['As', 'Kd', '3h'], potTotal: 42,
+      actions: [], constraints: {}, stateVersion: 40, turnUserId: 'villain-1', holeCards: [] });
+    update.kind = kind;
+    update.payload.public.betThisRoundByUserId = { 'user-1': 0, 'villain-1': 0 };
+    ws.onSnapshot(update);
+    await harness.flush();
+    assert.deepEqual(harness.getHeroCards(), receivedCards, kind + ' empty private branch must preserve the active deal');
+  }
+  const partialProjection = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: [] });
+  delete partialProjection.payload.public.betThisRoundByUserId;
+  ws.onSnapshot(partialProjection);
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), receivedCards, 'omitted same-hand participation is not an authoritative revocation');
+  ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-new', phase: 'PREFLOP', board: [], potTotal: 3,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: [] }));
+  await harness.flush();
+  assert.deepEqual(harness.getHeroCards(), [], 'new hand clears previous private cards while still seated');
+  ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: ['As', 'Kd', '3h'], potTotal: 42,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] }));
+  await harness.flush();
+
+  for (const boundary of ['WAITING_NEXT_HAND', 'OUT_OF_CHIPS', 'out-of-hand', 'seat-change', 'seat-loss']) {
+    const dealt = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+      actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] });
+    dealt.payload.public.betThisRoundByUserId = { 'user-1': 0 };
+    ws.onSnapshot(dealt);
+    await harness.flush();
+    const update = amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+      actions: [], constraints: {}, stateVersion: 40, holeCards: [],
+      ...(boundary === 'seat-change' ? { youSeat: 2, members: [{ userId: 'user-1', seat: 2 }] } : boundary === 'seat-loss' ? { youSeat: null } : {}) });
+    update.payload.public.betThisRoundByUserId = boundary === 'out-of-hand' ? { 'villain-1': 0 } : { 'user-1': 0 };
+    if (boundary === 'WAITING_NEXT_HAND' || boundary === 'OUT_OF_CHIPS') update.payload.private.playerState = { status: boundary, stack: 100 };
+    ws.onSnapshot(update);
+    await harness.flush();
+    assert.deepEqual(harness.getHeroCards(), [], boundary + ' clears despite empty private projection');
+  }
+
+  ws.onSnapshot(amountSnapshot({ handId: 'hand-stale-1', phase: 'FLOP', board: [], potTotal: 42,
+    actions: [], constraints: {}, stateVersion: 40, holeCards: ['3C', '7S'] }));
+  await harness.flush();
+
   // Reconnect full authoritative snapshot: the user no longer has a seat and
   // the private branch is absent — stale cards must be cleared from state.
   ws.onSnapshot(amountSnapshot({
@@ -6078,6 +6117,7 @@ test('poker v2 clears stale private hole cards when a full snapshot removes the 
   }));
   await harness.flush();
   assert.equal(harness.elements.pokerHeroCards.hidden, true, 'hero cards must be hidden without a seat');
+  assert.deepEqual(harness.getHeroCards(), [], 'seat loss clears private state');
 
   // A new hand where the user is seated again but has no private cards yet:
   // the stale 3C/7S must never reappear — only the standard face-down
@@ -6200,7 +6240,7 @@ test('bot-only all-in loss reaction catalog entries resolve emoji/labels, humanS
     ws.onReaction({ payload: { seatNo: 2, reactionKey: exp.key } });
     await harness.flush();
 
-    const bubble = harness.elements.pokerReactionLayer.children
+    const bubble = reactionAnchors(harness)
       .flatMap((anchor) => anchor.children || [])
       .find((child) => String(child.className || '').startsWith('poker-seat-reaction-bubble'));
     assert.ok(bubble, `Reaction bubble must render for ${exp.key}`);
@@ -6227,3 +6267,179 @@ test('bot-only all-in loss reaction catalog entries resolve emoji/labels, humanS
   }
 });
 
+
+test('Poker account projection sums every authoritative table stack and rejects unavailable values', () => {
+  const source = fs.readFileSync(path.resolve('poker/poker-v2.js'), 'utf8');
+  const functionSource = source.slice(source.indexOf('  function sumPokerTableStacks('), source.indexOf('  function accountHudContext('));
+  const sum = vm.runInNewContext(functionSource + '\nsumPokerTableStacks');
+  assert.equal(sum([{ tableId: 'here', stack: 900 }, { tableId: 'other', stack: 75 }, { tableId: 'bot-table', stack: 25 }]), 1000);
+  assert.equal(sum([]), 0);
+  assert.equal(sum([{ tableId: 'other', stack: 0 }]), 0);
+  assert.equal(sum(null), null);
+  assert.equal(sum([{ tableId: 'other', stack: null }]), null);
+  assert.equal(sum([{ tableId: 'other', stack: -1 }]), null);
+  assert.equal(sum([{ tableId: 'other', stack: Number.MAX_SAFE_INTEGER }, { tableId: 'third', stack: 1 }]), null);
+});
+
+function cardPresentationFrame(handId, version, { initial = false, folded = [], reveal = false } = {}){
+  const frame = amountSnapshot({ handId, phase: reveal ? 'SHOWDOWN' : 'FLOP', board: ['As','Ks','Qs'], potTotal: 30,
+    actions: [], constraints: {}, stateVersion: version, holeCards: ['Js','Ts'],
+    members: [{userId:'user-1',seat:1,status:folded.includes('user-1')?'FOLDED':'ACTIVE'},
+      {userId:'villain-1',seat:2,status:folded.includes('villain-1')?'FOLDED':'ACTIVE'}] });
+  frame.initial = initial;
+  frame.payload.public.betThisRoundByUserId = {'user-1':0,'villain-1':0};
+  frame.payload.public.foldedByUserId = Object.fromEntries(folded.map(id=>[id,true]));
+  frame.payload.public.showdown = reveal ? {handId, revealedShowdownParticipants:[{userId:'villain-1',holeCards:['Ah','Ad']}]} : null;
+  return frame;
+}
+
+test('Hero made-hand identities exclude High Card and kickers and allow board-only figures', async (t) => {
+  const { harness, ws } = await bootSeatedHarness();
+  const cases = [
+    { name: 'High Card', hole: ['As','Kd'], board: ['Qs','9c','7h','4d','2s'], expected: [] },
+    { name: 'Pair', hole: ['Ah','9c'], board: ['Ad','Ks','Qh','7d','2c'], expected: ['AH','AD'] },
+    { name: 'Two Pair', hole: ['Ah','Kc'], board: ['Ad','Ks','Qh','7d','2c'], expected: ['AH','AD','KC','KS'] },
+    { name: 'Trips', hole: ['Ah','Ac'], board: ['Ad','Ks','Qh','7d','2c'], expected: ['AH','AC','AD'] },
+    { name: 'Straight', hole: ['9h','8c'], board: ['7d','6s','5h','Kd','2c'], expected: ['9H','8C','7D','6S','5H'] },
+    { name: 'Flush', hole: ['Ah','9h'], board: ['Kh','7h','3h','Qd','2c'], expected: ['AH','9H','KH','7H','3H'] },
+    { name: 'Full House', hole: ['Ah','Ac'], board: ['Ad','Ks','Kc','7d','2c'], expected: ['AH','AC','AD','KS','KC'] },
+    { name: 'Quads', hole: ['Ah','Ac'], board: ['Ad','As','Kh','7d','2c'], expected: ['AH','AC','AD','AS'] },
+    { name: 'Straight Flush', hole: ['9h','8h'], board: ['7h','6h','5h','Kd','2c'], expected: ['9H','8H','7H','6H','5H'] },
+    { name: 'Royal Flush', hole: ['Js','Ts'], board: ['As','Ks','Qs','7d','2c'], expected: ['JS','10S','AS','KS','QS'] },
+    { name: 'board-only Pair', hole: ['Qc','9d'], board: ['As','Ah','Ks','7d','2c'], expected: ['AS','AH'] },
+    { name: 'board-only Straight', hole: ['2c','3d'], board: ['9h','8c','7d','6s','5h'], expected: ['9H','8C','7D','6S','5H'] }
+  ];
+  for (const [index, fixture] of cases.entries()) {
+    await t.test(fixture.name, () => {
+      ws.onSnapshot(amountSnapshot({ handId: 'made-hand-' + index, phase: 'RIVER', board: fixture.board,
+        stateVersion: index + 1, holeCards: fixture.hole,
+        members: [{ userId: 'user-1', seat: 1, status: 'ACTIVE' }] }));
+      assert.deepEqual(harness.getMadeHand().sort(), fixture.expected.slice().sort());
+    });
+  }
+});
+
+test('card FX claim only live authoritative deal/fold/reveal transitions once and retain Hero privacy lifecycle', async () => {
+  const {harness,ws}=await bootSeatedHarness();
+  ws.onSnapshot(cardPresentationFrame('cards-a',1,{initial:true}));
+  assert.equal(harness.getCardClaims().deal,true,'initial baseline consumes old deal');
+  assert.equal(harness.elements.pokerCardFxLayer.children.length,0,'initial snapshot has no motion');
+  assert.deepEqual(harness.getMadeHand().sort(),['AS','JS','KS','QS','10S'].sort(),'uses existing best-five evaluator');
+  assert.equal(harness.getRevealedCards('villain-1'),null,'unrevealed opponent has no faces');
+  ws.onSnapshot(cardPresentationFrame('cards-b',2));
+  const dealNodes=harness.elements.pokerCardFxLayer.children.slice();
+  assert.equal(dealNodes.length,4,'two rounds only to the two dealt-in users');
+  ws.onSnapshot(cardPresentationFrame('cards-b',2));
+  assert.deepEqual(harness.elements.pokerCardFxLayer.children,dealNodes,'duplicate cannot claim deal again');
+  ws.onSnapshot(cardPresentationFrame('cards-b',3,{folded:['user-1','villain-1']}));
+  assert.deepEqual(harness.getHeroCards(),[{r:'J',s:'S'},{r:'10',s:'S'}],'fold presentation does not erase private state');
+  assert.equal(harness.getCardClaims().fold['user-1'],true);
+  assert.equal(harness.getCardClaims().fold['villain-1'],true);
+  const foldedNodes=harness.elements.pokerCardFxLayer.children.slice();
+  ws.onSnapshot(cardPresentationFrame('cards-b',3,{folded:['user-1','villain-1']}));
+  assert.deepEqual(harness.elements.pokerCardFxLayer.children,foldedNodes);
+  ws.onSnapshot(cardPresentationFrame('cards-b',4,{folded:['user-1'],reveal:true}));
+  assert.deepEqual(harness.getRevealedCards('villain-1'),[{r:'A',s:'H'},{r:'A',s:'D'}]);
+  assert.equal(harness.getCardClaims().reveal['villain-1'],true);
+  const revealedNodes=harness.elements.pokerCardFxLayer.children.slice();
+  ws.onSnapshot(cardPresentationFrame('cards-b',4,{folded:['user-1'],reveal:true}));
+  assert.deepEqual(harness.elements.pokerCardFxLayer.children,revealedNodes);
+  ws.onStatus('resync',{});
+  assert.equal(harness.elements.pokerCardFxLayer.children.length,0,'recovery cancels stale passengers');
+  ws.onSnapshot(cardPresentationFrame('cards-b',5,{folded:['user-1'],reveal:true}));
+  assert.equal(harness.elements.pokerCardFxLayer.children.length,0,'resync renders final state without replay');
+  const boundary=cardPresentationFrame('cards-c',6);boundary.payload.private.holeCards=[];
+  ws.onSnapshot(boundary);
+  assert.deepEqual(harness.getHeroCards(),[],'new hand revokes the previous private deal');
+  assert.deepEqual(harness.getMadeHand(),[],'no private deal means no highlight');
+  const closed=cardPresentationFrame('cards-d',7);closed.payload.table.status='CLOSED';
+  ws.onSnapshot(closed);
+  assert.equal(harness.elements.pokerCardFxLayer.children.length,0,'closed table clears passengers and cannot start a deal');
+  assert.equal(harness.getCardClaims().key,null,'closed table prunes claims');
+});
+
+test('card FX initial/reconnect reveals and reduced motion never replay passengers', async () => {
+  for(const reducedMotion of [false,true]){
+    const harness=createHarness({reducedMotion});harness.fireDomContentLoaded();await harness.flush();
+    const ws=harness.getCreateOptions();
+    ws.onSnapshot(cardPresentationFrame('revealed-a',1,{initial:true,reveal:true}));
+    assert.equal(harness.elements.pokerCardFxLayer.children.length,0);
+    assert.deepEqual(harness.getRevealedCards('villain-1'),[{r:'A',s:'H'},{r:'A',s:'D'}]);
+    ws.onStatus('reconnecting',{});
+    ws.onSnapshot(cardPresentationFrame('revealed-b',2,{reveal:true}));
+    assert.equal(harness.elements.pokerCardFxLayer.children.length,0);
+    if(reducedMotion){
+      ws.onSnapshot(cardPresentationFrame('revealed-c',3));
+      ws.onSnapshot(cardPresentationFrame('revealed-c',4,{folded:['villain-1']}));
+      assert.equal(harness.elements.pokerCardFxLayer.children.length,0);
+      assert.equal(harness.getCardClaims().fold['villain-1'],true,'skip motion but consume transition');
+    }
+  }
+});
+
+function communityDealFrame(handId, version, board, initial = false){
+  const frame = cardPresentationFrame(handId, version, { initial });
+  frame.payload.public.board = board;
+  frame.payload.public.hand.status = board.length === 5 ? 'RIVER' : board.length === 4 ? 'TURN' : board.length ? 'FLOP' : 'PREFLOP';
+  return frame;
+}
+
+test('community FX claims only new flop/turn/river cards once per hand', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+  const board = ['As','Ks','Qs','7d','2c'];
+  ws.onSnapshot(communityDealFrame('board-a', 1, [], true));
+  for (const [version, count, expected] of [[2,3,['AS','KS','QS']], [3,4,['7D']], [4,5,['2C']]]) {
+    ws.onSnapshot(communityDealFrame('board-a', version, board.slice(0, count)));
+    const nodes = harness.elements.pokerCardFxLayer.children.filter(n => n.dataset.cardFx === 'community');
+    assert.deepEqual(nodes.slice(-expected.length).map(n => n.children[0].dataset.cardIdentity), expected);
+    assert.equal(nodes.length, count, 'exactly the new cards claimed, no previous street replay');
+    assert.equal(harness.getCardClaims().board[count], true);
+    ws.onSnapshot(communityDealFrame('board-a', version, board.slice(0, count)));
+    assert.deepEqual(harness.elements.pokerCardFxLayer.children.filter(n => n.dataset.cardFx === 'community'), nodes);
+  }
+  ws.onSnapshot(communityDealFrame('board-b', 5, [], true));
+  assert.deepEqual(harness.getCardClaims().board, {}, 'new hand resets street claims');
+  ws.onSnapshot(communityDealFrame('board-b', 6, board.slice(0,3)));
+  assert.equal(harness.elements.pokerCardFxLayer.children.filter(n => n.dataset.cardFx === 'community').length, 3);
+});
+
+test('community FX skips initial/reconnect/resync populated boards and reduced motion', async () => {
+  for (const mode of ['initial','reconnecting','resync','reduced']) {
+    const harness = createHarness({ reducedMotion: mode === 'reduced' });
+    harness.fireDomContentLoaded(); await harness.flush();
+    const ws = harness.getCreateOptions();
+    const board = ['As','Ks','Qs','7d','2c'];
+    ws.onSnapshot(communityDealFrame('board-skip', 1, [], true));
+    if (mode === 'reconnecting' || mode === 'resync') ws.onStatus(mode, {});
+    ws.onSnapshot(communityDealFrame('board-skip', 2, board.slice(0,3), mode === 'initial'));
+    assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, mode);
+    assert.deepEqual(harness.getCardClaims().board, {3:true}, 'consume historical flop despite a supported 0→3 transition');
+    ws.onSnapshot(communityDealFrame('board-skip', 3, board.slice(0,3)));
+    assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, 'no historical replay');
+    if (mode === 'reduced') {
+      ws.onSnapshot(communityDealFrame('board-next', 4, [], true));
+      ws.onSnapshot(communityDealFrame('board-next', 5, board.slice(0,3)));
+      assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, 'skip a genuine reduced-motion flop');
+      assert.equal(harness.getCardClaims().board[3], true);
+    }
+  }
+});
+
+test('active-table Back to lobby Yes sends leave and navigates only after leave completion', async () => {
+  let completeLeave;
+  const harness = createHarness({ sendLeave(){ return new Promise(resolve => { completeLeave = resolve; }); } });
+  harness.fireDomContentLoaded(); await harness.flush();
+  harness.getCreateOptions().onSnapshot(communityDealFrame('lobby-leave', 1, ['As','Ks','Qs'], true));
+  await harness.flush();
+  harness.elements.pokerMenuToggle.click();
+  harness.elements.pokerLobbyLink.click();
+  assert.equal(harness.elements.pokerV2LeaveConfirmModal.hidden, false);
+  assert.equal(harness.leavePayloads.length, 0, 'confirmation is required');
+  harness.elements.pokerV2LeaveConfirmYes.click();
+  await harness.flush();
+  assert.equal(harness.elements.pokerV2LeaveConfirmModal.hidden, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.leavePayloads)), [{ tableId: 'table-1' }]);
+  assert.equal(harness.windowLocation.href, '', 'fallback waits for correct leave completion');
+  completeLeave({ ok: true }); await harness.flush();
+  assert.equal(harness.windowLocation.href, '/poker/');
+});

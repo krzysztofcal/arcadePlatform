@@ -1,3 +1,5 @@
+import { applyInactivityPolicy } from "../../../netlify/functions/_shared/poker-inactivity-policy.mjs";
+import { clearInactivityPenalty, patchMissedTurnsByUserId } from "../../../shared/poker-domain/poker-missed-turns.mjs";
 import { createHash } from "node:crypto";
 import {
   dealHoleCards,
@@ -91,7 +93,8 @@ export function isContinuationEligibleByStack(userId, stacksByUserId, { isBot = 
 }
 
 export function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
-  const members = orderedSeatMembers(coreState);
+  const members = orderedSeatMembers(coreState).filter(member => !coreState?.pokerState?.sitOutByUserId?.[member.userId]
+    && !coreState?.pokerState?.leftTableByUserId?.[member.userId]);
   if (!stacksByUserId || typeof stacksByUserId !== "object" || Array.isArray(stacksByUserId)) {
     return members;
   }
@@ -123,6 +126,16 @@ export function buildBootstrappedPokerState({
     return null;
   }
 
+  const inactivity = { missedTurnsByUserId: {}, pendingAutoSitOutByUserId: {}, sitOutByUserId: {} };
+  for (const userId of Object.keys(coreState.seats || {})) {
+    if (!Number.isInteger(coreState.seats[userId]) || coreState.seats[userId] < 1
+      || coreState.pokerState?.leftTableByUserId?.[userId]) continue;
+    const missed = coreState.pokerState?.missedTurnsByUserId?.[userId];
+    if (Number.isInteger(missed) && missed >= 0) inactivity.missedTurnsByUserId[userId] = missed;
+    for (const key of ["pendingAutoSitOutByUserId", "sitOutByUserId"]) {
+      if (coreState.pokerState?.[key]?.[userId] === true) inactivity[key][userId] = true;
+    }
+  }
   const userIds = members.map((member) => member.userId);
   const dealerIndex = Number.isInteger(dealerSeatNo)
     ? Math.max(0, members.findIndex((member) => member.seat === dealerSeatNo))
@@ -174,6 +187,7 @@ export function buildBootstrappedPokerState({
   const handSeats = members.map((member) => ({ userId: member.userId, seatNo: member.seat }));
 
   return {
+    ...inactivity,
     roomId: coreState.roomId || tableId,
     handId: nextHandId(tableId, versionForHand, members.length),
     handSeed,
@@ -227,6 +241,11 @@ export function resolveNextDealerSeatNo({ members, settledState, coreState = nul
 }
 
 export function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion, stakes = null }) {
+  const sitOutByUserId = { ...(settledState?.sitOutByUserId || {}) };
+  for (const [userId, pending] of Object.entries(settledState?.pendingAutoSitOutByUserId || {})) {
+    if (pending === true) sitOutByUserId[userId] = true;
+  }
+  coreState = { ...coreState, pokerState: { ...settledState, sitOutByUserId, pendingAutoSitOutByUserId: {} } };
   const members = orderedEligibleSeatMembers(coreState, settledState?.stacks);
   const nextDealerSeatNo = resolveNextDealerSeatNo({ members, settledState, coreState });
   const nextHandState = buildBootstrappedPokerState({
@@ -550,7 +569,7 @@ export function bootstrapCoreStateHand({ tableId, coreState, nowMs = Date.now(),
   };
 }
 
-export function applyCoreStateAction({ tableId, coreState, handId, userId, action, amount, nowIso, nowMs = Date.now() }) {
+export function applyCoreStateAction({ tableId, coreState, handId, userId, action, amount, nowIso, nowMs = Date.now(), isTimeout = false }) {
   const liveState = asLiveHandState(coreState?.pokerState);
   if (!liveState) {
     return { ok: true, accepted: false, changed: false, reason: "hand_not_live", stateVersion: coreState.version, coreState };
@@ -629,7 +648,10 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
   }
 
   const nextVersion = coreState.version + 1;
-  const nextPokerState = stampTurnDeadline(applied.state, nowMs);
+  const activityState = !isTimeout && coreState.seatDetailsByUserId?.[userId]?.isBot !== true
+    ? clearInactivityPenalty(applied.state, userId).nextState
+    : applied.state;
+  const nextPokerState = stampTurnDeadline(activityState, nowMs);
 
   const nextCoreState = {
     ...coreState,
@@ -720,7 +742,8 @@ export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now
     action: decision.action.type,
     amount: null,
     nowIso: new Date(nowMs).toISOString(),
-    nowMs
+    nowMs,
+    isTimeout: true
   });
 
   if (!applied.accepted) {
@@ -746,6 +769,13 @@ export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now
         }
       }
     : applied.coreState;
+
+  if (!actorDeferredLeave && coreState.seatDetailsByUserId?.[actorUserId]?.isBot !== true) {
+    const previous = liveState.missedTurnsByUserId?.[actorUserId];
+    const count = Number.isInteger(previous) && previous >= 0 ? previous + 1 : 1;
+    const counted = patchMissedTurnsByUserId(nextCoreState.pokerState, actorUserId, count).nextState;
+    nextCoreState.pokerState = applyInactivityPolicy(counted).state;
+  }
 
   return {
     ok: true,

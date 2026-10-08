@@ -4,8 +4,11 @@ import {
   applyCoreStateAction,
   applyCoreStateTurnTimeout,
   bootstrapCoreStateHand,
+  buildNextHandStateFromSettled,
   decideCoreStateTurnTimeout
 } from "./poker-engine.mjs";
+
+import { stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
 
 function initialCore() {
   return {
@@ -187,4 +190,72 @@ test("timeout can fold a deferred-leave human even when runtime membership alrea
   assert.equal(timeout.coreState.pokerState.phase, "SETTLED");
   assert.equal(timeout.coreState.pokerState.turnUserId, null);
   assert.equal(actorSeat, 1);
+});
+
+
+test("authoritative timeouts survive hand boundaries, commit sitout safely, and manual activity resets penalty", () => {
+  const tableId = "table_engine_timeout";
+  const initial = initialCore();
+  initial.seats.user_c = 3;
+  initial.members.push({ userId: "user_c", seat: 3 });
+  initial.publicStacks.user_c = 100;
+  let core = bootstrapCoreStateHand({ tableId, coreState: initial, nowMs: 1000 }).coreState;
+  const inactive = core.pokerState.turnUserId;
+  const first = applyCoreStateTurnTimeout({ tableId, coreState: core, nowMs: core.pokerState.turnDeadlineAt + 1 });
+  core = first.coreState;
+  assert.equal(core.pokerState.missedTurnsByUserId?.[inactive], 1);
+  assert.equal(applyCoreStateTurnTimeout({ tableId, coreState: core, nowMs: core.pokerState.turnStartedAt }).changed, false);
+
+  function act(current, userId, action) {
+    const result = applyCoreStateAction({ tableId, coreState: current, handId: current.pokerState.handId, userId, action, nowMs: 2000 });
+    assert.equal(result.accepted, true, result.reason);
+    return result.coreState;
+  }
+  function settle(current) {
+    for (let i = 0; i < 3 && current.pokerState.phase !== "SETTLED"; i++) current = act(current, current.pokerState.turnUserId, "FOLD");
+    assert.equal(current.pokerState.phase, "SETTLED");
+    return current;
+  }
+  function rollover(current) {
+    const next = buildNextHandStateFromSettled({ tableId, coreState: current, settledState: current.pokerState, nextVersion: current.version + 1 });
+    assert.ok(next);
+    return { ...current, version: current.version + 1, pokerState: stampTurnDeadline(next, 3000) };
+  }
+  function reachInactive(current) {
+    for (let i = 0; i < 3 && current.pokerState.turnUserId !== inactive; i++) {
+      const actor = current.pokerState.turnUserId;
+      current = act(current, actor, current.pokerState.toCallByUserId[actor] > 0 ? "CALL" : "CHECK");
+    }
+    assert.equal(current.pokerState.turnUserId, inactive);
+    return current;
+  }
+  core = reachInactive(rollover(settle(core)));
+  assert.equal(core.pokerState.missedTurnsByUserId[inactive], 1);
+  // Simulate the durable JSON round-trip used by restore before the next timeout.
+  core = JSON.parse(JSON.stringify(core));
+  let active = act(core, inactive, core.pokerState.toCallByUserId[inactive] > 0 ? "CALL" : "CHECK");
+  assert.equal(active.pokerState.missedTurnsByUserId[inactive], undefined);
+  active = reachInactive(active);
+  const resetTimeout = applyCoreStateTurnTimeout({ tableId, coreState: active, nowMs: active.pokerState.turnDeadlineAt + 1 });
+  assert.equal(resetTimeout.coreState.pokerState.missedTurnsByUserId[inactive], 1);
+
+  const second = applyCoreStateTurnTimeout({ tableId, coreState: core, nowMs: core.pokerState.turnDeadlineAt + 1 });
+  core = second.coreState;
+  assert.equal(core.pokerState.missedTurnsByUserId[inactive], 2);
+  assert.equal(core.pokerState.pendingAutoSitOutByUserId[inactive], true);
+  assert.notEqual(core.pokerState.sitOutByUserId[inactive], true);
+  assert.ok(core.pokerState.handSeats.some(seat => seat.userId === inactive));
+  core = settle(core);
+  const stack = core.pokerState.stacks[inactive];
+  core = rollover(core);
+  assert.equal(core.pokerState.sitOutByUserId[inactive], true);
+  assert.equal(core.pokerState.pendingAutoSitOutByUserId[inactive], undefined);
+  assert.equal(core.seats[inactive], initial.seats[inactive]);
+  assert.equal(core.pokerState.stacks[inactive], stack);
+  assert.equal(core.pokerState.handSeats.some(seat => seat.userId === inactive), false);
+  assert.equal(core.pokerState.holeCardsByUserId[inactive], undefined);
+  assert.notEqual(core.pokerState.turnUserId, inactive);
+  assert.notEqual(core.pokerState.dealerSeatNo, initial.seats[inactive]);
+  core = rollover(settle(core));
+  assert.equal(core.pokerState.stacks[inactive], stack, "later hand charges no blind to sat-out player");
 });

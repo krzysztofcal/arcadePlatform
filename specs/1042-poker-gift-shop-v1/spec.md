@@ -507,7 +507,7 @@ If the correction touches only browser presentation before #1048, WS redeploy is
 - [x] **T012A — Custom gift picker**
 - [x] **T012B — Custom recipient picker**
 - [x] **T012C — Guest-visible disabled Gift Shop**
-- [ ] **T012D — Consume #1048 stable three-slot gift HUD** — BLOCKED on #1048
+- [x] **T012D — Consume #1048 stable three-slot gift HUD** — implemented against main/#1049; T013 smoke pending
 - [ ] **T013 — Final authenticated Stage smoke after T012A–T012E**
 - [ ] **T014 — Production owner GO/schema apply**
 - [ ] **T015 — Final handoff / merge-ready gate**
@@ -557,3 +557,10 @@ Do not create:
 - a temporary absolute-position/z-index overlay while #1048 is pending.
 
 Quick Gift placement is blocked on #1048; E1 no-self can and should be completed now.
+
+
+## 2026-10-08 — PR #1047 current-main conflict reconciliation
+
+This amendment supersedes historical #1048-blocked statements above: live #1048 is CLOSED and #1049 is MERGED. Integrate existing main `d49c33fa` HUD/scene/lifecycle without restoring the older layout. Received gifts use the three existing `hud.gifts` slots outside avatar clipping, including gifts received by the buyer's own seat. Self-exclusion applies only to purchase targets. Quick Gift uses `hud.quickAction`, preserves its existing targeted-reaction children, opens the same six-gift catalog toward the table interior and calls the single `sendSelectedGift()`/requestId/retry path. Show failures through the existing visible gift notice when the main shop is closed. Occupant replacement closes the picker and clears only that target's retry.
+
+No WS gift vocabulary/accounting/replay change, no migration edits, no new UI/CSS/JSP test suite. Re-run existing fundamental ledger/gift/WS/reconnect/lifecycle suites and required checks. Applied Stage receipt migration is immutable; existing intentional empty-schema Stage effect remains unchanged. Production inventory remains exhaustive; no Production mutation or deployment. Exact-SHA WS Preview deployment is required after integrating newer main runtime changes. Authenticated Stage smoke and separate Production schema owner GO remain blocking; Draft #1047 must remain not merge-ready.

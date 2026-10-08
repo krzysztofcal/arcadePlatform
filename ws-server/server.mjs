@@ -4772,7 +4772,9 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server });
+const MAX_SOCKET_MESSAGE_BACKLOG = 16;
+
+const wss = new WebSocketServer({ server, maxPayload: MAX_FRAME_BYTES });
 
 wss.on("connection", (ws) => {
   const connState = createConnState(nowTs);
@@ -4780,12 +4782,22 @@ wss.on("connection", (ws) => {
   ws.__connState = connState;
 
   let messageQueue = Promise.resolve();
+  let pendingMessages = 0;
   let connectionCleanupStarted = false;
 
   async function processMessage(msg, isBinary) {
-    sweepExpiredSessionsOnly();
-    void sweepDisconnectCleanupAndBroadcast();
-    await sweepTurnTimeoutsAndBroadcast();
+    if (connState.transportTerminationStarted === true) {
+      return;
+    }
+    if (process.env.WS_TEST_PROCESS_MESSAGE_DELAY_MS) {
+      const delayMs = Number(process.env.WS_TEST_PROCESS_MESSAGE_DELAY_MS);
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    if (connState.transportTerminationStarted === true) {
+      return;
+    }
     if (isBinary) {
       sendError(ws, connState, {
         code: "INVALID_ENVELOPE",
@@ -5858,6 +5870,22 @@ wss.on("connection", (ws) => {
       return;
     }
     acknowledgeTransportEvidence(connState);
+    if (pendingMessages >= MAX_SOCKET_MESSAGE_BACKLOG) {
+      beginTransportTermination(connState);
+      klogSafe("ws_message_backlog_overflow", {
+        sessionId: connState?.session?.sessionId || connState?.sessionId || null,
+        userId: connState?.session?.userId || null,
+        pendingMessages,
+        limit: MAX_SOCKET_MESSAGE_BACKLOG
+      });
+      try {
+        ws.close(1002);
+      } catch {
+        ws.terminate();
+      }
+      return;
+    }
+    pendingMessages += 1;
     messageQueue = messageQueue
       .then(() => processMessage(msg, isBinary))
       .catch((error) => {
@@ -5876,6 +5904,9 @@ wss.on("connection", (ws) => {
         } catch {
           ws.close(1011);
         }
+      })
+      .finally(() => {
+        pendingMessages = Math.max(0, pendingMessages - 1);
       });
   });
 
@@ -5905,8 +5936,6 @@ wss.on("connection", (ws) => {
         enqueueDisconnectCleanupCandidate({ tableId: update.tableId, userId: update.disconnectedUserId });
       }
     }
-    sweepExpiredSessionsOnly();
-    void sweepDisconnectCleanupAndBroadcast();
   };
 
   ws.on("error", (err) => {
@@ -5939,6 +5968,7 @@ function terminateUnresponsiveTransport(ws, connState, { ageMs, reason }) {
 }
 
 function sweepTransportWatchdog() {
+  sweepExpiredSessionsOnly();
   const nowMs = Date.now();
   for (const ws of wss.clients) {
     if (ws.readyState !== WebSocket.OPEN) {

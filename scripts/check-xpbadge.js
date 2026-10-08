@@ -131,6 +131,8 @@ for (const relativePath of filesToInspect) {
   const filePath = path.resolve(repoRoot, relativePath);
   if (!existsSync(filePath)) continue;
   if (!relativePath.endsWith('.html')) continue;
+  // #1048 replaces Poker Table XP with its authenticated CH account HUD.
+  if (relativePath === 'poker/table-v2.html') continue;
 
   let source = readFileSync(filePath, 'utf8');
   scanned += 1;

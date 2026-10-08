@@ -302,6 +302,7 @@ async function readVisiblePokerState(page: Page) {
   return page.evaluate(() => {
     const text = (selector: string) => (document.querySelector(selector)?.textContent || '').trim();
     const seatNodes = Array.from(document.querySelectorAll('#pokerSeatLayer .poker-seat'));
+    const nameOwners = Array.from(document.querySelectorAll<HTMLElement>('#pokerSeatNameLayer > div'));
     const occupiedSlots = seatNodes
       .map((node, index) => ({ node, index }))
       .filter(({ node }) => !node.classList.contains('poker-seat--empty'));
@@ -312,7 +313,7 @@ async function readVisiblePokerState(page: Page) {
       pot: Number((text('#pokerPotPill').match(/\d[\d,]*/) || ['0'])[0].replace(/,/g, '')),
       occupiedSeatCount: occupiedSlots.length,
       occupiedSlots: occupiedSlots.map(({ index }) => index),
-      seatNames: occupiedSlots.map(({ node }) => (node.querySelector('.poker-seat-name')?.textContent || '').trim()),
+      seatNames: occupiedSlots.map(({ node }) => (nameOwners.find((owner) => owner.dataset.seatNo === node.getAttribute('data-seat-no') && owner.dataset.userId === node.getAttribute('data-user-id'))?.textContent || '').trim()),
       activeSeatCount: seatNodes.filter((node) => node.classList.contains('poker-seat--active')).length,
       turnText: text('#pokerV2TurnText'),
       visibleActions: ['#pokerV2PrimaryBtn', '#pokerV2AmountBtn', '#pokerV2FoldBtn']
