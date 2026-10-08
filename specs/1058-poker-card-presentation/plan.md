@@ -204,8 +204,12 @@ Extend captureVisualSnapshot with a copy of authoritative communityCards. Extend
 
 Constitution Check PASS: browser-only, same IIFE/layer/primitives/claims, no dependencies/config/HTML/WS changes. Fundamental transition/replay tests in existing behavior harness only. Preview trajectory/order evidence external; no CSS/pixel/timing suites.
 
-## Final owner-smoke diagnosis and plan
+## Final owner-smoke placement plan
 
-Trace bindDestinationLink, leaveConfirmYes, leaveAndReturnToLobby, queued/acknowledged sendLeave, pending destination/recovery and navigation. Current ready-client Preview path navigates correctly; collect the failing connection/error state before altering leave behavior. Add fundamental full-flow coverage for active-table lobby confirmation and leave completion.
+Back to lobby: owner traced the isolated failure to a stale/hung errored tab with disabled Leave table. Current queued/ACK/removal/retry/reconnect flow and full confirmation regression verified; no runtime change or blocker.
 
-The retained landscape safe band is 24 scene px, insufficient for a northern award + hand summary + reaction stack in compact landscape. Reuse the existing 84 scene-px reserve in the existing <=500px compact landscape branch; retain all scene/SeatHud anchors and taller-landscape/portrait behavior. Verify supported short/normal views externally; no geometry/pixel/CSS tests. Constitution Check PASS: browser-only scoped fixes, no new action/leave/geometry subsystem, fundamental leave lifecycle coverage only.
+Replace the superseded global compact-landscape 84px reserve fix. Restore the accepted 24px landscape fit and keep 84px portrait fit. Add one compactTransient point to the existing northern landscape geometry, placing the complete column beside the avatar and above the community lane; use it only in <=500px compact landscape. All avatar/stack/bet/seat anchors stay intact; taller landscape unchanged.
+
+Portrait reaction max width derives from the nearest table edge relative to each existing avatar x. The existing clamp then keeps the reaction centered on that avatar instead of assuming 220px and shifting it inward. Preserve landscape width/clamp, shared reaction lifecycle and existing CSS.
+
+Constitution Check PASS: scoped browser placement correction, no second geometry/reaction system, no dependencies/HTML/WS/gameplay changes. Existing fundamental regressions plus external Preview visual evidence; no new cosmetic/layout/CSS test suites.

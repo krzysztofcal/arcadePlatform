@@ -3956,7 +3956,7 @@
       {avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[472,12],stack:[445,104],bet:[430,148],dealer:[402,92]},
+      {avatar:[472,12],compactTransient:[642,110],stack:[445,104],bet:[430,148],dealer:[402,92]},
       {avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[906,155]},
       {avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
       {avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
@@ -3979,8 +3979,8 @@
       var statusParent = seatSceneOrientation === 'portrait' ? els.sceneViewport : els.scene;
       if (els.roomStatus.parentNode !== statusParent) statusParent.appendChild(els.roomStatus);
     }
-    // Reserve a table-local band for northern player transients, below chrome.
-    var topSafeArea = seatSceneOrientation === 'landscape' && window.innerHeight > 500 ? 24 : 84;
+    // Compact northern transients use their local side anchor, not a larger scene reserve.
+    var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
     var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
     if (!Number.isFinite(scale) || scale <= 0) return;
     if (els.screen) els.screen.style.setProperty('--poker-scene-scale', String(scale));
@@ -4034,12 +4034,16 @@
       var point=config[role];
       if (point) placeSeatNode(hud[role],{origin:[0,0]},point,point[2],point[3]);
     });
-    // All player-owned transient content shares one column above the avatar.
-    placeSeatNode(hud.presentation,{origin:[0,0]},[config.avatar[0],config.avatar[1] - hud.avatarSize / 2 - 6],100);
+    // Compact landscape keeps the northern column beside its avatar, above the board.
+    var presentationPoint = !portrait && window.innerHeight <= 500 && config.compactTransient
+      ? config.compactTransient : [config.avatar[0],config.avatar[1] - hud.avatarSize / 2 - 6];
+    placeSeatNode(hud.presentation,{origin:[0,0]},presentationPoint,100);
     hud.presentation.classList.add('poker-seat-hud-transient');
     hud.presentation.appendChild(hud.social);
     var geometry = seatSceneGeometry[seatSceneOrientation];
-    var reactionWidth = Math.min(220, geometry.width - 16);
+    var reactionWidth = portrait
+      ? Math.min(220, 2 * (Math.min(config.avatar[0], geometry.width - config.avatar[0]) - 8))
+      : Math.min(220, geometry.width - 16);
     var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(config.avatar[0], geometry.width - reactionWidth / 2 - 8));
     hud.social.style.setProperty('--poker-reaction-width', reactionWidth + 'px');
     hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - config.avatar[0]) + 'px');

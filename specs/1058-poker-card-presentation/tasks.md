@@ -33,6 +33,14 @@ Original best-five acceptance is superseded by the latest #1058 amendment. Earli
 
 ## Final owner-smoke corrections
 
-- [ ] T018 — Diagnose failing lobby-confirmed leave and add fundamental full-flow regression; preserve retry/reconnect
+- [x] T018 — Diagnose failing lobby-confirmed leave and add fundamental full-flow regression; preserve retry/reconnect
 - [x] T019 — Preserve northern transient headroom in compact landscape and externally verify short/normal landscape + portrait
-- [ ] T020 — Required checks/CI, self-review, exact Preview and Draft handoff
+- [x] T020 — Required checks/CI, self-review, exact Preview and Draft handoff
+
+## Latest owner placement corrections
+
+- [x] T021 — Anchor all portrait reactions near their avatars using existing placement; preserve landscape reactions
+- [x] T022 — Replace global compact-landscape shrink with local northern transient placement and accepted fitting
+- [ ] T023 — Existing checks, self-review and exact Preview smoke across requested views; close stale-tab leave diagnosis
+
+T018 closed per owner clarification: isolated stale/hung errored tab, normal leave flow verified, no runtime workaround. T019 reserve solution superseded by T022 after owner observed global scene shrink.

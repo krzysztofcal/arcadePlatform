@@ -184,3 +184,9 @@ Fundamental transition tests only: 0→3, 3→4, 4→5, duplicates and initial/r
 ## Final owner-smoke corrections
 
 Back to lobby → Yes must use existing leave/queued leave, retry/reconnect and confirmed removal flow before returning to /poker/. Trace the actual failure rather than bypassing leave. Add one fundamental full-flow regression; preserve server semantics. Short landscape must keep the northern settlement/hand/reaction column inside the clipped screen without covering the avatar. Keep scene anchors/geometry and portrait/normal landscape intact. Verify short 1000×300 and normal portrait/landscape externally; no pixel/CSS test matrices.
+
+## Latest owner-smoke placement correction
+
+Portrait reactions, including S2/S3 and all physical slots, must remain visually tied to the correct avatar. Adjust existing geometry/placement only; preserve avatars/stacks/bets/seats, reaction lifecycle and landscape reaction anchors. Compact landscape must reuse the accepted scene scale instead of shrinking the whole scene for the last 84px reserve; retain visible northern settlement/summary/reactions through minimal local placement without avatar overlap. Taller landscape and portrait must not regress. External Preview smoke: controlled mobile landscape, 844×390, 1000×300, normal landscape and portrait. No new cosmetic/pixel/CSS/layout suites.
+
+Back to lobby clarification: owner reports one stale/hung tab with an error and disabled Leave table; normal leave flow was verified and failure did not recur. No longer a #1059 blocker. Preserve existing runtime leave flow; no speculative workaround.
