@@ -567,8 +567,9 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-scene[data-orientation="portrait"] .poker-hero-cards{transform:translate(-50%,calc(-50% - 14px));}
 }
 
-/* Keep docked top-seat card/gift indicators above neighboring avatar artwork. */
-.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat[data-seat-variant="top"] .poker-seat-hud-cards,.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat[data-seat-variant="top"] .poker-seat-gift-slot{z-index:1;}
+/* Keep docked top-seat card/gift/seat indicators above neighboring avatar artwork. */
+.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat[data-seat-variant="top"] .poker-seat-hud-cards,.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat[data-seat-variant="top"] .poker-seat-gift-slot,.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat[data-seat-variant="top"] .poker-seat-number{z-index:1;}
 /* Share one compact row for the full hand label and cards in the docked transient. */
-.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat-hud-transient--top .poker-seat-settlement-badge{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:center;}
-.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat-hud-transient--top .poker-seat-settlement-award{white-space:normal;}
+.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat-hud-transient--top .poker-seat-settlement-badge{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:center;}
+.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat-hud-transient--top .poker-seat-settlement-award{font-size:7px;white-space:normal;}
+.poker-scene[data-orientation="portrait"][data-top-seat-docked="1"] .poker-seat-hud-transient--top .poker-seat-settlement-hand-label{grid-column:1 / span 2;}

@@ -3968,7 +3968,7 @@
       if (sceneTop < 0){
         // Dock into the existing left-side lane, above the community cards.
         // This layout breakpoint and offset never depend on transient contents.
-        var dockAvatarY = geometry.seats[5].avatar[1] - 8;
+        var dockAvatarY = geometry.seats[5].avatar[1] - 26;
         topSeatDockOffset = dockAvatarY - geometry.seats[0].avatar[1];
       }
     }
@@ -4718,7 +4718,12 @@
     if (!valid) return;
     var slot = seatPhysicalSlot(rotateSeatIndex(seatIndex,state.maxSeats),state.maxSeats);
     var point = seatSceneGeometry[seatSceneOrientation].seats[slot].dealer;
-    var dealerPoint = [point[0], point[1] + (seatSceneOrientation === 'portrait' && slot === 0 ? topSeatDockOffset : 0)];
+    var dealerPoint = point;
+    if (seatSceneOrientation === 'portrait' && slot === 0 && topSeatDockOffset > 0){
+      // Attach D beside the docked name, clear of the neighboring seat marker and board.
+      var avatarPoint = seatSceneGeometry.portrait.seats[0].avatar;
+      dealerPoint = [avatarPoint[0] + 72 / 2 + 20, avatarPoint[1] + topSeatDockOffset + 72 / 2 + 20];
+    }
     placeSeatNode(els.dealerChip,{origin:[0,0]},dealerPoint,20,20);
   }
 
