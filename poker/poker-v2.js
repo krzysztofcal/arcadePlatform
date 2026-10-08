@@ -252,7 +252,7 @@
   var settlementAnimationGeneration = 0;
   var settlementAnimationTimers = [];
   var settlementAnimationNodes = [];
-  var cardFxClaims = { key: null, deal: false, fold: {}, reveal: {} };
+  var cardFxClaims = { key: null, deal: false, board: {}, fold: {}, reveal: {} };
   var cardFxNodes = [];
   var cardFxTimers = [];
   var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
@@ -1659,6 +1659,7 @@
       viewerId: state.currentUserId,
       viewerSeat: (deriveCurrentSeat() || {}).seatNo || null,
       cardSeats: captureCardSeats(),
+      communityCards: state.communityCards.map(normalizeCard),
       committedByUserId: Object.assign({}, seatCommittedByUserId),
       lastActionByUserId: Object.assign({}, state.lastBettingRoundActionByUserId || {}),
       settlementPresentation: cloneSettlementPresentation(getCurrentSettlementPresentation())
@@ -4264,12 +4265,20 @@
     return result;
   }
 
+  function removeCardFxNode(node){
+    if (node.dataset.communityCard && els.communityCards){
+      var target = els.communityCards.children[Number(node.dataset.boardIndex)];
+      if (target && target.dataset.cardIdentity === node.dataset.communityCard) target.classList.remove('poker-card--dealing');
+    }
+    if (node.parentNode) node.parentNode.removeChild(node);
+  }
+
   function clearCardFx(resetClaims){
     cardFxTimers.forEach(function(timer){ window.clearTimeout(timer); });
     cardFxTimers = [];
-    cardFxNodes.forEach(function(node){ if (node.parentNode) node.parentNode.removeChild(node); });
+    cardFxNodes.forEach(removeCardFxNode);
     cardFxNodes = [];
-    if (resetClaims) cardFxClaims = { key: null, deal: false, fold: {}, reveal: {} };
+    if (resetClaims) cardFxClaims = { key: null, deal: false, board: {}, fold: {}, reveal: {} };
   }
 
   function claimCardTransitions(previous, next, eligible){
@@ -4281,6 +4290,19 @@
     var transitions = [];
     if (!next.handId) return transitions;
     var sameHand = previous.handId === next.handId;
+    var sameContext = key === JSON.stringify([previous.tableId, previous.viewerId, previous.viewerSeat, previous.handId]);
+    var beforeBoard = previous.communityCards;
+    var board = next.communityCards;
+    var boardCount = board.length;
+    var newStreet = !cardFxClaims.board[boardCount];
+    // Consume all populated streets, including recovery/reduced-motion baselines.
+    [3, 4, 5].forEach(function(count){ if (count <= boardCount) cardFxClaims.board[count] = true; });
+    var forwardStreet = (beforeBoard.length === 0 && boardCount === 3)
+      || (beforeBoard.length === 3 && boardCount === 4) || (beforeBoard.length === 4 && boardCount === 5);
+    var samePrefix = beforeBoard.every(function(card, index){ return JSON.stringify(card) === JSON.stringify(board[index]); });
+    if (eligible && sameHand && sameContext && newStreet && forwardStreet && samePrefix){
+      transitions.push({ kind: 'community', start: beforeBoard.length, cards: board.slice(beforeBoard.length) });
+    }
     var users = Object.keys(next.cardSeats);
     var participants = users.filter(function(userId){ return next.cardSeats[userId].held; });
     if (!cardFxClaims.deal){
@@ -4343,11 +4365,12 @@
     els.cardFxLayer.appendChild(node);
     cardFxNodes.push(node);
     var timer = window.setTimeout(function(){
-      if (node.parentNode) node.parentNode.removeChild(node);
+      removeCardFxNode(node);
       cardFxNodes = cardFxNodes.filter(function(entry){ return entry !== node; });
       cardFxTimers = cardFxTimers.filter(function(entry){ return entry !== timer; });
     }, (delay || 0) + (kind === 'muck' ? 800 : kind === 'flip' ? 420 : 280));
     cardFxTimers.push(timer);
+    return node;
   }
 
   function animateCardDiff(previous, next, frame){
@@ -4355,11 +4378,34 @@
     var transitions = claimCardTransitions(previous, next, !!frame.cardFxEligible && !prefersReducedMotion());
     if (!els.scene || !els.cardFxLayer) return;
     transitions.forEach(function(transition){
-      if (transition.kind === 'deal'){
+      if (transition.kind === 'deal' || transition.kind === 'community'){
         if (!els.roomDealer) return;
         var dealerBox = els.roomDealer.getBoundingClientRect();
         // The rendered woman's hands, separate from the gameplay Dealer D.
         var origin = cardScenePoint(dealerBox.left + dealerBox.width * .5, dealerBox.top + dealerBox.height * .84);
+        if (transition.kind === 'community'){
+          transition.cards.forEach(function(card, index){
+            var target = els.communityCards && els.communityCards.children[transition.start + index];
+            var identity = card.r + card.s;
+            if (!target || target.dataset.cardIdentity !== identity) return;
+            var box = target.getBoundingClientRect();
+            var destination = cardScenePoint(box.left + box.width / 2, box.top + box.height / 2);
+            var node = spawnCardFx('community', origin, destination, [card], false, index * 70);
+            if (!node) return;
+            node.dataset.communityCard = identity;
+            node.dataset.boardIndex = String(transition.start + index);
+            var style = window.getComputedStyle(target);
+            var copy = node.children[0];
+            copy.style.flexBasis = copy.style.width = style.width;
+            copy.style.height = style.height;
+            copy.style.fontSize = style.fontSize;
+            copy.style.borderRadius = style.borderRadius;
+            copy.children[1].style.fontSize = window.getComputedStyle(target.children[1]).fontSize;
+            if (target.classList.contains('poker-card--made-hand')) copy.classList.add('poker-card--made-hand');
+            target.classList.add('poker-card--dealing');
+          });
+          return;
+        }
         for (var round = 0; round < 2; round++){
           transition.users.forEach(function(userId, index){
             var seat = next.cardSeats[userId];
@@ -4790,7 +4836,9 @@
     els.communityCards.innerHTML = '';
     var cards = getDisplayCommunityCards();
     cards.forEach(function(card){
-      els.communityCards.appendChild(createCard(card));
+      var element = createCard(card);
+      if (cardFxNodes.some(function(node){ return node.dataset.communityCard === element.dataset.cardIdentity; })) element.classList.add('poker-card--dealing');
+      els.communityCards.appendChild(element);
     });
   }
 

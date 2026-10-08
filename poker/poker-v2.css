@@ -584,7 +584,9 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-card-fx--hero .poker-card small{font-size:.8rem;}
 .poker-card-fx--hero{gap:8px;}
 .poker-card-fx--hero > :nth-child(2){margin-left:0;}
-.poker-card-fx--deal{animation:poker-card-deal 280ms ease-out both;}
+.poker-card--dealing{visibility:hidden;}
+.poker-card-fx--community > .poker-card{rotate:0deg;}
+.poker-card-fx--deal,.poker-card-fx--community{animation:poker-card-deal 280ms ease-out both;}
 .poker-card-fx--muck{animation:poker-card-muck 800ms ease-out both;}
 .poker-card-flip{position:relative;perspective:240px;}
 .poker-card-flip .poker-card{position:absolute;inset:0;backface-visibility:hidden;animation:poker-card-flip-back 420ms ease-in-out both;}

@@ -272,6 +272,7 @@ function createHarness(options = {}){
         }
       },
       matchMedia(){ return { matches: options.reducedMotion === true }; },
+      getComputedStyle(node){ return node.style; },
       setInterval(fn){
         intervalTimers.push(fn);
         return intervalTimers.length;
@@ -6372,6 +6373,54 @@ test('card FX initial/reconnect reveals and reduced motion never replay passenge
       ws.onSnapshot(cardPresentationFrame('revealed-c',4,{folded:['villain-1']}));
       assert.equal(harness.elements.pokerCardFxLayer.children.length,0);
       assert.equal(harness.getCardClaims().fold['villain-1'],true,'skip motion but consume transition');
+    }
+  }
+});
+
+function communityDealFrame(handId, version, board, initial = false){
+  const frame = cardPresentationFrame(handId, version, { initial });
+  frame.payload.public.board = board;
+  frame.payload.public.hand.status = board.length === 5 ? 'RIVER' : board.length === 4 ? 'TURN' : board.length ? 'FLOP' : 'PREFLOP';
+  return frame;
+}
+
+test('community FX claims only new flop/turn/river cards once per hand', async () => {
+  const { harness, ws } = await bootSeatedHarness();
+  const board = ['As','Ks','Qs','7d','2c'];
+  ws.onSnapshot(communityDealFrame('board-a', 1, [], true));
+  for (const [version, count, expected] of [[2,3,['AS','KS','QS']], [3,4,['7D']], [4,5,['2C']]]) {
+    ws.onSnapshot(communityDealFrame('board-a', version, board.slice(0, count)));
+    const nodes = harness.elements.pokerCardFxLayer.children.filter(n => n.dataset.cardFx === 'community');
+    assert.deepEqual(nodes.slice(-expected.length).map(n => n.children[0].dataset.cardIdentity), expected);
+    assert.equal(nodes.length, count, 'exactly the new cards claimed, no previous street replay');
+    assert.equal(harness.getCardClaims().board[count], true);
+    ws.onSnapshot(communityDealFrame('board-a', version, board.slice(0, count)));
+    assert.deepEqual(harness.elements.pokerCardFxLayer.children.filter(n => n.dataset.cardFx === 'community'), nodes);
+  }
+  ws.onSnapshot(communityDealFrame('board-b', 5, [], true));
+  assert.deepEqual(harness.getCardClaims().board, {}, 'new hand resets street claims');
+  ws.onSnapshot(communityDealFrame('board-b', 6, board.slice(0,3)));
+  assert.equal(harness.elements.pokerCardFxLayer.children.filter(n => n.dataset.cardFx === 'community').length, 3);
+});
+
+test('community FX skips initial/reconnect/resync populated boards and reduced motion', async () => {
+  for (const mode of ['initial','reconnecting','resync','reduced']) {
+    const harness = createHarness({ reducedMotion: mode === 'reduced' });
+    harness.fireDomContentLoaded(); await harness.flush();
+    const ws = harness.getCreateOptions();
+    const board = ['As','Ks','Qs','7d','2c'];
+    ws.onSnapshot(communityDealFrame('board-skip', 1, [], true));
+    if (mode === 'reconnecting' || mode === 'resync') ws.onStatus(mode, {});
+    ws.onSnapshot(communityDealFrame('board-skip', 2, board, mode === 'initial'));
+    assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, mode);
+    assert.deepEqual(harness.getCardClaims().board, {3:true,4:true,5:true}, 'consume historical streets');
+    ws.onSnapshot(communityDealFrame('board-skip', 3, board));
+    assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, 'no historical replay');
+    if (mode === 'reduced') {
+      ws.onSnapshot(communityDealFrame('board-next', 4, [], true));
+      ws.onSnapshot(communityDealFrame('board-next', 5, board.slice(0,3)));
+      assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, 'skip a genuine reduced-motion flop');
+      assert.equal(harness.getCardClaims().board[3], true);
     }
   }
 });

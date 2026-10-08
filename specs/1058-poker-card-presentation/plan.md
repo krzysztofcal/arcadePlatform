@@ -14,7 +14,7 @@ Keep this **browser-only** unless implementation evidence proves otherwise. The 
 
 Do **not** add a WS field, backend endpoint, DB change, dependency or second poker runtime for this feature.
 
-Use one new scene-owned cosmetic card-FX layer for **deal, showdown flip and fold/muck motion only**. Persistent/static card DOM remains the authoritative rendered end state. Animations are passengers and must never gate actions, timers or WS state.
+Use one new scene-owned cosmetic card-FX layer for **deal (private and community), showdown flip and fold/muck motion only**. Persistent/static card DOM remains the authoritative rendered end state. Animations are passengers and must never gate actions, timers or WS state.
 
 ### T001 — Made-hand highlight without disturbing persistent Hero cards
 
@@ -197,3 +197,9 @@ PASS: browser-only existing IIFE/card/evaluator/visual snapshot/SeatHud mechanis
 ## Latest owner amendment: action/pre-action modes
 
 Reuse renderControls authoritative preactionMode/usersTurn and existing button/checkbox handlers. Keep the existing sibling buttons/labels and hidden mode switching; disable hidden checkbox inputs and give immediate buttons the same reserved checkbox padding, alignment, font and dimensions as pre-action spans. No replacement/reordering, new action model or rule changes. Extend existing fundamental mode-transition coverage; verify no shift externally on Preview.
+
+## Community-card amendment implementation
+
+Extend captureVisualSnapshot with a copy of authoritative communityCards. Extend cardFxClaims with bounded street claims for lengths 3/4/5; consume populated streets on ineligible baselines. claimCardTransitions accepts only unchanged-prefix, same-context/hand 0→3, 3→4, 4→5 transitions. animateCardDiff uses rendered room-dealer origin and each rendered community slot, spawning ordered copies through spawnCardFx and existing deal keyframes. renderCommunityCards preserves pending cosmetic masks on active copies; existing timer/clearCardFx restores final static cards, including recovery/teardown. No authoritative card mutation or timing gate.
+
+Constitution Check PASS: browser-only, same IIFE/layer/primitives/claims, no dependencies/config/HTML/WS changes. Fundamental transition/replay tests in existing behavior harness only. Preview trajectory/order evidence external; no CSS/pixel/timing suites.

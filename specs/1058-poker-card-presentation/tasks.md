@@ -24,3 +24,9 @@ Original best-five acceptance is superseded by the latest #1058 amendment. Earli
 - [x] T013 — Self-review against amendment and update Draft PR/Preview handoff; owner re-smoke pending
 
 - [x] T014 — Latest owner amendment: disable inactive pre-actions, align both mode footprints, fundamental interaction/structure coverage and external Preview verification
+
+## Community-card owner amendment
+
+- [x] T015 — Fundamental RED/GREEN board-street and suppression cases in existing harness
+- [x] T016 — Extend existing snapshot/claims/card FX for ordered dealer-to-community-slot motion and safe cleanup
+- [ ] T017 — Required checks, self-review, exact Preview portrait/landscape trajectory/order smoke and Draft handoff
