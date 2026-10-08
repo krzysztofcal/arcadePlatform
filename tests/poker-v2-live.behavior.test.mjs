@@ -6411,10 +6411,10 @@ test('community FX skips initial/reconnect/resync populated boards and reduced m
     const board = ['As','Ks','Qs','7d','2c'];
     ws.onSnapshot(communityDealFrame('board-skip', 1, [], true));
     if (mode === 'reconnecting' || mode === 'resync') ws.onStatus(mode, {});
-    ws.onSnapshot(communityDealFrame('board-skip', 2, board, mode === 'initial'));
+    ws.onSnapshot(communityDealFrame('board-skip', 2, board.slice(0,3), mode === 'initial'));
     assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, mode);
-    assert.deepEqual(harness.getCardClaims().board, {3:true,4:true,5:true}, 'consume historical streets');
-    ws.onSnapshot(communityDealFrame('board-skip', 3, board));
+    assert.deepEqual(harness.getCardClaims().board, {3:true}, 'consume historical flop despite a supported 0→3 transition');
+    ws.onSnapshot(communityDealFrame('board-skip', 3, board.slice(0,3)));
     assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, 'no historical replay');
     if (mode === 'reduced') {
       ws.onSnapshot(communityDealFrame('board-next', 4, [], true));
