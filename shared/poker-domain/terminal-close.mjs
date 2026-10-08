@@ -453,10 +453,23 @@ function classifyClaims({ state, seatRows, escrowBefore }) {
     const stateSeatNo = stateSeatByUserId.get(userId) || null;
     if (directSeat?.is_bot === false) {
       const seatNo = normalizeSeatNo(directSeat?.seat_no);
+      // Hand participants exclude seated sit-out owners; their authoritative stacks remain funded.
+      const seatedSitOutNonParticipant = normalizeString(state?.phase).toUpperCase() === "SETTLED"
+        && normalizeString(directSeat.status).toUpperCase() === "ACTIVE"
+        && Array.isArray(state?.seats)
+        && state?.sitOutByUserId?.[userId] === true
+        && state?.leftTableByUserId?.[userId] !== true
+        && stateSeatNo === null
+        && !stateUserIdBySeatNo.has(seatNo)
+        && Array.isArray(state?.handSeats)
+        && state.handSeats.every((seat) => {
+          const handUserId = normalizeString(seat?.userId ?? seat?.user_id);
+          const handSeatNo = normalizeSeatNo(seat?.seatNo ?? seat?.seat_no ?? seat?.seat);
+          return handUserId && handSeatNo && handUserId !== userId && handSeatNo !== seatNo;
+        });
       if (
         !seatNo
-        || stateSeatNo !== seatNo
-        || stateUserIdBySeatNo.get(seatNo) !== userId
+        || (!seatedSitOutNonParticipant && (stateSeatNo !== seatNo || stateUserIdBySeatNo.get(seatNo) !== userId))
         || occupiedClaimSeats.has(seatNo)
       ) {
         return invariantFailure("terminal_seat_state_invalid");
