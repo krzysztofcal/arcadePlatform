@@ -109,6 +109,12 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 Only fundamental, deterministic tests for critical logic are required.
 
+### Optional real-device validation
+
+- BrowserStack is a targeted diagnostic/verification tool for browser- or device-specific behavior; see [the real-device workflow](docs/browserstack-real-device-testing.md).
+- It does not replace fundamental tests or the exact-SHA WS Preview Deploy gate, and is not a universal PR requirement.
+- Do not create broad UI/CSS/layout suites because BrowserStack is available. Prefer temporary ad-hoc tooling outside the repo unless the current spec explicitly requires maintained automation.
+
 ### ✅ When to write tests
 - Poker engine logic (reducers, state transitions)
 - WebSocket runtime behavior

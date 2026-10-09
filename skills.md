@@ -124,6 +124,14 @@ Agents MUST use this to locate logic quickly.
 
 ---
 
+## Real-device browser validation
+
+- See [BrowserStack real-device testing](docs/browserstack-real-device-testing.md) for the proven physical-mobile workflow, MCP limitations, security and quota guidance.
+- BrowserStack Automate + Selenium/WebDriver is the available path for automated real-device mobile browser verification; Live supports manual validation.
+- Use it for targeted optional diagnostics, preserving the fundamental-tests-only policy and the exact-SHA WS Preview Deploy gate.
+
+---
+
 ## 🔐 Security / CSP
 
 ### Files
