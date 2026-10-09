@@ -74,3 +74,10 @@ Coordinates are design-scene centres, transformed only by existing fitTableScene
 | upper left | (84,231) | (118,260) | (288,49) | (283,178) |
 
 Quick Gift button is 24×24, centre at avatar ±(radius+10), y−16; side depends only on physical slot. Three 22×22 gift slots use offsets (0,0),(12,5),(24,10), with reverse horizontal direction only for portrait top; newest has highest z-index. The shared quickAction remains at its previous 16×16 reaction anchor; placeSeatNode positions only the Gift button relative to it. Keep gifts container display:contents and existing anchor mechanism. No other scene coordinates change.
+
+
+## 2026-10-09 P2 — Quick Gift touch target
+
+Measured24-scene-px button: portrait390×844 ≈24.93 CSS px;landscape844×390 ≈19.11 CSS px;desktop1440×1000 ≈32.86 CSS px in Chromium/Firefox. Expand only transparent button padding outward/upward, retaining18-scene-px glyph and its exact fixed avatar-edge anchor. Derive target size from existing fitTableScene scale, aiming30 CSS px with existing24 scene px minimum; protect shared reaction/other controls and viewport clipping. If a physical slot cannot fit30, document actual safe bound rather than overlap another control. No purchase/retry/WS/shared/schema/config changes or new UI tests; temporary browser rectangles/hit samples/touch only. Existing authenticated smoke/ACTIVE recovery/Production schema GO gates remain pending.
+
+Implementation: fitTableScene publishes max(24,30/scale) in existing screen CSS scope. configureSeatHud retains quickGiftPoint and shared reaction anchor, chooses outward padding direction, caps northern landscape height32 scene px (24px existing top reserve +8px button bottom). syncQuickGifts uses placeSeatNode without overriding CSS dimensions. Asymmetric transparent button padding/transform keeps its original24×24 content rectangle/18px emoji stationary, extends outward and upward only. No extra DOM children or positioning layers. The northern landscape30×25.48 CSS px result is intentional; full30px height would be clipped outside viewport.

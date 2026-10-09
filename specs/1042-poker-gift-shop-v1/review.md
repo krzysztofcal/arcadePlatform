@@ -177,3 +177,21 @@ Existing gift domain/handler14/14, browser/client170/170, focused real server gi
 Netlify BUILD_INFO confirmed `c974e920877554228e779d25ab6a32bed0920a58`; temporary probe fetched actual deployed JS and CSS (only a controlled fixture injected, API/state mocked). Chromium and Firefox at390×844,844×390,1440×1000:120 seat-count/dealer/viewport/browser combinations, each playing and end-showdown state,240 rectangle evaluations, zero overlaps. Both controls’ centres hit their own 🎁/👍 buttons.1/2/3 hero receipts,duplicates,newest ordering,hand/chip changes,fixed button bounds,avatar replacement,seat replacement,touch picker open/selection,Escape/focus and full refresh+controlled authoritative recovery pass. Screenshots inspected: /tmp/1047-layout-{chromium,firefox}-{390,844,1440}.png;1/2/3-gift captures use suffix -gifts{1,2,3}.png. This covers desktop browser engines and mobile-sized touch contexts, not physical Android or authenticated financial acceptance. No broad UI tests committed.
 
 Final c974e920 CI: no pending or failed checks. Independent re-review: shared reaction anchor correction resolved; no further actionable defects. Existing required local fundamentals/checks remain PASS. Docs-only evidence follow-up does not alter deployed frontend/WS. No WS/shared/protocol/config changes in correction; installed WS2c9976d4 retained, no redundant WS deployment. Authentication/ACTIVE recovery/Production GO gates unchanged.
+
+
+## Quick Gift P2 — touch target verification
+
+Original target24×24 scene px. Real Chromium/Firefox before/after rectangles:
+
+| Viewport | Scene target after | CSS target before | CSS target after |
+|---|---|---|---|
+|390×844 portrait|≈28.88×28.88|24.93×24.93|30×30|
+|844×390 landscape sides|≈37.68×37.68|19.10–19.11 square|29.99–30 square|
+|844×390 landscape top|≈37.68×32|19.10–19.11 square|29.99–30×25.48|
+|1440×1000 desktop|24×24|32.86–32.87 square|unchanged|
+
+Northern landscape height is limited to the existing scene/viewport top reserve, not another control moved/hidden. Emoji remains18 scene px; Range glyph bounds before/after differ≤0.017 CSS px (layout rounding), all anchor coordinates unchanged.49/49 sampled points per30px target,42/42 northern target and64/64 desktop points hit their own button, including expanded padding; 👍 rectangles have zero overlap. Added-area0.5-CSS-px sampling found zero new points inside circular avatars (original edge footprint unchanged). Sampling caught an initial custom-property inheritance scope error expanding right-seat hitboxes inward; corrected parent pad-left to resolve from inherited screen size directly, reran all measurements.
+
+Temporary Chromium/Firefox local-code-on-Preview matrix:120 combinations of390×844/844×390/1440×1000,2–6 players,every dealer,each playing/showdown (240 evaluations). Zero received-gift collisions and zero Quick Gift overlaps with other visible button/link/input/role-button rectangles; thumbs-up coexistence,stable geometry across hands/avatar updates,resize/orientation,full controlled refresh/recovery,touch picker/product selection,Escape/focus pass. /tmp/1047-hit-before.json,/tmp/1047-hit-after.json,/tmp/1047-touch-matrix.log; screenshots /tmp/1047-touch-{chromium,firefox}-{390,844,1440}.png. No UI/CSS test framework or tests added to repository. Controlled probe is not physical Android or authenticated financial smoke.
+
+Existing browser/client170/170; syntax221 files,check:all,ci:guards,CSP52 and diff whitespace pass. Independent review: no actionable findings; corrected CSS scope reported separately. Changes only frontend JS/CSS and existing SpecKit, no WS/shared/protocol/config/DB/inline scripts. No redundant WS deploy. Authenticated Stage smoke,ACTIVE recovery and Production schema GO remain pending; Draft. Actual deployed frontend measurement follows push.

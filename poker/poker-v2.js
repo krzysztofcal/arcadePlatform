@@ -3983,7 +3983,10 @@
     var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
     var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
     if (!Number.isFinite(scale) || scale <= 0) return;
-    if (els.screen) els.screen.style.setProperty('--poker-scene-scale', String(scale));
+    if (els.screen){
+      els.screen.style.setProperty('--poker-scene-scale', String(scale));
+      els.screen.style.setProperty('--poker-quick-gift-hit-size', Math.max(24,30/scale) + 'px');
+    }
     els.scene.dataset.orientation = seatSceneOrientation;
     els.scene.style.width = geometry.width + 'px';
     els.scene.style.height = geometry.height + 'px';
@@ -4029,6 +4032,9 @@
     var actionPoint = [config.avatar[0] + (rightSide ? -corner : corner),config.avatar[1] + (hero ? 12 : 8)];
     placeSeatNode(hud.quickAction,{origin:[0,0]},actionPoint,16,16);
     hud.quickGiftPoint = [quick[0]-actionPoint[0]+8,quick[1]-actionPoint[1]+8];
+    hud.quickAction.style.setProperty('--poker-quick-gift-pad-left', rightSide ? 'calc(var(--poker-quick-gift-hit-size,24px) - 24px)' : '0px');
+    // Northern landscape controls share the existing 24px scene top reserve.
+    hud.quickAction.style.setProperty('--poker-quick-gift-height-limit', !portrait && slot === 0 ? '32px' : '999px');
     hud.cardPoint = hero ? config.cards : [config.avatar[0] + edge,config.avatar[1] + (leftSide || rightSide ? 28 : 8)];
     placeSeatNode(hud.cards,hud,hud.cardPoint,hero ? 110 : 36,hero ? 80 : 30);
     placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
@@ -4737,7 +4743,7 @@
         });
         hud.quickAction.appendChild(button); hud.quickAction.appendChild(picker);
       }
-      placeSeatNode(button,{origin:[0,0]},hud.quickGiftPoint,24,24);
+      placeSeatNode(button,{origin:[0,0]},hud.quickGiftPoint);
       var open = quickGiftTarget && quickGiftTarget.seatNo === seat.seatNo && quickGiftTarget.userId === seat.userId;
       button.hidden = false; button.disabled = giftPending;
       button.setAttribute('aria-expanded', String(!!open));
