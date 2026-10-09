@@ -13,3 +13,7 @@ Owner checkpoint feedback: overall Royal Gold direction liked; replace the high-
 **Latest owner instruction (supersedes the extraction correction):** Owner rejected the extracted/upscaled dealer as unacceptable and explicitly requested restoring the earlier high-quality imagegen dealer. Restore that exact export, including its high gathered neckline; do not retain the extracted sprite or generate another wardrobe variant in this correction. Full Royal Gold checkpoint acceptance remains pending.
 
 **Latest owner feedback:** Restored high-quality dealer direction is acceptable; user screenshot shows the torso ending before the rail hides it. Owner requests a new high-quality imagegen sprite with a fuller lower torso/dress so the existing rail can occlude it. Preserve current identity, outfit, hand/deck registration and layout; fix the garment continuation and necessary foreground masking. This supersedes retaining the truncated asset unchanged; final repaired checkpoint inspection remains pending.
+
+## Remaining themes authorized — 2026-10-09
+
+Owner accepted the fuller generated Royal Gold dealer and its rail occlusion: “Super, to teraz implementuj pozostale motywy na tym samym pr.” RG06 is satisfied. Complete Neon Vegas, Midnight Sapphire, Crimson Velvet and Emerald Palace on Draft PR #1076 using the accepted full-torso Royal Gold identity/pose as the dealer reference.

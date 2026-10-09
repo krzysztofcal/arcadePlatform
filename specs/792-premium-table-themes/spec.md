@@ -2,7 +2,7 @@
 
 **Feature Branch**: `design/792-premium-table-themes`
 **Created**: 2026-10-09
-**Status**: Implementation in progress — six designs/SpecKit approved; Royal Gold runtime checkpoint awaiting owner inspection
+**Status**: Six packages implemented — owner accepted Royal Gold; final Preview verification in progress
 **Input**: Issue #792, latest owner amendment of 2026-10-09, supersedes the previous three-theme scope. Source: https://github.com/krzysztofcal/arcadePlatform/issues/792
 
 ## User Scenarios & Testing

@@ -20,24 +20,24 @@ Independent verification: owner sees all six complete directions and the unchang
 
 Independent verification: six packages selectable from Preview FX, default/reset unchanged, no account/gameplay writes.
 
-- [ ] T007 [US2] Produce approved local room/dealer/felt/rail/face/back/frame art under `poker/assets/themes/<theme-id>/`; keep Classic's shipped defaults, record all reused/generated assets and measured budgets in `specs/792-premium-table-themes/artwork.md`.
-- [ ] T008 [US2] Add `TABLE_THEME_CATALOG`, `previewThemeId` and `applyPreviewTheme(themeId)` to `poker/poker-v2.js`, with exact six IDs, preview build gate, requested-only loading, stale-load cancellation and error retention of current art.
-- [ ] T009 [US2] Extend `bindCelebrationPreview()` with labeled Theme select/status in `poker/poker-v2.js`; audit `render()`/preference/leave visibility assignments for demo, guest, spectator and reconnect while preserving existing effect click gates and no persistence.
-- [ ] T010 [US2] Add scoped cosmetic overrides in `poker/poker-v2.css` for room, rail/felt, dealer, face/back and frame; reuse `createCard()` text and existing FX hooks without geometry changes.
+- [x] T007 [US2] Produce approved local room/dealer/felt/rail/face/back/frame art under `poker/assets/themes/<theme-id>/`; keep Classic's shipped defaults, record all reused/generated assets and measured budgets in `specs/792-premium-table-themes/artwork.md`.
+- [x] T008 [US2] Add `TABLE_THEME_CATALOG`, `previewThemeId` and `applyPreviewTheme(themeId)` to `poker/poker-v2.js`, with exact six IDs, preview build gate, requested-only loading, stale-load cancellation and error retention of current art.
+- [x] T009 [US2] Extend `bindCelebrationPreview()` with labeled Theme select/status in `poker/poker-v2.js`; audit `render()`/preference/leave visibility assignments for demo, guest, spectator and reconnect while preserving existing effect click gates and no persistence.
+- [x] T010 [US2] Add scoped cosmetic overrides in `poker/poker-v2.css` for room, rail/felt, dealer, face/back and frame; reuse `createCard()` text and existing FX hooks without geometry changes.
 - [ ] T011 [US2] Verify six switches, Classic/reload, non-preview absence, guest/spectator access, rapid/failed loading and no gameplay writes on Deploy Preview; record evidence in `specs/792-premium-table-themes/review.md`.
 
 ## Phase 4 — US3: Readability and geometry
 
 Independent verification: readable cards and UI, unchanged bounds, reduced motion at target orientations.
 
-- [ ] T012 [US3] Inspect all exported dealer assets against current pose/hands/origin and `::after` clipping in `poker/poker-v2.css`; correct artwork registration without moving dealer boxes.
+- [x] T012 [US3] Inspect all exported dealer assets against current pose/hands/origin and `::after` clipping in `poker/poker-v2.css`; correct artwork registration without moving dealer boxes.
 - [ ] T013 [US3] Verify 390×844, 844×390 and 1440×900 on Deploy Preview, compare protected bounds to baseline, inspect native-size hero/board/opponent/showdown/FX cards, turn/highlight/avatar cues and contrast; record in `specs/792-premium-table-themes/review.md`.
-- [ ] T014 [US3] Verify keyboard chooser/status, focus and reduced-motion switching in Preview; adjust only scoped presentation in `poker/poker-v2.css`/`poker/poker-v2.js` when necessary.
+- [x] T014 [US3] Verify keyboard chooser/status, focus and reduced-motion switching in Preview; adjust only scoped presentation in `poker/poker-v2.css`/`poker/poker-v2.js` when necessary.
 
 ## Phase 5 — Review and handoff
 
-- [ ] T015 Re-run Constitution Check against actual diff and task list in `specs/792-premium-table-themes/plan.md`; run `node --check poker/poker-v2.js` and `npm run check:csp-inline`, document results in `review.md`; no new test suites.
-- [ ] T016 Review final complete art/catalog/code for scope, simple reuse, default/preview gates, JSP/CSP/klog, geometry/readability and provenance; resolve findings in `review.md`.
+- [x] T015 Re-run Constitution Check against actual diff and task list in `specs/792-premium-table-themes/plan.md`; run `node --check poker/poker-v2.js` and `npm run check:csp-inline`, document results in `review.md`; no new test suites.
+- [x] T016 Review final complete art/catalog/code for scope, simple reuse, default/preview gates, JSP/CSP/klog, geometry/readability and provenance; resolve findings in `review.md`.
 - [ ] T017 Verify current Draft PR Deploy Preview corresponds to latest deployable revision; record URL/SHA and any pending live smoke in `review.md`. Hand off without merge or Production deployment.
 
 ## Dependencies and Delivery Strategy
@@ -53,7 +53,7 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 - [x] RG03 Apply scoped Royal Gold CSS, preserve geometry/live card text/FX gates, and verify local target viewports, build gates, error/race/reset, keyboard and reduced motion.
 - [x] RG04 Run existing syntax/CSP checks and independent checkpoint code/art review.
 - [x] RG05 Verify exact-revision Deploy Preview and record live evidence.
-- [ ] RG06 Obtain owner inspection/acceptance of Royal Gold before generating remaining dealer variants.
+- [x] RG06 Obtain owner inspection/acceptance of Royal Gold before generating remaining dealer variants.
 
 ## Rejected wardrobe extraction — superseded
 
@@ -69,3 +69,7 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 
 - [x] RG11 Generate a high-quality full lower torso for the accepted dealer, optimize local dealer.webp, update scoped foreground masking and verify local native-size/zoom presentation and protected bounds.
 - [x] RG12 Review final repair and verify exact-revision Deploy Preview, including waist/rail close-up, and record evidence.
+
+## Six-theme completion evidence
+
+All six packages implemented; RG06 accepted. T011/T013 remain partial only for authenticated live guest/spectator/reconnect/dealing/showdown/fold and comprehensive live-state contrast, to be inspected manually on Preview. Demo six-theme/error/race/reset/non-preview gates, protected geometry/card text, keyboard and reduced motion have been verified locally; exact-SHA Preview verification is T017. No new maintained test suites.

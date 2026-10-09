@@ -82,3 +82,7 @@ Owner rejected the deterministic extraction. Restore only the original generated
 ## Full-torso repair on the accepted generated direction
 
 Regenerate only Royal Gold dealer art as a high-fidelity edit of the restored sprite, extending central lower dress to the bottom in the same 546×640 registration. Update only its scoped .poker-room-dealer::after foreground clip to exclude the filled torso while keeping hands/deck in front of the existing rail. No changes to dealer dimensions/anchors, table geometry, card flight origin, JS, Classic or other layers. Inspect portrait/landscape/desktop and a high-DPI close-up of the waist/rail; record new bytes/hash/provenance. No new dependencies, tests or tooling.
+
+## Complete six-package implementation
+
+Royal Gold checkpoint accepted by owner; RG06 satisfied. Complete four remaining packages using separate built-in imagegen dealer edits/empty rooms and original approved circuit/diamond/damask/jade-lattice vectors. All six catalog entries enabled; Classic remains unchanged. Reuse existing requested-only atomic loader/chooser and scoped CSS, including the full-torso foreground clip. Constitution Check against final runtime paths: PASS — browser art only, no geometry, new suites, dependencies/config, backend/WS/protocol, Stage or Production changes. Exact Preview and manual live limits recorded in review.md.

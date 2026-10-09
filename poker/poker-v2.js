@@ -3,14 +3,14 @@
 
   var SUIT_SYMBOLS = { S: '♠', H: '♥', D: '♦', C: '♣' };
 
-  // Page-local art review. Remaining packages unlock after the Royal Gold checkpoint.
+  // Page-local art review; Classic reuses the shipped default artwork.
   var TABLE_THEME_CATALOG = [
     { id: 'classic-casino', label: 'Classic Casino', assets: [] },
     { id: 'royal-gold', label: 'Royal Gold', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
-    { id: 'neon-vegas', label: 'Neon Vegas', assets: null },
-    { id: 'midnight-sapphire', label: 'Midnight Sapphire', assets: null },
-    { id: 'crimson-velvet', label: 'Crimson Velvet', assets: null },
-    { id: 'emerald-palace', label: 'Emerald Palace', assets: null }
+    { id: 'neon-vegas', label: 'Neon Vegas', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'midnight-sapphire', label: 'Midnight Sapphire', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'crimson-velvet', label: 'Crimson Velvet', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'emerald-palace', label: 'Emerald Palace', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] }
   ];
   var previewThemeId = 'classic-casino';
   var previewThemeRequest = 0;
@@ -624,15 +624,14 @@
     TABLE_THEME_CATALOG.forEach(function(theme){
       var option = document.createElement('option');
       option.value = theme.id;
-      option.textContent = theme.label + (theme.assets ? '' : ' · awaiting Royal Gold review');
-      option.disabled = !theme.assets;
+      option.textContent = theme.label;
       themeSelect.appendChild(option);
     });
     var themeStatus = document.createElement('small');
     themeStatus.id = 'pokerPreviewThemeStatus';
     themeStatus.setAttribute('role', 'status');
     themeStatus.setAttribute('aria-live', 'polite');
-    themeStatus.textContent = 'Classic Casino · default. Royal Gold is ready for visual review.';
+    themeStatus.textContent = 'Classic Casino · default. Six themes available for this page.';
     panel.appendChild(themeLabel);
     panel.appendChild(themeSelect);
     panel.appendChild(themeStatus);

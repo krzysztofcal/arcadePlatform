@@ -650,3 +650,51 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 #pokerPreviewTheme:focus-visible{outline:2px solid #ffe2a1;outline-offset:2px;}
 /* Keep the complete torso behind the rail; only the arms/hands are foreground. */
 #pokerTableScreen[data-preview-theme="royal-gold"] .poker-room-dealer::after{clip-path:polygon(0 64%,29.5% 64%,27% 74%,24.5% 84%,21.2% 90%,21.4% 92.1%,24.4% 94%,24.8% 97.5%,16.4% 99.7%,16.4% 100%,83.4% 100%,81% 97.5%,78.5% 94%,79.2% 90%,82% 84%,80% 74%,77% 64%,100% 64%,100% 100%,0 100%);}
+
+/* neon-vegas — approved complete presentation package. */
+#pokerTableScreen[data-preview-theme="neon-vegas"]{background-image:linear-gradient(180deg,#19101f22,#19101f77 55%,#19101faa),url('/poker/assets/themes/neon-vegas/room.webp');}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-table-shell{background-image:url('/poker/assets/themes/neon-vegas/rail.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-table-shell::before{background:linear-gradient(180deg,#42dbe9,#19101f 50%,#514061);}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-table-felt{background-image:url('/poker/assets/themes/neon-vegas/felt.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-room-dealer{background-image:url('/poker/assets/themes/neon-vegas/dealer.webp');}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-card:not(.poker-card--back){background-image:url('/poker/assets/themes/neon-vegas/card-face.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-card--back{background-image:url('/poker/assets/themes/neon-vegas/card-back.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-card--back::before{border-color:#42dbe9;box-shadow:none;}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-seat-avatar:not(.poker-seat-avatar--open)::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:url('/poker/assets/themes/neon-vegas/avatar-frame.svg') center/100% 100% no-repeat;}
+#pokerTableScreen[data-preview-theme="neon-vegas"] .poker-room-dealer::after{clip-path:polygon(0 64%,29.5% 64%,27% 74%,24.5% 84%,21.2% 90%,21.4% 92.1%,24.4% 94%,24.8% 97.5%,16.4% 99.7%,16.4% 100%,83.4% 100%,81% 97.5%,78.5% 94%,79.2% 90%,82% 84%,80% 74%,77% 64%,100% 64%,100% 100%,0 100%);}
+
+/* midnight-sapphire — approved complete presentation package. */
+#pokerTableScreen[data-preview-theme="midnight-sapphire"]{background-image:linear-gradient(180deg,#0b152422,#0b152477 55%,#0b1524aa),url('/poker/assets/themes/midnight-sapphire/room.webp');}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-table-shell{background-image:url('/poker/assets/themes/midnight-sapphire/rail.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-table-shell::before{background:linear-gradient(180deg,#83aed9,#0b1524 50%,#394d68);}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-table-felt{background-image:url('/poker/assets/themes/midnight-sapphire/felt.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-room-dealer{background-image:url('/poker/assets/themes/midnight-sapphire/dealer.webp');}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-card:not(.poker-card--back){background-image:url('/poker/assets/themes/midnight-sapphire/card-face.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-card--back{background-image:url('/poker/assets/themes/midnight-sapphire/card-back.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-card--back::before{border-color:#83aed9;box-shadow:none;}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-seat-avatar:not(.poker-seat-avatar--open)::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:url('/poker/assets/themes/midnight-sapphire/avatar-frame.svg') center/100% 100% no-repeat;}
+#pokerTableScreen[data-preview-theme="midnight-sapphire"] .poker-room-dealer::after{clip-path:polygon(0 64%,29.5% 64%,27% 74%,24.5% 84%,21.2% 90%,21.4% 92.1%,24.4% 94%,24.8% 97.5%,16.4% 99.7%,16.4% 100%,83.4% 100%,81% 97.5%,78.5% 94%,79.2% 90%,82% 84%,80% 74%,77% 64%,100% 64%,100% 100%,0 100%);}
+
+/* crimson-velvet — approved complete presentation package. */
+#pokerTableScreen[data-preview-theme="crimson-velvet"]{background-image:linear-gradient(180deg,#26101022,#26101077 55%,#261010aa),url('/poker/assets/themes/crimson-velvet/room.webp');}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-table-shell{background-image:url('/poker/assets/themes/crimson-velvet/rail.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-table-shell::before{background:linear-gradient(180deg,#c19b55,#261010 50%,#693524);}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-table-felt{background-image:url('/poker/assets/themes/crimson-velvet/felt.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-room-dealer{background-image:url('/poker/assets/themes/crimson-velvet/dealer.webp');}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-card:not(.poker-card--back){background-image:url('/poker/assets/themes/crimson-velvet/card-face.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-card--back{background-image:url('/poker/assets/themes/crimson-velvet/card-back.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-card--back::before{border-color:#c19b55;box-shadow:none;}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-seat-avatar:not(.poker-seat-avatar--open)::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:url('/poker/assets/themes/crimson-velvet/avatar-frame.svg') center/100% 100% no-repeat;}
+#pokerTableScreen[data-preview-theme="crimson-velvet"] .poker-room-dealer::after{clip-path:polygon(0 64%,29.5% 64%,27% 74%,24.5% 84%,21.2% 90%,21.4% 92.1%,24.4% 94%,24.8% 97.5%,16.4% 99.7%,16.4% 100%,83.4% 100%,81% 97.5%,78.5% 94%,79.2% 90%,82% 84%,80% 74%,77% 64%,100% 64%,100% 100%,0 100%);}
+
+/* emerald-palace — approved complete presentation package. */
+#pokerTableScreen[data-preview-theme="emerald-palace"]{background-image:linear-gradient(180deg,#10291f22,#10291f77 55%,#10291faa),url('/poker/assets/themes/emerald-palace/room.webp');}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-table-shell{background-image:url('/poker/assets/themes/emerald-palace/rail.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-table-shell::before{background:linear-gradient(180deg,#c6b06b,#10291f 50%,#34684b);}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-table-felt{background-image:url('/poker/assets/themes/emerald-palace/felt.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-room-dealer{background-image:url('/poker/assets/themes/emerald-palace/dealer.webp');}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-card:not(.poker-card--back){background-image:url('/poker/assets/themes/emerald-palace/card-face.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-card--back{background-image:url('/poker/assets/themes/emerald-palace/card-back.svg');background-size:100% 100%;}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-card--back::before{border-color:#c6b06b;box-shadow:none;}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-seat-avatar:not(.poker-seat-avatar--open)::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:url('/poker/assets/themes/emerald-palace/avatar-frame.svg') center/100% 100% no-repeat;}
+#pokerTableScreen[data-preview-theme="emerald-palace"] .poker-room-dealer::after{clip-path:polygon(0 64%,29.5% 64%,27% 74%,24.5% 84%,21.2% 90%,21.4% 92.1%,24.4% 94%,24.8% 97.5%,16.4% 99.7%,16.4% 100%,83.4% 100%,81% 97.5%,78.5% 94%,79.2% 90%,82% 84%,80% 74%,77% 64%,100% 64%,100% 100%,0 100%);}

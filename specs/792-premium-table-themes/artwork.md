@@ -39,13 +39,13 @@ Seven local exports; Classic reuses the shipped assets unchanged. Raster exports
 | rail.svg | 512×128 | 598 | `df0ccdd18821fa137ddc0ca1eb3ebc3b55c1f644224baee75075330eb075a8b3` | Original project vector |
 | room.webp | 1536×1024 | 172924 | `e8744b52964028d08fae14645638f3dab00e39b5d8f52fbc3b836563f96eb047` | OpenAI generated; Sharp export |
 
-Package total: **255229 bytes** (ceiling 962,560). Room 172,924 bytes ≤614,400; transparent dealer 79,894 bytes ≤225,280; surface and decorative vectors each below their group ceilings. Dealer export canvas 546×640 matches the original canvas and aspect ratio. Existing box dimensions, background positioning and normalized card-flight origin (0.5, 0.84) are unchanged; Royal Gold foreground clipping is corrected for the full lower torso; visually compared head/hands/deck registration at native scene size. Final owner acceptance remains pending.
+Package total: **255229 bytes** (ceiling 962,560). Room 172,924 bytes ≤614,400; transparent dealer 79,894 bytes ≤225,280; surface and decorative vectors each below their group ceilings. Dealer export canvas 546×640 matches the original canvas and aspect ratio. Existing box dimensions, background positioning and normalized card-flight origin (0.5, 0.84) are unchanged; Royal Gold foreground clipping is corrected for the full lower torso; visually compared head/hands/deck registration at native scene size. Royal Gold full-torso checkpoint is accepted; see approval.md.
 
 Generation prompts (built-in tool):
 - Room: empty black-marble and gold Art Deco private casino salon, warm crystal chandeliers, cinematic realistic illustration, dark unobstructed foreground for the existing table; no people/table/cards/chips/UI/text.
 - Dealer: imagegen edit of the restored high-quality sprite: preserve face, hair, expression, high gathered neckline, thin straps, arms/hands/deck and normalized framing; extend only the lower central gold satin garment naturally to the bottom edge on a genuinely transparent canvas. No table/background or reframe. Built-in imagegen; Sharp export 546×640, WebP quality 90/alpha quality 100.
 
-No remaining dealer variants are generated before owner acceptance of this checkpoint.
+The remaining dealer variants were generated after explicit owner acceptance of this checkpoint.
 
 ## Rejected deterministic extraction — historical record
 
@@ -60,3 +60,107 @@ Restored dealer.webp byte-for-byte from original blob e0902cdd7bf3b42a1563c4e16e
 ## Current full-torso imagegen repair
 
 Owner accepted the restored generated direction but identified the horizontal lower-torso cutoff before rail occlusion. New high-resolution imagegen edit extends continuous gold satin to the bottom without moving the reference head/hands. Export dimensions 546×640; decoded center column alpha remains at least 252/255 across rows 576–639 (last 10%). Pose, dress cut and identity visually inspected against the restored sprite. Original generated repair remains outside the public repo; the optimized final WebP is local in poker/assets/themes/royal-gold. The scoped CSS foreground clip now follows arms/hands/deck and excludes the lower torso, which the existing rail covers; no scene box, origin or z-order changes. All budgets remain met.
+
+## Complete remaining packages — owner-authorized 2026-10-09
+
+Royal Gold full-torso checkpoint is accepted (approval.md/RG06). Classic Casino reuses all shipped assets unchanged. Four new complete alternative packages follow the approved collection and detail motifs. Built-in imagegen generated each empty room and edited the accepted Royal Gold dealer separately; no API key, remote runtime image or third-party pack. Dealer edits change gown/jewelry colors only, preserving identity, pose, high gathered neckline, thin straps, hand/deck placement and continuous lower torso. Existing Sharp export: 1536×1024 room, 546×640 RGBA dealer, WebP quality 90/alpha quality 100. Five SVG layers per package are original project vectors; surface SVGs explicitly stretch to the existing table box. Provider terms source is recorded above.
+
+### neon-vegas
+
+| Path under `poker/assets/themes/neon-vegas/` | Dimensions | Bytes | SHA-256 | Source |
+|---|---|---:|---|---|
+| avatar-frame.svg | 100×100 | 487 | `15bb524301592c2d93d7bc8f8877d57e3569f6b31c62cadd527ed7bb91635c5f` | Original project vector |
+| card-back.svg | 100×140 | 417 | `6917367c5d2d95243f3a4f26d20f98904b8e27125e439c9c634612b029e42851` | Original project vector |
+| card-face.svg | 100×140 | 331 | `e368783916af84d8b9c69e428195d0e4040b17b77a2f0612c8a82b1c330eb411` | Original project vector |
+| dealer.webp | 546×640 | 83966 | `21ab6e8435ac3aea0824b0e499464bdf08b7e90908fdd4f802427941a4dc3db1` | Built-in imagegen; Sharp export |
+| felt.svg | 512×512 | 591 | `ca53622c2030b944af43db93f773d0c0ebc1dd8cb9454533663651b70cb5eff3` | Original project vector |
+| rail.svg | 512×128 | 488 | `efdc06891dfe8b99b8aed12bccd18b28ee1654ba1a3446a11458a671ae2c62e8` | Original project vector |
+| room.webp | 1536×1024 | 385492 | `682ed13d10fd8aa72f4b1a885a0143bf78c1063a792599e3ca14f3a0eb65f822` | Built-in imagegen; Sharp export |
+
+Package total: **471772 bytes**, within all room/dealer/surface/card/frame ceilings.
+
+### midnight-sapphire
+
+| Path under `poker/assets/themes/midnight-sapphire/` | Dimensions | Bytes | SHA-256 | Source |
+|---|---|---:|---|---|
+| avatar-frame.svg | 100×100 | 487 | `32f1475bad264eec104b9b05bdf443827b7135621ecd1623098ad9e24403e48b` | Original project vector |
+| card-back.svg | 100×140 | 412 | `07d45604e6551af6c100f04628cef5c4f560a3bc10ec10e603d2a25a9a85ddec` | Original project vector |
+| card-face.svg | 100×140 | 331 | `a3e43484225b8aaba18b53ef12140f7dca900d70bc6e111318c966c1dc23db7b` | Original project vector |
+| dealer.webp | 546×640 | 81886 | `e6f5a52c219a77248c3a7992ed543ba48ea2fe582860cdec216632bad458867e` | Built-in imagegen; Sharp export |
+| felt.svg | 512×512 | 539 | `607779185421145e4b6471bf4268bfd4539b6e10cd5b330638322aefa274570d` | Original project vector |
+| rail.svg | 512×128 | 488 | `e15788c69400f2c29029838e8282c064b0788b26d46ef7b995f4c427510e311d` | Original project vector |
+| room.webp | 1536×1024 | 311298 | `6d0b3253196f499f2e4911da47aa03f44c4b027daf52c2677d9c60cc30d76295` | Built-in imagegen; Sharp export |
+
+Package total: **395441 bytes**, within all room/dealer/surface/card/frame ceilings.
+
+### crimson-velvet
+
+| Path under `poker/assets/themes/crimson-velvet/` | Dimensions | Bytes | SHA-256 | Source |
+|---|---|---:|---|---|
+| avatar-frame.svg | 100×100 | 487 | `0acf3accb6649177293fb7e386d0f79f504eb5daadbca80681517b9a994a7e0f` | Original project vector |
+| card-back.svg | 100×140 | 438 | `e1508e7012938242f27bf656c1ed8ab74774139c41df3ed414ac63c1a08d7eef` | Original project vector |
+| card-face.svg | 100×140 | 331 | `3c659b18f0d445b712af1b3057e34905eb8c5ae7deb0c137c924781d290ff2f2` | Original project vector |
+| dealer.webp | 546×640 | 80002 | `8ec5d4dd62c971fe8c0f4dccec8d6034d9c357b7d8a794bd81098d8b4f2904bc` | Built-in imagegen; Sharp export |
+| felt.svg | 512×512 | 599 | `902f30bf0f65d385d5462e273dab421016716da13cd89cd067ebe2a61b367f3a` | Original project vector |
+| rail.svg | 512×128 | 488 | `6b0cc895153189bdf06752590543c2a08b70b92e536c6b35ea52727eddac9725` | Original project vector |
+| room.webp | 1536×1024 | 293008 | `d45502f47e5948b4a6a8a60389410347ecaf4f94160f6f25ab774599f921a6db` | Built-in imagegen; Sharp export |
+
+Package total: **375353 bytes**, within all room/dealer/surface/card/frame ceilings.
+
+### emerald-palace
+
+| Path under `poker/assets/themes/emerald-palace/` | Dimensions | Bytes | SHA-256 | Source |
+|---|---|---:|---|---|
+| avatar-frame.svg | 100×100 | 487 | `f6e1fe849523fe088496b43d41000cd1613614fed9681a8630bf1979560e1187` | Original project vector |
+| card-back.svg | 100×140 | 452 | `17cf9c8e66006c11e48398d75ddbad41d2714280706af9fc456bbaa329271130` | Original project vector |
+| card-face.svg | 100×140 | 331 | `d38a3a866d672f139f46374eee187c9a2e5712f68320b963ad6b368641da4794` | Original project vector |
+| dealer.webp | 546×640 | 83360 | `628f4ae0514c03dddec9b96f18dfccbce51dd2ced2d3b19ac17ad97deb2c9112` | Built-in imagegen; Sharp export |
+| felt.svg | 512×512 | 564 | `76706c773f9f8b10f14d36b978870720b5aaf61596b3e11d8cec8698a268df45` | Original project vector |
+| rail.svg | 512×128 | 488 | `ed82dbd2e0dde8e7c2633519184a8a251e59193ff6e7db8d8861c58d11d26703` | Original project vector |
+| room.webp | 1536×1024 | 430246 | `ae80e0e4dbe5d050e7690e19d581044f14c9a6a22ceca675352d7f0b75393149` | Built-in imagegen; Sharp export |
+
+Package total: **515928 bytes**, within all room/dealer/surface/card/frame ceilings.
+
+
+## Exact remaining-theme generation prompt set
+
+### neon-vegas
+
+Dealer edit:
+
+> Use case: identity-preserve. Production high-quality transparent casino dealer sprite. Edit the supplied accepted dealer. Change ONLY garment and jewelry colors to violet satin gown, silver earrings with violet gems. Preserve exact adult woman face, brunette bob, expression, pose, silhouette, hands and card deck positions, canvas composition and proportions. Keep the same gathered high neckline and thin straps. Full continuous lower torso and gown must extend all the way to bottom edge, without horizontal cutoffs or transparent holes. No table, no room, no text. Genuine transparent background. Photoreal premium rendering, crisp natural detail.
+
+Room generation:
+
+> Use case: stylized-concept. Production high-quality photoreal casino room background, wide landscape 3:2 composition. modern luxurious Las Vegas penthouse casino lounge at night, violet cyan and magenta architectural neon, panoramic skyline, palm silhouettes, dark chrome furnishings. Match a premium poker game's sophisticated realistic cinematic art direction. Symmetrical centered view with quiet dark central lower space for an overlaid poker table and dealer. Rich material texture, restrained atmospheric lighting, coherent perspective. Empty room: NO people, NO dealer, NO poker table in foreground, NO cards, NO chips, NO UI, NO text or logos. Architecture and lighting only.
+
+### midnight-sapphire
+
+Dealer edit:
+
+> Use case: identity-preserve. Production high-quality transparent casino dealer sprite. Edit the supplied accepted dealer. Change ONLY garment and jewelry colors to deep sapphire blue satin gown, silver earrings with sapphire gems. Preserve exact adult woman face, brunette bob, expression, pose, silhouette, hands and card deck positions, canvas composition and proportions. Keep the same gathered high neckline and thin straps. Full continuous lower torso and gown must extend all the way to bottom edge, without horizontal cutoffs or transparent holes. No table, no room, no text. Genuine transparent background. Photoreal premium rendering, crisp natural detail.
+
+Room generation:
+
+> Use case: stylized-concept. Production high-quality photoreal casino room background, wide landscape 3:2 composition. refined midnight blue casino salon, cool silver architecture, panoramic moonlit city windows, subtle diamond decorative geometry. Match a premium poker game's sophisticated realistic cinematic art direction. Symmetrical centered view with quiet dark central lower space for an overlaid poker table and dealer. Rich material texture, restrained atmospheric lighting, coherent perspective. Empty room: NO people, NO dealer, NO poker table in foreground, NO cards, NO chips, NO UI, NO text or logos. Architecture and lighting only.
+
+### crimson-velvet
+
+Dealer edit:
+
+> Use case: identity-preserve. Production high-quality transparent casino dealer sprite. Edit the supplied accepted dealer. Change ONLY garment and jewelry colors to rich burgundy red satin gown, gold earrings with ruby gems. Preserve exact adult woman face, brunette bob, expression, pose, silhouette, hands and card deck positions, canvas composition and proportions. Keep the same gathered high neckline and thin straps. Full continuous lower torso and gown must extend all the way to bottom edge, without horizontal cutoffs or transparent holes. No table, no room, no text. Genuine transparent background. Photoreal premium rendering, crisp natural detail.
+
+Room generation:
+
+> Use case: stylized-concept. Production high-quality photoreal casino room background, wide landscape 3:2 composition. warm luxurious private casino salon, crimson velvet curtains, mahogany and antique gold architecture, warm lamps, elegant sculpture, understated damask. Match a premium poker game's sophisticated realistic cinematic art direction. Symmetrical centered view with quiet dark central lower space for an overlaid poker table and dealer. Rich material texture, restrained atmospheric lighting, coherent perspective. Empty room: NO people, NO dealer, NO poker table in foreground, NO cards, NO chips, NO UI, NO text or logos. Architecture and lighting only.
+
+### emerald-palace
+
+Dealer edit:
+
+> Use case: identity-preserve. Production high-quality transparent casino dealer sprite. Edit the supplied accepted dealer. Change ONLY garment and jewelry colors to deep emerald green satin gown, gold earrings with emerald gems. Preserve exact adult woman face, brunette bob, expression, pose, silhouette, hands and card deck positions, canvas composition and proportions. Keep the same gathered high neckline and thin straps. Full continuous lower torso and gown must extend all the way to bottom edge, without horizontal cutoffs or transparent holes. No table, no room, no text. Genuine transparent background. Photoreal premium rendering, crisp natural detail.
+
+Room generation:
+
+> Use case: stylized-concept. Production high-quality photoreal casino room background, wide landscape 3:2 composition. opulent emerald palace casino salon, green marble and gold architecture, lush greenery, elegant arches and small distant fountain, warm daylight. Match a premium poker game's sophisticated realistic cinematic art direction. Symmetrical centered view with quiet dark central lower space for an overlaid poker table and dealer. Rich material texture, restrained atmospheric lighting, coherent perspective. Empty room: NO people, NO dealer, NO poker table in foreground, NO cards, NO chips, NO UI, NO text or logos. Architecture and lighting only.
+
