@@ -3963,7 +3963,7 @@
     portrait: { width:360, height:650, seats:[
       {gifts:[88,162,-1],avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
       {gifts:[238,234],avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
-      {gifts:[174,375],avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
+      {gifts:[290,440],avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
       {gifts:[198,520],avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
       {gifts:[117,440],avatar:[38,410],stack:[82,488],bet:[102,389],dealer:[90,370]},
       {gifts:[118,260],avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}

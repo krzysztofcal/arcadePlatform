@@ -133,3 +133,9 @@ Constitution: existing fundamental tests/repo checks and temporary browser probe
 - [ ] LAYOUT-T002 — Establish Helena physical slot from smoke screenshots and correct only its portrait gift anchor.
 - [x] LAYOUT-T003 — Require actual hero gift eligibility; add minimal blocked/error klog and reconnect copy without retry/economy changes.
 - [ ] LAYOUT-T004 — Existing checks/tests, deployed Preview probe, issue/PR handoff, preserve Draft and pending gates.
+
+## 2026-10-09 confirmed smoke mapping — Helena portrait
+
+User confirms maxSeats6,heroS4,HelenaS3,S6empty. Zero-based Helena index2/hero index3 gives rotateSeatIndex=(2−3+3+6)%6=2; seatPhysicalSlot(2,6)=2 (lower-right). Supersedes earlier unconfirmed S6 interpretation/missing mapping. Change ONLY portrait.seats[2].gifts [174,375]→[290,440], fixed three-item offsets unchanged. Preserve all accepted hero/dealer/drawing-source/readiness/demo changes and Quick Gift/reaction anchors/hitboxes. Verify actual published Preview in Chromium/Firefox portrait390×844 with Helena three gifts,heroS4,S6empty,active action bar,all dealer positions/playing/showdown; landscape844×390 regression. Existing fundamental tests/checks only,no UI/CSS tests/dependencies/inline scripts/protocol/economic changes. ee710913 incident cause remains unconfirmed; next rejection code/klog required. No WS redeploy/Production/merge; Draft and authenticated Stage/ACTIVE recovery/Production GO gates unchanged.
+
+- [ ] HELENA-T001 — Apply confirmed portrait slot2 anchor; verify published Preview collision bounds/screenshots and landscape; existing checks and issue/PR handoff.
