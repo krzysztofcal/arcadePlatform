@@ -3970,7 +3970,7 @@
     ]},
     landscape: { width:1040, height:390, seats:[
       {gifts:[387,132],avatar:[472,12],compactTransient:[642,110],stack:[445,104],bet:[430,148],dealer:[402,92]},
-      {gifts:[757,120],avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[906,155]},
+      {gifts:[782,192],avatar:[906,65],stack:[820,154],bet:[772,169],dealer:[906,155]},
       {gifts:[838,258],avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
       {gifts:[276,278],avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
       {gifts:[193,266],avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
@@ -5089,8 +5089,13 @@
     }
     var hud = renderedSeatHud[seatNo];
     if (!hud) return;
-    hud.social.appendChild(anchorNode);
-    anchorNode.className = 'poker-seat-social-reaction';
+    var topAvatarReaction = seatSceneOrientation === 'landscape' && hud.config === seatSceneGeometry.landscape.seats[0];
+    (topAvatarReaction ? els.seatTransientLayer : hud.social).appendChild(anchorNode);
+    anchorNode.className = 'poker-seat-social-reaction' + (topAvatarReaction ? ' poker-seat-social-reaction--top-avatar' : '');
+    if (!topAvatarReaction){
+      anchorNode.removeAttribute('data-seat-anchor');
+      anchorNode.style.cssText = '';
+    }
     var bubbleNode = anchorNode.children && anchorNode.children[0];
     if (!bubbleNode){
       clearReactionBubble(seatNo);
@@ -5102,15 +5107,25 @@
     var floatingEmoji = anchorNode.children && anchorNode.children[1];
     if (reducedMotion){
       if (floatingEmoji && floatingEmoji.parentNode) floatingEmoji.parentNode.removeChild(floatingEmoji);
-      return;
+    } else {
+      if (!floatingEmoji){
+        floatingEmoji = document.createElement('span');
+        anchorNode.appendChild(floatingEmoji);
+      }
+      floatingEmoji.className = 'poker-seat-reaction-float';
+      floatingEmoji.setAttribute('aria-hidden', 'true');
+      floatingEmoji.textContent = reactionEntry.emoji;
     }
-    if (!floatingEmoji){
-      floatingEmoji = document.createElement('span');
-      anchorNode.appendChild(floatingEmoji);
+    if (topAvatarReaction){
+      placeSeatNode(anchorNode,{origin:[0,0]},hud.config.avatar,84);
+      var sceneRect = els.scene.getBoundingClientRect();
+      var scale = sceneRect.width / seatSceneGeometry.landscape.width;
+      var topbarBottom = els.liveTopbar ? els.liveTopbar.getBoundingClientRect().bottom : 0;
+      var visibleTop = Math.max(topbarBottom,els.sceneViewport.getBoundingClientRect().top,0) + 4;
+      var height = anchorNode.offsetHeight;
+      var top = Math.max(hud.config.avatar[1] - hud.avatarSize / 2 - 6 - height,(visibleTop - sceneRect.top) / scale);
+      anchorNode.style.top = (top + height / 2) + 'px';
     }
-    floatingEmoji.className = 'poker-seat-reaction-float';
-    floatingEmoji.setAttribute('aria-hidden', 'true');
-    floatingEmoji.textContent = reactionEntry.emoji;
   }
 
   function getReactionLayerDimensions(){

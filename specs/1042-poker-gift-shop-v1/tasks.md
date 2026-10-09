@@ -155,3 +155,15 @@ Constitution:existing fundamental tests/repo/syntax/CSP and temporary probes onl
 - [x] PICKER-T003 — Fundamental checks,published Chromium/Firefox probe,issue/PR/SpecKit handoff,Draft/manualFAIL gates.
 
 PICKER-T002 measurements complete; strict right-D criterion is infeasible. Candidate[883,173] is temporary-probe-only,awaiting user acceptance; source anchor still[757,120].
+
+## Landscape-only follow-up — upper-right chips/gifts and top regular reaction
+
+User supersedes prior whole-group-right-ofD criterion. Scope only landscape slot1.stack+gifts and landscape slot0 ordinary reaction positioning. Aim smallest right/down stack move and gift move right/nearstack with whole staggered group/CH label clear. If incompatible,select nearest safe variant and document exact deviation;do not move neighbors,bet/avatar/D/cards/name/portrait. Ordinary top reaction must anchor to avatar (above if space or on upper avatar otherwise),not compactTransient/presentation. Preserve presentation/targeted reactions/timing/owner cleanup/reduced motion;existing chip animation uses updated renderedSeatStackAnchors.
+
+Constitution:temporary DOM-bounds/browser probes,existing fundamental tests/guards/syntax/CSP only,no UI/CSS suite/dependencies/inline scripts/backend/WS/schema/economy/picker/trigger changes. Manual smokeFAIL until owner acceptance;authenticatedStage/ACTIVErecovery/ProductionGO pending. NoWSredeploy/Production/merge.
+
+- [x] LANDSCAPE-T001 — Measure/apply nearest safe upper-right stack/gifts;document any directional conflict and chip-flight anchor evidence.
+- [x] LANDSCAPE-T002 — Only top ordinary reaction at avatar,viewport/topbar/QuickGift clear;targeted reactions/lifecycle unchanged.
+- [ ] LANDSCAPE-T003 — Published Chromium/Firefox probes/portrait regression,existing checks,issue/PR/SpecKit handoff,DraftFAIL gates.
+
+Local controlled probe: 864 scenarios across Chromium/Firefox and three viewports, zero moving-element landscape collisions for the tested CH range; top reaction EN/PL, motion/reduced motion, owner replacement and updated settlement chip destination verified. Portrait collisions are pre-existing and require baseline comparison, not a new portrait layout correction. LANDSCAPE-T003 still awaits published exact-source verification. Earlier PICKER-T002 right-D acceptance request is superseded by this follow-up; no pending approval for that old candidate.
