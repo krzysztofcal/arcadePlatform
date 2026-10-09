@@ -179,6 +179,8 @@ One document pointerdown listener registered once in bindGiftShop(): if quickGif
 
 - [x] OUTSIDE-T001 — Measure candidate/nearest safe gift anchor against actual DOM, without other layout changes.
 - [x] OUTSIDE-T002 — Single initialization pointerdown listener, preserve purchase/retry/focus/main shop.
-- [ ] OUTSIDE-T003 — Existing checks, published Chromium/Firefox geometry/interaction probes, issue/PR/SpecKit handoff.
+- [x] OUTSIDE-T003 — Existing checks, published Chromium/Firefox geometry/interaction probes, issue/PR/SpecKit handoff.
 
 OUTSIDE-T001 analysis complete: candidate and entire permitted region are blocked by the unchanged lower-right Quick Gift hitbox on mobile in Chromium/Firefox. Retain[782,192]; requested relocation FAIL. OUTSIDE-T002 implemented/reviewed; Chromium three-view interactions and focused Firefox mobile passed. OUTSIDE-T003 awaits full published verification; no claim of merge readiness.
+
+OUTSIDE-T003 controlled published verification complete: a1019c2a BUILD_INFO/file hash, Chromium/Firefox1080-case matrix and interaction lifecycle PASS for retained anchor/handler. Requested relocation remains FAIL because allowed region intersects lower-right Quick Gift; no whole-task/manual smoke PASS or merge readiness claimed. Stage/ACTIVE/Production gates remain. CI status/evidence snapshots in review.md and issue/PR handoff.
