@@ -88,3 +88,9 @@ Root cause: the restored sprite central dress ends around row 575 of 640 (90%), 
 Final export 79,894 bytes, SHA-256 `48373c618583ef00ad102da90a28b24a8e1d01ac742eb4ff58de3389d7f1f8ba`; decoded lower-center alpha minimum 252/255 through rows 576–639. Local Chromium at 390×844, 844×390, 1440×900 shows continuous waist hidden by rail, hands/deck foreground, 16 protected bounds identical, no page errors/overflow. High-DPI waist close-up inspected; source cutoff/gap no longer visible. Classic/error/race/reload and build gates pass. Existing syntax/CSP checks follow before publication; exact live repair verification follows publication.
 
 Independent final repair reviewer inspected all three native-size captures and the high-DPI waist close-up: no critical/important findings; arms/hands/deck visible, torso behind rail and no conspicuous clipping. Inventory/provenance and changed foreground clipping documentation updated as requested. Syntax and CSP guard PASS (52 served documents).
+
+### Complete torso — exact live Preview evidence
+
+Verified runtime SHA `859f8b41dd67a5a9e8d941eab126d52389de27f5`, Netlify deploy `6ac974057df72c0008598b58`, HTTP 200. Tested table: https://6ac974057df72c0008598b58--playkcswh.netlify.app/poker/table-v2.html . Live asset SHA-256 matches export `48373c618583ef00ad102da90a28b24a8e1d01ac742eb4ff58de3389d7f1f8ba`.
+
+Remote Chromium at 390×844, 844×390 and 1440×900: 16 protected bounds unchanged, no page errors or horizontal overflow, eight unseated-demo FX buttons disabled, Classic/reload and blocked/stale art-load retention pass. Inspected the published mobile waist at deviceScaleFactor 3 using a crop from its complete screenshot: continuous dress behind rail, no horizontal source cutoff/transparency gap, hands/deck in foreground. Independent final repair review found no critical/important issue. Syntax/CSP guard PASS (52 documents). No backend/WS/Stage/Production change; subsequent evidence commit changes docs only.
