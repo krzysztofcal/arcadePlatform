@@ -104,4 +104,6 @@ Final GHUD-T007/T008 evidence: deployed Netlify frontend SHA c974e920877554228e7
 
 - [x] QG-P2-T001 — Measure actual scaled hitbox at390×844/844×390 Chromium/Firefox.
 - [x] QG-P2-T002 — Minimal fixed-anchor transparent padding, preserve glyph and existing reactions; size only from scene scale.
-- [ ] QG-P2-T003 — Controlled browser hitbox/glyph/overlap/clipping/touch/resize verification, appropriate existing checks and Draft PR evidence. No WS deploy.
+- [x] QG-P2-T003 — Controlled browser hitbox/glyph/overlap/clipping/touch/resize verification, appropriate existing checks and Draft PR evidence. No WS deploy.
+
+QG-P2 deployed measurement: frontend71edd1654eeb1a410ff938502099763345df35ed confirmed BUILD_INFO; remote Chromium/Firefox JS/CSS reproduce30×30 sides/portrait,30×25.48 northern landscape,desktop unchanged and all hit-grid samples ownbutton. Local matrix/required checks passed; authenticated smoke/ACTIVE recovery/Production GO remain pending.
