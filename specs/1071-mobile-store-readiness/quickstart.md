@@ -21,3 +21,5 @@ Record device/OS/browser/package/revision/environment, expected vs observed reco
 - SpecKit scope, source/claim review and local-link checks are the documentation acceptance evidence.
 - Device sessions, store registration/questionnaires/submission, live purchases and environment mutations: not performed.
 - F1–F7 and M1–M5 remain pending in the report. These pending release decisions do not leave the requested audit implementation unfinished.
+
+Documentation handoff: [Draft PR #1074](https://github.com/krzysztofcal/arcadePlatform/pull/1074). Twelve audit delivery tasks complete. Future release gates remain pending; CI status must be read from the PR for its current head.

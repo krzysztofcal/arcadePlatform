@@ -31,10 +31,12 @@ Created: 2026-10-09. Feature: [spec.md](../spec.md). Evidence: [report](../../..
 - [x] SpecKit prerequisite discovery resolves this feature with tasks.
 - [x] Source claims/route recommendation and report/spec/plan/tasks are consistent.
 - [x] Diff is Markdown only; original workspace changes excluded.
-- [ ] Remote PR is Draft with expected branch/head and scope.
+- [x] Remote PR is Draft with expected branch/head and scope.
 
 ## Release status
 
 Audit document quality can pass while F/M release gates remain pending. No device, legal or store approval is claimed. The plan/checklist includes no broad UI/CSS/JSP/glue tests and no new billing/runtime/dependency/migration work.
 
 Verification evidence: nine Markdown artifacts, eighteen resolving local links, twelve sequential audit task IDs; SpecKit prerequisite discovery succeeds. Scoped diff excludes runtime/configuration/migrations. Independent review checked baseline observations and clarified the Apple purchased-CH no-expiry requirement.
+
+Publication evidence: [Draft PR #1074](https://github.com/krzysztofcal/arcadePlatform/pull/1074), base `main`, head `docs/1071-mobile-readiness`; initial published commit `42a21c4787a4109db8a0c23b0bf397da0b15bef7` matched the remote head and nine-file Markdown scope. The follow-up documentation commit records this verified handoff. GitHub/Netlify checks were still running at publication; no CI pass or mobile-release readiness is claimed.

@@ -36,7 +36,7 @@ Independent acceptance: device proposal is bounded; purchase verification/recove
 ## Phase 6 — Cross-cutting review and publication
 
 - [x] T011 Validate FR coverage, local links, source/claim consistency and documentation-only scope; record results in `specs/1071-mobile-store-readiness/checklists/requirements.md`.
-- [ ] T012 Publish one documentation Draft PR referencing #1071 and `docs/issue-1071-mobile-store-readiness-audit.md`; verify draft/head/diff and disclose pending release gates.
+- [x] T012 Publish one documentation Draft PR referencing #1071 and `docs/issue-1071-mobile-store-readiness-audit.md`; verify draft/head/diff and disclose pending release gates.
 
 ## Dependencies and delivery strategy
 
