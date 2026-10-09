@@ -71,6 +71,10 @@ No intended breaking API, schema, gameplay, tier, layout or default presentation
 
 Execute the approval.md checkpoint before completing the entire Phase 3: Royal Gold assets and reusable catalog/chooser/CSS first; the other four non-default entries are disabled and explicitly labeled pending review until their complete packages exist. This avoids presenting placeholders as approved final art. Full T007–T017 remain incomplete. The existing authority/gameplay boundaries and Stage effects are unchanged. Actual diff Constitution Check: PASS; only poker presentation assets, existing JS/CSS and feature evidence change; no new suites, dependencies, inline scripts, backend/WS, migrations or generic setup changes.
 
-## Owner-approved deterministic dealer extraction
+## Superseded deterministic dealer extraction
 
 Replace only Royal Gold dealer.webp with pixels isolated from the already approved concept board. Keep a feature-local alpha mask and reproducible extraction script beside that source in design/, using existing Sharp/Lanczos3 without dependencies or image synthesis. Preserve existing runtime/CSS/box geometry, document source-resolution limits and check native-size Preview. This resolves the wardrobe substitution rather than generating another interpretation. No generic tooling/configuration or maintained test suites.
+
+## Current restoration scope
+
+Owner rejected the deterministic extraction. Restore only the original generated Royal Gold dealer asset byte-for-byte; remove the feature-local extraction script/mask and record the rejection/restoration. Existing JS/CSS/layout/gameplay and all other theme layers remain unchanged. Verify the restored export on the PR Deploy Preview; stay Draft.

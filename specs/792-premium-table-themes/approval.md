@@ -9,3 +9,5 @@ Approved directions: Classic Casino, Royal Gold, Neon Vegas, Midnight Sapphire, 
 This is visual/technical approval to proceed, **not** acceptance of final artwork or runtime feature verification, merge approval or Production authorization. Keep the PR Draft until final validation and review.
 
 Owner checkpoint feedback: overall Royal Gold direction liked; replace the high-neck dealer outfit with the exact V-neck gold strappy dress already approved in the design. Owner explicitly authorized direct extraction from the design and deterministic upscaling. Corrected checkpoint acceptance remains pending; other dealer variants remain gated.
+
+**Latest owner instruction (supersedes the extraction correction):** Owner rejected the extracted/upscaled dealer as unacceptable and explicitly requested restoring the earlier high-quality imagegen dealer. Restore that exact export, including its high gathered neckline; do not retain the extracted sprite or generate another wardrobe variant in this correction. Full Royal Gold checkpoint acceptance remains pending.

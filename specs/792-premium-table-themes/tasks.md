@@ -55,7 +55,12 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 - [x] RG05 Verify exact-revision Deploy Preview and record live evidence.
 - [ ] RG06 Obtain owner inspection/acceptance of Royal Gold before generating remaining dealer variants.
 
-## Owner wardrobe correction
+## Rejected wardrobe extraction — superseded
 
 - [x] RG07 Extract the approved Royal Gold dealer from premium-collection.png with a feature-local alpha mask and deterministic export; record source resolution, SHA/provenance and reproducibility.
 - [x] RG08 Verify corrected dealer registration/native-size presentation and protected bounds on exact-revision Deploy Preview; owner visual acceptance remains RG06.
+
+## Owner-requested high-quality restoration
+
+- [x] RG09 Restore the exact original imagegen dealer.webp, verify original SHA/bytes, remove rejected extraction script/mask and update current provenance/owner direction.
+- [ ] RG10 Verify restored exact-revision Deploy Preview and record evidence.
