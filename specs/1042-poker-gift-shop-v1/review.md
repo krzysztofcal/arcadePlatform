@@ -317,3 +317,62 @@ Both engines confirm candidate conflict. Firefox lower-right trigger bounds `[88
 Outside-close controls pass in both engines/all three viewports: real touch outside, inside header pointerdown stays open, current trigger toggle, reachable two-recipient switch, Escape/focus, pending outside close preserves pending/retry, ws_closed uncertainty retains requestId and same-product retry reuses it; resolution completes normally. Five rerenders keep exactly1document pointerdown listener; reconnect gate closes stale picker, resize preserves placement/open state then outside closes; main Gift Shop stays open on outside and retains6options. Gift stores are unchanged. Existing portrait panel can occlude the lower-right trigger while upper-right picker is open; switching probe uses another physically accessible trigger, not forced clicks. This pre-existing picker-placement limitation was not altered outside requested scope.
 
 Screenshot artifacts `/tmp/1047-outside-deployed-{chromium,firefox}-{844,1440,390}.png`, result/bounds JSON and probe logs stay outside repo. Only source change is the six-line handler; no CSS/reaction/chip/deal animation/backend/WS/protocol/schema/economy change or breaking impact. Existing fundamental185tests,syntax/guards/CSP passed; core/ledger/WS persistence/Playwright/CodeQL CI passed. Initial unchanged WS cleanup race (`seat_user_closed` versus null) failed; failed-job rerun pending at this evidence snapshot. Draft and manual owner FAIL retained; requested gift relocation FAIL plus authenticated Stage smoke, ACTIVE recovery and Production schema GO remain unresolved.
+
+## 2026-10-09 owner acceptance and final preflight (supersedes earlier smoke FAIL)
+
+Owner accepts the current implementation: manual UI/functionality smoke **PASS**, portrait/landscape, Quick Gift picker including outside-pointerdown dismissal, current gifts/chips, and ACTIVE refresh/reconnect recovery on a new open table. Keep landscape physical slot 1 gifts `[782,192]`; no further UI changes. Earlier FAIL/PENDING entries above are historical; they are not current UI or ACTIVE-recovery blockers. Incident ee710913 root cause remains unconfirmed; accepted gating diagnostics remain unchanged.
+
+### Evidence by source
+
+| Source | Confirmed result | Limits |
+|---|---|---|
+| Owner authenticated manual smoke | UI/Quick Gift PASS; Stage Coffee purchases; ACTIVE refresh/reconnect recovery PASS | No claim that each separately listed negative/premium/leave-rejoin/reduced-motion/settlement scenario was executed |
+| Fresh read-only Stage PostgreSQL audit | Table `9941f588-ee19-4b7c-8e3e-196308ab1614`: 7 Coffee receipts,70 CH,7 BURN,14 entries,zero discrepancies; each transaction exactly buyer USER -10 + SYSTEM/GENESIS +10; no forbidden account entries | Does not measure historical table escrow balances; no gift ESCROW entries observed |
+| Real timestamp persistence | All 7 recipient timestamps equal same-user/seat `joined_at` exactly: `2026-10-09 15:02:29.046715+00`, preserving sub-millisecond precision | That recipient is now INACTIVE, so recovery correctly excludes these receipts |
+| Read-only ACTIVE recovery predicate | OPEN table `ee710913-86b9-44b4-bd33-b2b3eccbf944`: S1/S2/S3/S6 have 2/3/2/1 exact current-participation receipts; microseconds .141974/.869078/.129622/.676787 | SQL predicate proof, not a new authenticated browser smoke or direct adapter invocation; owner separately confirms end-to-end recovery |
+| Fundamental automated tests | Existing domain/handler/browser/client/settlement selection:185/185 PASS; insufficient funds and ledger/receipt failure rollback,self-gift rejection,human/bot target,replay/conflict,cooldown,inactive target and participation change,newest-three duplicates | PGlite timestamp test models driver binding; real Stage receipt comparison supplies actual persistence evidence |
+| Repository checks | Syntax221 files; check:all,ci:guards,CSP52 documents,migration inventory108 Stage sources/7 Production replacements PASS | No new tests/frameworks or runtime changes |
+
+### T013 — acceptance recorded; narrowly missing mandatory manual evidence
+
+Owner's UI/financial/ACTIVE acceptance is PASS. Original spec Verification/rollout step6 explicitly requires authenticated manual cases beyond those reported. Automated negative paths PASS, but they do not establish manual execution. Remaining evidence needed (short targeted confirmations only; no full smoke rerun):
+
+- representative premium purchase and recipient human/bot paths (reported audit is Coffee only);
+- self-target rejection;
+- insufficient-CH rejection;
+- immediate duplicate/retry with no double BURN/receipt or double-count/replayed HUD gift;
+- 3-second cooldown rejection/recovery;
+- leave/rejoin clears prior participation gifts (distinct from accepted reconnect);
+- reduced-motion behavior;
+- poker actions/settlement continue normally during gifting.
+
+Do not silently waive this explicit original checklist or relabel automatic coverage as manual PASS. Owner may supply already-performed case evidence or explicitly amend that checklist to accept automated evidence for the named cases. T013 remains partial solely for these specific evidence items, not UI or ACTIVE recovery. No additional purchase is performed by the agent.
+
+### T014 — read-only Production preflight COMPLETE; schema apply STOP
+
+Production `otbqfijerkieoxwpxjnm` identity matches system identifier `7575202818581710058`. Table `public.poker_gift_purchases`, its indexes/policies and replacement migration version `20261004222426` are absent. Existing ledger/seats/tables and BURN enum/one GENESIS account exist. Six earlier Production replacement versions are recorded:20260914090000,20260914091000,20260929201500,20260930211624,20261003183626,20261004114411. Do not replay the historical manifest missing-source list: it is provenance, not an apply queue.
+
+Existing approved-candidate file is sufficient: `supabase/production-migrations/20261004222426_poker_gift_purchases_production_contract.sql`, SHA256 `8f8a3bd3c86cf38aaddc4fbddafc02e275640ae3b260558046ef5707dab72415`. Stage source remains immutable; manifest validates exact hashes and exhaustive108/7 inventory. No new migration is necessary.
+
+Migration is atomic empty schema only:14 columns,PK/unique purchase_key and catalog/CH/seat/payment checks,full-precision timestamptz,zero foreign keys to table/auth users,RLS enabled,no policies,revoke PUBLIC/anon/authenticated,two narrow cooldown/participation indexes plus PK/unique indexes. Service_role has backend access. Current Supabase default grants include broader service_role privileges; this file does not narrow those inherited grants and does not claim SELECT/INSERT-only effective backend permissions. Client revocations keep the schema backend-only. Stage catalog confirms RLS=true,zero policies,four indexes,no anon/authenticated grants.
+
+Minimal sequence after **separate Production schema GO**:
+
+1. Pin reviewed PR revision/file hash; repeat read-only target identity/table/version checks immediately before application. Use privileged canonical Production connection; do not run bulk `supabase db push` with Stage history.
+2. On that same connection set session GUC `chips.production_project_ref='otbqfijerkieoxwpxjnm'` (currently unset; migration intentionally fails closed without it), then execute ONLY the existing Production-equivalent SQL file. Its own BEGIN/COMMIT checks actual system identifier and absence of version,creates empty schema/indexes/RLS/client revocations and records ONLY version20261004222426 atomically. No receipts,ledger transactions,CH changes,backfill or historical timestamp repair.
+3. Read-only postflight must verify14 exact columns/types/defaults,all constraints,no table/auth FK,RLS=true,zero client policies,anon/authenticated/PUBLIC no privileges,backend SELECT/INSERT,four valid indexes and exact index definitions,recorded version and receipt count0. Compare with immutable Stage source and the approved file. Stop on mismatch; never mark skipped source version20261004220956 applied in Production.
+4. Only after postflight PASS and remaining T013 evidence/explicit requirement amendment,request separate owner merge GO. Schema first is compatible with current runtime (unused empty table). Merge/runtime rollout is not authorized here. Production purchase smoke is also a separate authorization.
+
+Failure before COMMIT rolls back this new schema/version. After schema success,leave the harmless empty schema in place if runtime rollout is held; no destructive rollback,drop or receipt repair. Main merge can deploy Production WS/browser: absent schema is a real dependency,not merely an administrative checkbox.
+
+### T015 — final review prepared; conditional HOLD
+
+Audited HEAD `005e0af02d78708b88f6006c9cae103ca6839d65`: Draft OPEN,MERGEABLE/CLEAN,current main `d49c33fa19ea52e5715c046bc082af65d15889c5` is an ancestor. All applicable CI/Netlify checks SUCCESS; intentionally skipped Production deploy jobs are not deployment proof. Netlify Preview BUILD_INFO matches HEAD,deploy `6ac8ff0aee38ca000862c222`: https://deploy-preview-1047--playkcswh.netlify.app/poker/table-v2.html . Docs-only follow-up requires current-head CI/Preview validation below.
+
+WS application runtime `2c9976d4a01bd143898422208644840e7ec1efad` remains valid: [exact-ref run37853558761](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37853558761) SUCCESS,application RELEASE_SHA/DEPLOY_REF match; installed metadata/health evidence retained,latest WS Preview workflow has not been superseded and public health=ok. Workflow headSHA is main definition,different from application SHA by design. Diff from that runtime to audited HEAD shows zero changes in ws-server/shared/ledger dependencies/WS Preview workflow. No redundant deployment.
+
+No new breaking changes in this documentation handoff. Existing additive command/state fields retain legacy aggregate compatibility; three newest duplicate-preserving gifts are accepted presentation. Required backend receipt schema is the rollout dependency. Historical precision-damaged receipts remain excluded,not repaired. No economy/WS/UI/anchor changes; no Production modification,merge or issue closure. PR stays Draft.
+
+Current blockers are exactly: named T013 mandatory-case evidence (or explicit owner amendment); separate Production schema GO and successful schema postflight; then separate merge GO. Owner authenticated baseline financial smoke and ACTIVE recovery are **cleared**,not pending. Therefore not all criteria except Production GO can yet be claimed satisfied under the unchanged original spec.
+
+Final independent review: no material preflight/handoff defects; explicitly retained manual replay no-double-count requirement. Fresh canonical ledger unit1/1 and focused real-server gift replay/recovery1/1 PASS in addition to185-test selection. T014 checkbox means read-only handoff/preflight complete,not schema applied. T013/T015 remain unchecked for the named gates.

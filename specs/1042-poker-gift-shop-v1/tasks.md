@@ -21,7 +21,7 @@ Execute sequentially T001–T015; each depends on the preceding task. Stage auto
 - [x] **T012D — Consume #1048 stable three-slot gift HUD.** Integrated main/#1049 HUD slots during conflict reconciliation; preserve gift state/recovery. Authenticated visual smoke remains T013.
 - [x] **T012E — Quick Gift per seat + no self-gifting.** E1 preserved; E2 uses main/#1049 quick-action slot and the shared sendSelectedGift/catalog/retry path. Authenticated smoke remains T013.
 - [ ] **T013 — Final Preview gate after T012D + T012E.** Deploy latest runtime-affecting SHA with WS Preview Deploy, verify release metadata/health, then perform final authenticated Stage smoke after HUD/Quick Gift integration.
-- [ ] **T014 — Production handoff.** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.
+- [x] **T014 — Production handoff (read-only preflight prepared; apply awaiting owner GO).** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.
 - [ ] **T015 — Final handoff.** Record exact runtime SHA, Stage migration/apply evidence, CI, WS Preview deploy, smoke evidence, any Production schema status and breaking impacts. Only call merge-ready when repository Definition of Done is satisfied.
 
 
@@ -184,3 +184,9 @@ One document pointerdown listener registered once in bindGiftShop(): if quickGif
 OUTSIDE-T001 analysis complete: candidate and entire permitted region are blocked by the unchanged lower-right Quick Gift hitbox on mobile in Chromium/Firefox. Retain[782,192]; requested relocation FAIL. OUTSIDE-T002 implemented/reviewed; Chromium three-view interactions and focused Firefox mobile passed. OUTSIDE-T003 awaits full published verification; no claim of merge readiness.
 
 OUTSIDE-T003 controlled published verification complete: a1019c2a BUILD_INFO/file hash, Chromium/Firefox1080-case matrix and interaction lifecycle PASS for retained anchor/handler. Requested relocation remains FAIL because allowed region intersects lower-right Quick Gift; no whole-task/manual smoke PASS or merge readiness claimed. Stage/ACTIVE/Production gates remain. CI status/evidence snapshots in review.md and issue/PR handoff.
+
+## 2026-10-09 accepted implementation / final handoff
+
+Owner manual smoke **PASS**, UI/Quick Gift/current layout and ACTIVE reconnect/refresh recovery accepted. Preserve landscape slot1 gifts `[782,192]`. Read-only Stage:7 Coffee receipts/70 CH,7 correct BURN,14 entries,zero discrepancies; exact recipient timestamp .046715 preserved. See review.md latest evidence matrix and T013/T014/T015 preflight, which supersede historical FAIL/PENDING notes without deleting history. No runtime/UI/WS/schema changes.
+
+T013 partial: baseline authenticated smoke and ACTIVE recovery cleared; original mandatory manual premium/human-bot,self-target,insufficient-CH,retry,cooldown,leave/rejoin,reduced-motion and gameplay/settlement cases need specific evidence or explicit owner amendment (automated coverage recorded separately). T014 preflight COMPLETE: existing Production-equivalent migration sufficient; Production table/version absent; STOP before separate schema GO/apply/postflight. T015 review prepared,conditional HOLD; Draft,no merge/Production action.

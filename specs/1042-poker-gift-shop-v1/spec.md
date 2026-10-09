@@ -1,7 +1,7 @@
 # Poker Gift Shop V1 — SpecKit implementation plan
 
 **Parent:** #786
-**Status:** implementation ready, awaiting manual runtime verification
+**Status:** owner manual smoke PASS; final mandatory-case evidence and Production schema GO/postflight pending
 
 Implementation progress and validation are tracked in tasks.md and review.md.
 **Scope:** one complete V1 vertical slice: Poker V2 UI → authoritative WS purchase → CH BURN → durable receipt → table gift event → session-visible gift badges.
@@ -357,7 +357,7 @@ Because this changes `ws-server/**` and the WS/browser protocol:
 - [x] **T011 — Fundamental domain/WS tests.** Add only the focused gift purchase/handler/runtime cases listed above. No UI/CSS/glue suite.
 - [x] **T012 — Full verification/refactor.** Run focused + required repo checks; review/refactor touched code for the smallest implementation; verify no second ledger/payment/event framework and no gameplay mutation.
 - [ ] **T013 — Exact-SHA Preview gate.** Deploy latest runtime-affecting SHA with WS Preview Deploy, verify release metadata/health, then perform the mandatory Stage smoke above.
-- [ ] **T014 — Production handoff.** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.
+- [x] **T014 — Production handoff (read-only preflight prepared; apply awaiting owner GO).** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.
 - [ ] **T015 — Final handoff.** Record exact runtime SHA, Stage migration/apply evidence, CI, WS Preview deploy, smoke evidence, any Production schema status and breaking impacts. Only call merge-ready when repository Definition of Done is satisfied.
 
 ## Out of scope
@@ -632,3 +632,9 @@ Manual smoke remains FAIL. Candidate landscape physical slot1 gifts[883,173], re
 One document pointerdown listener registered once in bindGiftShop(): if quickGiftTarget===null return; ignore open picker descendants and any Quick Gift trigger; otherwise clear only quickGiftTarget and syncQuickGifts(). No propagation/default suppression, overlay, retry/pending/purchase cancellation or main Gift Shop behavior change. Preserve trigger toggle/switch/Escape focus and lifecycle. Constitution: existing fundamental tests/guards/syntax/CSP plus temporary published Chromium/Firefox probes only; no persistent UI/CSS tests, dependencies, inline scripts, WS/backend/schema/economy changes. Draft/manual owner FAIL and authenticated Stage/ACTIVE recovery/Production GO gates remain. No WS redeploy, merge or Production.
 
 Current result: `[883,173]` and the permitted fallback region are obstructed by the fixed lower-right Quick Gift hitbox on mobile landscape. Keep `[782,192]`; relocation requirement remains FAIL. No dynamic anchor/neighbor movement is allowed to evade that conflict. Exact bounds and proof are in review.md.
+
+## 2026-10-09 accepted implementation / final handoff
+
+Owner manual smoke **PASS**, UI/Quick Gift/current layout and ACTIVE reconnect/refresh recovery accepted. Preserve landscape slot1 gifts `[782,192]`. Read-only Stage:7 Coffee receipts/70 CH,7 correct BURN,14 entries,zero discrepancies; exact recipient timestamp .046715 preserved. See review.md latest evidence matrix and T013/T014/T015 preflight, which supersede historical FAIL/PENDING notes without deleting history. No runtime/UI/WS/schema changes.
+
+T013 partial: baseline authenticated smoke and ACTIVE recovery cleared; original mandatory manual premium/human-bot,self-target,insufficient-CH,retry,cooldown,leave/rejoin,reduced-motion and gameplay/settlement cases need specific evidence or explicit owner amendment (automated coverage recorded separately). T014 preflight COMPLETE: existing Production-equivalent migration sufficient; Production table/version absent; STOP before separate schema GO/apply/postflight. T015 review prepared,conditional HOLD; Draft,no merge/Production action.
