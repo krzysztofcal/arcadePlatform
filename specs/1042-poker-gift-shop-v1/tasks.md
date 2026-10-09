@@ -141,3 +141,17 @@ User confirms maxSeats6,heroS4,HelenaS3,S6empty. Zero-based Helena index2/hero i
 - [x] HELENA-T001 — Apply confirmed portrait slot2 anchor; verify published Preview collision bounds/screenshots and landscape; existing checks and issue/PR handoff.
 
 Earlier HERO-T001 S6 interpretation is superseded by confirmed HelenaS3/heroS4 mapping above; completion refers to portrait physical slot2, not seat-number hardcoding. Manual owner acceptance remains distinct from controlled probe PASS.
+
+## 2026-10-09 remaining smoke FAIL — Quick Gift Picker / landscape upper-right
+
+Quick Gift menu (not main Gift Shop) must use dark16251f/gold725735/radius12,recipient header,six catalog cards2×3,separate emoji/name/CH price,minimum44×44CSSpx unscaled after scene fitting,one-tap shared sendSelectedGift. Preserve trigger hitboxes/reaction and focus/Escape/pending/disabled. Existing picker element may be locally hosted under body/fixed viewport to avoid transformed-scene clipping,with explicit cleanup on seat rerender and local placement bounded above active action bar; no global popover system/framework.
+
+Landscape only slot1 gifts:desired whole group right of stack/name-below/right ofD/outside adjacent lower-right HUD. Measure actual DOM for all three staggered22px slots. If incompatible document exact obstruction,keep other anchors fixed and propose nearest safe variant for user acceptance,do not falsely reportPASS. No portrait/other landscape/dealer/rotation/economic/protocol changes.
+
+Constitution:existing fundamental tests/repo/syntax/CSP and temporary probes only,no permanent UI/CSS tests/dependencies/inline scripts/endpoints/migrations. Smoke staysFAIL until owner acceptance;authenticatedStage/ACTIVErecovery/ProductionGO pending;noWSredeploy/Production/merge.
+
+- [x] PICKER-T001 — Existing picker cards/header/unscaled fixed viewport placement/lifecycle;controlled all-slot probes.
+- [ ] PICKER-T002 — Measure upper-right constraints,apply if feasible or document/propose safe alternative for approval.
+- [ ] PICKER-T003 — Fundamental checks,published Chromium/Firefox probe,issue/PR/SpecKit handoff,Draft/manualFAIL gates.
+
+PICKER-T002 measurements complete; strict right-D criterion is infeasible. Candidate[883,173] is temporary-probe-only,awaiting user acceptance; source anchor still[757,120].

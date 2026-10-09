@@ -4007,6 +4007,7 @@
     if (seatSceneOrientation === 'landscape' && window.innerHeight <= 500) sceneTop = (geometry.height / 2 + topSafeArea) * scale;
     els.scene.style.top = sceneTop + 'px';
     els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
+    positionQuickGiftPicker();
   }
 
   function seatPhysicalSlot(index, total){
@@ -4757,7 +4758,7 @@
       if (!hud) return;
       var allowed = available && eligible.indexOf(seat) !== -1;
       var button = hud.quickAction.querySelector('.poker-quick-gift-button');
-      var picker = hud.quickAction.querySelector('.poker-quick-gift-picker');
+      var picker = hud.quickPicker;
       if (!allowed) { if (button) button.hidden = true; if (picker) picker.hidden = true; return; }
       if (!button){
         button = document.createElement('button');
@@ -4766,15 +4767,18 @@
         button.setAttribute('aria-haspopup', 'true');
         picker = document.createElement('div');
         picker.className = 'poker-gift-picker poker-quick-gift-picker';
-        var geometry = seatSceneGeometry[seatSceneOrientation];
-        var leftHalf = hud.config.avatar[0] < geometry.width / 2;
-        picker.style.left = leftHalf ? '0' : 'auto'; picker.style.right = leftHalf ? 'auto' : '0';
-        var lowerHalf = hud.config.avatar[1] > geometry.height / 2;
-        picker.style.top = lowerHalf ? 'auto' : '20px'; picker.style.bottom = lowerHalf ? '20px' : 'auto';
+        var heading = document.createElement('strong');
+        heading.className = 'poker-quick-gift-picker__heading';
+        picker.appendChild(heading);
         giftCatalog.forEach(function(gift){
           var choice = document.createElement('button');
           choice.type = 'button'; choice.className = 'poker-gift-choice';
-          choice.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH';
+          ['emoji', 'name', 'price'].forEach(function(part){
+            var value = document.createElement('span');
+            value.className = 'poker-quick-gift-choice__' + part;
+            value.textContent = part === 'emoji' ? gift.emoji : part === 'name' ? giftName(gift) : formatNumber(gift.price) + ' CH';
+            choice.appendChild(value);
+          });
           choice.addEventListener('click', function(){ sendSelectedGift(gift.key, seat.seatNo); });
           picker.appendChild(choice);
         });
@@ -4792,20 +4796,47 @@
         picker.addEventListener('keydown', function(event){
           if (event.key === 'Escape') { quickGiftTarget = null; syncQuickGifts(); button.focus(); }
         });
-        hud.quickAction.appendChild(button); hud.quickAction.appendChild(picker);
+        hud.quickAction.appendChild(button);
+        hud.quickPicker = picker;
+        document.body.appendChild(picker);
       }
       placeSeatNode(button,{origin:[0,0]},hud.quickGiftPoint);
       var open = quickGiftTarget && quickGiftTarget.seatNo === seat.seatNo && quickGiftTarget.userId === seat.userId;
       button.hidden = false; button.disabled = giftPending;
       button.setAttribute('aria-expanded', String(!!open));
       picker.hidden = !open;
-      Array.prototype.forEach.call(picker.children, function(choice){ choice.disabled = giftPending; });
+      picker.firstChild.textContent = (document.documentElement.lang === 'pl' ? 'Prezent dla: ' : 'Gift for: ') + getDisplayName(seat) + ' · S' + seat.seatNo;
+      Array.prototype.forEach.call(picker.querySelectorAll('button'), function(choice){ choice.disabled = giftPending; });
     });
     if (!available) quickGiftTarget = null;
+    positionQuickGiftPicker();
+  }
+
+  function positionQuickGiftPicker(){
+    if (!quickGiftTarget) return;
+    var hud = renderedSeatHud[quickGiftTarget.seatNo];
+    var picker = hud && hud.quickPicker;
+    if (!picker || picker.hidden) return;
+    var button = hud.quickAction.querySelector('.poker-quick-gift-button');
+    var trigger = button.getBoundingClientRect();
+    var action = els.actionBar && els.actionBar.getBoundingClientRect();
+    var bottom = action && action.width && action.height ? Math.min(window.innerHeight - 8, action.top - 8) : window.innerHeight - 8;
+    picker.style.maxHeight = Math.max(44, bottom - 8) + 'px';
+    var box = picker.getBoundingClientRect();
+    var left = trigger.right + 8 + box.width <= window.innerWidth - 8 ? trigger.right + 8
+      : trigger.left - box.width - 8 >= 8 ? trigger.left - box.width - 8 : trigger.left;
+    var top = trigger.bottom + 8 + box.height <= bottom ? trigger.bottom + 8
+      : trigger.top - box.height - 8 >= 8 ? trigger.top - box.height - 8 : bottom - box.height;
+    picker.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + 'px';
+    picker.style.top = Math.max(8, Math.min(top, bottom - box.height)) + 'px';
   }
 
   function renderSeats(){
     if (!els.seatLayer) return;
+    Object.keys(renderedSeatHud).forEach(function(key){
+      var picker = renderedSeatHud[key].quickPicker;
+      if (picker) picker.remove();
+    });
     if (els.scene && els.scene.dataset) els.scene.dataset.pokerMaxSeats = String(state.maxSeats);
     syncGiftOwners();
     clearReactionBubblesWithChangedOwners();

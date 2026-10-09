@@ -607,3 +607,11 @@ Constitution: existing fundamental tests/repo checks and temporary browser probe
 ## 2026-10-09 confirmed smoke mapping — Helena portrait
 
 User confirms maxSeats6,heroS4,HelenaS3,S6empty. Zero-based Helena index2/hero index3 gives rotateSeatIndex=(2−3+3+6)%6=2; seatPhysicalSlot(2,6)=2 (lower-right). Supersedes earlier unconfirmed S6 interpretation/missing mapping. Change ONLY portrait.seats[2].gifts [174,375]→[290,440], fixed three-item offsets unchanged. Preserve all accepted hero/dealer/drawing-source/readiness/demo changes and Quick Gift/reaction anchors/hitboxes. Verify actual published Preview in Chromium/Firefox portrait390×844 with Helena three gifts,heroS4,S6empty,active action bar,all dealer positions/playing/showdown; landscape844×390 regression. Existing fundamental tests/checks only,no UI/CSS tests/dependencies/inline scripts/protocol/economic changes. ee710913 incident cause remains unconfirmed; next rejection code/klog required. No WS redeploy/Production/merge; Draft and authenticated Stage/ACTIVE recovery/Production GO gates unchanged.
+
+## 2026-10-09 remaining smoke FAIL — Quick Gift Picker / landscape upper-right
+
+Quick Gift menu (not main Gift Shop) must use dark16251f/gold725735/radius12,recipient header,six catalog cards2×3,separate emoji/name/CH price,minimum44×44CSSpx unscaled after scene fitting,one-tap shared sendSelectedGift. Preserve trigger hitboxes/reaction and focus/Escape/pending/disabled. Existing picker element may be locally hosted under body/fixed viewport to avoid transformed-scene clipping,with explicit cleanup on seat rerender and local placement bounded above active action bar; no global popover system/framework.
+
+Landscape only slot1 gifts:desired whole group right of stack/name-below/right ofD/outside adjacent lower-right HUD. Measure actual DOM for all three staggered22px slots. If incompatible document exact obstruction,keep other anchors fixed and propose nearest safe variant for user acceptance,do not falsely reportPASS. No portrait/other landscape/dealer/rotation/economic/protocol changes.
+
+Constitution:existing fundamental tests/repo/syntax/CSP and temporary probes only,no permanent UI/CSS tests/dependencies/inline scripts/endpoints/migrations. Smoke staysFAIL until owner acceptance;authenticatedStage/ACTIVErecovery/ProductionGO pending;noWSredeploy/Production/merge.
