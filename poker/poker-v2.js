@@ -4683,6 +4683,12 @@
       els[key] = document.getElementById(ids[key]);
     });
     if (!els.giftShopButton) return;
+    document.addEventListener('pointerdown', function(event){
+      if (quickGiftTarget === null) return;
+      if (event.target.closest('.poker-quick-gift-picker:not([hidden]),.poker-quick-gift-button')) return;
+      quickGiftTarget = null;
+      syncQuickGifts();
+    });
     els.giftNotice = document.getElementById('pokerGiftNotice');
     giftCatalog.forEach(function(gift){ var button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice'; button.dataset.giftKey = gift.key; els.giftSelect.appendChild(button); });
     els.giftShopButton.addEventListener('click', function(){

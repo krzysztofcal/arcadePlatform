@@ -169,3 +169,16 @@ Constitution:temporary DOM-bounds/browser probes,existing fundamental tests/guar
 Local controlled probe: 864 scenarios across Chromium/Firefox and three viewports, zero moving-element landscape collisions for the tested CH range; top reaction EN/PL, motion/reduced motion, owner replacement and updated settlement chip destination verified. Portrait collisions are pre-existing and require baseline comparison, not a new portrait layout correction. LANDSCAPE-T003 still awaits published exact-source verification. Earlier PICKER-T002 right-D acceptance request is superseded by this follow-up; no pending approval for that old candidate.
 
 LANDSCAPE-T003 complete: published031642aa assets/BUILD_INFO verified, Chromium/Firefox864-case matrix plus lifecycle and identical144-rectangle portrait baseline;198fundamental tests/final170client rerun,syntax/guards/CSP/migrations,CI green after documented unchanged WS test retry. Geometry limitations remain explicit; completion is implementation/controlled verification, not owner smoke acceptance or merge readiness. Superseded PICKER-T002 now resolved under this follow-up, without applying the old[883,173] proposal.
+
+
+## Follow-up — upper-right gifts and Quick Gift outside pointerdown
+
+Manual smoke remains FAIL. Candidate landscape physical slot1 gifts[883,173], retaining stack[820,154] and every other anchor, portrait, reaction and chip layout. Verify all three22×22 objects with (+12,+5), decoded chips/CHlabel/name/D/bet/cards/neighbor HUD. If it collides, nearest safe first-item center in x860–910/y150–190; if none retain[782,192] and document FAIL. Whole-group-right-ofD is not required.
+
+One document pointerdown listener registered once in bindGiftShop(): if quickGiftTarget===null return; ignore open picker descendants and any Quick Gift trigger; otherwise clear only quickGiftTarget and syncQuickGifts(). No propagation/default suppression, overlay, retry/pending/purchase cancellation or main Gift Shop behavior change. Preserve trigger toggle/switch/Escape focus and lifecycle. Constitution: existing fundamental tests/guards/syntax/CSP plus temporary published Chromium/Firefox probes only; no persistent UI/CSS tests, dependencies, inline scripts, WS/backend/schema/economy changes. Draft/manual owner FAIL and authenticated Stage/ACTIVE recovery/Production GO gates remain. No WS redeploy, merge or Production.
+
+- [x] OUTSIDE-T001 — Measure candidate/nearest safe gift anchor against actual DOM, without other layout changes.
+- [x] OUTSIDE-T002 — Single initialization pointerdown listener, preserve purchase/retry/focus/main shop.
+- [ ] OUTSIDE-T003 — Existing checks, published Chromium/Firefox geometry/interaction probes, issue/PR/SpecKit handoff.
+
+OUTSIDE-T001 analysis complete: candidate and entire permitted region are blocked by the unchanged lower-right Quick Gift hitbox on mobile in Chromium/Firefox. Retain[782,192]; requested relocation FAIL. OUTSIDE-T002 implemented/reviewed; Chromium three-view interactions and focused Firefox mobile passed. OUTSIDE-T003 awaits full published verification; no claim of merge readiness.
