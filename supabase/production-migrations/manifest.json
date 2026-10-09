@@ -1025,6 +1025,20 @@
         "Production remains untouched; demand core, refill control kill switch/identity guard, pg_cron extension and ledger/pool state are preserved"
       ],
       "replacement": "20261004114411_poker_demand_refill_production_scheduler_decommission.sql"
+    },
+    {
+      "version": "20261004220956",
+      "file": "20261004220956_poker_gift_purchases.sql",
+      "sha256": "f88f4f4707b681fee6ebba2bb62a57853478b4850d267c17e6b5c45621ac7608",
+      "category": "needs-production-equivalent",
+      "status": "awaiting-production-go",
+      "replacement": "20261004222426_poker_gift_purchases_production_contract.sql",
+      "required_effects": [
+        "Empty backend-only receipt schema, RLS, constraints and two narrow indexes"
+      ],
+      "omitted_effects": [
+        "No Production application, receipts, ledger transactions or CH mutation"
+      ]
     }
   ],
   "replacement_migrations": [
@@ -1070,6 +1084,11 @@
       "prerequisites": [
         "20261003183626_poker_demand_refill_production_contract.sql"
       ]
+    },
+    {
+      "file": "20261004222426_poker_gift_purchases_production_contract.sql",
+      "purpose": "#1042 empty receipt schema; separate owner GO only",
+      "sha256": "8f8a3bd3c86cf38aaddc4fbddafc02e275640ae3b260558046ef5707dab72415"
     }
   ],
   "provenance_rules": [

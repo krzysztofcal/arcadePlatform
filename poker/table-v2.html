@@ -31,6 +31,7 @@
     <div class="poker-boot-splash__card">Loading table…</div>
   </div>
   <div class="poker-table-screen" id="pokerTableScreen">
+    <div class="poker-gift-notice" id="pokerGiftNotice" role="status" aria-live="polite" hidden></div>
     <div class="poker-auto-rebuy-toast poker-auto-rebuy-toast--balance" id="pokerV2AutoRebuyBalanceToast" role="status" aria-live="polite" hidden></div>
 
     <button type="button" class="poker-menu-toggle" id="pokerMenuToggle" aria-label="Toggle table menu" aria-expanded="false" aria-controls="pokerMenuPanel">
@@ -85,6 +86,14 @@
         <div class="poker-top-right-rail">
           <button type="button" class="poker-live-btn poker-live-btn--accent" id="pokerV2JoinBtn" hidden>Join</button>
           <div class="poker-top-right-reactions">
+            <button type="button" class="poker-live-btn" id="pokerGiftShopButton" aria-controls="pokerGiftShop" aria-expanded="false" hidden>🎁</button>
+            <section class="poker-gift-shop" id="pokerGiftShop" aria-labelledby="pokerGiftTitle" hidden>
+              <div class="poker-gift-shop__header"><strong id="pokerGiftTitle" data-i18n="pokerGiftShop">Gift Shop</strong><button type="button" id="pokerGiftClose" aria-label="Close">×</button></div>
+              <div class="poker-gift-shop__field"><span id="pokerGiftChooseLabel" data-i18n="pokerGiftChoose">Choose a gift</span><div id="pokerGiftSelect" class="poker-gift-picker" role="group" aria-labelledby="pokerGiftChooseLabel"></div></div>
+              <div class="poker-gift-shop__field"><span id="pokerGiftRecipientLabel" data-i18n="pokerGiftRecipient">Recipient</span><div id="pokerGiftRecipient" class="poker-gift-recipients" role="group" aria-labelledby="pokerGiftRecipientLabel"></div></div>
+              <button type="button" class="poker-live-btn" id="pokerGiftSend" data-i18n="pokerGiftSend" disabled>Send</button>
+              <p id="pokerGiftMessage" role="status" aria-live="polite"></p>
+            </section>
             <div class="poker-action-reaction" id="pokerV2ReactionControl" hidden>
               <button type="button" class="poker-live-btn poker-reaction-btn" id="pokerV2ReactionBtn" aria-label="Send a table reaction" aria-haspopup="menu" aria-expanded="false" aria-controls="pokerV2ReactionMenu" hidden><span aria-hidden="true">🙂</span></button>
               <div class="poker-reaction-menu" id="pokerV2ReactionMenu" role="menu" aria-label="Reactions" hidden></div>

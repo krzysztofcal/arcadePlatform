@@ -55,6 +55,9 @@ register("DEBUG", "janitor", [
   "ws_table_janitor_evaluation_coalesced"
 ]);
 
+register("WARN", "accounting", ["ws_gift_purchase_rejected"]);
+register("WARN", "recovery", ["ws_gift_state_unavailable"]);
+
 register("DEBUG", "persistence", [
   "ws_state_persist_result",
   "ws_state_persist_start",

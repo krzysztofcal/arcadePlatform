@@ -71,6 +71,7 @@ const run = async () => {
     };
     sqlTx.unsafe = async (query, params = []) => {
       const text = String(query).toLowerCase();
+      if (text.includes("system_key = any")) return executeSql(query, params);
       if (text.startsWith("savepoint") || text.startsWith("release savepoint") || text.startsWith("rollback to savepoint")) return [];
       if (text.includes("update public.chips_transaction_idempotency")) {
         const record = state.registry.get(params[0]);
@@ -139,6 +140,19 @@ const run = async () => {
   assert.deepEqual(replay.entries, []);
   assert.equal(replay.account, null);
   assert.equal(state.userAccountsCreated, 1);
+  // #1042: canonical BURN uses the caller transaction and only USER -> GENESIS.
+  state.accounts.set('acct-genesis', { id: 'acct-genesis', account_type: 'SYSTEM', system_key: 'GENESIS', status: 'active', balance: -1000 });
+  const burn = { userId, txType: 'BURN', idempotencyKey: 'gift-burn-1', createdBy: userId,
+    entries: [{ accountType: 'USER', userId, amount: -25 }, { accountType: 'SYSTEM', systemKey: 'GENESIS', amount: 25 }] };
+  const beforeUser = state.accounts.get(`acct-user-${userId}`).balance;
+  const beforeEscrow = state.accounts.get('acct-escrow').balance;
+  const first = await beginSql((tx) => postTransaction({ ...burn, tx }));
+  assert.equal(first.transaction.tx_type, 'BURN');
+  assert.deepEqual(first.entries.map(entry => [entry.account_id, entry.amount]), [[`acct-user-${userId}`, -25], ['acct-genesis', 25]]);
+  assert.equal(first.entries.reduce((sum, entry) => sum + entry.amount, 0), 0);
+  assert.equal(state.accounts.get(`acct-user-${userId}`).balance, beforeUser - 25);
+  assert.equal(state.accounts.get('acct-genesis').balance, -975);
+  assert.equal(state.accounts.get('acct-escrow').balance, beforeEscrow);
 };
 
 const runSavepointIsolationTests = async () => {

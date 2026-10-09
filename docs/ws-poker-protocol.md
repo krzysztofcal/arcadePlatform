@@ -392,3 +392,19 @@ Client resync expectation:
 - `table_join`/`join`, `start_hand`, and `act` are WS-only gameplay writes for browser runtime
 - client must not replay rejected or failed WS gameplay writes over HTTP fallback for the same operation
 - accepted gameplay writes must converge UI from WS `table_state` / `stateSnapshot` / `table_snapshot` data, not from HTTP write responses
+
+### Poker Gift Shop V1 (#1042)
+
+`gift_send` is a protected requestId-required command. Payload: `{ tableId, giftKey, targetSeatNo }` only. Buyer must have identityMode `user`, be associated with the table and occupy an ACTIVE human seat. Other human and bot recipients are valid. A new self-gift purchase is rejected as `gift_target_unavailable` before the ledger write (zero BURN/receipt). Catalog prices are authoritative: coffee 10, beer 25, whisky 50, pizza 100, cake 250, diamond 1000 CH. Per-buyer/table cooldown is 3000 ms. Client prices, recipient IDs and payment references are rejected.
+
+The existing `commandResult` reports accepted/rejected. Rejections use `gift_shop_unavailable`, `gift_invalid`, `gift_target_unavailable`, `gift_rate_limited`, `gift_insufficient_chips`, `gift_idempotency_conflict`, `gift_purchase_failed`, `not_seated`, or `invalid_sender`. Reuse requestId after uncertain transport failure. Exact replay burns no additional CH, returns accepted and broadcasts current `table_gift_state`, without another `table_gift` or animation; changed gift/target is a conflict.
+
+Additive, non-stream frames (normal envelope, table roomId):
+
+- `table_gift`: `{ eventId, senderSeatNo, recipientSeatNo, giftKey }`. Clients dedupe the stable receipt UUID with a bounded set.
+- `table_gift_state`: `{ seats: [{ seatNo, userId, gifts: [{ giftKey, count }], recentGifts: [{ eventId, giftKey }] }] }`. Replaces cosmetic aggregates after authenticated join/subscription/resync/resume. Receipts attach only to current ACTIVE recipient user/seat/exact joined_at. Accepted joins refresh all associated table clients, including observers of same-user rejoin. Each successful purchase/replay is followed by this frame to reconcile clients that recovered counts before retrying.
+
+Gifts never enter gameplay state, snapshots or streamLog. File-backed and guest purchase paths fail closed without DB writes. CH BURN and durable receipt commit in one transaction: USER -price, SYSTEM/GENESIS +price, no recipient credit.
+
+
+Persistent Gift HUD correction: `gifts` retains the legacy per-type aggregate. Additive `recentGifts` contains at most three purchases (duplicates allowed), newest first by receipt `created_at DESC, id DESC`; `userId` identifies the current recipient. New HUD replaces slots from this list, rejects summaries for a changed occupant and retains state through hand renders; older clients may continue reading `gifts`. Recovery uses exact recipient user/seat/joined_at, with SQL-bound text timestamps preserving microseconds at purchase. No stream/replay/purchase command or cooldown/accounting change. Historical malformed millisecond-only receipts are not approximately matched to another participation.

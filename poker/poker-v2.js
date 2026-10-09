@@ -581,6 +581,19 @@
     potAmount.textContent = 'DEMO Monster Pot · ' + formatNumber(1250) + ' CH';
     panel.appendChild(streakCount);
     panel.appendChild(potAmount);
+    var giftDemoLabel = document.createElement('label');
+    var giftDemoToggle = document.createElement('input');
+    giftDemoToggle.type = 'checkbox';
+    giftDemoLabel.appendChild(giftDemoToggle);
+    giftDemoLabel.appendChild(document.createTextNode(' Show demo gifts on hero — DEMO / Visual only'));
+    panel.appendChild(giftDemoLabel);
+    els.heroGiftDemoToggle = giftDemoToggle;
+    giftDemoToggle.addEventListener('change', function(){
+      var hero = giftDemoHeroSeat();
+      heroGiftDemo = giftDemoToggle.checked && hero
+        ? { tableId: state.tableId, seatNo: hero.seatNo, userId: hero.userId } : null;
+      renderGiftBadges();
+    });
     [
       { kind: 'hand', title: 'STRAIGHT', label: 'Straight', cards: ['2S', '3H', '4D', '5C', '6S'] },
       { kind: 'hand', title: 'FLUSH', label: 'Flush', cards: ['2S', '5S', '8S', '10S', 'QS'] },
@@ -3948,20 +3961,20 @@
   // Physical variants: top, upper right, lower right, hero, lower left, upper left.
   var seatSceneGeometry = {
     portrait: { width:360, height:650, seats:[
-      {avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
-      {avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
-      {avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
-      {avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
-      {avatar:[38,410],stack:[82,488],bet:[102,389],dealer:[90,370]},
-      {avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
+      {gifts:[88,162,-1],avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
+      {gifts:[238,234],avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
+      {gifts:[290,440],avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
+      {gifts:[198,520],avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
+      {gifts:[117,440],avatar:[38,410],stack:[82,488],bet:[102,389],dealer:[90,370]},
+      {gifts:[118,260],avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[472,12],compactTransient:[642,110],stack:[445,104],bet:[430,148],dealer:[402,92]},
-      {avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[906,155]},
-      {avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
-      {avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
-      {avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
-      {avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
+      {gifts:[387,132],avatar:[472,12],compactTransient:[642,110],stack:[445,104],bet:[430,148],dealer:[402,92]},
+      {gifts:[782,192],avatar:[906,65],stack:[820,154],bet:[772,169],dealer:[906,155]},
+      {gifts:[838,258],avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
+      {gifts:[276,278],avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
+      {gifts:[193,266],avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
+      {gifts:[283,178],avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
     ]}
   };
   var seatSceneOrientation = 'portrait';
@@ -3983,7 +3996,10 @@
     var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
     var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
     if (!Number.isFinite(scale) || scale <= 0) return;
-    if (els.screen) els.screen.style.setProperty('--poker-scene-scale', String(scale));
+    if (els.screen){
+      els.screen.style.setProperty('--poker-scene-scale', String(scale));
+      els.screen.style.setProperty('--poker-quick-gift-hit-size', Math.max(24,30/scale) + 'px');
+    }
     els.scene.dataset.orientation = seatSceneOrientation;
     els.scene.style.width = geometry.width + 'px';
     els.scene.style.height = geometry.height + 'px';
@@ -3991,6 +4007,7 @@
     if (seatSceneOrientation === 'landscape' && window.innerHeight <= 500) sceneTop = (geometry.height / 2 + topSafeArea) * scale;
     els.scene.style.top = sceneTop + 'px';
     els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
+    positionQuickGiftPicker();
   }
 
   function seatPhysicalSlot(index, total){
@@ -4022,10 +4039,16 @@
     var leftSide = slot === 4 || slot === 5;
     var rightSide = slot === 1 || slot === 2;
     var edge = leftSide ? corner : -corner;
-    var quick = [config.avatar[0] + (rightSide ? -corner : corner),config.avatar[1] + (hero ? 12 : 8)];
+    var quick = [config.avatar[0] + (rightSide ? -1 : 1) * (hud.avatarSize / 2 + 10),config.avatar[1] - 16];
     var marker = [config.avatar[0] + edge,config.avatar[1] + (hero ? 20 : leftSide || rightSide ? 48 : 28)];
     hud.marker = marker;
-    placeSeatNode(hud.quickAction,{origin:[0,0]},quick,16,16);
+    // Preserve the shared reaction anchor; only Gift owns the avatar-edge position.
+    var actionPoint = [config.avatar[0] + (rightSide ? -corner : corner),config.avatar[1] + (hero ? 12 : 8)];
+    placeSeatNode(hud.quickAction,{origin:[0,0]},actionPoint,16,16);
+    hud.quickGiftPoint = [quick[0]-actionPoint[0]+8,quick[1]-actionPoint[1]+8];
+    hud.quickAction.style.setProperty('--poker-quick-gift-pad-left', rightSide ? 'calc(var(--poker-quick-gift-hit-size,24px) - 24px)' : '0px');
+    // Northern landscape controls share the existing 24px scene top reserve.
+    hud.quickAction.style.setProperty('--poker-quick-gift-height-limit', !portrait && slot === 0 ? '32px' : '999px');
     hud.cardPoint = hero ? config.cards : [config.avatar[0] + edge,config.avatar[1] + (leftSide || rightSide ? 28 : 8)];
     placeSeatNode(hud.cards,hud,hud.cardPoint,hero ? 110 : 36,hero ? 80 : 30);
     placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
@@ -4047,11 +4070,10 @@
     var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(config.avatar[0], geometry.width - reactionWidth / 2 - 8));
     hud.social.style.setProperty('--poker-reaction-width', reactionWidth + 'px');
     hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - config.avatar[0]) + 'px');
-    var radius = portrait ? 52 : 58;
-    var giftAngles = leftSide ? [-100,-60,-20] : rightSide ? [-160,-120,-80] : [-150,-90,-30];
-    giftAngles.forEach(function(angle,index){
-      var radians=angle*Math.PI/180;
-      placeSeatNode(hud.gifts.children[index],hud,[config.avatar[0]+Math.cos(radians)*radius,config.avatar[1]+Math.sin(radians)*radius],16,16);
+    // Three receipt objects stand on a fixed tabletop patch, independent of avatar actions.
+    [0,1,2].forEach(function(index){
+      placeSeatNode(hud.gifts.children[index],hud,[config.gifts[0]+index*12*(config.gifts[2] || 1),config.gifts[1]+index*5],22,22);
+      hud.gifts.children[index].style.zIndex = String(3-index);
     });
   }
 
@@ -4478,9 +4500,356 @@
     container.appendChild(cards);
   }
 
+  var giftCatalog = [
+    { key: 'coffee', emoji: '☕', price: 10 }, { key: 'beer', emoji: '🍺', price: 25 },
+    { key: 'whisky', emoji: '🥃', price: 50 }, { key: 'pizza', emoji: '🍕', price: 100 },
+    { key: 'cake', emoji: '🎂', price: 250 }, { key: 'diamond', emoji: '💎', price: 1000 }
+  ];
+  var giftsBySeat = {};
+  var giftOwners = {};
+  var giftEventIds = new Set();
+  var giftAnimationQueue = [];
+  var giftAnimationTimer = null;
+  var giftTableId = null;
+  var giftNoticeTimer = null;
+  var giftPending = false;
+  var giftRetry = null;
+  var quickGiftTarget = null;
+  var heroGiftDemo = null;
+  function giftByKey(key){ return giftCatalog.filter(function(gift){ return gift.key === key; })[0] || null; }
+  function giftName(gift){ return t('pokerGift_' + gift.key, gift.key); }
+  function giftEligibleSeats(){ return state.seats.filter(function(seat){ return seat && seat.userId && !isCurrentUserSeat(seat) && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''); }); }
+  function giftShopBlockReason(){
+    if (isGuestMode || !isSignedIn()) return 'sign_in_required';
+    if (isClosedTableStatus(state.tableStatus)) return 'table_closed';
+    if (state.reconnectGate) return 'reconnecting';
+    if (!isWsReady()) return 'ws_not_ready';
+    var seat = state.seats.filter(function(entry){ return entry && entry.userId && entry.userId === state.currentUserId; })[0];
+    return !seat || seat.isBot || /LEFT|INACTIVE|EMPTY/.test(seat.status || '') ? 'seat_not_active' : null;
+  }
+  function giftShopAvailable(){ return !giftShopBlockReason(); }
+  function giftDemoHeroSeat(){
+    var build = window.BUILD_INFO;
+    if (!build || build.context !== 'deploy-preview' || build.isPreview !== true
+      || !state.tableId || isClosedTableStatus(state.tableStatus) || state.reconnectGate || !state.wsReady) return null;
+    return state.seats.filter(function(seat){
+      return seat && seat.userId && seat.userId === state.currentUserId && !/LEFT|INACTIVE|EMPTY/.test(seat.status || '');
+    })[0] || null;
+  }
+  function clearHeroGiftDemo(){ heroGiftDemo = null; renderGiftBadges(); }
+  function renderGiftBadges(){
+    var hero = giftDemoHeroSeat();
+    if (heroGiftDemo && (!hero || heroGiftDemo.tableId !== state.tableId
+      || heroGiftDemo.seatNo !== hero.seatNo || heroGiftDemo.userId !== hero.userId)) heroGiftDemo = null;
+    if (els.heroGiftDemoToggle){
+      els.heroGiftDemoToggle.checked = !!heroGiftDemo;
+      els.heroGiftDemoToggle.disabled = !hero;
+    }
+    state.seats.forEach(function(seat){
+      var hud = renderedSeatHud[seat.seatNo];
+      if (!hud || !seat.userId) return;
+      var demo = !!heroGiftDemo && seat.seatNo === heroGiftDemo.seatNo && seat.userId === heroGiftDemo.userId;
+      var gifts = demo ? [{giftKey:'beer'},{giftKey:'pizza'},{giftKey:'whisky'}] : giftsBySeat[seat.seatNo] || [];
+      if (hud.nameNode){
+        if (demo) hud.nameNode.dataset.giftDemo = 'true';
+        else delete hud.nameNode.dataset.giftDemo;
+      }
+      Array.prototype.forEach.call(hud.gifts.children, function(slot, index){
+        var gift = gifts[index] && giftByKey(gifts[index].giftKey);
+        slot.textContent = gift ? gift.emoji : '';
+        slot.title = gift ? (demo ? 'DEMO / Visual only · ' : '') + giftName(gift) : '';
+      });
+    });
+  }
+  function syncGiftOwners(){
+    if (giftTableId !== state.tableId) { giftsBySeat = {}; giftOwners = {}; giftEventIds.clear(); giftAnimationQueue = []; giftRetry = null; giftTableId = state.tableId; quickGiftTarget = null; }
+    var owners = {};
+    state.seats.forEach(function(seat){ if (seat && seat.userId && !/LEFT|INACTIVE|EMPTY/.test(seat.status || '')) owners[seat.seatNo] = seat.userId; });
+    Object.keys(giftOwners).forEach(function(seatNo){ if (giftOwners[seatNo] !== owners[seatNo]) delete giftsBySeat[seatNo]; });
+    giftOwners = owners;
+    if (giftRetry && owners[giftRetry.seatNo] !== giftRetry.userId) {
+      if (els.giftRecipient && els.giftRecipient.dataset.value === String(giftRetry.seatNo)) els.giftRecipient.dataset.value = '';
+      giftRetry = null;
+    }
+    if (quickGiftTarget && owners[quickGiftTarget.seatNo] !== quickGiftTarget.userId) {
+      quickGiftTarget = null;
+    }
+  }
+  function applyTableGiftState(payload){
+    if (!payload || !Array.isArray(payload.seats)) return;
+    syncGiftOwners();
+    giftsBySeat = {};
+    payload.seats.forEach(function(seat){
+      if (!Number.isInteger(seat.seatNo) || !giftOwners[seat.seatNo]
+          || (seat.userId && seat.userId !== giftOwners[seat.seatNo])) return;
+      var recent = Array.isArray(seat.recentGifts) ? seat.recentGifts : (Array.isArray(seat.gifts) ? seat.gifts : []);
+      giftsBySeat[seat.seatNo] = recent.filter(function(gift){ return gift && giftByKey(gift.giftKey); }).slice(0, 3);
+      giftsBySeat[seat.seatNo].forEach(function(gift){ if (gift.eventId) giftEventIds.add(gift.eventId); });
+    });
+    while (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
+    renderGiftBadges();
+  }
+  function playNextGift(){
+    if (giftAnimationTimer || !giftAnimationQueue.length) return;
+    var event = giftAnimationQueue.shift();
+    var gift = giftByKey(event.giftKey);
+    var sender = renderedSeatAvatars[event.senderSeatNo];
+    var recipient = renderedSeatAvatars[event.recipientSeatNo];
+    if (!sender || !recipient || !gift) { playNextGift(); return; }
+    var node = document.createElement('span');
+    node.className = 'poker-gift-fly';
+    node.textContent = gift.emoji;
+    node.setAttribute('aria-hidden', 'true');
+    var from = sender.getBoundingClientRect();
+    var to = recipient.getBoundingClientRect();
+    node.style.left = (from.left + from.width / 2) + 'px';
+    node.style.top = (from.top + from.height / 2) + 'px';
+    node.style.setProperty('--gift-x', (to.left + to.width / 2 - from.left - from.width / 2) + 'px');
+    node.style.setProperty('--gift-y', (to.top + to.height / 2 - from.top - from.height / 2) + 'px');
+    document.body.appendChild(node);
+    giftAnimationTimer = setTimeout(function(){ node.remove(); giftAnimationTimer = null; playNextGift(); }, 800);
+  }
+  function handleTableGift(event){
+    var gift = event && giftByKey(event.giftKey);
+    if (!gift || typeof event.eventId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(event.eventId)
+        || !Number.isInteger(event.senderSeatNo) || !Number.isInteger(event.recipientSeatNo) || giftEventIds.has(event.eventId)) return;
+    giftEventIds.add(event.eventId);
+    if (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
+    syncGiftOwners();
+    if (!giftOwners[event.recipientSeatNo]) return;
+    var recent = giftsBySeat[event.recipientSeatNo] || [];
+    giftsBySeat[event.recipientSeatNo] = [{ eventId: event.eventId, giftKey: event.giftKey }].concat(recent).slice(0, 3);
+    renderGiftBadges();
+    if (els.giftNotice) {
+      els.giftNotice.textContent = gift.emoji + ' ' + t('pokerGiftSent', 'Gift sent') + ' · S' + event.recipientSeatNo;
+      els.giftNotice.hidden = false;
+      clearTimeout(giftNoticeTimer);
+      giftNoticeTimer = setTimeout(function(){ els.giftNotice.hidden = true; }, 2200);
+    }
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (giftAnimationQueue.length < 8) giftAnimationQueue.push(event);
+    playNextGift();
+  }
+  function syncGiftShop(){
+    if (!els.giftShopButton) return;
+    syncGiftOwners();
+    var available = giftShopAvailable();
+    var locked = isGuestMode || !isSignedIn();
+    var copy = locked ? t('pokerGiftSignInRequired', 'Gift Shop is available only to signed-in players') : t('pokerGiftShop', 'Gift Shop');
+    els.giftShopButton.hidden = !locked && !available;
+    els.giftShopButton.classList.toggle('poker-gift-shop-button--locked', locked);
+    els.giftShopButton.setAttribute('aria-disabled', String(!available));
+    els.giftShopButton.title = copy;
+    els.giftShopButton.setAttribute('aria-label', copy);
+    els.giftShop.setAttribute('aria-busy', String(giftPending));
+    syncQuickGifts();
+    if (!available) { els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); }
+    giftCatalog.forEach(function(gift){
+      var button = els.giftSelect.querySelector('[data-gift-key="' + gift.key + '"]');
+      button.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH';
+      button.setAttribute('aria-pressed', String(els.giftSelect.dataset.value === gift.key));
+      button.disabled = !available || giftPending;
+    });
+    var seats = giftEligibleSeats();
+    Array.prototype.slice.call(els.giftRecipient.children).forEach(function(button){
+      if (!seats.some(function(seat){ return String(seat.seatNo) === button.dataset.seatNo && String(seat.userId) === button.dataset.userId; })) {
+        if (els.giftRecipient.dataset.value === button.dataset.seatNo) els.giftRecipient.dataset.value = '';
+        if (giftRetry && String(giftRetry.seatNo) === button.dataset.seatNo) giftRetry = null;
+        button.remove();
+      }
+    });
+    if (els.giftRecipient.dataset.value && !seats.some(function(seat){ return String(seat.seatNo) === els.giftRecipient.dataset.value; })) els.giftRecipient.dataset.value = '';
+    if (giftRetry && !seats.some(function(seat){ return seat.seatNo === giftRetry.seatNo && seat.userId === giftRetry.userId; })) giftRetry = null;
+    seats.forEach(function(seat){
+      var seatNo = String(seat.seatNo);
+      var button = els.giftRecipient.querySelector('[data-seat-no="' + seatNo + '"]');
+      var avatar = document.createElement('span'); avatar.className = 'poker-gift-recipient__avatar'; avatar.setAttribute('aria-hidden', 'true');
+      renderSeatAvatar(avatar, seat);
+      if (!button) {
+        button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice poker-gift-recipient'; button.dataset.seatNo = seatNo; button.dataset.userId = String(seat.userId);
+        button.appendChild(avatar);
+        var label = document.createElement('span'); label.className = 'poker-gift-recipient__label'; button.appendChild(label);
+        els.giftRecipient.appendChild(button);
+      } else button.replaceChild(avatar, button.firstChild);
+      button.lastChild.textContent = getDisplayName(seat) + ' · S' + seatNo;
+      button.setAttribute('aria-pressed', String(els.giftRecipient.dataset.value === seatNo));
+      button.disabled = !available || giftPending;
+    });
+    els.giftSend.disabled = !available || giftPending || !giftByKey(els.giftSelect.dataset.value) || !els.giftRecipient.dataset.value;
+  }
+  function bindGiftShop(){
+    ['giftShopButton', 'giftShop', 'giftSelect', 'giftRecipient', 'giftSend', 'giftMessage', 'giftClose'].forEach(function(key){
+      var ids = { giftShopButton: 'pokerGiftShopButton', giftShop: 'pokerGiftShop', giftSelect: 'pokerGiftSelect', giftRecipient: 'pokerGiftRecipient', giftSend: 'pokerGiftSend', giftMessage: 'pokerGiftMessage', giftClose: 'pokerGiftClose' };
+      els[key] = document.getElementById(ids[key]);
+    });
+    if (!els.giftShopButton) return;
+    document.addEventListener('pointerdown', function(event){
+      if (quickGiftTarget === null) return;
+      if (event.target.closest('.poker-quick-gift-picker:not([hidden]),.poker-quick-gift-button')) return;
+      quickGiftTarget = null;
+      syncQuickGifts();
+    });
+    els.giftNotice = document.getElementById('pokerGiftNotice');
+    giftCatalog.forEach(function(gift){ var button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice'; button.dataset.giftKey = gift.key; els.giftSelect.appendChild(button); });
+    els.giftShopButton.addEventListener('click', function(){
+      syncGiftShop();
+      if (!giftShopAvailable()) return;
+      quickGiftTarget = null; syncQuickGifts();
+      els.giftShop.hidden = !els.giftShop.hidden;
+      els.giftShopButton.setAttribute('aria-expanded', String(!els.giftShop.hidden));
+      if (!els.giftShop.hidden) els.giftSelect.querySelector('button').focus();
+    });
+    function close(){ els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); els.giftShopButton.focus(); }
+    els.giftClose.addEventListener('click', close);
+    els.giftShop.addEventListener('keydown', function(event){ if (event.key === 'Escape') close(); });
+    els.giftSelect.addEventListener('click', function(event){
+      var button = event.target.closest('[data-gift-key]');
+      if (!button || button.disabled || !giftShopAvailable()) return;
+      if (els.giftSelect.dataset.value !== button.dataset.giftKey) giftRetry = null;
+      els.giftSelect.dataset.value = button.dataset.giftKey; syncGiftShop();
+    });
+    els.giftRecipient.addEventListener('click', function(event){
+      var button = event.target.closest('[data-seat-no]');
+      if (!button || button.disabled || !giftShopAvailable()) return;
+      if (els.giftRecipient.dataset.value !== button.dataset.seatNo) giftRetry = null;
+      els.giftRecipient.dataset.value = button.dataset.seatNo; syncGiftShop();
+    });
+    els.giftSend.addEventListener('click', function(){
+      if (els.giftSend.disabled) return;
+      sendSelectedGift(els.giftSelect.dataset.value, Number(els.giftRecipient.dataset.value));
+    });
+  }
+
+  function sendSelectedGift(key, seatNo){
+    var blocked = giftShopBlockReason();
+    if (giftPending || !wsClient || blocked || !giftByKey(key)) {
+      klog('poker_gift_send_blocked', { tableId: state.tableId, targetSeatNo: seatNo, reason: giftPending ? 'pending' : blocked || 'gift_invalid', wsReady: isWsReady(), reconnectGate: !!state.reconnectGate });
+      return;
+    }
+    var recipient = giftEligibleSeats().filter(function(seat){ return seat.seatNo === seatNo; })[0];
+    if (!recipient || (giftRetry && giftRetry.seatNo === seatNo && giftRetry.userId !== recipient.userId)) {
+      klog('poker_gift_send_blocked', { tableId: state.tableId, targetSeatNo: seatNo, reason: 'target_unavailable' });
+      syncGiftShop();
+      return;
+    }
+    var retry = giftRetry && giftRetry.key === key && giftRetry.seatNo === seatNo && giftRetry.userId === recipient.userId
+      ? giftRetry : { key: key, seatNo: seatNo, userId: recipient.userId, requestId: 'gift_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10) };
+    giftRetry = retry;
+    giftPending = true; syncGiftShop();
+    wsClient.sendGift(key, seatNo, retry.requestId).then(function(){
+      giftRetry = null; quickGiftTarget = null;
+      els.giftMessage.textContent = t('pokerGiftSent', 'Gift sent');
+      document.dispatchEvent(new CustomEvent('chips:tx-complete'));
+    }).catch(function(error){
+      var messages = { gift_insufficient_chips: 'pokerGiftInsufficient', gift_rate_limited: 'pokerGiftRateLimited', gift_target_unavailable: 'pokerGiftTargetUnavailable', gift_shop_unavailable: 'pokerGiftUnavailable' };
+      var seat = state.seats.filter(function(entry){ return entry && entry.userId && entry.userId === state.currentUserId; })[0];
+      klog('poker_gift_purchase_failed', { tableId: state.tableId, targetSeatNo: seatNo, code: error.code || 'unknown', wsReady: isWsReady(), reconnectGate: !!state.reconnectGate, seatStatus: seat && seat.status || 'absent', availability: giftShopBlockReason() });
+      if (error.code === 'ws_unavailable' || error.code === 'ws_closed') messages[error.code] = 'pokerLobbyReconnecting';
+      els.giftMessage.textContent = t(messages[error.code] || 'pokerGiftFailed', 'Gift purchase failed');
+      if (els.giftShop.hidden && els.giftNotice) {
+        els.giftNotice.textContent = els.giftMessage.textContent; els.giftNotice.hidden = false;
+        clearTimeout(giftNoticeTimer);
+        giftNoticeTimer = setTimeout(function(){ els.giftNotice.hidden = true; }, 4000);
+      }
+      // Preserve the request identity after uncertain transport failure; a retry cannot charge twice.
+      if ((String(error.code || '').indexOf('gift_') === 0 && error.code !== 'gift_purchase_failed') || error.code === 'not_seated' || error.code === 'invalid_sender') giftRetry = null;
+    }).then(function(){ giftPending = false; syncGiftShop(); });
+  }
+
+  function syncQuickGifts(){
+    var available = giftShopAvailable();
+    var eligible = giftEligibleSeats();
+    state.seats.forEach(function(seat){
+      var hud = renderedSeatHud[seat.seatNo];
+      if (!hud) return;
+      var allowed = available && eligible.indexOf(seat) !== -1;
+      var button = hud.quickAction.querySelector('.poker-quick-gift-button');
+      var picker = hud.quickPicker;
+      if (!allowed) { if (button) button.hidden = true; if (picker) picker.hidden = true; return; }
+      if (!button){
+        button = document.createElement('button');
+        button.type = 'button'; button.className = 'poker-quick-gift-button'; button.textContent = '🎁';
+        button.setAttribute('aria-label', t('pokerGiftShop', 'Gift Shop') + ' · ' + getDisplayName(seat));
+        button.setAttribute('aria-haspopup', 'true');
+        picker = document.createElement('div');
+        picker.className = 'poker-gift-picker poker-quick-gift-picker';
+        picker.tabIndex = -1;
+        var heading = document.createElement('strong');
+        heading.className = 'poker-quick-gift-picker__heading';
+        picker.appendChild(heading);
+        giftCatalog.forEach(function(gift){
+          var choice = document.createElement('button');
+          choice.type = 'button'; choice.className = 'poker-gift-choice';
+          ['emoji', 'name', 'price'].forEach(function(part){
+            var value = document.createElement('span');
+            value.className = 'poker-quick-gift-choice__' + part;
+            value.textContent = part === 'emoji' ? gift.emoji : part === 'name' ? giftName(gift) : formatNumber(gift.price) + ' CH';
+            choice.appendChild(value);
+          });
+          choice.addEventListener('click', function(){ sendSelectedGift(gift.key, seat.seatNo); });
+          picker.appendChild(choice);
+        });
+        button.addEventListener('click', function(){
+          if (!giftShopAvailable() || giftPending) return;
+          var same = quickGiftTarget && quickGiftTarget.seatNo === seat.seatNo && quickGiftTarget.userId === seat.userId;
+          quickGiftTarget = same ? null : { seatNo: seat.seatNo, userId: seat.userId };
+          if (!same) {
+            if (giftRetry && giftRetry.seatNo !== seat.seatNo) giftRetry = null;
+            els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false');
+          }
+          syncQuickGifts();
+          if (!picker.hidden) picker.querySelector('button').focus();
+        });
+        picker.addEventListener('keydown', function(event){
+          if (event.key === 'Escape') { quickGiftTarget = null; syncQuickGifts(); button.focus(); }
+        });
+        hud.quickAction.appendChild(button);
+        hud.quickPicker = picker;
+        document.body.appendChild(picker);
+      }
+      placeSeatNode(button,{origin:[0,0]},hud.quickGiftPoint);
+      var open = quickGiftTarget && quickGiftTarget.seatNo === seat.seatNo && quickGiftTarget.userId === seat.userId;
+      button.hidden = false; button.disabled = giftPending;
+      button.setAttribute('aria-expanded', String(!!open));
+      picker.hidden = !open;
+      picker.firstChild.textContent = (document.documentElement.lang === 'pl' ? 'Prezent dla: ' : 'Gift for: ') + getDisplayName(seat) + ' · S' + seat.seatNo;
+      Array.prototype.forEach.call(picker.querySelectorAll('button'), function(choice){ choice.disabled = giftPending; });
+    });
+    if (!available) quickGiftTarget = null;
+    positionQuickGiftPicker();
+  }
+
+  function positionQuickGiftPicker(){
+    if (!quickGiftTarget) return;
+    var hud = renderedSeatHud[quickGiftTarget.seatNo];
+    var picker = hud && hud.quickPicker;
+    if (!picker || picker.hidden) return;
+    var button = hud.quickAction.querySelector('.poker-quick-gift-button');
+    var trigger = button.getBoundingClientRect();
+    var action = els.actionBar && els.actionBar.getBoundingClientRect();
+    var bottom = action && action.width && action.height ? Math.min(window.innerHeight - 8, action.top - 8) : window.innerHeight - 8;
+    picker.style.maxHeight = Math.max(44, bottom - 8) + 'px';
+    var box = picker.getBoundingClientRect();
+    var left = trigger.right + 8 + box.width <= window.innerWidth - 8 ? trigger.right + 8
+      : trigger.left - box.width - 8 >= 8 ? trigger.left - box.width - 8 : trigger.left;
+    var top = trigger.bottom + 8 + box.height <= bottom ? trigger.bottom + 8
+      : trigger.top - box.height - 8 >= 8 ? trigger.top - box.height - 8 : bottom - box.height;
+    picker.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + 'px';
+    picker.style.top = Math.max(8, Math.min(top, bottom - box.height)) + 'px';
+  }
+
   function renderSeats(){
     if (!els.seatLayer) return;
+    var quickFocus = null;
+    Object.keys(renderedSeatHud).forEach(function(key){
+      var picker = renderedSeatHud[key].quickPicker;
+      if (picker && document.activeElement && picker.contains(document.activeElement)) {
+        quickFocus = { seatNo: key, userId: giftOwners[key], index: Array.prototype.indexOf.call(picker.querySelectorAll('button'), document.activeElement) };
+      }
+      if (picker) picker.remove();
+    });
     if (els.scene && els.scene.dataset) els.scene.dataset.pokerMaxSeats = String(state.maxSeats);
+    syncGiftOwners();
     clearReactionBubblesWithChangedOwners();
     clearTargetedReactionEffectsWithChangedOwners();
     clearBotAvatarReactions();
@@ -4650,6 +5019,7 @@
       nameOwner.dataset.seatNo = article.dataset.seatNo;
       nameOwner.dataset.userId = article.dataset.userId;
       placeSeatNode(name,{origin:[0,0]},hud.name,seatSceneOrientation === 'landscape' ? 104 : hero ? 88 : 76,seatSceneOrientation === 'landscape' ? 20 : 14);
+      hud.nameNode = name;
       nameOwner.appendChild(name);
       els.seatNameLayer.appendChild(nameOwner);
       if (seat && !visibleAction && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
@@ -4687,6 +5057,16 @@
       var reactionBubble = reactionBubblesBySeatNo[seatNo];
       if (reactionBubble) reactionBubble.animate = false;
     });
+    renderGiftBadges();
+    syncGiftShop();
+    if (quickFocus && giftOwners[quickFocus.seatNo] === quickFocus.userId){
+      var hud = renderedSeatHud[quickFocus.seatNo];
+      var picker = hud && hud.quickPicker;
+      if (picker && !picker.hidden){
+        var choice = picker.querySelectorAll('button')[quickFocus.index];
+        (choice && !choice.disabled ? choice : picker).focus();
+      }
+    }
   }
 
   function clearReactionRenderNodes(){
@@ -4715,8 +5095,13 @@
     }
     var hud = renderedSeatHud[seatNo];
     if (!hud) return;
-    hud.social.appendChild(anchorNode);
-    anchorNode.className = 'poker-seat-social-reaction';
+    var topAvatarReaction = seatSceneOrientation === 'landscape' && hud.config === seatSceneGeometry.landscape.seats[0];
+    (topAvatarReaction ? els.seatTransientLayer : hud.social).appendChild(anchorNode);
+    anchorNode.className = 'poker-seat-social-reaction' + (topAvatarReaction ? ' poker-seat-social-reaction--top-avatar' : '');
+    if (!topAvatarReaction){
+      anchorNode.removeAttribute('data-seat-anchor');
+      anchorNode.style.cssText = '';
+    }
     var bubbleNode = anchorNode.children && anchorNode.children[0];
     if (!bubbleNode){
       clearReactionBubble(seatNo);
@@ -4728,15 +5113,25 @@
     var floatingEmoji = anchorNode.children && anchorNode.children[1];
     if (reducedMotion){
       if (floatingEmoji && floatingEmoji.parentNode) floatingEmoji.parentNode.removeChild(floatingEmoji);
-      return;
+    } else {
+      if (!floatingEmoji){
+        floatingEmoji = document.createElement('span');
+        anchorNode.appendChild(floatingEmoji);
+      }
+      floatingEmoji.className = 'poker-seat-reaction-float';
+      floatingEmoji.setAttribute('aria-hidden', 'true');
+      floatingEmoji.textContent = reactionEntry.emoji;
     }
-    if (!floatingEmoji){
-      floatingEmoji = document.createElement('span');
-      anchorNode.appendChild(floatingEmoji);
+    if (topAvatarReaction){
+      placeSeatNode(anchorNode,{origin:[0,0]},hud.config.avatar,84);
+      var sceneRect = els.scene.getBoundingClientRect();
+      var scale = sceneRect.width / seatSceneGeometry.landscape.width;
+      var topbarBottom = els.liveTopbar ? els.liveTopbar.getBoundingClientRect().bottom : 0;
+      var visibleTop = Math.max(topbarBottom,els.sceneViewport.getBoundingClientRect().top,0) + 4;
+      var height = anchorNode.offsetHeight;
+      var top = Math.max(hud.config.avatar[1] - hud.avatarSize / 2 - 6 - height,(visibleTop - sceneRect.top) / scale);
+      anchorNode.style.top = (top + height / 2) + 'px';
     }
-    floatingEmoji.className = 'poker-seat-reaction-float';
-    floatingEmoji.setAttribute('aria-hidden', 'true');
-    floatingEmoji.textContent = reactionEntry.emoji;
   }
 
   function getReactionLayerDimensions(){
@@ -5951,6 +6346,7 @@
   }
 
   function leaveAndReturnToLobby(destination){
+    clearHeroGiftDemo();
     var leaveDestination = destination == null
       ? (pendingLeaveNavigation ? pendingLeaveDestination : '/poker/')
       : normalizeLeaveDestination(destination);
@@ -6260,6 +6656,7 @@
     els.menuSettings = document.getElementById('pokerMenuSettings');
     els.menuSignIn = document.getElementById('pokerMenuSignIn');
     els.menuGuestInfo = document.getElementById('pokerMenuGuestInfo');
+    bindGiftShop();
     els.socialSettingsPanel = document.getElementById('pokerSocialSettingsPanel');
     els.socialSettingsClose = document.getElementById('pokerSocialSettingsClose');
     els.reactionBubblesPreference = document.getElementById('pokerReactionBubblesPreference');
@@ -6432,6 +6829,7 @@
     resetQueuedPreactionState();
     state = createEmptyLiveState(tableId, null);
     state.statusText = LIVE_STATUS_COPY.auth;
+    markBootReady();
     render();
   }
 
@@ -6617,6 +7015,8 @@
       guestToken: isGuestMode && currentGuestSession ? currentGuestSession.token : null,
       getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
       klog: klog,
+      onGift: function(event){ if (gen === liveModeGeneration) handleTableGift(event); },
+      onGiftState: function(payload){ if (gen === liveModeGeneration) applyTableGiftState(payload); },
       onReaction: function(event){
         if (gen !== liveModeGeneration) return;
         handleTableReaction(event);
@@ -6629,6 +7029,7 @@
         if (gen !== liveModeGeneration) return;
         if (['hello_ack', 'minting_token', 'authenticating', 'reconnecting', 'resync', 'failed', 'error', 'closed'].indexOf(status) !== -1){
           clearCelebration();
+          clearHeroGiftDemo();
           resetWinStreakSession();
           if (els.celebrationPreview) els.celebrationPreview.hidden = true;
         }

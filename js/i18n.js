@@ -1,6 +1,24 @@
 // Minimal footer i18n + language toggle (PL/EN)
 (function(){
   const dict = {
+    pokerGiftShop: { en: 'Gift Shop', pl: 'Sklep z prezentami' },
+    pokerGiftSignInRequired: { en: 'Gift Shop is available only to signed-in players', pl: 'Sklep z prezentami dostępny tylko dla zalogowanych graczy' },
+    pokerGiftChoose: { en: 'Choose a gift', pl: 'Wybierz prezent' },
+    pokerGiftRecipient: { en: 'Recipient', pl: 'Odbiorca' },
+    pokerGiftSend: { en: 'Send', pl: 'Wyślij' },
+    pokerGiftSent: { en: 'Gift sent', pl: 'Prezent wysłany' },
+    pokerGiftInsufficient: { en: 'Not enough CH', pl: 'Za mało CH' },
+    pokerGiftRateLimited: { en: 'Wait 3 seconds before sending again', pl: 'Odczekaj 3 sekundy przed kolejnym prezentem' },
+    pokerGiftTargetUnavailable: { en: 'Recipient is no longer seated', pl: 'Odbiorca opuścił miejsce' },
+    pokerGiftUnavailable: { en: 'Gift Shop unavailable', pl: 'Sklep z prezentami jest niedostępny' },
+    pokerGiftFailed: { en: 'Gift purchase failed. Try again.', pl: 'Zakup nie powiódł się. Spróbuj ponownie.' },
+    pokerGift_coffee: { en: 'Coffee', pl: 'Kawa' },
+    pokerGift_beer: { en: 'Beer', pl: 'Piwo' },
+    pokerGift_whisky: { en: 'Whisky', pl: 'Whisky' },
+    pokerGift_pizza: { en: 'Pizza', pl: 'Pizza' },
+    pokerGift_cake: { en: 'Cake', pl: 'Tort' },
+    pokerGift_diamond: { en: 'Diamond', pl: 'Diament' },
+
     about: { en: 'About', pl: 'O serwisie' },
     licenses: { en: 'Licenses', pl: 'Licencje' },
     terms: { en: 'Terms', pl: 'Regulamin' },

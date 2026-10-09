@@ -63,8 +63,9 @@ The last already-applied Production migration, `20260813090000_chips_ledger_arch
 | `20261001200000_poker_demand_refill_caps.sql` | needs-production-equivalent | §32 nullable NORMAL/SLOW hourly caps and non-unique refill lookup. Prepared in the unapplied Production §32 contract; Production remains separate GO. |
 | `20261003183317_poker_demand_refill_core.sql` | needs-production-equivalent | §32 restricted demand refill core with the control retained as kill switch/identity guard; temporary Stage Cron wrapper remains only for cutover. Prepared in the unapplied Production §32 contract. |
 | `20261004073000_poker_demand_refill_scheduler_decommission.sql` | needs-production-equivalent | Final Stage §32 demand-only cutover: unschedule only `poker-bot-pool-refill-hourly` and drop only `public.poker_bot_pool_refill_hourly()`; preserve demand core, control and pg_cron extension. Production cleanup requires separate GO. |
+| `20261004220956_poker_gift_purchases.sql` | needs-production-equivalent | #1042 backend-only empty receipts, RLS, constraints, cooldown and participation indexes; prepared separately owner-gated Production equivalent. Zero CH/data mutation. |
 
-Totals: **32 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (53 missing source files).
+Totals: **33 needs-production-equivalent**, **18 shared-safe**, **3 stage-only** (54 missing source files).
 
 ## History and equivalence proof
 
@@ -585,3 +586,9 @@ Disposition: `needs-production-equivalent`, mapped to the existing prepared P2 `
 Source: [SQL](../../supabase/migrations/20261004073000_poker_demand_refill_scheduler_decommission.sql) · SHA256 `49263025f8e5827e3cf0c11e40712969dae1e76397afc4801fe9b5caf33d88c8`.
 
 Disposition: `needs-production-equivalent`; Production execution remains separately authorized. Stage removes only the exact `poker-bot-pool-refill-hourly` job and temporary hourly wrapper after accepted owner smoke. The demand core, `poker_bot_refill_control` kill switch/identity guard, `pg_cron` extension, balances, policies and ledger history are preserved.
+
+### 20261004220956 — #1042 Poker Gift Shop receipts
+
+Source: [SQL](../../supabase/migrations/20261004220956_poker_gift_purchases.sql) · SHA256 `f88f4f4707b681fee6ebba2bb62a57853478b4850d267c17e6b5c45621ac7608`.
+
+Disposition: `needs-production-equivalent`, mapped to `20261004222426_poker_gift_purchases_production_contract.sql`. Creates empty backend-only public.poker_gift_purchases with RLS/no client policies, stable receipt ID and unique purchase key, safe positive CH constraints, two narrow lookup indexes. No table/auth-user FK (audit survives cleanup; bot recipients supported). Intentional automatic Stage apply creates no receipts, transactions or CH changes. Production equivalent checks canonical project/system identity and is not applied without separate owner GO.
