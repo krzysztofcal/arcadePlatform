@@ -24,3 +24,25 @@ Six `<theme-id>-details.svg` files were authored for this review as deterministi
 - `midnight-sapphire-details.svg`: 1200×410, 7576 bytes, SHA-256 `bbf7b5ec8029216b3395474be0bacfba23039f40a1a84f06d77d0ad13009db14`.
 - `neon-vegas-details.svg`: 1200×410, 7909 bytes, SHA-256 `93dbbc5be1891b2bd35b87c1edb5b1b4046917584c0e648588ccd59a0782a89e`.
 - `royal-gold-details.svg`: 1200×410, 7439 bytes, SHA-256 `8f33bd64f587fff764453ccf6fc1d0f8c88e4149fb7f29cadfc2f9e88cb473c9`.
+
+## Royal Gold runtime checkpoint
+
+Seven local exports; Classic reuses the shipped assets unchanged. Raster exports use built-in OpenAI image generation, with the existing dealer as the identity/pose reference. Generated originals remain outside the published repository. Resized and encoded with the existing Sharp dependency; transparency preserved. Vectors authored originally for this project. Terms source remains the OpenAI terms link above; no third-party art pack is used.
+
+| Path under `poker/assets/themes/royal-gold/` | Dimensions | Bytes | SHA-256 | Source |
+|---|---|---:|---|---|
+| avatar-frame.svg | 100×100 | 487 | `813bdf37332bf495bce11755a8fa103f63adcddae171f072d0cf3f37e72cbc9c` | Original project vector |
+| card-back.svg | 100×140 | 515 | `4b70c3d3eb3b57c3211ed85864831a43701a9daeb9ae94e094fc000deb78912c` | Original project vector |
+| card-face.svg | 100×140 | 331 | `2ec38ff92fc784ce5d85022c1955b2c0793077a9f7cb3414f05aa7919b17534a` | Original project vector |
+| dealer.webp | 546×640 | 72014 | `3eaf2a6f46d8145a6b8dd1d85751c3a06dc2d9e734c265110caa3b8120c9622d` | OpenAI generated; Sharp export |
+| felt.svg | 512×512 | 480 | `1229631247d5cb926ca41d4bb9eff2c3ecdf6c4c332c0ceeaab847506cd7d0ff` | Original project vector |
+| rail.svg | 512×128 | 598 | `df0ccdd18821fa137ddc0ca1eb3ebc3b55c1f644224baee75075330eb075a8b3` | Original project vector |
+| room.webp | 1536×1024 | 172924 | `e8744b52964028d08fae14645638f3dab00e39b5d8f52fbc3b836563f96eb047` | OpenAI generated; Sharp export |
+
+Package total: **247349 bytes** (ceiling 962,560). Room 172,924 bytes ≤614,400; transparent dealer 72,014 bytes ≤225,280; surface and decorative vectors each below their group ceilings. Dealer export canvas 546×640 matches the original canvas and aspect ratio. Existing box dimensions, background positioning, clipping and normalized card-flight origin (0.5, 0.84) are unchanged; visually compared head/hands/deck registration at native scene size. Final owner acceptance remains pending.
+
+Generation prompts (built-in tool):
+- Room: empty black-marble and gold Art Deco private casino salon, warm crystal chandeliers, cinematic realistic illustration, dark unobstructed foreground for the existing table; no people/table/cards/chips/UI/text.
+- Dealer: costume-only edit of the existing adult dealer; preserve identity, face, hair, pose, hands and deck; modest champagne gold satin formal dress with thin straps, transparent canvas, identical registration.
+
+No remaining dealer variants are generated before owner acceptance of this checkpoint.

@@ -43,3 +43,14 @@ Independent verification: readable cards and UI, unchanged bounds, reduced motio
 ## Dependencies and Delivery Strategy
 
 T001→T002→T003/T004→T005→T006 is the design milestone. T006→T007→T008→T009→T010→T011→T012/T013/T014→T015→T016→T017 is implementation. The initial review deliverable is US1; the final V1 includes US1–US3 and all six complete packages. Art production for separate packages can be independent after approval; code edits stay sequential in the existing files. Do not ship a three-theme or felt-only substitute.
+
+## Approved Royal Gold implementation checkpoint
+
+The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 stay unchecked until all six packages and their evidence are complete.
+
+- [x] RG01 Produce seven optimized Royal Gold layers and record inventory/provenance/budgets in artwork.md.
+- [x] RG02 Implement page-local catalog, atomic requested-only loading, Classic reset, stale-load/error handling and accessible Theme chooser in existing Preview FX. Retain exact six catalog identities; four alternatives visibly unavailable until their art is produced after review.
+- [x] RG03 Apply scoped Royal Gold CSS, preserve geometry/live card text/FX gates, and verify local target viewports, build gates, error/race/reset, keyboard and reduced motion.
+- [x] RG04 Run existing syntax/CSP checks and independent checkpoint code/art review.
+- [ ] RG05 Verify exact-revision Deploy Preview and record live evidence.
+- [ ] RG06 Obtain owner inspection/acceptance of Royal Gold before generating remaining dealer variants.

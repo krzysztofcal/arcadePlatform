@@ -66,3 +66,7 @@ After implementation: `node --check poker/poker-v2.js`; `npm run check:csp-inlin
 ## Breaking Impact
 
 No intended breaking API, schema, gameplay, tier, layout or default presentation changes. Preview FX visibility expands for art review; existing celebration execution permissions are preserved. No Stage mutation, WS deployment, merge or Production rollout.
+
+## Implementation checkpoint ruling
+
+Execute the approval.md checkpoint before completing the entire Phase 3: Royal Gold assets and reusable catalog/chooser/CSS first; the other four non-default entries are disabled and explicitly labeled pending review until their complete packages exist. This avoids presenting placeholders as approved final art. Full T007–T017 remain incomplete. The existing authority/gameplay boundaries and Stage effects are unchanged. Actual diff Constitution Check: PASS; only poker presentation assets, existing JS/CSS and feature evidence change; no new suites, dependencies, inline scripts, backend/WS, migrations or generic setup changes.

@@ -35,3 +35,18 @@ GitHub comparison against baseline confirmed all 22 changed files are under `spe
 Only `specs/792-premium-table-themes/**` is changed. No breaking runtime/API/schema/layout changes, Stage effect, WS/protocol changes, dependencies or Production deployment. PR stays Draft; issue remains open.
 
 Concept illustrations redraw geometry and omit parts of action/HUD composition; they are approval references, not geometry evidence. Final per-layer exports, native-size readability/contrast, dealer head/hand registration, zero-displacement comparisons, Preview FX switching, live game smoke and final code review remain T007–T017 after owner approval. No completed-feature or merge-ready claim is made.
+
+## Royal Gold implementation checkpoint
+
+Scope: seven complete Royal Gold layers, a six-ID catalog with four pending alternatives disabled, and existing Preview FX extended for page-local art selection. Classic defaults remain inherited and reload/reset removes overrides. Full six-package completion is not claimed.
+
+Local Chromium with actual Poker V2 demo, temporary tooling outside the repository:
+- 390×844, 844×390, 1440×900: 16 selected protected element bounds before/after are identical (0 CSS-pixel displacement); no horizontal document overflow or page errors. Dealer hands/deck visually inspected against the unchanged default. Cards retain live rank/suit text and made-hand/turn cues.
+- Failed dealer request retains Classic and reports failure. Delayed Royal→Classic cannot apply stale artwork. Reload restores Classic. Missing BUILD_INFO, Production and false isPreview all omit the chooser.
+- Eight effect demo buttons remain disabled in unseated demo; existing effect click checks and gift eligibility remain unchanged. Theme selection creates only local static-art image loads; code has no storage, API, WS or account writes. Guest/live reconnect/dealing/showdown validation remains pending.
+- Native keyboard ArrowDown/Enter selects Royal Gold through Menu → Table settings → Preview FX at 390×844; chooser stays focused and live status announces application. Reduced-motion smoke completed with the same static switch.
+- Visual finding fixed: default SVG aspect-ratio letterboxing produced rectangular felt patches; felt/rail now stretch their surface texture inside the existing CSS border radii without changing DOM bounds.
+
+Existing checks: node --check poker/poker-v2.js PASS; npm run check:csp-inline PASS for 52 served documents. No new maintained test suite. Independent reviewer compared JS/CSS with live 5eef334f and found no critical/important issue; requested export inventory was completed in artwork.md. All seven assets total 247,295 bytes. No Stage/WS/Production changes.
+
+Owner must inspect final Royal Gold on Deploy Preview before other dealer variants are produced. Exact deployed revision, live verification and final acceptance are recorded separately below; final all-six native-size/contrast/live gameplay review remains pending.
