@@ -117,9 +117,9 @@ Extend existing gated bindCelebrationPreview with one unchecked,non-persisted ch
 
 Constitution: existing fundamental checks and temporary browser probes only,no committed UI/CSS suite,backend/protocol/schema/dependency/inline-script changes or WS deployment. Draft/manual FAIL remains until authenticated acceptance; ACTIVE recovery and Production GO pending.
 
-- [ ] HERO-T001 — Confirm rotated S6 physical slot; correct only matching portrait gift anchor.
+- [x] HERO-T001 — Confirm rotated S6 physical slot; correct only matching portrait gift anchor.
 - [x] HERO-T002 — Gated identity-bound hero visual demo/visible DEMO/restoration/cleanup, existing renderer only.
-- [ ] HERO-T003 — Existing fundamentals/checks,controlled Preview on/off/recovery/collision/hitbox verification,issue/SpecKit/Draft PR handoff.
+- [x] HERO-T003 — Existing fundamentals/checks,controlled Preview on/off/recovery/collision/hitbox verification,issue/SpecKit/Draft PR handoff.
 
 ## 2026-10-09 follow-up smoke — hero gifts / dealer / purchase diagnostics
 
@@ -130,12 +130,14 @@ Purchase investigation: deriveCurrentSeat can fabricate ACTIVE from stale youSea
 Constitution: existing fundamental tests/repo checks and temporary browser probes only. No new UI/CSS tests, dependencies, inline scripts, schema/backend/protocol changes. Required screenshots and authenticated acceptance remain pending, as do ACTIVE recovery/Production GO.
 
 - [x] LAYOUT-T001 — Correct hero portrait/landscape gifts and landscape dealer; verify DOM card source and collision bounds.
-- [ ] LAYOUT-T002 — Establish Helena physical slot from smoke screenshots and correct only its portrait gift anchor.
+- [x] LAYOUT-T002 — Establish Helena physical slot from smoke screenshots and correct only its portrait gift anchor.
 - [x] LAYOUT-T003 — Require actual hero gift eligibility; add minimal blocked/error klog and reconnect copy without retry/economy changes.
-- [ ] LAYOUT-T004 — Existing checks/tests, deployed Preview probe, issue/PR handoff, preserve Draft and pending gates.
+- [x] LAYOUT-T004 — Existing checks/tests, deployed Preview probe, issue/PR handoff, preserve Draft and pending gates.
 
 ## 2026-10-09 confirmed smoke mapping — Helena portrait
 
 User confirms maxSeats6,heroS4,HelenaS3,S6empty. Zero-based Helena index2/hero index3 gives rotateSeatIndex=(2−3+3+6)%6=2; seatPhysicalSlot(2,6)=2 (lower-right). Supersedes earlier unconfirmed S6 interpretation/missing mapping. Change ONLY portrait.seats[2].gifts [174,375]→[290,440], fixed three-item offsets unchanged. Preserve all accepted hero/dealer/drawing-source/readiness/demo changes and Quick Gift/reaction anchors/hitboxes. Verify actual published Preview in Chromium/Firefox portrait390×844 with Helena three gifts,heroS4,S6empty,active action bar,all dealer positions/playing/showdown; landscape844×390 regression. Existing fundamental tests/checks only,no UI/CSS tests/dependencies/inline scripts/protocol/economic changes. ee710913 incident cause remains unconfirmed; next rejection code/klog required. No WS redeploy/Production/merge; Draft and authenticated Stage/ACTIVE recovery/Production GO gates unchanged.
 
-- [ ] HELENA-T001 — Apply confirmed portrait slot2 anchor; verify published Preview collision bounds/screenshots and landscape; existing checks and issue/PR handoff.
+- [x] HELENA-T001 — Apply confirmed portrait slot2 anchor; verify published Preview collision bounds/screenshots and landscape; existing checks and issue/PR handoff.
+
+Earlier HERO-T001 S6 interpretation is superseded by confirmed HelenaS3/heroS4 mapping above; completion refers to portrait physical slot2, not seat-number hardcoding. Manual owner acceptance remains distinct from controlled probe PASS.
