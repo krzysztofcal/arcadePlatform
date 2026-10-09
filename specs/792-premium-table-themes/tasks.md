@@ -38,7 +38,7 @@ Independent verification: readable cards and UI, unchanged bounds, reduced motio
 
 - [x] T015 Re-run Constitution Check against actual diff and task list in `specs/792-premium-table-themes/plan.md`; run `node --check poker/poker-v2.js` and `npm run check:csp-inline`, document results in `review.md`; no new test suites.
 - [x] T016 Review final complete art/catalog/code for scope, simple reuse, default/preview gates, JSP/CSP/klog, geometry/readability and provenance; resolve findings in `review.md`.
-- [ ] T017 Verify current Draft PR Deploy Preview corresponds to latest deployable revision; record URL/SHA and any pending live smoke in `review.md`. Hand off without merge or Production deployment.
+- [x] T017 Verify current Draft PR Deploy Preview corresponds to latest deployable revision; record URL/SHA and any pending live smoke in `review.md`. Hand off without merge or Production deployment.
 
 ## Dependencies and Delivery Strategy
 
@@ -72,4 +72,4 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 
 ## Six-theme completion evidence
 
-All six packages implemented; RG06 accepted. T011/T013 remain partial only for authenticated live guest/spectator/reconnect/dealing/showdown/fold and comprehensive live-state contrast, to be inspected manually on Preview. Demo six-theme/error/race/reset/non-preview gates, protected geometry/card text, keyboard and reduced motion have been verified locally; exact-SHA Preview verification is T017. No new maintained test suites.
+All six packages implemented; RG06 accepted. T011/T013 remain partial only for authenticated live guest/spectator/reconnect/dealing/showdown/fold and comprehensive live-state contrast, to be inspected manually on Preview. Demo six-theme/error/race/reset/non-preview gates, protected geometry/card text, keyboard and reduced motion have been verified locally; exact-SHA Preview verification passed (T017), including all six packages, unchanged geometry/cards, error/race/reset/reload, keyboard/reduced motion, served raster hashes and native/high-DPI waist inspection. No new maintained test suites.
