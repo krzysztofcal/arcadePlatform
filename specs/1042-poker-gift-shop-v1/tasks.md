@@ -120,3 +120,16 @@ Constitution: existing fundamental checks and temporary browser probes only,no c
 - [ ] HERO-T001 — Confirm rotated S6 physical slot; correct only matching portrait gift anchor.
 - [x] HERO-T002 — Gated identity-bound hero visual demo/visible DEMO/restoration/cleanup, existing renderer only.
 - [ ] HERO-T003 — Existing fundamentals/checks,controlled Preview on/off/recovery/collision/hitbox verification,issue/SpecKit/Draft PR handoff.
+
+## 2026-10-09 follow-up smoke — hero gifts / dealer / purchase diagnostics
+
+Manual portrait/landscape layout remains FAIL. Correct portrait hero anchor slightly left/down, landscape hero above left best-hand cards and left of stack; shift landscape woman dealer left, retaining DOM-derived card-flight source. Helena mapping is pending screenshots absent from request; do not guess her seat/physical slot. Preserve Quick Gift/reaction hitboxes, demo lifecycle, receipt ordering/economy/protocol.
+
+Purchase investigation: deriveCurrentSeat can fabricate ACTIVE from stale youSeat; Gift Shop must require an actual occupied current-user seat, rejecting LEFT/INACTIVE/EMPTY. Reconnect/WS guards are expected safety gates; log attempted blocked sends and rejected purchases with table/target/code/readiness/reconnect/seat status via klog. Keep retry/requestId rules unchanged; reuse existing reconnect translation for ws_closed/ws_unavailable. No runtime WS change/deploy. Stage journal access attempt denied, so ee710913 incident cause not established.
+
+Constitution: existing fundamental tests/repo checks and temporary browser probes only. No new UI/CSS tests, dependencies, inline scripts, schema/backend/protocol changes. Required screenshots and authenticated acceptance remain pending, as do ACTIVE recovery/Production GO.
+
+- [x] LAYOUT-T001 — Correct hero portrait/landscape gifts and landscape dealer; verify DOM card source and collision bounds.
+- [ ] LAYOUT-T002 — Establish Helena physical slot from smoke screenshots and correct only its portrait gift anchor.
+- [x] LAYOUT-T003 — Require actual hero gift eligibility; add minimal blocked/error klog and reconnect copy without retry/economy changes.
+- [ ] LAYOUT-T004 — Existing checks/tests, deployed Preview probe, issue/PR handoff, preserve Draft and pending gates.

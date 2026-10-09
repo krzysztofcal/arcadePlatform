@@ -90,3 +90,11 @@ Manual smoke FAIL: S6 gifts too far from avatar in portrait; hero gifts lack con
 Extend existing gated bindCelebrationPreview with one unchecked,non-persisted checkbox “Show demo gifts on hero — DEMO / Visual only”. One local identity-bound state; renderGiftBadges selects beer/pizza/whisky only for actually occupied hero. Reuse three hud.gifts slots/geometric placement; mark visible hero name DEMO while active. Never mutate giftsBySeat/giftOwners/giftEventIds, create event IDs/receipts or call purchase/WS/backend. Turning off shows current real data. Clear on leave/table/user/seat changes and reconnect/recovery (participation boundary not exposed publicly); ordinary seat/hand renders retain demo. No changes to other players.
 
 Constitution: existing fundamental checks and temporary browser probes only,no committed UI/CSS suite,backend/protocol/schema/dependency/inline-script changes or WS deployment. Draft/manual FAIL remains until authenticated acceptance; ACTIVE recovery and Production GO pending.
+
+## 2026-10-09 follow-up smoke — hero gifts / dealer / purchase diagnostics
+
+Manual portrait/landscape layout remains FAIL. Correct portrait hero anchor slightly left/down, landscape hero above left best-hand cards and left of stack; shift landscape woman dealer left, retaining DOM-derived card-flight source. Helena mapping is pending screenshots absent from request; do not guess her seat/physical slot. Preserve Quick Gift/reaction hitboxes, demo lifecycle, receipt ordering/economy/protocol.
+
+Purchase investigation: deriveCurrentSeat can fabricate ACTIVE from stale youSeat; Gift Shop must require an actual occupied current-user seat, rejecting LEFT/INACTIVE/EMPTY. Reconnect/WS guards are expected safety gates; log attempted blocked sends and rejected purchases with table/target/code/readiness/reconnect/seat status via klog. Keep retry/requestId rules unchanged; reuse existing reconnect translation for ws_closed/ws_unavailable. No runtime WS change/deploy. Stage journal access attempt denied, so ee710913 incident cause not established.
+
+Constitution: existing fundamental tests/repo checks and temporary browser probes only. No new UI/CSS tests, dependencies, inline scripts, schema/backend/protocol changes. Required screenshots and authenticated acceptance remain pending, as do ACTIVE recovery/Production GO.

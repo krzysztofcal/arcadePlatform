@@ -3964,7 +3964,7 @@
       {gifts:[88,162,-1],avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
       {gifts:[238,234],avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
       {gifts:[174,375],avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
-      {gifts:[230,475],avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
+      {gifts:[198,520],avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
       {gifts:[117,440],avatar:[38,410],stack:[82,488],bet:[102,389],dealer:[90,370]},
       {gifts:[118,260],avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
     ]},
@@ -3972,7 +3972,7 @@
       {gifts:[387,132],avatar:[472,12],compactTransient:[642,110],stack:[445,104],bet:[430,148],dealer:[402,92]},
       {gifts:[757,120],avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[906,155]},
       {gifts:[838,258],avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
-      {gifts:[342,199],avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
+      {gifts:[276,278],avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
       {gifts:[193,266],avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
       {gifts:[283,178],avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
     ]}
@@ -4518,7 +4518,15 @@
   function giftByKey(key){ return giftCatalog.filter(function(gift){ return gift.key === key; })[0] || null; }
   function giftName(gift){ return t('pokerGift_' + gift.key, gift.key); }
   function giftEligibleSeats(){ return state.seats.filter(function(seat){ return seat && seat.userId && !isCurrentUserSeat(seat) && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''); }); }
-  function giftShopAvailable(){ var seat = deriveCurrentSeat(); return !isGuestMode && isSignedIn() && seat && !seat.isBot && isWsReady() && !state.reconnectGate; }
+  function giftShopBlockReason(){
+    if (isGuestMode || !isSignedIn()) return 'sign_in_required';
+    if (isClosedTableStatus(state.tableStatus)) return 'table_closed';
+    if (state.reconnectGate) return 'reconnecting';
+    if (!isWsReady()) return 'ws_not_ready';
+    var seat = state.seats.filter(function(entry){ return entry && entry.userId && entry.userId === state.currentUserId; })[0];
+    return !seat || seat.isBot || /LEFT|INACTIVE|EMPTY/.test(seat.status || '') ? 'seat_not_active' : null;
+  }
+  function giftShopAvailable(){ return !giftShopBlockReason(); }
   function giftDemoHeroSeat(){
     var build = window.BUILD_INFO;
     if (!build || build.context !== 'deploy-preview' || build.isPreview !== true
@@ -4706,9 +4714,14 @@
   }
 
   function sendSelectedGift(key, seatNo){
-    if (giftPending || !wsClient || !giftShopAvailable() || !giftByKey(key)) return;
+    var blocked = giftShopBlockReason();
+    if (giftPending || !wsClient || blocked || !giftByKey(key)) {
+      klog('poker_gift_send_blocked', { tableId: state.tableId, targetSeatNo: seatNo, reason: giftPending ? 'pending' : blocked || 'gift_invalid', wsReady: isWsReady(), reconnectGate: !!state.reconnectGate });
+      return;
+    }
     var recipient = giftEligibleSeats().filter(function(seat){ return seat.seatNo === seatNo; })[0];
     if (!recipient || (giftRetry && giftRetry.seatNo === seatNo && giftRetry.userId !== recipient.userId)) {
+      klog('poker_gift_send_blocked', { tableId: state.tableId, targetSeatNo: seatNo, reason: 'target_unavailable' });
       syncGiftShop();
       return;
     }
@@ -4722,6 +4735,9 @@
       document.dispatchEvent(new CustomEvent('chips:tx-complete'));
     }).catch(function(error){
       var messages = { gift_insufficient_chips: 'pokerGiftInsufficient', gift_rate_limited: 'pokerGiftRateLimited', gift_target_unavailable: 'pokerGiftTargetUnavailable', gift_shop_unavailable: 'pokerGiftUnavailable' };
+      var seat = state.seats.filter(function(entry){ return entry && entry.userId && entry.userId === state.currentUserId; })[0];
+      klog('poker_gift_purchase_failed', { tableId: state.tableId, targetSeatNo: seatNo, code: error.code || 'unknown', wsReady: isWsReady(), reconnectGate: !!state.reconnectGate, seatStatus: seat && seat.status || 'absent', availability: giftShopBlockReason() });
+      if (error.code === 'ws_unavailable' || error.code === 'ws_closed') messages[error.code] = 'pokerLobbyReconnecting';
       els.giftMessage.textContent = t(messages[error.code] || 'pokerGiftFailed', 'Gift purchase failed');
       if (els.giftShop.hidden && els.giftNotice) {
         els.giftNotice.textContent = els.giftMessage.textContent; els.giftNotice.hidden = false;
