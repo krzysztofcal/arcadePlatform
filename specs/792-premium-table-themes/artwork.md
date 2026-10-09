@@ -34,15 +34,21 @@ Seven local exports; Classic reuses the shipped assets unchanged. Raster exports
 | avatar-frame.svg | 100×100 | 487 | `813bdf37332bf495bce11755a8fa103f63adcddae171f072d0cf3f37e72cbc9c` | Original project vector |
 | card-back.svg | 100×140 | 515 | `4b70c3d3eb3b57c3211ed85864831a43701a9daeb9ae94e094fc000deb78912c` | Original project vector |
 | card-face.svg | 100×140 | 331 | `2ec38ff92fc784ce5d85022c1955b2c0793077a9f7cb3414f05aa7919b17534a` | Original project vector |
-| dealer.webp | 546×640 | 72014 | `3eaf2a6f46d8145a6b8dd1d85751c3a06dc2d9e734c265110caa3b8120c9622d` | OpenAI generated; Sharp export |
+| dealer.webp | 546×640 | 46950 | `fbfa14d4c2b4c36f1f40e779dac4a3af24e561524d502310c37a7db92d643aac` | Extracted approved concept-board pixels; original SVG alpha mask; deterministic Sharp/Lanczos export |
 | felt.svg | 512×512 | 480 | `1229631247d5cb926ca41d4bb9eff2c3ecdf6c4c332c0ceeaab847506cd7d0ff` | Original project vector |
 | rail.svg | 512×128 | 598 | `df0ccdd18821fa137ddc0ca1eb3ebc3b55c1f644224baee75075330eb075a8b3` | Original project vector |
 | room.webp | 1536×1024 | 172924 | `e8744b52964028d08fae14645638f3dab00e39b5d8f52fbc3b836563f96eb047` | OpenAI generated; Sharp export |
 
-Package total: **247349 bytes** (ceiling 962,560). Room 172,924 bytes ≤614,400; transparent dealer 72,014 bytes ≤225,280; surface and decorative vectors each below their group ceilings. Dealer export canvas 546×640 matches the original canvas and aspect ratio. Existing box dimensions, background positioning, clipping and normalized card-flight origin (0.5, 0.84) are unchanged; visually compared head/hands/deck registration at native scene size. Final owner acceptance remains pending.
+Package total: **222285 bytes** (ceiling 962,560). Room 172,924 bytes ≤614,400; transparent dealer 46,950 bytes ≤225,280; surface and decorative vectors each below their group ceilings. Dealer export canvas 546×640 matches the original canvas and aspect ratio. Existing box dimensions, background positioning, clipping and normalized card-flight origin (0.5, 0.84) are unchanged; visually compared head/hands/deck registration at native scene size. Final owner acceptance remains pending.
 
 Generation prompts (built-in tool):
 - Room: empty black-marble and gold Art Deco private casino salon, warm crystal chandeliers, cinematic realistic illustration, dark unobstructed foreground for the existing table; no people/table/cards/chips/UI/text.
-- Dealer: costume-only edit of the existing adult dealer; preserve identity, face, hair, pose, hands and deck; modest champagne gold satin formal dress with thin straps, transparent canvas, identical registration.
+- Dealer: exact approved Royal Gold character extracted from premium-collection.png; original source attribution is the generated design board above. No new image generation or learned super-resolution.
 
 No remaining dealer variants are generated before owner acceptance of this checkpoint.
+
+## Deterministic approved-design dealer correction
+
+Owner requested extraction and deterministic upscale after rejecting the high-neck substitute. Reused Royal Gold pixels directly from `design/premium-collection.png` (source SHA-256 above). Source region `(1250,40,135,140)` includes approximately 114×123 useful character pixels. Authored `design/royal-gold-dealer-mask.svg` isolates hair, torso, hands and card stack, excluding the table and room. `design/extract-royal-gold-dealer.cjs` reproduces the export using existing Sharp 0.34.5: Lanczos3 sampling, alpha matte, normalized crop, mild sharpening (sigma 0.5), 546×640 canvas and WebP quality 92/alpha quality 100. Same input/version produced the same encoded SHA on two runs. No API key, generative edit or invented fine detail.
+
+The concept table occludes the lower waist. A 269×33 crop of the source gown at intermediate (310,594) is resampled vertically to 269×100 and masked into only the lower garment before the existing live rail occludes it; no generative reconstruction. The source composition maps to the existing dealer canvas; CSS dimensions/position/flight origin/clipping stay unchanged. This preserves the approved garment cut but the small source limits native detail, especially on enlarged desktop scenes. Output resolution must not be interpreted as recovered high-resolution detail. Inspect the exported dress/hands on the actual Preview before owner acceptance.

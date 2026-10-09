@@ -7,3 +7,5 @@ Approved directions: Classic Casino, Royal Gold, Neon Vegas, Midnight Sapphire, 
 **Implementation checkpoint:** First produce a complete Royal Gold package, including the final dealer illustration, on the real Poker V2 table in Deploy Preview for owner visual inspection. Do not generate all remaining dealer variants before this checkpoint is accepted. Then finish all six theme packages and local switching through the existing Preview FX according to `spec.md`, `plan.md` and `tasks.md`.
 
 This is visual/technical approval to proceed, **not** acceptance of final artwork or runtime feature verification, merge approval or Production authorization. Keep the PR Draft until final validation and review.
+
+Owner checkpoint feedback: overall Royal Gold direction liked; replace the high-neck dealer outfit with the exact V-neck gold strappy dress already approved in the design. Owner explicitly authorized direct extraction from the design and deterministic upscaling. Corrected checkpoint acceptance remains pending; other dealer variants remain gated.
