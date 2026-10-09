@@ -8,6 +8,6 @@ Feature: [spec.md](../spec.md), reviewed 2026-10-09.
 - [x] Scope, failure/race behavior, assumptions and dependencies are explicit; no unresolved requirement markers.
 - [x] Outcomes include six packages, readable cards, geometry invariance, reset and preview-only behavior.
 - [x] Implementation details live in plan/data-model/contracts; specification expresses expected user behavior and owner constraints.
-- [x] Constitution checked before and after design; no prohibited UI/glue tests or generic setup work.
+- [x] Pre-design and post-design Constitution checked for this review-only milestone; no prohibited UI/glue tests or generic setup work.
 - [x] No Stage effect, new backend/WS/protocol, #1075, payment or scheduler scope.
 - [x] Owner approval remains an explicit prerequisite; runtime completion is not claimed.

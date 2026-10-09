@@ -1,0 +1,35 @@
+# Review — #792 design approval milestone
+
+Date: 2026-10-09. Baseline main: `669cfdb41f98dde8adf179445360c1916e021612`. Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1076
+
+## Independent review
+
+A separate reviewer inspected SpecKit, existing Poker V2 integration, the six-theme concept board, baseline captures, gallery and six SVG detail sheets.
+
+Findings resolved:
+- Clarified card-art inheritance: scene dealing/showdown/fold FX uses `createCard()`; separate celebration cards retain existing treatment.
+- Added stable-state geometry measurement selectors to quickstart; pre-design/post-design governance status is explicit.
+- Added six original vector face/back/frame/material detail sheets to establish theme-specific face art, beyond plain generated face samples.
+- Explicitly stated generated Classic ornaments do not replace shipped default art.
+
+Final assessment: no remaining critical or important design-stage findings; suitable for owner review of six complete art directions. Owner approval remains pending.
+
+## Evidence
+
+- SpecKit check: exactly six stable IDs, 17 ordered tasks, complete required artifacts, no unresolved requirement markers or Git commands.
+- Existing source: `node --check poker/poker-v2.js` exited 0; `npm run check:csp-inline` passed for 52 served documents. No product runtime or CSP changes are included in this milestone.
+- Local Chromium, desktop 1440×900 and mobile 390×844: six theme sections, 36 component descriptions, all nine image/detail resources loaded, zero scripts, no page errors, no horizontal overflow.
+- All six SVG detail sheets parsed as XML; Royal rendered and visually inspected. Current-size samples demonstrate rank/suit sizing; final decorated-card native-size checks remain pending.
+- Baseline captures from unchanged demo: landscape 1440×900, portrait 390×844. Generated board 1536×1024; SVG details 1200×410. Provenance, bytes and hashes are in artwork.md.
+
+## Deploy Preview
+
+Target: https://deploy-preview-1076--playkcswh.netlify.app/specs/792-premium-table-themes/design/
+
+Remote verification is recorded after the gallery deploy. This URL serves a static review gallery at this milestone, not implemented runtime theme switching.
+
+## Scope and limits
+
+Only `specs/792-premium-table-themes/**` is changed. No breaking runtime/API/schema/layout changes, Stage effect, WS/protocol changes, dependencies or Production deployment. PR stays Draft; issue remains open.
+
+Concept illustrations redraw geometry and omit parts of action/HUD composition; they are approval references, not geometry evidence. Final per-layer exports, native-size readability/contrast, dealer head/hand registration, zero-displacement comparisons, Preview FX switching, live game smoke and final code review remain T007–T017 after owner approval. No completed-feature or merge-ready claim is made.

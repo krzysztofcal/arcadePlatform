@@ -11,8 +11,8 @@
 
 Independent verification: owner sees all six complete directions and the unchanged Poker V2 baseline in both orientations.
 
-- [ ] T003 [US1] Capture current table geometry without product edits; save portrait/landscape baseline images in `specs/792-premium-table-themes/design/`.
-- [ ] T004 [US1] Prepare six high-quality concept boards and room/lighting/rail/felt/card/frame/dealer detail directions in `specs/792-premium-table-themes/design/`; label illustrative art separately from exact-layout proof.
+- [x] T003 [US1] Capture current table geometry without product edits; save portrait/landscape baseline images in `specs/792-premium-table-themes/design/`.
+- [x] T004 [US1] Prepare six high-quality concept boards and room/lighting/rail/felt/card/frame/dealer detail directions in `specs/792-premium-table-themes/design/`; label illustrative art separately from exact-layout proof.
 - [ ] T005 [US1] Publish static review gallery `specs/792-premium-table-themes/design/index.html` on Draft PR Deploy Preview, verify its URL/images and self-review this phase in `specs/792-premium-table-themes/review.md`.
 - [ ] T006 [US1] Record owner's explicit acceptance or requested corrections against the reviewed revision in `specs/792-premium-table-themes/approval.md`; do not proceed to T007 without acceptance.
 
