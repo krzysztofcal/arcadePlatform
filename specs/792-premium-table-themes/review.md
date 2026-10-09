@@ -26,7 +26,9 @@ Final assessment: no remaining critical or important design-stage findings; suit
 
 Target: https://deploy-preview-1076--playkcswh.netlify.app/specs/792-premium-table-themes/design/
 
-Remote verification is recorded after the gallery deploy. This URL serves a static review gallery at this milestone, not implemented runtime theme switching.
+Verified gallery revision: `447eafbd1de24e4b8fd9935bad6019289a6762a4`. Netlify `netlify/playkcswh/deploy-preview` reported “Deploy Preview ready!”. Remote Chromium checks at 1440×900 and 390×844 returned HTTP 200: six theme sections, 36 component descriptions, all nine image/detail resources loaded, no page errors and no horizontal overflow. A screenshot of the deployed desktop gallery was visually inspected. Netlify injects its preview helper; the source gallery contains no scripts. This URL serves a static review gallery at this milestone, not implemented runtime theme switching.
+
+GitHub comparison against baseline confirmed all 22 changed files are under `specs/792-premium-table-themes/`; product runtime and layout are unchanged. The final evidence/task update modifies Markdown only, preserving the verified gallery artifacts.
 
 ## Scope and limits
 
