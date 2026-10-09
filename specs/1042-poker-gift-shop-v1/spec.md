@@ -1,7 +1,7 @@
 # Poker Gift Shop V1 — SpecKit implementation plan
 
 **Parent:** #786
-**Status:** owner manual smoke PASS; final mandatory-case evidence and Production schema GO/postflight pending
+**Status:** T013/T014/T015 PASS; merge-ready, awaiting separate owner merge GO
 
 Implementation progress and validation are tracked in tasks.md and review.md.
 **Scope:** one complete V1 vertical slice: Poker V2 UI → authoritative WS purchase → CH BURN → durable receipt → table gift event → session-visible gift badges.
@@ -327,7 +327,7 @@ Because this changes `ws-server/**` and the WS/browser protocol:
 3. Review whole diff for accidental gameplay/accounting changes.
 4. Run **WS Preview Deploy** for the exact latest runtime-affecting SHA.
 5. Verify installed `RELEASE_SHA == DEPLOY_REF`.
-6. Mandatory authenticated Deploy Preview → WS Preview Stage smoke:
+6. Authenticated Deploy Preview → WS Preview Stage smoke (2026-10-09 owner amendment: baseline manual PASS plus existing automated evidence accepted for remaining cases; no further manual tests required):
    - open Gift Shop at a normal seated human table;
    - send each representative cheap/premium gift to other human/bot; confirm self-target rejection;
    - confirm exact CH decrement and balanced BURN ledger;
@@ -356,9 +356,9 @@ Because this changes `ws-server/**` and the WS/browser protocol:
 - [x] **T010 — Fundamental accounting/migration tests.** Extend migration/ledger suites for receipt contract, RLS/indexes and exact USER→GENESIS BURN/no-recipient-credit invariants.
 - [x] **T011 — Fundamental domain/WS tests.** Add only the focused gift purchase/handler/runtime cases listed above. No UI/CSS/glue suite.
 - [x] **T012 — Full verification/refactor.** Run focused + required repo checks; review/refactor touched code for the smallest implementation; verify no second ledger/payment/event framework and no gameplay mutation.
-- [ ] **T013 — Exact-SHA Preview gate.** Deploy latest runtime-affecting SHA with WS Preview Deploy, verify release metadata/health, then perform the mandatory Stage smoke above.
-- [x] **T014 — Production handoff (read-only preflight prepared; apply awaiting owner GO).** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.
-- [ ] **T015 — Final handoff.** Record exact runtime SHA, Stage migration/apply evidence, CI, WS Preview deploy, smoke evidence, any Production schema status and breaking impacts. Only call merge-ready when repository Definition of Done is satisfied.
+- [x] **T013 — Exact-SHA Preview gate.** Deploy latest runtime-affecting SHA with WS Preview Deploy, verify release metadata/health, then perform the mandatory Stage smoke above.
+- [x] **T014 — Production handoff (schema deployed; postflight PASS).** Prepare/verify the Production-equivalent empty receipt schema according to current manifest rules and STOP for owner authorization before any Production DB mutation. Do not merge Production-deploying runtime while required Production schema is absent.
+- [x] **T015 — Final handoff.** Record exact runtime SHA, Stage migration/apply evidence, CI, WS Preview deploy, smoke evidence, any Production schema status and breaking impacts. Only call merge-ready when repository Definition of Done is satisfied.
 
 ## Out of scope
 
@@ -508,9 +508,9 @@ If the correction touches only browser presentation before #1048, WS redeploy is
 - [x] **T012B — Custom recipient picker**
 - [x] **T012C — Guest-visible disabled Gift Shop**
 - [x] **T012D — Consume #1048 stable three-slot gift HUD** — implemented against main/#1049; T013 smoke pending
-- [ ] **T013 — Final authenticated Stage smoke after T012A–T012E**
+- [x] **T013 — Final authenticated Stage smoke after T012A–T012E**
 - [ ] **T014 — Production owner GO/schema apply**
-- [ ] **T015 — Final handoff / merge-ready gate**
+- [x] **T015 — Final handoff / merge-ready gate**
 
 Existing T001–T012 implementation work remains valid; these are smoke-discovered corrective tasks, not a rewrite of the gift accounting/WS mechanism.
 
@@ -638,3 +638,7 @@ Current result: `[883,173]` and the permitted fallback region are obstructed by 
 Owner manual smoke **PASS**, UI/Quick Gift/current layout and ACTIVE reconnect/refresh recovery accepted. Preserve landscape slot1 gifts `[782,192]`. Read-only Stage:7 Coffee receipts/70 CH,7 correct BURN,14 entries,zero discrepancies; exact recipient timestamp .046715 preserved. See review.md latest evidence matrix and T013/T014/T015 preflight, which supersede historical FAIL/PENDING notes without deleting history. No runtime/UI/WS/schema changes.
 
 T013 partial: baseline authenticated smoke and ACTIVE recovery cleared; original mandatory manual premium/human-bot,self-target,insufficient-CH,retry,cooldown,leave/rejoin,reduced-motion and gameplay/settlement cases need specific evidence or explicit owner amendment (automated coverage recorded separately). T014 preflight COMPLETE: existing Production-equivalent migration sufficient; Production table/version absent; STOP before separate schema GO/apply/postflight. T015 review prepared,conditional HOLD; Draft,no merge/Production action.
+
+## 2026-10-09 final acceptance
+
+T013 **PASS**: owner final manual smoke PASS; remaining manual-case requirement explicitly replaced by accepted existing automated evidence. No additional manual tests required. T014 **PASS**: Production schema deployed and independently checked read-only (14 columns,9 constraints,4 valid indexes,RLS/no client access,0 receipts,version recorded). T015 **PASS**,technical merge gates satisfied; current-head CI/Preview to be verified after this docs-only commit. See review.md final entry and linked schema postflight. Supersedes historical HOLD/FAIL/PENDING notes. No implementation/migration/deploy change; no merge or Production runtime authorization.
