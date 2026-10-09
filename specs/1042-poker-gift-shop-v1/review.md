@@ -122,3 +122,52 @@ Exact-SHA WS Preview deployment is required for this shared runtime/protocol ext
 
 
 Corrected WS runtime deployed: `2c9976d4a01bd143898422208644840e7ec1efad`; [WS Preview Deploy 37853558761](https://github.com/krzysztofcal/arcadePlatform/actions/runs/37853558761) SUCCESS, workflow definition main/application full SHA. RELEASE_SHA == DEPLOY_REF confirmed directly from installed /opt/arcade-ws-preview/ws-server/release-metadata.json; extracted/installed-before/after-restart equality and local/public health workflow gates passed, additional public /healthz=ok. Netlify build-info confirms same SHA. Full npm test final rerun exit 0 (144 groups; first parallel run terminated with 143 after group output and was not used as success evidence). Final checks/probes described above pass. Current CI result/remote browser probe linked in PR. This follow-up changes only SpecKit review/tasks, no deployable/configuration/runtime artifact, so no additional WS deployment needed. No authenticated Stage purchase performed; previous manual HUD FAIL still requires corrected-runtime owner smoke.
+
+
+## 2026-10-09 accepted correction — avatar action / tabletop receipts
+
+Supersedes historical three-types/duplicate-counter/overflow presentation and the 2026-10-08 avatar-ring placement. Show three latest purchases newest-first, duplicate purchases as separate emoji objects; older purchases remain receipts. Legacy aggregate `gifts` stays compatible. Quick Gift belongs to the avatar edge, statically derived from avatar geometry/physical slot, outside its clipped element. Received gifts belong to a separate fixed tabletop anchor near stack/bet, for every slot including hero. Reuse existing quickAction/gifts/three slots and scene scaling; no runtime collision engine, observers, new dependencies or purchase/protocol/schema changes. Verify actual browser rectangles/screenshots across portrait/landscape, all seats/dealers and gameplay states.
+
+Timestamp precision: modeled postgres-js/PGlite regression remains useful but is not real driver→PostgreSQL evidence. Read-only Stage receipt/seat equality and exact active summary recovery after a new-runtime purchase are required; if absent mark PENDING, never approximate historical identity or repair old receipts. Authenticated financial smoke and Production owner GO remain merge gates.
+
+Constitution check: presentation verified using temporary controlled preview probes, no committed UI/CSS suite or tooling/dependency/ignore changes. Stage checks SELECT-only. Existing tracked branch isolated from main; pre-existing untracked files preserved.
+
+### Real Stage precision finding — 2026-10-09
+
+SELECT-only Stage inspection found four purchases at 08:32:59–08:33:19 UTC after corrected runtime deployment. All four receipt recipient timestamps equal same-owner seat participation exactly: `2026-10-09 08:32:48.444881+00`. Installed WS release metadata remains `2c9976d4a01bd143898422208644840e7ec1efad`. This is real PostgreSQL receipt evidence, not the modeled PGlite driver boundary. Current matching seat is INACTIVE: the production `loadActiveGiftSummary` predicate must exclude it; exact ACTIVE recovery query returned no rows. **Precision persistence confirmed; current-participation loader/WS recovery remains PENDING** until a manual purchase is checked while seated ACTIVE. No history repair, approximate matching, DB writes or authenticated financial smoke performed.
+
+Small read-only check after manual Stage purchase (use only Stage):
+
+```sql
+SELECT g.id, g.created_at, s.status,
+       to_char(g.recipient_joined_at,'YYYY-MM-DD HH24:MI:SS.USOF') AS receipt_time,
+       to_char(s.joined_at,'YYYY-MM-DD HH24:MI:SS.USOF') AS seat_time,
+       g.recipient_joined_at = s.joined_at AS exact_match
+FROM public.poker_gift_purchases g
+LEFT JOIN public.poker_seats s ON s.table_id=g.table_id
+ AND s.seat_no=g.recipient_seat_no AND s.user_id=g.recipient_user_id
+WHERE g.created_at > now() - interval '15 minutes'
+ORDER BY g.created_at DESC LIMIT 12;
+
+WITH matched AS (
+ SELECT s.table_id,s.seat_no,s.user_id,g.id,g.gift_key,
+ row_number() OVER (PARTITION BY s.table_id,s.seat_no
+                    ORDER BY g.created_at DESC,g.id DESC) AS position
+ FROM public.poker_seats s JOIN public.poker_gift_purchases g
+ ON g.table_id=s.table_id AND g.recipient_user_id=s.user_id
+ AND g.recipient_seat_no=s.seat_no AND g.recipient_joined_at=s.joined_at
+ WHERE s.status='ACTIVE'
+)
+SELECT table_id,seat_no,user_id,
+ jsonb_agg(jsonb_build_object('eventId',id,'giftKey',gift_key) ORDER BY position)
+ FILTER (WHERE position<=3) AS recent_gifts
+FROM matched GROUP BY table_id,seat_no,user_id;
+```
+
+Compare the latest purchase ID with the actual table_gift_state recentGifts payload/visible slot during authenticated reconnect/refresh. SELECT result alone proves the loader predicates, not authenticated WS delivery.
+
+### Geometry verification / initial correction review
+
+Baseline PR head e34a63c9; fetched main d49c33fa already integrated. #1048 closed/#1049 merged (6c8ab3fa), use existing scene/HUD. First temporary rectangle probe rejected overlaps with pot/avatar/cards; normalized hero cards exposed best-hand overlap, corrected hero landscape anchor above stack. Independent review caught shared 👍/🎁 hit-box collision; preserve previous reaction quickAction anchor and position only Gift via placeSeatNode. Final temporary Chromium/Firefox local JS/CSS interception on Preview: 390×844,844×390,1440×1000;2–6 seats/every dealer;120 combinations, zero gift/obstacle rectangle overlaps. Obstacles include actual chip images/labels, names/avatar/seat numbers, dealer, private/public/best-hand cards, pot and room text. 1/2/3 hero gifts and repeated beer/beer/pizza, hand rollover/chip changes, avatar update, seat replacement, picker open/Escape/focus/product mock send, fixed button rectangles and coexistence hit-tests pass. Screenshots inspected at /tmp/1047-layout-{chromium,firefox}-{390,844,1440}.png. These controlled state probes do not prove authenticated transactions or actual Android hardware. Actual deployed frontend check follows push.
+
+Existing gift domain/handler14/14, browser/client170/170, focused real server gift1/1, canonical ledger exit0. Syntax/check:all/ci:guards/CSP52/migration inventory108/7 pass. No new UI suites, dependency/config/schema/inline script or CSP changes. Source diff confined to frontend geometry/CSS and SpecKit. Authenticated corrected-layout Stage acceptance remains PENDING; previous manual persistent-HUD FAIL is not cleared by controlled probes. Production schema GO pending; Draft/no merge/Production deploy.

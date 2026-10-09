@@ -76,3 +76,23 @@ Manual authenticated persistent HUD smoke remains FAIL/unverified until all thre
 
 
 Corrected runtime SHA `2c9976d4a01bd143898422208644840e7ec1efad`: WS Preview Deploy run 37853558761 success, installed RELEASE_SHA == DEPLOY_REF and health verified; Netlify same SHA. Full npm test exit 0 (144 runner groups), WS/reconnect 160/160, browser/client 170/170, Gift Shop 14/14. Current CI linked from PR #1047. Authenticated persistent HUD smoke remains FAIL/unverified; T013/Production T014/final acceptance T015 still pending.
+
+
+## 2026-10-09 accepted correction — avatar action / tabletop receipts
+
+Supersedes historical three-types/duplicate-counter/overflow presentation and the 2026-10-08 avatar-ring placement. Show three latest purchases newest-first, duplicate purchases as separate emoji objects; older purchases remain receipts. Legacy aggregate `gifts` stays compatible. Quick Gift belongs to the avatar edge, statically derived from avatar geometry/physical slot, outside its clipped element. Received gifts belong to a separate fixed tabletop anchor near stack/bet, for every slot including hero. Reuse existing quickAction/gifts/three slots and scene scaling; no runtime collision engine, observers, new dependencies or purchase/protocol/schema changes. Verify actual browser rectangles/screenshots across portrait/landscape, all seats/dealers and gameplay states.
+
+Timestamp precision: modeled postgres-js/PGlite regression remains useful but is not real driver→PostgreSQL evidence. Read-only Stage receipt/seat equality and exact active summary recovery after a new-runtime purchase are required; if absent mark PENDING, never approximate historical identity or repair old receipts. Authenticated financial smoke and Production owner GO remain merge gates.
+
+### New corrective tasks (historical completed tasks retained)
+
+- [x] GHUD-T001 — Read live main/PR/#1048/#1049 geometry, update existing issue and SpecKit before implementation.
+- [x] GHUD-T002 — Static Quick Gift avatar-edge anchor using existing quickAction; preserve picker/retry/focus/self exclusion.
+- [x] GHUD-T003 — Static three-object tabletop anchors for six physical slots in both orientations; reuse gift slots.
+- [x] GHUD-T004 — Preserve recentGifts/owner/recovery/lifecycle/purchase semantics.
+- [ ] GHUD-T005 — Read-only real Stage timestamp/active-recovery check; PENDING if no eligible corrected-runtime receipt.
+- [x] GHUD-T006 — Replace stale issue aggregation requirements with accepted contract and explicit history.
+- [ ] GHUD-T007 — Chromium/Firefox Preview rectangles/screenshots and interaction matrix; distinguish controlled probe from authenticated smoke.
+- [ ] GHUD-T008 — Existing fundamental/repo/CSP/syntax checks, review, update Draft PR/handoff; no redundant WS deployment for frontend-only change.
+
+GHUD-T005 partial evidence: four new real Stage receipts preserve exact microseconds; seat now INACTIVE, ACTIVE loader/WS reconnect remains PENDING. GHUD-T007 controlled local-JS/CSS-on-Preview matrix passes (120 seat-count/dealer/viewport/browser combinations), including normalized hero best-hand cards, stack 99,999/bet/pot, duplicate objects,1–3 hero gifts, next hand, avatar/replacement and picker actions. Await actual deployed frontend verification. No WS/shared/protocol/config/migration edits; retain installed WS2c9976d4 without redundant deployment.

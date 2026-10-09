@@ -24,7 +24,7 @@ V1 is intentionally small:
 - Whole-table gifts are **not** V1.
 - Cooldown: **3,000 ms per buyer per table**, enforced authoritatively.
 - Presentation: emoji-based V1; no premium image asset set yet.
-- Received gifts remain attached to the recipient's current table participation. Display at most **3 gift types** beside an avatar, aggregate duplicates as e.g. `🍺 ×4`, and show a compact overflow indicator for additional types.
+- Received gifts remain attached to the recipient's current table participation. Display three latest purchases newest-first in a fixed tabletop area; duplicates occupy separate slots, no visible aggregation or overflow. Legacy aggregate gifts remains compatible.
 - One short bounded fly animation/notification per delivered gift. Keep a bounded presentation queue; gameplay never waits for it.
 - A minimal durable purchase receipt is required in V1 for payment/delivery idempotency and future #1046 compatibility.
 - Payment source in V1 is only `CH`.
@@ -154,7 +154,7 @@ Adapter responsibilities:
 - supply `beginSqlWs`;
 - call `executePokerGiftPurchase`;
 - map known DB/domain failures to stable gift reasons;
-- expose a read-only `loadActiveTableGiftState(tableId)` that joins receipts to current ACTIVE `poker_seats` on recipient user + seat + exact `joined_at`, then returns only aggregated counts by seat/gift key.
+- expose a read-only `loadActiveTableGiftState(tableId)` that joins receipts to current ACTIVE `poker_seats` on recipient user + seat + exact `joined_at`, then returns legacy aggregate counts plus userId and bounded recentGifts receipt events.
 
 The active gift-state query is presentation recovery, not poker state. It must not mutate `poker_state`, snapshots, stream log or seat stacks.
 
@@ -227,15 +227,15 @@ UI behavior:
 - `handleTableGift(event)`:
   - validate stable event ID/key/seats;
   - bounded dedupe set;
-  - increment recipient session gift counts;
+  - prepend the event to the bounded newest-first receipt list;
   - enqueue a short fly animation/notification;
   - never block cards/actions/turn clock.
-- `applyTableGiftState(state)` replaces local aggregate counts from authoritative active-participation recovery.
-- Render beside each occupied recipient avatar:
-  - maximum 3 gift types;
-  - duplicates as `emoji ×N`;
-  - compact overflow for additional types.
-- Ordinary `renderSeats()` rebuilds must re-render current local gift aggregates so state patches do not erase badges.
+- `applyTableGiftState(state)` replaces local recent purchase events from authoritative active-participation recovery.
+- Render in each occupied recipient’s fixed tabletop area near chips:
+  - three latest purchases, newest-first;
+  - duplicates occupy separate slots;
+  - no aggregation or overflow.
+- Ordinary `renderSeats()` rebuilds must re-render current local newest-purchase slots so state patches do not erase badges.
 - Remove a seat's local gifts when the authoritative seat disappears/changes participation; recovered state remains final authority after reconnect.
 - Respect `prefers-reduced-motion`: keep gift badge + short text feedback, skip fly motion.
 - V1 uses emoji only; no image/CDN/audio assets.
@@ -479,8 +479,8 @@ After #1048 exposes the stable per-seat gift-slot container/anchor:
 - change `renderGiftBadges()` to render into that dedicated seat HUD gift area, not inside `.poker-seat-avatar`;
 - preserve existing `giftsBySeat`, `table_gift_state`, replay suppression and exact participation recovery;
 - use exactly three visible stable slots;
-- duplicate gift types remain aggregated (for example `🍺 ×4`);
-- additional types use the already accepted compact overflow representation;
+- duplicate purchases occupy separate slots newest-first;
+- older purchases remain receipts, not visible slots;
 - ordinary seat re-render/reconnect must rebind to the new HUD slot without losing authoritative gift state.
 
 #1042 is blocked from final merge until #1048 provides this stable placement and the integrated Gift Shop smoke passes.
@@ -574,3 +574,10 @@ Local `giftRetry` must retain `key`, `seatNo`, recipient `userId` and `requestId
 ## Persistent Gift HUD correction — latest three purchases
 
 Supersedes aggregated-type visual slots: show the three most recent purchases (duplicates occupy separate slots), newest first, during the current recipient participation. Keep legacy aggregate `gifts` in table_gift_state and add `userId` plus `recentGifts: [{eventId,giftKey}]`. Query receipts by exact user/seat/joined_at; never resurrect previous participation. Preserve microseconds across the postgres driver by binding participation as text and casting inside SQL. No schema/migration or accounting change. Existing incorrectly truncated receipts are not repaired or matched approximately. Current authenticated manual HUD smoke is FAIL until verified on the corrected runtime.
+
+
+## 2026-10-09 accepted correction — avatar action / tabletop receipts
+
+Supersedes historical three-types/duplicate-counter/overflow presentation and the 2026-10-08 avatar-ring placement. Show three latest purchases newest-first, duplicate purchases as separate emoji objects; older purchases remain receipts. Legacy aggregate `gifts` stays compatible. Quick Gift belongs to the avatar edge, statically derived from avatar geometry/physical slot, outside its clipped element. Received gifts belong to a separate fixed tabletop anchor near stack/bet, for every slot including hero. Reuse existing quickAction/gifts/three slots and scene scaling; no runtime collision engine, observers, new dependencies or purchase/protocol/schema changes. Verify actual browser rectangles/screenshots across portrait/landscape, all seats/dealers and gameplay states.
+
+Timestamp precision: modeled postgres-js/PGlite regression remains useful but is not real driver→PostgreSQL evidence. Read-only Stage receipt/seat equality and exact active summary recovery after a new-runtime purchase are required; if absent mark PENDING, never approximate historical identity or repair old receipts. Authenticated financial smoke and Production owner GO remain merge gates.

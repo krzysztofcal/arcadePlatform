@@ -3948,20 +3948,20 @@
   // Physical variants: top, upper right, lower right, hero, lower left, upper left.
   var seatSceneGeometry = {
     portrait: { width:360, height:650, seats:[
-      {avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
-      {avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
-      {avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
-      {avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
-      {avatar:[38,410],stack:[82,488],bet:[102,389],dealer:[90,370]},
-      {avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
+      {gifts:[88,162,-1],avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
+      {gifts:[238,234],avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
+      {gifts:[174,375],avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
+      {gifts:[230,475],avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
+      {gifts:[117,440],avatar:[38,410],stack:[82,488],bet:[102,389],dealer:[90,370]},
+      {gifts:[118,260],avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
     ]},
     landscape: { width:1040, height:390, seats:[
-      {avatar:[472,12],compactTransient:[642,110],stack:[445,104],bet:[430,148],dealer:[402,92]},
-      {avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[906,155]},
-      {avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
-      {avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
-      {avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
-      {avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
+      {gifts:[387,132],avatar:[472,12],compactTransient:[642,110],stack:[445,104],bet:[430,148],dealer:[402,92]},
+      {gifts:[757,120],avatar:[906,65],stack:[825,140],bet:[772,169],dealer:[906,155]},
+      {gifts:[838,258],avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
+      {gifts:[342,199],avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
+      {gifts:[193,266],avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
+      {gifts:[283,178],avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
     ]}
   };
   var seatSceneOrientation = 'portrait';
@@ -4022,11 +4022,13 @@
     var leftSide = slot === 4 || slot === 5;
     var rightSide = slot === 1 || slot === 2;
     var edge = leftSide ? corner : -corner;
-    var quick = [config.avatar[0] + (rightSide ? -corner : corner),config.avatar[1] + (hero ? 12 : 8)];
+    var quick = [config.avatar[0] + (rightSide ? -1 : 1) * (hud.avatarSize / 2 + 10),config.avatar[1] - 16];
     var marker = [config.avatar[0] + edge,config.avatar[1] + (hero ? 20 : leftSide || rightSide ? 48 : 28)];
     hud.marker = marker;
-    placeSeatNode(hud.quickAction,{origin:[0,0]},quick,16,16);
-    hud.quickAction.style.setProperty('--poker-quick-gift-offset', (rightSide ? -20 : 20) + 'px');
+    // Preserve the shared reaction anchor; only Gift owns the avatar-edge position.
+    var actionPoint = [config.avatar[0] + (rightSide ? -corner : corner),config.avatar[1] + (hero ? 12 : 8)];
+    placeSeatNode(hud.quickAction,{origin:[0,0]},actionPoint,16,16);
+    hud.quickGiftPoint = [quick[0]-actionPoint[0]+8,quick[1]-actionPoint[1]+8];
     hud.cardPoint = hero ? config.cards : [config.avatar[0] + edge,config.avatar[1] + (leftSide || rightSide ? 28 : 8)];
     placeSeatNode(hud.cards,hud,hud.cardPoint,hero ? 110 : 36,hero ? 80 : 30);
     placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
@@ -4048,11 +4050,10 @@
     var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(config.avatar[0], geometry.width - reactionWidth / 2 - 8));
     hud.social.style.setProperty('--poker-reaction-width', reactionWidth + 'px');
     hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - config.avatar[0]) + 'px');
-    var radius = portrait ? 52 : 58;
-    var giftAngles = leftSide ? [-100,-60,-20] : rightSide ? [-160,-120,-80] : [-150,-90,-30];
-    giftAngles.forEach(function(angle,index){
-      var radians=angle*Math.PI/180;
-      placeSeatNode(hud.gifts.children[index],hud,[config.avatar[0]+Math.cos(radians)*radius,config.avatar[1]+Math.sin(radians)*radius],16,16);
+    // Three receipt objects stand on a fixed tabletop patch, independent of avatar actions.
+    [0,1,2].forEach(function(index){
+      placeSeatNode(hud.gifts.children[index],hud,[config.gifts[0]+index*12*(config.gifts[2] || 1),config.gifts[1]+index*5],22,22);
+      hud.gifts.children[index].style.zIndex = String(3-index);
     });
   }
 
@@ -4736,6 +4737,7 @@
         });
         hud.quickAction.appendChild(button); hud.quickAction.appendChild(picker);
       }
+      placeSeatNode(button,{origin:[0,0]},hud.quickGiftPoint,24,24);
       var open = quickGiftTarget && quickGiftTarget.seatNo === seat.seatNo && quickGiftTarget.userId === seat.userId;
       button.hidden = false; button.disabled = giftPending;
       button.setAttribute('aria-expanded', String(!!open));

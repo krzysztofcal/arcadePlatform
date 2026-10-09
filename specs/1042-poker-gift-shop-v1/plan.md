@@ -54,3 +54,23 @@ In `poker/poker-v2.js`, `sendSelectedGift()` resolves current eligible recipient
 ## Persistent Gift HUD correction plan / Constitution Check
 
 Evidence: Stage read-only receipts show recipient_joined_at .124000 versus current seat .124309; postgres timestamp serializer passes strings through Date, truncating microseconds. Event then authoritative empty summary erases badge. Firefox controlled HUD shows data-backed slots render, but a stricter hit-test proves Quick Gift overlaps the third slot. Offset only the existing Quick Gift button ±20px toward the outer side; retain received anchors/scene geometry. Fix SQL insert parameter types in shared/poker-domain/gift-purchase.mjs (text→timestamptz), keep exact participation joins, and extend loadActiveGiftSummary with bounded newest receipt rows plus userId while retaining aggregate compatibility. Browser keeps three recent event entries independent of fly animation; state recovery replaces list and verifies occupant. Fundamental receipt/order/participation and WS replay/reconnect tests only; existing browser/client suites and temporary Chromium/Firefox probes. No UI test suite or migrations. Exact-SHA WS Preview Deploy required; authenticated Stage smoke conditional on available access; Production untouched.
+
+
+## 2026-10-09 accepted correction — avatar action / tabletop receipts
+
+Supersedes historical three-types/duplicate-counter/overflow presentation and the 2026-10-08 avatar-ring placement. Show three latest purchases newest-first, duplicate purchases as separate emoji objects; older purchases remain receipts. Legacy aggregate `gifts` stays compatible. Quick Gift belongs to the avatar edge, statically derived from avatar geometry/physical slot, outside its clipped element. Received gifts belong to a separate fixed tabletop anchor near stack/bet, for every slot including hero. Reuse existing quickAction/gifts/three slots and scene scaling; no runtime collision engine, observers, new dependencies or purchase/protocol/schema changes. Verify actual browser rectangles/screenshots across portrait/landscape, all seats/dealers and gameplay states.
+
+Timestamp precision: modeled postgres-js/PGlite regression remains useful but is not real driver→PostgreSQL evidence. Read-only Stage receipt/seat equality and exact active summary recovery after a new-runtime purchase are required; if absent mark PENDING, never approximate historical identity or repair old receipts. Authenticated financial smoke and Production owner GO remain merge gates.
+
+Coordinates are design-scene centres, transformed only by existing fitTableScene scaling:
+
+| Physical slot | Quick portrait | Gifts portrait | Quick landscape | Gifts landscape |
+|---|---|---|---|---|
+| top | (136,39) | (88,162) | (530,-4) | (387,132) |
+| upper right | (278,159) | (238,234) | (848,49) | (757,120) |
+| lower right | (278,344) | (174,375) | (912,189) | (838,258) |
+| hero | (196,484), hidden for self | (230,475) | (488,282), hidden for self | (342,199) |
+| lower left | (84,394) | (117,440) | (153,169) | (193,266) |
+| upper left | (84,231) | (118,260) | (288,49) | (283,178) |
+
+Quick Gift button is 24×24, centre at avatar ±(radius+10), y−16; side depends only on physical slot. Three 22×22 gift slots use offsets (0,0),(12,5),(24,10), with reverse horizontal direction only for portrait top; newest has highest z-index. The shared quickAction remains at its previous 16×16 reaction anchor; placeSeatNode positions only the Gift button relative to it. Keep gifts container display:contents and existing anchor mechanism. No other scene coordinates change.
