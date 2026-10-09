@@ -151,7 +151,7 @@ Landscape only slot1 gifts:desired whole group right of stack/name-below/right o
 Constitution:existing fundamental tests/repo/syntax/CSP and temporary probes only,no permanent UI/CSS tests/dependencies/inline scripts/endpoints/migrations. Smoke staysFAIL until owner acceptance;authenticatedStage/ACTIVErecovery/ProductionGO pending;noWSredeploy/Production/merge.
 
 - [x] PICKER-T001 — Existing picker cards/header/unscaled fixed viewport placement/lifecycle;controlled all-slot probes.
-- [ ] PICKER-T002 — Measure upper-right constraints,apply if feasible or document/propose safe alternative for approval.
+- [x] PICKER-T002 — Measure upper-right constraints,apply if feasible or document/propose safe alternative for approval.
 - [x] PICKER-T003 — Fundamental checks,published Chromium/Firefox probe,issue/PR/SpecKit handoff,Draft/manualFAIL gates.
 
 PICKER-T002 measurements complete; strict right-D criterion is infeasible. Candidate[883,173] is temporary-probe-only,awaiting user acceptance; source anchor still[757,120].
@@ -164,6 +164,8 @@ Constitution:temporary DOM-bounds/browser probes,existing fundamental tests/guar
 
 - [x] LANDSCAPE-T001 — Measure/apply nearest safe upper-right stack/gifts;document any directional conflict and chip-flight anchor evidence.
 - [x] LANDSCAPE-T002 — Only top ordinary reaction at avatar,viewport/topbar/QuickGift clear;targeted reactions/lifecycle unchanged.
-- [ ] LANDSCAPE-T003 — Published Chromium/Firefox probes/portrait regression,existing checks,issue/PR/SpecKit handoff,DraftFAIL gates.
+- [x] LANDSCAPE-T003 — Published Chromium/Firefox probes/portrait regression,existing checks,issue/PR/SpecKit handoff,DraftFAIL gates.
 
 Local controlled probe: 864 scenarios across Chromium/Firefox and three viewports, zero moving-element landscape collisions for the tested CH range; top reaction EN/PL, motion/reduced motion, owner replacement and updated settlement chip destination verified. Portrait collisions are pre-existing and require baseline comparison, not a new portrait layout correction. LANDSCAPE-T003 still awaits published exact-source verification. Earlier PICKER-T002 right-D acceptance request is superseded by this follow-up; no pending approval for that old candidate.
+
+LANDSCAPE-T003 complete: published031642aa assets/BUILD_INFO verified, Chromium/Firefox864-case matrix plus lifecycle and identical144-rectangle portrait baseline;198fundamental tests/final170client rerun,syntax/guards/CSP/migrations,CI green after documented unchanged WS test retry. Geometry limitations remain explicit; completion is implementation/controlled verification, not owner smoke acceptance or merge readiness. Superseded PICKER-T002 now resolved under this follow-up, without applying the old[883,173] proposal.
