@@ -50,3 +50,11 @@ Local Chromium with actual Poker V2 demo, temporary tooling outside the reposito
 Existing checks: node --check poker/poker-v2.js PASS; npm run check:csp-inline PASS for 52 served documents. No new maintained test suite. Independent reviewer compared JS/CSS with live 5eef334f and found no critical/important issue; requested export inventory was completed in artwork.md. All seven assets total 247,295 bytes. No Stage/WS/Production changes.
 
 Owner must inspect final Royal Gold on Deploy Preview before other dealer variants are produced. Exact deployed revision, live verification and final acceptance are recorded separately below; final all-six native-size/contrast/live gameplay review remains pending.
+
+### Exact-revision Deploy Preview verification
+
+Verified browser BUILD_INFO.commitHash = `78d591a0fb4e7e7ed87f6aaa299277830726ec0f`, Netlify deploy `6ac96b190a75ee0008661864`, HTTP 200. Table URL: https://deploy-preview-1076--playkcswh.netlify.app/poker/table-v2.html ; immutable tested deploy: https://6ac96b190a75ee0008661864--playkcswh.netlify.app/poker/table-v2.html .
+
+Remote Chromium repeated demo checks on the actual Deploy Preview with its real build metadata (no injected preview gate): all three target viewports show Royal Gold, 16 protected bounds remain unchanged, no page errors or horizontal overflow, eight effect buttons remain disabled for unseated demo. Blocked dealer load retains Classic; delayed Royal→Classic retains Classic; reload restores Classic. Native mobile keyboard chooser works with reduced motion and retained focus. Cached Royal Gold application measured **1.5 ms** on this Chromium runner (target ≤100 ms); this is a runner result, not a guarantee on all devices.
+
+RG05 is complete for this art-only checkpoint; RG06 owner acceptance and full live guest/reconnect/dealing/showdown/contrast/all-six validation remain pending. A following docs-only evidence commit does not alter any deployable presentation artifact; the verified runtime SHA above remains the checkpoint revision.

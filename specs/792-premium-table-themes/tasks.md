@@ -52,5 +52,5 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 - [x] RG02 Implement page-local catalog, atomic requested-only loading, Classic reset, stale-load/error handling and accessible Theme chooser in existing Preview FX. Retain exact six catalog identities; four alternatives visibly unavailable until their art is produced after review.
 - [x] RG03 Apply scoped Royal Gold CSS, preserve geometry/live card text/FX gates, and verify local target viewports, build gates, error/race/reset, keyboard and reduced motion.
 - [x] RG04 Run existing syntax/CSP checks and independent checkpoint code/art review.
-- [ ] RG05 Verify exact-revision Deploy Preview and record live evidence.
+- [x] RG05 Verify exact-revision Deploy Preview and record live evidence.
 - [ ] RG06 Obtain owner inspection/acceptance of Royal Gold before generating remaining dealer variants.
