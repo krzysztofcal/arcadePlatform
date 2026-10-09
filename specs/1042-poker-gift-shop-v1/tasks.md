@@ -92,7 +92,9 @@ Timestamp precision: modeled postgres-js/PGlite regression remains useful but is
 - [x] GHUD-T004 — Preserve recentGifts/owner/recovery/lifecycle/purchase semantics.
 - [ ] GHUD-T005 — Read-only real Stage timestamp/active-recovery check; PENDING if no eligible corrected-runtime receipt.
 - [x] GHUD-T006 — Replace stale issue aggregation requirements with accepted contract and explicit history.
-- [ ] GHUD-T007 — Chromium/Firefox Preview rectangles/screenshots and interaction matrix; distinguish controlled probe from authenticated smoke.
-- [ ] GHUD-T008 — Existing fundamental/repo/CSP/syntax checks, review, update Draft PR/handoff; no redundant WS deployment for frontend-only change.
+- [x] GHUD-T007 — Chromium/Firefox Preview rectangles/screenshots and interaction matrix; distinguish controlled probe from authenticated smoke.
+- [x] GHUD-T008 — Existing fundamental/repo/CSP/syntax checks, review, update Draft PR/handoff; no redundant WS deployment for frontend-only change.
 
 GHUD-T005 partial evidence: four new real Stage receipts preserve exact microseconds; seat now INACTIVE, ACTIVE loader/WS reconnect remains PENDING. GHUD-T007 controlled local-JS/CSS-on-Preview matrix passes (120 seat-count/dealer/viewport/browser combinations), including normalized hero best-hand cards, stack 99,999/bet/pot, duplicate objects,1–3 hero gifts, next hand, avatar/replacement and picker actions. Await actual deployed frontend verification. No WS/shared/protocol/config/migration edits; retain installed WS2c9976d4 without redundant deployment.
+
+Final GHUD-T007/T008 evidence: deployed Netlify frontend SHA c974e920877554228e779d25ab6a32bed0920a58 confirmed via BUILD_INFO; actual remote JS/CSS Chromium/Firefox matrix passed120 geometry combinations, each playing/end-showdown state (240 evaluations), zero collisions.1–3 receipt objects,hero,self exclusion,thumbs-up coexistence,stable action rectangles,resize/orientation,full reload+controlled recovery,avatar/seat replacement and touch picker/product mock send pass. CI for c974e920 complete with no pending/failed checks. GHUD-T005 ACTIVE recovery and authenticated real financial Stage acceptance remain PENDING; Production GO remains pending. These completed visual/check tasks do not clear the authenticated merge gates.
