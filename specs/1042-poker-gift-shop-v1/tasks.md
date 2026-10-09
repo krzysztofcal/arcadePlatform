@@ -107,3 +107,16 @@ Final GHUD-T007/T008 evidence: deployed Netlify frontend SHA c974e920877554228e7
 - [x] QG-P2-T003 — Controlled browser hitbox/glyph/overlap/clipping/touch/resize verification, appropriate existing checks and Draft PR evidence. No WS deploy.
 
 QG-P2 deployed measurement: frontend71edd1654eeb1a410ff938502099763345df35ed confirmed BUILD_INFO; remote Chromium/Firefox JS/CSS reproduce30×30 sides/portrait,30×25.48 northern landscape,desktop unchanged and all hit-grid samples ownbutton. Local matrix/required checks passed; authenticated smoke/ACTIVE recovery/Production GO remain pending.
+
+
+## 2026-10-09 manual FAIL — portrait S6 proximity / hero visual demo
+
+Manual smoke FAIL: S6 gifts too far from avatar in portrait; hero gifts lack convenient on-device inspection. Seat numbers rotate relative to hero: resolve physical slot using rotateSeatIndex→seatPhysicalSlot, not S6 hardcoding. For six seats/heroS1,S6 is physical lower-right(slot2); manual hero/seat-count clarification requested. Change only the relevant portrait gifts anchor after mapping confirmation; preserve all Quick Gift anchors/hitboxes and landscape.
+
+Extend existing gated bindCelebrationPreview with one unchecked,non-persisted checkbox “Show demo gifts on hero — DEMO / Visual only”. One local identity-bound state; renderGiftBadges selects beer/pizza/whisky only for actually occupied hero. Reuse three hud.gifts slots/geometric placement; mark visible hero name DEMO while active. Never mutate giftsBySeat/giftOwners/giftEventIds, create event IDs/receipts or call purchase/WS/backend. Turning off shows current real data. Clear on leave/table/user/seat changes and reconnect/recovery (participation boundary not exposed publicly); ordinary seat/hand renders retain demo. No changes to other players.
+
+Constitution: existing fundamental checks and temporary browser probes only,no committed UI/CSS suite,backend/protocol/schema/dependency/inline-script changes or WS deployment. Draft/manual FAIL remains until authenticated acceptance; ACTIVE recovery and Production GO pending.
+
+- [ ] HERO-T001 — Confirm rotated S6 physical slot; correct only matching portrait gift anchor.
+- [x] HERO-T002 — Gated identity-bound hero visual demo/visible DEMO/restoration/cleanup, existing renderer only.
+- [ ] HERO-T003 — Existing fundamentals/checks,controlled Preview on/off/recovery/collision/hitbox verification,issue/SpecKit/Draft PR handoff.

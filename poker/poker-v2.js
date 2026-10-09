@@ -581,6 +581,19 @@
     potAmount.textContent = 'DEMO Monster Pot · ' + formatNumber(1250) + ' CH';
     panel.appendChild(streakCount);
     panel.appendChild(potAmount);
+    var giftDemoLabel = document.createElement('label');
+    var giftDemoToggle = document.createElement('input');
+    giftDemoToggle.type = 'checkbox';
+    giftDemoLabel.appendChild(giftDemoToggle);
+    giftDemoLabel.appendChild(document.createTextNode(' Show demo gifts on hero — DEMO / Visual only'));
+    panel.appendChild(giftDemoLabel);
+    els.heroGiftDemoToggle = giftDemoToggle;
+    giftDemoToggle.addEventListener('change', function(){
+      var hero = giftDemoHeroSeat();
+      heroGiftDemo = giftDemoToggle.checked && hero
+        ? { tableId: state.tableId, seatNo: hero.seatNo, userId: hero.userId } : null;
+      renderGiftBadges();
+    });
     [
       { kind: 'hand', title: 'STRAIGHT', label: 'Straight', cards: ['2S', '3H', '4D', '5C', '6S'] },
       { kind: 'hand', title: 'FLUSH', label: 'Flush', cards: ['2S', '5S', '8S', '10S', 'QS'] },
@@ -4501,19 +4514,41 @@
   var giftPending = false;
   var giftRetry = null;
   var quickGiftTarget = null;
+  var heroGiftDemo = null;
   function giftByKey(key){ return giftCatalog.filter(function(gift){ return gift.key === key; })[0] || null; }
   function giftName(gift){ return t('pokerGift_' + gift.key, gift.key); }
   function giftEligibleSeats(){ return state.seats.filter(function(seat){ return seat && seat.userId && !isCurrentUserSeat(seat) && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''); }); }
   function giftShopAvailable(){ var seat = deriveCurrentSeat(); return !isGuestMode && isSignedIn() && seat && !seat.isBot && isWsReady() && !state.reconnectGate; }
+  function giftDemoHeroSeat(){
+    var build = window.BUILD_INFO;
+    if (!build || build.context !== 'deploy-preview' || build.isPreview !== true
+      || !state.tableId || isClosedTableStatus(state.tableStatus) || state.reconnectGate || !state.wsReady) return null;
+    return state.seats.filter(function(seat){
+      return seat && seat.userId && seat.userId === state.currentUserId && !/LEFT|INACTIVE|EMPTY/.test(seat.status || '');
+    })[0] || null;
+  }
+  function clearHeroGiftDemo(){ heroGiftDemo = null; renderGiftBadges(); }
   function renderGiftBadges(){
+    var hero = giftDemoHeroSeat();
+    if (heroGiftDemo && (!hero || heroGiftDemo.tableId !== state.tableId
+      || heroGiftDemo.seatNo !== hero.seatNo || heroGiftDemo.userId !== hero.userId)) heroGiftDemo = null;
+    if (els.heroGiftDemoToggle){
+      els.heroGiftDemoToggle.checked = !!heroGiftDemo;
+      els.heroGiftDemoToggle.disabled = !hero;
+    }
     state.seats.forEach(function(seat){
       var hud = renderedSeatHud[seat.seatNo];
       if (!hud || !seat.userId) return;
-      var gifts = giftsBySeat[seat.seatNo] || [];
+      var demo = !!heroGiftDemo && seat.seatNo === heroGiftDemo.seatNo && seat.userId === heroGiftDemo.userId;
+      var gifts = demo ? [{giftKey:'beer'},{giftKey:'pizza'},{giftKey:'whisky'}] : giftsBySeat[seat.seatNo] || [];
+      if (hud.nameNode){
+        if (demo) hud.nameNode.dataset.giftDemo = 'true';
+        else delete hud.nameNode.dataset.giftDemo;
+      }
       Array.prototype.forEach.call(hud.gifts.children, function(slot, index){
         var gift = gifts[index] && giftByKey(gifts[index].giftKey);
         slot.textContent = gift ? gift.emoji : '';
-        slot.title = gift ? giftName(gift) : '';
+        slot.title = gift ? (demo ? 'DEMO / Visual only · ' : '') + giftName(gift) : '';
       });
     });
   }
@@ -4926,6 +4961,7 @@
       nameOwner.dataset.seatNo = article.dataset.seatNo;
       nameOwner.dataset.userId = article.dataset.userId;
       placeSeatNode(name,{origin:[0,0]},hud.name,seatSceneOrientation === 'landscape' ? 104 : hero ? 88 : 76,seatSceneOrientation === 'landscape' ? 20 : 14);
+      hud.nameNode = name;
       nameOwner.appendChild(name);
       els.seatNameLayer.appendChild(nameOwner);
       if (seat && !visibleAction && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
@@ -6229,6 +6265,7 @@
   }
 
   function leaveAndReturnToLobby(destination){
+    clearHeroGiftDemo();
     var leaveDestination = destination == null
       ? (pendingLeaveNavigation ? pendingLeaveDestination : '/poker/')
       : normalizeLeaveDestination(destination);
@@ -6911,6 +6948,7 @@
         if (gen !== liveModeGeneration) return;
         if (['hello_ack', 'minting_token', 'authenticating', 'reconnecting', 'resync', 'failed', 'error', 'closed'].indexOf(status) !== -1){
           clearCelebration();
+          clearHeroGiftDemo();
           resetWinStreakSession();
           if (els.celebrationPreview) els.celebrationPreview.hidden = true;
         }
