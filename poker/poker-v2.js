@@ -4767,6 +4767,7 @@
         button.setAttribute('aria-haspopup', 'true');
         picker = document.createElement('div');
         picker.className = 'poker-gift-picker poker-quick-gift-picker';
+        picker.tabIndex = -1;
         var heading = document.createElement('strong');
         heading.className = 'poker-quick-gift-picker__heading';
         picker.appendChild(heading);
@@ -4833,8 +4834,12 @@
 
   function renderSeats(){
     if (!els.seatLayer) return;
+    var quickFocus = null;
     Object.keys(renderedSeatHud).forEach(function(key){
       var picker = renderedSeatHud[key].quickPicker;
+      if (picker && document.activeElement && picker.contains(document.activeElement)) {
+        quickFocus = { seatNo: key, userId: giftOwners[key], index: Array.prototype.indexOf.call(picker.querySelectorAll('button'), document.activeElement) };
+      }
       if (picker) picker.remove();
     });
     if (els.scene && els.scene.dataset) els.scene.dataset.pokerMaxSeats = String(state.maxSeats);
@@ -5048,6 +5053,14 @@
     });
     renderGiftBadges();
     syncGiftShop();
+    if (quickFocus && giftOwners[quickFocus.seatNo] === quickFocus.userId){
+      var hud = renderedSeatHud[quickFocus.seatNo];
+      var picker = hud && hud.quickPicker;
+      if (picker && !picker.hidden){
+        var choice = picker.querySelectorAll('button')[quickFocus.index];
+        (choice && !choice.disabled ? choice : picker).focus();
+      }
+    }
   }
 
   function clearReactionRenderNodes(){
