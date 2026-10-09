@@ -648,3 +648,5 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 #pokerTableScreen[data-preview-theme="royal-gold"] .poker-card--back::before{border-color:#dfc183;box-shadow:none;}
 #pokerTableScreen[data-preview-theme="royal-gold"] .poker-seat-avatar:not(.poker-seat-avatar--open)::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:url('/poker/assets/themes/royal-gold/avatar-frame.svg') center/100% 100% no-repeat;}
 #pokerPreviewTheme:focus-visible{outline:2px solid #ffe2a1;outline-offset:2px;}
+/* Keep the complete torso behind the rail; only the arms/hands are foreground. */
+#pokerTableScreen[data-preview-theme="royal-gold"] .poker-room-dealer::after{clip-path:polygon(0 64%,29.5% 64%,27% 74%,24.5% 84%,21.2% 90%,21.4% 92.1%,24.4% 94%,24.8% 97.5%,16.4% 99.7%,16.4% 100%,83.4% 100%,81% 97.5%,78.5% 94%,79.2% 90%,82% 84%,80% 74%,77% 64%,100% 64%,100% 100%,0 100%);}

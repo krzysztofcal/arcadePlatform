@@ -34,16 +34,16 @@ Seven local exports; Classic reuses the shipped assets unchanged. Raster exports
 | avatar-frame.svg | 100×100 | 487 | `813bdf37332bf495bce11755a8fa103f63adcddae171f072d0cf3f37e72cbc9c` | Original project vector |
 | card-back.svg | 100×140 | 515 | `4b70c3d3eb3b57c3211ed85864831a43701a9daeb9ae94e094fc000deb78912c` | Original project vector |
 | card-face.svg | 100×140 | 331 | `2ec38ff92fc784ce5d85022c1955b2c0793077a9f7cb3414f05aa7919b17534a` | Original project vector |
-| dealer.webp | 546×640 | 72014 | `3eaf2a6f46d8145a6b8dd1d85751c3a06dc2d9e734c265110caa3b8120c9622d` | Original high-quality OpenAI imagegen dealer; exact restored export from 9df2500 |
+| dealer.webp | 546×640 | 79894 | `48373c618583ef00ad102da90a28b24a8e1d01ac742eb4ff58de3389d7f1f8ba` | High-quality OpenAI imagegen lower-torso repair of the restored dealer; Sharp export |
 | felt.svg | 512×512 | 480 | `1229631247d5cb926ca41d4bb9eff2c3ecdf6c4c332c0ceeaab847506cd7d0ff` | Original project vector |
 | rail.svg | 512×128 | 598 | `df0ccdd18821fa137ddc0ca1eb3ebc3b55c1f644224baee75075330eb075a8b3` | Original project vector |
 | room.webp | 1536×1024 | 172924 | `e8744b52964028d08fae14645638f3dab00e39b5d8f52fbc3b836563f96eb047` | OpenAI generated; Sharp export |
 
-Package total: **247349 bytes** (ceiling 962,560). Room 172,924 bytes ≤614,400; transparent dealer 72,014 bytes ≤225,280; surface and decorative vectors each below their group ceilings. Dealer export canvas 546×640 matches the original canvas and aspect ratio. Existing box dimensions, background positioning, clipping and normalized card-flight origin (0.5, 0.84) are unchanged; visually compared head/hands/deck registration at native scene size. Final owner acceptance remains pending.
+Package total: **255229 bytes** (ceiling 962,560). Room 172,924 bytes ≤614,400; transparent dealer 79,894 bytes ≤225,280; surface and decorative vectors each below their group ceilings. Dealer export canvas 546×640 matches the original canvas and aspect ratio. Existing box dimensions, background positioning and normalized card-flight origin (0.5, 0.84) are unchanged; Royal Gold foreground clipping is corrected for the full lower torso; visually compared head/hands/deck registration at native scene size. Final owner acceptance remains pending.
 
 Generation prompts (built-in tool):
 - Room: empty black-marble and gold Art Deco private casino salon, warm crystal chandeliers, cinematic realistic illustration, dark unobstructed foreground for the existing table; no people/table/cards/chips/UI/text.
-- Dealer: restored original imagegen costume edit of the existing adult dealer: champagne gold satin dress with thin straps and a high gathered neckline, transparent canvas, reference identity/pose/hand registration. Owner explicitly requested restoring this export after rejecting the enlarged design crop.
+- Dealer: imagegen edit of the restored high-quality sprite: preserve face, hair, expression, high gathered neckline, thin straps, arms/hands/deck and normalized framing; extend only the lower central gold satin garment naturally to the bottom edge on a genuinely transparent canvas. No table/background or reframe. Built-in imagegen; Sharp export 546×640, WebP quality 90/alpha quality 100.
 
 No remaining dealer variants are generated before owner acceptance of this checkpoint.
 
@@ -53,6 +53,10 @@ Historical attempt, now reverted: owner requested extraction and deterministic u
 
 The concept table occludes the lower waist. A 269×33 crop of the source gown at intermediate (310,594) is resampled vertically to 269×100 and masked into only the lower garment before the existing live rail occludes it; no generative reconstruction. The source composition maps to the existing dealer canvas; CSS dimensions/position/flight origin/clipping stay unchanged. This preserves the approved garment cut but the small source limits native detail, especially on enlarged desktop scenes. Output resolution must not be interpreted as recovered high-resolution detail. Inspect the exported dress/hands on the actual Preview before owner acceptance.
 
-## Current owner-requested restoration
+## Owner-requested restoration before torso repair
 
 Restored dealer.webp byte-for-byte from original blob e0902cdd7bf3b42a1563c4e16e79dc9063f934eb (runtime checkpoint 78d591a / pre-extraction 9df2500). SHA-256 and bytes match the original export; no regeneration, resizing or sharpening. Owner explicitly rejected the soft extracted version and requested this imagegen version.
+
+## Current full-torso imagegen repair
+
+Owner accepted the restored generated direction but identified the horizontal lower-torso cutoff before rail occlusion. New high-resolution imagegen edit extends continuous gold satin to the bottom without moving the reference head/hands. Export dimensions 546×640; decoded center column alpha remains at least 252/255 across rows 576–639 (last 10%). Pose, dress cut and identity visually inspected against the restored sprite. Original generated repair remains outside the public repo; the optimized final WebP is local in poker/assets/themes/royal-gold. The scoped CSS foreground clip now follows arms/hands/deck and excludes the lower torso, which the existing rail covers; no scene box, origin or z-order changes. All budgets remain met.

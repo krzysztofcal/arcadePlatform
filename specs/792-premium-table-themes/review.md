@@ -80,3 +80,11 @@ Owner rejected the deterministic enlarged design crop as unacceptable. Restored 
 Verified runtime SHA `c8492a6f69f98196d4163b8b1b857a68f43421c1`, Netlify deploy `6ac970c315dedb0008c33aa1`, HTTP 200. Exact tested table: https://6ac970c315dedb0008c33aa1--playkcswh.netlify.app/poker/table-v2.html . Downloaded live dealer.webp has SHA-256 `3eaf2a6f46d8145a6b8dd1d85751c3a06dc2d9e734c265110caa3b8120c9622d`, identical to the original imagegen export.
 
 Remote Chromium rechecked 390×844, 844×390 and 1440×900: Royal Gold loads the restored dealer, 16 protected bounds unchanged, no page errors/horizontal overflow, Classic/reload/error/stale-request retention pass. CSP guard passes for 52 served documents. No regeneration, runtime JS/CSS, Stage, WS or Production change. Following evidence commit changes documentation only. Royal Gold owner checkpoint acceptance remains pending.
+
+## Full lower-torso imagegen repair
+
+Root cause: the restored sprite central dress ends around row 575 of 640 (90%), leaving transparent waist before the existing rail covers it. New high-quality imagegen edit fills central lower dress through the bottom; same 546×640 canvas and reference identity/pose/hands/deck. Old ::after clip would redraw the new lower dress over the rail; a Royal-only normalized foreground polygon follows arms/hands/deck and keeps the torso behind the rail. Classic unchanged.
+
+Final export 79,894 bytes, SHA-256 `48373c618583ef00ad102da90a28b24a8e1d01ac742eb4ff58de3389d7f1f8ba`; decoded lower-center alpha minimum 252/255 through rows 576–639. Local Chromium at 390×844, 844×390, 1440×900 shows continuous waist hidden by rail, hands/deck foreground, 16 protected bounds identical, no page errors/overflow. High-DPI waist close-up inspected; source cutoff/gap no longer visible. Classic/error/race/reload and build gates pass. Existing syntax/CSP checks follow before publication; exact live repair verification follows publication.
+
+Independent final repair reviewer inspected all three native-size captures and the high-DPI waist close-up: no critical/important findings; arms/hands/deck visible, torso behind rail and no conspicuous clipping. Inventory/provenance and changed foreground clipping documentation updated as requested. Syntax and CSP guard PASS (52 served documents).

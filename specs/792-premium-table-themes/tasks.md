@@ -64,3 +64,8 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 
 - [x] RG09 Restore the exact original imagegen dealer.webp, verify original SHA/bytes, remove rejected extraction script/mask and update current provenance/owner direction.
 - [x] RG10 Verify restored exact-revision Deploy Preview and record evidence.
+
+## Fuller generated dealer and correct rail occlusion
+
+- [x] RG11 Generate a high-quality full lower torso for the accepted dealer, optimize local dealer.webp, update scoped foreground masking and verify local native-size/zoom presentation and protected bounds.
+- [ ] RG12 Review final repair and verify exact-revision Deploy Preview, including waist/rail close-up, and record evidence.

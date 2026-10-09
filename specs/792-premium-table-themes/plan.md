@@ -78,3 +78,7 @@ Replace only Royal Gold dealer.webp with pixels isolated from the already approv
 ## Current restoration scope
 
 Owner rejected the deterministic extraction. Restore only the original generated Royal Gold dealer asset byte-for-byte; remove the feature-local extraction script/mask and record the rejection/restoration. Existing JS/CSS/layout/gameplay and all other theme layers remain unchanged. Verify the restored export on the PR Deploy Preview; stay Draft.
+
+## Full-torso repair on the accepted generated direction
+
+Regenerate only Royal Gold dealer art as a high-fidelity edit of the restored sprite, extending central lower dress to the bottom in the same 546×640 registration. Update only its scoped .poker-room-dealer::after foreground clip to exclude the filled torso while keeping hands/deck in front of the existing rail. No changes to dealer dimensions/anchors, table geometry, card flight origin, JS, Classic or other layers. Inspect portrait/landscape/desktop and a high-DPI close-up of the waist/rail; record new bytes/hash/provenance. No new dependencies, tests or tooling.
