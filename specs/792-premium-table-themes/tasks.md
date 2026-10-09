@@ -63,4 +63,4 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 ## Owner-requested high-quality restoration
 
 - [x] RG09 Restore the exact original imagegen dealer.webp, verify original SHA/bytes, remove rejected extraction script/mask and update current provenance/owner direction.
-- [ ] RG10 Verify restored exact-revision Deploy Preview and record evidence.
+- [x] RG10 Verify restored exact-revision Deploy Preview and record evidence.

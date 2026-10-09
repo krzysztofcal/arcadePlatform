@@ -74,3 +74,9 @@ Remote Chromium inspected the extracted Royal Gold dealer at 390×844, 844×390 
 ## Owner rejection and high-quality restoration
 
 Owner rejected the deterministic enlarged design crop as unacceptable. Restored original imagegen dealer.webp byte-for-byte from pre-extraction 9df2500: 72,014 bytes, SHA-256 `3eaf2a6f46d8145a6b8dd1d85751c3a06dc2d9e734c265110caa3b8120c9622d`. Current source is the original high-resolution generated sprite export, including the gathered high neckline explicitly restored by the owner. Removed the rejected extraction script and alpha mask. Other art and runtime JS/CSS are unchanged; prior extraction evidence is historical, not current visual acceptance. Live restoration verification follows publication.
+
+### Restored imagegen dealer — live verification
+
+Verified runtime SHA `c8492a6f69f98196d4163b8b1b857a68f43421c1`, Netlify deploy `6ac970c315dedb0008c33aa1`, HTTP 200. Exact tested table: https://6ac970c315dedb0008c33aa1--playkcswh.netlify.app/poker/table-v2.html . Downloaded live dealer.webp has SHA-256 `3eaf2a6f46d8145a6b8dd1d85751c3a06dc2d9e734c265110caa3b8120c9622d`, identical to the original imagegen export.
+
+Remote Chromium rechecked 390×844, 844×390 and 1440×900: Royal Gold loads the restored dealer, 16 protected bounds unchanged, no page errors/horizontal overflow, Classic/reload/error/stale-request retention pass. CSP guard passes for 52 served documents. No regeneration, runtime JS/CSS, Stage, WS or Production change. Following evidence commit changes documentation only. Royal Gold owner checkpoint acceptance remains pending.
