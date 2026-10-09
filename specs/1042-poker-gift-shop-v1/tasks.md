@@ -152,6 +152,6 @@ Constitution:existing fundamental tests/repo/syntax/CSP and temporary probes onl
 
 - [x] PICKER-T001 — Existing picker cards/header/unscaled fixed viewport placement/lifecycle;controlled all-slot probes.
 - [ ] PICKER-T002 — Measure upper-right constraints,apply if feasible or document/propose safe alternative for approval.
-- [ ] PICKER-T003 — Fundamental checks,published Chromium/Firefox probe,issue/PR/SpecKit handoff,Draft/manualFAIL gates.
+- [x] PICKER-T003 — Fundamental checks,published Chromium/Firefox probe,issue/PR/SpecKit handoff,Draft/manualFAIL gates.
 
 PICKER-T002 measurements complete; strict right-D criterion is infeasible. Candidate[883,173] is temporary-probe-only,awaiting user acceptance; source anchor still[757,120].
