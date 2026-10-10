@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", checkWsBuyInCapability = async () => ({ ok: true }) }) =>
+const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", checkWsBuyInCapability = async () => ({ ok: true }) }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -26,6 +26,7 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, mode, quer
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
+          if (text.includes(") pending_tables")) return [{ count: pendingTables }];
           if (text.includes("to_regclass")) return [{ available: poolSchema }];
           if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows(enabledBuyIns);
           if (text.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
@@ -112,6 +113,68 @@ const assertCanonicalLockKey = (queries, expectedKey) => {
 };
 
 const run = async () => {
+  {
+    const queries = [], notifications = [];
+    const response = await callQuickSeat(makeHandler({ mode: "create", queries, notifications, pendingTables: 4, balance: 550 }), { buyIn: 100 });
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(JSON.parse(response.body), { error: "pending_table_limit", limit: 4 });
+    assert.equal(queries.some(({ query }) => query.includes("insert into public.poker_tables")), false);
+    assert.equal(notifications.length, 0);
+  }
+  for (const effectiveClass of ["NORMAL", "SLOW", "RESTRICTED"]) {
+    const queries = [];
+    const response = await callQuickSeat(makeHandler({ mode: "any_open", queries, effectiveClass, balance: 550 }), { buyIn: 100 });
+    assert.equal(response.statusCode, 200);
+    assert.ok(queries.filter(({ query }) => query.includes("t.buy_in = any($4::int[])"))
+      .every(({ params }) => params[4] === effectiveClass && JSON.stringify(params[3]) === "[100]"));
+  }
+  // Exact tier is an optional contract; legacy cases below stay unchanged.
+  for (const mode of ["prefer_humans", "any_open", "create"]) {
+    const queries = [], notifications = [];
+    const handler = makeHandler({ mode, queries, notifications, balance: 550 });
+    const response = await callQuickSeat(handler, { maxPlayers: 6, buyIn: 100 });
+    assert.equal(response.statusCode, 200);
+    assert.ok(queries.filter(({ query }) => query.includes("t.buy_in = any($4::int[])"))
+      .every(({ params }) => JSON.stringify(params[3]) === "[100]"), "both searches must keep the selected tier");
+    if (mode === "create") assert.equal(notifications[0].buyIn, 100, "fallback Create must not upgrade tier");
+  }
+  for (const buyIn of [null, "100", true, 0, -1, 100.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const queries = [];
+    const response = await callQuickSeat(makeHandler({ mode: "create", queries }), { buyIn });
+    assert.equal(response.statusCode, 400, "supplied buyIn must be a positive safe integer number");
+    assert.equal(JSON.parse(response.body).error, "invalid_buy_in");
+    assert.equal(queries.length, 0);
+  }
+  for (const settings of [{ balance: 99 }, { enabledBuyIns: [500], balance: 550 }, { enabledBuyIns: [100, 500, 1000], balance: 1100 }]) {
+    const queries = [], notifications = [];
+    const response = await callQuickSeat(makeHandler({ mode: "create", queries, notifications, ...settings }), { buyIn: 100 });
+    assert.equal(response.statusCode, 409, "fresh policy/bankroll must revalidate the selected tier");
+    assert.equal(JSON.parse(response.body).error, "buy_in_tier_locked");
+    assert.equal(queries.some(({ query }) => query.includes("insert into public.poker_tables")), false);
+    assert.equal(notifications.length, 0);
+  }
+  {
+    const queries = [];
+    const response = await callQuickSeat(makeHandler({ mode: "create", queries, effectiveClass: "UNKNOWN" }), { buyIn: 100 });
+    assert.equal(response.statusCode, 503);
+    assert.equal(JSON.parse(response.body).error, "poker_access_unavailable");
+    assert.equal(queries.some(({ query }) => query.includes("insert into public.poker_tables")), false);
+  }
+  {
+    const queries = [];
+    const response = await callQuickSeat(makeHandler({ mode: "already_seated", queries, balance: 0, enabledBuyIns: [], candidateBuyIn: 500 }), { buyIn: 100 });
+    assert.equal(response.statusCode, 200, "resume existing financed seat before tier revalidation");
+    assert.equal(JSON.parse(response.body).tableId, "table-human");
+    assert.equal(queries.some(({ query }) => /account_type = 'USER'|insert into public.poker_seats|chips_transactions|insert into public.poker_tables/.test(query)), false, "resume has no second funding or reseating");
+  }
+  {
+    const queries = [], notifications = [];
+    // Defensive mismatch guard also covers a stale/unexpected candidate projection.
+    const response = await callQuickSeat(makeHandler({ mode: "prefer_humans", queries, notifications, balance: 550, candidateBuyIn: 500 }), { buyIn: 100 });
+    assert.equal(response.statusCode, 200);
+    assert.equal(JSON.parse(response.body).tableId, "table-new");
+    assert.equal(notifications[0].buyIn, 100);
+  }
   for (const mode of ["prefer_humans", "create"]) {
     const queries = [], notifications = [];
     const handler = makeHandler({ mode, queries, notifications, balance: 1_000_000, candidateBuyIn: 500 });

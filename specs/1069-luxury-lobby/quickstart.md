@@ -15,3 +15,12 @@ Existing design PR #1078 only. Owner accepted V3 landscape, portrait and Daily B
 7. Exact HEAD preview check: deployed CSS/JS/six active art hashes match local assets, both HTML routes 200 with CSP. Netlify-injected HTML is browser-verified rather than byte-identical.
 
 Later, separate approvals: #1069 real guest/auth/quick-seat/Create/Join/Refresh/tier/progression/bonus/back/reconnect integration; #800 shared table-ID resolver with fixed mapping, no player settings; #1079 real economy/history/claims. No backend/DB/WS/Production change authorized.
+
+## Real lobby smoke after #1078 merge
+Open the implementation PR Deploy Preview `/poker/` on a phone. Dismiss/decline the consent banner. Check 320–390px portrait and rotated landscape: swipe all five cards, test arrows/dots, Coming Soon details/Escape, Daily Bonus unavailable, Profile and sidebar.
+
+Guest: Play as Guest navigates directly to Poker V2 with `guest=1&autoJoin=1`; the existing runtime deals when ready. Reload/reconnect preserves guest identity/seat.
+
+Authenticated Stage test account: compare actual topbar name/avatar/XP/CH and Progression. With two `availableBuyIns`, highest is initially selected; tap lower exact CH then Play Now once. Confirm exact table buy-in/canonical blinds after auto-join, with no forced start or duplicate debit. A live/financed seat changes action to Resume Game even if bankroll no longer unlocks a tier; verify same table/seat without extra funding. Online Tables preserves Create/Join/Refresh and Back to modes.
+
+Failure checks: no available tier/failed progression disables new play; stale policy/bankroll returns authoritative error and refreshes options. Four active/four pending caps, NORMAL/SLOW/RESTRICTED and funding gates remain server enforced. Disconnect/reconnect should resync without new client start_hand. Do not enable campaigns, alter economy, migrate DB, deploy WS or touch Production.

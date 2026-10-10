@@ -46,3 +46,18 @@ The owner requests this design PR be prepared for merge but explicitly forbids a
 Approval update changes SpecKit documents only; browser/deployable code is identical to the accepted SHA. Before handoff verify final remote HEAD equals local HEAD, PR ready-for-review/mergeability and all CI statuses. Existing six-viewport HTTPS evidence remains valid because no preview runtime/art/config changed; final deployed route/CSS/JS/art identity is rechecked. Physical-device, large-text/200% zoom and safe-area testing are not newly claimed.
 
 Final lobby and table resolver remain unimplemented. No backend/WS/DB/CH economy/Production/Stage changes or merge performed. Worktree retained for the owner merge process.
+
+## #1069 real implementation self-review — 2026-10-10
+Base main c4f26e4c (merged #1078); separate feat/1069-luxury-poker-lobby. T009–T014 reuse exact six accepted optimized WebP files, five-card V3 carousel, scoped CSS and existing initLobby controller. Topbar identity uses existing avatarLabel renderUser path; no second auth/XP/balance request framework. Online Tables/Progression preserve existing nodes. Daily Bonus is honest unavailable; no #800/#1079 work. Poker AdSense presentation removed, consent unchanged.
+
+Backend test-first: exact-tier assertion failed before implementation, passed afterward. Extended existing Quick Seat tests cover exact searches and Create, mismatch fallback same tier, malformed input, authoritative disabled/unaffordable/outside-current-two tier, unknown class, resume before fresh policy with no debit/reseat; legacy/capability tests unchanged. Existing JOIN/start-hand tests: 33/33 pass. Existing lobby regression test harness updated only for browser API stubs/funded resume fixture, no new UI assertions.
+
+Local temporary browser checks: 390×844, 320×568, 844×390, five cards, no horizontal page overflow/duplicate IDs/page errors, guest button hit-test and Daily Bonus unavailable. Consent first declined. Local mocked authenticated wiring (explicitly not runtime evidence): available 500/100 CH displays correctly; lower selection sends {maxPlayers:6,buyIn:100}; 409 message appears.
+
+Guards: ci:guards, syntax, CSP SHA guard, changed index XP badge and diff whitespace pass. Broad check:all fails in four unchanged design pages missing XP anchors; reproduced on clean main c4f26e4c. No unrelated fix. Full npm test initially exposed limited legacy browser harness; fixed harness and rerun pending.
+
+Readiness inspection: handleJoinCommand already bootstraps after financed admission/runtime join and persists expected version before broadcasting/scheduling bots; guest JOIN also bootstraps. bootstrapHand uses existing eligible-human and enough-player gates, live/settlement idempotence. No client autoStart or new WS command. No WS/protocol/shared runtime/deploy change; WS Preview Deploy gate not triggered. No migration/Stage config/Production/merge.
+
+Review risks: optional buyIn strictly numeric safe integer, missing keeps legacy semantics; exact-tier errors intentional and no silent fallback. CSS body scoping/DOM relocation preserve IDs and auth/guest/connection lifecycle. Await final Deploy Preview revision and CI; authenticated Stage account/device runtime smoke may remain user-run and must be reported explicitly.
+
+Final self-review corrected keyboard focus: auth watcher no longer refocuses Guest every three seconds; buttons retain normal tab order, inline tier selection updates aria-pressed without destroying focused controls. Existing pending-table cap and all three class filters also exercised with selected buy-in. Independent read-only reviewer found no blockers; targeted backend/lobby regressions passed. Full runtime evidence remains separate.

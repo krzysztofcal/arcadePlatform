@@ -295,6 +295,7 @@ function loadLobbyHarness(options = {}){
       addEventListener: (type, fn) => { registerEvent(windowEvents, type, fn); },
       removeEventListener: () => {},
       __RUNNING_POKER_UI_TESTS__: false,
+      matchMedia: () => ({ matches: true }),
       KLog: { log: () => {} },
       sessionStorage: {
         getItem(key){ return sessionStorageEntries.has(String(key)) ? sessionStorageEntries.get(String(key)) : null; },
@@ -334,6 +335,8 @@ function loadLobbyHarness(options = {}){
     document: {
       readyState: 'complete',
       visibilityState: 'visible',
+      querySelector: () => null,
+      querySelectorAll: () => [],
       addEventListener: (type, fn) => { registerEvent(documentEvents, type, fn); },
       getElementById: (id) => elements[id] || null,
       createElement: (tag) => makeElement(tag),
@@ -444,7 +447,7 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
   const quickSeatGuardHarness = loadLobbyHarness({
     fetchResponse: async (url) => url.includes('poker-quick-seat')
       ? { ok: false, status: 409, json: async () => ({ error: 'insufficient_chips', requiredBuyIn: 100, balance: 99 }) }
-      : { ok: true, status: 200, json: async () => ({ ok: true }) },
+      : { ok: true, status: 200, json: async () => ({ rejoinableTableIds: ['funded-table'], availableBuyIns: [], tiers: [] }) },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   quickSeatGuardHarness.elements.pokerQuickSeat.click();

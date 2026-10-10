@@ -1467,6 +1467,12 @@
     var tableList = document.getElementById('pokerTableList');
     var refreshBtn = document.getElementById('pokerRefresh');
     var quickSeatBtn = document.getElementById('pokerQuickSeat');
+    var quickTiers = document.getElementById('pokerQuickTiers');
+    var quickStatus = document.getElementById('pokerQuickStatus');
+    var selectedQuickBuyIn = null;
+    var quickSeatInFlight = false;
+    var lobbyAuthenticated = false;
+    var lobbyIdentity = null;
     var createBtn = document.getElementById('pokerCreate');
     var buyInInput = document.getElementById('pokerBuyIn');
     var maxPlayersInput = document.getElementById('pokerMaxPlayers');
@@ -1493,6 +1499,74 @@
 
     if (quickSeatBtn) quickSeatBtn.disabled = true;
     if (createBtn) createBtn.disabled = true;
+
+    var carousel = document.querySelector('.carousel');
+    var tiles = Array.prototype.slice.call(document.querySelectorAll('.tile'));
+    var dots = Array.prototype.slice.call(document.querySelectorAll('.dot'));
+    var current = 0;
+    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var descriptions = {
+      single: ['Single Player', 'Planned online poker against existing bots, with exactly one human at a table. This is not offline poker. Admission, tier eligibility and bot funding require separate implementation in #1077.'],
+      world: ['World Tour', 'A planned free choice of play path through designated country-themed tables. It is not a purchased cosmetic or reward. Table discovery, tier access and routing belong to #1075.'],
+      seasons: ['Seasons', 'Planned winter, spring, summer and autumn visuals rotating weekly on designated themed tables. Ordinary Quick Play tables stay unchanged. Scheduling and gameplay routing belong to #1075.'],
+      sitgo: ['Sit & Go', 'A planned tournament format that starts after enough players register. Tournament admission, blinds, bankroll and payouts are future work in #797.']
+    };
+    function goTo(index){
+      index = Math.max(0, Math.min(tiles.length - 1, index));
+      carousel.scrollTo({ left: tiles[index].offsetLeft - tiles[0].offsetLeft, behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+    }
+    function updatePosition(){
+      if (!carousel) return;
+      var distance = Infinity;
+      tiles.forEach(function(tile, index){
+        var nextDistance = Math.abs(tile.offsetLeft - tiles[0].offsetLeft - carousel.scrollLeft);
+        if (nextDistance < distance){ distance = nextDistance; current = index; }
+      });
+      if (carousel.scrollLeft >= carousel.scrollWidth - carousel.clientWidth - 2) current = tiles.length - 1;
+      dots.forEach(function(dot, index){ dot.setAttribute('aria-current', String(index === current)); });
+      document.querySelectorAll('[data-step]').forEach(function(button){ button.disabled = Number(button.dataset.step) < 0 ? current === 0 : current === tiles.length - 1; });
+    }
+    dots.forEach(function(dot){ dot.addEventListener('click', function(){ goTo(Number(dot.dataset.index)); }); });
+    document.querySelectorAll('[data-step]').forEach(function(button){ button.addEventListener('click', function(){ goTo(current + Number(button.dataset.step)); }); });
+    if (carousel) carousel.addEventListener('scroll', updatePosition, { passive: true });
+    window.addEventListener('resize', updatePosition); // xp-lifecycle-allow:poker-lobby-carousel(2027-01-01)
+    if (carousel) carousel.addEventListener('keydown', function(event){
+      if (event.target !== carousel) return;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft'){ event.preventDefault(); goTo(current + (event.key === 'ArrowRight' ? 1 : -1)); }
+      if (event.key === 'Home' || event.key === 'End'){ event.preventDefault(); goTo(event.key === 'Home' ? 0 : tiles.length - 1); }
+    });
+    document.querySelectorAll('[data-mode]').forEach(function(button){ button.addEventListener('click', function(){
+      var description = descriptions[button.dataset.mode];
+      document.getElementById('infoTitle').textContent = description[0];
+      document.getElementById('infoCopy').textContent = description[1];
+      document.getElementById('infoDialog').showModal();
+    }); });
+    document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
+      var dialog = document.getElementById(button.dataset.panel + 'Dialog');
+      if (dialog && !dialog.open) dialog.showModal();
+    }); });
+    document.querySelectorAll('[data-close]').forEach(function(button){ button.addEventListener('click', function(){ button.closest('dialog').close(); }); });
+    document.querySelectorAll('[data-view]').forEach(function(button){ button.addEventListener('click', function(){
+      showLobbyView(button.dataset.view);
+    }); });
+    function showLobbyView(view, focusTarget){
+      if (view !== 'modes' && !lobbyAuthenticated){
+        view = 'modes';
+        setError(errorEl, 'Sign in to browse persistent-chip tables and progression, or play as Guest.');
+      }
+      ['modes', 'tables', 'progression'].forEach(function(name){
+        var node = document.getElementById('poker' + name.charAt(0).toUpperCase() + name.slice(1) + 'View');
+        if (node) node.hidden = name !== view;
+      });
+      var target = document.getElementById(view === 'modes' ? 'pokerQuickSeat' : view === 'tables' ? 'pokerTablesTitle' : 'pokerProgressTitle');
+      if (view === 'modes' && !lobbyAuthenticated) target = guestPlayBtn;
+      if (target && focusTarget !== false){
+        if (target.tagName !== 'BUTTON') target.setAttribute('tabindex', '-1');
+        target.focus({ preventScroll: true });
+      }
+      if (view === 'modes') updatePosition();
+    }
+    if (carousel) updatePosition();
 
     function requiredCashBuyIn(){
       var value = lobbyContent && lobbyContent.dataset ? Number(lobbyContent.dataset.requiredBuyIn) : NaN;
@@ -1719,6 +1793,52 @@
       } catch (_err){}
     }
 
+    function hasResumeSeat(){
+      return !!(progressionState && Array.isArray(progressionState.rejoinableTableIds) && progressionState.rejoinableTableIds.length);
+    }
+
+    function renderQuickTiers(){
+      var options = progressionState && Array.isArray(progressionState.availableBuyIns)
+        ? progressionState.availableBuyIns.filter(function(value){ return Number.isSafeInteger(value) && value > 0; }).slice(0, 2) : [];
+      if (options.indexOf(selectedQuickBuyIn) === -1) selectedQuickBuyIn = options.length ? options[0] : null;
+      var resume = hasResumeSeat();
+      var effectiveClass = progressionState && progressionState.pokerAccess && progressionState.pokerAccess.effectiveClass;
+      var accessReady = effectiveClass === 'NORMAL' || effectiveClass === 'SLOW' || effectiveClass === 'RESTRICTED';
+      if (quickTiers){
+        quickTiers.innerHTML = '';
+        quickTiers.hidden = resume || !options.length;
+        options.forEach(function(buyIn){
+          var node = document.createElement(options.length > 1 ? 'button' : 'span');
+          node.className = options.length > 1 ? 'quick-tier' : 'quick-tier-label';
+          node.textContent = formatChips(buyIn) + ' CH';
+          if (options.length > 1){
+            node.type = 'button';
+            node.dataset.buyIn = String(buyIn);
+            node.setAttribute('aria-pressed', String(buyIn === selectedQuickBuyIn));
+            node.disabled = quickSeatInFlight;
+            node.addEventListener('click', function(){
+              selectedQuickBuyIn = buyIn;
+              quickTiers.querySelectorAll('button').forEach(function(button){
+                button.setAttribute('aria-pressed', String(Number(button.dataset.buyIn) === buyIn));
+              });
+            });
+          }
+          quickTiers.appendChild(node);
+        });
+      }
+      if (quickSeatBtn){
+        quickSeatBtn.textContent = quickSeatInFlight ? 'CONNECTING…' : resume ? 'RESUME GAME' : 'PLAY NOW';
+        quickSeatBtn.disabled = quickSeatInFlight || !lobbyAuthenticated || (!resume && (!options.length || !accessReady));
+        quickSeatBtn.setAttribute('aria-busy', String(quickSeatInFlight));
+      }
+      if (quickStatus) quickStatus.textContent = quickSeatInFlight ? 'Finding your table…'
+        : resume ? 'Return to your existing seat. No additional buy-in.'
+        : !progressionState ? 'Progression unavailable. Refresh to retry.'
+        : !accessReady ? 'Poker access temporarily unavailable.'
+        : !options.length ? 'No playable tier for your current bankroll.'
+        : 'Auto-join · the hand starts when the table is ready.';
+    }
+
     function renderProgression(data){
       progressionState = data && typeof data === 'object' ? data : null;
       if (progressionBankroll){
@@ -1740,7 +1860,7 @@
         }
         if (createBtn) createBtn.disabled = data.tiers.length === 0;
       }
-      if (quickSeatBtn) quickSeatBtn.disabled = !(progressionState && Array.isArray(progressionState.availableBuyIns) && progressionState.availableBuyIns.length > 0);
+      renderQuickTiers();
       if (progressionRoadmap){
         progressionRoadmap.innerHTML = '';
         var tiers = data && Array.isArray(data.tiers) ? data.tiers : [];
@@ -1777,10 +1897,16 @@
         progressionRefreshQueued = true;
         return progressionInFlight;
       }
+      var requestIdentity = lobbyIdentity;
       progressionInFlight = apiGet(PROGRESSION_URL).then(function(data){
+        if (!lobbyAuthenticated || lobbyIdentity !== requestIdentity) return null;
         renderProgression(data);
         return data;
       }).catch(function(err){
+        if (!lobbyAuthenticated || lobbyIdentity !== requestIdentity) return null;
+        progressionState = null;
+        selectedQuickBuyIn = null;
+        renderQuickTiers();
         if (!isAuthError(err)) klog('poker_progression_refresh_failed', { error: err && (err.code || err.message) ? (err.code || err.message) : 'unknown' });
         return null;
       }).finally(function(){
@@ -1809,6 +1935,12 @@
     async function checkAuth(){
       var token = await getAccessToken();
       if (!token){
+        lobbyAuthenticated = false;
+        lobbyIdentity = null;
+        progressionState = null;
+        selectedQuickBuyIn = null;
+        renderQuickTiers();
+        showLobbyView('modes', false);
         stopLobbyWs();
         setWelcomeBonusBannerVisible(false);
         if (authMsg) authMsg.hidden = false;
@@ -1817,6 +1949,13 @@
         startAuthWatch();
         return false;
       }
+      if (lobbyIdentity !== token){
+        progressionState = null;
+        selectedQuickBuyIn = null;
+        lobbyIdentity = token;
+      }
+      lobbyAuthenticated = true;
+      renderQuickTiers();
       if (authMsg) authMsg.hidden = true;
       if (lobbyContent) lobbyContent.hidden = false;
       stopAuthWatch();
@@ -1854,6 +1993,7 @@
           if (generation !== lobbyWsGeneration || !access || !access.payload) return;
           if (!progressionState || typeof progressionState !== 'object') progressionState = {};
           progressionState.pokerAccess = access.payload;
+          renderQuickTiers();
           renderTables(lobbyTables);
         },
         onStatus: function(status, data){
@@ -1887,7 +2027,7 @@
               content: lobbyContent,
               errorEl: errorEl,
               stopPolling: stopLobbyWs,
-              onAuthExpired: startAuthWatch
+              onAuthExpired: function(){ lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
             });
             if (tableList) tableList.innerHTML = '';
             return;
@@ -2037,12 +2177,18 @@
     }
 
     async function quickSeat(){
+      if (quickSeatInFlight || !lobbyAuthenticated) return;
+      if (!hasResumeSeat() && selectedQuickBuyIn === null) return;
       setError(errorEl, null);
       var maxPlayers = resolveLobbyMaxPlayers();
       var payload = { maxPlayers: maxPlayers };
-      setLoading(quickSeatBtn, true);
+      if (selectedQuickBuyIn !== null) payload.buyIn = selectedQuickBuyIn;
+      quickSeatInFlight = true;
+      renderQuickTiers();
+      var requestIdentity = lobbyIdentity;
       try {
         var data = await apiPost(QUICK_SEAT_URL, payload);
+        if (!lobbyAuthenticated || lobbyIdentity !== requestIdentity) return;
         if (data && data.ok === true && data.tableId){
           navigateToPokerTable(data.tableId, {
             seatNo: data.seatNo != null ? data.seatNo : null,
@@ -2052,22 +2198,26 @@
         }
         setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
       } catch (err){
-        if (handleTierLocked(err)) return;
-        if (handleInsufficientChips(err)) return;
+        if (!lobbyAuthenticated || lobbyIdentity !== requestIdentity) return;
+        if (handleTierLocked(err) || handleInsufficientChips(err)){
+          refreshProgression();
+          return;
+        }
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
             content: lobbyContent,
             errorEl: errorEl,
             stopPolling: stopLobbyWs,
-            onAuthExpired: startAuthWatch
+            onAuthExpired: function(){ lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
           });
           return;
         }
         klog('poker_quick_seat_error', { error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
       } finally {
-        setLoading(quickSeatBtn, false);
+        quickSeatInFlight = false;
+        renderQuickTiers();
       }
     }
     async function createTable(){
@@ -2096,7 +2246,7 @@
             content: lobbyContent,
             errorEl: errorEl,
             stopPolling: stopLobbyWs,
-            onAuthExpired: startAuthWatch
+            onAuthExpired: function(){ lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
           });
           return;
         }
