@@ -14,7 +14,7 @@
 **Independent verification**: two preview URLs; five reachable cards, native phone layouts, honest four Coming Soon shells.
 - [x] T005 [US1] Create poker/designs/luxury-lobby/landscape.html and portrait.html plus shared preview.css, native scroll-snap cards, peek, safe-area spacing and 44px targets.
 - [x] T006 [US1] Create poker/designs/luxury-lobby/preview.js IIFE for navigation indicators/arrows and honest Coming Soon dialogs; no gameplay, auth, wallet, logging or storage code.
-- [ ] T007 [US1] Record bounded browser viewport/dialog/gallery/CSP review and deploy-preview URLs in specs/1069-luxury-lobby/self-review.md; publish Draft PR only.
+- [x] T007 [US1] Record bounded browser viewport/dialog/gallery/CSP review and deploy-preview URLs in specs/1069-luxury-lobby/self-review.md; publish Draft PR only.
 - [ ] T008 [US1] Obtain owner visual acceptance for landscape and portrait and record decisions in specs/1069-luxury-lobby/self-review.md. STOP final implementation until approved.
 
 ## Phase 4 — US2: real lobby integration (P1, BLOCKED by T008; future #1069 PR)
@@ -37,8 +37,8 @@
 - [ ] T021 [US3] Verify #800 permitted selection, deny unpermitted persisted IDs, account/guest separation, storage denial, missing assets, static dealer and reconnect manually; record in specs/1069-luxury-lobby/self-review.md. Extend existing fundamental critical-logic tests only if changed rules warrant it.
 
 ## Phase 6 — Polish and review
-- [ ] T022 Review specs/1069-luxury-lobby/checklists/requirements.md and self-review.md for traceability/contradictions, actual art quality, incomplete approval and separate PR boundaries; fix review findings before handoff.
-- [ ] T023 Confirm exact Draft PR HTTPS Netlify URLs/assets and revision, existing checks and unchanged runtime/DB/WS/Production scope; record in specs/1069-luxury-lobby/self-review.md.
+- [x] T022 Review specs/1069-luxury-lobby/checklists/requirements.md and self-review.md for traceability/contradictions, actual art quality, incomplete approval and separate PR boundaries; fix review findings before handoff.
+- [x] T023 Confirm exact Draft PR HTTPS Netlify URLs/assets and revision, existing checks and unchanged runtime/DB/WS/Production scope; record in specs/1069-luxury-lobby/self-review.md.
 
 ## Dependencies / execution strategy
 T001 → T002 → T003/T004 → T005/T006/T016 → T007/T022/T023 → owner T008. Current delivery stops at that gate. Complete approved five-card design is the current milestone; Online functionality uses unchanged lobby link.

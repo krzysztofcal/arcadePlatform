@@ -45,3 +45,13 @@ Owner real-device portrait/landscape/touch/visual acceptance is pending. Final l
 Chromium review at 1280×800 landscape, 844×390 landscape phone, 390×844 portrait, 360×640 and 320×568 portrait: five decoded mode artworks, partial next-card peek, zero page-wide horizontal overflow, six decoded theme art samples, Coming Soon dialog Escape and focus return, Cosmetics focus return, zero JS errors and zero account/API/WS requests. Snapshots are in `poker/designs/luxury-lobby/screenshots/`. These are browser viewport simulations, not physical-phone acceptance. Wide final-card indicator and 44px indicator hit targets rechecked after refinement.
 
 Five artwork bytes: 781368 total; first art 133896 bytes. Within SC-004 budget.
+
+## Published Draft PR and HTTPS evidence
+- Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1078 (remains Draft).
+- Landscape: https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/landscape.html
+- Portrait: https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/portrait.html
+- Verified deployed runtime/design revision: `71d65a3ef3bd34ec8f658637ea8139db9f7149d6`. Netlify Deploy Preview and required actionlint passed for that revision. Later review-evidence-only commits do not change these design assets.
+- Real HTTPS Chromium inspection at 844×390 and 390×844: HTTP 200, CSP present, five artwork decodes, indicator/Sit & Go Coming Soon details/Escape/Cosmetics/Neon Vegas art selection all usable; zero application JS errors and zero platform account/API/WS requests. Netlify itself injects its CDP script and makes its own preview-drawer request; two camera/microphone permissions-policy console messages originate from that iframe, not the application. The drawer is hidden only on review pages; site security/deploy settings remain unchanged.
+- Final scope diff contains only `poker/designs/luxury-lobby/**` and `specs/1069-luxury-lobby/**`. Original lobby/topbar/backend/DB/WS/configuration/dependencies unchanged; local feature selector remains ignored/uncommitted. GitHub auto-runs broader existing CI; ws-harness/playwright were still running when this evidence was recorded, no failure observed. No manual runtime deployment or production operation performed.
+
+Owner acceptance is the remaining current milestone gate (T008). T007/T022/T023 are complete. T009–T015 and T017–T021 remain unchecked and blocked.
