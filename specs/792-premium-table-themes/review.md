@@ -130,3 +130,9 @@ Exact runtime **223c28f81fa95b70f315f9458fd1995bce0e792c**, BUILD_INFO matched a
 ### CI result for corrected runtime
 
 GitHub ws-harness initially failed1/140 cases in the unchanged test `disconnect cleanup close rewrite restores inert state and blocks repeated timeout sweeps` (seat_user_closed vsnull). Runtime commit changes only five rooms and feature docs; backend/WS/test sources are unchanged. Failed check rerun, workflow38042366627 attempt2, completed **success** with no source change. No WS patch/deployment or Stage mutation performed. Netlify success, local syntax/CSP and corrected Preview checks pass. This records the observed retry result without asserting a root cause for the transient harness failure.
+
+## Final owner acceptance and manual smoke — 2026-10-10
+
+Owner accepted the final five background corrections and, after being asked to verify the remaining live scenarios (dealing/showdown/fold, reconnect and guest/spectator views), explicitly reported: "Smoke test pass." This is owner-reported manual verification, not an additional automated browser run. Combined with the documented automated geometry, readability, preview-gate, loading and exact-artifact evidence, this closes T011/T013. No remaining implementation tasks or critical/important review findings.
+
+Readiness audit before this documentation update: head f69cb44a6124c31296ee9e19c354acd72a59b585, GitHub MERGEABLE/CLEAN, all applicable CI checks successful, and actual Preview BUILD_INFO.commitHash matches that head. This update changes documentation only. Earlier pending-smoke statements above are historical and superseded by this confirmation. No merge or Production deployment performed.

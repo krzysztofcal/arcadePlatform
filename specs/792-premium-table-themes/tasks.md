@@ -24,14 +24,14 @@ Independent verification: six packages selectable from Preview FX, default/reset
 - [x] T008 [US2] Add `TABLE_THEME_CATALOG`, `previewThemeId` and `applyPreviewTheme(themeId)` to `poker/poker-v2.js`, with exact six IDs, preview build gate, requested-only loading, stale-load cancellation and error retention of current art.
 - [x] T009 [US2] Extend `bindCelebrationPreview()` with labeled Theme select/status in `poker/poker-v2.js`; audit `render()`/preference/leave visibility assignments for demo, guest, spectator and reconnect while preserving existing effect click gates and no persistence.
 - [x] T010 [US2] Add scoped cosmetic overrides in `poker/poker-v2.css` for room, rail/felt, dealer, face/back and frame; reuse `createCard()` text and existing FX hooks without geometry changes.
-- [ ] T011 [US2] Verify six switches, Classic/reload, non-preview absence, guest/spectator access, rapid/failed loading and no gameplay writes on Deploy Preview; record evidence in `specs/792-premium-table-themes/review.md`.
+- [x] T011 [US2] Verify six switches, Classic/reload, non-preview absence, guest/spectator access, rapid/failed loading and no gameplay writes on Deploy Preview; record evidence in `specs/792-premium-table-themes/review.md`.
 
 ## Phase 4 — US3: Readability and geometry
 
 Independent verification: readable cards and UI, unchanged bounds, reduced motion at target orientations.
 
 - [x] T012 [US3] Inspect all exported dealer assets against current pose/hands/origin and `::after` clipping in `poker/poker-v2.css`; correct artwork registration without moving dealer boxes.
-- [ ] T013 [US3] Verify 390×844, 844×390 and 1440×900 on Deploy Preview, compare protected bounds to baseline, inspect native-size hero/board/opponent/showdown/FX cards, turn/highlight/avatar cues and contrast; record in `specs/792-premium-table-themes/review.md`.
+- [x] T013 [US3] Verify 390×844, 844×390 and 1440×900 on Deploy Preview, compare protected bounds to baseline, inspect native-size hero/board/opponent/showdown/FX cards, turn/highlight/avatar cues and contrast; record in `specs/792-premium-table-themes/review.md`.
 - [x] T014 [US3] Verify keyboard chooser/status, focus and reduced-motion switching in Preview; adjust only scoped presentation in `poker/poker-v2.css`/`poker/poker-v2.js` when necessary.
 
 ## Phase 5 — Review and handoff
@@ -72,7 +72,7 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 
 ## Six-theme completion evidence
 
-All six packages implemented; RG06 accepted. T011/T013 remain partial only for authenticated live guest/spectator/reconnect/dealing/showdown/fold and comprehensive live-state contrast, to be inspected manually on Preview. Demo six-theme/error/race/reset/non-preview gates, protected geometry/card text, keyboard and reduced motion have been verified locally; exact-SHA Preview verification passed (T017), including all six packages, unchanged geometry/cards, error/race/reset/reload, keyboard/reduced motion, served raster hashes and native/high-DPI waist inspection. No new maintained test suites.
+All six packages implemented; RG06 accepted. T011/T013 completed: owner confirmed the remaining manual runtime smoke test passed on 2026-10-10, following final visual acceptance. See review.md for the distinction between owner-reported smoke and automated evidence. Demo six-theme/error/race/reset/non-preview gates, protected geometry/card text, keyboard and reduced motion have been verified locally; exact-SHA Preview verification passed (T017), including all six packages, unchanged geometry/cards, error/race/reset/reload, keyboard/reduced motion, served raster hashes and native/high-DPI waist inspection. No new maintained test suites.
 
 ## Owner-requested floor perspective correction
 
