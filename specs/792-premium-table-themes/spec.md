@@ -92,3 +92,7 @@ Players can read values, suits, names and actions on every package at existing c
 - Design boards are approval artifacts, not final geometry proof or ready-to-ship asset atlases. Final per-layer exports will be inspected at native size after approval.
 - Original generated artwork can be used for commercial project art subject to the provider terms; no exclusivity or third-party rights clearance is asserted. Provenance and export processing are recorded per file.
 - No Stage mutation or Production effect is intended. Netlify Deploy Preview is the only deployment target.
+
+## Owner-requested room perspective correction — 2026-10-10
+
+Correct only the five alternative room.webp images: the table/dealer appears too high above the background floor. Use Classic Casino as the composition/crop reference, measure source floor/wall transition and existing rendered geometry at portrait/landscape/desktop, then choose revised proportions by actual in-scene inspection. Do not move/resize table, dealer, hands, cards, HUD, controls or change CSS/JS/background-position/size. Preserve each room's accepted palette/materials/architecture; Classic and all non-room layers remain byte-identical.

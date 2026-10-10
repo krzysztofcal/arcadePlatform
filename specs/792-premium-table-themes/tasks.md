@@ -73,3 +73,11 @@ The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 st
 ## Six-theme completion evidence
 
 All six packages implemented; RG06 accepted. T011/T013 remain partial only for authenticated live guest/spectator/reconnect/dealing/showdown/fold and comprehensive live-state contrast, to be inspected manually on Preview. Demo six-theme/error/race/reset/non-preview gates, protected geometry/card text, keyboard and reduced motion have been verified locally; exact-SHA Preview verification passed (T017), including all six packages, unchanged geometry/cards, error/race/reset/reload, keyboard/reduced motion, served raster hashes and native/high-DPI waist inspection. No new maintained test suites.
+
+## Owner-requested floor perspective correction
+
+- [x] FP01 Reproduce/measure original room aspect ratios, visual floor-wall transitions and center/cover mapping against Classic across390×844,844×390,1440×900; preserve baseline hashes/bounds outside repository.
+- [x] FP02 Edit Royal Gold room artwork with built-in imagegen against Classic composition, inspect proposed floor proportions in scene before producing other variants.
+- [x] FP03 Correct Neon/Sapphire/Crimson/Emerald room artwork using validated proportions; preserve styles and all non-room bytes; update current artwork manifest/prompts/budgets.
+- [x] FP04 Verify all five corrected floors in local portrait/landscape/desktop, unchanged protected geometry/card text/non-room hashes and existing checks; obtain independent review.
+- [ ] FP05 Publish five room replacements and feature docs on same Draft PR#1076; verify exact-SHA Preview/native scene/hash evidence, retain prior live-smoke limits.

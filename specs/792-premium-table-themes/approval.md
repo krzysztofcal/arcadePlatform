@@ -17,3 +17,7 @@ Owner checkpoint feedback: overall Royal Gold direction liked; replace the high-
 ## Remaining themes authorized — 2026-10-09
 
 Owner accepted the fuller generated Royal Gold dealer and its rail occlusion: “Super, to teraz implementuj pozostale motywy na tym samym pr.” RG06 is satisfied. Complete Neon Vegas, Midnight Sapphire, Crimson Velvet and Emerald Palace on Draft PR #1076 using the accepted full-torso Royal Gold identity/pose as the dealer reference.
+
+## Background perspective correction authorized — 2026-10-10
+
+Owner reported a floating table/dealer impression in all five alternatives, contrasted with Classic, and explicitly requested measuring perspective and modifying only room graphics. No table/dealer/other element movement authorized. This authorizes background edits on the same PR; no new layout/design scope or Production action. Result and chosen image proportions are documented in perspective.md.

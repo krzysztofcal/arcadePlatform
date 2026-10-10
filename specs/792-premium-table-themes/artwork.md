@@ -164,3 +164,19 @@ Room generation:
 
 > Use case: stylized-concept. Production high-quality photoreal casino room background, wide landscape 3:2 composition. opulent emerald palace casino salon, green marble and gold architecture, lush greenery, elegant arches and small distant fountain, warm daylight. Match a premium poker game's sophisticated realistic cinematic art direction. Symmetrical centered view with quiet dark central lower space for an overlaid poker table and dealer. Rich material texture, restrained atmospheric lighting, coherent perspective. Empty room: NO people, NO dealer, NO poker table in foreground, NO cards, NO chips, NO UI, NO text or logos. Architecture and lighting only.
 
+
+## Current five-room perspective replacement — 2026-10-10
+
+The room entries/package totals earlier in this historical record are superseded by [perspective.md](perspective.md), which records current1600×900 room hashes/bytes/budgets, reference measurements, output crop registration and exact built-in imagegen prompts. All non-room layers, Classic, JS and CSS stay byte-identical.
+
+## Current corrected room inventory
+
+This supersedes earlier room.webp entries and package totals in artwork.md; all other layers retain their earlier recorded hashes. Every room1600×900 WebP, built-in imagegen edit of its prior room with Classic used only as composition reference. No API key/third-party pack/remote runtime art. Existing Sharp WebPquality90; Royal generated1672×941 exported with aspect-preserving cover resize; other four generated1672×941 have a small final artwork registration crop(left36,top41,width1600,height900), encoded directly, with no stretch or runtime position change. OpenAI terms source remains artwork.md.
+
+| Path | Dimensions | Bytes | SHA-256 | Current complete package bytes |
+|---|---|---:|---|---:|
+| poker/assets/themes/royal-gold/room.webp |1600×900|240382|`6d93b0be1a16e930d11f39f67e65adcae62bdbb47332f1e36cf3c2715a951835`|322687|
+| poker/assets/themes/neon-vegas/room.webp |1600×900|259638|`c2bd1066ad93c36ab8c40dcb3f1d9ef6eb4bddc63c06f016907d732af3346afc`|345918|
+| poker/assets/themes/midnight-sapphire/room.webp |1600×900|227082|`4cd9b4155595ec0a01ca909691a312b2f9d020669da3697a8f27fb7db67f1fb3`|311225|
+| poker/assets/themes/crimson-velvet/room.webp |1600×900|202268|`b5c6292c87b782843b6f837a3e9fb163f62ce5412cd48e2793b7cf20769ed084`|284613|
+| poker/assets/themes/emerald-palace/room.webp |1600×900|325826|`609424ba73b33f025a338156ccb66e2a5a63a7f3d7f1beb90e27830e439dc523`|411508|
