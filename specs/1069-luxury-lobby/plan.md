@@ -1,5 +1,7 @@
 # Implementation Plan: Premium Mobile Arcade Poker Lobby
 
+**Current scope:** #1078 is merged and #1069 implementation is authorized. The implementation authorization section at the end supersedes historical design-only restrictions in this document. T009–T015 and validation evidence are recorded in tasks.md/self-review.md; #800/#1079 remain separate.
+
 **Branch**: `feat/1069-luxury-poker-lobby` | **Date**: 2026-10-10 | **Spec**: [spec.md](spec.md)
 
 ## Summary

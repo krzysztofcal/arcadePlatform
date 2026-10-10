@@ -1,5 +1,7 @@
 # Research — final owner Variant A, review v3
 
+**Current scope:** #1078 is merged and #1069 implementation is authorized. The implementation authorization section at the end supersedes historical design-only restrictions in this document. T009–T015 and validation evidence are recorded in tasks.md/self-review.md; #800/#1079 remain separate.
+
 Main baseline `d8f48bd3b7dd47e6c2619646b3b708149d4af4d4` reconfirmed by live fetch on 2026-10-10. Revision start HEAD `1c9ecd2a30e9e8eefb31f159e2838b7c5da04034`. Read updated issues #800/#1069/#1075, current agents.md/skills.md and constitution. Final owner review: https://github.com/krzysztofcal/arcadePlatform/pull/1078#issuecomment-6100781471; preceding correction https://github.com/krzysztofcal/arcadePlatform/pull/1078#issuecomment-6100584724. Latest top-of-issue decisions supersede contradictory historical paragraphs. V3 visual approval was subsequently granted by the owner in this session on 2026-10-10, for landscape, portrait and Daily Bonus; accepted artifact revision a92b55d0905f8406a5ae1b893f1a3fcf5e01fdb6.
 
 | Decision | Evidence / rationale |

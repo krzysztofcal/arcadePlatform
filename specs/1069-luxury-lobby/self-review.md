@@ -1,5 +1,7 @@
 # Self-review — final owner Variant A, review v3
 
+**Scope note:** Sections through owner acceptance are the historical design PR #1078. The current #1069 implementation evidence is below.
+
 2026-10-10, existing Draft PR #1078 only. Latest issue #800/#1069/#1075 top sections and owner review https://github.com/krzysztofcal/arcadePlatform/pull/1078#issuecomment-6100781471 analyzed; prior conflicting player-selection guidance removed. Main reconfirmed `d8f48bd3b7dd47e6c2619646b3b708149d4af4d4`; start revision `1c9ecd2a30e9e8eefb31f159e2838b7c5da04034`.
 
 ## Findings addressed
@@ -54,10 +56,23 @@ Backend test-first: exact-tier assertion failed before implementation, passed af
 
 Local temporary browser checks: 390×844, 320×568, 844×390, five cards, no horizontal page overflow/duplicate IDs/page errors, guest button hit-test and Daily Bonus unavailable. Consent first declined. Local mocked authenticated wiring (explicitly not runtime evidence): available 500/100 CH displays correctly; lower selection sends {maxPlayers:6,buyIn:100}; 409 message appears.
 
-Guards: ci:guards, syntax, CSP SHA guard, changed index XP badge and diff whitespace pass. Broad check:all fails in four unchanged design pages missing XP anchors; reproduced on clean main c4f26e4c. No unrelated fix. Full npm test initially exposed limited legacy browser harness; fixed harness and rerun pending.
+Guards: ci:guards, syntax, CSP SHA guard, changed index XP badge and diff whitespace pass. Broad check:all fails in four unchanged design pages missing XP anchors; reproduced on clean main c4f26e4c. No unrelated fix. Full npm test initially exposed limited legacy browser harness; fixed harness. A later local run lacked the linked WS dependencies, which were restored locally without a dependency/lockfile change; the maintenance test then passed 8/8. Final local output completed every registered stage without failed assertions, but the command wrapper returned SIGTERM/143; full-suite success is therefore based on the successful CI core job, not that wrapper result.
 
 Readiness inspection: handleJoinCommand already bootstraps after financed admission/runtime join and persists expected version before broadcasting/scheduling bots; guest JOIN also bootstraps. bootstrapHand uses existing eligible-human and enough-player gates, live/settlement idempotence. No client autoStart or new WS command. No WS/protocol/shared runtime/deploy change; WS Preview Deploy gate not triggered. No migration/Stage config/Production/merge.
 
 Review risks: optional buyIn strictly numeric safe integer, missing keeps legacy semantics; exact-tier errors intentional and no silent fallback. CSS body scoping/DOM relocation preserve IDs and auth/guest/connection lifecycle. Await final Deploy Preview revision and CI; authenticated Stage account/device runtime smoke may remain user-run and must be reported explicitly.
 
 Final self-review corrected keyboard focus: auth watcher no longer refocuses Guest every three seconds; buttons retain normal tab order, inline tier selection updates aria-pressed without destroying focused controls. Existing pending-table cap and all three class filters also exercised with selected buy-in. Independent read-only reviewer found no blockers; targeted backend/lobby regressions passed. Full runtime evidence remains separate.
+
+## Final implementation evidence — runtime SHA 0062bb990420e0f943aeae429166a606ee51a61f
+Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1080. Preview: https://deploy-preview-1080--playkcswh.netlify.app/poker/. Netlify deploy `6aca93afe04485000840bb28` is ready at exactly this SHA; `/js/build-info.js` confirms commitHash, deploy-preview and `wss://ws-preview.kcswh.pl/ws`. Deployed art/HTML reuse approved V3. Final portrait/landscape snapshots: [portrait](screenshots/implementation-portrait.webp), [landscape](screenshots/implementation-landscape.webp).
+
+CI success for runtime SHA: [full core suite](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38080457518/job/114296164382), [Playwright](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38080457518/job/114296164318), [WS harness](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38080457547/job/114296158774), [WS persistence](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38080457518/job/114296164390), [structural guards](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38080457513/job/114296161346), [WS package validation](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38080457483/job/114296168493), actionlint and CodeQL. WS deploy and DB apply jobs are skipped; no such deployment/migration was needed or performed. The existing broad local XP-badge check failures remain documented above and are not failing required CI.
+
+Actual Deploy Preview browser smoke (no fixtures/intercepted gameplay): 390×844 portrait, 844×390 landscape, swipe/dots/Coming Soon and Daily Bonus unavailable, five cards, no page-wide overflow, zero ad nodes, sidebar fixed outside flow and hamburger opens it. Guest Play navigated with guest=1 and autoJoin=1, connected only to WS Preview, received a real hand with hole cards/actions and bot activity; reload retained the same guest table. Zero outgoing start_hand frames, zero page errors/CSP violations. Sidebar landscape flow issue was found and corrected before this final smoke.
+
+Real Preview API negative smoke: POST Quick Seat buyIn:null → 400 invalid_buy_in; numeric buyIn without auth → 401 missing_token; GET progression without auth → 401 missing_token. No funded authenticated operation or account/campaign/economy configuration was performed.
+
+T009–T015 engineering work/checks/available preview smoke complete. **Implementation ready, awaiting manual runtime verification** for a dedicated authenticated Stage account and physical phone: exact selected-tier funded JOIN/Create, financed Resume with zero extra debit, current CH/tier/class/caps, reconnect and honest waiting when bots are not funded. See quickstart.md. PR remains Draft and is not merge-ready; no merge/Production change. Backend deterministic tests prove corresponding policy paths but do not replace that runtime verification.
+
+Post-smoke changes are documentation/verification screenshots only; they do not modify deployed lobby/API/WS logic. No additional WS Preview Deploy requirement. The final PR checks/Netlify revision are rechecked after the evidence commit.

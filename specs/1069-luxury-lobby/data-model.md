@@ -1,5 +1,7 @@
 # Presentation data model — Variant A review v3
 
+**Current scope:** #1078 is merged and #1069 implementation is authorized. The implementation authorization section at the end supersedes historical design-only restrictions in this document. T009–T015 and validation evidence are recorded in tasks.md/self-review.md; #800/#1079 remain separate.
+
 No database model, migration, player appearance storage or live reward state is introduced.
 
 | Entity | Fields / source | Validation / transition |
