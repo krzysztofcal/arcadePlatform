@@ -3,7 +3,7 @@
 **Branch**: `1069-luxury-lobby-design` | **Date**: 2026-10-10 | **Spec**: [spec.md](spec.md)
 
 ## Summary
-Deliver isolated landscape/portrait review prototypes with five original glossy 3D cards, four illustrated shortcuts and Day 1–4 Daily Bonus concept in existing Draft PR #1078. Remove all appearance controls. Future #1069 lobby and #800 shared table appearance wait for explicit approval.
+Deliver isolated landscape/portrait review prototypes with five original glossy 3D cards, four illustrated shortcuts and Day 1–4 Daily Bonus concept in existing Draft PR #1078. Remove all appearance controls. Owner accepted V3 landscape, portrait and Daily Bonus on 2026-10-10. #1069 runtime lobby starts only in a separate PR after this design PR is merged by the owner; #800 implementation and #1079 economics remain separate.
 
 ## Technical Context
 **Language/Version**: Existing plain browser JavaScript, global/IIFE, JSP-compatible; HTML and CSS.
@@ -25,7 +25,7 @@ Before research and after design: PASS within authorized design scope.
 - Logs: preview has no application logging; future failure paths use existing `klog` recorder.
 - Tests: no generated UI unit suite, framework or TDD obligation. Existing checks and bounded visual smoke only.
 - SpecKit hooks: `.specify/extensions.yml` absent; no before/after hooks registered.
-- Approval: owner explicitly requested complete review artifacts now. Future implementation is gated, not authorized by these artifacts.
+- Approval: owner explicitly requested complete review artifacts now. Visual approval is recorded; runtime code is deferred to a separate post-merge PR, not authorized in #1078.
 
 ## Project Structure
 - `specs/1069-luxury-lobby/{spec,plan,tasks,research,data-model,quickstart,self-review}.md`, `contracts/ui.md`, `checklists/requirements.md`.
@@ -43,7 +43,7 @@ Separate review routes support native proportions; portrait is capped at 470px o
 
 Play Now occlusion at 320×568 was reproduced by hit-testing: sticky lower toolbar covered the button center. Toolbar now participates in document flow in every layout; short screens scroll naturally rather than overlapping actions. Safe-area padding remains. Isolated preview-only Netlify drawer suppression remains to prevent hosting-toolbar touch interception, without deploy configuration changes.
 
-### #1069 implementation (BLOCKED pending visual approval)
+### #1069 implementation (V3 approved; separate PR only after #1078 merge)
 1. `poker/index.html`: keep topbar/sidebar and existing ID nodes once each; introduce scoped lobby carousel. Reuse `pokerQuickSeat` for the actual Poker Online action inside `pokerLobbyContent`; current guest/sign-in controls remain visible in `pokerAuthMsg`. Preserve `data-required-buy-in`, `pokerError`, bonus and progression nodes; only one active action/handler path.
 2. Keep table browsing/Create/Join/Refresh in an Online Tables subview with Back to modes. Relocate existing `pokerCreate`, `pokerBuyIn`, `pokerMaxPlayers`, `pokerRefresh`, `pokerTableList` rather than recreating them. Keep default semantics, table event delegation and form constraints.
 3. `poker/poker.js:initLobby()`: add only view switching and carousel/detail handlers. Preserve `quickSeat()`, `createTable()`, `handleClick()`, `playAsGuest()`, `checkAuth()`, `refreshLobby()`, `ensureLobbyWs()` and existing lifecycle teardown. No endpoint or payload change.
@@ -53,7 +53,7 @@ Play Now occlusion at 320×568 was reproduced by hit-testing: sticky lower toolb
 7. Remove two Poker-lobby `.ad-slot.poker-ad-slot` blocks, its AdSense meta and `/js/adsense-init.js` include from `poker/index.html`; delete only resulting unused `.poker-ad-slot` rules in `poker/poker.css`. Preserve Klaro/config/consent services and other pages. This intentional removal is already approved in #1069, but its code waits with final implementation.
 8. Original art: locally hosted versioned filenames, separate accessible HTML labels, dark error fallback, first visible eager image and later lazy images. Four Coming Soon buttons open details only. No events/offers beyond real availability.
 
-### #800 implementation (SEPARATE PR, BLOCKED; Variant A)
+### #800 implementation (SEPARATE PR; not authorized in #1078; Variant A)
 1. Extend `poker/poker-v2.js` in place; do not extract a new catalog/module or add lobby settings. Reuse `TABLE_THEME_CATALOG`, `hashBotPresentationKey(value)` (existing FNV-1a unsigned 32-bit hash using `Math.imul`) and existing asset preload/generation guard from `applyPreviewTheme()`.
 2. Proposed `resolveTableTheme(tableId)` takes only a non-empty authoritative string ID, rejects whitespace/control characters without silently normalizing a different identity, and computes `hashBotPresentationKey(tableId) % 6`. Pin V1 order explicitly: classic-casino, royal-gold, neon-vegas, midnight-sapphire, crimson-velvet, emerald-palace. Same ID yields same assigned ID in all compatible clients; this is deterministic pseudo-random distribution, not a persisted random draw. Multiple different tables may legitimately map to the same theme. No user, seat, hand, clock, entropy, storage, economy or event input.
 3. `readTableId()` is only the existing URL routing hint. `mergeSnapshot(payload, frame)` receives `payload.tableId` / `payload.table.tableId` and sets `state.tableId`; retain its wrong-table guard. Resolve only after an accepted authoritative snapshot establishes non-empty `state.tableId` consistent with the requested table. Missing/invalid/mismatching identity stays Classic with existing error handling; never mutate identity/state to make art apply. Resolution is idempotent, skipped if the same canonical table ID was already resolved. It never depends on auth identity or rerolls on subsequent snapshots/hands/reconnects/reloads.
@@ -84,7 +84,7 @@ Design approval → focused #1069 navigation/lobby implementation. Separately ap
 - API, schemas, protocol, engine, currencies, stakes, retention and tier access: no breaking change or authorization.
 
 ## Validation / approval gates
-Now: run existing CSP and syntax checks/guards; bounded browser review for both orientations, all images, swipe/indicators/details/Daily Bonus/Escape, safe overflow and zero account/WS requests. Inspect Draft PR preview HTTPS/CSP. Record owner real-device approval as pending, not a passed automated check.
+Now: run existing CSP and syntax checks/guards; bounded browser review for both orientations, all images, swipe/indicators/details/Daily Bonus/Escape, safe overflow and zero account/WS requests. Inspect Draft PR preview HTTPS/CSP. Owner visual acceptance is recorded separately from browser verification; do not claim physical-device or 200% zoom checks were performed.
 Later: same checks plus targeted existing critical poker/access tests if their logic changes and manual actual guest/auth/Quick Seat/Create/Join/Refresh/progression/bonus/table reconnect in Netlify preview. No WS Preview Deploy needed for this art-only PR; any later WS/protocol change is outside scope and requires independent plan/exact-SHA deploy. No DB Stage effect. No Production or merge action.
 
 ## Complexity Tracking

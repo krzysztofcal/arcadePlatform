@@ -1,6 +1,6 @@
 # Visual review — Variant A v3
 
-Existing Draft PR #1078 only. Owner visual approval and final implementation remain pending.
+Existing design PR #1078 only. Owner accepted V3 landscape, portrait and Daily Bonus on 2026-10-10. Prepare this PR for owner merge; runtime implementation starts only in a separate #1069 PR after merge.
 
 - Landscape: https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/landscape.html
 - Portrait: https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/portrait.html

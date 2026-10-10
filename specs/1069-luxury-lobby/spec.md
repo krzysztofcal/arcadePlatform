@@ -2,8 +2,8 @@
 
 **Feature Branch**: `1069-luxury-lobby-design`
 **Created**: 2026-10-10
-**Revised**: Owner review in PR #1078, 2026-10-10; Variant A correction; visual approval still pending
-**Status**: Draft — visual approval required; final implementation blocked
+**Revised**: Owner review in PR #1078, 2026-10-10; V3 landscape, portrait and Daily Bonus accepted by owner in this session
+**Status**: Visual design V3 approved — design PR ready for merge checks; runtime implementation deferred to separate post-merge #1069 PR
 **Input**: Owner requests complete landscape/portrait design, five original finished cards, four lower shortcuts and table-wide automatic theme planning, SpecKit, self-review and a Draft PR with Netlify preview. No final lobby implementation yet.
 
 ## User Scenarios & Testing
@@ -104,7 +104,7 @@ The owner reviews a cohesive Day 1–4 reward-panel concept in both orientations
 - **SC-002**: At 390×844, 360×640, 320×568 and 844×390, every mode/shortcut is reachable without page-wide horizontal overflow; intentional carousel overflow remains.
 - **SC-003**: All four future modes have visible Coming Soon labels and zero gameplay/purchase effects; the preview makes zero wallet/auth/WS requests.
 - **SC-004**: Main active five-art bundle totals under 1.5MB, first visible illustration under 350KB; bonus art under 150KB; images reserve dimensions and later cards load lazily.
-- **SC-005**: Owner can inspect portrait, landscape and Daily Bonus; final implementation tasks remain unchecked until explicit visual acceptance.
+- **SC-005**: Owner can inspect portrait, landscape and Daily Bonus; T008 records explicit owner visual acceptance; runtime implementation tasks remain unchecked for separate post-merge PRs.
 - **SC-006**: Final approved implementation keeps every existing action and access rule, removes only Poker-lobby ads, and passes existing fundamental checks plus targeted manual preview scenarios.
 
 ## Assumptions

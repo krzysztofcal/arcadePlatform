@@ -15,9 +15,9 @@
 - [x] T005 [US1] Create poker/designs/luxury-lobby/landscape.html and portrait.html plus shared preview.css, native scroll-snap cards, peek, safe-area spacing and 44px targets.
 - [x] T006 [US1] Create poker/designs/luxury-lobby/preview.js IIFE for navigation indicators/arrows and honest Coming Soon dialogs; no gameplay, auth, wallet, logging or storage code.
 - [x] T007 [US1] Record bounded browser viewport/dialog/CSP review and deploy-preview URLs in specs/1069-luxury-lobby/self-review.md; publish Draft PR only.
-- [ ] T008 [US1] Obtain owner visual acceptance for landscape and portrait and record decisions in specs/1069-luxury-lobby/self-review.md. STOP final implementation until approved.
+- [x] T008 [US1] Owner accepted V3 landscape, portrait and Daily Bonus on 2026-10-10 in this session; recorded exact approval and accepted design SHA a92b55d0 in specs/1069-luxury-lobby/self-review.md. Runtime implementation remains deferred to separate post-merge #1069 PR.
 
-## Phase 4 — US2: real lobby integration (P1, BLOCKED by T008; future #1069 PR)
+## Phase 4 — US2: real lobby integration (P1, T008 complete; separate #1069 PR after #1078 merge)
 **Independent verification**: actual guest/auth/current table actions work with unchanged runtime and access rules.
 - [ ] T009 [US2] Promote approved original art to poker/assets/lobby/; update poker/index.html carousel while preserving existing ID nodes, topbar/sidebar and guest/auth paths.
 - [ ] T010 [US2] Relocate existing pokerCreate/pokerBuyIn/pokerMaxPlayers/pokerRefresh/pokerTableList into Online Tables subview in poker/index.html; preserve bindings in poker/poker.js:initLobby(), quickSeat(), createTable(), handleClick(), playAsGuest(), checkAuth().
@@ -27,7 +27,7 @@
 - [ ] T014 [US2] Remove only Poker-lobby AdSense meta/include/two ad slots in poker/index.html and unused poker-ad-slot rules in poker/poker.css; preserve Klaro/consent and unrelated Hub ads.
 - [ ] T015 [US2] Run existing guards/CSP/syntax and targeted manual real guest/auth/Quick Seat/Create/Join/Refresh/tiers/bonus/back/reconnect scenarios; record evidence in specs/1069-luxury-lobby/self-review.md. No protocol or WS deployment change.
 
-## Phase 5 — US3: shared automatic table theme (P2; future #800 blocked)
+## Phase 5 — US3: shared automatic table theme (P2; future separately authorized #800 PR)
 **Independent verification**: no appearance UI in current review. Later every compatible client at the same table resolves the same fixed theme through joins/hands/reload/reconnect.
 - [x] T016 [US3] Remove entire appearance dialog/shortcut/controls and associated script/styles/deep links from poker/designs/luxury-lobby/{landscape,portrait,index}.html, preview.js and preview.css.
 - [ ] T017 [US3] After T008 and separate #800 implementation approval, extend poker/poker-v2.js with resolveTableTheme(tableId), existing hashBotPresentationKey and fixed V1 six-ID order in plan.md; non-empty canonical string rejects whitespace/control characters, invalid → Classic. No player/seat/hand/time inputs or storage.
@@ -53,10 +53,10 @@
 
 
 ## Dependencies / execution strategy
-T001 → T002 → T003/T004 → T005/T006/T016 → T007/T022/T023 → owner T008. Revised design tasks T024–T031 are authorized now and supersede previous visual evidence; T024 → T025/T026/T027 → T028/T029/T030 → T031 → renewed owner T008. Current delivery stops at that gate. Complete approved five-card design is the current milestone; Online functionality uses unchanged lobby link.
+T001 → T002 → T003/T004 → T005/T006/T016 → T007/T022/T023 → owner T008. Revised design tasks T024–T031 are authorized now and supersede previous visual evidence; T024 → T025/T026/T027 → T028/T029/T030 → T031 → renewed owner T008. T008 is now complete; current delivery stops at design-only merge preparation. Complete approved five-card design is the current milestone; Online functionality uses unchanged lobby link.
 
-After approval: T009 → T010 → T011/T012/T013/T014 → T015 in focused #1069 implementation. Separately approved #800: T017 → T018 → T019/T020 → T021. #800 is not a lobby prerequisite. Daily reward logic belongs to independently approved #1079.
+After owner merge of #1078, in a separate implementation PR: T009 → T010 → T011/T012/T013/T014 → T015 in focused #1069 implementation. Separately approved #800: T017 → T018 → T019/T020 → T021. #800 is not a lobby prerequisite. Daily reward logic belongs to independently approved #1079.
 
-Parallel opportunities: after requirements, research documentation and art cleanup affect different files. Once markup settles, screenshot verification and SpecKit review are independent; shared preview CSS/JS and future renderer must be edited sequentially. Stop after current T031 for renewed T008; elapsed time/green checks are not owner approval.
+Parallel opportunities: after requirements, research documentation and art cleanup affect different files. Once markup settles, screenshot verification and SpecKit review are independent; shared preview CSS/JS and future renderer must be edited sequentially. T008 is complete based on explicit owner approval, not elapsed time/green checks. Keep T009–T015/T017–T021 unchecked; no runtime implementation in #1078.
 
 Task count: 31. US1: 8; US2: 7; US3: 7; US4: 3; setup/foundation/polish: 6. Checked boxes mean completed design artifacts, never future runtime implementation.

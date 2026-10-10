@@ -7,7 +7,7 @@
 2. Five original glossy arcade-mode illustrations/styles retained; four modes remain Coming Soon. Daily Bonus remains separately designed for portrait/landscape with four EXAMPLE STATE cards, no amounts/countdown/claim API and disabled Claim.
 3. Play Now overlap reproduced at 320×568: center hit-testing returned shortcut-art because the sticky toolbar covered it. Removed sticky positioning from all toolbar variants; flow plus natural vertical scrolling preserves every control. Five-point button hit-testing now passes all six viewports. No new production/global CSS.
 4. Deleted five unused V1 artwork exports and 19 gallery/redundant screenshot files. Retained five representative refreshed screenshots: two lobby, two Daily Bonus and one portrait Daily footer. Small viewport evidence is recorded below rather than duplicating images.
-5. SpecKit spec/plan/tasks/research/data-model/contracts/quickstart/checklist rewritten around one shared table assignment. No player preference keys/read/save APIs or selection tasks. Future #800 reuses existing file-local catalog/hash/loader, not a new module. T008, T009–T015 and T017–T021 remain blocked/uncompleted.
+5. SpecKit spec/plan/tasks/research/data-model/contracts/quickstart/checklist rewritten around one shared table assignment. No player preference keys/read/save APIs or selection tasks. Future #800 reuses existing file-local catalog/hash/loader, not a new module. T008 is now completed by explicit owner approval; T009–T015 and T017–T021 remain unimplemented in separate future PRs.
 6. CSS physical selector rules remain single-line, media braces separate. Preview script is an IIFE, external self-origin CSP; no new inline script/hash needed or application logs introduced. Future runtime failure logs use klog. Netlify drawer suppression stays review-route-scoped.
 
 ## Future #800 source review and risks
@@ -38,5 +38,11 @@ Syntax passed 225 files; CSP inline passed 55 documents; lifecycle/badge/29 XP-h
 
 Review URLs: [Landscape](https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/landscape.html), [Portrait](https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/portrait.html). Append #daily-bonus for the corresponding panel.
 
-## Remaining gate
-Physical-phone visual acceptance in both orientations and Daily Bonus remains pending; browser emulation is not owner acceptance. Large-text/200% zoom and physical safe-area review are manual scenarios, not claimed verified. Final lobby and table resolver are unimplemented. Draft remains not merge-ready. No backend/WS/DB/CH economy/Production/Stage change, new PR or merge. Stop at T008 for owner visual approval.
+## Owner acceptance and merge preparation
+On 2026-10-10 the owner explicitly stated in this conversation: “Akceptuję kierunek wizualny V3 w PR #1078 jako docelowy projekt nowego Poker Lobby, w tym landscape, portrait i Daily Bonus.” Accepted visual artifact SHA: `a92b55d0905f8406a5ae1b893f1a3fcf5e01fdb6`. T008 is completed. Acceptance covers the V3 design, not implemented daily economics or table runtime. This approval is recorded from the direct owner instruction, not inferred from GitHub CI/review status.
+
+The owner requests this design PR be prepared for merge but explicitly forbids agent merge or runtime lobby implementation here. After owner merge, begin a separate #1069 implementation PR using the approved design and existing architecture. #800 resolver and #1079 daily claim/history/economics remain separate work. No new PR opened in this step.
+
+Approval update changes SpecKit documents only; browser/deployable code is identical to the accepted SHA. Before handoff verify final remote HEAD equals local HEAD, PR ready-for-review/mergeability and all CI statuses. Existing six-viewport HTTPS evidence remains valid because no preview runtime/art/config changed; final deployed route/CSS/JS/art identity is rechecked. Physical-device, large-text/200% zoom and safe-area testing are not newly claimed.
+
+Final lobby and table resolver remain unimplemented. No backend/WS/DB/CH economy/Production/Stage changes or merge performed. Worktree retained for the owner merge process.
