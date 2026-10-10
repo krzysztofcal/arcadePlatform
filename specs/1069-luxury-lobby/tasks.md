@@ -49,7 +49,7 @@
 - [x] T028 [US4] Record existing daily API/status/template limitations and separate #1079 economic/history/timing gates in specs/1069-luxury-lobby/research.md, plan.md, contracts/ui.md and data-model.md; no live campaign read/activation or ledger change.
 - [x] T029 [US4] Inspect small-screen portrait/landscape Daily Bonus layouts, disabled claim, dialog keyboard/focus and zero rewards calls; refresh poker/designs/luxury-lobby/screenshots/* and specs/1069-luxury-lobby/self-review.md using temporary browser inspection only.
 - [x] T030 [US1] Reproduce 320×568 Play Now occlusion, fix flow toolbar in poker/designs/luxury-lobby/preview.css and verify whole-button hit-testing/touch, four shortcuts and no appearance nodes/requests/storage across both layouts; refresh representative screenshots and specs/1069-luxury-lobby/self-review.md.
-- [ ] T031 [US1] Publish revised visual artifacts and SpecKit to existing Draft PR #1078 only; verify exact HEAD Netlify preview, CSS/active-art hashes/CSP and phone viewports; record in specs/1069-luxury-lobby/self-review.md.
+- [x] T031 [US1] Publish revised visual artifacts and SpecKit to existing Draft PR #1078 only; verify exact HEAD Netlify preview, CSS/active-art hashes/CSP and phone viewports; record in specs/1069-luxury-lobby/self-review.md.
 
 
 ## Dependencies / execution strategy
