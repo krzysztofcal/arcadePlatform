@@ -523,3 +523,6 @@ body.poker-lobby .topbar-right{flex:1 1 auto;}
 body.poker-lobby .topbar .brand h1{font-size:14px;}
 }
 body.poker-lobby .mobile-bottom-nav{display:none;}
+body.poker-lobby .sidebar{position:fixed;top:calc(76px + env(safe-area-inset-top));bottom:12px;left:12px;width:min(286px,calc(100vw - 24px));max-height:calc(100svh - 100px);height:auto;transform:translateX(calc(-100% - 18px));}
+body.poker-lobby .sidebar.collapsed{width:min(286px,calc(100vw - 24px));transform:translateX(calc(-100% - 18px));}
+body.poker-lobby .sidebar.expanded{width:min(286px,calc(100vw - 24px));transform:translateX(0);}
