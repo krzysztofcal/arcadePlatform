@@ -14,6 +14,8 @@
 9. Preview values stay unset (Guest preview, level/XP —, — CH). Authentic live identity/balance is reserved for existing topbar integration after approval; no mocked ranks/currencies.
 10. Preview has no inline JS, browser modules, storage, account/WS bootstrapping, ad SDK or application logs. Existing CSP `self` is sufficient; no SHA allowlist changes needed. Future inline changes remain SHA-gated.
 
+11. Exact HTTPS review exposed the Netlify Drawer iframe intercepting bottom-toolbar clicks on short landscape phones. Confirmed its fixed 48px frame in DOM; scoped the review-only stylesheet to hide its injected wrapper on these two pages. No site settings/global page changes.
+
 ## SpecKit consistency analysis
 Ran existing plan/tasks setup and `check-prerequisites.sh --json --require-spec --require-tasks --include-tasks`. All required artifacts resolved. No extension hooks exist. Review of spec/plan/tasks against constitution found no unresolved CRITICAL/HIGH conflicts.
 

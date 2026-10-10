@@ -100,3 +100,4 @@ dialog p{color:#c1b7d2;line-height:1.7;font-size:13px;}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;}}
 @media(min-height:700px){.portrait .tile{height:clamp(350px,calc(100svh - 430px),575px);}}
 @media(orientation:landscape) and (max-height:550px){.preview-note{padding-block:4px;}.playerbar{padding-block:6px;}.intro{padding-block:6px;}.intro h1{display:none;}.tile{flex-basis:clamp(160px,21vw,235px);height:max(195px,calc(100svh - 210px));}.tile-number{display:none;}.tile h2{font-size:23px;}.tile-status{padding:6px 9px;font-size:8px;}.tile-copy{left:12px;right:12px;bottom:12px;}.tile-action{font-size:10px;}.indicators{padding-bottom:0;}.shortcuts{padding-block:5px;}.shortcut{min-height:44px;padding-block:4px;}.shortcut small{display:none;}}
+.landscape > [data-netlify-deploy-id],.portrait > [data-netlify-deploy-id]{display:none!important;}
