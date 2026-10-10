@@ -1,39 +1,42 @@
-# Self-review — premium mobile arcade review v2
+# Self-review — final owner Variant A, review v3
 
-2026-10-10. Existing Draft PR #1078, no new PR. Owner review https://github.com/krzysztofcal/arcadePlatform/pull/1078#issuecomment-6098655623 explicitly left the previous design unapproved. Latest issues #1069/#800/#1079/#1070/#1072 analyzed; main baseline reconfirmed `d8f48bd3b7dd47e6c2619646b3b708149d4af4d4`.
+2026-10-10, existing Draft PR #1078 only. Latest issue #800/#1069/#1075 top sections and owner review https://github.com/krzysztofcal/arcadePlatform/pull/1078#issuecomment-6100781471 analyzed; prior conflicting player-selection guidance removed. Main reconfirmed `d8f48bd3b7dd47e6c2619646b3b708149d4af4d4`; start revision `1c9ecd2a30e9e8eefb31f159e2838b7c5da04034`.
 
 ## Findings addressed
-1. Visual direction: replaced restrained serif/editorial luxury with saturated blue/purple/magenta bokeh, five new original glossy 3D illustrations, brighter per-mode frames, bold arcade headings and beveled green/gold CTAs. Four future modes remain Coming Soon.
-2. Daily Bonus missing: added fifth lower shortcut and separate native landscape/portrait concept panels, four Day 1–4 cards, explicitly labeled sample completed/current/upcoming states, disabled Claim and Not configured availability. No amounts/countdown/reward APIs/CH emission. No jackpot/sale/extra currency.
-3. Six existing themes FREE: removed earlier access assumption throughout SpecKit/gallery/PR text. Auto/Random is proposed default with optional manual choice. The preview only demonstrates a labeled fixed Neon Vegas sample and transient selection; no production preference/randomization implementation.
-4. Misleading generic thumbnails: every non-Classic preview now references its actual room/dealer/rail/felt/face/back/frame assets. Classic reuses existing scene/native defaults. Atomic preview preload/request-generation protection prevents mixed assets after fast switching. No second renderer/catalog introduced into production.
-5. CSS media formatting: opening/closing media braces are separate physical lines, each enclosed selector/declaration rule stays on one complete physical line. No collapsed multi-rule media lines or global CSS changes.
-6. Portrait indicators initially overlapped the sticky toolbar. Reduced tall-phone tile height so 390×844 has complete lobby/indicators/toolbar on one screen; short phones may scroll vertically. Gifts initially overflowed reward-card labels due grid intrinsic image sizing; bounded absolute image sizing fixes that. Short landscape Daily panel uses a compact header/art layout to preserve readable states/action.
-7. Existing isolated preview-only Netlify drawer suppression retained. It affects only these review routes, not site/deploy settings. Existing CSP `self` covers all scripts/assets, no inline JavaScript/handlers and no SHA changes. IIFE remains JSP-compatible; no application logs needed.
-8. Snapshot references remain descriptions: screenshot files are absent from issue/this prompt, so no pixel-match or file-access claim. Original raster generation via built-in image_gen; prompts/provenance in ARTWORK.md.
+1. Entire lobby appearance shortcut/dialog/gallery/controls/deep links, associated theme loading/request logic and CSS removed from both layouts and review hub. No replacement appearance control. Four lower shortcuts: Online Tables, Progression, Daily Bonus, Profile.
+2. Five original glossy arcade-mode illustrations/styles retained; four modes remain Coming Soon. Daily Bonus remains separately designed for portrait/landscape with four EXAMPLE STATE cards, no amounts/countdown/claim API and disabled Claim.
+3. Play Now overlap reproduced at 320×568: center hit-testing returned shortcut-art because the sticky toolbar covered it. Removed sticky positioning from all toolbar variants; flow plus natural vertical scrolling preserves every control. Five-point button hit-testing now passes all six viewports. No new production/global CSS.
+4. Deleted five unused V1 artwork exports and 19 gallery/redundant screenshot files. Retained five representative refreshed screenshots: two lobby, two Daily Bonus and one portrait Daily footer. Small viewport evidence is recorded below rather than duplicating images.
+5. SpecKit spec/plan/tasks/research/data-model/contracts/quickstart/checklist rewritten around one shared table assignment. No player preference keys/read/save APIs or selection tasks. Future #800 reuses existing file-local catalog/hash/loader, not a new module. T008, T009–T015 and T017–T021 remain blocked/uncompleted.
+6. CSS physical selector rules remain single-line, media braces separate. Preview script is an IIFE, external self-origin CSP; no new inline script/hash needed or application logs introduced. Future runtime failure logs use klog. Netlify drawer suppression stays review-route-scoped.
 
-## Source/authority findings
-- Existing `bonus-campaigns` supports atomic/idempotent UTC daily PROMO_BONUS, not an implemented Day 1–4 streak. GET filters eligible/unclaimed items; absent items cannot become completed-day history or a countdown. Admin's 20 CH template is not active-campaign evidence. No live campaign existence queried or claimed. #1079 needs separate economic/history/status design and owner GO.
-- #1070/#1072 may cover future distinct paid/VIP assets; none of the six shipped free themes may be paywalled. #800 Auto choice proposal is deterministic per identity/table, stable through hand/snapshot/reload/reconnect; owner still must approve the detailed policy before implementation.
-- Actual lobby remains poker/index.html + poker/poker.js:initLobby; real account navigation remains /account.html. All existing runtime/table/tier/guest/auth paths stay untouched.
+## Future #800 source review and risks
+Proposed resolveTableTheme(tableId) hashes canonical accepted state.tableId using existing hashBotPresentationKey (FNV-1a) modulo fixed six IDs. No per-user/seat/hand/time state. Existing mergeSnapshot wrong-table guards, actual seven-resource preload/generation/timeout and static Classic scene are reused. No implementation in this PR.
 
-## SpecKit traceability
-| Requirements | Tasks / evidence |
+Fixed V1 list/hash must never be reordered/expanded for active tables; identical compatible clients produce identical assignments through late join/hand/reload/reconnect. Old pre-#800 clients still show Classic; rollout/cache compatibility must be planned separately. Asset failure can locally show Classic even with identical assigned ID; that is a safe fallback, not another assignment. Different tables may map to the same ID. True persisted randomness or stronger server-enforced cross-version guarantees would need separately authorized architecture. Events/World Tour/Seasons precedence and weekly transitions remain future #1075 work.
+
+Existing Daily API filters eligible unclaimed campaigns, so no completed-day history/countdown can be inferred from absence. Admin's 20 CH template is not an active campaign. No campaign/environment reads or changes performed; #1079 owns economic/history/status approval.
+
+## Traceability / consistency review
+| Requirements | Tasks |
 | --- | --- |
-| FR-001–003, FR-014 / arcade native preview/art | T024, T025, T029, T031 |
-| FR-004–005 / real paths and toolbar | Existing blocked T009–T013/T015; T025/T027 now |
-| FR-006 / Coming Soon | T006/T024/T025; four same scopes |
-| FR-007, FR-015 / free actual-asset Cosmetics | T026/T030; future blocked T017–T021 |
-| FR-008–009 / no live/runtime/economy changes | Scope diff, future blocked T014, T028 |
-| FR-010–012 / access/style/security/concrete artifacts | T025/T029/T030/T031, existing guards |
-| FR-013 / truthful Day 1–4 concept | T027–T029; separate #1079 |
+| FR-001–003, FR-014; SC-001/002/004/005 | T005–T008, T024/T025/T030/T031 |
+| FR-004–005; SC-006 | Future T009–T013/T015, current T005/T025/T027 |
+| FR-006; SC-003 | T006/T024/T025 |
+| FR-007 | Current T016/T026, future T017–T021 |
+| FR-008–009 | Future T014, current scope/T028 |
+| FR-010–012 | T003/T007/T022/T029–T031 |
+| FR-013 | T027–T029, separate #1079 |
+| FR-015 | T016/T026/T030 |
 
-Spec/plan/tasks/research/data-model/contracts/quickstart and checklist aligned. Previous selection restrictions removed; tests remain fundamental-only with temporary browser inspection rather than a committed UI suite. No git commands in plan; no unresolved placeholder requirement. No before/after hooks (.specify/extensions.yml absent). Existing plan/tasks setup executed for the same feature directory.
+15 functional requirements, 31 sequential tasks; all requirements covered. No constitution conflicts, unresolved placeholder or implementation authorization inferred. Theme scheme is explicitly a proposal to implement later under approved Variant A. SpecKit setup-plan/setup-tasks/check-prerequisites executed for the same feature, extensions.yml absent (no hooks). No git commands in plan; fundamental critical resolver tests planned only in existing node:test/vm harness, no maintained UI suite.
 
 ## Verification evidence
-Local v2 inspection passed at 1280×800, 390×844, 844×390, 568×320, 360×640 and 320×568: five tiles/shortcuts, six decoded actual theme samples, four day examples, no horizontal overflow, touch/keyboard/focus return, disabled claim, no storage writes, platform API calls or JavaScript errors. Both hash-panel deep links and orientation resize passed. Same-document hash changes initially missed the second panel; hashchange handling now fixes this. Screenshots refreshed for all six viewports, including scrolled Daily footer. Syntax (225 files), CSP inline (55 documents), CI guards (29 XP hooks) and diff whitespace checks passed. Earlier v1 evidence is superseded and is not approval of this revision. HTTPS browser inspection also passed all six viewports on Deploy Preview for `fbde8182f73079f48198c3fb393f5994576eaff9`, with the same assertions and zero application errors/API calls/storage writes. GitHub actionlint and netlify/playkcswh/deploy-preview succeeded for that revision. SHA-256 of deployed CSS/JS and all six v2 artworks matched local source. Subsequent compact-landscape close-button alignment fix places the control at the right edge, clear of decorative art; direct touch-close verification and refreshed screenshots are included in the final publication. The final PR HEAD is additionally checked after push; no owner approval is inferred from these checks.
+Local temporary browser inspection passed 1280×800, 390×844, 844×390, 568×320, 360×640, 320×568: five decoded tile illustrations, four lower shortcuts, zero appearance controls, whole-button Play Now hit-test at five points, Coming Soon/details/carousel touch/keyboard, Daily four states/disabled claim/touch-close/Escape/focus-return, Progression dialog, direct Daily link and orientation resize. No horizontal page overflow, JavaScript errors, application platform/API/WS calls or storage writes. Short-screen vertical scrolling is intentional. Screenshots refreshed from these exact local files.
 
-Review URLs: [Landscape](https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/landscape.html), [Portrait](https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/portrait.html). Append `#daily-bonus` or `#cosmetics` for their corresponding dialogs. Browser emulation is not physical-device acceptance. 200% text enlargement remains a manual review scenario, not a verified assertion.
+Syntax passed 225 files; CSP inline passed 55 documents; lifecycle/badge/29 XP-hook guards and diff whitespace check passed. Physical CSS-rule/task-ID/scope checks included. HTTPS evidence is finalized after publication on the existing PR. Earlier v2 evidence is superseded and is not approval.
 
-## Remaining gates
-Owner actual-phone visual/touch approval for both orientations and Daily Bonus/Cosmetics remains pending. T008 is unchecked. Final lobby T009–T015 and #800 preference tasks T017–T021 remain unchecked; Daily claims/history/economics belong to separate #1079. Draft remains not merge-ready. No Production/backend/DB/WS/economy change or merge.
+Review URLs: [Landscape](https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/landscape.html), [Portrait](https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/portrait.html). Append #daily-bonus for the corresponding panel.
+
+## Remaining gate
+Physical-phone visual acceptance in both orientations and Daily Bonus remains pending; browser emulation is not owner acceptance. Large-text/200% zoom and physical safe-area review are manual scenarios, not claimed verified. Final lobby and table resolver are unimplemented. Draft remains not merge-ready. No backend/WS/DB/CH economy/Production/Stage change, new PR or merge. Stop at T008 for owner visual approval.

@@ -2,9 +2,9 @@
 
 **Feature Branch**: `1069-luxury-lobby-design`
 **Created**: 2026-10-10
-**Revised**: Owner review in PR #1078, 2026-10-10; previous visual direction not approved
+**Revised**: Owner review in PR #1078, 2026-10-10; Variant A correction; visual approval still pending
 **Status**: Draft — visual approval required; final implementation blocked
-**Input**: Owner requests complete landscape/portrait design, five original finished cards, coordinated Cosmetics UX, SpecKit, self-review and a Draft PR with Netlify preview. No final lobby implementation yet.
+**Input**: Owner requests complete landscape/portrait design, five original finished cards, four lower shortcuts and table-wide automatic theme planning, SpecKit, self-review and a Draft PR with Netlify preview. No final lobby implementation yet.
 
 ## User Scenarios & Testing
 
@@ -35,26 +35,27 @@ After visual approval, players use the new lobby while retaining all current onl
 4. Given locked/unaffordable tables or NORMAL/SLOW/RESTRICTED access, presentation preserves existing restrictions and errors.
 5. Given an eligible unclaimed welcome bonus, only the real existing account claim pathway is shown; everyone else sees no bonus shortcut.
 
-### User Story 3 — Preview coherent Cosmetics UX (Priority: P2)
-Players discover a secondary Cosmetics gallery from the bottom toolbar, visually aligned with the lobby and existing table settings.
+### User Story 3 — Shared automatic table appearance (Priority: P2, future #800)
+Every participant at the same table sees one system-assigned appearance from the six existing FREE Poker V2 themes. The assigned theme is fixed for that table's entire lifecycle.
 
-**Why this priority**: #800 is part of the shared presentation milestone, with a separate implementation PR.
+**Why this priority**: Owner Variant A supersedes all earlier per-player appearance guidance. No lobby appearance controls belong in this milestone.
 
-**Independent Test**: Open Cosmetics, inspect all six shipped theme artworks and close it. The design prototype changes only its own transient gallery view.
+**Independent Test**: After separate #800 approval/implementation, compare two clients at the same table, late join, hand change, reload and reconnect; the resolved theme ID must stay identical. This PR verifies only the absence of appearance controls and the completeness of its future plan.
 
 **Acceptance Scenarios**:
-1. Given the Cosmetics gallery, Classic Casino, Royal Gold, Neon Vegas, Midnight Sapphire, Crimson Velvet and Emerald Palace are all illustrated using the shipped catalog artwork.
-2. Given a gallery selection in this preview, the room/dealer/felt preview changes without saving preferences, claiming ownership or changing a table.
-3. Given the later #800 implementation, free selection changes only this user's local scene and survives reload/reconnect; another account or guest never inherits that selection.
-4. Given any player, all six existing themes are free with no CH, ownership or VIP check. Auto / Random is the proposed default and all six are available for optional manual choice; future paid SKUs must be different content.
+1. Given one valid immutable table ID, every participant resolves the same one of Classic Casino, Royal Gold, Neon Vegas, Midnight Sapphire, Crimson Velvet or Emerald Palace.
+2. Given hands, joins, redraws, reload or reconnect, the resolved ID stays unchanged for the life of that table.
+3. Given any player, no theme selector or player appearance storage is present; all six themes are free.
+4. Given missing/invalid table identity or unavailable art, the scene has a readable Classic fallback without changing gameplay or drawing another theme.
+5. Given future event/path work, #1075 defines precedence/transitions separately; V1 performs no event rotation.
 
 ### Edge Cases
 - 320px portrait, 360px short phone, 844×390 landscape, 200% zoom, safe-area insets: allow vertical overflow when needed; never hide critical controls to force a one-screen fit.
 - Keyboard: scroll, arrows/Home/End on the carousel, labeled indicator buttons, details/dialog Escape and focus return; screen readers receive real mode availability.
 - Reduced motion: no autoplay, animated shimmer or essential hover; scrolling respects the preference.
 - Missing artwork: readable labels/actions and dark fallback remain; image loading must not block navigation.
-- Account switch/logout/storage denial: Classic-safe identity reset; no paid entitlement inferred from local storage.
-- Reconnect: preserve authoritative snapshot/reveal/action gates and local theme; ignore stale asset loads after identity changes.
+- Missing or invalid authoritative table ID: keep Classic; no identity-derived theme or gameplay mutation.
+- Reconnect: preserve authoritative snapshot/reveal/action gates and table-scoped theme; stale artwork requests from a different table cannot apply.
 - No real configured offer/event: omit promotions, timers, VIP, real daily reward claims and notification counts. Daily Bonus here is explicitly illustrative, without amounts.
 
 ### User Story 4 — Review Daily Bonus progression (Priority: P2)
@@ -77,33 +78,33 @@ The owner reviews a cohesive Day 1–4 reward-panel concept in both orientations
 - **FR-002**: Use the exact five-card lineup/order and status in US1; landscape is a scrollable carousel rather than an equal-width dashboard grid; portrait shows one dominant swipeable card and a peek.
 - **FR-003**: Provide original cinematic art for all five modes, locally hosted, optimized, with accessible HTML labels and no copied commercial artwork.
 - **FR-004**: Preserve the existing topbar/sidebar/account system and all online poker actions; preserve loading, disabled, guest, auth and tier/access states.
-- **FR-005**: Bottom navigation offers Online Tables, Progression, Daily Bonus, Cosmetics and Profile. Welcome bonus appears only on actual eligibility, using existing account flow.
+- **FR-005**: Bottom navigation offers Online Tables, Progression, Daily Bonus and Profile. Welcome bonus appears only on actual eligibility, using existing account flow.
 - **FR-006**: Four future modes are inert or honest accessible informational shells. Single Player means online one-human-vs-bots; World Tour is a future themed play path; Seasons rotates weekly on designated tables; Sit & Go is future tournament work.
-- **FR-007**: Cosmetics shares all six FREE shipped themes with table settings. Auto / Random is the proposed default, plus optional manual selection. #800 owns local persistence and stable choice through play/reload/reconnect; #1070/#1072 can concern only future distinct paid/VIP content, never these six.
+- **FR-007**: #800 assigns one of six FREE shipped themes from immutable table identity, shared by all participants and stable for the entire table lifecycle, including late joins/reloads/reconnects. No per-player theme UI or storage. Implementation is separately gated.
 - **FR-008**: Future approved lobby replacement removes Poker-lobby AdSense presentation only, preserves unrelated Hub inventory and legally required consent. This preview includes no ad SDK; existing lobby is unchanged here.
 - **FR-009**: No backend, database, migrations, WS/protocol, purchase, production activation, new currency, fabricated prizes, VIP offers or unsupported routes.
 - **FR-010**: Preserve touch targets of at least 44×44px, keyboard navigation, screen-reader availability, safe areas and reduced-motion behavior in both orientations.
 - **FR-011**: Use existing architecture, minimal complexity, fundamental tests only, JSP-compatible global/IIFE JS, one physical CSS line per selector, CSP SHA allowlisting for any new inline scripts and klog for application logs. No git commands in the implementation plan.
 - **FR-013**: Daily Bonus is a design-only bottom destination with separate landscape/portrait Day 1–4 layouts, labeled sample states, disabled claim and Not configured availability; no amounts, countdown or rewards API.
 - **FR-014**: Use saturated blue/purple/magenta lighting, varied glossy 3D subjects, beveled frames, bold arcade typography, high-contrast green/gold/orange CTAs and an illustrated toolbar.
-- **FR-015**: Cosmetics previews use each actual room/dealer/felt/rail and non-Classic card/frame assets; Classic uses native default styling. No generic green felt or common gold rail substituted for other themes.
+- **FR-015**: Remove all lobby appearance controls, dialog, theme links and selection JS/CSS; retain shipped Poker V2 assets for future #800 reuse. Remove unused V1 lobby art and redundant screenshots.
 - **FR-012**: SpecKit names actual paths, methods, fields, dependencies and breaking-impact risks; self-review documents evidence and outstanding owner/device approval.
 
 ### Key Entities
 - Mode card: identity, label, original illustration, availability, honest destination/description and feature owner.
 - Player presentation: existing identity, XP, actual CH and availability states; design preview intentionally uses unset values.
 - Progression: existing bankroll, current/available tiers and eligibility; unlock and available access are distinct.
-- Theme: existing catalog ID/artwork, display name and free local appearance; Auto / Random versus manual choice, stable during participation; no ownership model for these six.
+- Theme: existing six catalog IDs/assets; fixed automatic table-scoped assignment, no user entity or preference.
 - Visual approval: portrait and landscape decisions, recorded separately from future feature implementation authorization. Daily Bonus implementation belongs to #1079, independently of visual approval.
 
 ## Success Criteria
 
 ### Measurable Outcomes
-- **SC-001**: Both URLs load over HTTPS from the Draft PR preview; all five card artworks and all six Cosmetics entries and Day 1–4 panels are accessible.
+- **SC-001**: Both URLs load over HTTPS from the Draft PR preview; all five card artworks and Day 1–4 panels are accessible.
 - **SC-002**: At 390×844, 360×640, 320×568 and 844×390, every mode/shortcut is reachable without page-wide horizontal overflow; intentional carousel overflow remains.
 - **SC-003**: All four future modes have visible Coming Soon labels and zero gameplay/purchase effects; the preview makes zero wallet/auth/WS requests.
 - **SC-004**: Main active five-art bundle totals under 1.5MB, first visible illustration under 350KB; bonus art under 150KB; images reserve dimensions and later cards load lazily.
-- **SC-005**: Owner can inspect portrait, landscape and six-theme gallery; final implementation tasks remain unchecked until explicit visual acceptance.
+- **SC-005**: Owner can inspect portrait, landscape and Daily Bonus; final implementation tasks remain unchecked until explicit visual acceptance.
 - **SC-006**: Final approved implementation keeps every existing action and access rule, removes only Poker-lobby ads, and passes existing fundamental checks plus targeted manual preview scenarios.
 
 ## Assumptions
@@ -111,10 +112,10 @@ The owner reviews a cohesive Day 1–4 reward-panel concept in both orientations
 - Preview markup is an isolated review artifact, not a competing application or live data layer. No fixture balance/rank or account data is invented.
 - Current main is `d8f48bd3b7dd47e6c2619646b3b708149d4af4d4`, including merged #1076 theme assets.
 - Common UX/specification for #1069/#800; separate focused future implementation PRs. Future playable modes require independent approvals in #1077/#1075/#797.
-- All six shipped themes are explicitly free for everyone per latest #800/#1070/#1072 updates. Auto / Random is proposed with deterministic per-participant/table choice; precise selection policy remains a design decision requiring owner visual/spec approval. No random change mid-hand, snapshot, reconnect or reload.
+- All six shipped themes are free. Final owner Variant A is authoritative: deterministic table-ID mapping is the proposed smallest implementation; one shared assignment, immutable mapping/order through table lifetime. Event precedence is separate #1075 work.
 
 ## Concrete repository scope and dependencies
 Required by the project constitution: future #1069 touches `poker/index.html`, `poker/poker.css`, `poker/poker.js:initLobby()` and original lobby assets; preserve `quickSeat()`, `createTable()`, `playAsGuest()`, `renderTables()`, `renderProgression()`, `checkAuth()`, `buildPokerTableUrl()` and `navigateToPokerTable()`. Actual topbar/navigation owners are `js/topbar.js`, `js/sidebar.js`, `js/core/sidebar-model.js`, `css/portal.css` (the `portal/portal.js` mapping in skills.md is stale). #800 uses `poker/poker-v2.js`, `poker/poker-v2.css`, `poker/table-v2.html`, and theme art under `poker/assets/themes/`. Exact properties and contracts are in [plan.md](plan.md) and [contracts/ui.md](contracts/ui.md).
 
 ## Breaking impact and environment boundary
-No existing production runtime files are modified by this review PR. Future DOM relocation must preserve IDs, event handlers, loading/hidden behavior and accessibility; CSS must be lobby-scoped. Removing ads is an intentional Poker-lobby-only presentation change after approval. Extracting the local theme catalog and widening its preview-only apply path are #800 implementation changes with identity/fallback risks. No new DB/Stage effect, WS deploy or Production effect is authorized. Daily repeating claim support is not evidence of active campaigns or Day 1–4 streak support; no campaign/API read is needed to review this concept.
+No existing production runtime files are modified by this review PR. Future DOM relocation must preserve IDs, event handlers, loading/hidden behavior and accessibility; CSS must be lobby-scoped. Removing ads is an intentional Poker-lobby-only presentation change after approval. Widening the preview-only theme apply path in the existing Poker V2 renderer is a future #800 change with mapping/version/asset-fallback risks. No new DB/Stage effect, WS deploy or Production effect is authorized. Daily repeating claim support is not evidence of active campaigns or Day 1–4 streak support; no campaign/API read is needed to review this concept.

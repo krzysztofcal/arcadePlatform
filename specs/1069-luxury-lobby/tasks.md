@@ -14,7 +14,7 @@
 **Independent verification**: two preview URLs; five reachable cards, native phone layouts, honest four Coming Soon shells.
 - [x] T005 [US1] Create poker/designs/luxury-lobby/landscape.html and portrait.html plus shared preview.css, native scroll-snap cards, peek, safe-area spacing and 44px targets.
 - [x] T006 [US1] Create poker/designs/luxury-lobby/preview.js IIFE for navigation indicators/arrows and honest Coming Soon dialogs; no gameplay, auth, wallet, logging or storage code.
-- [x] T007 [US1] Record bounded browser viewport/dialog/gallery/CSP review and deploy-preview URLs in specs/1069-luxury-lobby/self-review.md; publish Draft PR only.
+- [x] T007 [US1] Record bounded browser viewport/dialog/CSP review and deploy-preview URLs in specs/1069-luxury-lobby/self-review.md; publish Draft PR only.
 - [ ] T008 [US1] Obtain owner visual acceptance for landscape and portrait and record decisions in specs/1069-luxury-lobby/self-review.md. STOP final implementation until approved.
 
 ## Phase 4 — US2: real lobby integration (P1, BLOCKED by T008; future #1069 PR)
@@ -27,14 +27,14 @@
 - [ ] T014 [US2] Remove only Poker-lobby AdSense meta/include/two ad slots in poker/index.html and unused poker-ad-slot rules in poker/poker.css; preserve Klaro/consent and unrelated Hub ads.
 - [ ] T015 [US2] Run existing guards/CSP/syntax and targeted manual real guest/auth/Quick Seat/Create/Join/Refresh/tiers/bonus/back/reconnect scenarios; record evidence in specs/1069-luxury-lobby/self-review.md. No protocol or WS deployment change.
 
-## Phase 5 — US3: coordinated Cosmetics (P2)
-**Independent verification**: six artwork previews now; FREE identity-scoped Auto/manual choice later in separate #800 PR.
-- [x] T016 [US3] Add six shipped-theme art samples and transient gallery preview in poker/designs/luxury-lobby/landscape.html, portrait.html and preview.js; no apply/save/Buy/Owned claims.
-- [ ] T017 [US3] After T008, in separate #800 PR extract poker/poker-v2.js:TABLE_THEME_CATALOG and all-assets apply logic into proposed poker/poker-cosmetics.js shared IIFE; reuse six IDs/assets, generation guard and klog.
-- [ ] T018 [US3] Implement free local appearance preference in poker/poker-cosmetics.js under kcswh:poker-cosmetics:v1:<userId> / separate guest key, value {mode:"auto"} or {mode:"manual",themeId}; validate mode/known catalog ID; all six FREE with no purchase/VIP/entitlement checks. Proposed stable identity+tableId hash modulo six on new participation only; no reroll on snapshot/hand/reconnect/reload. Storage failure → Classic/static dealer.
-- [ ] T019 [US3] Connect one gallery/apply path from poker/index.html and poker/table-v2.html settings; update poker/poker-v2.css theme attribute selectors together, keeping hand/cards/HUD/seats/actions/portrait-landscape coordinates unchanged.
-- [ ] T020 [US3] Reset/invalidate theme request on poker/poker-v2.js:applySignedOutState()/applyAuthenticatedPendingState() identity transitions; preload before scene reveal, retain preference through reconnectGate/wsReady/hasAppliedAuthoritativeSnapshot without changing gameplay.
-- [ ] T021 [US3] Verify #800 six free choices, Auto/manual stability, invalid mode/IDs, account/guest separation, storage denial, missing assets, static dealer and reconnect manually; record in specs/1069-luxury-lobby/self-review.md. Extend existing fundamental critical-logic tests only if changed rules warrant it.
+## Phase 5 — US3: shared automatic table theme (P2; future #800 blocked)
+**Independent verification**: no appearance UI in current review. Later every compatible client at the same table resolves the same fixed theme through joins/hands/reload/reconnect.
+- [x] T016 [US3] Remove entire appearance dialog/shortcut/controls and associated script/styles/deep links from poker/designs/luxury-lobby/{landscape,portrait,index}.html, preview.js and preview.css.
+- [ ] T017 [US3] After T008 and separate #800 implementation approval, extend poker/poker-v2.js with resolveTableTheme(tableId), existing hashBotPresentationKey and fixed V1 six-ID order in plan.md; non-empty canonical string rejects whitespace/control characters, invalid → Classic. No player/seat/hand/time inputs or storage.
+- [ ] T018 [US3] Resolve idempotently after accepted poker/poker-v2.js:mergeSnapshot establishes state.tableId consistent with requested table; reuse wrong-table/reconnect gates. No re-roll on joins/snapshots/hands/reload/reconnect; retain in-memory resolvedTableId/resolvedThemeId only.
+- [ ] T019 [US3] Refactor poker/poker-v2.js:applyPreviewTheme into table-controlled applyTableTheme using seven-asset preload/timeout/generation/current-table guard, Classic safe fallback and klog; update poker/poker-v2.css scene attribute selectors and poker/table-v2.html references if needed. Keep static dealer/cards/HUD/actions/coordinates; no backend/WS/DB changes.
+- [ ] T020 [US3] Remove theme-select fragment of poker/poker-v2.js:bindCelebrationPreview and els.previewThemeSelect/previewThemeStatus references only in #800; keep unrelated celebration FX. Freeze V1 hash/list independent of future catalog/event additions; document mixed-version rollout and missing-art fallback in specs/1069-luxury-lobby/self-review.md.
+- [ ] T021 [US3] Extend existing tests/poker-v2-live.behavior.test.mjs node:test/vm harness for fundamental mapping vectors/table-wide agreement/lifetime stability/invalid ID fallback; targeted manual art-failure/reconnect smoke in specs/1069-luxury-lobby/self-review.md, no UI/CSS suite.
 
 ## Phase 6 — Polish and review
 - [x] T022 Review specs/1069-luxury-lobby/checklists/requirements.md and self-review.md for traceability/contradictions, actual art quality, incomplete approval and separate PR boundaries; fix review findings before handoff.
@@ -43,20 +43,20 @@
 ## Phase 7 — Owner review revision: US1/US3/US4 (authorized design only)
 **Independent verification**: landscape/portrait deep links show four Day 1–4 example states, disabled claim, no amount/countdown/account or rewards API.
 - [x] T024 [US1] Replace active art with original poker/designs/luxury-lobby/art/*-v2.webp and record bright arcade prompts/provenance/budgets in ARTWORK.md.
-- [x] T025 [US1] Restyle poker/designs/luxury-lobby/preview.css with saturated arcade colors, bold headings/beveled CTAs, illustrated five-shortcut bar; one rule per physical line including media blocks, safe portrait/short-landscape controls.
-- [x] T026 [US3] Correct all six Free theme samples in poker/designs/luxury-lobby/landscape.html and portrait.html using actual felt/rail/room/dealer/card/frame assets; add default Auto/Random and optional manual preview via preview.js:showTheme(), no save/random gameplay implementation.
+- [x] T025 [US1] Restyle poker/designs/luxury-lobby/preview.css with saturated arcade colors, bold headings/beveled CTAs, illustrated four-shortcut bar; one rule per physical line including media blocks, safe portrait/short-landscape controls.
+- [x] T026 [US3] Replace obsolete per-player requirements in specs/1069-luxury-lobby/{spec,plan,tasks,research,data-model}.md and contracts/ui.md with final owner shared table-wide automatic mapping; remove unneeded V1 art and gallery/redundant screenshots from poker/designs/luxury-lobby/.
 - [x] T027 [US4] Add dailyDialog/Day 1–4 completed/current/upcoming EXAMPLE STATE cards, decorative original bonus art and disabled Claim/Not configured availability to poker/designs/luxury-lobby/landscape.html and portrait.html; preview.js:openPanel() opens #daily-bonus only, no claim/API/timer.
 - [x] T028 [US4] Record existing daily API/status/template limitations and separate #1079 economic/history/timing gates in specs/1069-luxury-lobby/research.md, plan.md, contracts/ui.md and data-model.md; no live campaign read/activation or ledger change.
 - [x] T029 [US4] Inspect small-screen portrait/landscape Daily Bonus layouts, disabled claim, dialog keyboard/focus and zero rewards calls; refresh poker/designs/luxury-lobby/screenshots/* and specs/1069-luxury-lobby/self-review.md using temporary browser inspection only.
-- [x] T030 [US3] Inspect all six real asset samples, Auto/default/manual selection, Classic reset and no storage writes in both orientations; update poker/designs/luxury-lobby/screenshots/* and specs/1069-luxury-lobby/self-review.md.
-- [x] T031 [US1] Publish revised visual artifacts and SpecKit to existing Draft PR #1078 only; verify exact HEAD Netlify preview, CSS/active-art hashes/CSP and phone viewports; record in specs/1069-luxury-lobby/self-review.md.
+- [x] T030 [US1] Reproduce 320×568 Play Now occlusion, fix flow toolbar in poker/designs/luxury-lobby/preview.css and verify whole-button hit-testing/touch, four shortcuts and no appearance nodes/requests/storage across both layouts; refresh representative screenshots and specs/1069-luxury-lobby/self-review.md.
+- [ ] T031 [US1] Publish revised visual artifacts and SpecKit to existing Draft PR #1078 only; verify exact HEAD Netlify preview, CSS/active-art hashes/CSP and phone viewports; record in specs/1069-luxury-lobby/self-review.md.
 
 
 ## Dependencies / execution strategy
 T001 → T002 → T003/T004 → T005/T006/T016 → T007/T022/T023 → owner T008. Revised design tasks T024–T031 are authorized now and supersede previous visual evidence; T024 → T025/T026/T027 → T028/T029/T030 → T031 → renewed owner T008. Current delivery stops at that gate. Complete approved five-card design is the current milestone; Online functionality uses unchanged lobby link.
 
-After approval: T009 → T010 → T011/T012/T013/T014 → T015 in focused #1069 PR. T017 → T018 → T019 → T020 → T021 in separate #800 PR; #1069 may ship honest preview-only Cosmetics while #800 awaits implementation approval. No dependency on future playable modes/payments for six free themes. Daily reward logic is outside these tasks and belongs to independently approved #1079.
+After approval: T009 → T010 → T011/T012/T013/T014 → T015 in focused #1069 implementation. Separately approved #800: T017 → T018 → T019/T020 → T021. #800 is not a lobby prerequisite. Daily reward logic belongs to independently approved #1079.
 
-Parallel opportunities: documentation and art authoring can proceed independently after research. After markup contract settles, asset optimization and documentation review are independent. Do not concurrently edit shared lobby JS/HTML or extract the catalog in two PRs. Owner approval is not inferred from elapsed time or green checks.
+Parallel opportunities: after requirements, research documentation and art cleanup affect different files. Once markup settles, screenshot verification and SpecKit review are independent; shared preview CSS/JS and future renderer must be edited sequentially. Stop after current T031 for renewed T008; elapsed time/green checks are not owner approval.
 
-Task count: 31. US1: 7; US2: 7; US3: 8; US4: 3; setup/foundation/polish: 6. Checked boxes describe only finished design work, never future product implementation.
+Task count: 31. US1: 8; US2: 7; US3: 7; US4: 3; setup/foundation/polish: 6. Checked boxes mean completed design artifacts, never future runtime implementation.
