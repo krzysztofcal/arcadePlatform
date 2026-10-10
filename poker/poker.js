@@ -1506,10 +1506,10 @@
     var current = 0;
     var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     var descriptions = {
-      single: ['Single Player', 'Planned online poker against existing bots, with exactly one human at a table. This is not offline poker. Admission, tier eligibility and bot funding require separate implementation in #1077.'],
-      world: ['World Tour', 'A planned free choice of play path through designated country-themed tables. It is not a purchased cosmetic or reward. Table discovery, tier access and routing belong to #1075.'],
-      seasons: ['Seasons', 'Planned winter, spring, summer and autumn visuals rotating weekly on designated themed tables. Ordinary Quick Play tables stay unchanged. Scheduling and gameplay routing belong to #1075.'],
-      sitgo: ['Sit & Go', 'A planned tournament format that starts after enough players register. Tournament admission, blinds, bankroll and payouts are future work in #797.']
+      single: ['Single Player', 'Online poker against bot opponents, with one human at the table. This mode is in development.'],
+      world: ['World Tour', 'A future journey through country-themed poker tables. This mode is in development.'],
+      seasons: ['Seasons', 'Explore winter, spring, summer and autumn on future designated tables. This mode is in development.'],
+      sitgo: ['Sit & Go', 'A future tournament format that starts after enough players register. This mode is in development.']
     };
     function goTo(index){
       index = Math.max(0, Math.min(tiles.length - 1, index));
