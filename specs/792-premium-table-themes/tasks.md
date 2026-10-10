@@ -80,4 +80,4 @@ All six packages implemented; RG06 accepted. T011/T013 remain partial only for a
 - [x] FP02 Edit Royal Gold room artwork with built-in imagegen against Classic composition, inspect proposed floor proportions in scene before producing other variants.
 - [x] FP03 Correct Neon/Sapphire/Crimson/Emerald room artwork using validated proportions; preserve styles and all non-room bytes; update current artwork manifest/prompts/budgets.
 - [x] FP04 Verify all five corrected floors in local portrait/landscape/desktop, unchanged protected geometry/card text/non-room hashes and existing checks; obtain independent review.
-- [ ] FP05 Publish five room replacements and feature docs on same Draft PR#1076; verify exact-SHA Preview/native scene/hash evidence, retain prior live-smoke limits.
+- [x] FP05 Publish five room replacements and feature docs on same Draft PR#1076; verify exact-SHA Preview/native scene/hash evidence, retain prior live-smoke limits.
