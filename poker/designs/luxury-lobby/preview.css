@@ -213,6 +213,7 @@ dialog h2{font-size:26px;}
 @media(orientation:landscape) and (max-height:550px) and (min-width:601px){
 #dailyDialog{padding:14px 18px;}
 #dailyDialog .dialog-top .eyebrow{display:none;}
+#dailyDialog .dialog-top{justify-content:flex-end;}
 #dailyDialog .bonus-heading{margin-top:-44px;margin-right:60px;min-height:60px;}
 #dailyDialog .bonus-heading p{display:none;}
 #dailyDialog .bonus-heading img{height:60px;}
