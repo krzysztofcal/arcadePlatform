@@ -63,3 +63,8 @@ Task count: 31. US1: 8; US2: 7; US3: 7; US4: 3; setup/foundation/polish: 6. Chec
 
 ## Implementation progress (separate #1069 PR)
 T009–T014 implemented on main c4f26e4c baseline. T015 CI/actual guest and negative API Deploy Preview evidence recorded; authenticated Stage/physical-phone runtime smoke remains explicitly pending. Existing poker-ui.behavior harness received browser API stubs and a funded-seat fixture correction only, with no new UI cases/suite. Optional selected tier tests extend existing backend file. Scoped CSS suppresses injected Hub mobile-bottom-nav on this lobby to prevent its fixed overlay hiding Play Now; Hub routes remain in unchanged sidebar, brand and Profile. No global stylesheet/navigation changes.
+
+## PR #1080 confirmed review corrections
+- [x] T031 Independently verify all three findings against current PR HEAD, live Preview and merged V3 before any implementation edit; record classifications/evidence in self-review.md.
+- [x] T032 In poker/poker.js use stable subject and generation checks for identity-bound async responses/auth reads; reset account UI/client on transition. Restore approved illustrative Daily Bonus in poker/index.html and scoped poker/poker.css; improve only Online short-landscape contrast/spacing.
+- [ ] T033 Run existing fundamental tests/guards and temporary auth-race/short-landscape checks; confirm CI/Netlify Preview latest SHA, record evidence and pending funded Stage/physical-device gate. Keep Draft, no merge/Production.

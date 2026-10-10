@@ -1473,6 +1473,8 @@
     var quickSeatInFlight = false;
     var lobbyAuthenticated = false;
     var lobbyIdentity = null;
+    var lobbyIdentityGeneration = 0;
+    var authCheckGeneration = 0;
     var createBtn = document.getElementById('pokerCreate');
     var buyInInput = document.getElementById('pokerBuyIn');
     var maxPlayersInput = document.getElementById('pokerMaxPlayers');
@@ -1737,14 +1739,16 @@
         return null;
       }
       if (welcomeBonusInFlight) return welcomeBonusInFlight;
+      var requestGeneration = lobbyIdentityGeneration;
       welcomeBonusInFlight = (async function(){
         try {
           var status = await window.ChipsClient.fetchWelcomeBonusStatus();
+          if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return null;
           var canClaim = !!(status && status.eligible && !status.alreadyClaimed);
           setWelcomeBonusBannerVisible(canClaim);
           return status || null;
         } catch (_err){
-          setWelcomeBonusBannerVisible(false);
+          if (lobbyIdentityGeneration === requestGeneration) setWelcomeBonusBannerVisible(false);
           return null;
         } finally {
           welcomeBonusInFlight = null;
@@ -1897,13 +1901,13 @@
         progressionRefreshQueued = true;
         return progressionInFlight;
       }
-      var requestIdentity = lobbyIdentity;
+      var requestGeneration = lobbyIdentityGeneration;
       progressionInFlight = apiGet(PROGRESSION_URL).then(function(data){
-        if (!lobbyAuthenticated || lobbyIdentity !== requestIdentity) return null;
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return null;
         renderProgression(data);
         return data;
       }).catch(function(err){
-        if (!lobbyAuthenticated || lobbyIdentity !== requestIdentity) return null;
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return null;
         progressionState = null;
         selectedQuickBuyIn = null;
         renderQuickTiers();
@@ -1932,11 +1936,28 @@
         || normalized === 'auth_failed';
     }
 
+    function setLobbyIdentity(identity){
+      if (lobbyIdentity === identity) return;
+      lobbyIdentity = identity;
+      lobbyIdentityGeneration += 1;
+      progressionState = null;
+      selectedQuickBuyIn = null;
+      lobbyTables = [];
+      if (progressionBankroll) progressionBankroll.textContent = 'Loading bankroll…';
+      if (progressionRoadmap) progressionRoadmap.innerHTML = '';
+      if (progressionCelebration) progressionCelebration.hidden = true;
+      if (tableList) tableList.innerHTML = '';
+      setWelcomeBonusBannerVisible(false);
+      stopLobbyWs();
+    }
+
     async function checkAuth(){
+      var checkGeneration = ++authCheckGeneration;
       var token = await getAccessToken();
+      if (checkGeneration !== authCheckGeneration) return false;
       if (!token){
         lobbyAuthenticated = false;
-        lobbyIdentity = null;
+        setLobbyIdentity(null);
         progressionState = null;
         selectedQuickBuyIn = null;
         renderQuickTiers();
@@ -1949,11 +1970,8 @@
         startAuthWatch();
         return false;
       }
-      if (lobbyIdentity !== token){
-        progressionState = null;
-        selectedQuickBuyIn = null;
-        lobbyIdentity = token;
-      }
+      // JWT subject is UI identity only; all authorization remains server-side.
+      setLobbyIdentity(getUserIdFromToken(token) || token);
       lobbyAuthenticated = true;
       renderQuickTiers();
       if (authMsg) authMsg.hidden = true;
@@ -2027,7 +2045,7 @@
               content: lobbyContent,
               errorEl: errorEl,
               stopPolling: stopLobbyWs,
-              onAuthExpired: function(){ lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
+              onAuthExpired: function(){ authCheckGeneration += 1; setLobbyIdentity(null); lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
             });
             if (tableList) tableList.innerHTML = '';
             return;
@@ -2185,10 +2203,10 @@
       if (selectedQuickBuyIn !== null) payload.buyIn = selectedQuickBuyIn;
       quickSeatInFlight = true;
       renderQuickTiers();
-      var requestIdentity = lobbyIdentity;
+      var requestGeneration = lobbyIdentityGeneration;
       try {
         var data = await apiPost(QUICK_SEAT_URL, payload);
-        if (!lobbyAuthenticated || lobbyIdentity !== requestIdentity) return;
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (data && data.ok === true && data.tableId){
           navigateToPokerTable(data.tableId, {
             seatNo: data.seatNo != null ? data.seatNo : null,
@@ -2198,7 +2216,7 @@
         }
         setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
       } catch (err){
-        if (!lobbyAuthenticated || lobbyIdentity !== requestIdentity) return;
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (handleTierLocked(err) || handleInsufficientChips(err)){
           refreshProgression();
           return;
@@ -2209,7 +2227,7 @@
             content: lobbyContent,
             errorEl: errorEl,
             stopPolling: stopLobbyWs,
-            onAuthExpired: function(){ lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
+            onAuthExpired: function(){ authCheckGeneration += 1; setLobbyIdentity(null); lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
           });
           return;
         }
@@ -2230,14 +2248,17 @@
       }
       var maxPlayers = resolveLobbyMaxPlayers();
       setLoading(createBtn, true);
+      var requestGeneration = lobbyIdentityGeneration;
       try {
         var data = await apiPost(CREATE_URL, { maxPlayers: maxPlayers, buyIn: buyIn });
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (data.tableId){
           navigateToPokerTable(data.tableId);
         } else {
           setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
         }
       } catch (err){
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (handleTierLocked(err)) return;
         if (handleInsufficientChips(err)) return;
         if (isAuthError(err)){
@@ -2246,7 +2267,7 @@
             content: lobbyContent,
             errorEl: errorEl,
             stopPolling: stopLobbyWs,
-            onAuthExpired: function(){ lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
+            onAuthExpired: function(){ authCheckGeneration += 1; setLobbyIdentity(null); lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
           });
           return;
         }
@@ -2297,6 +2318,20 @@
       welcomeBonusClaimBtn.addEventListener('click', function(){
         window.location.href = '/account.html';
       });
+    }
+
+    if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
+      var unsubscribeLobbyAuth = window.SupabaseAuth.onAuthChange(function(_event, user){
+        authCheckGeneration += 1;
+        setLobbyIdentity(user && user.id ? user.id : null);
+        lobbyAuthenticated = !!user;
+        renderQuickTiers();
+        if (authMsg) authMsg.hidden = !!user;
+        if (lobbyContent) lobbyContent.hidden = !user;
+        // Read the session after the Supabase auth callback releases its lock.
+        setTimeout(function(){ refreshLobby('auth_change'); }, 0);
+      });
+      window.addEventListener('beforeunload', unsubscribeLobbyAuth); // xp-lifecycle-allow:poker-lobby-auth(2027-01-01)
     }
 
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)
