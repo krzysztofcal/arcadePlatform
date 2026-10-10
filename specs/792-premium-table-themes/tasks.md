@@ -1,0 +1,83 @@
+# Tasks: Six premium Poker V2 presentation packages
+
+**Input**: [spec.md](spec.md), [plan.md](plan.md). Product implementation starts only after T006. No UI/CSS/layout/JSP/glue test suites, generic setup changes or Git commands. Stage effects: none; Preview only.
+
+## Phase 1 — Scope and SpecKit
+
+- [x] T001 Verify latest #792 and `agents.md`, `skills.md`, `.specify/memory/constitution.md`; record live baseline in `specs/792-premium-table-themes/research.md`.
+- [x] T002 Prepare `specs/792-premium-table-themes/spec.md`, `plan.md`, `tasks.md`, `data-model.md`, `contracts/preview.md`, `quickstart.md` and requirements checklist; check six-package coverage and exclusions.
+
+## Phase 2 — US1: Owner visual review (no product changes)
+
+Independent verification: owner sees all six complete directions and the unchanged Poker V2 baseline in both orientations.
+
+- [x] T003 [US1] Capture current table geometry without product edits; save portrait/landscape baseline images in `specs/792-premium-table-themes/design/`.
+- [x] T004 [US1] Prepare six high-quality concept boards and room/lighting/rail/felt/card/frame/dealer detail directions in `specs/792-premium-table-themes/design/`; label illustrative art separately from exact-layout proof.
+- [x] T005 [US1] Publish static review gallery `specs/792-premium-table-themes/design/index.html` on Draft PR Deploy Preview, verify its URL/images and self-review this phase in `specs/792-premium-table-themes/review.md`.
+- [x] T006 [US1] Record owner's explicit acceptance or requested corrections against the reviewed revision in `specs/792-premium-table-themes/approval.md`; do not proceed to T007 without acceptance.
+
+## Phase 3 — US2: Complete approved packages and local preview
+
+Independent verification: six packages selectable from Preview FX, default/reset unchanged, no account/gameplay writes.
+
+- [x] T007 [US2] Produce approved local room/dealer/felt/rail/face/back/frame art under `poker/assets/themes/<theme-id>/`; keep Classic's shipped defaults, record all reused/generated assets and measured budgets in `specs/792-premium-table-themes/artwork.md`.
+- [x] T008 [US2] Add `TABLE_THEME_CATALOG`, `previewThemeId` and `applyPreviewTheme(themeId)` to `poker/poker-v2.js`, with exact six IDs, preview build gate, requested-only loading, stale-load cancellation and error retention of current art.
+- [x] T009 [US2] Extend `bindCelebrationPreview()` with labeled Theme select/status in `poker/poker-v2.js`; audit `render()`/preference/leave visibility assignments for demo, guest, spectator and reconnect while preserving existing effect click gates and no persistence.
+- [x] T010 [US2] Add scoped cosmetic overrides in `poker/poker-v2.css` for room, rail/felt, dealer, face/back and frame; reuse `createCard()` text and existing FX hooks without geometry changes.
+- [x] T011 [US2] Verify six switches, Classic/reload, non-preview absence, guest/spectator access, rapid/failed loading and no gameplay writes on Deploy Preview; record evidence in `specs/792-premium-table-themes/review.md`.
+
+## Phase 4 — US3: Readability and geometry
+
+Independent verification: readable cards and UI, unchanged bounds, reduced motion at target orientations.
+
+- [x] T012 [US3] Inspect all exported dealer assets against current pose/hands/origin and `::after` clipping in `poker/poker-v2.css`; correct artwork registration without moving dealer boxes.
+- [x] T013 [US3] Verify 390×844, 844×390 and 1440×900 on Deploy Preview, compare protected bounds to baseline, inspect native-size hero/board/opponent/showdown/FX cards, turn/highlight/avatar cues and contrast; record in `specs/792-premium-table-themes/review.md`.
+- [x] T014 [US3] Verify keyboard chooser/status, focus and reduced-motion switching in Preview; adjust only scoped presentation in `poker/poker-v2.css`/`poker/poker-v2.js` when necessary.
+
+## Phase 5 — Review and handoff
+
+- [x] T015 Re-run Constitution Check against actual diff and task list in `specs/792-premium-table-themes/plan.md`; run `node --check poker/poker-v2.js` and `npm run check:csp-inline`, document results in `review.md`; no new test suites.
+- [x] T016 Review final complete art/catalog/code for scope, simple reuse, default/preview gates, JSP/CSP/klog, geometry/readability and provenance; resolve findings in `review.md`.
+- [x] T017 Verify current Draft PR Deploy Preview corresponds to latest deployable revision; record URL/SHA and any pending live smoke in `review.md`. Hand off without merge or Production deployment.
+
+## Dependencies and Delivery Strategy
+
+T001→T002→T003/T004→T005→T006 is the design milestone. T006→T007→T008→T009→T010→T011→T012/T013/T014→T015→T016→T017 is implementation. The initial review deliverable is US1; the final V1 includes US1–US3 and all six complete packages. Art production for separate packages can be independent after approval; code edits stay sequential in the existing files. Do not ship a three-theme or felt-only substitute.
+
+## Approved Royal Gold implementation checkpoint
+
+The owner checkpoint in approval.md splits Phase 3 delivery. Full T007–T017 stay unchecked until all six packages and their evidence are complete.
+
+- [x] RG01 Produce seven optimized Royal Gold layers and record inventory/provenance/budgets in artwork.md.
+- [x] RG02 Implement page-local catalog, atomic requested-only loading, Classic reset, stale-load/error handling and accessible Theme chooser in existing Preview FX. Retain exact six catalog identities; four alternatives visibly unavailable until their art is produced after review.
+- [x] RG03 Apply scoped Royal Gold CSS, preserve geometry/live card text/FX gates, and verify local target viewports, build gates, error/race/reset, keyboard and reduced motion.
+- [x] RG04 Run existing syntax/CSP checks and independent checkpoint code/art review.
+- [x] RG05 Verify exact-revision Deploy Preview and record live evidence.
+- [x] RG06 Obtain owner inspection/acceptance of Royal Gold before generating remaining dealer variants.
+
+## Rejected wardrobe extraction — superseded
+
+- [x] RG07 Extract the approved Royal Gold dealer from premium-collection.png with a feature-local alpha mask and deterministic export; record source resolution, SHA/provenance and reproducibility.
+- [x] RG08 Verify corrected dealer registration/native-size presentation and protected bounds on exact-revision Deploy Preview; owner visual acceptance remains RG06.
+
+## Owner-requested high-quality restoration
+
+- [x] RG09 Restore the exact original imagegen dealer.webp, verify original SHA/bytes, remove rejected extraction script/mask and update current provenance/owner direction.
+- [x] RG10 Verify restored exact-revision Deploy Preview and record evidence.
+
+## Fuller generated dealer and correct rail occlusion
+
+- [x] RG11 Generate a high-quality full lower torso for the accepted dealer, optimize local dealer.webp, update scoped foreground masking and verify local native-size/zoom presentation and protected bounds.
+- [x] RG12 Review final repair and verify exact-revision Deploy Preview, including waist/rail close-up, and record evidence.
+
+## Six-theme completion evidence
+
+All six packages implemented; RG06 accepted. T011/T013 completed: owner confirmed the remaining manual runtime smoke test passed on 2026-10-10, following final visual acceptance. See review.md for the distinction between owner-reported smoke and automated evidence. Demo six-theme/error/race/reset/non-preview gates, protected geometry/card text, keyboard and reduced motion have been verified locally; exact-SHA Preview verification passed (T017), including all six packages, unchanged geometry/cards, error/race/reset/reload, keyboard/reduced motion, served raster hashes and native/high-DPI waist inspection. No new maintained test suites.
+
+## Owner-requested floor perspective correction
+
+- [x] FP01 Reproduce/measure original room aspect ratios, visual floor-wall transitions and center/cover mapping against Classic across390×844,844×390,1440×900; preserve baseline hashes/bounds outside repository.
+- [x] FP02 Edit Royal Gold room artwork with built-in imagegen against Classic composition, inspect proposed floor proportions in scene before producing other variants.
+- [x] FP03 Correct Neon/Sapphire/Crimson/Emerald room artwork using validated proportions; preserve styles and all non-room bytes; update current artwork manifest/prompts/budgets.
+- [x] FP04 Verify all five corrected floors in local portrait/landscape/desktop, unchanged protected geometry/card text/non-room hashes and existing checks; obtain independent review.
+- [x] FP05 Publish five room replacements and feature docs on same Draft PR#1076; verify exact-SHA Preview/native scene/hash evidence, retain prior live-smoke limits.

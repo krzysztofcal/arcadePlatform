@@ -2,6 +2,68 @@
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   var SUIT_SYMBOLS = { S: '♠', H: '♥', D: '♦', C: '♣' };
+
+  // Page-local art review; Classic reuses the shipped default artwork.
+  var TABLE_THEME_CATALOG = [
+    { id: 'classic-casino', label: 'Classic Casino', assets: [] },
+    { id: 'royal-gold', label: 'Royal Gold', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'neon-vegas', label: 'Neon Vegas', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'midnight-sapphire', label: 'Midnight Sapphire', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'crimson-velvet', label: 'Crimson Velvet', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'emerald-palace', label: 'Emerald Palace', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] }
+  ];
+  var previewThemeId = 'classic-casino';
+  var previewThemeRequest = 0;
+
+  function isThemePreviewBuild(){
+    var build = window.BUILD_INFO;
+    return !!build && build.context === 'deploy-preview' && build.isPreview === true;
+  }
+
+  function applyPreviewTheme(themeId){
+    if (!isThemePreviewBuild() || !els.screen) return;
+    var theme = TABLE_THEME_CATALOG.find(function(entry){ return entry.id === themeId; });
+    if (!theme || !theme.assets) return;
+    var request = ++previewThemeRequest;
+    function status(message){
+      if (els.previewThemeStatus) els.previewThemeStatus.textContent = message;
+    }
+    if (themeId === 'classic-casino'){
+      els.screen.removeAttribute('data-preview-theme');
+      previewThemeId = themeId;
+      if (els.previewThemeSelect) els.previewThemeSelect.value = themeId;
+      status('Classic Casino · default restored');
+      return;
+    }
+    status('Loading ' + theme.label + '… Current artwork stays visible.');
+    Promise.all(theme.assets.map(function(file){
+      return new Promise(function(resolve, reject){
+        var image = new Image();
+        var timeout = window.setTimeout(function(){ finish(false); }, 15000);
+        function finish(loaded){
+          window.clearTimeout(timeout);
+          image.onload = null;
+          image.onerror = null;
+          if (loaded) resolve();
+          else reject(new Error('Theme artwork unavailable'));
+        }
+        image.onload = function(){ finish(image.naturalWidth > 0); };
+        image.onerror = function(){ finish(false); };
+        image.src = '/poker/assets/themes/' + theme.id + '/' + file;
+      });
+    })).then(function(){
+      if (request !== previewThemeRequest || !isThemePreviewBuild()) return;
+      els.screen.setAttribute('data-preview-theme', theme.id);
+      previewThemeId = theme.id;
+      status(theme.label + ' · applied to this page only');
+    }).catch(function(){
+      if (request !== previewThemeRequest) return;
+      if (els.previewThemeSelect) els.previewThemeSelect.value = previewThemeId;
+      status('Could not load ' + theme.label + '. Current artwork retained; try again.');
+      klog('poker_preview_theme_load_failed', { themeId: theme.id });
+    });
+  }
+
   var HAND_CATEGORY = {
     HIGH_CARD: 1,
     PAIR: 2,
@@ -421,6 +483,8 @@
     if (!els.celebrationPreviewMode || !els.celebrationPreviewTarget) return;
     var targetSelect = els.celebrationPreviewTarget;
     var selectedTargetValue = targetSelect.value;
+    var canPreviewEffects = isSeatedAtLiveTable() && isWsReady() && !state.reconnectGate && !getActiveWinnerReveal();
+    if (els.celebrationPreviewPanel) els.celebrationPreviewPanel.querySelectorAll('[data-preview-effect]').forEach(function(button){ button.disabled = !canPreviewEffects; });
     var opponents = celebrationPreviewOpponents();
     var optionKey = JSON.stringify(opponents.map(function(seat){
       return [seat.userId, getPublicDisplayName(seat), !!seat.isBot, seat.seatNo];
@@ -540,7 +604,7 @@
     if (!build || build.context !== 'deploy-preview' || build.isPreview !== true) return;
     var controls = document.createElement('div');
     controls.className = 'poker-celebration-preview';
-    controls.hidden = true;
+    controls.hidden = false;
     var button = document.createElement('button');
     button.type = 'button';
     button.textContent = 'Preview FX';
@@ -549,8 +613,31 @@
     var panel = document.createElement('section');
     panel.id = 'pokerCelebrationPreviewPanel';
     panel.className = 'poker-celebration-preview__panel';
-    panel.setAttribute('aria-label', 'Celebration preview');
+    panel.setAttribute('aria-label', 'Table art and celebration preview');
     panel.hidden = true;
+    var themeLabel = document.createElement('label');
+    themeLabel.htmlFor = 'pokerPreviewTheme';
+    themeLabel.textContent = 'Theme';
+    var themeSelect = document.createElement('select');
+    themeSelect.id = 'pokerPreviewTheme';
+    themeSelect.setAttribute('aria-describedby', 'pokerPreviewThemeStatus');
+    TABLE_THEME_CATALOG.forEach(function(theme){
+      var option = document.createElement('option');
+      option.value = theme.id;
+      option.textContent = theme.label;
+      themeSelect.appendChild(option);
+    });
+    var themeStatus = document.createElement('small');
+    themeStatus.id = 'pokerPreviewThemeStatus';
+    themeStatus.setAttribute('role', 'status');
+    themeStatus.setAttribute('aria-live', 'polite');
+    themeStatus.textContent = 'Classic Casino · default. Six themes available for this page.';
+    panel.appendChild(themeLabel);
+    panel.appendChild(themeSelect);
+    panel.appendChild(themeStatus);
+    els.previewThemeSelect = themeSelect;
+    els.previewThemeStatus = themeStatus;
+    themeSelect.addEventListener('change', function(){ applyPreviewTheme(themeSelect.value); });
     var mode = document.createElement('select');
     mode.setAttribute('aria-label', 'Preview presentation');
     [['own', 'My win (large)'], ['other', 'Other player/bot (small near avatar)']].forEach(function(entry){
@@ -619,6 +706,7 @@
           amount: entry.kind === 'pot' ? 1250 : undefined, count: entry.kind === 'streak' ? Number(streakCount.value) : undefined },
         { demo: true, mode: mode.value });
       });
+      if (entry.kind !== 'close') choice.setAttribute('data-preview-effect', '');
       panel.appendChild(choice);
     });
     var hint = document.createElement('small');
@@ -5902,7 +5990,7 @@
 
   function render(){
     fitTableScene();
-    if (els.celebrationPreview) els.celebrationPreview.hidden = !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate;
+    if (els.celebrationPreview) els.celebrationPreview.hidden = !isThemePreviewBuild();
     if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
     renderCommunityCards();
     renderSeats();
@@ -7031,7 +7119,7 @@
           clearCelebration();
           clearHeroGiftDemo();
           resetWinStreakSession();
-          if (els.celebrationPreview) els.celebrationPreview.hidden = true;
+          if (els.celebrationPreview) els.celebrationPreview.hidden = !isThemePreviewBuild();
         }
         heroLifecycleTransition = status;
         if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
