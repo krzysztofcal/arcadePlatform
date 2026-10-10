@@ -1,57 +1,37 @@
-# Self-review — design and SpecKit
+# Self-review — premium mobile arcade review v2
 
-2026-10-10. Current main baseline `d8f48bd3b7dd47e6c2619646b3b708149d4af4d4`. Status: visual design review; final implementation blocked by owner approval.
+2026-10-10. Existing Draft PR #1078, no new PR. Owner review https://github.com/krzysztofcal/arcadePlatform/pull/1078#issuecomment-6098655623 explicitly left the previous design unapproved. Latest issues #1069/#800/#1079/#1070/#1072 analyzed; main baseline reconfirmed `d8f48bd3b7dd47e6c2619646b3b708149d4af4d4`.
 
-## Findings and decisions
-1. Latest #1069 update supersedes dashboard-first structure. Both review layouts use the same five original cinematic cards and native carousel/peek. Four future modes explicitly Coming Soon; no unsupported play links.
-2. The described screenshot is absent from live issue comments/attachments and user prompt. Design follows its written composition; no claimed pixel match or borrowed game art.
-3. Real code differs from skills.md mapping: no `portal/portal.js`; actual shared topbar/sidebar and `poker.js:initLobby()` identified. Account navigation and welcome bonus use `/account.html`. Plan corrected accordingly.
-4. Existing #792 theme chooser is preview-only, nonpersistent. Six-theme gallery here previews art; it does not implement #800 or invent permission/paid ownership. Proposed default Classic-only permission keeps unknown policy fail-closed. Separate #800 PR shares one extracted catalog/apply path.
-5. Native short landscape needs reduced copy/width; native portrait needs smaller vertical art height on tall phones. Refined without shrinking primary touch targets. Short phones may scroll vertically instead of hiding controls.
-6. Browser screenshot capture initially ran before lazy artwork finished loading. Review capture now waits for all visible/generated assets; runtime lazy loading remains enabled.
-7. Carousel end clamping on wide screens could leave the final indicator inaccurate. Corrected updatePosition() to recognize the scroll end as the final entry.
-8. Indicator dots initially had 28px hit height. Corrected to 44px to match accessibility requirement.
-9. Preview values stay unset (Guest preview, level/XP —, — CH). Authentic live identity/balance is reserved for existing topbar integration after approval; no mocked ranks/currencies.
-10. Preview has no inline JS, browser modules, storage, account/WS bootstrapping, ad SDK or application logs. Existing CSP `self` is sufficient; no SHA allowlist changes needed. Future inline changes remain SHA-gated.
+## Findings addressed
+1. Visual direction: replaced restrained serif/editorial luxury with saturated blue/purple/magenta bokeh, five new original glossy 3D illustrations, brighter per-mode frames, bold arcade headings and beveled green/gold CTAs. Four future modes remain Coming Soon.
+2. Daily Bonus missing: added fifth lower shortcut and separate native landscape/portrait concept panels, four Day 1–4 cards, explicitly labeled sample completed/current/upcoming states, disabled Claim and Not configured availability. No amounts/countdown/reward APIs/CH emission. No jackpot/sale/extra currency.
+3. Six existing themes FREE: removed earlier access assumption throughout SpecKit/gallery/PR text. Auto/Random is proposed default with optional manual choice. The preview only demonstrates a labeled fixed Neon Vegas sample and transient selection; no production preference/randomization implementation.
+4. Misleading generic thumbnails: every non-Classic preview now references its actual room/dealer/rail/felt/face/back/frame assets. Classic reuses existing scene/native defaults. Atomic preview preload/request-generation protection prevents mixed assets after fast switching. No second renderer/catalog introduced into production.
+5. CSS media formatting: opening/closing media braces are separate physical lines, each enclosed selector/declaration rule stays on one complete physical line. No collapsed multi-rule media lines or global CSS changes.
+6. Portrait indicators initially overlapped the sticky toolbar. Reduced tall-phone tile height so 390×844 has complete lobby/indicators/toolbar on one screen; short phones may scroll vertically. Gifts initially overflowed reward-card labels due grid intrinsic image sizing; bounded absolute image sizing fixes that. Short landscape Daily panel uses a compact header/art layout to preserve readable states/action.
+7. Existing isolated preview-only Netlify drawer suppression retained. It affects only these review routes, not site/deploy settings. Existing CSP `self` covers all scripts/assets, no inline JavaScript/handlers and no SHA changes. IIFE remains JSP-compatible; no application logs needed.
+8. Snapshot references remain descriptions: screenshot files are absent from issue/this prompt, so no pixel-match or file-access claim. Original raster generation via built-in image_gen; prompts/provenance in ARTWORK.md.
 
-11. Exact HTTPS review exposed the Netlify Drawer iframe intercepting bottom-toolbar clicks on short landscape phones. Confirmed its fixed 48px frame in DOM; scoped the review-only stylesheet to hide its injected wrapper on these two pages. No site settings/global page changes.
+## Source/authority findings
+- Existing `bonus-campaigns` supports atomic/idempotent UTC daily PROMO_BONUS, not an implemented Day 1–4 streak. GET filters eligible/unclaimed items; absent items cannot become completed-day history or a countdown. Admin's 20 CH template is not active-campaign evidence. No live campaign existence queried or claimed. #1079 needs separate economic/history/status design and owner GO.
+- #1070/#1072 may cover future distinct paid/VIP assets; none of the six shipped free themes may be paywalled. #800 Auto choice proposal is deterministic per identity/table, stable through hand/snapshot/reload/reconnect; owner still must approve the detailed policy before implementation.
+- Actual lobby remains poker/index.html + poker/poker.js:initLobby; real account navigation remains /account.html. All existing runtime/table/tier/guest/auth paths stay untouched.
 
-## SpecKit consistency analysis
-Ran existing plan/tasks setup and `check-prerequisites.sh --json --require-spec --require-tasks --include-tasks`. All required artifacts resolved. No extension hooks exist. Review of spec/plan/tasks against constitution found no unresolved CRITICAL/HIGH conflicts.
+## SpecKit traceability
+| Requirements | Tasks / evidence |
+| --- | --- |
+| FR-001–003, FR-014 / arcade native preview/art | T024, T025, T029, T031 |
+| FR-004–005 / real paths and toolbar | Existing blocked T009–T013/T015; T025/T027 now |
+| FR-006 / Coming Soon | T006/T024/T025; four same scopes |
+| FR-007, FR-015 / free actual-asset Cosmetics | T026/T030; future blocked T017–T021 |
+| FR-008–009 / no live/runtime/economy changes | Scope diff, future blocked T014, T028 |
+| FR-010–012 / access/style/security/concrete artifacts | T025/T029/T030/T031, existing guards |
+| FR-013 / truthful Day 1–4 concept | T027–T029; separate #1079 |
 
-| Requirement | Covered tasks | Review |
-| --- | --- | --- |
-| FR-001, FR-002 / two approved compositions | T005–T008, T023 | Native review URLs; owner approval pending |
-| FR-003 / original optimized artwork | T004, T007 | Five assets, provenance and prompts documented |
-| FR-004, FR-005 / real navigation and player data | T009–T013, T015 | Current action/ID contracts; future implementation explicitly blocked |
-| FR-006 / future mode boundaries | T006, T011 | #1077/#1075/#797 separate gameplay scope |
-| FR-007 / common Cosmetics design | T016–T021 | Six art previews now, one shared runtime path later |
-| FR-008 / Poker-only ads | T014 | Existing lobby unchanged here; future approved removal bounded |
-| FR-009 / environment/authority exclusions | T001, T003, T023 | No backend/DB/WS/Production change |
-| FR-010 / accessibility/orientations | T005–T007, T012, T015 | Touch/keyboard/dialog/reduced-motion and manual device scenarios |
-| FR-011, FR-012 / constitution and concrete review | T003, T022, T023 | CSP/JSP/CSS/klog and fundamental-tests-only |
-
-No requirement is left without tasks. SC-001–SC-005 cover review evidence; SC-006 belongs to blocked future implementation. No proposed gameplay/CSS unit suites. No git commands in plan. Tasks are sequentially numbered, story-labeled, with exact paths and explicit dependency gate. Proposed Cosmetics helper extraction has a stated simplicity rationale, not a new framework.
+Spec/plan/tasks/research/data-model/contracts/quickstart and checklist aligned. Previous selection restrictions removed; tests remain fundamental-only with temporary browser inspection rather than a committed UI suite. No git commands in plan; no unresolved placeholder requirement. No before/after hooks (.specify/extensions.yml absent). Existing plan/tasks setup executed for the same feature directory.
 
 ## Verification evidence
-- Baseline CSP: 52 documents passed. Baseline syntax initially lacked installed declared acorn dependency; local `npm ci --ignore-scripts` installed existing lockfile dependencies with no manifest/config change.
-- Review checks: `npm run syntax` passed (222 files), `npm run check:csp-inline` passed (55 served documents), `npm run ci:guards` passed lifecycle/badge/29-file XP hook guards.
-- Browser and exact Netlify verification results are recorded below after publication. No new test suite is committed; review uses installed Playwright as an ephemeral bounded inspection tool.
+Local v2 inspection passed at 1280×800, 390×844, 844×390, 568×320, 360×640 and 320×568: five tiles/shortcuts, six decoded actual theme samples, four day examples, no horizontal overflow, touch/keyboard/focus return, disabled claim, no storage writes, platform API calls or JavaScript errors. Both hash-panel deep links and orientation resize passed. Same-document hash changes initially missed the second panel; hashchange handling now fixes this. Screenshots refreshed for all six viewports, including scrolled Daily footer. Syntax (225 files), CSP inline (55 documents), CI guards (29 XP hooks) and diff whitespace checks passed. Earlier v1 evidence is superseded and is not approval of this revision. HTTPS publication verification follows below.
 
 ## Remaining gates
-Owner real-device portrait/landscape/touch/visual acceptance is pending. Final lobby T009–T015 and Cosmetics T017–T021 are not performed. This Draft PR is not merge-ready and does not close #1069/#800. Future permission classification of non-Classic theme selection requires explicit agreement; no entitlement is invented. No WS deploy is required for this isolated art-only prototype. No Stage/Production/backend/database/WS effect.
-
-## Bounded browser evidence
-Chromium review at 1280×800 landscape, 844×390 landscape phone, 390×844 portrait, 360×640 and 320×568 portrait: five decoded mode artworks, partial next-card peek, zero page-wide horizontal overflow, six decoded theme art samples, Coming Soon dialog Escape and focus return, Cosmetics focus return, zero JS errors and zero account/API/WS requests. Snapshots are in `poker/designs/luxury-lobby/screenshots/`. These are browser viewport simulations, not physical-phone acceptance. Wide final-card indicator and 44px indicator hit targets rechecked after refinement.
-
-Five artwork bytes: 781368 total; first art 133896 bytes. Within SC-004 budget.
-
-## Published Draft PR and HTTPS evidence
-- Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1078 (remains Draft).
-- Landscape: https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/landscape.html
-- Portrait: https://deploy-preview-1078--playkcswh.netlify.app/poker/designs/luxury-lobby/portrait.html
-- Verified deployed runtime/design revision: `71d65a3ef3bd34ec8f658637ea8139db9f7149d6`. Netlify Deploy Preview and required actionlint passed for that revision. Later review-evidence-only commits do not change these design assets.
-- Real HTTPS Chromium inspection at 844×390 and 390×844: HTTP 200, CSP present, five artwork decodes, indicator/Sit & Go Coming Soon details/Escape/Cosmetics/Neon Vegas art selection all usable; zero application JS errors and zero platform account/API/WS requests. Netlify itself injects its CDP script and makes its own preview-drawer request; two camera/microphone permissions-policy console messages originate from that iframe, not the application. The drawer is hidden only on review pages; site security/deploy settings remain unchanged.
-- Final scope diff contains only `poker/designs/luxury-lobby/**` and `specs/1069-luxury-lobby/**`. Original lobby/topbar/backend/DB/WS/configuration/dependencies unchanged; local feature selector remains ignored/uncommitted. GitHub auto-runs broader existing CI; ws-harness/playwright were still running when this evidence was recorded, no failure observed. No manual runtime deployment or production operation performed.
-
-Owner acceptance is the remaining current milestone gate (T008). T007/T022/T023 are complete. T009–T015 and T017–T021 remain unchecked and blocked.
+Owner actual-phone visual/touch approval for both orientations and Daily Bonus/Cosmetics remains pending. T008 is unchecked. Final lobby T009–T015 and #800 preference tasks T017–T021 remain unchecked; Daily claims/history/economics belong to separate #1079. Draft remains not merge-ready. No Production/backend/DB/WS/economy change or merge.

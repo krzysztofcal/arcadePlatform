@@ -1,20 +1,20 @@
-# Implementation Plan: Arcade-style Luxury Poker Lobby
+# Implementation Plan: Premium Mobile Arcade Poker Lobby
 
 **Branch**: `1069-luxury-lobby-design` | **Date**: 2026-10-10 | **Spec**: [spec.md](spec.md)
 
 ## Summary
-Deliver an isolated landscape/portrait review prototype with five original cards and existing-theme Cosmetics gallery now. After explicit owner approval, reshape the existing lobby and implement local Cosmetics in separate focused PRs. Preserve all engine/economy/navigation behavior.
+Deliver an isolated landscape/portrait review prototype with five original glossy 3D cards, FREE six-theme Cosmetics gallery and Day 1–4 Daily Bonus concept now in existing Draft PR #1078. After explicit owner approval, reshape the existing lobby and implement local Cosmetics in separate focused PRs. Preserve all engine/economy/navigation behavior.
 
 ## Technical Context
 **Language/Version**: Existing plain browser JavaScript, global/IIFE, JSP-compatible; HTML and CSS.
 **Primary Dependencies**: Existing topbar/auth/ChipsClient/XPClient/UserUiState/sidebar; browser scroll-snap and dialog; existing sharp for asset optimization only. No new packages/frameworks.
-**Storage**: None in this prototype. Proposed #800 local versioned preference scoped by authenticated user ID or separate guest identity; never entitlements or gameplay state.
+**Storage**: None in this prototype. Proposed #800 local versioned free-theme preference scoped by authenticated user ID or separate guest identity, Auto / Random default with manual override; never entitlements or gameplay state.
 **Testing**: Existing syntax/CSP/guards; targeted browser/manual visual verification. No new UI/CSS/glue/JSP test suites. Existing fundamental poker/access checks apply if critical logic changes later.
 **Target Platform**: Mobile portrait/landscape web, keyboard desktop, 320px upward, safe areas/reduced motion.
 **Project Type**: Existing static/JSP-compatible frontend with unchanged Netlify/WS runtime.
 **Performance Goals**: Five WebP illustrations <1.5MB total; first <350KB; reserved dimensions, async decoding and lazy later cards; no autoplay or animation library.
 **Constraints**: No backend/DB/WS/shared runtime/Production modifications; no final lobby yet; no purchase or ownership assertions.
-**Scale/Scope**: Five mode tiles, four shortcuts, six theme previews, two review URLs.
+**Scale/Scope**: Five mode tiles, five shortcuts, six theme previews, two review URLs.
 
 ## Constitution Check
 Before research and after design: PASS within authorized design scope.
@@ -29,17 +29,17 @@ Before research and after design: PASS within authorized design scope.
 
 ## Project Structure
 - `specs/1069-luxury-lobby/{spec,plan,tasks,research,data-model,quickstart,self-review}.md`, `contracts/ui.md`, `checklists/requirements.md`.
-- Review only: `poker/designs/luxury-lobby/{index,landscape,portrait}.html`, `preview.css`, `preview.js`, `art/*-v1.webp`, `ARTWORK.md`, review screenshots.
+- Review only: `poker/designs/luxury-lobby/{index,landscape,portrait}.html`, `preview.css`, `preview.js`, `art/*-v2.webp` (active), archived `art/*-v1.webp`, `ARTWORK.md`, review screenshots.
 - Local ignored feature selector `.specify/feature.json` points at this spec and is not committed; no tooling/dependency/ignore/deploy configuration change.
 - Future #1069: `poker/index.html`, `poker/poker.css`, `poker/poker.js`; promote approved images to `poker/assets/lobby/`.
 - Future separate #800: `poker/poker-v2.js`, `poker/poker-v2.css`, `poker/table-v2.html`; proposed single catalog/apply helper `poker/poker-cosmetics.js` shared with `poker/index.html`.
 
 ## Phase 0 — Research decisions
-See [research.md](research.md). Live main and issues #1069/#800/#1075/#797/#1077 are authoritative. Reuse existing lobby rather than a new shell. Native scroll-snap with buttons beats library/autoplay. Future mode details beat unsupported links. Keep Cosmetics preview-only until permissions are explicit. No screenshot file available; detailed issue description is the inspiration.
+See [research.md](research.md). Live main and issues #1069/#800/#1075/#797/#1077 are authoritative. Reuse existing lobby rather than a new shell. Native scroll-snap with buttons beats library/autoplay. Future mode details beat unsupported links. Six themes are free; prototype selection remains transient because runtime integration is not authorized. No screenshot file available; detailed issue description is the inspiration.
 
 ## Phase 1 — Concrete design and touchpoints
 ### Review artifact (authorized now)
-Separate review routes support native proportions; portrait is capped at 470px on desktop, landscape fills wide screens and responds to real phone orientation. The wide short-screen variant reduces card copy instead of shrinking touch controls. Both show honest unset player values; no live data fetching. `preview.js:goTo()/updatePosition()` handle navigation, `descriptions` contains four honest future scopes, HTML `data-theme/data-room/data-dealer` describes illustrative gallery samples only. This transient gallery is not an executable player catalog/preferences path. The review stylesheet hides only the Netlify-injected drawer on these two review pages because its fixed bottom iframe intercepts phone toolbar touches; deployment settings remain unchanged. Current Poker remains at `/poker/` and Profile at `/account.html`.
+Separate review routes support native proportions; portrait is capped at 470px on desktop, landscape fills wide screens and responds to real phone orientation. The wide short-screen variant reduces card copy instead of shrinking touch controls. Both show honest unset player values; no live data fetching. `preview.js:goTo()/updatePosition()` handle navigation, `descriptions` contains four honest future scopes, `openPanel()` serves toolbar/deep-linked review dialogs, and `showTheme()` preloads room/dealer/rail/felt/face/back/frame before atomically updating the gallery sample. HTML `data-theme`/asset paths are illustrative samples, not a production catalog. Auto / Random resets to a labeled fixed Neon Vegas example, not an implemented random selection algorithm. This transient gallery is not an executable player catalog/preferences path. The review stylesheet hides only the Netlify-injected drawer on these two review pages because its fixed bottom iframe intercepts phone toolbar touches; deployment settings remain unchanged. Current Poker remains at `/poker/` and Profile at `/account.html`.
 
 ### #1069 implementation (BLOCKED pending visual approval)
 1. `poker/index.html`: keep topbar/sidebar and existing ID nodes once each; introduce scoped lobby carousel. Reuse `pokerQuickSeat` for the actual Poker Online action inside `pokerLobbyContent`; current guest/sign-in controls remain visible in `pokerAuthMsg`. Preserve `data-required-buy-in`, `pokerError`, bonus and progression nodes; only one active action/handler path.
@@ -52,15 +52,22 @@ Separate review routes support native proportions; portrait is capped at 470px o
 8. Original art: locally hosted versioned filenames, separate accessible HTML labels, dark error fallback, first visible eager image and later lazy images. Four Coming Soon buttons open details only. No events/offers beyond real availability.
 
 ### #800 implementation (SEPARATE PR, also BLOCKED)
-1. Extract existing `TABLE_THEME_CATALOG` from `poker/poker-v2.js` into proposed IIFE `poker/poker-cosmetics.js`, preserving six IDs and seven-asset definitions. Export one proposed `window.PokerCosmetics` with `catalog`, `readPreference(identity)`, `savePreference(identity, themeId)`, `canSelect(themeId, permissions)`, `applyTheme(screen, themeId, identity)`. Gallery/settings use this shared path; no generic inventory.
-2. Start with `classic-casino` selectable; others are artwork previews only until explicit free/permitted policy or #1070 authoritative entitlement exists. Do not add backend for entitlement in #800/#1069; deny unpermitted persisted IDs. UI says Preview, not Owned/Buy/Free.
-3. Proposed local key: `kcswh:poker-cosmetics:v1:<userId>`; guest key `kcswh:poker-cosmetics:guest:v1`. Value `{themeId}` only; validate catalog/permission, storage exceptions fall back Classic. Follow existing `syncSocialPreferencesIdentity()` / `persistSocialPreferences()` identity model, without modifying social/auto-rebuy keys.
-4. Refactor `applyPreviewTheme()` into the shared apply path retaining all-assets preload, request-generation protection (`previewThemeRequest` equivalent), failed-load Classic/static dealer fallback and existing klog events. Production permitted preference and Preview gallery must call the same path; `isThemePreviewBuild()` continues gating diagnostic FX, not granting ownership. Proposed final CSS scene attribute `data-poker-theme` replaces theme CSS selectors only; update `poker/poker-v2.css` coherently, keep overlay/seat/action coordinates unchanged.
+1. Extract existing `TABLE_THEME_CATALOG` from `poker/poker-v2.js` into proposed IIFE `poker/poker-cosmetics.js`, preserving six IDs and seven-asset definitions. Export one proposed `window.PokerCosmetics` with `catalog`, `readPreference(identity)`, `savePreference(identity, choice)`, `resolveTheme(choice, identity, tableId)`, `applyTheme(screen, themeId, identity)`. Gallery/settings use this shared path; no generic inventory.
+2. All six shipped IDs are FREE for everyone. No `canSelect` entitlement check, purchase, VIP, lock or ownership boundary applies. Auto / Random is the proposed default with explicit optional manual choice; no dependency on #1070 for these six. Future paid/VIP SKUs must use distinct new assets. Gallery says FREE and Auto/Random or manual-preview selection.
+3. Proposed local key: `kcswh:poker-cosmetics:v1:<userId>`; guest key `kcswh:poker-cosmetics:guest:v1`. Value `{mode: "auto"}` or `{mode: "manual", themeId}` only; validate mode/catalog, storage exceptions fall back Classic. Proposed minimal deterministic selection: stable hash of normalized identity + current `tableId`, modulo six catalog entries; same participant/table gives same result through reload/reconnect. Resolve only on initial participation or explicit manual choice, never on snapshots, hands, bets or redraw. No persisted random index/scheduler/DB required. Identity keys do not grant authority and guest identity remains separate. Follow existing `syncSocialPreferencesIdentity()` / `persistSocialPreferences()` identity model, without modifying social/auto-rebuy keys.
+4. Refactor `applyPreviewTheme()` into the shared apply path retaining all-assets preload, request-generation protection (`previewThemeRequest` equivalent), failed-load Classic/static dealer fallback and existing klog events. Production free preference and Preview gallery must call the same path; `isThemePreviewBuild()` continues gating diagnostic FX, not choosing ownership. Proposed final CSS scene attribute `data-poker-theme` replaces theme CSS selectors only; update `poker/poker-v2.css` coherently, keep overlay/seat/action coordinates unchanged.
 5. Load identity preference before revealing local scene. `applySignedOutState()`, `applyAuthenticatedPendingState()` invalidate pending art requests and reset scene before identity transition; no account leakage. Reconnect under `state.reconnectGate`, `state.wsReady`, `hasAppliedAuthoritativeSnapshot` must retain scene without triggering join/snapshot/gameplay changes.
 6. Shared gallery accessible from lobby and table settings; preserve the static dealer and reduced motion, ranks/suits/HUD and hand origin. Failure retains a safe Classic scene; preference load never delays authoritative actions.
 
+### Daily Bonus design / #1079 boundary (authorized concept only)
+- Add `data-panel="daily"` toolbar shortcut, `dailyDialog`, `dailyTitle`, `dailyDisclaimer`, four `.bonus-day` cards and disabled `.claim-concept` only in the review HTML. `preview.js:openPanel()` may open a dialog but has no claim handler, storage, fetch or timer. Deep links `#daily-bonus` open each native concept layout for review.
+- Day 1 completed / Day 2 current / Days 3–4 upcoming are labeled EXAMPLE STATE under SAMPLE JOURNEY · NOT YOUR ACCOUNT. Decorative box art has no coins/currency or quantities. Amount not configured and next availability Not configured; no fake countdown placeholder.
+- Inspect source only: `netlify/functions/bonus-campaigns.mjs:createBonusCampaignsHandler()/publicClaimableItem()` GET filters `eligible && !alreadyClaimed`; returned `code/title/claimPolicy/amount/eligible/alreadyClaimed/reason` cannot reconstruct completed-day history or next availability. `netlify/functions/_shared/bonus-campaigns.mjs:getBonusCampaignStatus()/buildClaimPeriodKey()` and `bonus_claims` support existing UTC daily/idempotent PROMO_BONUS. `js/chips/client.js:fetchBonusCampaigns()/claimBonusCampaign()` and `chips:tx-complete` refresh path must be reused in later #1079, not implemented here.
+- `js/admin-page.js` Daily Login template (20 CH) is not an active-campaign assertion. No Stage/Production campaign queries, activation or DB writes performed. Real cycle/amounts/missed-day/reset/audiences/caps/funding/timezone/budget need separate #1079 owner economic GO. A smallest authenticated history/status projection may need later design; do not prescribe schema/protocol now.
+- Future #1069 live shortcut stays visibly unavailable without approved real daily status/campaign. Claim/history/timer belong to a separate #1079 implementation PR; visual approval alone does not authorize economics.
+
 ## Dependencies and delivery order
-Design approval → #1069 card/navigation PR with Cosmetics preview destination → separate #800 permitted preference PR using common UX/catalog. If #800 is not yet delivered, Cosmetics remains an explicitly informational art gallery without apply/save. No need to block the basic lobby on payments. #1070 alone owns paid entitlements; #791 owns animations; #792/#1076 provide six theme artworks; #1075/#1077/#797 own future playable modes. Reconfirm concurrent main changes before implementation.
+Design approval → #1069 card/navigation PR with Cosmetics preview destination → separate #800 free preference PR using common UX/catalog. If #800 is not yet delivered, Cosmetics remains an explicitly informational art gallery without apply/save. No need to block the basic lobby or six free Cosmetics on payments. #1070 alone owns paid entitlements; #791 owns animations; #792/#1076 provide six theme artworks; #1075/#1077/#797 own future playable modes. Reconfirm concurrent main changes before implementation.
 
 ## Breaking changes and mitigation
 - Review PR: additive URLs/assets and feature selector only; existing lobby byte-for-byte unchanged.
@@ -68,7 +75,7 @@ Design approval → #1069 card/navigation PR with Cosmetics preview destination 
 - Topbar/global CSS: existing badge normalization moves nodes. Keep structure and scope styles; preserve loading/stale balance rather than fake zero.
 - URL: preserve `/poker/table-v2.html` with `tableId`, `seatNo`, `autoJoin`, `autoStart`, `guest`; no router replacement.
 - Ad removal: intended Poker-only business/presentation change; consent and Hub inventory unchanged.
-- Cosmetics extraction: internal preview CSS attribute/catalog changes require all consumers updated in the same #800 PR; retain six IDs and default art, identity request generation and fallback. Storage is a permitted local preference, never an ownership source.
+- Cosmetics extraction: internal preview CSS attribute/catalog changes require all consumers updated in the same #800 PR; retain six IDs and default art, identity request generation and fallback. Storage is a free local appearance preference; unknown mode/ID or unavailable art falls back safely. Random resolution must be identity/table-stable, and future event overrides cannot change ordinary Quick Play or silently replace manual preferences.
 - API, schemas, protocol, engine, currencies, stakes, retention and tier access: no breaking change or authorization.
 
 ## Validation / approval gates
@@ -76,4 +83,4 @@ Now: run existing CSP and syntax checks/guards; bounded browser review for both 
 Later: same checks plus targeted existing critical poker/access tests if their logic changes and manual actual guest/auth/Quick Seat/Create/Join/Refresh/progression/bonus/table reconnect in Netlify preview. No WS Preview Deploy needed for this art-only PR; any later WS/protocol change is outside scope and requires independent plan/exact-SHA deploy. No DB Stage effect. No Production or merge action.
 
 ## Complexity Tracking
-No constitution exception. Proposed single shared Cosmetics helper is justified because lobby and table scripts currently have separate closures; extracting the existing catalog/apply path avoids duplicating it. It is not created in the design PR.
+No constitution exception. CSS media blocks contain one complete selector/declaration rule per physical line; media braces are on separate lines, not multiple collapsed rules. Proposed single shared Cosmetics helper is justified because lobby and table scripts currently have separate closures; extracting the existing catalog/apply path avoids duplicating it. It is not created in the design PR.
