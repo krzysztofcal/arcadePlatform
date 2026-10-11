@@ -1507,24 +1507,6 @@
     var dots = Array.prototype.slice.call(document.querySelectorAll('.dot'));
     var current = 0;
     var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    var bonusShortcut = document.querySelector('.shortcut--bonus');
-    if (bonusShortcut){
-      try {
-        var bonusAttentionSeen = window.sessionStorage.getItem('poker:lobby:bonus-attention:v1') === '1';
-        window.sessionStorage.setItem('poker:lobby:bonus-attention:v1', '1');
-        if (!bonusAttentionSeen && !reducedMotion.matches){
-          bonusShortcut.classList.add('lobby-bonus-attention');
-          var finishBonusAttention = function(event){
-            if (event.target !== bonusShortcut || event.animationName !== 'pokerLobbyBonusPulse') return;
-            bonusShortcut.classList.remove('lobby-bonus-attention');
-            bonusShortcut.removeEventListener('animationend', finishBonusAttention);
-            bonusShortcut.removeEventListener('animationcancel', finishBonusAttention);
-          };
-          bonusShortcut.addEventListener('animationend', finishBonusAttention);
-          bonusShortcut.addEventListener('animationcancel', finishBonusAttention);
-        }
-      } catch (_storageErr){}
-    }
     var descriptions = {
       single: ['Single Player', 'Online poker against bot opponents, with one human at the table. This mode is in development.'],
       world: ['World Tour', 'A future journey through country-themed poker tables. This mode is in development.'],
