@@ -9,6 +9,7 @@ import {
 } from "../../shared/poker-domain/table-economy.mjs";
 import { lockUserTableSlots } from "../../shared/poker-domain/table-participation.mjs";
 import { hasPokerPoolSchema, readPokerAccessSnapshot } from "../../shared/poker-domain/bot-access.mjs";
+import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 
 const DEFAULT_MAX_PLAYERS = 6;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -72,7 +73,20 @@ const readQuickSeatEffectiveClass = async (tx, userId) => {
   return snapshot?.effectiveClass || "UNKNOWN";
 };
 
-const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn = null, isSinglePlayer = false }) => {
+const recordQuickSeatRequest = async (tx, { tableId, userId, requestId, result }) => {
+  if (!requestId || !tableId) return;
+  await tx.unsafe(
+    `
+insert into public.poker_requests (table_id, user_id, request_id, kind, result_json)
+values ($1, $2, $3, 'QUICK_SEAT', $4::jsonb)
+on conflict (table_id, kind, request_id, user_id) do update
+  set result_json = excluded.result_json;
+    `,
+    [tableId, userId, requestId, JSON.stringify(result)]
+  );
+};
+
+const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn = null, isSinglePlayer = false, requestId = null }) => {
   const buyIn = selectedBuyIn ?? progression?.availableBuyIns?.[0];
   if (!Number.isSafeInteger(buyIn) || buyIn <= 0) {
     const firstTier = progression?.tiers?.[0] || null;
@@ -105,7 +119,11 @@ const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureW
   const tableId = created.tableId;
   await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
   const seatNoUi = 1;
-  return { kind: "recommended", tableId, seatNo: seatNoUi, strategy: "create", buyIn, stakes: canonicalStakes, isSinglePlayer };
+  const recommendation = { kind: "recommended", tableId, seatNo: seatNoUi, strategy: "create", buyIn, stakes: canonicalStakes, isSinglePlayer };
+  if (isSinglePlayer && requestId) {
+    await recordQuickSeatRequest(tx, { tableId, userId, requestId, result: recommendation });
+  }
+  return recommendation;
 };
 
 const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, buyIn, isSinglePlayer = false, klog }) => {
@@ -113,7 +131,13 @@ const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, buyIn, isSingl
   void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, buyIn, isSinglePlayer, klog });
 };
 
-const selectExistingActiveSeat = async (tx, { userId, isSinglePlayer = false }) => {
+const selectExistingActiveSeat = async (tx, { userId, isSinglePlayer = false, tableId = null }) => {
+  const params = [userId, Boolean(isSinglePlayer)];
+  let tableIdFilter = "";
+  if (typeof tableId === "string" && tableId) {
+    params.push(tableId);
+    tableIdFilter = `and t.id = $${params.length}`;
+  }
   return tx.unsafe(
     `
 select t.id, t.max_players, t.buy_in, t.stakes
@@ -124,31 +148,30 @@ where t.status = 'OPEN'
   and s.status = 'ACTIVE'
   and coalesce(t.is_single_player, false) = $2
   ${isSinglePlayer ? "and t.created_by = $1" : ""}
+  ${tableIdFilter}
+order by coalesce(s.last_seen_at, s.created_at) desc, t.last_activity_at desc nulls last, t.created_at desc
 limit 1;
     `,
-    [userId, Boolean(isSinglePlayer)]
+    params
   );
 };
 
-const selectRecentPendingSinglePlayerTable = async (tx, { userId, buyIn, maxPlayers }) => {
+const selectSinglePlayerTableByRequestId = async (tx, { userId, requestId }) => {
+  if (!requestId) return [];
   return tx.unsafe(
     `
-select t.id, t.max_players, t.buy_in, t.stakes
-from public.poker_tables t
-where t.status = 'OPEN'
-  and t.created_by = $1
+select t.id, t.max_players, t.buy_in, t.stakes, r.result_json
+from public.poker_requests r
+join public.poker_tables t on t.id = r.table_id
+where r.user_id = $1
+  and r.request_id = $2
+  and r.kind = 'QUICK_SEAT'
+  and t.status = 'OPEN'
   and t.is_single_player = true
-  and t.has_human_participant = false
-  and t.max_players = $2
-  and t.buy_in = $3
-  and t.created_at >= now() - interval '60 seconds'
-  and not exists (
-    select 1 from public.poker_seats s where s.table_id = t.id and s.status = 'ACTIVE'
-  )
-order by t.created_at desc
+  and t.created_by = $1
 limit 1;
     `,
-    [userId, maxPlayers, buyIn]
+    [userId, requestId]
   );
 };
 
@@ -314,6 +337,16 @@ export async function handler(event) {
     || payload?.mode === "single_player"
     || payload?.singlePlayer === true;
 
+  const reqIdResult = normalizeRequestId(payload?.requestId);
+  if (!reqIdResult.ok && payload?.requestId !== undefined && payload?.requestId !== null) {
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_request_id" }) };
+  }
+  const requestId = reqIdResult.value;
+
+  const requestedTableId = typeof payload?.tableId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.tableId.trim())
+    ? payload.tableId.trim().toLowerCase()
+    : null;
+
   const maxPlayers = parseMaxPlayers(payload?.maxPlayers);
   if (maxPlayers == null) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_max_players" }) };
@@ -348,7 +381,7 @@ export async function handler(event) {
       if (await hasPokerPoolSchema(tx)) await lockUserTableSlots(tx, auth.userId);
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
-      const existingRows = await selectExistingActiveSeat(tx, { userId: auth.userId, isSinglePlayer });
+      const existingRows = await selectExistingActiveSeat(tx, { userId: auth.userId, isSinglePlayer, tableId: requestedTableId });
       if (existingRows?.[0]?.id) {
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: existingRows[0].id,
@@ -369,6 +402,9 @@ export async function handler(event) {
         && progression.pokerAccess.effectiveClass !== "SLOW"
         && progression.pokerAccess.effectiveClass !== "RESTRICTED") {
         return { kind: "poker_access_unavailable" };
+      }
+      if (isSinglePlayer && progression.pokerAccess.effectiveClass === "RESTRICTED") {
+        return { kind: "single_player_restricted_unavailable" };
       }
       if (isSinglePlayer) {
         progression.availableBuyIns = (progression.availableBuyIns || []).filter((b) => b <= 1000);
@@ -398,27 +434,23 @@ export async function handler(event) {
       const createPayload = { userId: auth.userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn, isSinglePlayer };
 
       if (isSinglePlayer) {
-        const targetBuyIn = selectedBuyIn ?? availableBuyIns[0];
-        if (Number.isSafeInteger(targetBuyIn)) {
-          const recentPending = await selectRecentPendingSinglePlayerTable(tx, {
-            userId: auth.userId,
-            buyIn: targetBuyIn,
-            maxPlayers
-          });
-          if (recentPending?.[0]?.id) {
-            await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [recentPending[0].id]);
+        if (requestId) {
+          const replayRows = await selectSinglePlayerTableByRequestId(tx, { userId: auth.userId, requestId });
+          if (replayRows?.[0]?.id) {
+            const replayed = replayRows[0];
+            await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [replayed.id]);
             return {
               kind: "recommended",
-              tableId: recentPending[0].id,
+              tableId: replayed.id,
               seatNo: 1,
-              strategy: "create",
-              buyIn: targetBuyIn,
-              stakes: calculateCanonicalPokerStakes(targetBuyIn),
+              strategy: "idempotent_replay",
+              buyIn: replayed.buy_in,
+              stakes: replayed.stakes,
               isSinglePlayer: true
             };
           }
         }
-        const createdRecommendation = await createAndRecommend(tx, createPayload);
+        const createdRecommendation = await createAndRecommend(tx, { ...createPayload, requestId });
         return createdRecommendation;
       }
 
@@ -534,6 +566,13 @@ export async function handler(event) {
           requiredBankroll: result.requiredBankroll,
           balance: result.balance
         }),
+      };
+    }
+    if (result?.kind === "single_player_restricted_unavailable") {
+      return {
+        statusCode: 403,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "single_player_restricted_unavailable" })
       };
     }
     if (result?.kind !== "recommended" || typeof result?.tableId !== "string" || !result.tableId) {

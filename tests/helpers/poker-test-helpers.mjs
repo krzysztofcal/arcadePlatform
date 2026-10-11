@@ -21,6 +21,7 @@ import {
 import { applySeatsAndStacksToState, seedBotsForJoin } from "../../shared/poker-domain/bots.mjs";
 import { startHandCore } from "../../netlify/functions/_shared/poker-start-hand-core.mjs";
 import { isValidUuid } from "../../netlify/functions/_shared/poker-utils.mjs";
+import { normalizeRequestId } from "../../netlify/functions/_shared/poker-request-id.mjs";
 import { isStateStorageValid, withoutPrivateState } from "../../netlify/functions/_shared/poker-state-utils.mjs";
 import { hasActiveHumanGuardSql, shouldSeedBotsOnJoin, tableIdleCutoffExprSql } from "../../netlify/functions/_shared/poker-table-lifecycle.mjs";
 import { advanceIfNeeded, applyLeaveTable } from "../../netlify/functions/_shared/poker-reducer.mjs";
@@ -261,6 +262,7 @@ return handler;`
       readPokerAccessSnapshot,
       readPokerTierPolicySnapshot,
       resolvePokerEnabledBuyIns,
+      normalizeRequestId,
       deriveRemainingDeck,
       deriveCommunityCards,
       loadHoleCardsByUserId,

@@ -3838,3 +3838,45 @@ test("settled funding cache observes live tier disable on its next existing refr
   assert.equal(resolveSettledBotFundingSystemKey({ snapshot: refreshed, buyIn: 1000, nowMs: 25_001 }), null);
   assert.equal(resolveSettledBotFundingSystemKey({ snapshot: cached, buyIn: 1000, nowMs: 30_001 }), null);
 });
+
+test("Single Player tableManager.join requires authoritative seat and rejects non-authoritative join", async () => {
+  const manager = createTableManager({ maxSeats: 6 });
+  const table = manager.materializeLobbyTable({ tableId: "sp-table-join-test", tableMeta: { isSinglePlayer: true } });
+  assert.equal(table.ok, true);
+  assert.equal(manager.tableMeta("sp-table-join-test")?.isSinglePlayer, true);
+
+  const fakeWs = {};
+  // Attempt non-authoritative join without authoritativeSeatNo
+  const nonAuth = manager.join({
+    ws: fakeWs,
+    userId: "human_unauthorized",
+    tableId: "sp-table-join-test",
+    requestId: "join-req-1"
+  });
+  assert.equal(nonAuth.ok, false);
+  assert.equal(nonAuth.code, "single_player_authoritative_required");
+
+  // Legitimate authoritative join with authoritativeSeatNo
+  const auth = manager.join({
+    ws: fakeWs,
+    userId: "human_owner",
+    tableId: "sp-table-join-test",
+    requestId: "join-req-2",
+    authoritativeSeatNo: 1,
+    buyIn: 500
+  });
+  assert.equal(auth.ok, true);
+
+  // Second human attempting to join Single Player table must be rejected
+  const fakeWs2 = {};
+  const secondHuman = manager.join({
+    ws: fakeWs2,
+    userId: "human_second",
+    tableId: "sp-table-join-test",
+    requestId: "join-req-3",
+    authoritativeSeatNo: 2,
+    buyIn: 500
+  });
+  assert.equal(secondHuman.ok, false);
+  assert.equal(secondHuman.code, "single_player_human_conflict");
+});

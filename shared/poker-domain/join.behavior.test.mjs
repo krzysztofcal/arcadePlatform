@@ -3200,3 +3200,56 @@ test("Single Player owner rejoin: succeeds without duplicate buy-in or second de
   assert.equal(result.stack, 480);
   assert.equal(ledgerCalls.length, 0, "zero ledger calls on legitimate rejoin");
 });
+
+test("Single Player RESTRICTED user: rejected before debit or bot funding", async () => {
+  const table = {
+    id: "t-sp-restricted",
+    status: "OPEN",
+    max_players: 6,
+    stakes: { sb: 5, bb: 10 },
+    buy_in: 500,
+    created_by: "human_restricted",
+    lifecycle_kind: "STANDARD",
+    has_human_participant: false,
+    is_slow_only: false,
+    is_single_player: true
+  };
+  const ledgerCalls = [];
+
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("from public.poker_tables")) return [{ ...table }];
+          if (text.includes("from public.poker_seats")) return [];
+          if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 2000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 1900, revision: 1 }];
+          if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 500, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+          if (text.includes("account_type = 'USER'")) return [{ balance: 1000000, poker_auto_class: "NORMAL", poker_access_override: "FORCE_RESTRICTED", poker_access_revision: 1 }];
+          return [];
+        }
+      }),
+      tableId: "t-sp-restricted",
+      userId: "human_restricted",
+      requestId: "req-restricted",
+      buyIn: 500,
+      postTransactionFn: async (payload) => {
+        ledgerCalls.push(payload);
+        return { ok: true };
+      },
+      loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId: "t-sp-restricted", seats: [], stacks: {} } }),
+      updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
+      validateStateForStorage: isStateStorageValid,
+      env: {
+        POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 500, 1000])
+      }
+    }),
+    (error) => {
+      assert.equal(error?.code, "single_player_restricted_unavailable");
+      return true;
+    }
+  );
+
+  assert.equal(ledgerCalls.length, 0, "zero ledger calls when restricted user rejected");
+});

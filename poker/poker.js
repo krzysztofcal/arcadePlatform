@@ -1479,6 +1479,7 @@
     var singleSignInBtn = document.getElementById('pokerSingleSignIn');
     var selectedSingleBuyIn = null;
     var singlePlayInFlight = false;
+    var singlePlayRequestId = null;
     var lobbyAuthenticated = false;
     var lobbyIdentity = null;
     var lobbyIdentityGeneration = 0;
@@ -2067,6 +2068,7 @@
             node.disabled = singlePlayInFlight;
             node.addEventListener('click', function(){
               selectedSingleBuyIn = buyIn;
+              singlePlayRequestId = null;
               singleQuickTiers.querySelectorAll('button').forEach(function(button){
                 button.setAttribute('aria-pressed', String(Number(button.dataset.buyIn) === buyIn));
               });
@@ -2520,10 +2522,14 @@
       }
       setError(errorEl, null);
       var maxPlayers = 6;
+      if (!singlePlayRequestId){
+        singlePlayRequestId = 'sp_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+      }
       var payload = {
         mode: 'single_player',
         maxPlayers: maxPlayers,
-        buyIn: selectedSingleBuyIn
+        buyIn: selectedSingleBuyIn,
+        requestId: singlePlayRequestId
       };
       singlePlayInFlight = true;
       renderSingleTiers();
@@ -2532,6 +2538,7 @@
         var data = await apiPost(QUICK_SEAT_URL, payload);
         if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (data && data.ok === true && data.tableId){
+          singlePlayRequestId = null;
           navigateToPokerTable(data.tableId, {
             seatNo: data.seatNo != null ? data.seatNo : null,
             autoJoin: true

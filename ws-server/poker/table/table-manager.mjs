@@ -1707,6 +1707,28 @@ export function createTableManager({
     }
 
     const table = ensureTable(tableId);
+    if (table.tableMeta?.isSinglePlayer === true) {
+      if (!Number.isInteger(authoritativeSeatNo) && !table.coreState.members.some((member) => member.userId === userId)) {
+        return {
+          ok: false,
+          code: "single_player_authoritative_required",
+          message: "single_player_authoritative_required",
+          tableState: tableState(tableId)
+        };
+      }
+      const otherHumanMember = table.coreState.members.find(
+        (member) => member.userId !== userId && !table.coreState.seatDetailsByUserId?.[member.userId]?.isBot
+      );
+      if (otherHumanMember) {
+        return {
+          ok: false,
+          code: "single_player_human_conflict",
+          message: "single_player_human_conflict",
+          tableState: tableState(tableId)
+        };
+      }
+    }
+
     const isAuthoritativeMember = table.coreState.members.some((member) => member.userId === userId);
     const authoritativeSeat = Number.isInteger(authoritativeSeatNo) && authoritativeSeatNo >= 1 ? authoritativeSeatNo : null;
     const shouldMutateMembership = !observeOnlyJoin;

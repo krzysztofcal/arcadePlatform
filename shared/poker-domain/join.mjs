@@ -896,6 +896,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       }
 
       if (joinAccess.effectiveClass === "RESTRICTED") {
+        if (isSinglePlayer) {
+          throw makeError("single_player_restricted_unavailable");
+        }
         const activeRows = activeSeatRows(seatRows);
         const hasActiveBot = activeRows.some((row) => row?.is_bot === true);
         const hasBotFunding = hasActiveBot || await hasMaterializedBotFunding(tx, tableId);

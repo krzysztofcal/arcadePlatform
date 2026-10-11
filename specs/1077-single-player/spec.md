@@ -38,27 +38,36 @@ The owner approved **Variant B with corrections**:
 ### SP-003 — Authoritative Fail-Fast Admission
 - Inside `shared/poker-domain/join.mjs::executePokerJoinAuthoritative()` under `poker_tables ... FOR UPDATE`:
   - **Sole-Owner Check:** Only `created_by` may join or rejoin a Single Player table.
-  - **Zero Other Humans:** Verify `activeSeatRows(seatRows)` and `state.seats` contain no other human. If another human is present or attempting admission, reject immediately.
-  - **Hard 1000 CH Cap Check:** Verify `authoritativeBuyIn <= 1000`. Over-cap tables or requests are rejected immediately.
+  - **Zero Other Humans:** Verify `activeSeatRows(seatRows)` and `state.seats` contain no other human. If another human is present or attempting admission, reject immediately (`single_player_human_conflict`).
+  - **Hard 1000 CH Cap Check:** Verify `authoritativeBuyIn <= 1000`. Over-cap tables or requests are rejected immediately (`invalid_buy_in`).
+  - **RESTRICTED Account Fail-Fast:** Reject `RESTRICTED` users immediately before any seat assignment, user chip debit, or bot funding resolution (`single_player_restricted_unavailable`).
   - **Fail-Fast Safety:** All rejections occur **before** seat assignment, buy-in debit, bot seeding, or state mutation.
   - No conversion, eviction, silent table switch, or second debit.
   - Contaminated/polluted table reconnect fails fast.
+- Inside `ws-server/poker/handlers/join.mjs` and `ws-server/poker/table/table-manager.mjs`:
+  - If `authoritativeJoinEnabled` is false or `observeOnlyJoinEnabled` is true, joining a Single Player table is **strictly fail-closed** (`single_player_authoritative_required`), preventing any non-authoritative fallback from seating an unauthorized player or second human.
+  - `tableManager.join()` enforces that only an authoritative join with `authoritativeSeatNo` or an existing authoritative member can attach, and rejects any second human.
 
 ### SP-004 — Economy, Hard 1000 CH Cap, and Atomic Bot Funding
 - **Hard 1000 CH Buy-In Cap:** Single Player tables accept **only currently enabled/unlocked tiers <= 1000 CH** (100, 500, 1000 CH if available).
   - Enforced in `poker-quick-seat.mjs` creation and authoritatively in `executePokerJoinAuthoritative()`.
   - Normal Poker Online multiplayer tables retain all higher tiers without change.
+- **Immediate RESTRICTED Fail-Fast:**
+  - `RESTRICTED` accounts are rejected at the entrance of `poker-quick-seat.mjs` (403 `single_player_restricted_unavailable`) and authoritatively in `join.mjs` before touching user bankroll or attempting bot pool funding.
 - **Mandatory Bot Funding with Atomic Rollback:**
   - Single Player tables require the legitimate configured minimum bots (at least 2 bots, clamped by table capacity).
-  - If bot funding from NORMAL/SLOW pool cannot provision the required bots, the JOIN **fails closed and rolls back the entire transaction**.
+  - If bot funding from NORMAL/SLOW pool cannot provision the required bots, the JOIN **fails closed and rolls back the entire transaction** (`single_player_bot_funding_unavailable`).
   - Zero chips debited from the human player. Zero partial bot debits.
   - The table remains unjoined and will be pruned by standard inactive table cleanup.
-  - `RESTRICTED` accounts fail closed (never receive bot opponents).
 
 ### SP-005 — Dedicated Creation, Discovery, and UI
 - Request routes through existing `netlify/functions/poker-quick-seat.mjs::handler()` with `mode: "single_player"`.
 - Single Player new-play skips `selectCandidate()` and calls `createPokerTableWithState()`.
-- Sequential retries, double-clicks, and timeouts reuse an existing pending unjoined Single Player table for that owner without creating duplicates or hitting caps.
+- **Request ID Intent Idempotency:**
+  - Double-clicks, network retries, and timeouts with the **same `requestId`** reuse the existing table record from `poker_requests` without creating duplicates or hitting table limits (`strategy: "idempotent_replay"`).
+  - Conscious "New Game" actions generate a new `requestId`, ensuring a brand-new dedicated table is created rather than reusing an old pending table.
+- **Deterministic Resume:**
+  - `selectExistingActiveSeat()` orders active seats deterministically by `coalesce(s.last_seen_at, s.created_at) desc`, and supports explicit `tableId` scoping when provided.
 - Normal table list and WS lobby exclude Single Player tables (`buildLobbyTableEntry` returns `null`).
 - In `poker/index.html` and `poker/poker.js`:
   - Activate the Single Player card.
@@ -70,3 +79,28 @@ The owner approved **Variant B with corrections**:
 - Tables containing the human player receive `has_human_participant = true` upon successful join.
 - Never treated as 7-day bot-only tables (#891). Standard human-table close/settlement/escrow retention policies (#923) apply.
 - Normal table janitor and inactive session cleanup remain in effect.
+
+---
+
+## 3. Safe Phased Rollout & Protocol Compatibility
+
+Because earlier versions of Poker Online do not filter by `is_single_player` and lack fail-fast Single Player guards, the rollout order must be strictly sequenced to prevent multi-human cross-play or lobby pollution:
+
+```mermaid
+flowchart TD
+  Phase1["1. Database Migration (Schema)<br/>Add is_single_player column & CHECK constraint"] --> Phase2["2. WebSocket Server Deploy<br/>Lobby filtering, bootstrap hydration, fail-closed guards"]
+  Phase2 --> Phase3["3. Backend Functions Deploy<br/>poker-quick-seat creation & isolation, 1000 CH cap, requestId idempotency"]
+  Phase3 --> Phase4["4. Web Client Deploy<br/>UI activation of Single Player card and tier selector"]
+```
+
+1. **Step 1 — Database Migration (Schema):**
+   - Applies forward-only `is_single_player boolean NOT NULL DEFAULT false` with `poker_tables_single_player_chk`.
+   - Backward-compatible; existing tables remain unaffected (`is_single_player = false`).
+2. **Step 2 — WebSocket Server Deploy:**
+   - Deploys updated WS server with bootstrap hydration of `is_single_player`, lobby exclusion (`buildLobbyTableEntry` returning `null`), and fail-closed non-authoritative join protection (`single_player_authoritative_required`).
+   - **Crucial:** No Single Player tables can be created prior to Step 2, ensuring that any Single Player tables subsequently created will never leak into public lobbies or allow non-authoritative joins.
+3. **Step 3 — Netlify Functions Deploy:**
+   - Deploys `poker-quick-seat.mjs` and `poker-progression.mjs`.
+   - Isolates candidate matching (`coalesce(is_single_player, false) = false`), caps Single Player buy-ins at 1000 CH, and enables `requestId` idempotency.
+4. **Step 4 — Web Client Deploy:**
+   - Exposes the Single Player card and interactive controls in `poker/index.html` and `poker/poker.js`.

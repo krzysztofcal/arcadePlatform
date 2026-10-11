@@ -14,7 +14,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", checkWsBuyInCapability = async () => ({ ok: true }) }) =>
+const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
   loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
@@ -74,6 +74,26 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTab
           if (text.includes("where table_id = $1 order by seat_no asc")) {
             if (mode === "prefer_humans") return [{ seat_no: 1 }, { seat_no: 2 }];
             if (mode === "any_open") return [{ seat_no: 1 }];
+            return [];
+          }
+
+          if (text.includes("from public.poker_requests r")) {
+            const reqId = params?.[1];
+            if (storedRequests && storedRequests.has(reqId)) {
+              return [storedRequests.get(reqId)];
+            }
+            return [];
+          }
+
+          if (text.includes("insert into public.poker_requests")) {
+            if (storedRequests) {
+              storedRequests.set(params?.[2], {
+                id: params?.[0],
+                max_players: 6,
+                buy_in: 500,
+                stakes: { sb: 5, bb: 10 }
+              });
+            }
             return [];
           }
 
@@ -621,8 +641,44 @@ const run = async () => {
     assert.match(candidateQuery.query, /coalesce\(t\.is_single_player,\s*false\)\s*=\s*false/i);
   }
   {
-    // 4. Double-click / retry reuses recent pending Single Player table within 60s
-    let checkedRecent = false;
+    // 4. Request ID idempotency: same requestId reuses table, distinct requestId creates new dedicated table
+    const queries = [];
+    const notifications = [];
+    const storedRequests = new Map();
+    const handler = makeHandler({
+      mode: "create",
+      queries,
+      notifications,
+      balance: 1000,
+      storedRequests
+    });
+
+    // First attempt with req-1 creates table and records request
+    const response1 = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-1" });
+    assert.equal(response1.statusCode, 200);
+    assert.deepEqual(JSON.parse(response1.body), { ok: true, tableId: "table-new", seatNo: 1 });
+    assert.ok(queries.some((q) => q.query.includes("insert into public.poker_tables")), "first intent creates table");
+    assert.ok(queries.some((q) => q.query.includes("insert into public.poker_requests")), "records quick seat request");
+
+    // Retry with SAME requestId returns stored table without duplicate creation
+    const queriesBeforeRetry = queries.length;
+    const response2 = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-1" });
+    assert.equal(response2.statusCode, 200);
+    assert.deepEqual(JSON.parse(response2.body), { ok: true, tableId: "table-new", seatNo: 1 });
+    const retryQueries = queries.slice(queriesBeforeRetry);
+    assert.equal(retryQueries.some((q) => q.query.includes("insert into public.poker_tables")), false, "retry must not create duplicate table");
+  }
+  {
+    // 5. RESTRICTED accounts in Single Player fail fast with 403 before table creation
+    const queries = [];
+    const handler = makeHandler({ mode: "create", queries, effectiveClass: "RESTRICTED", balance: 550 });
+    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500 });
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(JSON.parse(response.body), { error: "single_player_restricted_unavailable" });
+    assert.equal(queries.some(({ query }) => query.includes("insert into public.poker_tables")), false, "RESTRICTED must not create table");
+  }
+  {
+    // 6. Resume with multiple tables respects explicit tableId and deterministic order
     const queries = [];
     const handler = loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
       baseHeaders: () => ({}),
@@ -635,15 +691,16 @@ const run = async () => {
           const text = String(query).toLowerCase();
           if (text.includes("to_regclass")) return [{ available: true }];
           if (text.includes("poker_auto_class")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
-          if (text.includes("join public.poker_seats s")) return [];
-          if (text.includes("account_type = 'user'")) return [{ balance: 1000 }];
-          if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows([100, 500, 1000]);
-          if (text.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
-          if (text.includes("t.is_single_player = true") && text.includes("interval '60 seconds'")) {
-            checkedRecent = true;
-            return [{ id: "table-pending-existing", max_players: 6, buy_in: 500, stakes: { sb: 5, bb: 10 } }];
+          if (text.includes("join public.poker_seats s")) {
+            assert.match(text, /order by coalesce\(s\.last_seen_at,\s*s\.created_at\)\s*desc/i, "must order active seats deterministically");
+            if (params.includes("00000000-0000-0000-0000-000000000002")) {
+              return [{ id: "00000000-0000-0000-0000-000000000002", max_players: 6, buy_in: 500, stakes: { sb: 5, bb: 10 } }];
+            }
+            return [{ id: "00000000-0000-0000-0000-000000000001", max_players: 6, buy_in: 500, stakes: { sb: 5, bb: 10 } }];
           }
-          if (text.includes("where table_id = $1 order by seat_no asc")) return [];
+          if (text.includes("select seat_no from public.poker_seats where table_id = $1 and user_id = $2")) {
+            return [{ seat_no: 1 }];
+          }
           return [];
         }
       }),
@@ -651,11 +708,14 @@ const run = async () => {
       checkWsBuyInCapability: async () => ({ ok: true }),
       klog: () => {}
     });
-    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500 });
+    const response = await callQuickSeat(handler, {
+      mode: "single_player",
+      maxPlayers: 6,
+      buyIn: 500,
+      tableId: "00000000-0000-0000-0000-000000000002"
+    });
     assert.equal(response.statusCode, 200);
-    assert.equal(checkedRecent, true);
-    assert.deepEqual(JSON.parse(response.body), { ok: true, tableId: "table-pending-existing", seatNo: 1 });
-    assert.equal(queries.some((q) => q.query.includes("insert into public.poker_tables")), false, "must not create duplicate table on retry");
+    assert.deepEqual(JSON.parse(response.body), { ok: true, tableId: "00000000-0000-0000-0000-000000000002", seatNo: 1 });
   }
 
 };

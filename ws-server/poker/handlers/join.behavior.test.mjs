@@ -579,3 +579,30 @@ test('does not emit routine authoritative join lifecycle logs', async () => {
   assert.equal(eventNames.includes('ws_join_restore_validate'), false);
   assert.equal(calls.command[0].status, 'accepted');
 });
+
+test('handleJoinCommand rejects Single Player join fail-closed when authoritativeJoinEnabled is false', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 500 });
+  ctx.authoritativeJoinEnabled = false;
+  ctx.tableManager.tableMeta = () => ({ isSinglePlayer: true, buyIn: 500 });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'single_player_authoritative_required');
+  assert.equal(calls.joinArgs, null, 'tableManager.join must never be invoked');
+});
+
+test('handleJoinCommand rejects Single Player join fail-closed when observeOnlyJoinEnabled is true', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 500 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.observeOnlyJoinEnabled = true;
+  ctx.tableManager.tableMeta = () => ({ isSinglePlayer: true, buyIn: 500 });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'single_player_authoritative_required');
+  assert.equal(calls.joinArgs, null, 'tableManager.join must never be invoked');
+});
