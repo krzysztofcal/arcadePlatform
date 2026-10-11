@@ -6,6 +6,6 @@
 - [x] T004 Implement resolveTableThemeId(), reused applyTableTheme() and once-per-init assignment in poker/poker-v2.js. Remove manual theme selector from bindCelebrationPreview(); no economics or snapshot-path edits.
 - [x] T005 Rename existing theme selectors in poker/poker-v2.css; inspect poker/table-v2.html loading/CSP without adding scripts.
 - [x] T006 Run fundamental tests, existing live and join/rebuy regressions, syntax/CSP/lifecycle checks; self-review and breaking-impact assessment.
-- [ ] T007 Create separate Draft PR linked to #800; verify exact-head CI and Netlify Deploy Preview. No WS/protocol change, WS deployment, merge or Production.
-- [ ] T008 Inspect Preview portrait/landscape, different tables, reload/reconnect and fallback. Record authenticated runtime/CH evidence or explicitly pending owner smoke.
-- [ ] T009 Report PR, SHA, checks, limitations and simple phone smoke steps.
+- [x] T007 Create separate Draft PR linked to #800; verify exact-head CI and Netlify Deploy Preview. No WS/protocol change, WS deployment, merge or Production.
+- [x] T008 Inspect Preview portrait/landscape, different tables, reload/reconnect and fallback. Record authenticated runtime/CH evidence or explicitly pending owner smoke.
+- [x] T009 Report PR, SHA, checks, limitations and simple phone smoke steps.
