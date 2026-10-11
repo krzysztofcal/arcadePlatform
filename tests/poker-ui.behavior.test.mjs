@@ -305,7 +305,7 @@ function loadLobbyHarness(options = {}){
       },
       SupabaseAuth: options.authClient,
       ChipsClient: options.fetchWelcomeBonusStatus
-        ? { fetchWelcomeBonusStatus: options.fetchWelcomeBonusStatus }
+        ? { fetchBonusCampaigns: () => options.fetchWelcomeBonusStatus().then(status => ({ items: [{ ...status, campaignType: 'welcome' }], dailyBonus: null })), fetchWelcomeBonusStatus: async payload => payload.items[0] }
         : options.balanceError
         ? { fetchBalance: async () => { throw new Error('balance_failed'); } }
         : (options.balanceResult ? { fetchBalance: async () => options.balanceResult } : null),
@@ -695,10 +695,11 @@ for (const scenario of ['A-B', 'A-B-A', 'logout', 'A-B-reject']){
     assert.equal(pending.length, 1, 'logout: no follow-up request without account');
     assert.equal(harness.elements.pokerLobbyContent.hidden, true, 'logout: account content remains hidden');
   } else {
-    assert.equal(pending.length, 2, scenario + ': latest account must refresh after obsolete request');
-    assert.equal(pending[1].account, account, scenario + ': fetch latest identity only');
+    assert.equal(pending.length, scenario === 'A-B-A' ? 3 : 2, scenario + ': new identities must start an isolated shared request immediately');
+    const latest = pending[pending.length - 1];
+    assert.equal(latest.account, account, scenario + ': fetch latest identity only');
     const eligible = scenario !== 'A-B-A';
-    pending[1].resolve({ eligible, alreadyClaimed: false });
+    latest.resolve({ eligible, alreadyClaimed: false });
     await settle();
     assert.equal(harness.elements.pokerWelcomeBonusBanner.hidden, !eligible, scenario + ': only fresh eligibility is applied');
   }

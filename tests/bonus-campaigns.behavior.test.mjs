@@ -94,12 +94,13 @@ function createDeps() {
         if (text.includes("for update")) {
           return campaigns.filter((campaign) => campaign.id === params[0]);
         }
+        if (text.includes("campaign_type = 'poker_daily'")) return campaigns.filter((campaign) => campaign.campaign_type === "poker_daily" && ["active", "paused", "ended"].includes(campaign.status)).slice(0,1);
         const code = params[0] || null;
-        return code ? campaigns.filter((campaign) => campaign.code === code) : campaigns;
+        return campaigns.filter((campaign) => campaign.status === "active" && (!code || campaign.code === code));
       }
       if (text.includes("from auth.users")) {
         const createdAt = users.get(params[0]);
-        return createdAt ? [{ created_at: createdAt }] : [];
+        return createdAt ? [{ created_at: createdAt, is_anonymous: false }] : [];
       }
       if (text.includes("from public.bonus_claims")) {
         if (text.includes("count(*)")) {
@@ -129,7 +130,8 @@ function createDeps() {
           transaction_id: params[2],
           idempotency_key: params[3],
           claim_period_key: params[4],
-          claimed_at: "2026-07-07T00:00:00.000Z",
+          claimed_at: params[6] || "2026-07-07T00:00:00.000Z",
+          metadata: JSON.parse(params[5]),
         };
         claimsByCampaignUser.set(`${params[0]}:${params[1]}:${params[4]}`, row);
         return [row];
@@ -146,6 +148,7 @@ function createDeps() {
         id: `tx-${posts.length}`,
         user_id: payload.userId,
         tx_type: payload.txType,
+        metadata: payload.metadata,
         idempotency_key: payload.idempotencyKey,
       };
       txByKey.set(payload.idempotencyKey, transaction);
@@ -156,6 +159,9 @@ function createDeps() {
         unsafe: (query, params = []) => deps.executeSql(query, params),
       });
     },
+    now: "2026-07-07T12:00:00Z",
+    campaigns,
+    users,
     posts,
     claimsByCampaignUser,
     txByKey,
@@ -277,7 +283,14 @@ test("claim path does not post ledger transaction after max_total_claims is reac
 
 test("list helper returns public campaign status summaries", async () => {
   const deps = createDeps();
+  const runSql = deps.executeSql;
+  let campaignReads = 0;
+  deps.executeSql = async (query, params) => {
+    if (String(query).includes('from public.bonus_campaigns')) campaignReads += 1;
+    return runSql(query, params);
+  };
   const list = await listBonusCampaignStatuses(ALLOWLIST_USER, deps);
+  assert.equal(campaignReads, 1, 'evaluate listed campaign rows without per-code configuration re-reads');
 
   assert.equal(list.items.length, 4);
   assert.deepEqual(
@@ -294,4 +307,156 @@ test("list helper returns public campaign status summaries", async () => {
       { code: "limited-2026", claimPolicy: "once", eligible: true, amount: 75 },
     ],
   );
+});
+
+function pokerDailyDeps() {
+  const deps = createDeps();
+  Object.assign(deps.campaigns[2], { campaign_type: "poker_daily", eligibility_config: { daily_rewards: [25, 50, 100, 200] } });
+  return deps;
+}
+
+test("Poker Daily progresses indefinitely, replays paid amount, and resets only after a missed UTC day", async () => {
+  const deps = pokerDailyDeps();
+  for (let day = 1; day <= 100; day++) {
+    const now = new Date(Date.UTC(2026, 0, day, 23, 59, 59));
+    const result = await claimBonusCampaign(BEFORE_USER, "daily-login", { ...deps, now });
+    assert.equal(result.claimed, true);
+    assert.equal(result.streakDay, day);
+    assert.equal(result.campaign.amount, [25, 50, 100, 200][Math.min(day, 4) - 1]);
+    const replay = await claimBonusCampaign(BEFORE_USER, "daily-login", { ...deps, now });
+    assert.equal(replay.claimed, false);
+    assert.equal(replay.campaign.amount, result.campaign.amount);
+    assert.equal(replay.streakDay, day);
+    assert.equal(deps.posts[day - 1].entries.reduce((sum, entry) => sum + entry.amount, 0), 0);
+  }
+  const reset = await claimBonusCampaign(BEFORE_USER, "daily-login", { ...deps, now: new Date(Date.UTC(2026, 0, 102)) });
+  assert.equal(reset.streakDay, 1);
+  assert.equal(reset.campaign.amount, 25);
+});
+
+test("Poker Daily rejects malformed rewards and anonymous accounts", async () => {
+  const deps = pokerDailyDeps();
+  deps.campaigns[2].eligibility_config.daily_rewards = [25, 50, 100];
+  assert.equal((await claimBonusCampaign(AFTER_USER, "daily-login", deps)).reason, "invalid_daily_rewards");
+  deps.campaigns[2].eligibility_config.daily_rewards = [25, 50, 100, 200];
+  const sql = deps.executeSql;
+  deps.executeSql = async (q, p) => String(q).includes("from auth.users") ? [{ created_at: START_AT, is_anonymous: true }] : sql(q, p);
+  assert.equal((await claimBonusCampaign(AFTER_USER, "daily-login", deps)).reason, "guest_not_eligible");
+  assert.equal(deps.posts.length, 0);
+});
+
+test("claim rechecks End and changed configuration after campaign row lock", async () => {
+  for (const change of [{ status: "ended" }, { eligibility_config: { daily_rewards: [] } }]) {
+    const deps = pokerDailyDeps();
+    deps.beginSql = async (fn) => {
+      Object.assign(deps.campaigns[2], change);
+      return fn({ unsafe: deps.executeSql });
+    };
+    const result = await claimBonusCampaign(AFTER_USER, "daily-login", deps);
+    assert.equal(result.claimed, false);
+    assert.equal(deps.posts.length, 0);
+  }
+});
+
+test("Poker Daily rejects corrupt yesterday receipts and missing ledger/receipt results", async () => {
+  const deps = pokerDailyDeps();
+  await claimBonusCampaign(AFTER_USER, "daily-login", { ...deps, now: "2026-12-31T23:59:59Z" });
+  [...deps.claimsByCampaignUser.values()][0].metadata.streak_day = 0;
+  const result = await claimBonusCampaign(AFTER_USER, "daily-login", { ...deps, now: "2027-01-01T00:00:00Z" });
+  assert.equal(result.reason, "invalid_daily_claim");
+  const broken = pokerDailyDeps();
+  await assert.rejects(claimBonusCampaign(AFTER_USER, "daily-login", { ...broken, postTransaction: async () => ({}) }), /bonus_claim_write_failed/);
+  const sql = broken.executeSql;
+  broken.executeSql = async (q, p) => String(q).includes("insert into public.bonus_claims") ? [] : sql(q, p);
+  await assert.rejects(claimBonusCampaign(AFTER_USER, "daily-login", broken), /bonus_claim_write_failed/);
+});
+
+
+test("UTC decision is taken after lock wait and boundary changes abort before ledger", async () => {
+  const deps = pokerDailyDeps();
+  let calls = 0;
+  const moved = await claimBonusCampaign(AFTER_USER, "daily-login", { ...deps, now: "2026-12-31T23:59:59Z",
+    transactionNow: async () => "2027-01-01T00:00:01Z" });
+  assert.equal(moved.claimPeriodKey, "2027-01-01");
+  assert.equal(moved.claim.claimed_at, "2027-01-01T00:00:01.000Z");
+  const abort = await claimBonusCampaign(BEFORE_USER, "daily-login", { ...deps, now: "2027-01-01T23:59:59Z",
+    transactionNow: async () => ++calls === 1 ? "2027-01-01T23:59:59Z" : "2027-01-02T00:00:00Z" });
+  assert.equal(abort.reason, "claim_period_changed");
+  assert.equal(deps.posts.length, 1);
+});
+
+test("Daily paid evidence must match ledger; configured amounts are authoritative under lock", async () => {
+  const deps = pokerDailyDeps();
+  deps.beginSql = async (fn) => {
+    deps.campaigns[2].amount = 30;
+    deps.campaigns[2].eligibility_config.daily_rewards = [30,60,120,240];
+    return fn({ unsafe: deps.executeSql });
+  };
+  const first = await claimBonusCampaign(AFTER_USER, "daily-login", deps);
+  assert.equal(first.campaign.amount, 30);
+  deps.txByKey.get(first.idempotencyKey).metadata.amount = 31;
+  assert.equal((await getBonusCampaignStatus(AFTER_USER, "daily-login", deps)).reason, "invalid_daily_claim");
+});
+
+
+test("Daily status projection is unavailable before publication and shows claimed/paused server progress", async () => {
+  const deps = pokerDailyDeps();
+  deps.campaigns[2].status = "draft";
+  assert.equal((await listBonusCampaignStatuses(AFTER_USER, { ...deps, includeDailyStatus: true })).dailyBonus, null);
+  deps.campaigns[2].status = "active";
+  await claimBonusCampaign(AFTER_USER, "daily-login", deps);
+  const paid = await listBonusCampaignStatuses(AFTER_USER, { ...deps, includeDailyStatus: true });
+  assert.equal(paid.dailyBonus.streakDay, 1);
+  assert.equal(paid.dailyBonus.alreadyClaimed, true);
+  deps.campaigns[2].status = "paused";
+  const paused = await listBonusCampaignStatuses(AFTER_USER, { ...deps, includeDailyStatus: true, now: "2026-07-08T00:00:00Z" });
+  assert.equal(paused.dailyBonus.status, "paused");
+  assert.equal(paused.dailyBonus.eligible, false);
+  assert.equal(paused.dailyBonus.amount, 50);
+  assert.equal(paused.dailyBonus.nextEligibleAt, "2026-07-09T00:00:00.000Z");
+});
+
+test("Daily receipt without matching PROMO_BONUS transaction fails closed for replay and continuation", async () => {
+  const deps = pokerDailyDeps();
+  const today = "2026-07-07T12:00:00Z";
+  const first = await claimBonusCampaign(AFTER_USER, "daily-login", { ...deps, now: today });
+  assert.equal(first.claimed, true);
+  deps.txByKey.delete(first.idempotencyKey);
+
+  for (const now of [today, "2026-07-08T00:00:00Z"]) {
+    const status = await getBonusCampaignStatus(AFTER_USER, "daily-login", { ...deps, now });
+    assert.equal(status.eligible, false);
+    assert.equal(status.reason, "invalid_daily_claim");
+    const result = await claimBonusCampaign(AFTER_USER, "daily-login", { ...deps, now });
+    assert.equal(result.claimed, false);
+    assert.equal(result.reason, "invalid_daily_claim");
+  }
+  assert.equal(deps.posts.length, 1);
+  assert.equal(deps.claimsByCampaignUser.size, 1);
+});
+
+
+test("combined campaign list retains Welcome and authoritative Daily status with two configuration reads", async () => {
+  const deps = pokerDailyDeps();
+  await claimBonusCampaign(AFTER_USER, "daily-login", deps);
+  const runSql = deps.executeSql;
+  let campaignReads = 0;
+  deps.executeSql = async (query, params) => {
+    if (String(query).includes('from public.bonus_campaigns')) campaignReads += 1;
+    return runSql(query, params);
+  };
+  const result = await listBonusCampaignStatuses(AFTER_USER, { ...deps, includeDailyStatus: true });
+  assert.equal(campaignReads, 2, 'one active list plus separate latest Daily selector');
+  assert.equal(result.items.find(item => item.campaignType === 'welcome').amount, 500);
+  assert.equal(result.dailyBonus.alreadyClaimed, true);
+  assert.equal(result.dailyBonus.streakDay, 1);
+  assert.equal(result.dailyBonus.amount, 25);
+  assert.equal(result.dailyBonus.nextEligibleAt, '2026-07-08T00:00:00.000Z');
+  deps.campaigns[2].status = 'paused';
+  campaignReads = 0;
+  const paused = await listBonusCampaignStatuses(AFTER_USER, { ...deps, includeDailyStatus: true });
+  assert.equal(campaignReads, 2);
+  assert.equal(paused.items.some(item => item.campaignType === 'poker_daily'), false);
+  assert.equal(paused.dailyBonus.status, 'paused');
+  assert.equal(paused.dailyBonus.eligible, false);
 });

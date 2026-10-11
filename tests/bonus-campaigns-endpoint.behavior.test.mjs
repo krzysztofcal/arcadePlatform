@@ -81,3 +81,37 @@ test("bonus-campaigns POST rejects invalid campaign codes", async () => {
   assert.equal(response.statusCode, 400);
   assert.deepEqual(JSON.parse(response.body), { error: "invalid_campaign_code" });
 });
+
+
+test("opt-in Daily status includes claimed/paused state without changing default GET", async () => {
+  const dailyBonus = { code: "daily-streak", status: "paused", amount: 200, streakDay: 5, alreadyClaimed: true };
+  const handler = createBonusCampaignsHandler({ env: { CHIPS_ENABLED: "1" },
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    listBonusCampaignStatuses: async (_user, options) => ({ items: [], ...(options.includeDailyStatus ? { dailyBonus } : {}) }) });
+  const ordinary = await handler(createEvent("GET"));
+  assert.deepEqual(JSON.parse(ordinary.body), { items: [] });
+  const daily = await handler({ ...createEvent("GET"), queryStringParameters: { includeDailyStatus: "1" } });
+  assert.deepEqual(JSON.parse(daily.body).dailyBonus, dailyBonus);
+});
+
+test("Poker Daily POST exposes actual paid amount and uncapped streak", async () => {
+  const handler = createBonusCampaignsHandler({ env: { CHIPS_ENABLED: "1" },
+    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
+    claimBonusCampaign: async () => ({ claimed: true, eligible: false, alreadyClaimed: true,
+      streakDay: 100, rewardDay: 4, transactionId: "paid-tx",
+      claimPeriodKey: "daily:2026-10-11", nextEligibleAt: "2026-10-12T00:00:00.000Z",
+      serverNow: "2026-10-11T12:00:00.000Z",
+      campaign: { code: "daily-streak", campaignType: "poker_daily", amount: 200 } }) });
+  const response = await handler(createEvent("POST", { code: "daily-streak" }));
+  const body = JSON.parse(response.body);
+  assert.equal(body.amount, 200);
+  assert.equal(body.streakDay, 100);
+  assert.equal(body.rewardDay, 4);
+  assert.equal(body.eligible, false);
+  assert.equal(body.alreadyClaimed, true);
+  assert.equal(body.claimed, true);
+  assert.equal(body.transactionId, "paid-tx");
+  assert.equal(body.claimPeriodKey, "daily:2026-10-11");
+  assert.equal(body.nextEligibleAt, "2026-10-12T00:00:00.000Z");
+  assert.equal(body.serverNow, "2026-10-11T12:00:00.000Z");
+});

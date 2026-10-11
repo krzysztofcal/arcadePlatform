@@ -1474,6 +1474,176 @@
     var lobbyAuthenticated = false;
     var lobbyIdentity = null;
     var lobbyIdentityGeneration = 0;
+    var dailyDialog = document.getElementById('dailyDialog');
+    var dailyClaimButton = document.getElementById('dailyClaim');
+    var dailySignInButton = document.getElementById('dailySignIn');
+    var dailyStatusMessage = document.getElementById('dailyDisclaimer');
+    var dailySuccess = document.getElementById('dailySuccess');
+    var dailyReceipt = null;
+    var dailyFlyin = document.getElementById('dailyFlyin');
+    var dailyFlyinTimer = null;
+    var dailyLoadError = false;
+    var dailyState = null;
+    var dailyPending = false;
+    var dailyRequestGeneration = 0;
+    var dailyResetTimer = null;
+    var bonusCampaignsState = null;
+    var bonusCampaignsFetchedAt = 0;
+    var bonusCampaignsExpiresAt = 0;
+
+    function clearDailyFlyin(){
+      clearTimeout(dailyFlyinTimer);
+      dailyFlyinTimer = null;
+      if (dailyFlyin) dailyFlyin.hidden = true;
+    }
+
+    function showDailyFlyin(result){
+      clearDailyFlyin();
+      if (!dailyFlyin || !dailyDialog.open || document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      dailyFlyin.querySelector('strong').textContent = '+' + result.amount + ' CH';
+      dailyFlyin.querySelector('span').textContent = 'STREAK DAY ' + result.streakDay;
+      dailyFlyin.hidden = false;
+      dailyFlyinTimer = setTimeout(clearDailyFlyin, 1800);
+    }
+
+    function renderDailyBonus(message){
+      if (!dailyDialog) return;
+      var status = dailyState;
+      var canClaim = !!(lobbyAuthenticated && status && status.eligible && !status.alreadyClaimed);
+      var completedDays = status && status.streakDay ? Math.min(status.streakDay - (status.alreadyClaimed ? 0 : 1), 4) : 0;
+      dailyDialog.querySelectorAll('[data-daily-day]').forEach(function(cell){
+        var day = Number(cell.dataset.dailyDay);
+        var current = status && status.rewardDay === day;
+        var completed = day <= completedDays;
+        cell.className = 'bonus-day bonus-day--' + (completed ? 'completed' : current ? 'current' : 'upcoming')
+          + (current && status.alreadyClaimed ? ' bonus-day--claimed' : '');
+        cell.querySelector('.day-state').textContent = completed ? 'CLAIMED' : current ? 'CURRENT' : 'UPCOMING';
+        cell.querySelector('.reward-space').textContent = status && status.dailyRewards ? status.dailyRewards[day - 1] + ' CH' : '— CH';
+      });
+      document.getElementById('dailyProgress').textContent = status && status.streakDay ? 'STREAK · DAY ' + status.streakDay : 'DAILY REWARDS';
+      document.getElementById('dailyReset').textContent = status && status.nextEligibleAt ? new Date(status.nextEligibleAt).toISOString().slice(0,16).replace('T', ' ') + ' UTC' : '—';
+      dailyDialog.classList.toggle('daily-success', !!dailyReceipt);
+      dailySuccess.hidden = !dailyReceipt;
+      if (dailyReceipt){
+        dailySuccess.querySelector('strong').textContent = '+' + dailyReceipt.amount + ' CH';
+        dailySuccess.querySelector('span').textContent = 'REWARD CLAIMED · STREAK DAY ' + dailyReceipt.streakDay;
+      }
+      dailyClaimButton.hidden = !!(status && status.alreadyClaimed);
+      dailyClaimButton.disabled = dailyPending || !canClaim;
+      dailyClaimButton.textContent = dailyPending ? 'PLEASE WAIT…' : status && status.alreadyClaimed ? 'CLAIMED' : canClaim ? 'CLAIM ' + status.amount + ' CH' : 'CLAIM';
+      if (dailySignInButton) dailySignInButton.hidden = lobbyAuthenticated && !(status && status.reason === 'guest_not_eligible');
+      var text = dailyReceipt ? 'Daily reward claimed. Your streak keeps growing!'
+        : !lobbyAuthenticated ? 'Sign in or create an Arcade account to claim daily rewards.'
+        : dailyLoadError ? 'Could not load Daily Bonus data. Reopen the panel to retry.'
+        : !status ? 'Daily Bonus is not active yet.'
+        : status.reason === 'guest_not_eligible' ? 'Sign in with a registered account. Guests are not eligible.'
+        : status.status === 'paused' ? 'Daily Bonus is temporarily paused.'
+        : status.alreadyClaimed ? 'Already claimed today. Return after the next UTC reset.'
+        : !canClaim ? 'Daily Bonus is unavailable.'
+        : 'A missed UTC day resets your streak. Day 4+ repeats indefinitely.';
+      dailyStatusMessage.textContent = message || text;
+    }
+
+    function invalidateBonusCampaigns(){
+      bonusCampaignsFetchedAt = 0;
+      bonusCampaignsExpiresAt = 0;
+      dailyRequestGeneration += 1;
+      welcomeBonusInFlight = null;
+    }
+
+    function bonusCampaignsAreFresh(){
+      var now = Date.now();
+      return !!(bonusCampaignsState && bonusCampaignsFetchedAt && now >= bonusCampaignsFetchedAt
+        && now - bonusCampaignsFetchedAt < 60000 && now < bonusCampaignsExpiresAt);
+    }
+
+    function cacheDailyStatus(status, startedAt){
+      var now = Date.now();
+      dailyState = status;
+      bonusCampaignsFetchedAt = now;
+      var remaining = status && Date.parse(status.nextEligibleAt) - Date.parse(status.serverNow);
+      bonusCampaignsExpiresAt = Number.isFinite(remaining)
+        ? now + Math.max(0, remaining - (now - startedAt))
+        : now + 86400000 - (now % 86400000);
+      dailyLoadError = false;
+      if (!status || !status.alreadyClaimed) dailyReceipt = null;
+    }
+
+    function scheduleDailyReset(){
+      clearTimeout(dailyResetTimer);
+      dailyResetTimer = null;
+      if (dailyDialog && dailyDialog.open && bonusCampaignsFetchedAt){
+        var delay = bonusCampaignsExpiresAt - Date.now();
+        if (delay > 0) dailyResetTimer = setTimeout(function(){
+          invalidateBonusCampaigns();
+          refreshDailyBonus();
+        }, Math.min(delay + 50, 86400100));
+      }
+    }
+
+    async function refreshDailyBonus(allowPending, force){
+      if (dailyPending && allowPending !== true) return null;
+      var identity = lobbyIdentityGeneration;
+      if (!lobbyAuthenticated || !window.ChipsClient){
+        dailyLoadError = lobbyAuthenticated;
+        dailyState = null;
+        renderDailyBonus();
+        return null;
+      }
+      if (!bonusCampaignsAreFresh()) renderDailyBonus('Loading Daily Bonus…');
+      await refreshWelcomeBonusBanner(force, allowPending);
+      if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return null;
+      renderDailyBonus();
+      scheduleDailyReset();
+      return bonusCampaignsAreFresh() ? dailyState : null;
+    }
+
+    async function claimDailyBonus(){
+      if (dailyPending) return;
+      clearDailyFlyin();
+      dailyReceipt = null;
+      if (!lobbyAuthenticated){ renderDailyBonus(); return; }
+      var identity = lobbyIdentityGeneration;
+      var message = null;
+      dailyPending = true;
+      renderDailyBonus();
+      try {
+        var status = await refreshDailyBonus(true);
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated || !dailyDialog.open || !status || !status.eligible || status.alreadyClaimed) return;
+        var claimStartedAt = Date.now();
+        var result = await window.ChipsClient.claimBonusCampaign(status.code);
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
+        if (result.claimed || result.alreadyClaimed){
+          cacheDailyStatus(Object.assign({}, status, result, { eligible: false, alreadyClaimed: true }), claimStartedAt);
+          if (bonusCampaignsState) bonusCampaignsState.dailyBonus = dailyState;
+          if (result.claimed) dailyReceipt = result;
+          renderDailyBonus();
+          if (result.claimed) showDailyFlyin(result);
+        } else {
+          await refreshDailyBonus(true, true);
+          message = 'Daily Bonus could not be claimed. Please check its status again.';
+        }
+      } catch (error){
+        if (identity === lobbyIdentityGeneration){
+          await refreshDailyBonus(true, true);
+          message = 'Claim could not be confirmed. Check status before retrying.';
+          klog('poker_daily_claim_failed', { reason: error.code || error.message || 'unknown' });
+        }
+      } finally {
+        if (identity === lobbyIdentityGeneration){
+          dailyPending = false;
+          scheduleDailyReset();
+          renderDailyBonus(message);
+        }
+      }
+    }
+    if (dailySignInButton) dailySignInButton.addEventListener('click', function(){
+      dailyDialog.close();
+      openSignIn();
+    });
+    if (dailyClaimButton) dailyClaimButton.addEventListener('click', claimDailyBonus);
+    if (dailyDialog) dailyDialog.addEventListener('close', function(){ clearTimeout(dailyResetTimer); clearDailyFlyin(); });
+
     var authCheckGeneration = 0;
     var createBtn = document.getElementById('pokerCreate');
     var buyInInput = document.getElementById('pokerBuyIn');
@@ -1546,6 +1716,7 @@
     document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
       var dialog = document.getElementById(button.dataset.panel + 'Dialog');
       if (dialog && !dialog.open) dialog.showModal();
+      if (button.dataset.panel === 'daily') claimDailyBonus();
     }); });
     document.querySelectorAll('[data-close]').forEach(function(button){ button.addEventListener('click', function(){ button.closest('dialog').close(); }); });
     document.querySelectorAll('[data-view]').forEach(function(button){ button.addEventListener('click', function(){
@@ -1732,32 +1903,49 @@
       welcomeBonusBanner.hidden = !isVisible;
     }
 
-    async function refreshWelcomeBonusBanner(){
-      if (!welcomeBonusBanner || !lobbyAuthenticated) return null;
-      if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchWelcomeBonusStatus !== 'function'){
+    async function refreshWelcomeBonusBanner(force, allowPending){
+      if (!lobbyAuthenticated) return null;
+      if (!window.ChipsClient || typeof window.ChipsClient.fetchBonusCampaigns !== 'function'){
         setWelcomeBonusBannerVisible(false);
+        dailyLoadError = true;
+        renderDailyBonus();
         return null;
       }
       if (welcomeBonusInFlight) return welcomeBonusInFlight;
-      var requestGeneration = lobbyIdentityGeneration;
-      welcomeBonusInFlight = (async function(){
+      if (dailyPending && allowPending !== true) return null;
+      if (!force && bonusCampaignsAreFresh()) return bonusCampaignsState;
+      var identity = lobbyIdentityGeneration;
+      var request = ++dailyRequestGeneration;
+      var startedAt = Date.now();
+      bonusCampaignsFetchedAt = 0;
+      var requestPromise = (async function(){
         try {
-          var status = await window.ChipsClient.fetchWelcomeBonusStatus();
-          if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return null;
-          var canClaim = !!(status && status.eligible && !status.alreadyClaimed);
-          setWelcomeBonusBannerVisible(canClaim);
-          return status || null;
-        } catch (_err){
-          if (lobbyIdentityGeneration === requestGeneration) setWelcomeBonusBannerVisible(false);
+          var payload = await window.ChipsClient.fetchBonusCampaigns({ includeDailyStatus: true });
+          var status = await window.ChipsClient.fetchWelcomeBonusStatus(payload);
+          if (!lobbyAuthenticated || identity !== lobbyIdentityGeneration || request !== dailyRequestGeneration) return null;
+          bonusCampaignsState = payload;
+          cacheDailyStatus(payload.dailyBonus || null, startedAt);
+          setWelcomeBonusBannerVisible(!!(status && status.eligible && !status.alreadyClaimed));
+          renderDailyBonus();
+          scheduleDailyReset();
+          return payload;
+        } catch (error){
+          if (identity === lobbyIdentityGeneration && request === dailyRequestGeneration){
+            bonusCampaignsState = null;
+            bonusCampaignsFetchedAt = 0;
+            dailyState = null;
+            dailyLoadError = true;
+            setWelcomeBonusBannerVisible(false);
+            renderDailyBonus();
+            klog('poker_bonus_status_failed', { reason: error.code || error.message || 'unknown' });
+          }
           return null;
         } finally {
-          welcomeBonusInFlight = null;
-          if (lobbyAuthenticated && lobbyIdentityGeneration !== requestGeneration){
-            refreshWelcomeBonusBanner();
-          }
+          if (welcomeBonusInFlight === requestPromise) welcomeBonusInFlight = null;
         }
       })();
-      return welcomeBonusInFlight;
+      welcomeBonusInFlight = requestPromise;
+      return requestPromise;
     }
 
     function progressionStorageKey(data){
@@ -1943,6 +2131,15 @@
       if (lobbyIdentity === identity) return;
       lobbyIdentity = identity;
       lobbyIdentityGeneration += 1;
+      invalidateBonusCampaigns();
+      bonusCampaignsState = null;
+      clearDailyFlyin();
+      dailyReceipt = null;
+      dailyLoadError = false;
+      dailyState = null;
+      dailyPending = false;
+      clearTimeout(dailyResetTimer);
+      renderDailyBonus();
       progressionState = null;
       selectedQuickBuyIn = null;
       lobbyTables = [];
@@ -1974,14 +2171,15 @@
         return false;
       }
       // JWT subject is UI identity only; all authorization remains server-side.
-      setLobbyIdentity(getUserIdFromToken(token) || token);
       lobbyAuthenticated = true;
+      setLobbyIdentity(getUserIdFromToken(token) || token);
       renderQuickTiers();
       if (authMsg) authMsg.hidden = true;
       if (lobbyContent) lobbyContent.hidden = false;
       stopAuthWatch();
       refreshWelcomeBonusBanner();
       refreshProgression();
+      if (dailyDialog && dailyDialog.open) refreshDailyBonus();
       return true;
     }
 
@@ -2071,11 +2269,14 @@
 
     function handleLobbyVisibilityChange(){
       if (!isLobbyPageVisible()){
+        invalidateBonusCampaigns();
         clearLobbyReconnectTimer();
         return;
       }
+      refreshWelcomeBonusBanner();
       refreshProgression();
       refreshLobby('visibility');
+      if (dailyDialog && dailyDialog.open) refreshDailyBonus();
     }
 
     function isCanonicalTableForTier(table, tier){
@@ -2326,8 +2527,8 @@
     if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
       var unsubscribeLobbyAuth = window.SupabaseAuth.onAuthChange(function(_event, user){
         authCheckGeneration += 1;
-        setLobbyIdentity(user && user.id ? user.id : null);
         lobbyAuthenticated = !!user;
+        setLobbyIdentity(user && user.id ? user.id : null);
         renderQuickTiers();
         if (authMsg) authMsg.hidden = !!user;
         if (lobbyContent) lobbyContent.hidden = !user;
@@ -2340,8 +2541,16 @@
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)
     window.addEventListener('beforeunload', stopLobbyWs); // xp-lifecycle-allow:poker-lobby-ws(2026-01-01)
     document.addEventListener('visibilitychange', handleLobbyVisibilityChange); // xp-lifecycle-allow:poker-lobby-visibility(2027-01-01)
+    window.addEventListener('focus', function(){
+      if (dailyPending) return;
+      refreshWelcomeBonusBanner(true);
+    }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
+    window.addEventListener('beforeunload', function(){ clearTimeout(dailyResetTimer); clearDailyFlyin(); }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
     document.addEventListener('chips:tx-complete', function(){
-      refreshWelcomeBonusBanner();
+      if (!dailyPending){
+        invalidateBonusCampaigns();
+        refreshWelcomeBonusBanner();
+      }
       refreshProgression();
     });
 

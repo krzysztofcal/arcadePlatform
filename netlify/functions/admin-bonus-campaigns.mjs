@@ -1,3 +1,4 @@
+import { validatePokerDaily } from "./_shared/bonus-campaigns.mjs";
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
 import {
   badRequest,
@@ -10,7 +11,7 @@ import {
   parseTimestamp,
   parseUuid,
 } from "./_shared/admin-ops.mjs";
-import { baseHeaders, corsHeaders, executeSql, klog } from "./_shared/supabase-admin.mjs";
+import { baseHeaders, beginSql, corsHeaders, executeSql, klog } from "./_shared/supabase-admin.mjs";
 
 const CODE_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const STATUSES = new Set(["draft", "scheduled", "active", "paused", "ended"]);
@@ -27,6 +28,8 @@ const SAFE_UPDATE_STATUSES = new Set(["scheduled", "paused"]);
 
 function normalizeCampaignRow(row) {
   if (!row) return null;
+  let eligibilityConfig = {};
+  try { eligibilityConfig = parseJsonObjectStrict(row.eligibility_config); } catch (_error) {}
   return {
     id: row.id,
     code: row.code,
@@ -38,7 +41,7 @@ function normalizeCampaignRow(row) {
     startsAt: row.starts_at || null,
     endsAt: row.ends_at || null,
     eligibilityType: row.eligibility_type,
-    eligibilityConfig: row.eligibility_config || {},
+    eligibilityConfig,
     claimPolicy: row.claim_policy || "once",
     maxTotalClaims: row.max_total_claims == null ? null : Number(row.max_total_claims),
     claimCount: Number(row.claim_count || 0),
@@ -115,7 +118,7 @@ function parseCampaignInput(payload = {}, { requireCode = true } = {}) {
   if (endsAt && Date.parse(endsAt) <= Date.parse(startsAt)) {
     throw badRequest("invalid_time_window", "invalid_time_window");
   }
-  return {
+  const input = {
     code: requireCode ? parseCode(payload.code) : null,
     title: parseRequiredText(payload.title, "missing_title", { maxLength: 160 }),
     description: parseOptionalText(payload.description, "description", { maxLength: 500 }),
@@ -128,6 +131,8 @@ function parseCampaignInput(payload = {}, { requireCode = true } = {}) {
     claimPolicy: parseEnum(payload.claimPolicy ?? payload.claim_policy ?? "once", CLAIM_POLICIES, "invalid_claim_policy"),
     maxTotalClaims: parseOptionalPositiveInt(payload.maxTotalClaims ?? payload.max_total_claims, "invalid_max_total_claims"),
   };
+  if (!validatePokerDaily(input)) throw badRequest("invalid_daily_rewards", "invalid_daily_rewards");
+  return input;
 }
 
 function normalizeStable(value) {
@@ -282,7 +287,7 @@ insert into public.bonus_campaigns (
   max_total_claims,
   created_by
 )
-values ($1, $2, $3, $4, $5, 'draft', $6::timestamptz, $7::timestamptz, $8, $9::jsonb, $10, $11, $12)
+values ($1, $2, $3, $4, $5, 'draft', $6::timestamptz, $7::timestamptz, $8, ($9::text)::jsonb, $10, $11, $12)
 returning *, 0::bigint as claim_count;
 `,
     [
@@ -303,7 +308,7 @@ returning *, 0::bigint as claim_count;
   return normalizeCampaignRow(rows?.[0] || null);
 }
 
-async function updateBonusCampaign(id, payload = {}, runSql = executeSql) {
+async function updateLockedCampaign(id, payload, runSql) {
   const input = parseCampaignInput(payload, { requireCode: false });
   const current = await fetchCampaignById(id, runSql);
   if (!current) throw notFound("campaign_not_found", "campaign_not_found");
@@ -320,7 +325,7 @@ set title = $2,
     starts_at = $6::timestamptz,
     ends_at = $7::timestamptz,
     eligibility_type = $8,
-    eligibility_config = $9::jsonb,
+    eligibility_config = ($9::text)::jsonb,
     claim_policy = $10,
     max_total_claims = $11
 where id = $1
@@ -344,10 +349,13 @@ returning *, $12::bigint as claim_count;
   return normalizeCampaignRow(rows?.[0] || null);
 }
 
-async function setBonusCampaignStatus(id, status, runSql = executeSql) {
+async function setLockedCampaignStatus(id, status, runSql) {
   const nextStatus = parseEnum(status, STATUSES, "invalid_status");
   const current = await fetchCampaignById(id, runSql);
   if (!current) throw notFound("campaign_not_found", "campaign_not_found");
+  if (current.campaignType === "poker_daily" && (nextStatus === "scheduled" || (nextStatus === "active" && !validatePokerDaily(current)))) {
+    throw badRequest("invalid_daily_rewards", "invalid_daily_rewards");
+  }
   if (current.status === nextStatus) return current;
   const allowed = STATUS_TRANSITIONS[current.status] || new Set();
   if (!allowed.has(nextStatus)) {
@@ -365,6 +373,22 @@ returning *, $3::bigint as claim_count;
   return normalizeCampaignRow(rows?.[0] || null);
 }
 
+async function withLockedCampaign(id, operation, begin = beginSql) {
+  return begin(async (tx) => {
+    const runSql = (query, params = []) => tx.unsafe(query, params);
+    await runSql("select id from public.bonus_campaigns where id = $1 for update;", [id]);
+    return operation(runSql);
+  });
+}
+
+async function updateBonusCampaign(id, payload = {}, runSql = executeSql, begin = beginSql) {
+  return withLockedCampaign(id, (txSql) => updateLockedCampaign(id, payload, txSql), begin);
+}
+
+async function setBonusCampaignStatus(id, status, runSql = executeSql, begin = beginSql) {
+  return withLockedCampaign(id, (txSql) => setLockedCampaignStatus(id, status, txSql), begin);
+}
+
 function mapAdminCampaignError(error) {
   if (error?.status === 400) return { statusCode: 400, body: { error: error.code || "invalid_request" } };
   if (error?.status === 404) return { statusCode: 404, body: { error: error.code || "not_found" } };
@@ -378,6 +402,7 @@ function createAdminBonusCampaignsHandler(deps = {}) {
   const env = deps.env || process.env;
   const requireAdmin = deps.requireAdminUser || requireAdminUser;
   const runSql = deps.executeSql || executeSql;
+  const begin = deps.beginSql || beginSql;
   return async function handler(event) {
     if (env.CHIPS_ENABLED !== "1") {
       return { statusCode: 404, headers: baseHeaders(), body: JSON.stringify({ error: "not_found" }) };
@@ -410,10 +435,10 @@ function createAdminBonusCampaignsHandler(deps = {}) {
         campaign = await createBonusCampaign(body.campaign || body, adminUserId, runSql);
       } else if (action === "update") {
         const id = parseUuid(body.campaignId || body.id, "invalid_campaign_id");
-        campaign = await updateBonusCampaign(id, body.campaign || body, runSql);
+        campaign = await updateBonusCampaign(id, body.campaign || body, runSql, begin);
       } else if (action === "set_status") {
         const id = parseUuid(body.campaignId || body.id, "invalid_campaign_id");
-        campaign = await setBonusCampaignStatus(id, body.status, runSql);
+        campaign = await setBonusCampaignStatus(id, body.status, runSql, begin);
       } else {
         throw badRequest("invalid_action", "invalid_action");
       }

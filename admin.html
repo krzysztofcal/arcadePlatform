@@ -501,7 +501,7 @@
                     <input type="hidden" name="campaignId">
                     <div class="admin-filter-actions" aria-label="Bonus campaign templates">
                       <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="welcome">Welcome once</button>
-                      <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="daily">Daily login</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="daily">Poker Daily</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="anniversary">Anniversary</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-bonus-template="compensation">Compensation</button>
                     </div>
@@ -523,6 +523,7 @@
                       <datalist id="adminBonusCampaignTypeOptions">
                         <option value="welcome"></option>
                         <option value="daily"></option>
+                        <option value="poker_daily"></option>
                         <option value="anniversary"></option>
                         <option value="seasonal"></option>
                         <option value="vip"></option>
@@ -536,6 +537,7 @@
                       <span class="admin-field__label">Amount</span>
                       <input class="admin-input" type="number" name="amount" min="1" step="1" required>
                     </label>
+                    <fieldset id="adminDailyRewards" hidden><legend>Poker Daily rewards (CH)</legend><label class="admin-field"><span class="admin-field__label">Day 1</span><input class="admin-input" type="number" name="dailyReward1" min="1" step="1"></label><label class="admin-field"><span class="admin-field__label">Day 2</span><input class="admin-input" type="number" name="dailyReward2" min="1" step="1"></label><label class="admin-field"><span class="admin-field__label">Day 3</span><input class="admin-input" type="number" name="dailyReward3" min="1" step="1"></label><label class="admin-field"><span class="admin-field__label">Day 4+</span><input class="admin-input" type="number" name="dailyReward4" min="1" step="1"></label><p>Day 4 repeats indefinitely. Daily UTC, all registered accounts, no total cap. Activate manually; rewards are locked after publication.</p></fieldset>
                     <label class="admin-field">
                       <span class="admin-field__label">Starts at</span>
                       <input class="admin-input" type="datetime-local" name="startsAt" required>

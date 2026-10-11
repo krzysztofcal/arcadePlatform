@@ -538,7 +538,7 @@
           "<tr>",
           '<td><div class="admin-list__title"><span>' + escapeHtml(item.code || "—") + '</span></div><div class="admin-list__meta">' + escapeHtml(item.title || "—") + "</div></td>",
           "<td>" + pill(item.status || "—", campaignStatusTone(item.status)) + "</td>",
-          "<td>" + escapeHtml(formatAmount(item.amount)) + "</td>",
+          "<td>" + escapeHtml(item.campaignType === "poker_daily" ? (item.eligibilityConfig.daily_rewards || []).join(" / ") + " CH (Day 4+)" : formatAmount(item.amount)) + "</td>",
           "<td>" + escapeHtml(item.claimPolicy || "once") + "</td>",
           "<td>" + escapeHtml(item.eligibilityType || "—") + "</td>",
           "<td>" + escapeHtml(windowText) + "</td>",
@@ -640,11 +640,12 @@
         endsAt: "",
       },
       daily: {
-        code: "daily-login-2026",
-        title: "Daily Login Bonus",
-        description: "Claim once per UTC day.",
-        campaignType: "daily",
-        amount: 20,
+        code: "daily-streak-2026",
+        title: "Poker Daily Bonus",
+        description: "Consecutive UTC days: 25, 50, 100, then 200 CH daily.",
+        campaignType: "poker_daily",
+        amount: 25,
+        dailyReward1: 25, dailyReward2: 50, dailyReward3: 100, dailyReward4: 200,
         eligibilityType: "all_accounts",
         claimPolicy: "daily",
         maxTotalClaims: "",
@@ -689,6 +690,8 @@
       setBonusCampaignFormValue("startsAt", formatDateTimeLocalValue(new Date().toISOString()));
     }
     syncEligibilityConfigFromPreset(true);
+    if (templateKey === "daily") setBonusCampaignFormValue("eligibilityConfig", JSON.stringify({ daily_rewards: [25, 50, 100, 200] }, null, 2));
+    syncDailyRewardFields();
     setStatus("Bonus campaign template applied. Review code, dates, amount, and eligibility before saving.", "info");
   }
 
@@ -710,6 +713,10 @@
       if (field.name === "title") field.value = campaign.title || "";
       if (field.name === "description") field.value = campaign.description || "";
       if (field.name === "campaignType") field.value = campaign.campaignType || "";
+      if (/^dailyReward[1-4]$/.test(field.name)) {
+        var rewards = campaign.eligibilityConfig && campaign.eligibilityConfig.daily_rewards;
+        field.value = Array.isArray(rewards) ? rewards[Number(field.name.slice(-1)) - 1] : "";
+      }
       if (field.name === "amount") field.value = campaign.amount == null ? "" : String(campaign.amount);
       if (field.name === "startsAt") field.value = formatDateTimeLocalValue(campaign.startsAt);
       if (field.name === "endsAt") field.value = formatDateTimeLocalValue(campaign.endsAt);
@@ -736,6 +743,16 @@
       }
     });
     state.bonusCampaigns.selectedCampaignId = campaign.id || null;
+    syncDailyRewardFields();
+  }
+
+  function syncDailyRewardFields(){
+    var daily = getBonusCampaignFormValue("campaignType") === "poker_daily";
+    var group = doc.getElementById("adminDailyRewards");
+    if (group) group.hidden = !daily;
+    var amountField = getBonusCampaignField("amount");
+    if (amountField) amountField.readOnly = daily;
+    if (daily && amountField && !amountField.disabled) amountField.value = getBonusCampaignFormValue("dailyReward1");
   }
 
   function readBonusCampaignForm(){
@@ -763,6 +780,14 @@
       error.code = "invalid_eligibility_config";
       throw error;
     }
+    if (raw.campaignType === "poker_daily") {
+      if (!config || typeof config !== "object" || Array.isArray(config)) config = {};
+      config.daily_rewards = [1,2,3,4].map(function(day){
+        var field = getBonusCampaignField("dailyReward" + day);
+        return field && !field.disabled ? Number(field.value) : (selectedCampaign && selectedCampaign.eligibilityConfig.daily_rewards[day - 1]);
+      });
+      raw.amount = config.daily_rewards[0];
+    }
     return {
       campaignId: raw.campaignId || "",
       code: raw.code || "",
@@ -789,6 +814,7 @@
       description_too_long: "Description must be at most 500 characters.",
       missing_campaign_type: "Campaign type is required.",
       missing_campaign_type_too_long: "Campaign type must be at most 80 characters.",
+      invalid_daily_rewards: "Poker Daily requires four positive whole rewards, daily UTC, all accounts and no total cap. Activation is manual.",
       invalid_amount: "Amount must be a positive whole number.",
       missing_starts_at: "Starts at is required.",
       invalid_starts_at: "Starts at must be a valid date and time.",
@@ -819,6 +845,11 @@
     if (!campaignType) return "missing_campaign_type";
     if (campaignType.length > 80) return "missing_campaign_type_too_long";
     if (!Number.isInteger(data.amount) || data.amount <= 0) return "invalid_amount";
+    if (campaignType === "poker_daily") {
+      var rewards = data.eligibilityConfig && data.eligibilityConfig.daily_rewards;
+      if (!Array.isArray(rewards) || rewards.length !== 4 || !rewards.every(function(value){ return Number.isSafeInteger(value) && value > 0; })
+        || data.amount !== rewards[0] || data.claimPolicy !== "daily" || data.eligibilityType !== "all_accounts" || data.maxTotalClaims != null) return "invalid_daily_rewards";
+    }
     if (!data.startsAt) return "missing_starts_at";
     if (!Number.isFinite(Date.parse(data.startsAt))) return "invalid_starts_at";
     if (data.endsAt && !Number.isFinite(Date.parse(data.endsAt))) return "invalid_ends_at";
@@ -3584,6 +3615,7 @@
   }
 
   function handleBonusCampaignFormChange(event){
+    syncDailyRewardFields();
     var target = event && event.target;
     if (!target || !target.name) return;
     if (target.name === "eligibilityType" || target.name === "startsAt"){
