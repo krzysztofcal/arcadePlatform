@@ -79,3 +79,14 @@ Stage attempt stopped on Admin Draft create HTTP 500. Deployed backend/identity 
 Local verification: 36 fundamental Bonus/Admin/endpoint/scheduler/Welcome tests passed with the repository test runner CORS allowlist; direct invocation without that allowlist failed CORS assertions, then corrected configuration passed. Syntax (225 files), CSP (55 documents), lifecycle guards and diff check passed. Mobile Preview/CI results recorded in PR description.
 
 Runtime/mobile verification SHA: `d728c59bca1f3ee971218b869860dd9fd51dce31`. Netlify playkcswh Preview ready; 8 read-only browser checks passed at 390×844 and 667×375, including an explicit assertion that campaign status is inside the initial viewport, above reward cards/Claim. Sign-in CTA/eligibility and Claim guards preserved. Authenticated UI states simulated only; final live Stage GET still returns `dailyBonus:null`. CI launched for the PR, with final results recorded in its description. Self-review: only existing HTML live-region placement and cached JS element changed; no payout, CSS, inline-script or protocol changes. Stage activation remains blocked at T020, not completed.
+
+
+## Dedicated Stage identity gate
+
+- [x] T022 Read current Auth/Admin code and effective Preview configuration; inspect Stage Auth public settings, existing allowlisted Stage user existence and campaign inventory without using owner session or creating JWTs. Result: Preview Stage ref matches; email confirmation required; unauthenticated Admin GET returns 401.
+- [ ] T023 Obtain operator-controlled technical email and VPS secret mechanism/access identifiers; stop before provisioning while missing. Never request passwords/tokens in chat.
+- [ ] T024 Provision and confirm dedicated Stage Auth user, store credentials exclusively in approved VPS secrets, record UUID; append only to Preview ADMIN_USER_IDS while preserving existing IDs and Production values.
+- [ ] T025 Refresh appropriate Preview, authenticate through real Supabase Auth session and verify JWT subject/Auth row/Admin GET/Stage identity plus Production rejection; no locally generated JWT or personal-account reuse.
+- [ ] T026 Resume T020 after T025; existing Admin only, Draft verification before irreversible End, no duplicates, stop on failure, no Claim.
+
+Read-only preflight baseline SHA `20a24f893ba683f99e706491a3bc7fff29a91cfc`. 50 fundamental existing Auth/Stage-identity/Bonus/Admin/endpoint/scheduler/Welcome tests passed with repository CORS setup. Self-review: no application/security-policy changes; no secret values persisted or logged. Stage old `daily-active-2026` remains active (20 CH), new `daily-streak-2026` absent. Technical account has not been created; actual account authorization and Production denial have not been verified. Blocked on controlled email and VPS secret mechanism/access. No migrations, payouts, Production mutation or merge.

@@ -91,3 +91,18 @@ In `poker/poker.js:renderDailyBonus`, keep a local `dailyLoadError` flag separat
 ## Stage GO and mobile status follow-up
 
 Use deployed `admin-stage-identity` and existing `admin-bonus-campaigns` GET/create/set_status APIs: verify Stage identity/backend, create or reuse uniquely coded correct Draft, verify full configuration, End `daily-active-2026`, activate new Draft, read back both campaigns and authenticated Daily status without Claim. Move existing `dailyDisclaimer` live region before reward cards in `poker/index.html`; cache its element in current `poker/poker.js` renderer. Keep existing classes, sign-in CTA and payout logic.
+
+
+## Dedicated Stage identity preflight and resumption
+
+Reuse `requireAdminUser()` / `parseAdminUserIds()` in `netlify/functions/_shared/admin-auth.mjs`, current Supabase Auth login and `admin-bonus-campaigns` GET/create/set_status. No application changes are needed. `supabase-admin.mjs` resolves primary `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_DB_URL` and `SUPABASE_SERVICE_ROLE_KEY` before available V2 fallbacks; frontend build writes `js/auth/supabase-config.js` from public URL/anon configuration.
+
+Observed on PR1084 Preview: Netlify context `deploy-preview`; URL, DB target and expected Stage ref identify `krydukthwdvccggbyjfw`; `CHIPS_ENABLED=1`. `ADMIN_USER_IDS` has two existing IDs, one matching a Stage Auth user. Preserve both, append only the new technical UUID to this context. Production is separately scoped and must remain unchanged.
+
+1. Obtain controlled email and VPS host/approved existing secret mechanism identifiers from owner, without requesting credential values in chat. Store generated credentials directly there; no local credential-file fallback.
+2. Provision the Stage Auth identity using supported Supabase Auth administration, confirm controlled email when required, record only actual UUID. Current Stage Auth settings: email enabled, signup enabled, automatic email confirmation disabled. Stop for required manual confirmation.
+3. Extend only Preview allowlist and refresh the affected Preview deployment so the new setting is effective. Preserve owner's IDs.
+4. Log in using real Supabase Auth credentials from VPS secrets. Keep access/refresh tokens out of files, repository, PR and logs. Verify authenticated Supabase user/JWT subject, existing Stage Auth row, successful Admin GET and `admin-stage-identity` matches across URL/DB/service role; verify Production rejection and no Production allowlist change. Environment configuration alone is not authorization evidence.
+5. Only then resume T020 through authenticated existing Admin: recheck no duplicate, create and verify `daily-streak-2026` Draft, End legacy 20 CH, Activate new, read back statuses/rewards/eligible Day1 25CH without claiming. Stop on any failure.
+
+Current preflight stops before provisioning: controlled email and approved VPS secret storage/access not supplied. No Auth creation, environment edits, campaign operations or real-session authorization checks performed.

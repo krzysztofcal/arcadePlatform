@@ -68,3 +68,12 @@ Distinguish a successful status read with no new campaign (“Daily Bonus is not
 ## Stage GO and mobile status follow-up
 
 Owner GO: Stage-only Admin cutover to `daily-streak-2026`, with exact project `krydukthwdvccggbyjfw`, verified deployed backend and verified Draft before ending old campaign; preserve history and stop on any failure. No claims, Production, migration or merge authorized. Lobby status is placed directly after eligibility heading, before reward cards and Claim, so it is visible near the top on mobile.
+
+
+## Dedicated Codex Stage administrator — owner authorization
+
+The owner authorizes one dedicated technical Supabase Auth identity in Stage `krydukthwdvccggbyjfw` only, using a real operator-controlled email address. Append its actual UUID only to the Netlify `deploy-preview` value of existing `ADMIN_USER_IDS`; preserve all existing IDs and all Production values. No new RBAC, schema, frontend secrets or personal-account/session reuse.
+
+Credentials must be stored only in the operator-approved VPS secret mechanism. A missing controlled address, secret location/access or required account confirmation is a hard stop; never fabricate email, locally mint a substitute user JWT or bypass Auth/allowlist/FK checks. The Stage cutover GO remains valid, but requires a real authenticated Codex Stage session verified through the existing Admin API first.
+
+Verify Auth-issued JWT subject against the new Stage user, membership in the Stage allowlist, Stage `auth.users` existence, successful administrative GET and denial of Production access before any campaign mutation. No automatic Claim/CH payout is authorized.
