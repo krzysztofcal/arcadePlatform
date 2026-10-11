@@ -1,6 +1,6 @@
 # Tasks: Poker Daily Bonus (#1079)
 
-**Source:** [spec.md](spec.md), [plan.md](plan.md), updated owner decision in #1079.  
+**Source:** [spec.md](spec.md), [plan.md](plan.md), updated owner decision in #1079.
 **State:** revised planning in Draft PR #1084; implementation/rollout pending authorization. No DB migrations.
 
 ## Phase 0 — Owner gate
@@ -35,12 +35,12 @@
 
 ## Scope and developer notes (project rules 3–9)
 
-3. Think carefully and fulfill requirements completely.  
-4. Keep code minimal; simplify without changing behavior.  
-5. Reuse existing packages, methods, patterns and classes.  
-6. Highlight all breaking effects, especially End of old daily and changed Admin template/dynamic amount.  
-7. All JS remains JSP-compatible (global/IIFE, no browser modules).  
-8. One CSS selector per physical line with no intra-declaration linebreak.  
-9. Double-check/refactor before handing off.  
+3. Think carefully and fulfill requirements completely.
+4. Keep code minimal; simplify without changing behavior.
+5. Reuse existing packages, methods, patterns and classes.
+6. Highlight all breaking effects, especially End of old daily and changed Admin template/dynamic amount.
+7. All JS remains JSP-compatible (global/IIFE, no browser modules).
+8. One CSS selector per physical line with no intra-declaration linebreak.
+9. Double-check/refactor before handing off.
 
 Use `agents.md`/`skills.md`; no repository commands in this SpecKit, no new migrations, only fundamental tests, CSP SHA for added inline scripts, `klog` instead of `console.log`. The owner-approved product behavior does **not** authorize Stage/Production writes, CH grants or merge.
