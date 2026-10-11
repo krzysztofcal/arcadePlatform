@@ -77,3 +77,7 @@ The owner authorizes one dedicated technical Supabase Auth identity in Stage `kr
 Credentials must be stored only in the operator-approved VPS secret mechanism. A missing controlled address, secret location/access or required account confirmation is a hard stop; never fabricate email, locally mint a substitute user JWT or bypass Auth/allowlist/FK checks. The Stage cutover GO remains valid, but requires a real authenticated Codex Stage session verified through the existing Admin API first.
 
 Verify Auth-issued JWT subject against the new Stage user, membership in the Stage allowlist, Stage `auth.users` existence, successful administrative GET and denial of Production access before any campaign mutation. No automatic Claim/CH payout is authorized.
+
+## Approved operator workflow — supersedes dedicated Codex Auth identity
+
+The 2026-10-11 Stage transition was performed as one approved, atomic management operation: old `daily-active-2026` ended, new `daily-streak-2026` active with 25/50/100/200 CH. No Production operation or CH claim occurred. The abandoned request to create an agent Supabase Auth account is not a prerequisite. Future AI agents must use the explicitly dispatched Stage-only GitHub workflow described in `docs/stage-bonus-agent-operations.md`, with owner GitHub identity, exact GO binding, Stage physical DB fence, existing Admin campaign validation and a transactional switch. No new Auth users or stored credentials are required.
