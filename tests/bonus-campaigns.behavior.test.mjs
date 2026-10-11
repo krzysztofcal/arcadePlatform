@@ -408,3 +408,22 @@ test("Daily status projection is unavailable before publication and shows claime
   assert.equal(paused.dailyBonus.amount, 50);
   assert.equal(paused.dailyBonus.nextEligibleAt, "2026-07-09T00:00:00.000Z");
 });
+
+test("Daily receipt without matching PROMO_BONUS transaction fails closed for replay and continuation", async () => {
+  const deps = pokerDailyDeps();
+  const today = "2026-07-07T12:00:00Z";
+  const first = await claimBonusCampaign(AFTER_USER, "daily-login", { ...deps, now: today });
+  assert.equal(first.claimed, true);
+  deps.txByKey.delete(first.idempotencyKey);
+
+  for (const now of [today, "2026-07-08T00:00:00Z"]) {
+    const status = await getBonusCampaignStatus(AFTER_USER, "daily-login", { ...deps, now });
+    assert.equal(status.eligible, false);
+    assert.equal(status.reason, "invalid_daily_claim");
+    const result = await claimBonusCampaign(AFTER_USER, "daily-login", { ...deps, now });
+    assert.equal(result.claimed, false);
+    assert.equal(result.reason, "invalid_daily_claim");
+  }
+  assert.equal(deps.posts.length, 1);
+  assert.equal(deps.claimsByCampaignUser.size, 1);
+});

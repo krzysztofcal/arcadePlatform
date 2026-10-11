@@ -242,10 +242,9 @@ async function validDailyEvidence(claim, campaign, userId, runSql) {
   const paid = readDailyReceipt(claim, campaign.eligibilityConfig.daily_rewards);
   if (!paid || claim.idempotency_key !== buildCampaignIdempotencyKey(campaign.code, userId, claim.claim_period_key)) return null;
   const transaction = await fetchPromoTransaction(userId, claim.idempotency_key, runSql);
-  if (transaction) {
-    const metadata = parseJsonObject(transaction.metadata);
-    if (transaction.id !== claim.transaction_id || metadata.amount !== paid.amount || metadata.streak_day !== paid.streakDay) return null;
-  }
+  if (!transaction) return null;
+  const metadata = parseJsonObject(transaction.metadata);
+  if (transaction.id !== claim.transaction_id || metadata.amount !== paid.amount || metadata.streak_day !== paid.streakDay) return null;
   return paid;
 }
 

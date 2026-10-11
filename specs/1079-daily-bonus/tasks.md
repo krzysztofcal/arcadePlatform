@@ -48,8 +48,13 @@ Use `agents.md`/`skills.md`; no repository commands in this SpecKit, no new migr
 
 ## Verification record
 
-Implementation runtime SHA: `6df81d3b1010d59fa85b02b55d3f69bbe51f3925` (subsequent verification-document commits do not change runtime).
+Original implementation runtime SHA: `6df81d3b1010d59fa85b02b55d3f69bbe51f3925` (historical baseline before the P2 correction below).
 
 Completed: 35 targeted Bonus/Admin/endpoint/scheduler/Welcome tests; real isolated PostgreSQL native JSONB/concurrent Claim/End-wait/ledger rollback contract; full local `scripts/test-all.mjs` runner; syntax, CSP (55 documents), lifecycle guards and diff review. Only existing Admin template regression fixtures/expectations changed; no new presentation test suite.
 
 Remote GitHub CI is running on this PR; final results will be recorded in its description. PR remains Draft for owner code review. Netlify Preview is intentionally skipped. T013–T014 remain unapproved and unexecuted; no live environment operations, campaign changes or production merge. T015's runtime/environment verification awaits later deployment authorization.
+
+
+## Review follow-up — P2
+
+- [x] T016 Make `validDailyEvidence()` fail closed when its matching PROMO_BONUS transaction is absent; preserve ID/amount/streak checks. Add exactly one fundamental missing-transaction case covering replay/continuation, verify red→green and run the relevant regression suites. Self-review: no new payout/storage/history mechanism; no migration or environment action. Local result: 36 tests passed, syntax and diff checks passed. Final SHA/remote CI results are recorded in Draft PR #1084; Netlify deployment remains skipped.
