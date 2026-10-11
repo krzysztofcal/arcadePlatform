@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Poker Felt V2 — przegląd POC #1086</title><style>
+body{margin:0;background:#0c1218;color:#eef1f5;font:16px/1.6 system-ui,sans-serif;}
+main{padding:24px;max-width:1800px;margin:auto;}
+a{color:#9bdde7;}
+h1,h2{line-height:1.25;}
+p{max-width:950px;}
+nav{display:flex;gap:16px;flex-wrap:wrap;}
+.row{display:flex;gap:16px;overflow-x:auto;align-items:flex-start;padding:8px 0 24px;}
+figure{margin:0;flex:none;}
+figcaption{padding:8px 0;color:#cdd6df;}
+img{display:block;max-width:none;border:1px solid #35404a;}
+small{display:block;color:#abb9c8;}
+section{scroll-margin-top:16px;border-top:1px solid #35404a;margin-top:32px;padding-top:12px;}
+code{overflow-wrap:anywhere;}
+</style></head><body><main>
+<h1>Poker Table Felt V2 — dwa motywy, T001–T004</h1>
+<p><strong>Wymagana Twoja ocena wyglądu. Draft PR — bez akceptacji wizualnej.</strong> Porównania pokazują rzeczywisty renderer i zasoby z Netlify Deploy Preview. Karty, żetony i HUD pochodzą z izolowanej sceny w przeglądarce; nie zmieniano żywych stołów, WS, CH ani Stage/Production. To emulacja rozmiaru ekranu, nie test telefonu.</p>
+<p><strong>Rekomendacja: A — sama tekstura.</strong> B to osobna propozycja napisu, którą możesz odrzucić niezależnie od filcu. Tekstura nieco rozjaśnia Neon i osłabia ornament — oceń szczególnie ten kompromis. Pozostałe cztery motywy czekają na GO.</p>
+<p>Obrazy mają rzeczywiste wymiary viewportu, bez powiększania filcu. Przewiń porównania poziomo lub kliknij obraz, aby otworzyć go osobno. Przed = oryginalny CSS z main; A = wdrożony CSS; B = A z tymczasowym pseudo-elementem z napisem (nie jest włączony w produkcie).</p>
+<p><a href="https://github.com/krzysztofcal/arcadePlatform/pull/1088">Draft PR #1088</a> · <a href="../artwork.md">Raport i provenance</a> · <a href="measurements.json">Pomiary</a> · <a href="/poker/">Lobby tego Preview</a></p>
+<p>Zweryfikowany SHA kodu/tekstury: <code>f92527351f7bf1285cf865949e6366759c505f49</code>. <a href="https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/table-v2.html?tableId=table-2">Niezmienny Deploy Preview tego SHA</a>. Karty w porównaniach są danymi izolowanej sceny; bez tych danych testowych link stołu nie odtwarza rozdania.</p>
+<nav><a href="#classic-portrait">Classic portrait</a><a href="#classic-landscape">Classic landscape</a><a href="#neon-portrait">Neon portrait</a><a href="#neon-landscape">Neon landscape</a><a href="#classic-short-landscape">Krótki landscape</a></nav>
+<section id="classic-portrait"><h2>Classic Casino — portrait, 390×844</h2><div class="row">
+<figure><figcaption>Przed — main</figcaption><a href="classic-portrait-baseline.webp"><img src="classic-portrait-baseline.webp" width="390" height="844" loading="lazy" alt="Classic Casino, portrait: Przed — main"></a></figure>
+<figure><figcaption>A — sama tekstura</figcaption><a href="classic-portrait-texture.webp"><img src="classic-portrait-texture.webp" width="390" height="844" loading="lazy" alt="Classic Casino, portrait: A — sama tekstura"></a></figure>
+<figure><figcaption>B — tekstura + napis, propozycja</figcaption><a href="classic-portrait-marking.webp"><img src="classic-portrait-marking.webp" width="390" height="844" loading="lazy" alt="Classic Casino, portrait: B — tekstura + napis, propozycja"></a></figure>
+</div></section>
+<section id="classic-landscape"><h2>Classic Casino — landscape, 844×390</h2><div class="row">
+<figure><figcaption>Przed — main</figcaption><a href="classic-landscape-baseline.webp"><img src="classic-landscape-baseline.webp" width="844" height="390" loading="lazy" alt="Classic Casino, landscape: Przed — main"></a></figure>
+<figure><figcaption>A — sama tekstura</figcaption><a href="classic-landscape-texture.webp"><img src="classic-landscape-texture.webp" width="844" height="390" loading="lazy" alt="Classic Casino, landscape: A — sama tekstura"></a></figure>
+<figure><figcaption>B — tekstura + napis, propozycja</figcaption><a href="classic-landscape-marking.webp"><img src="classic-landscape-marking.webp" width="844" height="390" loading="lazy" alt="Classic Casino, landscape: B — tekstura + napis, propozycja"></a></figure>
+</div></section>
+<section id="classic-short-landscape"><h2>Classic Casino — short-landscape, 568×320</h2><div class="row">
+<figure><figcaption>Przed — main</figcaption><a href="classic-short-landscape-baseline.webp"><img src="classic-short-landscape-baseline.webp" width="568" height="320" loading="lazy" alt="Classic Casino, short-landscape: Przed — main"></a></figure>
+<figure><figcaption>A — sama tekstura</figcaption><a href="classic-short-landscape-texture.webp"><img src="classic-short-landscape-texture.webp" width="568" height="320" loading="lazy" alt="Classic Casino, short-landscape: A — sama tekstura"></a></figure>
+<figure><figcaption>B — tekstura + napis, propozycja</figcaption><a href="classic-short-landscape-marking.webp"><img src="classic-short-landscape-marking.webp" width="568" height="320" loading="lazy" alt="Classic Casino, short-landscape: B — tekstura + napis, propozycja"></a></figure>
+</div></section>
+<section id="neon-portrait"><h2>Neon Vegas — portrait, 390×844</h2><div class="row">
+<figure><figcaption>Przed — main</figcaption><a href="neon-portrait-baseline.webp"><img src="neon-portrait-baseline.webp" width="390" height="844" loading="lazy" alt="Neon Vegas, portrait: Przed — main"></a></figure>
+<figure><figcaption>A — sama tekstura</figcaption><a href="neon-portrait-texture.webp"><img src="neon-portrait-texture.webp" width="390" height="844" loading="lazy" alt="Neon Vegas, portrait: A — sama tekstura"></a></figure>
+<figure><figcaption>B — tekstura + napis, propozycja</figcaption><a href="neon-portrait-marking.webp"><img src="neon-portrait-marking.webp" width="390" height="844" loading="lazy" alt="Neon Vegas, portrait: B — tekstura + napis, propozycja"></a></figure>
+</div></section>
+<section id="neon-landscape"><h2>Neon Vegas — landscape, 844×390</h2><div class="row">
+<figure><figcaption>Przed — main</figcaption><a href="neon-landscape-baseline.webp"><img src="neon-landscape-baseline.webp" width="844" height="390" loading="lazy" alt="Neon Vegas, landscape: Przed — main"></a></figure>
+<figure><figcaption>A — sama tekstura</figcaption><a href="neon-landscape-texture.webp"><img src="neon-landscape-texture.webp" width="844" height="390" loading="lazy" alt="Neon Vegas, landscape: A — sama tekstura"></a></figure>
+<figure><figcaption>B — tekstura + napis, propozycja</figcaption><a href="neon-landscape-marking.webp"><img src="neon-landscape-marking.webp" width="844" height="390" loading="lazy" alt="Neon Vegas, landscape: B — tekstura + napis, propozycja"></a></figure>
+</div></section>
+<section id="neon-short-landscape"><h2>Neon Vegas — short-landscape, 568×320</h2><div class="row">
+<figure><figcaption>Przed — main</figcaption><a href="neon-short-landscape-baseline.webp"><img src="neon-short-landscape-baseline.webp" width="568" height="320" loading="lazy" alt="Neon Vegas, short-landscape: Przed — main"></a></figure>
+<figure><figcaption>A — sama tekstura</figcaption><a href="neon-short-landscape-texture.webp"><img src="neon-short-landscape-texture.webp" width="568" height="320" loading="lazy" alt="Neon Vegas, short-landscape: A — sama tekstura"></a></figure>
+<figure><figcaption>B — tekstura + napis, propozycja</figcaption><a href="neon-short-landscape-marking.webp"><img src="neon-short-landscape-marking.webp" width="568" height="320" loading="lazy" alt="Neon Vegas, short-landscape: B — tekstura + napis, propozycja"></a></figure>
+</div></section>
+<p>Materiał: jeden WebP 384×384, 68 632 bajty (67,02 KiB); +1 zasób na dokument. Brak nowych animacji, filtrów i skryptów. Nie wykryto przesunięć geometrii, błędów JS/CSP ani regresji menu i przeciągania suwaka. Odstępy requestAnimationFrame ~16,7 ms w desktopowym Chromium są tylko kontrolą orientacyjną.</p>
+<p><strong>T004 — STOP.</strong> Czekamy na oddzielną akceptację realistyczności materiału i decyzję o napisie. CI nie oznacza akceptacji wyglądu.</p>
+</main></body></html>
