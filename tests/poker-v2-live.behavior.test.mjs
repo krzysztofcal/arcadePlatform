@@ -233,6 +233,21 @@ function createHarness(options = {}){
     };
   }
 
+  const themeImages = [];
+  class ThemeImage {
+    naturalWidth = 100;
+    set src(value){
+      this.url = value;
+      themeImages.push(this);
+      if (options.themeImageOutcome !== 'pending') Promise.resolve().then(() => this.complete());
+    }
+    complete(){
+      const outcome = typeof options.themeImageOutcome === 'function' ? options.themeImageOutcome(this.url) : options.themeImageOutcome;
+      this.naturalWidth = outcome === 'invalid' ? 0 : 100;
+      if (outcome === 'error') this.onerror?.();
+      else this.onload?.();
+    }
+  }
   const intervalTimers = [];
   const timeoutTimers = [];
   const sessionStorageEntries = new Map();
@@ -249,6 +264,7 @@ function createHarness(options = {}){
   FakeDate.parse = Date.parse;
   FakeDate.UTC = Date.UTC;
   const sandbox = {
+    Image: ThemeImage,
     window: {
       innerWidth: Number.isFinite(options.innerWidth) ? options.innerWidth : 320,
       innerHeight: Number.isFinite(options.innerHeight) ? options.innerHeight : 640,
@@ -394,6 +410,7 @@ async function flush(){
 
   return {
     elements,
+    themeImages,
     logs,
     windowLocation: sandbox.window.location,
     joinPayloads,
@@ -6442,4 +6459,84 @@ test('active-table Back to lobby Yes sends leave and navigates only after leave 
   assert.equal(harness.windowLocation.href, '', 'fallback waits for correct leave completion');
   completeLeave({ ok: true }); await harness.flush();
   assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+
+test('automatic table themes agree across clients and reload for the same immutable ID', async () => {
+  const fixtures = [
+    ['table-0', 'crimson-velvet'], ['table-1', 'midnight-sapphire'],
+    ['table-2', 'classic-casino'], ['table-3', 'emerald-palace'],
+    ['table-4', 'neon-vegas'], ['table-5', 'royal-gold'],
+    ['%20table-1%20', 'midnight-sapphire']
+  ];
+  for (const [tableId, expected] of fixtures) {
+    for (const token of ['token-user-1', 'token-user-2', 'token-user-1']) {
+      const harness = createHarness({ search: '?tableId=' + tableId, token });
+      harness.fireDomContentLoaded();
+      await harness.flush();
+      assert.equal(harness.elements.pokerTableScreen.getAttribute('data-table-theme') || 'classic-casino', expected);
+      assert.equal(harness.themeImages.length, expected === 'classic-casino' ? 0 : 7);
+    }
+  }
+  for (const search of ['', '?tableId=', '?tableId=%20']) {
+    const harness = createHarness({ search });
+    harness.fireDomContentLoaded();
+    await harness.flush();
+    assert.equal(harness.themeImages.length, 0, 'missing/blank ID keeps Classic');
+    assert.equal(harness.elements.pokerTableScreen.getAttribute('data-table-theme'), null);
+  }
+});
+
+test('automatic table theme survives hands and reconnect without reloading assets or adding economic operations', async () => {
+  const { harness, ws } = await bootReactionHistoryHarness();
+  const before = [harness.joinPayloads.length, harness.rebuyPayloads.length];
+  assert.equal(harness.elements.pokerTableScreen.getAttribute('data-table-theme'), 'midnight-sapphire');
+  ws.onStatus('reconnecting', {});
+  ws.onStatus('auth_ok', {});
+  const snapshot = {
+    kind: 'stateSnapshot', initial: true,
+    payload: { tableId: 'table-1', stateVersion: 10, table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      seats: [{ seatNo: 1, userId: 'user-1', status: 'ACTIVE' }], you: { seat: 1 }, private: { holeCards: ['AS', 'KH'] },
+      public: { hand: { handId: 'next-hand', status: 'PLAYING' }, stacks: { 'user-1': 100 }, pot: { total: 0, sidePots: [] }, legalActions: { seat: 1, actions: [] } } }
+  };
+  ws.onSnapshot(snapshot);
+  await harness.flush();
+  snapshot.payload.stateVersion = 11;
+  snapshot.payload.public.hand.handId = 'another-hand';
+  ws.onSnapshot(snapshot);
+  await harness.flush();
+  assert.equal(harness.elements.pokerTableScreen.getAttribute('data-table-theme'), 'midnight-sapphire');
+  assert.equal(harness.themeImages.length, 7, 'reconnect/snapshots never start another preload');
+  assert.equal(harness.joinPayloads.length, before[0] + 1, 'existing reconnect performs one authoritative seat reattach');
+  assert.equal(harness.joinPayloads.at(-1).preferredSeatNo, 1);
+  assert.equal(harness.rebuyPayloads.length, before[1], 'theme loading must not initiate a rebuy');
+});
+
+test('automatic table themes preload the full package and fall back to Classic on failure', async (t) => {
+  const harness = createHarness({ themeImageOutcome: 'pending' });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+  assert.equal(harness.themeImages.length, 7);
+  for (const image of harness.themeImages.slice(0, 6)) image.complete();
+  await harness.flush();
+  assert.equal(harness.elements.pokerTableScreen.getAttribute('data-table-theme'), null, 'partial preload must stay Classic');
+  harness.themeImages[6].complete();
+  await harness.flush();
+  assert.equal(harness.elements.pokerTableScreen.getAttribute('data-table-theme'), 'midnight-sapphire');
+  for (const outcome of ['error', 'invalid', 'pending']) {
+    await t.test(outcome, async () => {
+      const failed = createHarness({ themeImageOutcome: outcome === 'pending' ? 'pending' : (url) => url.endsWith('card-back.svg') ? outcome : 'loaded' });
+      failed.fireDomContentLoaded();
+      await failed.flush();
+      if (outcome === 'pending') {
+        failed.advanceTime(15000);
+        await failed.flush();
+        for (const image of failed.themeImages) image.complete();
+        await failed.flush();
+      }
+      assert.equal(failed.themeImages.length, 7);
+      assert.equal(failed.elements.pokerTableScreen.getAttribute('data-table-theme'), null);
+      assert.ok(failed.logs.some((entry) => entry.kind === 'poker_table_theme_load_failed'));
+    });
+  }
 });
