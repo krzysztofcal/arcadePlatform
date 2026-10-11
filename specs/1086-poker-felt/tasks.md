@@ -5,7 +5,7 @@
 - [X] T003 Before/after plus optional marking, cards/chips/HUD; actual exact-SHA Netlify Preview, visual/performance/self-review evidence; Draft PR.
 - [X] T004 Review evidence prepared for presentation and explicit owner approval request — STOP.
 
-**Owner visual approval: PENDING. No T005–T007 authorization.**
+**Owner approval: branded saturated B APPROVED; portrait correction requested. No T005–T007 authorization.**
 
 ## Deferred — unauthorized
 - [ ] T005 Finalize all six themes only after GO.
@@ -20,4 +20,5 @@
 ## Owner-requested centered large seal revision
 - [X] Center imprint geometrically, enlarge original premium Arcade seal; accept natural content occlusion.
 - [X] Capture exact-SHA active/board-clear scenes and refresh review gallery/Draft PR.
-- [ ] Owner visual approval — PENDING; STOP at T004.
+- [X] Owner visual approval — saturated branded B approved.
+- [X] Owner-requested portrait leveling in current two-theme POC; no rollout authorization.
