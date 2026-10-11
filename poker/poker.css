@@ -506,7 +506,7 @@ body.poker-lobby .tile{min-height:410px;}
 body.poker-lobby .poker-table-row{flex-wrap:wrap;}
 }
 @media(orientation:landscape) and (max-height:550px){
-body.poker-lobby .tile{min-height:245px;}
+body.poker-lobby .tile{min-height:300px;}
 body.poker-lobby .tile--online h2{margin:5px 0 8px;font-size:23px;}
 body.poker-lobby .quick-status{font-size:9px;}
 body.poker-lobby .topbar{min-height:60px;}
@@ -568,7 +568,6 @@ body.poker-lobby #dailyDialog .bonus-disclaimer{font-size:9px!important;margin-t
 }
 /* Keep Online text off bright artwork and below its status in short landscape. */
 @media(orientation:landscape) and (max-height:550px){
-body.poker-lobby .tile--online{min-height:300px;}
 body.poker-lobby .tile--online::after{background:linear-gradient(180deg,#06082533,#0b1040ed 25%,#070e37 100%);}
 body.poker-lobby .tile--online .tile-status{background:#0a614e;}
 body.poker-lobby #pokerSignIn{background:#152a50;color:#fff;font-size:12px;}
