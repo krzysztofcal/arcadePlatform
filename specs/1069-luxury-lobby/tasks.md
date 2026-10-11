@@ -68,3 +68,6 @@ T009–T014 implemented on main c4f26e4c baseline. T015 CI/actual guest and nega
 - [x] T031 Independently verify all three findings against current PR HEAD, live Preview and merged V3 before any implementation edit; record classifications/evidence in self-review.md.
 - [x] T032 In poker/poker.js use stable subject and generation checks for identity-bound async responses/auth reads; reset account UI/client on transition. Restore approved illustrative Daily Bonus in poker/index.html and scoped poker/poker.css; improve only Online short-landscape contrast/spacing.
 - [ ] T033 Run existing fundamental tests/guards and temporary auth-race/short-landscape checks; confirm CI/Netlify Preview latest SHA, record evidence and pending funded Stage/physical-device gate. Keep Draft, no merge/Production.
+
+- [x] T034 Verify Welcome Bonus in-flight finding against live HEAD, reproduce with deferred status and extend existing fundamental account-isolation regression (A→B, A→B→A, logout, old-request rejection). Apply minimal same-method refresh in finally; no bonus economics or backend changes.
+- [ ] T035 Confirm final CI and Netlify Preview SHA, record combined review evidence/self-review and pending funded authenticated Stage smoke; retain Draft/no merge.

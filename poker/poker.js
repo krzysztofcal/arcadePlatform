@@ -1733,7 +1733,7 @@
     }
 
     async function refreshWelcomeBonusBanner(){
-      if (!welcomeBonusBanner) return null;
+      if (!welcomeBonusBanner || !lobbyAuthenticated) return null;
       if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchWelcomeBonusStatus !== 'function'){
         setWelcomeBonusBannerVisible(false);
         return null;
@@ -1752,6 +1752,9 @@
           return null;
         } finally {
           welcomeBonusInFlight = null;
+          if (lobbyAuthenticated && lobbyIdentityGeneration !== requestGeneration){
+            refreshWelcomeBonusBanner();
+          }
         }
       })();
       return welcomeBonusInFlight;
