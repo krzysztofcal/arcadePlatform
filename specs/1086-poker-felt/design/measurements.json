@@ -1,4 +1,5 @@
 {
+  "runtimeSHA": "609c48fa599e18b408f27359721f97252fd0dc39",
   "baseline": {
     "origin": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app",
     "results": [
@@ -387,8 +388,8 @@
       "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
     ]
   },
-  "texture": {
-    "origin": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app",
+  "material": {
+    "origin": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app",
     "results": [
       {
         "theme": null,
@@ -396,7 +397,7 @@
           "width": 390,
           "height": 844
         },
-        "variant": "texture",
+        "variant": "fiberonly",
         "orientation": "portrait",
         "faceCards": 5,
         "chipElements": 0,
@@ -432,9 +433,10 @@
           "height": 178
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
         },
@@ -445,10 +447,16 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 374.6999969482422
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
             "transfer": 68932,
             "encoded": 68632,
-            "duration": 204.20000076293945
+            "duration": 428.20000076293945
           }
         ],
         "joins": 0,
@@ -456,7 +464,7 @@
         "frame": {
           "median": 16.699999999999818,
           "p95": 16.799999999999272,
-          "max": 16.799999999999727
+          "max": 16.800000000000182
         }
       },
       {
@@ -465,7 +473,7 @@
           "width": 844,
           "height": 390
         },
-        "variant": "texture",
+        "variant": "fiberonly",
         "orientation": "landscape",
         "faceCards": 5,
         "chipElements": 0,
@@ -501,9 +509,10 @@
           "height": 58
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "48% / 44%"
         },
@@ -514,17 +523,23 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 423.5
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
             "transfer": 68932,
             "encoded": 68632,
-            "duration": 64.29999923706055
+            "duration": 517.4000015258789
           }
         ],
         "joins": 0,
         "rebuys": 0,
         "frame": {
           "median": 16.699999999999818,
-          "p95": 16.700000000000273,
+          "p95": 16.800000000000182,
           "max": 16.800000000000182
         }
       },
@@ -534,7 +549,7 @@
           "width": 568,
           "height": 320
         },
-        "variant": "texture",
+        "variant": "fiberonly",
         "orientation": "landscape",
         "faceCards": 5,
         "chipElements": 0,
@@ -570,9 +585,10 @@
           "height": 64
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "48% / 44%"
         },
@@ -583,18 +599,24 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 432
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
             "transfer": 68932,
             "encoded": 68632,
-            "duration": 111.10000228881836
+            "duration": 546
           }
         ],
         "joins": 0,
         "rebuys": 0,
         "frame": {
           "median": 16.699999999999818,
-          "p95": 16.800000000000182,
-          "max": 16.800000000000182
+          "p95": 16.799999999999727,
+          "max": 33.19999999999982
         }
       },
       {
@@ -603,7 +625,7 @@
           "width": 390,
           "height": 844
         },
-        "variant": "texture",
+        "variant": "fiberonly",
         "orientation": "portrait",
         "faceCards": 5,
         "chipElements": 0,
@@ -639,9 +661,10 @@
           "height": 178
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
         },
@@ -652,79 +675,16 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 68932,
-            "encoded": 68632,
-            "duration": 95
-          }
-        ],
-        "joins": 0,
-        "rebuys": 0,
-        "frame": {
-          "median": 16.699999999999818,
-          "p95": 16.700000000000273,
-          "max": 16.800000000000182
-        }
-      },
-      {
-        "theme": "neon-vegas",
-        "viewport": {
-          "width": 844,
-          "height": 390
-        },
-        "variant": "texture",
-        "orientation": "landscape",
-        "faceCards": 5,
-        "chipElements": 0,
-        "hud": "Wallet: 500 CH",
-        "scene": {
-          "x": 8,
-          "y": 69.09375,
-          "width": 828,
-          "height": 310.5
-        },
-        "felt": {
-          "x": 46.21538543701172,
-          "y": 135.97067260742188,
-          "width": 751.5692138671875,
-          "height": 200.63076782226562
-        },
-        "community": {
-          "x": 367.8615417480469,
-          "y": 220.36297607421875,
-          "width": 108.27691650390625,
-          "height": 46.17694091796875
-        },
-        "hero": {
-          "x": 408.46539306640625,
-          "y": 303.1629638671875,
-          "width": 87.576904296875,
-          "height": 63.69232177734375
-        },
-        "actions": {
-          "x": 525.578125,
-          "y": 324,
-          "width": 310.421875,
-          "height": 58
-        },
-        "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
-          "pointer": "none",
-          "radius": "48% / 44%"
-        },
-        "scroll": {
-          "width": 844,
-          "height": 390
-        },
-        "hit": true,
-        "resources": [
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 247
+          },
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
             "transfer": 68932,
             "encoded": 68632,
-            "duration": 92.80000305175781
+            "duration": 267.60000228881836
           }
         ],
         "joins": 0,
@@ -738,10 +698,86 @@
       {
         "theme": "neon-vegas",
         "viewport": {
+          "width": 844,
+          "height": 390
+        },
+        "variant": "fiberonly",
+        "orientation": "landscape",
+        "faceCards": 5,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 69.09375,
+          "width": 828,
+          "height": 310.5
+        },
+        "felt": {
+          "x": 46.21538543701172,
+          "y": 135.97067260742188,
+          "width": 751.5692138671875,
+          "height": 200.63076782226562
+        },
+        "community": {
+          "x": 367.8615417480469,
+          "y": 220.36297607421875,
+          "width": 108.27691650390625,
+          "height": 46.17694091796875
+        },
+        "hero": {
+          "x": 408.46539306640625,
+          "y": 303.1629638671875,
+          "width": 87.576904296875,
+          "height": 63.69232177734375
+        },
+        "actions": {
+          "x": 525.578125,
+          "y": 324,
+          "width": 310.421875,
+          "height": 58
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 844,
+          "height": 390
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 90.20000076293945
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 107.79999923706055
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      {
+        "theme": "neon-vegas",
+        "viewport": {
           "width": 568,
           "height": 320
         },
-        "variant": "texture",
+        "variant": "fiberonly",
         "orientation": "landscape",
         "faceCards": 5,
         "chipElements": 0,
@@ -777,9 +813,10 @@
           "height": 64
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "48% / 44%"
         },
@@ -790,10 +827,16 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 64
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
             "transfer": 68932,
             "encoded": 68632,
-            "duration": 163.20000076293945
+            "duration": 109.10000228881836
           }
         ],
         "joins": 0,
@@ -801,33 +844,57 @@
         "frame": {
           "median": 16.699999999999818,
           "p95": 16.700000000000273,
-          "max": 16.799999999999727
+          "max": 33.200000000000045
         }
       }
     ],
     "requests": [
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
         "status": 200
       }
     ],
@@ -842,8 +909,8 @@
       "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
     ]
   },
-  "marking": {
-    "origin": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app",
+  "branded": {
+    "origin": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app",
     "results": [
       {
         "theme": null,
@@ -851,7 +918,7 @@
           "width": 390,
           "height": 844
         },
-        "variant": "marking",
+        "variant": "branded",
         "orientation": "portrait",
         "faceCards": 5,
         "chipElements": 0,
@@ -887,9 +954,10 @@
           "height": 178
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
         },
@@ -900,17 +968,23 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 961,
+            "encoded": 661,
+            "duration": 261.5999984741211
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
             "transfer": 68932,
             "encoded": 68632,
-            "duration": 291.39999771118164
+            "duration": 367.5999984741211
           }
         ],
         "joins": 0,
         "rebuys": 0,
         "frame": {
           "median": 16.699999999999818,
-          "p95": 16.700000000000273,
+          "p95": 16.700000000000728,
           "max": 16.800000000000182
         }
       },
@@ -920,7 +994,7 @@
           "width": 844,
           "height": 390
         },
-        "variant": "marking",
+        "variant": "branded",
         "orientation": "landscape",
         "faceCards": 5,
         "chipElements": 0,
@@ -956,9 +1030,10 @@
           "height": 58
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "48% / 44%"
         },
@@ -969,18 +1044,24 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 961,
+            "encoded": 661,
+            "duration": 352.0999984741211
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
             "transfer": 68932,
             "encoded": 68632,
-            "duration": 102.79999923706055
+            "duration": 517.6000022888184
           }
         ],
         "joins": 0,
         "rebuys": 0,
         "frame": {
           "median": 16.699999999999818,
-          "p95": 16.700000000000273,
-          "max": 66.59999999999991
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
         }
       },
       {
@@ -989,7 +1070,7 @@
           "width": 568,
           "height": 320
         },
-        "variant": "marking",
+        "variant": "branded",
         "orientation": "landscape",
         "faceCards": 5,
         "chipElements": 0,
@@ -1025,9 +1106,10 @@
           "height": 64
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "48% / 44%"
         },
@@ -1038,10 +1120,1058 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 961,
+            "encoded": 661,
+            "duration": 540.8000030517578
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
             "transfer": 68932,
             "encoded": 68632,
-            "duration": 76.29999923706055
+            "duration": 661.7999992370605
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      {
+        "theme": "neon-vegas",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "variant": "branded",
+        "orientation": "portrait",
+        "faceCards": 5,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 148.986083984375,
+          "width": 374,
+          "height": 675.27783203125
+        },
+        "felt": {
+          "x": 37.08222961425781,
+          "y": 266.993896484375,
+          "width": 332.74200439453125,
+          "height": 479.90789794921875
+        },
+        "community": {
+          "x": 151.36666870117188,
+          "y": 460.65277099609375,
+          "width": 87.26667785644531,
+          "height": 41.5555419921875
+        },
+        "hero": {
+          "x": 110.85000610351562,
+          "y": 746.3472290039062,
+          "width": 114.27778625488281,
+          "height": 83.111083984375
+        },
+        "actions": {
+          "x": 253.3125,
+          "y": 658,
+          "width": 128.6875,
+          "height": 178
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
+        },
+        "scroll": {
+          "width": 390,
+          "height": 844
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 961,
+            "encoded": 661,
+            "duration": 113.29999923706055
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 230.8000030517578
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.799999999999727,
+          "max": 16.800000000000182
+        }
+      },
+      {
+        "theme": "neon-vegas",
+        "viewport": {
+          "width": 844,
+          "height": 390
+        },
+        "variant": "branded",
+        "orientation": "landscape",
+        "faceCards": 5,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 69.09375,
+          "width": 828,
+          "height": 310.5
+        },
+        "felt": {
+          "x": 46.21538543701172,
+          "y": 135.97067260742188,
+          "width": 751.5692138671875,
+          "height": 200.63076782226562
+        },
+        "community": {
+          "x": 367.8615417480469,
+          "y": 220.36297607421875,
+          "width": 108.27691650390625,
+          "height": 46.17694091796875
+        },
+        "hero": {
+          "x": 408.46539306640625,
+          "y": 303.1629638671875,
+          "width": 87.576904296875,
+          "height": 63.69232177734375
+        },
+        "actions": {
+          "x": 525.578125,
+          "y": 324,
+          "width": 310.421875,
+          "height": 58
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 844,
+          "height": 390
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 961,
+            "encoded": 661,
+            "duration": 177.0999984741211
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 189.60000228881836
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.700000000000273,
+          "max": 16.800000000000182
+        }
+      },
+      {
+        "theme": "neon-vegas",
+        "viewport": {
+          "width": 568,
+          "height": 320
+        },
+        "variant": "branded",
+        "orientation": "landscape",
+        "faceCards": 5,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 62.734375,
+          "width": 552,
+          "height": 207
+        },
+        "felt": {
+          "x": 33.47692108154297,
+          "y": 107.31898498535156,
+          "width": 501.046142578125,
+          "height": 133.75384521484375
+        },
+        "community": {
+          "x": 247.90768432617188,
+          "y": 163.58053588867188,
+          "width": 72.18463134765625,
+          "height": 30.78460693359375
+        },
+        "hero": {
+          "x": 274.9769287109375,
+          "y": 218.78053283691406,
+          "width": 58.384613037109375,
+          "height": 42.46153259277344
+        },
+        "actions": {
+          "x": 139.6875,
+          "y": 248,
+          "width": 420.3125,
+          "height": 64
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 568,
+          "height": 320
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 961,
+            "encoded": 661,
+            "duration": 63.900001525878906
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 96.9000015258789
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.700000000000273,
+          "max": 16.799999999999955
+        }
+      }
+    ],
+    "requests": [
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      }
+    ],
+    "errors": [],
+    "csp": [],
+    "external": [
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
+    ]
+  },
+  "boardClear": {
+    "origin": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app",
+    "results": [
+      {
+        "theme": null,
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "variant": "branded",
+        "orientation": "portrait",
+        "faceCards": 2,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 148.986083984375,
+          "width": 374,
+          "height": 675.27783203125
+        },
+        "felt": {
+          "x": 37.08222961425781,
+          "y": 266.993896484375,
+          "width": 332.74200439453125,
+          "height": 479.90789794921875
+        },
+        "community": {
+          "x": 195,
+          "y": 502.20831298828125,
+          "width": 0,
+          "height": 0
+        },
+        "hero": {
+          "x": 110.85000610351562,
+          "y": 746.3472290039062,
+          "width": 114.27778625488281,
+          "height": 83.111083984375
+        },
+        "actions": {
+          "x": 253.3125,
+          "y": 658,
+          "width": 128.6875,
+          "height": 178
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
+        },
+        "scroll": {
+          "width": 390,
+          "height": 844
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 412.29999923706055
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 459.39999771118164
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      {
+        "theme": null,
+        "viewport": {
+          "width": 844,
+          "height": 390
+        },
+        "variant": "branded",
+        "orientation": "landscape",
+        "faceCards": 2,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 69.09375,
+          "width": 828,
+          "height": 310.5
+        },
+        "felt": {
+          "x": 46.21538543701172,
+          "y": 135.97067260742188,
+          "width": 751.5692138671875,
+          "height": 200.63076782226562
+        },
+        "community": {
+          "x": 422,
+          "y": 266.5399169921875,
+          "width": 0,
+          "height": 0
+        },
+        "hero": {
+          "x": 408.46539306640625,
+          "y": 303.1629638671875,
+          "width": 87.576904296875,
+          "height": 63.69232177734375
+        },
+        "actions": {
+          "x": 525.578125,
+          "y": 324,
+          "width": 310.421875,
+          "height": 58
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 844,
+          "height": 390
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 336.9000015258789
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 473.5
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.700000000000273,
+          "max": 16.799999999999727
+        }
+      },
+      {
+        "theme": null,
+        "viewport": {
+          "width": 568,
+          "height": 320
+        },
+        "variant": "branded",
+        "orientation": "landscape",
+        "faceCards": 2,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 62.734375,
+          "width": 552,
+          "height": 207
+        },
+        "felt": {
+          "x": 33.47692108154297,
+          "y": 107.31898498535156,
+          "width": 501.046142578125,
+          "height": 133.75384521484375
+        },
+        "community": {
+          "x": 284,
+          "y": 194.36514282226562,
+          "width": 0,
+          "height": 0
+        },
+        "hero": {
+          "x": 274.9769287109375,
+          "y": 218.78053283691406,
+          "width": 58.384613037109375,
+          "height": 42.46153259277344
+        },
+        "actions": {
+          "x": 139.6875,
+          "y": 248,
+          "width": 420.3125,
+          "height": 64
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 568,
+          "height": 320
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 268.70000076293945
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 316.39999771118164
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.700000000000728,
+          "max": 16.800000000000182
+        }
+      },
+      {
+        "theme": "neon-vegas",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "variant": "branded",
+        "orientation": "portrait",
+        "faceCards": 2,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 148.986083984375,
+          "width": 374,
+          "height": 675.27783203125
+        },
+        "felt": {
+          "x": 37.08222961425781,
+          "y": 266.993896484375,
+          "width": 332.74200439453125,
+          "height": 479.90789794921875
+        },
+        "community": {
+          "x": 195,
+          "y": 502.20831298828125,
+          "width": 0,
+          "height": 0
+        },
+        "hero": {
+          "x": 110.85000610351562,
+          "y": 746.3472290039062,
+          "width": 114.27778625488281,
+          "height": 83.111083984375
+        },
+        "actions": {
+          "x": 253.3125,
+          "y": 658,
+          "width": 128.6875,
+          "height": 178
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
+        },
+        "scroll": {
+          "width": 390,
+          "height": 844
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 64.5999984741211
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 106.9000015258789
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.799999999999727,
+          "max": 16.800000000000182
+        }
+      },
+      {
+        "theme": "neon-vegas",
+        "viewport": {
+          "width": 844,
+          "height": 390
+        },
+        "variant": "branded",
+        "orientation": "landscape",
+        "faceCards": 2,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 69.09375,
+          "width": 828,
+          "height": 310.5
+        },
+        "felt": {
+          "x": 46.21538543701172,
+          "y": 135.97067260742188,
+          "width": 751.5692138671875,
+          "height": 200.63076782226562
+        },
+        "community": {
+          "x": 422,
+          "y": 266.5399169921875,
+          "width": 0,
+          "height": 0
+        },
+        "hero": {
+          "x": 408.46539306640625,
+          "y": 303.1629638671875,
+          "width": 87.576904296875,
+          "height": 63.69232177734375
+        },
+        "actions": {
+          "x": 525.578125,
+          "y": 324,
+          "width": 310.421875,
+          "height": 58
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 844,
+          "height": 390
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 85.4000015258789
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 105.60000228881836
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.800000000000182,
+          "max": 16.800000000000182
+        }
+      },
+      {
+        "theme": "neon-vegas",
+        "viewport": {
+          "width": 568,
+          "height": 320
+        },
+        "variant": "branded",
+        "orientation": "landscape",
+        "faceCards": 2,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 62.734375,
+          "width": 552,
+          "height": 207
+        },
+        "felt": {
+          "x": 33.47692108154297,
+          "y": 107.31898498535156,
+          "width": 501.046142578125,
+          "height": 133.75384521484375
+        },
+        "community": {
+          "x": 284,
+          "y": 194.36514282226562,
+          "width": 0,
+          "height": 0
+        },
+        "hero": {
+          "x": 274.9769287109375,
+          "y": 218.78053283691406,
+          "width": 58.384613037109375,
+          "height": 42.46153259277344
+        },
+        "actions": {
+          "x": 139.6875,
+          "y": 248,
+          "width": 420.3125,
+          "height": 64
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 568,
+          "height": 320
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 69.9000015258789
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 68932,
+            "encoded": 68632,
+            "duration": 118.5
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.799999999999727,
+          "max": 16.800000000000182
+        }
+      }
+    ],
+    "requests": [
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+        "status": 200
+      },
+      {
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "status": 200
+      }
+    ],
+    "errors": [],
+    "csp": [],
+    "external": [
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
+      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
+    ]
+  },
+  "blocked": {
+    "origin": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app",
+    "results": [
+      {
+        "theme": null,
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "variant": "blocked",
+        "orientation": "portrait",
+        "faceCards": 5,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 148.986083984375,
+          "width": 374,
+          "height": 675.27783203125
+        },
+        "felt": {
+          "x": 37.08222961425781,
+          "y": 266.993896484375,
+          "width": 332.74200439453125,
+          "height": 479.90789794921875
+        },
+        "community": {
+          "x": 151.36666870117188,
+          "y": 460.65277099609375,
+          "width": 87.26667785644531,
+          "height": 41.5555419921875
+        },
+        "hero": {
+          "x": 110.85000610351562,
+          "y": 746.3472290039062,
+          "width": 114.27778625488281,
+          "height": 83.111083984375
+        },
+        "actions": {
+          "x": 253.3125,
+          "y": 658,
+          "width": 128.6875,
+          "height": 178
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
+        },
+        "scroll": {
+          "width": 390,
+          "height": 844
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 0,
+            "encoded": 0,
+            "duration": 53.599998474121094
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 225.70000076293945
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.700000000000273,
+          "max": 16.799999999999727
+        }
+      },
+      {
+        "theme": null,
+        "viewport": {
+          "width": 844,
+          "height": 390
+        },
+        "variant": "blocked",
+        "orientation": "landscape",
+        "faceCards": 5,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 69.09375,
+          "width": 828,
+          "height": 310.5
+        },
+        "felt": {
+          "x": 46.21538543701172,
+          "y": 135.97067260742188,
+          "width": 751.5692138671875,
+          "height": 200.63076782226562
+        },
+        "community": {
+          "x": 367.8615417480469,
+          "y": 220.36297607421875,
+          "width": 108.27691650390625,
+          "height": 46.17694091796875
+        },
+        "hero": {
+          "x": 408.46539306640625,
+          "y": 303.1629638671875,
+          "width": 87.576904296875,
+          "height": 63.69232177734375
+        },
+        "actions": {
+          "x": 525.578125,
+          "y": 324,
+          "width": 310.421875,
+          "height": 58
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 844,
+          "height": 390
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 53.5
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 0,
+            "encoded": 0,
+            "duration": 29.10000228881836
+          }
+        ],
+        "joins": 0,
+        "rebuys": 0,
+        "frame": {
+          "median": 16.699999999999818,
+          "p95": 16.700000000000273,
+          "max": 16.799999999999955
+        }
+      },
+      {
+        "theme": null,
+        "viewport": {
+          "width": 568,
+          "height": 320
+        },
+        "variant": "blocked",
+        "orientation": "landscape",
+        "faceCards": 5,
+        "chipElements": 0,
+        "hud": "Wallet: 500 CH",
+        "scene": {
+          "x": 8,
+          "y": 62.734375,
+          "width": 552,
+          "height": 207
+        },
+        "felt": {
+          "x": 33.47692108154297,
+          "y": 107.31898498535156,
+          "width": 501.046142578125,
+          "height": 133.75384521484375
+        },
+        "community": {
+          "x": 247.90768432617188,
+          "y": 163.58053588867188,
+          "width": 72.18463134765625,
+          "height": 30.78460693359375
+        },
+        "hero": {
+          "x": 274.9769287109375,
+          "y": 218.78053283691406,
+          "width": 58.384613037109375,
+          "height": 42.46153259277344
+        },
+        "actions": {
+          "x": 139.6875,
+          "y": 248,
+          "width": 420.3125,
+          "height": 64
+        },
+        "texture": {
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
+          "pointer": "none",
+          "radius": "48% / 44%"
+        },
+        "scroll": {
+          "width": 568,
+          "height": 320
+        },
+        "hit": true,
+        "resources": [
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 52.099998474121094
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 0,
+            "encoded": 0,
+            "duration": 34.599998474121094
           }
         ],
         "joins": 0,
@@ -1058,7 +2188,7 @@
           "width": 390,
           "height": 844
         },
-        "variant": "marking",
+        "variant": "blocked",
         "orientation": "portrait",
         "faceCards": 5,
         "chipElements": 0,
@@ -1094,9 +2224,10 @@
           "height": 178
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
         },
@@ -1107,18 +2238,24 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 68932,
-            "encoded": 68632,
-            "duration": 110.9000015258789
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 0,
+            "encoded": 0,
+            "duration": 33.79999923706055
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 54
           }
         ],
         "joins": 0,
         "rebuys": 0,
         "frame": {
           "median": 16.699999999999818,
-          "p95": 16.700000000000273,
-          "max": 33.28399999999988
+          "p95": 16.799999999999955,
+          "max": 16.800000000000182
         }
       },
       {
@@ -1127,7 +2264,7 @@
           "width": 844,
           "height": 390
         },
-        "variant": "marking",
+        "variant": "blocked",
         "orientation": "landscape",
         "faceCards": 5,
         "chipElements": 0,
@@ -1163,9 +2300,10 @@
           "height": 58
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "48% / 44%"
         },
@@ -1176,18 +2314,24 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 68932,
-            "encoded": 68632,
-            "duration": 116
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 109.5
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 0,
+            "encoded": 0,
+            "duration": 39.5
           }
         ],
         "joins": 0,
         "rebuys": 0,
         "frame": {
           "median": 16.699999999999818,
-          "p95": 16.800000000000182,
-          "max": 16.800000000000182
+          "p95": 16.700000000000273,
+          "max": 16.799999999999955
         }
       },
       {
@@ -1196,7 +2340,7 @@
           "width": 568,
           "height": 320
         },
-        "variant": "marking",
+        "variant": "blocked",
         "orientation": "landscape",
         "faceCards": 5,
         "chipElements": 0,
@@ -1232,9 +2376,10 @@
           "height": 64
         },
         "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
+          "image": "url(\"https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
+          "size": "128px 128px",
+          "opacity": "0.4",
+          "blend": "soft-light",
           "pointer": "none",
           "radius": "48% / 44%"
         },
@@ -1245,477 +2390,53 @@
         "hit": true,
         "resources": [
           {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 68932,
-            "encoded": 68632,
-            "duration": 92.5
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+            "transfer": 997,
+            "encoded": 697,
+            "duration": 117.20000076293945
+          },
+          {
+            "name": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+            "transfer": 0,
+            "encoded": 0,
+            "duration": 63.599998474121094
           }
         ],
         "joins": 0,
         "rebuys": 0,
         "frame": {
           "median": 16.699999999999818,
-          "p95": 16.700000000000273,
+          "p95": 16.799999999999955,
           "max": 16.800000000000182
         }
       }
     ],
     "requests": [
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       },
       {
-        "url": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+        "url": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
         "status": 200
       }
     ],
-    "errors": [],
-    "csp": [],
-    "external": [
-      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
-      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
-      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
-      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
-      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js",
-      "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"
-    ]
-  },
-  "blocked": {
-    "origin": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app",
-    "results": [
-      {
-        "theme": null,
-        "viewport": {
-          "width": 390,
-          "height": 844
-        },
-        "variant": "blocked",
-        "orientation": "portrait",
-        "faceCards": 5,
-        "chipElements": 0,
-        "hud": "Wallet: 500 CH",
-        "scene": {
-          "x": 8,
-          "y": 148.986083984375,
-          "width": 374,
-          "height": 675.27783203125
-        },
-        "felt": {
-          "x": 37.08222961425781,
-          "y": 266.993896484375,
-          "width": 332.74200439453125,
-          "height": 479.90789794921875
-        },
-        "community": {
-          "x": 151.36666870117188,
-          "y": 460.65277099609375,
-          "width": 87.26667785644531,
-          "height": 41.5555419921875
-        },
-        "hero": {
-          "x": 110.85000610351562,
-          "y": 746.3472290039062,
-          "width": 114.27778625488281,
-          "height": 83.111083984375
-        },
-        "actions": {
-          "x": 253.3125,
-          "y": 658,
-          "width": 128.6875,
-          "height": 178
-        },
-        "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
-          "pointer": "none",
-          "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
-        },
-        "scroll": {
-          "width": 390,
-          "height": 844
-        },
-        "hit": true,
-        "resources": [
-          {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 0,
-            "encoded": 0,
-            "duration": 45.5
-          }
-        ],
-        "joins": 0,
-        "rebuys": 0,
-        "frame": {
-          "median": 16.699999999999818,
-          "p95": 16.799999999999727,
-          "max": 16.800000000000182
-        }
-      },
-      {
-        "theme": null,
-        "viewport": {
-          "width": 844,
-          "height": 390
-        },
-        "variant": "blocked",
-        "orientation": "landscape",
-        "faceCards": 5,
-        "chipElements": 0,
-        "hud": "Wallet: 500 CH",
-        "scene": {
-          "x": 8,
-          "y": 69.09375,
-          "width": 828,
-          "height": 310.5
-        },
-        "felt": {
-          "x": 46.21538543701172,
-          "y": 135.97067260742188,
-          "width": 751.5692138671875,
-          "height": 200.63076782226562
-        },
-        "community": {
-          "x": 367.8615417480469,
-          "y": 220.36297607421875,
-          "width": 108.27691650390625,
-          "height": 46.17694091796875
-        },
-        "hero": {
-          "x": 408.46539306640625,
-          "y": 303.1629638671875,
-          "width": 87.576904296875,
-          "height": 63.69232177734375
-        },
-        "actions": {
-          "x": 525.578125,
-          "y": 324,
-          "width": 310.421875,
-          "height": 58
-        },
-        "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
-          "pointer": "none",
-          "radius": "48% / 44%"
-        },
-        "scroll": {
-          "width": 844,
-          "height": 390
-        },
-        "hit": true,
-        "resources": [
-          {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 0,
-            "encoded": 0,
-            "duration": 24.099998474121094
-          }
-        ],
-        "joins": 0,
-        "rebuys": 0,
-        "frame": {
-          "median": 16.699999999999818,
-          "p95": 16.799999999999727,
-          "max": 16.800000000000182
-        }
-      },
-      {
-        "theme": null,
-        "viewport": {
-          "width": 568,
-          "height": 320
-        },
-        "variant": "blocked",
-        "orientation": "landscape",
-        "faceCards": 5,
-        "chipElements": 0,
-        "hud": "Wallet: 500 CH",
-        "scene": {
-          "x": 8,
-          "y": 62.734375,
-          "width": 552,
-          "height": 207
-        },
-        "felt": {
-          "x": 33.47692108154297,
-          "y": 107.31898498535156,
-          "width": 501.046142578125,
-          "height": 133.75384521484375
-        },
-        "community": {
-          "x": 247.90768432617188,
-          "y": 163.58053588867188,
-          "width": 72.18463134765625,
-          "height": 30.78460693359375
-        },
-        "hero": {
-          "x": 274.9769287109375,
-          "y": 218.78053283691406,
-          "width": 58.384613037109375,
-          "height": 42.46153259277344
-        },
-        "actions": {
-          "x": 139.6875,
-          "y": 248,
-          "width": 420.3125,
-          "height": 64
-        },
-        "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
-          "pointer": "none",
-          "radius": "48% / 44%"
-        },
-        "scroll": {
-          "width": 568,
-          "height": 320
-        },
-        "hit": true,
-        "resources": [
-          {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 0,
-            "encoded": 0,
-            "duration": 32.5
-          }
-        ],
-        "joins": 0,
-        "rebuys": 0,
-        "frame": {
-          "median": 16.699999999999818,
-          "p95": 16.799999999999727,
-          "max": 16.800000000000182
-        }
-      },
-      {
-        "theme": "neon-vegas",
-        "viewport": {
-          "width": 390,
-          "height": 844
-        },
-        "variant": "blocked",
-        "orientation": "portrait",
-        "faceCards": 5,
-        "chipElements": 0,
-        "hud": "Wallet: 500 CH",
-        "scene": {
-          "x": 8,
-          "y": 148.986083984375,
-          "width": 374,
-          "height": 675.27783203125
-        },
-        "felt": {
-          "x": 37.08222961425781,
-          "y": 266.993896484375,
-          "width": 332.74200439453125,
-          "height": 479.90789794921875
-        },
-        "community": {
-          "x": 151.36666870117188,
-          "y": 460.65277099609375,
-          "width": 87.26667785644531,
-          "height": 41.5555419921875
-        },
-        "hero": {
-          "x": 110.85000610351562,
-          "y": 746.3472290039062,
-          "width": 114.27778625488281,
-          "height": 83.111083984375
-        },
-        "actions": {
-          "x": 253.3125,
-          "y": 658,
-          "width": 128.6875,
-          "height": 178
-        },
-        "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
-          "pointer": "none",
-          "radius": "46% 46% 43% 43% / 17% 17% 22% 22%"
-        },
-        "scroll": {
-          "width": 390,
-          "height": 844
-        },
-        "hit": true,
-        "resources": [
-          {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 0,
-            "encoded": 0,
-            "duration": 50.099998474121094
-          }
-        ],
-        "joins": 0,
-        "rebuys": 0,
-        "frame": {
-          "median": 16.699999999999818,
-          "p95": 16.700000000000273,
-          "max": 16.800000000000182
-        }
-      },
-      {
-        "theme": "neon-vegas",
-        "viewport": {
-          "width": 844,
-          "height": 390
-        },
-        "variant": "blocked",
-        "orientation": "landscape",
-        "faceCards": 5,
-        "chipElements": 0,
-        "hud": "Wallet: 500 CH",
-        "scene": {
-          "x": 8,
-          "y": 69.09375,
-          "width": 828,
-          "height": 310.5
-        },
-        "felt": {
-          "x": 46.21538543701172,
-          "y": 135.97067260742188,
-          "width": 751.5692138671875,
-          "height": 200.63076782226562
-        },
-        "community": {
-          "x": 367.8615417480469,
-          "y": 220.36297607421875,
-          "width": 108.27691650390625,
-          "height": 46.17694091796875
-        },
-        "hero": {
-          "x": 408.46539306640625,
-          "y": 303.1629638671875,
-          "width": 87.576904296875,
-          "height": 63.69232177734375
-        },
-        "actions": {
-          "x": 525.578125,
-          "y": 324,
-          "width": 310.421875,
-          "height": 58
-        },
-        "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
-          "pointer": "none",
-          "radius": "48% / 44%"
-        },
-        "scroll": {
-          "width": 844,
-          "height": 390
-        },
-        "hit": true,
-        "resources": [
-          {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 0,
-            "encoded": 0,
-            "duration": 51.900001525878906
-          }
-        ],
-        "joins": 0,
-        "rebuys": 0,
-        "frame": {
-          "median": 16.699999999999818,
-          "p95": 16.700000000000273,
-          "max": 16.800000000000182
-        }
-      },
-      {
-        "theme": "neon-vegas",
-        "viewport": {
-          "width": 568,
-          "height": 320
-        },
-        "variant": "blocked",
-        "orientation": "landscape",
-        "faceCards": 5,
-        "chipElements": 0,
-        "hud": "Wallet: 500 CH",
-        "scene": {
-          "x": 8,
-          "y": 62.734375,
-          "width": 552,
-          "height": 207
-        },
-        "felt": {
-          "x": 33.47692108154297,
-          "y": 107.31898498535156,
-          "width": 501.046142578125,
-          "height": 133.75384521484375
-        },
-        "community": {
-          "x": 247.90768432617188,
-          "y": 163.58053588867188,
-          "width": 72.18463134765625,
-          "height": 30.78460693359375
-        },
-        "hero": {
-          "x": 274.9769287109375,
-          "y": 218.78053283691406,
-          "width": 58.384613037109375,
-          "height": 42.46153259277344
-        },
-        "actions": {
-          "x": 139.6875,
-          "y": 248,
-          "width": 420.3125,
-          "height": 64
-        },
-        "texture": {
-          "image": "url(\"https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp\")",
-          "size": "256px 256px",
-          "opacity": "0.24",
-          "pointer": "none",
-          "radius": "48% / 44%"
-        },
-        "scroll": {
-          "width": 568,
-          "height": 320
-        },
-        "hit": true,
-        "resources": [
-          {
-            "name": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
-            "transfer": 0,
-            "encoded": 0,
-            "duration": 21.200000762939453
-          }
-        ],
-        "joins": 0,
-        "rebuys": 0,
-        "frame": {
-          "median": 16.699999999999818,
-          "p95": 16.800000000000182,
-          "max": 16.800000000000182
-        }
-      }
-    ],
-    "requests": [],
     "errors": [],
     "csp": [],
     "external": [
@@ -1728,7 +2449,7 @@
     ]
   },
   "controls": {
-    "origin": "https://6acbf738e0c1ac0008d5f508--playkcswh.netlify.app",
+    "origin": "https://6acbff41817d36000769f4ea--playkcswh.netlify.app",
     "results": [
       {
         "theme": "royal-gold",
@@ -1768,6 +2489,7 @@
       "joins": 0,
       "rebuys": 0,
       "textureFilter": "none",
+      "textureBlend": "soft-light",
       "textureAnimation": "none"
     },
     "reduced": {
@@ -1776,6 +2498,5 @@
     },
     "errors": [],
     "csp": []
-  },
-  "runtimeSha": "f92527351f7bf1285cf865949e6366759c505f49"
+  }
 }

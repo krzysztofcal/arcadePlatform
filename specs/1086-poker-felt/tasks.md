@@ -13,6 +13,11 @@
 - [ ] T007 Final rollout handoff only after GO.
 
 ## Owner-requested POC revision 2 (T001–T004, not rollout)
-- [ ] R2 Material/color correction and original SVG branding.
-- [ ] R2 Actual-table A/B comparisons and exact-SHA Preview validation.
-- [ ] R2 Update Draft PR/gallery and STOP for owner visual approval.
+- [X] R2 Material/color correction and original SVG branding.
+- [X] R2 Actual-table A/B comparisons and exact-SHA Preview validation.
+- [X] R2 Update Draft PR/gallery and STOP for owner visual approval.
+
+## Owner-requested centered large seal revision
+- [X] Center imprint geometrically, enlarge original premium Arcade seal; accept natural content occlusion.
+- [X] Capture exact-SHA active/board-clear scenes and refresh review gallery/Draft PR.
+- [ ] Owner visual approval — PENDING; STOP at T004.
