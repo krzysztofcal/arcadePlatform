@@ -4109,6 +4109,35 @@ async function assertEscrowAccountRetirementContracts(sql) {
   }
   assert.match(directReceiptError?.message || "", /Account-retirement receipt requires the archive pruner function/);
 
+  // Keep canary authorization unchanged: establish exact GO while dependency-free.
+  await sql.begin(async (tx) => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("select public.chips_authorize_stage_escrow_account_retirement_canary($1::bigint, $2::text, $3::text);", [batchId, accountHash, `GO ${batchId}`]);
+  });
+
+  // Use the real producer: funding context contains the historical table ID,
+  // but accounting belongs exclusively to SYSTEM GENESIS and bankroll.
+  const refillControl = await sql`select * from public.poker_bot_refill_control where id = 1;`;
+  await sql`update public.poker_bot_refill_control set enabled = true,
+    expected_system_identifier = (select system_identifier::text from pg_catalog.pg_control_system()) where id = 1;`;
+  const refillTier = await sql`select enabled from public.poker_bot_tier_policy where buy_in = 100;`;
+  await sql`update public.poker_bot_tier_policy set enabled = true where buy_in = 100;`;
+  const refillRows = await sql.unsafe("select public.poker_bot_pool_refill_demand(100, 'NORMAL', $1, 1) as result;", [`managed-bot-seed-buyin:${tableId}:1`]);
+  await sql.unsafe("update public.poker_bot_refill_control set enabled = $1, expected_system_identifier = $2 where id = 1;",
+    [refillControl[0].enabled, refillControl[0].expected_system_identifier]);
+  await sql`update public.poker_bot_tier_policy set enabled = ${refillTier[0].enabled} where buy_in = 100;`;
+  assert.equal(refillRows[0].result.status, "refilled");
+  const refillId = refillRows[0].result.transactionId;
+  const refillSnapshot = () => sql.unsafe(`select
+    (select to_jsonb(t) from public.chips_transactions t where id = $1::uuid) as transaction,
+    (select to_jsonb(r) from public.chips_transaction_idempotency r where transaction_id = $1::uuid) as registry,
+    (select jsonb_agg(to_jsonb(e) order by e.id) from public.chips_entries e where transaction_id = $1::uuid) as entries,
+    (select jsonb_agg(to_jsonb(a) order by a.id) from public.chips_accounts a
+      where id in (select account_id from public.chips_entries where transaction_id = $1::uuid)) as accounts;`, [refillId]);
+  const refillBefore = await refillSnapshot();
+  assert.equal(refillBefore[0].entries.length, 2);
+  assert.ok(refillBefore[0].entries.every((entry) => entry.account_id !== accountId));
+
   const readOnlySql = postgres(dbUrl, { max: 1, prepare: false });
   try {
     await sql.unsafe(`create table public.chips_escrow_retirement_unknown_fk_probe (
@@ -4129,6 +4158,78 @@ async function assertEscrowAccountRetirementContracts(sql) {
     }
     assert.match(unknownFkError?.message || "", /Unknown foreign key dependency/);
 
+    const prepare = () => readOnlySql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      return tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
+        $1::bigint, $2::uuid[], $3::text, $4::text, $5::text, false, null
+      ) as result;`, [batchId, accountIds, recoveryPath, recoverySha, snapshotSha]);
+    });
+    // Deliberately corrupt one fixture field on this disposable database only.
+    // Re-enable immutable guards before prepare, then restore in finally.
+    const rejectCorruption = async (table, column, value, code) => {
+      const keyColumn = table === "chips_transaction_idempotency"
+        ? (column === "transaction_id" ? "idempotency_key" : "transaction_id")
+        : table === "chips_ledger_archive_batches" ? "batch_id" : "id";
+      const key = keyColumn === "idempotency_key" ? refillBefore[0].registry.idempotency_key
+        : table === "chips_entries" ? refillBefore[0].entries.find((e) => e.amount > 0).id
+        : table === "chips_ledger_archive_batches" ? batchId : refillId;
+      const original = await sql.unsafe(`select ${column} as value from public.${table} where ${keyColumn} = $1;`, [key]);
+      const setValue = (next) => sql.begin(async (tx) => {
+        await tx.unsafe(`alter table public.${table} disable trigger user;`);
+        await tx.unsafe(`update public.${table} set ${column} = $1 where ${keyColumn} = $2;`,
+          [next, key]);
+        await tx.unsafe(`alter table public.${table} enable trigger user;`);
+      });
+      await setValue(value);
+      try {
+        await assert.rejects(prepare(), (error) => error.code === code,
+          `${table}.${column} must fail closed with ${code}`);
+      } finally {
+        await setValue(original[0].value);
+      }
+    };
+    const unknownLinkedKey = `unknown:${tableId}`;
+    await sql.unsafe(`insert into public.chips_transaction_idempotency
+      (idempotency_key, transaction_id, payload_hash, tx_type, transaction_created_at)
+      values ($1, $2::uuid, $3, 'TABLE_BUY_IN', now());`, [unknownLinkedKey, refillId, "0".repeat(64)]);
+    try {
+      await assert.rejects(prepare(), (error) => error.code === "P8964",
+        "a noncanonical registry row pointing to a valid refill is still a dependency");
+    } finally {
+      await sql.begin(async (tx) => {
+        await tx.unsafe("alter table public.chips_transaction_idempotency disable trigger user;");
+        await tx.unsafe("delete from public.chips_transaction_idempotency where idempotency_key = $1;", [unknownLinkedKey]);
+        await tx.unsafe("alter table public.chips_transaction_idempotency enable trigger user;");
+      });
+    }
+    await rejectCorruption("chips_transaction_idempotency", "table_id", tableId, "P8964");
+    await rejectCorruption("chips_transaction_idempotency", "archive_batch_id", batchId, "P8964");
+    await rejectCorruption("chips_transaction_idempotency", "tx_type", "TABLE_BUY_IN", "P8964");
+    await rejectCorruption("chips_transaction_idempotency", "transaction_id", primaryUserId, "P8964");
+    await rejectCorruption("chips_transaction_idempotency", "payload_hash", "0".repeat(64), "P8964");
+    await rejectCorruption("chips_transactions", "metadata", {}, "P8964");
+    await rejectCorruption("chips_transactions", "metadata", { ...refillBefore[0].transaction.metadata, tableId }, "P8964");
+    await rejectCorruption("chips_transactions", "tx_type", "TABLE_BUY_IN", "P8964");
+    await rejectCorruption("chips_transactions", "payload_hash", "0".repeat(64), "P8964");
+    await rejectCorruption("chips_entries", "amount", Number(refillBefore[0].transaction.metadata.amount) + 1, "P8964");
+    await rejectCorruption("chips_entries", "account_id", accountId, "P8962");
+    // Without the text-matching registry row, the unverified live MINT must
+    // still block P8965; a MINT label alone cannot bypass transaction identity.
+    await rejectCorruption("chips_transaction_idempotency", "idempotency_key", "unrelated-registry-key", "P8965");
+    await rejectCorruption("chips_ledger_archive_batches", "bot_only_eligible_count", null, "P8950");
+    await sql`insert into public.chips_account_snapshot (account_id, balance, last_entry_seq) values (${accountId}::uuid, 0, 18);`;
+    try {
+      await assert.rejects(prepare(), (error) => error.code === "P8963");
+    } finally {
+      await sql`delete from public.chips_account_snapshot where account_id = ${accountId}::uuid;`;
+    }
+    await assert.rejects(readOnlySql.begin(async (tx) => {
+      await tx.unsafe("set transaction isolation level repeatable read, read only;");
+      await tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
+        $1::bigint, $2::uuid[], 'invalid-recovery', $3, $4, false, null
+      );`, [batchId, accountIds, recoverySha, snapshotSha]);
+    }), (error) => error.code === "P8946");
+
     const dryRows = await readOnlySql.begin(async (tx) => {
       await tx.unsafe("set transaction isolation level repeatable read, read only;");
       return tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
@@ -4137,6 +4238,7 @@ async function assertEscrowAccountRetirementContracts(sql) {
     });
     assert.equal(dryRows[0].result.state, "eligible", "prepare must execute on a stable read-only snapshot");
     assert.equal(dryRows[0].result.read_only, true);
+    assert.deepEqual(await refillSnapshot(), refillBefore, "read-only prepare must preserve refill accounting");
   } finally {
     await readOnlySql.end({ timeout: 5 });
   }
@@ -4149,7 +4251,6 @@ async function assertEscrowAccountRetirementContracts(sql) {
   assert.equal(lockRows[0].acquired, true, "execute contract must run while the Stage advisory lock is held");
   const executeRows = await sql.begin(async (tx) => {
     await tx.unsafe("set transaction isolation level serializable;");
-    await tx.unsafe("select public.chips_authorize_stage_escrow_account_retirement_canary($1::bigint, $2::text, $3::text);", [batchId, accountHash, `GO ${batchId}`]);
     const retired = await tx.unsafe(`select public.chips_retire_stage_escrow_accounts(
       $1::bigint, $2::uuid[], $3::text, $4::text, $5::text, true, $6::text
     ) as result;`, [batchId, accountIds, recoveryPath, recoverySha, snapshotSha, `GO ${batchId}`]);
@@ -4161,6 +4262,7 @@ async function assertEscrowAccountRetirementContracts(sql) {
   await sql.unsafe("select pg_catalog.pg_advisory_unlock(pg_catalog.hashtextextended($1, 0));", [lockKey]);
   assert.equal(executeRows.retired.state, "retired");
   assert.equal(executeRows.replay.state, "already_retired");
+  assert.deepEqual(await refillSnapshot(), refillBefore, "escrow retirement must preserve the unrelated MINT, registry, entries and SYSTEM balances");
   const stateRows = await sql.unsafe(`select
     (select count(*) from public.chips_accounts where id = $1::uuid) as account_count,
     account_retirement_account_count::text as receipt_count,

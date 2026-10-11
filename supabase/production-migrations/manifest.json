@@ -1039,6 +1039,13 @@
       "omitted_effects": [
         "No Production application, receipts, ledger transactions or CH mutation"
       ]
+    },
+    {
+      "version": "20261011090000",
+      "file": "20261011090000_chips_stage_escrow_demand_refill_identity.sql",
+      "sha256": "bb42935c646f4305c6772d9698b90135f6e441365ee18c5777cdc5107bc7656e",
+      "category": "stage-only",
+      "reason": "Stage escrow retirement textual demand-refill identity correction; no Production equivalent or application."
     }
   ],
   "replacement_migrations": [
