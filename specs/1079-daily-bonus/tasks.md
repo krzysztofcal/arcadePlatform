@@ -25,7 +25,7 @@
 ## Phase 3 — Fundamental verification in the same PR
 
 - [x] T011 Register `tests/bonus-campaigns.behavior.test.mjs` and `tests/bonus-campaigns.transaction.test.mjs` in `scripts/test-all.mjs`; run the essential PostgreSQL lock/ledger-rollback test in existing isolated PostgreSQL CI infrastructure (`.github/workflows/tests.yml`), without new jobs/dependencies/framework. Only fundamental deterministic tests; no UI/CSS/JSP suite.
-- [ ] T012 Run fundamental Bonus/Admin/endpoint/Welcome/ledger tests and existing syntax/CSP checks. Self-review impact and ensure the PR contains **no** `supabase/migrations/**` changes, scheduler, legacy cross-campaign guards or unrelated cleanup. Record exact runtime SHA and important breaking effects.
+- [x] T012 Run fundamental Bonus/Admin/endpoint/Welcome/ledger tests and existing syntax/CSP checks. Self-review impact and ensure the PR contains **no** `supabase/migrations/**` changes, scheduler, legacy cross-campaign guards or unrelated cleanup. Record exact runtime SHA and important breaking effects.
 
 ## Phase 4 — Authorized environment actions, not PR database code
 
@@ -44,3 +44,12 @@
 9. Double-check/refactor before handing off.
 
 Use `agents.md`/`skills.md`; no repository commands in this SpecKit, no new migrations, only fundamental tests, CSP SHA for added inline scripts, `klog` instead of `console.log`. The owner-approved product behavior does **not** authorize Stage/Production writes, CH grants or merge.
+
+
+## Verification record
+
+Implementation runtime SHA: `6df81d3b1010d59fa85b02b55d3f69bbe51f3925` (subsequent verification-document commits do not change runtime).
+
+Completed: 35 targeted Bonus/Admin/endpoint/scheduler/Welcome tests; real isolated PostgreSQL native JSONB/concurrent Claim/End-wait/ledger rollback contract; full local `scripts/test-all.mjs` runner; syntax, CSP (55 documents), lifecycle guards and diff review. Only existing Admin template regression fixtures/expectations changed; no new presentation test suite.
+
+Remote GitHub CI is running on this PR; final results will be recorded in its description. PR remains Draft for owner code review. Netlify Preview is intentionally skipped. T013–T014 remain unapproved and unexecuted; no live environment operations, campaign changes or production merge. T015's runtime/environment verification awaits later deployment authorization.
