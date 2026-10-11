@@ -1,82 +1,58 @@
-# Feature Specification: Poker Daily Bonus
+# Feature Specification: Poker Daily Bonus (#1079)
 
-**Issue**: [#1079](https://github.com/krzysztofcal/arcadePlatform/issues/1079)
-**Date**: 2026-10-11
-**Status**: analysis/design only, awaiting owner review and implementation approval.
-**Code baseline**: `origin/main`, `1ba99776ff427783f858e075d3474e144c3947b3`.
-**Authority**: latest issue economics/replacement decisions and owner's current request. Approval of economics is not permission to implement, deploy, apply migrations, mutate campaigns, grant CH or merge.
+**Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1079  
+**Baseline:** main `1ba99776ff427783f858e075d3474e144c3947b3`  
+**Status:** revised plan; no implementation, database changes, activation, deployment or merge authorized by this docs change.
 
-## User Scenarios & Testing
+## Latest owner decision — simple, no-migration replacement
 
-### US1 — Claim consecutive daily rewards (P1)
-A registered, signed-in Arcade account manually claims once per UTC calendar day without a Poker activity requirement.
+Arcade Poker has no external users yet. Retire `daily-active-2026` (fixed 20 CH) and start one new Poker Daily streak. A one-time same-day 20 CH + 25 CH payment is explicitly acceptable. **Do not add any legacy/new cross-campaign exclusion, shared advisory lock, unique family index, historical-orphan scanner, legacy receipt migration or special cutover mechanism.** Legacy records remain untouched; they are ignored by the new streak.
 
-**Acceptance scenarios**:
-1. Consecutive successful claims pay 25, 50, 100, 200, 200, 200… CH. Day 4+ is a reward plateau; streak length does not wrap or stop at four.
-2. A complete unclaimed UTC day resets the next claim to Day 1/25 CH; there is no backfill or rolling 24-hour cooldown. Claims at 23:59 UTC and just after 00:00 UTC can be consecutive days.
-3. Duplicate clicks, concurrent tabs, lost-response retry, reload and reconnect neither pay twice nor advance the streak twice.
-4. All registered accounts qualify, including accounts older than the campaign. Guests, unauthenticated requests and anonymous Supabase users do not qualify. No email-verification or Poker-hand requirement is introduced.
-5. Pause/End or an invalid configuration prevents payout. Unclaimed UTC days during a pause also count as missed days; no automatic catch-up or pause credit.
+This feature requires **no SQL migration**: use existing `bonus_campaigns.eligibility_config` JSONB for the four rewards and existing `bonus_claims.metadata` for the streak. One PR (#1084, after implementation GO) may contain all implementation files and planning documents. State changes for existing campaigns are made through Admin *after the application is deployed*, not by merging the PR.
 
-**Fundamental verification**: deterministic server progression/UTC/idempotency tests, including a long plateau and a missed day, plus a narrowly scoped real PostgreSQL two-connection race test in an isolated test database.
+## User scenarios and acceptance
 
-### US2 — Replace the legacy Stage campaign safely (P1)
-The operator replaces `daily-active-2026` (20 CH) with one new streak campaign, preserving every prior receipt and ledger entry.
+### US1 — Daily streak (P1)
+- Signed-in, non-anonymous Arcade accounts, including previously registered users, may manually claim once per UTC calendar day. No poker play or email verification requirement.
+- New campaign's consecutive successful days pay 25, 50, 100, 200, 200, 200… CH. Day 100 still pays 200 CH; streak length never wraps to Day 1 after Day 4.
+- Missing an entire UTC day resets the next successful claim to Day 1/25 CH; no catch-up. Two claims on opposite sides of 00:00 UTC can be consecutive days.
+- Duplicate/replayed/concurrent requests for the same account, campaign and UTC day never create two payments or advance the streak twice.
+- Payout uses existing PROMO_BONUS, USER(+)/SYSTEM GENESIS(-), one atomic ledger transaction + claim receipt, existing per-campaign/day idempotency. Pause/End, ineligible or invalid configuration means no payout.
 
-**Acceptance scenarios**:
-1. The new campaign is created as draft. After verified code/schema and an explicit Stage cutover GO, old active becomes paused; confirm no further grant can occur; only then activate the new campaign. They are never concurrently claimable.
-2. An account paid by the old campaign on the cutover UTC day cannot receive the new bonus that day, including a racing/in-flight old request. The next eligible day starts at new Day 1; legacy claims never advance the new streak.
-3. An account not paid by the old campaign that day may receive new Day 1 immediately after activation.
-4. Cross-campaign same-day protection applies to the legacy code and all replacement Poker Daily campaigns, not to Welcome Bonus or unrelated campaigns—even those using generic `claim_policy=daily`.
-5. After the first replacement has been published, attempts to reactivate the legacy campaign fail, including when its successor is paused or ended. Claim also fails closed for unsafe overlap/state. Ending the legacy campaign after acceptance requires explicit operator approval.
-6. No old claims, transactions, metadata or balances are deleted/reinterpreted. A retry reports an existing payment rather than claiming a different campaign automatically.
+### US2 — Replace old 20 CH campaign (P1)
+- Create the new `poker_daily` campaign as draft. Once the implementation is deployed and verified with environment-specific authorization, **End** the old `daily-active-2026` in existing Admin, then **Activate** the new draft. A short downtime between these actions is acceptable.
+- No separate cutover PR, database migration, cleanup, manual SQL edit or payout script. The old `ended` campaign cannot be reactivated by the existing Admin lifecycle.
+- An account paid 20 CH earlier on the same UTC day may also claim new Day 1/25 CH; this is intended and does not need testing as a collision failure. Old claims neither continue nor reset the new streak.
+- Preserve old transactions, claims, ledger balances and evidence as-is. New claim/projection paths never need to inspect legacy records.
 
-### US3 — Configure and stop rewards in existing Admin (P2)
-The operator configures four day amounts and uses existing campaign status controls.
+### US3 — Configure via existing Admin (P2)
+- Use one campaign type `poker_daily` with `eligibility_config.daily_rewards=[25,50,100,200]`, `amount=25` (Day 1 compatibility), `claim_policy=daily`, `eligibility_type=all_accounts`, `max_total_claims=null`.
+- Validate exactly four positive safe-integer rewards and the required type/policy/audience/cap in the backend; all values are backend configuration, never frontend-authoritative literals.
+- Once published, rewards and eligibility terms cannot be changed; new economics require a new campaign. Admin keeps Pause/End, no automatic rewards or new scheduled job. New Poker Daily is manually activated from a draft; unrelated Bonus Campaigns remain unchanged.
+- The old generic 20 CH Daily template is replaced with the Poker Daily streak template; ordinary generic daily campaigns remain supported by their existing API.
 
-**Acceptance scenarios**:
-1. One campaign contains four positive safe-integer CH amounts, initially `[25,50,100,200]`; the fourth repeats indefinitely. `max_total_claims=null`, `eligibility_type=all_accounts`, `claim_policy=daily`.
-2. Reward/identity/eligibility terms become immutable upon publication, following the existing stricter Admin policy. Once claims exist, they cannot be rewritten even while paused. Changed economics use a new campaign and restart that campaign's streak; shared daily protection still applies.
-3. Pause/End are the existing kill switch. No budget framework, aggregate payout cap, scheduler, new bonus endpoint or streak table is added.
-4. The dedicated Poker Daily template cannot schedule automatic activation; cutover is manual. Other campaign templates and their existing scheduler remain functional.
+### US4 — Truthful Poker lobby (P2)
+- Reuse #1069's `poker/index.html` `dailyDialog`, styles, day cards and assets; render the real four amounts, current streak day, claimed/unclaimed state, next UTC reset and a working Claim.
+- Add bounded opt-in authenticated Daily status to existing `GET /.netlify/functions/bonus-campaigns`; preserve default claimable-only `{items}` and ordinary Welcome Bonus API. Before new activation, show unavailable state instead of pretending the old 20 CH campaign is a streak.
+- POST always validates again server-side. The client never decides awards. Only a newly successful payment emits the existing chips refresh; duplicate shows already claimed.
+- Refresh on opening, after claiming, on auth/account changes and at UTC reset while the modal is open. Guard stale responses via existing `lobbyIdentityGeneration`; guests see sign-in/unavailable, not fake progress.
 
-### US4 — Show truthful lobby progress (P2)
-The existing Daily Bonus shortcut/modal shows account-specific server status and performs a real manual Claim.
+## Data and server invariants
 
-**Acceptance scenarios**:
-1. Reuse `dailyDialog`, `bonus-days`, reward art and portrait/landscape layout from #1069. Replace illustrative account states, “Amount not configured” and design-only Claim with server-derived rewards and status.
-2. Display Day 1/2/3/4+, actual uncapped streak day, claimable/claimed/paused/unavailable/sign-in state and next UTC reset. Day 5 is not Day 1.
-3. Before POST or after midnight/focus/auth changes, reload status. Server always rechecks inside its payout transaction regardless of UI state. Client time/countdown never grants eligibility.
-4. While a claim is pending, disable repeated UI submission. Only authoritative success yields reward copy; a replay shows already claimed, not a second success. Preserve existing `chips:tx-complete` wallet/progression refresh.
-5. Account A's response cannot appear after logout or A→B→A switching: use the existing `lobbyIdentityGeneration` guard. Do not persist progress or authority in browser storage.
+- `bonus_campaigns`: no new columns. Store four amounts under existing JSONB `eligibility_config.daily_rewards` for `campaign_type=poker_daily`; other campaign types ignore this key.
+- `bonus_claims`: preserve existing unique (`campaign_id`, `user_id`, `claim_period_key`). For new receipts add metadata `streak_day`, `reward_day` (1–4), actual `amount`, and authoritative `claim_period_key`. Previous new-campaign day's receipt determines continuation. A missing yesterday means Day 1; invalid new-campaign receipt evidence denies rather than guessing.
+- `chips_transactions`/`chips_entries`/idempotency registry: unchanged. Record the actual payout and matching claim atomically. No new payout path, enum, funding account, cron or migrations.
+- On the claim transaction acquire the existing campaign row lock, reload authoritative status/window/type/config/eligibility and use a database UTC decision instant to derive the period/amount. Admin End and claim must serialize on that row; no legacy family lock is required. Match new claim timestamps to the decision period. Fail or rollback on incomplete ledger/receipt writes.
+- Legacy fixed claims are not queried for new entitlement. Concurrent old/new payouts on cutover day are explicitly allowed.
+- Preserve RLS and authenticated access; do not expose account identifiers, private receipt history, or trust browser-supplied amounts/day.
 
-## Functional Requirements
+## Breaking/operational impact and approval
 
-- FR001: Extend existing Bonus Campaigns/`bonus_claims`, `PROMO_BONUS`, GENESIS USER(+)/SYSTEM(-) entries and `postTransaction(..., tx)`; no direct balance write.
-- FR002: Derive progression from the new campaign's successful receipts. Store server-derived `streak_day` in existing claim/transaction metadata; today's receipt is replay evidence, yesterday's receipt determines continuation. Invalid/missing new-format evidence fails closed; legacy evidence is only for same-day exclusion.
-- FR003: Keep existing per-campaign period keys/idempotency strings. Add a cross-campaign Daily family check under a shared purpose-specific transaction lock; distinct campaign keys alone are insufficient.
-- FR004: Inside the atomic claim transaction re-read the full locked campaign, registration/non-guest status, eligibility, date window, reward configuration, UTC day, same-day evidence and previous new-campaign receipt. Preflight GET is advisory only.
-- FR005: Use one DB UTC decision instant after lock waits, immediately before payout validation. Do not derive entitlement from request arrival, browser clock or transaction-start `now()`. Receipt period and explicit `claimed_at` reflect this decision. If the period changes during validation, abort without writes and require a fresh status/claim. Commit may follow the validated decision instant; commit time does not retroactively move the claim's period.
-- FR006: Ledger transaction, balanced entries and `bonus_claims` insert commit together. Missing/invalid transaction or receipt result must throw/rollback, not return `claimed=true`.
-- FR007: Preserve the default GET `{items}` claimable-only behavior and ordinary POST contracts. Add an opt-in status projection to the same endpoint for the Daily panel, including claimed/paused states and progression. Do not repurpose legacy fixed campaign `amount` for all campaigns.
-- FR008: Reuse Admin validation/form/status operations. Add one campaign reward configuration field, not a configuration/rules subsystem. Retain existing RLS/deny-all public access; read/write through authenticated existing backend.
-- FR009: JSP-compatible global/IIFE browser JS; `klog`, one physical CSS line per selector; no new inline script planned, otherwise CSP SHA in the same change. No Poker WS/gameplay/tier/access changes.
+- The old `daily-active-2026` is irreversibly **Ended** when each environment is cut over; old 20 CH daily rewards stop. Existing generic fixed-daily campaign mechanics and Welcome Bonus stay available.
+- `poker_daily` uses the existing JSONB field for four rewards and yields a **dynamic** daily payout; new GET/POST projection must distinguish actual awarded amount from Day 1 scalar `amount`.
+- One implementation PR, **no schema migration**, but Admin campaign End/Create/Activate are real environment writes and cannot happen from PR merge alone.
+- Keep Stage and Production rollouts separately authorized. This revised Draft PR still only updates SpecKit; it does not authorize campaign changes, CH grants, deployment or merge.
 
-## Key Entities
+## Fundamental acceptance tests
 
-- `bonus_campaigns`: existing fields plus proposed nullable `daily_rewards` JSONB/API `dailyRewards`; reserved new `campaign_type=poker_daily`. Existing `amount` remains scalar, equal to Day 1 for the new type.
-- `bonus_claims`: unchanged table/uniqueness; existing metadata additionally holds `streak_day`, `reward_day` (1–4), `amount`, `claim_period_key`, `daily_bonus_family=poker_daily`, `claim_decision_at` for new claims. Legacy rows stay intact.
-- `chips_transactions`, `chips_entries`, durable `chips_transaction_idempotency`: existing economic/idempotency evidence; no new transaction type or funding account.
-
-## Success Criteria
-
-- Every account/day emits at most one Poker Daily payout across legacy/replacement campaigns; ordinary Welcome Bonus remains independently claimable.
-- Every successful new-campaign payout matches authoritative day/config; Day 100 still pays the fourth amount; a missed day returns to Day 1.
-- Pause/config/date/eligibility races cannot grant from stale preflight data; ledger/claim failures leave no partial economic state.
-- Stage transition preserves historical evidence and passes explicit cutover and no-overlap checks before Production is considered.
-
-## Scope and Approval Boundaries
-
-Only these three planning documents are produced now. No code, SQL migration file, database connection/write, campaign mutation, CH grant or deployment is authorized by this planning task. The owner separately authorized publishing these three documents in a Draft PR for review; that authorization does not approve implementation or operational actions. The issue reports seven earlier Stage claims and no enabled Production Daily at its previous audit; these are historical reports, not freshly verified environment facts.
-
-The future code/schema design, including manual-only activation and the proposed reserved campaign type/column, awaits review. Environment identities, actual old claims/configuration, deployment SHA and cutover date are operator preflight inputs, not unresolved reward economics. See plan.md for separate implementation, Stage schema/deploy/cutover and Production gates.
+Extend existing backend tests for days 1–6 and 100, missed-day reset, UTC boundary, duplicate/concurrent same-day claim, locked Pause/End-vs-claim, invalid reward config, ledger/claim atomic rollback, Welcome compatibility and opt-in GET status. Register tests in the existing CI runner/isolated PostgreSQL job where required; no UI/CSS/JSP snapshot suite or new testing framework.
