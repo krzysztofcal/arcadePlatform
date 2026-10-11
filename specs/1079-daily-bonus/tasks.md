@@ -120,6 +120,8 @@ Local verification: 38 fundamental tests, syntax (225 files), CSP (55 documents)
 
 ## Cumulative streak card highlights
 
-- [ ] T033 Apply cumulative gold milestone highlights and neutral unclaimed current card; verify paid Days 1/2/3/4/100, continuing Day 5 before claim and reset to zero. Run fundamental tests/controls/CI and Preview; no actual CH claims.
+- [x] T033 Apply cumulative gold milestone highlights and neutral unclaimed current card; verify paid Days 1/2/3/4/100, continuing Day 5 before claim and reset to zero. Run fundamental tests/controls/CI and Preview; no actual CH claims.
 
 T033 local validation: 38 fundamental tests and syntax/CSP/project guards passed. Sixteen ephemeral mobile cases cover paid Days 1/2/3/4/100, pre-claim ongoing Days 2/5 and missed-day reset (0 highlighted), including computed gold styling for each completed milestone. Self-review: only lobby JS/CSS and three SpecKit files changed; status-derived presentation, no extra requests, payout/backend/protocol/schema changes, no breaking impacts. CI/Preview evidence will be recorded in PR.
+
+T033 Preview verification at runtime SHA `7ba3e2601cba8167acf2c9f85941052c93b68834`: Netlify playkcswh succeeded; all 16 mocked mobile milestone/reset cases passed on deployed files, plus fresh-claim fly-in/persistent receipt screenshot with all four gold cards at Day 100. No real claims. CI evidence is tracked in PR; Tests workflow explicitly dispatched after normal PR workflows did not appear for the runtime push.
