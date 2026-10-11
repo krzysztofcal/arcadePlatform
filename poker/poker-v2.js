@@ -3,7 +3,8 @@
 
   var SUIT_SYMBOLS = { S: '♠', H: '♥', D: '♦', C: '♣' };
 
-  // Page-local art review; Classic reuses the shipped default artwork.
+  // Stable table assignment contract: keep this order and the hash unchanged.
+  // Classic reuses the shipped default artwork.
   var TABLE_THEME_CATALOG = [
     { id: 'classic-casino', label: 'Classic Casino', assets: [] },
     { id: 'royal-gold', label: 'Royal Gold', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
@@ -12,30 +13,29 @@
     { id: 'crimson-velvet', label: 'Crimson Velvet', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
     { id: 'emerald-palace', label: 'Emerald Palace', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] }
   ];
-  var previewThemeId = 'classic-casino';
-  var previewThemeRequest = 0;
+  var tableThemeRequest = 0;
+
+  function resolveTableThemeId(tableId){
+    if (typeof tableId !== 'string' || !tableId.trim()) return 'classic-casino';
+    tableId = tableId.trim(); // Match PokerWsClient's table identity normalization.
+    var hash = 2166136261;
+    for (var i = 0; i < tableId.length; i++){
+      hash = Math.imul(hash ^ tableId.charCodeAt(i), 16777619) >>> 0;
+    }
+    return TABLE_THEME_CATALOG[hash % TABLE_THEME_CATALOG.length].id;
+  }
 
   function isThemePreviewBuild(){
     var build = window.BUILD_INFO;
     return !!build && build.context === 'deploy-preview' && build.isPreview === true;
   }
 
-  function applyPreviewTheme(themeId){
-    if (!isThemePreviewBuild() || !els.screen) return;
+  function applyTableTheme(themeId){
+    if (!els.screen) return;
     var theme = TABLE_THEME_CATALOG.find(function(entry){ return entry.id === themeId; });
-    if (!theme || !theme.assets) return;
-    var request = ++previewThemeRequest;
-    function status(message){
-      if (els.previewThemeStatus) els.previewThemeStatus.textContent = message;
-    }
-    if (themeId === 'classic-casino'){
-      els.screen.removeAttribute('data-preview-theme');
-      previewThemeId = themeId;
-      if (els.previewThemeSelect) els.previewThemeSelect.value = themeId;
-      status('Classic Casino · default restored');
-      return;
-    }
-    status('Loading ' + theme.label + '… Current artwork stays visible.');
+    var request = ++tableThemeRequest;
+    els.screen.removeAttribute('data-table-theme');
+    if (!theme || !theme.assets || theme.id === 'classic-casino') return;
     Promise.all(theme.assets.map(function(file){
       return new Promise(function(resolve, reject){
         var image = new Image();
@@ -52,15 +52,12 @@
         image.src = '/poker/assets/themes/' + theme.id + '/' + file;
       });
     })).then(function(){
-      if (request !== previewThemeRequest || !isThemePreviewBuild()) return;
-      els.screen.setAttribute('data-preview-theme', theme.id);
-      previewThemeId = theme.id;
-      status(theme.label + ' · applied to this page only');
+      if (request !== tableThemeRequest) return;
+      els.screen.setAttribute('data-table-theme', theme.id);
     }).catch(function(){
-      if (request !== previewThemeRequest) return;
-      if (els.previewThemeSelect) els.previewThemeSelect.value = previewThemeId;
-      status('Could not load ' + theme.label + '. Current artwork retained; try again.');
-      klog('poker_preview_theme_load_failed', { themeId: theme.id });
+      if (request !== tableThemeRequest) return;
+      els.screen.removeAttribute('data-table-theme');
+      klog('poker_table_theme_load_failed', { themeId: theme.id });
     });
   }
 
@@ -613,31 +610,8 @@
     var panel = document.createElement('section');
     panel.id = 'pokerCelebrationPreviewPanel';
     panel.className = 'poker-celebration-preview__panel';
-    panel.setAttribute('aria-label', 'Table art and celebration preview');
+    panel.setAttribute('aria-label', 'Celebration preview');
     panel.hidden = true;
-    var themeLabel = document.createElement('label');
-    themeLabel.htmlFor = 'pokerPreviewTheme';
-    themeLabel.textContent = 'Theme';
-    var themeSelect = document.createElement('select');
-    themeSelect.id = 'pokerPreviewTheme';
-    themeSelect.setAttribute('aria-describedby', 'pokerPreviewThemeStatus');
-    TABLE_THEME_CATALOG.forEach(function(theme){
-      var option = document.createElement('option');
-      option.value = theme.id;
-      option.textContent = theme.label;
-      themeSelect.appendChild(option);
-    });
-    var themeStatus = document.createElement('small');
-    themeStatus.id = 'pokerPreviewThemeStatus';
-    themeStatus.setAttribute('role', 'status');
-    themeStatus.setAttribute('aria-live', 'polite');
-    themeStatus.textContent = 'Classic Casino · default. Six themes available for this page.';
-    panel.appendChild(themeLabel);
-    panel.appendChild(themeSelect);
-    panel.appendChild(themeStatus);
-    els.previewThemeSelect = themeSelect;
-    els.previewThemeStatus = themeStatus;
-    themeSelect.addEventListener('change', function(){ applyPreviewTheme(themeSelect.value); });
     var mode = document.createElement('select');
     mode.setAttribute('aria-label', 'Preview presentation');
     [['own', 'My win (large)'], ['other', 'Other player/bot (small near avatar)']].forEach(function(entry){
@@ -7321,6 +7295,7 @@
 
   function init(){
     selectElements();
+    applyTableTheme(resolveTableThemeId(tableId));
     if (els.sceneViewport && typeof window.ResizeObserver === 'function'){
       new window.ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
     }
