@@ -1480,11 +1480,28 @@
     var dailyStatusMessage = document.getElementById('dailyDisclaimer');
     var dailySuccess = document.getElementById('dailySuccess');
     var dailyReceipt = null;
+    var dailyFlyin = document.getElementById('dailyFlyin');
+    var dailyFlyinTimer = null;
     var dailyLoadError = false;
     var dailyState = null;
     var dailyPending = false;
     var dailyRequestGeneration = 0;
     var dailyResetTimer = null;
+
+    function clearDailyFlyin(){
+      clearTimeout(dailyFlyinTimer);
+      dailyFlyinTimer = null;
+      if (dailyFlyin) dailyFlyin.hidden = true;
+    }
+
+    function showDailyFlyin(result){
+      clearDailyFlyin();
+      if (!dailyFlyin || !dailyDialog.open || document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      dailyFlyin.querySelector('strong').textContent = '+' + result.amount + ' CH';
+      dailyFlyin.querySelector('span').textContent = 'STREAK DAY ' + result.streakDay;
+      dailyFlyin.hidden = false;
+      dailyFlyinTimer = setTimeout(clearDailyFlyin, 1800);
+    }
 
     function renderDailyBonus(message){
       if (!dailyDialog) return;
@@ -1568,6 +1585,7 @@
 
     async function claimDailyBonus(){
       if (dailyPending) return;
+      clearDailyFlyin();
       dailyReceipt = null;
       if (!lobbyAuthenticated){ renderDailyBonus(); return; }
       var identity = lobbyIdentityGeneration;
@@ -1583,6 +1601,7 @@
           dailyState = Object.assign({}, status, result, { eligible: false, alreadyClaimed: true });
           if (result.claimed) dailyReceipt = result;
           renderDailyBonus();
+          if (result.claimed) showDailyFlyin(result);
         } else {
           await refreshDailyBonus(true);
           message = 'Daily Bonus could not be claimed. Please check its status again.';
@@ -1606,7 +1625,7 @@
       openSignIn();
     });
     if (dailyClaimButton) dailyClaimButton.addEventListener('click', claimDailyBonus);
-    if (dailyDialog) dailyDialog.addEventListener('close', function(){ clearTimeout(dailyResetTimer); });
+    if (dailyDialog) dailyDialog.addEventListener('close', function(){ clearTimeout(dailyResetTimer); clearDailyFlyin(); });
 
     var authCheckGeneration = 0;
     var createBtn = document.getElementById('pokerCreate');
@@ -2079,6 +2098,7 @@
       lobbyIdentity = identity;
       lobbyIdentityGeneration += 1;
       dailyRequestGeneration += 1;
+      clearDailyFlyin();
       dailyReceipt = null;
       dailyLoadError = false;
       dailyState = null;
@@ -2485,7 +2505,7 @@
     window.addEventListener('beforeunload', stopLobbyWs); // xp-lifecycle-allow:poker-lobby-ws(2026-01-01)
     document.addEventListener('visibilitychange', handleLobbyVisibilityChange); // xp-lifecycle-allow:poker-lobby-visibility(2027-01-01)
     window.addEventListener('focus', function(){ if (dailyDialog && dailyDialog.open) refreshDailyBonus(); }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
-    window.addEventListener('beforeunload', function(){ clearTimeout(dailyResetTimer); }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
+    window.addEventListener('beforeunload', function(){ clearTimeout(dailyResetTimer); clearDailyFlyin(); }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
     document.addEventListener('chips:tx-complete', function(){
       refreshWelcomeBonusBanner();
       refreshProgression();

@@ -653,3 +653,31 @@ body.poker-lobby #dailyDialog .bonus-success:not([hidden]){display:flex;align-it
 body.poker-lobby #dailyDialog .bonus-success strong{font-size:28px;}
 body.poker-lobby #dailyDialog .bonus-success span{margin-top:0;font-size:9px;}
 }
+
+/* Short table-style hero celebration, above the modal in its existing top layer. */
+body.poker-lobby .daily-flyin{position:fixed;inset:0;z-index:10;display:grid;place-items:center;overflow:hidden;pointer-events:none;isolation:isolate;background:radial-gradient(ellipse,#261037ed,#080820df 65%,#050518bf);animation:pokerDailyFlyinBackdrop 1800ms ease-out both;}
+body.poker-lobby .daily-flyin[hidden]{display:none;}
+body.poker-lobby .daily-flyin::before{content:"";position:absolute;inset:12% 3%;border:2px solid #ffe6a799;border-radius:50%;box-shadow:0 0 45px #ffcd6666,inset 0 0 35px #ffcd6633;animation:pokerDailyFlyinRing 1800ms ease-out both;}
+body.poker-lobby .daily-flyin__art{position:relative;display:flex;flex-direction:column;align-items:center;gap:clamp(8px,2vmin,20px);width:min(94vw,950px);text-align:center;animation:pokerDailyFlyinHero 1800ms cubic-bezier(.18,.7,.25,1) both;}
+body.poker-lobby .daily-flyin__art b{font:900 italic clamp(20px,6vmin,48px)/1 Georgia,serif;letter-spacing:.09em;color:#ffe7a6;text-shadow:0 3px #6b381d,0 0 24px #ffc65c;}
+body.poker-lobby .daily-flyin__art img{width:clamp(110px,32vmin,250px);height:clamp(110px,32vmin,250px);object-fit:contain;filter:drop-shadow(0 0 30px #ffcf63aa);}
+body.poker-lobby .daily-flyin__art strong{font:900 italic clamp(52px,18vmin,140px)/1 Georgia,serif;color:#fff0b4;text-shadow:0 5px #8f4b18,0 0 20px #ffc95b,0 0 60px #ffb83d99;}
+body.poker-lobby .daily-flyin__art span{font-size:clamp(13px,3.8vmin,27px);font-weight:900;letter-spacing:.18em;color:#fff1d2;}
+@keyframes pokerDailyFlyinHero{
+0%{opacity:0;transform:translateX(-100vw) scale(.5) rotate(-10deg);}
+20%{opacity:1;transform:translateX(0) scale(1.08) rotate(1deg);}
+32%,74%{opacity:1;transform:translateX(0) scale(1) rotate(0);}
+100%{opacity:0;transform:translateX(100vw) scale(1.1) rotate(5deg);}
+}
+@keyframes pokerDailyFlyinRing{
+0%{opacity:0;transform:rotate(-18deg) scale(.55);}
+28%,75%{opacity:1;}
+100%{opacity:0;transform:rotate(8deg) scale(1.1);}
+}
+@keyframes pokerDailyFlyinBackdrop{
+0%,100%{opacity:0;}
+15%,78%{opacity:1;}
+}
+@media(prefers-reduced-motion:reduce){
+body.poker-lobby .daily-flyin{display:none;animation:none;}
+}

@@ -86,3 +86,8 @@ The 2026-10-11 Stage transition was performed as one approved, atomic management
 ## One-click Daily reward and success emphasis
 
 Latest owner UX decision: the explicit Daily Bonus shortcut click is the manual claim action. Signed-in eligible accounts perform a status GET followed immediately by the existing Claim POST; guests only see sign-in info, already-claimed accounts only see status/streak. No claims on login, focus, reload, UTC timer or reconnect. Render successful payout from authoritative POST response: prominent +CH/streak summary, gold glow/shine on the paid milestone, no repeat celebration for replay. Preserve pending/identity protection and existing accounting. This supersedes the earlier separate second Claim-click requirement; no additional Stage writes or payout smoke authorized.
+
+
+## Table-style transient Claim celebration
+
+Clarified owner intent: a dominant, table-strong-hand-style fly-in interstitial after a confirmed fresh Daily Claim. Display giant +CH, existing bonus art and streak over the viewport for 1.8 seconds, then automatically disappear; retain claimed panel state. Never replay for duplicate/already-claimed/reopen; omit moving overlay for reduced motion. No new payout or request.
