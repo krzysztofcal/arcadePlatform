@@ -14,7 +14,7 @@
 ## Validation and handoff
 
 - [x] T006 Review effective function, owner/ACLs and regression suites; record in `specs/1072-stage-escrow-demand-refill/verification.md`.
-- [ ] T007 Create Draft PR, observe automatic shared Stage apply and verify batch 19314 read-only; record risks, outcome and breaking changes in `specs/1072-stage-escrow-demand-refill/verification.md`.
+- [x] T007 Create Draft PR, observe automatic shared Stage apply and verify batch 19314 read-only; record risks, outcome and breaking changes in `specs/1072-stage-escrow-demand-refill/verification.md`.
 
 ## Dependencies and strategy
 

@@ -32,7 +32,13 @@ Before push, protected SQL prepare was called inside REPEATABLE READ, READ ONLY 
 - Snapshot SHA: `bf78189189eeeb2db7954d0f0ab2e09f2d4aac5b789d611aa27e4a4b86240f88`.
 - Account IDs SHA: `192022fdc8071878dd0501fca0c0fc142c9f2da6ea8fc5287bd3c9555b9e7c20`.
 
-The new proof query already recognizes the exact Stage refill evidence read-only. Post-apply prepare and guard checks are pending automatic `DB Stage Apply PR`.
+The new proof query already recognizes the exact Stage refill evidence read-only. [DB Stage Apply PR run 38134696775](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38134696775) applied exactly migration `20261011090000` at 2026-10-11 11:12:27 UTC for implementation SHA `3f8fe1627096afe59184fc847dd7e3d3e61b4617`; job succeeded. Stage recorded migration SHA-256 `bb42935c646f4305c6772d9698b90135f6e441365ee18c5777cdc5107bc7656e`, matching the reviewed file.
+
+Post-apply protected SQL prepare in REPEATABLE READ, READ ONLY returned `state=eligible`, `mode=prepare-only`, `read_only=true`, `account_count=1` and the exact account/recovery/snapshot hashes above. Wrong recovery remained P8946; READ COMMITTED READ ONLY remained P8947. anon/authenticated/service_role still have no EXECUTE. Effective deployed definition exactly equals the locally tested definition; owner/ACL/config are identical to the pre-apply Stage snapshot. Stage identity remains `7656985631720456337`.
+
+MINT still exists with entries `397099`/`397100`, amounts -5000/+5000; its transaction, registry and entry snapshots were identical across post-apply read-only verification. Escrow entry/snapshot counts are zero. At verification (2026-10-11 11:15 UTC), the escrow account still existed and `account_retirement_at` was NULL; automation remained enabled. No account deletion was performed by this task.
+
+CI on the implementation SHA: migration-guard, apply-stage, chips-retention-integration and ws-persistence-integration PASS. Draft PR: [#1081](https://github.com/krzysztofcal/arcadePlatform/pull/1081). Later documentation-only commits do not change the tested/applied migration or runtime artifacts.
 
 Draft PR creation intentionally permits migration application to shared Stage. The retirement policy is already enabled: subsequent existing scheduled automation can delete now-eligible escrow accounts, including batch 19314. Draft status does not prevent apply. No manual cleanup execute, canary/GO change, scheduler change or Production operation is authorized or performed. Stage verification uses SQL prepare with p_execute=false and READ ONLY exclusively; it is not a new storage download/durable-recovery verification run.
 
