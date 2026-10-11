@@ -90,3 +90,10 @@ Runtime/mobile verification SHA: `d728c59bca1f3ee971218b869860dd9fd51dce31`. Net
 - [ ] T026 Resume T020 after T025; existing Admin only, Draft verification before irreversible End, no duplicates, stop on failure, no Claim.
 
 Read-only preflight baseline SHA `20a24f893ba683f99e706491a3bc7fff29a91cfc`. 50 fundamental existing Auth/Stage-identity/Bonus/Admin/endpoint/scheduler/Welcome tests passed with repository CORS setup. Self-review: no application/security-policy changes; no secret values persisted or logged. Stage old `daily-active-2026` remains active (20 CH), new `daily-streak-2026` absent. Technical account has not been created; actual account authorization and Production denial have not been verified. Blocked on controlled email and VPS secret mechanism/access. No migrations, payouts, Production mutation or merge.
+
+## AI-agent Stage operations follow-up
+
+- [x] T024 Complete approved Stage Daily switch atomically using the connected Stage management action, then read back exact old/new status/rewards (not Claim; Production unchanged).
+- [x] T025 Add reusable owner-dispatched, Stage-fenced GitHub workflow and operator script using existing Stage secrets and Admin campaign validation/status methods; read-only inspect default, exact GO for writes, DB physical identity check, atomic old/new switch, stop on unexpected state.
+- [x] T026 Add one minimal guard test file to the existing runner; document agent one-line dispatch and Stage/Production boundary in `docs/stage-bonus-agent-operations.md`.
+- [ ] T027 Confirm CI on final SHA; after approved merge to main, verify an actual **inspect-only** workflow dispatch on Stage. No workflow has been dispatched from this Draft PR.
