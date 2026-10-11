@@ -667,6 +667,11 @@ const run = async () => {
     assert.deepEqual(JSON.parse(response2.body), { ok: true, tableId: "table-new", seatNo: 1 });
     const retryQueries = queries.slice(queriesBeforeRetry);
     assert.equal(retryQueries.some((q) => q.query.includes("insert into public.poker_tables")), false, "retry must not create duplicate table");
+
+    // Retry with SAME requestId but CHANGED buyIn is rejected with 400 invalid_buy_in
+    const responseChangedBuyIn = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 100, requestId: "req-intent-1" });
+    assert.equal(responseChangedBuyIn.statusCode, 400, "retry with changed buyIn must fail fast");
+    assert.deepEqual(JSON.parse(responseChangedBuyIn.body), { error: "invalid_buy_in" });
   }
   {
     // 5. RESTRICTED accounts in Single Player fail fast with 403 before table creation

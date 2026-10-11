@@ -438,6 +438,9 @@ export async function handler(event) {
           const replayRows = await selectSinglePlayerTableByRequestId(tx, { userId: auth.userId, requestId });
           if (replayRows?.[0]?.id) {
             const replayed = replayRows[0];
+            if (selectedBuyIn !== null && Number(replayed.buy_in) !== selectedBuyIn) {
+              return { kind: "invalid_buy_in" };
+            }
             await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [replayed.id]);
             return {
               kind: "recommended",
