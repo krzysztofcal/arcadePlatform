@@ -91,3 +91,8 @@ Latest owner UX decision: the explicit Daily Bonus shortcut click is the manual 
 ## Table-style transient Claim celebration
 
 Clarified owner intent: a dominant, table-strong-hand-style fly-in interstitial after a confirmed fresh Daily Claim. Display giant +CH, existing bonus art and the full current streak day (including Day 100+) over the viewport for 1.8 seconds, then automatically disappear; retain claimed panel state. Never replay for duplicate/already-claimed/reopen; omit moving overlay for reduced motion. No new payout or request.
+
+
+## Cumulative streak card highlights
+
+Highlight cumulative claimed milestones of the current UTC streak: after paid Day 1/2/3 show 1/2/3 gold cards; after paid Day 4 or later show all four. Before today's claim preserve yesterday's completed milestones (Day 4+ remains gold for an ongoing Day 5+). A missed whole UTC day resets all gold highlights; the unclaimed current card is neutral. Current successful receipt retains extra emphasis. No reward rules change.

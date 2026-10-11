@@ -116,3 +116,10 @@ Verified runtime SHA `c6b59ac6692b6e81458e4921e59eff340332fa8f`: Netlify playkcs
 - [x] T032 Run fundamental tests/controls and CI; inspect mobile Preview overlay size, timing, duplicate/account-switch/close and reduced-motion behavior; self-review and retain Draft.
 
 Local verification: 38 fundamental tests, syntax (225 files), CSP (55 documents), lifecycle/project guards and diff checks passed. Mobile mock smoke asserts viewport-sized transient +CH and full STREAK DAY (including Day 100), 1.8s disappearance and persistent streak receipt; no actual claims. Runtime SHA `42e4ae494ca154fce701f2c7eb6483d6155ab1f6`: all executed CI checks and Netlify playkcswh Preview succeeded. Sixteen Preview mock cases passed (12 flow cases, two reduced-motion and two close-during-effect checks) at 390×844 and 667×375. Screenshots confirm visible giant +CH and STREAK DAY 100 in both orientations. No real CH claims. Self-review: six files touched (existing lobby HTML/JS/CSS plus SpecKit); effect is visual only, adds no requests or payout changes, and introduces no protocol/schema breaking impacts. Existing foreground claim remains GET + POST versus four sequential Daily requests before the previous optimization.
+
+
+## Cumulative streak card highlights
+
+- [ ] T033 Apply cumulative gold milestone highlights and neutral unclaimed current card; verify paid Days 1/2/3/4/100, continuing Day 5 before claim and reset to zero. Run fundamental tests/controls/CI and Preview; no actual CH claims.
+
+T033 local validation: 38 fundamental tests and syntax/CSP/project guards passed. Sixteen ephemeral mobile cases cover paid Days 1/2/3/4/100, pre-claim ongoing Days 2/5 and missed-day reset (0 highlighted), including computed gold styling for each completed milestone. Self-review: only lobby JS/CSS and three SpecKit files changed; status-derived presentation, no extra requests, payout/backend/protocol/schema changes, no breaking impacts. CI/Preview evidence will be recorded in PR.

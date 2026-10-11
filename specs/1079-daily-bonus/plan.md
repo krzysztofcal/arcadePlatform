@@ -133,3 +133,8 @@ Intentional behavioral impact: the explicit shortcut click now claims when eligi
 ## Table-style transient Claim celebration
 
 Use the existing table celebration visual/lifecycle pattern (gold ring, hero enter/hold/exit and timer), without coupling lobby to table settlement runtime. Add dailyFlyin inside existing dailyDialog top layer in poker/index.html; fixed viewport CSS in poker/poker.css with 1800ms hero/ring/backdrop keyframes, no new asset/inline script. poker/poker.js: showDailyFlyin only after claimed:true, clearDailyFlyin on identity change/dialog close/beforeunload or a new explicit entry; timeout hides overlay after1800ms. Existing persistent receipt and GET→POST flow unchanged. Verify mobile overlay bounds/exit/cleanup/reduced-motion through temporary browser mocks, no maintained UI tests.
+
+
+## Cumulative streak card highlights
+
+In `poker/poker.js:renderDailyBonus()`, derive completed milestone count as min(streakDay minus one when not alreadyClaimed, 4), using authoritative existing status. Existing `.bonus-day--completed` in `poker/poker.css` shares the gold claimed-card styling; unclaimed `.bonus-day--current` is neutral. Verify 0→1→2→3→4, plateau, pre-claim continuation and reset through mocked API mobile smoke; preserve fly-in and payout path.

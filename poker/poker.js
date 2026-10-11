@@ -1507,10 +1507,11 @@
       if (!dailyDialog) return;
       var status = dailyState;
       var canClaim = !!(lobbyAuthenticated && status && status.eligible && !status.alreadyClaimed);
+      var completedDays = status && status.streakDay ? Math.min(status.streakDay - (status.alreadyClaimed ? 0 : 1), 4) : 0;
       dailyDialog.querySelectorAll('[data-daily-day]').forEach(function(cell){
         var day = Number(cell.dataset.dailyDay);
         var current = status && status.rewardDay === day;
-        var completed = status && (day < status.rewardDay || (current && status.alreadyClaimed));
+        var completed = day <= completedDays;
         cell.className = 'bonus-day bonus-day--' + (completed ? 'completed' : current ? 'current' : 'upcoming')
           + (current && status.alreadyClaimed ? ' bonus-day--claimed' : '');
         cell.querySelector('.day-state').textContent = completed ? 'CLAIMED' : current ? 'CURRENT' : 'UPCOMING';
