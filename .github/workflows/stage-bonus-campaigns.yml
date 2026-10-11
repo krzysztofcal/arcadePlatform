@@ -1,0 +1,75 @@
+name: Stage Bonus Campaign Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Stage-only operation (inspect does not change data)"
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - create_daily_draft
+          - switch_daily
+          - set_status
+      code:
+        description: "New/target campaign code (not needed for inspect)"
+        type: string
+        required: false
+      old_code:
+        description: "Currently active campaign code, only for switch_daily"
+        type: string
+        required: false
+      title:
+        description: "New campaign title, only for create_daily_draft"
+        type: string
+        required: false
+      rewards:
+        description: "Four positive CH amounts, e.g. 25,50,100,200"
+        type: string
+        required: false
+      status:
+        description: "Only paused or ended for set_status"
+        type: string
+        required: false
+      confirmation:
+        description: "Explicit GO string documented in the runbook; required for mutations"
+        type: string
+        required: false
+
+concurrency:
+  group: stage-bonus-campaign-operations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  stage-operator:
+    if: ${{ github.repository == 'krzysztofcal/arcadePlatform' && github.ref == 'refs/heads/main' && github.actor == 'krzysztofcal' && github.event_name == 'workflow_dispatch' }}
+    runs-on: [self-hosted, linux, x64, stage-db-ipv6]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install existing dependencies
+        run: npm ci --ignore-scripts
+      - name: Check action and run authorized Stage operation
+        env:
+          SUPABASE_STAGE_DIRECT_DB_URL: ${{ secrets.SUPABASE_STAGE_DIRECT_DB_URL }}
+          SUPABASE_STAGE_PROJECT_REF: ${{ secrets.SUPABASE_STAGE_PROJECT_REF }}
+          BONUS_ACTION: ${{ inputs.action }}
+          BONUS_CODE: ${{ inputs.code }}
+          BONUS_OLD_CODE: ${{ inputs.old_code }}
+          BONUS_TITLE: ${{ inputs.title }}
+          BONUS_REWARDS: ${{ inputs.rewards }}
+          BONUS_STATUS: ${{ inputs.status }}
+          BONUS_CONFIRM: ${{ inputs.confirmation }}
+        run: node scripts/ops/stage-bonus-campaigns.mjs
