@@ -36,7 +36,7 @@ The new proof query already recognizes the exact Stage refill evidence read-only
 
 Post-apply protected SQL prepare in REPEATABLE READ, READ ONLY returned `state=eligible`, `mode=prepare-only`, `read_only=true`, `account_count=1` and the exact account/recovery/snapshot hashes above. Wrong recovery remained P8946; READ COMMITTED READ ONLY remained P8947. anon/authenticated/service_role still have no EXECUTE. Effective deployed definition exactly equals the locally tested definition; owner/ACL/config are identical to the pre-apply Stage snapshot. Stage identity remains `7656985631720456337`.
 
-MINT still exists with entries `397099`/`397100`, amounts -5000/+5000; its transaction, registry and entry snapshots were identical across post-apply read-only verification. Escrow entry/snapshot counts are zero. At verification (2026-10-11 11:15 UTC), the escrow account still existed and `account_retirement_at` was NULL; automation remained enabled. No account deletion was performed by this task.
+MINT still exists with entries `397099`/`397100`, amounts -5000/+5000; its transaction, registry and entry snapshots were identical across post-apply read-only verification. Escrow entry/snapshot counts are zero. At post-apply verification (2026-10-11), the escrow account still existed and `account_retirement_at` was NULL; automation remained enabled. No account deletion was performed by this task.
 
 CI on the implementation SHA: migration-guard, apply-stage, chips-retention-integration and ws-persistence-integration PASS. Draft PR: [#1081](https://github.com/krzysztofcal/arcadePlatform/pull/1081). Later documentation-only commits do not change the tested/applied migration or runtime artifacts.
 
