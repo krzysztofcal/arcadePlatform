@@ -326,8 +326,9 @@
     return claimBonusCampaign(status.code);
   }
 
-  async function fetchBonusCampaigns(){
-    var payload = await authedFetchWithRetry(BONUS_CAMPAIGNS_URL, { method: 'GET' });
+  async function fetchBonusCampaigns(options){
+    var url = BONUS_CAMPAIGNS_URL + (options && options.includeDailyStatus ? '?includeDailyStatus=1' : '');
+    var payload = await authedFetchWithRetry(url, { method: 'GET' });
     return payload.data;
   }
 

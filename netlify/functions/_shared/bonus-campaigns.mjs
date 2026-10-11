@@ -78,14 +78,14 @@ function buildCampaignIdempotencyKey(campaignCode, userId, claimPeriodKey = "onc
 async function fetchUserCreatedAt(userId, runSql = executeSql) {
   const rows = await runSql(
     `
-select created_at
+select created_at, is_anonymous
 from auth.users
 where id = $1
 limit 1;
 `,
     [userId],
   );
-  return toIso(rows?.[0]?.created_at);
+  return rows?.[0] ? { createdAt: toIso(rows[0].created_at), anonymous: rows[0].is_anonymous !== false } : null;
 }
 
 async function fetchActiveCampaignRows(runSql = executeSql, code = null) {
@@ -107,7 +107,7 @@ order by starts_at asc, code asc;
 async function fetchClaim(campaignId, userId, claimPeriodKey, runSql = executeSql) {
   const rows = await runSql(
     `
-select id, campaign_id, user_id, transaction_id, idempotency_key, claim_period_key, claimed_at
+select id, campaign_id, user_id, transaction_id, idempotency_key, claim_period_key, claimed_at, metadata
 from public.bonus_claims
 where campaign_id = $1
   and user_id = $2
@@ -122,7 +122,7 @@ limit 1;
 async function fetchPromoTransaction(userId, idempotencyKey, runSql = executeSql) {
   const rows = await runSql(
     `
-select id, created_at
+select id, created_at, metadata
 from public.chips_transactions
 where user_id = $1
   and tx_type = 'PROMO_BONUS'
@@ -149,7 +149,7 @@ where campaign_id = $1;
 async function lockCampaign(campaignId, runSql = executeSql) {
   const rows = await runSql(
     `
-select id, max_total_claims
+select *
 from public.bonus_campaigns
 where id = $1
 for update;
@@ -211,6 +211,7 @@ function publicStatus(status) {
     campaignType: status.campaign.campaignType,
     claimPolicy: status.campaign.claimPolicy,
     amount: status.campaign.amount,
+    ...(status.campaign.campaignType === "poker_daily" ? { status: status.campaign.status, dailyRewards: status.dailyRewards, streakDay: status.streakDay, rewardDay: status.rewardDay, claimPeriodKey: status.claimPeriodKey, nextEligibleAt: status.nextEligibleAt, serverNow: status.serverNow } : {}),
     eligible: status.eligible,
     alreadyClaimed: status.alreadyClaimed,
     reason: status.reason,
@@ -218,81 +219,85 @@ function publicStatus(status) {
   };
 }
 
-async function getBonusCampaignStatus(userId, campaignCode, deps = {}) {
-  const runSql = deps.executeSql || executeSql;
-  const now = deps.now ? new Date(deps.now) : new Date();
-  const rows = await fetchActiveCampaignRows(runSql, campaignCode);
-  const campaign = normalizeCampaign(rows?.[0]);
-  if (!campaign) {
-    return {
-      eligible: false,
-      alreadyClaimed: false,
-      reason: "campaign_not_found",
-      campaign: null,
-      idempotencyKey: null,
-    };
-  }
+function validatePokerDaily(campaign) {
+  if (campaign.campaignType !== "poker_daily") return true;
+  const rewards = campaign.eligibilityConfig?.daily_rewards;
+  return Array.isArray(rewards) && rewards.length === 4
+    && rewards.every((amount) => Number.isSafeInteger(amount) && amount > 0)
+    && campaign.amount === rewards[0] && campaign.claimPolicy === "daily"
+    && campaign.eligibilityType === "all_accounts" && campaign.maxTotalClaims === null;
+}
 
+function readDailyReceipt(claim, rewards) {
+  const metadata = parseJsonObject(claim?.metadata);
+  const day = metadata.streak_day;
+  if (!claim?.transaction_id || !Number.isSafeInteger(day) || day < 1 || day >= Number.MAX_SAFE_INTEGER
+    || metadata.reward_day !== Math.min(day, 4)
+    || metadata.amount !== rewards[Math.min(day, 4) - 1]
+    || metadata.claim_period_key !== claim.claim_period_key) return null;
+  return { streakDay: day, rewardDay: Math.min(day, 4), amount: metadata.amount };
+}
+
+async function validDailyEvidence(claim, campaign, userId, runSql) {
+  const paid = readDailyReceipt(claim, campaign.eligibilityConfig.daily_rewards);
+  if (!paid || claim.idempotency_key !== buildCampaignIdempotencyKey(campaign.code, userId, claim.claim_period_key)) return null;
+  const transaction = await fetchPromoTransaction(userId, claim.idempotency_key, runSql);
+  if (transaction) {
+    const metadata = parseJsonObject(transaction.metadata);
+    if (transaction.id !== claim.transaction_id || metadata.amount !== paid.amount || metadata.streak_day !== paid.streakDay) return null;
+  }
+  return paid;
+}
+
+async function campaignStatus(userId, campaign, now, runSql) {
+  const base = { campaign, eligible: false, alreadyClaimed: false, reason: "campaign_not_found", transactionId: null };
+  if (!campaign) return base;
+  const daily = campaign.campaignType === "poker_daily";
   const claimPeriodKey = buildClaimPeriodKey(campaign.claimPolicy, now);
   const idempotencyKey = buildCampaignIdempotencyKey(campaign.code, userId, claimPeriodKey);
-  const userCreatedAt = await fetchUserCreatedAt(userId, runSql);
+  Object.assign(base, { claimPeriodKey, idempotencyKey });
+  if (daily) {
+    base.serverNow = now.toISOString();
+    base.nextEligibleAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
+    if (!validatePokerDaily(campaign)) return { ...base, reason: "invalid_daily_rewards" };
+    base.dailyRewards = campaign.eligibilityConfig.daily_rewards;
+  }
+  const user = await fetchUserCreatedAt(userId, runSql);
+  base.createdAt = user?.createdAt || null;
+  if (daily && user?.anonymous) return { ...base, reason: "guest_not_eligible" };
+  const eligibility = await evaluateEligibility(campaign, userId, base.createdAt, runSql);
+  if (!eligibility.eligible) return { ...base, reason: eligibility.reason };
   const claim = await fetchClaim(campaign.id, userId, claimPeriodKey, runSql);
   const transaction = claim ? null : await fetchPromoTransaction(userId, idempotencyKey, runSql);
-
   if (claim || transaction) {
-    return {
-      eligible: false,
-      alreadyClaimed: true,
-      reason: "already_claimed",
-      campaign,
-      claimPeriodKey,
-      idempotencyKey,
-      createdAt: userCreatedAt,
-      transactionId: claim?.transaction_id || transaction?.id || null,
-    };
-  }
-
-  const eligibility = await evaluateEligibility(campaign, userId, userCreatedAt, runSql);
-  if (!eligibility.eligible) {
-    return {
-      eligible: false,
-      alreadyClaimed: false,
-      reason: eligibility.reason,
-      campaign,
-      claimPeriodKey,
-      idempotencyKey,
-      createdAt: userCreatedAt,
-      transactionId: null,
-    };
-  }
-
-  const maxTotalClaims = campaign.maxTotalClaims;
-  if (Number.isInteger(maxTotalClaims) && maxTotalClaims > 0) {
-    const claimCount = await fetchCampaignClaimCount(campaign.id, runSql);
-    if (claimCount >= maxTotalClaims) {
-      return {
-        eligible: false,
-        alreadyClaimed: false,
-        reason: "max_total_claims_reached",
-        campaign,
-        claimPeriodKey,
-        idempotencyKey,
-        createdAt: userCreatedAt,
-        transactionId: null,
-      };
+    if (daily) {
+      const paid = await validDailyEvidence(claim, campaign, userId, runSql);
+      if (!paid) return { ...base, reason: "invalid_daily_claim" };
+      Object.assign(base, paid);
+      base.campaign = { ...campaign, amount: paid.amount };
     }
+    return { ...base, alreadyClaimed: true, reason: "already_claimed", transactionId: claim?.transaction_id || transaction?.id };
   }
+  if (daily) {
+    const yesterday = buildClaimPeriodKey("daily", new Date(now.getTime() - 86400000));
+    const previous = await fetchClaim(campaign.id, userId, yesterday, runSql);
+    const paid = previous ? await validDailyEvidence(previous, campaign, userId, runSql) : null;
+    if (previous && !paid) return { ...base, reason: "invalid_daily_claim" };
+    base.streakDay = paid ? paid.streakDay + 1 : 1;
+    base.rewardDay = Math.min(base.streakDay, 4);
+    base.campaign = { ...campaign, amount: base.dailyRewards[base.rewardDay - 1] };
+  }
+  if (campaign.status !== "active" || !campaign.startsAt || Date.parse(campaign.startsAt) > now.getTime()
+    || (campaign.endsAt && Date.parse(campaign.endsAt) <= now.getTime())) return { ...base, reason: "campaign_inactive" };
+  if (Number.isInteger(campaign.maxTotalClaims) && campaign.maxTotalClaims > 0
+    && await fetchCampaignClaimCount(campaign.id, runSql) >= campaign.maxTotalClaims) return { ...base, reason: "max_total_claims_reached" };
+  return { ...base, eligible: true, reason: "eligible" };
+}
 
-  return {
-    eligible: true,
-    alreadyClaimed: false,
-    reason: "eligible",
-    campaign,
-    claimPeriodKey,
-    idempotencyKey,
-    createdAt: userCreatedAt,
-    transactionId: null,
-  };
+async function getBonusCampaignStatus(userId, campaignCode, deps = {}) {
+  const runSql = deps.executeSql || executeSql;
+  const rows = await fetchActiveCampaignRows(runSql, campaignCode);
+  return campaignStatus(userId, normalizeCampaign(rows?.[0]), deps.now ? new Date(deps.now) : new Date(), runSql);
 }
 
 async function listBonusCampaignStatuses(userId, deps = {}) {
@@ -303,7 +308,14 @@ async function listBonusCampaignStatuses(userId, deps = {}) {
     const status = await getBonusCampaignStatus(userId, row.code, deps);
     if (status.campaign) items.push(publicStatus(status));
   }
-  return { items };
+  if (!deps.includeDailyStatus) return { items };
+  const dailyRows = await runSql(`
+select * from public.bonus_campaigns
+where campaign_type = 'poker_daily' and status in ('active', 'paused', 'ended')
+order by (status = 'active') desc, created_at desc, id desc limit 1;
+`, []);
+  const status = await campaignStatus(userId, normalizeCampaign(dailyRows?.[0]), deps.now ? new Date(deps.now) : new Date(), runSql);
+  return { items, dailyBonus: status.campaign ? publicStatus(status) : null };
 }
 
 function buildBonusCampaignEntries(userId, campaign, claimPeriodKey = "once") {
@@ -314,6 +326,7 @@ function buildBonusCampaignEntries(userId, campaign, claimPeriodKey = "once") {
     campaign_type: campaign.campaignType,
     claim_policy: campaign.claimPolicy,
     claim_period_key: claimPeriodKey,
+    ...campaign.awardMetadata,
   };
   return [
     {
@@ -331,7 +344,7 @@ function buildBonusCampaignEntries(userId, campaign, claimPeriodKey = "once") {
   ];
 }
 
-async function insertBonusClaim({ campaign, userId, transactionId, idempotencyKey, claimPeriodKey }, runSql = executeSql) {
+async function insertBonusClaim({ campaign, userId, transactionId, idempotencyKey, claimPeriodKey, decisionAt }, runSql = executeSql) {
   const metadata = {
     source: "bonus_campaign",
     campaign_id: campaign.id,
@@ -340,194 +353,71 @@ async function insertBonusClaim({ campaign, userId, transactionId, idempotencyKe
     claim_policy: campaign.claimPolicy,
     claim_period_key: claimPeriodKey,
     amount: campaign.amount,
+    ...campaign.awardMetadata,
   };
   const rows = await runSql(
     `
-insert into public.bonus_claims (campaign_id, user_id, transaction_id, idempotency_key, claim_period_key, metadata)
-values ($1, $2, $3, $4, $5, $6::jsonb)
+insert into public.bonus_claims (campaign_id, user_id, transaction_id, idempotency_key, claim_period_key, metadata, claimed_at)
+values ($1, $2, $3, $4, $5, ($6::text)::jsonb, $7::timestamptz)
 on conflict (campaign_id, user_id, claim_period_key) do update
 set metadata = public.bonus_claims.metadata
 returning id, campaign_id, user_id, transaction_id, idempotency_key, claim_period_key, claimed_at;
 `,
-    [campaign.id, userId, transactionId, idempotencyKey, claimPeriodKey, JSON.stringify(metadata)],
+    [campaign.id, userId, transactionId, idempotencyKey, claimPeriodKey, JSON.stringify(metadata), decisionAt],
   );
   return rows?.[0] || null;
 }
 
+async function transactionClock(deps, runSql) {
+  const value = deps.transactionNow ? await deps.transactionNow() : deps.now || (await runSql("select clock_timestamp() as decision_at;", []))?.[0]?.decision_at;
+  const now = new Date(value);
+  if (Number.isNaN(now.getTime())) throw new Error("invalid_claim_clock");
+  return now;
+}
+
 async function claimBonusCampaign(userId, campaignCode, deps = {}) {
-  const runSql = deps.executeSql || executeSql;
   const writeTransaction = deps.postTransaction || postTransaction;
   const begin = deps.beginSql || beginSql;
-  const status = await getBonusCampaignStatus(userId, campaignCode, deps);
-  const campaign = status.campaign;
-  const baseLog = {
-    userId,
-    campaignId: campaign?.id || null,
-    campaignCode: campaign?.code || campaignCode || null,
-    campaignType: campaign?.campaignType || null,
-    eligible: status.eligible,
-    alreadyClaimed: status.alreadyClaimed,
-    amount: campaign?.amount || null,
-    reason: status.reason,
-  };
-
-  if (!status.eligible || !campaign) {
-    klog("bonus_campaign_skipped", {
-      ...baseLog,
-      transactionId: status.transactionId || null,
-    });
-    return { ...status, claimed: false, transaction: null, entries: [], account: null };
-  }
-
+  const preflight = await getBonusCampaignStatus(userId, campaignCode, deps);
+  const empty = { claimed: false, transaction: null, entries: [], account: null };
+  if (!preflight.eligible || !preflight.campaign) return { ...preflight, ...empty };
   try {
-    const metadata = {
-      source: "bonus_campaign",
-      campaign_id: campaign.id,
-      campaign_code: campaign.code,
-      campaign_type: campaign.campaignType,
-      claim_policy: campaign.claimPolicy,
-      claim_period_key: status.claimPeriodKey,
-      amount: campaign.amount,
-    };
-    const transactionResult = await begin(async (sqlTx) => {
+    return await begin(async (sqlTx) => {
       const txSql = (query, params = []) => sqlTx.unsafe(query, params);
-      const lockedCampaign = await lockCampaign(campaign.id, txSql);
-      if (!lockedCampaign) {
-        return {
-          missingCampaign: true,
-          result: null,
-          claim: null,
-        };
+      const campaign = normalizeCampaign(await lockCampaign(preflight.campaign.id, txSql));
+      const now = await transactionClock(deps, txSql);
+      const status = await campaignStatus(userId, campaign, now, txSql);
+      if (!status.eligible) return { ...status, ...empty };
+      const finalNow = await transactionClock(deps, txSql);
+      if (buildClaimPeriodKey(campaign.claimPolicy, finalNow) !== status.claimPeriodKey
+        || (campaign.endsAt && Date.parse(campaign.endsAt) <= finalNow.getTime())) {
+        return { ...status, ...empty, eligible: false, reason: "claim_period_changed" };
       }
-
-      const existingClaim = await fetchClaim(campaign.id, userId, status.claimPeriodKey, txSql);
-      const existingTransaction = existingClaim
-        ? null
-        : await fetchPromoTransaction(userId, status.idempotencyKey, txSql);
-      if (existingClaim || existingTransaction) {
-        return {
-          alreadyClaimed: true,
-          transactionId: existingClaim?.transaction_id || existingTransaction?.id || null,
-          result: existingTransaction ? { transaction: existingTransaction, entries: [], account: null } : null,
-          claim: existingClaim || null,
-        };
-      }
-
-      const maxTotalClaims = lockedCampaign.max_total_claims == null ? null : Number(lockedCampaign.max_total_claims);
-      if (Number.isInteger(maxTotalClaims) && maxTotalClaims > 0) {
-        const claimCount = await fetchCampaignClaimCount(campaign.id, txSql);
-        if (claimCount >= maxTotalClaims) {
-          return {
-            limitReached: true,
-            result: null,
-            claim: null,
-          };
-        }
-      }
-
+      const award = { ...status.campaign };
+      if (campaign.campaignType === "poker_daily") award.awardMetadata = {
+        streak_day: status.streakDay, reward_day: status.rewardDay,
+        amount: award.amount, claim_decision_at: finalNow.toISOString(),
+      };
+      const entries = buildBonusCampaignEntries(userId, award, status.claimPeriodKey);
+      const metadata = { ...entries[0].metadata, amount: award.amount };
+      delete metadata.entry_role;
       const result = await writeTransaction({
-        userId,
-        txType: PROMO_BONUS_TX_TYPE,
-        idempotencyKey: status.idempotencyKey,
-        reference: status.idempotencyKey,
-        description: campaign.title,
-        metadata,
-        entries: buildBonusCampaignEntries(userId, campaign, status.claimPeriodKey),
-        createdBy: userId,
-        tx: sqlTx,
+        userId, txType: PROMO_BONUS_TX_TYPE, idempotencyKey: status.idempotencyKey,
+        reference: status.idempotencyKey, description: award.title, metadata, entries,
+        createdBy: userId, tx: sqlTx,
       });
-      const transactionId = result?.transaction?.id || null;
-      const claim = transactionId
-        ? await insertBonusClaim({
-            campaign,
-            userId,
-            transactionId,
-            idempotencyKey: status.idempotencyKey,
-            claimPeriodKey: status.claimPeriodKey,
-          }, txSql)
-        : null;
-      return {
-        result,
-        transactionId,
-        claim,
-      };
+      const transactionId = result?.transaction?.id;
+      if (!transactionId) throw new Error("bonus_claim_write_failed");
+      const claim = await insertBonusClaim({ campaign: award, userId, transactionId,
+        idempotencyKey: status.idempotencyKey, claimPeriodKey: status.claimPeriodKey,
+        decisionAt: finalNow.toISOString() }, txSql);
+      if (!claim?.id || claim.transaction_id !== transactionId) throw new Error("bonus_claim_write_failed");
+      klog("bonus_campaign_claimed", { userId, campaignCode, transactionId, amount: award.amount });
+      return { ...status, eligible: false, alreadyClaimed: true, claimed: true, reason: "claimed",
+        transactionId, claim, transaction: result.transaction, entries: result.entries || [], account: result.account || null };
     });
-
-    if (transactionResult?.limitReached) {
-      klog("bonus_campaign_skipped", {
-        ...baseLog,
-        reason: "max_total_claims_reached",
-        transactionId: null,
-      });
-      return {
-        ...status,
-        eligible: false,
-        alreadyClaimed: false,
-        claimed: false,
-        reason: "max_total_claims_reached",
-        transaction: null,
-        entries: [],
-        account: null,
-      };
-    }
-
-    if (transactionResult?.missingCampaign) {
-      klog("bonus_campaign_skipped", {
-        ...baseLog,
-        reason: "campaign_not_found",
-        transactionId: null,
-      });
-      return {
-        ...status,
-        eligible: false,
-        alreadyClaimed: false,
-        claimed: false,
-        reason: "campaign_not_found",
-        transaction: null,
-        entries: [],
-        account: null,
-      };
-    }
-
-    if (transactionResult?.alreadyClaimed) {
-      return {
-        ...status,
-        eligible: false,
-        alreadyClaimed: true,
-        claimed: false,
-        reason: "already_claimed",
-        transactionId: transactionResult.transactionId || null,
-        claim: transactionResult.claim || null,
-        transaction: transactionResult.result?.transaction || null,
-        entries: transactionResult.result?.entries || [],
-        account: transactionResult.result?.account || null,
-      };
-    }
-
-    const result = transactionResult?.result || null;
-    const transactionId = transactionResult?.transactionId || null;
-    const claim = transactionResult?.claim || null;
-    klog("bonus_campaign_claimed", {
-      ...baseLog,
-      transactionId,
-    });
-    return {
-      ...status,
-      eligible: false,
-      alreadyClaimed: true,
-      claimed: true,
-      reason: "claimed",
-      transactionId,
-      claim,
-      transaction: result?.transaction || null,
-      entries: result?.entries || [],
-      account: result?.account || null,
-    };
   } catch (error) {
-    klog("bonus_campaign_failed", {
-      ...baseLog,
-      reason: error?.code || error?.message || "server_error",
-    });
+    klog("bonus_campaign_failed", { userId, campaignCode, reason: error?.code || error?.message || "server_error" });
     throw error;
   }
 }
@@ -542,4 +432,5 @@ export {
   getBonusCampaignStatus,
   listBonusCampaignStatuses,
   publicStatus,
+  validatePokerDaily,
 };

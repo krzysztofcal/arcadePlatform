@@ -376,6 +376,7 @@ function createAdminDom() {
   addField(bonusCampaignForm, { name: "description", value: "" });
   addField(bonusCampaignForm, { name: "campaignType", value: "" });
   addField(bonusCampaignForm, { name: "amount", value: "" });
+  [1,2,3,4].forEach((day) => addField(bonusCampaignForm, { name: "dailyReward" + day, value: "" }));
   addField(bonusCampaignForm, { name: "startsAt", value: "" });
   addField(bonusCampaignForm, { name: "endsAt", value: "" });
   addField(bonusCampaignForm, { name: "eligibilityType", value: "all_accounts" });
@@ -764,14 +765,14 @@ test("admin page tabs switch panels on click and keep ARIA state in sync", async
   document.dispatchEvent({ type: "click", target: dailyTemplateButton, preventDefault() {} });
 
   const bonusCampaignForm = document.getElementById("adminBonusCampaignForm");
-  assert.equal(formField(bonusCampaignForm, "title").value, "Daily Login Bonus");
-  assert.equal(formField(bonusCampaignForm, "campaignType").value, "daily");
-  assert.equal(formField(bonusCampaignForm, "amount").value, "20");
+  assert.equal(formField(bonusCampaignForm, "title").value, "Poker Daily Bonus");
+  assert.equal(formField(bonusCampaignForm, "campaignType").value, "poker_daily");
+  assert.equal(formField(bonusCampaignForm, "amount").value, "25");
   assert.equal(formField(bonusCampaignForm, "claimPolicy").value, "daily");
   assert.equal(formField(bonusCampaignForm, "eligibilityType").value, "all_accounts");
-  assert.equal(formField(bonusCampaignForm, "code").value, "daily-login-2026");
+  assert.equal(formField(bonusCampaignForm, "code").value, "daily-streak-2026");
   assert.match(formField(bonusCampaignForm, "startsAt").value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
-  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), {});
+  assert.deepEqual(JSON.parse(formField(bonusCampaignForm, "eligibilityConfig").value), { daily_rewards: [25,50,100,200] });
   assert.match(document.getElementById("adminStatus").textContent, /template applied/);
 
   formField(bonusCampaignForm, "code").value = "Arcade-Hub-anniversary";

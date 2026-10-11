@@ -2,7 +2,7 @@
 
 **Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1079
 **Baseline:** main `1ba99776ff427783f858e075d3474e144c3947b3`
-**Status:** revised plan; no implementation, database changes, activation, deployment or merge authorized by this docs change.
+**Status:** owner approved implementation in Draft PR #1084. Deployment, live database/campaign changes, CH grants and merge remain unauthorized.
 
 ## Latest owner decision — simple, no-migration replacement
 
@@ -51,7 +51,7 @@ This feature requires **no SQL migration**: use existing `bonus_campaigns.eligib
 - The old `daily-active-2026` is irreversibly **Ended** when each environment is cut over; old 20 CH daily rewards stop. Existing generic fixed-daily campaign mechanics and Welcome Bonus stay available.
 - `poker_daily` uses the existing JSONB field for four rewards and yields a **dynamic** daily payout; new GET/POST projection must distinguish actual awarded amount from Day 1 scalar `amount`.
 - One implementation PR, **no schema migration**, but Admin campaign End/Create/Activate are real environment writes and cannot happen from PR merge alone.
-- Keep Stage and Production rollouts separately authorized. This revised Draft PR still only updates SpecKit; it does not authorize campaign changes, CH grants, deployment or merge.
+- Keep Stage and Production rollouts separately authorized. The implementation in this Draft PR does not authorize campaign changes, CH grants, deployment or merge.
 
 ## Fundamental acceptance tests
 

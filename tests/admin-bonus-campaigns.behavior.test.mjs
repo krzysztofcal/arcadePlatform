@@ -69,9 +69,13 @@ function createHandler(options = {}) {
   const handler = createAdminBonusCampaignsHandler({
     env: { CHIPS_ENABLED: "1" },
     requireAdminUser: options.requireAdminUser || (async () => ({ userId: ADMIN_USER_ID })),
-    executeSql: async (query, params = []) => {
+    beginSql: async (fn) => fn({ unsafe: async (query, params = []) => handlerSql(query, params) }),
+    executeSql: (query, params = []) => handlerSql(query, params),
+  });
+  async function handlerSql(query, params = []) {
       calls.push({ query, params });
       const text = String(query).replace(/\s+/g, " ").trim().toLowerCase();
+      if (text.includes("for update")) return rows.has(params[0]) ? [{ id: params[0] }] : [];
       if (text.includes("from public.bonus_campaigns c") && text.includes("count(*) over()")) {
         return [...rows.values()].map((row) => ({ ...row, total_count: rows.size }));
       }
@@ -124,8 +128,7 @@ function createHandler(options = {}) {
         return [next];
       }
       throw new Error(`unexpected query: ${text}`);
-    },
-  });
+    }
   return { calls, handler, rows };
 }
 
@@ -272,4 +275,43 @@ test("admin-bonus-campaigns enforces status transitions", async () => {
   assert.equal(JSON.parse(first.body).campaign.status, "active");
   assert.equal(invalid.statusCode, 409);
   assert.deepEqual(JSON.parse(invalid.body), { error: "invalid_status_transition" });
+});
+
+
+test("Poker Daily Admin validates JSONB rewards and keeps publication immutable/manual", async () => {
+  const { handler, rows } = createHandler();
+  const payload = { code: "daily-streak", title: "Daily", campaignType: "poker_daily", amount: 25,
+    startsAt: "2026-07-07T00:00:00Z", eligibilityType: "all_accounts", claimPolicy: "daily",
+    maxTotalClaims: null, eligibilityConfig: { daily_rewards: [25,50,100,200] } };
+  const created = await handler(createEvent("POST", { action: "create", campaign: payload }));
+  assert.equal(created.statusCode, 200);
+  const campaign = JSON.parse(created.body).campaign;
+  assert.deepEqual(campaign.eligibilityConfig.daily_rewards, [25,50,100,200]);
+  const scheduled = await handler(createEvent("POST", { action: "set_status", campaignId: campaign.id, status: "scheduled" }));
+  assert.equal(scheduled.statusCode, 400);
+  const active = await handler(createEvent("POST", { action: "set_status", campaignId: campaign.id, status: "active" }));
+  assert.equal(active.statusCode, 200);
+  await handler(createEvent("POST", { action: "set_status", campaignId: campaign.id, status: "paused" }));
+  const edited = await handler(createEvent("POST", { action: "update", campaignId: campaign.id,
+    campaign: { ...payload, eligibilityConfig: { daily_rewards: [25,50,100,300] } } }));
+  assert.equal(edited.statusCode, 409);
+  const ended = await handler(createEvent("POST", { action: "set_status", campaignId: campaign.id, status: "ended" }));
+  assert.equal(ended.statusCode, 200);
+  for (const override of [{ maxTotalClaims: 10 }, { amount: 50 }, { claimPolicy: "once" },
+    { eligibilityType: "created_after" }, { eligibilityConfig: { daily_rewards: [25, 50, 100, 0] } }]) {
+    const bad = await handler(createEvent("POST", { action: "create", campaign: { ...payload, ...override } }));
+    assert.equal(bad.statusCode, 400);
+  }
+});
+
+
+test("Admin kill switch remains available even for malformed Poker Daily configuration", async () => {
+  const { handler, rows } = createHandler();
+  Object.assign(rows.get(ACTIVE_ID), { campaign_type: "poker_daily", eligibility_config: { daily_rewards: [] } });
+  const pause = await handler(createEvent("POST", { action: "set_status", campaignId: ACTIVE_ID, status: "paused" }));
+  assert.equal(pause.statusCode, 200);
+  const resume = await handler(createEvent("POST", { action: "set_status", campaignId: ACTIVE_ID, status: "active" }));
+  assert.equal(resume.statusCode, 400);
+  const end = await handler(createEvent("POST", { action: "set_status", campaignId: ACTIVE_ID, status: "ended" }));
+  assert.equal(end.statusCode, 200);
 });

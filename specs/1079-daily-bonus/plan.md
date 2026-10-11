@@ -2,7 +2,7 @@
 
 **Source:** [spec.md](spec.md), latest owner decision in [issue #1079](https://github.com/krzysztofcal/arcadePlatform/issues/1079).
 **Baseline:** main `1ba99776ff427783f858e075d3474e144c3947b3`.
-**Status:** reviewed redesign proposal. No implementation or environment mutation in the current documentation-only Draft PR.
+**Status:** simplified design approved and implemented in Draft PR #1084; CI verification in progress. Environment actions remain unauthorized.
 
 ## Summary — YAGNI
 
@@ -63,3 +63,12 @@ Use one implementation PR (continue #1084 after implementation GO), containing t
 - JSP-compatible JS only, CSS one physical line per selector, CSP SHA whitelist if any inline script is added, and diagnostic logs through `klog`.
 - Only fundamental tests; no large test matrix, dependencies, extra framework, tooling cleanup, broad new feature flags, or future-proof subsystem.
 - No commands for repository operations in this SpecKit; no migrations and no unapproved Stage/Production actions.
+
+
+## Implementation self-review
+
+Implemented the scoped reward parser/progression in existing Bonus helpers, opt-in endpoint projection, four Admin inputs and real lobby Claim. The existing campaign row lock now protects fresh status/configuration/eligibility/UTC validation; Admin edits/status transitions take that same row lock. No legacy cross-campaign mechanism or scheduler change was added.
+
+Fundamental real-PostgreSQL verification is `tests/bonus-campaigns.transaction.test.mjs`, registered in the existing runner and isolated PostgreSQL job. It proves native JSONB Admin configuration, simultaneous Claim serialization, an End lock blocking a stale-preflight Claim, and complete real-ledger/idempotency rollback on missing receipt. CI auth fixtures include `created_at` and `is_anonymous`; no shared database fixtures are used. JSONB writes cast serialized text to JSONB explicitly, and Admin tolerates existing JSON-string configuration without rewriting old records.
+
+Local verification: 35 Bonus/Admin/endpoint/scheduler/Welcome tests, the focused PostgreSQL transaction test, syntax, CSP and lifecycle guards passed. Full regression runner and remote CI evidence will be reported in the PR. Only existing Admin template expectations/fixtures were updated; no new UI test suite or inline script. Deploy Preview is intentionally suppressed with `[skip netlify]` while deployment remains unauthorized. Runtime/mobile verification follows separate deployment approval; the PR stays Draft for owner code review.

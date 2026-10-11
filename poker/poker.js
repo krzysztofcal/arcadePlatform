@@ -1474,6 +1474,104 @@
     var lobbyAuthenticated = false;
     var lobbyIdentity = null;
     var lobbyIdentityGeneration = 0;
+    var dailyDialog = document.getElementById('dailyDialog');
+    var dailyClaimButton = document.getElementById('dailyClaim');
+    var dailyState = null;
+    var dailyPending = false;
+    var dailyRequestGeneration = 0;
+    var dailyResetTimer = null;
+
+    function renderDailyBonus(message){
+      if (!dailyDialog) return;
+      var status = dailyState;
+      var canClaim = !!(lobbyAuthenticated && status && status.eligible && !status.alreadyClaimed);
+      dailyDialog.querySelectorAll('[data-daily-day]').forEach(function(cell){
+        var day = Number(cell.dataset.dailyDay);
+        var current = status && status.rewardDay === day;
+        var completed = status && (day < status.rewardDay || (current && status.alreadyClaimed));
+        cell.className = 'bonus-day bonus-day--' + (completed ? 'completed' : current ? 'current' : 'upcoming');
+        cell.querySelector('.day-state').textContent = completed ? 'CLAIMED' : current ? 'CURRENT' : 'UPCOMING';
+        cell.querySelector('.reward-space').textContent = status && status.dailyRewards ? status.dailyRewards[day - 1] + ' CH' : '— CH';
+      });
+      document.getElementById('dailyProgress').textContent = status && status.streakDay ? 'STREAK · DAY ' + status.streakDay : 'DAILY REWARDS';
+      document.getElementById('dailyReset').textContent = status && status.nextEligibleAt ? new Date(status.nextEligibleAt).toISOString().slice(0,16).replace('T', ' ') + ' UTC' : '—';
+      dailyClaimButton.disabled = dailyPending || !canClaim;
+      dailyClaimButton.textContent = dailyPending ? 'PLEASE WAIT…' : status && status.alreadyClaimed ? 'CLAIMED' : canClaim ? 'CLAIM ' + status.amount + ' CH' : 'CLAIM';
+      var text = !lobbyAuthenticated ? 'Sign in to claim. Guests are not eligible.'
+        : !status ? 'Daily Bonus is unavailable.'
+        : status.reason === 'guest_not_eligible' ? 'Sign in with a registered account. Guests are not eligible.'
+        : status.alreadyClaimed ? 'Already claimed today. Return after the next UTC reset.'
+        : status.status === 'paused' ? 'Daily Bonus is paused.'
+        : !canClaim ? 'Daily Bonus is unavailable.'
+        : 'A missed UTC day resets your streak. Day 4+ repeats indefinitely.';
+      document.getElementById('dailyDisclaimer').textContent = message || text;
+    }
+
+    async function refreshDailyBonus(){
+      clearTimeout(dailyResetTimer);
+      dailyResetTimer = null;
+      var identity = lobbyIdentityGeneration;
+      var request = ++dailyRequestGeneration;
+      if (!lobbyAuthenticated || !window.ChipsClient){
+        dailyState = null;
+        renderDailyBonus();
+        return null;
+      }
+      dailyState = null;
+      renderDailyBonus('Loading Daily Bonus…');
+      try {
+        var payload = await window.ChipsClient.fetchBonusCampaigns({ includeDailyStatus: true });
+        if (identity !== lobbyIdentityGeneration || request !== dailyRequestGeneration || !lobbyAuthenticated) return null;
+        dailyState = payload.dailyBonus || null;
+        renderDailyBonus();
+        if (dailyDialog.open && dailyState && dailyState.nextEligibleAt && dailyState.serverNow){
+          var delay = Date.parse(dailyState.nextEligibleAt) - Date.parse(dailyState.serverNow);
+          if (delay > 0) dailyResetTimer = setTimeout(refreshDailyBonus, Math.min(delay + 50, 86400100));
+        }
+        return dailyState;
+      } catch (error){
+        if (identity === lobbyIdentityGeneration && request === dailyRequestGeneration){
+          dailyState = null;
+          renderDailyBonus('Could not load Daily Bonus. Reopen to retry.');
+          klog('poker_daily_status_failed', { reason: error.code || error.message || 'unknown' });
+        }
+        return null;
+      }
+    }
+
+    async function claimDailyBonus(){
+      if (dailyPending || !lobbyAuthenticated) return;
+      var identity = lobbyIdentityGeneration;
+      dailyPending = true;
+      renderDailyBonus();
+      try {
+        var status = await refreshDailyBonus();
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated || !status || !status.eligible || status.alreadyClaimed) return;
+        var result = await window.ChipsClient.claimBonusCampaign(status.code);
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
+        await refreshDailyBonus();
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
+        renderDailyBonus(result.claimed ? 'Claimed ' + result.amount + ' CH. Streak day ' + result.streakDay + '.'
+          : result.alreadyClaimed ? 'Already claimed today.' : 'Daily Bonus is unavailable. Please check its status again.');
+      } catch (error){
+        if (identity === lobbyIdentityGeneration){
+          await refreshDailyBonus();
+          if (identity === lobbyIdentityGeneration) renderDailyBonus('Claim could not be confirmed. Check status before retrying.');
+          klog('poker_daily_claim_failed', { reason: error.code || error.message || 'unknown' });
+        }
+      } finally {
+        if (identity === lobbyIdentityGeneration){
+          dailyPending = false;
+          if (dailyClaimButton) {
+            dailyClaimButton.disabled = !(dailyState && dailyState.eligible && !dailyState.alreadyClaimed);
+            dailyClaimButton.textContent = dailyState && dailyState.alreadyClaimed ? 'CLAIMED' : dailyState && dailyState.eligible ? 'CLAIM ' + dailyState.amount + ' CH' : 'CLAIM';
+          }
+        }
+      }
+    }
+    if (dailyClaimButton) dailyClaimButton.addEventListener('click', claimDailyBonus);
+    if (dailyDialog) dailyDialog.addEventListener('close', function(){ clearTimeout(dailyResetTimer); });
+
     var authCheckGeneration = 0;
     var createBtn = document.getElementById('pokerCreate');
     var buyInInput = document.getElementById('pokerBuyIn');
@@ -1546,6 +1644,7 @@
     document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
       var dialog = document.getElementById(button.dataset.panel + 'Dialog');
       if (dialog && !dialog.open) dialog.showModal();
+      if (button.dataset.panel === 'daily') refreshDailyBonus();
     }); });
     document.querySelectorAll('[data-close]').forEach(function(button){ button.addEventListener('click', function(){ button.closest('dialog').close(); }); });
     document.querySelectorAll('[data-view]').forEach(function(button){ button.addEventListener('click', function(){
@@ -1943,6 +2042,11 @@
       if (lobbyIdentity === identity) return;
       lobbyIdentity = identity;
       lobbyIdentityGeneration += 1;
+      dailyRequestGeneration += 1;
+      dailyState = null;
+      dailyPending = false;
+      clearTimeout(dailyResetTimer);
+      renderDailyBonus();
       progressionState = null;
       selectedQuickBuyIn = null;
       lobbyTables = [];
@@ -1982,6 +2086,7 @@
       stopAuthWatch();
       refreshWelcomeBonusBanner();
       refreshProgression();
+      if (dailyDialog && dailyDialog.open) refreshDailyBonus();
       return true;
     }
 
@@ -2076,6 +2181,7 @@
       }
       refreshProgression();
       refreshLobby('visibility');
+      if (dailyDialog && dailyDialog.open) refreshDailyBonus();
     }
 
     function isCanonicalTableForTier(table, tier){
@@ -2340,6 +2446,8 @@
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)
     window.addEventListener('beforeunload', stopLobbyWs); // xp-lifecycle-allow:poker-lobby-ws(2026-01-01)
     document.addEventListener('visibilitychange', handleLobbyVisibilityChange); // xp-lifecycle-allow:poker-lobby-visibility(2027-01-01)
+    window.addEventListener('focus', function(){ if (dailyDialog && dailyDialog.open) refreshDailyBonus(); }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
+    window.addEventListener('beforeunload', function(){ clearTimeout(dailyResetTimer); }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
     document.addEventListener('chips:tx-complete', function(){
       refreshWelcomeBonusBanner();
       refreshProgression();

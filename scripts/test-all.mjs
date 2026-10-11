@@ -69,6 +69,8 @@ run("node", ["tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs"
 run("node", ["tests/chips/chips-ledger-legacy-stage-allowlist-audit.test.mjs"], "chips-ledger-legacy-stage-allowlist-audit");
 run("node", ["tests/chips/chips-ledger-stage-timeout-diagnostic.guard.test.mjs"], "chips-ledger-stage-timeout-diagnostic");
 run("node", ["tests/welcome-bonus.behavior.test.mjs"], "welcome-bonus-behavior");
+run("node", ["tests/bonus-campaigns.behavior.test.mjs"], "bonus-campaigns-behavior");
+run("node", ["tests/bonus-campaigns.transaction.test.mjs"], "bonus-campaigns-transaction");
 run("node", ["tests/bonus-campaigns-endpoint.behavior.test.mjs"], "bonus-campaigns-endpoint-behavior");
 run("node", ["tests/bonus-campaigns-scheduler.behavior.test.mjs"], "bonus-campaigns-scheduler-behavior");
 run("node", ["tests/poker-stakes-ui.test.mjs"], "poker-stakes-ui");

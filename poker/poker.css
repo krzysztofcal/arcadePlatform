@@ -622,3 +622,5 @@ to{opacity:1;transform:translateY(0);}
 5.5%{transform:scale(.99,1.02) rotate(1.5deg);}
 6.5%{transform:scale(1.01) rotate(-.5deg);}
 }
+
+body.poker-lobby #dailyClaim:disabled{opacity:.6;cursor:not-allowed;}

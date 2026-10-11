@@ -90,11 +90,14 @@ function createBonusCampaignsHandler(deps = {}) {
 
     try {
       if (event.httpMethod === "GET") {
-        const statusList = await listStatuses(auth.userId, { env });
+        const flag = event.queryStringParameters?.includeDailyStatus;
+        if (flag != null && flag !== "1") return json(400, cors, { error: "invalid_daily_status_flag" });
+        const includeDailyStatus = flag === "1";
+        const statusList = await listStatuses(auth.userId, { env, includeDailyStatus });
         const items = (Array.isArray(statusList?.items) ? statusList.items : [])
           .filter((item) => item && item.eligible && !item.alreadyClaimed)
           .map(publicClaimableItem);
-        return json(200, cors, { items });
+        return json(200, cors, { items, ...(includeDailyStatus ? { dailyBonus: statusList.dailyBonus || null } : {}) });
       }
 
       const payload = parseBody(event.body);
@@ -108,6 +111,7 @@ function createBonusCampaignsHandler(deps = {}) {
         code: result.campaign?.code || code,
         title: result.campaign?.title || null,
         amount: result.campaign?.amount || null,
+        ...(result.campaign?.campaignType === "poker_daily" ? { streakDay: result.streakDay, rewardDay: result.rewardDay, claimPeriodKey: result.claimPeriodKey, nextEligibleAt: result.nextEligibleAt, serverNow: result.serverNow } : {}),
         transactionId: result.transactionId || null,
         transaction: result.transaction || null,
         account: result.account || null,
