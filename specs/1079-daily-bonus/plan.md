@@ -1,7 +1,7 @@
 # Implementation Plan: Poker Daily Bonus (#1079)
 
-**Source:** [spec.md](spec.md), latest owner decision in [issue #1079](https://github.com/krzysztofcal/arcadePlatform/issues/1079).  
-**Baseline:** main `1ba99776ff427783f858e075d3474e144c3947b3`.  
+**Source:** [spec.md](spec.md), latest owner decision in [issue #1079](https://github.com/krzysztofcal/arcadePlatform/issues/1079).
+**Baseline:** main `1ba99776ff427783f858e075d3474e144c3947b3`.
 **Status:** reviewed redesign proposal. No implementation or environment mutation in the current documentation-only Draft PR.
 
 ## Summary — YAGNI
