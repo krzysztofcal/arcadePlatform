@@ -1,7 +1,7 @@
 # Implementation Plan: Poker Single Player vs Bots (#1077)
 
 **Source:** [spec.md](spec.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)  
-**Baseline:** `main` (commit `97f8b8e5`)  
+**Baseline:** `main` (commit `e7fd0ce2`)  
 **Status:** Approved Variant B implementation complete locally. All fundamental tests, syntax, and CSP checks passing. Ready for owner review (Phase 4). Migration kept local.
 
 ---
@@ -31,13 +31,17 @@ Add forward-only migration `supabase/migrations/20261011200000_poker_single_play
   - Filter available tiers to `<= 1000 CH`.
 - **Per-mode Deterministic Resume:**
   - Single Player: check `selectExistingActiveSeat()` with `is_single_player = true and created_by = $1`, ordered by `coalesce(s.last_seen_at, s.created_at) desc` (with explicit `tableId` filter support).
+  - Return active Single Player tables in `poker-progression.mjs` via `singlePlayerRejoinableTables` / `singlePlayerRejoinableTableIds`.
   - Poker Online: check `selectExistingActiveSeat()` with `coalesce(is_single_player, false) = false`.
 - **Dedicated Create & Request-ID Idempotency:**
   - For Single Player, skip `selectCandidate()` across tables.
-  - Require or generate normalized `requestId` (`normalizeRequestId(event.requestId || ...)`).
-  - Check `selectSinglePlayerTableByRequestId(tx, { userId, requestId, buyIn })` against `public.poker_requests`.
-  - If existing request found, replay same table (`strategy: "idempotent_replay"`) under advisory transaction lock `pg_advisory_xact_lock(hashtext('quickseat:sp:' || auth.userId))`.
-  - New Game actions provide distinct `requestId` generating a dedicated new table via `createPokerTableWithState({ isSinglePlayer: true })`.
+  - Require normalized `requestId` (`normalizeRequestId(event.requestId)`), rejecting missing with `400 missing_request_id`.
+  - Check `selectSinglePlayerTableByRequestId(tx, { userId, requestId })` against `public.poker_requests`.
+  - If existing request found:
+    - If buy-in changed -> reject with `400 invalid_buy_in`.
+    - If original table status is closed -> reject with `409 table_closed` (never creates a duplicate table for the same intent).
+    - Otherwise replay same table (`strategy: "idempotent_replay"`).
+  - New Game actions provide distinct `requestId` generating a dedicated new table via `createPokerTableWithState({ isSinglePlayer: true })`, subject to 4 active / 4 pending limits.
 - **Matchmaking Isolation:**
   - In `selectCandidate()`, enforce `and coalesce(t.is_single_player, false) = false`.
 
@@ -45,7 +49,7 @@ Add forward-only migration `supabase/migrations/20261011200000_poker_single_play
 - In `executePokerJoinAuthoritative()` under `poker_tables ... FOR UPDATE`:
   - Query `is_single_player`.
   - If `is_single_player` is true:
-    - **Early Account Status Guard:** Reject `RESTRICTED` users immediately (`single_player_restricted_unavailable`) before capacity checks, chip debit, or bot funding.
+    - **Early Account Status Guard:** Reject `RESTRICTED` users immediately (`single_player_restricted_unavailable`) before capacity checks, chip debit, or bot funding. Uses `readPokerAccessSnapshot(tx, { userId, lock: true })` taking row lock on `chips_accounts` to eliminate race conditions with concurrent overrides.
     - **Sole-Owner:** `table.created_by === userId` (otherwise throw `single_player_owner_only`).
     - **Buy-In Cap:** `authoritativeBuyIn <= 1000` (otherwise throw `invalid_buy_in`).
     - **No Other Humans:** `activeSeatRows` and `state.seats` contain zero other humans (otherwise throw `single_player_human_conflict`).
@@ -87,13 +91,15 @@ To ensure zero risk of older multiplayer clients seating into Single Player tabl
 
 ### 3.1 `poker/index.html`
 - Activate `.tile--single` card with interactive controls:
-  - Buy-in tier selector for tiers `<= 1000 CH`.
-  - "PLAY VS BOTS" action button.
+  - Resume shell with dropdown selector (`#pokerSingleResumeSelect`) and action button (`#pokerSingleResume`).
+  - Buy-in tier selector for tiers `<= 1000 CH` (`#pokerSingleQuickTiers`).
+  - "PLAY VS BOTS" action button (`#pokerSinglePlay`).
   - Guest sign-in messaging and prompt.
 
 ### 3.2 `poker/poker.js`
 - Wire Single Player tier selector and quickSeat trigger with `mode: "single_player"`.
-- Support resume and honest error reporting (bot pool exhausted, restricted account).
+- Support resume for active tables (with multi-table dropdown selection) using existing `QUICK_SEAT_URL` endpoint with `tableId`.
+- Honest error reporting (`single_player_bot_funding_unavailable`, restricted account, closed tables).
 - Maintain JSP compatibility, IIFE/global functions, and 44px touch targets.
 
 ---

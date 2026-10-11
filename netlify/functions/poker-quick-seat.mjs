@@ -160,13 +160,12 @@ const selectSinglePlayerTableByRequestId = async (tx, { userId, requestId }) => 
   if (!requestId) return [];
   return tx.unsafe(
     `
-select t.id, t.max_players, t.buy_in, t.stakes, r.result_json
+select t.id, t.max_players, t.buy_in, t.stakes, t.status, r.result_json
 from public.poker_requests r
 join public.poker_tables t on t.id = r.table_id
 where r.user_id = $1
   and r.request_id = $2
   and r.kind = 'QUICK_SEAT'
-  and t.status = 'OPEN'
   and t.is_single_player = true
   and t.created_by = $1
 limit 1;
@@ -462,6 +461,9 @@ export async function handler(event) {
           if (selectedBuyIn !== null && Number(replayed.buy_in) !== selectedBuyIn) {
             return { kind: "invalid_buy_in" };
           }
+          if (String(replayed.status || "").toUpperCase() !== "OPEN") {
+            return { kind: "table_closed" };
+          }
           await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [replayed.id]);
           return {
             kind: "recommended",
@@ -555,6 +557,13 @@ export async function handler(event) {
         statusCode: 400,
         headers: mergeHeaders(cors),
         body: JSON.stringify({ error: "invalid_buy_in" })
+      };
+    }
+    if (result?.kind === "table_closed") {
+      return {
+        statusCode: 409,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "table_closed" })
       };
     }
     if (result?.kind === "recommended" && result.requiresWsBuyInCapability) {

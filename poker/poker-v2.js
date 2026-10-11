@@ -6165,6 +6165,21 @@
 
   function joinErrorMessage(error){
     var code = autoJoinErrorCode(error);
+    if (code === 'single_player_bot_funding_unavailable') {
+      return 'Bot funding pool temporarily unavailable. Please try again later.';
+    }
+    if (code === 'single_player_owner_only') {
+      return 'This single player table belongs to another player.';
+    }
+    if (code === 'single_player_human_conflict') {
+      return 'Single Player tables permit only one human player.';
+    }
+    if (code === 'single_player_restricted_unavailable') {
+      return 'Single Player vs bots is unavailable for restricted accounts.';
+    }
+    if (code === 'single_player_authoritative_required') {
+      return 'Single Player tables require authoritative game access.';
+    }
     if (code === 'buy_in_tier_locked') {
       var requiredBankroll = Number(error && error.requiredBankroll);
       var balance = Number(error && error.balance);

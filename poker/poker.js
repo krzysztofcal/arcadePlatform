@@ -1473,6 +1473,9 @@
     var quickSeatInFlight = false;
     var singleLobbyContent = document.getElementById('pokerSingleLobbyContent');
     var singleAuthMsg = document.getElementById('pokerSingleAuthMsg');
+    var singleResumeShell = document.getElementById('pokerSingleResumeShell');
+    var singleResumeSelect = document.getElementById('pokerSingleResumeSelect');
+    var singleResumeBtn = document.getElementById('pokerSingleResume');
     var singlePlayBtn = document.getElementById('pokerSinglePlay');
     var singleQuickTiers = document.getElementById('pokerSingleQuickTiers');
     var singleStatus = document.getElementById('pokerSingleStatus');
@@ -2044,6 +2047,17 @@
         : 'Auto-join · the hand starts when the table is ready.';
     }
 
+    function getSinglePlayerResumeTables(){
+      if (!progressionState) return [];
+      if (Array.isArray(progressionState.singlePlayerRejoinableTables) && progressionState.singlePlayerRejoinableTables.length){
+        return progressionState.singlePlayerRejoinableTables;
+      }
+      if (Array.isArray(progressionState.singlePlayerRejoinableTableIds) && progressionState.singlePlayerRejoinableTableIds.length){
+        return progressionState.singlePlayerRejoinableTableIds.map(function(id){ return { id: id, buyIn: null }; });
+      }
+      return [];
+    }
+
     function renderSingleTiers(){
       var singleOptions = progressionState && Array.isArray(progressionState.availableBuyIns)
         ? progressionState.availableBuyIns.filter(function(value){ return Number.isSafeInteger(value) && value > 0 && value <= 1000; }) : [];
@@ -2053,9 +2067,41 @@
       var effectiveClass = progressionState && progressionState.pokerAccess && progressionState.pokerAccess.effectiveClass;
       var accessReady = effectiveClass === 'NORMAL' || effectiveClass === 'SLOW' || effectiveClass === 'RESTRICTED';
       var isRestricted = effectiveClass === 'RESTRICTED';
+      var resumeTables = getSinglePlayerResumeTables();
+      var hasResume = resumeTables.length > 0;
+      var reachedMaxTables = resumeTables.length >= 4;
+
+      if (singleResumeShell){
+        singleResumeShell.hidden = !hasResume;
+        if (hasResume){
+          if (singleResumeSelect){
+            singleResumeSelect.hidden = resumeTables.length <= 1;
+            singleResumeSelect.innerHTML = '';
+            resumeTables.forEach(function(tbl, idx){
+              var opt = document.createElement('option');
+              opt.value = tbl.id;
+              var label = 'Table ' + (idx + 1);
+              if (Number.isSafeInteger(tbl.buyIn) && tbl.buyIn > 0){
+                label += ' · ' + formatChips(tbl.buyIn) + ' CH';
+              }
+              opt.textContent = label;
+              singleResumeSelect.appendChild(opt);
+            });
+          }
+          if (singleResumeBtn){
+            var singleTable = resumeTables[0];
+            var btnLabel = resumeTables.length === 1 && Number.isSafeInteger(singleTable.buyIn) && singleTable.buyIn > 0
+              ? 'RESUME (' + formatChips(singleTable.buyIn) + ' CH)'
+              : 'RESUME GAME';
+            singleResumeBtn.textContent = singlePlayInFlight ? 'CONNECTING…' : btnLabel;
+            singleResumeBtn.disabled = singlePlayInFlight || !lobbyAuthenticated || isRestricted;
+          }
+        }
+      }
+
       if (singleQuickTiers){
         singleQuickTiers.innerHTML = '';
-        singleQuickTiers.hidden = !singleOptions.length;
+        singleQuickTiers.hidden = reachedMaxTables || !singleOptions.length;
         singleOptions.forEach(function(buyIn){
           var node = document.createElement(singleOptions.length > 1 ? 'button' : 'span');
           node.className = singleOptions.length > 1 ? 'quick-tier' : 'quick-tier-label';
@@ -2077,8 +2123,8 @@
         });
       }
       if (singlePlayBtn){
-        singlePlayBtn.textContent = singlePlayInFlight ? 'STARTING…' : 'PLAY VS BOTS';
-        singlePlayBtn.disabled = singlePlayInFlight || !lobbyAuthenticated || !singleOptions.length || !accessReady || isRestricted;
+        singlePlayBtn.textContent = singlePlayInFlight ? 'STARTING…' : reachedMaxTables ? 'MAX TABLES (4)' : 'PLAY VS BOTS';
+        singlePlayBtn.disabled = singlePlayInFlight || !lobbyAuthenticated || !singleOptions.length || !accessReady || isRestricted || reachedMaxTables;
         singlePlayBtn.setAttribute('aria-busy', String(singlePlayInFlight));
       }
       if (singleStatus){
@@ -2086,6 +2132,8 @@
           : !progressionState ? 'Progression unavailable. Refresh to retry.'
           : !accessReady ? 'Poker access temporarily unavailable.'
           : isRestricted ? 'Single Player vs bots is unavailable for restricted accounts.'
+          : reachedMaxTables ? 'Maximum 4 active tables reached. Resume an existing table.'
+          : hasResume ? 'Resume active table or start a new game (≤ 1,000 CH).'
           : !singleOptions.length ? 'Requires bankroll for ≤ 1,000 CH tiers.'
           : 'Dedicated table · 1 human vs bots · max 1,000 CH buy-in.';
       }
@@ -2568,8 +2616,71 @@
           setError(errorEl, 'Single Player buy-in exceeds maximum limit of 1,000 CH.');
         } else if (msg === 'single_player_restricted_unavailable' || msg === 'restricted_table_required'){
           setError(errorEl, 'Single Player vs bots is unavailable for restricted accounts.');
+        } else if (msg === 'table_closed'){
+          setError(errorEl, 'This game session has closed. Please try again.');
+          singlePlayRequestId = null;
+          refreshProgression();
         } else {
           klog('poker_single_player_error', { error: err.message || err.code });
+          setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
+        }
+      } finally {
+        singlePlayInFlight = false;
+        renderSingleTiers();
+      }
+    }
+
+    async function resumeSinglePlayer(){
+      if (singlePlayInFlight || !lobbyAuthenticated) return;
+      var resumeTables = getSinglePlayerResumeTables();
+      if (!resumeTables.length) return;
+      var targetTableId = (singleResumeSelect && !singleResumeSelect.hidden && singleResumeSelect.value)
+        ? singleResumeSelect.value
+        : resumeTables[0].id;
+      if (!targetTableId) return;
+      var effectiveClass = progressionState && progressionState.pokerAccess && progressionState.pokerAccess.effectiveClass;
+      if (effectiveClass === 'RESTRICTED'){
+        setError(errorEl, 'Single Player vs bots is unavailable for restricted accounts.');
+        return;
+      }
+      setError(errorEl, null);
+      singlePlayInFlight = true;
+      renderSingleTiers();
+      var requestGeneration = lobbyIdentityGeneration;
+      try {
+        var data = await apiPost(QUICK_SEAT_URL, {
+          mode: 'single_player',
+          tableId: targetTableId
+        });
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
+        if (data && data.ok === true && data.tableId){
+          navigateToPokerTable(data.tableId, {
+            seatNo: data.seatNo != null ? data.seatNo : null,
+            autoJoin: true
+          });
+          return;
+        }
+        setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
+      } catch (err){
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
+        if (isAuthError(err)){
+          handleAuthExpired({
+            authMsg: authMsg,
+            content: lobbyContent,
+            errorEl: errorEl,
+            stopPolling: stopLobbyWs,
+            onAuthExpired: function(){ authCheckGeneration += 1; setLobbyIdentity(null); lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; selectedSingleBuyIn = null; renderQuickTiers(); renderSingleTiers(); showLobbyView('modes'); startAuthWatch(); }
+          });
+          return;
+        }
+        var msg = err && (err.message || err.code);
+        if (msg === 'single_player_restricted_unavailable' || msg === 'restricted_table_required'){
+          setError(errorEl, 'Single Player vs bots is unavailable for restricted accounts.');
+        } else if (msg === 'seat_not_found' || msg === 'table_not_found' || msg === 'table_closed'){
+          setError(errorEl, 'Active table no longer available. Refreshing progression…');
+          refreshProgression();
+        } else {
+          klog('poker_single_player_resume_error', { error: err.message || err.code });
           setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
         }
       } finally {
@@ -2643,6 +2754,9 @@
     }
     if (quickSeatBtn){
       quickSeatBtn.addEventListener('click', quickSeat);
+    }
+    if (singleResumeBtn){
+      singleResumeBtn.addEventListener('click', resumeSinglePlayer);
     }
     if (singlePlayBtn){
       singlePlayBtn.addEventListener('click', playVsBots);

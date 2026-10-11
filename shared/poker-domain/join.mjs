@@ -783,7 +783,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           throw makeError("invalid_buy_in");
         }
         if (await hasPokerPoolSchema(tx)) {
-          const accessSnapshot = await readPokerAccessSnapshot(tx, { userId });
+          const accessSnapshot = await readPokerAccessSnapshot(tx, { userId, lock: true });
           if (accessSnapshot?.effectiveClass === "RESTRICTED") {
             throw makeError("single_player_restricted_unavailable");
           }

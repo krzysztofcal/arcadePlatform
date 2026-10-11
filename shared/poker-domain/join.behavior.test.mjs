@@ -3272,12 +3272,14 @@ test("Single Player RESTRICTED user: rejoin rejected before existing seat or sta
   ];
   const ledgerCalls = [];
   const stateUpdates = [];
+  const executedSql = [];
 
   await assert.rejects(
     () => executePokerJoinAuthoritative({
       beginSql: async (fn) => fn({
         unsafe: async (sql) => {
           const text = String(sql);
+          executedSql.push(text);
           if (text.includes("to_regclass")) return [{ available: true }];
           if (text.includes("from public.poker_tables")) return [{ ...table }];
           if (text.includes("from public.poker_seats")) return tableSeats;
@@ -3310,6 +3312,9 @@ test("Single Player RESTRICTED user: rejoin rejected before existing seat or sta
     }
   );
 
+  const accountQuery = executedSql.find((q) => q.toLowerCase().includes("account_type = 'user'"));
+  assert.ok(accountQuery, "must query chips_accounts for access snapshot");
+  assert.match(accountQuery.toLowerCase(), /for update/, "early access check in Single Player must lock row with FOR UPDATE");
   assert.equal(ledgerCalls.length, 0, "zero ledger calls when restricted rejoin rejected");
   assert.equal(stateUpdates.length, 0, "zero state updates when restricted rejoin rejected");
 });

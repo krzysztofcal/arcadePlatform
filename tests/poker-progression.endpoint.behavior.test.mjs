@@ -89,6 +89,8 @@ test("poker progression endpoint reads progression only for the verified user", 
         automaticSlowAt: null
       },
       rejoinableTableIds: [],
+      singlePlayerRejoinableTableIds: [],
+      singlePlayerRejoinableTables: [],
       tableAccess: null
     });
     assert.deepEqual(calls.tokens, ["verified-token"]);
@@ -240,3 +242,47 @@ test("table access follows shared activation, bankroll and financed rejoin", asy
     else process.env.CHIPS_ENABLED = previous;
   }
 });
+
+test("poker progression returns active Single Player tables for user resume", async () => {
+  const previous = process.env.CHIPS_ENABLED;
+  process.env.CHIPS_ENABLED = "1";
+  try {
+    const handler = makeHandler({
+      authResult: { valid: true, userId: "sp-player" },
+      progression: { balance: 1000, highestUnlockedBuyIn: 500, availableBuyIns: [500, 100] },
+      calls: { tokens: [], progression: [] },
+      unsafe: async (sql) => {
+        const text = String(sql).toLowerCase();
+        if (text.includes("select poker_auto_class, poker_access_override")) {
+          return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+        }
+        if (text.includes("coalesce(t.is_single_player, false) = false")) {
+          return [];
+        }
+        if (text.includes("t.is_single_player = true")) {
+          return [
+            { id: "sp-table-1", buy_in: 500, stakes: { sb: 5, bb: 10 } },
+            { id: "sp-table-2", buy_in: 100, stakes: { sb: 1, bb: 2 } }
+          ];
+        }
+        return [];
+      }
+    });
+    const response = await handler({
+      httpMethod: "GET",
+      headers: { origin, authorization: "Bearer valid-token" }
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.rejoinableTableIds, [], "online rejoinable tables must remain empty");
+    assert.deepEqual(body.singlePlayerRejoinableTableIds, ["sp-table-1", "sp-table-2"]);
+    assert.deepEqual(body.singlePlayerRejoinableTables, [
+      { id: "sp-table-1", buyIn: 500, stakes: { sb: 5, bb: 10 } },
+      { id: "sp-table-2", buyIn: 100, stakes: { sb: 1, bb: 2 } }
+    ]);
+  } finally {
+    if (previous === undefined) delete process.env.CHIPS_ENABLED;
+    else process.env.CHIPS_ENABLED = previous;
+  }
+});
+

@@ -1,7 +1,7 @@
 # Feature Specification: Poker Single Player vs Bots (#1077)
 
 **Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1077  
-**Baseline:** `main` (commit `97f8b8e5`)  
+**Baseline:** `main` (commit `e7fd0ce2`)  
 **Status:** Owner decision approved Variant B (2026-10-11). Minimal forward-only migration for `is_single_player` authorized locally.
 
 ---
@@ -23,6 +23,10 @@ The owner approved **Variant B with corrections**:
 - **Online Cash Runtime:** Reuses the existing authoritative WebSocket runtime (`ws-server/`), table lifecycle, bot autoplay, reconnect, and CH ledger/escrow. It is **not** an offline client simulation or separate game engine.
 - **Dedicated Tables:** Every new Single Player session creates a **brand-new dedicated table** belonging exclusively to that player and existing bots.
   - No matchmaking between human players.
+  - Resume allows reconnecting to player's own active table(s) without second buy-in. When the user has multiple active tables, the lobby provides explicit selection.
+  - If a table was closed, repeating the original `requestId` fails with a controlled error (`table_closed`) and never fabricates a second table.
+  - Normal Poker Online never matches or lists Single Player tables.
+  - Early `readPokerAccessSnapshot` takes row lock (`lock: true`) preventing race conditions with RESTRICTED overrides.
   - No joining or reusing tables of other humans.
   - Default Poker Online matchmaking / Quick Seat must never select or recommend Single Player tables.
 - **Sole-Owner Resume:** A player may Resume/reconnect to their own existing active Single Player table without paying an additional buy-in.

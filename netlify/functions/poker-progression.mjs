@@ -37,6 +37,28 @@ where t.status = 'OPEN'
     .filter(Boolean);
 }
 
+async function readSinglePlayerRejoinableTables(tx, userId) {
+  const rows = await tx.unsafe(
+    `
+select t.id, t.buy_in, t.stakes
+from public.poker_tables t
+join public.poker_seats s on s.table_id = t.id
+where t.status = 'OPEN'
+  and s.user_id = $1
+  and s.status = 'ACTIVE'
+  and t.is_single_player = true
+  and t.created_by = $1
+order by coalesce(s.last_seen_at, s.created_at) desc, t.created_at desc;
+    `,
+    [userId]
+  );
+  return (rows || []).map((row) => ({
+    id: row.id,
+    buyIn: Number(row.buy_in),
+    stakes: row.stakes
+  }));
+}
+
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
     `select id, status, buy_in, stakes, lifecycle_kind, created_by, coalesce(is_single_player, false) as is_single_player${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
@@ -139,10 +161,12 @@ export async function handler(event) {
       const pokerAccess = await readPokerAccess(tx, auth.userId);
       progression.pokerAccess = pokerAccess;
       const rejoinableTableIds = await readRejoinableTableIds(tx, auth.userId);
+      const singlePlayerRejoinableTables = await readSinglePlayerRejoinableTables(tx, auth.userId);
+      const singlePlayerRejoinableTableIds = singlePlayerRejoinableTables.map((t) => t.id);
       const tableAccess = tableId
         ? await readTableAccess(tx, { userId: auth.userId, tableId, progression })
         : null;
-      return { progression, rejoinableTableIds, tableAccess };
+      return { progression, rejoinableTableIds, singlePlayerRejoinableTables, singlePlayerRejoinableTableIds, tableAccess };
     });
     let tableAccess = result.tableAccess;
     if (tableAccess?.allowed === true
@@ -170,6 +194,8 @@ export async function handler(event) {
         userId: auth.userId,
         ...result.progression,
         rejoinableTableIds: result.rejoinableTableIds,
+        singlePlayerRejoinableTableIds: result.singlePlayerRejoinableTableIds,
+        singlePlayerRejoinableTables: result.singlePlayerRejoinableTables,
         tableAccess
       })
     };

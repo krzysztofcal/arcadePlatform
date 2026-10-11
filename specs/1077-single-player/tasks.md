@@ -1,7 +1,7 @@
 # Tasks: Poker Single Player vs Bots (#1077)
 
 **Source:** [spec.md](spec.md), [plan.md](plan.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)  
-**Baseline:** `main` (`97f8b8e5`)  
+**Baseline:** `main` (`e7fd0ce2`)  
 **State:** Owner approved Variant B. Local implementation in progress. No migrations pushed to remote.
 
 ---
@@ -17,8 +17,8 @@
 ## Phase 1 — Database & Backend Implementation (Local Only)
 
 - [x] **T004a / Local migration:** Create `supabase/migrations/20261011200000_poker_single_player_table_flag.sql` adding `is_single_player boolean not null default false` and constraint requiring `lifecycle_kind = 'STANDARD'` and `created_by is not null` when true. (Keep local, do not push).
-- [x] **T004b / Dedicated create & request ID:** In `netlify/functions/_shared/poker-table-init.mjs`, persist `is_single_player`. In `netlify/functions/poker-quick-seat.mjs`, create fresh dedicated table for Single Player, support owner-only same-mode Resume, enforce buyIn <= 1000 CH, reject RESTRICTED early (403), and protect retries/double-clicks via `requestId` against `public.poker_requests`.
-- [x] **T005 / Critical fail-fast gate:** In `shared/poker-domain/join.mjs::executePokerJoinAuthoritative()`, enforce RESTRICTED check, sole-owner, zero other humans, buyIn <= 1000 CH, and atomic bot funding rollback (fail closed if required bots cannot be funded). Propagate rejection codes in `ws-server/poker/persistence/authoritative-join-adapter.mjs` and `handlers/join.mjs`.
+- [x] **T004b / Dedicated create & request ID:** In `netlify/functions/_shared/poker-table-init.mjs`, persist `is_single_player`. In `netlify/functions/poker-quick-seat.mjs`, create fresh dedicated table for Single Player, support owner-only Resume with explicit `tableId`, reject closed table replay with 409 `table_closed`, enforce buyIn <= 1000 CH, reject RESTRICTED early (403), and protect retries/double-clicks via mandatory `requestId` against `public.poker_requests`. Return active Single Player tables in `poker-progression.mjs`.
+- [x] **T005 / Critical fail-fast gate:** In `shared/poker-domain/join.mjs::executePokerJoinAuthoritative()`, enforce early locked RESTRICTED check (`lock: true`), sole-owner, zero other humans, buyIn <= 1000 CH, and atomic bot funding rollback (fail closed if required bots cannot be funded). Propagate rejection codes in `ws-server/poker/persistence/authoritative-join-adapter.mjs` and `handlers/join.mjs`.
 - [x] **T005b / Non-authoritative fail-closed:** In `ws-server/poker/handlers/join.mjs` and `ws-server/poker/table/table-manager.mjs`, fail-closed (`single_player_authoritative_required`) if Single Player join is attempted without authoritative check or when observe-only is enabled.
 - [x] **T006 / Isolation & bootstrap:** Ensure `poker-quick-seat.mjs::selectCandidate()` and `ws-server/server.mjs::buildLobbyTableEntry()` exclude Single Player tables from public recommendation and lobby listings. Hydrate `is_single_player` on table manager bootstrap / restart.
 
@@ -26,7 +26,7 @@
 
 ## Phase 2 — Client & UI Activation
 
-- [x] **T007 / UI:** Activate `poker/index.html` Single Player card and `poker/poker.js::initLobby()` with Play/Resume flows, buy-in tier selector (`<= 1000 CH`), guest guidance, 44px targets, `singlePlayRequestId` idempotency lifecycle, and error handling. Preserve Daily Bonus and other Coming Soon cards.
+- [x] **T007 / UI:** Activate `poker/index.html` Single Player card and `poker/poker.js::initLobby()` with Play/Resume flows (including multi-table dropdown), buy-in tier selector (`<= 1000 CH`), guest guidance, 44px targets, `singlePlayRequestId` idempotency lifecycle, and readable error handling (including `joinErrorMessage` for `single_player_bot_funding_unavailable`). Preserve Daily Bonus and other Coming Soon cards.
 
 ---
 

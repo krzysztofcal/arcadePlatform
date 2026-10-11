@@ -93,7 +93,8 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTab
                 id: params?.[0],
                 max_players: 6,
                 buy_in: 500,
-                stakes: { sb: 5, bb: 10 }
+                stakes: { sb: 5, bb: 10 },
+                status: "OPEN"
               });
             }
             return [];
@@ -690,6 +691,15 @@ const run = async () => {
     const responseChangedBuyIn = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 100, requestId: "req-intent-1" });
     assert.equal(responseChangedBuyIn.statusCode, 400, "retry with changed buyIn must fail fast");
     assert.deepEqual(JSON.parse(responseChangedBuyIn.body), { error: "invalid_buy_in" });
+
+    // Retry with SAME requestId after table is CLOSED returns 409 table_closed and does NOT create a new table
+    storedRequests.get("req-intent-1").status = "CLOSED";
+    const queriesBeforeClosedRetry = queries.length;
+    const responseClosedRetry = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-1" });
+    assert.equal(responseClosedRetry.statusCode, 409, "retry for closed table must return 409 table_closed");
+    assert.deepEqual(JSON.parse(responseClosedRetry.body), { error: "table_closed" });
+    const closedRetryQueries = queries.slice(queriesBeforeClosedRetry);
+    assert.equal(closedRetryQueries.some((q) => q.query.includes("insert into public.poker_tables")), false, "closed table retry must not create table");
 
     // NEW GAME with DIFFERENT requestId creates distinct dedicated table-2 (does NOT return table-1 with already_seated!)
     const responseNewGame = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-2" });
