@@ -1,7 +1,7 @@
 # Feature Specification: Poker Daily Bonus (#1079)
 
-**Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1079  
-**Baseline:** main `1ba99776ff427783f858e075d3474e144c3947b3`  
+**Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1079
+**Baseline:** main `1ba99776ff427783f858e075d3474e144c3947b3`
 **Status:** revised plan; no implementation, database changes, activation, deployment or merge authorized by this docs change.
 
 ## Latest owner decision — simple, no-migration replacement
