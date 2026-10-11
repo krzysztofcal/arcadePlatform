@@ -86,3 +86,8 @@ One fundamental case in `tests/bonus-campaigns.behavior.test.mjs` removes the ma
 In `poker/poker.js:renderDailyBonus`, keep a local `dailyLoadError` flag separate from null `dailyState`; clear it on refresh/account change and set it on failed status read. Render distinct inactive/paused/signed-out/error messages and toggle existing-panel `dailySignIn` CTA. Its handler closes the panel and invokes existing `openSignIn()`. No changes to backend, Claim authority or response-generation guards.
 
 `poker/index.html:dailyDialog` adds permanent `dailyEligibility` copy and `dailySignIn` button. Replace the narrow-landscape CSS rule hiding heading paragraphs with readable small text, preserving one physical line per selector. Check portrait/landscape and sign-in behavior on Deploy Preview using read-only browser inspection and simulated status responses; do not submit a Claim or mutate environments. Existing syntax/CSP/lifecycle controls apply; no UI suite, new scripts or inline CSP changes.
+
+
+## Stage GO and mobile status follow-up
+
+Use deployed `admin-stage-identity` and existing `admin-bonus-campaigns` GET/create/set_status APIs: verify Stage identity/backend, create or reuse uniquely coded correct Draft, verify full configuration, End `daily-active-2026`, activate new Draft, read back both campaigns and authenticated Daily status without Claim. Move existing `dailyDisclaimer` live region before reward cards in `poker/index.html`; cache its element in current `poker/poker.js` renderer. Keep existing classes, sign-in CTA and payout logic.

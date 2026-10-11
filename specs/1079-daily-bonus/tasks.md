@@ -66,3 +66,14 @@ Remote GitHub CI is running on this PR; final results will be recorded in its de
 - [x] T018 Run syntax/CSP/lifecycle controls, self-review and inspect updated Deploy Preview in portrait/landscape, including sign-in navigation and read-only simulated inactive/paused/API-error states. Keep PR Draft; no Claim, migration, campaign activation, Stage/Production mutation or merge.
 
 UX verification: syntax (225 files), CSP (55 documents), lifecycle guards and diff check passed. Read-only Chromium smoke on Deploy Preview passed all 8 combinations: 390×844 portrait / 667×375 landscape × signed-out / missing campaign / paused / API error. Authenticated states used browser-only mock responses; no real Claim or campaign mutation. Existing sign-in bridge invocation and disabled Claim verified. GitHub CI for runtime commit `a9c893e8c4cf11c1afe4d7c429130629cd8f9047` passed, including core, PostgreSQL, Playwright, CodeQL and WS harness; Netlify playkcswh Preview succeeded. Preview authorization supersedes the historical skipped-deployment notes above; Stage/Production operations remain unexecuted. Self-review: no backend changes, inline scripts, breaking protocol changes or payout behavior changes.
+
+
+## Stage GO and mobile status follow-up
+
+- [x] T019 Move existing campaign live status above reward cards/Claim while retaining eligibility copy and sign-in CTA.
+- [ ] T020 Verify Stage identity/backend; use existing Admin to create/verify Draft then End old and activate new, stop on failure, record both statuses and read-only API claim eligibility.
+- [ ] T021 Run fundamental tests, syntax/CSP/guards, CI and mobile Preview smoke; self-review and record deployment/SHA/Stage outcome. No automated CH claims, migration, Production or merge.
+
+Stage attempt stopped on Admin Draft create HTTP 500. Deployed backend/identity verified at `c26301f7a0cbf7407a31a0c1153f3afa25c04fc6`, all Stage refs matched. PostgreSQL log confirms `bonus_campaigns_created_by_fkey`: the admin identity used for the request does not exist in Stage `auth.users`. No retry or bypass; no Draft persisted, old `daily-active-2026` remains active (20 CH), new `daily-streak-2026` absent. End/Activate were never requested. T020 remains incomplete pending a valid existing Stage admin identity and owner review of the stopped operation. No payout or migration performed.
+
+Local verification: 36 fundamental Bonus/Admin/endpoint/scheduler/Welcome tests passed with the repository test runner CORS allowlist; direct invocation without that allowlist failed CORS assertions, then corrected configuration passed. Syntax (225 files), CSP (55 documents), lifecycle guards and diff check passed. Mobile Preview/CI results recorded in PR description.

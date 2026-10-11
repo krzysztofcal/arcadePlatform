@@ -1477,6 +1477,7 @@
     var dailyDialog = document.getElementById('dailyDialog');
     var dailyClaimButton = document.getElementById('dailyClaim');
     var dailySignInButton = document.getElementById('dailySignIn');
+    var dailyStatusMessage = document.getElementById('dailyDisclaimer');
     var dailyLoadError = false;
     var dailyState = null;
     var dailyPending = false;
@@ -1508,7 +1509,7 @@
         : status.alreadyClaimed ? 'Already claimed today. Return after the next UTC reset.'
         : !canClaim ? 'Daily Bonus is unavailable.'
         : 'A missed UTC day resets your streak. Day 4+ repeats indefinitely.';
-      document.getElementById('dailyDisclaimer').textContent = message || text;
+      dailyStatusMessage.textContent = message || text;
     }
 
     async function refreshDailyBonus(){

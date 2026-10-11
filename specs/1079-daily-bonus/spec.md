@@ -63,3 +63,8 @@ Extend existing backend tests for days 1–6 and 100, missed-day reset, UTC boun
 The panel stays viewable without signing in. It permanently displays “Daily rewards are available only to signed-in Arcade players. Guest play does not qualify.” below its heading, including landscape. Signed-out viewers have a “Sign in / Create account” button using existing `openSignIn()`.
 
 Distinguish a successful status read with no new campaign (“Daily Bonus is not active yet.”), paused campaign (“Daily Bonus is temporarily paused.”), signed-out account and a failed API read. No fixed legacy campaign is represented as a new streak; Claim remains governed by authoritative eligibility. Owner-reported Stage inventory still contains only legacy `daily-active-2026`; this UX change does not create/activate campaigns.
+
+
+## Stage GO and mobile status follow-up
+
+Owner GO: Stage-only Admin cutover to `daily-streak-2026`, with exact project `krydukthwdvccggbyjfw`, verified deployed backend and verified Draft before ending old campaign; preserve history and stop on any failure. No claims, Production, migration or merge authorized. Lobby status is placed directly after eligibility heading, before reward cards and Claim, so it is visible near the top on mobile.
