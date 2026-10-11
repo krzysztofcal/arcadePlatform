@@ -11,3 +11,8 @@
 - [ ] T005 Finalize all six themes only after GO.
 - [ ] T006 Six-theme final exact-SHA validation only after GO.
 - [ ] T007 Final rollout handoff only after GO.
+
+## Owner-requested POC revision 2 (T001–T004, not rollout)
+- [ ] R2 Material/color correction and original SVG branding.
+- [ ] R2 Actual-table A/B comparisons and exact-SHA Preview validation.
+- [ ] R2 Update Draft PR/gallery and STOP for owner visual approval.

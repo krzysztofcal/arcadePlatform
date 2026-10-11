@@ -10,3 +10,6 @@ One repeated texture, initially ≤100 KiB, same origin; no stretching to fit th
 
 ## Exclusions and constitution check
 No T005–T007 or four-theme rollout. No room/rail/dealer/card asset changes, lobby, theme catalog/resolver/loader, poker behavior, WS, backend, SQL, CH, Stage/Production, merge, new dependencies/configuration/ignore files or CSS/UI tests. Existing syntax/CSP/guards and targeted visual inspection suffice. One physical CSS line per selector; no JS planned. No third-party brand or sponsorship. Follow agents.md, skills.md and constitution v1.1.1. Shared Stage mutation: none.
+
+## Owner-requested revision 2
+Owner rejected gray/desaturated Neon and weak branding, provided saturated premium-table references, and explicitly requested corrected versions. Authorized: revise the same Classic/Neon POC, preserve original backgrounds/ornaments but add restrained theme-colored illumination, hue-preserving material blend, finer repeat scale and an original native SVG house emblem/typography. Compare material-only A with branded B again on actual deployed renderer. B may be the default two-theme POC for review; neither B nor the other four themes is final-approved. No copying reference brands/art; no gameplay/geometry/JS/backend/config changes. No T005–T007 GO.

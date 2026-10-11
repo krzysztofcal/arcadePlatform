@@ -7,3 +7,6 @@
 
 ## Constitution / execution rulings
 No new UI/CSS tests, TDD, generic setup changes, dependencies or Stage mutation. Reuse installed packages outside this worktree for ad-hoc capture/optimization; no tracked setup change. Worktree isolates #1077; do not edit its files. Independent self-review requested by owner; no delegation needed.
+
+## Revision 2 implementation
+Reuse original WebP at finer repeat scale, mix-blend-mode soft-light within isolated felt stacking context, and colored translucent radial lighting in ::before, preserving shipped gradient/SVG declarations. Add original `poker/assets/scene/felt-house-mark.svg` and use it in the same noninteractive artwork pseudo-element. No new raster necessary: hue loss is a compositing error; finer sampling removes coarse fibers. Existing classes/pseudo-elements only. Review A hides the mark via ad-hoc browser-only CSS, B uses committed POC CSS. Capture 2 themes × 3 viewports on exact-SHA Preview and compare main/rejected/new A/new B. Record asset/hash/render/controls and STOP for visual approval.
