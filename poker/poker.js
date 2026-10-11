@@ -1476,6 +1476,8 @@
     var lobbyIdentityGeneration = 0;
     var dailyDialog = document.getElementById('dailyDialog');
     var dailyClaimButton = document.getElementById('dailyClaim');
+    var dailySignInButton = document.getElementById('dailySignIn');
+    var dailyLoadError = false;
     var dailyState = null;
     var dailyPending = false;
     var dailyRequestGeneration = 0;
@@ -1497,11 +1499,13 @@
       document.getElementById('dailyReset').textContent = status && status.nextEligibleAt ? new Date(status.nextEligibleAt).toISOString().slice(0,16).replace('T', ' ') + ' UTC' : '—';
       dailyClaimButton.disabled = dailyPending || !canClaim;
       dailyClaimButton.textContent = dailyPending ? 'PLEASE WAIT…' : status && status.alreadyClaimed ? 'CLAIMED' : canClaim ? 'CLAIM ' + status.amount + ' CH' : 'CLAIM';
-      var text = !lobbyAuthenticated ? 'Sign in to claim. Guests are not eligible.'
-        : !status ? 'Daily Bonus is unavailable.'
+      if (dailySignInButton) dailySignInButton.hidden = lobbyAuthenticated && !(status && status.reason === 'guest_not_eligible');
+      var text = !lobbyAuthenticated ? 'Sign in or create an Arcade account to claim daily rewards.'
+        : dailyLoadError ? 'Could not load Daily Bonus data. Reopen the panel to retry.'
+        : !status ? 'Daily Bonus is not active yet.'
         : status.reason === 'guest_not_eligible' ? 'Sign in with a registered account. Guests are not eligible.'
+        : status.status === 'paused' ? 'Daily Bonus is temporarily paused.'
         : status.alreadyClaimed ? 'Already claimed today. Return after the next UTC reset.'
-        : status.status === 'paused' ? 'Daily Bonus is paused.'
         : !canClaim ? 'Daily Bonus is unavailable.'
         : 'A missed UTC day resets your streak. Day 4+ repeats indefinitely.';
       document.getElementById('dailyDisclaimer').textContent = message || text;
@@ -1512,7 +1516,9 @@
       dailyResetTimer = null;
       var identity = lobbyIdentityGeneration;
       var request = ++dailyRequestGeneration;
+      dailyLoadError = false;
       if (!lobbyAuthenticated || !window.ChipsClient){
+        dailyLoadError = lobbyAuthenticated;
         dailyState = null;
         renderDailyBonus();
         return null;
@@ -1532,7 +1538,8 @@
       } catch (error){
         if (identity === lobbyIdentityGeneration && request === dailyRequestGeneration){
           dailyState = null;
-          renderDailyBonus('Could not load Daily Bonus. Reopen to retry.');
+          dailyLoadError = true;
+          renderDailyBonus();
           klog('poker_daily_status_failed', { reason: error.code || error.message || 'unknown' });
         }
         return null;
@@ -1569,6 +1576,10 @@
         }
       }
     }
+    if (dailySignInButton) dailySignInButton.addEventListener('click', function(){
+      dailyDialog.close();
+      openSignIn();
+    });
     if (dailyClaimButton) dailyClaimButton.addEventListener('click', claimDailyBonus);
     if (dailyDialog) dailyDialog.addEventListener('close', function(){ clearTimeout(dailyResetTimer); });
 
@@ -2043,6 +2054,7 @@
       lobbyIdentity = identity;
       lobbyIdentityGeneration += 1;
       dailyRequestGeneration += 1;
+      dailyLoadError = false;
       dailyState = null;
       dailyPending = false;
       clearTimeout(dailyResetTimer);

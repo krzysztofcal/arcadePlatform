@@ -56,3 +56,10 @@ This feature requires **no SQL migration**: use existing `bonus_campaigns.eligib
 ## Fundamental acceptance tests
 
 Extend existing backend tests for days 1–6 and 100, missed-day reset, UTC boundary, duplicate/concurrent same-day claim, locked Pause/End-vs-claim, invalid reward config, ledger/claim atomic rollback, Welcome compatibility and opt-in GET status. Register tests in the existing CI runner/isolated PostgreSQL job where required; no UI/CSS/JSP snapshot suite or new testing framework.
+
+
+## UX clarification after Preview review
+
+The panel stays viewable without signing in. It permanently displays “Daily rewards are available only to signed-in Arcade players. Guest play does not qualify.” below its heading, including landscape. Signed-out viewers have a “Sign in / Create account” button using existing `openSignIn()`.
+
+Distinguish a successful status read with no new campaign (“Daily Bonus is not active yet.”), paused campaign (“Daily Bonus is temporarily paused.”), signed-out account and a failed API read. No fixed legacy campaign is represented as a new streak; Claim remains governed by authoritative eligibility. Owner-reported Stage inventory still contains only legacy `daily-active-2026`; this UX change does not create/activate campaigns.

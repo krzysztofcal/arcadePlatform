@@ -58,3 +58,9 @@ Remote GitHub CI is running on this PR; final results will be recorded in its de
 ## Review follow-up — P2
 
 - [x] T016 Make `validDailyEvidence()` fail closed when its matching PROMO_BONUS transaction is absent; preserve ID/amount/streak checks. Add exactly one fundamental missing-transaction case covering replay/continuation, verify red→green and run the relevant regression suites. Self-review: no new payout/storage/history mechanism; no migration or environment action. Local result: 36 tests passed, syntax and diff checks passed. Final SHA/remote CI results are recorded in Draft PR #1084; Netlify deployment remains skipped.
+
+
+## UX follow-up
+
+- [x] T017 Clarify inactive/paused/signed-out/API-error states in `renderDailyBonus`; add permanent eligibility text and existing `openSignIn()` CTA in the current dialog. Keep Claim/identity protections and narrow-landscape text visible. No backend, campaign or database changes.
+- [ ] T018 Run syntax/CSP/lifecycle controls, self-review and inspect updated Deploy Preview in portrait/landscape, including sign-in navigation and read-only simulated inactive/paused/API-error states. Keep PR Draft; no Claim, migration, campaign activation, Stage/Production mutation or merge.

@@ -79,3 +79,10 @@ Local verification: 35 Bonus/Admin/endpoint/scheduler/Welcome tests, the focused
 `validDailyEvidence()` returns null if `fetchPromoTransaction()` finds no matching PROMO_BONUS transaction. Existing transaction ID, amount and streak-day comparisons remain mandatory. This also denies unverifiable receipts whose matching transaction is absent from the existing lookup; no reconstruction, fallback history scanner or additional storage is introduced.
 
 One fundamental case in `tests/bonus-campaigns.behavior.test.mjs` removes the matching transaction after a valid claim and verifies both today's replay and tomorrow's continuation deny eligibility/payout without any extra ledger write. The case failed before the fix and passed afterward; all 36 targeted Bonus/Admin/endpoint/scheduler/Welcome tests and syntax checks passed locally. Self-review confirms the change only tightens new Daily receipt validation. Remote CI and the final SHA are recorded in the Draft PR description; deployment remains intentionally skipped.
+
+
+## UX follow-up
+
+In `poker/poker.js:renderDailyBonus`, keep a local `dailyLoadError` flag separate from null `dailyState`; clear it on refresh/account change and set it on failed status read. Render distinct inactive/paused/signed-out/error messages and toggle existing-panel `dailySignIn` CTA. Its handler closes the panel and invokes existing `openSignIn()`. No changes to backend, Claim authority or response-generation guards.
+
+`poker/index.html:dailyDialog` adds permanent `dailyEligibility` copy and `dailySignIn` button. Replace the narrow-landscape CSS rule hiding heading paragraphs with readable small text, preserving one physical line per selector. Check portrait/landscape and sign-in behavior on Deploy Preview using read-only browser inspection and simulated status responses; do not submit a Claim or mutate environments. Existing syntax/CSP/lifecycle controls apply; no UI suite, new scripts or inline CSP changes.

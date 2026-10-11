@@ -460,7 +460,7 @@ body.poker-lobby #dailyDialog{padding:14px 18px;}
 body.poker-lobby #dailyDialog .dialog-top .eyebrow{display:none;}
 body.poker-lobby #dailyDialog .dialog-top{justify-content:flex-end;}
 body.poker-lobby #dailyDialog .bonus-heading{margin-top:-44px;margin-right:60px;min-height:60px;}
-body.poker-lobby #dailyDialog .bonus-heading p{display:none;}
+body.poker-lobby #dailyDialog .bonus-heading p{font-size:12px;}
 body.poker-lobby #dailyDialog .bonus-heading img{height:60px;}
 }
 @media(max-width:350px){
