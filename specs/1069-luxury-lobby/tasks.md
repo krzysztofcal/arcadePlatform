@@ -1,6 +1,6 @@
 # Tasks: Premium Mobile Arcade Poker Lobby
 
-**Scope**: Review delivery now; final implementation after owner approval only. Common #1069/#800 UX; separate future implementation PRs. No backend/DB/WS/Production work. No new automated UI/CSS/JSP/glue suite.
+**Scope**: T009–T015 implementation authorized after merged #1078; historical review delivery: final implementation after owner approval only. Common #1069/#800 UX; separate future implementation PRs. No backend/DB/WS/Production work. No new automated UI/CSS/JSP/glue suite.
 
 ## Phase 1 — Setup and live evidence
 - [x] T001 Read live main `d8f48bd3`, agents.md, skills.md and .specify/memory/constitution.md; record issue #1069/#800/#1075/#797/#1077 scope in specs/1069-luxury-lobby/research.md.
@@ -19,13 +19,13 @@
 
 ## Phase 4 — US2: real lobby integration (P1, T008 complete; separate #1069 PR after #1078 merge)
 **Independent verification**: actual guest/auth/current table actions work with unchanged runtime and access rules.
-- [ ] T009 [US2] Promote approved original art to poker/assets/lobby/; update poker/index.html carousel while preserving existing ID nodes, topbar/sidebar and guest/auth paths.
-- [ ] T010 [US2] Relocate existing pokerCreate/pokerBuyIn/pokerMaxPlayers/pokerRefresh/pokerTableList into Online Tables subview in poker/index.html; preserve bindings in poker/poker.js:initLobby(), quickSeat(), createTable(), handleClick(), playAsGuest(), checkAuth().
-- [ ] T011 [US2] Add only view switching/carousel/Coming Soon handlers in poker/poker.js:initLobby(); retain refreshLobby()/ensureLobbyWs() lifecycle and buildPokerTableUrl()/navigateToPokerTable() parameters.
-- [ ] T012 [US2] Style lobby under scoped selectors in poker/poker.css with one physical line each; preserve actual topbar XP/avatar/CH loading/stale states from js/topbar.js/UserUiState and current sidebar navigation.
-- [ ] T013 [US2] Expose existing Progress Roadmap and conditionally eligible welcome bonus in poker/index.html; preserve poker/poker.js:renderProgression()/refreshProgression()/refreshWelcomeBonusBanner(), available versus unlocked and account bonus destination.
-- [ ] T014 [US2] Remove only Poker-lobby AdSense meta/include/two ad slots in poker/index.html and unused poker-ad-slot rules in poker/poker.css; preserve Klaro/consent and unrelated Hub ads.
-- [ ] T015 [US2] Run existing guards/CSP/syntax and targeted manual real guest/auth/Quick Seat/Create/Join/Refresh/tiers/bonus/back/reconnect scenarios; record evidence in specs/1069-luxury-lobby/self-review.md. No protocol or WS deployment change.
+- [x] T009 [US2] Promote approved original art to poker/assets/lobby/; update poker/index.html carousel while preserving existing ID nodes, topbar/sidebar and guest/auth paths.
+- [x] T010 [US2] Relocate existing pokerCreate/pokerBuyIn/pokerMaxPlayers/pokerRefresh/pokerTableList into Online Tables subview in poker/index.html; preserve bindings in poker/poker.js:initLobby(), quickSeat(), createTable(), handleClick(), playAsGuest(), checkAuth().
+- [x] T011 [US2] Reuse view switching/carousel/Coming Soon handlers; add inline exact-tier quick choice from availableBuyIns and optional validated buyIn in existing Quick Seat API; preserve Resume-first, locks/caps/class/funding/capability; keep existing authoritative JOIN auto-bootstrap. Add only fundamental backend tests. Add view handlers in poker/poker.js:initLobby(); retain refreshLobby()/ensureLobbyWs() lifecycle and buildPokerTableUrl()/navigateToPokerTable() parameters.
+- [x] T012 [US2] Style lobby under scoped selectors in poker/poker.css with one physical line each; preserve actual topbar XP/avatar/CH loading/stale states from js/topbar.js/UserUiState and current sidebar navigation.
+- [x] T013 [US2] Expose existing Progress Roadmap and conditionally eligible welcome bonus in poker/index.html; preserve poker/poker.js:renderProgression()/refreshProgression()/refreshWelcomeBonusBanner(), available versus unlocked and account bonus destination.
+- [x] T014 [US2] Remove only Poker-lobby AdSense meta/include/two ad slots in poker/index.html and unused poker-ad-slot rules in poker/poker.css; preserve Klaro/consent and unrelated Hub ads.
+- [x] T015 [US2] Run existing guards/CSP/syntax and fundamental Quick Seat rules; perform available actual guest/auto-join/readiness/reload and anonymous/API negative Deploy Preview smoke; record authenticated Stage/physical-phone Quick Seat/Create/Join/Refresh/tiers/bonus/back/reconnect scenarios still requiring user verification and evidence in specs/1069-luxury-lobby/self-review.md. Existing JOIN auto-bootstrap verified by source; no protocol or WS deployment change. Record unauthenticated/guest runtime smoke and any authenticated/manual verification still pending.
 
 ## Phase 5 — US3: shared automatic table theme (P2; future separately authorized #800 PR)
 **Independent verification**: no appearance UI in current review. Later every compatible client at the same table resolves the same fixed theme through joins/hands/reload/reconnect.
@@ -57,6 +57,27 @@ T001 → T002 → T003/T004 → T005/T006/T016 → T007/T022/T023 → owner T008
 
 After owner merge of #1078, in a separate implementation PR: T009 → T010 → T011/T012/T013/T014 → T015 in focused #1069 implementation. Separately approved #800: T017 → T018 → T019/T020 → T021. #800 is not a lobby prerequisite. Daily reward logic belongs to independently approved #1079.
 
-Parallel opportunities: after requirements, research documentation and art cleanup affect different files. Once markup settles, screenshot verification and SpecKit review are independent; shared preview CSS/JS and future renderer must be edited sequentially. T008 is complete based on explicit owner approval, not elapsed time/green checks. Keep T009–T015/T017–T021 unchecked; no runtime implementation in #1078.
+Parallel opportunities: after requirements, research documentation and art cleanup affect different files. Once markup settles, screenshot verification and SpecKit review are independent; shared preview CSS/JS and future renderer must be edited sequentially. T008 is complete based on explicit owner approval, not elapsed time/green checks. Historical #1078 kept T009–T015/T017–T021 unchecked. Current separate #1069 completes T009–T015; T017–T021 remain outside scope.
 
 Task count: 31. US1: 8; US2: 7; US3: 7; US4: 3; setup/foundation/polish: 6. Checked boxes mean completed design artifacts, never future runtime implementation.
+
+## Implementation progress (separate #1069 PR)
+T009–T014 implemented on main c4f26e4c baseline. T015 CI/actual guest and negative API Deploy Preview evidence recorded; authenticated Stage/physical-phone runtime smoke remains explicitly pending. Existing poker-ui.behavior harness received browser API stubs and a funded-seat fixture correction only, with no new UI cases/suite. Optional selected tier tests extend existing backend file. Scoped CSS suppresses injected Hub mobile-bottom-nav on this lobby to prevent its fixed overlay hiding Play Now; Hub routes remain in unchanged sidebar, brand and Profile. No global stylesheet/navigation changes.
+
+## PR #1080 confirmed review corrections
+- [x] T031 Independently verify all three findings against current PR HEAD, live Preview and merged V3 before any implementation edit; record classifications/evidence in self-review.md.
+- [x] T032 In poker/poker.js use stable subject and generation checks for identity-bound async responses/auth reads; reset account UI/client on transition. Restore approved illustrative Daily Bonus in poker/index.html and scoped poker/poker.css; improve only Online short-landscape contrast/spacing.
+- [x] T033 Run existing fundamental tests/guards and temporary auth-race/short-landscape checks; confirm CI/Netlify Preview latest SHA, record evidence and pending funded Stage/physical-device gate. Keep Draft, no merge/Production.
+
+- [x] T034 Verify Welcome Bonus in-flight finding against live HEAD, reproduce with deferred status and extend existing fundamental account-isolation regression (A→B, A→B→A, logout, old-request rejection). Apply minimal same-method refresh in finally; no bonus economics or backend changes.
+- [x] T035 Confirm final CI and Netlify Preview SHA, record combined review evidence/self-review and pending funded authenticated Stage smoke; retain Draft/no merge.
+
+## Owner-approved visual polish (#1069 latest update)
+- [x] T036 Verify newest issue/approved motion direction; record finite CSS and session-only attention boundaries in spec/plan before edits.
+- [x] T037 Add scoped finite entrance/glints/static neon in poker/poker.css and once-per-session Daily attention in poker/poker.js:initLobby(); preserve V3 art/layout/readability/actions, reduced motion and disabled gates.
+- [x] T038 Run existing fundamental regressions, syntax/CSP/guards and exact-SHA Preview smoke (portrait/short landscape/swipe/focus/reduced motion/once per session/storage failure). Update self-review and PR; keep Draft, authenticated Stage/physical device pending.
+
+## Owner correction: ongoing ambient motion
+- [x] T039 Verify live owner correction and replace finite-only constraints in SpecKit; preserve V3 and all economic/runtime gates.
+- [x] T040 Add spaced CSS ambient cycles and visible Daily icon reaction; remove session marker from initLobby, retain reduced-motion/interaction safety.
+- [x] T041 Verify actual exact-SHA Preview >=30s, repeated cycles/reload/new session, portrait/landscape/swipe/click/focus/reduced motion/contrast; save timed frames, run existing fundamental tests/guards, update self-review and Draft PR.

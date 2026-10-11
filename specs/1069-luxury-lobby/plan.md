@@ -1,6 +1,8 @@
 # Implementation Plan: Premium Mobile Arcade Poker Lobby
 
-**Branch**: `1069-luxury-lobby-design` | **Date**: 2026-10-10 | **Spec**: [spec.md](spec.md)
+**Current scope:** #1078 is merged and #1069 implementation is authorized. The implementation authorization section at the end supersedes historical design-only restrictions in this document. T009–T015 and validation evidence are recorded in tasks.md/self-review.md; #800/#1079 remain separate.
+
+**Branch**: `feat/1069-luxury-poker-lobby` | **Date**: 2026-10-10 | **Spec**: [spec.md](spec.md)
 
 ## Summary
 Deliver isolated landscape/portrait review prototypes with five original glossy 3D cards, four illustrated shortcuts and Day 1–4 Daily Bonus concept in existing Draft PR #1078. Remove all appearance controls. Owner accepted V3 landscape, portrait and Daily Bonus on 2026-10-10. #1069 runtime lobby starts only in a separate PR after this design PR is merged by the owner; #800 implementation and #1079 economics remain separate.
@@ -89,3 +91,30 @@ Later: same checks plus targeted existing critical poker/access tests if their l
 
 ## Complexity Tracking
 No constitution exception. CSS media blocks contain one complete selector/declaration rule per physical line; media braces are on separate lines, not multiple collapsed rules. No new helper module is justified: #800 can extend the existing file-local Poker V2 hash/catalog/loader. Resolver and loader changes are future work, not created in this design PR.
+
+## Implementation authorization — 2026-10-10 (#1069 after merged #1078)
+Owner explicitly requests T009–T015 on current main c4f26e4c. Reuse approved V3 art and portrait/landscape composition; no redesign. The earlier design-only restrictions describe historical #1078 and do not block this focused implementation. #800/#1079 and future playable modes remain excluded.
+
+`poker/index.html`, `poker/poker.css`, `poker/poker.js:initLobby()` retain one controller, existing IDs, auth/guest/topbar/sidebar, Online Tables/Create/Join/Refresh and Progress Roadmap. Promote approved art to `poker/assets/lobby/`. Daily Bonus is honestly Coming Soon. Retain approved V3 Day 1–4 as SAMPLE JOURNEY · NOT YOUR ACCOUNT with EXAMPLE STATE labels, no configured amounts/timer and disabled Claim; never present sample states as account history or eligibility. Remove Poker lobby AdSense only; preserve consent.
+
+`renderProgression()` renders at most two actual `availableBuyIns`, defaults to highest on first view, retains a still-available explicit choice, resets safely on availability/account changes; one option is a label. `quickSeat()` sends optional numeric `buyIn` plus existing `maxPlayers`, keeps loading/error gates and navigates with existing `autoJoin=1`. `rejoinableTableIds` enables Resume Game regardless of tier availability; server always rechecks active seat first. Failed progression clears playable choices.
+
+`netlify/functions/poker-quick-seat.mjs:handler()` validates a supplied positive safe integer `buyIn` (400 invalid_buy_in), then after resume-first and fresh progression/class validation restricts `selectCandidate()` to that exact available tier and `createAndRecommend()` to the same buy-in. Fresh unavailable selection returns existing 409 buy_in_tier_locked with bankroll metadata. Omitted property preserves legacy matching/default Create. Existing advisory lock order, canonical stakes, WS capability check, transactional table caps, authoritative JOIN funding, anti-farming and pool rules remain. No debit/seat write in Quick Seat.
+
+Readiness: `ws-server/poker/handlers/join.mjs:handleJoinCommand()` already calls `tableManager.bootstrapHand()` after validated/funded JOIN and runtime membership; changed state is persisted with expected version, then broadcast and bot scheduling. Guest JOIN in `ws-server/server.mjs` already bootstraps. `bootstrapHand()` uses eligible human/member/readiness gates and returns unchanged for live/settlement/waiting states. Reuse this mechanism; no `autoStart` consumer, new client command, WS/protocol change or WS deployment. If runtime smoke demonstrates a gap, propose a separate readiness change for approval rather than forcing a hand.
+
+Constitution Check: fundamental deterministic backend tests only in existing `tests/poker-quick-seat.behavior.test.mjs`: exact-tier match/create/mismatch fallback, fresh tier/class policy, resume/no debit and legacy defaults/capability/caps. Presentation uses temporary browser smoke; no new UI suite/dependencies/config/ignore cleanup. JSP IIFE/global JS, physical one-line CSS rules, klog and existing CSP; no added inline script or hash required. No migrations, Stage configuration/campaign changes, Production deploy or merge. Preview gameplay smoke may use existing isolated guest runtime only.
+
+Breaking impact: optional API property is additive; supplied malformed values now fail 400. Exact-tier calls cannot silently switch tiers; legacy omitted calls unchanged. DOM relocation/CSS are scoped to lobby body and preserve IDs/handlers; ad removal intentional. No economy, DB or WS/protocol breaking change. Authenticated runtime verification requires a test account; do not invent credentials or use Production.
+
+### PR #1080 review correction implementation
+`poker/poker.js:checkAuth()/setLobbyIdentity()/refreshProgression()/quickSeat()/createTable()/refreshWelcomeBonusBanner()` retain stable subject and reject obsolete identity generations; auth callback refreshes outside lock, account transition clears old UI/client. `poker/index.html:dailyDialog` restores exact approved illustrative V3 markup/art; `poker/poker.css` restores its scoped responsive rules and locally improves short-landscape Online overlay/spacing/sign-in readability, retaining equal card heights with a shared minimum. Temporary browser checks cover same-account JWT rotation, ordered auth completion, A→B→A progression, logout, Guest text/background and hit targets at 844×390/568×320. Existing fundamental tests and CI remain required; no maintained UI/layout suite, no runtime backend/WS changes.
+
+### Welcome Bonus stale in-flight correction
+`refreshWelcomeBonusBanner():finally` clears welcomeBonusInFlight and reuses the same method for current identity when requestGeneration differs from lobbyIdentityGeneration and lobbyAuthenticated is true. Signed-out entry performs no fetch. Extend existing loadLobbyHarness only to inject a deferred ChipsClient status and existing auth notifications; assert stale eligibility is hidden, latest eligibility refreshes, A→B→A is generation-safe and logout prevents follow-up. No new production hooks or request system.
+
+### Approved motion amendment implementation
+The prior finite-only/session-marker approach is superseded by the owner correction below.
+
+## Owner correction: ongoing ambient motion
+In poker/poker.css retain entrance; replace finite glint/pulse keyframes with11/12/13/15s cycles whose motion occupies only first~1s. Stagger future-card neon, scope actionable sheen to enabled Online CTA. Animate Daily .shortcut-art at1.05 maximum/±3deg plus synchronized gold pseudo-element; suppress during interaction. Reduced-motion media gate applies to all additions. In poker/poker.js:initLobby remove obsolete marker/listeners; no replacement JS. Existing fundamental tests/guards; outside-repo deployed30s+ diagnostics and timed frame evidence, no permanent visual suite. No backend/WS/deploy configuration/CH effect.

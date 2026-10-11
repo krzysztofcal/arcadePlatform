@@ -72,8 +72,8 @@ const readQuickSeatEffectiveClass = async (tx, userId) => {
   return snapshot?.effectiveClass || "UNKNOWN";
 };
 
-const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability }) => {
-  const buyIn = progression?.availableBuyIns?.[0];
+const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn = null }) => {
+  const buyIn = selectedBuyIn ?? progression?.availableBuyIns?.[0];
   if (!Number.isSafeInteger(buyIn) || buyIn <= 0) {
     const firstTier = progression?.tiers?.[0] || null;
     return {
@@ -280,6 +280,12 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_max_players" }) };
   }
 
+  const selectedBuyIn = Object.prototype.hasOwnProperty.call(payload, "buyIn") ? payload.buyIn : null;
+  if (Object.prototype.hasOwnProperty.call(payload, "buyIn")
+    && (typeof selectedBuyIn !== "number" || !Number.isSafeInteger(selectedBuyIn) || selectedBuyIn <= 0)) {
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
+  }
+
   const token = extractBearerToken(event.headers);
   const auth = await verifySupabaseJwt(token);
   if (!auth.valid || !auth.userId) {
@@ -322,16 +328,28 @@ export async function handler(event) {
         && progression.pokerAccess.effectiveClass !== "RESTRICTED") {
         return { kind: "poker_access_unavailable" };
       }
-      const createPayload = { userId: auth.userId, maxPlayers, progression, ensureWsBuyInCapability };
+      if (selectedBuyIn !== null && !progression.availableBuyIns.includes(selectedBuyIn)) {
+        const tier = progression.tiers.find((item) => item.buyIn === selectedBuyIn);
+        return {
+          kind: "buy_in_tier_locked",
+          balance: progression.balance,
+          buyIn: selectedBuyIn,
+          requiredBuyIn: selectedBuyIn,
+          requiredBankroll: tier?.unlockBankroll ?? null
+        };
+      }
+      const availableBuyIns = selectedBuyIn === null ? progression.availableBuyIns : [selectedBuyIn];
+      const createPayload = { userId: auth.userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn };
 
       const preferredRows = await selectCandidate(tx, {
         maxPlayers,
         requireHuman: true,
         humanSeatFreshCutoffIso,
-        availableBuyIns: progression.availableBuyIns,
+        availableBuyIns,
         effectiveClass: progression.pokerAccess?.effectiveClass || "UNKNOWN"
       });
       for (const candidate of preferredRows || []) {
+        if (selectedBuyIn !== null && Number(candidate.buy_in) !== selectedBuyIn) continue;
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: candidate.id,
           userId: auth.userId,
@@ -352,10 +370,11 @@ export async function handler(event) {
         maxPlayers,
         requireHuman: false,
         humanSeatFreshCutoffIso,
-        availableBuyIns: progression.availableBuyIns,
+        availableBuyIns,
         effectiveClass: progression.pokerAccess?.effectiveClass || "UNKNOWN"
       });
       for (const candidate of anyRows || []) {
+        if (selectedBuyIn !== null && Number(candidate.buy_in) !== selectedBuyIn) continue;
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: candidate.id,
           userId: auth.userId,

@@ -1467,6 +1467,14 @@
     var tableList = document.getElementById('pokerTableList');
     var refreshBtn = document.getElementById('pokerRefresh');
     var quickSeatBtn = document.getElementById('pokerQuickSeat');
+    var quickTiers = document.getElementById('pokerQuickTiers');
+    var quickStatus = document.getElementById('pokerQuickStatus');
+    var selectedQuickBuyIn = null;
+    var quickSeatInFlight = false;
+    var lobbyAuthenticated = false;
+    var lobbyIdentity = null;
+    var lobbyIdentityGeneration = 0;
+    var authCheckGeneration = 0;
     var createBtn = document.getElementById('pokerCreate');
     var buyInInput = document.getElementById('pokerBuyIn');
     var maxPlayersInput = document.getElementById('pokerMaxPlayers');
@@ -1493,6 +1501,74 @@
 
     if (quickSeatBtn) quickSeatBtn.disabled = true;
     if (createBtn) createBtn.disabled = true;
+
+    var carousel = document.querySelector('.carousel');
+    var tiles = Array.prototype.slice.call(document.querySelectorAll('.tile'));
+    var dots = Array.prototype.slice.call(document.querySelectorAll('.dot'));
+    var current = 0;
+    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var descriptions = {
+      single: ['Single Player', 'Online poker against bot opponents, with one human at the table. This mode is in development.'],
+      world: ['World Tour', 'A future journey through country-themed poker tables. This mode is in development.'],
+      seasons: ['Seasons', 'Explore winter, spring, summer and autumn on future designated tables. This mode is in development.'],
+      sitgo: ['Sit & Go', 'A future tournament format that starts after enough players register. This mode is in development.']
+    };
+    function goTo(index){
+      index = Math.max(0, Math.min(tiles.length - 1, index));
+      carousel.scrollTo({ left: tiles[index].offsetLeft - tiles[0].offsetLeft, behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+    }
+    function updatePosition(){
+      if (!carousel) return;
+      var distance = Infinity;
+      tiles.forEach(function(tile, index){
+        var nextDistance = Math.abs(tile.offsetLeft - tiles[0].offsetLeft - carousel.scrollLeft);
+        if (nextDistance < distance){ distance = nextDistance; current = index; }
+      });
+      if (carousel.scrollLeft >= carousel.scrollWidth - carousel.clientWidth - 2) current = tiles.length - 1;
+      dots.forEach(function(dot, index){ dot.setAttribute('aria-current', String(index === current)); });
+      document.querySelectorAll('[data-step]').forEach(function(button){ button.disabled = Number(button.dataset.step) < 0 ? current === 0 : current === tiles.length - 1; });
+    }
+    dots.forEach(function(dot){ dot.addEventListener('click', function(){ goTo(Number(dot.dataset.index)); }); });
+    document.querySelectorAll('[data-step]').forEach(function(button){ button.addEventListener('click', function(){ goTo(current + Number(button.dataset.step)); }); });
+    if (carousel) carousel.addEventListener('scroll', updatePosition, { passive: true });
+    window.addEventListener('resize', updatePosition); // xp-lifecycle-allow:poker-lobby-carousel(2027-01-01)
+    if (carousel) carousel.addEventListener('keydown', function(event){
+      if (event.target !== carousel) return;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft'){ event.preventDefault(); goTo(current + (event.key === 'ArrowRight' ? 1 : -1)); }
+      if (event.key === 'Home' || event.key === 'End'){ event.preventDefault(); goTo(event.key === 'Home' ? 0 : tiles.length - 1); }
+    });
+    document.querySelectorAll('[data-mode]').forEach(function(button){ button.addEventListener('click', function(){
+      var description = descriptions[button.dataset.mode];
+      document.getElementById('infoTitle').textContent = description[0];
+      document.getElementById('infoCopy').textContent = description[1];
+      document.getElementById('infoDialog').showModal();
+    }); });
+    document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
+      var dialog = document.getElementById(button.dataset.panel + 'Dialog');
+      if (dialog && !dialog.open) dialog.showModal();
+    }); });
+    document.querySelectorAll('[data-close]').forEach(function(button){ button.addEventListener('click', function(){ button.closest('dialog').close(); }); });
+    document.querySelectorAll('[data-view]').forEach(function(button){ button.addEventListener('click', function(){
+      showLobbyView(button.dataset.view);
+    }); });
+    function showLobbyView(view, focusTarget){
+      if (view !== 'modes' && !lobbyAuthenticated){
+        view = 'modes';
+        setError(errorEl, 'Sign in to browse persistent-chip tables and progression, or play as Guest.');
+      }
+      ['modes', 'tables', 'progression'].forEach(function(name){
+        var node = document.getElementById('poker' + name.charAt(0).toUpperCase() + name.slice(1) + 'View');
+        if (node) node.hidden = name !== view;
+      });
+      var target = document.getElementById(view === 'modes' ? 'pokerQuickSeat' : view === 'tables' ? 'pokerTablesTitle' : 'pokerProgressTitle');
+      if (view === 'modes' && !lobbyAuthenticated) target = guestPlayBtn;
+      if (target && focusTarget !== false){
+        if (target.tagName !== 'BUTTON') target.setAttribute('tabindex', '-1');
+        target.focus({ preventScroll: true });
+      }
+      if (view === 'modes') updatePosition();
+    }
+    if (carousel) updatePosition();
 
     function requiredCashBuyIn(){
       var value = lobbyContent && lobbyContent.dataset ? Number(lobbyContent.dataset.requiredBuyIn) : NaN;
@@ -1657,23 +1733,28 @@
     }
 
     async function refreshWelcomeBonusBanner(){
-      if (!welcomeBonusBanner) return null;
+      if (!welcomeBonusBanner || !lobbyAuthenticated) return null;
       if (!window || !window.ChipsClient || typeof window.ChipsClient.fetchWelcomeBonusStatus !== 'function'){
         setWelcomeBonusBannerVisible(false);
         return null;
       }
       if (welcomeBonusInFlight) return welcomeBonusInFlight;
+      var requestGeneration = lobbyIdentityGeneration;
       welcomeBonusInFlight = (async function(){
         try {
           var status = await window.ChipsClient.fetchWelcomeBonusStatus();
+          if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return null;
           var canClaim = !!(status && status.eligible && !status.alreadyClaimed);
           setWelcomeBonusBannerVisible(canClaim);
           return status || null;
         } catch (_err){
-          setWelcomeBonusBannerVisible(false);
+          if (lobbyIdentityGeneration === requestGeneration) setWelcomeBonusBannerVisible(false);
           return null;
         } finally {
           welcomeBonusInFlight = null;
+          if (lobbyAuthenticated && lobbyIdentityGeneration !== requestGeneration){
+            refreshWelcomeBonusBanner();
+          }
         }
       })();
       return welcomeBonusInFlight;
@@ -1719,6 +1800,52 @@
       } catch (_err){}
     }
 
+    function hasResumeSeat(){
+      return !!(progressionState && Array.isArray(progressionState.rejoinableTableIds) && progressionState.rejoinableTableIds.length);
+    }
+
+    function renderQuickTiers(){
+      var options = progressionState && Array.isArray(progressionState.availableBuyIns)
+        ? progressionState.availableBuyIns.filter(function(value){ return Number.isSafeInteger(value) && value > 0; }).slice(0, 2) : [];
+      if (options.indexOf(selectedQuickBuyIn) === -1) selectedQuickBuyIn = options.length ? options[0] : null;
+      var resume = hasResumeSeat();
+      var effectiveClass = progressionState && progressionState.pokerAccess && progressionState.pokerAccess.effectiveClass;
+      var accessReady = effectiveClass === 'NORMAL' || effectiveClass === 'SLOW' || effectiveClass === 'RESTRICTED';
+      if (quickTiers){
+        quickTiers.innerHTML = '';
+        quickTiers.hidden = resume || !options.length;
+        options.forEach(function(buyIn){
+          var node = document.createElement(options.length > 1 ? 'button' : 'span');
+          node.className = options.length > 1 ? 'quick-tier' : 'quick-tier-label';
+          node.textContent = formatChips(buyIn) + ' CH';
+          if (options.length > 1){
+            node.type = 'button';
+            node.dataset.buyIn = String(buyIn);
+            node.setAttribute('aria-pressed', String(buyIn === selectedQuickBuyIn));
+            node.disabled = quickSeatInFlight;
+            node.addEventListener('click', function(){
+              selectedQuickBuyIn = buyIn;
+              quickTiers.querySelectorAll('button').forEach(function(button){
+                button.setAttribute('aria-pressed', String(Number(button.dataset.buyIn) === buyIn));
+              });
+            });
+          }
+          quickTiers.appendChild(node);
+        });
+      }
+      if (quickSeatBtn){
+        quickSeatBtn.textContent = quickSeatInFlight ? 'CONNECTING…' : resume ? 'RESUME GAME' : 'PLAY NOW';
+        quickSeatBtn.disabled = quickSeatInFlight || !lobbyAuthenticated || (!resume && (!options.length || !accessReady));
+        quickSeatBtn.setAttribute('aria-busy', String(quickSeatInFlight));
+      }
+      if (quickStatus) quickStatus.textContent = quickSeatInFlight ? 'Finding your table…'
+        : resume ? 'Return to your existing seat. No additional buy-in.'
+        : !progressionState ? 'Progression unavailable. Refresh to retry.'
+        : !accessReady ? 'Poker access temporarily unavailable.'
+        : !options.length ? 'No playable tier for your current bankroll.'
+        : 'Auto-join · the hand starts when the table is ready.';
+    }
+
     function renderProgression(data){
       progressionState = data && typeof data === 'object' ? data : null;
       if (progressionBankroll){
@@ -1740,7 +1867,7 @@
         }
         if (createBtn) createBtn.disabled = data.tiers.length === 0;
       }
-      if (quickSeatBtn) quickSeatBtn.disabled = !(progressionState && Array.isArray(progressionState.availableBuyIns) && progressionState.availableBuyIns.length > 0);
+      renderQuickTiers();
       if (progressionRoadmap){
         progressionRoadmap.innerHTML = '';
         var tiers = data && Array.isArray(data.tiers) ? data.tiers : [];
@@ -1777,10 +1904,16 @@
         progressionRefreshQueued = true;
         return progressionInFlight;
       }
+      var requestGeneration = lobbyIdentityGeneration;
       progressionInFlight = apiGet(PROGRESSION_URL).then(function(data){
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return null;
         renderProgression(data);
         return data;
       }).catch(function(err){
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return null;
+        progressionState = null;
+        selectedQuickBuyIn = null;
+        renderQuickTiers();
         if (!isAuthError(err)) klog('poker_progression_refresh_failed', { error: err && (err.code || err.message) ? (err.code || err.message) : 'unknown' });
         return null;
       }).finally(function(){
@@ -1806,9 +1939,32 @@
         || normalized === 'auth_failed';
     }
 
+    function setLobbyIdentity(identity){
+      if (lobbyIdentity === identity) return;
+      lobbyIdentity = identity;
+      lobbyIdentityGeneration += 1;
+      progressionState = null;
+      selectedQuickBuyIn = null;
+      lobbyTables = [];
+      if (progressionBankroll) progressionBankroll.textContent = 'Loading bankroll…';
+      if (progressionRoadmap) progressionRoadmap.innerHTML = '';
+      if (progressionCelebration) progressionCelebration.hidden = true;
+      if (tableList) tableList.innerHTML = '';
+      setWelcomeBonusBannerVisible(false);
+      stopLobbyWs();
+    }
+
     async function checkAuth(){
+      var checkGeneration = ++authCheckGeneration;
       var token = await getAccessToken();
+      if (checkGeneration !== authCheckGeneration) return false;
       if (!token){
+        lobbyAuthenticated = false;
+        setLobbyIdentity(null);
+        progressionState = null;
+        selectedQuickBuyIn = null;
+        renderQuickTiers();
+        showLobbyView('modes', false);
         stopLobbyWs();
         setWelcomeBonusBannerVisible(false);
         if (authMsg) authMsg.hidden = false;
@@ -1817,6 +1973,10 @@
         startAuthWatch();
         return false;
       }
+      // JWT subject is UI identity only; all authorization remains server-side.
+      setLobbyIdentity(getUserIdFromToken(token) || token);
+      lobbyAuthenticated = true;
+      renderQuickTiers();
       if (authMsg) authMsg.hidden = true;
       if (lobbyContent) lobbyContent.hidden = false;
       stopAuthWatch();
@@ -1854,6 +2014,7 @@
           if (generation !== lobbyWsGeneration || !access || !access.payload) return;
           if (!progressionState || typeof progressionState !== 'object') progressionState = {};
           progressionState.pokerAccess = access.payload;
+          renderQuickTiers();
           renderTables(lobbyTables);
         },
         onStatus: function(status, data){
@@ -1887,7 +2048,7 @@
               content: lobbyContent,
               errorEl: errorEl,
               stopPolling: stopLobbyWs,
-              onAuthExpired: startAuthWatch
+              onAuthExpired: function(){ authCheckGeneration += 1; setLobbyIdentity(null); lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
             });
             if (tableList) tableList.innerHTML = '';
             return;
@@ -2037,12 +2198,18 @@
     }
 
     async function quickSeat(){
+      if (quickSeatInFlight || !lobbyAuthenticated) return;
+      if (!hasResumeSeat() && selectedQuickBuyIn === null) return;
       setError(errorEl, null);
       var maxPlayers = resolveLobbyMaxPlayers();
       var payload = { maxPlayers: maxPlayers };
-      setLoading(quickSeatBtn, true);
+      if (selectedQuickBuyIn !== null) payload.buyIn = selectedQuickBuyIn;
+      quickSeatInFlight = true;
+      renderQuickTiers();
+      var requestGeneration = lobbyIdentityGeneration;
       try {
         var data = await apiPost(QUICK_SEAT_URL, payload);
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (data && data.ok === true && data.tableId){
           navigateToPokerTable(data.tableId, {
             seatNo: data.seatNo != null ? data.seatNo : null,
@@ -2052,22 +2219,26 @@
         }
         setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
       } catch (err){
-        if (handleTierLocked(err)) return;
-        if (handleInsufficientChips(err)) return;
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
+        if (handleTierLocked(err) || handleInsufficientChips(err)){
+          refreshProgression();
+          return;
+        }
         if (isAuthError(err)){
           handleAuthExpired({
             authMsg: authMsg,
             content: lobbyContent,
             errorEl: errorEl,
             stopPolling: stopLobbyWs,
-            onAuthExpired: startAuthWatch
+            onAuthExpired: function(){ authCheckGeneration += 1; setLobbyIdentity(null); lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
           });
           return;
         }
         klog('poker_quick_seat_error', { error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
       } finally {
-        setLoading(quickSeatBtn, false);
+        quickSeatInFlight = false;
+        renderQuickTiers();
       }
     }
     async function createTable(){
@@ -2080,14 +2251,17 @@
       }
       var maxPlayers = resolveLobbyMaxPlayers();
       setLoading(createBtn, true);
+      var requestGeneration = lobbyIdentityGeneration;
       try {
         var data = await apiPost(CREATE_URL, { maxPlayers: maxPlayers, buyIn: buyIn });
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (data.tableId){
           navigateToPokerTable(data.tableId);
         } else {
           setError(errorEl, t('pokerErrNoTableId', 'Table created but no ID returned'));
         }
       } catch (err){
+        if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (handleTierLocked(err)) return;
         if (handleInsufficientChips(err)) return;
         if (isAuthError(err)){
@@ -2096,7 +2270,7 @@
             content: lobbyContent,
             errorEl: errorEl,
             stopPolling: stopLobbyWs,
-            onAuthExpired: startAuthWatch
+            onAuthExpired: function(){ authCheckGeneration += 1; setLobbyIdentity(null); lobbyAuthenticated = false; progressionState = null; selectedQuickBuyIn = null; renderQuickTiers(); showLobbyView('modes'); startAuthWatch(); }
           });
           return;
         }
@@ -2147,6 +2321,20 @@
       welcomeBonusClaimBtn.addEventListener('click', function(){
         window.location.href = '/account.html';
       });
+    }
+
+    if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
+      var unsubscribeLobbyAuth = window.SupabaseAuth.onAuthChange(function(_event, user){
+        authCheckGeneration += 1;
+        setLobbyIdentity(user && user.id ? user.id : null);
+        lobbyAuthenticated = !!user;
+        renderQuickTiers();
+        if (authMsg) authMsg.hidden = !!user;
+        if (lobbyContent) lobbyContent.hidden = !user;
+        // Read the session after the Supabase auth callback releases its lock.
+        setTimeout(function(){ refreshLobby('auth_change'); }, 0);
+      });
+      window.addEventListener('beforeunload', unsubscribeLobbyAuth); // xp-lifecycle-allow:poker-lobby-auth(2027-01-01)
     }
 
     window.addEventListener('beforeunload', stopAuthWatch); // xp-lifecycle-allow:poker-lobby(2026-01-01)

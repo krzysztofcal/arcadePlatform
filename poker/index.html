@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b1020">
-  <meta name="google-adsense-account" content="ca-pub-4054734235779751">
   <title>Poker Lobby - Arcade Hub</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,7 +12,6 @@
   <link rel="stylesheet" href="/poker/poker.css">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236ee7e7'/%3E%3Cstop offset='1' stop-color='%23a78bfa'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' ry='14' fill='%23111533'/%3E%3Ccircle cx='24' cy='24' r='16' fill='url(%23g)'/%3E%3Ccircle cx='40' cy='40' r='16' fill='url(%23g)' opacity='0.7'/%3E%3C/svg%3E">
 <script src="/js/i18n.js" defer></script>
-  <script src="/js/adsense-init.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/user-ui-state.js" defer></script>
@@ -38,7 +36,7 @@
   <script src="../js/vendor/klaro/klaro.js" defer></script>
   <script src="../js/consent-services.js" defer></script>
 </head>
-<body>
+<body class="poker-lobby">
   <div class="topbar" data-user-ui-state="pending" data-user-ui-profile-state="pending" data-user-ui-xp-state="pending" data-user-ui-chips-state="pending">
     <div class="topbar-left">
       <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -46,7 +44,7 @@
       </button>
       <a href="/index.html" class="brand" aria-label="Arcade Hub home">
         <div class="logo" aria-hidden="true"></div>
-        <h1>Arcade Hub</h1>
+        <h1>Arcade Poker</h1>
       </a>
     </div>
     <div class="topbar-right">
@@ -54,6 +52,7 @@
         <span class="xp-badge__label">XP</span>
       </a>
       <div class="avatar-shell" id="avatarShell">
+        <span id="avatarLabel" class="avatar-label poker-player-name">Sign in</span>
         <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
           <span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span>
         </button>
@@ -74,38 +73,8 @@
   <div class="shell">
     <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation"></aside>
 
-  <main class="poker-page">
-    <div id="pokerError" class="poker-error" hidden></div>
-    <section class="ad-slot poker-ad-slot" aria-label="Advertisement">
-      <ins class="adsbygoogle"
-           style="display:block"
-           data-ad-client="ca-pub-4054734235779751"
-           data-ad-slot="6777117794"
-           data-ad-format="auto"
-           data-full-width-responsive="true"></ins>
-    </section>
-    <section class="poker-panel poker-intro-panel" aria-labelledby="pokerIntroTitle">
-      <h2 id="pokerIntroTitle">Arcade Poker with virtual chips</h2>
-      <p>Arcade Poker is the multiplayer card room inside Arcade Hub. It is designed for browser-based play using virtual chips, player accounts, and social tables inside the wider arcade platform.</p>
-      <p>No cash-out is offered on this page. Sign in to access the lobby, join tables, and manage your in-platform poker activity.</p>
-    </section>
-    <div id="pokerAuthMsg" class="poker-auth-msg" hidden>
-      <div class="poker-auth-text" data-i18n="pokerAuthLobby">Please log in to access the poker lobby.</div>
-      <div class="poker-auth-actions">
-        <button id="pokerGuestPlay" class="poker-btn poker-btn--primary">Play as Guest</button>
-        <button id="pokerSignIn" class="poker-btn poker-btn--primary">Create account or sign in</button>
-      </div>
-    </div>
-
-    <div id="pokerLobbyContent" data-required-buy-in="100" hidden>
-      <div class="poker-header">
-        <h2 data-i18n="pokerTables">Poker Tables</h2>
-        <div class="poker-form-row">
-          <button id="pokerQuickSeat" class="poker-btn poker-btn--primary">Play now</button>
-          <button id="pokerRefresh" class="poker-btn" data-i18n="refresh">Refresh</button>
-        </div>
-      </div>
-
+  <main class="poker-page lobby">
+    <div id="pokerError" class="poker-error" role="alert" hidden></div>
       <div id="pokerWelcomeBonusBanner" class="poker-bonus-banner" hidden>
         <div class="poker-bonus-banner__copy">
           <strong>Your 500 CH Welcome Bonus is ready.</strong>
@@ -114,21 +83,31 @@
         <button id="pokerWelcomeBonusClaim" class="poker-btn poker-btn--primary" type="button">Claim bonus</button>
       </div>
 
-      <section class="poker-panel poker-progression-panel" aria-labelledby="pokerProgressTitle">
-        <h3 id="pokerProgressTitle">Progress Roadmap</h3>
-        <div id="pokerProgressBankroll" class="poker-progression-bankroll">Current bankroll: — CH</div>
-        <div id="pokerProgressCelebration" class="poker-progression-celebration" role="status" hidden></div>
-        <div id="pokerProgressRoadmap" class="poker-progression-roadmap">
-          <div class="poker-loading">Loading progression...</div>
-        </div>
-      </section>
-
+    <div id="pokerModesView"><div class="intro"><div><span class="eyebrow">WELCOME TO THE CARD ROOM</span><h1>YOUR NEXT HAND.</h1><p>Online poker · virtual chips · no cash-out.</p></div><div class="carousel-controls"><span>SWIPE TO EXPLORE</span><button class="arrow" type="button" data-step="-1" aria-label="Previous mode">‹</button><button class="arrow" type="button" data-step="1" aria-label="Next mode">›</button></div></div><section class="carousel" aria-label="Poker game modes" tabindex="0"><article class="tile tile--online" aria-label="Poker Online, ONLINE POKER"><img src="/poker/assets/lobby/online-v2.webp" alt="" width="768" height="1152" fetchpriority=high decoding="async"><span class="tile-status">ONLINE POKER</span><div class="tile-copy"><span class="tile-number">THE CARD ROOM</span><h2>Poker Online</h2><p>Choose your table tier. Join or resume your game.</p><div id="pokerLobbyContent" hidden>
+  <div id="pokerQuickTiers" class="quick-tiers" role="group" aria-label="Quick Play buy-in"></div>
+  <button id="pokerQuickSeat" class="tile-action" type="button" disabled>PLAY NOW</button>
+  <div id="pokerQuickStatus" class="quick-status" role="status">Loading progression…</div>
+</div>
+<div id="pokerAuthMsg" class="poker-auth-msg" hidden>
+  <div class="poker-auth-text">Guest play uses temporary chips.</div>
+  <div class="poker-auth-actions">
+    <button id="pokerGuestPlay" class="tile-action" type="button">PLAY AS GUEST</button>
+    <button id="pokerSignIn" class="poker-btn" type="button">Create account or sign in</button>
+  </div>
+</div></div></article>
+<article class="tile tile--single" aria-label="Single Player, COMING SOON"><img src="/poker/assets/lobby/single-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">COMING SOON</span><div class="tile-copy"><span class="tile-number">YOU VS BOTS</span><h2>Single Player</h2><p>One human. Bot opponents. Always online.</p><button class="tile-action" type="button" data-mode="single" aria-label="Single Player: Coming Soon details">MODE PREVIEW <span aria-hidden="true">→</span></button></div></article>
+<article class="tile tile--world" aria-label="World Tour, COMING SOON"><img src="/poker/assets/lobby/world-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">COMING SOON</span><div class="tile-copy"><span class="tile-number">POKER WITHOUT BORDERS</span><h2>World Tour</h2><p>A future journey through country-themed tables.</p><button class="tile-action" type="button" data-mode="world" aria-label="World Tour: Coming Soon details">MODE PREVIEW <span aria-hidden="true">→</span></button></div></article>
+<article class="tile tile--seasons" aria-label="Seasons, COMING SOON"><img src="/poker/assets/lobby/seasons-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">COMING SOON</span><div class="tile-copy"><span class="tile-number">FOUR WORLDS. ONE TABLE.</span><h2>Seasons</h2><p>Weekly visual rotations on future designated tables.</p><button class="tile-action" type="button" data-mode="seasons" aria-label="Seasons: Coming Soon details">MODE PREVIEW <span aria-hidden="true">→</span></button></div></article>
+<article class="tile tile--sitgo" aria-label="Sit & Go, COMING SOON"><img src="/poker/assets/lobby/sitgo-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">COMING SOON</span><div class="tile-copy"><span class="tile-number">THE TOURNAMENT STAGE</span><h2>Sit & Go</h2><p>A future tournament format. A new challenge.</p><button class="tile-action" type="button" data-mode="sitgo" aria-label="Sit & Go: Coming Soon details">MODE PREVIEW <span aria-hidden="true">→</span></button></div></article>
+</section><nav class="indicators" aria-label="Game mode carousel"><button class="dot" type="button" data-index="0" aria-label="Show Poker Online" aria-current="true"></button><button class="dot" type="button" data-index="1" aria-label="Show Single Player" aria-current="false"></button><button class="dot" type="button" data-index="2" aria-label="Show World Tour" aria-current="false"></button><button class="dot" type="button" data-index="3" aria-label="Show Seasons" aria-current="false"></button><button class="dot" type="button" data-index="4" aria-label="Show Sit & Go" aria-current="false"></button></nav></div>
+    <section id="pokerTablesView" class="lobby-subview" aria-labelledby="pokerTablesTitle" hidden><button class="poker-btn" type="button" data-view="modes">‹ Back to modes</button>
+      <div class="poker-header"><h2 id="pokerTablesTitle">Online Tables</h2><button id="pokerRefresh" class="poker-btn" type="button" data-i18n="refresh">Refresh</button></div>
       <div class="poker-panel">
         <h3 data-i18n="createTable">Create Table</h3>
         <div class="poker-form-row">
           <label class="poker-label"><span data-i18n="buyIn">Buy-in</span>:</label>
           <select id="pokerBuyIn" class="poker-input">
-            <option value="100" selected>100 CH · blinds 1/2</option>
+            <option value="" selected>Loading tiers…</option>
           </select>
           <label class="poker-label"><span data-i18n="maxPlayers">Max Players</span>:</label>
           <input type="number" id="pokerMaxPlayers" class="poker-input" value="6" min="2" max="6">
@@ -144,17 +123,22 @@
           <div class="poker-loading" data-i18n="loading">Loading...</div>
         </div>
       </div>
-    </div>
-      <section class="ad-slot poker-ad-slot poker-ad-slot--secondary" aria-label="Advertisement">
-        <ins class="adsbygoogle"
-             style="display:block"
-             data-ad-client="ca-pub-4054734235779751"
-             data-ad-slot="6777117794"
-             data-ad-format="auto"
-             data-full-width-responsive="true"></ins>
+    </section>
+    <section id="pokerProgressionView" class="lobby-subview" hidden><button class="poker-btn" type="button" data-view="modes">‹ Back to modes</button>      <section class="poker-panel poker-progression-panel" aria-labelledby="pokerProgressTitle">
+        <h3 id="pokerProgressTitle">Progress Roadmap</h3>
+        <div id="pokerProgressBankroll" class="poker-progression-bankroll">Current bankroll: — CH</div>
+        <div id="pokerProgressCelebration" class="poker-progression-celebration" role="status" hidden></div>
+        <div id="pokerProgressRoadmap" class="poker-progression-roadmap">
+          <div class="poker-loading">Loading progression...</div>
+        </div>
       </section>
+
+    </section>
+<nav class="shortcuts" aria-label="Lobby shortcuts"><button class="shortcut" type="button" data-view="tables"><img class="shortcut-art" src="/poker/assets/chips/chip-purple-3.png" alt="" width="45" height="45"><span>Online Tables<small>CREATE · JOIN · REFRESH</small></span></button><button class="shortcut" type="button" data-view="progression"><img class="shortcut-art" src="/poker/assets/chips/chip-green-4.png" alt="" width="45" height="45"><span>Progression<small>BANKROLL & TIERS</small></span></button><button class="shortcut shortcut--bonus" type="button" data-panel="daily"><img class="shortcut-art" src="/poker/assets/lobby/bonus-v2.webp" alt="" width="45" height="45"><span>Daily Bonus<small>COMING SOON</small></span></button><a class="shortcut" href="/account.html"><img class="shortcut-art" src="/poker/assets/themes/midnight-sapphire/avatar-frame.svg" alt="" width="45" height="45"><span>Profile<small>YOUR ARCADE ACCOUNT</small></span></a></nav><div class="footer-mark">ARCADE POKER · VIRTUAL CHIPS · NO CASH-OUT</div>
   </main>
   </div>
+<dialog id="infoDialog" aria-labelledby="infoTitle"><div class="dialog-top"><span class="eyebrow">COMING SOON · IN DEVELOPMENT</span><button class="close" type="button" data-close aria-label="Close details">×</button></div><h2 id="infoTitle"></h2><p id="infoCopy"></p><p>No launch date, entry fee or reward is announced.</p></dialog>
+<dialog id="dailyDialog" aria-labelledby="dailyTitle" aria-describedby="dailyDisclaimer"><div class="dialog-top"><span class="eyebrow">COMING SOON</span><button class="close" type="button" data-close aria-label="Close Daily Bonus">×</button></div><div class="bonus-heading"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384"><div><h2 id="dailyTitle">DAILY BONUS</h2><p>Daily rewards are not available yet.</p><span class="concept-tag">SAMPLE JOURNEY · NOT YOUR ACCOUNT</span></div></div><ol class="bonus-days" aria-label="Day 1 to 4, illustrative progression only"><li class="bonus-day bonus-day--completed"><strong>DAY 1</strong><div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384" loading="lazy"><span class="day-check" aria-hidden="true">✓</span></div><span class="day-state">COMPLETED</span><span class="day-concept">EXAMPLE STATE</span><div class="reward-space">Amount not configured</div></li><li class="bonus-day bonus-day--current"><strong>DAY 2</strong><div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384" loading="lazy"></div><span class="day-state">CURRENT</span><span class="day-concept">EXAMPLE STATE</span><div class="reward-space">Amount not configured</div></li><li class="bonus-day bonus-day--upcoming"><strong>DAY 3</strong><div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384" loading="lazy"></div><span class="day-state">UPCOMING</span><span class="day-concept">EXAMPLE STATE</span><div class="reward-space">Amount not configured</div></li><li class="bonus-day bonus-day--upcoming"><strong>DAY 4</strong><div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384" loading="lazy"></div><span class="day-state">UPCOMING</span><span class="day-concept">EXAMPLE STATE</span><div class="reward-space">Amount not configured</div></li></ol><div class="bonus-footer"><div class="availability">Next availability<strong>Not configured</strong></div><button class="claim-concept" type="button" disabled>CLAIM · DESIGN ONLY</button></div><p id="dailyDisclaimer" class="bonus-disclaimer">Illustrative states only. No reward amount, timer or claim is configured. Real daily eligibility, rewards and progression belong to #1079 after economic approval.</p></dialog>
   <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>

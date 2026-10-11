@@ -249,6 +249,7 @@ function loadLobbyHarness(options = {}){
     pokerSignIn: makeElement('pokerSignIn'),
     pokerGuestPlay: makeElement('pokerGuestPlay'),
   };
+  if (options.fetchWelcomeBonusStatus) elements.pokerWelcomeBonusBanner = makeElement('pokerWelcomeBonusBanner');
   elements.pokerSb.value = '1';
   elements.pokerBb.value = '2';
   elements.pokerBuyIn.value = '100';
@@ -295,13 +296,17 @@ function loadLobbyHarness(options = {}){
       addEventListener: (type, fn) => { registerEvent(windowEvents, type, fn); },
       removeEventListener: () => {},
       __RUNNING_POKER_UI_TESTS__: false,
+      matchMedia: () => ({ matches: true }),
       KLog: { log: () => {} },
       sessionStorage: {
         getItem(key){ return sessionStorageEntries.has(String(key)) ? sessionStorageEntries.get(String(key)) : null; },
         setItem(key, value){ sessionStorageEntries.set(String(key), String(value)); },
         removeItem(key){ sessionStorageEntries.delete(String(key)); }
       },
-      ChipsClient: options.balanceError
+      SupabaseAuth: options.authClient,
+      ChipsClient: options.fetchWelcomeBonusStatus
+        ? { fetchWelcomeBonusStatus: options.fetchWelcomeBonusStatus }
+        : options.balanceError
         ? { fetchBalance: async () => { throw new Error('balance_failed'); } }
         : (options.balanceResult ? { fetchBalance: async () => options.balanceResult } : null),
       SupabaseAuthBridge: { getAccessToken: options.getAccessToken || (async () => 'token') },
@@ -334,6 +339,8 @@ function loadLobbyHarness(options = {}){
     document: {
       readyState: 'complete',
       visibilityState: 'visible',
+      querySelector: () => null,
+      querySelectorAll: () => [],
       addEventListener: (type, fn) => { registerEvent(documentEvents, type, fn); },
       getElementById: (id) => elements[id] || null,
       createElement: (tag) => makeElement(tag),
@@ -444,7 +451,7 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
   const quickSeatGuardHarness = loadLobbyHarness({
     fetchResponse: async (url) => url.includes('poker-quick-seat')
       ? { ok: false, status: 409, json: async () => ({ error: 'insufficient_chips', requiredBuyIn: 100, balance: 99 }) }
-      : { ok: true, status: 200, json: async () => ({ ok: true }) },
+      : { ok: true, status: 200, json: async () => ({ rejoinableTableIds: ['funded-table'], availableBuyIns: [], tiers: [] }) },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   quickSeatGuardHarness.elements.pokerQuickSeat.click();
@@ -657,4 +664,42 @@ assert.equal(lobbyHarness.getRequestLobbySnapshotCalls(), 1, 'lobby refresh shou
   authHarness.advanceTime(1000);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(authHarness.wsCreates.filter((entry) => entry && typeof entry === 'object').length, 1, 'lobby should not reconnect once auth is no longer available');
+}
+
+// Account-bound async isolation: an obsolete response must neither reveal a
+// previous account's eligibility nor prevent refreshing the current account.
+for (const scenario of ['A-B', 'A-B-A', 'logout', 'A-B-reject']){
+  let account = 'A';
+  let authListener;
+  const pending = [];
+  const harness = loadLobbyHarness({
+    authClient: { onAuthChange(fn){ authListener = fn; return () => {}; } },
+    getAccessToken: async () => account ? 'header.' + Buffer.from(JSON.stringify({ sub: account })).toString('base64url') + '.signature' : null,
+    fetchWelcomeBonusStatus: () => new Promise((resolve, reject) => pending.push({ account, resolve, reject })),
+  });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  await settle();
+  assert.equal(pending.length, 1, scenario + ': initial status request');
+  assert.equal(harness.elements.pokerWelcomeBonusBanner.hidden, true, scenario + ': no status before response');
+  for (const next of scenario === 'A-B-A' ? ['B', 'A'] : [scenario === 'logout' ? null : 'B']){
+    account = next;
+    authListener(next ? 'SIGNED_IN' : 'SIGNED_OUT', next ? { id: next } : null);
+    harness.advanceTime(0);
+    await settle();
+  }
+  if (scenario === 'A-B-reject') pending[0].reject(new Error('obsolete_request_failed'));
+  else pending[0].resolve({ eligible: true, alreadyClaimed: false });
+  await settle();
+  assert.equal(harness.elements.pokerWelcomeBonusBanner.hidden, true, scenario + ': old eligibility must never be displayed');
+  if (scenario === 'logout'){
+    assert.equal(pending.length, 1, 'logout: no follow-up request without account');
+    assert.equal(harness.elements.pokerLobbyContent.hidden, true, 'logout: account content remains hidden');
+  } else {
+    assert.equal(pending.length, 2, scenario + ': latest account must refresh after obsolete request');
+    assert.equal(pending[1].account, account, scenario + ': fetch latest identity only');
+    const eligible = scenario !== 'A-B-A';
+    pending[1].resolve({ eligible, alreadyClaimed: false });
+    await settle();
+    assert.equal(harness.elements.pokerWelcomeBonusBanner.hidden, !eligible, scenario + ': only fresh eligibility is applied');
+  }
 }
