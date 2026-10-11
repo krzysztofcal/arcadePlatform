@@ -80,4 +80,4 @@ T009–T014 implemented on main c4f26e4c baseline. T015 CI/actual guest and nega
 ## Owner correction: ongoing ambient motion
 - [x] T039 Verify live owner correction and replace finite-only constraints in SpecKit; preserve V3 and all economic/runtime gates.
 - [x] T040 Add spaced CSS ambient cycles and visible Daily icon reaction; remove session marker from initLobby, retain reduced-motion/interaction safety.
-- [ ] T041 Verify actual exact-SHA Preview >=30s, repeated cycles/reload/new session, portrait/landscape/swipe/click/focus/reduced motion/contrast; save timed frames, run existing fundamental tests/guards, update self-review and Draft PR.
+- [x] T041 Verify actual exact-SHA Preview >=30s, repeated cycles/reload/new session, portrait/landscape/swipe/click/focus/reduced motion/contrast; save timed frames, run existing fundamental tests/guards, update self-review and Draft PR.
