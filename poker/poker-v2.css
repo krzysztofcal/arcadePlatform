@@ -707,3 +707,6 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 @supports not (mix-blend-mode:soft-light){
 #pokerTableScreen:not([data-table-theme]) .poker-table-felt::after,#pokerTableScreen[data-table-theme="neon-vegas"] .poker-table-felt::after{display:none;}
 }
+
+/* Owner-approved POC: level the portrait surface without changing perspective. */
+#pokerTableScreen:not([data-table-theme]) .poker-scene[data-orientation="portrait"] .poker-table-shell,#pokerTableScreen[data-table-theme="neon-vegas"] .poker-scene[data-orientation="portrait"] .poker-table-shell{transform:perspective(900px) rotateX(12deg);}

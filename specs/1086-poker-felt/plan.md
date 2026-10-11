@@ -13,3 +13,6 @@ Reuse original WebP at finer repeat scale, mix-blend-mode soft-light within isol
 
 ## Owner steering — centered large premium imprint
 Owner explicitly requests geometric centering on the felt, accepts natural occlusion by cards/chips, and wants a larger, more premium Arcade logo. Supersedes previous attempts to place the logo in spare space. Use a larger original medallion/spade/leaf seal with ARCADE as principal serif wordmark, POKER CLUB secondary. Position 50% 50% in both orientations, print follows unchanged physical table perspective. Compare active-hand and board-clear browser-fixture renders so complete emblem can be reviewed without moving gameplay elements. Still only Classic/Neon POC and STOP for visual approval; no T005–T007 authorization.
+
+## Owner approval and portrait correction
+Owner approved saturated material and branded B. Additionally authorized leveling portrait table in this PR so centered lettering is horizontal relative to screen. Remove existing rotateZ(-3deg) for Classic/Neon only, preserve perspective(900px) rotateX(12deg), sizing, content and landscape. Projected shell/felt bounds necessarily change with removal of rotation; validate surrounding cards/chips/HUD and hit tests. This is no authorization for T005–T007 or remaining themes.
