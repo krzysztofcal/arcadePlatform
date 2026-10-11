@@ -100,4 +100,14 @@ function createClient(fetchImpl){
   assert.equal(state.events.filter((event) => event.type === 'chips:tx-complete').length, 1);
 }
 
+{
+  let requests = 0;
+  const state = createClient(async () => { requests += 1; throw new Error('unexpected_fetch'); });
+  const campaigns = { items: [{ code: 'welcome-2026', campaignType: 'welcome', amount: 500, eligible: true }], dailyBonus: { streakDay: 3 } };
+  const welcome = await state.client.fetchWelcomeBonusStatus(campaigns);
+  assert.equal(welcome.code, 'welcome-2026');
+  assert.equal(welcome.amount, 500);
+  assert.equal(requests, 0, 'a shared campaigns payload must not cause another GET');
+}
+
 console.log('chips client cache behavior tests passed');

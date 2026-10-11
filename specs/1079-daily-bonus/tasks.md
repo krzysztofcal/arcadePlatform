@@ -132,3 +132,12 @@ T033 Preview verification at runtime SHA `7ba3e2601cba8167acf2c9f85941052c93b688
 - [x] T034 Integrate current main (Welcome Bonus #1083) into the Draft PR branch. Resolve the append-only CSS conflict by preserving complete Daily and Welcome animation blocks and closing braces. No payout, API or WS changes.
 
 Validation before branch update: 38 fundamental Bonus/Admin/Welcome/operator tests passed; syntax, CSP and project guards passed. Ephemeral portrait/landscape smoke confirmed browser parsing of all six Daily/Welcome animation names and retained Daily success flow. Remote CI/Preview evidence for the merge commit is tracked in the PR.
+
+
+## Shared lobby bonus prefetch
+
+- [x] T035 Implement shared Welcome/Daily prefetch and account-bound memory freshness/Promise guards in existing lobby/client, direct warm POST, UTC/resume/uncertain-result handling; preserve visuals.
+- [x] T036 Remove redundant per-campaign configuration reads from list helper; fundamental contract/query-count plus client payload reuse/auth isolation tests.
+- [ ] T037 Run fundamental tests/controls, measure separate GET/POST/click success on mobile Preview, check cache/races/reconciliation and CI/exact SHA; self-review, conflict check and retain Draft. No real CH claims.
+
+Local prefetch validation: 41 fundamental tests passed, including payload reuse with zero HTTP, campaign read count/default/paused-Daily compatibility and isolated auth generations. Syntax/CSP/project guards passed. Twenty ephemeral portrait/landscape cases passed: warm, shared in-flight, claimed, guest, stale, UTC boundary, resume, uncertain paid POST, account switch and replay. Controlled local browser comparison (three samples per orientation, GET delay 300ms/POST delay 350ms) reduced median click-to-visible success from 708→381ms portrait and 695→381ms landscape; these are mock-network UI measurements, not live claim endpoint latency. No real CH claims; remote CI/Preview/performance pending.

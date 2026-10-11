@@ -283,7 +283,14 @@ test("claim path does not post ledger transaction after max_total_claims is reac
 
 test("list helper returns public campaign status summaries", async () => {
   const deps = createDeps();
+  const runSql = deps.executeSql;
+  let campaignReads = 0;
+  deps.executeSql = async (query, params) => {
+    if (String(query).includes('from public.bonus_campaigns')) campaignReads += 1;
+    return runSql(query, params);
+  };
   const list = await listBonusCampaignStatuses(ALLOWLIST_USER, deps);
+  assert.equal(campaignReads, 1, 'evaluate listed campaign rows without per-code configuration re-reads');
 
   assert.equal(list.items.length, 4);
   assert.deepEqual(
@@ -426,4 +433,30 @@ test("Daily receipt without matching PROMO_BONUS transaction fails closed for re
   }
   assert.equal(deps.posts.length, 1);
   assert.equal(deps.claimsByCampaignUser.size, 1);
+});
+
+
+test("combined campaign list retains Welcome and authoritative Daily status with two configuration reads", async () => {
+  const deps = pokerDailyDeps();
+  await claimBonusCampaign(AFTER_USER, "daily-login", deps);
+  const runSql = deps.executeSql;
+  let campaignReads = 0;
+  deps.executeSql = async (query, params) => {
+    if (String(query).includes('from public.bonus_campaigns')) campaignReads += 1;
+    return runSql(query, params);
+  };
+  const result = await listBonusCampaignStatuses(AFTER_USER, { ...deps, includeDailyStatus: true });
+  assert.equal(campaignReads, 2, 'one active list plus separate latest Daily selector');
+  assert.equal(result.items.find(item => item.campaignType === 'welcome').amount, 500);
+  assert.equal(result.dailyBonus.alreadyClaimed, true);
+  assert.equal(result.dailyBonus.streakDay, 1);
+  assert.equal(result.dailyBonus.amount, 25);
+  assert.equal(result.dailyBonus.nextEligibleAt, '2026-07-08T00:00:00.000Z');
+  deps.campaigns[2].status = 'paused';
+  campaignReads = 0;
+  const paused = await listBonusCampaignStatuses(AFTER_USER, { ...deps, includeDailyStatus: true });
+  assert.equal(campaignReads, 2);
+  assert.equal(paused.items.some(item => item.campaignType === 'poker_daily'), false);
+  assert.equal(paused.dailyBonus.status, 'paused');
+  assert.equal(paused.dailyBonus.eligible, false);
 });

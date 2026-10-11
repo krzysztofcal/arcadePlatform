@@ -311,8 +311,8 @@
     return null;
   }
 
-  async function fetchWelcomeBonusStatus(){
-    var campaigns = await fetchBonusCampaigns();
+  async function fetchWelcomeBonusStatus(campaigns){
+    campaigns = campaigns || await fetchBonusCampaigns();
     var welcome = findWelcomeCampaign(campaigns);
     if (!welcome){
       return { eligible: false, alreadyClaimed: false, amount: null, reason: 'not_available', code: null };

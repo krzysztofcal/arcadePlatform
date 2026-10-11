@@ -304,7 +304,7 @@ async function listBonusCampaignStatuses(userId, deps = {}) {
   const rows = await fetchActiveCampaignRows(runSql, null);
   const items = [];
   for (const row of rows) {
-    const status = await getBonusCampaignStatus(userId, row.code, deps);
+    const status = await campaignStatus(userId, normalizeCampaign(row), deps.now ? new Date(deps.now) : new Date(), runSql);
     if (status.campaign) items.push(publicStatus(status));
   }
   if (!deps.includeDailyStatus) return { items };

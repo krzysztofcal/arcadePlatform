@@ -96,3 +96,8 @@ Clarified owner intent: a dominant, table-strong-hand-style fly-in interstitial 
 ## Cumulative streak card highlights
 
 Highlight cumulative claimed milestones of the current UTC streak: after paid Day 1/2/3 show 1/2/3 gold cards; after paid Day 4 or later show all four. Before today's claim preserve yesterday's completed milestones (Day 4+ remains gold for an ongoing Day 5+). A missed whole UTC day resets all gold highlights; the unclaimed current card is neutral. Current successful receipt retains extra emphasis. No reward rules change.
+
+
+## Shared lobby bonus prefetch
+
+This supersedes the earlier mandatory status GET on every shortcut click. Welcome and Daily share one lobby-entry GET `bonus-campaigns?includeDailyStatus=1`, one in-flight Promise and an account-bound in-memory snapshot. Fresh eligible click sends POST directly; an unfinished prefetch is awaited, already-claimed opens immediately without HTTP, stale status is read before deciding. Freshness is at most 60 seconds and never beyond the server-relative next UTC reset; invalidate on identity/logout, background return, clock rollback and uncertain POST. No background claims. Fresh POST renders the existing unchanged fly-in/cumulative cards immediately; no success reconciliation GET. Server authority/idempotency/atomic validation unchanged. Measure GET, POST and click-to-visible success separately on mobile Preview, using mock claims only and clearly distinguish controlled latency from real readonly GET timing.

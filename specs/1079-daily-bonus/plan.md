@@ -138,3 +138,8 @@ Use the existing table celebration visual/lifecycle pattern (gold ring, hero ent
 ## Cumulative streak card highlights
 
 In `poker/poker.js:renderDailyBonus()`, derive completed milestone count as min(streakDay minus one when not alreadyClaimed, 4), using authoritative existing status. Existing `.bonus-day--completed` in `poker/poker.css` shares the gold claimed-card styling; unclaimed `.bonus-day--current` is neutral. Verify 0→1→2→3→4, plateau, pre-claim continuation and reset through mocked API mobile smoke; preserve fly-in and payout path.
+
+
+## Shared lobby bonus prefetch
+
+Reuse `poker/poker.js:refreshWelcomeBonusBanner()` as the shared GET/promise owner; store dailyState plus fetched/expiry timestamps, guard response generation/identity, add freshness check and reuse it in refreshDailyBonus/claimDailyBonus. Prefetch even when the Daily dialog is closed. Join in-flight reads, invalidate upon account/resume/UTC and uncertain POST; suppress campaigns refresh from the Daily tx event while pending. `js/chips/client.js:fetchWelcomeBonusStatus(campaigns)` accepts an optional fetched payload so its existing Welcome selection stays unchanged and requires no extra HTTP. `listBonusCampaignStatuses()` evaluates already-listed active rows directly, eliminating per-code configuration reads; retain separate latest Daily selection (paused/ended/future distinctions), accounting reads and Claim lock rechecks. Extend existing fundamental client/list/auth isolation tests; ephemeral mobile request-count/race/cache/performance checks, no UI/CSS test suite. No HTML/CSS/assets/inline script/protocol/schema/config changes.
