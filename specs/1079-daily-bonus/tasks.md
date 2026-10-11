@@ -97,3 +97,12 @@ Read-only preflight baseline SHA `20a24f893ba683f99e706491a3bc7fff29a91cfc`. 50 
 - [x] T025 Add reusable owner-dispatched, Stage-fenced GitHub workflow and operator script using existing Stage secrets and Admin campaign validation/status methods; read-only inspect default, exact GO for writes, DB physical identity check, atomic old/new switch, stop on unexpected state.
 - [x] T026 Add one minimal guard test file to the existing runner; document agent one-line dispatch and Stage/Production boundary in `docs/stage-bonus-agent-operations.md`.
 - [ ] T027 Confirm CI on final SHA; after approved merge to main, verify an actual **inspect-only** workflow dispatch on Stage. No workflow has been dispatched from this Draft PR.
+
+
+## One-click Daily reward and success emphasis
+
+- [x] T028 Update existing Daily shortcut/claim flow to one preflight plus POST, immediate authoritative receipt projection, pending/identity guards, readonly reset/focus/reload and error reconciliation.
+- [x] T029 Add strong gold success +CH/streak hero and claimed milestone shine/glow in existing HTML/CSS; no style overhaul, extra assets or UI test suite; reduced-motion supported.
+- [ ] T030 Extend fundamental POST receipt contract assertions, run Bonus/Welcome and controls/CI; ephemeral mobile Preview verifies eligible GET+POST, claimed/guest no POST, duplicate clicks and account switching. Self-review records request counts, touched files and breaking impacts.
+
+Local verification: 38 fundamental Bonus/Admin/endpoint/scheduler/Welcome/operator guard tests passed; endpoint contract covers paid amount, uncapped streak, milestone, receipt ID and authoritative UTC times required for immediate rendering. Syntax, CSP (55 documents), lifecycle guards and diff checks passed. Ephemeral browser smoke with locally intercepted PR files passed 12 portrait/landscape cases: guest, claimed, eligible, duplicate replay, uncertain failure/reconciliation and identity change during pending POST. Eligible happy path asserted exactly one Daily status GET + one POST before success; reopening added only a status GET. Focus/double-click during POST added no request. No real claims or campaign/identity changes performed. Preview/remote CI pending and tracked in PR.

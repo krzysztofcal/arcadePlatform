@@ -81,3 +81,8 @@ Verify Auth-issued JWT subject against the new Stage user, membership in the Sta
 ## Approved operator workflow — supersedes dedicated Codex Auth identity
 
 The 2026-10-11 Stage transition was performed as one approved, atomic management operation: old `daily-active-2026` ended, new `daily-streak-2026` active with 25/50/100/200 CH. No Production operation or CH claim occurred. The abandoned request to create an agent Supabase Auth account is not a prerequisite. Future AI agents must use the explicitly dispatched Stage-only GitHub workflow described in `docs/stage-bonus-agent-operations.md`, with owner GitHub identity, exact GO binding, Stage physical DB fence, existing Admin campaign validation and a transactional switch. No new Auth users or stored credentials are required.
+
+
+## One-click Daily reward and success emphasis
+
+Latest owner UX decision: the explicit Daily Bonus shortcut click is the manual claim action. Signed-in eligible accounts perform a status GET followed immediately by the existing Claim POST; guests only see sign-in info, already-claimed accounts only see status/streak. No claims on login, focus, reload, UTC timer or reconnect. Render successful payout from authoritative POST response: prominent +CH/streak summary, gold glow/shine on the paid milestone, no repeat celebration for replay. Preserve pending/identity protection and existing accounting. This supersedes the earlier separate second Claim-click requirement; no additional Stage writes or payout smoke authorized.

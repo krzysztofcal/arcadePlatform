@@ -624,3 +624,32 @@ to{opacity:1;transform:translateY(0);}
 }
 
 body.poker-lobby #dailyClaim:disabled{opacity:.6;cursor:not-allowed;}
+
+/* Daily reward receipt: gold celebration within the existing purple casino palette. */
+body.poker-lobby #dailyDialog.daily-success{border-color:#fff0ad;box-shadow:0 0 36px #ffcd5866,0 22px 70px #05051b;}
+body.poker-lobby .bonus-success{position:relative;overflow:hidden;text-align:center;margin-top:12px;padding:14px;border:2px solid #ffe9a0;border-radius:14px;background:linear-gradient(120deg,#53306e,#79512c,#3f285f);box-shadow:0 0 24px #ffbd4b55,inset 0 0 18px #ffd97322;}
+body.poker-lobby .bonus-success strong{display:block;font:900 italic clamp(30px,6vw,46px)/1.1 Arial,sans-serif;color:#ffec9f;text-shadow:0 2px #814216,0 0 18px #ffc44e;}
+body.poker-lobby .bonus-success span{display:block;margin-top:7px;color:#fff5cf;font-size:11px;font-weight:900;letter-spacing:1px;}
+body.poker-lobby .bonus-day--claimed{border-color:#ffedaa;background:linear-gradient(145deg,#876032,#51376b 55%,#261b4c);box-shadow:0 0 24px #ffc85888,inset 0 0 16px #ffe29133,0 6px #372031;}
+body.poker-lobby .bonus-day--claimed .reward-space{color:#fff0a6;font-size:14px;font-weight:900;text-shadow:0 0 12px #ffbc4f;}
+body.poker-lobby .bonus-day--claimed .day-state{color:#fff1b6;}
+body.poker-lobby .daily-success .bonus-day--claimed .day-illustration img{filter:drop-shadow(0 0 12px #ffd75b);animation:pokerDailyRewardPop .65s ease-out;}
+body.poker-lobby .bonus-success::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 35%,#fff7 50%,transparent 65%);transform:translateX(-120%);pointer-events:none;animation:pokerDailyRewardShine 1.2s ease-out;}
+@keyframes pokerDailyRewardPop{
+0%{transform:scale(.85);}
+55%{transform:scale(1.15);}
+100%{transform:scale(1);}
+}
+@keyframes pokerDailyRewardShine{
+0%{transform:translateX(-120%);}
+100%{transform:translateX(120%);}
+}
+@media(prefers-reduced-motion:reduce){
+body.poker-lobby .daily-success .bonus-day--claimed .day-illustration img,body.poker-lobby .bonus-success::after{animation:none;}
+}
+
+@media(orientation:landscape) and (max-height:550px) and (min-width:601px){
+body.poker-lobby #dailyDialog .bonus-success:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;margin-top:8px;}
+body.poker-lobby #dailyDialog .bonus-success strong{font-size:28px;}
+body.poker-lobby #dailyDialog .bonus-success span{margin-top:0;font-size:9px;}
+}

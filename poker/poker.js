@@ -1478,6 +1478,8 @@
     var dailyClaimButton = document.getElementById('dailyClaim');
     var dailySignInButton = document.getElementById('dailySignIn');
     var dailyStatusMessage = document.getElementById('dailyDisclaimer');
+    var dailySuccess = document.getElementById('dailySuccess');
+    var dailyReceipt = null;
     var dailyLoadError = false;
     var dailyState = null;
     var dailyPending = false;
@@ -1492,16 +1494,25 @@
         var day = Number(cell.dataset.dailyDay);
         var current = status && status.rewardDay === day;
         var completed = status && (day < status.rewardDay || (current && status.alreadyClaimed));
-        cell.className = 'bonus-day bonus-day--' + (completed ? 'completed' : current ? 'current' : 'upcoming');
+        cell.className = 'bonus-day bonus-day--' + (completed ? 'completed' : current ? 'current' : 'upcoming')
+          + (current && status.alreadyClaimed ? ' bonus-day--claimed' : '');
         cell.querySelector('.day-state').textContent = completed ? 'CLAIMED' : current ? 'CURRENT' : 'UPCOMING';
         cell.querySelector('.reward-space').textContent = status && status.dailyRewards ? status.dailyRewards[day - 1] + ' CH' : '— CH';
       });
       document.getElementById('dailyProgress').textContent = status && status.streakDay ? 'STREAK · DAY ' + status.streakDay : 'DAILY REWARDS';
       document.getElementById('dailyReset').textContent = status && status.nextEligibleAt ? new Date(status.nextEligibleAt).toISOString().slice(0,16).replace('T', ' ') + ' UTC' : '—';
+      dailyDialog.classList.toggle('daily-success', !!dailyReceipt);
+      dailySuccess.hidden = !dailyReceipt;
+      if (dailyReceipt){
+        dailySuccess.querySelector('strong').textContent = '+' + dailyReceipt.amount + ' CH';
+        dailySuccess.querySelector('span').textContent = 'REWARD CLAIMED · STREAK DAY ' + dailyReceipt.streakDay;
+      }
+      dailyClaimButton.hidden = !!(status && status.alreadyClaimed);
       dailyClaimButton.disabled = dailyPending || !canClaim;
       dailyClaimButton.textContent = dailyPending ? 'PLEASE WAIT…' : status && status.alreadyClaimed ? 'CLAIMED' : canClaim ? 'CLAIM ' + status.amount + ' CH' : 'CLAIM';
       if (dailySignInButton) dailySignInButton.hidden = lobbyAuthenticated && !(status && status.reason === 'guest_not_eligible');
-      var text = !lobbyAuthenticated ? 'Sign in or create an Arcade account to claim daily rewards.'
+      var text = dailyReceipt ? 'Daily reward claimed. Your streak keeps growing!'
+        : !lobbyAuthenticated ? 'Sign in or create an Arcade account to claim daily rewards.'
         : dailyLoadError ? 'Could not load Daily Bonus data. Reopen the panel to retry.'
         : !status ? 'Daily Bonus is not active yet.'
         : status.reason === 'guest_not_eligible' ? 'Sign in with a registered account. Guests are not eligible.'
@@ -1512,7 +1523,18 @@
       dailyStatusMessage.textContent = message || text;
     }
 
-    async function refreshDailyBonus(){
+    function scheduleDailyReset(){
+      clearTimeout(dailyResetTimer);
+      dailyResetTimer = null;
+      if (dailyDialog.open && dailyState && dailyState.nextEligibleAt && dailyState.serverNow){
+        var delay = Date.parse(dailyState.nextEligibleAt) - Date.parse(dailyState.serverNow);
+        if (delay > 0) dailyResetTimer = setTimeout(refreshDailyBonus, Math.min(delay + 50, 86400100));
+      }
+    }
+
+    async function refreshDailyBonus(allowPending){
+      if (dailyPending && allowPending !== true) return null;
+      dailyReceipt = null;
       clearTimeout(dailyResetTimer);
       dailyResetTimer = null;
       var identity = lobbyIdentityGeneration;
@@ -1531,10 +1553,7 @@
         if (identity !== lobbyIdentityGeneration || request !== dailyRequestGeneration || !lobbyAuthenticated) return null;
         dailyState = payload.dailyBonus || null;
         renderDailyBonus();
-        if (dailyDialog.open && dailyState && dailyState.nextEligibleAt && dailyState.serverNow){
-          var delay = Date.parse(dailyState.nextEligibleAt) - Date.parse(dailyState.serverNow);
-          if (delay > 0) dailyResetTimer = setTimeout(refreshDailyBonus, Math.min(delay + 50, 86400100));
-        }
+        scheduleDailyReset();
         return dailyState;
       } catch (error){
         if (identity === lobbyIdentityGeneration && request === dailyRequestGeneration){
@@ -1548,32 +1567,37 @@
     }
 
     async function claimDailyBonus(){
-      if (dailyPending || !lobbyAuthenticated) return;
+      if (dailyPending) return;
+      dailyReceipt = null;
+      if (!lobbyAuthenticated){ renderDailyBonus(); return; }
       var identity = lobbyIdentityGeneration;
+      var message = null;
       dailyPending = true;
       renderDailyBonus();
       try {
-        var status = await refreshDailyBonus();
-        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated || !status || !status.eligible || status.alreadyClaimed) return;
+        var status = await refreshDailyBonus(true);
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated || !dailyDialog.open || !status || !status.eligible || status.alreadyClaimed) return;
         var result = await window.ChipsClient.claimBonusCampaign(status.code);
         if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
-        await refreshDailyBonus();
-        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
-        renderDailyBonus(result.claimed ? 'Claimed ' + result.amount + ' CH. Streak day ' + result.streakDay + '.'
-          : result.alreadyClaimed ? 'Already claimed today.' : 'Daily Bonus is unavailable. Please check its status again.');
+        if (result.claimed || result.alreadyClaimed){
+          dailyState = Object.assign({}, status, result, { eligible: false, alreadyClaimed: true });
+          if (result.claimed) dailyReceipt = result;
+          renderDailyBonus();
+        } else {
+          await refreshDailyBonus(true);
+          message = 'Daily Bonus could not be claimed. Please check its status again.';
+        }
       } catch (error){
         if (identity === lobbyIdentityGeneration){
-          await refreshDailyBonus();
-          if (identity === lobbyIdentityGeneration) renderDailyBonus('Claim could not be confirmed. Check status before retrying.');
+          await refreshDailyBonus(true);
+          message = 'Claim could not be confirmed. Check status before retrying.';
           klog('poker_daily_claim_failed', { reason: error.code || error.message || 'unknown' });
         }
       } finally {
         if (identity === lobbyIdentityGeneration){
           dailyPending = false;
-          if (dailyClaimButton) {
-            dailyClaimButton.disabled = !(dailyState && dailyState.eligible && !dailyState.alreadyClaimed);
-            dailyClaimButton.textContent = dailyState && dailyState.alreadyClaimed ? 'CLAIMED' : dailyState && dailyState.eligible ? 'CLAIM ' + dailyState.amount + ' CH' : 'CLAIM';
-          }
+          scheduleDailyReset();
+          renderDailyBonus(message);
         }
       }
     }
@@ -1656,7 +1680,7 @@
     document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
       var dialog = document.getElementById(button.dataset.panel + 'Dialog');
       if (dialog && !dialog.open) dialog.showModal();
-      if (button.dataset.panel === 'daily') refreshDailyBonus();
+      if (button.dataset.panel === 'daily') claimDailyBonus();
     }); });
     document.querySelectorAll('[data-close]').forEach(function(button){ button.addEventListener('click', function(){ button.closest('dialog').close(); }); });
     document.querySelectorAll('[data-view]').forEach(function(button){ button.addEventListener('click', function(){
@@ -2055,6 +2079,7 @@
       lobbyIdentity = identity;
       lobbyIdentityGeneration += 1;
       dailyRequestGeneration += 1;
+      dailyReceipt = null;
       dailyLoadError = false;
       dailyState = null;
       dailyPending = false;
@@ -2445,8 +2470,8 @@
     if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
       var unsubscribeLobbyAuth = window.SupabaseAuth.onAuthChange(function(_event, user){
         authCheckGeneration += 1;
-        setLobbyIdentity(user && user.id ? user.id : null);
         lobbyAuthenticated = !!user;
+        setLobbyIdentity(user && user.id ? user.id : null);
         renderQuickTiers();
         if (authMsg) authMsg.hidden = !!user;
         if (lobbyContent) lobbyContent.hidden = !user;
