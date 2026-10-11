@@ -697,3 +697,6 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 #pokerTableScreen[data-table-theme="emerald-palace"] .poker-card--back::before{border-color:#c6b06b;box-shadow:none;}
 #pokerTableScreen[data-table-theme="emerald-palace"] .poker-seat-avatar:not(.poker-seat-avatar--open)::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:url('/poker/assets/themes/emerald-palace/avatar-frame.svg') center/100% 100% no-repeat;}
 #pokerTableScreen[data-table-theme="emerald-palace"] .poker-room-dealer::after{clip-path:polygon(0 64%,29.5% 64%,27% 74%,24.5% 84%,21.2% 90%,21.4% 92.1%,24.4% 94%,24.8% 97.5%,16.4% 99.7%,16.4% 100%,83.4% 100%,81% 97.5%,78.5% 94%,79.2% 90%,82% 84%,80% 74%,77% 64%,100% 64%,100% 100%,0 100%);}
+
+/* #1086 T001–T004 POC: preserve theme art; four-theme rollout awaits owner GO. */
+#pokerTableScreen:not([data-table-theme]) .poker-table-felt::after,#pokerTableScreen[data-table-theme="neon-vegas"] .poker-table-felt::after{content:"";position:absolute;inset:0;border-radius:inherit;background:url('/poker/assets/scene/felt-weave.webp') 0 0/256px 256px repeat;opacity:.24;pointer-events:none;}
