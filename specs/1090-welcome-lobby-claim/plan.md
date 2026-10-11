@@ -8,6 +8,8 @@ Follow issue #1090 T001–T006 sequentially, based on live main e7fd0ce2.
 - `poker/poker.css`: only Welcome viewport/popover reset; reuse existing Daily keyframes, art and reduced-motion rule. One physical line per selector.
 - `setLobbyIdentity()`/visibility/unload: reset Welcome UI and timer; discard old responses and clear hidden-document animation.
 
+- `tests/poker-ui.behavior.test.mjs`: update only the existing banner DOM fixture with its real `strong` child so unchanged account-isolation assertions can run; no new cases or UI suite.
+
 ## Constitution Check
 PASS: minimal existing client mechanisms; server authoritative/idempotent; JSP IIFE, klog, one-line CSS; no inline scripts/CSP changes; no DB/WS/runtime deployment or shared Stage effects. Planned verification uses existing fundamental tests and temporary browser mocks only. No UI/CSS/JSP/glue suites, tooling/ignore/dependency changes or real funded claims.
 

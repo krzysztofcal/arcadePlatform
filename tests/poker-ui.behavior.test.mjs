@@ -249,7 +249,11 @@ function loadLobbyHarness(options = {}){
     pokerSignIn: makeElement('pokerSignIn'),
     pokerGuestPlay: makeElement('pokerGuestPlay'),
   };
-  if (options.fetchWelcomeBonusStatus) elements.pokerWelcomeBonusBanner = makeElement('pokerWelcomeBonusBanner');
+  if (options.fetchWelcomeBonusStatus){
+    elements.pokerWelcomeBonusBanner = makeElement('pokerWelcomeBonusBanner');
+    const welcomeHeading = makeElement('welcomeHeading');
+    elements.pokerWelcomeBonusBanner.querySelector = (selector) => selector === 'strong' ? welcomeHeading : null;
+  }
   elements.pokerSb.value = '1';
   elements.pokerBb.value = '2';
   elements.pokerBuyIn.value = '100';
