@@ -1529,7 +1529,8 @@
         dailySuccess.querySelector('span').textContent = 'REWARD CLAIMED · STREAK DAY ' + dailyReceipt.streakDay;
       }
       dailyClaimButton.hidden = !!(status && status.alreadyClaimed);
-      dailyClaimButton.disabled = dailyPending || !canClaim;
+      dailyClaimButton.disabled = dailyPending || welcomePending || !canClaim;
+      if (welcomeBonusClaimBtn) welcomeBonusClaimBtn.disabled = welcomePending || dailyPending;
       dailyClaimButton.textContent = dailyPending ? 'PLEASE WAIT…' : status && status.alreadyClaimed ? 'CLAIMED' : canClaim ? 'CLAIM ' + status.amount + ' CH' : 'CLAIM';
       if (dailySignInButton) dailySignInButton.hidden = lobbyAuthenticated && !(status && status.reason === 'guest_not_eligible');
       var text = dailyReceipt ? 'Daily reward claimed. Your streak keeps growing!'
@@ -1582,7 +1583,7 @@
     }
 
     async function refreshDailyBonus(allowPending, force){
-      if (dailyPending && allowPending !== true) return null;
+      if ((dailyPending || welcomePending) && allowPending !== true) return null;
       var identity = lobbyIdentityGeneration;
       if (!lobbyAuthenticated || !window.ChipsClient){
         dailyLoadError = lobbyAuthenticated;
@@ -1599,7 +1600,8 @@
     }
 
     async function claimDailyBonus(){
-      if (dailyPending) return;
+      if (dailyPending || welcomePending) return;
+      clearWelcomeFlyin();
       clearDailyFlyin();
       dailyReceipt = null;
       if (!lobbyAuthenticated){ renderDailyBonus(); return; }
@@ -1652,6 +1654,10 @@
     var guestPlayBtn = document.getElementById('pokerGuestPlay');
     var welcomeBonusBanner = document.getElementById('pokerWelcomeBonusBanner');
     var welcomeBonusClaimBtn = document.getElementById('pokerWelcomeBonusClaim');
+    var welcomeBonusStatus = document.getElementById('pokerWelcomeBonusStatus');
+    var welcomeFlyin = document.getElementById('welcomeFlyin');
+    var welcomeFlyinTimer = null;
+    var welcomePending = false;
     var progressionRoadmap = document.getElementById('pokerProgressRoadmap');
     var progressionBankroll = document.getElementById('pokerProgressBankroll');
     var progressionCelebration = document.getElementById('pokerProgressCelebration');
@@ -1903,6 +1909,84 @@
       welcomeBonusBanner.hidden = !isVisible;
     }
 
+    function clearWelcomeFlyin(){
+      clearTimeout(welcomeFlyinTimer);
+      welcomeFlyinTimer = null;
+      if (!welcomeFlyin) return;
+      if (typeof welcomeFlyin.hidePopover === 'function') welcomeFlyin.hidePopover();
+      welcomeFlyin.hidden = true;
+    }
+
+    function showWelcomeFlyin(amount){
+      clearWelcomeFlyin();
+      if (!welcomeFlyin || document.hidden || reducedMotion.matches) return;
+      welcomeFlyin.querySelector('strong').textContent = '+' + formatChips(amount) + ' CH';
+      welcomeFlyin.hidden = false;
+      if (typeof welcomeFlyin.showPopover === 'function') welcomeFlyin.showPopover();
+      welcomeFlyinTimer = setTimeout(clearWelcomeFlyin, 1800);
+    }
+
+    function showWelcomeStatus(message){
+      if (!welcomeBonusStatus) return;
+      welcomeBonusStatus.hidden = !message;
+      welcomeBonusStatus.textContent = message || '';
+    }
+
+    async function claimWelcomeBonus(){
+      if (welcomePending || dailyPending || !lobbyAuthenticated || !window.ChipsClient) return;
+      var identity = lobbyIdentityGeneration;
+      welcomePending = true;
+      welcomeBonusClaimBtn.disabled = true;
+      welcomeBonusClaimBtn.textContent = 'PLEASE WAIT…';
+      showWelcomeStatus('');
+      clearWelcomeFlyin();
+      renderDailyBonus();
+      try {
+        var payload = await refreshWelcomeBonusBanner(false, true);
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
+        if (!payload){ showWelcomeStatus('Could not load Welcome Bonus status. Please try again.'); return; }
+        var status = await window.ChipsClient.fetchWelcomeBonusStatus(payload);
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
+        if (!status || !status.eligible || status.alreadyClaimed || !status.code){
+          showWelcomeStatus('Welcome Bonus is not available.');
+          return;
+        }
+        var result = await window.ChipsClient.claimBonusCampaign(status.code);
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
+        // Only an explicit POST receipt can confirm a reward; GET disappearance cannot.
+        if (result && result.claimed === true && Number.isSafeInteger(result.amount) && result.amount > 0){
+          setWelcomeBonusBannerVisible(false);
+          showWelcomeStatus('WELCOME BONUS · +' + formatChips(result.amount) + ' CH · REWARD CLAIMED');
+          if (document.activeElement === welcomeBonusClaimBtn && welcomeBonusStatus) welcomeBonusStatus.focus({ preventScroll: true });
+          showWelcomeFlyin(result.amount);
+        } else {
+          showWelcomeStatus(result && result.alreadyClaimed === true
+            ? 'Welcome Bonus was already claimed. No new reward confirmed.'
+            : 'Welcome Bonus claim was not confirmed. Check its status before retrying.');
+        }
+      } catch (error){
+        if (identity === lobbyIdentityGeneration){
+          showWelcomeStatus('Claim could not be confirmed. Check your balance and bonus status before retrying.');
+          klog('poker_welcome_claim_failed', { reason: error.code || error.message || 'unknown' });
+        }
+      } finally {
+        if (identity === lobbyIdentityGeneration){
+          // Reconcile with reads only, including an uncertain transport outcome. Never re-POST.
+          invalidateBonusCampaigns();
+          await refreshWelcomeBonusBanner(true, true);
+          if (identity === lobbyIdentityGeneration){
+            welcomePending = false;
+            welcomeBonusClaimBtn.textContent = 'Claim bonus';
+            renderDailyBonus();
+            if (!result || result.claimed !== true){
+              refreshProgression();
+              window.ChipsClient.fetchBalance().catch(function(){});
+            }
+          }
+        }
+      }
+    }
+
     async function refreshWelcomeBonusBanner(force, allowPending){
       if (!lobbyAuthenticated) return null;
       if (!window.ChipsClient || typeof window.ChipsClient.fetchBonusCampaigns !== 'function'){
@@ -1912,7 +1996,7 @@
         return null;
       }
       if (welcomeBonusInFlight) return welcomeBonusInFlight;
-      if (dailyPending && allowPending !== true) return null;
+      if ((dailyPending || welcomePending) && allowPending !== true) return null;
       if (!force && bonusCampaignsAreFresh()) return bonusCampaignsState;
       var identity = lobbyIdentityGeneration;
       var request = ++dailyRequestGeneration;
@@ -1925,6 +2009,9 @@
           if (!lobbyAuthenticated || identity !== lobbyIdentityGeneration || request !== dailyRequestGeneration) return null;
           bonusCampaignsState = payload;
           cacheDailyStatus(payload.dailyBonus || null, startedAt);
+          if (welcomeBonusBanner && status && status.eligible){
+            welcomeBonusBanner.querySelector('strong').textContent = 'Your ' + formatChips(status.amount) + ' CH Welcome Bonus is ready.';
+          }
           setWelcomeBonusBannerVisible(!!(status && status.eligible && !status.alreadyClaimed));
           renderDailyBonus();
           scheduleDailyReset();
@@ -2133,6 +2220,10 @@
       lobbyIdentityGeneration += 1;
       invalidateBonusCampaigns();
       bonusCampaignsState = null;
+      clearWelcomeFlyin();
+      showWelcomeStatus('');
+      welcomePending = false;
+      if (welcomeBonusClaimBtn) welcomeBonusClaimBtn.textContent = 'Claim bonus';
       clearDailyFlyin();
       dailyReceipt = null;
       dailyLoadError = false;
@@ -2269,6 +2360,7 @@
 
     function handleLobbyVisibilityChange(){
       if (!isLobbyPageVisible()){
+        clearWelcomeFlyin();
         invalidateBonusCampaigns();
         clearLobbyReconnectTimer();
         return;
@@ -2519,9 +2611,7 @@
       signInBtn.addEventListener('click', openSignIn);
     }
     if (welcomeBonusClaimBtn){
-      welcomeBonusClaimBtn.addEventListener('click', function(){
-        window.location.href = '/account.html';
-      });
+      welcomeBonusClaimBtn.addEventListener('click', claimWelcomeBonus);
     }
 
     if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
@@ -2542,12 +2632,12 @@
     window.addEventListener('beforeunload', stopLobbyWs); // xp-lifecycle-allow:poker-lobby-ws(2026-01-01)
     document.addEventListener('visibilitychange', handleLobbyVisibilityChange); // xp-lifecycle-allow:poker-lobby-visibility(2027-01-01)
     window.addEventListener('focus', function(){
-      if (dailyPending) return;
+      if (dailyPending || welcomePending) return;
       refreshWelcomeBonusBanner(true);
     }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
-    window.addEventListener('beforeunload', function(){ clearTimeout(dailyResetTimer); clearDailyFlyin(); }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
+    window.addEventListener('beforeunload', function(){ clearTimeout(dailyResetTimer); clearDailyFlyin(); clearWelcomeFlyin(); }); // xp-lifecycle-allow:poker-lobby-daily(2027-01-01)
     document.addEventListener('chips:tx-complete', function(){
-      if (!dailyPending){
+      if (!dailyPending && !welcomePending){
         invalidateBonusCampaigns();
         refreshWelcomeBonusBanner();
       }
