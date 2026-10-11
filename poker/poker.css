@@ -496,6 +496,7 @@ body.poker-lobby .poker-bonus-banner{margin:12px 20px;}
 body.poker-lobby .poker-input,body.poker-lobby .poker-btn{min-height:44px;}
 body.poker-lobby .shortcut,body.poker-lobby .tile-action{font-family:Arial,Helvetica,sans-serif;}
 @media(max-width:600px){
+body.poker-lobby .poker-bonus-banner{margin:8px 20px;padding:10px 14px;}
 body.poker-lobby .topbar{flex-wrap:wrap;min-height:76px;}
 body.poker-lobby .topbar-left{gap:8px;}
 body.poker-lobby .topbar .brand h1{font-size:16px;}
@@ -506,6 +507,10 @@ body.poker-lobby .tile{min-height:410px;}
 body.poker-lobby .poker-table-row{flex-wrap:wrap;}
 }
 @media(orientation:landscape) and (max-height:550px){
+body.poker-lobby .poker-bonus-banner{flex-direction:row;align-items:center;justify-content:space-between;margin:4px 20px;padding:6px 14px;gap:10px;}
+body.poker-lobby .poker-bonus-banner__copy{flex-direction:row;align-items:center;gap:8px;}
+body.poker-lobby .poker-bonus-banner__copy span{display:none;}
+body.poker-lobby .poker-bonus-banner .poker-btn{width:auto;min-height:44px;padding:6px 14px;font-size:11px;white-space:nowrap;}
 body.poker-lobby .tile{min-height:300px;}
 body.poker-lobby .tile--online h2{margin:5px 0 8px;font-size:23px;}
 body.poker-lobby .quick-status{font-size:9px;}
