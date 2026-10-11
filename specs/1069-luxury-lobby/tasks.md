@@ -71,3 +71,8 @@ T009–T014 implemented on main c4f26e4c baseline. T015 CI/actual guest and nega
 
 - [x] T034 Verify Welcome Bonus in-flight finding against live HEAD, reproduce with deferred status and extend existing fundamental account-isolation regression (A→B, A→B→A, logout, old-request rejection). Apply minimal same-method refresh in finally; no bonus economics or backend changes.
 - [x] T035 Confirm final CI and Netlify Preview SHA, record combined review evidence/self-review and pending funded authenticated Stage smoke; retain Draft/no merge.
+
+## Owner-approved visual polish (#1069 latest update)
+- [x] T036 Verify newest issue/approved motion direction; record finite CSS and session-only attention boundaries in spec/plan before edits.
+- [x] T037 Add scoped finite entrance/glints/static neon in poker/poker.css and once-per-session Daily attention in poker/poker.js:initLobby(); preserve V3 art/layout/readability/actions, reduced motion and disabled gates.
+- [ ] T038 Run existing fundamental regressions, syntax/CSP/guards and exact-SHA Preview smoke (portrait/short landscape/swipe/focus/reduced motion/once per session/storage failure). Update self-review and PR; keep Draft, authenticated Stage/physical device pending.
