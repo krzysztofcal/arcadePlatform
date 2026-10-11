@@ -2897,3 +2897,306 @@ test("T071/T072/T074: first AUTO/SLOW human joins empty table with depleted SLOW
   assert.equal(ledgerCalls.length, ledgerCallsBeforeStep3, "zero ledger mutation for rejected normal user");
   assert.equal(tableSeats.length, 2, "seats remain untouched");
 }));
+
+test("Single Player fail-fast: non-creator rejected with single_player_owner_only and zero mutations", async () => {
+  const table = {
+    id: "t-sp-1",
+    status: "OPEN",
+    max_players: 6,
+    stakes: { sb: 5, bb: 10 },
+    buy_in: 500,
+    created_by: "human_creator",
+    lifecycle_kind: "STANDARD",
+    has_human_participant: false,
+    is_slow_only: false,
+    is_single_player: true
+  };
+  let tableSeats = [];
+  const ledgerCalls = [];
+
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("from public.poker_tables")) return [{ ...table }];
+          if (text.includes("from public.poker_seats")) return tableSeats;
+          return [];
+        }
+      }),
+      tableId: "t-sp-1",
+      userId: "intruder_human",
+      requestId: "req-intruder",
+      buyIn: 500,
+      postTransactionFn: async (payload) => {
+        ledgerCalls.push(payload);
+        return { ok: true };
+      },
+      loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId: "t-sp-1", seats: [], stacks: {} } }),
+      updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
+      validateStateForStorage: isStateStorageValid
+    }),
+    (error) => {
+      assert.equal(error?.code, "single_player_owner_only");
+      return true;
+    }
+  );
+
+  assert.equal(ledgerCalls.length, 0, "zero ledger calls for non-creator");
+  assert.equal(tableSeats.length, 0, "zero seats added");
+});
+
+test("Single Player fail-fast: buy-in > 1000 CH rejected with invalid_buy_in before any mutation", async () => {
+  const table = {
+    id: "t-sp-high",
+    status: "OPEN",
+    max_players: 6,
+    stakes: { sb: 25, bb: 50 },
+    buy_in: 2500,
+    created_by: "human_creator",
+    lifecycle_kind: "STANDARD",
+    has_human_participant: false,
+    is_slow_only: false,
+    is_single_player: true
+  };
+  let tableSeats = [];
+  const ledgerCalls = [];
+
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("from public.poker_tables")) return [{ ...table }];
+          if (text.includes("from public.poker_seats")) return tableSeats;
+          return [];
+        }
+      }),
+      tableId: "t-sp-high",
+      userId: "human_creator",
+      requestId: "req-high-buyin",
+      buyIn: 2500,
+      postTransactionFn: async (payload) => {
+        ledgerCalls.push(payload);
+        return { ok: true };
+      },
+      loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId: "t-sp-high", seats: [], stacks: {} } }),
+      updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
+      validateStateForStorage: isStateStorageValid
+    }),
+    (error) => {
+      assert.equal(error?.code, "invalid_buy_in");
+      return true;
+    }
+  );
+
+  assert.equal(ledgerCalls.length, 0, "zero ledger calls for buy-in > 1000 CH");
+  assert.equal(tableSeats.length, 0, "zero seats added");
+});
+
+test("Single Player fail-fast: corrupted state with existing other human rejected with single_player_human_conflict", async () => {
+  const table = {
+    id: "t-sp-conflict",
+    status: "OPEN",
+    max_players: 6,
+    stakes: { sb: 5, bb: 10 },
+    buy_in: 500,
+    created_by: "human_creator",
+    lifecycle_kind: "STANDARD",
+    has_human_participant: true,
+    is_slow_only: false,
+    is_single_player: true
+  };
+  const tableSeats = [
+    { table_id: "t-sp-conflict", user_id: "foreign_human", seat_no: 2, status: "ACTIVE", is_bot: false }
+  ];
+  const ledgerCalls = [];
+
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => fn({
+        unsafe: async (sql) => {
+          const text = String(sql);
+          if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("from public.poker_tables")) return [{ ...table }];
+          if (text.includes("from public.poker_seats")) return tableSeats;
+          return [];
+        }
+      }),
+      tableId: "t-sp-conflict",
+      userId: "human_creator",
+      requestId: "req-conflict",
+      buyIn: 500,
+      postTransactionFn: async (payload) => {
+        ledgerCalls.push(payload);
+        return { ok: true };
+      },
+      loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId: "t-sp-conflict", seats: [], stacks: {} } }),
+      updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
+      validateStateForStorage: isStateStorageValid
+    }),
+    (error) => {
+      assert.equal(error?.code, "single_player_human_conflict");
+      return true;
+    }
+  );
+
+  assert.equal(ledgerCalls.length, 0, "zero ledger calls on conflict");
+});
+
+test("Single Player atomic rollback: fails closed if minimum required bots cannot be funded", async () => {
+  const table = {
+    id: "t-sp-bot-fail",
+    status: "OPEN",
+    max_players: 6,
+    stakes: { sb: 5, bb: 10 },
+    buy_in: 500,
+    created_by: "human_creator",
+    lifecycle_kind: "STANDARD",
+    has_human_participant: false,
+    is_slow_only: false,
+    is_single_player: true
+  };
+  let tableSeats = [];
+  const ledgerCalls = [];
+
+  await assert.rejects(
+    () => executePokerJoinAuthoritative({
+      beginSql: async (fn) => {
+        const savedSeats = [...tableSeats];
+        try {
+          return await fn({
+            savepoint: async (_sp, cb) => cb({
+              unsafe: async (sql, params = []) => {
+                const text = String(sql);
+                if (text.includes("insert into public.poker_seats")) {
+                  tableSeats.push({ user_id: params[1], seat_no: params[2], is_bot: true, status: "ACTIVE" });
+                  return [{ seat_no: params[2] }];
+                }
+                return [];
+              }
+            }),
+            unsafe: async (sql, params = []) => {
+              const text = String(sql);
+              if (text.includes("to_regclass")) return [{ available: true }];
+              if (text.includes("from public.poker_tables")) return [{ ...table }];
+              if (text.includes("from public.poker_seats")) return tableSeats;
+              if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 2000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 1900, revision: 1 }];
+              if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 500, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
+              if (text.includes("account_type = 'USER'")) return [{ balance: 1000000, poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+              if (text.includes("system_key = any")) return [{ system_key: "POKER_BOT_BANKROLL" }, { system_key: "POKER_BOT_SLOW_BANKROLL_500" }];
+              if (text.includes("from public.chips_accounts where system_key = $1")) return [{ balance: 1000000 }];
+              if (text.includes("insert into public.poker_seats")) {
+                tableSeats.push({ user_id: params[1], seat_no: params[2], is_bot: false, status: "ACTIVE" });
+                return [{ seat_no: params[2] }];
+              }
+              if (text.includes("update public.poker_seats")) return [];
+              if (text.includes("update public.poker_tables")) return [];
+              return [];
+            }
+          });
+        } catch (err) {
+          tableSeats = savedSeats;
+          throw err;
+        }
+      },
+      tableId: "t-sp-bot-fail",
+      userId: "human_creator",
+      requestId: "req-bot-fail",
+      buyIn: 500,
+      postTransactionFn: async (payload) => {
+        ledgerCalls.push(payload);
+        for (const entry of payload.entries || []) {
+          if (entry.accountType === "SYSTEM" || entry.kind === "SYSTEM") {
+            const err = new Error("insufficient_funds");
+            err.code = "P0001";
+            throw err;
+          }
+        }
+        return { ok: true, transaction: { id: "tx-1" }, account: { balance: 500 } };
+      },
+      loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId: "t-sp-bot-fail", seats: [], stacks: {} } }),
+      updateStateLocked: async () => ({ ok: true, newVersion: 2 }),
+      validateStateForStorage: isStateStorageValid,
+      env: {
+        POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 500, 1000]),
+        POKER_BOTS_ENABLED: "1",
+        POKER_BOTS_MIN_PER_TABLE: "2",
+        POKER_BOTS_MAX_PER_TABLE: "3"
+      }
+    }),
+    (error) => {
+      assert.equal(error?.code, "single_player_bot_funding_unavailable");
+      return true;
+    }
+  );
+
+  assert.equal(tableSeats.length, 0, "all seats rolled back atomically");
+});
+
+test("Single Player owner rejoin: succeeds without duplicate buy-in or second debit", async () => {
+  const table = {
+    id: "t-sp-rejoin",
+    status: "OPEN",
+    max_players: 6,
+    stakes: { sb: 5, bb: 10 },
+    buy_in: 500,
+    created_by: "human_creator",
+    lifecycle_kind: "STANDARD",
+    has_human_participant: true,
+    is_slow_only: false,
+    is_single_player: true
+  };
+  const tableSeats = [
+    { table_id: "t-sp-rejoin", user_id: "human_creator", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 480 },
+    { table_id: "t-sp-rejoin", user_id: "bot_1", seat_no: 2, status: "ACTIVE", is_bot: true, stack: 510 },
+    { table_id: "t-sp-rejoin", user_id: "bot_2", seat_no: 3, status: "ACTIVE", is_bot: true, stack: 510 }
+  ];
+  const ledgerCalls = [];
+
+  const result = await executePokerJoinAuthoritative({
+    beginSql: async (fn) => fn({
+      unsafe: async (sql) => {
+        const text = String(sql);
+        if (text.includes("to_regclass")) return [{ available: true }];
+        if (text.includes("from public.poker_tables")) return [{ ...table }];
+        if (text.includes("from public.poker_seats")) return tableSeats;
+        if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 2000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 1900, revision: 1 }];
+        if (text.includes("account_type = 'USER'")) return [{ balance: 1000000, poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+        if (text.includes("update public.poker_tables")) return [];
+        return [];
+      }
+    }),
+    tableId: "t-sp-rejoin",
+    userId: "human_creator",
+    requestId: "req-rejoin",
+    buyIn: 500,
+    postTransactionFn: async (payload) => {
+      ledgerCalls.push(payload);
+      return { ok: true };
+    },
+    loadStateForUpdate: async () => ({
+      ok: true,
+      version: 5,
+      state: {
+        tableId: "t-sp-rejoin",
+        seats: [{ userId: "human_creator", seatNo: 1 }, { userId: "bot_1", seatNo: 2 }, { userId: "bot_2", seatNo: 3 }],
+        stacks: { human_creator: 480, bot_1: 510, bot_2: 510 }
+      }
+    }),
+    updateStateLocked: async () => ({ ok: true, newVersion: 5 }),
+    validateStateForStorage: isStateStorageValid,
+    env: {
+      POKER_BUY_IN_TIERS_JSON: JSON.stringify([100, 500, 1000])
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rejoin, true);
+  assert.equal(result.isSinglePlayer, true);
+  assert.equal(result.seatNo, 1);
+  assert.equal(result.stack, 480);
+  assert.equal(ledgerCalls.length, 0, "zero ledger calls on legitimate rejoin");
+});

@@ -578,6 +578,86 @@ const run = async () => {
     assert.equal(events.indexOf("capability") < events.indexOf("beginSql"), true);
   }
 
+  // Single Player tests (#1077)
+  {
+    // 1. Single Player creates dedicated table with is_single_player: true and <= 1000 CH
+    const queries = [], notifications = [];
+    const handler = makeHandler({ mode: "create", queries, notifications, balance: 550 });
+    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500 });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.ok, true);
+    assert.equal(body.seatNo, 1);
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].isSinglePlayer, true);
+    assert.equal(notifications[0].buyIn, 500);
+    const insertQuery = queries.find((q) => q.query.includes("insert into public.poker_tables"));
+    assert.ok(insertQuery, "must insert into poker_tables");
+    assert.match(insertQuery.query, /is_single_player/);
+    assert.equal(insertQuery.params[3], userId, "created_by must match authenticated creator");
+    assert.equal(insertQuery.params[7], true, "is_single_player must be true");
+  }
+  {
+    // 2. Single Player buy-in > 1000 CH is rejected with 400 invalid_buy_in
+    const queries = [];
+    const handler = makeHandler({ mode: "create", queries, balance: 10000 });
+    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 2500 });
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(JSON.parse(response.body), { error: "invalid_buy_in" });
+    assert.equal(queries.length, 0);
+  }
+  {
+    // 3. Normal Poker Online candidate query explicitly filters coalesce(t.is_single_player, false) = false
+    const queries = [];
+    const handler = makeHandler({ mode: "any_open", queries, balance: 550 });
+    const response = await callQuickSeat(handler, { maxPlayers: 6, buyIn: 100 });
+    assert.equal(response.statusCode, 200);
+    const activeSeatQuery = queries.find((q) => q.query.includes("join public.poker_seats s") && q.query.includes("coalesce(t.is_single_player, false) = $2"));
+    assert.ok(activeSeatQuery, "must query active seat");
+    assert.equal(activeSeatQuery.params[1], false, "active seat query must filter is_single_player false for online mode");
+
+    const candidateQuery = queries.find((q) => q.query.includes("t.buy_in = any($4::int[])"));
+    assert.ok(candidateQuery, "must query candidate tables");
+    assert.match(candidateQuery.query, /coalesce\(t\.is_single_player,\s*false\)\s*=\s*false/i);
+  }
+  {
+    // 4. Double-click / retry reuses recent pending Single Player table within 60s
+    let checkedRecent = false;
+    const queries = [];
+    const handler = loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
+      baseHeaders: () => ({}),
+      corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
+      extractBearerToken: () => "token",
+      verifySupabaseJwt: async () => ({ valid: true, userId }),
+      beginSql: async (fn) => fn({
+        unsafe: async (query, params) => {
+          queries.push({ query: String(query), params });
+          const text = String(query).toLowerCase();
+          if (text.includes("to_regclass")) return [{ available: true }];
+          if (text.includes("poker_auto_class")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+          if (text.includes("join public.poker_seats s")) return [];
+          if (text.includes("account_type = 'user'")) return [{ balance: 1000 }];
+          if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows([100, 500, 1000]);
+          if (text.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
+          if (text.includes("t.is_single_player = true") && text.includes("interval '60 seconds'")) {
+            checkedRecent = true;
+            return [{ id: "table-pending-existing", max_players: 6, buy_in: 500, stakes: { sb: 5, bb: 10 } }];
+          }
+          if (text.includes("where table_id = $1 order by seat_no asc")) return [];
+          return [];
+        }
+      }),
+      notifyWsLobbyMaterialize: async () => ({ ok: true }),
+      checkWsBuyInCapability: async () => ({ ok: true }),
+      klog: () => {}
+    });
+    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500 });
+    assert.equal(response.statusCode, 200);
+    assert.equal(checkedRecent, true);
+    assert.deepEqual(JSON.parse(response.body), { ok: true, tableId: "table-pending-existing", seatNo: 1 });
+    assert.equal(queries.some((q) => q.query.includes("insert into public.poker_tables")), false, "must not create duplicate table on retry");
+  }
+
 };
 
 run().catch((error) => {

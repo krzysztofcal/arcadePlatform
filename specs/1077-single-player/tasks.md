@@ -2,47 +2,49 @@
 
 **Source:** [spec.md](spec.md), [plan.md](plan.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)  
 **Baseline:** `main` (`97f8b8e5`)  
-**State:** Architecture Preflight T001–T003 completed. Stop gate active at T002/T003: waiting for owner review and decision on SQL migration design. No migrations created or deployed.
+**State:** Owner approved Variant B. Local implementation in progress. No migrations pushed to remote.
 
 ---
 
-## Phase 0 — Preflight & Architecture Stop Gate
+## Phase 0 — Preflight & Architecture Decision
 
 - [x] **T001 / Research:** Inspect `agents.md`, `skills.md`, issue #1077, PR #1084; map create/join/bootstrap/bot/retention paths, DB constraints, and existing test coverage.
-- [x] **T002 / Mandatory stop gate:** Document safe durable mode identity, ownership, and compatibility proof; identify that DB check constraints require a minimal additive migration; **stop and seek owner GO for SQL migration proposal before creating any files in `supabase/migrations/**`**.
-- [x] **T003 / SpecKit:** Author `specs/1077-single-player/{spec,plan,tasks}.md` documenting requirements SP-001–SP-006, the two mandatory product changes (dedicated tables + fail-fast, max buy-in 1000 CH), and the minimal migration design.
+- [x] **T002 / Architecture decision:** Completed investigation; owner approved minimal new boolean `is_single_player` with DB CHECK constraint (Variant B).
+- [x] **T003 / SpecKit:** Update `specs/1077-single-player/{spec,plan,tasks}.md` documenting Variant B, dedicated tables, fail-fast join, 1000 CH cap, atomic bot funding rollback, and double-click protection.
 
 ---
 
-## Phase 1 — Server & Domain Implementation (Blocked on Owner GO)
+## Phase 1 — Database & Backend Implementation (Local Only)
 
-- [ ] **T004 / Dedicated create:** In `netlify/functions/poker-quick-seat.mjs::handler()` add mode-specific create fresh table (never select another human's table), while allowing only same-owner same-mode Resume. Reuse `poker-table-init.mjs::createPokerTableWithState()`, current table caps/locks, and bot-funding path. Validate enabled/unlocked `buyIn <= 1000 CH` before creation. Existing Poker Online quick-seat remains unchanged.
-- [ ] **T005 / Critical fail-fast gate:** Enforce trusted sole-owner mode, absence of any other human, and `buyIn <= 1000 CH` in `shared/poker-domain/join.mjs::executePokerJoinAuthoritative()` under the locked table, prior to seat/buy-in/bot side effects; validate inconsistent existing-seat rejoin too. Propagate explicit stable rejection via `authoritative-join-adapter.mjs` and `handlers/join.mjs`. No conversion, eviction, silent table switch, or second debit.
-- [ ] **T006 / Isolation:** Ensure normal `poker-quick-seat.mjs::selectCandidate()` and `ws-server/server.mjs::buildLobbyTableEntry()` cannot recommend or surface Single Player tables to other users. A Single Player new-play request must never invoke shared-table selection.
-
----
-
-## Phase 2 — Client & UI Activation (Blocked on Owner GO)
-
-- [ ] **T007 / UI:** Activate `poker/index.html` Single Player CTA and `poker/poker.js::initLobby()` using existing authenticated new dedicated Play / same-mode Resume / navigation patterns; show configured unlocked tiers `<= 1000 CH` and explicit errors when bot pool unavailable or account RESTRICTED. Preserve Poker Online tiers/matchmaking, guests, Daily Bonus, and other Coming Soon cards.
+- [x] **T004a / Local migration:** Create `supabase/migrations/20261011200000_poker_single_player_table_flag.sql` adding `is_single_player boolean not null default false` and constraint requiring `lifecycle_kind = 'STANDARD'` and `created_by is not null` when true. (Keep local, do not push).
+- [x] **T004b / Dedicated create:** In `netlify/functions/_shared/poker-table-init.mjs`, persist `is_single_player`. In `netlify/functions/poker-quick-seat.mjs`, create fresh dedicated table for Single Player, support owner-only same-mode Resume, enforce buyIn <= 1000 CH, and protect retries/double-clicks from duplicate tables.
+- [x] **T005 / Critical fail-fast gate:** In `shared/poker-domain/join.mjs::executePokerJoinAuthoritative()`, enforce sole-owner, zero other humans, buyIn <= 1000 CH, and atomic bot funding rollback (fail closed if required bots cannot be funded). Propagate rejection codes in `ws-server/poker/persistence/authoritative-join-adapter.mjs` and `handlers/join.mjs`.
+- [x] **T006 / Isolation:** Ensure `poker-quick-seat.mjs::selectCandidate()` and `ws-server/server.mjs::buildLobbyTableEntry()` exclude Single Player tables from public recommendation and lobby listings.
 
 ---
 
-## Phase 3 — Fundamental Tests & Local Verification (Blocked on Owner GO)
+## Phase 2 — Client & UI Activation
 
-- [ ] **T008 / Fundamental tests only:** Extend existing authoritative-join/Quick Seat/WS behavior tests:
-  - Two distinct authenticated users create distinct dedicated table IDs.
-  - Direct/concurrent cross-human admission fails fast with zero seat or financial side effects.
-  - Polluted-table owner reconnect fails fast.
-  - Legitimate owner Resume has zero second debit.
-  - Normal Quick Seat never selects Single Player.
-  - Tier <= 1000 CH succeeds; tier > 1000 CH rejected in server create and authoritative join, while Poker Online retains higher tiers.
-  - RESTRICTED denied, NORMAL/SLOW bot pool/cap and human retention preserved.
-- [ ] **T009 / Verification:** Syntax, CSP guard, focused tests and CI; Netlify Deploy Preview for browser commit with exact SHA, static/portrait/short-landscape smoke.
+- [x] **T007 / UI:** Activate `poker/index.html` Single Player card and `poker/poker.js::initLobby()` with Play/Resume flows, buy-in tier selector (`<= 1000 CH`), guest guidance, 44px targets, and error handling. Preserve Daily Bonus and other Coming Soon cards.
 
 ---
 
-## Phase 4 — Deployment Gates & Handoff (Blocked on Owner GO)
+## Phase 3 — Fundamental Tests & Local Verification
 
-- [ ] **T010 / WS deployment gate:** If WS/shared/protocol changed, report exact runtime SHA and seek owner GO for manual `WS Preview Deploy`; verify exact-SHA WS Preview and approved Stage smoke. No shared WS Preview deploy, Stage writes, or Production deployment without separate GO.
-- [ ] **T011 / Handoff:** Self-review, regressions/compatibility/stale-client analysis, and explicit breaking impacts. Submit **Draft PR only**, mark implementation ready but **not merge-ready** until required WS Preview and authenticated smoke are successful. No agent merge.
+- [x] **T008 / Fundamental tests:** Extend `tests/poker-quick-seat.behavior.test.mjs` and `shared/poker-domain/join.behavior.test.mjs`:
+  - Distinct users create distinct dedicated Single Player tables.
+  - Fail-fast rejection of unauthorized human with zero seat/debit/state effect.
+  - Fail-fast rejection of table containing another human.
+  - Atomic rollback when bot funding fails (zero human debit, zero seat).
+  - Enforce buyIn <= 1000 CH on create and authoritative join.
+  - Normal Poker Online never selects Single Player tables.
+  - Double-click / retry reuses pending table.
+  - Owner reconnect to own table succeeds without second debit.
+- [x] **T009 / Verification:** Syntax, CSP inline hash check, and test suite execution.
+
+---
+
+## Phase 4 — Review & Deployment Gates
+
+- [ ] **T010 / Deployment gate:** Await owner GO before pushing migration or executing WS deploy / Stage operations.
+- [ ] **T011 / Handoff:** Present diff, test results, and breaking impacts.

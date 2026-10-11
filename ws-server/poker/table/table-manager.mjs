@@ -250,6 +250,7 @@ function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = nu
     lifecycleKind,
     managedProfileKey: lifecycleKind === "CONTINUOUS_BOT" ? managedProfileKeyRaw : null,
     isSlowOnly: value?.isSlowOnly === true || value?.is_slow_only === true,
+    isSinglePlayer: value?.isSinglePlayer === true || value?.is_single_player === true,
     rotationDueAtMs: lifecycleKind === "CONTINUOUS_BOT"
       ? normalizeTimestampMs(value?.rotationDueAtMs ?? value?.rotation_due_at ?? value?.rotationDueAt)
       : null

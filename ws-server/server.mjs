@@ -1704,6 +1704,9 @@ function buildLobbyTableEntry(tableId) {
   }
   const tableSnapshot = tableManager.tableSnapshot(tableId, null);
   const tableMeta = tableManager.tableMeta(tableId);
+  if (tableMeta?.isSinglePlayer === true) {
+    return null;
+  }
   const seats = Array.isArray(tableSnapshot?.seats) ? tableSnapshot.seats : [];
   const handStatus = normalizeLobbyHandStatus(tableSnapshot?.hand?.status);
   const liveHand = isLiveHandPhase(handStatus);
@@ -4609,12 +4612,14 @@ async function handleInternalLobbyMaterialize(req, res) {
     res.end(JSON.stringify({ error: "invalid_buy_in" }));
     return;
   }
+  const isSinglePlayer = payload?.isSinglePlayer === true;
   const materialized = tableManager.materializeLobbyTable({
     tableId,
     tableMeta: {
       maxPlayers,
       buyIn,
-      stakes: canonicalStakes
+      stakes: canonicalStakes,
+      ...(isSinglePlayer ? { isSinglePlayer: true } : {})
     },
     nowMs: Date.now()
   });

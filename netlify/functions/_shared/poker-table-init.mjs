@@ -9,7 +9,8 @@ export const createPokerTableWithState = async (tx, {
   lifecycleKind = "STANDARD",
   managedProfileKey = null,
   rotationDueAt = null,
-  userSlotLocked = false
+  userSlotLocked = false,
+  isSinglePlayer = false
 }) => {
   if (typeof userId === "string" && userId.trim() && await hasPokerPoolSchema(tx)) {
     if (!userSlotLocked) await lockUserTableSlots(tx, userId);
@@ -23,12 +24,12 @@ export const createPokerTableWithState = async (tx, {
     `
 insert into public.poker_tables (
   stakes, buy_in, max_players, status, created_by, updated_at, last_activity_at,
-  lifecycle_kind, managed_profile_key, rotation_due_at
+  lifecycle_kind, managed_profile_key, rotation_due_at, is_single_player
 )
-values ($1::jsonb, $2, $3, 'OPEN', $4, now(), now(), $5, $6, $7)
+values ($1::jsonb, $2, $3, 'OPEN', $4, now(), now(), $5, $6, $7, $8)
 returning id;
     `,
-    [stakesJson, normalizedBuyIn, maxPlayers, userId, lifecycleKind, managedProfileKey, rotationDueAt]
+    [stakesJson, normalizedBuyIn, maxPlayers, userId, lifecycleKind, managedProfileKey, rotationDueAt, Boolean(isSinglePlayer)]
   );
   const tableId = tableRows?.[0]?.id || null;
   if (!tableId) {

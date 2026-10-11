@@ -755,11 +755,12 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const poolSchema = await hasPokerPoolSchema(tx);
       if (poolSchema) await lockUserTableSlots(tx, userId);
       const tableRows = await tx.unsafe(
-        `select id, status, max_players, stakes, buy_in, created_by, lifecycle_kind, has_human_participant${poolSchema ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1 for update;`,
+        `select id, status, max_players, stakes, buy_in, created_by, lifecycle_kind, has_human_participant, is_single_player${poolSchema ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1 for update;`,
         [tableId]
       );
       const table = tableRows?.[0] || null;
       if (!table) throw makeError("table_not_found");
+      const isSinglePlayer = table?.is_single_player === true;
       const authoritativeBuyIn = normalizePositiveInt(table.buy_in);
       if (!authoritativeBuyIn) throw makeError("invalid_buy_in");
       const declaredBuyIn = buyIn == null ? null : normalizePositiveInt(buyIn);
@@ -773,6 +774,23 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
 
       const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
       const seatRows = await loadSeatRows(tx, tableId);
+
+      if (isSinglePlayer) {
+        if (table.created_by !== userId) {
+          throw makeError("single_player_owner_only");
+        }
+        if (authoritativeBuyIn > 1000 || (declaredBuyIn !== null && declaredBuyIn > 1000)) {
+          throw makeError("invalid_buy_in");
+        }
+        const activeSeats = activeSeatRows(seatRows);
+        const hasOtherHumanSeat = activeSeats.some((row) => !row?.is_bot && row?.user_id !== userId);
+        const botUserIds = new Set(seatRows.filter((r) => r?.is_bot).map((r) => r?.user_id));
+        const stateSeats = Array.isArray(stateRow.state?.seats) ? stateRow.state.seats : [];
+        const hasOtherHumanInState = stateSeats.some((seat) => !seat?.isBot && !botUserIds.has(seat?.userId) && seat?.userId && seat.userId !== userId);
+        if (hasOtherHumanSeat || hasOtherHumanInState) {
+          throw makeError("single_player_human_conflict");
+        }
+      }
 
       const existingSeatNo = Number(
         activeSeatRows(seatRows).find((row) => {
@@ -802,6 +820,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             stack: authoritativeStack,
             buyIn: authoritativeBuyIn,
             rejoin: true,
+            isSinglePlayer: Boolean(isSinglePlayer),
             requestId: requestId || null,
             me: { seated: true },
             joinStatus: joinStatusForState(stateRow.state, userId),
@@ -840,6 +859,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           stack: Number(nextStateForStorage.stacks?.[userId]),
           buyIn: authoritativeBuyIn,
           rejoin: true,
+          isSinglePlayer: Boolean(isSinglePlayer),
           requestId: requestId || null,
           me: { seated: true },
           joinStatus: joinStatusForState(nextStateForStorage, userId),
@@ -1086,6 +1106,12 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       klog
       });
       const expectedBotCountAfterSeed = seededBots.length;
+      if (isSinglePlayer) {
+        const minPlayableBots = Math.max(1, Math.min(botCfg.minPerTable || 2, maxPlayers - 1));
+        if (expectedBotCountAfterSeed < minPlayableBots) {
+          throw makeError("single_player_bot_funding_unavailable");
+        }
+      }
       const updatedStateRow = await syncStateSeatAndStack({
       tx,
       tableId,
@@ -1118,6 +1144,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         stack: fundedStack,
         buyIn: authoritativeBuyIn,
         rejoin: false,
+        isSinglePlayer: Boolean(isSinglePlayer),
         requestId: requestId || null,
         me: { seated: true },
         joinStatus: updatedStateRow.joinStatus,

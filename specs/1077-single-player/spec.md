@@ -2,13 +2,22 @@
 
 **Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1077  
 **Baseline:** `main` (commit `97f8b8e5`)  
-**Status:** Mandatory Architecture Preflight completed (T001–T003). Stop gate reached: minimal SQL migration proposal submitted for owner review before creation or deployment.
+**Status:** Owner decision approved Variant B (2026-10-11). Minimal forward-only migration for `is_single_player` authorized locally.
 
 ---
 
-## 1. Overview and Product Requirements
+## 1. Owner Decision — Variant B Approved (Binding Contract)
 
-Poker Single Player vs Bots allows authenticated players to play poker online against server bots in dedicated, private cash-game tables.
+The owner approved **Variant B with corrections**:
+- Add `is_single_player boolean NOT NULL DEFAULT false` to `public.poker_tables`.
+- One simple database `CHECK` constraint: when `is_single_player` is true, `lifecycle_kind = 'STANDARD'` **and** `created_by IS NOT NULL`.
+- Do not modify `lifecycle_kind` values. Do not overload `managed_profile_key`, `stakes`, or `poker_state.state`.
+- Do not add an index by default without measurement justification.
+- **Local Implementation Only:** The migration file and application changes are prepared locally. **Do not push any PR containing `supabase/migrations/**` until explicit owner authorization for the Stage migration side effect.**
+
+---
+
+## 2. Core Product Requirements
 
 ### SP-001 — Identity and Isolation
 - **Online Cash Runtime:** Reuses the existing authoritative WebSocket runtime (`ws-server/`), table lifecycle, bot autoplay, reconnect, and CH ledger/escrow. It is **not** an offline client simulation or separate game engine.
@@ -19,56 +28,45 @@ Poker Single Player vs Bots allows authenticated players to play poker online ag
 - **Sole-Owner Resume:** A player may Resume/reconnect to their own existing active Single Player table without paying an additional buy-in.
   - Reconnect/Resume is restricted to the table creator (`created_by === userId`).
   - Cross-user table reuse is strictly forbidden.
+  - Poker Online resume never silently routes to Single Player, and vice versa.
 
-### SP-002 — Mandatory Architecture Gate & Mode Discriminator
-- The mode discriminator must be server-trusted, immutable, and survive table creation, state transitions, client reload/reconnect, and server restarts.
-- **Constraint Preflight:** Existing database constraints in `supabase/migrations/20260729100000_poker_managed_table_profiles.sql` restrict `poker_tables.lifecycle_kind` to `('STANDARD', 'CONTINUOUS_BOT')`, and require `managed_profile_key IS NULL` for `STANDARD`.
-- Casual use of mutable client-visible state (`poker_state.state`), stake economics fields (`poker_tables.stakes`), or evading check constraints is explicitly prohibited.
-- A minimal additive migration is required to record the durable mode on `poker_tables`. Implementation halts at the T002 stop gate pending explicit owner authorization.
+### SP-002 — Mode Discriminator
+- The mode discriminator is the server-trusted, immutable column `poker_tables.is_single_player`.
+- Enforced at table creation via `createPokerTableWithState({ isSinglePlayer: true })`.
+- Cannot be altered or requested post-creation.
 
 ### SP-003 — Authoritative Fail-Fast Admission
 - Inside `shared/poker-domain/join.mjs::executePokerJoinAuthoritative()` under `poker_tables ... FOR UPDATE`:
-  - Enforce trusted sole-owner mode: only `created_by` may join or rejoin a Single Player table.
-  - Enforce zero other humans: any attempt by another human (via direct URL, WS `join`, forged message, autoJoin, or race condition) must be rejected immediately.
-  - **Fail-Fast Safety:** The rejection must occur **before** any seat assignment, buy-in debit, bot seeding, or state mutation.
+  - **Sole-Owner Check:** Only `created_by` may join or rejoin a Single Player table.
+  - **Zero Other Humans:** Verify `activeSeatRows(seatRows)` and `state.seats` contain no other human. If another human is present or attempting admission, reject immediately.
+  - **Hard 1000 CH Cap Check:** Verify `authoritativeBuyIn <= 1000`. Over-cap tables or requests are rejected immediately.
+  - **Fail-Fast Safety:** All rejections occur **before** seat assignment, buy-in debit, bot seeding, or state mutation.
   - No conversion, eviction, silent table switch, or second debit.
-  - Enforce that corrupted/polluted tables reject joins fail-closed.
+  - Contaminated/polluted table reconnect fails fast.
 
-### SP-004 — Economy, Hard 1000 CH Cap, and Bot Gates
-- **Hard 1000 CH Buy-In Cap:** Single Player tables accept **only currently enabled/unlocked tiers <= 1000 CH** (typically 100, 500, 1000 CH depending on account tier unlock).
-  - Tiers > 1000 CH are strictly prohibited for Single Player.
-  - The cap must be enforced on the server in `poker-quick-seat.mjs` table creation **and** authoritatively in `executePokerJoinAuthoritative()`. UI filtering alone is insufficient.
-  - Poker Online multiplayer tables retain their standard higher tiers without change.
-- **Anti-Farming & Bot Pool Compatibility:**
-  - `NORMAL` and `SLOW` pool separation is preserved.
-  - `RESTRICTED` accounts must fail closed: never receive bot opponents or access bot pools.
-  - Human-owned tables receive safely funded bots via `seedBotsForJoin()` from existing bot bankroll pools.
-  - If bot funding is unavailable, show an honest failure state; never grant free chips or unbacked bots.
+### SP-004 — Economy, Hard 1000 CH Cap, and Atomic Bot Funding
+- **Hard 1000 CH Buy-In Cap:** Single Player tables accept **only currently enabled/unlocked tiers <= 1000 CH** (100, 500, 1000 CH if available).
+  - Enforced in `poker-quick-seat.mjs` creation and authoritatively in `executePokerJoinAuthoritative()`.
+  - Normal Poker Online multiplayer tables retain all higher tiers without change.
+- **Mandatory Bot Funding with Atomic Rollback:**
+  - Single Player tables require the legitimate configured minimum bots (at least 2 bots, clamped by table capacity).
+  - If bot funding from NORMAL/SLOW pool cannot provision the required bots, the JOIN **fails closed and rolls back the entire transaction**.
+  - Zero chips debited from the human player. Zero partial bot debits.
+  - The table remains unjoined and will be pruned by standard inactive table cleanup.
+  - `RESTRICTED` accounts fail closed (never receive bot opponents).
 
 ### SP-005 — Dedicated Creation, Discovery, and UI
-- Single Player requests route through the existing `netlify/functions/poker-quick-seat.mjs::handler()` with mode opt-in (e.g. `mode: "single_player"`).
-- Single Player new-play skips `selectCandidate()` and directly invokes `createPokerTableWithState()`.
-- Only own-table Resume queries active seats.
-- UI in `poker/index.html` and `poker/poker.js`:
-  - Activate the Single Player card (transitioning from "Coming Soon" to active Play/Resume).
-  - Filter stake tier selection to eligible tiers <= 1000 CH.
-  - Provide clear guest sign-in guidance.
-  - Preserve 44px touch targets, portrait/landscape responsiveness, and PR #1084 Daily Bonus integration.
+- Request routes through existing `netlify/functions/poker-quick-seat.mjs::handler()` with `mode: "single_player"`.
+- Single Player new-play skips `selectCandidate()` and calls `createPokerTableWithState()`.
+- Sequential retries, double-clicks, and timeouts reuse an existing pending unjoined Single Player table for that owner without creating duplicates or hitting caps.
+- Normal table list and WS lobby exclude Single Player tables (`buildLobbyTableEntry` returns `null`).
+- In `poker/index.html` and `poker/poker.js`:
+  - Activate the Single Player card.
+  - Expose only eligible unlocked tiers <= 1000 CH.
+  - Show honest error states (e.g. bot pool unavailable or account RESTRICTED).
+  - Preserve guest guidance, 44px touch targets, portrait/landscape responsiveness, and Daily Bonus (#1084).
 
 ### SP-006 — Runtime, Retention, and Cleanup
-- Tables containing the human player are **human-participating tables** (`has_human_participant = true`).
-- They are **never** treated as historical 7-day bot-only tables for cleanup (#891).
-- Standard human-table close/settlement/escrow retention policies (#923) apply.
-- Normal table janitor and inactive session cleanup remain intact.
-
----
-
-## 2. Invariants and Guardrails
-
-1. **One Human Invariant:** Under no circumstance may more than one human exist in `poker_seats` or `poker_state` for a Single Player table.
-2. **Fail-Closed on Mismatch:** If an unauthorized user attempts to join a Single Player table, or a player attempts to join with buy-in > 1000 CH, return a deterministic rejection error with zero side effects.
-3. **Ledger Integrity:** Escrow system key `POKER_TABLE:${tableId}` and idempotency keys `join-buyin:${tableId}:${userId}:...` must strictly obey chips ledger triggers. No duplicate debits on Resume/reconnect.
-4. **No Framework / No New Engines:** Reuse existing WS runtime, reducers, and Netlify functions.
-5. **JSP / Global JS Compatibility:** All client script changes must use global/IIFE patterns without ES modules.
-6. **Logging:** Use `klog()`, never `console.log()`.
-7. **CSS Rules:** One physical line per selector in `css/` and `poker/poker.css`.
+- Tables containing the human player receive `has_human_participant = true` upon successful join.
+- Never treated as 7-day bot-only tables (#891). Standard human-table close/settlement/escrow retention policies (#923) apply.
+- Normal table janitor and inactive session cleanup remain in effect.

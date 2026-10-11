@@ -72,7 +72,7 @@ const readQuickSeatEffectiveClass = async (tx, userId) => {
   return snapshot?.effectiveClass || "UNKNOWN";
 };
 
-const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn = null }) => {
+const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn = null, isSinglePlayer = false }) => {
   const buyIn = selectedBuyIn ?? progression?.availableBuyIns?.[0];
   if (!Number.isSafeInteger(buyIn) || buyIn <= 0) {
     const firstTier = progression?.tiers?.[0] || null;
@@ -84,6 +84,9 @@ const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureW
       requiredBankroll: firstTier?.unlockBankroll ?? null
     };
   }
+  if (isSinglePlayer && buyIn > 1000) {
+    return { kind: "invalid_buy_in" };
+  }
   const canonicalStakes = calculateCanonicalPokerStakes(buyIn);
   if (!canonicalStakes) return { kind: "unavailable" };
   if (buyIn !== DEFAULT_CASH_TABLE_BUY_IN_CHIPS) {
@@ -91,19 +94,26 @@ const createAndRecommend = async (tx, { userId, maxPlayers, progression, ensureW
     if (!capability?.ok) return { kind: "ws_buy_in_capability_unavailable", buyIn };
   }
   const stakesJson = JSON.stringify(canonicalStakes);
-  const created = await createPokerTableWithState(tx, { userId, maxPlayers, stakesJson, buyIn, userSlotLocked: true });
+  const created = await createPokerTableWithState(tx, {
+    userId,
+    maxPlayers,
+    stakesJson,
+    buyIn,
+    userSlotLocked: true,
+    isSinglePlayer
+  });
   const tableId = created.tableId;
   await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [tableId]);
   const seatNoUi = 1;
-  return { kind: "recommended", tableId, seatNo: seatNoUi, strategy: "create", buyIn, stakes: canonicalStakes };
+  return { kind: "recommended", tableId, seatNo: seatNoUi, strategy: "create", buyIn, stakes: canonicalStakes, isSinglePlayer };
 };
 
-const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, buyIn, klog }) => {
+const triggerWsLobbyMaterialize = ({ tableId, maxPlayers, stakes, buyIn, isSinglePlayer = false, klog }) => {
   if (typeof tableId !== "string" || !tableId) return;
-  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, buyIn, klog });
+  void notifyWsLobbyMaterialize({ tableId, maxPlayers, stakes, buyIn, isSinglePlayer, klog });
 };
 
-const selectExistingActiveSeat = async (tx, { userId }) => {
+const selectExistingActiveSeat = async (tx, { userId, isSinglePlayer = false }) => {
   return tx.unsafe(
     `
 select t.id, t.max_players, t.buy_in, t.stakes
@@ -112,9 +122,33 @@ join public.poker_seats s on s.table_id = t.id
 where t.status = 'OPEN'
   and s.user_id = $1
   and s.status = 'ACTIVE'
+  and coalesce(t.is_single_player, false) = $2
+  ${isSinglePlayer ? "and t.created_by = $1" : ""}
 limit 1;
     `,
-    [userId]
+    [userId, Boolean(isSinglePlayer)]
+  );
+};
+
+const selectRecentPendingSinglePlayerTable = async (tx, { userId, buyIn, maxPlayers }) => {
+  return tx.unsafe(
+    `
+select t.id, t.max_players, t.buy_in, t.stakes
+from public.poker_tables t
+where t.status = 'OPEN'
+  and t.created_by = $1
+  and t.is_single_player = true
+  and t.has_human_participant = false
+  and t.max_players = $2
+  and t.buy_in = $3
+  and t.created_at >= now() - interval '60 seconds'
+  and not exists (
+    select 1 from public.poker_seats s where s.table_id = t.id and s.status = 'ACTIVE'
+  )
+order by t.created_at desc
+limit 1;
+    `,
+    [userId, maxPlayers, buyIn]
   );
 };
 
@@ -124,6 +158,7 @@ const selectCandidate = async (tx, { maxPlayers, requireHuman, humanSeatFreshCut
 select t.id, t.max_players, t.buy_in, t.stakes
 from public.poker_tables t
 where t.status = 'OPEN'
+  and coalesce(t.is_single_player, false) = false
   and t.max_players = $1
   and not (
     t.lifecycle_kind = 'CONTINUOUS_BOT'
@@ -275,6 +310,10 @@ export async function handler(event) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_payload" }) };
   }
 
+  const isSinglePlayer = payload?.mode === "single"
+    || payload?.mode === "single_player"
+    || payload?.singlePlayer === true;
+
   const maxPlayers = parseMaxPlayers(payload?.maxPlayers);
   if (maxPlayers == null) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_max_players" }) };
@@ -283,6 +322,9 @@ export async function handler(event) {
   const selectedBuyIn = Object.prototype.hasOwnProperty.call(payload, "buyIn") ? payload.buyIn : null;
   if (Object.prototype.hasOwnProperty.call(payload, "buyIn")
     && (typeof selectedBuyIn !== "number" || !Number.isSafeInteger(selectedBuyIn) || selectedBuyIn <= 0)) {
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
+  }
+  if (isSinglePlayer && selectedBuyIn !== null && selectedBuyIn > 1000) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_buy_in" }) };
   }
 
@@ -300,13 +342,13 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
-      const matchKey = `quickseat:${maxPlayers}`;
+      const matchKey = isSinglePlayer ? `quickseat:sp:${auth.userId}` : `quickseat:${maxPlayers}`;
       const humanSeatFreshCutoffIso = new Date(Date.now() - resolveHumanSeatFreshMs(process.env.POKER_ACTIVE_HUMAN_SEAT_FRESH_MS)).toISOString();
 
       if (await hasPokerPoolSchema(tx)) await lockUserTableSlots(tx, auth.userId);
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
-      const existingRows = await selectExistingActiveSeat(tx, { userId: auth.userId });
+      const existingRows = await selectExistingActiveSeat(tx, { userId: auth.userId, isSinglePlayer });
       if (existingRows?.[0]?.id) {
         const recommendation = await recommendSeatAtTable(tx, {
           tableId: existingRows[0].id,
@@ -328,6 +370,10 @@ export async function handler(event) {
         && progression.pokerAccess.effectiveClass !== "RESTRICTED") {
         return { kind: "poker_access_unavailable" };
       }
+      if (isSinglePlayer) {
+        progression.availableBuyIns = (progression.availableBuyIns || []).filter((b) => b <= 1000);
+        progression.enabledBuyIns = (progression.enabledBuyIns || []).filter((b) => b <= 1000);
+      }
       if (selectedBuyIn !== null && !progression.availableBuyIns.includes(selectedBuyIn)) {
         const tier = progression.tiers.find((item) => item.buyIn === selectedBuyIn);
         return {
@@ -338,8 +384,43 @@ export async function handler(event) {
           requiredBankroll: tier?.unlockBankroll ?? null
         };
       }
+      if (selectedBuyIn === null && isSinglePlayer && (!progression.availableBuyIns || progression.availableBuyIns.length === 0)) {
+        const firstTier = progression?.tiers?.find((item) => item.buyIn <= 1000) || progression?.tiers?.[0] || null;
+        return {
+          kind: "buy_in_tier_locked",
+          balance: progression.balance,
+          buyIn: firstTier?.buyIn ?? null,
+          requiredBuyIn: firstTier?.buyIn ?? null,
+          requiredBankroll: firstTier?.unlockBankroll ?? null
+        };
+      }
       const availableBuyIns = selectedBuyIn === null ? progression.availableBuyIns : [selectedBuyIn];
-      const createPayload = { userId: auth.userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn };
+      const createPayload = { userId: auth.userId, maxPlayers, progression, ensureWsBuyInCapability, selectedBuyIn, isSinglePlayer };
+
+      if (isSinglePlayer) {
+        const targetBuyIn = selectedBuyIn ?? availableBuyIns[0];
+        if (Number.isSafeInteger(targetBuyIn)) {
+          const recentPending = await selectRecentPendingSinglePlayerTable(tx, {
+            userId: auth.userId,
+            buyIn: targetBuyIn,
+            maxPlayers
+          });
+          if (recentPending?.[0]?.id) {
+            await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [recentPending[0].id]);
+            return {
+              kind: "recommended",
+              tableId: recentPending[0].id,
+              seatNo: 1,
+              strategy: "create",
+              buyIn: targetBuyIn,
+              stakes: calculateCanonicalPokerStakes(targetBuyIn),
+              isSinglePlayer: true
+            };
+          }
+        }
+        const createdRecommendation = await createAndRecommend(tx, createPayload);
+        return createdRecommendation;
+      }
 
       const preferredRows = await selectCandidate(tx, {
         maxPlayers,
@@ -395,6 +476,13 @@ export async function handler(event) {
       return createdRecommendation;
     });
 
+    if (result?.kind === "invalid_buy_in") {
+      return {
+        statusCode: 400,
+        headers: mergeHeaders(cors),
+        body: JSON.stringify({ error: "invalid_buy_in" })
+      };
+    }
     if (result?.kind === "recommended" && result.requiresWsBuyInCapability) {
       const capability = await ensureWsBuyInCapability(result.buyIn);
       if (!capability?.ok) {
@@ -453,7 +541,14 @@ export async function handler(event) {
     }
 
     if (result.strategy === "create") {
-      triggerWsLobbyMaterialize({ tableId: result.tableId, maxPlayers, stakes: result.stakes || calculateCanonicalPokerStakes(result.buyIn), buyIn: result.buyIn, klog });
+      triggerWsLobbyMaterialize({
+        tableId: result.tableId,
+        maxPlayers,
+        stakes: result.stakes || calculateCanonicalPokerStakes(result.buyIn),
+        buyIn: result.buyIn,
+        isSinglePlayer: result.isSinglePlayer === true,
+        klog
+      });
     }
 
     return {
