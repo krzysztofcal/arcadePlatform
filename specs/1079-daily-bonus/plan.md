@@ -106,3 +106,11 @@ Observed on PR1084 Preview: Netlify context `deploy-preview`; URL, DB target and
 5. Only then resume T020 through authenticated existing Admin: recheck no duplicate, create and verify `daily-streak-2026` Draft, End legacy 20 CH, Activate new, read back statuses/rewards/eligible Day1 25CH without claiming. Stop on any failure.
 
 Current preflight stops before provisioning: controlled email and approved VPS secret storage/access not supplied. No Auth creation, environment edits, campaign operations or real-session authorization checks performed.
+
+## Stage execution and reusable AI-agent operator (2026-10-11)
+
+Owner-authorized Stage transition completed atomically via the connected Supabase management connector, with independent readback: legacy `daily-active-2026` = ended, `daily-streak-2026` = active, rewards `[25,50,100,200]`, no cap/end date. This replaces the earlier blocked technical-account route; its preflight was correct but no longer necessary.
+
+For future agents, `.github/workflows/stage-bonus-campaigns.yml` (owner-only dispatch from main) runs `scripts/ops/stage-bonus-campaigns.mjs` on the existing Stage runner with existing GitHub Stage database secrets. Actions: inspect, create daily Draft via `admin-bonus-campaigns.mjs::createBonusCampaign`, atomic switch via `setBonusCampaignStatus` under row locks, and pause/end. No generic privileged Supabase Auth account, Production secrets, scheduled automation or new migration. Exact GO strings include parameters; verify host/ref/system identifier. `tests/stage-bonus-campaigns.behavior.test.mjs` covers only critical action/target/GO guards. Workflow becomes usable **after merge**, not merely after this Draft PR push; do not dispatch it until approved.
+
+Notes: review deeply and refactor for minimal complexity; reuse existing packages and backend methods; only fundamental tests; preserve JSP compatibility and single-line CSS if frontend changes, update CSP SHA for any added inline script, log using `klog`; highlight that ending a campaign cannot be undone and `created_by=NULL` on workflow-created drafts reflects a GitHub operator rather than impersonating an Auth user. No unauthorized Production actions.
