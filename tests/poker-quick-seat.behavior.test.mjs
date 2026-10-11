@@ -14,8 +14,9 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, checkWsBuyInCapability = async () => ({ ok: true }) }) =>
-  loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
+const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
+  const tableIdsQueue = Array.isArray(createTableIds) ? [...createTableIds] : null;
+  return loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
@@ -26,6 +27,7 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTab
         unsafe: async (query, params) => {
           queries.push({ query: String(query), params });
           const text = String(query).toLowerCase();
+          if (text.includes(") active_tables")) return [{ count: 0 }];
           if (text.includes(") pending_tables")) return [{ count: pendingTables }];
           if (text.includes("to_regclass")) return [{ available: poolSchema }];
           if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows(enabledBuyIns);
@@ -39,7 +41,7 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTab
           }
 
           if (text.includes("join public.poker_seats s") && text.includes("s.user_id = $1")) {
-            if (mode === "already_seated") return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: { sb: candidateBuyIn / 100, bb: candidateBuyIn / 50 } }];
+            if (mode === "already_seated" || hasActiveSeat) return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: { sb: candidateBuyIn / 100, bb: candidateBuyIn / 50 } }];
             return [];
           }
 
@@ -98,6 +100,9 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTab
           }
 
           if (text.includes("insert into public.poker_tables")) {
+            if (tableIdsQueue && tableIdsQueue.length) {
+              return [{ id: tableIdsQueue.shift() }];
+            }
             return [{ id: "table-new" }];
           }
 
@@ -115,6 +120,7 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, pendingTab
     checkWsBuyInCapability,
     klog: (kind, data) => { logs.push({ kind, data }); },
   });
+};
 
 const findLockCall = (queries) =>
   queries.find((entry) => entry.query.toLowerCase().includes("pg_advisory_xact_lock(hashtext($1))"));
@@ -601,9 +607,9 @@ const run = async () => {
   // Single Player tests (#1077)
   {
     // 1. Single Player creates dedicated table with is_single_player: true and <= 1000 CH
-    const queries = [], notifications = [];
-    const handler = makeHandler({ mode: "create", queries, notifications, balance: 550 });
-    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500 });
+    const queries = [], notifications = [], logs = [];
+    const handler = makeHandler({ mode: "create", queries, notifications, logs, balance: 550 });
+    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-sp-1" });
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.ok, true);
@@ -618,10 +624,19 @@ const run = async () => {
     assert.equal(insertQuery.params[7], true, "is_single_player must be true");
   }
   {
+    // 1b. Single Player New Game without requestId is rejected with 400 missing_request_id
+    const queries = [];
+    const handler = makeHandler({ mode: "create", queries, balance: 550 });
+    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500 });
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(JSON.parse(response.body), { error: "missing_request_id" });
+    assert.equal(queries.length, 0, "must reject before SQL queries");
+  }
+  {
     // 2. Single Player buy-in > 1000 CH is rejected with 400 invalid_buy_in
     const queries = [];
     const handler = makeHandler({ mode: "create", queries, balance: 10000 });
-    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 2500 });
+    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 2500, requestId: "req-high" });
     assert.equal(response.statusCode, 400);
     assert.deepEqual(JSON.parse(response.body), { error: "invalid_buy_in" });
     assert.equal(queries.length, 0);
@@ -641,7 +656,9 @@ const run = async () => {
     assert.match(candidateQuery.query, /coalesce\(t\.is_single_player,\s*false\)\s*=\s*false/i);
   }
   {
-    // 4. Request ID idempotency: same requestId reuses table, distinct requestId creates new dedicated table
+    // 4. Request ID idempotency & New Game separation:
+    // - same requestId reuses table
+    // - distinct requestId creates new dedicated table even if previous table is active
     const queries = [];
     const notifications = [];
     const storedRequests = new Map();
@@ -650,21 +667,22 @@ const run = async () => {
       queries,
       notifications,
       balance: 1000,
-      storedRequests
+      enabledBuyIns: [100, 500, 1000],
+      storedRequests,
+      hasActiveSeat: true,
+      createTableIds: ["table-1", "table-2"],
     });
 
-    // First attempt with req-1 creates table and records request
+    // First intent with req-intent-1 creates table-1
     const response1 = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-1" });
     assert.equal(response1.statusCode, 200);
-    assert.deepEqual(JSON.parse(response1.body), { ok: true, tableId: "table-new", seatNo: 1 });
-    assert.ok(queries.some((q) => q.query.includes("insert into public.poker_tables")), "first intent creates table");
-    assert.ok(queries.some((q) => q.query.includes("insert into public.poker_requests")), "records quick seat request");
+    assert.deepEqual(JSON.parse(response1.body), { ok: true, tableId: "table-1", seatNo: 1 });
 
-    // Retry with SAME requestId returns stored table without duplicate creation
+    // Retry with SAME requestId returns stored table-1 without duplicate creation
     const queriesBeforeRetry = queries.length;
-    const response2 = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-1" });
-    assert.equal(response2.statusCode, 200);
-    assert.deepEqual(JSON.parse(response2.body), { ok: true, tableId: "table-new", seatNo: 1 });
+    const responseRetry = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-1" });
+    assert.equal(responseRetry.statusCode, 200);
+    assert.deepEqual(JSON.parse(responseRetry.body), { ok: true, tableId: "table-1", seatNo: 1 });
     const retryQueries = queries.slice(queriesBeforeRetry);
     assert.equal(retryQueries.some((q) => q.query.includes("insert into public.poker_tables")), false, "retry must not create duplicate table");
 
@@ -672,15 +690,27 @@ const run = async () => {
     const responseChangedBuyIn = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 100, requestId: "req-intent-1" });
     assert.equal(responseChangedBuyIn.statusCode, 400, "retry with changed buyIn must fail fast");
     assert.deepEqual(JSON.parse(responseChangedBuyIn.body), { error: "invalid_buy_in" });
+
+    // NEW GAME with DIFFERENT requestId creates distinct dedicated table-2 (does NOT return table-1 with already_seated!)
+    const responseNewGame = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-2" });
+    assert.equal(responseNewGame.statusCode, 200);
+    assert.deepEqual(JSON.parse(responseNewGame.body), { ok: true, tableId: "table-2", seatNo: 1 });
   }
   {
-    // 5. RESTRICTED accounts in Single Player fail fast with 403 before table creation
+    // 5. RESTRICTED accounts in Single Player fail fast with 403 on both New Game and Rejoin
     const queries = [];
     const handler = makeHandler({ mode: "create", queries, effectiveClass: "RESTRICTED", balance: 550 });
-    const response = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500 });
-    assert.equal(response.statusCode, 403);
-    assert.deepEqual(JSON.parse(response.body), { error: "single_player_restricted_unavailable" });
+
+    // 5a. New Game rejected early with 403
+    const responseNew = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-restricted-new" });
+    assert.equal(responseNew.statusCode, 403);
+    assert.deepEqual(JSON.parse(responseNew.body), { error: "single_player_restricted_unavailable" });
     assert.equal(queries.some(({ query }) => query.includes("insert into public.poker_tables")), false, "RESTRICTED must not create table");
+
+    // 5b. Resume rejected early with 403
+    const responseResume = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, tableId: "00000000-0000-0000-0000-000000000001" });
+    assert.equal(responseResume.statusCode, 403);
+    assert.deepEqual(JSON.parse(responseResume.body), { error: "single_player_restricted_unavailable" });
   }
   {
     // 6. Resume with multiple tables respects explicit tableId and deterministic order
@@ -721,6 +751,32 @@ const run = async () => {
     });
     assert.equal(response.statusCode, 200);
     assert.deepEqual(JSON.parse(response.body), { ok: true, tableId: "00000000-0000-0000-0000-000000000002", seatNo: 1 });
+  }
+  {
+    // 7. Highest tier selection: 1000 CH tier is available and selected when 100/500/1000 configured
+    const queries = [], notifications = [];
+    const handler = makeHandler({
+      mode: "create",
+      queries,
+      notifications,
+      balance: 10000,
+      enabledBuyIns: [100, 500, 1000]
+    });
+    const response = await callQuickSeat(handler, {
+      mode: "single_player",
+      maxPlayers: 6,
+      buyIn: 1000,
+      requestId: "req-highest-tier"
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.ok, true);
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].buyIn, 1000, "must create table with highest 1000 CH tier");
+    assert.equal(notifications[0].isSinglePlayer, true);
+    const insertQuery = queries.find((q) => q.query.includes("insert into public.poker_tables"));
+    assert.ok(insertQuery);
+    assert.equal(insertQuery.params[1], 1000, "inserted table buy_in must be 1000");
   }
 
 };

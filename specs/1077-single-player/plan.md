@@ -77,10 +77,9 @@ Add forward-only migration `supabase/migrations/20261011200000_poker_single_play
 ## 2.5 Phased Rollout Sequence
 
 To ensure zero risk of older multiplayer clients seating into Single Player tables before protections are active:
-1. **Phase 1: DB Migration (Schema)** - Add column `is_single_player` with CHECK constraint. Existing rows default to `false`.
-2. **Phase 2: WS Server Deployment** - Hydrate `is_single_player`, activate non-authoritative fail-closed protections, authoritative join guards, and exclude from public lobby projections.
-3. **Phase 3: Netlify Backend Deployment** - Deploy `poker-quick-seat.mjs` with `is_single_player` candidate isolation, request ID idempotency, and early RESTRICTED guards.
-4. **Phase 4: Frontend UI Deployment** - Activate Single Player tile in `poker/index.html` and `poker/poker.js`. Older clients cannot create Single Player tables; newer clients get dedicated tables protected by all backend/WS layers.
+1. **Phase 1: DB Migration (Schema)** - Add column `is_single_player` with CHECK constraint via `supabase/migrations/20261011200000_poker_single_player_table_flag.sql`. Existing rows default to `false`.
+2. **Phase 2: WS Server Deployment** - Hydrate `is_single_player`, activate non-authoritative fail-closed protections, authoritative join guards, and exclude from public lobby projections. Pinned SHA deployment.
+3. **Phase 3: Netlify Atomic Deployment (Backend + Frontend)** - Deploy Netlify functions (`poker-quick-seat.mjs`, `poker-progression.mjs`) and frontend web assets (`poker/index.html`, `poker/poker.js`, `poker/poker.css`) atomically. Activates candidate isolation, mandatory `requestId` on New Game, early RESTRICTED check, and Single Player UI controls. Older clients continue playing Poker Online without seeing Single Player tables; newer clients are immediately protected by WS.
 
 ---
 

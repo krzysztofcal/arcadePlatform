@@ -782,6 +782,12 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         if (authoritativeBuyIn > 1000 || (declaredBuyIn !== null && declaredBuyIn > 1000)) {
           throw makeError("invalid_buy_in");
         }
+        if (await hasPokerPoolSchema(tx)) {
+          const accessSnapshot = await readPokerAccessSnapshot(tx, { userId });
+          if (accessSnapshot?.effectiveClass === "RESTRICTED") {
+            throw makeError("single_player_restricted_unavailable");
+          }
+        }
         const activeSeats = activeSeatRows(seatRows);
         const hasOtherHumanSeat = activeSeats.some((row) => !row?.is_bot && row?.user_id !== userId);
         const botUserIds = new Set(seatRows.filter((r) => r?.is_bot).map((r) => r?.user_id));

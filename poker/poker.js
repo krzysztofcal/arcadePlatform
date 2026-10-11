@@ -2045,9 +2045,8 @@
     }
 
     function renderSingleTiers(){
-      var allOptions = progressionState && Array.isArray(progressionState.availableBuyIns)
+      var singleOptions = progressionState && Array.isArray(progressionState.availableBuyIns)
         ? progressionState.availableBuyIns.filter(function(value){ return Number.isSafeInteger(value) && value > 0 && value <= 1000; }) : [];
-      var singleOptions = allOptions.slice(0, 2);
       if (singleOptions.indexOf(selectedSingleBuyIn) === -1){
         selectedSingleBuyIn = singleOptions.length ? singleOptions[0] : null;
       }

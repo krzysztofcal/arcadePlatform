@@ -89,18 +89,18 @@ Because earlier versions of Poker Online do not filter by `is_single_player` and
 ```mermaid
 flowchart TD
   Phase1["1. Database Migration (Schema)<br/>Add is_single_player column & CHECK constraint"] --> Phase2["2. WebSocket Server Deploy<br/>Lobby filtering, bootstrap hydration, fail-closed guards"]
-  Phase2 --> Phase3["3. Backend Functions Deploy<br/>poker-quick-seat creation & isolation, 1000 CH cap, requestId idempotency"]
-  Phase3 --> Phase4["4. Web Client Deploy<br/>UI activation of Single Player card and tier selector"]
+  Phase2 --> Phase3["3. Netlify Atomic Deploy (Backend + Frontend)<br/>poker-quick-seat isolation, mandatory requestId, <=1000 CH tiers, UI activation"]
 ```
 
 1. **Step 1 — Database Migration (Schema):**
    - Applies forward-only `is_single_player boolean NOT NULL DEFAULT false` with `poker_tables_single_player_chk`.
-   - Backward-compatible; existing tables remain unaffected (`is_single_player = false`).
+   - Backward-compatible; existing tables and running WS/functions remain unaffected (`is_single_player = false`).
 2. **Step 2 — WebSocket Server Deploy:**
    - Deploys updated WS server with bootstrap hydration of `is_single_player`, lobby exclusion (`buildLobbyTableEntry` returning `null`), and fail-closed non-authoritative join protection (`single_player_authoritative_required`).
+   - Pinned SHA provides unambiguous rollback point.
    - **Crucial:** No Single Player tables can be created prior to Step 2, ensuring that any Single Player tables subsequently created will never leak into public lobbies or allow non-authoritative joins.
-3. **Step 3 — Netlify Functions Deploy:**
-   - Deploys `poker-quick-seat.mjs` and `poker-progression.mjs`.
-   - Isolates candidate matching (`coalesce(is_single_player, false) = false`), caps Single Player buy-ins at 1000 CH, and enables `requestId` idempotency.
-4. **Step 4 — Web Client Deploy:**
-   - Exposes the Single Player card and interactive controls in `poker/index.html` and `poker/poker.js`.
+3. **Step 3 — Netlify Atomic Deploy (Backend + Frontend):**
+   - Deploys Netlify functions (`poker-quick-seat.mjs`, `poker-progression.mjs`) together with web assets (`poker/index.html`, `poker/poker.js`, `poker/poker.css`) in a single atomic release.
+   - Netlify functions enforce mandatory `requestId` on New Game, early `RESTRICTED` 403 rejection, 1000 CH cap, candidate isolation (`coalesce(is_single_player, false) = false`), and separate explicit `tableId` Resume.
+   - Frontend UI exposes the Single Player card, interactive tier selector (`<= 1000 CH`), and client-side double-click/retry protection.
+   - Older clients connecting to Poker Online cannot see or join Single Player tables. Newer clients creating Single Player tables are immediately protected by the already-active WS server.

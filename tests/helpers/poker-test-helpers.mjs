@@ -45,7 +45,7 @@ import {
   readPokerProgression,
   resolvePokerBuyInTiers
 } from "../../shared/poker-domain/poker-progression.mjs";
-import { lockUserTableSlots } from "../../shared/poker-domain/table-participation.mjs";
+import { assertActivePokerTableCapacity, lockUserTableSlots } from "../../shared/poker-domain/table-participation.mjs";
 import { hasPokerPoolSchema, readPokerAccessSnapshot, readPokerTierPolicySnapshot, resolvePokerEnabledBuyIns } from "../../shared/poker-domain/bot-access.mjs";
 
 const root = process.cwd();
@@ -190,6 +190,7 @@ export const loadPokerHandler = (filePath, mocks) => {
     "runAdvanceLoop",
     "runBotAutoplayLoop",
     "executePokerLeave",
+    "assertActivePokerTableCapacity",
     "lockUserTableSlots",
     "hasPokerPoolSchema",
     "readPokerAccessSnapshot",
@@ -257,6 +258,7 @@ return handler;`
       hasParticipatingHumanInHand,
       runAdvanceLoop,
       runBotAutoplayLoop,
+      assertActivePokerTableCapacity,
       lockUserTableSlots,
       hasPokerPoolSchema,
       readPokerAccessSnapshot,

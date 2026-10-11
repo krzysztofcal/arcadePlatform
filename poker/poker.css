@@ -470,6 +470,7 @@ body.poker-lobby .shortcut{font-size:8px;}
 body.poker-lobby .tile h2{font-size:32px;}
 body.poker-lobby .bonus-heading h2{font-size:25px;}
 body.poker-lobby .bonus-heading img{width:66px;}
+body.poker-lobby .quick-tier{font-size:10px;padding:4px 2px;}
 }
 @media(prefers-reduced-motion:reduce){
 body.poker-lobby *{scroll-behavior:auto!important;}
@@ -486,10 +487,13 @@ body.poker-lobby .poker-auth-text{font-size:11px;margin-bottom:8px;}
 body.poker-lobby .poker-auth-actions{display:flex;flex-direction:column;gap:8px;}
 body.poker-lobby .tile--online .tile-copy{bottom:17px;}
 body.poker-lobby .tile--single .tile-copy{bottom:17px;}
-body.poker-lobby .quick-tiers{display:flex;gap:6px;margin-bottom:8px;}
-body.poker-lobby .quick-tier{flex:1;min-height:44px;padding:5px;border:1px solid #6cffe388;border-radius:9px;background:#080e35e6;color:#e3fff6;font-size:12px;font-weight:800;}
+body.poker-lobby .quick-tiers{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+body.poker-lobby .quick-tier{flex:1;min-height:44px;min-width:0;padding:5px 4px;border:1px solid #6cffe388;border-radius:9px;background:#080e35e6;color:#e3fff6;font-size:12px;font-weight:800;text-align:center;}
 body.poker-lobby .quick-tier[aria-pressed="true"]{background:#165c52;border-color:#c5ffb4;box-shadow:inset 0 0 0 1px #c5ffb4;}
+body.poker-lobby .tile--single .quick-tier{border-color:#f999ff88;color:#fce8ff;}
+body.poker-lobby .tile--single .quick-tier[aria-pressed="true"]{background:#5c165a;border-color:#ffb4fb;box-shadow:inset 0 0 0 1px #ffb4fb;}
 body.poker-lobby .quick-tier-label{font-size:13px;font-weight:800;color:#b8ffe2;}
+body.poker-lobby .tile--single .quick-tier-label{color:#fce8ff;}
 body.poker-lobby .quick-status{font-size:10px;line-height:1.4;color:#dce8ff;margin-top:8px;}
 body.poker-lobby .tile-action:disabled{opacity:.6;cursor:wait;}
 body.poker-lobby .lobby-subview{padding:20px max(20px,env(safe-area-inset-left));}

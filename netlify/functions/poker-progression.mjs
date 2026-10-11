@@ -37,25 +37,6 @@ where t.status = 'OPEN'
     .filter(Boolean);
 }
 
-async function readSinglePlayerRejoinableTableIds(tx, userId) {
-  const rows = await tx.unsafe(
-    `
-select distinct t.id
-from public.poker_tables t
-join public.poker_seats s on s.table_id = t.id
-where t.status = 'OPEN'
-  and s.user_id = $1
-  and s.status = 'ACTIVE'
-  and t.created_by = $1
-  and coalesce(t.is_single_player, false) = true;
-    `,
-    [userId]
-  );
-  return (rows || [])
-    .map((row) => typeof row?.id === "string" ? row.id : null)
-    .filter(Boolean);
-}
-
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
     `select id, status, buy_in, stakes, lifecycle_kind, created_by, coalesce(is_single_player, false) as is_single_player${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
