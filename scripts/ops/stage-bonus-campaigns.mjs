@@ -17,14 +17,15 @@ export function readRequest(env = process.env) {
   const action = env.BONUS_ACTION || "inspect";
   requireValue(["inspect", "create_daily_draft", "switch_daily", "set_status"].includes(action), "invalid_action");
   const code = (env.BONUS_CODE || "").trim();
-  if (action !== "inspect") {
-    requireValue(CODE.test(code), "invalid_campaign_code");
-    requireValue(env.BONUS_CONFIRM === "GO STAGE BONUS " + action + " " + code, "stage_bonus_go_required");
-  }
   const oldCode = (env.BONUS_OLD_CODE || "").trim();
-  if (action === "switch_daily") requireValue(CODE.test(oldCode) && oldCode !== code, "invalid_old_campaign_code");
   const status = (env.BONUS_STATUS || "").trim();
+  if (action !== "inspect") requireValue(CODE.test(code), "invalid_campaign_code");
+  if (action === "switch_daily") requireValue(CODE.test(oldCode) && oldCode !== code, "invalid_old_campaign_code");
   if (action === "set_status") requireValue(["paused", "ended"].includes(status), "invalid_status");
+  const suffix = action === "create_daily_draft" ? " " + parseRewards(env.BONUS_REWARDS).join(",")
+    : action === "switch_daily" ? " FROM " + oldCode
+    : action === "set_status" ? " " + status : "";
+  if (action !== "inspect") requireValue(env.BONUS_CONFIRM === "GO STAGE BONUS " + action + " " + code + suffix, "stage_bonus_go_required");
   return { action, code, oldCode, status };
 }
 
