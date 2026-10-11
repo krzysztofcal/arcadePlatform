@@ -224,7 +224,7 @@
 
 .poker-form-row:last-child{margin-bottom:0;}
 
-.poker-bonus-banner{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; padding:14px 16px; border:1px solid rgba(247,201,72,.34); border-radius:14px; background:linear-gradient(135deg, rgba(247,201,72,.14), rgba(110,231,231,.08)); box-shadow:0 12px 32px rgba(0,0,0,.18);}
+.poker-bonus-banner{position:relative; overflow:hidden; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; padding:14px 16px; border:1px solid rgba(247,201,72,.34); border-radius:14px; background:linear-gradient(135deg, rgba(247,201,72,.14), rgba(110,231,231,.08)); box-shadow:0 12px 32px rgba(0,0,0,.18);}
 
 .poker-bonus-banner[hidden]{display:none;}
 
@@ -597,6 +597,8 @@ body.poker-lobby .tile--online .tile-action:not(:disabled)::after{content:"";pos
 body.poker-lobby .shortcut--bonus{position:relative;}
 body.poker-lobby .shortcut--bonus .shortcut-art{transform-origin:50% 65%;animation:pokerLobbyBonusReaction 15s linear .55s infinite;}
 body.poker-lobby .shortcut--bonus::after{content:"";position:absolute;inset:-1px;border-radius:inherit;box-shadow:0 0 18px 3px #ffce5bcc,inset 0 0 0 2px #fff0ba;background:linear-gradient(110deg,transparent,#ffe39044,transparent);opacity:0;pointer-events:none;animation:pokerLobbyBonusFlash 15s linear .55s infinite;}
+body.poker-lobby .poker-bonus-banner{animation:pokerLobbyWelcomeGlow 4.5s ease-out 1;}
+body.poker-lobby .poker-bonus-banner::after{content:"";position:absolute;top:0;left:0;width:45%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.38) 50%,transparent);transform:translateX(-180%) skewX(-20deg);opacity:0;pointer-events:none;z-index:2;animation:pokerLobbyWelcomeSheen 4.5s ease-out 1;}
 body.poker-lobby .shortcut--bonus:is(:hover,:focus-visible,:active) .shortcut-art{animation:none;transform:none;}
 body.poker-lobby .shortcut--bonus:is(:hover,:focus-visible,:active)::after{animation:none;opacity:0;}
 }
@@ -626,4 +628,17 @@ to{opacity:1;transform:translateY(0);}
 4%{transform:scale(1.03) rotate(-3deg);}
 5.5%{transform:scale(.99,1.02) rotate(1.5deg);}
 6.5%{transform:scale(1.01) rotate(-.5deg);}
+}
+@keyframes pokerLobbyWelcomeGlow{
+0%{box-shadow:0 12px 32px rgba(0,0,0,.18),0 0 0 rgba(247,201,72,0);border-color:rgba(247,201,72,.34);}
+15%{box-shadow:0 12px 32px rgba(0,0,0,.18),0 0 28px rgba(247,201,72,.65),inset 0 0 16px rgba(247,201,72,.25);border-color:rgba(255,232,160,.95);}
+45%{box-shadow:0 12px 32px rgba(0,0,0,.18),0 0 20px rgba(247,201,72,.4),inset 0 0 10px rgba(247,201,72,.16);border-color:rgba(255,232,160,.75);}
+75%{box-shadow:0 12px 32px rgba(0,0,0,.18),0 0 24px rgba(247,201,72,.5),inset 0 0 14px rgba(247,201,72,.2);border-color:rgba(255,232,160,.85);}
+100%{box-shadow:0 12px 32px rgba(0,0,0,.18);border-color:rgba(247,201,72,.34);}
+}
+@keyframes pokerLobbyWelcomeSheen{
+0%{opacity:0;transform:translateX(-180%) skewX(-20deg);}
+4%{opacity:1;}
+24%{opacity:1;transform:translateX(320%) skewX(-20deg);}
+28%,100%{opacity:0;transform:translateX(350%) skewX(-20deg);}
 }
