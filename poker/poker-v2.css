@@ -568,7 +568,7 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-room-status{display:block;position:absolute;left:0;right:calc(min(33vw,196px) + max(8px,env(safe-area-inset-right)) + 8px);bottom:0;width:auto;height:calc(18px * var(--poker-scene-scale,1));border-radius:12px;background:transparent;color:#d3c6a9;font-size:calc(10px * var(--poker-scene-scale,1));line-height:calc(18px * var(--poker-scene-scale,1));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;pointer-events:none;}
 .poker-table-screen{background:linear-gradient(180deg,#050a0822,#02090677 55%,#020805aa),url('/poker/assets/scene/casino-room-v2.webp') center/cover no-repeat #07100b;}
 .poker-table-screen::before{opacity:.18;}
-.poker-scene[data-orientation="portrait"] .poker-table-shell{inset:84px 12px 70px;border-radius:46% 46% 43% 43% / 17% 17% 22% 22%;transform:perspective(900px) rotateX(12deg) rotateZ(-3deg);background:linear-gradient(180deg,#725039,#2c1c16 22%,#170e0b 70%,#6a442a);box-shadow:0 18px 32px #000b,inset 0 2px 2px #f8ddacaa,inset 0 -5px 8px #000c;}
+.poker-scene[data-orientation="portrait"] .poker-table-shell{inset:84px 12px 70px;border-radius:46% 46% 43% 43% / 17% 17% 22% 22%;transform:perspective(900px) rotateX(12deg);background:linear-gradient(180deg,#725039,#2c1c16 22%,#170e0b 70%,#6a442a);box-shadow:0 18px 32px #000b,inset 0 2px 2px #f8ddacaa,inset 0 -5px 8px #000c;}
 .poker-scene[data-orientation="portrait"] .poker-table-shell::before{inset:10px;border-radius:46% 46% 43% 43% / 17% 17% 22% 22%;background:linear-gradient(180deg,#61462b,#1d160f 50%,#45341f);}
 .poker-scene[data-orientation="portrait"] .poker-table-felt{inset:20px;border-radius:46% 46% 43% 43% / 17% 17% 22% 22%;background:radial-gradient(ellipse at 50% 35%,#197b61,#0b5340 58%,#052c22);box-shadow:inset 0 6px 16px #001c1680,inset 0 -8px 15px #001c16aa,0 0 0 1px #d9c69555;}
 .poker-room-dealer{display:block;position:absolute;left:164px;top:-30px;width:126px;height:150px;background:url('/poker/assets/scene/dealer-v2.webp') center top/contain no-repeat;pointer-events:none;}
@@ -697,3 +697,17 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 #pokerTableScreen[data-table-theme="emerald-palace"] .poker-card--back::before{border-color:#c6b06b;box-shadow:none;}
 #pokerTableScreen[data-table-theme="emerald-palace"] .poker-seat-avatar:not(.poker-seat-avatar--open)::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:url('/poker/assets/themes/emerald-palace/avatar-frame.svg') center/100% 100% no-repeat;}
 #pokerTableScreen[data-table-theme="emerald-palace"] .poker-room-dealer::after{clip-path:polygon(0 64%,29.5% 64%,27% 74%,24.5% 84%,21.2% 90%,21.4% 92.1%,24.4% 94%,24.8% 97.5%,16.4% 99.7%,16.4% 100%,83.4% 100%,81% 97.5%,78.5% 94%,79.2% 90%,82% 84%,80% 74%,77% 64%,100% 64%,100% 100%,0 100%);}
+
+/* #1086: shared static material and centered house print; original theme art stays below. */
+#pokerTableScreen .poker-table-felt{isolation:isolate;}
+#pokerTableScreen .poker-table-felt::after{content:"";position:absolute;inset:0;border-radius:inherit;background:url('/poker/assets/scene/felt-weave.webp') 0 0/128px 128px repeat;opacity:.40;mix-blend-mode:soft-light;pointer-events:none;}
+#pokerTableScreen .poker-table-felt::before{content:"";position:absolute;inset:0;border-radius:inherit;background-image:url('/poker/assets/scene/felt-house-mark.svg'),radial-gradient(ellipse at 50% 34%,#19a57730,transparent 72%);background-position:50% 50%,center;background-size:240px 147px,100% 100%;background-repeat:no-repeat;pointer-events:none;}
+#pokerTableScreen[data-table-theme="neon-vegas"] .poker-table-felt::before{background-image:url('/poker/assets/scene/felt-house-mark.svg'),radial-gradient(ellipse at 50% 38%,#8c1acdbb,#58109170 56%,transparent 86%);}
+#pokerTableScreen[data-table-theme="royal-gold"] .poker-table-felt::before{background-image:url('/poker/assets/scene/felt-house-mark.svg'),radial-gradient(ellipse at 50% 34%,#b38c3438,transparent 72%);}
+#pokerTableScreen[data-table-theme="midnight-sapphire"] .poker-table-felt::before{background-image:url('/poker/assets/scene/felt-house-mark.svg'),radial-gradient(ellipse at 50% 34%,#177fc950,transparent 72%);}
+#pokerTableScreen[data-table-theme="crimson-velvet"] .poker-table-felt::before{background-image:url('/poker/assets/scene/felt-house-mark.svg'),radial-gradient(ellipse at 50% 34%,#bc164d60,transparent 72%);}
+#pokerTableScreen[data-table-theme="emerald-palace"] .poker-table-felt::before{background-image:url('/poker/assets/scene/felt-house-mark.svg'),radial-gradient(ellipse at 50% 34%,#13a77840,transparent 72%);}
+#pokerTableScreen .poker-scene[data-orientation="landscape"] .poker-table-felt::before{background-size:280px 171px,100% 100%;}
+@supports not (mix-blend-mode:soft-light){
+#pokerTableScreen .poker-table-felt::after{display:none;}
+}
