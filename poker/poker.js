@@ -1483,6 +1483,7 @@
     var selectedSingleBuyIn = null;
     var singlePlayInFlight = false;
     var singlePlayRequestId = null;
+    var singlePlayRequestBuyIn = null;
     var lobbyAuthenticated = false;
     var lobbyIdentity = null;
     var lobbyIdentityGeneration = 0;
@@ -2212,8 +2213,8 @@
         });
       }
       if (singlePlayBtn){
-        singlePlayBtn.textContent = singlePlayInFlight ? 'STARTING…' : reachedMaxTables ? 'MAX TABLES (4)' : 'PLAY VS BOTS';
-        singlePlayBtn.disabled = singlePlayInFlight || !lobbyAuthenticated || !singleOptions.length || !accessReady || isRestricted || reachedMaxTables;
+        singlePlayBtn.textContent = singlePlayInFlight ? 'STARTING…' : singlePlayRequestId ? 'RETRY START' : reachedMaxTables ? 'MAX TABLES (4)' : 'PLAY VS BOTS';
+        singlePlayBtn.disabled = singlePlayInFlight || !lobbyAuthenticated || (!singlePlayRequestId && (!singleOptions.length || reachedMaxTables)) || !accessReady || isRestricted;
         singlePlayBtn.setAttribute('aria-busy', String(singlePlayInFlight));
       }
       if (singleStatus){
@@ -2221,6 +2222,7 @@
           : !progressionState ? 'Progression unavailable. Refresh to retry.'
           : !accessReady ? 'Poker access temporarily unavailable.'
           : isRestricted ? 'Single Player vs bots is unavailable for restricted accounts.'
+          : singlePlayRequestId ? 'Retry starting your ' + formatChips(singlePlayRequestBuyIn) + ' CH table.'
           : reachedMaxTables ? 'Maximum 4 active tables reached. Resume an existing table.'
           : hasResume ? 'Resume active table or start a new game (≤ 1,000 CH).'
           : !singleOptions.length ? 'Requires bankroll for ≤ 1,000 CH tiers.'
@@ -2655,7 +2657,7 @@
 
     async function playVsBots(){
       if (singlePlayInFlight || !lobbyAuthenticated) return;
-      if (selectedSingleBuyIn === null) return;
+      if (selectedSingleBuyIn === null && !singlePlayRequestId) return;
       var effectiveClass = progressionState && progressionState.pokerAccess && progressionState.pokerAccess.effectiveClass;
       if (effectiveClass === 'RESTRICTED'){
         setError(errorEl, 'Single Player vs bots is unavailable for restricted accounts.');
@@ -2665,11 +2667,12 @@
       var maxPlayers = 6;
       if (!singlePlayRequestId){
         singlePlayRequestId = 'sp_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+        singlePlayRequestBuyIn = selectedSingleBuyIn;
       }
       var payload = {
         mode: 'single_player',
         maxPlayers: maxPlayers,
-        buyIn: selectedSingleBuyIn,
+        buyIn: singlePlayRequestBuyIn,
         requestId: singlePlayRequestId
       };
       singlePlayInFlight = true;
@@ -2690,6 +2693,8 @@
       } catch (err){
         if (!lobbyAuthenticated || lobbyIdentityGeneration !== requestGeneration) return;
         if (handleTierLocked(err) || handleInsufficientChips(err)){
+          singlePlayRequestId = null;
+          singlePlayRequestBuyIn = null;
           refreshProgression();
           return;
         }
@@ -2712,6 +2717,10 @@
           setError(errorEl, 'Single Player vs bots is unavailable for restricted accounts.');
         } else if (msg === 'table_closed'){
           setError(errorEl, 'This game session has closed. Please try again.');
+          singlePlayRequestId = null;
+          refreshProgression();
+        } else if (msg === 'single_player_request_expired'){
+          setError(errorEl, 'This start request has expired. Start a new game to continue.');
           singlePlayRequestId = null;
           refreshProgression();
         } else {

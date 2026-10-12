@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 50,
+    "missing_count": 56,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -1046,6 +1046,20 @@
       "sha256": "bb42935c646f4305c6772d9698b90135f6e441365ee18c5777cdc5107bc7656e",
       "category": "stage-only",
       "reason": "Stage escrow retirement textual demand-refill identity correction; no Production equivalent or application."
+    },
+    {
+      "version": "20261011200000",
+      "file": "20261011200000_poker_single_player_table_flag.sql",
+      "sha256": "f67dc33566d865c36b8649310643b8dd5eff386b5d48d143ec906035f5a8d4a5",
+      "category": "shared-safe",
+      "status": "awaiting-production-go",
+      "reason": "Portable additive boolean flag with false default and STANDARD/owner CHECK; no environment identities, policy activation, ledger mutation or Production replacement required.",
+      "required_effects": [
+        "is_single_player boolean NOT NULL DEFAULT false; true requires STANDARD lifecycle and a non-null creator. Existing tables remain false."
+      ],
+      "omitted_effects": [
+        "No Stage or Production application, runtime deployment or feature activation is authorized by this inventory update."
+      ]
     }
   ],
   "replacement_migrations": [

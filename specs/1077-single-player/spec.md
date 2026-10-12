@@ -24,7 +24,7 @@ The owner approved **Variant B with corrections**:
 - **Dedicated Tables:** Every new Single Player session creates a **brand-new dedicated table** belonging exclusively to that player and existing bots.
   - No matchmaking between human players.
   - Resume allows reconnecting to player's own active table(s) without second buy-in. When the user has multiple active tables, the lobby provides explicit selection.
-  - If a table was closed, repeating the original `requestId` fails with a controlled error (`table_closed`) and never fabricates a second table.
+  - A retained closed table rejects its original `requestId` with `table_closed`; after physical purge an expired ID returns `single_player_request_expired`. Neither path creates a second table.
   - Normal Poker Online never matches or lists Single Player tables.
   - Early `readPokerAccessSnapshot` takes row lock (`lock: true`) preventing race conditions with RESTRICTED overrides.
   - No joining or reusing tables of other humans.
@@ -86,12 +86,13 @@ The owner approved **Variant B with corrections**:
 - Never treated as 7-day bot-only tables (#891). Standard human-table close/settlement/escrow retention policies (#923) apply.
 - Normal table janitor and inactive session cleanup remain in effect.
 
-### 2026-10-12 review gates still open
+### 2026-10-12 owner-approved bounded retry contract
 
-- Retained CLOSED tables reject repeated Quick Seat request IDs with `409 table_closed`, even if bankroll/tier eligibility changed. Authoritative JOIN still checks current eligibility for fresh seats.
-- Physical table purge cascades `poker_requests`; the current mechanism cannot promise permanent deduplication after that purge. Owner clarification is pending: durable independent intent identity versus deduplication bounded by existing retention. Do not treat indefinite deduplication as verified or suppress cleanup to retain all closed tables.
+- Single Player start intents use the existing `sp_<base36 timestamp milliseconds>_<random alphanumeric suffix>` format after `normalizeRequestId()`; whitespace normalization remains valid. Resume does not need a start request ID. Poker Online request IDs are unchanged.
+- Valid start/retry IDs expire after 24 hours; at most 5 minutes future clock skew is accepted. Malformed or farther-future IDs return `400 invalid_request_id`; expired OPEN/missing/purged intents return `409 single_player_request_expired` without creation. At the exact 24-hour boundary the ID remains valid. A retained CLOSED intent keeps `409 table_closed`, even after expiry. A new user action may generate a new ID; retry keeps both ID and original buy-in across eligibility refresh.
+- Existing closed-table cleanup protects trusted Single Player QUICK_SEAT rows for at least 24 hours plus 5 minutes from DB creation, in discovery, guarded DELETE and status eligibility, regardless of shorter table retention configuration. This covers a timestamp accepted 5 minutes ahead of server time; no permanent history, new table/tombstone or separate cleanup is required. Ordinary Online requests keep their existing retention rules.
 - Early Single Player account access uses `lock: true`; administrative overrides take the existing per-user slot lock before account/table row locks, serializing against owner JOIN/rejoin.
-- The repository migration guard rejects the new local migration because the Production manifest is exhaustive for the older 109-file baseline. Local schema validity is verified, but releasing the migration requires a separately reviewed manifest/guard change without automatically preparing Production replacements.
+- The immutable flag migration is classified as `shared-safe` with its exact SHA-256 in the Production inventory: 110 source files, 54 baseline/56 missing, categories 19/4/33 and seven unchanged replacements. This classification authorizes no database application or Production action.
 
 ---
 

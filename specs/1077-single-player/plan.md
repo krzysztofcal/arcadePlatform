@@ -2,13 +2,20 @@
 
 **Source:** [spec.md](spec.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)
 **Baseline:** AGY started on `e7fd0ce2`; handoff integrates current `main` `8f691d65` (2026-10-12).
-**Status:** Implementation and review fixes remain local. Runtime tests, syntax and CSP pass; permanent post-purge request identity and migration-manifest compatibility remain open. No runtime deployment evidence or Stage writes.
+**Status:** Implementation and review fixes remain local. Both owner-approved local blocker resolutions pass verification: bounded 24h retry identity and strict updated migration inventory. Runtime tests, syntax and CSP pass. No runtime deployment evidence or Stage writes.
 
 ---
 
 ## 1. Minimal Migration Implementation (Local Only)
 
 ### Handoff review amendment (2026-10-12)
+
+### Owner-approved blocker resolution
+
+- `poker-quick-seat.mjs`: validate existing `sp_<base36 milliseconds>_<random suffix>` IDs after `normalizeRequestId()`. New/retried intents expire after 24 hours; accept at most 5 minutes future skew. Retained CLOSED intents keep `409 table_closed`. Resume is independent of start-intent expiry; Online is unchanged.
+- `closed-table-cleanup.mjs`: retain trusted Single Player QUICK_SEAT records for at least 24 hours plus 5 minutes from DB creation, in discovery, final guarded DELETE and status queries, even if configured table retention is shorter. Reuse existing cleanup only.
+- `production-migrations/manifest.json` and `check-db-migrations.mjs`: inventory 110 source files, 54 baseline / 56 missing, category counts 19 shared-safe / 4 stage-only / 33 equivalent. Hash and classify the portable additive flag migration as shared-safe; preserve historical hashes, canonical identities and seven replacements.
+- Extend existing endpoint and cleanup fundamental tests for timestamp boundaries, replay, purge guards and existing table caps; run local checks and independent review. No remote mutation.
 
 - Preserve all six AGY commits through `d29736dc`; integrate current main `8f691d65` locally, preserving #1090 Welcome claim behavior.
 - Verify the four requested findings already addressed by AGY's final commit; keep existing Resume, closed replay, funding error and access row lock paths.
@@ -17,7 +24,7 @@
 - Enforce at least two configured funded bots (clamped by table capacity) only for Single Player; preserve existing bot maximum/pool rules. Extend existing successful NORMAL/SLOW and partial-funding tests.
 - Serialize administrative access overrides with JOIN using `shared/poker-domain/table-participation.mjs::lockUserTableSlots()` before account/table row locks; extend the existing propagation test.
 - Preserve selected Resume table through lobby re-render and add unique table ID as final ordering tie-breaker.
-- Audit physical-purge idempotency separately: current request rows cascade with table deletion. Durable identity beyond retention requires owner contract clarification; do not introduce an independent idempotency subsystem silently.
+- Apply the owner-approved 24h timestamped request contract and 24h5m protection in existing physical cleanup; no durable identity or independent subsystem.
 - Verification: existing focused domain/endpoint/WS tests, existing full local runner, syntax, CSP and local SQL migration checks. No push, PR, Stage writes or deploys.
 
 Add forward-only migration `supabase/migrations/20261011200000_poker_single_player_table_flag.sql`:

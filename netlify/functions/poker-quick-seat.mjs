@@ -12,6 +12,8 @@ import { hasPokerPoolSchema, readPokerAccessSnapshot } from "../../shared/poker-
 import { normalizeRequestId } from "./_shared/poker-request-id.mjs";
 
 const DEFAULT_MAX_PLAYERS = 6;
+const SINGLE_PLAYER_REQUEST_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SINGLE_PLAYER_REQUEST_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
 
 const DEFAULT_HUMAN_SEAT_FRESH_MS = 120_000;
@@ -349,6 +351,16 @@ export async function handler(event) {
   if (isSinglePlayer && !requestedTableId && !requestId) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "missing_request_id" }) };
   }
+  let singlePlayerRequestIssuedAt = null;
+  if (isSinglePlayer && !requestedTableId) {
+    const match = /^sp_([0-9a-z]{1,11})_([0-9a-z]{1,16})$/.exec(requestId);
+    singlePlayerRequestIssuedAt = match ? Number.parseInt(match[1], 36) : null;
+    if (!Number.isSafeInteger(singlePlayerRequestIssuedAt) || singlePlayerRequestIssuedAt <= 0
+      || singlePlayerRequestIssuedAt.toString(36) !== match[1]
+      || singlePlayerRequestIssuedAt > Date.now() + SINGLE_PLAYER_REQUEST_CLOCK_SKEW_MS) {
+      return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_request_id" }) };
+    }
+  }
 
   const maxPlayers = parseMaxPlayers(payload?.maxPlayers);
   if (maxPlayers == null) {
@@ -440,6 +452,9 @@ export async function handler(event) {
           if (String(replayed.status || "").toUpperCase() !== "OPEN") {
             return { kind: "table_closed" };
           }
+          if (Date.now() - singlePlayerRequestIssuedAt > SINGLE_PLAYER_REQUEST_WINDOW_MS) {
+            return { kind: "single_player_request_expired" };
+          }
           await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [replayed.id]);
           return {
             kind: "recommended",
@@ -452,6 +467,9 @@ export async function handler(event) {
           };
         }
 
+        if (Date.now() - singlePlayerRequestIssuedAt > SINGLE_PLAYER_REQUEST_WINDOW_MS) {
+          return { kind: "single_player_request_expired" };
+        }
         progression.availableBuyIns = (progression.availableBuyIns || []).filter((b) => b <= 1000);
         progression.enabledBuyIns = (progression.enabledBuyIns || []).filter((b) => b <= 1000);
 
@@ -559,11 +577,11 @@ export async function handler(event) {
         body: JSON.stringify({ error: "invalid_buy_in" })
       };
     }
-    if (result?.kind === "table_closed") {
+    if (result?.kind === "table_closed" || result?.kind === "single_player_request_expired") {
       return {
         statusCode: 409,
         headers: mergeHeaders(cors),
-        body: JSON.stringify({ error: "table_closed" })
+        body: JSON.stringify({ error: result.kind })
       };
     }
     if (result?.kind === "recommended" && result.requiresWsBuyInCapability) {
