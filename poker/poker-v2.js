@@ -264,7 +264,6 @@
   var lastKnownCurrentSeatNo = null;
   var spectatorJoinIntroShown = false;
   var spectatorJoinIntroActive = false;
-  var spectatorJoinIntroPhase = 'idle';
   var spectatorJoinIntroTimer = null;
   var spectatorJoinIntroSettleTimer = null;
   var heroPresentationState = null;
@@ -4172,17 +4171,10 @@
     layoutRefreshTimer = window.setTimeout(refreshLayoutPresentation, 0);
   }
 
-  function shouldReduceMotion(){
-    return typeof window !== 'undefined'
-      && typeof window.matchMedia === 'function'
-      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  }
-
   function startSpectatorJoinIntro(){
-    if (shouldReduceMotion()) return;
+    if (prefersReducedMotion()) return;
     if (!els.spectatorJoinIntro || !els.spectatorJoinIntroBtn || !els.joinBtn) return;
     spectatorJoinIntroActive = true;
-    spectatorJoinIntroPhase = 'wobble';
     els.joinBtn.hidden = false;
     els.joinBtn.classList.add('poker-join-btn--intro-target');
     els.spectatorJoinIntro.hidden = false;
@@ -4198,7 +4190,6 @@
 
   function flySpectatorJoinIntro(){
     if (!spectatorJoinIntroActive || !els.spectatorJoinIntroBtn || !els.joinBtn) return;
-    spectatorJoinIntroPhase = 'flying';
     if (els.spectatorJoinIntro) {
       els.spectatorJoinIntro.classList.add('poker-spectator-join-intro--flying');
     }
@@ -4227,7 +4218,6 @@
 
   function finishSpectatorJoinIntro(){
     spectatorJoinIntroActive = false;
-    spectatorJoinIntroPhase = 'idle';
     if (spectatorJoinIntroTimer) {
       window.clearTimeout(spectatorJoinIntroTimer);
       spectatorJoinIntroTimer = null;
@@ -4254,7 +4244,6 @@
 
   function cancelSpectatorJoinIntro(preserveJoinBtn){
     spectatorJoinIntroActive = false;
-    spectatorJoinIntroPhase = 'idle';
     if (spectatorJoinIntroTimer) {
       window.clearTimeout(spectatorJoinIntroTimer);
       spectatorJoinIntroTimer = null;
@@ -4289,12 +4278,17 @@
     var canJoin = state.mode === 'live' && signedIn && !seated && !isClosed && !!state.tableId
       && !state.reconnectGate && isWsReady() && state.hasAppliedAuthoritativeSnapshot === true
       && !joinPending && !waitingForAuthoritativeSeat;
+    var occupiedSeatsCount = Array.isArray(state.seats)
+      ? state.seats.filter(function(seat){ return seat && Number.isInteger(seat.seatNo); }).length
+      : 0;
+    var maxSeatsCount = Number.isInteger(state.maxSeats) && state.maxSeats > 0 ? state.maxSeats : 6;
+    var isTableFull = occupiedSeatsCount >= maxSeatsCount;
 
-    if (seated) {
+    if (seated || isTableFull) {
       spectatorJoinIntroShown = true;
     }
 
-    if (!canJoin && spectatorJoinIntroActive) {
+    if ((!canJoin || isTableFull) && spectatorJoinIntroActive) {
       cancelSpectatorJoinIntro(false);
     }
 
@@ -4306,10 +4300,10 @@
       els.joinBtn.hidden = !canJoin;
     }
 
-    if (canJoin && !spectatorJoinIntroShown && !shouldAutoJoin
+    if (canJoin && !isTableFull && !spectatorJoinIntroShown && !shouldAutoJoin
         && !Number.isInteger(reconnectSeatNo) && !autoJoinAttempted && !joinPending) {
       spectatorJoinIntroShown = true;
-      if (shouldReduceMotion()) {
+      if (prefersReducedMotion()) {
         els.joinBtn.hidden = false;
         els.joinBtn.classList.remove('poker-join-btn--intro-target');
       } else {

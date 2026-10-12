@@ -6711,3 +6711,64 @@ test('poker v2 respects prefers-reduced-motion by skipping spectator join intro 
   assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'static join button should be visible immediately');
   assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false);
 });
+
+test('poker v2 does not trigger spectator join intro for full table and cancels intro if table fills up', async () => {
+  // 1. Table is full on initial entry (e.g. 6/6 seats occupied)
+  const fullHarness = createHarness();
+  fullHarness.fireDomContentLoaded();
+  await fullHarness.flush();
+
+  const fullMembers = [
+    { userId: 'bot-1', seat: 1 },
+    { userId: 'bot-2', seat: 2 },
+    { userId: 'bot-3', seat: 3 },
+    { userId: 'bot-4', seat: 4 },
+    { userId: 'bot-5', seat: 5 },
+    { userId: 'bot-6', seat: 6 }
+  ];
+
+  const ws = fullHarness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: fullMembers },
+      public: { hand: { handId: 'hand-1', status: 'PREFLOP' }, pot: { total: 30 } },
+      you: { seat: null }
+    }
+  });
+  await fullHarness.flush();
+
+  assert.equal(fullHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'spectator intro must not show for a full table');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible for full table');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'join button must not be target placeholder');
+
+  // 2. Table has an open seat on entry, but fills up during active intro
+  const activeHarness = createHarness();
+  activeHarness.fireDomContentLoaded();
+  await activeHarness.flush();
+
+  sendInitialTableSnapshot(activeHarness);
+  await activeHarness.flush();
+  assert.equal(activeHarness.elements.pokerSpectatorJoinIntro.hidden, false, 'intro starts for table with open seats');
+  assert.equal(activeHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), true);
+
+  // Snapshot arrives where 6th player sat down making table full
+  const activeWs = activeHarness.getCreateOptions();
+  activeWs.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: fullMembers },
+      public: { hand: { handId: 'hand-1', status: 'PREFLOP' }, pot: { total: 30 } },
+      you: { seat: null }
+    }
+  });
+  await activeHarness.flush();
+
+  assert.equal(activeHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro must be cancelled when table becomes full');
+  assert.equal(activeHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'placeholder class removed');
+  assert.equal(activeHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible');
+});
