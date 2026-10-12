@@ -78,6 +78,184 @@
       </section>
     </section>
 
+    <section class="poker-hand-info" id="pokerHandInfoPanel" aria-labelledby="pokerHandInfoTitle" role="region" hidden>
+      <div class="poker-hand-info__header">
+        <div class="poker-hand-info__title-wrap">
+          <span class="poker-hand-info__eyebrow">Luxury Casino</span>
+          <h2 class="poker-hand-info__title" id="pokerHandInfoTitle">Poker Hands</h2>
+        </div>
+        <button type="button" class="poker-hand-info__close" id="pokerHandInfoClose" aria-label="Close Poker Hands">×</button>
+      </div>
+      <div class="poker-hand-info__body">
+        <ol class="poker-hand-info__list" aria-label="Poker hand rankings from highest to lowest">
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">1</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">Royal Flush</strong>
+                <span class="poker-hand-info__item-desc">A, K, Q, J, 10 of the same suit (Ace-high straight flush)</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="A♠ K♠ Q♠ J♠ 10♠">
+              <span class="poker-hand-info__card"><span>A</span><small>♠</small></span>
+              <span class="poker-hand-info__card"><span>K</span><small>♠</small></span>
+              <span class="poker-hand-info__card"><span>Q</span><small>♠</small></span>
+              <span class="poker-hand-info__card"><span>J</span><small>♠</small></span>
+              <span class="poker-hand-info__card"><span>10</span><small>♠</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">2</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">Straight Flush</strong>
+                <span class="poker-hand-info__item-desc">Five consecutive cards of the same suit</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="9♦ 8♦ 7♦ 6♦ 5♦">
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>9</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>8</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>7</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>6</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>5</span><small>♦</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">3</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">Four of a Kind</strong>
+                <span class="poker-hand-info__item-desc">Four cards of the same numerical rank</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="A♣ A♦ A♥ A♠ 9♠">
+              <span class="poker-hand-info__card"><span>A</span><small>♣</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>A</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>A</span><small>♥</small></span>
+              <span class="poker-hand-info__card"><span>A</span><small>♠</small></span>
+              <span class="poker-hand-info__card"><span>9</span><small>♠</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">4</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">Full House</strong>
+                <span class="poker-hand-info__item-desc">Three of a kind combined with a pair</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="Q♠ Q♥ Q♦ J♣ J♥">
+              <span class="poker-hand-info__card"><span>Q</span><small>♠</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>Q</span><small>♥</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>Q</span><small>♦</small></span>
+              <span class="poker-hand-info__card"><span>J</span><small>♣</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>J</span><small>♥</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">5</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">Flush</strong>
+                <span class="poker-hand-info__item-desc">Any five cards of the same suit, not in sequence</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="A♦ J♦ 9♦ 7♦ 2♦">
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>A</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>J</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>9</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>7</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>2</span><small>♦</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">6</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">Straight</strong>
+                <span class="poker-hand-info__item-desc">Five consecutive cards in rank, mixed suits</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="9♠ 8♦ 7♥ 6♣ 5♠">
+              <span class="poker-hand-info__card"><span>9</span><small>♠</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>8</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>7</span><small>♥</small></span>
+              <span class="poker-hand-info__card"><span>6</span><small>♣</small></span>
+              <span class="poker-hand-info__card"><span>5</span><small>♠</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">7</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">Three of a Kind</strong>
+                <span class="poker-hand-info__item-desc">Three cards of the same numerical rank</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="9♠ 9♥ 9♦ K♣ 2♦">
+              <span class="poker-hand-info__card"><span>9</span><small>♠</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>9</span><small>♥</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>9</span><small>♦</small></span>
+              <span class="poker-hand-info__card"><span>K</span><small>♣</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>2</span><small>♦</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">8</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">Two Pair</strong>
+                <span class="poker-hand-info__item-desc">Two distinct pairs of equal rank</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="A♠ A♦ Q♣ Q♥ 4♠">
+              <span class="poker-hand-info__card"><span>A</span><small>♠</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>A</span><small>♦</small></span>
+              <span class="poker-hand-info__card"><span>Q</span><small>♣</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>Q</span><small>♥</small></span>
+              <span class="poker-hand-info__card"><span>4</span><small>♠</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">9</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">One Pair</strong>
+                <span class="poker-hand-info__item-desc">Two cards of the same numerical rank</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="9♦ 9♠ J♥ 7♣ 2♦">
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>9</span><small>♦</small></span>
+              <span class="poker-hand-info__card"><span>9</span><small>♠</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>J</span><small>♥</small></span>
+              <span class="poker-hand-info__card"><span>7</span><small>♣</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>2</span><small>♦</small></span>
+            </div>
+          </li>
+          <li class="poker-hand-info__item">
+            <div class="poker-hand-info__item-header">
+              <span class="poker-hand-info__rank">10</span>
+              <div class="poker-hand-info__item-text">
+                <strong class="poker-hand-info__item-name">High Card</strong>
+                <span class="poker-hand-info__item-desc">Highest single card when no other hand is made</span>
+              </div>
+            </div>
+            <div class="poker-hand-info__cards" aria-label="A♠ K♦ 9♥ 6♣ 2♠">
+              <span class="poker-hand-info__card"><span>A</span><small>♠</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>K</span><small>♦</small></span>
+              <span class="poker-hand-info__card poker-hand-info__card--red"><span>9</span><small>♥</small></span>
+              <span class="poker-hand-info__card"><span>6</span><small>♣</small></span>
+              <span class="poker-hand-info__card"><span>2</span><small>♠</small></span>
+            </div>
+          </li>
+        </ol>
+        <div class="poker-hand-info__footer">
+          <strong class="poker-hand-info__note-title">Texas Hold'em Rule</strong>
+          <p class="poker-hand-info__note-text">Best 5 cards from 2 hole + 5 community cards. You may use 0, 1, or 2 hole cards.</p>
+        </div>
+      </div>
+    </section>
+
     <section class="poker-live-panel">
       <div class="poker-live-topbar">
         <div id="pokerAccountHud" class="poker-account-hud" role="status" aria-live="polite" hidden></div>
@@ -104,6 +282,7 @@
                 <div class="poker-reaction-history__list" id="pokerReactionHistoryList"></div>
               </section>
             </div>
+            <button type="button" class="poker-live-btn poker-hand-info-toggle" id="pokerHandInfoToggle" aria-label="Poker Hands" aria-controls="pokerHandInfoPanel" aria-expanded="false" title="Poker Hands"><span class="poker-hand-info-toggle__icon" aria-hidden="true"><svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="10" height="13" rx="1.8"/><path d="M6 4.5V2.8A1.8 1.8 0 0 1 7.8 1h8.4A1.8 1.8 0 0 1 18 2.8v11.4a1.8 1.8 0 0 1-1.8 1.8h-1.7"/><path d="M6 11h3"/></svg></span></button>
           </div>
         </div>
       </div>
