@@ -130,3 +130,8 @@ flowchart TD
 - ACTIVE owner Resume/reconnect preserves stack without a second buy-in. Under the existing table transaction/lock, an owner without an ACTIVE seat is refused with `single_player_participation_ended` when `has_human_participant` or historical owner seat proves previous participation. This precedes seat writes, human debit and bot funding. CLOSED remains refused; a never-occupied first JOIN remains allowed. Poker Online re-entry is unchanged.
 - Quick Seat/access and browser feedback expose ended participation, discard stale Resume, refresh progression and stop automatic JOIN retries. Returning after Leave requires explicit New Game; there is no automatic paid fallback.
 - Confirmed smoke defect: newly seeded count excluded existing bots. The API recommendation/Leave/WS timing is not proven by retained incident records; the race is deterministically covered locally. These amendments authorize no Stage/ledger operation, push or deployment.
+
+
+### Final P2 review amendment
+
+Existing bot seed/replacement receipts must credit exactly the authoritative table buy-in, matched by an equal debit from the correct NORMAL/SLOW pool; balanced undersized funding does not count. On `single_player_participation_ended`, reconnect must retain the cleared remembered seat and disabled auto-JOIN; transient errors retain existing seat memory/retry. No schema, Online or funding-policy change.

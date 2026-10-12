@@ -194,7 +194,7 @@ async function hasMaterializedBotFunding(tx, tableId) {
   return Array.isArray(rows) && rows.length > 0;
 }
 
-async function countExistingSinglePlayerBots(tx, { tableId, seatRows, state, maxPlayers, fundingSystemKey }) {
+async function countExistingSinglePlayerBots(tx, { tableId, seatRows, state, maxPlayers, fundingSystemKey, authoritativeBuyIn }) {
   const bots = activeSeatRows(seatRows).filter(row => row?.is_bot === true);
   if (!bots.length) return 0;
   const funding = await tx.unsafe(`
@@ -207,12 +207,12 @@ where t.tx_type = 'TABLE_BUY_IN' and t.metadata ->> 'actor' = 'BOT'
   and t.metadata ->> 'tableId' = $1
   and t.metadata ->> 'reason' in ('BOT_SEED_BUY_IN', 'BOT_REPLACEMENT_BUY_IN')
   and escrow.account_type = 'ESCROW' and escrow.system_key = 'POKER_TABLE:' || $1
-  and credit.amount > 0
+  and credit.amount = $3
   and exists (select 1 from public.chips_entries debit
     join public.chips_accounts source on source.id = debit.account_id
     where debit.transaction_id = t.id and debit.amount = -credit.amount
       and source.account_type = 'SYSTEM' and source.status = 'active' and source.system_key = $2);
-`, [tableId, fundingSystemKey]);
+`, [tableId, fundingSystemKey, authoritativeBuyIn]);
   const fundedSeats = new Set(funding.map(row => `${row.user_id}:${row.seat_no}`));
   const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
   for (const bot of bots) {
@@ -1139,7 +1139,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         && joinAccess.poolProvisioning?.NORMAL === true
         && joinAccess.poolProvisioning?.SLOW === true;
       const existingBotCount = isSinglePlayer ? await countExistingSinglePlayerBots(tx, {
-        tableId, seatRows, state: stateRow.state, maxPlayers,
+        tableId, seatRows, state: stateRow.state, maxPlayers, authoritativeBuyIn,
         fundingSystemKey: getBotFundingSystemKeyForBuyIn(authoritativeBuyIn, { poolClass: fundingPoolClass })
       }) : 0;
       const seededBots = await seedBotsForJoin({

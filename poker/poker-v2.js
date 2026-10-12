@@ -6453,7 +6453,7 @@
       lastKnownCurrentSeatNo = resolvedSeatNo;
     }).catch(function(err){
       autoJoinAttempted = false;
-      reconnectSeatNo = preferredSeatNo;
+      if (autoJoinErrorCode(err) !== 'single_player_participation_ended') reconnectSeatNo = preferredSeatNo;
       setError(err && err.message ? err.message : 'Failed to reconnect seat');
     });
     return true;

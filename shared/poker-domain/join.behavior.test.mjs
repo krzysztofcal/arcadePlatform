@@ -3269,6 +3269,9 @@ test('Single Player smoke: actual funding SQL accepts seed/replacement receipts 
       insert into chips_entries values ('seed','pool',-100),('seed','escrow',100),('replacement','pool',-100),('replacement','escrow',100);`);
     const make = () => createSinglePlayerSmokeHarness({ bots: [{ stack: 78 }, { stack: 168 }], fundingSql: async (sql, params) => (await db.query(sql, params)).rows });
     const valid = make(); assert.equal((await valid.join()).seededBots.length, 0); assert.equal(valid.read().ledger.length, 1);
+    await db.exec("update chips_entries set amount=case when account_id='pool' then -1 else 1 end where transaction_id='replacement'");
+    const underfunded = make(); await assert.rejects(underfunded.join, error => error.code === 'single_player_bot_funding_unavailable'); assert.equal(underfunded.read().ledger.length, 0);
+    await db.exec("update chips_entries set amount=case when account_id='pool' then -100 else 100 end where transaction_id='replacement'");
     await db.exec("update chips_entries set amount=-90 where transaction_id='replacement' and account_id='pool'");
     const unbacked = make(); await assert.rejects(unbacked.join, error => error.code === 'single_player_bot_funding_unavailable'); assert.equal(unbacked.read().ledger.length, 0);
     await db.exec("update chips_entries set amount=-100 where transaction_id='replacement' and account_id='pool'; update chips_accounts set system_key='POKER_BOT_SLOW_BANKROLL_100' where id='pool'");

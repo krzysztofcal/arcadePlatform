@@ -117,3 +117,17 @@ Stop after automatic Stage apply and read-only verification. No additional break
 **Remaining gate:** local owner code review first, then separate GO for push/update of existing DRAFT PR, green CI and exact-SHA WS Preview Deploy, matching Netlify Preview and repeated owner browser smoke. No push, shared Stage/ledger access, funded smoke, deployment, Production or merge was performed during this amendment. Implementation awaits manual runtime verification and is not declared merge-ready.
 
 Local immutable migration SHA-256 checks match the previously reviewed values exactly; no migration/manifest change. `git diff --check` passes and all six original AGY commits remain ancestors. No new concrete findings remain in local review; runtime smoke on the new revision remains unverified.
+
+
+## Final owner P2 amendments — local review against c8c27901
+
+Both findings were reproduced before the fixes. The real PGlite receipt query accepted a balanced -1/+1 CH replacement receipt for a 100 CH table. The V2 reconnect catch restored seat 1 after the central ended-participation handler cleared it; the deterministic test keeps access refresh pending so socket teardown cannot hide this stale-seat state.
+
+- **Exact funding:** pass authoritative buy-in to `countExistingSinglePlayerBots()` and require that exact escrow credit. The existing equal/opposite debit consequently requires the full buy-in from the correct pool. Identity, ACTIVE slot, positive authoritative stack, seed/replacement reason, NORMAL/SLOW source and table escrow checks remain intact. No seeding/replacement/rollback change.
+- **Reconnect:** restore preferred seat only if the error is not `single_player_participation_ended`. The central handler's cleared seat, stopped timer and disabled auto-JOIN survive the outer catch. Transient errors retain existing remembered-seat behavior. No Online change or new WS contract.
+
+Focused full JOIN/domain plus V2 suite passed 237/237 (including actual PGlite and both reconnect cases). Syntax passed 226 files, CSP passed 55 documents and migration guard passed 111 sources/seven replacements. Fresh `npm test` exited 0 with all 146 registered groups successful. No migration, manifest or schema changes; no Stage/ledger access, push or deployment.
+
+Separate read-only subagent `review_final_p2` (same model, separate agent/context) reviewed CH economics, escrow, rollback, idempotency and reconnect/Online compatibility. No blocking findings; independently reran the three targeted regressions, 3/3 PASS.
+
+Breaking impact is limited to intentionally refusing undersized bot funding receipts; correctly funded receipts, first JOIN, ACTIVE Resume and Online retain their contract. Definite ended participation no longer leaves reconnect memory behind. Runtime verification on the final new SHA remains pending owner review and separate publication/deploy GO. PR #1095 remains DRAFT; deployed Preview has not changed.

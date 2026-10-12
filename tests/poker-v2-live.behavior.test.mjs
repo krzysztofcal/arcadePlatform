@@ -368,7 +368,7 @@ function createHarness(options = {}){
 
   vm.createContext(sandbox);
   const closureEnd = source.lastIndexOf('})();');
-  const privacySource = source.slice(0, closureEnd) + 'window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__madeHandForTest = function(){ return heroMadeHandIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
+  const privacySource = source.slice(0, closureEnd) + 'window.__reconnectForTest = function(){ return { seat: reconnectSeatNo, autoJoin: shouldAutoJoin }; }; window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__madeHandForTest = function(){ return heroMadeHandIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
   vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
@@ -425,6 +425,7 @@ async function flush(){
     reactionPayloads,
     targetedReactionPayloads,
     getOpponentHeldCards(userId){ return sandbox.window.__opponentHeldCardsForTest(userId); },
+    getReconnect(){ return sandbox.window.__reconnectForTest(); },
     getCardClaims(){ return JSON.parse(JSON.stringify(sandbox.window.__cardClaimsForTest())); },
     getMadeHand(){ return JSON.parse(JSON.stringify(sandbox.window.__madeHandForTest())); },
     getHeroCards(){ return JSON.parse(JSON.stringify(sandbox.window.__heroCardsForTest())); },
@@ -6816,4 +6817,37 @@ test('poker v2 does not trigger spectator join intro for full table and cancels 
   assert.equal(activeHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro must be cancelled when table becomes full');
   assert.equal(activeHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'placeholder class removed');
   assert.equal(activeHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible');
+});
+
+
+for (const ended of [true, false]) test('reconnect preserves seat only for transient rejection: ended=' + ended, async () => {
+  let accessReads = 0;
+  const code = ended ? 'single_player_participation_ended' : 'temporarily_unavailable';
+  const harness = createHarness({
+    fetch: async () => {
+      if (++accessReads > 1) return new Promise(() => {}); // Keep access refresh pending to expose reconnect state.
+      return { ok: true, status: 200, json: async () => ({ tableAccess: { tableId: 'table-1', buyIn: 100, allowed: true } }) };
+    },
+    sendJoin: () => Promise.reject(Object.assign(new Error(code), { code }))
+  });
+  harness.fireDomContentLoaded(); await harness.flush();
+  const ws = harness.getCreateOptions();
+  function snapshot(version, seated){
+    ws.onSnapshot({ kind: 'stateSnapshot', payload: {
+      tableId: 'table-1', stateVersion: version,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: seated ? [{ userId: 'user-1', seat: 1 }] : [] },
+      public: { hand: { handId: 'hand-reconnect', status: 'TURN' }, pot: { total: 0 } }, you: { seat: seated ? 1 : null }
+    } });
+  }
+  snapshot(1, true); await harness.flush();
+  ws.onStatus('reconnecting', { attempt: 1 }); ws.onStatus('auth_ok'); snapshot(2, false); await harness.flush();
+  assert.equal(harness.joinPayloads.length, 1);
+  await harness.flush();
+  assert.equal(harness.getReconnect().seat, ended ? null : 1, 'ended participation must not restore the remembered seat; transient rejection must retain it');
+  if (ended) {
+    assert.equal(harness.getReconnect().autoJoin, false);
+    ws.onStatus('reconnecting', { attempt: 2 }); ws.onStatus('auth_ok'); snapshot(3, false); await harness.flush();
+    harness.advanceTime(10000); await harness.flush();
+    assert.equal(harness.joinPayloads.length, 1, 'ended participation must not retry');
+  }
 });

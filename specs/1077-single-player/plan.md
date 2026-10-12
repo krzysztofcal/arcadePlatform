@@ -168,3 +168,8 @@ Main `d45756dc181f679f5754d147edc61fabf62e05e0` integrated in `96272e0781de259fa
 3. Quick Seat and progression expose ended participation; lobby removes stale Resume and refreshes. V2 maps the authoritative error, clears auto-JOIN retry and remembered seat, and reuses access preflight. Normalize the stable rejection in the existing authoritative adapter.
 4. Extend existing deterministic JOIN/API/adapter tests; verify receipt SQL with isolated PGlite, with no shared DB or migration changes. Separate read-only subagent review covers debit, escrow, rollback, idempotency and Online isolation.
 5. Provide a local commit and small patch against `8839bf0b`. After owner review, a separate GO is required to publish and deploy the exact new runtime SHA before repeating owner smoke.
+
+
+### Final P2 amendment implementation
+
+Pass `authoritativeBuyIn` into the existing bot validation helper and require `credit.amount = buy-in` in its receipt query; keep matching debit, pool/escrow, seat/state checks and rollback. In `rejoinSeatAfterReconnect().catch()`, restore preferred seat only for errors other than ended participation. Extend the existing PGlite test with -1/+1 at buy-in 100 and existing V2 harness with ended/transient reconnect cases; no additional mechanism or protocol change.

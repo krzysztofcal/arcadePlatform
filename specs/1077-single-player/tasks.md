@@ -84,3 +84,10 @@
 - [x] **T033 / Resume feedback:** Expose stable ended error through Quick Seat, access preflight and authoritative adapter; discard stale lobby Resume, refresh progression, clear V2 auto-JOIN retries and remembered seat. No automatic New Game.
 - [x] **T034 / Final local evidence:** Fresh npm test (146 groups), focused tests 258/258, full WS server 140/140 on Node 20, V2 live 157/157, syntax 226, CSP 55 and migration guard 111/seven pass. Separate read-only re-review has no P1/P2 findings; local report/commit and patch against `8839bf0b` prepared.
 - [ ] **T035 / Repeat runtime gate:** Await owner review and separate GO for publication and exact-new-SHA WS Preview; repeat manual smoke before considering readiness. No Stage/ledger operations or deployment in this amendment.
+
+
+## Final P2 owner review (local only)
+
+- [x] **T036 / Exact existing-bot funding:** Require authoritative buy-in amount in the existing receipt query; isolated PGlite rejects balanced -1/+1 funding at buy-in 100 while preserving valid seed/replacement receipts.
+- [x] **T037 / Definitive reconnect refusal:** Do not restore remembered seat after ended participation; deterministic V2 test checks cleared seat, disabled auto-JOIN and no retry while retaining transient-error seat memory.
+- [x] **T038 / P2 local package:** Focused domain/PGlite/V2 237/237, npm 146 groups, syntax 226, CSP 55 and migration guard 111/seven pass; separate read-only review has no P1/P2 findings; small patch against `c8c27901` prepared. No publication, Stage/ledger access or deployment; T035 remains pending.
