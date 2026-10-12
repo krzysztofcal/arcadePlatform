@@ -49,6 +49,8 @@ The owner approved **Variant B with corrections**:
   - No conversion, eviction, silent table switch, or second debit.
   - Contaminated/polluted table reconnect fails fast.
 - Inside `ws-server/poker/handlers/join.mjs` and `ws-server/poker/table/table-manager.mjs`:
+  - A persisted UUID table with absent mode metadata retains `isSinglePlayer: null`; missing mode is never normalized to Online. Non-authoritative/observe-only JOIN fails closed (`temporarily_unavailable` at handler, `table_bootstrap_unavailable` at direct manager attachment), even if allowCreate synthesizes an empty cached table. Unknown UUIDs are excluded from public Online lobby until trusted metadata arrives.
+  - Normal DB bootstrap and authenticated materialization explicitly carry `false` for Online; missing legacy notification mode needs DB hydration. Non-UUID server-created ephemeral/guest rooms remain separate from DB UUID admission. A successful authoritative executor's positive seat proof retains its existing trusted attach path; browser payload cannot provide that proof.
   - If `authoritativeJoinEnabled` is false or `observeOnlyJoinEnabled` is true, joining a Single Player table is **strictly fail-closed** (`single_player_authoritative_required`), preventing any non-authoritative fallback from seating an unauthorized player or second human.
   - `tableManager.join()` enforces that only an authoritative join with `authoritativeSeatNo` or an existing authoritative member can attach, and rejects any second human.
 
@@ -67,6 +69,7 @@ The owner approved **Variant B with corrections**:
 
 ### SP-005 — Dedicated Creation, Discovery, and UI
 - Request routes through existing `netlify/functions/poker-quick-seat.mjs::handler()` with `mode: "single_player"`.
+- Optional `tableId` validation and Resume scoping apply only to Single Player. Poker Online ignores this field for every value and keeps the original unscoped already-seated lookup; optional request IDs are also ignored there.
 - Single Player new-play skips `selectCandidate()` and calls `createPokerTableWithState()`.
 - **Request ID Intent Idempotency:**
   - Double-clicks, network retries, and timeouts with the **same `requestId`** reuse the existing table record from `poker_requests` without creating duplicates or hitting table limits (`strategy: "idempotent_replay"`).

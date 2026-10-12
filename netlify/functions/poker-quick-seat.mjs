@@ -338,10 +338,10 @@ export async function handler(event) {
     || payload?.mode === "single_player"
     || payload?.singlePlayer === true;
 
-  const requestedTableId = typeof payload?.tableId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.tableId.trim())
+  const requestedTableId = isSinglePlayer && typeof payload?.tableId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.tableId.trim())
     ? payload.tableId.trim().toLowerCase()
     : null;
-  if (Object.prototype.hasOwnProperty.call(payload, "tableId") && !requestedTableId) {
+  if (isSinglePlayer && Object.prototype.hasOwnProperty.call(payload, "tableId") && !requestedTableId) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_table_id" }) };
   }
 
@@ -401,7 +401,7 @@ export async function handler(event) {
       await tx.unsafe("select pg_advisory_xact_lock(hashtext($1));", [matchKey]);
 
       if (!isSinglePlayer) {
-        const existingRows = await selectExistingActiveSeat(tx, { userId: auth.userId, isSinglePlayer: false, tableId: requestedTableId });
+        const existingRows = await selectExistingActiveSeat(tx, { userId: auth.userId, isSinglePlayer: false });
         if (existingRows?.[0]?.id) {
           const recommendation = await recommendSeatAtTable(tx, {
             tableId: existingRows[0].id,

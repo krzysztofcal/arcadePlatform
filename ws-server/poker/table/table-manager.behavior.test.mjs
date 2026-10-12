@@ -600,6 +600,7 @@ test("persistent bot replacement commits runtime only with matching funding rece
   const humanUserId = "00000000-0000-4000-8000-0000000000a1";
   const oldBotUserId = "00000000-0000-4000-8000-0000000000b2";
   const restored = tableManager.restoreTableFromPersisted(tableId, {
+    tableMeta: { isSinglePlayer: false },
     coreState: {
       version: 7,
       roomId: tableId,
@@ -3081,6 +3082,20 @@ test("applyAction replay for rejected requestId stays deterministic and non-muta
 });
 
 
+
+test("unknown persisted UUID cannot bypass mode validation through direct manager join", async () => {
+  const tableId = '00000000-0000-4000-8000-000000000107';
+  const manager = createTableManager();
+  assert.equal((await manager.ensureTableLoaded(tableId, { allowCreate: true })).ok, true);
+  const denied = manager.join({ ws: {}, userId: 'human', tableId, requestId: 'unknown' });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, 'table_bootstrap_unavailable');
+  assert.equal(manager.tableState(tableId).members.length, 0);
+  manager.materializeLobbyTable({ tableId, tableMeta: { isSinglePlayer: false } });
+  assert.equal(manager.join({ ws: {}, userId: 'human', tableId, requestId: 'known-online' }).ok, true);
+  assert.equal(manager.materializeLobbyTable({ tableId, tableMeta: { isSinglePlayer: true } }).code, 'table_mode_immutable');
+  assert.equal(manager.tableMeta(tableId).isSinglePlayer, false);
+});
 
 test("bootstrap requires loader and does not synthesize empty table", async () => {
   const tableManager = createTableManager();

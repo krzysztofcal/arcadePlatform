@@ -146,6 +146,17 @@ const assertCanonicalLockKey = (queries, expectedKey) => {
 
 const run = async () => {
   {
+    for (const tableId of ['not-a-uuid', '', null, 123, {}, [], '00000000-0000-4000-8000-000000000123']) {
+      const queries = [];
+      const response = await callQuickSeat(makeHandler({ mode: 'already_seated', queries }), { tableId });
+      assert.equal(response.statusCode, 200, 'Online ignores optional tableId');
+      assert.equal(JSON.parse(response.body).tableId, 'table-human');
+      const lookup = queries.find(q => q.query.includes('join public.poker_seats s'));
+      assert.equal(lookup.params.length, 2, 'Online already-seated lookup is not scoped to optional tableId');
+      assert.doesNotMatch(lookup.query, /and t.id = \$3/);
+    }
+  }
+  {
     for (const tableId of ['not-a-uuid', '', null, 123, {}, []]) {
       const queries = [];
       const response = await callQuickSeat(makeHandler({ mode: 'create', queries, balance: 550 }), { mode: 'single_player', tableId, requestId: singleRequestId('invalid-table') });

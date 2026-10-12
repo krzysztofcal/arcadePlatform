@@ -186,6 +186,16 @@ export async function handleJoinCommand({ frame, ws, connState, sessionStore, ta
   }
 
   const currentMeta = typeof tableManager.tableMeta === "function" ? tableManager.tableMeta(tableId) : ensured?.table?.tableMeta;
+  if (!authoritativeJoinRequired && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(tableId)
+    && typeof currentMeta?.isSinglePlayer !== "boolean") {
+    sendCommandResult(ws, connState, {
+      requestId: frame.requestId ?? null,
+      tableId,
+      status: "rejected",
+      reason: "temporarily_unavailable"
+    });
+    return;
+  }
   if (currentMeta?.isSinglePlayer === true && !authoritativeJoinRequired) {
     klog("ws_join_single_player_non_authoritative_rejected", {
       tableId,

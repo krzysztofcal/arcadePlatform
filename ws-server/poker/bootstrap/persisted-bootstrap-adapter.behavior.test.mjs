@@ -588,23 +588,26 @@ test("adapter carries is_single_player flag into runtime tableMeta on bootstrap/
   assert.equal(bootstrapped.table.tableMeta.buyIn, 500);
 });
 
-test("adapter defaults isSinglePlayer to false when omitted or false", () => {
-  const multiplayer = adaptPersistedBootstrap({
-    tableId: "table_multi_bootstrap",
-    tableRow: {
-      id: "table_multi_bootstrap",
-      max_players: 6,
-      status: "OPEN",
-      buy_in: 1000,
-      stakes: { sb: 10, bb: 20 },
-      lifecycle_kind: "STANDARD"
-    },
-    seatRows: [],
-    stateRow: { version: 0, state: { tableId: "table_multi_bootstrap", phase: "INIT", seats: [], stacks: {} } }
-  });
+test("adapter preserves unknown mode and trusts an explicit Online flag", () => {
+  for (const isSinglePlayer of [undefined, false]) {
+    const multiplayer = adaptPersistedBootstrap({
+      tableId: "table_multi_bootstrap",
+      tableRow: {
+        id: "table_multi_bootstrap",
+        max_players: 6,
+        status: "OPEN",
+        buy_in: 1000,
+        stakes: { sb: 10, bb: 20 },
+        lifecycle_kind: "STANDARD",
+        is_single_player: isSinglePlayer
+      },
+      seatRows: [],
+      stateRow: { version: 0, state: { tableId: "table_multi_bootstrap", phase: "INIT", seats: [], stacks: {} } }
+    });
 
-  assert.equal(multiplayer.ok, true);
-  assert.equal(multiplayer.table.tableMeta.isSinglePlayer, false);
+    assert.equal(multiplayer.ok, true);
+    assert.equal(multiplayer.table.tableMeta.isSinglePlayer, isSinglePlayer === false ? false : null);
+  }
 });
 
 test("tableManager hydrates persisted single player table with isSinglePlayer: true upon restart", async () => {

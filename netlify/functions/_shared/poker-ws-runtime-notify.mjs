@@ -263,7 +263,7 @@ export async function notifyWsLobbyMaterialize({
         maxPlayers,
         stakes,
         buyIn,
-        ...(isSinglePlayer === true ? { isSinglePlayer: true } : {})
+        isSinglePlayer: isSinglePlayer === true
       }),
       signal: controller.signal
     });

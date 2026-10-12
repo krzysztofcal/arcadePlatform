@@ -14,9 +14,17 @@
 
 ### Owner review amendments — five findings
 
+### Final two-finding amendment
+
+- Preserve unknown persisted-table mode as `isSinglePlayer: null` in `table-manager.mjs` and the existing bootstrap adapter; non-authoritative handler/direct manager attachment fail closed until trusted metadata is available. The existing positive seat proof from a successful authoritative executor is still accepted; observe-only cannot use that exception. Server-created non-UUID ephemeral/guest rooms remain explicit Online; a UUID DB table cannot be synthesized as Online.
+- Exclude unknown UUID mode from `buildLobbyTableEntry()` so a rejected synthetic table cannot pollute the Online registry. Extend the existing backend lobby projection test, not UI rendering tests.
+- Keep normal materialization functional by carrying explicit boolean mode through existing runtime notifier/server endpoint. Missing legacy notification metadata stays unknown until DB hydration; trusted mode is immutable once known.
+- Restrict optional `tableId` validation/scoping to Single Player; Online ignores all optional tableId values and uses its original unscoped already-seated lookup.
+- Extend existing WS handler/manager and Quick Seat tests, including missing notification/loader, default UUID metadata, explicit trusted Online mode, known SP fail-closed and Online legacy Resume. No migration change or shared DB operation.
+
 - Measure `selectSinglePlayerTableByRequestId()` using EXPLAIN ANALYZE/BUFFERS in isolated PGlite with 250,000 request rows and 10,000 tables. Add a separate forward-only partial `(user_id, request_id)` QUICK_SEAT index only if the plan proves need; classify and hash it in the existing manifest/guard.
 - Deny Single Player RESTRICTED table access before active-seat rejoin success; Online rejoin remains unchanged.
-- Reject explicitly invalid `tableId` with `400 invalid_table_id`; normalize/validate start request IDs only in Single Player. Extend existing endpoint regression tests.
+- Reject explicitly invalid Single Player `tableId` with `400 invalid_table_id`; normalize/validate start request IDs only in Single Player. Extend existing endpoint regression tests.
 - Remove the lobby's alternative count-based table limit. Let existing backend caps decide; show explicit active/pending limit errors and clear definitive rejected start intents. Existing cap tests remain authoritative; no UI suite.
 - Raise Resume selector touch height to 44px and synchronize the minimum-bot description with capacity-clamped minimum 2.
 - Re-run existing local/domain/WS checks, syntax, CSP, migration guard and independent review; export the complete final patch. No publication or deployment.

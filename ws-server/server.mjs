@@ -1707,7 +1707,8 @@ function buildLobbyTableEntry(tableId) {
   }
   const tableSnapshot = tableManager.tableSnapshot(tableId, null);
   const tableMeta = tableManager.tableMeta(tableId);
-  if (tableMeta?.isSinglePlayer === true) {
+  if (tableMeta?.isSinglePlayer === true
+    || (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(tableId) && typeof tableMeta?.isSinglePlayer !== "boolean")) {
     return null;
   }
   const seats = Array.isArray(tableSnapshot?.seats) ? tableSnapshot.seats : [];
@@ -4622,7 +4623,7 @@ async function handleInternalLobbyMaterialize(req, res) {
       maxPlayers,
       buyIn,
       stakes: canonicalStakes,
-      ...(isSinglePlayer ? { isSinglePlayer: true } : {})
+      ...(typeof payload?.isSinglePlayer === "boolean" ? { isSinglePlayer } : {})
     },
     nowMs: Date.now()
   });
