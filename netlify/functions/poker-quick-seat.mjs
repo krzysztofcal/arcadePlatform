@@ -149,7 +149,7 @@ where t.status = 'OPEN'
   and coalesce(t.is_single_player, false) = $2
   ${isSinglePlayer ? "and t.created_by = $1" : ""}
   ${tableIdFilter}
-order by coalesce(s.last_seen_at, s.created_at) desc, t.last_activity_at desc nulls last, t.created_at desc
+order by coalesce(s.last_seen_at, s.created_at) desc, t.last_activity_at desc nulls last, t.created_at desc, t.id desc
 limit 1;
     `,
     params
@@ -401,7 +401,7 @@ export async function handler(event) {
         }
       }
 
-      const progression = await readPokerProgression(tx, { userId: auth.userId });
+      const progression = await readPokerProgression(tx, { userId: auth.userId, isSinglePlayer });
       progression.pokerAccess = { effectiveClass: await readQuickSeatEffectiveClass(tx, auth.userId) };
       if (progression.pokerAccess.effectiveClass !== "NORMAL"
         && progression.pokerAccess.effectiveClass !== "SLOW"
@@ -431,6 +431,27 @@ export async function handler(event) {
           return { kind: "unavailable", reason: "seat_not_found" };
         }
 
+        const replayRows = await selectSinglePlayerTableByRequestId(tx, { userId: auth.userId, requestId });
+        if (replayRows?.[0]?.id) {
+          const replayed = replayRows[0];
+          if (selectedBuyIn !== null && Number(replayed.buy_in) !== selectedBuyIn) {
+            return { kind: "invalid_buy_in" };
+          }
+          if (String(replayed.status || "").toUpperCase() !== "OPEN") {
+            return { kind: "table_closed" };
+          }
+          await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [replayed.id]);
+          return {
+            kind: "recommended",
+            tableId: replayed.id,
+            seatNo: 1,
+            strategy: "idempotent_replay",
+            buyIn: replayed.buy_in,
+            stakes: replayed.stakes,
+            isSinglePlayer: true
+          };
+        }
+
         progression.availableBuyIns = (progression.availableBuyIns || []).filter((b) => b <= 1000);
         progression.enabledBuyIns = (progression.enabledBuyIns || []).filter((b) => b <= 1000);
 
@@ -452,27 +473,6 @@ export async function handler(event) {
             buyIn: firstTier?.buyIn ?? null,
             requiredBuyIn: firstTier?.buyIn ?? null,
             requiredBankroll: firstTier?.unlockBankroll ?? null
-          };
-        }
-
-        const replayRows = await selectSinglePlayerTableByRequestId(tx, { userId: auth.userId, requestId });
-        if (replayRows?.[0]?.id) {
-          const replayed = replayRows[0];
-          if (selectedBuyIn !== null && Number(replayed.buy_in) !== selectedBuyIn) {
-            return { kind: "invalid_buy_in" };
-          }
-          if (String(replayed.status || "").toUpperCase() !== "OPEN") {
-            return { kind: "table_closed" };
-          }
-          await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [replayed.id]);
-          return {
-            kind: "recommended",
-            tableId: replayed.id,
-            seatNo: 1,
-            strategy: "idempotent_replay",
-            buyIn: replayed.buy_in,
-            stakes: replayed.stakes,
-            isSinglePlayer: true
           };
         }
 

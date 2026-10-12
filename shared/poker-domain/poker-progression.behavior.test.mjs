@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  evaluatePokerBuyInAccess,
   calculateUnlockBankroll,
   evaluatePokerProgression,
   readPokerBankroll,
@@ -80,6 +81,16 @@ test("the 100 CH tier unlocks at exactly 100 CH while higher tiers keep their bu
   assert.equal(atMinimum.tiers.find((tier) => tier.buyIn === 100)?.unlockBankroll, 100);
   assert.equal(atMinimum.tiers.find((tier) => tier.buyIn === 500)?.unlockBankroll, 550);
   assert.equal(atMinimum.tiers.find((tier) => tier.buyIn === 1_000)?.unlockBankroll, 1_100);
+});
+
+test("Single Player keeps enabled unlocked low tiers when Online advances to higher tiers", () => {
+  const tiers = [100, 500, 1000, 2500, 5000, 10000];
+  const input = { balance: 11000, tiers, enabledBuyIns: tiers };
+  assert.deepEqual(evaluatePokerProgression(input).availableBuyIns, [10000, 5000]);
+  assert.deepEqual(evaluatePokerProgression({ ...input, isSinglePlayer: true }).availableBuyIns, [1000, 500, 100]);
+  assert.equal(evaluatePokerBuyInAccess({ ...input, buyIn: 1000, isSinglePlayer: true }).eligible, true);
+  assert.equal(evaluatePokerBuyInAccess({ ...input, buyIn: 2500, isSinglePlayer: true }).eligible, false);
+  assert.deepEqual(evaluatePokerProgression({ ...input, enabledBuyIns: [100, 1000, 5000], isSinglePlayer: true }).availableBuyIns, [1000, 100]);
 });
 
 

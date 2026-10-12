@@ -1,8 +1,8 @@
 # Tasks: Poker Single Player vs Bots (#1077)
 
-**Source:** [spec.md](spec.md), [plan.md](plan.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)  
-**Baseline:** `main` (`e7fd0ce2`)  
-**State:** Owner approved Variant B. Local implementation in progress. No migrations pushed to remote.
+**Source:** [spec.md](spec.md), [plan.md](plan.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)
+**Baseline:** AGY `e7fd0ce2`; current main integrated locally at `8f691d65`.
+**State:** AGY handoff recovered and reviewed locally; two release gates remain. No push, PR, Stage writes or deployment.
 
 ---
 
@@ -36,7 +36,7 @@
   - Quick Seat: dedicated tables, isolation, `requestId` idempotency deduplication, early RESTRICTED 403, deterministic multi-table resume.
   - Authoritative Join: fail-fast rejection of unauthorized humans, second humans, > 1000 CH buy-in, early RESTRICTED rejection, atomic bot rollback.
   - WS Server: non-authoritative join fail-closed, observe-only fail-closed, `tableManager.join()` human conflict guard, restart/bootstrap hydration.
-- [x] **T009 / Verification:** Syntax (225 files), CSP inline hash check (55 files), and repository test suite execution (0 failures).
+- [x] **T009 / Verification:** Current syntax (226 files), CSP inline hash check (55 documents), and repository local test runner (146 registered groups, exit 0). Migration validity passes isolated PGlite checks; repository migration manifest guard fails (T019).
 
 ---
 
@@ -44,4 +44,14 @@
 
 - [x] **T010 / Code review package:** Prepare complete unified diff / patch against `origin/main` for owner code review.
 - [ ] **T011 / Deployment gate:** Await owner GO before pushing migration or executing WS deploy / Stage operations.
-- [ ] **T012 / Handoff:** Present diff, test results, phased rollout plan, and breaking impacts.
+- [x] **T012 / Handoff:** Record AGY commits, baseline, review findings, verification, remaining release gates and phased rollout in `handoff-review.md`.
+
+## Phase 5 — VPS handoff review (2026-10-12)
+
+- [x] **T013 / Recovery:** Import all six original AGY commits to arcadePlatform2; preserve source checkout, original target branch and backup of AGY HEAD. Integrate latest main without resetting or overwriting changes.
+- [x] **T014 / Four requested findings:** Verify visible multi-table Resume, CLOSED intent rejection, V2 bot-funding error and early locked RESTRICTED check; preserve selected Resume table across re-render.
+- [x] **T015 / Eligibility:** Use separate <=1000 CH Single Player eligibility in progression, Quick Seat, table access and authoritative JOIN. Extend existing fundamental tests for high bankroll, enabled tiers and NORMAL/SLOW admission.
+- [x] **T016 / Replay and funding:** Replay intent before current tier validation; retain closed error on changed bankroll. Require at least two bots capacity permitting and cover monetary rollback after partial bot funding.
+- [x] **T017 / Lock ordering:** Admin access mutation takes the existing user slot lock before account/table locks; propagation test verifies the order. Independent review confirms owner JOIN/rejoin serialization.
+- [ ] **T018 / Post-purge intent contract:** Owner decision pending on permanent durable request identity versus deduplication bounded by retained tables. Current cascade behavior is a known limitation, not a completed permanent guarantee.
+- [ ] **T019 / Migration release compatibility:** Resolve Production manifest guard rejecting the added local migration through a separately reviewed minimal manifest/guard change. Do not add Production migration copies or apply Stage implicitly.

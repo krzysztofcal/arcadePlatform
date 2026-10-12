@@ -2146,8 +2146,8 @@
     }
 
     function renderSingleTiers(){
-      var singleOptions = progressionState && Array.isArray(progressionState.availableBuyIns)
-        ? progressionState.availableBuyIns.filter(function(value){ return Number.isSafeInteger(value) && value > 0 && value <= 1000; }) : [];
+      var singleOptions = progressionState && Array.isArray(progressionState.singlePlayerAvailableBuyIns)
+        ? progressionState.singlePlayerAvailableBuyIns.filter(function(value){ return Number.isSafeInteger(value) && value > 0 && value <= 1000; }) : [];
       if (singleOptions.indexOf(selectedSingleBuyIn) === -1){
         selectedSingleBuyIn = singleOptions.length ? singleOptions[0] : null;
       }
@@ -2162,6 +2162,7 @@
         singleResumeShell.hidden = !hasResume;
         if (hasResume){
           if (singleResumeSelect){
+            var selectedResumeTableId = singleResumeSelect.value;
             singleResumeSelect.hidden = resumeTables.length <= 1;
             singleResumeSelect.innerHTML = '';
             resumeTables.forEach(function(tbl, idx){
@@ -2174,6 +2175,7 @@
               opt.textContent = label;
               singleResumeSelect.appendChild(opt);
             });
+            if (resumeTables.some(function(tbl){ return tbl.id === selectedResumeTableId; })) singleResumeSelect.value = selectedResumeTableId;
           }
           if (singleResumeBtn){
             var singleTable = resumeTables[0];

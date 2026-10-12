@@ -701,6 +701,14 @@ const run = async () => {
     const closedRetryQueries = queries.slice(queriesBeforeClosedRetry);
     assert.equal(closedRetryQueries.some((q) => q.query.includes("insert into public.poker_tables")), false, "closed table retry must not create table");
 
+    const lowBalanceHandler = makeHandler({ mode: "create", queries, balance: 0, storedRequests });
+    const responseClosedLowBalance = await callQuickSeat(lowBalanceHandler, { mode: "single_player", buyIn: 500, requestId: "req-intent-1" });
+    assert.equal(responseClosedLowBalance.statusCode, 409, "closed intent must remain closed after bankroll changes");
+    assert.deepEqual(JSON.parse(responseClosedLowBalance.body), { error: "table_closed" });
+    storedRequests.get("req-intent-1").status = "OPEN";
+    const responseOpenLowBalance = await callQuickSeat(lowBalanceHandler, { mode: "single_player", buyIn: 500, requestId: "req-intent-1" });
+    assert.equal(responseOpenLowBalance.statusCode, 200, "replay recommends original table; JOIN still checks fresh eligibility");
+
     // NEW GAME with DIFFERENT requestId creates distinct dedicated table-2 (does NOT return table-1 with already_seated!)
     const responseNewGame = await callQuickSeat(handler, { mode: "single_player", maxPlayers: 6, buyIn: 500, requestId: "req-intent-2" });
     assert.equal(responseNewGame.statusCode, 200);
@@ -769,8 +777,8 @@ const run = async () => {
       mode: "create",
       queries,
       notifications,
-      balance: 10000,
-      enabledBuyIns: [100, 500, 1000]
+      balance: 11000,
+      enabledBuyIns: [100, 500, 1000, 2500, 5000, 10000]
     });
     const response = await callQuickSeat(handler, {
       mode: "single_player",

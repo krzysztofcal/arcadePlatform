@@ -54,6 +54,7 @@ The owner approved **Variant B with corrections**:
 
 ### SP-004 — Economy, Hard 1000 CH Cap, and Atomic Bot Funding
 - **Hard 1000 CH Buy-In Cap:** Single Player tables accept **only currently enabled/unlocked tiers <= 1000 CH** (100, 500, 1000 CH if available).
+  - Select all eligible Single Player tiers before applying any Poker Online highest-two window. A large bankroll must not hide 100/500/1000 CH; `singlePlayerAvailableBuyIns` is a separate progression response field. Poker Online retains its existing window.
   - Enforced in `poker-quick-seat.mjs` creation and authoritatively in `executePokerJoinAuthoritative()`.
   - Normal Poker Online multiplayer tables retain all higher tiers without change.
 - **Immediate RESTRICTED Fail-Fast:**
@@ -72,6 +73,7 @@ The owner approved **Variant B with corrections**:
   - Conscious "New Game" actions generate a new `requestId`, ensuring a brand-new dedicated table is created rather than reusing an old pending table.
 - **Deterministic Resume:**
   - `selectExistingActiveSeat()` orders active seats deterministically by `coalesce(s.last_seen_at, s.created_at) desc`, and supports explicit `tableId` scoping when provided.
+  - Use table ID as the final ordering tie-breaker; preserve the user's dropdown selection across progression updates.
 - Normal table list and WS lobby exclude Single Player tables (`buildLobbyTableEntry` returns `null`).
 - In `poker/index.html` and `poker/poker.js`:
   - Activate the Single Player card.
@@ -83,6 +85,13 @@ The owner approved **Variant B with corrections**:
 - Tables containing the human player receive `has_human_participant = true` upon successful join.
 - Never treated as 7-day bot-only tables (#891). Standard human-table close/settlement/escrow retention policies (#923) apply.
 - Normal table janitor and inactive session cleanup remain in effect.
+
+### 2026-10-12 review gates still open
+
+- Retained CLOSED tables reject repeated Quick Seat request IDs with `409 table_closed`, even if bankroll/tier eligibility changed. Authoritative JOIN still checks current eligibility for fresh seats.
+- Physical table purge cascades `poker_requests`; the current mechanism cannot promise permanent deduplication after that purge. Owner clarification is pending: durable independent intent identity versus deduplication bounded by existing retention. Do not treat indefinite deduplication as verified or suppress cleanup to retain all closed tables.
+- Early Single Player account access uses `lock: true`; administrative overrides take the existing per-user slot lock before account/table row locks, serializing against owner JOIN/rejoin.
+- The repository migration guard rejects the new local migration because the Production manifest is exhaustive for the older 109-file baseline. Local schema validity is verified, but releasing the migration requires a separately reviewed manifest/guard change without automatically preparing Production replacements.
 
 ---
 

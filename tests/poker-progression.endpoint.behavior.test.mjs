@@ -25,7 +25,11 @@ function makeHandler({ poolSchema = true, authResult, progression, calls, unsafe
     beginSql: async (fn) => fn({ unsafe: async (sql, params) => String(sql).includes("to_regclass") ? [{ available: poolSchema }] : (unsafe || fallbackUnsafe)(sql, params) }),
     readPokerProgression: async (_tx, options) => {
       calls.progression.push(options);
-      return progression;
+      return progression?.tiers ? progression : {
+        ...progression,
+        tiers: (progression?.availableBuyIns || []).map((buyIn) => ({ buyIn })),
+        enabledBuyIns: progression?.availableBuyIns || []
+      };
     },
     checkWsBuyInCapability
   });
@@ -81,6 +85,9 @@ test("poker progression endpoint reads progression only for the verified user", 
       balance: 550,
       highestUnlockedBuyIn: 500,
       availableBuyIns: [500, 100],
+      tiers: [{ buyIn: 500 }, { buyIn: 100 }],
+      enabledBuyIns: [500, 100],
+      singlePlayerAvailableBuyIns: [100, 500],
       pokerAccess: {
         automaticClass: "NORMAL",
         override: "AUTO",
@@ -280,6 +287,33 @@ test("poker progression returns active Single Player tables for user resume", as
       { id: "sp-table-1", buyIn: 500, stakes: { sb: 5, bb: 10 } },
       { id: "sp-table-2", buyIn: 100, stakes: { sb: 1, bb: 2 } }
     ]);
+  } finally {
+    if (previous === undefined) delete process.env.CHIPS_ENABLED;
+    else process.env.CHIPS_ENABLED = previous;
+  }
+});
+
+test("high-bankroll progression offers Single Player tiers independently and allows its owner table", async () => {
+  const previous = process.env.CHIPS_ENABLED;
+  process.env.CHIPS_ENABLED = "1";
+  try {
+    const tiers = [100, 500, 1000, 2500, 5000, 10000];
+    const handler = makeHandler({
+      authResult: { valid: true, userId: "sp-player" },
+      progression: evaluatePokerProgression({ balance: 11000, tiers, enabledBuyIns: tiers }),
+      calls: { tokens: [], progression: [] },
+      unsafe: async (sql) => {
+        if (sql.includes("select poker_auto_class")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+        if (sql.includes("select id, status, buy_in, stakes")) return [{ id: "sp-table", status: "OPEN", buy_in: 1000, stakes: { sb: 10, bb: 20 }, is_single_player: true, created_by: "sp-player" }];
+        return [];
+      }
+    });
+    const response = await handler({ httpMethod: "GET", queryStringParameters: { tableId: "sp-table" }, headers: { origin, authorization: "Bearer token" } });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.availableBuyIns, [10000, 5000]);
+    assert.deepEqual(body.singlePlayerAvailableBuyIns, [1000, 500, 100]);
+    assert.equal(body.tableAccess.allowed, true);
   } finally {
     if (previous === undefined) delete process.env.CHIPS_ENABLED;
     else process.env.CHIPS_ENABLED = previous;

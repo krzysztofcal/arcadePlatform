@@ -1,7 +1,7 @@
 import { hasPokerPoolSchema, readPokerAccessSnapshot } from "../../shared/poker-domain/bot-access.mjs";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { checkWsBuyInCapability } from "./_shared/poker-ws-runtime-notify.mjs";
-import { isConfiguredPokerBuyIn, readPokerProgression } from "../../shared/poker-domain/poker-progression.mjs";
+import { evaluatePokerProgression, isConfiguredPokerBuyIn, readPokerProgression } from "../../shared/poker-domain/poker-progression.mjs";
 import { DEFAULT_CASH_TABLE_BUY_IN_CHIPS, isCanonicalPokerStakes } from "../../shared/poker-domain/table-economy.mjs";
 
 const mergeHeaders = (next) => ({ ...baseHeaders(), ...(next || {}) });
@@ -48,7 +48,7 @@ where t.status = 'OPEN'
   and s.status = 'ACTIVE'
   and t.is_single_player = true
   and t.created_by = $1
-order by coalesce(s.last_seen_at, s.created_at) desc, t.created_at desc;
+order by coalesce(s.last_seen_at, s.created_at) desc, t.created_at desc, t.id desc;
     `,
     [userId]
   );
@@ -100,7 +100,8 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
   if (!isCanonicalPokerStakes(normalizedBuyIn, normalizeTableStakes(table.stakes))) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: "invalid_table_economy" };
   }
-  if (!progression.availableBuyIns.includes(normalizedBuyIn)) {
+  const availableBuyIns = table.is_single_player === true ? progression.singlePlayerAvailableBuyIns : progression.availableBuyIns;
+  if (!availableBuyIns.includes(normalizedBuyIn)) {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: true, rejoin: false, reason: "buy_in_tier_locked" };
   }
   if (progression.pokerAccess?.effectiveClass === "NORMAL" && table.is_slow_only === true) {
@@ -158,6 +159,12 @@ export async function handler(event) {
     const tableId = requestedTableId(event);
     const result = await beginSql(async (tx) => {
       const progression = await readPokerProgression(tx, { userId: auth.userId });
+      progression.singlePlayerAvailableBuyIns = evaluatePokerProgression({
+        balance: progression.balance,
+        tiers: progression.tiers.map((tier) => tier.buyIn),
+        enabledBuyIns: progression.enabledBuyIns,
+        isSinglePlayer: true
+      }).availableBuyIns;
       const pokerAccess = await readPokerAccess(tx, auth.userId);
       progression.pokerAccess = pokerAccess;
       const rejoinableTableIds = await readRejoinableTableIds(tx, auth.userId);

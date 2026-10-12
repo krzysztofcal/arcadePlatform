@@ -48,7 +48,7 @@ export function calculateUnlockBankroll(buyIn) {
   return normalizedBuyIn + buffer;
 }
 
-export function evaluatePokerProgression({ balance, tiers, enabledBuyIns = [] }) {
+export function evaluatePokerProgression({ balance, tiers, enabledBuyIns = [], isSinglePlayer = false }) {
   const normalizedBalance = normalizeBalance(balance);
   if (!Array.isArray(tiers) || tiers.length === 0) throw configError();
   const normalizedTiers = tiers.map((tier) => normalizePositiveSafeInteger(tier, "poker_buy_in_tiers_config_invalid"));
@@ -59,7 +59,7 @@ export function evaluatePokerProgression({ balance, tiers, enabledBuyIns = [] })
     const unlockBankroll = calculateUnlockBankroll(buyIn);
     const unlocked = normalizedBalance >= unlockBankroll;
     if (unlocked) highestUnlockedIndex = index;
-    if (unlocked && enabledSet.has(buyIn)) playableIndexes.push(index);
+    if (unlocked && enabledSet.has(buyIn) && (!isSinglePlayer || buyIn <= 1000)) playableIndexes.push(index);
     const progressPercent = unlocked
       ? 100
       : Math.max(0, Math.min(99, Math.round((normalizedBalance / unlockBankroll) * 100)));
@@ -74,7 +74,7 @@ export function evaluatePokerProgression({ balance, tiers, enabledBuyIns = [] })
       remaining: Math.max(0, unlockBankroll - normalizedBalance)
     };
   });
-  const availableIndexes = playableIndexes.slice(-2).reverse();
+  const availableIndexes = (isSinglePlayer ? playableIndexes : playableIndexes.slice(-2)).reverse();
   const availableSet = new Set(availableIndexes);
   const tiersWithAvailability = tierRows.map((tier, index) => ({
     ...tier,
@@ -115,15 +115,15 @@ limit 1${lockClause};
   return rows?.[0] ? normalizeBalance(rows[0].balance) : 0;
 }
 
-export async function readPokerProgression(tx, { userId, lock = false } = {}) {
+export async function readPokerProgression(tx, { userId, lock = false, isSinglePlayer = false } = {}) {
   const tiers = resolvePokerBuyInTiers();
   const tierPolicySnapshot = await readPokerTierPolicySnapshot(tx);
   const enabledBuyIns = resolvePokerEnabledBuyIns(tierPolicySnapshot, tiers);
   const balance = await readPokerBankroll(tx, { userId, lock });
-  return evaluatePokerProgression({ balance, tiers, enabledBuyIns });
+  return evaluatePokerProgression({ balance, tiers, enabledBuyIns, isSinglePlayer });
 }
 
-export function evaluatePokerBuyInAccess({ balance, buyIn, tiers, enabledBuyIns = [] }) {
+export function evaluatePokerBuyInAccess({ balance, buyIn, tiers, enabledBuyIns = [], isSinglePlayer = false }) {
   const normalizedBuyIn = Number(buyIn);
   if (!isConfiguredPokerBuyIn(normalizedBuyIn, tiers)) {
     return {
@@ -135,7 +135,7 @@ export function evaluatePokerBuyInAccess({ balance, buyIn, tiers, enabledBuyIns 
     };
   }
   const requiredBankroll = calculateUnlockBankroll(normalizedBuyIn);
-  const progression = evaluatePokerProgression({ balance, tiers, enabledBuyIns });
+  const progression = evaluatePokerProgression({ balance, tiers, enabledBuyIns, isSinglePlayer });
   return {
     eligible: progression.availableBuyIns.includes(normalizedBuyIn),
     configured: true,

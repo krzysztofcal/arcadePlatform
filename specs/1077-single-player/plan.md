@@ -1,12 +1,24 @@
 # Implementation Plan: Poker Single Player vs Bots (#1077)
 
-**Source:** [spec.md](spec.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)  
-**Baseline:** `main` (commit `e7fd0ce2`)  
-**Status:** Approved Variant B implementation complete locally. All fundamental tests, syntax, and CSP checks passing. Ready for owner review (Phase 4). Migration kept local.
+**Source:** [spec.md](spec.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)
+**Baseline:** AGY started on `e7fd0ce2`; handoff integrates current `main` `8f691d65` (2026-10-12).
+**Status:** Implementation and review fixes remain local. Runtime tests, syntax and CSP pass; permanent post-purge request identity and migration-manifest compatibility remain open. No runtime deployment evidence or Stage writes.
 
 ---
 
 ## 1. Minimal Migration Implementation (Local Only)
+
+### Handoff review amendment (2026-10-12)
+
+- Preserve all six AGY commits through `d29736dc`; integrate current main `8f691d65` locally, preserving #1090 Welcome claim behavior.
+- Verify the four requested findings already addressed by AGY's final commit; keep existing Resume, closed replay, funding error and access row lock paths.
+- In `shared/poker-domain/poker-progression.mjs`, add opt-in Single Player eligibility before Online's highest-two tier window. Reuse in Quick Seat, progression response/table access and authoritative JOIN; expose `singlePlayerAvailableBuyIns` to the lobby. Online keeps its current window.
+- Move Quick Seat request replay ahead of current tier eligibility, preserving RESTRICTED denial and changed-buy-in rejection.
+- Enforce at least two configured funded bots (clamped by table capacity) only for Single Player; preserve existing bot maximum/pool rules. Extend existing successful NORMAL/SLOW and partial-funding tests.
+- Serialize administrative access overrides with JOIN using `shared/poker-domain/table-participation.mjs::lockUserTableSlots()` before account/table row locks; extend the existing propagation test.
+- Preserve selected Resume table through lobby re-render and add unique table ID as final ordering tie-breaker.
+- Audit physical-purge idempotency separately: current request rows cascade with table deletion. Durable identity beyond retention requires owner contract clarification; do not introduce an independent idempotency subsystem silently.
+- Verification: existing focused domain/endpoint/WS tests, existing full local runner, syntax, CSP and local SQL migration checks. No push, PR, Stage writes or deploys.
 
 Add forward-only migration `supabase/migrations/20261011200000_poker_single_player_table_flag.sql`:
 - `alter table public.poker_tables add column if not exists is_single_player boolean not null default false;`

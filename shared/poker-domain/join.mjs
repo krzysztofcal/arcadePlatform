@@ -958,7 +958,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const tiers = resolvePokerBuyInTiers();
       const enabledBuyIns = resolvePokerEnabledBuyIns(joinAccess.tierPolicySnapshot, tiers);
       const bankroll = bankrollForAccess;
-      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers, enabledBuyIns });
+      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers, enabledBuyIns, isSinglePlayer });
       if (!access.configured) throw makeError("invalid_buy_in");
       if (!access.eligible) {
         throw makeError("buy_in_tier_locked", null, {
@@ -1090,7 +1090,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         ? computeTargetBotCount({
           maxPlayers,
           humanCount: humanCountAfterJoin,
-          minBots: botCfg.minPerTable,
+          minBots: isSinglePlayer ? Math.max(2, botCfg.minPerTable) : botCfg.minPerTable,
           maxBots: botCfg.maxPerTable
         })
         : 0;
@@ -1116,7 +1116,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       });
       const expectedBotCountAfterSeed = seededBots.length;
       if (isSinglePlayer) {
-        const minPlayableBots = Math.max(1, Math.min(botCfg.minPerTable || 2, maxPlayers - 1));
+        const minPlayableBots = Math.min(Math.max(2, botCfg.minPerTable), maxPlayers - 1);
         if (expectedBotCountAfterSeed < minPlayableBots) {
           throw makeError("single_player_bot_funding_unavailable");
         }

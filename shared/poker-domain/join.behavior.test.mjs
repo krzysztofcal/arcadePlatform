@@ -11,6 +11,7 @@ import { isStateStorageValid } from "../../ws-server/poker/snapshot-runtime/poke
 
 function withBotEnv(fn) {
   const previous = {
+    POKER_BOTS_MIN_PER_TABLE: process.env.POKER_BOTS_MIN_PER_TABLE,
     POKER_BOTS_ENABLED: process.env.POKER_BOTS_ENABLED,
     POKER_BOTS_MAX_PER_TABLE: process.env.POKER_BOTS_MAX_PER_TABLE,
     POKER_BOT_BUYIN_BB: process.env.POKER_BOT_BUYIN_BB,
@@ -2283,13 +2284,14 @@ test("pre-migration first human JOIN preserves historical 100 CH funding provena
   }
 }));
 
-for (const [buyIn, poolClass, systemKey] of [[500,"NORMAL","POKER_BOT_BANKROLL"],[1000,"NORMAL","POKER_BOT_BANKROLL_1000"],[1000,"SLOW","POKER_BOT_SLOW_BANKROLL_1000"],[10_000_000,"NORMAL","POKER_BOT_BANKROLL_10000000"]]) {
-test(`fresh ${poolClass} JOIN ${buyIn} seeds exact canonical class pool`, async () => withBotEnv(async () => {
+for (const [buyIn, poolClass, systemKey, isSinglePlayer = false] of [[500,"NORMAL","POKER_BOT_BANKROLL"],[1000,"NORMAL","POKER_BOT_BANKROLL_1000"],[1000,"SLOW","POKER_BOT_SLOW_BANKROLL_1000"],[10_000_000,"NORMAL","POKER_BOT_BANKROLL_10000000"],[1000,"NORMAL","POKER_BOT_BANKROLL_1000",true],[1000,"SLOW","POKER_BOT_SLOW_BANKROLL_1000",true]]) {
+test(`fresh ${isSinglePlayer ? "Single Player" : "Online"} ${poolClass} JOIN ${buyIn} seeds exact canonical class pool`, async () => withBotEnv(async () => {
   process.env.POKER_BOTS_MAX_PER_TABLE = "2";
+  if (isSinglePlayer) process.env.POKER_BOTS_MIN_PER_TABLE = "1";
   const originalRandom = Math.random;
   Math.random = () => 0;
   const store = {
-    table: { id: "t-bounded-bots", status: "OPEN", max_players: 6, buy_in: buyIn, is_slow_only: poolClass === "SLOW", stakes: calculateCanonicalPokerStakes(buyIn) },
+    table: { id: "t-bounded-bots", status: "OPEN", max_players: 6, buy_in: buyIn, is_single_player: isSinglePlayer, created_by: "human_1", lifecycle_kind: "STANDARD", is_slow_only: poolClass === "SLOW", stakes: calculateCanonicalPokerStakes(buyIn) },
     seatRows: [],
     stateRow: { version: 3, state: { tableId: "t-bounded-bots", seats: [], stacks: {} } },
     ledgerCalls: []
@@ -2343,9 +2345,10 @@ test(`fresh ${poolClass} JOIN ${buyIn} seeds exact canonical class pool`, async 
       requestId: "join-bounded-bots",
       seatNo: 1,
       buyIn,
+      progressionBalance: isSinglePlayer ? 11000 : undefined,
       autoClass: "NORMAL",
       accessOverride: poolClass === "SLOW" ? "FORCE_SLOW" : "AUTO",
-      tierPolicyRows: [{ ...pokerTierPolicyRows([1000])[2], buy_in: buyIn }],
+      tierPolicyRows: isSinglePlayer ? pokerTierPolicyRows([100,500,1000,2500,5000,10000]) : [{ ...pokerTierPolicyRows([1000])[2], buy_in: buyIn }],
       postTransactionFn: async (payload) => {
         store.ledgerCalls.push(payload);
         return { ok: true };
@@ -3060,12 +3063,16 @@ test("Single Player atomic rollback: fails closed if minimum required bots canno
     is_single_player: true
   };
   let tableSeats = [];
-  const ledgerCalls = [];
+  let ledgerCalls = [];
+  let balances = { USER: 1000000, SYSTEM: 500, ESCROW: 0 };
+  let fundedBotAttempts = 0;
 
   await assert.rejects(
     () => executePokerJoinAuthoritative({
       beginSql: async (fn) => {
         const savedSeats = [...tableSeats];
+        const savedBalances = { ...balances };
+        const savedLedgerCalls = [...ledgerCalls];
         try {
           return await fn({
             savepoint: async (_sp, cb) => cb({
@@ -3082,7 +3089,7 @@ test("Single Player atomic rollback: fails closed if minimum required bots canno
               const text = String(sql);
               if (text.includes("to_regclass")) return [{ available: true }];
               if (text.includes("from public.poker_tables")) return [{ ...table }];
-              if (text.includes("from public.poker_seats")) return tableSeats;
+              if (text.includes("from public.poker_seats")) return tableSeats.map((row) => ({ ...row }));
               if (text.includes("from public.poker_access_policy")) return [{ slow_threshold_ch: 2000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 1900, revision: 1 }];
               if (text.includes("from public.poker_bot_tier_policy")) return [{ buy_in: 500, enabled: true, normal_refill_threshold_ch: 1, normal_refill_amount_ch: 1, slow_refill_threshold_ch: 1, slow_refill_amount_ch: 1, revision: 1 }];
               if (text.includes("account_type = 'USER'")) return [{ balance: 1000000, poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
@@ -3099,6 +3106,8 @@ test("Single Player atomic rollback: fails closed if minimum required bots canno
           });
         } catch (err) {
           tableSeats = savedSeats;
+          balances = savedBalances;
+          ledgerCalls = savedLedgerCalls;
           throw err;
         }
       },
@@ -3107,14 +3116,16 @@ test("Single Player atomic rollback: fails closed if minimum required bots canno
       requestId: "req-bot-fail",
       buyIn: 500,
       postTransactionFn: async (payload) => {
-        ledgerCalls.push(payload);
+        if (payload.entries.some((entry) => entry.accountType === "SYSTEM")) fundedBotAttempts += 1;
         for (const entry of payload.entries || []) {
-          if (entry.accountType === "SYSTEM" || entry.kind === "SYSTEM") {
+          if ((balances[entry.accountType] || 0) + entry.amount < 0) {
             const err = new Error("insufficient_funds");
             err.code = "P0001";
             throw err;
           }
         }
+        ledgerCalls.push(payload);
+        for (const entry of payload.entries || []) balances[entry.accountType] += entry.amount;
         return { ok: true, transaction: { id: "tx-1" }, account: { balance: 500 } };
       },
       loadStateForUpdate: async () => ({ ok: true, version: 1, state: { tableId: "t-sp-bot-fail", seats: [], stacks: {} } }),
@@ -3134,6 +3145,9 @@ test("Single Player atomic rollback: fails closed if minimum required bots canno
   );
 
   assert.equal(tableSeats.length, 0, "all seats rolled back atomically");
+  assert.equal(fundedBotAttempts, 2, "one funded bot before the second bot exhausts the pool");
+  assert.deepEqual(balances, { USER: 1000000, SYSTEM: 500, ESCROW: 0 }, "human and partial bot funding rolled back");
+  assert.equal(ledgerCalls.length, 0, "no committed buy-in after rollback");
 });
 
 test("Single Player owner rejoin: succeeds without duplicate buy-in or second debit", async () => {
