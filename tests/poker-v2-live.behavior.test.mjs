@@ -126,10 +126,12 @@ function createHarness(options = {}){
     'pokerV2AmountPreactionWrap', 'pokerV2AmountPreaction', 'pokerV2AmountPreactionText',
     'pokerV2AllInPreactionWrap', 'pokerV2AllInPreaction', 'pokerV2AllInPreactionText',
     'pokerV2AmountInput', 'pokerV2AmountInputWrap', 'pokerV2AmountValue',
-    'pokerTableScreen', 'pokerCenterLayer', 'pokerBootSplash'
+    'pokerTableScreen', 'pokerCenterLayer', 'pokerBootSplash',
+    'pokerSpectatorJoinIntro', 'pokerSpectatorJoinIntroBtn'
   ].forEach((id) => {
     elements[id] = makeElement(id);
   });
+  elements.pokerSpectatorJoinIntro.hidden = true;
   elements.pokerLobbyLink.href = '/poker/';
   elements.pokerV2SeatNo.value = '1';
   elements.pokerV2BuyIn.value = '100';
@@ -6539,4 +6541,279 @@ test('automatic table themes preload the full package and fall back to Classic o
       assert.ok(failed.logs.some((entry) => entry.kind === 'poker_table_theme_load_failed'));
     });
   }
+});
+
+test('poker v2 triggers animated spectator join introduction for eligible spectator and flies to rail', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, false, 'spectator join intro should be visible');
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), true, 'joinBtn should be placeholder target');
+
+  // Advance past attention wobble (1800ms)
+  harness.advanceTime(1850);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.classList.contains('poker-spectator-join-intro--flying'), true, 'should be flying');
+
+  // Advance past flight (550ms)
+  harness.advanceTime(600);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro should be hidden after flight');
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'joinBtn should be active in rail');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'joinBtn should be visible in rail');
+});
+
+test('poker v2 does not trigger spectator join intro for seated player, guest, or shouldAutoJoin', async () => {
+  // 1. Seated player
+  const seatedHarness = createHarness();
+  seatedHarness.fireDomContentLoaded();
+  await seatedHarness.flush();
+  const ws = seatedHarness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: null, status: 'INIT' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await seatedHarness.flush();
+  assert.equal(seatedHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'seated user must not see spectator intro');
+
+  // 2. Guest user
+  const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
+  const guestToken = `aaa.${guestPayload}.zzz`;
+  const guestHarness = createHarness({
+    search: '?tableId=table-1&guest=1',
+    token: null,
+    guestSession: {
+      token: guestToken,
+      tableId: 'table-1',
+      guestId: 'guest_user_1',
+      nickname: 'Guest1234'
+    }
+  });
+  guestHarness.fireDomContentLoaded();
+  await guestHarness.flush();
+  sendInitialTableSnapshot(guestHarness);
+  await guestHarness.flush();
+  assert.equal(guestHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'guest must not see spectator intro');
+
+  // 3. shouldAutoJoin
+  const autoHarness = createHarness({ search: '?tableId=table-1&autoJoin=1' });
+  autoHarness.fireDomContentLoaded();
+  await autoHarness.flush();
+  sendInitialTableSnapshot(autoHarness);
+  await autoHarness.flush();
+  assert.equal(autoHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'autoJoin must not see spectator intro');
+});
+
+test('poker v2 spectator join intro shows at most once per table entry and does not replay on snapshots', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, false);
+
+  // Complete the intro
+  harness.advanceTime(1850);
+  await harness.flush();
+  harness.advanceTime(600);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true);
+
+  // Subsequent snapshot
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'other-user', seat: 2 }] },
+      public: { hand: { handId: 'hand-2', status: 'TURN' }, pot: { total: 50 } },
+      you: null
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'should not replay on subsequent snapshot');
+});
+
+test('poker v2 immediately cancels spectator join intro if eligibility is lost while active', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, false);
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), true);
+
+  // Snapshot arrives where table is closed
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'CLOSED', maxSeats: 6, members: [] },
+      public: { hand: { handId: null, status: 'INIT' }, pot: { total: 0 } },
+      you: null
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro should be immediately cancelled');
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'joinBtn should be hidden on closed table');
+});
+
+test('poker v2 clicking spectator intro button triggers manual join and cancels intro', async () => {
+  let joinSent = false;
+  let joinPayload = null;
+  const harness = createHarness({
+    sendJoin: (payload) => {
+      joinSent = true;
+      joinPayload = payload;
+      return Promise.resolve({ ok: true, seatNo: 1 });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, false);
+
+  harness.elements.pokerSpectatorJoinIntroBtn.click();
+  await harness.flush();
+
+  assert.equal(joinSent, true, 'manual join should be sent');
+  assert.equal(joinPayload.autoSeat, true, 'should send autoSeat true');
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro should be hidden immediately on click');
+});
+
+test('poker v2 respects prefers-reduced-motion by skipping spectator join intro animation', async () => {
+  const harness = createHarness({ reducedMotion: true });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro animation should be skipped');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'static join button should be visible immediately');
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false);
+});
+
+test('poker v2 does not trigger spectator join intro for full table and cancels intro if table fills up', async () => {
+  // 1. Table is full on initial entry (e.g. 6/6 seats occupied)
+  const fullHarness = createHarness();
+  fullHarness.fireDomContentLoaded();
+  await fullHarness.flush();
+
+  const fullMembers = [
+    { userId: 'bot-1', seat: 1 },
+    { userId: 'bot-2', seat: 2 },
+    { userId: 'bot-3', seat: 3 },
+    { userId: 'bot-4', seat: 4 },
+    { userId: 'bot-5', seat: 5 },
+    { userId: 'bot-6', seat: 6 }
+  ];
+
+  const ws = fullHarness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: fullMembers },
+      public: { hand: { handId: 'hand-1', status: 'PREFLOP' }, pot: { total: 30 } },
+      you: { seat: null }
+    }
+  });
+  await fullHarness.flush();
+
+  assert.equal(fullHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'spectator intro must not show for a full table');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible for full table');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'join button must not be target placeholder');
+
+  // 1b. Seat opens up (6/6 -> 5/6 seats occupied) - intro triggers on first actual eligibility
+  const fiveMembers = fullMembers.slice(0, 5);
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: fiveMembers },
+      public: { hand: { handId: 'hand-2', status: 'PREFLOP' }, pot: { total: 30 } },
+      you: { seat: null }
+    }
+  });
+  await fullHarness.flush();
+
+  assert.equal(fullHarness.elements.pokerSpectatorJoinIntro.hidden, false, 'spectator intro should trigger when a seat opens up (6/6 -> 5/6)');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), true, 'join button becomes intro target placeholder');
+
+  // Complete the intro animation
+  fullHarness.advanceTime(1850);
+  await fullHarness.flush();
+  fullHarness.advanceTime(600);
+  await fullHarness.flush();
+
+  assert.equal(fullHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro finishes and hides');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'join button active in rail');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button visible in rail');
+
+  // 1c. Subsequent snapshot (e.g. 5/6 -> 4/6) must not re-trigger intro (runs exactly once)
+  const fourMembers = fullMembers.slice(0, 4);
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 3,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: fourMembers },
+      public: { hand: { handId: 'hand-3', status: 'PREFLOP' }, pot: { total: 30 } },
+      you: { seat: null }
+    }
+  });
+  await fullHarness.flush();
+
+  assert.equal(fullHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'spectator intro does not run again (runs exactly once)');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false);
+
+  // 2. Table has an open seat on entry, but fills up during active intro
+  const activeHarness = createHarness();
+  activeHarness.fireDomContentLoaded();
+  await activeHarness.flush();
+
+  sendInitialTableSnapshot(activeHarness);
+  await activeHarness.flush();
+  assert.equal(activeHarness.elements.pokerSpectatorJoinIntro.hidden, false, 'intro starts for table with open seats');
+  assert.equal(activeHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), true);
+
+  // Snapshot arrives where 6th player sat down making table full
+  const activeWs = activeHarness.getCreateOptions();
+  activeWs.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: fullMembers },
+      public: { hand: { handId: 'hand-1', status: 'PREFLOP' }, pot: { total: 30 } },
+      you: { seat: null }
+    }
+  });
+  await activeHarness.flush();
+
+  assert.equal(activeHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro must be cancelled when table becomes full');
+  assert.equal(activeHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'placeholder class removed');
+  assert.equal(activeHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible');
 });
