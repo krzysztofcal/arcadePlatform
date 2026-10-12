@@ -4156,6 +4156,7 @@
   function refreshLayoutPresentation(){
     layoutRefreshTimer = null;
     render();
+    if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
   }
 
   function scheduleLayoutPresentationRefresh(){
@@ -5985,6 +5986,7 @@
     positionCelebration();
     refreshCelebrationPreview();
     fitTableScene();
+    if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
   }
 
   function setError(message){
@@ -6313,10 +6315,60 @@
 
   function closeHandInfoPanel(restoreFocus){
     var wasOpen = !!(els.handInfoPanel && !els.handInfoPanel.hidden);
-    if (els.handInfoPanel) els.handInfoPanel.hidden = true;
+    if (els.handInfoPanel){
+      els.handInfoPanel.hidden = true;
+      els.handInfoPanel.style.maxHeight = '';
+    }
     if (els.handInfoToggle) els.handInfoToggle.setAttribute('aria-expanded', 'false');
     if (restoreFocus && wasOpen && els.handInfoToggle && typeof els.handInfoToggle.focus === 'function'){
       els.handInfoToggle.focus();
+    }
+  }
+
+  function updateHandInfoPanelBounds(){
+    if (!els.handInfoPanel) return;
+    var isLandscape = (els.scene && els.scene.dataset.orientation === 'landscape') || (window.innerWidth > window.innerHeight);
+    if (isLandscape){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var heroAvatar = document.querySelector('.poker-seat--hero .poker-seat-avatar');
+    if (!heroAvatar){
+      var currentSeat = typeof deriveCurrentSeat === 'function' ? deriveCurrentSeat() : null;
+      if (currentSeat && Number.isInteger(currentSeat.seatNo) && renderedSeatAvatars && renderedSeatAvatars[currentSeat.seatNo]){
+        heroAvatar = renderedSeatAvatars[currentSeat.seatNo];
+      }
+    }
+    if (!heroAvatar || typeof heroAvatar.getBoundingClientRect !== 'function'){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var avRect = heroAvatar.getBoundingClientRect();
+    if (!(avRect.width > 0 && avRect.height > 0)){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var clock = typeof findSeatTurnClock === 'function' ? findSeatTurnClock(heroAvatar) : heroAvatar.querySelector('.poker-seat-turn-clock');
+    var indicatorTop = avRect.top;
+    if (clock && typeof clock.getBoundingClientRect === 'function'){
+      var clockRect = clock.getBoundingClientRect();
+      if (clockRect.height > 0 && clockRect.top < indicatorTop){
+        indicatorTop = clockRect.top;
+      }
+    } else {
+      indicatorTop = avRect.top - 2;
+    }
+    var clearance = 11;
+    var targetBottom = indicatorTop - clearance;
+    var panelTop = els.handInfoPanel.getBoundingClientRect().top;
+    if (!(panelTop > 0)){
+      panelTop = 50;
+    }
+    var availableHeight = Math.floor(targetBottom - panelTop);
+    if (availableHeight > 100){
+      els.handInfoPanel.style.maxHeight = availableHeight + 'px';
+    } else {
+      els.handInfoPanel.style.maxHeight = '';
     }
   }
 
@@ -6327,6 +6379,7 @@
     closeReactionMenu();
     els.handInfoPanel.hidden = false;
     if (els.handInfoToggle) els.handInfoToggle.setAttribute('aria-expanded', 'true');
+    updateHandInfoPanelBounds();
     if (els.handInfoClose && typeof els.handInfoClose.focus === 'function'){
       els.handInfoClose.focus();
     }
@@ -6559,6 +6612,7 @@
         scheduleLayoutPresentationRefresh();
         syncJoinVisibility();
         if (els.socialSettingsPanel && !els.socialSettingsPanel.hidden) positionSocialSettingsPanel();
+        if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
       };
       window.addEventListener('resize', refreshResponsivePresentation);
       window.addEventListener('orientationchange', refreshResponsivePresentation);
