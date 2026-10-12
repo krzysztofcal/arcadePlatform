@@ -3246,6 +3246,15 @@ test('Single Player smoke: Quick Seat ACTIVE confirmation then Leave then WS JOI
   assert.equal(h.queries.some(sql => /insert into|update public.poker_seats/.test(sql)), false);
 });
 
+test('Single Player deferred Leave rejects ACTIVE Resume without seat or financial writes', async () => {
+  const h = createSinglePlayerSmokeHarness({ participated: true, humanActive: true, bots: [{ stack: 78 }, { stack: 90 }] });
+  h.read().state.leftTableByUserId = { 'smoke-owner': true };
+  const before = structuredClone(h.read());
+  await assert.rejects(h.join, error => error.code === 'single_player_participation_ended');
+  assert.deepEqual(h.read(), before); assert.equal(h.attempts.length, 0);
+  assert.equal(h.queries.some(sql => /insert into|update public.poker_seats/.test(sql)), false);
+});
+
 test('Single Player smoke: CLOSED wins over ended participation', async () => {
   const h = createSinglePlayerSmokeHarness({ participated: true, status: 'CLOSED' });
   await assert.rejects(h.join, error => error.code === 'table_closed'); assert.equal(h.attempts.length, 0);

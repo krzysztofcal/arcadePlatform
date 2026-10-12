@@ -142,7 +142,7 @@ const selectExistingActiveSeat = async (tx, { userId, isSinglePlayer = false, ta
   }
   return tx.unsafe(
     `
-select t.id, t.max_players, t.buy_in, t.stakes
+select t.id, t.max_players, t.buy_in, t.stakes${isSinglePlayer ? ", exists(select 1 from public.poker_state ps where ps.table_id = t.id and ps.state -> 'leftTableByUserId' ->> $1 = 'true') as has_left" : ""}
 from public.poker_tables t
 join public.poker_seats s on s.table_id = t.id
 where t.status = 'OPEN'
@@ -431,6 +431,7 @@ export async function handler(event) {
       if (isSinglePlayer) {
         if (requestedTableId) {
           const existingRows = await selectExistingActiveSeat(tx, { userId: auth.userId, isSinglePlayer: true, tableId: requestedTableId });
+          if (existingRows?.[0]?.has_left === true) return { kind: 'single_player_participation_ended' };
           if (existingRows?.[0]?.id) {
             const recommendation = await recommendSeatAtTable(tx, {
               tableId: existingRows[0].id,

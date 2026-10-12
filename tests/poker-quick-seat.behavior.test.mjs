@@ -19,7 +19,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTables = 0, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, resumeTable = null, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
+const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTables = 0, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, resumeTable = null, activeSeatLeft = false, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
   const tableIdsQueue = Array.isArray(createTableIds) ? [...createTableIds] : null;
   return loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
@@ -47,7 +47,7 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTabl
           }
 
           if (text.includes("join public.poker_seats s") && text.includes("s.user_id = $1")) {
-            if (mode === "already_seated" || hasActiveSeat) return [{ id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: { sb: candidateBuyIn / 100, bb: candidateBuyIn / 50 } }];
+            if (mode === "already_seated" || hasActiveSeat) return [{ has_left: activeSeatLeft, id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: { sb: candidateBuyIn / 100, bb: candidateBuyIn / 50 } }];
             return [];
           }
 
@@ -875,6 +875,16 @@ const run = async () => {
     const insertQuery = queries.find((q) => q.query.includes("insert into public.poker_tables"));
     assert.ok(insertQuery);
     assert.equal(insertQuery.params[1], 1000, "inserted table buy_in must be 1000");
+  }
+
+  {
+    const queries = [], notifications = [];
+    const handler = makeHandler({ mode: 'already_seated', queries, notifications, activeSeatLeft: true });
+    const response = await callQuickSeat(handler, { mode: 'single_player', tableId: '00000000-0000-0000-0000-000000000001' });
+    assert.equal(response.statusCode, 409);
+    assert.equal(JSON.parse(response.body).error, 'single_player_participation_ended');
+    assert.equal(notifications.length, 0);
+    assert.equal(queries.some(q => /insert into|update public.poker_seats/.test(q.query)), false);
   }
 
   for (const [status, expectedError] of [['OPEN', 'single_player_participation_ended'], ['CLOSED', 'table_closed']]) {

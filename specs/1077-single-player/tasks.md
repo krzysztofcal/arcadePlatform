@@ -91,3 +91,9 @@
 - [x] **T036 / Exact existing-bot funding:** Require authoritative buy-in amount in the existing receipt query; isolated PGlite rejects balanced -1/+1 funding at buy-in 100 while preserving valid seed/replacement receipts.
 - [x] **T037 / Definitive reconnect refusal:** Do not restore remembered seat after ended participation; deterministic V2 test checks cleared seat, disabled auto-JOIN and no retry while retaining transient-error seat memory.
 - [x] **T038 / P2 local package:** Focused domain/PGlite/V2 237/237, npm 146 groups, syntax 226, CSP 55 and migration guard 111/seven pass; separate read-only review has no P1/P2 findings; small patch against `c8c27901` prepared. No publication, Stage/ledger access or deployment; T035 remains pending.
+
+
+## Deferred Leave Resume amendment (local only)
+
+- [x] **T039 / Resume eligibility:** Exclude Single Player owner marked left from listing; Quick Seat/access and table-locked authoritative JOIN reject before ACTIVE rejoin, without touching stack, seat or financial transfers.
+- [x] **T040 / Local regression package:** Fundamental JOIN/Leave/API/PGlite tests 92/92, npm 146 groups, syntax 226, CSP 55, migration guard 111/seven PASS; separate read-only review has no P1/P2 findings; local patch against `f37f9001` prepared. No push/Stage/ledger/deployment authorization; repeat runtime gate remains pending.

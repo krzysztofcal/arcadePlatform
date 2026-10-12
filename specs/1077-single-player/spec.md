@@ -135,3 +135,8 @@ flowchart TD
 ### Final P2 review amendment
 
 Existing bot seed/replacement receipts must credit exactly the authoritative table buy-in, matched by an equal debit from the correct NORMAL/SLOW pool; balanced undersized funding does not count. On `single_player_participation_ended`, reconnect must retain the cleared remembered seat and disabled auto-JOIN; transient errors retain existing seat memory/retry. No schema, Online or funding-policy change.
+
+
+### Deferred Leave ends Resume eligibility
+
+For Single Player, accepted Leave with authoritative `leftTableByUserId[owner] === true` ends participation even while its seat remains ACTIVE pending hand settlement. Exclude such seats from Resume, reject Quick Seat/access and authoritative JOIN with `single_player_participation_ended` before the ACTIVE rejoin branch. Preserve the seat/stack for existing deferred settlement and cash-out. Ordinary ACTIVE Resume without Leave and Poker Online retain their contracts.

@@ -173,3 +173,8 @@ Main `d45756dc181f679f5754d147edc61fabf62e05e0` integrated in `96272e0781de259fa
 ### Final P2 amendment implementation
 
 Pass `authoritativeBuyIn` into the existing bot validation helper and require `credit.amount = buy-in` in its receipt query; keep matching debit, pool/escrow, seat/state checks and rollback. In `rejoinSeatAfterReconnect().catch()`, restore preferred seat only for errors other than ended participation. Extend the existing PGlite test with -1/+1 at buy-in 100 and existing V2 harness with ended/transient reconnect cases; no additional mechanism or protocol change.
+
+
+### Deferred Leave correction
+
+Use the existing persisted `poker_state.state.leftTableByUserId` for Single Player Resume listing, Quick Seat and table-access preflight. Check locked authoritative state before ACTIVE rejoin in `join.mjs`; CLOSED still wins, and no seat/CH mutation follows ended rejection. Leave, settlement, cash-out, cleanup, frontend messaging and protocol remain unchanged. Fundamental tests cover ACTIVE-but-left refusal/no writes, actual Resume-list SQL with owner isolation, normal ACTIVE/Online compatibility and existing deferred settlement scenarios.
