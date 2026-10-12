@@ -2,7 +2,7 @@
 
 **Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1077  
 **Baseline:** `main` (commit `e7fd0ce2`)  
-**Status:** Owner decision approved Variant B (2026-10-11). Minimal forward-only migration for `is_single_player` authorized locally.
+**Status:** Variant B approved; owner accepted `cadc8f88` and authorized Draft PR publication plus automatic application of exactly two #1077 migrations to shared Stage on 2026-10-12. WS Preview/runtime smoke, Production and merge still require separate GO.
 
 ---
 
@@ -13,7 +13,7 @@ The owner approved **Variant B with corrections**:
 - One simple database `CHECK` constraint: when `is_single_player` is true, `lifecycle_kind = 'STANDARD'` **and** `created_by IS NOT NULL`.
 - Do not modify `lifecycle_kind` values. Do not overload `managed_profile_key`, `stakes`, or `poker_state.state`.
 - Do not add an index by default without measurement justification. The owner review measurement on 250,000 requests/10,000 tables justifies one partial QUICK_SEAT `(user_id, request_id)` lookup index; it does not change uniqueness.
-- **Local Implementation Only:** The migration file and application changes are prepared locally. **Do not push any PR containing `supabase/migrations/**` until explicit owner authorization for the Stage migration side effect.**
+- **Intentional shared Stage effect:** Owner GO authorizes publishing a Draft PR containing `20261011200000_poker_single_player_table_flag.sql` and `20261012095657_poker_single_player_request_lookup.sql`. Existing `DB Stage Apply PR` may apply exactly these two pending migrations to Stage `krydukthwdvccggbyjfw` (system identifier `7656985631720456337`). No Stage Prepare, manual SQL, unauthorized retry, Production operation or WS deployment.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Source:** [spec.md](spec.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)
 **Baseline:** AGY started on `e7fd0ce2`; handoff integrates current `main` `8f691d65` (2026-10-12).
-**Status:** Implementation and review fixes remain local. Both owner-approved local blocker resolutions pass verification: bounded 24h retry identity and strict updated migration inventory. Runtime tests, syntax and CSP pass. No runtime deployment evidence or Stage writes.
+**Status:** Owner accepted final review and authorized Draft PR plus automatic shared Stage application of the two #1077 migrations. Latest main `d45756dc` (#1093 Poker Hands) merged without conflicts, preserving all AGY commits. No WS Preview/runtime, Production or merge authorization.
 
 ---
 
@@ -117,8 +117,8 @@ Add forward-only migration `supabase/migrations/20261011200000_poker_single_play
 ## 2.5 Phased Rollout Sequence
 
 To ensure zero risk of older multiplayer clients seating into Single Player tables before protections are active:
-1. **Phase 1: DB Migration (Schema)** - Add column `is_single_player` with CHECK constraint via `supabase/migrations/20261011200000_poker_single_player_table_flag.sql`. Existing rows default to `false`.
-2. **Phase 2: WS Server Deployment** - Hydrate `is_single_player`, activate non-authoritative fail-closed protections, authoritative join guards, and exclude from public lobby projections. Pinned SHA deployment.
+1. **Phase 1: DB Migration (Schema)** - Draft PR intentionally triggers existing `DB Stage Apply PR` on shared Stage `krydukthwdvccggbyjfw` / system identifier `7656985631720456337`. Apply only `20261011200000_poker_single_player_table_flag.sql` (column/default/CHECK) and `20261012095657_poker_single_player_request_lookup.sql` (measured partial index). Read-only inventory must show exactly these two pending versions. Verify exact PR HEAD, successful workflow and installed objects; no manual SQL or retry. Existing rows default to `false`.
+2. **Phase 2: WS Server Deployment** - Hydrate `is_single_player`, activate non-authoritative fail-closed protections, authoritative join guards, and exclude from public lobby projections. Pinned SHA deployment, only after separate owner GO.
 3. **Phase 3: Netlify Atomic Deployment (Backend + Frontend)** - Deploy Netlify functions (`poker-quick-seat.mjs`, `poker-progression.mjs`) and frontend web assets (`poker/index.html`, `poker/poker.js`, `poker/poker.css`) atomically. Activates candidate isolation, mandatory `requestId` on New Game, early RESTRICTED check, and Single Player UI controls. Older clients continue playing Poker Online without seeing Single Player tables; newer clients are immediately protected by WS.
 
 ---
@@ -155,3 +155,7 @@ To ensure zero risk of older multiplayer clients seating into Single Player tabl
    - Table containing another human rejected with `single_player_human_conflict`.
    - Insufficient bot funding rolls back entire transaction (zero debit, zero seat).
    - Rejoin by owner on unpolluted table succeeds without second debit.
+
+### Publication preflight, 2026-10-12
+
+Main `d45756dc181f679f5754d147edc61fabf62e05e0` integrated in `96272e0781de259fae2af6c27d735f4e0f384a7d`; #1093 UI retained, #1077 join errors preserved. Separate read-only reviewer found no material integration findings. Local checks rerun before publication. Stage inventory: 109 applied, exactly two approved pending, zero unknown; no migration-bearing competing open PR. Netlify API confirms production branch `main` and allowed branch deploys only `main`; PR preview is not runtime-verified until matching WS is explicitly deployed. Stop after Stage workflow and catalog verification.

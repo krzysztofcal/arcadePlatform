@@ -1,8 +1,8 @@
 # Tasks: Poker Single Player vs Bots (#1077)
 
 **Source:** [spec.md](spec.md), [plan.md](plan.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)
-**Baseline:** AGY `e7fd0ce2`; current main integrated locally at `8f691d65`.
-**State:** AGY handoff recovered and reviewed locally; both local blocker fixes verified; runtime deployment gate remains. No push, PR, Stage writes or deployment.
+**Baseline:** AGY `e7fd0ce2`; current main integrated locally at `d45756dc`.
+**State:** Final owner review accepted; GO covers Draft PR publication and automatic two-migration shared Stage apply. Latest main integrated; WS Preview/runtime, Production and merge gates remain.
 
 ---
 
@@ -16,7 +16,7 @@
 
 ## Phase 1 — Database & Backend Implementation (Local Only)
 
-- [x] **T004a / Local migration:** Create `supabase/migrations/20261011200000_poker_single_player_table_flag.sql` adding `is_single_player boolean not null default false` and constraint requiring `lifecycle_kind = 'STANDARD'` and `created_by is not null` when true. (Keep local, do not push).
+- [x] **T004a / Local migration:** Create `supabase/migrations/20261011200000_poker_single_player_table_flag.sql` adding `is_single_player boolean not null default false` and constraint requiring `lifecycle_kind = 'STANDARD'` and `created_by is not null` when true. (Publication and automatic Stage apply now explicitly authorized).
 - [x] **T004b / Dedicated create & request ID:** In `netlify/functions/_shared/poker-table-init.mjs`, persist `is_single_player`. In `netlify/functions/poker-quick-seat.mjs`, create fresh dedicated table for Single Player, support owner-only Resume with explicit `tableId`, reject closed table replay with 409 `table_closed`, enforce buyIn <= 1000 CH, reject RESTRICTED early (403), and protect retries/double-clicks via mandatory `requestId` against `public.poker_requests`. Return active Single Player tables in `poker-progression.mjs`.
 - [x] **T005 / Critical fail-fast gate:** In `shared/poker-domain/join.mjs::executePokerJoinAuthoritative()`, enforce early locked RESTRICTED check (`lock: true`), sole-owner, zero other humans, buyIn <= 1000 CH, and atomic bot funding rollback (fail closed if required bots cannot be funded). Propagate rejection codes in `ws-server/poker/persistence/authoritative-join-adapter.mjs` and `handlers/join.mjs`.
 - [x] **T005b / Non-authoritative fail-closed:** In `ws-server/poker/handlers/join.mjs` and `ws-server/poker/table/table-manager.mjs`, fail-closed (`single_player_authoritative_required`) if Single Player join is attempted without authoritative check or when observe-only is enabled.
@@ -43,7 +43,9 @@
 ## Phase 4 — Review & Deployment Gates
 
 - [x] **T010 / Code review package:** Prepare complete unified diff / patch against `origin/main` for owner code review.
-- [ ] **T011 / Deployment gate:** Await owner GO before pushing migration or executing WS deploy / Stage operations.
+- [x] **T011a / Publication authorization:** Owner GO for push, Draft PR and automatic shared Stage application of exactly the two #1077 migrations.
+- [ ] **T011b / Stage evidence:** Await exact-HEAD DB Stage Apply PR success and read-only verification of column, CHECK, partial index and migration hashes.
+- [ ] **T011c / Runtime deployment gate:** Await separate GO for exact-SHA WS Preview, runtime verification, Production or merge.
 - [x] **T012 / Handoff:** Record AGY commits, baseline, review findings, verification, remaining release gates and phased rollout in `handoff-review.md`.
 
 ## Phase 5 — VPS handoff review (2026-10-12)
@@ -70,3 +72,6 @@
 - [x] **T026 / Online tableId compatibility:** Validate/scope tableId only in Single Player. Existing endpoint test covers malformed, empty, null, wrong-type and valid foreign UUID fields ignored by Online; original seat selection is unscoped.
 - [x] **T027 / Related lobby isolation:** Independent review found cached unknown UUID could pollute Online lobby; projection now excludes it until trusted metadata, verified through existing backend lobby test. No frontend or migration change.
 - [x] **T028 / Final package:** Fresh npm runner (146 groups, exit 0), 328 focused tests, syntax (226 files), CSP (55 documents), migration guard (111 sources/seven replacements) pass; independent re-review has no remaining material findings. Small diff against 86c589b5 and full patch against current-main merge-base prepared. Owner review/deployment gate T011 remains pending.
+
+- [x] **T029 / Main integration:** Merge `d45756dc` (#1093) without conflicts; separate read-only integration review passes.
+- [x] **T030 / Stage publication preflight:** Canonical Stage identity verified, 109 applied / exactly two approved pending / no unknown versions; no competing migration PR; Netlify production branch `main` confirmed through read-only API.
