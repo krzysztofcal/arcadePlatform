@@ -6744,6 +6744,51 @@ test('poker v2 does not trigger spectator join intro for full table and cancels 
   assert.equal(fullHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible for full table');
   assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'join button must not be target placeholder');
 
+  // 1b. Seat opens up (6/6 -> 5/6 seats occupied) - intro triggers on first actual eligibility
+  const fiveMembers = fullMembers.slice(0, 5);
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: fiveMembers },
+      public: { hand: { handId: 'hand-2', status: 'PREFLOP' }, pot: { total: 30 } },
+      you: { seat: null }
+    }
+  });
+  await fullHarness.flush();
+
+  assert.equal(fullHarness.elements.pokerSpectatorJoinIntro.hidden, false, 'spectator intro should trigger when a seat opens up (6/6 -> 5/6)');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), true, 'join button becomes intro target placeholder');
+
+  // Complete the intro animation
+  fullHarness.advanceTime(1850);
+  await fullHarness.flush();
+  fullHarness.advanceTime(600);
+  await fullHarness.flush();
+
+  assert.equal(fullHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro finishes and hides');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'join button active in rail');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button visible in rail');
+
+  // 1c. Subsequent snapshot (e.g. 5/6 -> 4/6) must not re-trigger intro (runs exactly once)
+  const fourMembers = fullMembers.slice(0, 4);
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 3,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: fourMembers },
+      public: { hand: { handId: 'hand-3', status: 'PREFLOP' }, pot: { total: 30 } },
+      you: { seat: null }
+    }
+  });
+  await fullHarness.flush();
+
+  assert.equal(fullHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'spectator intro does not run again (runs exactly once)');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible');
+  assert.equal(fullHarness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false);
+
   // 2. Table has an open seat on entry, but fills up during active intro
   const activeHarness = createHarness();
   activeHarness.fireDomContentLoaded();

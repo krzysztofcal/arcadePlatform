@@ -4284,7 +4284,7 @@
     var maxSeatsCount = Number.isInteger(state.maxSeats) && state.maxSeats > 0 ? state.maxSeats : 6;
     var isTableFull = occupiedSeatsCount >= maxSeatsCount;
 
-    if (seated || isTableFull) {
+    if (seated) {
       spectatorJoinIntroShown = true;
     }
 
