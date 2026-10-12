@@ -12,9 +12,18 @@
 
 ### Owner-approved blocker resolution
 
+### Owner review amendments — five findings
+
+- Measure `selectSinglePlayerTableByRequestId()` using EXPLAIN ANALYZE/BUFFERS in isolated PGlite with 250,000 request rows and 10,000 tables. Add a separate forward-only partial `(user_id, request_id)` QUICK_SEAT index only if the plan proves need; classify and hash it in the existing manifest/guard.
+- Deny Single Player RESTRICTED table access before active-seat rejoin success; Online rejoin remains unchanged.
+- Reject explicitly invalid `tableId` with `400 invalid_table_id`; normalize/validate start request IDs only in Single Player. Extend existing endpoint regression tests.
+- Remove the lobby's alternative count-based table limit. Let existing backend caps decide; show explicit active/pending limit errors and clear definitive rejected start intents. Existing cap tests remain authoritative; no UI suite.
+- Raise Resume selector touch height to 44px and synchronize the minimum-bot description with capacity-clamped minimum 2.
+- Re-run existing local/domain/WS checks, syntax, CSP, migration guard and independent review; export the complete final patch. No publication or deployment.
+
 - `poker-quick-seat.mjs`: validate existing `sp_<base36 milliseconds>_<random suffix>` IDs after `normalizeRequestId()`. New/retried intents expire after 24 hours; accept at most 5 minutes future skew. Retained CLOSED intents keep `409 table_closed`. Resume is independent of start-intent expiry; Online is unchanged.
 - `closed-table-cleanup.mjs`: retain trusted Single Player QUICK_SEAT records for at least 24 hours plus 5 minutes from DB creation, in discovery, final guarded DELETE and status queries, even if configured table retention is shorter. Reuse existing cleanup only.
-- `production-migrations/manifest.json` and `check-db-migrations.mjs`: inventory 110 source files, 54 baseline / 56 missing, category counts 19 shared-safe / 4 stage-only / 33 equivalent. Hash and classify the portable additive flag migration as shared-safe; preserve historical hashes, canonical identities and seven replacements.
+- `production-migrations/manifest.json` and `check-db-migrations.mjs`: inventory 111 source files, 54 baseline / 57 missing, category counts 20 shared-safe / 4 stage-only / 33 equivalent. Hash and classify the portable additive flag migration as shared-safe; preserve historical hashes, canonical identities and seven replacements.
 - Extend existing endpoint and cleanup fundamental tests for timestamp boundaries, replay, purge guards and existing table caps; run local checks and independent review. No remote mutation.
 
 - Preserve all six AGY commits through `d29736dc`; integrate current main `8f691d65` locally, preserving #1090 Welcome claim behavior.
@@ -30,7 +39,7 @@
 Add forward-only migration `supabase/migrations/20261011200000_poker_single_player_table_flag.sql`:
 - `alter table public.poker_tables add column if not exists is_single_player boolean not null default false;`
 - Constraint: `check ((is_single_player is false) or (is_single_player is true and lifecycle_kind = 'STANDARD' and created_by is not null))`
-- No partial index by default.
+- Measured partial lookup index in separate forward-only `supabase/migrations/20261012095657_poker_single_player_request_lookup.sql`: `(user_id, request_id) WHERE kind = 'QUICK_SEAT'`. Retain the existing `(table_id, kind, request_id, user_id)` unique index. Local EXPLAIN confirms direct request lookup replaces table scan; no other index is added.
 - Keep migration local; do not push without owner authorization for Stage apply.
 
 ---
@@ -74,7 +83,7 @@ Add forward-only migration `supabase/migrations/20261011200000_poker_single_play
     - **No Other Humans:** `activeSeatRows` and `state.seats` contain zero other humans (otherwise throw `single_player_human_conflict`).
     - **Fail-Fast Safety:** All checks occur before seat insertion, debit, bot seeding, or state mutation.
   - **Mandatory Bot Funding with Atomic Rollback:**
-    - On fresh Single Player join, calculate required bots (`Math.max(1, botCfg.minPerTable || 2)`).
+    - On fresh Single Player join, calculate required bots (`Math.min(Math.max(2, botCfg.minPerTable), maxPlayers - 1)`).
     - If `seededBots.length < requiredBots`, throw `single_player_bot_funding_unavailable`.
     - This causes `beginSql` to roll back the entire transaction (human buy-in, seat, and partial bot debits all roll back cleanly).
     - `RESTRICTED` accounts fail closed.

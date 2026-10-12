@@ -12,7 +12,7 @@ The owner approved **Variant B with corrections**:
 - Add `is_single_player boolean NOT NULL DEFAULT false` to `public.poker_tables`.
 - One simple database `CHECK` constraint: when `is_single_player` is true, `lifecycle_kind = 'STANDARD'` **and** `created_by IS NOT NULL`.
 - Do not modify `lifecycle_kind` values. Do not overload `managed_profile_key`, `stakes`, or `poker_state.state`.
-- Do not add an index by default without measurement justification.
+- Do not add an index by default without measurement justification. The owner review measurement on 250,000 requests/10,000 tables justifies one partial QUICK_SEAT `(user_id, request_id)` lookup index; it does not change uniqueness.
 - **Local Implementation Only:** The migration file and application changes are prepared locally. **Do not push any PR containing `supabase/migrations/**` until explicit owner authorization for the Stage migration side effect.**
 
 ---
@@ -92,7 +92,7 @@ The owner approved **Variant B with corrections**:
 - Valid start/retry IDs expire after 24 hours; at most 5 minutes future clock skew is accepted. Malformed or farther-future IDs return `400 invalid_request_id`; expired OPEN/missing/purged intents return `409 single_player_request_expired` without creation. At the exact 24-hour boundary the ID remains valid. A retained CLOSED intent keeps `409 table_closed`, even after expiry. A new user action may generate a new ID; retry keeps both ID and original buy-in across eligibility refresh.
 - Existing closed-table cleanup protects trusted Single Player QUICK_SEAT rows for at least 24 hours plus 5 minutes from DB creation, in discovery, guarded DELETE and status eligibility, regardless of shorter table retention configuration. This covers a timestamp accepted 5 minutes ahead of server time; no permanent history, new table/tombstone or separate cleanup is required. Ordinary Online requests keep their existing retention rules.
 - Early Single Player account access uses `lock: true`; administrative overrides take the existing per-user slot lock before account/table row locks, serializing against owner JOIN/rejoin.
-- The immutable flag migration is classified as `shared-safe` with its exact SHA-256 in the Production inventory: 110 source files, 54 baseline/56 missing, categories 19/4/33 and seven unchanged replacements. This classification authorizes no database application or Production action.
+- The immutable flag migration is classified as `shared-safe` with its exact SHA-256 in the Production inventory: 111 source files, 54 baseline/57 missing, categories 20/4/33 and seven unchanged replacements. The separate measured lookup migration is also shared-safe; neither classification authorizes database application or Production action.
 
 ---
 
@@ -106,8 +106,9 @@ flowchart TD
   Phase2 --> Phase3["3. Netlify Atomic Deploy (Backend + Frontend)<br/>poker-quick-seat isolation, mandatory requestId, <=1000 CH tiers, UI activation"]
 ```
 
-1. **Step 1 — Database Migration (Schema):**
+1. **Step 1 — Database Migrations (Schema and Measured Lookup):**
    - Applies forward-only `is_single_player boolean NOT NULL DEFAULT false` with `poker_tables_single_player_chk`.
+   - Applies separate forward-only `20261012095657_poker_single_player_request_lookup.sql` after the flag migration, preserving the existing unique request constraint.
    - Backward-compatible; existing tables and running WS/functions remain unaffected (`is_single_player = false`).
 2. **Step 2 — WebSocket Server Deploy:**
    - Deploys updated WS server with bootstrap hydration of `is_single_player`, lobby exclusion (`buildLobbyTableEntry` returning `null`), and fail-closed non-authoritative join protection (`single_player_authoritative_required`).

@@ -338,15 +338,19 @@ export async function handler(event) {
     || payload?.mode === "single_player"
     || payload?.singlePlayer === true;
 
-  const reqIdResult = normalizeRequestId(payload?.requestId);
+  const requestedTableId = typeof payload?.tableId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.tableId.trim())
+    ? payload.tableId.trim().toLowerCase()
+    : null;
+  if (Object.prototype.hasOwnProperty.call(payload, "tableId") && !requestedTableId) {
+    return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_table_id" }) };
+  }
+
+  const reqIdResult = isSinglePlayer ? normalizeRequestId(payload?.requestId) : { ok: true, value: null };
   if (!reqIdResult.ok && payload?.requestId !== undefined && payload?.requestId !== null) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "invalid_request_id" }) };
   }
   const requestId = reqIdResult.value;
 
-  const requestedTableId = typeof payload?.tableId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.tableId.trim())
-    ? payload.tableId.trim().toLowerCase()
-    : null;
 
   if (isSinglePlayer && !requestedTableId && !requestId) {
     return { statusCode: 400, headers: mergeHeaders(cors), body: JSON.stringify({ error: "missing_request_id" }) };

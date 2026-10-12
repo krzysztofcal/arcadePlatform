@@ -488,7 +488,7 @@ body.poker-lobby .poker-auth-actions{display:flex;flex-direction:column;gap:8px;
 body.poker-lobby .tile--online .tile-copy{bottom:17px;}
 body.poker-lobby .tile--single .tile-copy{bottom:17px;}
 body.poker-lobby .quick-resume-shell{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;}
-body.poker-lobby .quick-resume-select{width:100%;min-height:38px;padding:4px 8px;border:1px solid #f999ff88;border-radius:9px;background:#080e35e6;color:#fce8ff;font-size:12px;font-weight:700;}
+body.poker-lobby .quick-resume-select{width:100%;min-height:44px;padding:4px 8px;border:1px solid #f999ff88;border-radius:9px;background:#080e35e6;color:#fce8ff;font-size:12px;font-weight:700;}
 body.poker-lobby .quick-tiers{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
 body.poker-lobby .quick-tier{flex:1;min-height:44px;min-width:0;padding:5px 4px;border:1px solid #6cffe388;border-radius:9px;background:#080e35e6;color:#e3fff6;font-size:12px;font-weight:800;text-align:center;}
 body.poker-lobby .quick-tier[aria-pressed="true"]{background:#165c52;border-color:#c5ffb4;box-shadow:inset 0 0 0 1px #c5ffb4;}

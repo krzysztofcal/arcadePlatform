@@ -80,6 +80,9 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
     if (normalizedBuyIn && normalizedBuyIn > 1000) {
       return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: "invalid_buy_in" };
     }
+    if (progression.pokerAccess?.effectiveClass === "RESTRICTED") {
+      return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: "single_player_restricted_unavailable" };
+    }
   }
 
   const seatRows = await tx.unsafe(

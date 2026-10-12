@@ -146,6 +146,21 @@ const assertCanonicalLockKey = (queries, expectedKey) => {
 
 const run = async () => {
   {
+    for (const tableId of ['not-a-uuid', '', null, 123, {}, []]) {
+      const queries = [];
+      const response = await callQuickSeat(makeHandler({ mode: 'create', queries, balance: 550 }), { mode: 'single_player', tableId, requestId: singleRequestId('invalid-table') });
+      assert.equal(response.statusCode, 400);
+      assert.deepEqual(JSON.parse(response.body), { error: 'invalid_table_id' });
+      assert.equal(queries.length, 0, 'invalid Resume has no DB effects');
+    }
+    for (const requestId of [{ unexpected: true }, false, [], '', 'x'.repeat(201), '[object PointerEvent]']) {
+      const queries = [];
+      const response = await callQuickSeat(makeHandler({ mode: 'prefer_humans', queries }), { requestId });
+      assert.equal(response.statusCode, 200, 'Online ignores its optional request ID as before');
+      assert.equal(queries.some(q => q.query.includes('from public.poker_requests')), false);
+    }
+  }
+  {
     const originalNow = Date.now;
     const now = 1791806400000;
     Date.now = () => now;
@@ -651,6 +666,7 @@ const run = async () => {
       const handler = makeHandler({ mode: 'create', queries, balance: 550, storedRequests, ...capacity });
       const requestId = singleRequestId(error);
       const denied = await callQuickSeat(handler, { mode: 'single_player', buyIn: 500, requestId });
+      assert.equal(denied.statusCode, 409);
       assert.deepEqual(JSON.parse(denied.body), { error, limit: 4 });
       assert.equal(queries.some(q => q.query.includes('insert into public.poker_tables')), false);
       storedRequests.set(requestId, { id: 'existing-table', buy_in: 500, status: 'OPEN' });

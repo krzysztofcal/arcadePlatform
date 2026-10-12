@@ -2157,7 +2157,6 @@
       var isRestricted = effectiveClass === 'RESTRICTED';
       var resumeTables = getSinglePlayerResumeTables();
       var hasResume = resumeTables.length > 0;
-      var reachedMaxTables = resumeTables.length >= 4;
 
       if (singleResumeShell){
         singleResumeShell.hidden = !hasResume;
@@ -2191,7 +2190,7 @@
 
       if (singleQuickTiers){
         singleQuickTiers.innerHTML = '';
-        singleQuickTiers.hidden = reachedMaxTables || !singleOptions.length;
+        singleQuickTiers.hidden = !singleOptions.length;
         singleOptions.forEach(function(buyIn){
           var node = document.createElement(singleOptions.length > 1 ? 'button' : 'span');
           node.className = singleOptions.length > 1 ? 'quick-tier' : 'quick-tier-label';
@@ -2213,8 +2212,8 @@
         });
       }
       if (singlePlayBtn){
-        singlePlayBtn.textContent = singlePlayInFlight ? 'STARTING…' : singlePlayRequestId ? 'RETRY START' : reachedMaxTables ? 'MAX TABLES (4)' : 'PLAY VS BOTS';
-        singlePlayBtn.disabled = singlePlayInFlight || !lobbyAuthenticated || (!singlePlayRequestId && (!singleOptions.length || reachedMaxTables)) || !accessReady || isRestricted;
+        singlePlayBtn.textContent = singlePlayInFlight ? 'STARTING…' : singlePlayRequestId ? 'RETRY START' : 'PLAY VS BOTS';
+        singlePlayBtn.disabled = singlePlayInFlight || !lobbyAuthenticated || (!singlePlayRequestId && !singleOptions.length) || !accessReady || isRestricted;
         singlePlayBtn.setAttribute('aria-busy', String(singlePlayInFlight));
       }
       if (singleStatus){
@@ -2223,7 +2222,6 @@
           : !accessReady ? 'Poker access temporarily unavailable.'
           : isRestricted ? 'Single Player vs bots is unavailable for restricted accounts.'
           : singlePlayRequestId ? 'Retry starting your ' + formatChips(singlePlayRequestBuyIn) + ' CH table.'
-          : reachedMaxTables ? 'Maximum 4 active tables reached. Resume an existing table.'
           : hasResume ? 'Resume active table or start a new game (≤ 1,000 CH).'
           : !singleOptions.length ? 'Requires bankroll for ≤ 1,000 CH tiers.'
           : 'Dedicated table · 1 human vs bots · max 1,000 CH buy-in.';
@@ -2709,7 +2707,14 @@
           return;
         }
         var msg = err && (err.message || err.code);
-        if (msg === 'single_player_bot_funding_unavailable'){
+        if (msg === 'active_table_limit' || msg === 'pending_table_limit'){
+          setError(errorEl, msg === 'active_table_limit'
+            ? 'Maximum 4 active tables reached across Poker modes. Resume or close an existing table.'
+            : 'Maximum 4 pending tables reached. Complete an existing start or wait for cleanup.');
+          singlePlayRequestId = null;
+          singlePlayRequestBuyIn = null;
+          refreshProgression();
+        } else if (msg === 'single_player_bot_funding_unavailable'){
           setError(errorEl, 'Bot funding pool temporarily unavailable. Please try again later.');
         } else if (msg === 'invalid_buy_in'){
           setError(errorEl, 'Single Player buy-in exceeds maximum limit of 1,000 CH.');

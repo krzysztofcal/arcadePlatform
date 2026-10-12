@@ -36,7 +36,7 @@
   - Quick Seat: dedicated tables, isolation, `requestId` idempotency deduplication, early RESTRICTED 403, deterministic multi-table resume.
   - Authoritative Join: fail-fast rejection of unauthorized humans, second humans, > 1000 CH buy-in, early RESTRICTED rejection, atomic bot rollback.
   - WS Server: non-authoritative join fail-closed, observe-only fail-closed, `tableManager.join()` human conflict guard, restart/bootstrap hydration.
-- [x] **T009 / Verification:** Current syntax (226 files), CSP inline hash check (55 documents), and repository local test runner (146 registered groups, exit 0). Migration validity passes isolated PGlite checks; repository migration manifest guard passes (110 source files, seven unchanged replacements).
+- [x] **T009 / Verification:** Current syntax (226 files), CSP inline hash check (55 documents), and repository local test runner (146 registered groups, exit 0). Migration validity passes isolated PGlite checks; repository migration manifest guard passes (111 source files, seven unchanged replacements).
 
 ---
 
@@ -54,4 +54,12 @@
 - [x] **T016 / Replay and funding:** Replay intent before current tier validation; retain closed error on changed bankroll. Require at least two bots capacity permitting and cover monetary rollback after partial bot funding.
 - [x] **T017 / Lock ordering:** Admin access mutation takes the existing user slot lock before account/table locks; propagation test verifies the order. Independent review confirms owner JOIN/rejoin serialization.
 - [x] **T018 / Bounded intent contract:** Owner approved 24h timestamped start IDs with 5m future skew. API rejects expired/purged IDs, preserves retained CLOSED 409 and request/buy-in retry payload. Existing cleanup protects trusted intent rows for 24h5m; endpoint and isolated PGlite purge tests pass. Online and Resume are unchanged.
-- [x] **T019 / Migration inventory:** Classify immutable additive migration as shared-safe with exact SHA-256; update 54/56 counters and 19/4/33 categories. Guard passes and rejects stale hashes, unclassified entries, incorrect categories/counters. No replacement or DB application.
+- [x] **T019 / Migration inventory:** Classify immutable additive migration as shared-safe with exact SHA-256; update 54/57 counters and 20/4/33 categories. Guard passes and rejects stale hashes, unclassified entries, incorrect categories/counters. No replacement or DB application.
+
+## Phase 6 — Owner CHANGES REQUESTED review
+
+- [x] **T020 / Request lookup:** EXPLAIN ANALYZE/BUFFERS on isolated PGlite (250,000 requests, 10,000 tables) confirms table-first scan; separate measured partial QUICK_SEAT user/request index changes it to direct request lookup. New immutable migration and repeat application validated locally; update manifest to 111 sources/54 baseline/57 missing, 20/4/33 categories, existing 7 replacements.
+- [x] **T021 / Access and input regressions:** Single Player RESTRICTED denied before active-seat tableAccess rejoin success; explicit invalid tableId rejected before DB work; Online optional request IDs ignored. Existing endpoint tests failed before fixes and pass afterward; Online rejoin/legacy request shape coverage retained.
+- [x] **T022 / Backend-owned capacity:** Remove Single Player resume-count admission cap; existing backend active/pending caps remain authoritative. Handle explicit cap responses and clear definitively rejected start intents; existing caps/replay tests and ad-hoc extracted real handler feedback check pass. No maintained UI tests.
+- [x] **T023 / Small corrections:** Resume select min-height 44px; plan reflects minimum 2 bots bounded by maxPlayers-1.
+- [x] **T024 / Review:** Separate read-only subagent reviewed all five fixes, isolation/economy/rollback/TTL/cleanup/Online; no remaining concrete code findings. Full runner (146 groups, exit 0), 296 focused tests, 226-file syntax, 55-document CSP and 111-migration guard pass; export final reviewed HEAD patch. Owner review and T011 remain pending.

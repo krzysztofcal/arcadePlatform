@@ -13,7 +13,7 @@
   },
   "history_policy": {
     "baseline_applied_count": 54,
-    "missing_count": 56,
+    "missing_count": 57,
     "history_repair": "forbidden",
     "apply_directory": "supabase/production-migrations"
   },
@@ -1059,6 +1059,20 @@
       ],
       "omitted_effects": [
         "No Stage or Production application, runtime deployment or feature activation is authorized by this inventory update."
+      ]
+    },
+    {
+      "version": "20261012095657",
+      "file": "20261012095657_poker_single_player_request_lookup.sql",
+      "sha256": "1e0907e2833f1f4ff85c1f8a93b368cf4d57266ce16ed1eb5a8df479e9d048c9",
+      "category": "shared-safe",
+      "status": "awaiting-production-go",
+      "reason": "Measured portable partial user/request lookup index for QUICK_SEAT records; no environment identity, data mutation, uniqueness change or Production replacement required.",
+      "required_effects": [
+        "B-tree (user_id, request_id) WHERE kind = QUICK_SEAT permits intent lookup without a known table_id. Existing unique idempotency index is preserved."
+      ],
+      "omitted_effects": [
+        "No Stage or Production application or runtime deployment is authorized by this inventory update."
       ]
     }
   ],
