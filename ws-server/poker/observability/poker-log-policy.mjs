@@ -190,7 +190,8 @@ register("WARN", "table_lifecycle", [
   "poker_leave_table_close_skipped_human_presence",
   "shared_join_reclaimed_inactive_seat_conflict",
   "shared_join_seat_retry",
-  "ws_join_authoritative_buyin_duplicate_idempotency"
+  "ws_join_authoritative_buyin_duplicate_idempotency",
+  "ws_join_single_player_non_authoritative_rejected"
 ]);
 
 register("ERROR", "accounting", [

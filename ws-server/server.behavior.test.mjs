@@ -9094,7 +9094,7 @@ export async function load(url, context, nextLoad) {
 }
 `, 'gift-adapter-loader.mjs');
   const register = await writeTestModule(`import { register } from 'node:module'; register(${JSON.stringify(new URL('file://' + loader.filePath).href)}, import.meta.url);`, 'gift-register.mjs');
-  const fixtures = { [tableId]: { tableRow: { id: tableId, max_players: 6, status: 'OPEN' }, seatRows: [{ user_id: userId, seat_no: 1, status: 'ACTIVE', is_bot: false }, { user_id: '00000000-0000-4000-8000-000000000003', seat_no: 2, status: 'ACTIVE', is_bot: false }], stateRow: { version: 0, state: {} } } };
+  const fixtures = { [tableId]: { tableRow: { id: tableId, max_players: 6, status: 'OPEN', is_single_player: false }, seatRows: [{ user_id: userId, seat_no: 1, status: 'ACTIVE', is_bot: false }, { user_id: '00000000-0000-4000-8000-000000000003', seat_no: 2, status: 'ACTIVE', is_bot: false }], stateRow: { version: 0, state: {} } } };
   const { port, child } = await createServer({ nodeArgs: ['--import', register.filePath], env: { WS_AUTH_REQUIRED: '1', WS_AUTH_TEST_SECRET: secret, SUPABASE_DB_URL: '', WS_TEST_GIFT_COUNTS_FILE: register.dir + '/counts.json', ...observeOnlyJoinEnv(), ...persistedBootstrapFixturesEnv(fixtures) } });
   try {
     await waitForListening(child, 5000);
