@@ -25,9 +25,9 @@ We have successfully developed and validated an isolated, high-fidelity Proof of
 
 | Asset | Authored Frames | Frame Delay | Nominal FPS | File Size | Dimensions & Channels | Motion & Loop Behavior |
 |---|---|---|---|---|---|---|
-| `idle.webp` | 105 | 33.00 ms | 30.3 | 7.55 MiB | 546×640 RGBA | Continuous seamless loop ($C^1$ periodic sine breath + 7-frame natural blink at $t \approx 1.8$s) |
-| `deal.webp` | 30 | 33.00 ms | 30.3 | 2.16 MiB | 546×640 RGBA | One-shot ($t=0.0 \to 1.0$s); head focus & gaze down toward felt, hands anchored, returns to resting pose |
-| `hand-end.webp` | 36 | 33.00 ms | 30.3 | 2.61 MiB | 546×640 RGBA | One-shot ($t=0.0 \to 1.2$s); gracious head nod, radiant smile to winner, hands anchored, returns to neutral |
+| `idle.webp` | 105 | 33.00 ms | 30.3 | 4.06 MiB | 546×640 RGBA | Continuous seamless loop ($C^1$ sine breath strictly in torso + biological blink strictly inside 9px eye slit). Forehead diff is 0.000. |
+| `deal.webp` | 30 | 33.00 ms | 30.3 | 1.47 MiB | 546×640 RGBA | One-shot ($t=0.0 \to 1.0$s); downward pupil gaze inside eye opening tracking card flight, head & forehead 100% frozen. |
+| `hand-end.webp` | 36 | 33.00 ms | 30.3 | 1.58 MiB | 546×640 RGBA | One-shot ($t=0.0 \to 1.2$s); warm radiant smile strictly on lips/mouth. Head, skull, nose, chin, and forehead 100% frozen. |
 | `dealer-v2.webp` | 1 | Static | N/A | 82.0 KiB | 546×640 RGBA | Original static poster fallback & `prefers-reduced-motion` target |
 
 ### Payload & Optimization Analysis

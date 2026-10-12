@@ -14,7 +14,7 @@
       frames: 105,
       duration: '3.46 s',
       fps: '30.3 FPS (33ms/frame)',
-      size: '7.55 MiB',
+      size: '4.06 MiB',
       loop: 'Infinite Loop (Periodic)',
       autoRevert: false
     },
@@ -24,18 +24,18 @@
       frames: 30,
       duration: '0.99 s',
       fps: '30.3 FPS (33ms/frame)',
-      size: '2.16 MiB',
+      size: '1.47 MiB',
       loop: 'One-Shot -> Returns to Idle',
       autoRevert: true,
       revertMs: 1050
     },
     'hand-end': {
-      name: 'Hand End (Gracious Smile & Nod)',
+      name: 'Hand End (Gracious Smile)',
       src: './assets/hand-end.webp',
       frames: 36,
       duration: '1.19 s',
       fps: '30.3 FPS (33ms/frame)',
-      size: '2.61 MiB',
+      size: '1.58 MiB',
       loop: 'One-Shot -> Returns to Idle',
       autoRevert: true,
       revertMs: 1250
