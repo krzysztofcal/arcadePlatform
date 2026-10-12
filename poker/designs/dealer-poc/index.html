@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Arcade Poker — Dealer Animation PoC (#791)</title>
+  <link rel="stylesheet" href="./poc.css">
+</head>
+<body>
+  <div class="poc-wrapper">
+    <header class="poc-header">
+      <div class="poc-title-row">
+        <h1 class="poc-title">
+          <span>Arcade Poker — Luxury Casino Dealer Animation</span>
+          <span class="poc-badge">PoC #791</span>
+        </h1>
+        <div class="poc-ctrl-group">
+          <button id="btnOrientation" class="poc-btn poc-btn--secondary" type="button">View: Portrait (360x480)</button>
+          <button id="btnReducedMotion" class="poc-btn poc-btn--secondary" type="button">Reduced Motion: OFF</button>
+        </div>
+      </div>
+      <p class="poc-subtitle">
+        Visual Proof of Concept for GitHub Issue #791 (CURRENT OWNER DECISION — 2026-10-12). Single female dealer identity from <code>dealer-v2.webp</code> rendered at 30 FPS articulated motion with 8-bit alpha transparency.
+      </p>
+      <div class="poc-controls-bar">
+        <span class="poc-ctrl-label">Animation State:</span>
+        <div class="poc-ctrl-group">
+          <button id="btnIdle" class="poc-btn poc-btn--active" data-state="idle" type="button">▶ Idle (Breathing &amp; Blink)</button>
+          <button id="btnDeal" class="poc-btn" data-state="deal" type="button">♠ Deal (Pitch Card)</button>
+          <button id="btnHandEnd" class="poc-btn" data-state="hand-end" type="button">★ Hand End (Gracious Nod)</button>
+          <button id="btnStatic" class="poc-btn" data-state="static" type="button">⨀ Original Static</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="poc-telemetry">
+      <div class="poc-telem-item">
+        <span class="poc-telem-k">Active State</span>
+        <span id="telemState" class="poc-telem-v poc-telem-v--highlight">Idle (Breathing &amp; Blink)</span>
+      </div>
+      <div class="poc-telem-item">
+        <span class="poc-telem-k">Nominal FPS</span>
+        <span id="telemFps" class="poc-telem-v">30.3 FPS (33ms/frame)</span>
+      </div>
+      <div class="poc-telem-item">
+        <span class="poc-telem-k">Encoded Frames</span>
+        <span id="telemFrames" class="poc-telem-v">105 frames</span>
+      </div>
+      <div class="poc-telem-item">
+        <span class="poc-telem-k">Duration</span>
+        <span id="telemDuration" class="poc-telem-v">3.46 s</span>
+      </div>
+      <div class="poc-telem-item">
+        <span class="poc-telem-k">Asset Payload</span>
+        <span id="telemSize" class="poc-telem-v">7.55 MiB</span>
+      </div>
+      <div class="poc-telem-item">
+        <span class="poc-telem-k">Loop Mode</span>
+        <span id="telemLoop" class="poc-telem-v">Infinite (Periodic)</span>
+      </div>
+      <div class="poc-telem-item">
+        <span class="poc-telem-k">Browser Render Rate</span>
+        <span id="telemLiveFps" class="poc-telem-v poc-telem-v--highlight">-- FPS</span>
+      </div>
+    </div>
+
+    <section class="poc-stage-container">
+      <div class="poc-stage-toggle-row">
+        <span class="poc-stage-caption">In-Situ Simulated Poker Table Scene (Classic Emerald Palace)</span>
+      </div>
+
+      <div class="poc-table-screen">
+        <div class="poc-scene-viewport">
+          <div id="pocScene" class="poc-scene" data-orientation="portrait">
+            <div class="poc-scene-bg"></div>
+
+            <div class="poc-dealer-anchor" id="pokerRoomDealer">
+              <img id="dealerAnimImg" class="poc-dealer-img" src="./assets/idle.webp" alt="Luxury Casino Dealer">
+              <div class="poc-dealer-overlay">
+                <img id="dealerOverlayImg" src="./assets/idle.webp" alt="Dealer Overlay">
+              </div>
+            </div>
+
+            <div class="poc-table-shell">
+              <div class="poc-table-felt">
+                <div class="poc-table-inner-ring"></div>
+              </div>
+            </div>
+
+            <div class="poc-dealer-chip">D</div>
+
+            <div class="poc-community-cards">
+              <div class="poc-card">
+                <span class="poc-card-val">A</span>
+                <span class="poc-card-suit">♠</span>
+              </div>
+              <div class="poc-card poc-card--red">
+                <span class="poc-card-val">K</span>
+                <span class="poc-card-suit">♥</span>
+              </div>
+              <div class="poc-card poc-card--red">
+                <span class="poc-card-val">Q</span>
+                <span class="poc-card-suit">♦</span>
+              </div>
+              <div class="poc-card">
+                <span class="poc-card-val">J</span>
+                <span class="poc-card-suit">♣</span>
+              </div>
+              <div class="poc-card">
+                <span class="poc-card-val">10</span>
+                <span class="poc-card-suit">♠</span>
+              </div>
+            </div>
+
+            <div class="poc-pot-hud">
+              <div class="poc-pot-pill">POT $1,250</div>
+            </div>
+
+            <div class="poc-room-status">Luxury Casino · Dealer Personalities PoC</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="poc-side-by-side">
+      <div class="poc-card-panel">
+        <div class="poc-panel-title">
+          <span>Active Animated PoC</span>
+          <span class="poc-badge">30 FPS WebP</span>
+        </div>
+        <div class="poc-comparison-view">
+          <img id="dealerSideImg" src="./assets/idle.webp" alt="Animated Dealer">
+        </div>
+      </div>
+      <div class="poc-card-panel">
+        <div class="poc-panel-title">
+          <span>Original Static Baseline</span>
+          <span class="poc-badge">dealer-v2.webp</span>
+        </div>
+        <div class="poc-comparison-view">
+          <img src="./assets/dealer-v2.webp" alt="Original Static Dealer">
+        </div>
+      </div>
+    </section>
+
+    <section class="poc-card-panel">
+      <div class="poc-panel-title">
+        <span>Technical Validation &amp; Specification Metrics</span>
+      </div>
+      <table class="poc-table">
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Frames</th>
+            <th>Nominal Frame Delay</th>
+            <th>FPS</th>
+            <th>File Size</th>
+            <th>Dimensions &amp; Channels</th>
+            <th>Behavior</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>idle.webp</strong></td>
+            <td>105</td>
+            <td>33.00 ms</td>
+            <td>30.3</td>
+            <td>7.55 MiB</td>
+            <td>546×640 RGBA</td>
+            <td>Infinite loop; natural breath sine cycle + blink at t=1.8s</td>
+          </tr>
+          <tr>
+            <td><strong>deal.webp</strong></td>
+            <td>30</td>
+            <td>33.00 ms</td>
+            <td>30.3</td>
+            <td>2.37 MiB</td>
+            <td>546×640 RGBA</td>
+            <td>One-shot; slide &amp; pitch card to (273, 537), return to neutral</td>
+          </tr>
+          <tr>
+            <td><strong>hand-end.webp</strong></td>
+            <td>36</td>
+            <td>33.00 ms</td>
+            <td>30.3</td>
+            <td>2.10 MiB</td>
+            <td>546×640 RGBA</td>
+            <td>One-shot; gracious nod + radiant smile + open palm presentation</td>
+          </tr>
+          <tr>
+            <td><strong>dealer-v2.webp</strong></td>
+            <td>1</td>
+            <td>Static</td>
+            <td>N/A</td>
+            <td>82.0 KiB</td>
+            <td>546×640 RGBA</td>
+            <td>Static fallback poster &amp; reduced-motion target</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <script src="./poc.js"></script>
+</body>
+</html>
