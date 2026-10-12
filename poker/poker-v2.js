@@ -4156,6 +4156,7 @@
   function refreshLayoutPresentation(){
     layoutRefreshTimer = null;
     render();
+    if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
   }
 
   function scheduleLayoutPresentationRefresh(){
@@ -5985,6 +5986,7 @@
     positionCelebration();
     refreshCelebrationPreview();
     fitTableScene();
+    if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
   }
 
   function setError(message){
@@ -6311,6 +6313,84 @@
     if (restoreFocus && wasOpen && opener && typeof opener.focus === 'function') opener.focus();
   }
 
+  function closeHandInfoPanel(restoreFocus){
+    var wasOpen = !!(els.handInfoPanel && !els.handInfoPanel.hidden);
+    if (els.handInfoPanel){
+      els.handInfoPanel.hidden = true;
+      els.handInfoPanel.style.maxHeight = '';
+    }
+    if (els.handInfoToggle) els.handInfoToggle.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && wasOpen && els.handInfoToggle && typeof els.handInfoToggle.focus === 'function'){
+      els.handInfoToggle.focus();
+    }
+  }
+
+  function updateHandInfoPanelBounds(){
+    if (!els.handInfoPanel) return;
+    var isLandscape = (els.scene && els.scene.dataset.orientation === 'landscape') || (window.innerWidth > window.innerHeight);
+    if (isLandscape){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var heroAvatar = document.querySelector('.poker-seat--hero .poker-seat-avatar');
+    if (!heroAvatar){
+      var currentSeat = typeof deriveCurrentSeat === 'function' ? deriveCurrentSeat() : null;
+      if (currentSeat && Number.isInteger(currentSeat.seatNo) && renderedSeatAvatars && renderedSeatAvatars[currentSeat.seatNo]){
+        heroAvatar = renderedSeatAvatars[currentSeat.seatNo];
+      }
+    }
+    if (!heroAvatar || typeof heroAvatar.getBoundingClientRect !== 'function'){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var avRect = heroAvatar.getBoundingClientRect();
+    if (!(avRect.width > 0 && avRect.height > 0)){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var clock = typeof findSeatTurnClock === 'function' ? findSeatTurnClock(heroAvatar) : heroAvatar.querySelector('.poker-seat-turn-clock');
+    var indicatorTop = avRect.top;
+    if (clock && typeof clock.getBoundingClientRect === 'function'){
+      var clockRect = clock.getBoundingClientRect();
+      if (clockRect.height > 0 && clockRect.top < indicatorTop){
+        indicatorTop = clockRect.top;
+      }
+    } else {
+      indicatorTop = avRect.top - 2;
+    }
+    var clearance = 11;
+    var targetBottom = indicatorTop - clearance;
+    var panelTop = els.handInfoPanel.getBoundingClientRect().top;
+    if (!(panelTop > 0)){
+      panelTop = 50;
+    }
+    var availableHeight = Math.floor(targetBottom - panelTop);
+    if (availableHeight > 100){
+      els.handInfoPanel.style.maxHeight = availableHeight + 'px';
+    } else {
+      els.handInfoPanel.style.maxHeight = '';
+    }
+  }
+
+  function openHandInfoPanel(){
+    if (!els.handInfoPanel) return;
+    closeMenu();
+    closeSocialSettings(false);
+    closeReactionMenu();
+    els.handInfoPanel.hidden = false;
+    if (els.handInfoToggle) els.handInfoToggle.setAttribute('aria-expanded', 'true');
+    updateHandInfoPanelBounds();
+    if (els.handInfoClose && typeof els.handInfoClose.focus === 'function'){
+      els.handInfoClose.focus();
+    }
+  }
+
+  function toggleHandInfoPanel(){
+    if (!els.handInfoPanel) return;
+    if (els.handInfoPanel.hidden) openHandInfoPanel();
+    else closeHandInfoPanel(true);
+  }
+
   function getSocialSettingsViewport(){
     var width = Number(window.innerWidth);
     var height = Number(window.innerHeight);
@@ -6492,7 +6572,10 @@
     if (!els.menuToggle || !els.menuPanel) return;
     els.menuToggle.addEventListener('click', function(){
       var hidden = els.menuPanel.hasAttribute('hidden');
-      if (hidden) closeSocialSettings(false);
+      if (hidden) {
+        closeSocialSettings(false);
+        closeHandInfoPanel(false);
+      }
       if (hidden) els.menuPanel.removeAttribute('hidden');
       else els.menuPanel.setAttribute('hidden', 'hidden');
       els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
@@ -6514,6 +6597,7 @@
     function toggleSocialSettings(trigger){
       var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
       closeMenu();
+      closeHandInfoPanel(false);
       if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = !opening;
       if (els.menuSettings) els.menuSettings.setAttribute('aria-expanded', opening ? 'true' : 'false');
       socialSettingsOpener = opening ? (trigger || els.menuSettings) : null;
@@ -6528,6 +6612,7 @@
         scheduleLayoutPresentationRefresh();
         syncJoinVisibility();
         if (els.socialSettingsPanel && !els.socialSettingsPanel.hidden) positionSocialSettingsPanel();
+        if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
       };
       window.addEventListener('resize', refreshResponsivePresentation);
       window.addEventListener('orientationchange', refreshResponsivePresentation);
@@ -6544,6 +6629,7 @@
       if (event && event.key === 'Escape') {
         closeMenu();
         closeSocialSettings(true);
+        if (els.handInfoPanel && !els.handInfoPanel.hidden) closeHandInfoPanel(true);
         if (autoRebuyConfirmOpen){
           closeAutoRebuyConfirm(true);
           renderSocialPreferences();
@@ -6659,6 +6745,8 @@
         els.reactionHistoryList.scrollTop = els.reactionHistoryList.scrollHeight;
       }
     });
+    if (els.handInfoToggle) els.handInfoToggle.addEventListener('click', toggleHandInfoPanel);
+    if (els.handInfoClose) els.handInfoClose.addEventListener('click', function(){ closeHandInfoPanel(true); });
     if (els.reactionBubblesPreference) els.reactionBubblesPreference.addEventListener('change', function(){ updateSocialPreference('reactionBubblesEnabled', els.reactionBubblesPreference.checked); });
     if (els.reactionHistoryPreference) els.reactionHistoryPreference.addEventListener('change', function(){ updateSocialPreference('reactionHistoryEnabled', els.reactionHistoryPreference.checked); });
     if (els.botReactionsPreference) els.botReactionsPreference.addEventListener('change', function(){ updateSocialPreference('botReactionsEnabled', els.botReactionsPreference.checked); });
@@ -6682,13 +6770,24 @@
     });
     document.addEventListener('click', function(event){
       var target = event && event.target;
-      if (!target || target === els.reactionBtn || target === els.reactionMenu) return;
+      if (!target) return;
+      if (els.handInfoPanel && !els.handInfoPanel.hidden){
+        var inToggle = els.handInfoToggle && typeof els.handInfoToggle.contains === 'function' && els.handInfoToggle.contains(target);
+        var inPanel = els.handInfoPanel && typeof els.handInfoPanel.contains === 'function' && els.handInfoPanel.contains(target);
+        if (target !== els.handInfoToggle && target !== els.handInfoPanel && !inToggle && !inPanel){
+          closeHandInfoPanel(false);
+        }
+      }
+      if (target === els.reactionBtn || target === els.reactionMenu) return;
       if (els.reactionBtn && typeof els.reactionBtn.contains === 'function' && els.reactionBtn.contains(target)) return;
       if (els.reactionMenu && typeof els.reactionMenu.contains === 'function' && els.reactionMenu.contains(target)) return;
       closeReactionMenu();
     });
     document.addEventListener('keydown', function(event){
-      if (event && event.key === 'Escape') closeReactionMenu();
+      if (event && event.key === 'Escape'){
+        if (els.handInfoPanel && !els.handInfoPanel.hidden) closeHandInfoPanel(true);
+        closeReactionMenu();
+      }
     });
     bindPreaction('fold');
     bindPreaction('primary');
@@ -6761,6 +6860,9 @@
     els.reactionHistoryCount = document.getElementById('pokerReactionHistoryCount');
     els.reactionHistoryPanel = document.getElementById('pokerReactionHistoryPanel');
     els.reactionHistoryList = document.getElementById('pokerReactionHistoryList');
+    els.handInfoToggle = document.getElementById('pokerHandInfoToggle');
+    els.handInfoPanel = document.getElementById('pokerHandInfoPanel');
+    els.handInfoClose = document.getElementById('pokerHandInfoClose');
     els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
     els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
     els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
