@@ -18,7 +18,7 @@
 | FR-005 (Hold'em rule note) | PASS | Explains 5 best cards from 2 hole + 5 community cards (0, 1, or 2 hole cards usable). No claim of live evaluation. |
 | FR-006 (Interaction & a11y) | PASS | Toggle handles `aria-expanded` and `hidden`. Escape key and Close button close panel and return focus to `#pokerHandInfoToggle`. Outside click closes without swallowing or stealing target focus. |
 | FR-007 (Join button clearance) | PASS | Bounding box tests in 390×844, 320×568, 844×390, 568×320 confirm `#pokerV2JoinBtn` is never overlapped, clipped, or obscured. Join is 100% clickable while panel is open. |
-| FR-008 (Viewport bounds & scroll) | PASS | `max-height` bounded by viewport `100dvh` and safe areas. Sticky header keeps Close button on screen during long scroll. |
+| FR-008 (Viewport bounds & scroll) | PASS | `max-height` bounded by viewport `100dvh` and safe areas. Sticky header keeps Close button on screen during long scroll. In portrait mode, dynamically bounded ~11px above the Hero avatar and active turn timer clock so seated players never lose sight of their timer or avatar. |
 
 ### 2. Multi-Viewport Automated Layout Evidence
 | Viewport | Join Overlap | Toggle Hit-test | Open Panel Overlap Join | Scrollable | Sticky Close | Escape Key |
