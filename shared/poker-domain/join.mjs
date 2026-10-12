@@ -2,7 +2,7 @@ import { clearInactivityPenalty } from "./poker-missed-turns.mjs";
 import { attemptDemandRefill } from "./demand-refill.mjs";
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
-import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
+import { getBotFundingSystemKeyForBuyIn, isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 import {
   hasPokerPoolSchema,
@@ -192,6 +192,39 @@ async function hasMaterializedBotFunding(tx, tableId) {
     [tableId]
   );
   return Array.isArray(rows) && rows.length > 0;
+}
+
+async function countExistingSinglePlayerBots(tx, { tableId, seatRows, state, maxPlayers, fundingSystemKey }) {
+  const bots = activeSeatRows(seatRows).filter(row => row?.is_bot === true);
+  if (!bots.length) return 0;
+  const funding = await tx.unsafe(`
+select coalesce(t.metadata ->> 'replacementBotUserId', t.metadata ->> 'botUserId') as user_id,
+       t.metadata ->> 'seatNo' as seat_no
+from public.chips_transactions t
+join public.chips_entries credit on credit.transaction_id = t.id
+join public.chips_accounts escrow on escrow.id = credit.account_id
+where t.tx_type = 'TABLE_BUY_IN' and t.metadata ->> 'actor' = 'BOT'
+  and t.metadata ->> 'tableId' = $1
+  and t.metadata ->> 'reason' in ('BOT_SEED_BUY_IN', 'BOT_REPLACEMENT_BUY_IN')
+  and escrow.account_type = 'ESCROW' and escrow.system_key = 'POKER_TABLE:' || $1
+  and credit.amount > 0
+  and exists (select 1 from public.chips_entries debit
+    join public.chips_accounts source on source.id = debit.account_id
+    where debit.transaction_id = t.id and debit.amount = -credit.amount
+      and source.account_type = 'SYSTEM' and source.status = 'active' and source.system_key = $2);
+`, [tableId, fundingSystemKey]);
+  const fundedSeats = new Set(funding.map(row => `${row.user_id}:${row.seat_no}`));
+  const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
+  for (const bot of bots) {
+    const seatNo = Number(bot.seat_no), stack = state?.stacks?.[bot.user_id];
+    if (!Number.isInteger(seatNo) || seatNo < 1 || seatNo > maxPlayers
+      || !Number.isSafeInteger(stack) || stack <= 0
+      || !stateSeats.some(seat => seat?.userId === bot.user_id && Number(seat?.seatNo) === seatNo && seat?.isBot !== false)
+      || !fundedSeats.has(`${bot.user_id}:${seatNo}`)) {
+      throw makeError('single_player_bot_funding_unavailable');
+    }
+  }
+  return bots.length;
 }
 
 function isSeatConflictError(error) {
@@ -878,6 +911,13 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         };
       }
 
+      if (isSinglePlayer) {
+        if (String(table.status || '').toUpperCase() === 'CLOSED') throw makeError('table_closed');
+        if (table.has_human_participant === true || seatRows.some(row => !row?.is_bot && row?.user_id === userId)) {
+          throw makeError('single_player_participation_ended');
+        }
+      }
+
       if (!isCanonicalPokerStakes(authoritativeBuyIn, normalizeTableStakes(table.stakes))) {
         throw makeError("invalid_buy_in");
       }
@@ -1098,6 +1138,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         && joinAccess.tierPolicy?.enabled === true
         && joinAccess.poolProvisioning?.NORMAL === true
         && joinAccess.poolProvisioning?.SLOW === true;
+      const existingBotCount = isSinglePlayer ? await countExistingSinglePlayerBots(tx, {
+        tableId, seatRows, state: stateRow.state, maxPlayers,
+        fundingSystemKey: getBotFundingSystemKeyForBuyIn(authoritativeBuyIn, { poolClass: fundingPoolClass })
+      }) : 0;
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,
@@ -1114,7 +1158,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       demandRefillFn: tierFundingEnabled && fundingPoolClass ? attemptDemandRefill : null,
       klog
       });
-      const expectedBotCountAfterSeed = seededBots.length;
+      const expectedBotCountAfterSeed = existingBotCount + seededBots.length;
       if (isSinglePlayer) {
         const minPlayableBots = Math.min(Math.max(2, botCfg.minPerTable), maxPlayers - 1);
         if (expectedBotCountAfterSeed < minPlayableBots) {

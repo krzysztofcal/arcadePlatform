@@ -344,7 +344,7 @@ test("authoritative join adapter preserves poker_state_missing as protocol-safe 
 });
 
 
-test("authoritative join adapter preserves seat_taken as protocol-safe known code", async () => {
+for (const code of ['seat_taken', 'single_player_participation_ended']) test(`authoritative join adapter preserves ${code} as protocol-safe known code`, async () => {
   const logs = [];
   const execute = createAuthoritativeJoinExecutor({
     env: {},
@@ -354,15 +354,15 @@ test("authoritative join adapter preserves seat_taken as protocol-safe known cod
     loadPostTransactionFn: async () => async () => ({ ok: true }),
     loadJoinModule: async () => ({
       executePokerJoinAuthoritative: async () => {
-        const err = new Error("seat_taken");
-        err.code = "seat_taken";
+        const err = new Error(code);
+        err.code = code;
         throw err;
       }
     })
   });
 
   const result = await execute({ tableId: "t1", userId: "u1", requestId: "r7", buyIn: 100 });
-  assert.deepEqual(result, { ok: false, code: "seat_taken" });
+  assert.deepEqual(result, { ok: false, code });
   assert.equal(logs.some((entry) => entry.event === "ws_join_authoritative_failed"), false);
 });
 

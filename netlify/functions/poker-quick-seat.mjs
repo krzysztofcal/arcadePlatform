@@ -444,6 +444,12 @@ export async function handler(event) {
               return { ...recommendation, strategy: "already_seated" };
             }
           }
+          const tables = await tx.unsafe(
+            "select id, status, has_human_participant from public.poker_tables where id = $1 and created_by = $2 and is_single_player = true limit 1;",
+            [requestedTableId, auth.userId]
+          );
+          if (String(tables?.[0]?.status || '').toUpperCase() === 'CLOSED') return { kind: 'table_closed' };
+          if (tables?.[0]?.has_human_participant === true) return { kind: 'single_player_participation_ended' };
           return { kind: "unavailable", reason: "seat_not_found" };
         }
 
@@ -581,7 +587,7 @@ export async function handler(event) {
         body: JSON.stringify({ error: "invalid_buy_in" })
       };
     }
-    if (result?.kind === "table_closed" || result?.kind === "single_player_request_expired") {
+    if (result?.kind === "table_closed" || result?.kind === "single_player_request_expired" || result?.kind === 'single_player_participation_ended') {
       return {
         statusCode: 409,
         headers: mergeHeaders(cors),

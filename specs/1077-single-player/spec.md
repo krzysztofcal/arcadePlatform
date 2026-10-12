@@ -2,7 +2,7 @@
 
 **Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1077  
 **Baseline:** `main` (commit `e7fd0ce2`)  
-**Status:** Variant B approved; owner accepted `cadc8f88` and authorized Draft PR publication plus automatic application of exactly two #1077 migrations to shared Stage on 2026-10-12. WS Preview/runtime smoke, Production and merge still require separate GO.
+**Status:** Draft PR #1095; main `a0de1b09` integrated in `8839bf0b`. Stage migrations and WS Preview for that revision succeeded, but owner smoke failed. Current regression fixes are local-only and await owner review; publication, further Stage operations and deployment require new GO.
 
 ---
 
@@ -122,3 +122,11 @@ flowchart TD
    - Netlify functions enforce mandatory `requestId` on New Game, early `RESTRICTED` 403 rejection, 1000 CH cap, candidate isolation (`coalesce(is_single_player, false) = false`), and separate explicit `tableId` Resume.
    - Frontend UI exposes the Single Player card, interactive tier selector (`<= 1000 CH`), and client-side double-click/retry protection.
    - Older clients connecting to Poker Online cannot see or join Single Player tables. Newer clients creating Single Player tables are immediately protected by the already-active WS server.
+
+
+## Smoke regression amendment — 2026-10-12
+
+- Minimum Single Player bots counts existing plus newly seeded bots, bounded by table capacity and existing configuration. Existing bots require ACTIVE seats, matching authoritative state slots, positive safe-integer authoritative stacks and balanced seed/replacement receipts from the appropriate NORMAL/SLOW pool into this table's escrow. Inconsistent or unfunded seats fail closed. Existing bot stacks are preserved; only new bot seats are funded.
+- ACTIVE owner Resume/reconnect preserves stack without a second buy-in. Under the existing table transaction/lock, an owner without an ACTIVE seat is refused with `single_player_participation_ended` when `has_human_participant` or historical owner seat proves previous participation. This precedes seat writes, human debit and bot funding. CLOSED remains refused; a never-occupied first JOIN remains allowed. Poker Online re-entry is unchanged.
+- Quick Seat/access and browser feedback expose ended participation, discard stale Resume, refresh progression and stop automatic JOIN retries. Returning after Leave requires explicit New Game; there is no automatic paid fallback.
+- Confirmed smoke defect: newly seeded count excluded existing bots. The API recommendation/Leave/WS timing is not proven by retained incident records; the race is deterministically covered locally. These amendments authorize no Stage/ledger operation, push or deployment.

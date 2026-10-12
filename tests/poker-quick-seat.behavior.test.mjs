@@ -19,7 +19,7 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTables = 0, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
+const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTables = 0, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, resumeTable = null, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
   const tableIdsQueue = Array.isArray(createTableIds) ? [...createTableIds] : null;
   return loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
@@ -35,6 +35,7 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTabl
           if (text.includes(") active_tables")) return [{ count: activeTables }];
           if (text.includes(") pending_tables")) return [{ count: pendingTables }];
           if (text.includes("to_regclass")) return [{ available: poolSchema }];
+          if (text.includes('select id, status, has_human_participant')) return resumeTable ? [resumeTable] : [];
           if (text.includes("from public.poker_bot_tier_policy")) return pokerTierPolicyRows(enabledBuyIns);
           if (text.includes("system_key = any")) return params[0].map((system_key) => ({ system_key }));
           if (!poolSchema) assert.doesNotMatch(text, /is_slow_only|poker_auto_class|poker_access_policy/);
@@ -876,6 +877,15 @@ const run = async () => {
     assert.equal(insertQuery.params[1], 1000, "inserted table buy_in must be 1000");
   }
 
+  for (const [status, expectedError] of [['OPEN', 'single_player_participation_ended'], ['CLOSED', 'table_closed']]) {
+    const queries = [], notifications = [];
+    const handler = makeHandler({ mode: 'create', queries, notifications, resumeTable: { status, has_human_participant: true } });
+    const response = await callQuickSeat(handler, { mode: 'single_player', tableId: '00000000-0000-0000-0000-000000000009' });
+    assert.equal(response.statusCode, 409);
+    assert.equal(JSON.parse(response.body).error, expectedError);
+    assert.equal(notifications.length, 0);
+    assert.equal(queries.some(q => /insert into|update public.poker_seats/.test(q.query)), false, 'Resume never creates or buys a new seat');
+  }
 };
 
 run().catch((error) => {

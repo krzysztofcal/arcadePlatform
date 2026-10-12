@@ -2,7 +2,7 @@
 
 **Source:** [spec.md](spec.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)
 **Baseline:** AGY started on `e7fd0ce2`; handoff integrates current `main` `8f691d65` (2026-10-12).
-**Status:** Owner accepted final review and authorized Draft PR plus automatic shared Stage application of the two #1077 migrations. Latest main `d45756dc` (#1093 Poker Hands) merged without conflicts, preserving all AGY commits. No WS Preview/runtime, Production or merge authorization.
+**Status:** Draft PR #1095 at integrated `8839bf0b` (main `a0de1b09`, including #1092). Stage and exact-SHA WS Preview succeeded; owner smoke failed. Current minimal regression amendments remain local pending review and separate publication/deployment GO.
 
 ---
 
@@ -159,3 +159,12 @@ To ensure zero risk of older multiplayer clients seating into Single Player tabl
 ### Publication preflight, 2026-10-12
 
 Main `d45756dc181f679f5754d147edc61fabf62e05e0` integrated in `96272e0781de259fae2af6c27d735f4e0f384a7d`; #1093 UI retained, #1077 join errors preserved. Separate read-only reviewer found no material integration findings. Local checks rerun before publication. Stage inventory: 109 applied, exactly two approved pending, zero unknown; no migration-bearing competing open PR. Netlify API confirms production branch `main` and allowed branch deploys only `main`; PR preview is not runtime-verified until matching WS is explicitly deployed. Stop after Stage workflow and catalog verification.
+
+
+## Local smoke fixes — 2026-10-12
+
+1. `join.mjs::executePokerJoinAuthoritative()` keeps free ACTIVE rejoin first; under the existing table lock reject ended Single Player participation before any financial or seat mutation using the durable human flag/historical owner seat. No protocol extension or new schema.
+2. Count valid existing bots using locked state stacks and balanced existing seed/replacement receipts from the table's funding class, then add newly funded bots. Pass the total to the existing state synchronizer without adding existing bots to stack updates or transferring their buy-ins again. Preserve minimum two, configuration/capacity bounds, transaction/savepoint rollback and Online logic.
+3. Quick Seat and progression expose ended participation; lobby removes stale Resume and refreshes. V2 maps the authoritative error, clears auto-JOIN retry and remembered seat, and reuses access preflight. Normalize the stable rejection in the existing authoritative adapter.
+4. Extend existing deterministic JOIN/API/adapter tests; verify receipt SQL with isolated PGlite, with no shared DB or migration changes. Separate read-only subagent review covers debit, escrow, rollback, idempotency and Online isolation.
+5. Provide a local commit and small patch against `8839bf0b`. After owner review, a separate GO is required to publish and deploy the exact new runtime SHA before repeating owner smoke.

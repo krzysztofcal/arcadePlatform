@@ -320,6 +320,28 @@ test("high-bankroll progression offers Single Player tiers independently and all
   }
 });
 
+test('ended Single Player participation denies table access while Online keeps fresh admission', async () => {
+  const previous = process.env.CHIPS_ENABLED; process.env.CHIPS_ENABLED = '1';
+  try {
+    for (const isSinglePlayer of [true, false]) {
+      const handler = makeHandler({ authResult: { valid: true, userId: 'owner' },
+        progression: evaluatePokerProgression({ balance: 550, tiers: [100,500], enabledBuyIns: [100,500] }),
+        calls: { tokens: [], progression: [] },
+        unsafe: async sql => {
+          if (sql.includes('select poker_auto_class')) return [{ poker_auto_class: 'NORMAL', poker_access_override: 'AUTO', poker_access_revision: 1 }];
+          if (sql.includes('select id, status, buy_in, stakes')) return [{ id: 'ended-table', status: 'OPEN', buy_in: 100, stakes: { sb: 1, bb: 2 }, is_single_player: isSinglePlayer, created_by: 'owner', has_human_participant: true }];
+          return [];
+        }
+      });
+      const response = await handler({ httpMethod: 'GET', queryStringParameters: { tableId: 'ended-table' }, headers: { origin, authorization: 'Bearer token' } });
+      const access = JSON.parse(response.body).tableAccess;
+      assert.equal(access.allowed, !isSinglePlayer);
+      assert.equal(access.reason, isSinglePlayer ? 'single_player_participation_ended' : 'available');
+      assert.equal(access.rejoin, false);
+    }
+  } finally { if (previous === undefined) delete process.env.CHIPS_ENABLED; else process.env.CHIPS_ENABLED = previous; }
+});
+
 test("RESTRICTED Single Player Resume is denied while Online active-seat rejoin remains allowed", async () => {
   const previous = process.env.CHIPS_ENABLED;
   process.env.CHIPS_ENABLED = "1";

@@ -44,7 +44,7 @@
 
 - [x] **T010 / Code review package:** Prepare complete unified diff / patch against `origin/main` for owner code review.
 - [x] **T011a / Publication authorization:** Owner GO for push, Draft PR and automatic shared Stage application of exactly the two #1077 migrations.
-- [ ] **T011b / Stage evidence:** Await exact-HEAD DB Stage Apply PR success and read-only verification of column, CHECK, partial index and migration hashes.
+- [x] **T011b / Stage evidence:** Earlier approved publication completed automatic Stage apply and read-only verification: 111 applied, zero pending, column/CHECK/index present, both reviewed hashes unchanged. No Stage access during the current local smoke amendment.
 - [ ] **T011c / Runtime deployment gate:** Await separate GO for exact-SHA WS Preview, runtime verification, Production or merge.
 - [x] **T012 / Handoff:** Record AGY commits, baseline, review findings, verification, remaining release gates and phased rollout in `handoff-review.md`.
 
@@ -75,3 +75,12 @@
 
 - [x] **T029 / Main integration:** Merge `d45756dc` (#1093) without conflicts; separate read-only integration review passes.
 - [x] **T030 / Stage publication preflight:** Canonical Stage identity verified, 109 applied / exactly two approved pending / no unknown versions; no competing migration PR; Netlify production branch `main` confirmed through read-only API.
+
+
+## Phase 8 — Owner smoke regressions (local only)
+
+- [x] **T031 / Total funded bots:** Count valid existing ACTIVE bots plus newly seeded bots; preserve authoritative stacks and forbid duplicate funding. Cover empty first admission, four existing bots, partial top-up, inconsistent/unfunded seats and actual funding SQL with isolated PGlite.
+- [x] **T032 / Ended participation:** Table-locked guard refuses Single Player fresh paid re-entry after prior participation, before financial/seat changes. Keep first admission and free ACTIVE Resume, CLOSED denial and Online re-entry. Cover ACTIVE confirmation → finalized Leave → WS JOIN plus rollback on partial pool exhaustion.
+- [x] **T033 / Resume feedback:** Expose stable ended error through Quick Seat, access preflight and authoritative adapter; discard stale lobby Resume, refresh progression, clear V2 auto-JOIN retries and remembered seat. No automatic New Game.
+- [x] **T034 / Final local evidence:** Fresh npm test (146 groups), focused tests 258/258, full WS server 140/140 on Node 20, V2 live 157/157, syntax 226, CSP 55 and migration guard 111/seven pass. Separate read-only re-review has no P1/P2 findings; local report/commit and patch against `8839bf0b` prepared.
+- [ ] **T035 / Repeat runtime gate:** Await owner review and separate GO for publication and exact-new-SHA WS Preview; repeat manual smoke before considering readiness. No Stage/ledger operations or deployment in this amendment.

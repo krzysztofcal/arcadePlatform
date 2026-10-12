@@ -1194,6 +1194,7 @@
   }
 
   function tableAccessDeniedMessage(access){
+    if (access && access.reason === 'single_player_participation_ended') return joinErrorMessage({ code: access.reason });
     if (access && access.reason === 'table_not_found') return 'This table is no longer available. Return to the lobby.';
     if (access && access.reason === 'table_closed') return 'This table is closed. Return to the lobby.';
     if (access && access.reason === 'table_not_open') return 'This table is not available. Return to the lobby.';
@@ -6202,6 +6203,12 @@
       joinOperation.requestId = null;
       joinOperation.payload = null;
       joinOperation.phase = 'rejected';
+      if (autoJoinErrorCode(error) === 'single_player_participation_ended') {
+        shouldAutoJoin = false;
+        clearAutoJoinRetry();
+        reconnectSeatNo = null;
+        if (currentAccessToken) preflightAuthenticatedLiveMode(currentAccessToken, ++authenticatedPreflightGeneration);
+      }
       if (isWsReady() && !state.reconnectGate) state.statusText = LIVE_STATUS_COPY.live;
       renderInfoPanel();
       renderControls();
@@ -6303,6 +6310,9 @@
 
   function joinErrorMessage(error){
     var code = autoJoinErrorCode(error);
+    if (code === 'single_player_participation_ended') {
+      return 'Your participation ended when you left. Return to the lobby and choose New Game explicitly to play again.';
+    }
     if (code === 'single_player_bot_funding_unavailable') {
       return 'Bot funding pool temporarily unavailable. Please try again later.';
     }

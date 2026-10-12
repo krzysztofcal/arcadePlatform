@@ -3150,6 +3150,132 @@ test("Single Player atomic rollback: fails closed if minimum required bots canno
   assert.equal(ledgerCalls.length, 0, "no committed buy-in after rollback");
 });
 
+function createSinglePlayerSmokeHarness({ bots = [], participated = false, humanActive = false, singlePlayer = true, poolBalance = 10000, target = 2, status = 'OPEN', fundingSql = null } = {}) {
+  const tableId = 't-sp-smoke', userId = 'smoke-owner';
+  const table = { id: tableId, status, max_players: 6, stakes: { sb: 1, bb: 2 }, buy_in: 100, created_by: userId, lifecycle_kind: 'STANDARD', has_human_participant: participated, is_slow_only: false, is_single_player: singlePlayer };
+  const initialRows = bots.map((bot, i) => ({ table_id: tableId, user_id: 'smoke-bot-' + i, seat_no: i + 2, status: bot.inactive ? 'INACTIVE' : 'ACTIVE', is_bot: true, stack: 100, bot_profile: 'NORMAL' }));
+  if (participated || humanActive) initialRows.push({ table_id: tableId, user_id: userId, seat_no: 1, status: humanActive ? 'ACTIVE' : 'INACTIVE', is_bot: false, stack: humanActive ? 402 : 0 });
+  const initialState = { tableId, phase: 'HAND_DONE', seats: [], stacks: {}, pot: 0 };
+  for (let i = 0; i < bots.length; i += 1) {
+    if (bots[i].inactive || bots[i].missingState) continue;
+    initialState.seats.push({ userId: initialRows[i].user_id, seatNo: bots[i].wrongSeat ? 6 : initialRows[i].seat_no, isBot: true });
+    initialState.stacks[initialRows[i].user_id] = bots[i].stack;
+  }
+  if (humanActive) { initialState.seats.push({ userId, seatNo: 1 }); initialState.stacks[userId] = 402; }
+  let data = { rows: initialRows, state: initialState, version: 5, balances: { USER: 1000, SYSTEM: poolBalance, ESCROW: 500 }, ledger: [] };
+  const queries = [], attempts = [];
+  const tx = {
+    savepoint: async (_name, fn) => { const saved = structuredClone(data); try { return await fn(tx); } catch (error) { data = saved; throw error; } },
+    unsafe: async (sql, params = []) => {
+      const text = String(sql); queries.push(text);
+      if (text.includes('to_regclass')) return [{ available: true }];
+      if (text.includes('select count')) return [{ count: 0 }];
+      if (text.includes('from public.poker_tables')) return [{ ...table }];
+      if (text.includes('from public.poker_access_policy')) return [{ slow_threshold_ch: 2000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 1900, revision: 1 }];
+      if (text.includes('from public.poker_bot_tier_policy')) return pokerTierPolicyRows([100]);
+      if (text.includes("account_type = 'USER'")) return [{ balance: data.balances.USER, poker_auto_class: 'NORMAL', poker_access_override: 'AUTO', poker_access_revision: 1 }];
+      if (text.includes('system_key = any')) return [{ system_key: 'POKER_BOT_BANKROLL_100' }, { system_key: 'POKER_BOT_SLOW_BANKROLL_100' }];
+      if (text.includes('from public.chips_transactions t')) return fundingSql ? fundingSql(sql, params) : initialRows.filter((row, i) => row.is_bot && bots[i].funded !== false).map(row => ({ user_id: row.user_id, seat_no: String(row.seat_no) }));
+      if (text.includes('from public.poker_seats')) return data.rows.filter(row => !text.includes('user_id = $2') || row.user_id === params[1]).filter(row => !text.includes("status = 'ACTIVE'") || row.status === 'ACTIVE').map(row => ({ ...row }));
+      if (text.includes('insert into public.poker_seats')) {
+        const isBot = text.includes('is_bot');
+        data.rows = data.rows.filter(row => row.user_id !== params[1]);
+        data.rows.push({ table_id: tableId, user_id: params[1], seat_no: params[2], status: 'ACTIVE', is_bot: isBot, stack: isBot ? params[4] : 0 });
+        return [{ seat_no: params[2] }];
+      }
+      if (text.includes('update public.poker_seats set stack')) for (const row of data.rows) if (row.user_id === params[1]) row.stack = params[3];
+      return [];
+    }
+  };
+  const join = () => executePokerJoinAuthoritative({
+    beginSql: async fn => { const saved = structuredClone(data); try { return await fn(tx); } catch (error) { data = saved; throw error; } },
+    tableId, userId, requestId: 'smoke-resume-intent', buyIn: 100,
+    env: { POKER_BOTS_ENABLED: '1', POKER_BOTS_MIN_PER_TABLE: String(target), POKER_BOTS_MAX_PER_TABLE: String(target) },
+    postTransactionFn: async payload => {
+      attempts.push(payload);
+      for (const entry of payload.entries) if (data.balances[entry.accountType] + entry.amount < 0) throw Object.assign(new Error('insufficient_funds'), { code: 'P0001' });
+      for (const entry of payload.entries) data.balances[entry.accountType] += entry.amount;
+      const { tx: _tx, ...record } = payload;
+      data.ledger.push(record); return { ok: true };
+    },
+    loadStateForUpdate: async () => ({ ok: true, version: data.version, state: structuredClone(data.state) }),
+    updateStateLocked: async (_tx, { nextState }) => { data.state = nextState; return { ok: true, newVersion: ++data.version }; },
+    validateStateForStorage: isStateStorageValid
+  });
+  return { join, queries, attempts, read: () => data, finishLeave: () => { table.has_human_participant = true; data.rows.find(row => row.user_id === userId).status = 'INACTIVE'; data.state.seats = data.state.seats.filter(row => row.userId !== userId); delete data.state.stacks[userId]; } };
+}
+
+for (const [label, bots, target, newBots] of [
+  ['first empty admission', [], 2, 2],
+  ['first admission with four already funded bots', [78,168,78,74].map(stack => ({ stack })), 4, 0],
+  ['partial top-up', [{ stack: 78 }], 2, 1]
+]) test('Single Player smoke: ' + label, async () => {
+  const h = createSinglePlayerSmokeHarness({ bots, target });
+  const result = await h.join();
+  assert.equal(result.ok, true);
+  assert.equal(result.seededBots.length, newBots);
+  assert.equal(h.read().ledger.length, 1 + newBots, 'only human buy-in and newly funded bots');
+  assert.equal(result.snapshot.seats.filter(row => row.isBot).length, target);
+  bots.forEach((bot, i) => assert.equal(result.snapshot.stacks['smoke-bot-' + i], bot.stack, 'existing authoritative stack preserved, not stale DB/buy-in stack'));
+});
+
+for (const invalid of [{ funded: false }, { stack: 0 }, { stack: -1 }, { stack: 1.5 }, { missingState: true }, { wrongSeat: true }, { inactive: true }]) test('Single Player smoke: invalid existing bot cannot satisfy minimum ' + JSON.stringify(invalid), async () => {
+  const h = createSinglePlayerSmokeHarness({ bots: [{ stack: 78, ...invalid }, { stack: 90 }], target: 2, poolBalance: 0 });
+  const before = structuredClone(h.read());
+  await assert.rejects(h.join, error => ['single_player_bot_funding_unavailable','authoritative_state_invalid'].includes(error.code));
+  assert.deepEqual(h.read(), before, 'seat/state/escrow/pool/user ledger rolled back');
+});
+
+test('Single Player smoke: real partial funding exhaustion rolls back all transfers', async () => {
+  const h = createSinglePlayerSmokeHarness({ poolBalance: 100 });
+  const before = structuredClone(h.read());
+  await assert.rejects(h.join, error => error.code === 'single_player_bot_funding_unavailable');
+  assert.equal(h.attempts.length, 3, 'human and one successful bot before second funding fails');
+  assert.deepEqual(h.read(), before);
+});
+
+test('Single Player smoke: Quick Seat ACTIVE confirmation then Leave then WS JOIN cannot debit again', async () => {
+  const h = createSinglePlayerSmokeHarness({ participated: true, humanActive: true, bots: [{ stack: 78 }, { stack: 90 }] });
+  const active = await h.join();
+  assert.equal(active.rejoin, true); assert.equal(active.stack, 402); assert.equal(h.attempts.length, 0);
+  h.finishLeave();
+  const before = structuredClone(h.read()); h.queries.length = 0;
+  await assert.rejects(h.join, error => error.code === 'single_player_participation_ended');
+  assert.equal(h.attempts.length, 0); assert.deepEqual(h.read(), before);
+  assert.match(h.queries.find(sql => sql.includes('from public.poker_tables')), /for update/);
+  assert.equal(h.queries.some(sql => /insert into|update public.poker_seats/.test(sql)), false);
+});
+
+test('Single Player smoke: CLOSED wins over ended participation', async () => {
+  const h = createSinglePlayerSmokeHarness({ participated: true, status: 'CLOSED' });
+  await assert.rejects(h.join, error => error.code === 'table_closed'); assert.equal(h.attempts.length, 0);
+});
+
+test('Poker Online smoke: paid re-entry with existing bots keeps its legacy rules', async () => {
+  const h = createSinglePlayerSmokeHarness({ participated: true, singlePlayer: false, bots: [{ stack: 78 }, { stack: 90 }] });
+  const result = await h.join(); assert.equal(result.rejoin, false); assert.equal(result.seededBots.length, 0); assert.equal(h.read().ledger.length, 1);
+});
+
+test('Single Player smoke: actual funding SQL accepts seed/replacement receipts and rejects unbacked entries', async () => {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const db = new PGlite();
+  try {
+    await db.exec(`create table chips_accounts(id text primary key,account_type text,system_key text,status text);
+      create table chips_transactions(id text primary key,tx_type text,metadata jsonb);
+      create table chips_entries(transaction_id text,account_id text,amount bigint);
+      insert into chips_accounts values ('pool','SYSTEM','POKER_BOT_BANKROLL_100','active'),('escrow','ESCROW','POKER_TABLE:t-sp-smoke','active');
+      insert into chips_transactions values ('seed','TABLE_BUY_IN','{"actor":"BOT","reason":"BOT_SEED_BUY_IN","tableId":"t-sp-smoke","seatNo":2,"botUserId":"smoke-bot-0"}'),
+        ('replacement','TABLE_BUY_IN','{"actor":"BOT","reason":"BOT_REPLACEMENT_BUY_IN","tableId":"t-sp-smoke","seatNo":3,"replacementBotUserId":"smoke-bot-1"}');
+      insert into chips_entries values ('seed','pool',-100),('seed','escrow',100),('replacement','pool',-100),('replacement','escrow',100);`);
+    const make = () => createSinglePlayerSmokeHarness({ bots: [{ stack: 78 }, { stack: 168 }], fundingSql: async (sql, params) => (await db.query(sql, params)).rows });
+    const valid = make(); assert.equal((await valid.join()).seededBots.length, 0); assert.equal(valid.read().ledger.length, 1);
+    await db.exec("update chips_entries set amount=-90 where transaction_id='replacement' and account_id='pool'");
+    const unbacked = make(); await assert.rejects(unbacked.join, error => error.code === 'single_player_bot_funding_unavailable'); assert.equal(unbacked.read().ledger.length, 0);
+    await db.exec("update chips_entries set amount=-100 where transaction_id='replacement' and account_id='pool'; update chips_accounts set system_key='POKER_BOT_SLOW_BANKROLL_100' where id='pool'");
+    const wrongPool = make(); await assert.rejects(wrongPool.join, error => error.code === 'single_player_bot_funding_unavailable'); assert.equal(wrongPool.read().ledger.length, 0);
+  } finally { await db.close(); }
+});
+
 test("Single Player owner rejoin: succeeds without duplicate buy-in or second debit", async () => {
   const table = {
     id: "t-sp-rejoin",

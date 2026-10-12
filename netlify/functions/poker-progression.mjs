@@ -61,7 +61,7 @@ order by coalesce(s.last_seen_at, s.created_at) desc, t.created_at desc, t.id de
 
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
-    `select id, status, buy_in, stakes, lifecycle_kind, created_by, coalesce(is_single_player, false) as is_single_player${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
+    `select id, status, buy_in, stakes, lifecycle_kind, created_by, has_human_participant, coalesce(is_single_player, false) as is_single_player${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
     [tableId]
   );
   const table = rows?.[0] || null;
@@ -91,6 +91,9 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
   );
   if (seatRows?.length) {
     return { tableId, buyIn: normalizedBuyIn, allowed: true, rejoin: true, reason: "rejoin" };
+  }
+  if (table.is_single_player === true && table.has_human_participant === true) {
+    return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: 'single_player_participation_ended' };
   }
   if (progression.pokerAccess?.effectiveClass !== "NORMAL" && progression.pokerAccess?.effectiveClass !== "SLOW") {
     if (progression.pokerAccess?.effectiveClass !== "RESTRICTED") {

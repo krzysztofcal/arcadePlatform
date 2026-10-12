@@ -2784,8 +2784,15 @@
         var msg = err && (err.message || err.code);
         if (msg === 'single_player_restricted_unavailable' || msg === 'restricted_table_required'){
           setError(errorEl, 'Single Player vs bots is unavailable for restricted accounts.');
-        } else if (msg === 'seat_not_found' || msg === 'table_not_found' || msg === 'table_closed'){
-          setError(errorEl, 'Active table no longer available. Refreshing progression…');
+        } else if (msg === 'single_player_participation_ended' || msg === 'seat_not_found' || msg === 'table_not_found' || msg === 'table_closed'){
+          if (progressionState) {
+            progressionState.singlePlayerRejoinableTables = (progressionState.singlePlayerRejoinableTables || []).filter(function(tbl){ return tbl.id !== targetTableId; });
+            progressionState.singlePlayerRejoinableTableIds = (progressionState.singlePlayerRejoinableTableIds || []).filter(function(id){ return id !== targetTableId; });
+          }
+          setError(errorEl, msg === 'single_player_participation_ended'
+            ? 'Your participation ended when you left. Choose New Game explicitly to play again.'
+            : 'Active table no longer available. Refreshing progression…');
+          renderSingleTiers();
           refreshProgression();
         } else {
           klog('poker_single_player_resume_error', { error: err.message || err.code });
