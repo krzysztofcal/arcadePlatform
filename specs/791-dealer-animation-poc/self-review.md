@@ -8,16 +8,16 @@ Scope: Visual and Technical Proof of Concept only. No production changes, no mer
 
 ## 1. Executive Summary & Recommendation
 
-We have successfully developed and validated an isolated, high-fidelity Proof of Concept (PoC) for the Luxury Casino animated poker dealer. 
+We have successfully developed and validated an isolated, high-fidelity Proof of Concept (PoC) for the Luxury Casino animated poker dealer, updated with **Option A: Luxury Poise (Mimicry & Presence)** following owner review.
 - **Identity Preservation**: Strictly maintains the single female character from `/poker/assets/scene/dealer-v2.webp` (face, brunette bob, emerald satin dress, gold/emerald jewelry, lighting, and card deck).
-- **Three Core States**:
+- **Three Core States (Option A: Luxury Poise)**:
   1. `idle.webp`: 105 frames / 3.46 s, seamless $C^1$ periodic breathing and biological blink at $t=1.8$s (~300ms duration).
-  2. `deal.webp`: 30 frames / 0.99 s, realistic forward slide and card pitch to table center $(273, 537)$ matching `animateCardDiff()` flight origin, returning smoothly to resting deck.
-  3. `hand-end.webp`: 36 frames / 1.19 s, gracious head nod, warm radiant smile, and subtle left-hand open-palm presentation gesture, easing smoothly back to neutral.
+  2. `deal.webp`: 30 frames / 0.99 s, professional downward gaze and focused head posture matching the game engine's card flight (`animateCardDiff`), with hands calmly anchored on the table felt (zero artificial arm/card stickers).
+  3. `hand-end.webp`: 36 frames / 1.19 s, gracious head nod and warm radiant smile acknowledging the winning hand, with hands calmly anchored on the table felt (100% natural, zero pasted arm cutouts).
 - **Genuine 30 FPS Timing**: Validated with Sharp and FFmpeg. Every single frame across all three assets is encoded with exactly 33.00 ms delay (30.3 FPS nominal), with zero duplicated/frozen hold frames or whole-image translation drift.
 - **Visual Staging**: Fully embedded in an authentic Poker V2 table scene at `poker/designs/dealer-poc/index.html`, supporting portrait and landscape orientations, with real-time telemetry HUD and `prefers-reduced-motion` compliance.
 
-**Recommendation**: **GO for aesthetic evaluation by owner**. The visual motion demonstrates that animated WebP can bring the table alive without uncanny morphing or external runtime engines. Full V1 implementation should remain gated on owner visual sign-off.
+**Recommendation**: **GO for aesthetic re-evaluation by owner**. Option A removes all artificial arm overlays and focuses strictly on biological presence, eye contact, and warm facial expressions.
 
 ---
 
@@ -26,8 +26,8 @@ We have successfully developed and validated an isolated, high-fidelity Proof of
 | Asset | Authored Frames | Frame Delay | Nominal FPS | File Size | Dimensions & Channels | Motion & Loop Behavior |
 |---|---|---|---|---|---|---|
 | `idle.webp` | 105 | 33.00 ms | 30.3 | 7.55 MiB | 546×640 RGBA | Continuous seamless loop ($C^1$ periodic sine breath + 7-frame natural blink at $t \approx 1.8$s) |
-| `deal.webp` | 30 | 33.00 ms | 30.3 | 2.37 MiB | 546×640 RGBA | One-shot ($t=0.0 \to 1.0$s); card slides from deck, pitches to center, returns to resting pose |
-| `hand-end.webp` | 36 | 33.00 ms | 30.3 | 2.10 MiB | 546×640 RGBA | One-shot ($t=0.0 \to 1.2$s); gracious nod, radiant smile, open palm gesture, returns to neutral |
+| `deal.webp` | 30 | 33.00 ms | 30.3 | 2.16 MiB | 546×640 RGBA | One-shot ($t=0.0 \to 1.0$s); head focus & gaze down toward felt, hands anchored, returns to resting pose |
+| `hand-end.webp` | 36 | 33.00 ms | 30.3 | 2.61 MiB | 546×640 RGBA | One-shot ($t=0.0 \to 1.2$s); gracious head nod, radiant smile to winner, hands anchored, returns to neutral |
 | `dealer-v2.webp` | 1 | Static | N/A | 82.0 KiB | 546×640 RGBA | Original static poster fallback & `prefers-reduced-motion` target |
 
 ### Payload & Optimization Analysis

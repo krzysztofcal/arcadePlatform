@@ -19,23 +19,23 @@
       autoRevert: false
     },
     deal: {
-      name: 'Deal (Card Slide & Pitch)',
+      name: 'Deal (Focus & Downward Gaze)',
       src: './assets/deal.webp',
       frames: 30,
       duration: '0.99 s',
       fps: '30.3 FPS (33ms/frame)',
-      size: '2.37 MiB',
+      size: '2.16 MiB',
       loop: 'One-Shot -> Returns to Idle',
       autoRevert: true,
       revertMs: 1050
     },
     'hand-end': {
-      name: 'Hand End (Nod & Gracious Smile)',
+      name: 'Hand End (Gracious Smile & Nod)',
       src: './assets/hand-end.webp',
       frames: 36,
       duration: '1.19 s',
       fps: '30.3 FPS (33ms/frame)',
-      size: '2.10 MiB',
+      size: '2.61 MiB',
       loop: 'One-Shot -> Returns to Idle',
       autoRevert: true,
       revertMs: 1250
