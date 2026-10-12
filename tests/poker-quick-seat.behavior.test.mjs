@@ -19,13 +19,13 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTables = 0, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, resumeTable = null, activeSeatLeft = false, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
+const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTables = 0, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, resumeTable = null, activeSeatLeft = false, activeSeatSql = null, authenticatedUserId = userId, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
   const tableIdsQueue = Array.isArray(createTableIds) ? [...createTableIds] : null;
   return loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
-    verifySupabaseJwt: async () => ({ valid: true, userId }),
+    verifySupabaseJwt: async () => ({ valid: true, userId: authenticatedUserId }),
     beginSql: async (fn) => {
       events.push("beginSql");
       return fn({
@@ -47,6 +47,7 @@ const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTabl
           }
 
           if (text.includes("join public.poker_seats s") && text.includes("s.user_id = $1")) {
+            if (activeSeatSql) return activeSeatSql(query, params);
             if (mode === "already_seated" || hasActiveSeat) return [{ has_left: activeSeatLeft, id: "table-human", max_players: 6, buy_in: candidateBuyIn, stakes: { sb: candidateBuyIn / 100, bb: candidateBuyIn / 50 } }];
             return [];
           }
@@ -885,6 +886,30 @@ const run = async () => {
     assert.equal(JSON.parse(response.body).error, 'single_player_participation_ended');
     assert.equal(notifications.length, 0);
     assert.equal(queries.some(q => /insert into|update public.poker_seats/.test(q.query)), false);
+  }
+
+  {
+    const { PGlite } = await import('@electric-sql/pglite');
+    const db = new PGlite();
+    const tableId = '00000000-0000-4000-8000-000000000001', ownerId = '00000000-0000-4000-8000-000000000004';
+    try {
+      await db.exec(`create table poker_tables(id uuid, max_players int, buy_in int, stakes jsonb, status text, is_single_player boolean, created_by uuid, created_at timestamptz default now(), last_activity_at timestamptz);
+        create table poker_seats(table_id uuid, user_id uuid, status text, last_seen_at timestamptz, created_at timestamptz default now());
+        create table poker_state(table_id uuid, state jsonb);
+        insert into poker_tables(id,max_players,buy_in,stakes,status,is_single_player,created_by) values ('${tableId}',6,100,'{"sb":1,"bb":2}','OPEN',true,'${ownerId}');
+        insert into poker_seats(table_id,user_id,status) values ('${tableId}','${ownerId}','ACTIVE');
+        insert into poker_state values ('${tableId}','{}');`);
+      for (const left of [false, true]) {
+        await db.query('update poker_state set state=$1::jsonb', [JSON.stringify({ leftTableByUserId: { [ownerId]: left } })]);
+        const queries = [], notifications = [];
+        const handler = makeHandler({ mode: 'already_seated', queries, notifications, authenticatedUserId: ownerId, activeSeatSql: async (sql, params) => (await db.query(sql, params)).rows });
+        const response = await callQuickSeat(handler, { mode: 'single_player', tableId });
+        assert.equal(response.statusCode, left ? 409 : 200);
+        if (left) assert.equal(JSON.parse(response.body).error, 'single_player_participation_ended');
+        assert.equal(queries.some(q => /insert into|update public.poker_seats/.test(q.query)), false);
+        assert.equal(notifications.length, 0);
+      }
+    } finally { await db.close(); }
   }
 
   for (const [status, expectedError] of [['OPEN', 'single_player_participation_ended'], ['CLOSED', 'table_closed']]) {
