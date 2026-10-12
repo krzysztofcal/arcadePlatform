@@ -126,10 +126,12 @@ function createHarness(options = {}){
     'pokerV2AmountPreactionWrap', 'pokerV2AmountPreaction', 'pokerV2AmountPreactionText',
     'pokerV2AllInPreactionWrap', 'pokerV2AllInPreaction', 'pokerV2AllInPreactionText',
     'pokerV2AmountInput', 'pokerV2AmountInputWrap', 'pokerV2AmountValue',
-    'pokerTableScreen', 'pokerCenterLayer', 'pokerBootSplash'
+    'pokerTableScreen', 'pokerCenterLayer', 'pokerBootSplash',
+    'pokerSpectatorJoinIntro', 'pokerSpectatorJoinIntroBtn'
   ].forEach((id) => {
     elements[id] = makeElement(id);
   });
+  elements.pokerSpectatorJoinIntro.hidden = true;
   elements.pokerLobbyLink.href = '/poker/';
   elements.pokerV2SeatNo.value = '1';
   elements.pokerV2BuyIn.value = '100';
@@ -6539,4 +6541,173 @@ test('automatic table themes preload the full package and fall back to Classic o
       assert.ok(failed.logs.some((entry) => entry.kind === 'poker_table_theme_load_failed'));
     });
   }
+});
+
+test('poker v2 triggers animated spectator join introduction for eligible spectator and flies to rail', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, false, 'spectator join intro should be visible');
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), true, 'joinBtn should be placeholder target');
+
+  // Advance past attention wobble (1800ms)
+  harness.advanceTime(1850);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.classList.contains('poker-spectator-join-intro--flying'), true, 'should be flying');
+
+  // Advance past flight (550ms)
+  harness.advanceTime(600);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro should be hidden after flight');
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false, 'joinBtn should be active in rail');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'joinBtn should be visible in rail');
+});
+
+test('poker v2 does not trigger spectator join intro for seated player, guest, or shouldAutoJoin', async () => {
+  // 1. Seated player
+  const seatedHarness = createHarness();
+  seatedHarness.fireDomContentLoaded();
+  await seatedHarness.flush();
+  const ws = seatedHarness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 1,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }] },
+      public: { hand: { handId: null, status: 'INIT' }, pot: { total: 0 } },
+      you: { seat: 1 }
+    }
+  });
+  await seatedHarness.flush();
+  assert.equal(seatedHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'seated user must not see spectator intro');
+
+  // 2. Guest user
+  const guestPayload = Buffer.from(JSON.stringify({ sub: 'guest_user_1' })).toString('base64url');
+  const guestToken = `aaa.${guestPayload}.zzz`;
+  const guestHarness = createHarness({
+    search: '?tableId=table-1&guest=1',
+    token: null,
+    guestSession: {
+      token: guestToken,
+      tableId: 'table-1',
+      guestId: 'guest_user_1',
+      nickname: 'Guest1234'
+    }
+  });
+  guestHarness.fireDomContentLoaded();
+  await guestHarness.flush();
+  sendInitialTableSnapshot(guestHarness);
+  await guestHarness.flush();
+  assert.equal(guestHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'guest must not see spectator intro');
+
+  // 3. shouldAutoJoin
+  const autoHarness = createHarness({ search: '?tableId=table-1&autoJoin=1' });
+  autoHarness.fireDomContentLoaded();
+  await autoHarness.flush();
+  sendInitialTableSnapshot(autoHarness);
+  await autoHarness.flush();
+  assert.equal(autoHarness.elements.pokerSpectatorJoinIntro.hidden, true, 'autoJoin must not see spectator intro');
+});
+
+test('poker v2 spectator join intro shows at most once per table entry and does not replay on snapshots', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, false);
+
+  // Complete the intro
+  harness.advanceTime(1850);
+  await harness.flush();
+  harness.advanceTime(600);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true);
+
+  // Subsequent snapshot
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'other-user', seat: 2 }] },
+      public: { hand: { handId: 'hand-2', status: 'TURN' }, pot: { total: 50 } },
+      you: null
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'should not replay on subsequent snapshot');
+});
+
+test('poker v2 immediately cancels spectator join intro if eligibility is lost while active', async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, false);
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), true);
+
+  // Snapshot arrives where table is closed
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot({
+    kind: 'stateSnapshot',
+    payload: {
+      tableId: 'table-1',
+      stateVersion: 2,
+      table: { tableId: 'table-1', status: 'CLOSED', maxSeats: 6, members: [] },
+      public: { hand: { handId: null, status: 'INIT' }, pot: { total: 0 } },
+      you: null
+    }
+  });
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro should be immediately cancelled');
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false);
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'joinBtn should be hidden on closed table');
+});
+
+test('poker v2 clicking spectator intro button triggers manual join and cancels intro', async () => {
+  let joinSent = false;
+  let joinPayload = null;
+  const harness = createHarness({
+    sendJoin: (payload) => {
+      joinSent = true;
+      joinPayload = payload;
+      return Promise.resolve({ ok: true, seatNo: 1 });
+    }
+  });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, false);
+
+  harness.elements.pokerSpectatorJoinIntroBtn.click();
+  await harness.flush();
+
+  assert.equal(joinSent, true, 'manual join should be sent');
+  assert.equal(joinPayload.autoSeat, true, 'should send autoSeat true');
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro should be hidden immediately on click');
+});
+
+test('poker v2 respects prefers-reduced-motion by skipping spectator join intro animation', async () => {
+  const harness = createHarness({ reducedMotion: true });
+  harness.fireDomContentLoaded();
+  await harness.flush();
+
+  sendInitialTableSnapshot(harness);
+  await harness.flush();
+
+  assert.equal(harness.elements.pokerSpectatorJoinIntro.hidden, true, 'intro animation should be skipped');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, false, 'static join button should be visible immediately');
+  assert.equal(harness.elements.pokerV2JoinBtn.classList.contains('poker-join-btn--intro-target'), false);
 });
