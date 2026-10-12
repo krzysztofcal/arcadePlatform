@@ -142,7 +142,7 @@ const selectExistingActiveSeat = async (tx, { userId, isSinglePlayer = false, ta
   }
   return tx.unsafe(
     `
-select t.id, t.max_players, t.buy_in, t.stakes${isSinglePlayer ? ", exists(select 1 from public.poker_state ps where ps.table_id = t.id and ps.state -> 'leftTableByUserId' ->> $1 = 'true') as has_left" : ""}
+select t.id, t.max_players, t.buy_in, t.stakes${isSinglePlayer ? ", exists(select 1 from public.poker_state ps where ps.table_id = t.id and ps.state -> 'leftTableByUserId' ->> $1::uuid::text = 'true') as has_left" : ""}
 from public.poker_tables t
 join public.poker_seats s on s.table_id = t.id
 where t.status = 'OPEN'

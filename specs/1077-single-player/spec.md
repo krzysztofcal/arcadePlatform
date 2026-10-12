@@ -140,3 +140,8 @@ Existing bot seed/replacement receipts must credit exactly the authoritative tab
 ### Deferred Leave ends Resume eligibility
 
 For Single Player, accepted Leave with authoritative `leftTableByUserId[owner] === true` ends participation even while its seat remains ACTIVE pending hand settlement. Exclude such seats from Resume, reject Quick Seat/access and authoritative JOIN with `single_player_participation_ended` before the ACTIVE rejoin branch. Preserve the seat/stack for existing deferred settlement and cash-out. Ordinary ACTIVE Resume without Leave and Poker Online retain their contracts.
+
+
+### UUID query regression correction
+
+Resume-marker JSON keys are text but account/table identifiers are UUID. All marker queries must explicitly convert the UUID parameter to text without causing UUID comparisons to infer a text parameter. Fundamental PGlite tests must use the production UUID types; failure of the Single Player list must not disable progression/Online accidentally.

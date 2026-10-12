@@ -48,7 +48,7 @@ where t.status = 'OPEN'
   and s.status = 'ACTIVE'
   and t.is_single_player = true
   and t.created_by = $1
-  and not exists(select 1 from public.poker_state ps where ps.table_id = t.id and ps.state -> 'leftTableByUserId' ->> $1 = 'true')
+  and not exists(select 1 from public.poker_state ps where ps.table_id = t.id and ps.state -> 'leftTableByUserId' ->> $1::uuid::text = 'true')
 order by coalesce(s.last_seen_at, s.created_at) desc, t.created_at desc, t.id desc;
     `,
     [userId]
@@ -62,7 +62,7 @@ order by coalesce(s.last_seen_at, s.created_at) desc, t.created_at desc, t.id de
 
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
-    `select id, status, buy_in, stakes, lifecycle_kind, created_by, has_human_participant, exists(select 1 from public.poker_state ps where ps.table_id = poker_tables.id and ps.state -> 'leftTableByUserId' ->> $2 = 'true') as has_left, coalesce(is_single_player, false) as is_single_player${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
+    `select id, status, buy_in, stakes, lifecycle_kind, created_by, has_human_participant, exists(select 1 from public.poker_state ps where ps.table_id = poker_tables.id and ps.state -> 'leftTableByUserId' ->> $2::uuid::text = 'true') as has_left, coalesce(is_single_player, false) as is_single_player${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
     [tableId, userId]
   );
   const table = rows?.[0] || null;

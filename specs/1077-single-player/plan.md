@@ -178,3 +178,8 @@ Pass `authoritativeBuyIn` into the existing bot validation helper and require `c
 ### Deferred Leave correction
 
 Use the existing persisted `poker_state.state.leftTableByUserId` for Single Player Resume listing, Quick Seat and table-access preflight. Check locked authoritative state before ACTIVE rejoin in `join.mjs`; CLOSED still wins, and no seat/CH mutation follows ended rejection. Leave, settlement, cash-out, cleanup, frontend messaging and protocol remain unchanged. Fundamental tests cover ACTIVE-but-left refusal/no writes, actual Resume-list SQL with owner isolation, normal ACTIVE/Online compatibility and existing deferred settlement scenarios.
+
+
+### Lobby regression correction
+
+Use `$1::uuid::text` / `$2::uuid::text` for existing JSON owner-key expressions in progression and Quick Seat. Retain all deferred-Leave checks. Correct the existing PGlite fixture from text identifiers to UUID and reproduce endpoint 500 before the fix/200 after. No schema, runtime domain, CSS or frontend behavior changes.

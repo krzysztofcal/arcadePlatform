@@ -97,3 +97,7 @@
 
 - [x] **T039 / Resume eligibility:** Exclude Single Player owner marked left from listing; Quick Seat/access and table-locked authoritative JOIN reject before ACTIVE rejoin, without touching stack, seat or financial transfers.
 - [x] **T040 / Local regression package:** Fundamental JOIN/Leave/API/PGlite tests 92/92, npm 146 groups, syntax 226, CSP 55, migration guard 111/seven PASS; separate read-only review has no P1/P2 findings; local patch against `f37f9001` prepared. No push/Stage/ledger/deployment authorization; repeat runtime gate remains pending.
+
+
+- [x] **T041 / UUID regression:** Reproduce progression 500 with actual UUID fixture, explicitly cast UUID owner parameters to JSON text keys in progression and Quick Seat; retain deferred-Leave filtering and Online contracts.
+- [x] **T042 / Local evidence:** Endpoint/PGlite tests12/12, npm146 groups, syntax226/CSP55/migration111+7 PASS; separate read-only review independently ran actual Quick Seat/access UUID SQL successfully and found no issues. Local correction awaits owner GO for publication/deployment. Deployed Preview remains at faulty6299ff12.

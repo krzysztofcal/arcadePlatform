@@ -395,19 +395,19 @@ test('Single Player Resume list excludes deferred Leave and foreign tables using
   const { PGlite } = await import('@electric-sql/pglite');
   const db = new PGlite(); const previous = process.env.CHIPS_ENABLED; process.env.CHIPS_ENABLED = '1';
   try {
-    await db.exec(`create table poker_tables(id text, buy_in int, stakes jsonb, status text, is_single_player boolean, created_by text, created_at timestamptz default now());
-      create table poker_seats(table_id text, user_id text, status text, last_seen_at timestamptz, created_at timestamptz default now());
-      create table poker_state(table_id text, state jsonb);
-      insert into poker_tables(id,buy_in,stakes,status,is_single_player,created_by) values ('active',100,'{}','OPEN',true,'owner'),('left',100,'{}','OPEN',true,'owner'),('foreign',100,'{}','OPEN',true,'other');
-      insert into poker_seats(table_id,user_id,status) values ('active','owner','ACTIVE'),('left','owner','ACTIVE'),('foreign','other','ACTIVE');
-      insert into poker_state values ('active','{}'),('left','{"leftTableByUserId":{"owner":true}}'),('foreign','{}');`);
-    const handler = makeHandler({ authResult: { valid: true, userId: 'owner' }, progression: evaluatePokerProgression({ balance: 550, tiers: [100,500], enabledBuyIns: [100,500] }), calls: { tokens: [], progression: [] }, unsafe: async (sql, params) => {
+    await db.exec(`create table poker_tables(id uuid, buy_in int, stakes jsonb, status text, is_single_player boolean, created_by uuid, created_at timestamptz default now());
+      create table poker_seats(table_id uuid, user_id uuid, status text, last_seen_at timestamptz, created_at timestamptz default now());
+      create table poker_state(table_id uuid, state jsonb);
+      insert into poker_tables(id,buy_in,stakes,status,is_single_player,created_by) values ('00000000-0000-4000-8000-000000000001',100,'{}','OPEN',true,'00000000-0000-4000-8000-000000000004'),('00000000-0000-4000-8000-000000000002',100,'{}','OPEN',true,'00000000-0000-4000-8000-000000000004'),('00000000-0000-4000-8000-000000000003',100,'{}','OPEN',true,'00000000-0000-4000-8000-000000000005');
+      insert into poker_seats(table_id,user_id,status) values ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000004','ACTIVE'),('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000004','ACTIVE'),('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000005','ACTIVE');
+      insert into poker_state values ('00000000-0000-4000-8000-000000000001','{}'),('00000000-0000-4000-8000-000000000002','{"leftTableByUserId":{"00000000-0000-4000-8000-000000000004":true}}'),('00000000-0000-4000-8000-000000000003','{}');`);
+    const handler = makeHandler({ authResult: { valid: true, userId: '00000000-0000-4000-8000-000000000004' }, progression: evaluatePokerProgression({ balance: 550, tiers: [100,500], enabledBuyIns: [100,500] }), calls: { tokens: [], progression: [] }, unsafe: async (sql, params) => {
       if (sql.includes('select t.id, t.buy_in, t.stakes')) return (await db.query(sql, params)).rows;
       if (sql.includes('select poker_auto_class')) return [{ poker_auto_class: 'NORMAL', poker_access_override: 'AUTO', poker_access_revision: 1 }];
       return [];
     } });
     const response = await handler({ httpMethod: 'GET', headers: { origin, authorization: 'Bearer token' } });
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(JSON.parse(response.body).singlePlayerRejoinableTableIds, ['active']);
+    assert.deepEqual(JSON.parse(response.body).singlePlayerRejoinableTableIds, ['00000000-0000-4000-8000-000000000001']);
   } finally { await db.close(); if (previous === undefined) delete process.env.CHIPS_ENABLED; else process.env.CHIPS_ENABLED = previous; }
 });
