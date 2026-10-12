@@ -153,3 +153,12 @@ Owner reported disabled Play Now/Play vs Bots and progression unavailable on the
 The preceding PGlite fixture incorrectly declared identifiers as text, masking the deployed type contract. Changing its account/table identifiers and values to real UUID reproduces500 before the fix and200 afterward. Fix uses explicit UUID-to-text casts in the three existing marker expressions (Resume list, table access and Quick Seat); no condition is removed, no migrations/schema/domain/financial behavior changes.
 
 Correction remains local; publication/deployment requires a new explicit GO because previous GO covered exact6299ff12 only. No automatic rollback, Stage/ledger operations or funded smoke performed. Existing Preview remains broken until a separately authorized corrected release. Fresh endpoint/PGlite tests12/12 PASS; npm test exit0 with146 groups; syntax226/CSP55/migration111+7 PASS. Separate read-only subagent `review_final_p2` (same model, separate context) found no issues and independently executed actual Quick Seat and access SQL against UUID tables successfully.
+
+
+## Final owner-accepted runtime handoff
+
+Owner manual smoke and agent100CH/NORMAL runtime/economic audit on `cbf0262fdb5dda061d53885fbff50496c5e279e4` are accepted PASS. Owner authorized documentation finalization and marking PR #1095 Ready for review. Current main remains `a0de1b09`; no integration change is necessary. [runtime-smoke.md](runtime-smoke.md) contains scenarios, scoped table IDs, correct fund receipts, single admission/cash-out counts, zero final escrow and limitations. Historical961 Leave origin is not reproduced/explained; owner accepted the release evidence with this uncertainty retained.
+
+Production JS remains identical to reviewed `7e2a1c41`; runtimecbf0262f adds the two durable UUID test changes. This finalization changes only Markdown documentation; exact-runtime deploy and accepted smoke remain valid under agents.md. Await checks on the docs revision before Ready; no new WS deploy, funded smoke, manual Stage/ledger changes, Production operation or merge is authorized by this finalization.
+
+Next release gate is the owner's merge/Production decision. Production is a separate rollout: verify Production migration inventory and approved immutable shared-safe contracts, then authorized forward-only schema rollout before compatible WS/browser/functions. No Production migration PR/application/deployment is prepared or executed implicitly by marking Ready.

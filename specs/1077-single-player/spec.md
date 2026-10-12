@@ -2,7 +2,7 @@
 
 **Issue:** https://github.com/krzysztofcal/arcadePlatform/issues/1077  
 **Baseline:** `main` (commit `e7fd0ce2`)  
-**Status:** Draft PR #1095; main `a0de1b09` integrated in `8839bf0b`. Stage migrations and WS Preview for that revision succeeded, but owner smoke failed. Current regression fixes are local-only and await owner review; publication, further Stage operations and deployment require new GO.
+**Status:** Owner accepted manual smoke and agent runtime/economic audit on `cbf0262fdb5dda061d53885fbff50496c5e279e4`; approved documentation finalization and PR #1095 Ready for review. Main `a0de1b09` remains integrated. Production rollout and merge are not authorized. See [runtime-smoke.md](runtime-smoke.md).
 
 ---
 

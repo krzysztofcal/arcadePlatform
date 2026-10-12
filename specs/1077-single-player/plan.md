@@ -2,7 +2,7 @@
 
 **Source:** [spec.md](spec.md), GitHub issue [#1077](https://github.com/krzysztofcal/arcadePlatform/issues/1077)
 **Baseline:** AGY started on `e7fd0ce2`; handoff integrates current `main` `8f691d65` (2026-10-12).
-**Status:** Draft PR #1095 at integrated `8839bf0b` (main `a0de1b09`, including #1092). Stage and exact-SHA WS Preview succeeded; owner smoke failed. Current minimal regression amendments remain local pending review and separate publication/deployment GO.
+**Status:** Owner accepted manual smoke and agent runtime/economic audit on `cbf0262fdb5dda061d53885fbff50496c5e279e4`; approved documentation finalization and PR #1095 Ready for review. Main `a0de1b09` remains integrated. Production rollout and merge are not authorized. See [runtime-smoke.md](runtime-smoke.md).
 
 ---
 

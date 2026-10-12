@@ -45,7 +45,7 @@
 - [x] **T010 / Code review package:** Prepare complete unified diff / patch against `origin/main` for owner code review.
 - [x] **T011a / Publication authorization:** Owner GO for push, Draft PR and automatic shared Stage application of exactly the two #1077 migrations.
 - [x] **T011b / Stage evidence:** Earlier approved publication completed automatic Stage apply and read-only verification: 111 applied, zero pending, column/CHECK/index present, both reviewed hashes unchanged. No Stage access during the current local smoke amendment.
-- [ ] **T011c / Runtime deployment gate:** Await separate GO for exact-SHA WS Preview, runtime verification, Production or merge.
+- [x] **T011c / Preview runtime gate:** Exact-SHA WS Preview `cbf0262f` verified and owner/agent smoke accepted. Production and merge remain separate gates.
 - [x] **T012 / Handoff:** Record AGY commits, baseline, review findings, verification, remaining release gates and phased rollout in `handoff-review.md`.
 
 ## Phase 5 — VPS handoff review (2026-10-12)
@@ -83,21 +83,29 @@
 - [x] **T032 / Ended participation:** Table-locked guard refuses Single Player fresh paid re-entry after prior participation, before financial/seat changes. Keep first admission and free ACTIVE Resume, CLOSED denial and Online re-entry. Cover ACTIVE confirmation → finalized Leave → WS JOIN plus rollback on partial pool exhaustion.
 - [x] **T033 / Resume feedback:** Expose stable ended error through Quick Seat, access preflight and authoritative adapter; discard stale lobby Resume, refresh progression, clear V2 auto-JOIN retries and remembered seat. No automatic New Game.
 - [x] **T034 / Final local evidence:** Fresh npm test (146 groups), focused tests 258/258, full WS server 140/140 on Node 20, V2 live 157/157, syntax 226, CSP 55 and migration guard 111/seven pass. Separate read-only re-review has no P1/P2 findings; local report/commit and patch against `8839bf0b` prepared.
-- [ ] **T035 / Repeat runtime gate:** Await owner review and separate GO for publication and exact-new-SHA WS Preview; repeat manual smoke before considering readiness. No Stage/ledger operations or deployment in this amendment.
+- [x] **T035 / Repeat runtime gate:** Owner approved fixes, exact-final-runtime SHA `cbf0262f` deployed to WS and Netlify Preview, authenticated progression200 and owner/agent smoke accepted.
 
 
 ## Final P2 owner review (local only)
 
 - [x] **T036 / Exact existing-bot funding:** Require authoritative buy-in amount in the existing receipt query; isolated PGlite rejects balanced -1/+1 funding at buy-in 100 while preserving valid seed/replacement receipts.
 - [x] **T037 / Definitive reconnect refusal:** Do not restore remembered seat after ended participation; deterministic V2 test checks cleared seat, disabled auto-JOIN and no retry while retaining transient-error seat memory.
-- [x] **T038 / P2 local package:** Focused domain/PGlite/V2 237/237, npm 146 groups, syntax 226, CSP 55 and migration guard 111/seven pass; separate read-only review has no P1/P2 findings; small patch against `c8c27901` prepared. No publication, Stage/ledger access or deployment; T035 remains pending.
+- [x] **T038 / P2 local package:** Focused domain/PGlite/V2 237/237, npm 146 groups, syntax 226, CSP 55 and migration guard 111/seven pass; separate read-only review has no P1/P2 findings; small patch against `c8c27901` prepared. This amendment was local-only at the time; subsequent publication/runtime acceptance is recorded in T035.
 
 
 ## Deferred Leave Resume amendment (local only)
 
 - [x] **T039 / Resume eligibility:** Exclude Single Player owner marked left from listing; Quick Seat/access and table-locked authoritative JOIN reject before ACTIVE rejoin, without touching stack, seat or financial transfers.
-- [x] **T040 / Local regression package:** Fundamental JOIN/Leave/API/PGlite tests 92/92, npm 146 groups, syntax 226, CSP 55, migration guard 111/seven PASS; separate read-only review has no P1/P2 findings; local patch against `f37f9001` prepared. No push/Stage/ledger/deployment authorization; repeat runtime gate remains pending.
+- [x] **T040 / Local regression package:** Fundamental JOIN/Leave/API/PGlite tests 92/92, npm 146 groups, syntax 226, CSP 55, migration guard 111/seven PASS; separate read-only review has no P1/P2 findings; local patch against `f37f9001` prepared. This amendment was local-only at the time; subsequent publication/runtime acceptance is recorded in T035.
 
 
 - [x] **T041 / UUID regression:** Reproduce progression 500 with actual UUID fixture, explicitly cast UUID owner parameters to JSON text keys in progression and Quick Seat; retain deferred-Leave filtering and Online contracts.
-- [x] **T042 / Local evidence:** Endpoint/PGlite tests12/12, npm146 groups, syntax226/CSP55/migration111+7 PASS; separate read-only review independently ran actual Quick Seat/access UUID SQL successfully and found no issues. Local correction awaits owner GO for publication/deployment. Deployed Preview remains at faulty6299ff12.
+- [x] **T042 / Local evidence:** Endpoint/PGlite tests12/12, npm146 groups, syntax226/CSP55/migration111+7 PASS; separate read-only review independently ran actual Quick Seat/access UUID SQL successfully and found no issues. Owner subsequently approved publication/deployment; corrected runtime `cbf0262f` is verified and accepted.
+
+
+## Final release evidence
+
+- [x] **T043 / Durable UUID SQL tests:** Test-only commit `cbf0262f` executes actual Table Access and Quick Seat SQL on production UUID types for ACTIVE/deferred Leave; no further runtime change after approved `7e2a1c41`.
+- [x] **T044 / Accepted smoke and read-only audit:** Owner manual smoke PASS; agent100CH/NORMAL smoke PASS, including direct URL/tab Resume, socket reconnect, deferred Leave and authoritative refusal before cash-out. Four scoped tables each have one human buy-in/one cash-out, final escrow0, balanced transactions and valid bot funding. See runtime-smoke.md.
+- [x] **T045 / Documentation:** Record exact runtime revisions, checks/Stage evidence, accepted scenarios, financial totals and historical961 uncertainty; owner authorized PR Ready for review.
+- [ ] **T046 / Production and merge:** Separate owner decision/authorization; no Production application/deployment or merge performed.
