@@ -262,6 +262,10 @@
   var autoJoinErrorActive = false;
   var reconnectSeatNo = null;
   var lastKnownCurrentSeatNo = null;
+  var spectatorJoinIntroShown = false;
+  var spectatorJoinIntroActive = false;
+  var spectatorJoinIntroTimer = null;
+  var spectatorJoinIntroSettleTimer = null;
   var heroPresentationState = null;
   var heroFrameKind = null;
   var heroLifecycleTransition = 'boot';
@@ -760,14 +764,17 @@
 
   function startClosedTableRedirect(reason){
     clearCardFx(true);
+    if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
     if (closedTableRedirectRemaining === CLOSED_TABLE_REDIRECT_SECONDS && closedTableRedirectReason === reason && closedTableRedirectTimer) {
       renderClosedTableNotice();
+      syncJoinVisibility();
       return;
     }
     closedTableRedirectReason = reason || null;
     closedTableRedirectRemaining = CLOSED_TABLE_REDIRECT_SECONDS;
     clearClosedTableRedirectTimer();
     renderClosedTableNotice();
+    syncJoinVisibility();
     klog('poker_closed_table_redirect_started', {
       tableId: state.tableId || null,
       reason: closedTableRedirectReason
@@ -4164,16 +4171,145 @@
     layoutRefreshTimer = window.setTimeout(refreshLayoutPresentation, 0);
   }
 
+  function startSpectatorJoinIntro(){
+    if (prefersReducedMotion()) return;
+    if (!els.spectatorJoinIntro || !els.spectatorJoinIntroBtn || !els.joinBtn) return;
+    spectatorJoinIntroActive = true;
+    els.joinBtn.hidden = false;
+    els.joinBtn.classList.add('poker-join-btn--intro-target');
+    els.spectatorJoinIntro.hidden = false;
+    els.spectatorJoinIntro.classList.remove('poker-spectator-join-intro--flying');
+    els.spectatorJoinIntroBtn.style.transform = '';
+    els.spectatorJoinIntroBtn.style.opacity = '';
+
+    if (spectatorJoinIntroTimer) window.clearTimeout(spectatorJoinIntroTimer);
+    spectatorJoinIntroTimer = window.setTimeout(function(){
+      flySpectatorJoinIntro();
+    }, 1800);
+  }
+
+  function flySpectatorJoinIntro(){
+    if (!spectatorJoinIntroActive || !els.spectatorJoinIntroBtn || !els.joinBtn) return;
+    if (els.spectatorJoinIntro) {
+      els.spectatorJoinIntro.classList.add('poker-spectator-join-intro--flying');
+    }
+
+    var fromRect = typeof els.spectatorJoinIntroBtn.getBoundingClientRect === 'function'
+      ? els.spectatorJoinIntroBtn.getBoundingClientRect()
+      : null;
+    var toRect = typeof els.joinBtn.getBoundingClientRect === 'function'
+      ? els.joinBtn.getBoundingClientRect()
+      : null;
+
+    if (toRect && toRect.width > 0 && toRect.height > 0 && fromRect && fromRect.width > 0 && fromRect.height > 0) {
+      var deltaX = (toRect.left + toRect.width / 2) - (fromRect.left + fromRect.width / 2);
+      var deltaY = (toRect.top + toRect.height / 2) - (fromRect.top + fromRect.height / 2);
+      var scale = toRect.height / fromRect.height;
+      els.spectatorJoinIntroBtn.style.transform = 'translate(' + Math.round(deltaX) + 'px, ' + Math.round(deltaY) + 'px) scale(' + scale.toFixed(3) + ')';
+    } else {
+      els.spectatorJoinIntroBtn.style.opacity = '0';
+    }
+
+    if (spectatorJoinIntroTimer) window.clearTimeout(spectatorJoinIntroTimer);
+    spectatorJoinIntroTimer = window.setTimeout(function(){
+      finishSpectatorJoinIntro();
+    }, 550);
+  }
+
+  function finishSpectatorJoinIntro(){
+    spectatorJoinIntroActive = false;
+    if (spectatorJoinIntroTimer) {
+      window.clearTimeout(spectatorJoinIntroTimer);
+      spectatorJoinIntroTimer = null;
+    }
+    if (els.spectatorJoinIntro) {
+      els.spectatorJoinIntro.hidden = true;
+      els.spectatorJoinIntro.classList.remove('poker-spectator-join-intro--flying');
+    }
+    if (els.spectatorJoinIntroBtn) {
+      els.spectatorJoinIntroBtn.style.transform = '';
+      els.spectatorJoinIntroBtn.style.opacity = '';
+    }
+    if (els.joinBtn) {
+      els.joinBtn.classList.remove('poker-join-btn--intro-target');
+      els.joinBtn.classList.add('poker-join-btn--settled');
+      if (spectatorJoinIntroSettleTimer) window.clearTimeout(spectatorJoinIntroSettleTimer);
+      spectatorJoinIntroSettleTimer = window.setTimeout(function(){
+        spectatorJoinIntroSettleTimer = null;
+        if (els.joinBtn) els.joinBtn.classList.remove('poker-join-btn--settled');
+      }, 700);
+    }
+    syncJoinVisibility();
+  }
+
+  function cancelSpectatorJoinIntro(preserveJoinBtn){
+    spectatorJoinIntroActive = false;
+    if (spectatorJoinIntroTimer) {
+      window.clearTimeout(spectatorJoinIntroTimer);
+      spectatorJoinIntroTimer = null;
+    }
+    if (spectatorJoinIntroSettleTimer) {
+      window.clearTimeout(spectatorJoinIntroSettleTimer);
+      spectatorJoinIntroSettleTimer = null;
+    }
+    if (els.spectatorJoinIntro) {
+      els.spectatorJoinIntro.hidden = true;
+      els.spectatorJoinIntro.classList.remove('poker-spectator-join-intro--flying');
+    }
+    if (els.spectatorJoinIntroBtn) {
+      els.spectatorJoinIntroBtn.style.transform = '';
+      els.spectatorJoinIntroBtn.style.opacity = '';
+    }
+    if (els.joinBtn) {
+      els.joinBtn.classList.remove('poker-join-btn--intro-target', 'poker-join-btn--settled');
+    }
+    if (!preserveJoinBtn) {
+      syncJoinVisibility();
+    }
+  }
+
   function syncJoinVisibility(){
     if (!els.joinBtn) return;
     var signedIn = isSignedIn() && !isGuestMode;
     var seated = !!deriveCurrentSeat();
     var joinPending = isJoinOperationPending();
     var waitingForAuthoritativeSeat = joinOperation.phase === 'active' && !seated;
-    var canJoin = state.mode === 'live' && signedIn && !seated && !!state.tableId
+    var isClosed = isClosedTableStatus(state.tableStatus) || closedTableRedirectRemaining > 0;
+    var canJoin = state.mode === 'live' && signedIn && !seated && !isClosed && !!state.tableId
       && !state.reconnectGate && isWsReady() && state.hasAppliedAuthoritativeSnapshot === true
       && !joinPending && !waitingForAuthoritativeSeat;
-    els.joinBtn.hidden = !canJoin;
+    var occupiedSeatsCount = Array.isArray(state.seats)
+      ? state.seats.filter(function(seat){ return seat && Number.isInteger(seat.seatNo); }).length
+      : 0;
+    var maxSeatsCount = Number.isInteger(state.maxSeats) && state.maxSeats > 0 ? state.maxSeats : 6;
+    var isTableFull = occupiedSeatsCount >= maxSeatsCount;
+
+    if (seated) {
+      spectatorJoinIntroShown = true;
+    }
+
+    if ((!canJoin || isTableFull) && spectatorJoinIntroActive) {
+      cancelSpectatorJoinIntro(false);
+    }
+
+    if (spectatorJoinIntroActive) {
+      els.joinBtn.hidden = false;
+      els.joinBtn.classList.add('poker-join-btn--intro-target');
+    } else {
+      els.joinBtn.classList.remove('poker-join-btn--intro-target');
+      els.joinBtn.hidden = !canJoin;
+    }
+
+    if (canJoin && !isTableFull && !spectatorJoinIntroShown && !shouldAutoJoin
+        && !Number.isInteger(reconnectSeatNo) && !autoJoinAttempted && !joinPending) {
+      spectatorJoinIntroShown = true;
+      if (prefersReducedMotion()) {
+        els.joinBtn.hidden = false;
+        els.joinBtn.classList.remove('poker-join-btn--intro-target');
+      } else {
+        startSpectatorJoinIntro();
+      }
+    }
   }
 
   function seatHudAnchor(node){
@@ -6377,6 +6513,7 @@
     closeMenu();
     closeSocialSettings(false);
     closeReactionMenu();
+    if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
     els.handInfoPanel.hidden = false;
     if (els.handInfoToggle) els.handInfoToggle.setAttribute('aria-expanded', 'true');
     updateHandInfoPanelBounds();
@@ -6488,6 +6625,7 @@
   }
 
   function leaveAndReturnToLobby(destination){
+    if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
     clearHeroGiftDemo();
     var leaveDestination = destination == null
       ? (pendingLeaveNavigation ? pendingLeaveDestination : '/poker/')
@@ -6575,6 +6713,7 @@
       if (hidden) {
         closeSocialSettings(false);
         closeHandInfoPanel(false);
+        if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
       }
       if (hidden) els.menuPanel.removeAttribute('hidden');
       else els.menuPanel.setAttribute('hidden', 'hidden');
@@ -6598,6 +6737,7 @@
       var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
       closeMenu();
       closeHandInfoPanel(false);
+      if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
       if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = !opening;
       if (els.menuSettings) els.menuSettings.setAttribute('aria-expanded', opening ? 'true' : 'false');
       socialSettingsOpener = opening ? (trigger || els.menuSettings) : null;
@@ -6669,11 +6809,17 @@
     if (els.foldBtn) els.foldBtn.addEventListener('click', function(){
       handleAction('FOLD');
     });
-    if (els.joinBtn) els.joinBtn.addEventListener('click', function(){
+    function handleManualJoinClick(){
+      if (isJoinOperationPending() || joinOperation.phase === 'active') return;
+      if (spectatorJoinIntroActive) {
+        cancelSpectatorJoinIntro(true);
+      }
       beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'manual' }).catch(function(err){
         setError(joinErrorMessage(err));
       });
-    });
+    }
+    if (els.joinBtn) els.joinBtn.addEventListener('click', handleManualJoinClick);
+    if (els.spectatorJoinIntroBtn) els.spectatorJoinIntroBtn.addEventListener('click', handleManualJoinClick);
     if (els.menuLeave) els.menuLeave.addEventListener('click', function(){
       closeMenu();
       setError('');
@@ -6850,6 +6996,8 @@
     els.stackText = document.getElementById('pokerV2StackText');
     els.errorText = document.getElementById('pokerV2ErrorText');
     els.joinBtn = document.getElementById('pokerV2JoinBtn');
+    els.spectatorJoinIntro = document.getElementById('pokerSpectatorJoinIntro');
+    els.spectatorJoinIntroBtn = document.getElementById('pokerSpectatorJoinIntroBtn');
     els.joinSeat = document.getElementById('pokerV2SeatNo');
     els.joinBuyIn = document.getElementById('pokerV2BuyIn');
     els.reactionBtn = document.getElementById('pokerV2ReactionBtn');
