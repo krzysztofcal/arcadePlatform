@@ -75,3 +75,6 @@ PL: „Jeśli wybierzesz logowanie Google, Google przekazuje identyfikator konta
 - [Netlify environment contexts/build scopes](https://docs.netlify.com/build/configure-builds/environment-variables/)
 
 Prepared status: plan/security/rollback COMPLETE; Production OAuth configuration/publication/activation/deploy/E2E NOT EXECUTED, awaiting explicit GO. Google inventory/domain read awaits owner authentication only.
+
+## Read-only audit follow-up
+See [production-audit.md](production-audit.md) for completed Google inventory, Stage Owner role, Search Console explicit no-access result, conditional brand-verification requirement and superseding final privacy paragraphs. No Production mutation was made.

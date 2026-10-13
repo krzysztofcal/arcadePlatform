@@ -1,0 +1,46 @@
+# Production Google Login V1 — read-only Google audit
+
+Audit date: 2026-10-13 UTC. No Cloud resource creation, OAuth client creation, policy acceptance, domain verification submission, publication, Supabase configuration change or Netlify deploy was performed.
+
+## Findings
+
+- Authenticated Cloud Resource Manager lists Arcade Hub Stage (`arcade-hub-stage-1100`), Gemini API (`gen-lang-client-0448800862`) and My First Project (`predictive-fx-464622-f7`). No dedicated Arcade Production project is visible to this account. The Stage IAM page shows the Owner role and the Auth Platform is accessible. Effective permission/quota to create a new project/client cannot be proven without the deferred mutation; the Console offers project creation and the account previously created the Stage Web client successfully.
+- Stage Verification Center says verification is not required because publishing status is Testing. This is Stage evidence, not approval of a future Production app.
+- Search Console direct read of `sc-domain:kcswh.pl` explicitly reports no access for the signed-in account. Domain ownership is NOT verified for this account. The domain might already be verified by another account; absence of access does not prove no owner exists. No ownership challenge or DNS changes were requested.
+- A separate standard Web client can be prepared safely after GO, isolated from Stage and using only the exact Production Supabase callback. No existing Production OAuth client was found through the accessible project inventory; none is configured in Production Supabase.
+
+## Verification decision
+
+For basic `openid/email/profile` scopes, public Published/External OAuth does not require sensitive/restricted-scope verification. Brand verification is not a prerequisite to public basic sign-in with the generic/unverified identity presentation. It is required to display the application's own name/logo on the Google consent screen. Thus verification is recommended for user trust, and mandatory for that specific branded presentation, not an unavoidable Google Login V1 activation blocker. Workspace administrator restrictions still apply.
+
+If owner chooses branded consent, supply access to an existing verified `kcswh.pl` property for the Cloud project owner/editor, or perform Google's exact ownership challenge after GO. Do not claim ownership of Supabase's parent domain, add a custom Auth domain, or promise verification approval. Check Google's actual domain findings for the hosted Supabase redirect when configuring the Production client.
+
+## Final proposed privacy addition
+
+Add these matching paragraphs to the existing account-data section of `legal/privacy.pl.html` and `legal/privacy.en.html` only after approval. Existing public-profile, retention, rights and Supabase processor provisions remain applicable.
+
+PL:
+
+„Logowanie przez Google jest opcjonalne. Jeśli je wybierzesz, Google przekazuje Supabase identyfikator konta Google, zweryfikowany adres e-mail oraz podstawowe dane profilu, takie jak nazwa i zdjęcie profilowe. Dane te są przechowywane w ramach uwierzytelnienia Supabase i używane do utworzenia lub połączenia konta Arcade Hub, logowania oraz utrzymywania sesji. Nie otrzymujemy Twojego hasła Google ani dostępu do Gmaila, Dysku lub Kalendarza. SDK Supabase w przeglądarce przechowuje dane sesji i może zachować token dostępu Google; aplikacja nie kopiuje ani nie przekazuje tego tokena do swoich API. Zakres widoczności profilu gracza opisano poniżej; adres e-mail i tokeny nie są publiczne. Żądanie usunięcia konta można wysłać na contact@kcswh.pl zgodnie z sekcją dotyczącą praw użytkownika.”
+
+EN:
+
+“Google sign-in is optional. If you choose it, Google provides Supabase with your Google account identifier, verified email address and basic profile data, such as your name and profile image. These data are stored as part of Supabase authentication and used to create or link your Arcade Hub account, sign you in and maintain your session. We do not receive your Google password or access to Gmail, Drive or Calendar. The Supabase browser SDK stores session data and may retain a Google access token; the application does not copy or forward that token to its APIs. Gaming-profile visibility is described below; your email address and tokens are not public. You can request account deletion by emailing contact@kcswh.pl as described in the user-rights section.”
+
+## Exact proposed mutations after separate GO
+
+1. Google Cloud: new separate Arcade Production project (proposed ID `arcade-hub-prod-1100`, subject to availability/quota), app Arcade Hub, eligible support email, developer contact contact@kcswh.pl. External audience, Published/In production. Only openid/email/profile. Homepage https://play.kcswh.pl/, existing EN privacy/terms URLs, app domain kcswh.pl. Standard Web client, origin https://play.kcswh.pl, sole redirect https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/callback. No Stage project changes. Domain/branding verification and Publish branding only when authorized and necessary for the owner's selected branded presentation. Secret downloaded privately, never in repo/log/chat/Netlify.
+2. Approved minimal PL/EN privacy paragraph through existing code/deployment workflow; no automatic account deletion or new auth mechanism. Owner performs any required PR merge.
+3. Supabase Production `otbqfijerkieoxwpxjnm`: official Management API PATCH only external_google_client_id, external_google_secret, external_google_enabled=true. Preserve Site URL, existing redirect allowlist, signup, passwords and all other providers. Exact https://play.kcswh.pl/account.html is already allowed. Record existing broad *.netlify.app allowlist as a preexisting risk, without silently altering unrelated flows.
+4. Netlify playkcswh only: AUTH_GOOGLE_ENABLED=1 in production/Builds, then build/deploy approved main revision. Keep preview flag and Stage credentials unchanged; no Google secret on Netlify. If connector cannot write this value, ask owner for only that env operation or prepare a minimal config PR; no merge by agent.
+5. Authorized nonfinancial Production E2E with an ordinary Google account absent from Production and not a tester, plus existing verified-email UUID continuity, profile HTTP200, clean callback, sign-out/re-login same UUID and password regression. No CH/Poker actions or account deletion/recreation.
+
+Rollback is in production-rollout.md: disable only Supabase Google first, restore Production build flag and rebuild/republish appropriate baseline; preserve users/profiles and already issued sessions. New Google-only sign-in is unavailable during rollback, not automatically converted to password login.
+
+## References
+
+- https://developers.google.com/identity/protocols/oauth2/production-readiness/overview
+- https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification
+- https://supabase.com/docs/guides/auth/social-login/auth-google
+
+Audit COMPLETE within current account visibility. Production project/client creation permission and Google's acceptance of future config are not write-tested. Await owner GO for all mutations.
