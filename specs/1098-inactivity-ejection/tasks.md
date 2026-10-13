@@ -23,5 +23,7 @@ Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1099. Exact final 
 
 ## P2 pending presentation owner follow-up
 - [x] T015 Reproduce client occupied-avatar/control failure in existing fundamental harness; minimal frontend visibility/participation fix, no backend delta.
-- [ ] T016 Run regressions/npm test/guards/required CI and independent final-SHA review; update Draft PR.
-- [ ] T017 Authorized exact-SHA Preview deployment and narrow Stage Chromium/DOM/WS pending-refresh-removed smoke; verify settlement and report PASS/FAIL/NOT TESTED, no merge/Production.
+- [x] T016 Run regressions/npm test/guards/required CI and independent final-SHA review; update Draft PR.
+- [x] T017 Authorized exact-SHA Preview deployment and narrow Stage Chromium/DOM/WS pending-refresh-removed smoke; verify settlement and report PASS/FAIL/NOT TESTED, no merge/Production.
+
+P2 runtime verification completed on 0e23d24a756e26a44874c60a28f46c1e053417e5; exact-SHA deploy run38407061216 and narrow Stage smoke passed. Second-human and worker-crash scenarios remain NOT TESTED. No merge/Production action. Final evidence is in review.md and PR #1099.
