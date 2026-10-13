@@ -7,7 +7,14 @@ Draft PR: [#1101](https://github.com/krzysztofcal/arcadePlatform/pull/1101).
 Preview: [account page](https://deploy-preview-1101--playkcswh.netlify.app/account.html).
 Verified runtime commit: `b68f546a514b640b28f41df25b190a61cec7a1fb`; Netlify deploy `6ace83be1e611a8e9f62571f` ready on 2026-10-13. Later evidence-only commits do not change runtime. Production provider activation/deploy/merge require separate owner GO. No DB migrations or WS deploy needed.
 
-## Google Cloud (owner dashboard access)
+## Current Stage configuration (2026-10-13)
+Codex created a dedicated Google Cloud project `arcade-hub-stage-1100` / Arcade Hub Stage through the logged-in Google Console, after owner login and owner acceptance of Google API user-data policy. Standard Web client: Arcade Hub Stage Web; exact Stage Supabase callback and Preview JavaScript origin. Audience: External / Testing, one owner test user; only openid/userinfo.email/userinfo.profile scopes. No billing activation or Production project change.
+
+Client JSON was downloaded directly from Google Console into a private VPS directory (0700), stored with file mode 0600, and applied through the official Supabase Stage Management API. Read-back confirms enabled Google, matching Client ID, exact Preview redirect, and Preview as Stage Site URL. No client secret is committed, logged or shared in chat. An immediate API read-back was stale; a subsequent read confirmed the save.
+
+Real Google E2E is currently at the Google account consent screen; owner must approve sharing basic identity. Pre-consent read-only evidence confirms the matching Stage user already has verified email/password; UUID and account/profile/ledger/poker snapshots are retained privately for continuity comparison. No E2E success is claimed until the callback completes.
+
+## Google Cloud setup reference
 1. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview), select/create a dedicated Stage project.
 2. [Branding](https://console.cloud.google.com/auth/branding): app name Arcade Hub Stage, owner-controlled support/developer email. Existing public [Privacy EN](https://play.kcswh.pl/legal/privacy.en.html), [Privacy PL](https://play.kcswh.pl/legal/privacy.pl.html) and [Terms EN](https://play.kcswh.pl/legal/terms.en.html) are available; review their accuracy before publishing branding. This PR does not approve/change legal copy.
 3. [Audience](https://console.cloud.google.com/auth/audience): External, Testing; add owner Google account(s) as test users. No production publishing required for Stage smoke.
@@ -18,7 +25,7 @@ Verified runtime commit: `b68f546a514b640b28f41df25b190a61cec7a1fb`; Netlify dep
 ## Supabase Stage
 1. Open [Stage Google provider](https://supabase.com/dashboard/project/krydukthwdvccggbyjfw/auth/providers?provider=Google) (Authentication → Sign In / Providers → Google).
 2. Enable Google, set the Web Client ID and Client Secret from above, save. Keep nonce/email verification safeguards; no manual linking needed.
-3. Open [Stage URL configuration](https://supabase.com/dashboard/project/krydukthwdvccggbyjfw/auth/url-configuration). Add exact redirect `https://deploy-preview-1101--playkcswh.netlify.app/account.html`. Existing preview wildcard already permits previews; verify callback lands on the task Preview, never Production. Current Stage Site URL was `https://play.kcswh.pl`; owner should set it to task Preview `/account.html` if using a Stage fallback. This PR always sends explicit same-origin redirectTo.
+3. Open [Stage URL configuration](https://supabase.com/dashboard/project/krydukthwdvccggbyjfw/auth/url-configuration). Add exact redirect `https://deploy-preview-1101--playkcswh.netlify.app/account.html`. Existing preview wildcard already permits previews; verify callback lands on the task Preview, never Production. Stage Site URL has now been changed through Management API to `https://deploy-preview-1101--playkcswh.netlify.app/account.html`, so fallback remains on Stage. This PR always sends explicit same-origin redirectTo.
 4. Tell Codex Stage is configured. A real Google browser login/consent may still require owner participation; the saved Stage password account is not a Google account/browser session.
 
 ## Netlify
@@ -35,7 +42,7 @@ Verified runtime commit: `b68f546a514b640b28f41df25b190a61cec7a1fb`; Netlify dep
 - PASS: real Preview browser checks at 1440×1000 and 390×844: pinned Stage target, visible G button, EN/PL labels, real disabled-provider settings response and retry (EN/PL messages), controlled synthetic cancellation callback and history cleanup. This checks cancellation handling, not real Google consent cancellation.
 - PASS: existing Stage password account signed in through the actual Preview form, profile-me HTTP 200, session restored after reload and sign-out returned to login. No JOIN, funding, gameplay, claims or ledger mutations.
 - PASS: anonymous desktop/mobile screenshots visually inspected; temporary browser tooling/state remained outside the repository and browser contexts were closed.
-- NOT TESTED: real Google new/repeat login, verified-email UUID continuity and unchanged XP/CH/Poker history, real Google SDK/provider-token storage audit, live recovery email completion. Google provider currently disabled/unconfigured; owner configuration pending.
+- NOT TESTED: real Google new/repeat login, verified-email UUID continuity and unchanged XP/CH/Poker history, real Google SDK/provider-token storage audit, live recovery email completion. Google provider is configured/enabled on Stage; first Google account consent and end-to-end evidence remain pending.
 - NOT TESTED / unauthorized: Production.
 
 ## Rollback
