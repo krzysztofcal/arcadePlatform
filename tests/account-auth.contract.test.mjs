@@ -68,7 +68,7 @@ test("type=recovery URL without a PASSWORD_RECOVERY event does not lock the acco
   assert.equal((await window.SupabaseAuth.getCurrentUser())?.id, user.id);
 });
 
-async function googleHarness({ enabled = true, hash = '', providerEnabled = true, redirectUrl, protocol = 'https:' } = {}) {
+async function googleHarness({ enabled = true, hash = '', providerEnabled = true, redirectUrl, protocol = 'https:', clientMode = 'ready', sessionPromise } = {}) {
   const source = await read('js/auth/supabaseClient.js');
   const calls = { oauth: [], navigation: [], history: [], logs: [] };
   const document = { readyState: 'loading', addEventListener() {} };
@@ -79,13 +79,19 @@ async function googleHarness({ enabled = true, hash = '', providerEnabled = true
     SUPABASE_CONFIG: { SUPABASE_URL: 'https://stage.supabase.co', SUPABASE_ANON_KEY: 'anon', AUTH_GOOGLE_ENABLED: enabled },
     KLog: { log(label, payload) { calls.logs.push({ label, payload }); } },
     supabase: { createClient: () => ({ auth: {
-      getSession: async () => ({ data: { session: { user: { id: 'private-user', email: 'private@example.com' }, expires_at: 123 } } }),
+      getSession: () => sessionPromise || Promise.resolve({ data: { session: { user: { id: 'private-user', email: 'private@example.com' }, expires_at: 123 } } }),
+      signInWithPassword: async () => ({ data: { session: { user: { id: 'password-user' } } }, error: null }),
+      signOut: async () => ({ error: null }),
       signInWithOAuth: async (options) => { calls.oauth.push(options); return { data: { url: redirectUrl || 'https://stage.supabase.co/auth/v1/authorize?provider=google' } }; },
     } }) },
   };
+  if (clientMode === 'missing') delete window.supabase;
+  if (clientMode === 'throws') window.supabase.createClient = () => { throw new Error('SDK failed'); };
+  if (clientMode === 'broken') window.supabase.createClient = () => ({ auth: {} });
   const fetch = async () => ({ ok: true, json: async () => ({ external: { google: providerEnabled } }) });
   vm.runInNewContext(source, { window, document, Promise, URL, URLSearchParams, fetch, console });
-  return { auth: window.SupabaseAuth, calls };
+  document.readyState = 'complete';
+  return { auth: window.SupabaseAuth, calls, window, document };
 }
 
 test('Google login is default-off and does not call SDK when disabled', async () => {
@@ -136,4 +142,56 @@ test('Password recovery callback errors stay generic even with Google disabled',
   await auth.getCurrentUser();
   assert.equal(calls.history.at(-1), '/account.html');
   assert.doesNotMatch(JSON.stringify(calls.logs), /private-text/);
+});
+
+
+test('Unavailable Supabase SDK cleans access/refresh callback without leaking tokens', async () => {
+  for (const clientMode of ['missing', 'throws', 'broken']) {
+    const { auth, calls } = await googleHarness({ clientMode, hash: '#access_token=secret&refresh_token=secret' });
+    assert.equal(await auth.getCurrentUser(), null);
+    assert.equal(calls.history.at(-1), '/account.html');
+    assert.doesNotMatch(JSON.stringify(calls.logs), /secret/);
+  }
+});
+
+test('Starting SDK consumes callback before history cleanup', async () => {
+  let finish;
+  const sessionPromise = new Promise(resolve => { finish = resolve; });
+  const { auth, calls } = await googleHarness({ sessionPromise, hash: '#access_token=secret&refresh_token=secret' });
+  const userPromise = auth.getCurrentUser();
+  await Promise.resolve();
+  assert.equal(calls.history.length, 0);
+  finish({ data: { session: { user: { id: 'sdk-user' } } } });
+  assert.equal((await userPromise).id, 'sdk-user');
+  assert.equal(calls.history.at(-1), '/account.html');
+});
+
+test('Successful password login clears old callback failure before later sign-out', async () => {
+  const { auth } = await googleHarness({ hash: '#error=server_error' });
+  assert.equal(auth.getAuthCallbackError(), 'auth_failed');
+  await auth.signIn('password@example.test', 'test-password');
+  await auth.signOut();
+  assert.equal(auth.getAuthCallbackError(), null);
+});
+
+
+test('Missing SDK during page loading waits for deferred SDK before cleaning callback', async () => {
+  const { auth, calls, window, document } = await googleHarness({ clientMode: 'missing', hash: '#access_token=secret&refresh_token=secret' });
+  document.readyState = 'loading';
+  let onReady;
+  document.addEventListener = (event, callback) => { if (event === 'DOMContentLoaded') onReady = callback; };
+  const pending = auth.getCurrentUser();
+  assert.equal(calls.history.length, 0);
+  window.supabase = { createClient: () => ({ auth: { getSession: async () => ({ data: { session: { user: { id: 'late-sdk-user' } } } }) } }) };
+  document.readyState = 'interactive';
+  onReady();
+  assert.equal((await pending).id, 'late-sdk-user');
+  assert.equal(calls.history.at(-1), '/account.html');
+});
+
+test('Failed password login preserves callback failure until a successful retry', async () => {
+  const { auth } = await googleHarness({ hash: '#error=server_error' });
+  auth.getClient().auth.signInWithPassword = async () => ({ error: { message: 'invalid credentials' } });
+  await auth.signIn('password@example.test', 'invalid-password');
+  assert.equal(auth.getAuthCallbackError(), 'auth_failed');
 });

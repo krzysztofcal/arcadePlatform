@@ -38,7 +38,7 @@ A completely new Google user registration still needs a second real Google ident
 `AUTH_GOOGLE_ENABLED="1"` is set in `netlify.toml` **deploy-preview** build context only. Netlify integration reported a save, but read-back and deployed config disproved it; direct env API writes returned HTTP 403. Using the existing context config is deterministic and keeps secrets out of the repo. Generated `SUPABASE_CONFIG.AUTH_GOOGLE_ENABLED` defaults false elsewhere. Google secret stays in Supabase, never Netlify/client. Deploy Preview continues to use existing pinned Stage Supabase config.
 
 ## Verification
-- PASS: `node --test tests/account-auth.contract.test.mjs` (9 cases); default-off, fixed origin redirect, basic scopes, provider unavailable, malicious authorize URL, callback cleanup/privacy and existing recovery replay.
+- PASS: `node --test tests/account-auth.contract.test.mjs` (14 cases); default-off, fixed origin redirect, basic scopes, provider unavailable, malicious authorize URL, callback cleanup/privacy and existing recovery replay.
 - PASS: `node tests/supabase-jwt-verify.test.mjs` (existing local/remote UUID verification).
 - PASS: `node --test tests/profile*.test.mjs` (7 existing profile/avatar cases).
 - PASS: `npm run syntax` (226 files), `npm run check:csp-inline` (55 documents), `git diff --check`.
@@ -59,3 +59,10 @@ Disable Preview Google visibility by changing the `netlify.toml` deploy-preview 
 
 ## Reference
 [Supabase Google](https://supabase.com/docs/guides/auth/social-login/auth-google), [Redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls), [automatic identity linking](https://supabase.com/docs/guides/auth/auth-identity-linking), [Google branding](https://developers.google.com/identity/branding-guidelines). PR #701 was reviewed as a reference; its three-provider/deletion scope was not imported. Existing implicit flow and SDK session persistence retained; application does not read/copy/forward provider tokens. SDK persistence audit remains pending real Google login.
+
+## PR review follow-up (current)
+Unavailable-SDK cleanup and stale callback error are fixed; 14 auth tests PASS. Deferred SDK startup is allowed to consume callback before cleanup. New runtime Preview verification and CI must be renewed for the review fix SHA; earlier Google E2E remains historical evidence.
+
+Proposed stable Stage Site URL: `https://stage.play.kcswh.pl/account.html`. No working Stage hosting exists at that hostname or `stage--playkcswh.netlify.app` today; do not substitute a dead URL or Production fallback. Temporary Preview #1101 is not the permanent default. Canonical hosting/Site URL are pending; keep the exact Preview in redirects for PR smoke. No Production changes.
+
+Brand-new Google user registration remains NOT TESTED and Draft is required. Only safe codes/status/boolean diagnostics are to be retained during the follow-up E2E; do not retain raw callback error descriptions, email or URL.

@@ -19,8 +19,15 @@ PASS: reuse existing mechanisms; UUID remains authoritative; no financial action
 6. Existing auth/profile/identity regressions, syntax, CSP checks and temporary browser Preview smoke; report real Google login/identity/storage checks only when actually performed.
 7. Draft PR with Preview, PASS/FAIL/NOT TESTED and external setup/rollback in `quickstart.md`.
 
-## Research
-Official Supabase Google/redirect/linking documentation checked 2026-10-13; PR #701 reviewed as reference only. Current Stage: Google disabled, no client/secret; signup enabled, preview redirect wildcard already allowed. Stage site_url currently Production URL; exact redirect must be verified after Preview exists. Google Cloud tools/session unavailable.
+## Research / current status
+Google is configured on Stage through the official Management API, with a dedicated Google Cloud Stage Web client. Existing verified-password account Google login/repeat/reload and SDK storage audit passed before review. New-account registration still requires a second real Google identity absent from Stage; Draft stays open until it passes. Current Stage Site URL is temporarily Preview #1101; proposed canonical address is `https://stage.play.kcswh.pl/account.html`, but a working Stage deployment/DNS must precede changing the fallback. The exact Preview remains in the Stage redirect allowlist. Production is untouched.
+
+## Review corrections
+- `getCurrentUser()`: if the SDK is unavailable while deferred scripts are loading, wait for DOMContentLoaded before deciding failure; cleanup when no functioning SDK remains, or after getSession settles. Handle synchronous SDK failures through the same promise error path.
+- `signIn()` / `attachAuthSubscription()`: clear stale callback error only on successful password session / SIGNED_IN; failed password attempts preserve it.
+- Extend existing critical auth cases; keep all prior tests. Verify error → real Stage password login → sign-out in Preview.
+- Temporary Google E2E tooling collects only allowlisted error codes, HTTP status, origin/path checks and boolean results; never persists tokens, email or full callback URL in diagnostic artifacts. Attempt first-callback reproduction during a new Google login; no new exception framework.
+- Keep new-user Google registration pending; do not perform CH/Poker operations.
 
 ## Risks
-Default SDK session may persist Google provider fields; application never reads/copies them. Must audit after real login. Implicit flow retained to avoid changing existing password confirmation/recovery semantics; SDK consumes tokens before cleanup. No caller-controlled return path or pending return state required.
+SDK-managed Google provider token persistence was observed and documented; no application-owned copies or forwarding observed. Initial first-consent callback failed once, with cause unknown; later existing-user attempts passed. New-user evidence and canonical Stage hosting remain pending.

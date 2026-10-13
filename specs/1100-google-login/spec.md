@@ -47,3 +47,6 @@ Player identity: existing Supabase UUID; account/profile/progression remain keye
 
 ## Assumptions
 User has authorized implementation, Stage configuration and Preview work in this task. Real Google consent/login may require the owner. Existing public legal pages/contact are used; legal changes require approval. Provider setup is an external dependency, not a reason to add account deletion. Production, financial actions and merge remain unauthorized.
+
+## Review requirements
+Callback tokens must be removed when SDK initialization fails, while deferred SDK initialization must retain the opportunity to consume them. Successful password login must clear an old callback error before subsequent sign-out. New-user Google E2E is mandatory before leaving Draft and must include profile creation/repeat UUID without CH/Poker operations. A stable Stage address must replace the temporary default once hosting exists; exact Preview remains explicitly allowed. Diagnostics persist only safe error codes/status/booleans, not tokens, email or full callback URLs. SpecKit directory maps to issue #1100.

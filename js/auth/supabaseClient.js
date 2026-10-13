@@ -81,10 +81,17 @@
   function getCurrentUser(){
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.getSession !== 'function'){
+      // Deferred page scripts can still provide the SDK before DOMContentLoaded.
+      if (doc.readyState === 'loading'){
+        return new Promise(function(resolve){
+          doc.addEventListener('DOMContentLoaded', function(){ getCurrentUser().then(resolve); }, { once: true });
+        });
+      }
+      cleanAuthCallback();
       return Promise.resolve(null);
     }
 
-    return client.auth.getSession().then(function(res){
+    return Promise.resolve().then(function(){ return client.auth.getSession(); }).then(function(res){
       var session = res && res.data ? res.data.session : null;
       var user = session && session.user ? session.user : null;
       logDiag('supabase:session_initial', {
@@ -156,6 +163,7 @@
         event: event,
         hasUser: !!user
       });
+      if (event === 'SIGNED_IN' && user) authCallbackError = null;
       if (event === 'PASSWORD_RECOVERY'){
         recoveryPending = true;
         recoverySession = session || null;
@@ -190,7 +198,10 @@
     if (!client || !client.auth || typeof client.auth.signInWithPassword !== 'function'){
       return Promise.reject(new Error('Authentication client not ready'));
     }
-    return client.auth.signInWithPassword({ email: email, password: password });
+    return client.auth.signInWithPassword({ email: email, password: password }).then(function(result){
+      if (result && !result.error && result.data && result.data.session) authCallbackError = null;
+      return result;
+    });
   }
 
   function getAuthRedirectTo(){
