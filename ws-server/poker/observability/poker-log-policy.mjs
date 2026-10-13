@@ -56,7 +56,7 @@ register("DEBUG", "janitor", [
 ]);
 
 register("WARN", "accounting", ["ws_gift_purchase_rejected"]);
-register("WARN", "recovery", ["ws_gift_state_unavailable"]);
+register("WARN", "recovery", ["ws_gift_state_unavailable", "ws_inactivity_ejection_pending"]);
 
 register("DEBUG", "persistence", [
   "ws_state_persist_result",
