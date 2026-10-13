@@ -7,7 +7,7 @@ Initial read-only audit date: 2026-10-13 UTC. The initial audit made no mutation
 
 - READY: separate Google Production project and standard Web client created; exact Production origin/callback and three basic scopes verified; credentials private only.
 - Google Audience remains External/Testing; not published. Branding verification deferred by owner and not an activation requirement for optional name/logo.
-- REQUIRED BEFORE ACTIVATION by owner decision: Search Console ownership of kcswh.pl. Exact existing TXT challenge confirmed in browser; expected DNS record absent at latest check. Authoritative nameservers dns1–dns4.p09.nsone.net. No DNS mutation by agent.
+- PASS: Search Console ownership of kcswh.pl verified. Added exactly one TXT through official Netlify API using existing authorized CLI credentials; all11 prior DNS records unchanged, total12. Public TXT visible. Search Console Settings explicitly reports verified owner. Authoritative nameservers unchanged.
 - Supabase Production Google=false and client absent; Netlify Production Google UI flag=false. No user/CH/ledger/Poker changes.
 - Privacy PL/EN approved in principle; PR #1102 remains Draft awaiting owner merge GO. Dates currently 2026-10-13 (PL13-10-2026), today's UTC date, are preparation dates until publication. Recheck and set both to the actual intended Production deployment date immediately before owner-authorized merge; do not invent a future date or claim the policy is deployed.
 - Publication, provider activation, production build flag, deployment and Production E2E remain unauthorized and unperformed.
@@ -74,3 +74,7 @@ Prepared PL/EN privacy paragraphs and dates in Draft PR #1102, preserving existi
 - Supabase Production read-back: Google=false, client absent. Public production config: AUTH_GOOGLE_ENABLED=false. No user-data, CH, ledger or Poker operation performed.
 
 Preparation READY for owner review. Final activation still requires a new explicit GO covering: owner-approved privacy merge/publication; Google Audience publication to In production (no optional branding submission unless selected); private client credentials applied through official Supabase Production API and provider enabled; Netlify playkcswh production Builds flag=1 plus approved main rebuild; real nonfinancial Production OAuth smoke with a non-tester and same-UUID profile/repeat checks. Agent will not merge any PR. Domain TXT/brand verification remains separately pending and is not silently declared PASS.
+
+## Domain verification completed
+
+Netlify MCP has no DNS operation, but existing authenticated CLI credentials authorized official Netlify API access to kcswh.pl zone. Added one ownership TXT, TTL3600; compared all existing record objects unchanged. Public DNS confirmed the exact expected TXT. Google Search Console for sc-domain:kcswh.pl now opens normally and Settings reports “Jesteś zweryfikowanym właścicielem”. Domain ownership PASS. Keep TXT in place to retain verification. No Google application publication, Supabase provider activation, Netlify production build-flag change, deploy, merge or user/financial/Poker operation. Final activation remains pending separate GO.
