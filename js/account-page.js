@@ -1094,7 +1094,11 @@
     nodes.googleSignIn.disabled = true;
     nodes.googleSignIn.setAttribute('aria-busy', 'true');
     setStatus(t('googleSigningIn', 'Connecting to Google…'), 'info');
-    Promise.resolve().then(function(){ return auth.signInWithGoogle(); }).catch(function(error){
+    Promise.resolve().then(function(){ return auth.signInWithGoogle(); }).then(function(){
+      // Reset before navigation so browser Back restores a usable form.
+      resetGoogleButton();
+      setStatus('', '');
+    }).catch(function(error){
       setStatus(googleErrorMessage(error && error.message), 'error');
       resetGoogleButton();
     });
@@ -1248,10 +1252,6 @@
     setBlockVisibility(nodes.googleSignIn, googleEnabled);
     setBlockVisibility(nodes.googleDivider, googleEnabled);
     if (nodes.googleSignIn) nodes.googleSignIn.addEventListener('click', handleGoogleSignIn);
-    window.addEventListener('pageshow', function(event){
-      resetGoogleButton();
-      if (event.persisted && !currentUser) setStatus('', '');
-    });
     if (nodes.signInForm){ nodes.signInForm.addEventListener('submit', handleSignIn); }
     if (nodes.signUpForm){ nodes.signUpForm.addEventListener('submit', handleSignUp); }
     if (nodes.signupConfirmationBack){ nodes.signupConfirmationBack.addEventListener('click', closeSignupConfirmation); }
