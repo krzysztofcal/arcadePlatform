@@ -831,6 +831,8 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         }
       }
 
+      if (stateRow.state?.inactivityEjectionByUserId?.[userId]) throw makeError("removed_for_inactivity");
+
       if (isSinglePlayer && stateRow.state?.leftTableByUserId?.[userId] === true) {
         if (String(table.status || '').toUpperCase() === 'CLOSED') throw makeError('table_closed');
         throw makeError('single_player_participation_ended');

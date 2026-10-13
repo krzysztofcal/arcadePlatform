@@ -598,6 +598,7 @@ const applyAction = (state, action) => {
       : {};
   const requestId = typeof action?.requestId === "string" ? action.requestId : "";
   const isAutoAction = requestId.startsWith("auto:");
+  if (!isAutoAction && state.inactivityEjectionByUserId?.[action.userId]) throw new Error("removed_for_inactivity");
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, safeSeats);
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, safeSeats);
   const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, safeSeats);
@@ -621,7 +622,7 @@ const applyAction = (state, action) => {
   if (isAutoAction && ["CHECK", "FOLD"].includes(action.type)) {
     const previousMissed = toSafeInt(next.missedTurnsByUserId[userId], 0);
     next.missedTurnsByUserId[userId] = Math.max(0, previousMissed) + 1;
-  } else if (["CALL", "BET", "CHECK", "RAISE"].includes(action.type)) {
+  } else if (["CALL", "BET", "CHECK", "RAISE", "FOLD"].includes(action.type)) {
     next.missedTurnsByUserId[userId] = 0;
     next.sitOutByUserId[userId] = false;
     if (next.pendingAutoSitOutByUserId) {

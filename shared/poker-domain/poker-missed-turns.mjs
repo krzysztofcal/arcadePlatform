@@ -22,6 +22,7 @@ const patchMissedTurnsByUserId = (state, userId, nextValue) => {
 const clearMissedTurns = (state, userId) => patchMissedTurnsByUserId(state, userId, undefined);
 
 const clearInactivityPenalty = (state, userId) => {
+  if (state?.inactivityEjectionByUserId?.[userId]) return { nextState: state, changed: false };
   const cleared = clearMissedTurns(state, userId);
   let nextState = cleared.nextState;
   let changed = cleared.changed;

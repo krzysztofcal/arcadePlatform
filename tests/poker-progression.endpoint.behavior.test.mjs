@@ -418,3 +418,29 @@ test('Single Player Resume list excludes deferred Leave and foreign tables using
     }
   } finally { await db.close(); if (previous === undefined) delete process.env.CHIPS_ENABLED; else process.env.CHIPS_ENABLED = previous; }
 });
+
+for (const pending of [false, true]) test(`reload recovers authoritative inactivity result before JOIN, pending=${pending}`, async () => {
+  const previous = process.env.CHIPS_ENABLED;
+  process.env.CHIPS_ENABLED = '1';
+  try {
+    const handler = makeHandler({ authResult: { valid: true, userId: 'sp-player' },
+      progression: evaluatePokerProgression({ balance: 1000, tiers: [100], enabledBuyIns: [100] }),
+      calls: { tokens: [], progression: [] }, unsafe: async sql => {
+        if (sql.includes('select poker_auto_class')) return [{ poker_auto_class: 'NORMAL', poker_access_override: 'AUTO', poker_access_revision: 1 }];
+        if (sql.includes('select id, status, buy_in, stakes')) {
+          assert.ok(sql.includes("ps.state -> 'seats' @> jsonb_build_array"));
+          assert.ok(sql.includes("s.status = 'ACTIVE'"));
+          return [{ id: 'sp-table', status: pending ? 'OPEN' : 'CLOSED',
+          buy_in: 100, stakes: { sb: 1, bb: 2 }, is_single_player: true, created_by: 'sp-player',
+          inactivity_ejection: { handId: 'last', isSinglePlayer: true }, inactivity_claim_pending: pending }];
+        }
+        return [];
+      } });
+    const response = await handler({ httpMethod: 'GET', queryStringParameters: { tableId: 'sp-table' }, headers: { origin, authorization: 'Bearer token' } });
+    const access = JSON.parse(response.body).tableAccess;
+    assert.equal(access.allowed, false);
+    assert.equal(access.rejoin, false);
+    assert.equal(access.reason, 'removed_for_inactivity');
+    assert.equal(access.inactivity.status, pending ? 'pending' : 'removed');
+  } finally { if (previous === undefined) delete process.env.CHIPS_ENABLED; else process.env.CHIPS_ENABLED = previous; }
+});

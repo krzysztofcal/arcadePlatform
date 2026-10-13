@@ -158,7 +158,7 @@ function normalizePlayerState(playerState) {
   if (!playerState || typeof playerState !== "object" || Array.isArray(playerState)) {
     return null;
   }
-  const allowedStatuses = new Set(["ACTIVE", "OUT_OF_CHIPS", "WAITING_NEXT_HAND"]);
+  const allowedStatuses = new Set(["ACTIVE", "OUT_OF_CHIPS", "WAITING_NEXT_HAND", "EJECTION_PENDING", "REMOVED"]);
   const status = typeof playerState.status === "string" ? playerState.status.trim().toUpperCase() : "";
   if (!allowedStatuses.has(status) || !Number.isInteger(playerState.stack) || playerState.stack < 0) {
     return null;
@@ -181,7 +181,9 @@ export function normalizePrivateBranch(privateBranch, { userId, youSeat }) {
   return {
     ...base,
     holeCards,
-    ...(playerState ? { playerState } : {})
+    ...(playerState ? { playerState } : {}),
+    ...(privateBranch.inactivity && ["pending", "removed"].includes(privateBranch.inactivity.status)
+      ? { inactivity: { status: privateBranch.inactivity.status, isSinglePlayer: privateBranch.inactivity.isSinglePlayer === true } } : {})
   };
 }
 
@@ -265,7 +267,7 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfile
     }
   };
 
-  if (youSeat !== null) {
+  if (youSeat !== null || tableSnapshot?.private?.inactivity) {
     payload.private = normalizePrivateBranch(tableSnapshot?.private, { userId, youSeat });
   }
 

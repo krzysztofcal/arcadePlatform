@@ -28,7 +28,8 @@ join public.poker_seats s on s.table_id = t.id
 where t.status = 'OPEN'
   and s.user_id = $1
   and s.status = 'ACTIVE'
-  and coalesce(t.is_single_player, false) = false;
+  and coalesce(t.is_single_player, false) = false
+  and not exists(select 1 from public.poker_state ps where ps.table_id = t.id and ps.state -> 'inactivityEjectionByUserId' ? $1::uuid::text);
     `,
     [userId]
   );
@@ -48,6 +49,7 @@ where t.status = 'OPEN'
   and s.status = 'ACTIVE'
   and t.is_single_player = true
   and t.created_by = $1
+  and not exists(select 1 from public.poker_state ps where ps.table_id = t.id and ps.state -> 'inactivityEjectionByUserId' ? $1::uuid::text)
   and not exists(select 1 from public.poker_state ps where ps.table_id = t.id and ps.state -> 'leftTableByUserId' ->> $1::uuid::text = 'true')
 order by coalesce(s.last_seen_at, s.created_at) desc, t.created_at desc, t.id desc;
     `,
@@ -62,7 +64,11 @@ order by coalesce(s.last_seen_at, s.created_at) desc, t.created_at desc, t.id de
 
 async function readTableAccess(tx, { userId, tableId, progression }) {
   const rows = await tx.unsafe(
-    `select id, status, buy_in, stakes, lifecycle_kind, created_by, has_human_participant, exists(select 1 from public.poker_state ps where ps.table_id = poker_tables.id and ps.state -> 'leftTableByUserId' ->> $2::uuid::text = 'true') as has_left, coalesce(is_single_player, false) as is_single_player${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
+    `select id, status, buy_in, stakes, lifecycle_kind, created_by, has_human_participant,
+      (select ps.state -> 'inactivityEjectionByUserId' -> $2::uuid::text from public.poker_state ps where ps.table_id = poker_tables.id) as inactivity_ejection,
+      (exists(select 1 from public.poker_state ps where ps.table_id = poker_tables.id and
+        (ps.state -> 'stacks' ? $2::uuid::text or ps.state -> 'seats' @> jsonb_build_array(jsonb_build_object('userId', $2::uuid::text))))
+        or exists(select 1 from public.poker_seats s where s.table_id = poker_tables.id and s.user_id = $2 and s.status = 'ACTIVE')) as inactivity_claim_pending, exists(select 1 from public.poker_state ps where ps.table_id = poker_tables.id and ps.state -> 'leftTableByUserId' ->> $2::uuid::text = 'true') as has_left, coalesce(is_single_player, false) as is_single_player${await hasPokerPoolSchema(tx) ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1;`,
     [tableId, userId]
   );
   const table = rows?.[0] || null;
@@ -70,6 +76,12 @@ async function readTableAccess(tx, { userId, tableId, progression }) {
 
   const buyIn = Number(table.buy_in);
   const normalizedBuyIn = Number.isSafeInteger(buyIn) && buyIn > 0 ? buyIn : null;
+  if (table.inactivity_ejection) {
+    const pending = String(table.status || "").toUpperCase() !== "CLOSED" && table.inactivity_claim_pending === true;
+    return { tableId, buyIn: normalizedBuyIn, allowed: false, viewAllowed: pending, rejoin: false,
+      reason: "removed_for_inactivity", inactivity: { status: pending ? "pending" : "removed",
+        isSinglePlayer: table.inactivity_ejection.isSinglePlayer === true } };
+  }
   if (String(table.status || "").toUpperCase() !== "OPEN") {
     return { tableId, buyIn: normalizedBuyIn, allowed: false, rejoin: false, reason: String(table.status || "").toUpperCase() === "CLOSED" ? "table_closed" : "table_not_open" };
   }

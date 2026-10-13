@@ -14,6 +14,7 @@ const collectSeatUserIds = (seats) => {
   const ids = new Set();
   if (!Array.isArray(seats)) return ids;
   for (const seat of seats) {
+    if (seat?.isBot === true) continue;
     if (typeof seat?.userId === "string" && seat.userId.trim()) {
       ids.add(seat.userId);
     }
@@ -30,7 +31,8 @@ const ensurePendingAutoSitOut = (state, userId) => {
   return { nextState: { ...state, pendingAutoSitOutByUserId: nextPending }, changed: true };
 };
 
-const applyInactivityPolicy = (state, events = []) => {
+const applyInactivityPolicy = (state, events = [], { isSinglePlayer = false } = {}) => {
+  const threshold = isSinglePlayer === true ? 3 : AUTO_SITOUT_MISSED_TURNS;
   if (!state || typeof state !== "object" || Array.isArray(state)) return { state, events };
   const missedTurnsByUserId = isPlainObject(state.missedTurnsByUserId) ? state.missedTurnsByUserId : {};
   const leftTableByUserId = isPlainObject(state.leftTableByUserId) ? state.leftTableByUserId : {};
@@ -45,14 +47,17 @@ const applyInactivityPolicy = (state, events = []) => {
 
   for (const [userId, missed] of Object.entries(missedTurnsByUserId)) {
     const missedCount = toSafeInt(missed, 0);
-    if (!userId || missedCount < AUTO_SITOUT_MISSED_TURNS) continue;
+    if (!userId || missedCount < threshold) continue;
     if (!seatUserIds.has(userId)) continue;
     if (leftTableByUserId[userId]) continue;
     if (sitOutByUserId[userId]) continue;
     if (pendingAutoSitOutByUserId[userId]) continue;
     const pendingResult = ensurePendingAutoSitOut(nextState, userId);
     if (!pendingResult.changed) continue;
-    nextState = pendingResult.nextState;
+    nextState = { ...pendingResult.nextState, inactivityEjectionByUserId: {
+      ...(isPlainObject(nextState.inactivityEjectionByUserId) ? nextState.inactivityEjectionByUserId : {}),
+      [userId]: { handId: state.handId, isSinglePlayer }
+    } };
     changed = true;
     nextEvents.push({ type: "PLAYER_AUTO_SITOUT_PENDING", userId, missedTurns: missedCount });
   }

@@ -766,3 +766,34 @@ test("projectRoomCoreSnapshot projects no raise for a viewer who already acted w
   assert.equal(snapshot.actionConstraints.maxRaiseTo, 110, "maxRaiseTo may stay numeric without implying a raise");
   assert.deepEqual(snapshot.legalActions.actions, ["FOLD"], "current-turn legalActions keep their semantics");
 });
+
+test('inactivity projects pending owned avatar, then private terminal reason on reconnect only to owner', () => {
+  const intent = { handId: 'hand-inactivity', isSinglePlayer: false };
+  const input = { tableId: 'table-inactivity', roomId: 'table-inactivity', userId: 'inactive', youSeat: 1,
+    members: [{ userId: 'other', seat: 2 }],
+    coreState: { seats: { other: 2 }, pokerState: { tableId: 'table-inactivity', phase: 'SETTLED',
+      seats: [{ userId: 'inactive', seatNo: 1 }, { userId: 'other', seatNo: 2 }],
+      stacks: { inactive: 50, other: 100 }, leftTableByUserId: { inactive: true },
+      inactivityEjectionByUserId: { inactive: intent } } } };
+  const pending = projectRoomCoreSnapshot(input);
+  assert.equal(pending.private.playerState.status, 'EJECTION_PENDING');
+  assert.equal(pending.private.inactivity.status, 'pending');
+  assert.ok(pending.seats.some(seat => seat.userId === 'inactive'));
+  assert.deepEqual(pending.legalActions.actions, []);
+  input.coreState.pokerState.seats = [{ userId: 'other', seatNo: 2 }];
+  delete input.coreState.pokerState.stacks.inactive;
+  const restored = projectRoomCoreSnapshot(JSON.parse(JSON.stringify(input)));
+  assert.equal(restored.private.inactivity.status, 'removed');
+  assert.equal(restored.seats.some(seat => seat.userId === 'inactive'), false);
+  const other = projectRoomCoreSnapshot({ ...input, userId: 'other', youSeat: 2 });
+  assert.equal(other.private.inactivity, undefined);
+});
+
+test('confirmed deferred Single Player close drops retained financial hand avatars', () => {
+  const snapshot = projectRoomCoreSnapshot({ tableId: 'sp', roomId: 'sp', userId: 'inactive', youSeat: null,
+    tableStatus: 'CLOSED', members: [], coreState: { pokerState: { phase: 'HAND_DONE',
+      seats: [{ userId: 'inactive', seatNo: 1 }], stacks: {}, leftTableByUserId: { inactive: true },
+      inactivityEjectionByUserId: { inactive: { handId: 'last', isSinglePlayer: true } } } } });
+  assert.equal(snapshot.private.inactivity.status, 'removed');
+  assert.deepEqual(snapshot.seats, []);
+});

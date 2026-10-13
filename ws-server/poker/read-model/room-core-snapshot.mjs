@@ -97,7 +97,7 @@ function normalizeMemberSeatRows(value) {
     .map((member) => ({ userId: member.userId, seatNo: member.seat, status: "ACTIVE" }));
 }
 
-function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl }) {
+function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus }) {
   const stateSeats = normalizeSeatRows(statePublic?.seats);
   const memberSeats = normalizeMemberSeatRows(members);
   const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
@@ -106,7 +106,8 @@ function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByU
   const byUserId = new Map(memberSeats.map((seat) => [seat.userId, seat]));
   for (const seat of stateSeats) byUserId.set(seat.userId, { ...(byUserId.get(seat.userId) || {}), ...seat });
   const baseSeats = [...byUserId.values()].sort((left, right) => left.seatNo - right.seatNo || left.userId.localeCompare(right.userId));
-  return baseSeats.filter((seat) => leftTableByUserId[seat.userId] !== true).map((seat) => {
+  return baseSeats.filter((seat) => leftTableByUserId[seat.userId] !== true
+    || (tableStatus !== "CLOSED" && statePublic?.inactivityEjectionByUserId?.[seat.userId] && stateSeats.some(owned => owned.userId === seat.userId))).map((seat) => {
     const details = seatDetailsByUserId[seat.userId] || null;
     const merged = { ...seat };
     if (foldedByUserId[seat.userId] === true) {
@@ -240,6 +241,15 @@ function normalizeHandSettlement(handSettlement) {
 }
 
 function resolvePrivateBranch({ state, statePublic, userId, youSeat, stack, isBot, tableStatus }) {
+  const intent = state?.inactivityEjectionByUserId?.[userId];
+  if (intent) {
+    const retained = state?.seats?.some(seat => seat?.userId === userId)
+      || Object.prototype.hasOwnProperty.call(state?.stacks || {}, userId);
+    const pending = tableStatus !== "CLOSED" && retained;
+    return { userId, seat: youSeat, holeCards: [],
+      inactivity: { status: pending ? "pending" : "removed", isSinglePlayer: intent.isSinglePlayer === true },
+      playerState: { status: pending ? "EJECTION_PENDING" : "REMOVED", stack: Number.isInteger(stack) ? stack : 0, canRebuy: false } };
+  }
   if (!Number.isInteger(youSeat)) {
     return null;
   }
@@ -318,12 +328,13 @@ function resolveRevealedShowdownParticipants({ statePublic, state }) {
 export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat, tableStatus = "OPEN", publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
   const state = asObject(coreState?.pokerState) || asObject(coreState?.state);
   const statePublic = state ? withoutPrivateState(state) : null;
-  let publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl });
+  let publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus });
   const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
   const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
   const publicPhase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
   const currentHandUserIds = new Set(handSeats.map((seat) => seat?.userId).filter((seatUserId) => typeof seatUserId === "string" && seatUserId));
   publicSeats = publicSeats.map((seat) => {
+    if (statePublic?.inactivityEjectionByUserId?.[seat.userId]) return { ...seat, status: "EJECTION_PENDING" };
     if (seat.isBot === true) return seat;
     const stack = Number(publicStacks[seat.userId]);
     if (statePublic?.waitingForNextHandByUserId?.[seat.userId] === true) return { ...seat, status: "WAITING_NEXT_HAND" };
@@ -334,7 +345,7 @@ export function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, u
     if (Number.isInteger(stack) && stack === 0 && !inCurrentHand) return { ...seat, status: "OUT_OF_CHIPS" };
     return seat;
   });
-  const effectiveYouSeat = hasLeftTable(statePublic, userId) ? null : youSeat;
+  const effectiveYouSeat = hasLeftTable(statePublic, userId) || state?.inactivityEjectionByUserId?.[userId] ? null : youSeat;
 
   if (!statePublic) {
     return {

@@ -153,6 +153,7 @@ test("timeout on a turn with legal CHECK applies CHECK and advances turn", () =>
 
   assert.equal(timeout.changed, true);
   assert.equal(timeout.action, "CHECK");
+  assert.equal(timeout.coreState.pokerState.missedTurnsByUserId.user_b, 1);
   assert.equal(timeout.actorUserId, "user_b");
   assert.equal(timeout.coreState.pokerState.phase, "FLOP");
   assert.equal(timeout.coreState.pokerState.turnUserId, "user_a");
@@ -258,4 +259,77 @@ test("authoritative timeouts survive hand boundaries, commit sitout safely, and 
   assert.notEqual(core.pokerState.dealerSeatNo, initial.seats[inactive]);
   core = rollover(settle(core));
   assert.equal(core.pokerState.stacks[inactive], stack, "later hand charges no blind to sat-out player");
+});
+
+for (const isSinglePlayer of [false, true]) {
+  test(`terminal inactivity survives real hands and restore, mode=${isSinglePlayer}`, () => {
+    const tableId = 'table_engine_timeout';
+    const initial = initialCore();
+    initial.seats.user_c = 3;
+    initial.members.push({ userId: 'user_c', seat: 3 });
+    initial.publicStacks.user_c = 100;
+    let nowMs = 1000;
+    let core = bootstrapCoreStateHand({ tableId, coreState: initial, nowMs }).coreState;
+    const inactive = core.pokerState.turnUserId;
+    const limit = isSinglePlayer ? 3 : 2;
+    const act = (action) => {
+      const result = applyCoreStateAction({ tableId, coreState: core, handId: core.pokerState.handId,
+        userId: core.pokerState.turnUserId, action, nowMs: ++nowMs });
+      assert.equal(result.accepted, true, result.reason);
+      core = result.coreState;
+    };
+    for (let miss = 1; miss <= limit; miss++) {
+      while (core.pokerState.turnUserId !== inactive) {
+        const actor = core.pokerState.turnUserId;
+        act(core.pokerState.toCallByUserId[actor] > 0 ? 'CALL' : 'CHECK');
+      }
+      assert.equal(core.pokerState.turnDeadlineAt - core.pokerState.turnStartedAt, 20000);
+      nowMs = core.pokerState.turnDeadlineAt + 1;
+      const result = applyCoreStateTurnTimeout({ tableId, coreState: core, nowMs, isSinglePlayer });
+      assert.equal(result.changed, true);
+      core = JSON.parse(JSON.stringify(result.coreState));
+      assert.equal(core.pokerState.missedTurnsByUserId[inactive], miss);
+      assert.equal(!!core.pokerState.inactivityEjectionByUserId?.[inactive], miss === limit);
+      if (miss === limit) {
+        assert.equal(core.pokerState.inactivityEjectionByUserId[inactive].isSinglePlayer, isSinglePlayer);
+        const late = applyCoreStateAction({ tableId, coreState: core, handId: core.pokerState.handId,
+          userId: inactive, action: 'CHECK', nowMs: ++nowMs });
+        assert.equal(late.accepted, false);
+      }
+      while (core.pokerState.phase !== 'SETTLED') act('FOLD');
+      const next = buildNextHandStateFromSettled({ tableId, coreState: core, settledState: core.pokerState, nextVersion: core.version + 1 });
+      assert.ok(next);
+      core = { ...core, version: core.version + 1, pokerState: stampTurnDeadline(next, ++nowMs) };
+    }
+    assert.ok(core.pokerState.inactivityEjectionByUserId[inactive]);
+    assert.equal(core.pokerState.handSeats.some(seat => seat.userId === inactive), false);
+  });
+}
+
+test('missing server deadline fails closed without a missed decision or ejection', () => {
+  const core = bootstrapCoreStateHand({ tableId: 'table_engine_timeout', coreState: initialCore(), nowMs: 1000 }).coreState;
+  for (const invalid of [null, undefined, '', false]) {
+    core.pokerState.turnDeadlineAt = invalid;
+    const result = applyCoreStateTurnTimeout({ tableId: 'table_engine_timeout', coreState: core, nowMs: 999999 });
+    assert.equal(result.changed, false);
+    assert.equal(result.reason, 'deadline_missing');
+    assert.equal(result.coreState.pokerState.inactivityEjectionByUserId?.user_a, undefined);
+  }
+});
+
+test('accepted manual action wins deadline race and resets penalty; committed timeout wins against late manual action', () => {
+  const tableId = 'table_engine_timeout';
+  const boot = bootstrapCoreStateHand({ tableId, coreState: initialCore(), nowMs: 1000 }).coreState;
+  const userId = boot.pokerState.turnUserId;
+  boot.pokerState.missedTurnsByUserId = { [userId]: 1 };
+  const nowMs = boot.pokerState.turnDeadlineAt;
+  const manual = applyCoreStateAction({ tableId, coreState: boot, handId: boot.pokerState.handId, userId, action: 'FOLD', nowMs });
+  assert.equal(manual.accepted, true);
+  assert.equal(manual.coreState.pokerState.missedTurnsByUserId[userId], undefined);
+  assert.equal(applyCoreStateTurnTimeout({ tableId, coreState: manual.coreState, nowMs }).changed, false);
+  const timeout = applyCoreStateTurnTimeout({ tableId, coreState: boot, nowMs });
+  assert.equal(timeout.coreState.pokerState.inactivityEjectionByUserId[userId].isSinglePlayer, false);
+  const late = applyCoreStateAction({ tableId, coreState: timeout.coreState, handId: timeout.coreState.pokerState.handId, userId, action: 'FOLD', nowMs });
+  assert.equal(late.accepted, false);
+  assert.ok(timeout.coreState.pokerState.inactivityEjectionByUserId[userId]);
 });

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeInactiveCleanup } from "./inactive-cleanup.mjs";
+import { finalizeDeferredLeavesAfterSettlement } from "./leave.mjs";
 import { executeTerminalPokerCloseInTx } from "./terminal-close.mjs";
 import {
   collectParticipantEvidence,
@@ -40,6 +41,9 @@ function createCleanupHarness({
 
   const tx = {
     unsafe: async (sql, params = []) => {
+      if (sql.includes("select id, status, lifecycle_kind, managed_profile_key from public.poker_tables")) {
+        return [{ id: "table_1", status: tableState.tableStatus, lifecycle_kind: lifecycleKind, managed_profile_key: managedProfileKey }];
+      }
       if (sql.includes("select id, status from public.poker_tables")) {
         return [{ id: "table_1", status: tableState.tableStatus }];
       }
@@ -135,6 +139,7 @@ function createCleanupHarness({
     seatState,
     tableState,
     escrowState,
+    tx,
     cashouts,
     logs,
     get tableCloseCount() {
@@ -895,4 +900,62 @@ test("STANDARD settled cleanup cashes out ACTIVE sit-out human absent from hand 
   assert.equal(harness.tableCloseCount, 1);
   assert.equal(harness.seatState.every((seat) => seat.status === "INACTIVE" && seat.stack === 0), true);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
+});
+
+test("Single Player deferred inactivity finalizer refunds human and bot sources once with escrow zero", async () => {
+  const bots = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
+  const handSeats = bots.map((userId, index) => ({ userId, seatNo: index + 2 }));
+  const fundingRows = bots.flatMap((botUserId, index) => {
+    const metadata = { actor: "BOT", reason: "BOT_SEED_BUY_IN", tableId: "table_1", seatNo: index + 2, botUserId };
+    return [
+      { transaction_id: `seed-${index}`, transaction_metadata: metadata, account_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", amount: -1000, account_type: "SYSTEM", system_key: "POKER_BOT_BANKROLL_1000", account_status: "active" },
+      { transaction_id: `seed-${index}`, transaction_metadata: metadata, account_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", amount: 1000, account_type: "ESCROW", system_key: "POKER_TABLE:table_1", account_status: "active" }
+    ];
+  });
+  const harness = createCleanupHarness({
+    lifecycleKind: "STANDARD",
+    seatRows: [
+      { user_id: "human_1", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 9999, last_seen_at: "2026-03-01T00:00:00Z" },
+      ...bots.map((user_id, index) => ({ user_id, seat_no: index + 2, status: "ACTIVE", is_bot: true, stack: 1000 }))
+    ],
+    state: { phase: "SETTLED", seats: [{ userId: "human_1", seatNo: 1 }, ...handSeats], handSeats, leftTableByUserId: { human_1: true }, inactivityEjectionByUserId: { human_1: { handId: "last-hand", isSinglePlayer: true } }, stacks: { human_1: 940, [bots[0]]: 710, [bots[1]]: 1350 }, pot: 0, potTotal: 0 },
+    useRealTerminalClose: true,
+    escrowBalance: 3000,
+    fundingRows
+  });
+
+  const args = { tableId: "table_1", beginSql: async fn => fn(harness.tx),
+    postTransactionFn: async entry => {
+      harness.cashouts.push(entry);
+      harness.escrowState.balance += Number(entry.entries.find(e => e.accountType === "ESCROW")?.amount || 0);
+      return { transaction: { id: `cashout-${harness.cashouts.length}` } };
+    } };
+  const result = await finalizeDeferredLeavesAfterSettlement(args);
+  assert.equal(result.ok, true);
+  assert.equal(result.closed, true);
+  assert.equal(result.humanSeatCount, 1);
+  assert.equal(result.botSeatCount, 2);
+  assert.equal(result.claimPolicy, "final_stacks");
+  assert.equal(result.escrowBefore, 3000);
+  assert.equal(harness.cashouts.length, 3);
+  assert.deepEqual(harness.cashouts[0].entries, [
+    { accountType: "ESCROW", systemKey: "POKER_TABLE:table_1", amount: -940 },
+    { accountType: "USER", amount: 940 }
+  ]);
+  assert.equal(harness.cashouts[0].userId, "human_1");
+  assert.deepEqual(harness.cashouts.slice(1).map((entry) => [entry.userId, entry.entries[1]]), [
+    [null, { accountType: "SYSTEM", systemKey: "POKER_BOT_BANKROLL_1000", amount: 710 }],
+    [null, { accountType: "SYSTEM", systemKey: "POKER_BOT_BANKROLL_1000", amount: 1350 }]
+  ]);
+  assert.equal(harness.escrowState.balance, 0);
+  assert.equal(harness.tableState.tableStatus, "CLOSED");
+  assert.equal(harness.tableCloseCount, 1);
+  assert.equal(harness.seatState.every((seat) => seat.status === "INACTIVE" && seat.stack === 0), true);
+  assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
+  assert.equal(harness.tableState.stateRow.state.inactivityEjectionByUserId.human_1.isSinglePlayer, true);
+  const retry = await finalizeDeferredLeavesAfterSettlement(args);
+  assert.equal(retry.ok, true);
+  assert.equal(retry.status, "already_closed");
+  assert.equal(harness.cashouts.length, 3);
+  assert.equal(harness.escrowState.balance, 0);
 });

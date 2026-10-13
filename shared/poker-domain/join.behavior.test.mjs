@@ -3470,3 +3470,12 @@ test("Single Player RESTRICTED user: rejoin rejected before existing seat or sta
   assert.equal(ledgerCalls.length, 0, "zero ledger calls when restricted rejoin rejected");
   assert.equal(stateUpdates.length, 0, "zero state updates when restricted rejoin rejected");
 });
+
+for (const singlePlayer of [false, true]) test(`terminal inactivity rejects JOIN before debit, singlePlayer=${singlePlayer}`, async () => {
+  const h = createSinglePlayerSmokeHarness({ singlePlayer, participated: true, humanActive: true });
+  h.read().state.inactivityEjectionByUserId = { 'smoke-owner': { handId: 'last', isSinglePlayer: singlePlayer } };
+  const before = structuredClone(h.read());
+  await assert.rejects(h.join, error => error.code === 'removed_for_inactivity');
+  assert.deepEqual(h.read(), before);
+  assert.equal(h.attempts.length, 0);
+});

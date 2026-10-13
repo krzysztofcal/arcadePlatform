@@ -643,7 +643,8 @@ async function settledRolloverRuntimeFixture(options = {}) {
     pokerLogRuntimeControl: { mayBuildDebugPayload: () => false },
     isGuestTableId: () => false,
     hasSupabaseDbUrl: true,
-    loadDeferredLeaveFinalizer: async () => async () => ({ ok: true, changed: false }),
+    reconcileInactivityEjections: async () => ({ ok: true }),
+    loadDeferredLeaveFinalizer: async () => async () => options.finalizerResult || ({ ok: true, changed: false }),
     syncCleanupRuntimeState: async () => ({ ok: true }),
     applyInactiveCleanupAndBroadcast: async () => ({ ok: true, changed: false }),
     handleContinuousBotRotationAtSettled: async () => ({ handled: false }),
@@ -996,4 +997,20 @@ test("normalizeWsPokerAccessPayload includes slowThresholdCh, slowHysteresisBps,
   assert.equal(payload.automaticClass, "NORMAL");
   assert.equal(payload.override, "AUTO");
   assert.equal(payload.effectiveClass, "NORMAL");
+});
+
+
+test('durable inactivity accounting failure stays settled and uses existing rollover retry', async () => {
+  const runtime = await settledRolloverRuntimeFixture({ finalizerResult: { ok: false, code: 'terminal_accounting_invariant_failed', retryable: false } });
+  const tableId = 'table_inactivity_retry';
+  const state = { tableId, phase: 'SETTLED', handId: 'h1', seats: [], stacks: {},
+    inactivityEjectionByUserId: { inactive: { handId: 'h1', isSinglePlayer: true } } };
+  runtime.tableManager.restoreTableFromPersisted(tableId, { coreState: { version: 1, seats: {}, members: [], pokerState: state },
+    tableMeta: { isSinglePlayer: true }, persistedVersion: 1 });
+  const generationKey = runtime.settledRolloverGenerationKey(tableId);
+  const result = await runtime.runSettledRolloverCommand({ tableId, generationKey });
+  assert.equal(result.ok, false);
+  assert.equal(runtime.getRetries().length, 1);
+  assert.equal(runtime.getPersistedCount(), 0);
+  assert.equal(runtime.tableManager.persistedPokerState(tableId).phase, 'SETTLED');
 });

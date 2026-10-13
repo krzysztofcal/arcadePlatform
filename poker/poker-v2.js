@@ -256,6 +256,7 @@
   var seatCommittedByUserId = {};
   var suggestedSeatNoParam = null;
   var shouldAutoJoin = false;
+  var inactivityExit = null;
   var autoJoinAttempted = false;
   var autoJoinRetryTimer = null;
   var autoJoinRetryCount = 0;
@@ -736,13 +737,16 @@
     var active = closedTableRedirectRemaining > 0;
     els.closedTableModal.hidden = !active;
     if (!active) return;
-    els.closedTableTitle.textContent = 'This table has ended. Returning to lobby in 5 seconds…';
+    els.closedTableTitle.textContent = inactivityExit && inactivityExit.status === 'removed'
+      ? (inactivityExit.isSinglePlayer ? 'Game ended due to inactivity' : 'Removed for inactivity')
+      : 'This table has ended. Returning to lobby in 5 seconds…';
     els.closedTableCountdown.textContent = closedTableRedirectRemaining === CLOSED_TABLE_REDIRECT_SECONDS
       ? 'Returning to lobby in 5 seconds…'
       : ('Returning to lobby in ' + closedTableRedirectRemaining + '…');
   }
 
   function cancelClosedTableRedirect(){
+    if (inactivityExit && inactivityExit.status === 'removed') return;
     clearClosedTableRedirectTimer();
     closedTableRedirectRemaining = 0;
     closedTableRedirectReason = null;
@@ -763,6 +767,7 @@
   }
 
   function startClosedTableRedirect(reason){
+    if (inactivityExit && inactivityExit.status === 'removed' && closedTableRedirectReason === 'removed_for_inactivity') return;
     clearCardFx(true);
     if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
     if (closedTableRedirectRemaining === CLOSED_TABLE_REDIRECT_SECONDS && closedTableRedirectReason === reason && closedTableRedirectTimer) {
@@ -784,6 +789,19 @@
 
   function syncClosedTableRedirectFromSnapshot(payload){
     if (!isObject(payload)) return;
+    var exit = payload.private && payload.private.inactivity;
+    if (exit && (exit.status === 'pending' || exit.status === 'removed')) {
+      if (!inactivityExit || inactivityExit.status !== 'removed') inactivityExit = exit;
+      shouldAutoJoin = false;
+      reconnectSeatNo = null;
+      lastKnownCurrentSeatNo = null;
+      clearAutoJoinRetry();
+      clearPendingJoin();
+      clearQueuedPreaction();
+      if (inactivityExit.status === 'removed') startClosedTableRedirect('removed_for_inactivity');
+      return;
+    }
+    if (inactivityExit) return;
     var tableObj = isObject(payload.table) ? payload.table : {};
     var nextStatus = null;
     if (typeof payload.status === 'string' && payload.status) nextStatus = payload.status;
@@ -1208,6 +1226,7 @@
     }
     return fetchTableAccess(token).then(function(access){
       if (!isCurrentPreflight()) return false;
+      if (access.inactivity) syncClosedTableRedirectFromSnapshot({ private: { inactivity: access.inactivity } });
       if (access.allowed !== true && access.viewAllowed !== true) {
         currentAccessToken = null;
         stopLiveMode();
@@ -2374,13 +2393,14 @@
   function normalizePlayerState(value){
     if (!isObject(value)) return null;
     var status = typeof value.status === 'string' ? value.status.trim().toUpperCase() : '';
-    if (status !== 'ACTIVE' && status !== 'OUT_OF_CHIPS' && status !== 'WAITING_NEXT_HAND') return null;
+    if (status !== 'ACTIVE' && status !== 'OUT_OF_CHIPS' && status !== 'WAITING_NEXT_HAND' && status !== 'EJECTION_PENDING' && status !== 'REMOVED') return null;
     var stack = Number(value.stack);
     if (!Number.isInteger(stack) || stack < 0) return null;
     return { status: status, stack: stack, canRebuy: value.canRebuy === true };
   }
 
   function mergeSnapshot(payload, frame){
+    if (inactivityExit && inactivityExit.status === 'removed') return;
     if (!isObject(payload)) return;
     var previousTableId = state.tableId;
     var previousHandId = state.handId;
@@ -2445,6 +2465,10 @@
 
     var suppliedOwnSeat = hasOwn(payload, 'youSeat') ? payload.youSeat : hasOwn(youObj, 'seat') ? youObj.seat : undefined;
     var nextSeats = normalizeSeatRows(payload, state.seats, state.tableId);
+    if (inactivityExit && inactivityExit.status === 'removed') {
+      suppliedOwnSeat = null;
+      nextSeats = nextSeats.filter(function(seat){ return seat.userId !== state.currentUserId; });
+    }
     var seatProjectionPresent = Array.isArray(payload.seats) || Array.isArray(tableObj.members)
       || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats);
     var currentParticipation = handBetsField.present ? handBetsField.value : state.betThisRoundByUserId;
@@ -5513,7 +5537,7 @@
 
   function isPlayerSittingOut(){
     var status = currentPlayerStatus();
-    return status === 'OUT_OF_CHIPS';
+    return !!inactivityExit || status === 'OUT_OF_CHIPS' || status === 'EJECTION_PENDING' || status === 'REMOVED';
   }
 
   function refreshRebuyBalance(){
@@ -5650,8 +5674,9 @@
       els.tableMeta.textContent = parts.join(' • ');
     }
     if (els.errorText){
-      els.errorText.textContent = state.errorText || '';
-      els.errorText.hidden = !state.errorText;
+      var pendingExit = inactivityExit && inactivityExit.status === 'pending';
+      els.errorText.textContent = pendingExit ? 'Removal for inactivity pending — finishing and settling the current hand.' : (state.errorText || '');
+      els.errorText.hidden = !pendingExit && !state.errorText;
     }
     if (els.turnText){
       if (currentPlayerStatus() === 'OUT_OF_CHIPS'){
@@ -5854,8 +5879,8 @@
     var liveReady = isWsReady();
     var activeHand = hasActiveHand();
     var usersTurn = isUsersTurn();
-    var controlsLocked = queuedPreactionInFlight;
-    var allowed = liveReady && usersTurn ? getAllowedActions() : [];
+    var controlsLocked = queuedPreactionInFlight || !!inactivityExit;
+    var allowed = liveReady && usersTurn && !inactivityExit ? getAllowedActions() : [];
     var primary = resolvePrimaryAction(allowed);
     var amountAction = resolveAmountAction(allowed);
     var allInPlan = resolveAllInPlan(allowed);
@@ -6177,6 +6202,7 @@
   }
 
   function beginJoinOperation(payload, options){
+    if (inactivityExit) return Promise.reject(new Error('removed_for_inactivity'));
     var opts = options || {};
     if (isJoinOperationPending() && opts.resume !== true) return joinOperation.promise || Promise.resolve({ ok: true, pending: true });
     var requestId = typeof opts.requestId === 'string' && opts.requestId ? opts.requestId : buildJoinRequestId();
@@ -6219,6 +6245,7 @@
   }
 
   function resumePendingJoinOperation(){
+    if (inactivityExit) return false;
     if (!isGuestMode && state.reconnectGate) return false;
     if (!isGuestMode && !state.hasAppliedAuthoritativeSnapshot) return false;
     if (isGuestMode && isJoinOperationPending()) return true;
@@ -6391,6 +6418,7 @@
   }
 
   function autoJoinSeat(){
+    if (inactivityExit) return;
     if (!isGuestMode && !state.hasAppliedAuthoritativeSnapshot) return;
     if (!isGuestMode && state.reconnectGate) return;
     if (!shouldAutoJoin) return;
@@ -6431,6 +6459,7 @@
   }
 
   function rejoinSeatAfterReconnect(){
+    if (inactivityExit) return false;
     if (isGuestMode) return false;
     if (state.reconnectGate) return false;
     if (!Number.isInteger(reconnectSeatNo) || reconnectSeatNo < 1) return false;
