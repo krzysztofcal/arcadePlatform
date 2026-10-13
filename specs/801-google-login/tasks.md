@@ -10,4 +10,4 @@
 - [x] T008 Prepare Draft PR, working Preview and evidence/remaining external steps in `specs/801-google-login/quickstart.md`.
 
 ## Evidence / remaining work
-Runtime SHA `b68f546a`, Preview #1101: desktop/mobile PL/EN, disabled provider/retry, controlled synthetic callback error, Stage password/profile HTTP 200/reload/sign-out PASS. Full npm test and settled CI PASS. T007 remains pending owner Stage Google configuration and real Google browser login, as explicitly deferred by the owner; no Google E2E success claimed.
+Runtime SHA `b68f546a`, Preview #1101: desktop/mobile PL/EN, disabled provider/retry, controlled synthetic callback error, Stage password/profile HTTP 200/reload/sign-out PASS. Full npm test and settled CI PASS. T007 Stage Google configuration, existing verified-email Google login, repeat/reload, UUID continuity and storage audit are now PASS. Completely new Google user registration remains pending a second real Google identity absent from Stage; do not mark this task fully done yet. See quickstart for the initial failed callback followed by successful fresh/repeat login.

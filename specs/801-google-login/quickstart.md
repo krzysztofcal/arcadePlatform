@@ -12,7 +12,13 @@ Codex created a dedicated Google Cloud project `arcade-hub-stage-1100` / Arcade 
 
 Client JSON was downloaded directly from Google Console into a private VPS directory (0700), stored with file mode 0600, and applied through the official Supabase Stage Management API. Read-back confirms enabled Google, matching Client ID, exact Preview redirect, and Preview as Stage Site URL. No client secret is committed, logged or shared in chat. An immediate API read-back was stale; a subsequent read confirmed the save.
 
-Real Google E2E is currently at the Google account consent screen; owner must approve sharing basic identity. Pre-consent read-only evidence confirms the matching Stage user already has verified email/password; UUID and account/profile/ledger/poker snapshots are retained privately for continuity comparison. No E2E success is claimed until the callback completes.
+Real Google E2E completed on 2026-10-13 after owner consent. First successful Google sign-in linked to the existing verified password user with the same Supabase UUID; profile-me HTTP 200. Repeat Google sign-in and reload preserved UUID, profile/balance and XP display. Pre-consent versus post-login/repeat read-only snapshots show unchanged chips account hash, ledger-entry count, poker-seat/request counts and profile hash. No financial actions or gameplay were performed.
+
+An initial callback after first consent returned a controlled generic auth error and no session. A fresh attempt succeeded, followed by another successful login and reload. The initial raw error was unavailable after callback sanitization; its cause is not established. Do not describe that first attempt as PASS or infer that configuration propagation was proven to be the cause.
+
+Storage audit: Google provider token is present inside the existing SDK-managed Supabase session record; provider refresh token is absent. No provider-token copy found in other localStorage/sessionStorage records, application KLog or IndexedDB. Post-login application network audit also checks for provider-token forwarding. This is not a claim of zero Google-token persistence: SDK-managed persistence is deliberately retained as documented in the plan.
+
+A completely new Google user registration still needs a second real Google identity absent from Stage; owner was asked for that specific login, without requesting secrets.
 
 ## Google Cloud setup reference
 1. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview), select/create a dedicated Stage project.
@@ -42,7 +48,10 @@ Real Google E2E is currently at the Google account consent screen; owner must ap
 - PASS: real Preview browser checks at 1440×1000 and 390×844: pinned Stage target, visible G button, EN/PL labels, real disabled-provider settings response and retry (EN/PL messages), controlled synthetic cancellation callback and history cleanup. This checks cancellation handling, not real Google consent cancellation.
 - PASS: existing Stage password account signed in through the actual Preview form, profile-me HTTP 200, session restored after reload and sign-out returned to login. No JOIN, funding, gameplay, claims or ledger mutations.
 - PASS: anonymous desktop/mobile screenshots visually inspected; temporary browser tooling/state remained outside the repository and browser contexts were closed.
-- NOT TESTED: real Google new/repeat login, verified-email UUID continuity and unchanged XP/CH/Poker history, real Google SDK/provider-token storage audit, live recovery email completion. Google provider is configured/enabled on Stage; first Google account consent and end-to-end evidence remain pending.
+- PASS: real Google login via task Preview and Supabase Stage; existing verified-password email retained its pre-consent UUID, repeated Google login retained UUID/profile/balance, reload restored session and callback URL was clean. Database snapshots before/after show unchanged profile, chips account, ledger-entry count and poker-seat/request counts; XP display unchanged across first/repeat login.
+- PASS: provider-token audit found no copies in application-owned localStorage/sessionStorage, KLog or IndexedDB; token is present only in the Supabase SDK record and is not a provider refresh token. No claim of zero SDK token persistence.
+- NOT TESTED: completely new Google account registration (second real Google identity required); completion of a real password recovery email. Real Google consent cancellation is not tested; the controlled synthetic callback error was tested.
+- Initial first-consent callback FAIL, cause unknown; subsequent fresh login/repeat/reload PASS. This is explicitly recorded rather than counted as a first-attempt success.
 - NOT TESTED / unauthorized: Production.
 
 ## Rollback
