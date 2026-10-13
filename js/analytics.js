@@ -7,7 +7,11 @@
 
   try {
     window.gtag('js', new Date());
-    window.gtag('config', GA_ID);
+    var config = {};
+    if (window.location && window.location.pathname === '/account.html'){
+      config.page_location = window.location.origin + '/account.html';
+    }
+    window.gtag('config', GA_ID, config);
   } catch (err) {
     if (typeof console !== 'undefined' && console && console.debug) console.debug('GA init failed', err);
   }

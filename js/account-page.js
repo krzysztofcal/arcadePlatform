@@ -41,6 +41,8 @@
     nodes.signOut = doc.getElementById('signOutButton');
     nodes.deleteBtn = doc.getElementById('deleteAccountButton');
     nodes.deleteNote = doc.getElementById('deleteAccountNote');
+    nodes.googleSignIn = doc.getElementById('googleSignInButton');
+    nodes.googleDivider = doc.getElementById('googleSignInDivider');
     nodes.signInForm = doc.getElementById('signinForm');
     nodes.signUpForm = doc.getElementById('signupForm');
     nodes.signInEmail = doc.getElementById('signinEmail');
@@ -1070,6 +1072,33 @@
     }
   }
 
+  function googleErrorMessage(code){
+    if (code === 'google_unavailable') return t('googleUnavailable', 'Google sign-in is unavailable right now. Use email or try again later.');
+    if (code === 'google_cancelled') return t('googleCancelled', 'Google sign-in was cancelled. You can try again.');
+    return t('googleFailed', 'Could not sign in with Google. Please try again.');
+  }
+
+  function resetGoogleButton(){
+    if (!nodes.googleSignIn) return;
+    nodes.googleSignIn.disabled = false;
+    nodes.googleSignIn.removeAttribute('aria-busy');
+  }
+
+  function handleGoogleSignIn(){
+    if (!nodes.googleSignIn || nodes.googleSignIn.disabled) return;
+    if (!auth || !auth.signInWithGoogle){
+      setStatus(googleErrorMessage('google_unavailable'), 'error');
+      return;
+    }
+    nodes.googleSignIn.disabled = true;
+    nodes.googleSignIn.setAttribute('aria-busy', 'true');
+    setStatus(t('googleSigningIn', 'Connecting to Google…'), 'info');
+    Promise.resolve().then(function(){ return auth.signInWithGoogle(); }).catch(function(error){
+      setStatus(googleErrorMessage(error && error.message), 'error');
+      resetGoogleButton();
+    });
+  }
+
   function handleSignIn(e){
     e.preventDefault();
     var email = nodes.signInEmail && nodes.signInEmail.value ? nodes.signInEmail.value.trim() : '';
@@ -1214,6 +1243,14 @@
   }
 
   function wireEvents(){
+    var googleEnabled = !!(auth && auth.isGoogleEnabled && auth.isGoogleEnabled());
+    setBlockVisibility(nodes.googleSignIn, googleEnabled);
+    setBlockVisibility(nodes.googleDivider, googleEnabled);
+    if (nodes.googleSignIn) nodes.googleSignIn.addEventListener('click', handleGoogleSignIn);
+    window.addEventListener('pageshow', function(event){
+      resetGoogleButton();
+      if (event.persisted && !currentUser) setStatus('', '');
+    });
     if (nodes.signInForm){ nodes.signInForm.addEventListener('submit', handleSignIn); }
     if (nodes.signUpForm){ nodes.signUpForm.addEventListener('submit', handleSignUp); }
     if (nodes.signupConfirmationBack){ nodes.signupConfirmationBack.addEventListener('click', closeSignupConfirmation); }
@@ -1268,7 +1305,8 @@
     auth.getCurrentUser().then(function(user){
       if (passwordRecoveryActive) return;
       renderUser(user);
-      setStatus(user ? t('signedIn', 'Signed in.') : '', user ? 'success' : '');
+      var googleError = auth.getGoogleSignInError && auth.getGoogleSignInError();
+      setStatus(googleError ? googleErrorMessage(googleError) : (user ? t('signedIn', 'Signed in.') : ''), googleError ? 'error' : (user ? 'success' : ''));
       if (user){
         loadChips();
         refreshWelcomeBonus(user);
@@ -1294,7 +1332,8 @@
           loadChips();
           refreshWelcomeBonus(user);
         } else {
-          if (!signupConfirmationPending) setStatus(t('signedOutNotice', 'You have been signed out.'), 'info');
+          var googleError = auth.getGoogleSignInError && auth.getGoogleSignInError();
+          if (!signupConfirmationPending) setStatus(googleError ? googleErrorMessage(googleError) : t('signedOutNotice', 'You have been signed out.'), googleError ? 'error' : 'info');
           clearChips();
           setWelcomeBonusVisibility(false);
           setBlockVisibility(nodes.chipPanel, false);

@@ -191,6 +191,7 @@ function pickSupabasePublicConfig(env) {
   return {
     url: env.SUPABASE_URL || env.SUPABASE_URL_V2 || "",
     anonKey: env.SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY_V2 || "",
+    googleEnabled: env.AUTH_GOOGLE_ENABLED === "1",
   };
 }
 
@@ -212,7 +213,8 @@ function generateSupabaseConfig(env) {
     "// Do not edit manually - this file is regenerated on Netlify builds",
     "window.SUPABASE_CONFIG = {",
     "  SUPABASE_URL: " + JSON.stringify(config.url) + ",",
-    "  SUPABASE_ANON_KEY: " + JSON.stringify(config.anonKey),
+    "  SUPABASE_ANON_KEY: " + JSON.stringify(config.anonKey) + ",",
+    "  AUTH_GOOGLE_ENABLED: " + JSON.stringify(config.googleEnabled),
     "};",
     "",
   ].join("\n");
