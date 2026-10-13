@@ -25,3 +25,9 @@ Online sit-out after two misses becomes terminal cash-out/seat release; Single P
 5. Run focused Online/SP financial/reconnect suites, full required CI and independent subagent review. Update Draft PR description and exact-SHA instructions; do not deploy.
 
 Constitution recheck: only fundamental read-only/persistence, rejection/auth isolation, lifecycle/recovery tests in existing files. No UI/CSS/JSP/layout suite or framework; unchanged economic rules, blinds and timer.
+
+## Additional verification plan
+- Extend persisted-bootstrap-adapter.behavior.test.mjs through real adaptPersistedBootstrap -> table-manager restore/resync/subscribe -> private WS payload -> real reconcile selection. Cover Online/SP before threshold, pending and completed JSON refresh. Use real engine/accepted timeout tests and actual JOIN executor regressions for threshold/reset/commit-only policy.
+- In persisted-bootstrap-adapter.mjs, filter completed inactivity historical current seats before identity reconciliation only with durable intent + left=true + missing stack + no ACTIVE owner row + no live-hand claim. Preserve handSeats and all financial maps/tombstones. Honor committed left flags in runtime-seat fallback so pending recovery cannot reseat the exiting user.
+- In room-core-snapshot.mjs, avoid publishing a completed inactivity user from stale members alone; private/public classification must agree about retained claims. Extend existing projection regression, no UI suite.
+- Re-run fundamental timeout/action, Leave exactly-once, terminal-close escrow and reconnect tests plus required CI. Keep Draft; no deployment/merge/funded environment writes.

@@ -15,3 +15,8 @@ Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1099. Exact final 
 - [x] T009 P2 identity: reset account-owned inactivity on logout/change, preserve same-account reconnect/countdown.
 - [x] T010 P2 reconcile: exclude resolved/history and already-deferred claims from Leave queue work; preserve durable marker, finalizer and retry.
 - [x] T011 Reverify fundamental Online/SP accounting/reconnect/close, independent review, final CI and Draft PR handoff (no deployment).
+
+## Additional reconnect/post-settlement verification
+- [x] T012 Audit transport/bootstrap/auth versus authoritative timeout paths; fundamental Online/SP pre-threshold count preservation.
+- [x] T013 Reproduce real bootstrap/projection completed ghost; narrowly remove historical detached seats and preserve pending/live claims; no repeated Leave/cash-out.
+- [x] T014 Verify real adapters/projections, economic/lifecycle invariants and required CI; update Draft PR evidence and SHA, no deploy/merge.

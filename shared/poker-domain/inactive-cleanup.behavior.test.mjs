@@ -953,6 +953,25 @@ test("Single Player deferred inactivity finalizer refunds human and bot sources 
   assert.equal(harness.seatState.every((seat) => seat.status === "INACTIVE" && seat.stack === 0), true);
   assert.deepEqual(harness.tableState.stateRow.state.stacks, {});
   assert.equal(harness.tableState.stateRow.state.inactivityEjectionByUserId.human_1.isSinglePlayer, true);
+  const { adaptPersistedBootstrap } = await import('../../ws-server/poker/bootstrap/persisted-bootstrap-adapter.mjs');
+  const { createTableManager } = await import('../../ws-server/poker/table/table-manager.mjs');
+  const { buildStateSnapshotPayload } = await import('../../ws-server/poker/read-model/state-snapshot.mjs');
+  const { listPendingInactivityLeaveEntries } = await import('../../ws-server/poker/handlers/leave.mjs');
+  for (let refresh = 0; refresh < 3; refresh++) {
+    const restored = adaptPersistedBootstrap({ tableId: 'table_1',
+      tableRow: { status: harness.tableState.tableStatus, max_players: 6, is_single_player: true },
+      seatRows: harness.seatState, stateRow: harness.tableState.stateRow });
+    assert.equal(restored.ok, true);
+    const manager = createTableManager();
+    manager.restoreTableFromPersisted('table_1', restored.table);
+    manager.resync({ tableId: 'table_1', userId: 'human_1', ws: {} });
+    const snapshot = manager.tableSnapshot('table_1', 'human_1');
+    const payload = buildStateSnapshotPayload({ tableSnapshot: snapshot, userId: 'human_1' });
+    assert.equal(payload.private.inactivity.status, 'removed');
+    assert.equal(snapshot.seats.some(seat => seat.userId === 'human_1'), false);
+    assert.deepEqual(listPendingInactivityLeaveEntries(manager.persistedPokerState('table_1')), []);
+  }
+
   const retry = await finalizeDeferredLeavesAfterSettlement(args);
   assert.equal(retry.ok, true);
   assert.equal(retry.status, "already_closed");

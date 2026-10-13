@@ -638,3 +638,97 @@ test("tableManager hydrates persisted single player table with isSinglePlayer: t
   assert.equal(meta.isSinglePlayer, true);
   assert.equal(meta.buyIn, 500);
 });
+
+for (const isSinglePlayer of [false, true]) for (const phase of ['HAND_DONE', 'SETTLED']) test(`completed inactivity survives real bootstrap/refresh without pending ghost or repeated Leave, Single Player=${isSinglePlayer}, phase=${phase}`, async () => {
+  const { buildStateSnapshotPayload } = await import('../read-model/state-snapshot.mjs');
+  const { listPendingInactivityLeaveEntries, reconcileInactivityEjectionsCommand } = await import('../handlers/leave.mjs');
+  const tableId = 'completed-inactivity-' + isSinglePlayer;
+  const rows = { tableId,
+    tableRow: { id: tableId, status: isSinglePlayer ? 'CLOSED' : 'OPEN', max_players: 6, buy_in: 100, is_single_player: isSinglePlayer },
+    seatRows: isSinglePlayer ? [{ user_id: 'removed', seat_no: 1, status: 'INACTIVE', is_bot: false, stack: 0 }]
+      : [{ user_id: 'remaining', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 100 }],
+    stateRow: { version: 20, state: { tableId, phase, handId: '',
+      // Old hand identity can remain after cash-out; it is not current ownership.
+      seats: [{ userId: 'removed', seatNo: 1 }], handSeats: [{ userId: 'removed', seatNo: 1 }],
+      stacks: isSinglePlayer ? {} : { remaining: 100 }, leftTableByUserId: { removed: true },
+      inactivityEjectionByUserId: { removed: { handId: 'settled-hand', isSinglePlayer } },
+      missedTurnsByUserId: { removed: isSinglePlayer ? 3 : 2 } } }
+  };
+  const manager = createTableManager();
+  for (let refresh = 0; refresh < 3; refresh++) {
+    const restored = adaptPersistedBootstrap(JSON.parse(JSON.stringify(rows)));
+    assert.equal(restored.ok, true, restored.message);
+    manager.restoreTableFromPersisted(tableId, restored.table);
+    const ws = {};
+    assert.equal(manager.resync({ tableId, ws, userId: 'removed', nowTs: 1000 + refresh }).ok, true);
+    const snapshot = manager.tableSnapshot(tableId, 'removed');
+    const payload = buildStateSnapshotPayload({ tableSnapshot: snapshot, userId: 'removed' });
+    assert.equal(payload.private.inactivity.status, 'removed');
+    assert.equal(payload.private.playerState.status, 'REMOVED');
+    assert.equal(snapshot.seats.some(seat => seat.userId === 'removed'), false);
+    assert.equal(snapshot.members.some(member => member.userId === 'removed'), false);
+    assert.equal(snapshot.youSeat, null);
+    if (!isSinglePlayer) assert.deepEqual(snapshot.seats.map(seat => [seat.userId, seat.seatNo]), [['remaining', 1]]);
+    assert.deepEqual(payload.public.legalActions.actions, []);
+    assert.deepEqual(listPendingInactivityLeaveEntries(manager.persistedPokerState(tableId)), []);
+    await reconcileInactivityEjectionsCommand({ tableId, tableManager: manager,
+      loadAuthoritativeLeaveExecutor: async () => { assert.fail('completed Leave must not reload executor or cash out'); },
+      restoreTableFromPersisted: async () => { assert.fail('completed result must not run settlement restore'); },
+      broadcastStateSnapshots: () => {}, broadcastTableState: () => {} });
+    assert.equal(manager.persistedStateVersion(tableId), 20);
+    assert.equal(manager.persistedPokerState(tableId).missedTurnsByUserId.removed, isSinglePlayer ? 3 : 2);
+  }
+});
+
+for (const isSinglePlayer of [false, true]) test(`transport reconnect and refresh preserve committed inactivity count, Single Player=${isSinglePlayer}`, () => {
+  const tableId = 'reconnect-count-' + isSinglePlayer;
+  const count = isSinglePlayer ? 2 : 1;
+  const rows = { tableId,
+    tableRow: { status: 'OPEN', max_players: 6, is_single_player: isSinglePlayer },
+    seatRows: [{ user_id: 'human', seat_no: 1, status: 'ACTIVE', is_bot: false, stack: 100 }],
+    stateRow: { version: 9, state: { phase: 'PREFLOP', seats: [{ userId: 'human', seatNo: 1 }], stacks: { human: 100 },
+      missedTurnsByUserId: { human: count }, turnDeadlineTs: 21000 } }
+  };
+  const manager = createTableManager();
+  for (let refresh = 0; refresh < 3; refresh++) {
+    const restored = adaptPersistedBootstrap(JSON.parse(JSON.stringify(rows)));
+    assert.equal(restored.ok, true);
+    manager.restoreTableFromPersisted(tableId, restored.table);
+    const before = JSON.stringify(manager.persistedPokerState(tableId));
+    const ws = {};
+    manager.subscribe({ tableId, userId: 'human', ws, nowTs: 1000 });
+    manager.resync({ tableId, userId: 'human', ws, nowTs: 2000 });
+    manager.cleanupConnection({ ws, userId: 'human', nowTs: 3000, activeSockets: [] });
+    manager.resync({ tableId, userId: 'human', ws: {}, nowTs: 4000 });
+    assert.equal(JSON.stringify(manager.persistedPokerState(tableId)), before);
+    assert.equal(manager.persistedStateVersion(tableId), 9);
+    assert.equal(manager.persistedPokerState(tableId).missedTurnsByUserId.human, count);
+    assert.equal(manager.persistedPokerState(tableId).inactivityEjectionByUserId?.human, undefined);
+  }
+});
+
+test('bootstrap preserves pending zero-stack and live-hand inactivity claims without active membership', async () => {
+  const { buildStateSnapshotPayload } = await import('../read-model/state-snapshot.mjs');
+  for (const variant of ['zero-stack', 'live-hand', 'active-owner']) {
+    const tableId = 'pending-' + variant;
+    const state = { phase: variant === 'live-hand' ? 'RIVER' : 'HAND_DONE',
+      seats: [{ userId: 'human', seatNo: 1 }], handSeats: [{ userId: 'human', seatNo: 1 }],
+      stacks: variant === 'zero-stack' ? { human: 0 } : {}, leftTableByUserId: { human: true },
+      inactivityEjectionByUserId: { human: { handId: 'hand', isSinglePlayer: false } }, missedTurnsByUserId: { human: 2 } };
+    const restored = adaptPersistedBootstrap({ tableId, tableRow: { status: 'OPEN', max_players: 6 },
+      seatRows: variant === 'active-owner' ? [{ user_id: 'human', seat_no: 1, status: 'ACTIVE', stack: 100 }] : [],
+      stateRow: { version: 10, state } });
+    assert.equal(restored.ok, true, restored.message);
+    const manager = createTableManager();
+    manager.restoreTableFromPersisted(tableId, restored.table);
+    manager.resync({ tableId, userId: 'human', ws: {}, nowTs: 1000 });
+    const snapshot = manager.tableSnapshot(tableId, 'human');
+    const payload = buildStateSnapshotPayload({ tableSnapshot: snapshot, userId: 'human' });
+    assert.equal(payload.private.inactivity.status, 'pending');
+    assert.equal(payload.private.playerState.status, 'EJECTION_PENDING');
+    assert.equal(snapshot.members.some(member => member.userId === 'human'), false);
+    assert.deepEqual(payload.public.legalActions.actions, []);
+    assert.deepEqual(manager.persistedPokerState(tableId).stacks, state.stacks);
+    assert.deepEqual(manager.persistedPokerState(tableId).handSeats, state.handSeats);
+  }
+});

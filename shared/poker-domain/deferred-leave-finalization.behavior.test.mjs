@@ -6,7 +6,7 @@ const tableId = "11111111-1111-4111-8111-111111111111";
 const leaverId = "22222222-2222-4222-8222-222222222222";
 const activeId = "33333333-3333-4333-8333-333333333333";
 
-function createFixture({ withActiveHuman, initialVersion = 7, managedContinuous = false }) {
+function createFixture({ withActiveHuman, initialVersion = 7, managedContinuous = false, inactivity = false }) {
   let version = initialVersion;
   let state = {
     tableId,
@@ -21,6 +21,7 @@ function createFixture({ withActiveHuman, initialVersion = 7, managedContinuous 
       ...(withActiveHuman ? { [activeId]: 75 } : {}),
     },
     leftTableByUserId: { [leaverId]: true },
+    ...(inactivity ? { inactivityEjectionByUserId: { [leaverId]: { handId: "hand", isSinglePlayer: false } } } : {}),
   };
   let seats = [
     { user_id: leaverId, seat_no: 1, status: "ACTIVE", is_bot: false, stack: 25 },
@@ -141,4 +142,31 @@ test("uses different idempotency keys for separate deferred leaves on the same t
   assert.equal(first.cashouts[0].idempotencyKey, `poker:deferred-leave:v1:${tableId}:7:${leaverId}`);
   assert.equal(second.cashouts[0].idempotencyKey, `poker:deferred-leave:v1:${tableId}:12:${leaverId}`);
   assert.notEqual(first.cashouts[0].idempotencyKey, second.cashouts[0].idempotencyKey);
+});
+
+
+test("Online completed inactivity finalizer feeds real removed snapshot and retries without another cash-out", async () => {
+  const { adaptPersistedBootstrap } = await import('../../ws-server/poker/bootstrap/persisted-bootstrap-adapter.mjs');
+  const { createTableManager } = await import('../../ws-server/poker/table/table-manager.mjs');
+  const { buildStateSnapshotPayload } = await import('../../ws-server/poker/read-model/state-snapshot.mjs');
+  const { listPendingInactivityLeaveEntries } = await import('../../ws-server/poker/handlers/leave.mjs');
+  const fixture = createFixture({ withActiveHuman: true, inactivity: true });
+  const args = { beginSql: fixture.beginSql, tableId, postTransactionFn: fixture.postTransactionFn };
+  assert.equal((await finalizeDeferredLeavesAfterSettlement(args)).ok, true);
+  for (let refresh = 0; refresh < 3; refresh++) {
+    const restored = adaptPersistedBootstrap({ tableId,
+      tableRow: { status: 'OPEN', max_players: 6, is_single_player: false },
+      seatRows: fixture.getSeats(), stateRow: { version: 8, state: fixture.getState() } });
+    assert.equal(restored.ok, true);
+    const manager = createTableManager();
+    manager.restoreTableFromPersisted(tableId, restored.table);
+    manager.resync({ tableId, userId: leaverId, ws: {} });
+    const snapshot = manager.tableSnapshot(tableId, leaverId);
+    const payload = buildStateSnapshotPayload({ tableSnapshot: snapshot, userId: leaverId });
+    assert.equal(payload.private.inactivity.status, 'removed');
+    assert.equal(snapshot.seats.some(seat => seat.userId === leaverId), false);
+    assert.deepEqual(listPendingInactivityLeaveEntries(manager.persistedPokerState(tableId)), []);
+    assert.equal((await finalizeDeferredLeavesAfterSettlement(args)).ok, true);
+    assert.equal(fixture.cashouts.length, 1);
+  }
 });
