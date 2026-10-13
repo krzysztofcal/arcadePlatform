@@ -16,7 +16,7 @@ Real Google E2E completed on 2026-10-13 after owner consent. First successful Go
 
 An initial callback after first consent returned a controlled generic auth error and no session. A fresh attempt succeeded, followed by another successful login and reload. The initial raw error was unavailable after callback sanitization; its cause is not established. Do not describe that first attempt as PASS or infer that configuration propagation was proven to be the cause.
 
-Storage audit: Google provider token is present inside the existing SDK-managed Supabase session record; provider refresh token is absent. No provider-token copy found in other localStorage/sessionStorage records, application KLog or IndexedDB. Post-login application network audit also checks for provider-token forwarding. This is not a claim of zero Google-token persistence: SDK-managed persistence is deliberately retained as documented in the plan.
+Storage audit: Google provider token is present inside the existing SDK-managed Supabase session record; provider refresh token is absent. No provider-token copy found in other localStorage/sessionStorage records, application KLog or IndexedDB. Post-login audit inspected 15 application requests and found no Google provider token forwarded. No WS frames were sent on this account page, so this is not a WS protocol test. This is not a claim of zero Google-token persistence: SDK-managed persistence is deliberately retained as documented in the plan.
 
 A completely new Google user registration still needs a second real Google identity absent from Stage; owner was asked for that specific login, without requesting secrets.
 
