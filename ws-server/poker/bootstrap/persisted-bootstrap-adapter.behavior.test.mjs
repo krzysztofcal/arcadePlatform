@@ -552,3 +552,89 @@ test("adapter carries only the trusted managed lifecycle binding into runtime me
   assert.equal(untrusted.table.tableMeta.lifecycleKind, "STANDARD");
   assert.equal(untrusted.table.tableMeta.managedProfileKey, null);
 });
+
+test("adapter carries is_single_player flag into runtime tableMeta on bootstrap/restart", () => {
+  const bootstrapped = adaptPersistedBootstrap({
+    tableId: "table_sp_bootstrap",
+    tableRow: {
+      id: "table_sp_bootstrap",
+      max_players: 6,
+      status: "OPEN",
+      buy_in: 500,
+      stakes: { sb: 5, bb: 10 },
+      lifecycle_kind: "STANDARD",
+      is_single_player: true
+    },
+    seatRows: [
+      { user_id: "human_owner", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 500 },
+      { user_id: "bot_1", seat_no: 2, status: "ACTIVE", is_bot: true, bot_profile: "NORMAL", stack: 500 }
+    ],
+    stateRow: {
+      version: 1,
+      state: {
+        tableId: "table_sp_bootstrap",
+        phase: "INIT",
+        seats: [
+          { userId: "human_owner", seatNo: 1, isBot: false },
+          { userId: "bot_1", seatNo: 2, isBot: true }
+        ],
+        stacks: { human_owner: 500, bot_1: 500 }
+      }
+    }
+  });
+
+  assert.equal(bootstrapped.ok, true);
+  assert.equal(bootstrapped.table.tableMeta.isSinglePlayer, true);
+  assert.equal(bootstrapped.table.tableMeta.buyIn, 500);
+});
+
+test("adapter preserves unknown mode and trusts an explicit Online flag", () => {
+  for (const isSinglePlayer of [undefined, false]) {
+    const multiplayer = adaptPersistedBootstrap({
+      tableId: "table_multi_bootstrap",
+      tableRow: {
+        id: "table_multi_bootstrap",
+        max_players: 6,
+        status: "OPEN",
+        buy_in: 1000,
+        stakes: { sb: 10, bb: 20 },
+        lifecycle_kind: "STANDARD",
+        is_single_player: isSinglePlayer
+      },
+      seatRows: [],
+      stateRow: { version: 0, state: { tableId: "table_multi_bootstrap", phase: "INIT", seats: [], stacks: {} } }
+    });
+
+    assert.equal(multiplayer.ok, true);
+    assert.equal(multiplayer.table.tableMeta.isSinglePlayer, isSinglePlayer === false ? false : null);
+  }
+});
+
+test("tableManager hydrates persisted single player table with isSinglePlayer: true upon restart", async () => {
+  const manager = createTableManager({
+    tableBootstrapLoader: async ({ tableId }) => {
+      if (tableId === "sp_table_restart") {
+        return adaptPersistedBootstrap({
+          tableId: "sp_table_restart",
+          tableRow: {
+            id: "sp_table_restart",
+            max_players: 6,
+            status: "OPEN",
+            buy_in: 500,
+            stakes: { sb: 5, bb: 10 },
+            is_single_player: true
+          },
+          seatRows: [{ user_id: "human_owner", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 500 }],
+          stateRow: { version: 1, state: { tableId: "sp_table_restart", phase: "INIT", seats: [{ userId: "human_owner", seatNo: 1 }], stacks: { human_owner: 500 } } }
+        });
+      }
+      return { ok: false, code: "table_not_found" };
+    }
+  });
+
+  const ensured = await manager.ensureTableLoaded("sp_table_restart");
+  assert.equal(ensured.ok, true);
+  const meta = manager.tableMeta("sp_table_restart");
+  assert.equal(meta.isSinglePlayer, true);
+  assert.equal(meta.buyIn, 500);
+});

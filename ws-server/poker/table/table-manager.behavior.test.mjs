@@ -600,6 +600,7 @@ test("persistent bot replacement commits runtime only with matching funding rece
   const humanUserId = "00000000-0000-4000-8000-0000000000a1";
   const oldBotUserId = "00000000-0000-4000-8000-0000000000b2";
   const restored = tableManager.restoreTableFromPersisted(tableId, {
+    tableMeta: { isSinglePlayer: false },
     coreState: {
       version: 7,
       roomId: tableId,
@@ -3082,6 +3083,20 @@ test("applyAction replay for rejected requestId stays deterministic and non-muta
 
 
 
+test("unknown persisted UUID cannot bypass mode validation through direct manager join", async () => {
+  const tableId = '00000000-0000-4000-8000-000000000107';
+  const manager = createTableManager();
+  assert.equal((await manager.ensureTableLoaded(tableId, { allowCreate: true })).ok, true);
+  const denied = manager.join({ ws: {}, userId: 'human', tableId, requestId: 'unknown' });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, 'table_bootstrap_unavailable');
+  assert.equal(manager.tableState(tableId).members.length, 0);
+  manager.materializeLobbyTable({ tableId, tableMeta: { isSinglePlayer: false } });
+  assert.equal(manager.join({ ws: {}, userId: 'human', tableId, requestId: 'known-online' }).ok, true);
+  assert.equal(manager.materializeLobbyTable({ tableId, tableMeta: { isSinglePlayer: true } }).code, 'table_mode_immutable');
+  assert.equal(manager.tableMeta(tableId).isSinglePlayer, false);
+});
+
 test("bootstrap requires loader and does not synthesize empty table", async () => {
   const tableManager = createTableManager();
 
@@ -3837,4 +3852,46 @@ test("settled funding cache observes live tier disable on its next existing refr
   const refreshed = await readSettledBotFundingSnapshot(transaction(), { nowMs: 25_000 });
   assert.equal(resolveSettledBotFundingSystemKey({ snapshot: refreshed, buyIn: 1000, nowMs: 25_001 }), null);
   assert.equal(resolveSettledBotFundingSystemKey({ snapshot: cached, buyIn: 1000, nowMs: 30_001 }), null);
+});
+
+test("Single Player tableManager.join requires authoritative seat and rejects non-authoritative join", async () => {
+  const manager = createTableManager({ maxSeats: 6 });
+  const table = manager.materializeLobbyTable({ tableId: "sp-table-join-test", tableMeta: { isSinglePlayer: true } });
+  assert.equal(table.ok, true);
+  assert.equal(manager.tableMeta("sp-table-join-test")?.isSinglePlayer, true);
+
+  const fakeWs = {};
+  // Attempt non-authoritative join without authoritativeSeatNo
+  const nonAuth = manager.join({
+    ws: fakeWs,
+    userId: "human_unauthorized",
+    tableId: "sp-table-join-test",
+    requestId: "join-req-1"
+  });
+  assert.equal(nonAuth.ok, false);
+  assert.equal(nonAuth.code, "single_player_authoritative_required");
+
+  // Legitimate authoritative join with authoritativeSeatNo
+  const auth = manager.join({
+    ws: fakeWs,
+    userId: "human_owner",
+    tableId: "sp-table-join-test",
+    requestId: "join-req-2",
+    authoritativeSeatNo: 1,
+    buyIn: 500
+  });
+  assert.equal(auth.ok, true);
+
+  // Second human attempting to join Single Player table must be rejected
+  const fakeWs2 = {};
+  const secondHuman = manager.join({
+    ws: fakeWs2,
+    userId: "human_second",
+    tableId: "sp-table-join-test",
+    requestId: "join-req-3",
+    authoritativeSeatNo: 2,
+    buyIn: 500
+  });
+  assert.equal(secondHuman.ok, false);
+  assert.equal(secondHuman.code, "single_player_human_conflict");
 });

@@ -73,7 +73,11 @@ function validateProductionManifest() {
   }
   const baseline = Array.isArray(manifest.baseline_applied) ? manifest.baseline_applied : [];
   const missing = Array.isArray(manifest.missing) ? manifest.missing : [];
-  if (baseline.length !== 54 || missing.length !== 55) fail("Production migration manifest must contain 54 baseline and 55 missing entries");
+  if (baseline.length !== 54 || missing.length !== 57) fail("Production migration manifest must contain 54 baseline and 57 missing entries");
+  if (manifest.history_policy?.baseline_applied_count !== baseline.length
+    || manifest.history_policy?.missing_count !== missing.length) {
+    fail("Production migration history counters must match the reviewed inventory");
+  }
   const expectedSourceFiles = [...sorted];
   const manifestSourceFiles = [...baseline, ...missing].map((entry) => entry?.file).sort();
   if (JSON.stringify(manifestSourceFiles) !== JSON.stringify(expectedSourceFiles)) {
@@ -94,8 +98,8 @@ function validateProductionManifest() {
     if (entry.category !== "baseline-applied" && !categories.has(entry.category)) fail(`Invalid Production migration category: ${entry.file}`);
   }
   const counts = Object.fromEntries([...categories].map((category) => [category, missing.filter((entry) => entry.category === category).length]));
-  if (counts["shared-safe"] !== 18 || counts["stage-only"] !== 4 || counts["needs-production-equivalent"] !== 33) {
-    fail(`Production migration categories must be 18/4/33, got ${JSON.stringify(counts)}`);
+  if (counts["shared-safe"] !== 20 || counts["stage-only"] !== 4 || counts["needs-production-equivalent"] !== 33) {
+    fail(`Production migration categories must be 20/4/33, got ${JSON.stringify(counts)}`);
   }
   const productionFiles = fs.existsSync(PRODUCTION_MIGRATIONS_DIR)
     ? fs.readdirSync(PRODUCTION_MIGRATIONS_DIR).filter((name) => name.endsWith(".sql")).sort()

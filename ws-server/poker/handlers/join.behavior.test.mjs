@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { handleJoinCommand } from './join.mjs';
+import { createTableManager } from '../table/table-manager.mjs';
+import { adaptPersistedBootstrap } from '../bootstrap/persisted-bootstrap-adapter.mjs';
+import { notifyWsLobbyMaterialize } from '../../../netlify/functions/_shared/poker-ws-runtime-notify.mjs';
 
 function baseCtx(payload = {}){
   const calls = { command: [], table: 0, snapshots: 0, joinArgs: null, authoritativeArgs: null, refreshProfileArgs: [], sendError: 0, sentErrors: [], actorTableState: 0, resync: 0, autoplay: [], logs: [] };
@@ -511,7 +514,6 @@ test('handleJoinCommand maps authoritative historical seat conflicts to seat_tak
   }
 });
 
-
 test('handleJoinCommand maps authoritative_join_failed + restore missing-state signal to state_missing', async () => {
   const { ctx, calls } = baseCtx({ seatNo: 2, buyIn: 100 });
   ctx.authoritativeJoinEnabled = true;
@@ -578,4 +580,88 @@ test('does not emit routine authoritative join lifecycle logs', async () => {
   assert.equal(eventNames.includes('ws_join_restore_result'), false);
   assert.equal(eventNames.includes('ws_join_restore_validate'), false);
   assert.equal(calls.command[0].status, 'accepted');
+});
+
+test('handleJoinCommand rejects Single Player join fail-closed when authoritativeJoinEnabled is false', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 500 });
+  ctx.authoritativeJoinEnabled = false;
+  ctx.tableManager.tableMeta = () => ({ isSinglePlayer: true, buyIn: 500 });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'single_player_authoritative_required');
+  assert.equal(calls.joinArgs, null, 'tableManager.join must never be invoked');
+});
+
+test('handleJoinCommand rejects Single Player join fail-closed when observeOnlyJoinEnabled is true', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 500 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.observeOnlyJoinEnabled = true;
+  ctx.tableManager.tableMeta = () => ({ isSinglePlayer: true, buyIn: 500 });
+
+  await handleJoinCommand(ctx);
+
+  assert.equal(calls.command.length, 1);
+  assert.equal(calls.command[0].status, 'rejected');
+  assert.equal(calls.command[0].reason, 'single_player_authoritative_required');
+  assert.equal(calls.joinArgs, null, 'tableManager.join must never be invoked');
+});
+
+test('unknown persisted UUID mode cannot admit JOIN when bootstrap and materialization notification are absent', async () => {
+  for (const observeOnly of [false, true]) {
+    const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100, isSinglePlayer: false });
+    const tableId = '00000000-0000-4000-8000-000000000107';
+    ctx.frame.__resolvedTableId = tableId;
+    ctx.authoritativeJoinEnabled = observeOnly;
+    ctx.observeOnlyJoinEnabled = observeOnly;
+    ctx.tableManager = createTableManager({ observeOnlyJoin: observeOnly });
+    await handleJoinCommand(ctx);
+    assert.equal(calls.command[0]?.status, 'rejected');
+    assert.equal(calls.command[0]?.reason, 'temporarily_unavailable');
+    assert.equal(ctx.tableManager.tableMeta(tableId).isSinglePlayer, null);
+    assert.equal(ctx.tableManager.tableState(tableId).members.length, 0);
+    assert.equal(calls.table, 0);
+    assert.equal(calls.snapshots, 0);
+    assert.equal(calls.autoplay.length, 0);
+  }
+});
+
+test('lost notification still discovers trusted Online/SP mode through persisted bootstrap', async () => {
+  for (const isSinglePlayer of [false, true, undefined]) {
+    const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100 });
+    const tableId = '00000000-0000-4000-8000-000000000108';
+    ctx.frame.__resolvedTableId = tableId;
+    ctx.tableManager = createTableManager({
+      tableBootstrapLoader: async () => adaptPersistedBootstrap({
+        tableId,
+        tableRow: { id: tableId, max_players: 6, buy_in: 100, stakes: { sb: 1, bb: 2 }, is_single_player: isSinglePlayer },
+        seatRows: [], stateRow: { version: 0, state: {} }
+      })
+    });
+    await handleJoinCommand(ctx);
+    assert.equal(calls.command[0]?.status, isSinglePlayer === false ? 'accepted' : 'rejected');
+    if (isSinglePlayer !== false) assert.equal(calls.command[0].reason, isSinglePlayer === true ? 'single_player_authoritative_required' : 'temporarily_unavailable');
+  }
+});
+
+test('trusted normal materialization explicitly sends Online mode and preserves legacy non-authoritative JOIN', async () => {
+  const { ctx, calls } = baseCtx({ seatNo: 1, buyIn: 100 });
+  const tableId = '00000000-0000-4000-8000-000000000109';
+  ctx.frame.__resolvedTableId = tableId;
+  ctx.tableManager = createTableManager();
+  const notified = await notifyWsLobbyMaterialize({
+    tableId, maxPlayers: 6, buyIn: 100, stakes: { sb: 1, bb: 2 },
+    env: { POKER_WS_INTERNAL_BASE_URL: 'https://internal.test' },
+    fetchImpl: async (_url, options) => {
+      const payload = JSON.parse(options.body);
+      assert.equal(payload.isSinglePlayer, false);
+      assert.equal(ctx.tableManager.materializeLobbyTable({ tableId, tableMeta: payload }).ok, true);
+      return { ok: true };
+    }
+  });
+  assert.equal(notified.ok, true);
+  await handleJoinCommand(ctx);
+  assert.equal(calls.command[0]?.status, 'accepted');
 });

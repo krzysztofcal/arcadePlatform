@@ -189,6 +189,8 @@ function normalizeTableMeta(tableRow, maxSeats) {
     lifecycleKind: trustedLifecycleKind,
     managedProfileKey: trustedLifecycleKind === "CONTINUOUS_BOT" ? managedProfileKey : null,
     isSlowOnly: tableRow?.is_slow_only === true || tableRow?.isSlowOnly === true,
+    isSinglePlayer: tableRow?.is_single_player === true || tableRow?.isSinglePlayer === true
+      ? true : tableRow?.is_single_player === false || tableRow?.isSinglePlayer === false ? false : null,
     rotationDueAtMs: trustedLifecycleKind === "CONTINUOUS_BOT"
       ? normalizeTimestampMs(tableRow?.rotation_due_at ?? tableRow?.rotationDueAt)
       : null

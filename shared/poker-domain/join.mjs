@@ -2,7 +2,7 @@ import { clearInactivityPenalty } from "./poker-missed-turns.mjs";
 import { attemptDemandRefill } from "./demand-refill.mjs";
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
 import { evaluatePokerBuyInAccess, readPokerBankroll, resolvePokerBuyInTiers } from "./poker-progression.mjs";
-import { isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
+import { getBotFundingSystemKeyForBuyIn, isBotFundingAllowedForBuyIn, isCanonicalPokerStakes } from "./table-economy.mjs";
 import { postUserTableBuyIn } from "./table-buy-in.mjs";
 import {
   hasPokerPoolSchema,
@@ -192,6 +192,39 @@ async function hasMaterializedBotFunding(tx, tableId) {
     [tableId]
   );
   return Array.isArray(rows) && rows.length > 0;
+}
+
+async function countExistingSinglePlayerBots(tx, { tableId, seatRows, state, maxPlayers, fundingSystemKey, authoritativeBuyIn }) {
+  const bots = activeSeatRows(seatRows).filter(row => row?.is_bot === true);
+  if (!bots.length) return 0;
+  const funding = await tx.unsafe(`
+select coalesce(t.metadata ->> 'replacementBotUserId', t.metadata ->> 'botUserId') as user_id,
+       t.metadata ->> 'seatNo' as seat_no
+from public.chips_transactions t
+join public.chips_entries credit on credit.transaction_id = t.id
+join public.chips_accounts escrow on escrow.id = credit.account_id
+where t.tx_type = 'TABLE_BUY_IN' and t.metadata ->> 'actor' = 'BOT'
+  and t.metadata ->> 'tableId' = $1
+  and t.metadata ->> 'reason' in ('BOT_SEED_BUY_IN', 'BOT_REPLACEMENT_BUY_IN')
+  and escrow.account_type = 'ESCROW' and escrow.system_key = 'POKER_TABLE:' || $1
+  and credit.amount = $3
+  and exists (select 1 from public.chips_entries debit
+    join public.chips_accounts source on source.id = debit.account_id
+    where debit.transaction_id = t.id and debit.amount = -credit.amount
+      and source.account_type = 'SYSTEM' and source.status = 'active' and source.system_key = $2);
+`, [tableId, fundingSystemKey, authoritativeBuyIn]);
+  const fundedSeats = new Set(funding.map(row => `${row.user_id}:${row.seat_no}`));
+  const stateSeats = Array.isArray(state?.seats) ? state.seats : [];
+  for (const bot of bots) {
+    const seatNo = Number(bot.seat_no), stack = state?.stacks?.[bot.user_id];
+    if (!Number.isInteger(seatNo) || seatNo < 1 || seatNo > maxPlayers
+      || !Number.isSafeInteger(stack) || stack <= 0
+      || !stateSeats.some(seat => seat?.userId === bot.user_id && Number(seat?.seatNo) === seatNo && seat?.isBot !== false)
+      || !fundedSeats.has(`${bot.user_id}:${seatNo}`)) {
+      throw makeError('single_player_bot_funding_unavailable');
+    }
+  }
+  return bots.length;
 }
 
 function isSeatConflictError(error) {
@@ -755,11 +788,12 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const poolSchema = await hasPokerPoolSchema(tx);
       if (poolSchema) await lockUserTableSlots(tx, userId);
       const tableRows = await tx.unsafe(
-        `select id, status, max_players, stakes, buy_in, created_by, lifecycle_kind, has_human_participant${poolSchema ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1 for update;`,
+        `select id, status, max_players, stakes, buy_in, created_by, lifecycle_kind, has_human_participant, is_single_player${poolSchema ? ", is_slow_only" : ""} from public.poker_tables where id = $1 limit 1 for update;`,
         [tableId]
       );
       const table = tableRows?.[0] || null;
       if (!table) throw makeError("table_not_found");
+      const isSinglePlayer = table?.is_single_player === true;
       const authoritativeBuyIn = normalizePositiveInt(table.buy_in);
       if (!authoritativeBuyIn) throw makeError("invalid_buy_in");
       const declaredBuyIn = buyIn == null ? null : normalizePositiveInt(buyIn);
@@ -773,6 +807,34 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
 
       const stateRow = normalizeLockedStateResult(await loadStateForUpdate(tx, tableId));
       const seatRows = await loadSeatRows(tx, tableId);
+
+      if (isSinglePlayer) {
+        if (table.created_by !== userId) {
+          throw makeError("single_player_owner_only");
+        }
+        if (authoritativeBuyIn > 1000 || (declaredBuyIn !== null && declaredBuyIn > 1000)) {
+          throw makeError("invalid_buy_in");
+        }
+        if (await hasPokerPoolSchema(tx)) {
+          const accessSnapshot = await readPokerAccessSnapshot(tx, { userId, lock: true });
+          if (accessSnapshot?.effectiveClass === "RESTRICTED") {
+            throw makeError("single_player_restricted_unavailable");
+          }
+        }
+        const activeSeats = activeSeatRows(seatRows);
+        const hasOtherHumanSeat = activeSeats.some((row) => !row?.is_bot && row?.user_id !== userId);
+        const botUserIds = new Set(seatRows.filter((r) => r?.is_bot).map((r) => r?.user_id));
+        const stateSeats = Array.isArray(stateRow.state?.seats) ? stateRow.state.seats : [];
+        const hasOtherHumanInState = stateSeats.some((seat) => !seat?.isBot && !botUserIds.has(seat?.userId) && seat?.userId && seat.userId !== userId);
+        if (hasOtherHumanSeat || hasOtherHumanInState) {
+          throw makeError("single_player_human_conflict");
+        }
+      }
+
+      if (isSinglePlayer && stateRow.state?.leftTableByUserId?.[userId] === true) {
+        if (String(table.status || '').toUpperCase() === 'CLOSED') throw makeError('table_closed');
+        throw makeError('single_player_participation_ended');
+      }
 
       const existingSeatNo = Number(
         activeSeatRows(seatRows).find((row) => {
@@ -802,6 +864,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             stack: authoritativeStack,
             buyIn: authoritativeBuyIn,
             rejoin: true,
+            isSinglePlayer: Boolean(isSinglePlayer),
             requestId: requestId || null,
             me: { seated: true },
             joinStatus: joinStatusForState(stateRow.state, userId),
@@ -840,6 +903,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           stack: Number(nextStateForStorage.stacks?.[userId]),
           buyIn: authoritativeBuyIn,
           rejoin: true,
+          isSinglePlayer: Boolean(isSinglePlayer),
           requestId: requestId || null,
           me: { seated: true },
           joinStatus: joinStatusForState(nextStateForStorage, userId),
@@ -850,6 +914,13 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
             stateVersion: snapshotVersion
           })
         };
+      }
+
+      if (isSinglePlayer) {
+        if (String(table.status || '').toUpperCase() === 'CLOSED') throw makeError('table_closed');
+        if (table.has_human_participant === true || seatRows.some(row => !row?.is_bot && row?.user_id === userId)) {
+          throw makeError('single_player_participation_ended');
+        }
       }
 
       if (!isCanonicalPokerStakes(authoritativeBuyIn, normalizeTableStakes(table.stakes))) {
@@ -876,6 +947,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       }
 
       if (joinAccess.effectiveClass === "RESTRICTED") {
+        if (isSinglePlayer) {
+          throw makeError("single_player_restricted_unavailable");
+        }
         const activeRows = activeSeatRows(seatRows);
         const hasActiveBot = activeRows.some((row) => row?.is_bot === true);
         const hasBotFunding = hasActiveBot || await hasMaterializedBotFunding(tx, tableId);
@@ -929,7 +1003,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       const tiers = resolvePokerBuyInTiers();
       const enabledBuyIns = resolvePokerEnabledBuyIns(joinAccess.tierPolicySnapshot, tiers);
       const bankroll = bankrollForAccess;
-      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers, enabledBuyIns });
+      const access = evaluatePokerBuyInAccess({ balance: bankroll, buyIn: authoritativeBuyIn, tiers, enabledBuyIns, isSinglePlayer });
       if (!access.configured) throw makeError("invalid_buy_in");
       if (!access.eligible) {
         throw makeError("buy_in_tier_locked", null, {
@@ -1061,7 +1135,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         ? computeTargetBotCount({
           maxPlayers,
           humanCount: humanCountAfterJoin,
-          minBots: botCfg.minPerTable,
+          minBots: isSinglePlayer ? Math.max(2, botCfg.minPerTable) : botCfg.minPerTable,
           maxBots: botCfg.maxPerTable
         })
         : 0;
@@ -1069,6 +1143,10 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         && joinAccess.tierPolicy?.enabled === true
         && joinAccess.poolProvisioning?.NORMAL === true
         && joinAccess.poolProvisioning?.SLOW === true;
+      const existingBotCount = isSinglePlayer ? await countExistingSinglePlayerBots(tx, {
+        tableId, seatRows, state: stateRow.state, maxPlayers, authoritativeBuyIn,
+        fundingSystemKey: getBotFundingSystemKeyForBuyIn(authoritativeBuyIn, { poolClass: fundingPoolClass })
+      }) : 0;
       const seededBots = await seedBotsForJoin({
       tx,
       tableId,
@@ -1085,7 +1163,13 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
       demandRefillFn: tierFundingEnabled && fundingPoolClass ? attemptDemandRefill : null,
       klog
       });
-      const expectedBotCountAfterSeed = seededBots.length;
+      const expectedBotCountAfterSeed = existingBotCount + seededBots.length;
+      if (isSinglePlayer) {
+        const minPlayableBots = Math.min(Math.max(2, botCfg.minPerTable), maxPlayers - 1);
+        if (expectedBotCountAfterSeed < minPlayableBots) {
+          throw makeError("single_player_bot_funding_unavailable");
+        }
+      }
       const updatedStateRow = await syncStateSeatAndStack({
       tx,
       tableId,
@@ -1118,6 +1202,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
         stack: fundedStack,
         buyIn: authoritativeBuyIn,
         rejoin: false,
+        isSinglePlayer: Boolean(isSinglePlayer),
         requestId: requestId || null,
         me: { seated: true },
         joinStatus: updatedStateRow.joinStatus,

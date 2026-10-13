@@ -30,6 +30,7 @@ const DEFAULT_ACTION_RESULT_CACHE_MAX = 256;
 const DEFAULT_PUBLIC_PROFILE_FRESH_MS = 60_000;
 const DEFAULT_PUBLIC_PROFILE_TIMEOUT_MS = 750;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TABLE_UUID_RE = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 export const __testOnly = {
   isContinuationEligibleByStack,
   orderedEligibleSeatMembers,
@@ -250,6 +251,8 @@ function normalizeTableMeta(value, fallbackMaxPlayers, { defaultCreatedAtMs = nu
     lifecycleKind,
     managedProfileKey: lifecycleKind === "CONTINUOUS_BOT" ? managedProfileKeyRaw : null,
     isSlowOnly: value?.isSlowOnly === true || value?.is_slow_only === true,
+    isSinglePlayer: value?.isSinglePlayer === true || value?.is_single_player === true
+      ? true : value?.isSinglePlayer === false || value?.is_single_player === false ? false : null,
     rotationDueAtMs: lifecycleKind === "CONTINUOUS_BOT"
       ? normalizeTimestampMs(value?.rotationDueAtMs ?? value?.rotation_due_at ?? value?.rotationDueAt)
       : null
@@ -600,7 +603,7 @@ export function createTableManager({
       tables.set(tableId, {
         tableId,
         tableStatus: "OPEN",
-        tableMeta: normalizeTableMeta({ buyIn: normalizedDefaultBuyIn }, initialCoreState.maxSeats, {
+        tableMeta: normalizeTableMeta({ buyIn: normalizedDefaultBuyIn, ...(!TABLE_UUID_RE.test(tableId) ? { isSinglePlayer: false } : {}) }, initialCoreState.maxSeats, {
           defaultCreatedAtMs: nowMs,
           defaultLastActivityAtMs: nowMs
         }),
@@ -828,10 +831,14 @@ export function createTableManager({
       buyIn: resolvedBuyIn,
       stakes: canonicalStakes
     };
-    table.tableMeta = normalizeTableMeta(nextTableMeta, table?.coreState?.maxSeats || maxSeats, {
+    const normalizedMeta = normalizeTableMeta(nextTableMeta, table?.coreState?.maxSeats || maxSeats, {
       defaultCreatedAtMs: table?.tableMeta?.createdAtMs ?? nowMs,
       defaultLastActivityAtMs: nowMs
     });
+    if (existed && typeof table.tableMeta?.isSinglePlayer === "boolean" && normalizedMeta.isSinglePlayer !== table.tableMeta.isSinglePlayer) {
+      return { ok: false, code: "table_mode_immutable" };
+    }
+    table.tableMeta = normalizedMeta;
     return { ok: true, existed, table };
   }
 
@@ -870,7 +877,7 @@ export function createTableManager({
       publicStacks[botUserId] = resolvedStack;
     }
     table.tableStatus = "OPEN";
-    table.tableMeta = normalizeTableMeta({ maxPlayers: resolvedMaxPlayers, buyIn: resolvedStack, stakes: { sb: 1, bb: 2 }, createdAtMs: nowMs, lastActivityAtMs: nowMs }, resolvedMaxPlayers, {
+    table.tableMeta = normalizeTableMeta({ maxPlayers: resolvedMaxPlayers, buyIn: resolvedStack, stakes: { sb: 1, bb: 2 }, isSinglePlayer: false, createdAtMs: nowMs, lastActivityAtMs: nowMs }, resolvedMaxPlayers, {
       defaultCreatedAtMs: nowMs,
       defaultLastActivityAtMs: nowMs
     });
@@ -1706,6 +1713,32 @@ export function createTableManager({
     }
 
     const table = ensureTable(tableId);
+    if (TABLE_UUID_RE.test(tableId) && typeof table.tableMeta?.isSinglePlayer !== "boolean"
+      && (observeOnlyJoin || !Number.isInteger(authoritativeSeatNo) || authoritativeSeatNo < 1)) {
+      return { ok: false, code: "table_bootstrap_unavailable", message: "table_mode_unknown", tableState: tableState(tableId) };
+    }
+    if (table.tableMeta?.isSinglePlayer === true) {
+      if (!Number.isInteger(authoritativeSeatNo) && !table.coreState.members.some((member) => member.userId === userId)) {
+        return {
+          ok: false,
+          code: "single_player_authoritative_required",
+          message: "single_player_authoritative_required",
+          tableState: tableState(tableId)
+        };
+      }
+      const otherHumanMember = table.coreState.members.find(
+        (member) => member.userId !== userId && !table.coreState.seatDetailsByUserId?.[member.userId]?.isBot
+      );
+      if (otherHumanMember) {
+        return {
+          ok: false,
+          code: "single_player_human_conflict",
+          message: "single_player_human_conflict",
+          tableState: tableState(tableId)
+        };
+      }
+    }
+
     const isAuthoritativeMember = table.coreState.members.some((member) => member.userId === userId);
     const authoritativeSeat = Number.isInteger(authoritativeSeatNo) && authoritativeSeatNo >= 1 ? authoritativeSeatNo : null;
     const shouldMutateMembership = !observeOnlyJoin;

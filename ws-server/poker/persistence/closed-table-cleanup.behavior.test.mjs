@@ -5,6 +5,47 @@ import { createClosedTableCleanup } from "./closed-table-cleanup.mjs";
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
 
+test("short retention preserves Single Player start intents through the retry/skew window only", async () => {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create table poker_tables (id uuid primary key, status text, updated_at timestamptz, has_human_participant boolean, bot_only_retention_complete_at timestamptz);
+      create table poker_state (table_id uuid references poker_tables on delete cascade, state jsonb);
+      create table chips_accounts (system_key text, account_type text, status text, balance bigint);
+      create table poker_actions (table_id uuid);
+      create table poker_hole_cards (table_id uuid);
+      create table poker_requests (table_id uuid references poker_tables on delete cascade, kind text, result_json jsonb, created_at timestamptz);
+    `);
+    const ids = [1,2,3].map(n => '00000000-0000-4000-8000-' + String(n).padStart(12,'0'));
+    for (let i = 0; i < ids.length; i += 1) {
+      await db.query("insert into poker_tables values ($1,'CLOSED',now()-interval '3 days',true,null)", [ids[i]]);
+      await db.query("insert into poker_state values ($1,'{\"phase\":\"HAND_DONE\",\"handId\":\"\"}')", [ids[i]]);
+      await db.query("insert into chips_accounts values ($1,'ESCROW','active',0)", ['POKER_TABLE:' + ids[i]]);
+      await db.query("insert into poker_requests values ($1,'QUICK_SEAT',$2::jsonb,now()-$3::interval)", [ids[i], JSON.stringify({ isSinglePlayer: i < 2 }), i === 0 ? '24 hours 4 minutes' : i === 1 ? '24 hours 6 minutes' : '1 hour']);
+    }
+    const cleanup = createClosedTableCleanup({
+      env: envWithRetention(HOUR),
+      beginSql: async (fn) => db.transaction(tx => fn({ unsafe: async (sql, params = []) => (await tx.query(sql, params)).rows }))
+    });
+    assert.equal((await cleanup.readBacklog()).eligibleTables, 2, 'backlog uses the same protected retry window');
+    let discovered = [];
+    const result = await cleanup.sweep({
+      claimTableIds: candidates => {
+        discovered = candidates;
+        // Revalidation must protect a recent intent even if an earlier claim includes it.
+        return { claimed: ids, skipped: [] };
+      },
+      releaseTableIds: () => {}
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(discovered.sort(), ids.slice(1), 'discovery excludes the recent Single Player intent');
+    assert.equal(result.deleted, 2, 'expired SP and ordinary Online table can be purged');
+    assert.deepEqual((await db.query('select id from poker_tables')).rows, [{ id: ids[0] }], 'future skew cannot outlive the retained intent');
+    assert.equal((await db.query('select count(*)::int as count from poker_requests')).rows[0].count, 1);
+  } finally { await db.close(); }
+});
+
 function envWithRetention(retentionMs = String(7 * DAY), batchSize = "20") {
   return {
     WS_POKER_CLOSED_TABLE_RETENTION_MS: String(retentionMs),

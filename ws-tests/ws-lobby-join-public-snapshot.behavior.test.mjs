@@ -5,6 +5,24 @@ import { adaptPersistedBootstrap } from "../ws-server/poker/bootstrap/persisted-
 import { createTableManager } from "../ws-server/poker/table/table-manager.mjs";
 import { normalizePrivateBranch } from "../ws-server/poker/read-model/state-snapshot.mjs";
 
+test("public Online lobby excludes UUID tables until trusted mode is known", async () => {
+  const tableId = '00000000-0000-4000-8000-000000000107';
+  const manager = createTableManager();
+  await manager.ensureTableLoaded(tableId, { allowCreate: true });
+  const source = fs.readFileSync(new URL('../ws-server/server.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('function buildLobbyTableEntry(tableId) {');
+  const end = source.indexOf('\nfunction syncLobbyTable(', start);
+  const dependencies = {
+    tableManager: manager, isGuestTableId: () => false,
+    normalizeLobbyHandStatus: () => 'WAITING', isLiveHandPhase: () => false,
+    isLobbyTableJoinable: () => true, hasVisibleHumanLobbySeat: () => false
+  };
+  const buildEntry = new Function(...Object.keys(dependencies), source.slice(start, end) + '\nreturn buildLobbyTableEntry;')(...Object.values(dependencies));
+  assert.equal(buildEntry(tableId), null, 'missing mode cannot advertise a persisted table as Online');
+  manager.materializeLobbyTable({ tableId, tableMeta: { isSinglePlayer: false } });
+  assert.equal(buildEntry(tableId)?.tableId, tableId, 'known Online mode remains discoverable');
+});
+
 function loadBuildTableStatePayload() {
   const source = fs.readFileSync(new URL("../ws-server/server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function buildTableStatePayload({ tableState, tableSnapshot, userId }) {");

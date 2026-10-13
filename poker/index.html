@@ -96,7 +96,21 @@
     <button id="pokerSignIn" class="poker-btn" type="button">Create account or sign in</button>
   </div>
 </div></div></article>
-<article class="tile tile--single" aria-label="Single Player, COMING SOON"><img src="/poker/assets/lobby/single-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">COMING SOON</span><div class="tile-copy"><span class="tile-number">YOU VS BOTS</span><h2>Single Player</h2><p>One human. Bot opponents. Always online.</p><button class="tile-action" type="button" data-mode="single" aria-label="Single Player: Coming Soon details">MODE PREVIEW <span aria-hidden="true">→</span></button></div></article>
+<article class="tile tile--single" aria-label="Single Player, VS BOTS"><img src="/poker/assets/lobby/single-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">VS BOTS</span><div class="tile-copy"><span class="tile-number">YOU VS BOTS</span><h2>Single Player</h2><p>One human. Bot opponents. Always online.</p><div id="pokerSingleLobbyContent" hidden>
+  <div id="pokerSingleResumeShell" class="quick-resume-shell" hidden>
+    <select id="pokerSingleResumeSelect" class="quick-resume-select" aria-label="Select table to resume" hidden></select>
+    <button id="pokerSingleResume" class="tile-action" type="button">RESUME GAME</button>
+  </div>
+  <div id="pokerSingleQuickTiers" class="quick-tiers" role="group" aria-label="Single Player buy-in"></div>
+  <button id="pokerSinglePlay" class="tile-action" type="button" disabled>PLAY VS BOTS</button>
+  <div id="pokerSingleStatus" class="quick-status" role="status">Loading progression…</div>
+</div>
+<div id="pokerSingleAuthMsg" class="poker-auth-msg" hidden>
+  <div class="poker-auth-text">Sign in to play Single Player vs bots.</div>
+  <div class="poker-auth-actions">
+    <button id="pokerSingleSignIn" class="poker-btn" type="button">Create account or sign in</button>
+  </div>
+</div></div></article>
 <article class="tile tile--world" aria-label="World Tour, COMING SOON"><img src="/poker/assets/lobby/world-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">COMING SOON</span><div class="tile-copy"><span class="tile-number">POKER WITHOUT BORDERS</span><h2>World Tour</h2><p>A future journey through country-themed tables.</p><button class="tile-action" type="button" data-mode="world" aria-label="World Tour: Coming Soon details">MODE PREVIEW <span aria-hidden="true">→</span></button></div></article>
 <article class="tile tile--seasons" aria-label="Seasons, COMING SOON"><img src="/poker/assets/lobby/seasons-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">COMING SOON</span><div class="tile-copy"><span class="tile-number">FOUR WORLDS. ONE TABLE.</span><h2>Seasons</h2><p>Weekly visual rotations on future designated tables.</p><button class="tile-action" type="button" data-mode="seasons" aria-label="Seasons: Coming Soon details">MODE PREVIEW <span aria-hidden="true">→</span></button></div></article>
 <article class="tile tile--sitgo" aria-label="Sit & Go, COMING SOON"><img src="/poker/assets/lobby/sitgo-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">COMING SOON</span><div class="tile-copy"><span class="tile-number">THE TOURNAMENT STAGE</span><h2>Sit & Go</h2><p>A future tournament format. A new challenge.</p><button class="tile-action" type="button" data-mode="sitgo" aria-label="Sit & Go: Coming Soon details">MODE PREVIEW <span aria-hidden="true">→</span></button></div></article>

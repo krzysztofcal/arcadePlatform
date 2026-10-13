@@ -1194,6 +1194,7 @@
   }
 
   function tableAccessDeniedMessage(access){
+    if (access && access.reason === 'single_player_participation_ended') return joinErrorMessage({ code: access.reason });
     if (access && access.reason === 'table_not_found') return 'This table is no longer available. Return to the lobby.';
     if (access && access.reason === 'table_closed') return 'This table is closed. Return to the lobby.';
     if (access && access.reason === 'table_not_open') return 'This table is not available. Return to the lobby.';
@@ -6202,6 +6203,12 @@
       joinOperation.requestId = null;
       joinOperation.payload = null;
       joinOperation.phase = 'rejected';
+      if (autoJoinErrorCode(error) === 'single_player_participation_ended') {
+        shouldAutoJoin = false;
+        clearAutoJoinRetry();
+        reconnectSeatNo = null;
+        if (currentAccessToken) preflightAuthenticatedLiveMode(currentAccessToken, ++authenticatedPreflightGeneration);
+      }
       if (isWsReady() && !state.reconnectGate) state.statusText = LIVE_STATUS_COPY.live;
       renderInfoPanel();
       renderControls();
@@ -6303,6 +6310,24 @@
 
   function joinErrorMessage(error){
     var code = autoJoinErrorCode(error);
+    if (code === 'single_player_participation_ended') {
+      return 'Your participation ended when you left. Return to the lobby and choose New Game explicitly to play again.';
+    }
+    if (code === 'single_player_bot_funding_unavailable') {
+      return 'Bot funding pool temporarily unavailable. Please try again later.';
+    }
+    if (code === 'single_player_owner_only') {
+      return 'This single player table belongs to another player.';
+    }
+    if (code === 'single_player_human_conflict') {
+      return 'Single Player tables permit only one human player.';
+    }
+    if (code === 'single_player_restricted_unavailable') {
+      return 'Single Player vs bots is unavailable for restricted accounts.';
+    }
+    if (code === 'single_player_authoritative_required') {
+      return 'Single Player tables require authoritative game access.';
+    }
     if (code === 'buy_in_tier_locked') {
       var requiredBankroll = Number(error && error.requiredBankroll);
       var balance = Number(error && error.balance);
@@ -6428,7 +6453,7 @@
       lastKnownCurrentSeatNo = resolvedSeatNo;
     }).catch(function(err){
       autoJoinAttempted = false;
-      reconnectSeatNo = preferredSeatNo;
+      if (autoJoinErrorCode(err) !== 'single_player_participation_ended') reconnectSeatNo = preferredSeatNo;
       setError(err && err.message ? err.message : 'Failed to reconnect seat');
     });
     return true;

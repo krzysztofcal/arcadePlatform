@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createTableManager } from "../table/table-manager.mjs";
 import { persistAuthoritativeSlowOnlyForUser } from "./poker-access-propagation.mjs";
+import { lockUserTableSlots } from "../../../shared/poker-domain/table-participation.mjs";
 
 test("recovery persists authoritative SLOW-only marker before releasing the fail-closed barrier", async () => {
   const tableId = "table_access_recovery_slow";
@@ -104,6 +105,7 @@ async function accessRuntimeFixture(options = {}) {
     poker_access_updated_by: null
   };
   let dbUpdates = 0;
+  const queries = [];
   let failDb = false;
   let mutationBarrier = null;
   let activeUsers = [];
@@ -119,6 +121,7 @@ async function accessRuntimeFixture(options = {}) {
     hasSupabaseDbUrl: true,
     ACCESS_OVERRIDES,
     hasPokerPoolSchema,
+    lockUserTableSlots,
     isFreshAccessSnapshot,
     isFreshPolicySnapshot,
     normalizeAccessOverride,
@@ -131,6 +134,7 @@ async function accessRuntimeFixture(options = {}) {
       return fn({
         unsafe: async (sql, params) => {
           const str = String(sql);
+          queries.push({ sql: str, params });
           if (str.includes('to_regclass')) {
             return [{ available: true }];
           }
@@ -193,6 +197,7 @@ async function accessRuntimeFixture(options = {}) {
     getUserRow: () => userRow,
     setUserRow: (val) => { userRow = val; },
     getDbUpdates: () => dbUpdates,
+    getQueries: () => queries,
     setFailDb: (val) => { failDb = val; },
     holdMutation: () => new Promise((resolve) => {
       mutationBarrier = new Promise((release) => { resolve(release); });
@@ -239,6 +244,11 @@ test('exactly one DB update occurs per accepted Admin request', async () => {
   });
   assert.equal(result.ok, true);
   assert.equal(f.getDbUpdates(), 1);
+  const queries = f.getQueries();
+  const slotLock = queries.findIndex((query) => query.sql.includes('pg_advisory_xact_lock'));
+  const accountLock = queries.findIndex((query) => query.sql.includes('for update'));
+  assert.ok(slotLock >= 0 && slotLock < accountLock, 'serialize with JOIN before acquiring account/table locks');
+  assert.deepEqual(queries[slotLock].params, ['poker-table-slots:v1:' + f.userId]);
 });
 
 test('stale revision performs zero DB update and releases fail-closed immediately', async () => {

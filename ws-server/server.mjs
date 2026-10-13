@@ -95,6 +95,7 @@ import {
   readPokerAccessSnapshot,
   readPokerAccessSnapshots
 } from "../shared/poker-domain/bot-access.mjs";
+import { lockUserTableSlots } from "../shared/poker-domain/table-participation.mjs";
 import { createContinuousBotTableRepository } from "./poker/persistence/continuous-bot-table-repository.mjs";
 import { createContinuousBotTableSupervisor } from "./poker/runtime/continuous-bot-table-supervisor.mjs";
 import { handleContinuousBotRotationAtSettled } from "./poker/runtime/continuous-bot-table-rotation.mjs";
@@ -922,6 +923,8 @@ async function mutatePokerAccessForUser({ userId, override, expectedRevision, ac
         error.statusCode = 409;
         throw error;
       }
+      // JOIN holds this same user lock before table/account row locks.
+      await lockUserTableSlots(tx, normalizedUserId);
       const rows = await tx.unsafe(`
 select user_id, poker_auto_class, poker_access_override, poker_access_revision,
        poker_auto_slow_at, poker_access_updated_at, poker_access_updated_by
@@ -1704,6 +1707,10 @@ function buildLobbyTableEntry(tableId) {
   }
   const tableSnapshot = tableManager.tableSnapshot(tableId, null);
   const tableMeta = tableManager.tableMeta(tableId);
+  if (tableMeta?.isSinglePlayer === true
+    || (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(tableId) && typeof tableMeta?.isSinglePlayer !== "boolean")) {
+    return null;
+  }
   const seats = Array.isArray(tableSnapshot?.seats) ? tableSnapshot.seats : [];
   const handStatus = normalizeLobbyHandStatus(tableSnapshot?.hand?.status);
   const liveHand = isLiveHandPhase(handStatus);
@@ -4609,12 +4616,14 @@ async function handleInternalLobbyMaterialize(req, res) {
     res.end(JSON.stringify({ error: "invalid_buy_in" }));
     return;
   }
+  const isSinglePlayer = payload?.isSinglePlayer === true;
   const materialized = tableManager.materializeLobbyTable({
     tableId,
     tableMeta: {
       maxPlayers,
       buyIn,
-      stakes: canonicalStakes
+      stakes: canonicalStakes,
+      ...(typeof payload?.isSinglePlayer === "boolean" ? { isSinglePlayer } : {})
     },
     nowMs: Date.now()
   });

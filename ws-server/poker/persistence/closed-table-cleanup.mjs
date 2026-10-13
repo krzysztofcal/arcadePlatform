@@ -16,6 +16,7 @@
 //   - no poker_actions rows;
 //   - no poker_hole_cards rows;
 //   - no fresh poker_requests (any kind) inside the retention window;
+//   - Single Player QUICK_SEAT intents retain 24h + 5m clock skew even under shorter retention;
 //   - no unfinished durable ACT request (kind = 'ACT' AND result_json IS NULL).
 //
 // Runtime safety: candidates are atomically claimed through
@@ -99,6 +100,11 @@ async function discoverCandidates({ tx, cutoff, batchSize, statementTimeoutMs, l
                            and r.created_at >= $1::timestamptz)
         and not exists (select 1 from public.poker_requests r
                          where r.table_id = t.id
+                           and r.kind = 'QUICK_SEAT'
+                           and r.result_json ->> 'isSinglePlayer' = 'true'
+                           and r.created_at >= now() - interval '24 hours 5 minutes')
+        and not exists (select 1 from public.poker_requests r
+                         where r.table_id = t.id
                            and r.kind = 'ACT'
                            and r.result_json is null)
       order by t.updated_at
@@ -147,6 +153,11 @@ async function deleteClaimed({ tx, cutoff, claimedIds, batchSize, lifecyclePredi
      and not exists (select 1 from public.poker_requests r
                       where r.table_id = t.id
                         and r.created_at >= $1::timestamptz)
+     and not exists (select 1 from public.poker_requests r
+                      where r.table_id = t.id
+                        and r.kind = 'QUICK_SEAT'
+                        and r.result_json ->> 'isSinglePlayer' = 'true'
+                        and r.created_at >= now() - interval '24 hours 5 minutes')
      and not exists (select 1 from public.poker_requests r
                       where r.table_id = t.id
                         and r.kind = 'ACT'
@@ -406,6 +417,11 @@ export function createClosedTableCleanup({
               and not exists (select 1 from public.poker_requests r
                                where r.table_id = t.id
                                  and r.created_at >= $1::timestamptz)
+              and not exists (select 1 from public.poker_requests r
+                               where r.table_id = t.id
+                                 and r.kind = 'QUICK_SEAT'
+                                 and r.result_json ->> 'isSinglePlayer' = 'true'
+                                 and r.created_at >= now() - interval '24 hours 5 minutes')
               and not exists (select 1 from public.poker_requests r
                                where r.table_id = t.id
                                  and r.kind = 'ACT'

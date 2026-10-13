@@ -25,7 +25,11 @@ function makeHandler({ poolSchema = true, authResult, progression, calls, unsafe
     beginSql: async (fn) => fn({ unsafe: async (sql, params) => String(sql).includes("to_regclass") ? [{ available: poolSchema }] : (unsafe || fallbackUnsafe)(sql, params) }),
     readPokerProgression: async (_tx, options) => {
       calls.progression.push(options);
-      return progression;
+      return progression?.tiers ? progression : {
+        ...progression,
+        tiers: (progression?.availableBuyIns || []).map((buyIn) => ({ buyIn })),
+        enabledBuyIns: progression?.availableBuyIns || []
+      };
     },
     checkWsBuyInCapability
   });
@@ -81,6 +85,9 @@ test("poker progression endpoint reads progression only for the verified user", 
       balance: 550,
       highestUnlockedBuyIn: 500,
       availableBuyIns: [500, 100],
+      tiers: [{ buyIn: 500 }, { buyIn: 100 }],
+      enabledBuyIns: [500, 100],
+      singlePlayerAvailableBuyIns: [100, 500],
       pokerAccess: {
         automaticClass: "NORMAL",
         override: "AUTO",
@@ -89,6 +96,8 @@ test("poker progression endpoint reads progression only for the verified user", 
         automaticSlowAt: null
       },
       rejoinableTableIds: [],
+      singlePlayerRejoinableTableIds: [],
+      singlePlayerRejoinableTables: [],
       tableAccess: null
     });
     assert.deepEqual(calls.tokens, ["verified-token"]);
@@ -239,4 +248,173 @@ test("table access follows shared activation, bankroll and financed rejoin", asy
     if (previous === undefined) delete process.env.CHIPS_ENABLED;
     else process.env.CHIPS_ENABLED = previous;
   }
+});
+
+test("poker progression returns active Single Player tables for user resume", async () => {
+  const previous = process.env.CHIPS_ENABLED;
+  process.env.CHIPS_ENABLED = "1";
+  try {
+    const handler = makeHandler({
+      authResult: { valid: true, userId: "sp-player" },
+      progression: { balance: 1000, highestUnlockedBuyIn: 500, availableBuyIns: [500, 100] },
+      calls: { tokens: [], progression: [] },
+      unsafe: async (sql) => {
+        const text = String(sql).toLowerCase();
+        if (text.includes("select poker_auto_class, poker_access_override")) {
+          return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+        }
+        if (text.includes("coalesce(t.is_single_player, false) = false")) {
+          return [];
+        }
+        if (text.includes("t.is_single_player = true")) {
+          return [
+            { id: "sp-table-1", buy_in: 500, stakes: { sb: 5, bb: 10 } },
+            { id: "sp-table-2", buy_in: 100, stakes: { sb: 1, bb: 2 } }
+          ];
+        }
+        return [];
+      }
+    });
+    const response = await handler({
+      httpMethod: "GET",
+      headers: { origin, authorization: "Bearer valid-token" }
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.rejoinableTableIds, [], "online rejoinable tables must remain empty");
+    assert.deepEqual(body.singlePlayerRejoinableTableIds, ["sp-table-1", "sp-table-2"]);
+    assert.deepEqual(body.singlePlayerRejoinableTables, [
+      { id: "sp-table-1", buyIn: 500, stakes: { sb: 5, bb: 10 } },
+      { id: "sp-table-2", buyIn: 100, stakes: { sb: 1, bb: 2 } }
+    ]);
+  } finally {
+    if (previous === undefined) delete process.env.CHIPS_ENABLED;
+    else process.env.CHIPS_ENABLED = previous;
+  }
+});
+
+test("high-bankroll progression offers Single Player tiers independently and allows its owner table", async () => {
+  const previous = process.env.CHIPS_ENABLED;
+  process.env.CHIPS_ENABLED = "1";
+  try {
+    const tiers = [100, 500, 1000, 2500, 5000, 10000];
+    const handler = makeHandler({
+      authResult: { valid: true, userId: "sp-player" },
+      progression: evaluatePokerProgression({ balance: 11000, tiers, enabledBuyIns: tiers }),
+      calls: { tokens: [], progression: [] },
+      unsafe: async (sql) => {
+        if (sql.includes("select poker_auto_class")) return [{ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 }];
+        if (sql.includes("select id, status, buy_in, stakes")) return [{ id: "sp-table", status: "OPEN", buy_in: 1000, stakes: { sb: 10, bb: 20 }, is_single_player: true, created_by: "sp-player" }];
+        return [];
+      }
+    });
+    const response = await handler({ httpMethod: "GET", queryStringParameters: { tableId: "sp-table" }, headers: { origin, authorization: "Bearer token" } });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.availableBuyIns, [10000, 5000]);
+    assert.deepEqual(body.singlePlayerAvailableBuyIns, [1000, 500, 100]);
+    assert.equal(body.tableAccess.allowed, true);
+  } finally {
+    if (previous === undefined) delete process.env.CHIPS_ENABLED;
+    else process.env.CHIPS_ENABLED = previous;
+  }
+});
+
+test('ended Single Player participation denies table access while Online keeps fresh admission', async () => {
+  const previous = process.env.CHIPS_ENABLED; process.env.CHIPS_ENABLED = '1';
+  try {
+    for (const isSinglePlayer of [true, false]) {
+      const handler = makeHandler({ authResult: { valid: true, userId: 'owner' },
+        progression: evaluatePokerProgression({ balance: 550, tiers: [100,500], enabledBuyIns: [100,500] }),
+        calls: { tokens: [], progression: [] },
+        unsafe: async sql => {
+          if (sql.includes('select poker_auto_class')) return [{ poker_auto_class: 'NORMAL', poker_access_override: 'AUTO', poker_access_revision: 1 }];
+          if (sql.includes('select id, status, buy_in, stakes')) return [{ id: 'ended-table', status: 'OPEN', buy_in: 100, stakes: { sb: 1, bb: 2 }, is_single_player: isSinglePlayer, created_by: 'owner', has_human_participant: true }];
+          return [];
+        }
+      });
+      const response = await handler({ httpMethod: 'GET', queryStringParameters: { tableId: 'ended-table' }, headers: { origin, authorization: 'Bearer token' } });
+      const access = JSON.parse(response.body).tableAccess;
+      assert.equal(access.allowed, !isSinglePlayer);
+      assert.equal(access.reason, isSinglePlayer ? 'single_player_participation_ended' : 'available');
+      assert.equal(access.rejoin, false);
+    }
+  } finally { if (previous === undefined) delete process.env.CHIPS_ENABLED; else process.env.CHIPS_ENABLED = previous; }
+});
+
+test("RESTRICTED Single Player Resume is denied while Online active-seat rejoin remains allowed", async () => {
+  const previous = process.env.CHIPS_ENABLED;
+  process.env.CHIPS_ENABLED = "1";
+  try {
+    for (const isSinglePlayer of [true, false]) {
+      const handler = makeHandler({
+        authResult: { valid: true, userId: "restricted-player" },
+        progression: evaluatePokerProgression({ balance: 550, tiers: [100,500], enabledBuyIns: [100,500] }),
+        calls: { tokens: [], progression: [] },
+        unsafe: async (sql) => {
+          if (sql.includes("select poker_auto_class")) return [{ poker_auto_class: "NORMAL", poker_access_override: "FORCE_RESTRICTED", poker_access_revision: 1 }];
+          if (sql.includes("select id, status, buy_in, stakes")) return [{ id: "restricted-table", status: "OPEN", buy_in: 500, stakes: { sb: 5, bb: 10 }, is_single_player: isSinglePlayer, created_by: "restricted-player" }];
+          if (sql.includes("select 1 from public.poker_seats")) return [{ seated: 1 }];
+          return [];
+        }
+      });
+      const response = await handler({ httpMethod: "GET", queryStringParameters: { tableId: "restricted-table" }, headers: { origin, authorization: "Bearer token" } });
+      assert.equal(response.statusCode, 200);
+      const access = JSON.parse(response.body).tableAccess;
+      assert.equal(access.allowed, !isSinglePlayer);
+      assert.equal(access.rejoin, !isSinglePlayer);
+      assert.equal(access.reason, isSinglePlayer ? "single_player_restricted_unavailable" : "rejoin");
+    }
+  } finally {
+    if (previous === undefined) delete process.env.CHIPS_ENABLED;
+    else process.env.CHIPS_ENABLED = previous;
+  }
+});
+
+
+
+test('deferred Single Player Leave denies table access despite ACTIVE seat; Online unchanged', async () => {
+  const previous = process.env.CHIPS_ENABLED; process.env.CHIPS_ENABLED = '1';
+  try {
+    for (const single of [true, false]) {
+      const handler = makeHandler({ authResult: { valid: true, userId: 'owner' }, progression: evaluatePokerProgression({ balance: 550, tiers: [100,500], enabledBuyIns: [100,500] }), calls: { tokens: [], progression: [] }, unsafe: async sql => {
+        if (sql.includes('select poker_auto_class')) return [{ poker_auto_class: 'NORMAL', poker_access_override: 'AUTO', poker_access_revision: 1 }];
+        if (sql.includes('select id, status, buy_in, stakes')) return [{ id: 'deferred', status: 'OPEN', buy_in: 100, stakes: { sb: 1, bb: 2 }, is_single_player: single, created_by: 'owner', has_human_participant: true, has_left: true }];
+        if (sql.includes('select 1 from public.poker_seats')) return [{ seated: 1 }];
+        return [];
+      } });
+      const response = await handler({ httpMethod: 'GET', queryStringParameters: { tableId: 'deferred' }, headers: { origin, authorization: 'Bearer token' } });
+      const access = JSON.parse(response.body).tableAccess;
+      assert.equal(access.allowed, !single); assert.equal(access.rejoin, !single);
+      assert.equal(access.reason, single ? 'single_player_participation_ended' : 'rejoin');
+    }
+  } finally { if (previous === undefined) delete process.env.CHIPS_ENABLED; else process.env.CHIPS_ENABLED = previous; }
+});
+
+test('Single Player Resume list excludes deferred Leave and foreign tables using real state SQL', async () => {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const db = new PGlite(); const previous = process.env.CHIPS_ENABLED; process.env.CHIPS_ENABLED = '1';
+  try {
+    await db.exec(`create table poker_tables(id uuid, buy_in int, stakes jsonb, status text, is_single_player boolean, created_by uuid, lifecycle_kind text default 'STANDARD', has_human_participant boolean default true, is_slow_only boolean default false, created_at timestamptz default now());
+      create table poker_seats(table_id uuid, user_id uuid, status text, last_seen_at timestamptz, created_at timestamptz default now());
+      create table poker_state(table_id uuid, state jsonb);
+      insert into poker_tables(id,buy_in,stakes,status,is_single_player,created_by) values ('00000000-0000-4000-8000-000000000001',100,'{}','OPEN',true,'00000000-0000-4000-8000-000000000004'),('00000000-0000-4000-8000-000000000002',100,'{}','OPEN',true,'00000000-0000-4000-8000-000000000004'),('00000000-0000-4000-8000-000000000003',100,'{}','OPEN',true,'00000000-0000-4000-8000-000000000005');
+      insert into poker_seats(table_id,user_id,status) values ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000004','ACTIVE'),('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000004','ACTIVE'),('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000005','ACTIVE');
+      insert into poker_state values ('00000000-0000-4000-8000-000000000001','{}'),('00000000-0000-4000-8000-000000000002','{"leftTableByUserId":{"00000000-0000-4000-8000-000000000004":true}}'),('00000000-0000-4000-8000-000000000003','{}');`);
+    const handler = makeHandler({ authResult: { valid: true, userId: '00000000-0000-4000-8000-000000000004' }, progression: evaluatePokerProgression({ balance: 550, tiers: [100,500], enabledBuyIns: [100,500] }), calls: { tokens: [], progression: [] }, unsafe: async (sql, params) => {
+      if (sql.includes('select t.id, t.buy_in, t.stakes') || sql.includes('select id, status, buy_in, stakes') || sql.includes('select 1 from public.poker_seats')) return (await db.query(sql, params)).rows;
+      if (sql.includes('select poker_auto_class')) return [{ poker_auto_class: 'NORMAL', poker_access_override: 'AUTO', poker_access_revision: 1 }];
+      return [];
+    } });
+    const response = await handler({ httpMethod: 'GET', headers: { origin, authorization: 'Bearer token' } });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(JSON.parse(response.body).singlePlayerRejoinableTableIds, ['00000000-0000-4000-8000-000000000001']);
+    for (const [tableId, allowed] of [['00000000-0000-4000-8000-000000000001', true], ['00000000-0000-4000-8000-000000000002', false]]) {
+      const accessResponse = await handler({ httpMethod: 'GET', queryStringParameters: { tableId }, headers: { origin, authorization: 'Bearer token' } });
+      assert.equal(accessResponse.statusCode, 200);
+      const access = JSON.parse(accessResponse.body).tableAccess;
+      assert.equal(access.allowed, allowed); assert.equal(access.rejoin, allowed);
+      assert.equal(access.reason, allowed ? 'rejoin' : 'single_player_participation_ended');
+    }
+  } finally { await db.close(); if (previous === undefined) delete process.env.CHIPS_ENABLED; else process.env.CHIPS_ENABLED = previous; }
 });
