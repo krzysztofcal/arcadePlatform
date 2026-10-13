@@ -44,3 +44,11 @@ Rollback is in production-rollout.md: disable only Supabase Google first, restor
 - https://supabase.com/docs/guides/auth/social-login/auth-google
 
 Audit COMPLETE within current account visibility. Production project/client creation permission and Google's acceptance of future config are not write-tested. Await owner GO for all mutations.
+
+## Authorized preparation — 2026-10-13
+
+Owner authorized project/client and privacy preparation, not public activation. Created separate `arcade-hub-prod-1100` (Arcade Hub Production). Auth configuration wizard has Arcade Hub name, owner support selection, External audience and developer contact contact@kcswh.pl; it is stopped at the owner's Google API User Data Policy checkbox. No client/secret exists yet; creation is pending that exact user step. No audience publication was performed.
+
+Both available Search Console sessions report no access to sc-domain:kcswh.pl. Prepared the official DNS TXT ownership challenge in Search Console; its exact value is held privately/outside repo and visible in the user's browser. Requested addition of TXT at @ for kcswh.pl, preserving existing DNS. Did not modify DNS or claim ownership. Ownership on unavailable accounts remains unknown.
+
+Prepared PL/EN privacy paragraphs and dates in Draft PR #1102, preserving existing content. CSP guard PASS for all55 served documents; diff check PASS. No merge by agent. Production read-back still Google=false, client absent, public UI flag=false. Final activation remains separately unauthorized. Standard Web client, basic scope read-back and final preparation report remain pending the policy acceptance; do not describe OAuth as ready yet.
