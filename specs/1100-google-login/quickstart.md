@@ -18,7 +18,7 @@ An initial callback after first consent returned a controlled generic auth error
 
 Storage audit: Google provider token is present inside the existing SDK-managed Supabase session record; provider refresh token is absent. No provider-token copy found in other localStorage/sessionStorage records, application KLog or IndexedDB. Post-login audit inspected 15 application requests and found no Google provider token forwarded. No WS frames were sent on this account page, so this is not a WS protocol test. This is not a claim of zero Google-token persistence: SDK-managed persistence is deliberately retained as documented in the plan.
 
-A completely new Google user registration still needs a second real Google identity absent from Stage; owner was asked for that specific login, without requesting secrets.
+Completely new Google user registration passed with a second real Google identity confirmed absent from Stage before signup; the owner completed only required Google authentication steps.
 
 ## Google Cloud setup reference
 1. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview), select/create a dedicated Stage project.
@@ -50,7 +50,8 @@ A completely new Google user registration still needs a second real Google ident
 - PASS: anonymous desktop/mobile screenshots visually inspected; temporary browser tooling/state remained outside the repository and browser contexts were closed.
 - PASS: real Google login via task Preview and Supabase Stage; existing verified-password email retained its pre-consent UUID, repeated Google login retained UUID/profile/balance, reload restored session and callback URL was clean. Database snapshots before/after show unchanged profile, chips account, ledger-entry count and poker-seat/request counts; XP display unchanged across first/repeat login.
 - PASS: provider-token audit found no copies in application-owned localStorage/sessionStorage, KLog or IndexedDB; token is present only in the Supabase SDK record and is not a provider refresh token. No claim of zero SDK token persistence.
-- NOT TESTED: completely new Google account registration (second real Google identity required); completion of a real password recovery email. Real Google consent cancellation is not tested; the controlled synthetic callback error was tested.
+- PASS: completely new Google account registration/profile/sign-out/repeat UUID (latest evidence below).
+- NOT TESTED: completion of a real password recovery email. Real Google consent cancellation is not tested; the controlled synthetic callback error was tested.
 - Initial first-consent callback FAIL, cause unknown; subsequent fresh login/repeat/reload PASS. This is explicitly recorded rather than counted as a first-attempt success.
 - NOT TESTED / unauthorized: Production.
 
@@ -65,7 +66,7 @@ Unavailable-SDK cleanup and stale callback error are fixed; 14 auth tests PASS. 
 
 Owner decision: permanent Stage Site URL configuration is deferred outside Google Login V1 and is not a merge blocker. Preview #1101 remains the temporary Stage default and an exact redirect allowlist entry; this code sends explicit same-origin redirectTo. Preserve the working Preview without creating new hosting or DNS. No Production changes.
 
-Brand-new Google user registration remains NOT TESTED and Draft is required. Only safe codes/status/boolean diagnostics are to be retained during the follow-up E2E; do not retain raw callback error descriptions, email or URL.
+Brand-new Google user registration is PASS. Only safe counts/status/boolean diagnostics were retained for this E2E; no raw callback error descriptions, email or callback URL in the evidence. Merge-ready requires settled checks for the final HEAD; merge and Production still require separate owner GO.
 
 ## New-user Stage E2E (2026-10-13)
 PASS: a second real Google account was confirmed absent from Stage before OAuth (auth.users count zero), then authenticated through Preview. Stage created exactly one auth user and a matching user_profiles row. Profile endpoint returned HTTP200. Sign-out cleared the session; fresh Google login returned the same UUID and profile HTTP200, with a clean callback URL. No financial or Poker actions were performed. Human Google password verification was completed by the owner. The original failed callback did not recur on this first registration or repeat login. Diagnostics contain counts/status/booleans only; no token, email or callback URL values.
