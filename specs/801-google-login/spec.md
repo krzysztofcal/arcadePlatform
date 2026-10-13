@@ -33,7 +33,7 @@ Provider not configured; network error; repeated click; callback containing erro
 - FR-004: Controlled errors, safe retry, URL cleanup after SDK consumes callback; no callback credentials or provider errors in logging/analytics.
 - FR-005: Google uses basic identity permissions only. No application-owned provider-token records; existing SDK-managed persistence is retained and must be audited in Stage.
 - FR-006: Google visibility is controlled by a non-secret build-context flag, off by default. Configure Preview only; Production activation requires separate GO.
-- FR-007: Modify existing `js/auth/supabaseClient.js`, `js/account-page.js`, `js/i18n.js`, `scripts/generate-build-info.js`, and account-scoped presentation; sanitize account analytics in `js/analytics.js`.
+- FR-007: Modify existing `js/auth/supabaseClient.js`, `js/account-page.js`, `js/i18n.js`, `scripts/generate-build-info.js`, `netlify.toml` deploy-preview flag, and account-scoped presentation; sanitize account analytics in `js/analytics.js`.
 - FR-008: Tests cover critical auth/security behavior in existing `tests/account-auth.contract.test.mjs`; no rendering/layout/glue suites or dependencies.
 
 ### Key Entities

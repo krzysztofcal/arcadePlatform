@@ -18,7 +18,7 @@ Stage only: `krydukthwdvccggbyjfw` (arcade-portal-stage). Production provider ac
 4. Tell Codex Stage is configured. A real Google browser login/consent may still require owner participation; the saved Stage password account is not a Google account/browser session.
 
 ## Netlify
-`AUTH_GOOGLE_ENABLED=1` set via authorized Netlify integration in **deploy-preview / builds** only. Generated `SUPABASE_CONFIG.AUTH_GOOGLE_ENABLED` defaults false elsewhere. Google secret stays in Supabase, never Netlify/client. Deploy Preview continues to use existing pinned Stage Supabase config.
+`AUTH_GOOGLE_ENABLED="1"` is set in `netlify.toml` **deploy-preview** build context only. Netlify integration reported a save, but read-back and deployed config disproved it; direct env API writes returned HTTP 403. Using the existing context config is deterministic and keeps secrets out of the repo. Generated `SUPABASE_CONFIG.AUTH_GOOGLE_ENABLED` defaults false elsewhere. Google secret stays in Supabase, never Netlify/client. Deploy Preview continues to use existing pinned Stage Supabase config.
 
 ## Verification
 - PASS: `node --test tests/account-auth.contract.test.mjs` (9 cases); default-off, fixed origin redirect, basic scopes, provider unavailable, malicious authorize URL, callback cleanup/privacy and existing recovery replay.
@@ -30,7 +30,7 @@ Stage only: `krydukthwdvccggbyjfw` (arcade-portal-stage). Production provider ac
 - NOT TESTED / unauthorized: Production.
 
 ## Rollback
-Disable Preview Google visibility with context-scoped `AUTH_GOOGLE_ENABLED=0` and rebuild; optionally disable Google provider in Stage. Existing accounts/password auth remain. Code rollback is a forward revert PR, with Production actions separately approved.
+Disable Preview Google visibility by changing the `netlify.toml` deploy-preview flag to `AUTH_GOOGLE_ENABLED="0"` and rebuilding; optionally disable Google provider in Stage. Existing accounts/password auth remain. Code rollback is a forward revert PR, with Production actions separately approved.
 
 ## Reference
 [Supabase Google](https://supabase.com/docs/guides/auth/social-login/auth-google), [Redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls), [automatic identity linking](https://supabase.com/docs/guides/auth/auth-identity-linking), [Google branding](https://developers.google.com/identity/branding-guidelines). PR #701 was reviewed as a reference; its three-provider/deletion scope was not imported. Existing implicit flow and SDK session persistence retained; application does not read/copy/forward provider tokens. SDK persistence audit remains pending real Google login.

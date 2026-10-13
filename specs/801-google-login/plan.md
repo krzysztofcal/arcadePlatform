@@ -5,7 +5,7 @@
 **Spec**: [spec.md](spec.md)
 
 ## Technical Context
-Plain global JS, existing Supabase UMD client, Netlify generated public config, PL/EN dictionary. No dependency/tooling/ignore changes.
+Plain global JS, existing Supabase UMD client, Netlify generated public config, PL/EN dictionary. No dependency/tooling/ignore changes. Only configuration edit is `netlify.toml` deploy-preview `AUTH_GOOGLE_ENABLED="1"`.
 
 ## Constitution Check
 PASS: reuse existing mechanisms; UUID remains authoritative; no financial actions/migrations/Production; no WS deployment required. Tests only critical authentication/redirect/privacy behavior, extending existing tests. Presentation verified with temporary browser tooling outside repository. CSS scoped to account. No new script/CSP host required.
@@ -15,7 +15,7 @@ PASS: reuse existing mechanisms; UUID remains authoritative; no financial action
 2. `js/auth/supabaseClient.js`: `isGoogleEnabled()`, `signInWithGoogle()` and `getAuthCallbackError()`; basic identity scopes; explicit authorize endpoint preflight with `skipBrowserRedirect` to catch disabled provider/network errors before navigation. Validate resulting redirect against configured Supabase origin and `/auth/v1/authorize`; never log provider response. Keep existing implicit callback consumption; clean callback URL when `getSession()` settles. Remove identity-bearing session telemetry and full navigation URL logging.
 3. `account.html`, `js/account-page.js`, `js/i18n.js`: one button within sign-in form with local inline G icon; translated pending/error states and busy/retry, hidden unless enabled; reset pending before leaving so browser Back restores a usable form; keep recovery separate.
 4. `scripts/generate-build-info.js`: public `AUTH_GOOGLE_ENABLED`, default false, from context-specific environment. `js/analytics.js`: account page_location excludes query/hash before auth callback settles.
-5. Set Netlify build flag only in deploy-preview context. Stage Google provider configured with owner assistance if inaccessible. Preserve Production settings.
+5. Set `netlify.toml` build flag only in deploy-preview context (API env write returned Forbidden). Stage Google provider configured with owner assistance if inaccessible. Preserve Production settings.
 6. Existing auth/profile/identity regressions, syntax, CSP checks and temporary browser Preview smoke; report real Google login/identity/storage checks only when actually performed.
 7. Draft PR with Preview, PASS/FAIL/NOT TESTED and external setup/rollback in `quickstart.md`.
 
