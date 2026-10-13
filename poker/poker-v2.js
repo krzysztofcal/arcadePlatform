@@ -7184,7 +7184,18 @@
     wsClient = null;
   }
 
+  function resetInactivityExitForIdentity(){
+    if (!inactivityExit) return;
+    inactivityExit = null;
+    // Clear the old identity's sticky countdown before technical teardown.
+    cancelClosedTableRedirect();
+    shouldAutoJoin = readAutoJoinParam();
+    reconnectSeatNo = null;
+    lastKnownCurrentSeatNo = null;
+  }
+
   function applySignedOutState(){
+    resetInactivityExitForIdentity();
     lastKnownCurrentSeatNo = null;
     heroLifecycleTransition = 'signed_out';
     syncSocialPreferencesIdentity(null);
@@ -7200,6 +7211,7 @@
   }
 
   function applyAuthenticatedPendingState(user, options){
+    if (!user || String(user.id || '') !== String(state.currentUserId || '')) resetInactivityExitForIdentity();
     heroLifecycleTransition = user && String(user.id || '') === state.currentUserId ? 'auth_pending_same_user' : 'auth_pending_identity';
     var preservingState = !!(user && state.mode === 'live' && state.hasAppliedAuthoritativeSnapshot
       && String(user.id || '') === state.currentUserId && state.tableId === tableId);
@@ -7235,7 +7247,7 @@
     var previousUserId = state && state.currentUserId ? String(state.currentUserId) : getUserIdFromToken(currentAccessToken);
     var userChanged = !!(nextUserId && previousUserId && nextUserId !== previousUserId);
     syncSocialPreferencesIdentity(nextUserId);
-    if (userChanged) clearRebuyOperation();
+    if (userChanged) { resetInactivityExitForIdentity(); clearRebuyOperation(); }
     isGuestMode = false;
     currentGuestSession = null;
     clearGuestSession();

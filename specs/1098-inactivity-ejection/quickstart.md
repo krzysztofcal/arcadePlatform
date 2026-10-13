@@ -1,6 +1,6 @@
 # WS Preview handoff — #1098
 
-Status: implementation ready, awaiting manual runtime verification. Owner has NOT authorized deployment or funded Stage smoke. No deployment was executed. Netlify Deploy Preview/WS PR validation alone does not deploy WS.
+Status: owner review corrections prepared in Draft PR #1099; awaiting another owner review and manual runtime verification. Use the new reviewed PR head SHA, never the previously blocked c47e1af revision. Owner has NOT authorized deployment or funded Stage smoke. No deployment was executed. Netlify Deploy Preview/WS PR validation alone does not deploy WS.
 
 ## Next deployment step (only after separate owner GO)
 Use workflow WS Preview Deploy from main, with the full reviewed PR head SHA as application ref:

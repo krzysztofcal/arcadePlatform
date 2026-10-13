@@ -14,3 +14,10 @@ Add inactivityEjectionByUserId entries {handId, isSinglePlayer} to existing pers
 
 ## Acceptance and authorization
 Fundamental deterministic engine, accounting/lifecycle, queue/retry and reconnect projection tests only; UI presentation via manual smoke. Independent subagent ledger/race review required. Draft PR references #1098 without closing it. WS Preview Deploy exact SHA and manual Online/SP smoke remain pending separate GO. No deployments, funded Stage tests, migrations, Production mutations or merge authorized.
+
+## Binding PR #1099 owner review corrections
+- `table_snapshot` persistence loader is read-only, including expired deadlines. It cannot increment counters, alter turns, create ejection intent or write timeout audit. Timeout decisions remain exclusively in the existing authoritative queued WS path with trusted mode.
+- Authoritative JOIN rejection `removed_for_inactivity` survives adapter normalization to the WS command result without debit/runtime seating.
+- Browser inactivity state/countdown belongs to the authenticated identity: logout/change clears it and its timer, same-account token refresh/reconnect preserves it. Late callbacks remain protected by existing generation gates.
+- Timeout sweep reconciles only pending authoritative Leave work (retained seat/stack and no already-committed deferred leave) on non-CLOSED tables. Completed tombstones remain durable without repeated queue work; existing hand progression/settled finalizer/retry continues handling deferred claims.
+- No deployment, funded Stage tests, migrations, Production change or merge; PR remains Draft for another owner review.

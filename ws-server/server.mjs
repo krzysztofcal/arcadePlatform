@@ -62,7 +62,7 @@ import {
   shouldClearBotTimeoutSafetySuppression,
   shouldSuppressBotTimeoutSafetyRetry
 } from "./poker/handlers/bot-autoplay.mjs";
-import { handleLeaveCommand, reconcileInactivityEjectionsCommand } from "./poker/handlers/leave.mjs";
+import { handleLeaveCommand, reconcileInactivityEjectionsCommand, listPendingInactivityLeaveEntries } from "./poker/handlers/leave.mjs";
 import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
@@ -3871,8 +3871,9 @@ async function sweepTurnTimeoutsAndBroadcast() {
   const nowMs = Date.now();
   pruneBotTimeoutSafetySuppressions();
   const ejectionTables = tableManager.listTableIds().filter(tableId =>
-    Object.keys(tableManager.persistedPokerState(tableId)?.inactivityEjectionByUserId || {}).length > 0);
-  await Promise.allSettled(ejectionTables.map(tableId => enqueueTableCommand({
+    !tableManager.isTableClosed(tableId)
+    && listPendingInactivityLeaveEntries(tableManager.persistedPokerState(tableId)).length > 0);
+  if (ejectionTables.length > 0) await Promise.allSettled(ejectionTables.map(tableId => enqueueTableCommand({
     tableId, commandName: "inactivity_ejection", dedupeKey: "inactivity_ejection",
     run: () => reconcileInactivityEjections(tableId)
   })));

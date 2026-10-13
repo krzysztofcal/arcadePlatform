@@ -16,3 +16,12 @@ Only existing critical deterministic tests are extended. No UI/CSS/JSP suites, n
 
 ## Breaking impacts
 Online sit-out after two misses becomes terminal cash-out/seat release; Single Player threshold becomes three then closes. Additive private protocol status/reason. No schema or economic-rule change. Rejoining the same terminally exited table is denied; other tables remain available. Missing nonnumeric deadlines fail closed (fixes Number(null)=0); standard 20s remains unchanged.
+
+## Owner review correction plan
+1. `ws-server/poker/table/table-snapshot.mjs::loadSnapshotInTx`: remove timeout derivation/CAS/audit mutation and mutation-only imports/helper; keep projection/hole-card reads. Replace obsolete HTTP timeout-parity test in `table-snapshot.behavior.test.mjs` with Online/SP expired-deadline read-only regressions (unchanged version/count/intent, zero writes). Update the existing ws-tests/ws-server-package-runtime-deps.guard.test.mjs snapshot import expectations to remove obsolete card-identity/state-write dependencies and require absence of snapshot timeout mutation. Remove the now-orphaned ws_table_snapshot_timeout_apply_skipped entry from existing poker-log-policy.mjs to satisfy event coverage guard.
+2. `authoritative-join-adapter.mjs`: preserve `removed_for_inactivity` as expected rejection. Existing adapter and JOIN handler tests cover the actual adapter-to-WS result chain.
+3. `poker/poker-v2.js`: clear inactivity exit/countdown only at logout or changed identity before technical teardown; retain same-account recovery. Extend existing fundamental auth/reconnect behavioral test with no presentation/layout assertions.
+4. `handlers/leave.mjs`: select pending inactivity Leave entries using existing retained seat/stack plus deferred-left semantics. Use selection in timeout sweep and reconciliation so completed historical tombstones and already-deferred hand claims generate no empty queue work. Existing settled finalizer/retry remains authoritative for deferred claims. Extend existing Leave/recovery tests.
+5. Run focused Online/SP financial/reconnect suites, full required CI and independent subagent review. Update Draft PR description and exact-SHA instructions; do not deploy.
+
+Constitution recheck: only fundamental read-only/persistence, rejection/auth isolation, lifecycle/recovery tests in existing files. No UI/CSS/JSP/layout suite or framework; unchanged economic rules, blinds and timer.

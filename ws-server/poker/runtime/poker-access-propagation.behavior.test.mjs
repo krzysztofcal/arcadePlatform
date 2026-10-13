@@ -1014,3 +1014,33 @@ test('durable inactivity accounting failure stays settled and uses existing roll
   assert.equal(runtime.getPersistedCount(), 0);
   assert.equal(runtime.tableManager.persistedPokerState(tableId).phase, 'SETTLED');
 });
+
+test('timeout sweep queues only unresolved Leave work and keeps completed/deferred tombstones without repeated work', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const leave = await import('../handlers/leave.mjs');
+  const source = await readFile(new URL('../../server.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('async function sweepTurnTimeoutsAndBroadcast()'), source.indexOf('function readJsonBody('));
+  const marker = { inactive: { handId: 'h1', isSinglePlayer: false } };
+  const states = {
+    completed: { seats: [], stacks: {}, inactivityEjectionByUserId: marker },
+    pending: { seats: [{ userId: 'inactive', seatNo: 1 }], stacks: { inactive: 25 }, inactivityEjectionByUserId: marker },
+    deferred: { seats: [{ userId: 'inactive', seatNo: 1 }], stacks: { inactive: 25 }, leftTableByUserId: { inactive: true }, inactivityEjectionByUserId: marker },
+    closed: { seats: [{ userId: 'inactive', seatNo: 1 }], stacks: {}, inactivityEjectionByUserId: marker }
+  };
+  const queued = [];
+  const deps = {
+    tableManager: { listTableIds: () => Object.keys(states), persistedPokerState: id => states[id],
+      isTableClosed: id => id === 'closed', listDueTurnTimeouts: () => [] },
+    pruneBotTimeoutSafetySuppressions: () => {},
+    listPendingInactivityLeaveEntries: leave.listPendingInactivityLeaveEntries,
+    enqueueTableCommand: async command => { queued.push(command.tableId); return command.run(); },
+    reconcileInactivityEjections: async tableId => { states[tableId] = { ...states[tableId], seats: [], stacks: {} }; }
+  };
+  const sweep = new Function(...Object.keys(deps), code + '\nreturn sweepTurnTimeoutsAndBroadcast;')(...Object.values(deps));
+  await sweep();
+  assert.deepEqual(queued, ['pending']);
+  await sweep();
+  assert.deepEqual(queued, ['pending'], 'resolved tombstone creates no new queued command');
+  assert.equal(states.completed.inactivityEjectionByUserId.inactive.handId, 'h1');
+  assert.equal(states.deferred.stacks.inactive, 25, 'deferred claim stays owned for settlement finalizer');
+});

@@ -130,6 +130,15 @@ export async function handleLeaveCommand({
   }
 }
 
+// A committed deferred Leave belongs to the hand/settled finalizer. Completed
+// tombstones remain durable, but neither case needs another Leave command.
+export function listPendingInactivityLeaveEntries(state) {
+  return Object.entries(state?.inactivityEjectionByUserId || {}).filter(([userId]) =>
+    state?.leftTableByUserId?.[userId] !== true
+    && (state?.seats?.some(seat => seat?.userId === userId)
+      || Object.prototype.hasOwnProperty.call(state?.stacks || {}, userId)));
+}
+
 // Called only under existing per-table command ownership. The persisted tombstone
 // survives process failure; the existing timeout sweep retries failed Leave/restore.
 export async function reconcileInactivityEjectionsCommand({ tableId, tableManager,
@@ -137,7 +146,7 @@ export async function reconcileInactivityEjectionsCommand({ tableId, tableManage
   broadcastTableState, klog = () => {} }) {
   if (tableManager.isTableClosed(tableId)) return { ok: true };
   let state = tableManager.persistedPokerState(tableId);
-  for (const [userId, intent] of Object.entries(state?.inactivityEjectionByUserId || {})) {
+  for (const [userId, intent] of listPendingInactivityLeaveEntries(state)) {
     if (state?.leftTableByUserId?.[userId] === true) continue;
     if (!state?.seats?.some(seat => seat?.userId === userId)
       && !Object.prototype.hasOwnProperty.call(state?.stacks || {}, userId)) continue;

@@ -327,8 +327,7 @@ register("ERROR", "transport", [
 ]);
 
 register("WARN", "gameplay", [
-  "ws_table_snapshot_empty_legal_actions",
-  "ws_table_snapshot_timeout_apply_skipped"
+  "ws_table_snapshot_empty_legal_actions"
 ]);
 
 register("ERROR", "gameplay", [

@@ -368,7 +368,7 @@ function createHarness(options = {}){
 
   vm.createContext(sandbox);
   const closureEnd = source.lastIndexOf('})();');
-  const privacySource = source.slice(0, closureEnd) + 'window.__reconnectForTest = function(){ return { seat: reconnectSeatNo, autoJoin: shouldAutoJoin }; }; window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__madeHandForTest = function(){ return heroMadeHandIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
+  const privacySource = source.slice(0, closureEnd) + 'window.__reconnectForTest = function(){ return { seat: reconnectSeatNo, autoJoin: shouldAutoJoin, inactivity: inactivityExit && inactivityExit.status, redirectRemaining: closedTableRedirectRemaining }; }; window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__madeHandForTest = function(){ return heroMadeHandIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
   vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
@@ -6849,5 +6849,47 @@ for (const ended of [true, false]) test('reconnect preserves seat only for trans
     ws.onStatus('reconnecting', { attempt: 2 }); ws.onStatus('auth_ok'); snapshot(3, false); await harness.flush();
     harness.advanceTime(10000); await harness.flush();
     assert.equal(harness.joinPayloads.length, 1, 'ended participation must not retry');
+  }
+});
+
+
+for (const exitStatus of ['pending', 'removed']) test(`inactivity identity isolation preserves same-account reconnect and clears logout/account switches, status=${exitStatus}`, async () => {
+  const tokenFor = (user, suffix) => 'aaa.' + Buffer.from(JSON.stringify({ sub: user })).toString('base64') + '.' + suffix;
+  for (const transition of ['logout', 'pending_identity', 'token_identity']) {
+    const harness = createHarness({ token: tokenFor('user-1', 'initial'), authUser: { id: 'user-1' }, search: '?tableId=table-1&autoJoin=1' });
+    harness.fireDomContentLoaded(); await harness.flush();
+    await waitFor(() => harness.getCreateOptions() !== null);
+    const ws = harness.getCreateOptions();
+    const exited = { kind: 'stateSnapshot', payload: { tableId: 'table-1', stateVersion: 10,
+      table: { tableId: 'table-1', status: 'OPEN', members: [] }, public: { seats: [], hand: { handId: 'h1', status: 'SETTLED' } },
+      you: { seat: null }, private: { inactivity: { status: exitStatus, isSinglePlayer: false } } } };
+    ws.onSnapshot(exited); await harness.flush();
+    if (exitStatus === 'removed') harness.advanceTime(1000);
+    const remaining = harness.getReconnect().redirectRemaining;
+    harness.setAuthToken(null); harness.triggerAuthChange({ id: 'user-1' }, {}); await harness.flush();
+    assert.equal(harness.getReconnect().inactivity, exitStatus, 'same identity awaiting token keeps its exit');
+    assert.equal(harness.getReconnect().redirectRemaining, remaining);
+    const token = tokenFor('user-1', 'refresh');
+    harness.setAuthToken(token); harness.triggerAuthChange({ id: 'user-1' }, { access_token: token }); await harness.flush();
+    assert.equal(harness.getReconnect().inactivity, exitStatus);
+    assert.equal(harness.getReconnect().redirectRemaining, remaining);
+    assert.equal(harness.getReconnect().autoJoin, false);
+    if (transition === 'logout') {
+      harness.setAuthToken(null); harness.triggerAuthChange(null, null);
+    } else if (transition === 'pending_identity') {
+      harness.setAuthToken(null); harness.triggerAuthChange({ id: 'user-2' }, {});
+    } else {
+      const other = tokenFor('user-2', 'new'); harness.setAuthToken(other);
+      harness.triggerAuthChange({ id: 'user-2' }, { access_token: other });
+    }
+    await harness.flush();
+    assert.equal(harness.getReconnect().inactivity, null, transition);
+    assert.equal(harness.getReconnect().redirectRemaining, 0, transition);
+    assert.equal(harness.getReconnect().autoJoin, true, 'new identity restores URL join intent');
+    // A callback from the retired user-1 socket cannot resurrect its exit.
+    ws.onSnapshot(exited); await harness.flush();
+    assert.equal(harness.getReconnect().inactivity, null);
+    for (let tick = 0; tick < 5; tick++) { harness.advanceTime(1000); await harness.flush(); }
+    assert.notEqual(harness.windowLocation.href, '/poker/', 'retired countdown cannot redirect the new identity');
   }
 });
