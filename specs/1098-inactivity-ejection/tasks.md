@@ -20,3 +20,8 @@ Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1099. Exact final 
 - [x] T012 Audit transport/bootstrap/auth versus authoritative timeout paths; fundamental Online/SP pre-threshold count preservation.
 - [x] T013 Reproduce real bootstrap/projection completed ghost; narrowly remove historical detached seats and preserve pending/live claims; no repeated Leave/cash-out.
 - [x] T014 Verify real adapters/projections, economic/lifecycle invariants and required CI; update Draft PR evidence and SHA, no deploy/merge.
+
+## P2 pending presentation owner follow-up
+- [x] T015 Reproduce client occupied-avatar/control failure in existing fundamental harness; minimal frontend visibility/participation fix, no backend delta.
+- [ ] T016 Run regressions/npm test/guards/required CI and independent final-SHA review; update Draft PR.
+- [ ] T017 Authorized exact-SHA Preview deployment and narrow Stage Chromium/DOM/WS pending-refresh-removed smoke; verify settlement and report PASS/FAIL/NOT TESTED, no merge/Production.

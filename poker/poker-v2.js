@@ -2484,7 +2484,7 @@
     if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
       state.seats = nextSeats;
       var currentSeatAfterMerge = deriveCurrentSeat();
-      if (currentSeatAfterMerge && Number.isInteger(currentSeatAfterMerge.seatNo)) {
+      if (!inactivityExit && currentSeatAfterMerge && Number.isInteger(currentSeatAfterMerge.seatNo)) {
         lastKnownCurrentSeatNo = currentSeatAfterMerge.seatNo;
       }
     }
@@ -2561,7 +2561,12 @@
     if ((Array.isArray(payload.seats) || Array.isArray(publicObj.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers))
       && !state.seats.some(isCurrentUserSeat)) state.youSeat = null;
     if (seatFieldPresent && state.youSeat == null){
-      state.seats = state.seats.filter(function(seat){ return seat.userId !== state.currentUserId; });
+      // A visible pending financial owner is not an active participant.
+      var pendingOwner = inactivityExit && inactivityExit.status === 'pending'
+        && Array.isArray(publicObj.seats) && publicObj.seats.some(function(seat){
+          return seat.userId === state.currentUserId && seat.status === 'EJECTION_PENDING';
+        });
+      state.seats = state.seats.filter(function(seat){ return seat.userId !== state.currentUserId || pendingOwner; });
       lastKnownCurrentSeatNo = null;
     }
     if (seatFieldPresent && previousSeatNo !== state.youSeat){
@@ -2707,7 +2712,7 @@
   }
 
   function isSeatedAtLiveTable(){
-    return !!(state && state.mode === 'live' && state.tableId && deriveCurrentSeat());
+    return !!(!inactivityExit && state && state.mode === 'live' && state.tableId && deriveCurrentSeat());
   }
 
   function isCurrentUserSeat(seat){
@@ -2929,6 +2934,7 @@
   }
 
   function reconcileJoinOperationFromSnapshot(authoritativeSnapshot){
+    if (inactivityExit) return false;
     // Guest seats can be projected before the required join is acknowledged.
     if (isGuestMode) return false;
     var seat = deriveCurrentSeat();
@@ -3287,7 +3293,7 @@
   }
 
   function getTargetedReactionOffers(){
-    if (state.reconnectGate || !deriveCurrentSeat()) return [];
+    if (inactivityExit || state.reconnectGate || !deriveCurrentSeat()) return [];
     var sticky = getActiveWinnerReveal();
     var presentation = sticky && sticky.settlementPresentation;
     if (!sticky || !presentation || presentation.valid !== true || !presentation.handId){
@@ -3449,7 +3455,7 @@
     var signedIn = isSignedIn();
     var seated = !!deriveCurrentSeat();
     var cooldownActive = reactionControlUntilMs > Date.now();
-    var canUse = signedIn && seated && isWsReady() && !state.reconnectGate;
+    var canUse = signedIn && seated && !inactivityExit && isWsReady() && !state.reconnectGate;
     if (els.reactionControl) els.reactionControl.hidden = !signedIn || !seated;
     els.reactionBtn.hidden = !signedIn || !seated;
     els.reactionBtn.disabled = !canUse || cooldownActive;
@@ -3470,7 +3476,7 @@
   }
 
   function sendTargetedReaction(targetSeatNo, handId){
-    if (!wsClient || typeof wsClient.sendTargetedReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
+    if (inactivityExit || !wsClient || typeof wsClient.sendTargetedReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
       return Promise.resolve(null);
     }
     var offerKey = targetedReactionOfferKey(handId, targetSeatNo);
@@ -3630,7 +3636,7 @@
   }
 
   function sendReaction(reactionKey){
-    if (!wsClient || typeof wsClient.sendReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
+    if (inactivityExit || !wsClient || typeof wsClient.sendReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
       return Promise.resolve(null);
     }
     closeReactionMenu();
@@ -4300,7 +4306,7 @@
     var joinPending = isJoinOperationPending();
     var waitingForAuthoritativeSeat = joinOperation.phase === 'active' && !seated;
     var isClosed = isClosedTableStatus(state.tableStatus) || closedTableRedirectRemaining > 0;
-    var canJoin = state.mode === 'live' && signedIn && !seated && !isClosed && !!state.tableId
+    var canJoin = state.mode === 'live' && signedIn && !inactivityExit && !seated && !isClosed && !!state.tableId
       && !state.reconnectGate && isWsReady() && state.hasAppliedAuthoritativeSnapshot === true
       && !joinPending && !waitingForAuthoritativeSeat;
     var occupiedSeatsCount = Array.isArray(state.seats)
@@ -4744,6 +4750,7 @@
   function giftName(gift){ return t('pokerGift_' + gift.key, gift.key); }
   function giftEligibleSeats(){ return state.seats.filter(function(seat){ return seat && seat.userId && !isCurrentUserSeat(seat) && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''); }); }
   function giftShopBlockReason(){
+    if (inactivityExit) return 'seat_not_active';
     if (isGuestMode || !isSignedIn()) return 'sign_in_required';
     if (isClosedTableStatus(state.tableStatus)) return 'table_closed';
     if (state.reconnectGate) return 'reconnecting';
@@ -4753,6 +4760,7 @@
   }
   function giftShopAvailable(){ return !giftShopBlockReason(); }
   function giftDemoHeroSeat(){
+    if (inactivityExit) return null;
     var build = window.BUILD_INFO;
     if (!build || build.context !== 'deploy-preview' || build.isPreview !== true
       || !state.tableId || isClosedTableStatus(state.tableStatus) || state.reconnectGate || !state.wsReady) return null;
@@ -5562,19 +5570,23 @@
     var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
     var show = ((outOfChips && playerState.canRebuy === true) || (waiting && !!rebuyOperation)) && !rebuyPanelDismissed;
     if (els.rebuyBtn) els.rebuyBtn.hidden = waiting;
+    if (inactivityExit) {
+      if (els.rebuyBtn) els.rebuyBtn.disabled = true;
+      if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = true;
+    }
     els.rebuyPanel.hidden = !show;
     if (!show) return;
     if (els.rebuyTitle) els.rebuyTitle.textContent = waiting ? 'Buy-in confirmed' : 'Out of chips';
     if (els.rebuyCopy) els.rebuyCopy.textContent = waiting ? 'Funded · Joining next hand' : 'The table will keep playing. Buy in to join the next hand.';
     if (els.rebuyBtn) {
       var rebuyPending = !!rebuyOperation && rebuyOperation.phase === 'pending';
-      els.rebuyBtn.disabled = rebuyPending || !isWsReady() || playerState.canRebuy !== true;
+      els.rebuyBtn.disabled = !!inactivityExit || rebuyPending || !isWsReady() || playerState.canRebuy !== true;
       var buyIn = currentTableBuyIn();
       els.rebuyBtn.textContent = rebuyPending ? 'Buying in…' : (rebuyOperation && rebuyOperation.phase === 'error'
         ? 'Retry buy-in'
         : (buyIn == null ? 'Buy in' : 'Buy in ' + formatNumber(buyIn) + ' CH'));
     }
-    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = (!!rebuyOperation && rebuyOperation.phase === 'pending') || !isWsReady();
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = !!inactivityExit || (!!rebuyOperation && rebuyOperation.phase === 'pending') || !isWsReady();
     if (outOfChips) refreshRebuyBalance();
   }
 
@@ -5909,7 +5921,7 @@
     var showLiveActionButtons = showActionButtons && !preactionMode;
     var actionControlsLocked = !liveReady || !usersTurn || controlsLocked || playerSittingOut;
     var joinPending = isJoinOperationPending();
-    var joinDisabled = !signedIn || isGuestMode || seated || !state.tableId || !liveReady
+    var joinDisabled = !!inactivityExit || !signedIn || isGuestMode || seated || !state.tableId || !liveReady
       || state.reconnectGate || !state.hasAppliedAuthoritativeSnapshot || joinPending
       || (joinOperation.phase === 'active' && !seated);
     if (!seated || !activeHand || isCurrentUserFolded() || playerSittingOut) clearQueuedPreaction();
@@ -5936,18 +5948,18 @@
       else els.joinBtn.removeAttribute('aria-busy');
     }
     syncJoinVisibility();
-    if (els.joinSeat) els.joinSeat.disabled = !signedIn || seated || !liveReady;
-    if (els.joinBuyIn) els.joinBuyIn.disabled = !signedIn || seated || !liveReady;
+    if (els.joinSeat) els.joinSeat.disabled = !!inactivityExit || !signedIn || seated || !liveReady;
+    if (els.joinBuyIn) els.joinBuyIn.disabled = !!inactivityExit || !signedIn || seated || !liveReady;
     if (els.joinSeat && suggestedSeatNoParam && !seated && !els.joinSeat.dataset.userEdited) {
       els.joinSeat.value = String(suggestedSeatNoParam);
     }
-    if (els.startBtn) els.startBtn.hidden = !signedIn || !seated;
-    if (els.startBtn) els.startBtn.disabled = !liveReady;
+    if (els.startBtn) els.startBtn.hidden = !!inactivityExit || !signedIn || !seated;
+    if (els.startBtn) els.startBtn.disabled = !!inactivityExit || !liveReady;
     if (els.menuLeave) {
-      els.menuLeave.hidden = !signedIn || !seated;
-      els.menuLeave.disabled = !liveReady;
+      els.menuLeave.hidden = !!inactivityExit || !signedIn || !seated;
+      els.menuLeave.disabled = !!inactivityExit || !liveReady;
     }
-    if ((!signedIn || !seated) && leaveConfirmOpen) closeLeaveConfirm();
+    if ((inactivityExit || !signedIn || !seated) && leaveConfirmOpen) closeLeaveConfirm();
     if ((!signedIn || isGuestMode) && autoRebuyConfirmOpen){
       closeAutoRebuyConfirm(false);
       renderSocialPreferences();
@@ -6194,6 +6206,7 @@
   }
 
   function sendCommand(methodName, payload, requestId){
+    if (inactivityExit) return Promise.reject(new Error('removed_for_inactivity'));
     if (!wsClient || typeof wsClient[methodName] !== 'function' || !isWsReady()){
       setError('Live table connection is still starting');
       return Promise.reject(new Error('ws_unavailable'));
@@ -6266,6 +6279,7 @@
   }
 
   function queueLeaveAndNavigateImmediately(){
+    if (inactivityExit) return false;
     if (!wsClient || typeof wsClient.sendLeaveQueued !== 'function' || !isWsReady()) return false;
     clearRebuyOperation();
     wsClient.sendLeaveQueued({ tableId: state.tableId });
@@ -6283,6 +6297,7 @@
   }
 
   function openLeaveConfirm(destination){
+    if (inactivityExit) return;
     if (!els.leaveConfirmModal) return;
     leaveConfirmDestination = normalizeLeaveDestination(destination);
     leaveConfirmOpen = true;
@@ -6449,6 +6464,7 @@
   }
 
   function rememberSeatForReconnect(){
+    if (inactivityExit) { reconnectSeatNo = null; return; }
     var currentSeat = deriveCurrentSeat();
     var seatNo = currentSeat && Number.isInteger(currentSeat.seatNo)
       ? currentSeat.seatNo
@@ -6679,6 +6695,7 @@
   }
 
   function leaveAndReturnToLobby(destination){
+    if (inactivityExit) return Promise.resolve(null);
     if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
     clearHeroGiftDemo();
     var leaveDestination = destination == null
@@ -6712,6 +6729,7 @@
   }
 
   function requestManualRebuy(source){
+    if (inactivityExit) return false;
     var requestedSource = normalizeRebuySource(source);
     if (!state.playerState || state.playerState.canRebuy !== true) return Promise.resolve();
     if (requestedSource === 'auto' && currentTableBuyIn() == null) return Promise.resolve();

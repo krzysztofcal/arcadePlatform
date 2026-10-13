@@ -49,3 +49,12 @@ Transport audit: subscribe/resync/touchPresence/cleanupConnection do not write t
 Independent reviewer: APPROVE, no blocking findings; reviewed preservation of zero/positive stacks, live claims, ACTIVE owners, old chair replacement and immutable input. Suggested SETTLED replacement coverage is included. Remaining integration risk is existing stale/inconsistent restore handling, covered by queue/CAS tests and requiring exact-SHA runtime smoke.
 
 Local verification: critical suite 215/215; bootstrap 26/26; real resync/Leave race 21/21; existing client/auth harness 161/161; guards/CSP PASS. Initial resync run lacked INFO startup output and timed out; rerun with WS_POKER_LOG_LEVEL=INFO passed. Full npm test PASS in an isolated local test environment; final-SHA CI evidence is reported in the PR handoff. No deployment, funded Stage test, migration, Production change or merge. Draft remains pending owner review and exact-SHA WS Preview GO/smoke.
+
+
+## P2 actual Preview finding — frontend correction
+
+Owner approved the actual Preview finding at base af276adb and authorized minimal frontend correction plus exact-new-SHA narrow Preview deploy/smoke after tests/CI/review. Root: mergeSnapshot interpreted explicit you.seat=null as removal of the own row even when current public EJECTION_PENDING ownership remained; visual-seat-dependent controls could become available once that row is retained.
+
+The correction retains only current supplied public pending ownership, keeps you.seat=null, preserves mutation/preaction locks and prevents JOIN in both render paths. Start/Leave/seat/buy-in/rebuy and dependent gift/reaction controls cannot acquire permissions from visible ownership. Shared sendCommand and queued Leave entry points reject terminal inactivity. No backend/WS protocol/timer/economy/settlement change.
+
+Existing client regressions reproduced missing avatar before fix (2/2 failing), now cover ACTIVE->pending->removed and fresh pending, avatar/control DOM, null participation, repeated render/reconnect, stale click dispatch with zero mutation, missing authoritative row and sticky redirect. Existing normal-player tests remain intact. Local full npm test, client regression and guard evidence are reported with the final PR handoff; current implementation remains gated on independent final-SHA review and CI before authorized narrow runtime smoke.

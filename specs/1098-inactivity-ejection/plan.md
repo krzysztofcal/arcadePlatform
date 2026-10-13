@@ -31,3 +31,9 @@ Constitution recheck: only fundamental read-only/persistence, rejection/auth iso
 - In persisted-bootstrap-adapter.mjs, filter completed inactivity historical current seats before identity reconciliation only with durable intent + left=true + missing stack + no ACTIVE owner row + no live-hand claim. Preserve handSeats and all financial maps/tombstones. Honor committed left flags in runtime-seat fallback so pending recovery cannot reseat the exiting user.
 - In room-core-snapshot.mjs, avoid publishing a completed inactivity user from stale members alone; private/public classification must agree about retained claims. Extend existing projection regression, no UI suite.
 - Re-run fundamental timeout/action, Leave exactly-once, terminal-close escrow and reconnect tests plus required CI. Keep Draft; no deployment/merge/funded environment writes.
+
+## P2 pending presentation follow-up
+- poker/poker-v2.js::mergeSnapshot: distinguish explicit null participation from current public EJECTION_PENDING ownership; never retain from history alone.
+- renderControls/syncJoinVisibility and mutation entry points: keep pending visible while locking Start/Leave/JOIN/rebuy, seat/buy-in, poker/preaction and dependent paid/social controls. Preserve ordinary participation.
+- Extend tests/poker-v2-live.behavior.test.mjs only: transition/fresh pending, actual seat/avatar/control DOM and no outbound mutation, reconnect/rerender, missing ownership, confirmed removal/redirect.
+- Full npm test/guards/CI and independent exact-SHA review, then authorized exact-SHA WS Preview deploy and narrow real Chromium/DOM/WS smoke using existing Stage account. Minimal normal CH gameplay only when needed; final settlement must be verified.
