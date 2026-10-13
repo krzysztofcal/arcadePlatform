@@ -88,6 +88,7 @@ async function googleHarness({ enabled = true, hash = '', providerEnabled = true
   if (clientMode === 'missing') delete window.supabase;
   if (clientMode === 'throws') window.supabase.createClient = () => { throw new Error('SDK failed'); };
   if (clientMode === 'broken') window.supabase.createClient = () => ({ auth: {} });
+  if (clientMode === 'session-throws') window.supabase.createClient = () => ({ auth: { getSession() { throw new Error('private SDK error'); } } });
   const fetch = async () => ({ ok: true, json: async () => ({ external: { google: providerEnabled } }) });
   vm.runInNewContext(source, { window, document, Promise, URL, URLSearchParams, fetch, console });
   document.readyState = 'complete';
@@ -146,7 +147,7 @@ test('Password recovery callback errors stay generic even with Google disabled',
 
 
 test('Unavailable Supabase SDK cleans access/refresh callback without leaking tokens', async () => {
-  for (const clientMode of ['missing', 'throws', 'broken']) {
+  for (const clientMode of ['missing', 'throws', 'broken', 'session-throws']) {
     const { auth, calls } = await googleHarness({ clientMode, hash: '#access_token=secret&refresh_token=secret' });
     assert.equal(await auth.getCurrentUser(), null);
     assert.equal(calls.history.at(-1), '/account.html');

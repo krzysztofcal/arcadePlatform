@@ -11,12 +11,14 @@
 - [x] T008 Prepare Draft PR, working Preview and evidence/remaining external steps in `specs/1100-google-login/quickstart.md`.
 
 ## Evidence / remaining work
-Runtime SHA `b68f546a`, Preview #1101: desktop/mobile PL/EN, disabled provider/retry, controlled synthetic callback error, Stage password/profile HTTP 200/reload/sign-out PASS. Full npm test and settled CI PASS. T007 Stage Google configuration, existing verified-email Google login, repeat/reload, UUID continuity and storage audit are now PASS. Completely new Google user registration remains pending a second real Google identity absent from Stage; do not mark this task fully done yet. See quickstart for the initial failed callback followed by successful fresh/repeat login.
+Historical runtime SHA `b68f546a`, Preview #1101: desktop/mobile PL/EN, disabled provider/retry, controlled synthetic callback error, Stage password/profile HTTP 200/reload/sign-out PASS. Full npm test and settled CI PASS. T007 Stage Google configuration, existing verified-email Google login, repeat/reload, UUID continuity and storage audit are now PASS. Completely new Google user registration remains pending a second real Google identity absent from Stage; do not mark this task fully done yet. See quickstart for the initial failed callback followed by successful fresh/repeat login.
 
 ## PR review follow-up
 - [x] T010 Fix unavailable-SDK callback cleanup in `js/auth/supabaseClient.js`; preserve deferred SDK opportunity and add fundamental tests.
 - [x] T011 Reproduce stale callback error after password login/sign-out; clear on successful authentication and preserve failed-password error; add tests.
 - [x] T012 Rename SpecKit directory to `specs/1100-google-login` and synchronize status.
-- [ ] T013 Verify updated Preview security cases, password flow and real Google repeat; attempt original callback reproduction with safe diagnostics.
+- [x] T013 Verify updated Preview security cases, password flow and real Google repeat; attempt original callback reproduction with safe diagnostics.
 - [ ] T014 Set a working canonical Stage Site URL after stable Stage hosting is available; proposed `https://stage.play.kcswh.pl/account.html`, keep exact Preview allowlist.
 - [ ] T015 Run relevant regressions/CI and update existing Draft PR PASS/FAIL/NOT TESTED.
+
+Review runtime SHA `19bc6fe1`: 14 auth cases PASS; syntax/structural/CSP/JWT regressions PASS; actual Preview blocked-SDK cleanup PASS; callback-error → real Stage password sign-in → sign-out PASS; two fresh existing-user Google logins PASS with callback HTTP302 and same UUID. Original callback error was not reproduced on these attempts. Safe diagnostics contain codes/status/booleans only. New-user registration remains NOT TESTED, canonical Stage hosting/Site URL pending. CI at runtime SHA currently has 22 PASS / 7 skips / 1 pending, 0 failures; final test-only extension must also settle.
