@@ -21,12 +21,30 @@
     }
   }
 
-  function getEmailDomain(email){
-    if (!email || typeof email !== 'string') return null;
-    var atIndex = email.lastIndexOf('@');
-    if (atIndex <= 0 || atIndex === email.length - 1) return null;
-    return email.slice(atIndex + 1).toLowerCase();
+  var callbackPending = false;
+  var authCallbackError = null;
+  try {
+    var callbackHash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+    var callbackQuery = new URLSearchParams(window.location.search || '');
+    callbackPending = callbackHash.has('access_token') || callbackHash.has('refresh_token') || callbackHash.has('error') || callbackQuery.has('error');
+    var callbackError = callbackHash.get('error') || callbackQuery.get('error');
+    var callbackCode = callbackHash.get('error_code') || callbackQuery.get('error_code');
+    if (callbackError) authCallbackError = callbackError === 'access_denied' && !callbackCode ? 'auth_cancelled' : 'auth_failed';
+    callbackCode = null;
+    callbackHash = null;
+    callbackQuery = null;
+    callbackError = null;
+  } catch (_err){}
+
+  function cleanAuthCallback(){
+    if (!callbackPending) return;
+    try {
+      window.history.replaceState(null, '', window.location.pathname || '/account.html');
+      callbackPending = false;
+    } catch (_err){}
   }
+
+  function getAuthCallbackError(){ return authCallbackError; }
 
   function pickEnv(){
     var cfg = (window.SUPABASE_CONFIG || {});
@@ -63,23 +81,28 @@
   function getCurrentUser(){
     var client = getClient();
     if (!client || !client.auth || typeof client.auth.getSession !== 'function'){
+      // Deferred page scripts can still provide the SDK before DOMContentLoaded.
+      if (doc.readyState === 'loading'){
+        return new Promise(function(resolve){
+          doc.addEventListener('DOMContentLoaded', function(){ getCurrentUser().then(resolve); }, { once: true });
+        });
+      }
+      cleanAuthCallback();
       return Promise.resolve(null);
     }
 
-    return client.auth.getSession().then(function(res){
+    return Promise.resolve().then(function(){ return client.auth.getSession(); }).then(function(res){
       var session = res && res.data ? res.data.session : null;
       var user = session && session.user ? session.user : null;
-      var emailDomain = getEmailDomain(user && user.email);
       logDiag('supabase:session_initial', {
         hasSession: !!user,
-        hasEmail: !!(user && user.email),
-        userId: user && user.id ? user.id : null,
-        emailDomain: emailDomain,
-        sessionExpiresAt: session && session.expires_at ? session.expires_at : null
+        hasEmail: !!(user && user.email)
       });
+      cleanAuthCallback();
       return user;
     }).catch(function(err){
-      logDiag('supabase:session_error', { message: err && err.message ? String(err.message) : 'error' });
+      cleanAuthCallback();
+      logDiag('supabase:session_error', { code: 'session_failed' });
       return null;
     });
   }
@@ -95,7 +118,7 @@
       var token = session && session.access_token ? session.access_token : null;
       return token || null;
     }).catch(function(err){
-      logDiag('supabase:token_error', { message: err && err.message ? String(err.message) : 'error' });
+      logDiag('supabase:token_error', { code: 'session_failed' });
       return null;
     });
   }
@@ -136,14 +159,11 @@
     authSubscriptionAttached = true;
     var result = client.auth.onAuthStateChange(function(event, session){
       var user = session && session.user ? session.user : null;
-      var emailDomain = getEmailDomain(user && user.email);
       logDiag('supabase:auth_change', {
         event: event,
-        hasUser: !!user,
-        userId: user && user.id ? user.id : null,
-        emailDomain: emailDomain,
-        sessionExpiresAt: session && session.expires_at ? session.expires_at : null
+        hasUser: !!user
       });
+      if (event === 'SIGNED_IN' && user) authCallbackError = null;
       if (event === 'PASSWORD_RECOVERY'){
         recoveryPending = true;
         recoverySession = session || null;
@@ -178,7 +198,10 @@
     if (!client || !client.auth || typeof client.auth.signInWithPassword !== 'function'){
       return Promise.reject(new Error('Authentication client not ready'));
     }
-    return client.auth.signInWithPassword({ email: email, password: password });
+    return client.auth.signInWithPassword({ email: email, password: password }).then(function(result){
+      if (result && !result.error && result.data && result.data.session) authCallbackError = null;
+      return result;
+    });
   }
 
   function getAuthRedirectTo(){
@@ -190,6 +213,42 @@
     } catch (_err){
       return null;
     }
+  }
+
+  function isGoogleEnabled(){
+    return (window.SUPABASE_CONFIG || {}).AUTH_GOOGLE_ENABLED === true;
+  }
+
+  function signInWithGoogle(){
+    authCallbackError = null;
+    var client = getClient();
+    var redirectTo = getAuthRedirectTo();
+    if (!isGoogleEnabled() || !redirectTo || !client || !client.auth || !client.auth.signInWithOAuth){
+      return Promise.reject(new Error('google_unavailable'));
+    }
+    var env = pickEnv();
+    // Public Auth settings allow a useful retryable error before leaving Arcade.
+    return Promise.resolve().then(function(){
+      return fetch(env.url.replace(/\/$/, '') + '/auth/v1/settings', { headers: { apikey: env.key } });
+    }).then(function(response){
+      if (!response.ok) throw new Error('google_failed');
+      return response.json();
+    }).then(function(settings){
+      if (!settings.external || settings.external.google !== true) throw new Error('google_unavailable');
+      return client.auth.signInWithOAuth({ provider: 'google', options: {
+        redirectTo: redirectTo, scopes: 'openid email profile', skipBrowserRedirect: true
+      } });
+    }).then(function(result){
+      if (!result || result.error || !result.data || !result.data.url) throw new Error('google_failed');
+      var target = new URL(result.data.url);
+      if (target.origin !== new URL(env.url).origin || target.pathname !== '/auth/v1/authorize' || target.searchParams.get('provider') !== 'google'){
+        throw new Error('google_failed');
+      }
+      window.location.assign(target.href);
+    }).catch(function(error){
+      // Never expose raw SDK/provider errors or credential-bearing URLs.
+      throw new Error(error && error.message === 'google_unavailable' ? 'google_unavailable' : 'google_failed');
+    });
   }
 
   function signUp(email, password){
@@ -423,7 +482,7 @@
     // SIGN IN / OPEN ACCOUNT PAGE
     if (!isOnAccountPage()){
       // Important: do NOT close the popup before navigation
-      logDiag('supabase:navigate_account', { from: window.location.href || '' });
+      logDiag('supabase:navigate_account', {});
       navigateToAccount();
       return;
     }
@@ -503,6 +562,9 @@
     getCurrentUser: getCurrentUser,
     onAuthChange: onAuthChange,
     signIn: signIn,
+    isGoogleEnabled: isGoogleEnabled,
+    signInWithGoogle: signInWithGoogle,
+    getAuthCallbackError: getAuthCallbackError,
     signUp: signUp,
     requestPasswordReset: requestPasswordReset,
     updatePassword: updatePassword,
