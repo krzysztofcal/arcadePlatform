@@ -1074,7 +1074,8 @@
 
   function googleErrorMessage(code){
     if (code === 'google_unavailable') return t('googleUnavailable', 'Google sign-in is unavailable right now. Use email or try again later.');
-    if (code === 'google_cancelled') return t('googleCancelled', 'Google sign-in was cancelled. You can try again.');
+    if (code === 'auth_cancelled') return t('authCallbackCancelled', 'Sign-in was cancelled. You can try again.');
+    if (code === 'auth_failed') return t('authCallbackFailed', 'This sign-in or recovery link could not be used. Try again or request a new link.');
     return t('googleFailed', 'Could not sign in with Google. Please try again.');
   }
 
@@ -1305,7 +1306,7 @@
     auth.getCurrentUser().then(function(user){
       if (passwordRecoveryActive) return;
       renderUser(user);
-      var googleError = auth.getGoogleSignInError && auth.getGoogleSignInError();
+      var googleError = auth.getAuthCallbackError && auth.getAuthCallbackError();
       setStatus(googleError ? googleErrorMessage(googleError) : (user ? t('signedIn', 'Signed in.') : ''), googleError ? 'error' : (user ? 'success' : ''));
       if (user){
         loadChips();
@@ -1332,7 +1333,7 @@
           loadChips();
           refreshWelcomeBonus(user);
         } else {
-          var googleError = auth.getGoogleSignInError && auth.getGoogleSignInError();
+          var googleError = auth.getAuthCallbackError && auth.getAuthCallbackError();
           if (!signupConfirmationPending) setStatus(googleError ? googleErrorMessage(googleError) : t('signedOutNotice', 'You have been signed out.'), googleError ? 'error' : 'info');
           clearChips();
           setWelcomeBonusVisibility(false);

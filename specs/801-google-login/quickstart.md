@@ -21,7 +21,7 @@ Stage only: `krydukthwdvccggbyjfw` (arcade-portal-stage). Production provider ac
 `AUTH_GOOGLE_ENABLED=1` set via authorized Netlify integration in **deploy-preview / builds** only. Generated `SUPABASE_CONFIG.AUTH_GOOGLE_ENABLED` defaults false elsewhere. Google secret stays in Supabase, never Netlify/client. Deploy Preview continues to use existing pinned Stage Supabase config.
 
 ## Verification
-- PASS: `node --test tests/account-auth.contract.test.mjs` (8 cases); default-off, fixed origin redirect, basic scopes, provider unavailable, malicious authorize URL, callback cleanup/privacy and existing recovery replay.
+- PASS: `node --test tests/account-auth.contract.test.mjs` (9 cases); default-off, fixed origin redirect, basic scopes, provider unavailable, malicious authorize URL, callback cleanup/privacy and existing recovery replay.
 - PASS: `node tests/supabase-jwt-verify.test.mjs` (existing local/remote UUID verification).
 - PASS: `node --test tests/profile*.test.mjs` (7 existing profile/avatar cases).
 - PASS: `npm run syntax` (226 files), `npm run check:csp-inline` (55 documents), `git diff --check`.

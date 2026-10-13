@@ -22,13 +22,15 @@
   }
 
   var callbackPending = false;
-  var googleSignInError = null;
+  var authCallbackError = null;
   try {
     var callbackHash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
     var callbackQuery = new URLSearchParams(window.location.search || '');
     callbackPending = callbackHash.has('access_token') || callbackHash.has('error') || callbackQuery.has('error');
     var callbackError = callbackHash.get('error') || callbackQuery.get('error');
-    if (callbackError) googleSignInError = callbackError === 'access_denied' ? 'google_cancelled' : 'google_failed';
+    var callbackCode = callbackHash.get('error_code') || callbackQuery.get('error_code');
+    if (callbackError) authCallbackError = callbackError === 'access_denied' && !callbackCode ? 'auth_cancelled' : 'auth_failed';
+    callbackCode = null;
     callbackHash = null;
     callbackQuery = null;
     callbackError = null;
@@ -42,7 +44,7 @@
     } catch (_err){}
   }
 
-  function getGoogleSignInError(){ return googleSignInError; }
+  function getAuthCallbackError(){ return authCallbackError; }
 
   function pickEnv(){
     var cfg = (window.SUPABASE_CONFIG || {});
@@ -207,7 +209,7 @@
   }
 
   function signInWithGoogle(){
-    googleSignInError = null;
+    authCallbackError = null;
     var client = getClient();
     var redirectTo = getAuthRedirectTo();
     if (!isGoogleEnabled() || !redirectTo || !client || !client.auth || !client.auth.signInWithOAuth){
@@ -551,7 +553,7 @@
     signIn: signIn,
     isGoogleEnabled: isGoogleEnabled,
     signInWithGoogle: signInWithGoogle,
-    getGoogleSignInError: getGoogleSignInError,
+    getAuthCallbackError: getAuthCallbackError,
     signUp: signUp,
     requestPasswordReset: requestPasswordReset,
     updatePassword: updatePassword,

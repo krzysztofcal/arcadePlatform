@@ -115,7 +115,7 @@ test('Unconfigured Google and unsafe authorize URL fail closed without navigatio
 
 test('OAuth callback errors are controlled and scrubbed without logging provider text', async () => {
   const { auth, calls } = await googleHarness({ hash: '#error=access_denied&error_description=secret-provider-text' });
-  assert.equal(auth.getGoogleSignInError(), 'google_cancelled');
+  assert.equal(auth.getAuthCallbackError(), 'auth_cancelled');
   await auth.getCurrentUser();
   assert.equal(calls.history.at(-1), '/account.html');
   assert.doesNotMatch(JSON.stringify(calls.logs), /private-user|example.com|expires_at|secret-provider-text/);
@@ -127,4 +127,13 @@ test('Token callback history is cleaned after SDK consumption; recovery remains 
   await auth.getCurrentUser();
   assert.equal(calls.history.at(-1), '/account.html');
   assert.doesNotMatch(JSON.stringify(calls.logs), /secret|private-user|example.com/);
+});
+
+
+test('Password recovery callback errors stay generic even with Google disabled', async () => {
+  const { auth, calls } = await googleHarness({ enabled: false, hash: '#error=access_denied&error_code=otp_expired&error_description=private-text' });
+  assert.equal(auth.getAuthCallbackError(), 'auth_failed');
+  await auth.getCurrentUser();
+  assert.equal(calls.history.at(-1), '/account.html');
+  assert.doesNotMatch(JSON.stringify(calls.logs), /private-text/);
 });
