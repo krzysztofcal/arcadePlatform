@@ -26,7 +26,7 @@
   try {
     var callbackHash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
     var callbackQuery = new URLSearchParams(window.location.search || '');
-    callbackPending = callbackHash.has('access_token') || callbackHash.has('error') || callbackQuery.has('error');
+    callbackPending = callbackHash.has('access_token') || callbackHash.has('refresh_token') || callbackHash.has('error') || callbackQuery.has('error');
     var callbackError = callbackHash.get('error') || callbackQuery.get('error');
     var callbackCode = callbackHash.get('error_code') || callbackQuery.get('error_code');
     if (callbackError) authCallbackError = callbackError === 'access_denied' && !callbackCode ? 'auth_cancelled' : 'auth_failed';

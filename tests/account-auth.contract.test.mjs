@@ -147,11 +147,13 @@ test('Password recovery callback errors stay generic even with Google disabled',
 
 
 test('Unavailable Supabase SDK cleans access/refresh callback without leaking tokens', async () => {
-  for (const clientMode of ['missing', 'throws', 'broken', 'session-throws']) {
-    const { auth, calls } = await googleHarness({ clientMode, hash: '#access_token=secret&refresh_token=secret' });
+  for (const hash of ['#access_token=secret&refresh_token=secret', '#refresh_token=secret']) {
+   for (const clientMode of ['missing', 'throws', 'broken', 'session-throws']) {
+    const { auth, calls } = await googleHarness({ clientMode, hash });
     assert.equal(await auth.getCurrentUser(), null);
     assert.equal(calls.history.at(-1), '/account.html');
     assert.doesNotMatch(JSON.stringify(calls.logs), /secret/);
+   }
   }
 });
 
