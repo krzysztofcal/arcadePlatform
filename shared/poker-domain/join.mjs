@@ -851,8 +851,9 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           [tableId, userId]
         );
         const persisted = await readPersistedSeatIdentity({ tx, tableId, userId });
-        const reset = clearInactivityPenalty(stateRow.state, userId);
-        if (!reset.changed && stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
+        // Restoring an already-funded seat is transport recovery, not a
+        // human decision. Only accepted game actions clear missed turns.
+        if (stateAlreadyRepresentsActiveSeatRows(stateRow.state, seatRows, userId)) {
           if (!Number.isInteger(stateRow.version) || stateRow.version <= 0) {
             throw makeError("authoritative_state_invalid", "rejoin_state_version_invalid");
           }
@@ -883,7 +884,7 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           seatEntries: seatRows.map(asSeatSnapshot).filter(Boolean),
           fundedStackEntries: []
         });
-        const nextState = markFreshJoinWaitingForNextHand(clearInactivityPenalty(merged.state, userId).nextState, userId).state;
+        const nextState = markFreshJoinWaitingForNextHand(merged.state, userId).state;
         buildProjectedSnapshot({
           state: nextState,
           seatRows,

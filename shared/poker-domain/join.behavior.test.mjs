@@ -821,7 +821,7 @@ test("fresh FORCE_RESTRICTED join rejects an active bot table before buy-in", as
   assert.equal(ledgerCalls, 0);
 }));
 
-test("existing financed FORCE_RESTRICTED rejoin remains legal without a new debit", async () => withBotsDisabled(async () => {
+test("existing financed FORCE_RESTRICTED rejoin preserves penalty without a new debit", async () => withBotsDisabled(async () => {
   const tableId = "00000000-0000-4000-8000-0000000000fa";
   const userId = "00000000-0000-4000-8000-0000000000fb";
   let postTransactionCalls = 0;
@@ -872,10 +872,7 @@ test("existing financed FORCE_RESTRICTED rejoin remains legal without a new debi
   assert.equal(result.rejoin, true);
   assert.equal(result.stack, 100);
   assert.equal(postTransactionCalls, 0);
-  assert.deepEqual(penaltyWrite.missedTurnsByUserId, {});
-  assert.deepEqual(penaltyWrite.pendingAutoSitOutByUserId, {});
-  assert.deepEqual(penaltyWrite.sitOutByUserId, {});
-  assert.equal(penaltyWrite.stacks[userId], 100);
+  assert.equal(penaltyWrite, null, "reconnect does not mutate inactivity evidence");
 }));
 
 test("fresh FORCE_RESTRICTED join rejects SLOW-only and CONTINUOUS_BOT targets before buy-in", async () => withBotsDisabled(async () => {
@@ -3478,4 +3475,15 @@ for (const singlePlayer of [false, true]) test(`terminal inactivity rejects JOIN
   await assert.rejects(h.join, error => error.code === 'removed_for_inactivity');
   assert.deepEqual(h.read(), before);
   assert.equal(h.attempts.length, 0);
+});
+
+for (const singlePlayer of [false, true]) test(`funded reconnect preserves pre-threshold missed decisions without debit, singlePlayer=${singlePlayer}`, async () => {
+  const h = createSinglePlayerSmokeHarness({ singlePlayer, participated: true, humanActive: true });
+  h.read().state.missedTurnsByUserId = { 'smoke-owner': 1 };
+  const beforeLedger = structuredClone(h.read().ledger);
+  const result = await h.join();
+  assert.equal(result.ok, true);
+  assert.equal(result.rejoin, true);
+  assert.equal(h.read().state.missedTurnsByUserId['smoke-owner'], 1);
+  assert.deepEqual(h.read().ledger, beforeLedger);
 });

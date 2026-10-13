@@ -7687,7 +7687,12 @@ export function createInactiveCleanupExecutor({ env }) {
     );
     assert.equal(afterDisconnect.payload.members.some((member) => member.userId === "seat_user_closed"), false);
     sendFrame(observer, { version: "1.0", type: "table_state_sub", requestId: "sub-cleanup-closed-observer-post", ts: "2026-03-01T00:05:03Z", payload: { tableId, view: "snapshot" } });
-    const afterCleanup = await nextMessageOfType(observer, "stateSnapshot");
+    // Membership disappearance can precede financial cleanup. Ignore an
+    // unsolicited earlier snapshot and await the confirmed inert result.
+    const afterCleanup = await nextMessageMatching(observer, frame =>
+      frame?.type === "stateSnapshot" && frame?.roomId === tableId
+      && frame?.payload?.public?.hand?.status === "HAND_DONE"
+      && frame?.payload?.public?.turn?.userId === null, 5000);
     assert.equal(afterCleanup.payload.public.turn.userId, null);
 
     const versionAfterCleanup = afterCleanup.payload.stateVersion;

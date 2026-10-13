@@ -19,3 +19,7 @@ No new migrations/dependencies/frameworks/configuration/CSS/inline scripts. No d
 
 Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1099 (issue reference only, no automatic issue closure).
 GitHub CI on initial runtime commit: core, WS persistence integration, disposable accounting/retention integration, Playwright, CodeQL, CI/actionlint, WS deployment validation and catalog all passed. WS PR harness identified missing registration of ws_inactivity_ejection_pending; fixed in existing WARN/recovery policy and locally reverified before final CI. Final head rollup is recorded in PR handoff. WS deploy and funded integration jobs skipped as intended. Netlify frontend Preview: https://deploy-preview-1099--playkcswh.netlify.app (WS still NOT deployed).
+
+Final reconnect audit additionally removed the pre-existing clearInactivityPenalty calls from funded rejoin paths; actual JOIN regressions in both modes fail before the fix and pass after it, with counter=1 preserved and no debit. Existing FORCE_RESTRICTED rejoin test now verifies no inactivity state mutation. Shared JOIN suite: 83/83 PASS. A second CI run exposed an existing cleanup-test race (unsolicited pre-finalization snapshot); the fundamental WS test now waits for confirmed HAND_DONE/null turn, not membership disappearance, before checking terminal state. Runtime cleanup semantics were not changed for this test correction.
+
+After the reconnect/cleanup-test correction, independent subagent again approved with no blocking findings. Complete local WS server harness: 140/140 PASS.
