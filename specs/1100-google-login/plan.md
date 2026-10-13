@@ -20,7 +20,7 @@ PASS: reuse existing mechanisms; UUID remains authoritative; no financial action
 7. Draft PR with Preview, PASS/FAIL/NOT TESTED and external setup/rollback in `quickstart.md`.
 
 ## Research / current status
-Google is configured on Stage through the official Management API, with a dedicated Google Cloud Stage Web client. Existing verified-password account Google login/repeat/reload and SDK storage audit passed before review. New-account registration still requires a second real Google identity absent from Stage; Draft stays open until it passes. Current Stage Site URL is temporarily Preview #1101; proposed canonical address is `https://stage.play.kcswh.pl/account.html`, but a working Stage deployment/DNS must precede changing the fallback. The exact Preview remains in the Stage redirect allowlist. Production is untouched.
+Google is configured on Stage through the official Management API, with a dedicated Google Cloud Stage Web client. Existing verified-password account Google login/repeat/reload and SDK storage audit passed before review. New-account registration still requires a second real Google identity absent from Stage; Draft stays open until it passes. Current Stage Site URL is temporarily Preview #1101. The owner deferred permanent Stage URL configuration outside this issue; it is not a merge blocker and no new hosting/DNS will be created. Explicit redirectTo selects the current Preview. The exact Preview remains in the Stage redirect allowlist. Production is untouched.
 
 ## Review corrections
 - `getCurrentUser()`: if the SDK is unavailable while deferred scripts are loading, wait for DOMContentLoaded before deciding failure; cleanup when no functioning SDK remains, or after getSession settles. Handle synchronous SDK failures through the same promise error path.
@@ -30,4 +30,4 @@ Google is configured on Stage through the official Management API, with a dedica
 - Keep new-user Google registration pending; do not perform CH/Poker operations.
 
 ## Risks
-SDK-managed Google provider token persistence was observed and documented; no application-owned copies or forwarding observed. Initial first-consent callback failed once, with cause unknown; later existing-user attempts passed. New-user evidence and canonical Stage hosting remain pending.
+SDK-managed Google provider token persistence was observed and documented; no application-owned copies or forwarding observed. Initial first-consent callback failed once, with cause unknown; later existing-user attempts passed. New-user evidence remains required. The temporary Stage default is a documented limitation; permanent hosting/URL configuration is deferred and nonblocking.
