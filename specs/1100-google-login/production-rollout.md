@@ -9,7 +9,7 @@ Reuse merged PR #1101; no auth/session refactor, PKCE, new providers, schema mig
 - Netlify project `playkcswh`, site ID `f7e19a84-28f7-41f7-978a-f3b4552a404d`; current ready Production deploy `6aceaefdf40f0609c1192e3c`, commit `788af6ebc724702bd6f2f12979b721d8fb5b4b75` (merge #1101). Site has no password or team-SSO gate. Production build flag currently false; preview flag stays enabled in `netlify.toml`.
 - Stage remains separate: `krydukthwdvccggbyjfw`, Google Cloud `arcade-hub-stage-1100`. Both existing verified-password identity continuity and genuinely new Google identity/profile/repeat UUID passed Stage. Final PR HEAD checks were 23 PASS / 7 expected skips.
 - Production privacy and terms EN URLs return HTTP200. Existing privacy text covers generic Auth/Supabase but Google-specific access/use/storage/sharing is missing; Google Analytics mention is unrelated.
-- Google Production project/client and Search Console ownership are NOT VERIFIED yet: private browser currently needs owner reauthentication. No new Production Google project/client has been created. No existing Stage project will be republished as Production.
+- Google Production project `arcade-hub-prod-1100` and standard Web client are now prepared and verified; private credentials have not been applied to Production Supabase. Search Console domain ownership is still pending and is required before activation by owner decision. Stage project is unchanged.
 
 ## Required Google configuration (after GO)
 
@@ -50,7 +50,7 @@ PL: „Jeśli wybierzesz logowanie Google, Google przekazuje identyfikator konta
 - No service-role key or Google client secret is exposed to browser. Existing public Supabase publishable/anon key remains public; never substitute admin key. Existing JWT/RLS/profile identity architecture remains; automatic verified-email identity linking, no manual profile/UUID merge or new linking UI.
 - Existing Production `https://*.netlify.app` allowlist is broader than needed for Google V1. Record as a preexisting redirect exposure and do not silently remove entries without auditing other password/recovery consumers. Production Google client accepts only Production Supabase callback and this UI sends only same-origin account redirect. This does not make the existing Supabase allowlist exact-only.
 - Implicit flow and SDK local session persistence are deliberate accepted V1 limitations; access/refresh fragments are transient before SDK consumption. SDK may store provider_token. No unsupported claim of zero exposure or no token persistence; no PKCE/session rewrite in this rollout.
-- Domain ownership, Production Google brand status and required verification are pending actual Console inspection, not PASS. Netlify write permission is not proven by read access.
+- Domain ownership remains pending; owner requires it before activation. Branding verification is deferred; optional logo/name must not block basic V1. Netlify write permission is not proven by read access.
 
 ## Rollback (after GO, on callback/auth/profile/identity failure)
 
@@ -74,7 +74,7 @@ PL: „Jeśli wybierzesz logowanie Google, Google przekazuje identyfikator konta
 - [Netlify playkcswh](https://app.netlify.com/projects/playkcswh/configuration/env)
 - [Netlify environment contexts/build scopes](https://docs.netlify.com/build/configure-builds/environment-variables/)
 
-Prepared status: plan/security/rollback COMPLETE; Production OAuth configuration/publication/activation/deploy/E2E NOT EXECUTED, awaiting explicit GO. Google inventory/domain read awaits owner authentication only.
+Prepared status: Google project/Web client/basic scopes COMPLETE; private credentials not yet applied to Supabase. Domain ownership pending; branding deferred. Public publication, provider activation, Netlify flag/deploy and Production E2E NOT EXECUTED, awaiting explicit GO. Privacy publication dates must be rechecked against the actual deployment date before owner-authorized merge.
 
 ## Read-only audit follow-up
 See [production-audit.md](production-audit.md) for completed Google inventory, Stage Owner role, Search Console explicit no-access result, conditional brand-verification requirement and superseding final privacy paragraphs. No Production mutation was made.

@@ -1,8 +1,18 @@
 # Production Google Login V1 — read-only Google audit
 
-Audit date: 2026-10-13 UTC. No Cloud resource creation, OAuth client creation, policy acceptance, domain verification submission, publication, Supabase configuration change or Netlify deploy was performed.
+Initial read-only audit date: 2026-10-13 UTC. The initial audit made no mutations; the later authorized preparation is recorded below. Current status takes precedence over historical checkpoints.
 
-## Findings
+
+## Current final preparation status
+
+- READY: separate Google Production project and standard Web client created; exact Production origin/callback and three basic scopes verified; credentials private only.
+- Google Audience remains External/Testing; not published. Branding verification deferred by owner and not an activation requirement for optional name/logo.
+- REQUIRED BEFORE ACTIVATION by owner decision: Search Console ownership of kcswh.pl. Exact existing TXT challenge confirmed in browser; expected DNS record absent at latest check. Authoritative nameservers dns1–dns4.p09.nsone.net. No DNS mutation by agent.
+- Supabase Production Google=false and client absent; Netlify Production Google UI flag=false. No user/CH/ledger/Poker changes.
+- Privacy PL/EN approved in principle; PR #1102 remains Draft awaiting owner merge GO. Dates currently 2026-10-13 (PL13-10-2026), today's UTC date, are preparation dates until publication. Recheck and set both to the actual intended Production deployment date immediately before owner-authorized merge; do not invent a future date or claim the policy is deployed.
+- Publication, provider activation, production build flag, deployment and Production E2E remain unauthorized and unperformed.
+
+## Historical read-only findings
 
 - Authenticated Cloud Resource Manager lists Arcade Hub Stage (`arcade-hub-stage-1100`), Gemini API (`gen-lang-client-0448800862`) and My First Project (`predictive-fx-464622-f7`). No dedicated Arcade Production project is visible to this account. The Stage IAM page shows the Owner role and the Auth Platform is accessible. Effective permission/quota to create a new project/client cannot be proven without the deferred mutation; the Console offers project creation and the account previously created the Stage Web client successfully.
 - Stage Verification Center says verification is not required because publishing status is Testing. This is Stage evidence, not approval of a future Production app.
@@ -45,7 +55,7 @@ Rollback is in production-rollout.md: disable only Supabase Google first, restor
 
 Audit COMPLETE within current account visibility. Production project/client creation permission and Google's acceptance of future config are not write-tested. Await owner GO for all mutations.
 
-## Authorized preparation — 2026-10-13
+## Historical preparation checkpoint — superseded below
 
 Owner authorized project/client and privacy preparation, not public activation. Created separate `arcade-hub-prod-1100` (Arcade Hub Production). Auth configuration wizard has Arcade Hub name, owner support selection, External audience and developer contact contact@kcswh.pl; it is stopped at the owner's Google API User Data Policy checkbox. No client/secret exists yet; creation is pending that exact user step. No audience publication was performed.
 
