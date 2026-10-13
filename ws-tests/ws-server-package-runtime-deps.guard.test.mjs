@@ -22,11 +22,6 @@ test("ws table snapshot runtime stays inside ws-server package boundary", () => 
   );
   assert.match(
     snapshot,
-    /from\s+"\.\.\/snapshot-runtime\/poker-cards-utils\.mjs"/,
-    "WS runtime boundary: table-snapshot must import ws-server local card identity helper"
-  );
-  assert.match(
-    snapshot,
     /from\s+"\.\.\/snapshot-runtime\/poker-hole-cards-store\.mjs"/,
     "WS runtime boundary: table-snapshot must import ws-server local hole cards store helper"
   );
@@ -40,10 +35,10 @@ test("ws table snapshot runtime stays inside ws-server package boundary", () => 
     /from\s+"\.\.\/snapshot-runtime\/poker-state-utils\.mjs"/,
     "WS runtime boundary: table-snapshot must import ws-server local state utils helper"
   );
-  assert.match(
+  assert.doesNotMatch(
     snapshot,
-    /from\s+"\.\.\/snapshot-runtime\/poker-state-write\.mjs"/,
-    "WS runtime boundary: table-snapshot must import ws-server local optimistic state write helper"
+    /updatePokerStateOptimistic|maybeApplyTurnTimeout/,
+    "WS snapshot reads must not own timeout mutations or state writes"
   );
   assert.match(
     snapshot,

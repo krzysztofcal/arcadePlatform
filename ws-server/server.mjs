@@ -62,7 +62,7 @@ import {
   shouldClearBotTimeoutSafetySuppression,
   shouldSuppressBotTimeoutSafetyRetry
 } from "./poker/handlers/bot-autoplay.mjs";
-import { handleLeaveCommand } from "./poker/handlers/leave.mjs";
+import { handleLeaveCommand, reconcileInactivityEjectionsCommand, listPendingInactivityLeaveEntries } from "./poker/handlers/leave.mjs";
 import { handleRebuyCommand } from "./poker/handlers/rebuy.mjs";
 import { createTableCommandQueue } from "./poker/runtime/table-command-queue.mjs";
 import { recoverFromPersistConflict } from "./poker/runtime/persist-conflict-recovery.mjs";
@@ -2332,6 +2332,11 @@ async function syncCleanupRuntimeState({ tableId, result, logPrefix, onRestore =
     return { ok: true, changed: false, evicted: false, restored: false };
   }
   if (shouldEvictClosedRuntimeTable(tableId, result)) {
+    if (Object.keys(tableManager.persistedPokerState(tableId)?.inactivityEjectionByUserId || {}).length > 0) {
+      const restored = await restoreTableFromPersisted(tableId);
+      if (!restored?.ok) return { ok: false, changed: true, restored: false };
+      broadcastStateSnapshots(tableId);
+    }
     evictClosedRuntimeTable({ tableId, logPrefix, status: result?.status || null });
     return { ok: true, changed: true, evicted: true, restored: false };
   }
@@ -2596,6 +2601,12 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
   }
   klogVerbose("ws_settled_rollover_start", () => ({ tableId, attempt }), { tableId });
   if (!isGuestTableId(tableId) && hasSupabaseDbUrl) {
+    const ejection = await reconcileInactivityEjections(tableId);
+    if (ejection?.ok !== true) {
+      scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+      return finishSettledRollover(ejection);
+    }
+    if (tableManager.isTableClosed(tableId)) return finishSettledRollover({ ok: true, closed: true });
     const finalizeDeferredLeaves = await loadDeferredLeaveFinalizer();
     const finalized = await finalizeDeferredLeaves({ tableId });
     if (finalized?.ok !== true) {
@@ -2604,7 +2615,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
         code: finalized?.code || "unknown",
         retryable: finalized?.retryable !== false,
       });
-      if (finalized?.retryable !== false) {
+      // A durable terminal intent must remain recoverable after an accounting
+      // failure is repaired. Existing slow retries still revalidate every claim.
+      if (finalized?.retryable !== false || Object.keys(pokerState?.inactivityEjectionByUserId || {}).length > 0) {
         scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
       }
       return finishSettledRollover(finalized);
@@ -3848,9 +3861,22 @@ async function sweepOpenTableJanitorAndBroadcast() {
   })));
 }
 
+async function reconcileInactivityEjections(tableId) {
+  if (isGuestTableId(tableId) || !hasSupabaseDbUrl) return { ok: true };
+  return reconcileInactivityEjectionsCommand({ tableId, tableManager, loadAuthoritativeLeaveExecutor,
+    restoreTableFromPersisted, broadcastStateSnapshots, broadcastTableState, klog: klogSafe });
+}
+
 async function sweepTurnTimeoutsAndBroadcast() {
   const nowMs = Date.now();
   pruneBotTimeoutSafetySuppressions();
+  const ejectionTables = tableManager.listTableIds().filter(tableId =>
+    !tableManager.isTableClosed(tableId)
+    && listPendingInactivityLeaveEntries(tableManager.persistedPokerState(tableId)).length > 0);
+  if (ejectionTables.length > 0) await Promise.allSettled(ejectionTables.map(tableId => enqueueTableCommand({
+    tableId, commandName: "inactivity_ejection", dedupeKey: "inactivity_ejection",
+    run: () => reconcileInactivityEjections(tableId)
+  })));
   const timeoutUpdates = tableManager.listDueTurnTimeouts({
     nowMs,
     shouldProcessTable: (tableId) => (
@@ -3900,6 +3926,7 @@ async function sweepTurnTimeoutsAndBroadcast() {
         tableId: update.tableId,
         nowMs,
         tableManager,
+        reconcileInactivityEjections,
         persistMutatedState,
         restoreTableFromPersisted,
         broadcastResyncRequired,

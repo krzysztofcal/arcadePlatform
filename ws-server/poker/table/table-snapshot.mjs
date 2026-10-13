@@ -1,11 +1,9 @@
 import { beginSql, klog } from "../persistence/sql-admin.mjs";
 import { deriveCommunityCards, deriveDeck, deriveRemainingDeck } from "../snapshot-runtime/poker-deal-deterministic.mjs";
-import { cardIdentity } from "../snapshot-runtime/poker-cards-utils.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../snapshot-runtime/poker-hole-cards-store.mjs";
 import { buildActionConstraints, computeLegalActions } from "../snapshot-runtime/poker-legal-actions.mjs";
-import { isStateStorageValid, normalizeJsonState, withoutPrivateState } from "../snapshot-runtime/poker-state-utils.mjs";
-import { updatePokerStateOptimistic } from "../snapshot-runtime/poker-state-write.mjs";
-import { maybeApplyTurnTimeout, normalizeSeatOrderFromState } from "../snapshot-runtime/poker-turn-timeout.mjs";
+import { normalizeJsonState, withoutPrivateState } from "../snapshot-runtime/poker-state-utils.mjs";
+import { normalizeSeatOrderFromState } from "../snapshot-runtime/poker-turn-timeout.mjs";
 
 const KNOWN_SNAPSHOT_FAILURE_CODES = new Set([
   "invalid_table_id",
@@ -65,18 +63,6 @@ function normalizeSeats(seatRows) {
   }));
 }
 
-function cardsSameSet(left, right) {
-  if (!Array.isArray(left) || !Array.isArray(right)) return false;
-  if (left.length !== right.length) return false;
-  const leftKeys = left.map(cardIdentity).sort();
-  const rightKeys = right.map(cardIdentity).sort();
-  if (leftKeys.some((key) => !key) || rightKeys.some((key) => !key)) return false;
-  for (let i = 0; i < leftKeys.length; i += 1) {
-    if (leftKeys[i] !== rightKeys[i]) return false;
-  }
-  return true;
-}
-
 function applyDerivedCards(state) {
   if (!state || typeof state !== "object" || Array.isArray(state)) return state;
   const handSeed = typeof state.handSeed === "string" ? state.handSeed.trim() : "";
@@ -99,7 +85,7 @@ function applyDerivedCards(state) {
   return out;
 }
 
-async function loadSnapshotInTx({ tx, tableId, userId, nowMs = Date.now() }) {
+async function loadSnapshotInTx({ tx, tableId, userId }) {
   const tableRows = await tx.unsafe("select id from public.poker_tables where id = $1 limit 1;", [tableId]);
   if (!tableRows?.[0]) {
     return { ok: false, code: "table_not_found" };
@@ -119,9 +105,8 @@ async function loadSnapshotInTx({ tx, tableId, userId, nowMs = Date.now() }) {
     return { ok: false, code: "state_missing" };
   }
 
-  let stateVersion = Number(stateRow.version);
-  let expectedVersion = Number(stateVersion);
-  let updatedState = normalizeJsonState(stateRow.state);
+  const stateVersion = Number(stateRow.version);
+  const updatedState = normalizeJsonState(stateRow.state);
 
   const stateSeatUserIds = normalizeSeatOrderFromState(updatedState.seats);
   const activeUserIds = Array.isArray(activeSeatRows)
@@ -144,78 +129,8 @@ async function loadSnapshotInTx({ tx, tableId, userId, nowMs = Date.now() }) {
     }
   }
 
-  if (Number.isFinite(Number(updatedState.turnDeadlineAt)) && nowMs > Number(updatedState.turnDeadlineAt)) {
-    const requiredSet = new Set(activeUserIds.length ? activeUserIds : stateSeatUserIds);
-    const timeoutSeatUserIdsInOrder = stateSeatUserIds.filter((id) => requiredSet.has(id));
-
-    if (timeoutSeatUserIdsInOrder.length > 0 && typeof updatedState.handSeed === "string" && updatedState.handSeed.trim()) {
-      const derivedCommunity = deriveCommunityCards({
-        handSeed: updatedState.handSeed,
-        seatUserIdsInOrder: timeoutSeatUserIdsInOrder,
-        communityDealt: updatedState.communityDealt
-      });
-
-      if (!cardsSameSet(updatedState.community, derivedCommunity)) {
-        return { ok: false, code: "state_invalid" };
-      }
-
-      const derivedDeck = deriveRemainingDeck({
-        handSeed: updatedState.handSeed,
-        seatUserIdsInOrder: timeoutSeatUserIdsInOrder,
-        communityDealt: updatedState.communityDealt
-      });
-
-      const privateState = {
-        ...updatedState,
-        community: derivedCommunity,
-        deck: derivedDeck,
-        holeCardsByUserId
-      };
-
-      const timeoutResult = maybeApplyTurnTimeout({
-        tableId,
-        state: updatedState,
-        privateState,
-        nowMs
-      });
-
-      if (timeoutResult?.applied) {
-        if (!isStateStorageValid(timeoutResult.state, { requireHandSeed: true, requireCommunityDealt: true, requireNoDeck: true })) {
-          return { ok: false, code: "state_invalid" };
-        }
-
-        await tx.unsafe("select set_config('lock_timeout', '200ms', true);");
-        await tx.unsafe("select set_config('statement_timeout', '4000ms', true);");
-
-        try {
-          const updateResult = await updatePokerStateOptimistic(tx, {
-            tableId,
-            expectedVersion,
-            nextState: timeoutResult.state
-          });
-
-          if (updateResult.ok) {
-            const newVersion = Number(updateResult.newVersion);
-            stateVersion = newVersion;
-            expectedVersion = newVersion;
-            updatedState = timeoutResult.state;
-
-            await tx.unsafe(
-              "insert into public.poker_actions (table_id, version, user_id, action_type, amount) values ($1, $2, $3, $4, $5);",
-              [tableId, newVersion, timeoutResult.action.userId, timeoutResult.action.type, timeoutResult.action.amount ?? null]
-            );
-          }
-        } catch (error) {
-          const code = String(error?.code || "");
-          if (code !== "55P03" && code !== "57014") {
-            throw error;
-          }
-          klog("ws_table_snapshot_timeout_apply_skipped", { tableId, code });
-        }
-      }
-    }
-  }
-
+  // Snapshot requests are reads. Expired decisions are committed exclusively
+  // by the authoritative per-table timeout queue, never by this DB projection.
   const seats = normalizeSeats(seatRows);
   const amSeated = seats.some((seat) => seat.status === "ACTIVE" && !seat.isBot && seat.userId === userId);
   const withDerived = applyDerivedCards(updatedState);

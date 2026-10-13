@@ -115,12 +115,12 @@ const materializeIfNeededPublic = (state, privateHoleCards) => {
   return next;
 };
 
-const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
+const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs, isSinglePlayer = false }) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return { applied: false, state };
   if (!isActionPhase(state.phase) || !state.turnUserId) return { applied: false, state };
   const deadline = Number(state.turnDeadlineAt);
   const now = Number.isFinite(nowMs) ? nowMs : Date.now();
-  if (!Number.isFinite(deadline) || now < deadline) return { applied: false, state };
+  if (typeof state.turnDeadlineAt !== "number" || !Number.isFinite(deadline) || now < deadline) return { applied: false, state };
 
   const action = getTimeoutAction(state);
   if (!action) return { applied: false, state };
@@ -169,7 +169,7 @@ const maybeApplyTurnTimeout = ({ tableId, state, privateState, nowMs }) => {
       [action.userId]: requestId,
     },
   };
-  const policyResult = applyInactivityPolicy(updatedState, events);
+  const policyResult = applyInactivityPolicy(updatedState, events, { isSinglePlayer });
   const finalState = policyResult.state;
   return {
     applied: true,

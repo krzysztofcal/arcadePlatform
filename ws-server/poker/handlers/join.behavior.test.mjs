@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { handleJoinCommand } from './join.mjs';
+import { createAuthoritativeJoinExecutor } from '../persistence/authoritative-join-adapter.mjs';
 import { createTableManager } from '../table/table-manager.mjs';
 import { adaptPersistedBootstrap } from '../bootstrap/persisted-bootstrap-adapter.mjs';
 import { notifyWsLobbyMaterialize } from '../../../netlify/functions/_shared/poker-ws-runtime-notify.mjs';
@@ -664,4 +665,22 @@ test('trusted normal materialization explicitly sends Online mode and preserves 
   assert.equal(notified.ok, true);
   await handleJoinCommand(ctx);
   assert.equal(calls.command[0]?.status, 'accepted');
+});
+
+
+test('actual JOIN adapter preserves inactivity rejection in WS commandResult before runtime seating', async () => {
+  const { ctx, calls } = baseCtx({ autoSeat: true, buyIn: 100 });
+  ctx.authoritativeJoinEnabled = true;
+  ctx.persistedBootstrapEnabled = true;
+  ctx.loadAuthoritativeJoinExecutor = async () => createAuthoritativeJoinExecutor({ env: {},
+    loadPostTransactionFn: async () => async () => { throw new Error('unexpected debit'); },
+    loadLockedStateHelpersFn: async () => ({ loadStateForUpdate: async () => ({}),
+      updateStateLocked: async () => ({}), validateStateForStorage: () => true }),
+    loadJoinModule: async () => ({ executePokerJoinAuthoritative: async () => {
+      throw Object.assign(new Error('removed_for_inactivity'), { code: 'removed_for_inactivity' });
+    } }) });
+  await handleJoinCommand(ctx);
+  assert.deepEqual(calls.command, [{ requestId: 'r1', tableId: 't1', status: 'rejected', reason: 'removed_for_inactivity' }]);
+  assert.equal(calls.joinArgs, null);
+  assert.equal(calls.snapshots, 0);
 });

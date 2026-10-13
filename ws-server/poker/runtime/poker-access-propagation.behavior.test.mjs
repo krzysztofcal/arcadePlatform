@@ -643,7 +643,8 @@ async function settledRolloverRuntimeFixture(options = {}) {
     pokerLogRuntimeControl: { mayBuildDebugPayload: () => false },
     isGuestTableId: () => false,
     hasSupabaseDbUrl: true,
-    loadDeferredLeaveFinalizer: async () => async () => ({ ok: true, changed: false }),
+    reconcileInactivityEjections: async () => ({ ok: true }),
+    loadDeferredLeaveFinalizer: async () => async () => options.finalizerResult || ({ ok: true, changed: false }),
     syncCleanupRuntimeState: async () => ({ ok: true }),
     applyInactiveCleanupAndBroadcast: async () => ({ ok: true, changed: false }),
     handleContinuousBotRotationAtSettled: async () => ({ handled: false }),
@@ -996,4 +997,50 @@ test("normalizeWsPokerAccessPayload includes slowThresholdCh, slowHysteresisBps,
   assert.equal(payload.automaticClass, "NORMAL");
   assert.equal(payload.override, "AUTO");
   assert.equal(payload.effectiveClass, "NORMAL");
+});
+
+
+test('durable inactivity accounting failure stays settled and uses existing rollover retry', async () => {
+  const runtime = await settledRolloverRuntimeFixture({ finalizerResult: { ok: false, code: 'terminal_accounting_invariant_failed', retryable: false } });
+  const tableId = 'table_inactivity_retry';
+  const state = { tableId, phase: 'SETTLED', handId: 'h1', seats: [], stacks: {},
+    inactivityEjectionByUserId: { inactive: { handId: 'h1', isSinglePlayer: true } } };
+  runtime.tableManager.restoreTableFromPersisted(tableId, { coreState: { version: 1, seats: {}, members: [], pokerState: state },
+    tableMeta: { isSinglePlayer: true }, persistedVersion: 1 });
+  const generationKey = runtime.settledRolloverGenerationKey(tableId);
+  const result = await runtime.runSettledRolloverCommand({ tableId, generationKey });
+  assert.equal(result.ok, false);
+  assert.equal(runtime.getRetries().length, 1);
+  assert.equal(runtime.getPersistedCount(), 0);
+  assert.equal(runtime.tableManager.persistedPokerState(tableId).phase, 'SETTLED');
+});
+
+test('timeout sweep queues only unresolved Leave work and keeps completed/deferred tombstones without repeated work', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const leave = await import('../handlers/leave.mjs');
+  const source = await readFile(new URL('../../server.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('async function sweepTurnTimeoutsAndBroadcast()'), source.indexOf('function readJsonBody('));
+  const marker = { inactive: { handId: 'h1', isSinglePlayer: false } };
+  const states = {
+    completed: { seats: [], stacks: {}, inactivityEjectionByUserId: marker },
+    pending: { seats: [{ userId: 'inactive', seatNo: 1 }], stacks: { inactive: 25 }, inactivityEjectionByUserId: marker },
+    deferred: { seats: [{ userId: 'inactive', seatNo: 1 }], stacks: { inactive: 25 }, leftTableByUserId: { inactive: true }, inactivityEjectionByUserId: marker },
+    closed: { seats: [{ userId: 'inactive', seatNo: 1 }], stacks: {}, inactivityEjectionByUserId: marker }
+  };
+  const queued = [];
+  const deps = {
+    tableManager: { listTableIds: () => Object.keys(states), persistedPokerState: id => states[id],
+      isTableClosed: id => id === 'closed', listDueTurnTimeouts: () => [] },
+    pruneBotTimeoutSafetySuppressions: () => {},
+    listPendingInactivityLeaveEntries: leave.listPendingInactivityLeaveEntries,
+    enqueueTableCommand: async command => { queued.push(command.tableId); return command.run(); },
+    reconcileInactivityEjections: async tableId => { states[tableId] = { ...states[tableId], seats: [], stacks: {} }; }
+  };
+  const sweep = new Function(...Object.keys(deps), code + '\nreturn sweepTurnTimeoutsAndBroadcast;')(...Object.values(deps));
+  await sweep();
+  assert.deepEqual(queued, ['pending']);
+  await sweep();
+  assert.deepEqual(queued, ['pending'], 'resolved tombstone creates no new queued command');
+  assert.equal(states.completed.inactivityEjectionByUserId.inactive.handId, 'h1');
+  assert.equal(states.deferred.stacks.inactive, 25, 'deferred claim stays owned for settlement finalizer');
 });

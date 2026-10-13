@@ -25,6 +25,7 @@ const makeMocks = () => {
   const requests = new Map();
   const tx = { unsafe: async (query, params) => {
     const text = String(query).toLowerCase();
+    if (text.includes("select lifecycle_kind, managed_profile_key from public.poker_tables")) return [state.tableMeta || {}];
     if (text.includes("select id, status from public.poker_tables")) return [{ id: tableId, status: tableStatus }];
     if (text.includes("from public.poker_state")) return [{ version: state.version, state: state.value }];
     if (text.includes("select seat_no, status, stack from public.poker_seats") && text.includes("for update")) {
@@ -791,6 +792,32 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(ctx.calls.closeTable, 0);
   assert.equal(result.state.state.phase, "HAND_DONE");
   assert.equal(logEvents.some((entry) => entry.name === "poker_leave_table_close_skipped_human_presence"), true);
+}
+
+// Inactivity close must be independent of the ejected human's still-connected socket.
+for (const managed of [false, true]) {
+  const ctx = makeMocks();
+  ctx.state.value.inactivityEjectionByUserId = { [userId]: { handId: "hand-1", isSinglePlayer: !managed } };
+  if (managed) ctx.state.tableMeta = { lifecycle_kind: "CONTINUOUS_BOT", managed_profile_key: "CONTINUOUS_BOT_DEFAULT" };
+  const execute = loadExecutePokerLeave(ctx.mocks);
+  const args = { beginSql: ctx.beginSql, tableId, userId, requestId: "inactivity-hand-1", includeState: true,
+    inactivityEjection: true, hasConnectedHumanPresence: () => true, klog: () => {} };
+  const first = await execute(args);
+  assert.equal(first.ok, true);
+  assert.equal(ctx.calls.cashouts, 1);
+  assert.equal(ctx.calls.terminalCloses, managed ? 0 : 1);
+  assert.equal(first.state.state.inactivityEjectionByUserId[userId].isSinglePlayer, !managed);
+  const retry = await execute(args);
+  assert.equal(retry.ok, true);
+  assert.equal(ctx.calls.cashouts, 1);
+  assert.equal(ctx.calls.terminalCloses, managed ? 0 : 1);
+}
+{
+  const ctx = makeMocks();
+  await assert.rejects(loadExecutePokerLeave(ctx.mocks)({ beginSql: ctx.beginSql, tableId, userId,
+    requestId: "untrusted-inactivity", inactivityEjection: true, klog: () => {} }),
+    error => error.code === "inactivity_intent_missing");
+  assert.equal(ctx.calls.cashouts, 0);
 }
 
 console.log("poker-domain leave behavior test passed");

@@ -56,7 +56,7 @@ register("DEBUG", "janitor", [
 ]);
 
 register("WARN", "accounting", ["ws_gift_purchase_rejected"]);
-register("WARN", "recovery", ["ws_gift_state_unavailable"]);
+register("WARN", "recovery", ["ws_gift_state_unavailable", "ws_inactivity_ejection_pending"]);
 
 register("DEBUG", "persistence", [
   "ws_state_persist_result",
@@ -327,8 +327,7 @@ register("ERROR", "transport", [
 ]);
 
 register("WARN", "gameplay", [
-  "ws_table_snapshot_empty_legal_actions",
-  "ws_table_snapshot_timeout_apply_skipped"
+  "ws_table_snapshot_empty_legal_actions"
 ]);
 
 register("ERROR", "gameplay", [

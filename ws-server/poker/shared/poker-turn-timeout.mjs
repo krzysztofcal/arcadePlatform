@@ -54,7 +54,7 @@ function decideTurnTimeout({ pokerState, nowMs, turnMs = TURN_MS }) {
 
   const deadline = Number(pokerState.turnDeadlineAt);
   const now = Number.isFinite(nowMs) ? Math.trunc(nowMs) : Date.now();
-  if (!Number.isFinite(deadline)) {
+  if (typeof pokerState.turnDeadlineAt !== "number" || !Number.isFinite(deadline)) {
     return { due: false, reason: "deadline_missing" };
   }
   if (now < deadline) {

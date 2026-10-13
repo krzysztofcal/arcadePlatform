@@ -93,7 +93,8 @@ export function isContinuationEligibleByStack(userId, stacksByUserId, { isBot = 
 }
 
 export function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
-  const members = orderedSeatMembers(coreState).filter(member => !coreState?.pokerState?.sitOutByUserId?.[member.userId]
+  const members = orderedSeatMembers(coreState).filter(member => !coreState?.pokerState?.inactivityEjectionByUserId?.[member.userId]
+    && !coreState?.pokerState?.sitOutByUserId?.[member.userId]
     && !coreState?.pokerState?.leftTableByUserId?.[member.userId]);
   if (!stacksByUserId || typeof stacksByUserId !== "object" || Array.isArray(stacksByUserId)) {
     return members;
@@ -126,7 +127,7 @@ export function buildBootstrappedPokerState({
     return null;
   }
 
-  const inactivity = { missedTurnsByUserId: {}, pendingAutoSitOutByUserId: {}, sitOutByUserId: {} };
+  const inactivity = { inactivityEjectionByUserId: { ...(coreState.pokerState?.inactivityEjectionByUserId || {}) }, missedTurnsByUserId: {}, pendingAutoSitOutByUserId: {}, sitOutByUserId: {} };
   for (const userId of Object.keys(coreState.seats || {})) {
     if (!Number.isInteger(coreState.seats[userId]) || coreState.seats[userId] < 1
       || coreState.pokerState?.leftTableByUserId?.[userId]) continue;
@@ -578,6 +579,9 @@ export function applyCoreStateAction({ tableId, coreState, handId, userId, actio
     return { ok: true, accepted: false, changed: false, reason: "hand_mismatch", stateVersion: coreState.version, coreState };
   }
 
+  if (!isTimeout && liveState.inactivityEjectionByUserId?.[userId]) {
+    return { ok: true, accepted: false, changed: false, reason: "removed_for_inactivity", stateVersion: coreState.version, coreState };
+  }
   const seat = Number.isInteger(coreState.seats?.[userId]) ? coreState.seats[userId] : null;
   if (!Number.isInteger(seat)) {
     return { ok: true, accepted: false, changed: false, reason: "not_seated", stateVersion: coreState.version, coreState };
@@ -685,7 +689,7 @@ export function decideCoreStateTurnTimeout({ coreState, nowMs = Date.now() }) {
   return { due: true, liveState, decision, stateVersion: coreState.version };
 }
 
-export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now() }) {
+export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now(), isSinglePlayer = false }) {
   const liveState = asLiveHandState(coreState?.pokerState);
   if (!liveState) {
     return { ok: true, changed: false, reason: "hand_not_live", stateVersion: coreState.version, coreState };
@@ -774,7 +778,7 @@ export function applyCoreStateTurnTimeout({ tableId, coreState, nowMs = Date.now
     const previous = liveState.missedTurnsByUserId?.[actorUserId];
     const count = Number.isInteger(previous) && previous >= 0 ? previous + 1 : 1;
     const counted = patchMissedTurnsByUserId(nextCoreState.pokerState, actorUserId, count).nextState;
-    nextCoreState.pokerState = applyInactivityPolicy(counted).state;
+    nextCoreState.pokerState = applyInactivityPolicy(counted, [], { isSinglePlayer }).state;
   }
 
   return {

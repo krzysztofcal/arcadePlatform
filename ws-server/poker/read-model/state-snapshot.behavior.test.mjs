@@ -567,3 +567,14 @@ test("buildStateSnapshotPayload exposes projected RAISE minimum for a seated vie
   assert.equal(payload.public.actionConstraints.minRaiseTo, 6, "projected raise minimum must be the real minimum raise-to, not null or 1");
   assert.equal(payload.public.actionConstraints.maxRaiseTo, 100, "projected raise maximum must be the real all-in amount");
 });
+
+test('unseated reconnect retains targeted inactivity result in private WS payload', () => {
+  const payload = buildStateSnapshotPayload({ userId: 'removed', tableSnapshot: {
+    tableId: 'table-inactivity', stateVersion: 9, youSeat: null, members: [],
+    private: { inactivity: { status: 'removed', isSinglePlayer: true },
+      playerState: { status: 'REMOVED', stack: 0, canRebuy: false } }
+  } });
+  assert.equal(payload.private.inactivity.status, 'removed');
+  assert.equal(payload.private.inactivity.isSinglePlayer, true);
+  assert.equal(payload.private.playerState.status, 'REMOVED');
+});

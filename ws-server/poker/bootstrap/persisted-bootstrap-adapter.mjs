@@ -448,6 +448,7 @@ function buildRuntimeSeats({ seatRows, stateSeats, replacementSeatNos, leftTable
   }
 
   for (const seat of seatRows || []) {
+    if (leftTableByUserId?.[seat.userId] === true) continue;
     if (replacementSeatNos?.has(seat.seat)) continue;
     if (seenUserIds.has(seat.userId) || seenSeatNos.has(seat.seat)) continue;
     runtimeSeats.push({ ...seat });
@@ -483,7 +484,20 @@ export function adaptPersistedBootstrap({ tableId, tableRow, seatRows, stateRow 
     return { ok: false, code: "invalid_table_state", message: "invalid_table_state" };
   }
 
-  const identityReconciliation = reconcilePersistedStateIdentity(pokerState, seats);
+  // Completed inactivity Leave can retain old hand identity in persisted seats.
+  // Drop only released ownership; keep live-hand and zero-stack claims intact.
+  const persistedSeats = Array.isArray(pokerState.seats) ? pokerState.seats : [];
+  const handSeats = Array.isArray(pokerState.handSeats) && pokerState.handSeats.length
+    ? pokerState.handSeats : persistedSeats;
+  const currentSeats = persistedSeats.filter((seat) => {
+    const userId = seat?.userId;
+    return !pokerState.inactivityEjectionByUserId?.[userId]
+      || pokerState.leftTableByUserId?.[userId] !== true
+      || Object.prototype.hasOwnProperty.call(pokerState.stacks || {}, userId)
+      || seats.some((owner) => owner.userId === userId)
+      || (LIVE_HAND_PHASES.has(pokerState.phase) && handSeats.some((owner) => owner?.userId === userId));
+  });
+  const identityReconciliation = reconcilePersistedStateIdentity({ ...pokerState, seats: currentSeats }, seats);
   if (!identityReconciliation?.ok) {
     return {
       ok: false,

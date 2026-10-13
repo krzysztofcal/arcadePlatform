@@ -451,3 +451,16 @@ test("authoritative join adapter default loader resolves from release-shaped sha
     await fs.rm(stageDir, { recursive: true, force: true });
   }
 });
+
+test('authoritative inactivity JOIN rejection retains its code without unexpected failure logging', async () => {
+  const logs = [];
+  const execute = createAuthoritativeJoinExecutor({ env: {}, klog: event => logs.push(event),
+    loadLockedStateHelpersFn: lockedStateHelpers,
+    loadPostTransactionFn: async () => async () => { throw new Error('unexpected debit'); },
+    loadJoinModule: async () => ({ executePokerJoinAuthoritative: async () => {
+      throw Object.assign(new Error('removed_for_inactivity'), { code: 'removed_for_inactivity' });
+    } }) });
+  assert.deepEqual(await execute({ tableId: 't1', userId: 'u1', requestId: 'inactivity-join' }),
+    { ok: false, code: 'removed_for_inactivity' });
+  assert.equal(logs.includes('ws_join_authoritative_failed'), false);
+});

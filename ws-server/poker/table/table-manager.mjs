@@ -1192,7 +1192,10 @@ export function createTableManager({
     const coreStateBefore = table.coreState;
     let timeoutApplied;
     try {
-      timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: coreStateBefore, nowMs });
+      if (TABLE_UUID_RE.test(tableId) && typeof table.tableMeta?.isSinglePlayer !== "boolean") {
+        return { ok: false, changed: false, reason: "table_mode_unknown", stateVersion: table.coreState.version };
+      }
+      timeoutApplied = applyCoreStateTurnTimeout({ tableId, coreState: coreStateBefore, nowMs, isSinglePlayer: table.tableMeta?.isSinglePlayer === true });
     } catch (error) {
       return {
         ok: false,
@@ -1713,6 +1716,9 @@ export function createTableManager({
     }
 
     const table = ensureTable(tableId);
+    if (!observeOnlyJoin && table.coreState?.pokerState?.inactivityEjectionByUserId?.[userId]) {
+      return { ok: false, code: "removed_for_inactivity", message: "removed_for_inactivity", tableState: tableState(tableId) };
+    }
     if (TABLE_UUID_RE.test(tableId) && typeof table.tableMeta?.isSinglePlayer !== "boolean"
       && (observeOnlyJoin || !Number.isInteger(authoritativeSeatNo) || authoritativeSeatNo < 1)) {
       return { ok: false, code: "table_bootstrap_unavailable", message: "table_mode_unknown", tableState: tableState(tableId) };

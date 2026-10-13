@@ -9,6 +9,7 @@ export async function handleTurnTimeoutCommand({
   broadcastResyncRequired,
   broadcastStateSnapshots,
   scheduleBotStep = () => {},
+  reconcileInactivityEjections = async () => ({ ok: true }),
   klog = () => {}
 }) {
   let result;
@@ -63,6 +64,7 @@ export async function handleTurnTimeoutCommand({
     };
   }
 
+  await reconcileInactivityEjections(tableId);
   broadcastStateSnapshots(tableId);
   try {
     scheduleBotStep({

@@ -123,7 +123,7 @@ export function createAuthoritativeLeaveExecutor({
     ) return;
     klog(kind, createPayload());
   };
-  return async function executeAuthoritativeLeave({ tableId, userId, requestId }) {
+  return async function executeAuthoritativeLeave({ tableId, userId, requestId, inactivityEjection = false }) {
     const override = resolveLeaveTestOverride(env);
     if (override) {
       return normalizeValidatedResult({ result: override, tableId, userId, requestId, klog });
@@ -153,6 +153,7 @@ export function createAuthoritativeLeaveExecutor({
           userId,
           requestId,
           includeState: true,
+          inactivityEjection,
           runPostLeaveBotAutoplay: false,
           hasConnectedHumanPresence,
           klog,

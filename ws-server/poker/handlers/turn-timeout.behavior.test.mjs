@@ -199,3 +199,15 @@ test("handleTurnTimeoutCommand restores and snapshots when timeout apply throws"
   assert.equal(calls.autoplay, 0);
   assert.equal(calls.snapshots, 1);
 });
+
+for (const commit of [true, false]) test(`ejection runs only after durable timeout acceptance, commit=${commit}`, async () => {
+  const order = [];
+  const result = await handleTurnTimeoutCommand({ tableId: 't1',
+    tableManager: { maybeApplyTurnTimeout: () => ({ ok: true, changed: true, stateVersion: 4 }) },
+    persistMutatedState: async () => { order.push('persist'); return { ok: commit, reason: 'conflict' }; },
+    reconcileInactivityEjections: async () => { order.push('leave'); return { ok: true }; },
+    restoreTableFromPersisted: async () => { order.push('restore'); return { ok: true }; },
+    broadcastResyncRequired: () => {}, broadcastStateSnapshots: () => {} });
+  assert.equal(result.ok, commit);
+  assert.deepEqual(order, commit ? ['persist', 'leave'] : ['persist', 'restore']);
+});

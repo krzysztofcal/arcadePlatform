@@ -84,10 +84,12 @@ test("loadSnapshotInTx propagates unknown hole-card storage failures to outer sa
   );
 });
 
-test("snapshot timeout parity with HTTP semantics", async () => {
+for (const isSinglePlayer of [false, true]) test(`expired snapshot remains read-only, Single Player=${isSinglePlayer}`, async () => {
   process.env.POKER_DEAL_SECRET = "table-snapshot-timeout-secret";
   let actionInsertCount = 0;
+  let writes = 0;
   const tx = makeTx({
+    tableRow: { id: "table_1", is_single_player: isSinglePlayer },
     seatRows: [{ user_id: "u1", seat_no: 1, status: "ACTIVE", is_bot: false }],
     activeSeatRows: [{ user_id: "u1", seat_no: 1 }],
     stateRow: {
@@ -103,6 +105,7 @@ test("snapshot timeout parity with HTTP semantics", async () => {
         community: [],
         seats: [{ userId: "u1", seatNo: 1 }],
         stacks: { u1: 1000 },
+        missedTurnsByUserId: { u1: 1 },
         foldedByUserId: {},
         leftTableByUserId: {},
         sitOutByUserId: {},
@@ -112,7 +115,7 @@ test("snapshot timeout parity with HTTP semantics", async () => {
       }
     },
     holeCardRows: [{ user_id: "u1", cards: [{ r: "A", s: "S" }, { r: "K", s: "H" }] }],
-    onUpdate: () => [{ version: 2 }],
+    onUpdate: () => { writes++; return [{ version: 2 }]; },
     onInsertAction: () => {
       actionInsertCount += 1;
     }
@@ -120,8 +123,17 @@ test("snapshot timeout parity with HTTP semantics", async () => {
 
   const first = await loadSnapshotInTx({ tx, tableId: "table_1", userId: "u1", nowMs: 10_000 });
   assert.equal(first.ok, true);
-  assert.equal(first.snapshot.state.version, 2);
-  assert.equal(actionInsertCount, 1);
+  assert.equal(first.snapshot.state.version, 1);
+  assert.equal(first.snapshot.state.state.turnUserId, "u1");
+  assert.equal(first.snapshot.state.state.turnDeadlineAt, 1);
+  assert.equal(first.snapshot.state.state.missedTurnsByUserId.u1, 1);
+  assert.equal(first.snapshot.state.state.inactivityEjectionByUserId, undefined);
+  assert.equal(writes, 0);
+  assert.equal(actionInsertCount, 0);
+  const second = await loadSnapshotInTx({ tx, tableId: "table_1", userId: "u1", nowMs: 99_000 });
+  assert.deepEqual(second, first);
+  assert.equal(writes, 0);
+  assert.equal(actionInsertCount, 0);
 });
 
 test("table snapshot loader supports fixture-path deterministic payload", async () => {

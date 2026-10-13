@@ -129,3 +129,41 @@ export async function handleLeaveCommand({
     });
   }
 }
+
+// A committed deferred Leave belongs to the hand/settled finalizer. Completed
+// tombstones remain durable, but neither case needs another Leave command.
+export function listPendingInactivityLeaveEntries(state) {
+  return Object.entries(state?.inactivityEjectionByUserId || {}).filter(([userId]) =>
+    state?.leftTableByUserId?.[userId] !== true
+    && (state?.seats?.some(seat => seat?.userId === userId)
+      || Object.prototype.hasOwnProperty.call(state?.stacks || {}, userId)));
+}
+
+// Called only under existing per-table command ownership. The persisted tombstone
+// survives process failure; the existing timeout sweep retries failed Leave/restore.
+export async function reconcileInactivityEjectionsCommand({ tableId, tableManager,
+  loadAuthoritativeLeaveExecutor, restoreTableFromPersisted, broadcastStateSnapshots,
+  broadcastTableState, klog = () => {} }) {
+  if (tableManager.isTableClosed(tableId)) return { ok: true };
+  let state = tableManager.persistedPokerState(tableId);
+  for (const [userId, intent] of listPendingInactivityLeaveEntries(state)) {
+    if (state?.leftTableByUserId?.[userId] === true) continue;
+    if (!state?.seats?.some(seat => seat?.userId === userId)
+      && !Object.prototype.hasOwnProperty.call(state?.stacks || {}, userId)) continue;
+    const executeLeave = await loadAuthoritativeLeaveExecutor();
+    const result = await executeLeave({ tableId, userId,
+      requestId: `inactivity:${tableId}:${intent.handId}:${userId}`, inactivityEjection: true });
+    // Even after a lost response/retry, reload current persistence rather than
+    // restoring an old idempotent result over a newer hand.
+    const restored = await restoreTableFromPersisted(tableId);
+    if (!restored?.ok || !result?.ok) {
+      klog("ws_inactivity_ejection_pending", { tableId, userId, reason: result?.code || restored?.reason });
+      broadcastStateSnapshots(tableId);
+      return { ok: false, reason: result?.code || restored?.reason || "inactivity_pending" };
+    }
+    broadcastStateSnapshots(tableId);
+    broadcastTableState(tableId);
+    state = tableManager.persistedPokerState(tableId);
+  }
+  return { ok: true };
+}

@@ -537,7 +537,8 @@ export async function executePokerLeave({
   verboseLogsEnabled = false,
   includeState = false,
   runPostLeaveBotAutoplay = true,
-  hasConnectedHumanPresence = () => false
+  hasConnectedHumanPresence = () => false,
+  inactivityEjection = false
 }) {
   void nowMs;
   const result = await beginSql(async (tx) => {
@@ -577,6 +578,10 @@ export async function executePokerLeave({
         }
 
         const currentState = normalizeState(stateRow.state);
+        // Only server-persisted timeout intent authorizes close despite the exiting socket.
+        if (inactivityEjection && !currentState.inactivityEjectionByUserId?.[userId]) {
+          throw makeError(409, "inactivity_intent_missing");
+        }
         const stacks = parseStacks(currentState.stacks);
         const seatsBefore = parseSeats(currentState.seats);
         const alreadyLeft =
@@ -939,7 +944,11 @@ export async function executePokerLeave({
           [tableId]
         );
         const connectedHumanPresence = hasConnectedHumanPresence({ tableId }) === true;
-        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && connectedHumanPresence) {
+        const lifecycleRows = inactivityEjection ? await tx.unsafe(
+          "select lifecycle_kind, managed_profile_key from public.poker_tables where id = $1 for update;", [tableId]
+        ) : [];
+        const managedInactivityExit = inactivityEjection && isManagedContinuousTable(lifecycleRows?.[0]);
+        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && connectedHumanPresence && !inactivityEjection) {
           klog("poker_leave_table_close_skipped_human_presence", {
             tableId,
             userId,
@@ -949,7 +958,7 @@ export async function executePokerLeave({
             remainingSeats: allSeatRows.length
           });
         }
-        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && !connectedHumanPresence) {
+        if (!hasAnyActiveHuman(allSeatRows) && !hasLiveHandSignal(latestState) && (!connectedHumanPresence || inactivityEjection) && !managedInactivityExit) {
           const terminalCloseResult = await executeTerminalPokerCloseInTx({
             tx,
             tableId,

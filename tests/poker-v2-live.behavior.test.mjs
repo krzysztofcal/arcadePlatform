@@ -368,7 +368,7 @@ function createHarness(options = {}){
 
   vm.createContext(sandbox);
   const closureEnd = source.lastIndexOf('})();');
-  const privacySource = source.slice(0, closureEnd) + 'window.__reconnectForTest = function(){ return { seat: reconnectSeatNo, autoJoin: shouldAutoJoin }; }; window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__madeHandForTest = function(){ return heroMadeHandIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
+  const privacySource = source.slice(0, closureEnd) + 'window.__reconnectForTest = function(){ return { seat: reconnectSeatNo, youSeat: state.youSeat, autoJoin: shouldAutoJoin, inactivity: inactivityExit && inactivityExit.status, redirectRemaining: closedTableRedirectRemaining }; }; window.__cardClaimsForTest = function(){ return cardFxClaims; }; window.__madeHandForTest = function(){ return heroMadeHandIdentities(); }; window.__heroCardsForTest = function(){ return state.heroCards; }; window.__missingHeroHudForTest = function(){ renderedSeatHud = {}; renderHeroCards(); positionHeroCards(); renderDealerChip(); }; window.__avatarUrlForTest = function(seatNo,url){ var seat = state.seats.find(function(row){ return row.seatNo === seatNo; }); seat.botPresentation = {avatarPath:url}; render(); }; window.__getSeatRevealCardsForTest = getSeatRevealCards; window.__opponentHeldCardsForTest = function(userId){ return getOpponentHeldCardCount(state.seats.find(function(seat){ return seat.userId === userId; }), state.handId, state.betThisRoundByUserId); };\n' + source.slice(closureEnd);
   vm.runInContext(privacySource, sandbox, { filename: 'poker/poker-v2.js' });
 
 async function flush(){
@@ -6850,4 +6850,104 @@ for (const ended of [true, false]) test('reconnect preserves seat only for trans
     harness.advanceTime(10000); await harness.flush();
     assert.equal(harness.joinPayloads.length, 1, 'ended participation must not retry');
   }
+});
+
+
+for (const exitStatus of ['pending', 'removed']) test(`inactivity identity isolation preserves same-account reconnect and clears logout/account switches, status=${exitStatus}`, async () => {
+  const tokenFor = (user, suffix) => 'aaa.' + Buffer.from(JSON.stringify({ sub: user })).toString('base64') + '.' + suffix;
+  for (const transition of ['logout', 'pending_identity', 'token_identity']) {
+    const harness = createHarness({ token: tokenFor('user-1', 'initial'), authUser: { id: 'user-1' }, search: '?tableId=table-1&autoJoin=1' });
+    harness.fireDomContentLoaded(); await harness.flush();
+    await waitFor(() => harness.getCreateOptions() !== null);
+    const ws = harness.getCreateOptions();
+    const exited = { kind: 'stateSnapshot', payload: { tableId: 'table-1', stateVersion: 10,
+      table: { tableId: 'table-1', status: 'OPEN', members: [] }, public: { seats: [], hand: { handId: 'h1', status: 'SETTLED' } },
+      you: { seat: null }, private: { inactivity: { status: exitStatus, isSinglePlayer: false } } } };
+    ws.onSnapshot(exited); await harness.flush();
+    if (exitStatus === 'removed') harness.advanceTime(1000);
+    const remaining = harness.getReconnect().redirectRemaining;
+    harness.setAuthToken(null); harness.triggerAuthChange({ id: 'user-1' }, {}); await harness.flush();
+    assert.equal(harness.getReconnect().inactivity, exitStatus, 'same identity awaiting token keeps its exit');
+    assert.equal(harness.getReconnect().redirectRemaining, remaining);
+    const token = tokenFor('user-1', 'refresh');
+    harness.setAuthToken(token); harness.triggerAuthChange({ id: 'user-1' }, { access_token: token }); await harness.flush();
+    assert.equal(harness.getReconnect().inactivity, exitStatus);
+    assert.equal(harness.getReconnect().redirectRemaining, remaining);
+    assert.equal(harness.getReconnect().autoJoin, false);
+    if (transition === 'logout') {
+      harness.setAuthToken(null); harness.triggerAuthChange(null, null);
+    } else if (transition === 'pending_identity') {
+      harness.setAuthToken(null); harness.triggerAuthChange({ id: 'user-2' }, {});
+    } else {
+      const other = tokenFor('user-2', 'new'); harness.setAuthToken(other);
+      harness.triggerAuthChange({ id: 'user-2' }, { access_token: other });
+    }
+    await harness.flush();
+    assert.equal(harness.getReconnect().inactivity, null, transition);
+    assert.equal(harness.getReconnect().redirectRemaining, 0, transition);
+    assert.equal(harness.getReconnect().autoJoin, true, 'new identity restores URL join intent');
+    // A callback from the retired user-1 socket cannot resurrect its exit.
+    ws.onSnapshot(exited); await harness.flush();
+    assert.equal(harness.getReconnect().inactivity, null);
+    for (let tick = 0; tick < 5; tick++) { harness.advanceTime(1000); await harness.flush(); }
+    assert.notEqual(harness.windowLocation.href, '/poker/', 'retired countdown cannot redirect the new identity');
+  }
+});
+
+for (const freshPending of [false, true]) test(`inactivity pending keeps authoritative avatar without participation or controls, fresh=${freshPending}`, async () => {
+  const harness = createHarness();
+  harness.fireDomContentLoaded(); await harness.flush();
+  const ws = harness.getCreateOptions();
+  function snapshot(version, status, owned = true){
+    const pending = status === 'pending';
+    const removed = status === 'removed';
+    ws.onSnapshot({ kind: 'stateSnapshot', payload: { tableId: 'table-1', stateVersion: version,
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6,
+        members: [{ userId: 'bot-2', seat: 2 }, ...(!pending && !removed && owned ? [{ userId: 'user-1', seat: 1 }] : [])] },
+      public: { seats: [{ userId: 'bot-2', seatNo: 2, isBot: true }, ...(owned ? [{ userId: 'user-1', seatNo: 1, status: pending ? 'EJECTION_PENDING' : 'ACTIVE' }] : [])],
+        stacks: owned ? { 'user-1': 95, 'bot-2': 100 } : { 'bot-2': 100 },
+        hand: { handId: 'pending-hand', status: 'TURN' }, turn: { userId: 'user-1', deadlineAt: Date.now() + 20000 },
+        pot: { total: 5 }, legalActions: { seat: pending || removed ? null : 1, actions: ['FOLD', 'CHECK', 'BET'] } },
+      you: { seat: pending || removed ? null : 1 },
+      private: { playerState: { status: pending ? 'EJECTION_PENDING' : removed ? 'REMOVED' : 'ACTIVE', stack: owned ? 95 : 0, canRebuy: false },
+        ...(pending || removed ? { inactivity: { status, isSinglePlayer: false } } : {}) } } });
+  }
+  if (!freshPending){
+    snapshot(1, 'active'); await harness.flush();
+    assert.ok(findSeatByLabel(harness, 'You'));
+    harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+    assert.equal(harness.actPayloads.length, 1, 'normal active player can still act');
+  }
+  snapshot(2, 'pending'); await harness.flush();
+  function assertPendingControls(){
+    const seat = findSeatByLabel(harness, 'You');
+    assert.ok(seat, 'authoritative pending occupied seat is visible');
+    assert.ok(findSeatChild(seat, 'poker-seat-avatar'), 'pending avatar remains visible');
+    assert.equal(harness.getReconnect().youSeat, null, 'visible ownership does not restore participation');
+    assert.equal(harness.elements.pokerV2JoinBtn.hidden, true);
+    assert.equal(harness.elements.pokerV2JoinBtn.disabled, true);
+    for (const id of ['pokerV2StartBtn', 'pokerMenuLeave', 'pokerV2SeatNo', 'pokerV2BuyIn', 'pokerV2FoldBtn', 'pokerV2PrimaryBtn', 'pokerV2AmountBtn', 'pokerV2AllInBtn', 'pokerV2FoldPreaction', 'pokerV2PrimaryPreaction', 'pokerV2AmountPreaction', 'pokerV2AllInPreaction', 'pokerV2RebuyBtn', 'pokerV2RebuyLobbyBtn', 'pokerV2ReactionBtn']) {
+      assert.equal(harness.elements[id].disabled, true, id + ' remains locked during pending');
+    }
+    assert.match(harness.elements.pokerV2ErrorText.textContent, /pending/);
+  }
+  assertPendingControls();
+  const before = [harness.actPayloads.length, harness.startPayloads.length, harness.leavePayloads.length, harness.joinPayloads.length, harness.rebuyPayloads.length];
+  for (const id of ['pokerV2StartBtn', 'pokerMenuLeave', 'pokerV2LeaveConfirmYes', 'pokerV2PrimaryBtn', 'pokerV2JoinBtn', 'pokerV2RebuyBtn']) {
+    (harness.elements[id]._listeners.click || []).forEach(fn => fn({ preventDefault(){}, stopPropagation(){} }));
+  }
+  await harness.flush();
+  assert.deepEqual([harness.actPayloads.length, harness.startPayloads.length, harness.leavePayloads.length, harness.joinPayloads.length, harness.rebuyPayloads.length], before, 'stale click handlers cannot send any mutation');
+  ws.onStatus('reconnecting'); ws.onStatus('auth_ok'); snapshot(3, 'pending'); await harness.flush();
+  assertPendingControls();
+  harness.advanceTime(1000); await harness.flush(); assertPendingControls();
+  snapshot(4, 'pending', false); await harness.flush();
+  assert.equal(findSeatByLabel(harness, 'You'), undefined, 'no current authoritative row means no historical avatar');
+  assert.equal(harness.elements.pokerV2JoinBtn.hidden, true, 'pending without ownership still cannot JOIN');
+  snapshot(5, 'pending'); await harness.flush(); assertPendingControls();
+  snapshot(6, 'removed', false); await harness.flush();
+  assert.equal(findSeatByLabel(harness, 'You'), undefined);
+  assert.equal(harness.getReconnect().inactivity, 'removed');
+  for (let i=0;i<5;i++){ harness.advanceTime(1000); await harness.flush(); }
+  assert.equal(harness.windowLocation.href, '/poker/');
 });

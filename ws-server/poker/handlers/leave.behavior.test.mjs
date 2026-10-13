@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleLeaveCommand } from "./leave.mjs";
+import { handleLeaveCommand, reconcileInactivityEjectionsCommand } from "./leave.mjs";
 
 function createCtx() {
   const calls = { command: [], snapshots: 0, tableState: 0, autoplay: 0, executorArgs: null, buildArgs: null, restoreArgs: [], leaveArgs: [] };
@@ -118,4 +118,43 @@ test("handleLeaveCommand maps thrown executor errors to stable rejection", async
   assert.equal(calls.command.length, 1);
   assert.equal(calls.command[0].reason, "state_conflict");
   assert.equal(calls.autoplay, 0);
+});
+
+
+test('durable inactivity retry reloads committed Leave after a lost result, without stale state or second cashout', async () => {
+  let state = { seats: [{ userId: 'u1', seatNo: 1 }], stacks: { u1: 25 },
+    inactivityEjectionByUserId: { u1: { handId: 'h1', isSinglePlayer: false } } };
+  let financialState = structuredClone(state);
+  let cashouts = 0, reloads = 0, publications = 0;
+  const ctx = { tableId: 't1', tableManager: { isTableClosed: () => false, persistedPokerState: () => state },
+    loadAuthoritativeLeaveExecutor: async () => async input => {
+      assert.equal(input.inactivityEjection, true);
+      assert.equal(input.requestId, 'inactivity:t1:h1:u1');
+      cashouts++;
+      financialState = { ...financialState, seats: [], stacks: {}, leftTableByUserId: { u1: true } };
+      return { ok: false, code: 'lost_result' };
+    }, restoreTableFromPersisted: async () => { reloads++; state = structuredClone(financialState); return { ok: true }; },
+    broadcastStateSnapshots: () => publications++, broadcastTableState: () => {} };
+  const lost = await reconcileInactivityEjectionsCommand(ctx);
+  assert.equal(lost.ok, false);
+  assert.equal(cashouts, 1);
+  assert.equal(reloads, 1);
+  assert.equal(publications, 1);
+  assert.deepEqual(state.seats, []);
+  const recovered = await reconcileInactivityEjectionsCommand(ctx);
+  assert.equal(recovered.ok, true);
+  assert.equal(cashouts, 1);
+});
+
+test('inactivity Leave failure remains pending and retries the same durable idempotency key', async () => {
+  const state = { seats: [{ userId: 'u1', seatNo: 1 }], stacks: { u1: 25 },
+    inactivityEjectionByUserId: { u1: { handId: 'h1', isSinglePlayer: true } } };
+  const requests = [];
+  const ctx = { tableId: 't1', tableManager: { isTableClosed: () => false, persistedPokerState: () => state },
+    loadAuthoritativeLeaveExecutor: async () => async input => { requests.push(input.requestId); return { ok: false, code: 'state_conflict' }; },
+    restoreTableFromPersisted: async () => ({ ok: true }), broadcastStateSnapshots: () => {}, broadcastTableState: () => {} };
+  assert.equal((await reconcileInactivityEjectionsCommand(ctx)).ok, false);
+  assert.equal((await reconcileInactivityEjectionsCommand(ctx)).ok, false);
+  assert.deepEqual(requests, ['inactivity:t1:h1:u1', 'inactivity:t1:h1:u1']);
+  assert.equal(state.stacks.u1, 25);
 });
