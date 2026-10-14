@@ -419,8 +419,8 @@ function assertProductionHumanPrunedBatch(row, batchId, cutoff = null) {
     || row.pruned_transaction_ids_sha256 !== row.archived_transaction_ids_sha256
     || row.pruned_entry_ids_sha256 !== row.archived_entry_ids_sha256
     || [row.registry_cleaned_at, row.registry_cleaned_key_count, row.registry_cleaned_keys_sha256].some(value => value != null)
-    || ((row.destructive_go_at == null) !== (row.destructive_go_batch_id == null))
-    || (row.destructive_go_batch_id != null && text(row.destructive_go_batch_id) !== text(batchId))) fail("closed-human lifecycle batch identity, cutoff, proof or prune receipt differs");
+    || row.destructive_go_at == null
+    || text(row.destructive_go_batch_id) !== text(batchId)) fail("closed-human lifecycle batch identity, cutoff, proof or prune receipt differs");
 }
 
 async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, storageTarget,
@@ -884,7 +884,10 @@ async function runProductionArchiveCycle({
       }
     }
     lockSession = await acquireRetentionAdvisoryLock(sql, profile);
-    if (!lockSession) return { state: "no-op", mode, policy, policyId: sourcePolicyId, reason: "advisory_lock_busy", processed: 0 };
+    if (!lockSession) {
+      if (mode === "lifecycle-completion") fail("Production lifecycle completion advisory lock is busy");
+      return { state: "no-op", mode, policy, policyId: sourcePolicyId, reason: "advisory_lock_busy", processed: 0 };
+    }
     const identityRows = await sql.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
     if (text(identityRows[0]?.system_identifier) !== profile.systemIdentifier) fail("database is not canonical Production");
     const ownRows = await sql.unsafe(PRODUCTION_OWN_BATCHES_SQL, [profile.projectRef, sourcePolicyId]);

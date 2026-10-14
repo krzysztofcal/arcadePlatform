@@ -477,6 +477,7 @@ const productionLifecycleCutoff = "2026-08-14T00:00:00.000Z";
 function makeProductionLifecycleHarness(options = {}) {
   const row = makeProductionResumeRow();
   Object.assign(row, { source_policy_id: "production-ledger-closed-human-table-retention-30d-v1",
+    destructive_go_at: "2026-08-15T00:02:00Z", destructive_go_batch_id: "2",
     pruned_at: "2026-08-15T00:03:00Z", pruned_transaction_count: 2, pruned_entry_count: 4,
     pruned_transaction_ids_sha256: row.archived_transaction_ids_sha256,
     pruned_entry_ids_sha256: row.archived_entry_ids_sha256 }, options.row || {});
@@ -517,6 +518,20 @@ async function runProductionLifecycle(harness, args = {}) {
     completionConfirmation: "COMPLETE HUMAN RETENTION 2", ...args,
     deps: { ...harness.deps, read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true, control: { enabled: false, max_transactions: 2 }, fenceActive: true, policies: [{ enabled: false }, { enabled: false }, { enabled: false }] }) } });
 }
+const noGoLifecycle = makeProductionLifecycleHarness({ row: { destructive_go_at: null, destructive_go_batch_id: null } });
+await assert.rejects(runProductionLifecycle(noGoLifecycle), /receipt differs/);
+assert.equal(noGoLifecycle.lifecycleCalls.completion, 0);
+const busyLifecycle = makeProductionLifecycleHarness();
+const busyLifecycleSql = busyLifecycle.deps.sql.unsafe;
+busyLifecycle.deps.sql.unsafe = async (query, values) => query.includes("pg_try_advisory_lock")
+  ? [{ acquired: false }] : busyLifecycleSql(query, values);
+await assert.rejects(runProductionLifecycle(busyLifecycle), /advisory lock is busy/);
+assert.equal(busyLifecycle.lifecycleCalls.completion, 0);
+assert.equal(busyLifecycle.lifecycleCalls.dry, 0);
+const busyPrepare = await prepareProductionResume(busyLifecycle);
+assert.equal(busyPrepare.state, "no-op");
+assert.equal(busyPrepare.reason, "advisory_lock_busy");
+
 const missingLifecycle = makeProductionLifecycleHarness();
 assert.equal((await runProductionLifecycle(missingLifecycle)).state, "completed");
 assert.equal(missingLifecycle.lifecycleCalls.completion, 1);
@@ -606,7 +621,7 @@ assert.equal(automaticLifecycleResume.calls.execute, 0);
 assert.equal(automaticLifecycleResume.calls.export, 0);
 // Future CANARY: pruning once, then verified marker, with no second execute.
 const futureHumanCanary = makeProductionLifecycleHarness();
-Object.assign(futureHumanCanary.row, { pruned_at: null, pruned_transaction_count: null, pruned_entry_count: null,
+Object.assign(futureHumanCanary.row, { destructive_go_at: null, destructive_go_batch_id: null, pruned_at: null, pruned_transaction_count: null, pruned_entry_count: null,
   pruned_transaction_ids_sha256: null, pruned_entry_ids_sha256: null });
 const futureSql = futureHumanCanary.deps.sql.unsafe;
 futureHumanCanary.deps.sql.unsafe = async (query, values) => query.includes("where project_ref")
