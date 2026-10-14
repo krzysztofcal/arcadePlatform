@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,7 @@ import {
   assertResumeRecoveryState,
   findOwnCycle,
   inspectDurableRecovery,
+  inspectDurableRecoveryState,
   persistDurableRecovery,
   releaseRetentionAdvisoryLock,
   runRetentionCycle,
@@ -81,7 +83,11 @@ const PRODUCTION_OWN_BATCHES_SQL = `select object_path, source_policy_id, status
     created_at::text as created_at,
     pruned_at::text as pruned_at,
     archive_proof_verified_at::text as archive_proof_verified_at,
-    registry_cleaned_at::text as registry_cleaned_at
+    registry_cleaned_at::text as registry_cleaned_at,
+    account_retirement_at::text as account_retirement_at,
+    account_retirement_account_count, account_retirement_account_ids_sha256,
+    account_retirement_recovery_object_path, account_retirement_recovery_object_sha256,
+    account_retirement_snapshot_sha256
   from public.chips_ledger_archive_batches
   where project_ref = $1 and source_policy_id = $2
   order by created_at desc, batch_id desc;`;
@@ -300,6 +306,83 @@ function assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicy
     fail("active Production batch has a partial or foreign destructive GO");
   }
   return row;
+}
+
+function assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId) {
+  if (!batchId || !/^[1-9][0-9]*$/.test(text(batchId))
+    || text(activeRow?.batch_id) !== text(batchId) || text(row?.batch_id) !== text(batchId)) {
+    fail("exact active Production batch ID does not match --batch-id");
+  }
+  if (row.project_ref !== profile.projectRef || row.source_policy_id !== sourcePolicyId
+    || row.status !== "committed" || !row.committed_at
+    || activeRow.project_ref !== row.project_ref || activeRow.source_policy_id !== row.source_policy_id
+    || activeRow.status !== row.status || activeRow.object_path !== row.object_path
+    || activeRow.compressed_sha256 !== row.compressed_sha256
+    || !SHA256_RE.test(text(row.compressed_sha256)) || !SHA256_RE.test(text(row.raw_sha256))
+    || row.object_path !== `v1/sha256/${row.compressed_sha256}.jsonl.gz`
+    || !Number.isInteger(Number(row.transaction_count)) || Number(row.transaction_count) < 1
+    || Number(row.transaction_count) > 2 || Number(row.entry_count) !== Number(row.transaction_count) * 2
+    || String(activeRow.transaction_count) !== String(row.transaction_count)
+    || String(activeRow.entry_count) !== String(row.entry_count)) {
+    fail("active Production PREPARE batch identity, archive or cap differs");
+  }
+  if (PRODUCTION_EXECUTE_RECEIPT_FIELDS.some(field => row[field] != null)
+    || row.destructive_go_at != null || row.destructive_go_batch_id != null
+    || [row, activeRow].some(manifest => ["account_retirement_at", "account_retirement_account_count",
+      "account_retirement_account_ids_sha256", "account_retirement_recovery_object_path",
+      "account_retirement_recovery_object_sha256", "account_retirement_snapshot_sha256"]
+      .some(field => manifest[field] != null))) {
+    fail("active Production PREPARE batch has cleanup receipts or destructive GO");
+  }
+  const proof = [row.archive_proof_verified_at, row.archived_transaction_ids_sha256, row.archived_entry_ids_sha256];
+  if (!proof.every(value => value == null)
+    && !(proof[0] && SHA256_RE.test(text(proof[1])) && SHA256_RE.test(text(proof[2])))) {
+    fail("active Production PREPARE batch has a partial immutable proof");
+  }
+}
+
+async function resumeProductionPrepareBatch({ activeRow, profile, env, policy, batchId,
+  sql, lockSession, pruneStore, storageTarget, verifyBucket, storageDeps, tempRoot, deps }) {
+  const sourcePolicyId = PRODUCTION_POLICIES[policy];
+  let row = await pruneStore.getManifest(activeRow.object_path);
+  assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId);
+  await verifyBucket(storageTarget);
+  const inspect = deps.inspectDurableRecoveryState || inspectDurableRecoveryState;
+  const recovery = await inspect(storageTarget, row, profile, null, storageDeps);
+  if (!["both_missing", "complete"].includes(recovery?.state)) fail("active Production PREPARE recovery is partial or unknown");
+  const main = await (deps.downloadPrivateArchiveObject || downloadPrivateArchiveObject)(storageTarget, row.object_path, storageDeps);
+  if (crypto.createHash("sha256").update(main.bytes).digest("hex") !== row.compressed_sha256) {
+    fail("active Production PREPARE archive SHA differs");
+  }
+  const runPrune = deps.pruneArchive || pruneArchive;
+  const pruneDeps = { ...storageDeps, sql, pruneStore, storageTarget,
+    targetOptions: productionTargetOptions(), verifyBucket, emit: false };
+  const args = ["--target", "prod", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256];
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  if (!row.archive_proof_verified_at) {
+    await runPrune({ argv: [...args, "--register-proof"], env, cwd: tempRoot, deps: pruneDeps });
+  }
+  row = await pruneStore.getManifest(activeRow.object_path);
+  assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId);
+  if (!row.archive_proof_verified_at) fail("active Production PREPARE proof registration is incomplete");
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  const dry = await runPrune({ argv: args, env, cwd: tempRoot, deps: pruneDeps });
+  if (dry?.state !== "ready" || dry.read_only !== true || !dry.evidence
+    || dry.evidence.transactionCount !== Number(row.transaction_count)
+    || dry.evidence.entryCount !== Number(row.entry_count)
+    || dry.evidence.transactionIdsSha256 !== row.archived_transaction_ids_sha256
+    || dry.evidence.entryIdsSha256 !== row.archived_entry_ids_sha256) {
+    fail("active Production PREPARE dry-run evidence differs from immutable proof");
+  }
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  const durable = await (deps.persistDurableRecovery || persistDurableRecovery)(storageTarget, row, profile, dry.evidence, main.bytes, storageDeps);
+  assertDurableRecoveryReady(durable);
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  assertProductionPrepareBatch(await pruneStore.getManifest(activeRow.object_path), activeRow, batchId, profile, sourcePolicyId);
+  return { state: "prepared", resumed: true, batchId: String(row.batch_id),
+    transactions: dry.evidence.transactionCount, entries: dry.evidence.entryCount,
+    compressedSha256: row.compressed_sha256, recoveryArchiveSha256: durable.recoveryArchive.sha256,
+    recoveryManifestSha256: durable.recoveryManifest.sha256 };
 }
 
 async function resumeProductionCanaryBatch({
@@ -689,10 +772,11 @@ async function runProductionArchiveCycle({
     const ownRows = await sql.unsafe(PRODUCTION_OWN_BATCHES_SQL, [profile.projectRef, sourcePolicyId]);
     const cycle = findOwnCycle(ownRows, sourcePolicyId);
     if (cycle.active) {
-      if (mode !== "canary") {
+      if (mode !== "canary" && mode !== "prepare") {
         fail("Production retention has an incomplete active batch; resume it through the reviewed recovery path");
       }
-      const resumed = await resumeProductionCanaryBatch({
+      const resume = mode === "prepare" ? resumeProductionPrepareBatch : resumeProductionCanaryBatch;
+      const resumed = await resume({
         activeRow: cycle.active,
         profile,
         env: moduleEnv,
@@ -711,6 +795,7 @@ async function runProductionArchiveCycle({
       });
       return { state: resumed.state, mode, policy, policyId: sourcePolicyId, ...resumed };
     }
+    if (mode === "prepare" && batchId != null) fail("exact active Production batch ID is not available for PREPARE");
     if (cycle.latestCompleted) {
       const completed = await pruneArchive({
         argv: ["--target", "prod", "--object-path", cycle.latestCompleted.object_path, "--confirm-sha", cycle.latestCompleted.compressed_sha256],
@@ -859,7 +944,7 @@ export async function runProductionAutomation({
     env,
     policy: selectedPolicy,
     mode: "prepare",
-    ...(selectedPolicy === "escrow" ? { batchId } : {}),
+    batchId,
     deps,
     cwd,
     accountIdsSha256,

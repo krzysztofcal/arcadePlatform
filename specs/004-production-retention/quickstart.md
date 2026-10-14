@@ -55,3 +55,11 @@ Planning READY FOR IMPLEMENTATION means an agent can implement PR A from these d
 ## Current owner-gated handoff — 2026-09-22
 
 The planning text above is historical. Current evidence is recorded in [research.md](research.md): T017 existing-30d, T018 bot-only-7d and T019 escrow account retirement are PASS; T018 closed-human-30d remains open because the exact 30-day selector currently returns no candidate. The earliest age lower bound for the only currently viable human table is `2026-10-14T13:32:28.499939Z`; this does not guarantee later eligibility. T020/PR B activation remains blocked, and Production global control, policies and scheduler remain OFF.
+
+## T018 batch 4 recovery gate — 2026-10-14
+
+PREPARE failed after committing batch 4's primary archive, before proof/dry-run/recovery. See research.md for exact identity/IDs/hashes and run URL. Preserve the existing batch and immutable archive; do not retry fresh selection or create a replacement batch.
+
+After repair review/owner merge and **separate exact Production PREPARE authorization**, the existing workflow can receive `policy=closed-human-30d`, `mode=prepare`, `batch_id=4`. It verifies the original committed archive, registers absent proof, dry-runs exact IDs and creates/verifies both durable copies under the Production lock. Existing GO/partial receipts/ambiguous recovery fail closed. No CANARY/execute input is part of PREPARE.
+
+Review exact batch/SHA/proof/recovery/dry-run evidence before a separate CANARY GO. Global/policy retention, scheduler and cap remain OFF/OFF/2; #992 cleanup override remains 0. This document does not authorize workflow dispatch or Production writes.

@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   BOT_ONLY_RETENTION_POLICY_ID,
   CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
@@ -877,6 +878,23 @@ const humanEvidence = buildPruneEvidence({
 assert.deepEqual(humanEvidence.txTypes, { TABLE_BUY_IN: 1, TABLE_CASH_OUT: 1 });
 assert.equal(humanEvidence.userTransactions, 2);
 assert.equal(humanEvidence.userEntries, 2);
+
+for (const policyId of [CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID]) {
+  const archive = { records: humanRecords, manifest: { ...humanManifest, source_policy_id: policyId }, summary: humanEvidence };
+  assert.equal(buildPruneEvidence(archive).userEntries, 2);
+  const invalidBinding = structuredClone(archive);
+  invalidBinding.records[0].entries.find(e => e.account.account_type === "USER").account.user_id = TABLE_ID;
+  assert.throws(() => buildPruneEvidence(invalidBinding), /USER binding/);
+  const invalidDirection = structuredClone(archive);
+  for (const entry of invalidDirection.records[0].entries) entry.amount = String(-BigInt(entry.amount));
+  assert.throws(() => buildPruneEvidence(invalidDirection), /direction/);
+  const invalidNet = structuredClone(archive);
+  invalidNet.records[0].entries[0].amount = "-999";
+  assert.throws(() => buildPruneEvidence(invalidNet), /conserv|binding/);
+}
+for (const policyId of [null, BOT_ONLY_RETENTION_POLICY_ID, "production-ledger-auto-retention-30d-v1", "unknown-policy"]) {
+  assert.throws(() => buildPruneEvidence({ records: humanRecords, manifest: { ...humanManifest, source_policy_id: policyId }, summary: humanEvidence }), /cannot prune USER/);
+}
 
 const userRecords = structuredClone(records);
 userRecords[0].transaction.user_id = "00000000-0000-4000-8000-000000000099";

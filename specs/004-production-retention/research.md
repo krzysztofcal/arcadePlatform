@@ -204,3 +204,30 @@ This section supersedes the pre-canary status above. It records aggregate eviden
 - **OPEN:** T018 closed-human-30d; it requires naturally aged data and a fresh diagnostic, then separately authorized PREPARE and CANARY.
 - **BLOCKED:** T020 activation/PR B readiness. The contract requires all four class canaries to PASS; the current closed-human no-candidate result is not PASS. Global control, policies and scheduler must remain OFF.
 - The nearest safe step is to wait until the stated human age lower bound, then run a fresh read-only closed-human qualification. Do not backdate, split, synthesize, increase the cap, or treat a no-op as a canary PASS.
+
+## T018 closed-human PREPARE failure — 2026-10-14
+
+Fresh diagnostic run [38616248892](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38616248892) passed on main `e9fc88506baca68786efd291025b1dcfc2e1ff25`. Owner separately authorized PREPARE only for canonical Production `otbqfijerkieoxwpxjnm/7575202818581710058`, table `7f3d73e4-36c5-4b66-afe6-d1d41bea13e2`, cap 2 transactions / 4 entries.
+
+[PREPARE run 38616939004](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38616939004) failed after committing fresh **batch 4**, before proof registration: `cannot prune USER ledger history (user_transactions=2, user_entries=2, distinct_tables=1)`. `buildPruneEvidence()` recognized only the Stage closed-human policy. Production's outer prune policy dispatch already recognized both policies, but evidence validation failed first.
+
+Read-only reconciliation confirmed primary archive private/MIME/bytes/SHA and identical repeated downloads:
+
+- Primary path: `v1/sha256/28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e.jsonl.gz`, 809 bytes.
+- Compressed SHA-256: `28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e`.
+- Raw SHA-256: `20f8b84b3eeffec797d994fedbe4dc12fce48fe75b47e97568177b5b7872f90a`, 3359 bytes.
+- Transactions: `8948e05e-ca00-4fc4-97ec-baff3ce710a1`, `f9529116-fc6f-419c-a563-90487d6845ef`; entries 4747–4750. Credits/debits 2000/2000, net 0.
+- Batch is committed, **unproven**, with no recovery copies, destructive GO, prune or registry-cleanup receipt. All selected hot rows, registry, involved balances/sequences and lifecycle markers remained unchanged. Global/policy retention OFF, cap 2, workflow switch 0; no Production retention scheduler units installed.
+- Operator restored WS cleanup override to 0 and restarted Production WS; config/process PASS for PID 3637526. Agent independently verified matching active PID and release `a00ededc18a98b30ff452bf166d4ef415577773e`; ledger/cleanup file hashes matched main. Cleanup must remain disabled under #992.
+
+No retry or CANARY was performed. Preserve batch 4 and its primary bytes. Normal fresh PREPARE is blocked by this active batch; existing CANARY resume requires proof and recovery, so it cannot repair this incomplete preparation. The repair adds only exact-batch PREPARE recovery, under the existing lock, without export/new batch/GO/execute. See `prepare-recovery-plan.md`.
+
+T018 closed-human remains **NOT PASS**, T020–T022 remain blocked. After owner review and merge, a separate explicit Production authorization is required to resume PREPARE for batch 4 and the exact archive SHA above. A subsequent exact-batch CANARY GO remains a separate gate. Implementing or merging the repair authorizes neither operation.
+
+### Repair implementation verification
+
+The existing archive-pruning, archive-export, archive-storage, Stage/Production automation, workflow-guard and escrow suites pass without remote credentials. New regressions first failed on the original policy/recovery branches, then passed with the fix. They cover both human policies, USER binding/direction/conservation, forbidden USER policies, exact batch resume, absent/ambiguous/wrong batch, cap, SHA, partial proof/receipts, destructive GO, recovery ambiguity and session loss. Real shared recovery helpers are exercised against private in-memory objects: two-copy creation, idempotent verification with no second upload/proof, and mismatched manifest rejection. Existing CANARY and Stage cases remain green.
+
+`npm run syntax`, `npm run ci:guards`, migration inventory validation and `git diff --check` pass. `npm run check:all` fails on five unrelated missing XP badge anchors in existing design HTML; the identical output was reproduced against an unchanged main snapshot. No UI/design files were modified. Full repository test status is recorded in the PR handoff. No Production or Stage access, workflow dispatch, migration, Storage write, policy/scheduler/cleanup change, merge or deploy was performed while implementing this repair.
+
+Full `npm test` subsequently **PASS** after installing the existing CI-prescribed WS dependencies (`npm ci --prefix ws-server --omit=dev`); no lockfile/dependency changes. The first attempt stopped at an unrelated maintenance test because `ws` was missing in the isolated checkout. Existing opt-in database tests retain their normal environment skips; no live Production/Stage tests were run. A separate reviewer inspected the recovery code and found no confirmed safety defect; the proposed real-helper recovery regression was added and passed.
