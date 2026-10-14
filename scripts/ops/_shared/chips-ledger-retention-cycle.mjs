@@ -254,7 +254,7 @@ export async function runRetentionCycle({
     if (typeof deps.prepare !== "function") return { state: "prepared", profile: profile.target, policyId, identity, processed: 0 };
     return deps.prepare({ profile, mode, policyId, identity, maxTransactions: profile.maxCanaryBatchSize });
   }
-  if (mode !== "canary" && mode !== "automatic") fail(`unsupported retention cycle mode: ${mode}`);
+  if (mode !== "canary" && mode !== "automatic" && !(mode === "lifecycle-completion" && profile.target === "production")) fail(`unsupported retention cycle mode: ${mode}`);
   if (typeof deps.execute !== "function") fail("retention cycle execute adapter is required", "execute_unavailable");
   return deps.execute({ profile, mode, policyId, identity, maxTransactions: profile.maxCanaryBatchSize });
 }

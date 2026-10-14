@@ -63,3 +63,19 @@ PREPARE failed after committing batch 4's primary archive, before proof/dry-run/
 After repair review/owner merge and **separate exact Production PREPARE authorization**, the existing workflow can receive `policy=closed-human-30d`, `mode=prepare`, `batch_id=4`. It verifies the original committed archive, registers absent proof, dry-runs exact IDs and creates/verifies both durable copies under the Production lock. Existing GO/partial receipts/ambiguous recovery fail closed. No CANARY/execute input is part of PREPARE.
 
 Review exact batch/SHA/proof/recovery/dry-run evidence before a separate CANARY GO. Global/policy retention, scheduler and cap remain OFF/OFF/2; #992 cleanup override remains 0. This document does not authorize workflow dispatch or Production writes.
+
+## Batch 4 marker-only gate after CANARY
+
+Batch 4 has complete pruning/proof/recovery and zero selected hot rows. Retained registry mappings are correct for closed-human. Its table marker is still missing, so T018 is incomplete.
+
+Only after review/owner merge and separate **marker-only Production GO**, dispatch existing Production workflow on the newly reviewed main with:
+
+- policy `closed-human-30d`, mode `lifecycle-completion`, batch_id `4`;
+- table_id `7f3d73e4-36c5-4b66-afe6-d1d41bea13e2`;
+- cutoff `2026-09-14T18:39:21.779Z`;
+- completion_confirmation `COMPLETE HUMAN RETENTION 4`;
+- no CANARY `confirmation` (`GO 4`).
+
+Require already_pruned dry-run, exact immutable proof/archive and both recovery copies, complete receipts, retained mappings, fenceON/control+policiesOFF/cap2. Invoke the existing protected marker routine only; verify persisted marker, idempotent re-check and unchanged ledger/registry/accounts/receipts. Existing marker returns already_complete without another write. Any mismatch/unknown result stops; do not repeat CANARY or repair receipts.
+
+This fixes future automatic finalization as well: pruning success is followed by marker verification, and interrupted pruning can resume only its marker without another execute/export in that invocation. This does not enable automation, scheduler or #992 cleanup. No commands in this document authorize a Production write or PR B.

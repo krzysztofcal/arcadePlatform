@@ -70,7 +70,7 @@ export const PRODUCTION_POLICIES = Object.freeze({
   "closed-human-30d": PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   escrow: PRODUCTION_ESCROW_RETENTION_POLICY_ID,
 });
-export const PRODUCTION_MODES = Object.freeze(["diagnostic", "prepare", "canary", "automatic"]);
+export const PRODUCTION_MODES = Object.freeze(["diagnostic", "prepare", "canary", "automatic", "lifecycle-completion"]);
 export const PRODUCTION_DISPATCH_ACTOR = "arcade-production-dispatch";
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
@@ -166,6 +166,9 @@ export function parseProductionAutomationArgs(argv = process.argv.slice(2)) {
     ["--mode", "mode"],
     ["--batch-id", "batchId"],
     ["--confirmation", "confirmation"],
+    ["--table-id", "tableId"],
+    ["--cutoff", "cutoff"],
+    ["--completion-confirmation", "completionConfirmation"],
     ["--account-ids-sha256", "accountIdsSha256"],
     ["--recovery-object-path", "recoveryObjectPath"],
   ]);
@@ -181,7 +184,7 @@ export function parseProductionAutomationArgs(argv = process.argv.slice(2)) {
   }
   if (!args.policy || !args.mode) fail("--policy and --mode are required");
   policyKey(args.policy);
-  if (!PRODUCTION_MODES.includes(args.mode)) fail("Production mode must be diagnostic, prepare, canary, or automatic");
+  if (!PRODUCTION_MODES.includes(args.mode)) fail("Production mode must be diagnostic, prepare, canary, automatic, or lifecycle-completion");
   return args;
 }
 
@@ -225,6 +228,22 @@ function requireAutomaticAuthorization({ env, mode }) {
     || text(env.GITHUB_ACTOR) !== PRODUCTION_DISPATCH_ACTOR) {
     fail("Production automatic cleanup requires the dedicated dispatch actor");
   }
+}
+
+function requireLifecycleAuthorization({ env, mode, policy, batchId, tableId, cutoff, completionConfirmation, confirmation }) {
+  if (mode !== "lifecycle-completion") {
+    if (tableId != null || cutoff != null || completionConfirmation != null) fail("completion inputs require lifecycle-completion mode");
+    return;
+  }
+  if (policy !== "closed-human-30d" || !/^[1-9][0-9]*$/.test(text(batchId))
+    || completionConfirmation !== `COMPLETE HUMAN RETENTION ${batchId}` || confirmation != null
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(text(tableId))
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(text(cutoff))
+    || !Number.isFinite(Date.parse(cutoff))) fail("exact lifecycle batch, table, cutoff and completion confirmation are required");
+  if (env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_REPOSITORY !== "krzysztofcal/arcadePlatform"
+    || env.GITHUB_REF !== "refs/heads/main" || env.GITHUB_REPOSITORY_OWNER !== "krzysztofcal"
+    || env.GITHUB_ACTOR !== env.GITHUB_REPOSITORY_OWNER
+    || env.GITHUB_SHA !== env.DEPLOYED_COMMIT_SHA) fail("Production lifecycle completion requires exact-SHA owner/main dispatch");
 }
 
 function productionExportArgs(policy, outputPath, manifestPath) {
@@ -383,6 +402,102 @@ async function resumeProductionPrepareBatch({ activeRow, profile, env, policy, b
     transactions: dry.evidence.transactionCount, entries: dry.evidence.entryCount,
     compressedSha256: row.compressed_sha256, recoveryArchiveSha256: durable.recoveryArchive.sha256,
     recoveryManifestSha256: durable.recoveryManifest.sha256 };
+}
+
+function assertProductionHumanPrunedBatch(row, batchId, cutoff = null) {
+  if (!row || text(row.batch_id) !== text(batchId) || row.project_ref !== "otbqfijerkieoxwpxjnm"
+    || row.source_policy_id !== PRODUCTION_POLICIES["closed-human-30d"] || row.status !== "committed"
+    || Number(row.format_version) !== 1 || !row.committed_at || !row.cutoff || !Number.isFinite(new Date(row.cutoff).getTime())
+    || (cutoff != null && new Date(row.cutoff).getTime() !== Date.parse(cutoff))
+    || !row.archive_proof_verified_at || !SHA256_RE.test(text(row.compressed_sha256))
+    || !SHA256_RE.test(text(row.archived_transaction_ids_sha256)) || !SHA256_RE.test(text(row.archived_entry_ids_sha256))
+    || row.object_path !== `v1/sha256/${row.compressed_sha256}.jsonl.gz`
+    || !Number.isSafeInteger(Number(row.transaction_count)) || Number(row.transaction_count) < 1 || Number(row.transaction_count) > 2
+    || Number(row.entry_count) !== Number(row.transaction_count) * 2
+    || !row.pruned_at || Number(row.pruned_transaction_count) !== Number(row.transaction_count)
+    || Number(row.pruned_entry_count) !== Number(row.entry_count)
+    || row.pruned_transaction_ids_sha256 !== row.archived_transaction_ids_sha256
+    || row.pruned_entry_ids_sha256 !== row.archived_entry_ids_sha256
+    || [row.registry_cleaned_at, row.registry_cleaned_key_count, row.registry_cleaned_keys_sha256].some(value => value != null)
+    || ((row.destructive_go_at == null) !== (row.destructive_go_batch_id == null))
+    || (row.destructive_go_batch_id != null && text(row.destructive_go_batch_id) !== text(batchId))) fail("closed-human lifecycle batch identity, cutoff, proof or prune receipt differs");
+}
+
+async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, storageTarget,
+  verifyBucket, storageDeps, env, profile, row, batchId, tableId = null, cutoff = null,
+  tempRoot, deps, allowComplete = true, manualOnly = false }) {
+  row = await pruneStore.getManifest(row.object_path);
+  assertProductionHumanPrunedBatch(row, batchId, cutoff);
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  await verifyBucket(storageTarget);
+  const dry = await (deps.pruneArchive || pruneArchive)({
+    argv: ["--target", "prod", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256],
+    env, cwd: tempRoot, deps: { ...storageDeps, sql, pruneStore, storageTarget,
+      targetOptions: productionTargetOptions(), verifyBucket, emit: false } });
+  const evidence = dry?.evidence;
+  if (dry?.state !== "already_pruned" || dry.read_only !== true || dry.archiveSha256 !== row.compressed_sha256
+    || !evidence || evidence.transactionCount !== Number(row.transaction_count) || evidence.entryCount !== Number(row.entry_count)
+    || evidence.transactionIdsSha256 !== row.archived_transaction_ids_sha256 || evidence.entryIdsSha256 !== row.archived_entry_ids_sha256
+    || !evidence.closedHumanTableId || (tableId != null && evidence.closedHumanTableId !== tableId)) {
+    fail("closed-human lifecycle dry-run archive, table or proof differs");
+  }
+  tableId = evidence.closedHumanTableId;
+  cutoff ||= row.cutoff;
+  const timestampValue = typeof sql.typed === "function" ? sql.typed(cutoff, 25) : cutoff;
+  const durable = await (deps.inspectDurableRecovery || inspectDurableRecovery)(storageTarget, row, profile, evidence, storageDeps);
+  assertResumeRecoveryState(row, durable, profile);
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  const lifecycle = await sql.begin(async tx => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("set local lock_timeout = '5s';");
+    await tx.unsafe("set local statement_timeout = '120s';");
+    const identity = await tx.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
+    if (text(identity[0]?.system_identifier) !== profile.systemIdentifier) fail("lifecycle database is not canonical Production");
+    if (manualOnly) {
+      const controls = await tx.unsafe(PRODUCTION_STATE_SQL.control);
+      const fences = await tx.unsafe(PRODUCTION_STATE_SQL.fence);
+      const policies = await tx.unsafe(PRODUCTION_STATE_SQL.policies);
+      if (controls.length !== 1 || controls[0].enabled !== false || Number(controls[0].max_transactions) !== 2
+        || fences.length !== 1 || fences[0].enforcement_active !== true
+        || policies.length !== 3 || policies.some(p => p.enabled !== false)) {
+        fail("locked manual completion requires fence ON, policies/control OFF and cap 2");
+      }
+    }
+    const locked = await tx.unsafe("select * from public.chips_ledger_archive_batches where batch_id = $1::bigint and cutoff = $2::timestamptz for update;", [batchId, timestampValue]);
+    if (locked.length !== 1) fail("exact lifecycle batch/cutoff is missing or ambiguous");
+    assertProductionHumanPrunedBatch(locked[0], batchId, cutoff);
+    for (const field of ["object_path", "compressed_sha256", "raw_sha256", "archived_transaction_ids_sha256", "archived_entry_ids_sha256"]) {
+      if (locked[0][field] !== row[field]) fail("lifecycle locked manifest differs from verified archive");
+    }
+    const markerQuery = "select id::text, status::text, has_human_participant, human_retention_complete_at::text from public.poker_tables where id = $1::uuid";
+    const marker = await tx.unsafe(`${markerQuery} for update;`, [tableId]);
+    if (marker.length !== 1 || marker[0].id !== tableId || marker[0].status !== "CLOSED" || marker[0].has_human_participant !== true) fail("lifecycle table identity differs");
+    const registry = await tx.unsafe("select transaction_id::text, archive_batch_id::text, table_id::text from public.chips_transaction_idempotency where table_id = $1::uuid order by transaction_id;", [tableId]);
+    const bound = registry.filter(r => evidence.transactionIds.includes(r.transaction_id));
+    if (bound.length !== evidence.transactionCount || bound.some(r => r.archive_batch_id !== String(batchId) || r.table_id !== tableId)
+      || new Set(bound.map(r => r.transaction_id)).size !== evidence.transactionCount) fail("lifecycle retained registry binding differs");
+    await tx.unsafe("select public.chips_assert_closed_human_table_lifecycle_gate($1::uuid, $2::timestamptz, null);", [tableId, timestampValue]);
+    const markerBefore = marker[0].human_retention_complete_at;
+    if (!markerBefore) {
+      if (!allowComplete) fail("closed-human lifecycle marker is missing; use separately authorized lifecycle-completion");
+      await assertRetentionAdvisoryLock(tx, lockSession);
+      const completed = await tx.unsafe("select public.chips_complete_closed_human_table_retention($1::uuid, $2::timestamptz) as result;", [tableId, timestampValue]);
+      if (completed.length !== 1 || completed[0].result?.state !== "human_retention_complete"
+        || completed[0].result?.table_id !== tableId) fail("lifecycle completion returned an unexpected result");
+    }
+    await tx.unsafe("select public.chips_assert_closed_human_table_lifecycle_gate($1::uuid, $2::timestamptz, null);", [tableId, timestampValue]);
+    const after = await tx.unsafe(markerQuery, [tableId]);
+    if (after.length !== 1 || !after[0].human_retention_complete_at
+      || (markerBefore && after[0].human_retention_complete_at !== markerBefore)) fail("lifecycle marker was not persisted or changed");
+    return { state: markerBefore ? "already_complete" : "completed", marker: after[0].human_retention_complete_at };
+  });
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  return { ...lifecycle, batchId: String(batchId), tableId, cutoff, dryRun: "already_pruned",
+    transactions: evidence.transactionCount, entries: evidence.entryCount, compressedSha256: row.compressed_sha256,
+    transactionProofSha256: row.archived_transaction_ids_sha256, entryProofSha256: row.archived_entry_ids_sha256,
+    pruneReceipt: { at: row.pruned_at, transactions: Number(row.pruned_transaction_count), entries: Number(row.pruned_entry_count) },
+    storageWrites: 0, databaseWrites: lifecycle.state === "completed" ? 1 : 0,
+    recoveryArchiveSha256: durable.recoveryArchive.sha256, recoveryManifestSha256: durable.recoveryManifest.sha256 };
 }
 
 async function resumeProductionCanaryBatch({
@@ -715,6 +830,9 @@ async function runProductionArchiveCycle({
   mode,
   batchId = null,
   confirmation = null,
+  tableId = null,
+  cutoff = null,
+  completionConfirmation = null,
   accountIdsSha256 = null,
   recoveryObjectPath = null,
   deps = {},
@@ -770,6 +888,23 @@ async function runProductionArchiveCycle({
     const identityRows = await sql.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
     if (text(identityRows[0]?.system_identifier) !== profile.systemIdentifier) fail("database is not canonical Production");
     const ownRows = await sql.unsafe(PRODUCTION_OWN_BATCHES_SQL, [profile.projectRef, sourcePolicyId]);
+    const finalize = (row, extra = {}) => finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore,
+      storageTarget, verifyBucket, storageDeps, env: moduleEnv, profile, row, batchId: row.batch_id, tempRoot, deps, ...extra });
+    if (mode === "lifecycle-completion") {
+      if (identity?.control?.enabled !== false || Number(identity.control.max_transactions) !== 2
+        || identity.fenceActive !== true || identity.policies?.length !== 3 || identity.policies.some(p => p.enabled !== false)) {
+        fail("manual lifecycle completion requires fence ON, policies/control OFF and cap 2");
+      }
+      if (ownRows.some(r => r.pruned_at == null)) fail("lifecycle policy has an incomplete batch; refusing ambiguous completion");
+      const exact = ownRows.filter(r => text(r.batch_id) === text(batchId));
+      if (exact.length !== 1 || !exact[0].pruned_at) fail("exact pruned lifecycle batch is missing or ambiguous");
+      return { ...(await finalize(exact[0], { tableId, cutoff, manualOnly: true })), mode, policy, policyId: sourcePolicyId };
+    }
+    if (policy === "closed-human-30d" && mode === "canary" && ownRows.some(r => text(r.batch_id) === text(batchId) && r.pruned_at)) {
+      const exact = ownRows.filter(r => text(r.batch_id) === text(batchId));
+      if (exact.length !== 1) fail("exact completed canary is ambiguous");
+      return { ...(await finalize(exact[0], { allowComplete: false })), state: "already_pruned", mode, policy, policyId: sourcePolicyId };
+    }
     const cycle = findOwnCycle(ownRows, sourcePolicyId);
     if (cycle.active) {
       if (mode !== "canary" && mode !== "prepare") {
@@ -793,10 +928,18 @@ async function runProductionArchiveCycle({
         tempRoot,
         deps,
       });
+      if (policy === "closed-human-30d" && mode === "canary") {
+        const lifecycle = await finalize(cycle.active);
+        return { ...resumed, mode, policy, policyId: sourcePolicyId, lifecycle, databaseWrites: resumed.databaseWrites + lifecycle.databaseWrites };
+      }
       return { state: resumed.state, mode, policy, policyId: sourcePolicyId, ...resumed };
     }
     if (mode === "prepare" && batchId != null) fail("exact active Production batch ID is not available for PREPARE");
-    if (cycle.latestCompleted) {
+    if (cycle.latestCompleted && policy === "closed-human-30d") {
+      const lifecycle = await finalize(cycle.latestCompleted, { allowComplete: mode === "automatic" });
+      if (lifecycle.state === "completed") return { ...lifecycle, mode, policy, policyId: sourcePolicyId, resumed: true };
+    }
+    if (cycle.latestCompleted && policy !== "closed-human-30d") {
       const completed = await pruneArchive({
         argv: ["--target", "prod", "--object-path", cycle.latestCompleted.object_path, "--confirm-sha", cycle.latestCompleted.compressed_sha256],
         env: moduleEnv,
@@ -887,7 +1030,8 @@ async function runProductionArchiveCycle({
         emit: false,
       },
     });
-    return { ...prepared, state: executed.state, receipt: executed.state, storageWrites: 2, databaseWrites: 3 };
+    const lifecycle = policy === "closed-human-30d" ? await finalize(row) : null;
+    return { ...prepared, state: executed.state, receipt: executed.state, storageWrites: 2, databaseWrites: 3 + (lifecycle?.databaseWrites || 0), ...(lifecycle ? { lifecycle } : {}) };
   } finally {
     if (lockSession) await releaseRetentionAdvisoryLock(sql, lockSession);
     if (ownsSql) await sql.end({ timeout: 5 });
@@ -902,12 +1046,15 @@ export async function runProductionAutomation({
   mode,
   batchId = null,
   confirmation = null,
+  tableId = null,
+  cutoff = null,
+  completionConfirmation = null,
   accountIdsSha256 = null,
   recoveryObjectPath = null,
   cwd = process.cwd(),
 } = {}) {
   const selectedPolicy = policyKey(policy);
-  if (!PRODUCTION_MODES.includes(mode)) fail("Production mode must be diagnostic, prepare, canary, or automatic");
+  if (!PRODUCTION_MODES.includes(mode)) fail("Production mode must be diagnostic, prepare, canary, automatic, or lifecycle-completion");
   const profile = deps.profile || validateRetentionEnvironment("production", env, { requireCommitSha: true });
   if (selectedPolicy === "escrow") assertProductionEscrowProfile(profile);
   const sourcePolicyId = PRODUCTION_POLICIES[selectedPolicy];
@@ -925,6 +1072,8 @@ export async function runProductionAutomation({
   });
   requireAutomaticAuthorization({ env, mode });
 
+  requireLifecycleAuthorization({ env, mode, policy: selectedPolicy, batchId, tableId, cutoff, completionConfirmation, confirmation });
+
   const read = deps.read || (({ profile: activeProfile }) => readProductionState({ profile: activeProfile, deps }));
   const execute = deps.execute || (({ profile: activeProfile, identity: activeIdentity }) => runProductionArchiveCycle({
     profile: activeProfile,
@@ -933,6 +1082,9 @@ export async function runProductionAutomation({
     mode,
     batchId,
     confirmation,
+    tableId,
+    cutoff,
+    completionConfirmation,
     deps,
     cwd,
     accountIdsSha256,
@@ -1003,7 +1155,7 @@ export function buildProductionExportInvocation(policy, { outputPath, manifestPa
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = parseProductionAutomationArgs();
   if (args.help) {
-    process.stdout.write("Usage: node scripts/ops/chips-ledger-production-automation.mjs --policy <existing-30d|bot-only-7d|closed-human-30d|escrow> --mode <diagnostic|prepare|canary|automatic>\n");
+    process.stdout.write("Usage: node scripts/ops/chips-ledger-production-automation.mjs --policy <existing-30d|bot-only-7d|closed-human-30d|escrow> --mode <diagnostic|prepare|canary|automatic|lifecycle-completion>\n");
   } else {
     runProductionAutomation({ ...args }).catch((error) => {
       process.stderr.write(`chips-ledger-production-automation failed: ${error?.message || error}\n`);
