@@ -472,6 +472,185 @@ const overCapPrepare = makeProductionPrepareResumeHarness({ overCap: true });
 await assert.rejects(prepareProductionResume(overCapPrepare), /evidence/);
 assert.equal(overCapPrepare.prepareCalls.persist, 0);
 
+const productionLifecycleTable = "00000000-0000-4000-8000-000000000020";
+const productionLifecycleCutoff = "2026-08-14T00:00:00.000Z";
+function makeProductionLifecycleHarness(options = {}) {
+  const row = makeProductionResumeRow();
+  Object.assign(row, { source_policy_id: "production-ledger-closed-human-table-retention-30d-v1",
+    destructive_go_at: "2026-08-15T00:02:00Z", destructive_go_batch_id: "2",
+    pruned_at: "2026-08-15T00:03:00Z", pruned_transaction_count: 2, pruned_entry_count: 4,
+    pruned_transaction_ids_sha256: row.archived_transaction_ids_sha256,
+    pruned_entry_ids_sha256: row.archived_entry_ids_sha256 }, options.row || {});
+  const harness = makeProductionResumeHarness(row);
+  let marker = options.marker || null;
+  const calls = { completion: 0, dry: 0 };
+  const baseSql = harness.deps.sql.unsafe;
+  harness.deps.sql.unsafe = async (query, values) => {
+    if (query.startsWith("set ")) return [];
+    if (query.includes("from public.chips_production_retention_control")) return [{ enabled: options.enabledControl || false, max_transactions: 2 }];
+    if (query.includes("from public.chips_table_fence_control")) return [{ enforcement_active: true }];
+    if (query.includes("from public.chips_production_bot_only_retention_policy")) return [{ enabled: false }, { enabled: false }, { enabled: false }];
+    if (query.includes("chips_ledger_archive_batches") && query.includes("for update")) return [{ ...row, cutoff: new Date(row.cutoff) }];
+    if (query.includes("human_retention_complete_at") && query.includes("poker_tables")) return [{ id: productionLifecycleTable, status: "CLOSED", has_human_participant: true, human_retention_complete_at: marker }];
+    if (query.includes("from public.chips_transaction_idempotency")) return productionResumeEvidence.transactionIds.map(transaction_id => ({ transaction_id, archive_batch_id: "2", table_id: productionLifecycleTable }));
+    if (query.includes("chips_assert_closed_human_table_lifecycle_gate")) return [{}];
+    if (query.includes("chips_complete_closed_human_table_retention")) {
+      calls.completion += 1;
+      if (!options.missingMarker) marker ||= "2026-08-15T00:04:00Z";
+      return [{ result: { state: "human_retention_complete", table_id: productionLifecycleTable } }];
+    }
+    return baseSql(query, values);
+  };
+  harness.deps.pruneArchive = async ({ argv }) => {
+    assert.equal(argv.includes("--execute"), false, "completed pruning must never execute again");
+    assert.equal(argv.includes("--register-proof"), false);
+    calls.dry += 1;
+    return { state: options.dryState || "already_pruned", read_only: true, archiveSha256: options.badArchive ? "9".repeat(64) : row.compressed_sha256,
+      evidence: { ...productionResumeEvidence, transactionCount: 2, entryCount: 4,
+        closedHumanTableId: options.badTable ? "00000000-0000-4000-8000-000000000099" : productionLifecycleTable } };
+  };
+  return { ...harness, row, lifecycleCalls: calls };
+}
+const productionLifecycleEnv = { ...PRODUCTION_ENV, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform", GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY_OWNER: "krzysztofcal", GITHUB_ACTOR: "krzysztofcal", GITHUB_SHA: PRODUCTION_ENV.DEPLOYED_COMMIT_SHA };
+async function runProductionLifecycle(harness, args = {}) {
+  return runProductionAutomation({ env: productionLifecycleEnv, policy: "closed-human-30d", mode: "lifecycle-completion",
+    batchId: "2", tableId: productionLifecycleTable, cutoff: productionLifecycleCutoff,
+    completionConfirmation: "COMPLETE HUMAN RETENTION 2", ...args,
+    deps: { ...harness.deps, read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true, control: { enabled: false, max_transactions: 2 }, fenceActive: true, policies: [{ enabled: false }, { enabled: false }, { enabled: false }] }) } });
+}
+const noGoLifecycle = makeProductionLifecycleHarness({ row: { destructive_go_at: null, destructive_go_batch_id: null } });
+await assert.rejects(runProductionLifecycle(noGoLifecycle), /receipt differs/);
+assert.equal(noGoLifecycle.lifecycleCalls.completion, 0);
+const busyLifecycle = makeProductionLifecycleHarness();
+const busyLifecycleSql = busyLifecycle.deps.sql.unsafe;
+busyLifecycle.deps.sql.unsafe = async (query, values) => query.includes("pg_try_advisory_lock")
+  ? [{ acquired: false }] : busyLifecycleSql(query, values);
+await assert.rejects(runProductionLifecycle(busyLifecycle), /advisory lock is busy/);
+assert.equal(busyLifecycle.lifecycleCalls.completion, 0);
+assert.equal(busyLifecycle.lifecycleCalls.dry, 0);
+const busyPrepare = await prepareProductionResume(busyLifecycle);
+assert.equal(busyPrepare.state, "no-op");
+assert.equal(busyPrepare.reason, "advisory_lock_busy");
+
+const missingLifecycle = makeProductionLifecycleHarness();
+assert.equal((await runProductionLifecycle(missingLifecycle)).state, "completed");
+assert.equal(missingLifecycle.lifecycleCalls.completion, 1);
+assert.equal(missingLifecycle.calls.execute, 0);
+assert.equal(missingLifecycle.calls.authorize, 0);
+assert.equal(missingLifecycle.calls.export, 0);
+assert.equal(missingLifecycle.calls.store, 0);
+assert.equal((await runProductionLifecycle(missingLifecycle)).state, "already_complete");
+assert.equal(missingLifecycle.lifecycleCalls.completion, 1);
+for (const options of [{ enabledControl: true }, { badArchive: true }, { badTable: true }, { dryState: "ready" }, { row: { pruned_entry_count: 3 } },
+  { row: { archived_transaction_ids_sha256: "9".repeat(64) } }, { row: { cutoff: "2026-08-13T00:00:00Z" } },
+  { row: { project_ref: STAGE_PROJECT_REF } }]) {
+  const h = makeProductionLifecycleHarness(options);
+  await assert.rejects(runProductionLifecycle(h));
+  assert.equal(h.lifecycleCalls.completion, 0);
+}
+for (const args of [{ batchId: "3" }, { completionConfirmation: "GO 2" }, { tableId: null }, { cutoff: null },
+  { env: { ...productionLifecycleEnv, GITHUB_ACTOR: "other" } }, { mode: "prepare" }]) {
+  const h = makeProductionLifecycleHarness();
+  await assert.rejects(runProductionLifecycle(h, args));
+  assert.equal(h.lifecycleCalls.completion, 0);
+}
+const preciseLifecycleCutoff = "2026-08-14T00:00:00.123456Z";
+const preciseLifecycle = makeProductionLifecycleHarness({ row: { cutoff: preciseLifecycleCutoff } });
+let preciseTimestampCalls = 0;
+preciseLifecycle.deps.sql.typed = (value, type) => { assert.equal(value, preciseLifecycleCutoff); assert.equal(type, 25); return { value, type }; };
+const preciseLifecycleSql = preciseLifecycle.deps.sql.unsafe;
+preciseLifecycle.deps.sql.unsafe = async (query, values) => {
+  if (query.includes("cutoff =") || query.includes("chips_assert_closed_human_table_lifecycle_gate") || query.includes("chips_complete_closed_human_table_retention")) {
+    assert.deepEqual(values[1], { value: preciseLifecycleCutoff, type: 25 });
+    preciseTimestampCalls += 1;
+  }
+  return preciseLifecycleSql(query, values);
+};
+assert.equal((await runProductionLifecycle(preciseLifecycle, { cutoff: preciseLifecycleCutoff })).state, "completed");
+assert.equal(preciseTimestampCalls, 4);
+
+const noRecoveryLifecycle = makeProductionLifecycleHarness();
+noRecoveryLifecycle.deps.inspectDurableRecovery = async () => null;
+await assert.rejects(runProductionLifecycle(noRecoveryLifecycle));
+assert.equal(noRecoveryLifecycle.lifecycleCalls.completion, 0);
+const wrongRecoveryLifecycle = makeProductionLifecycleHarness();
+const originalLifecycleRecovery = wrongRecoveryLifecycle.deps.inspectDurableRecovery;
+wrongRecoveryLifecycle.deps.inspectDurableRecovery = async () => ({ ...(await originalLifecycleRecovery()), projectRef: STAGE_PROJECT_REF });
+await assert.rejects(runProductionLifecycle(wrongRecoveryLifecycle), /identity|policy|project/);
+assert.equal(wrongRecoveryLifecycle.lifecycleCalls.completion, 0);
+const wrongRegistryLifecycle = makeProductionLifecycleHarness();
+const originalRegistryLifecycleSql = wrongRegistryLifecycle.deps.sql.unsafe;
+wrongRegistryLifecycle.deps.sql.unsafe = async (query, values) => query.includes("from public.chips_transaction_idempotency")
+  ? [{ transaction_id: productionResumeEvidence.transactionIds[0], archive_batch_id: "99", table_id: productionLifecycleTable }]
+  : originalRegistryLifecycleSql(query, values);
+await assert.rejects(runProductionLifecycle(wrongRegistryLifecycle), /registry binding/);
+assert.equal(wrongRegistryLifecycle.lifecycleCalls.completion, 0);
+const driftedLifecycleBatch = makeProductionLifecycleHarness();
+const originalDriftLifecycleSql = driftedLifecycleBatch.deps.sql.unsafe;
+driftedLifecycleBatch.deps.sql.unsafe = async (query, values) => query.includes("chips_ledger_archive_batches") && query.includes("for update")
+  ? [{ ...driftedLifecycleBatch.row, raw_sha256: "8".repeat(64) }] : originalDriftLifecycleSql(query, values);
+await assert.rejects(runProductionLifecycle(driftedLifecycleBatch), /manifest differs/);
+assert.equal(driftedLifecycleBatch.lifecycleCalls.completion, 0);
+
+const missingMarkerLifecycle = makeProductionLifecycleHarness({ missingMarker: true });
+await assert.rejects(runProductionLifecycle(missingMarkerLifecycle), /marker/);
+
+const incompleteCompletedCanary = makeProductionLifecycleHarness();
+await assert.rejects(runProductionAutomation({ env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1" },
+  policy: "closed-human-30d", mode: "canary", batchId: "2", confirmation: "GO 2",
+  deps: { ...incompleteCompletedCanary.deps, read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier }) } }), /marker is missing/);
+assert.equal(incompleteCompletedCanary.lifecycleCalls.completion, 0);
+assert.equal(incompleteCompletedCanary.calls.execute, 0);
+assert.equal(incompleteCompletedCanary.calls.authorize, 0);
+const completeCanaryRetry = makeProductionLifecycleHarness({ marker: "2026-08-15T00:04:00Z" });
+assert.equal((await runProductionAutomation({ env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1" },
+  policy: "closed-human-30d", mode: "canary", batchId: "2", confirmation: "GO 2",
+  deps: { ...completeCanaryRetry.deps, read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier }) } })).state, "already_pruned");
+assert.equal(completeCanaryRetry.calls.execute, 0);
+assert.equal(completeCanaryRetry.lifecycleCalls.completion, 0);
+const automaticLifecycleResume = makeProductionLifecycleHarness();
+const automaticLifecycleResult = await runProductionAutomation({ env: { ...PRODUCTION_ENV,
+  CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "1", CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR: "arcade-production-dispatch", GITHUB_ACTOR: "arcade-production-dispatch" },
+  policy: "closed-human-30d", mode: "automatic", deps: { ...automaticLifecycleResume.deps,
+    read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier,
+      control: { enabled: true }, policies: [{ policy_id: "production-ledger-closed-human-table-retention-30d-v1", enabled: true }] }) } });
+assert.equal(automaticLifecycleResult.state, "completed");
+assert.equal(automaticLifecycleResult.resumed, true);
+assert.equal(automaticLifecycleResume.lifecycleCalls.completion, 1);
+assert.equal(automaticLifecycleResume.calls.execute, 0);
+assert.equal(automaticLifecycleResume.calls.export, 0);
+// Future CANARY: pruning once, then verified marker, with no second execute.
+const futureHumanCanary = makeProductionLifecycleHarness();
+Object.assign(futureHumanCanary.row, { destructive_go_at: null, destructive_go_batch_id: null, pruned_at: null, pruned_transaction_count: null, pruned_entry_count: null,
+  pruned_transaction_ids_sha256: null, pruned_entry_ids_sha256: null });
+const futureSql = futureHumanCanary.deps.sql.unsafe;
+futureHumanCanary.deps.sql.unsafe = async (query, values) => query.includes("where project_ref")
+  ? [futureHumanCanary.row] : futureSql(query, values);
+futureHumanCanary.deps.authorize = async () => {
+  futureHumanCanary.calls.authorize += 1;
+  futureHumanCanary.row.destructive_go_at = "2026-08-15T00:02:00Z";
+  futureHumanCanary.row.destructive_go_batch_id = "2";
+  return { state: "authorized", batch_id: "2" };
+};
+const finalDryPrune = futureHumanCanary.deps.pruneArchive;
+futureHumanCanary.deps.pruneArchive = async args => {
+  if (args.argv.includes("--execute")) {
+    futureHumanCanary.calls.execute += 1;
+    Object.assign(futureHumanCanary.row, { pruned_at: "2026-08-15T00:03:00Z", pruned_transaction_count: 2, pruned_entry_count: 4,
+      pruned_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256, pruned_entry_ids_sha256: productionResumeEvidence.entryIdsSha256 });
+    return { state: "pruned" };
+  }
+  if (!futureHumanCanary.row.pruned_at) return { state: "ready", evidence: productionResumeEvidence };
+  return finalDryPrune(args);
+};
+const futureHumanCanaryResult = await runProductionAutomation({ env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1" },
+  policy: "closed-human-30d", mode: "canary", batchId: "2", confirmation: "GO 2",
+  deps: { ...futureHumanCanary.deps, read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier }) } });
+assert.equal(futureHumanCanaryResult.state, "pruned");
+assert.ok(futureHumanCanaryResult.lifecycle.marker);
+assert.equal(futureHumanCanary.calls.execute, 1);
+assert.equal(futureHumanCanary.lifecycleCalls.completion, 1);
+
 let productionPreparedResumeRow = null;
 const productionPrepareForResume = await runProductionAutomation({
   env: PRODUCTION_ENV,

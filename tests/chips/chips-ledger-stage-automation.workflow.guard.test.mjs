@@ -462,6 +462,9 @@ assert.deepEqual(Object.keys(parsedProductionWorkflow.on?.workflow_dispatch?.inp
   "account_ids_sha256",
   "batch_id",
   "confirmation",
+  "completion_confirmation",
+  "cutoff",
+  "table_id",
   "mode",
   "policy",
   "recovery_object_path",
@@ -473,7 +476,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   parsedProductionWorkflow.on.workflow_dispatch.inputs.mode.options,
-  ["diagnostic", "prepare", "canary", "automatic"],
+  ["diagnostic", "prepare", "canary", "automatic", "lifecycle-completion"],
   "Production must expose only the bounded automation modes",
 );
 assert.doesNotMatch(productionWorkflow, /^  (push|pull_request|schedule):/m);
@@ -513,6 +516,11 @@ assert.match(productionWorkflow, /node scripts\/ops\/chips-ledger-production-aut
 assert.match(productionWorkflow, /--policy "\$PRODUCTION_POLICY"/);
 assert.match(productionWorkflow, /--mode "\$PRODUCTION_MODE"/);
 
+assert.match(productionWorkflow, /test "\$PRODUCTION_COMPLETION_CONFIRMATION" = "COMPLETE HUMAN RETENTION \$PRODUCTION_BATCH_ID"/);
+assert.match(productionWorkflow, /test -z "\$PRODUCTION_CONFIRMATION"/);
+assert.match(productionWorkflow, /--table-id "\$PRODUCTION_TABLE_ID"/);
+assert.match(productionWorkflow, /--cutoff "\$PRODUCTION_CUTOFF"/);
+assert.match(productionWorkflow, /--completion-confirmation "\$PRODUCTION_COMPLETION_CONFIRMATION"/);
 const productionEnv = productionJob.env;
 assert.deepEqual(Object.keys(productionEnv).sort(), [
   "CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256",
