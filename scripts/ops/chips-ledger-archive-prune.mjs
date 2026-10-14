@@ -386,7 +386,7 @@ export function buildPruneEvidence(localArchive, { maxBatchSize = MAX_BATCH_SIZE
   const registryKeys = [];
   const tableIds = new Set();
   const replayPairs = [];
-  const isClosedHumanPolicy = localArchive.manifest.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID;
+  const isClosedHumanPolicy = [CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID].includes(localArchive.manifest.source_policy_id);
 
   for (const record of localArchive.records) {
     const transaction = record.transaction;

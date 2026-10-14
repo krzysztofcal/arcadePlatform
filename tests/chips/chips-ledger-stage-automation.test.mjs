@@ -66,7 +66,7 @@ import {
   buildAccountRecoverySnapshot,
   serializeAccountRecovery,
 } from "../../scripts/ops/_shared/chips-ledger-escrow-retention.mjs";
-import { runRetentionCycle } from "../../scripts/ops/_shared/chips-ledger-retention-cycle.mjs";
+import { inspectDurableRecoveryState as inspectProductionRecovery, persistDurableRecovery as persistProductionRecovery, runRetentionCycle } from "../../scripts/ops/_shared/chips-ledger-retention-cycle.mjs";
 
 const STAGE_DB_URL = "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres";
 const STAGE_URL = "https://krydukthwdvccggbyjfw.supabase.co";
@@ -348,6 +348,129 @@ function makeProductionResumeHarness(row, options = {}) {
   };
   return { calls, deps, pruneCalls };
 }
+
+function makeProductionPrepareResumeHarness(options = {}) {
+  const row = makeProductionResumeRow();
+  row.source_policy_id = "production-ledger-closed-human-table-retention-30d-v1";
+  row.archive_proof_verified_at = null;
+  row.archived_transaction_ids_sha256 = null;
+  row.archived_entry_ids_sha256 = null;
+  Object.assign(row, options.row || {});
+  const harness = makeProductionResumeHarness(row);
+  const calls = { proof: 0, dry: 0, persist: 0 };
+  harness.deps.inspectDurableRecoveryState = async () => ({ state: options.recoveryState || "both_missing" });
+  harness.deps.downloadPrivateArchiveObject = async () => ({ bytes: options.badBytes ? Buffer.from("wrong archive") : productionResumeArchiveBytes });
+  harness.deps.persistDurableRecovery = async () => {
+    calls.persist += 1;
+    return { state: "complete", archive: { sha256: row.compressed_sha256 }, recoveryArchive: { sha256: row.compressed_sha256 }, recoveryManifest: { sha256: "4".repeat(64) } };
+  };
+  harness.deps.pruneArchive = async ({ argv }) => {
+    assert.equal(argv.includes("--execute"), false, "PREPARE must never execute DELETE/cleanup");
+    assert.equal(argv.includes("--approved-batch-id"), false);
+    if (argv.includes("--register-proof")) {
+      calls.proof += 1;
+      row.archive_proof_verified_at = "2026-08-15T00:01:00Z";
+      row.archived_transaction_ids_sha256 = productionResumeEvidence.transactionIdsSha256;
+      row.archived_entry_ids_sha256 = productionResumeEvidence.entryIdsSha256;
+      return { state: "proof_registered", evidence: productionResumeEvidence };
+    }
+    calls.dry += 1;
+    return { state: "ready", read_only: true, evidence: { ...productionResumeEvidence, transactionCount: options.overCap ? 3 : 2, entryCount: 4, transactionIdsSha256: options.badProof ? "9".repeat(64) : productionResumeEvidence.transactionIdsSha256 } };
+  };
+  return { ...harness, row, prepareCalls: calls };
+}
+async function prepareProductionResume(harness, batchId = "2") {
+  return runProductionAutomation({ env: PRODUCTION_ENV, policy: "closed-human-30d", mode: "prepare", batchId,
+    deps: { ...harness.deps, read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier, readOnly: true }) } });
+}
+const partialPrepare = makeProductionPrepareResumeHarness();
+const partialPrepared = await prepareProductionResume(partialPrepare);
+assert.equal(partialPrepared.state, "prepared");
+assert.equal(partialPrepared.batchId, "2");
+assert.deepEqual(partialPrepare.prepareCalls, { proof: 1, dry: 1, persist: 1 });
+assert.equal(partialPrepare.calls.authorize, 0);
+assert.equal(partialPrepare.calls.execute, 0);
+assert.equal(partialPrepare.calls.export, 0);
+assert.equal(partialPrepare.calls.store, 0);
+for (const options of [
+  { row: { status: "pending" } }, { row: { transaction_count: 3 } },
+  { row: { destructive_go_at: "now", destructive_go_batch_id: "2" } },
+  { row: { account_retirement_account_count: 1 } },
+  { row: { pruned_entry_count: 1 } }, { row: { archived_transaction_ids_sha256: "1".repeat(64) } },
+  { row: { project_ref: "krydukthwdvccggbyjfw" } },
+  { row: { compressed_sha256: "bad" } }, { badBytes: true },
+  { recoveryState: "partial" }, { recoveryState: "mismatch" }, { recoveryState: "unknown" },
+]) {
+  const harness = makeProductionPrepareResumeHarness(options);
+  await assert.rejects(prepareProductionResume(harness));
+  assert.equal(harness.prepareCalls.proof, 0);
+  assert.equal(harness.prepareCalls.persist, 0);
+  assert.equal(harness.calls.execute, 0);
+  assert.equal(harness.calls.authorize, 0);
+}
+const provenPrepare = makeProductionPrepareResumeHarness({ row: {
+  archive_proof_verified_at: "2026-08-15T00:01:00Z",
+  archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256,
+  archived_entry_ids_sha256: productionResumeEvidence.entryIdsSha256,
+}, recoveryState: "complete" });
+assert.equal((await prepareProductionResume(provenPrepare)).state, "prepared");
+assert.deepEqual(provenPrepare.prepareCalls, { proof: 0, dry: 1, persist: 1 });
+const badProofPrepare = makeProductionPrepareResumeHarness({ badProof: true });
+await assert.rejects(prepareProductionResume(badProofPrepare), /evidence/);
+assert.equal(badProofPrepare.prepareCalls.persist, 0);
+const lostPrepareLock = makeProductionPrepareResumeHarness();
+const originalPrepareSql = lostPrepareLock.deps.sql.unsafe;
+lostPrepareLock.deps.sql.unsafe = async (query, values) => query.includes("pg_backend_pid") && !query.includes("pg_try_advisory_lock")
+  ? [{ backend_pid: "lost-session" }] : originalPrepareSql(query, values);
+await assert.rejects(prepareProductionResume(lostPrepareLock), /advisory lock session changed/);
+assert.equal(lostPrepareLock.prepareCalls.proof, 0);
+const noActivePrepare = makeProductionPrepareResumeHarness();
+const originalNoActiveSql = noActivePrepare.deps.sql.unsafe;
+noActivePrepare.deps.sql.unsafe = async (query, values) => query.includes("where project_ref")
+  ? [] : originalNoActiveSql(query, values);
+await assert.rejects(prepareProductionResume(noActivePrepare), /not available/);
+assert.equal(noActivePrepare.calls.export, 0);
+const ambiguousPrepare = makeProductionPrepareResumeHarness();
+const originalAmbiguousSql = ambiguousPrepare.deps.sql.unsafe;
+ambiguousPrepare.deps.sql.unsafe = async (query, values) => query.includes("where project_ref")
+  ? [ambiguousPrepare.row, { ...ambiguousPrepare.row, batch_id: "3" }] : originalAmbiguousSql(query, values);
+await assert.rejects(prepareProductionResume(ambiguousPrepare), /ambiguous/);
+assert.equal(ambiguousPrepare.prepareCalls.proof, 0);
+
+// Exercise the real profile-bound durable helpers with private in-memory objects.
+const realRecoveryPrepare = makeProductionPrepareResumeHarness();
+const recoveryObjects = new Map();
+let recoveryUploads = 0;
+realRecoveryPrepare.deps.readPrivateObjectIfExists = async (_target, objectPath) => recoveryObjects.get(objectPath) || null;
+realRecoveryPrepare.deps.uploadOrVerifyPrivateObject = async ({ objectPath, bytes }) => {
+  assert.equal(recoveryObjects.has(objectPath), false, "recovery must not overwrite");
+  recoveryUploads += 1;
+  const object = { objectPath, bytes, sha256: crypto.createHash("sha256").update(bytes).digest("hex") };
+  recoveryObjects.set(objectPath, object);
+  return object;
+};
+realRecoveryPrepare.deps.inspectDurableRecoveryState = inspectProductionRecovery;
+realRecoveryPrepare.deps.persistDurableRecovery = persistProductionRecovery;
+assert.equal((await prepareProductionResume(realRecoveryPrepare)).state, "prepared");
+assert.equal(recoveryUploads, 2);
+assert.equal((await prepareProductionResume(realRecoveryPrepare)).state, "prepared");
+assert.equal(recoveryUploads, 2, "same-batch retry must verify rather than recreate recovery");
+assert.equal(realRecoveryPrepare.prepareCalls.proof, 1);
+const manifestObject = [...recoveryObjects.values()].find(o => o.objectPath.endsWith(".recovery.json.gz"));
+const mismatchedRecovery = JSON.parse(gunzipSync(manifestObject.bytes).toString("utf8"));
+mismatchedRecovery.project_ref = STAGE_PROJECT_REF;
+manifestObject.bytes = gzipSync(Buffer.from(JSON.stringify(mismatchedRecovery)));
+await assert.rejects(prepareProductionResume(realRecoveryPrepare), /identity differs/);
+assert.equal(recoveryUploads, 2);
+
+const wrongPrepare = makeProductionPrepareResumeHarness();
+await assert.rejects(prepareProductionResume(wrongPrepare, "4"), /exact active Production batch/);
+assert.equal(wrongPrepare.prepareCalls.proof, 0);
+const missingPrepareId = makeProductionPrepareResumeHarness();
+await assert.rejects(prepareProductionResume(missingPrepareId, null), /exact active Production batch/);
+const overCapPrepare = makeProductionPrepareResumeHarness({ overCap: true });
+await assert.rejects(prepareProductionResume(overCapPrepare), /evidence/);
+assert.equal(overCapPrepare.prepareCalls.persist, 0);
 
 let productionPreparedResumeRow = null;
 const productionPrepareForResume = await runProductionAutomation({

@@ -80,3 +80,8 @@ US1 provides a independently testable schema catch-up; US2 provides bounded cana
 | FR012 authorization | T015–T019,T023–T026 |
 
 All added tests are fundamental critical boundaries in existing suites. Do not translate template TDD or setup suggestions into UI tests, new framework/dependencies, generic ignore changes or live database fixtures.
+
+## T018 recovery implementation follow-up — 2026-10-14
+
+- [x] T018-R Repair Production closed-human evidence policy recognition and add exact-batch PREPARE recovery in the existing Production cycle; fundamental regressions only. Record failed batch 4 and preserve primary archive. Implementation/test evidence and Draft PR are recorded in the handoff; review and owner merge remain pending.
+- [ ] T018-R-OP OWNER GATE — after repair review/owner merge, separately authorize resuming **existing batch 4** (`closed-human-30d`, table `7f3d73e4-36c5-4b66-afe6-d1d41bea13e2`, compressed SHA `28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e`). Verify proof, both durable copies and dry-run before requesting a separate exact-batch CANARY GO. No new export/batch, reset, overwrite, cap/policy/scheduler change or #992 cleanup re-enable. T018 remains incomplete and T020–T022 blocked until actual CANARY PASS.
