@@ -1,3 +1,5 @@
+> **Current status — 2026-10-14:** T017 batch2, T018 bot batch3, T018 human batch4 (including lifecycle), and T019 escrow batch3 are PASS. PR B T020–T022 implementation was approved and is now locally verified for Draft PR review; T023+ operations are not authorized. Earlier dated OPEN/BLOCKED/failure paragraphs are historical snapshots superseded by the final matrix below.
+
 # Research and decisions — issue #891
 
 ## Evidence scope and provenance
@@ -162,7 +164,7 @@ The first human-table attempt is retained for audit and is not a canary candidat
 
 T018 remains open. The actual retention canaries still require natural age, a fresh fenced eligibility diagnostic, prepare, and separately authorized destructive execute for each policy. No T018 task checkbox is marked PASS.
 
-## Current owner-gated evidence — T017/T018/T019 (2026-09-22)
+## Historical owner-gated evidence — T017/T018/T019 (2026-09-22)
 
 This section supersedes the pre-canary status above. It records aggregate evidence only; private recovery bytes, credentials and secrets are intentionally excluded. No Production policy or global control was activated.
 
@@ -253,3 +255,128 @@ Existing Stage/Production automation, workflow guard, archive export/storage/pru
 Full `npm test`, syntax, CI guards, migration inventory validation and whitespace PASS; existing opt-in DB tests retain their normal environment skips. `check:all` retains the same five existing design HTML XP badge-anchor failures already reproduced on unchanged main. No migration, dependency, config or unrelated design change. No Production/Stage access, workflow dispatch, completion write, CANARY, merge, deploy or activation occurred during this implementation. Marker-only authorization remains pending.
 
 PR #1107 review corrections: complete closed-human prune receipts now require both a non-null destructive GO timestamp and the exact GO batch ID, including completed automatic batches. A busy advisory lock in explicit lifecycle-completion raises an error rather than successful no-op; other modes retain intentional lock-busy no-op behavior. The completed-batch harness records valid GO, and fundamental regressions reject missing GO and busy completion while preserving prepare no-op. No Production operation is authorized or executed by these changes.
+
+## Current PR B evidence matrix — all canaries PASS (2026-10-14)
+
+Reviewed GitHub main `2b212b795c1e0648d61ee8d06b1bb3d0b2ff164f`, including merged #1106/#1107. The live #891 PASS comment at 2026-10-14T20:43:08Z supersedes its stale age BLOCKED body. The approved T022 handoff corrects that stale status and provides a Draft PR; #891 remains open for T023–T025.
+
+Final human [lifecycle completion run 38633895421](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38633895421) reports completed, dry-run already_pruned, one DB marker write and zero Storage writes. Independent reconciliation verified marker `2026-10-14T20:39:44.985066Z`, unchanged complete batch/proof/prune/GO, 0 hot rows, 2 retained mappings, unchanged balances/sequences/conservation and both recovery copies. No repeated pruning/export/new batch. Last observed controls: OFF/all policiesOFF/cap2/fenceON, workflow switch0, no Production scheduler units; operator freshly attested cleanup0 in config/process PID3637526. #992 remains a separate re-enable gate.
+
+For planning, a scoped read-only audit additionally re-read only batches2/3/4 and downloaded their existing private primary/recovery artifacts through the existing verifier. Canonical database identity and all hashes below matched; no DB/Storage write or workflow dispatch occurred. This is evidence collection, not E3 authorization. Storage must be reverified with a fresh operator attestation before E3 apply.
+
+Each ledger canary has 2 transactions /4 entries, credits=debits/net0, complete proof and matching prune ID hashes. Batch2 and4 retain exactly2 registry mappings; batch3 has a complete2-key cleanup and completed bot escrow retirement. Historical old manual batch1 and Stage IDs15/334 are not activation evidence.
+
+### Batch 2 — production-ledger-auto-retention-30d-v1
+
+- Raw archive SHA: `7d117aef6bbc21dbce030cc0859092bed132a82c764178f585b37cc6cf0d63f0`.
+- Compressed archive / recovery archive SHA: `5e4ce1100e82555135bd761951beaaa83095a13d966306c003b7f474bf55f367`.
+- Transaction proof / prune SHA: `ea3085b290ae32be4eb34419afb04ea55caddcbca0801fc7b1ca47972e3fd010`.
+- Entry proof / prune SHA: `f224a1028f71b277fe725c6c6a2097b4c44872780100a7c46666bb8dab130aa6`.
+- Proof verified at: `2026-09-13 21:54:01.998395+00`.
+- Exact cutoff: `2026-08-14 21:54:00.245+00`.
+- Pruned at: `2026-09-14 08:32:49.627231+00`.
+- Destructive GO at: `2026-09-14 08:32:49.309998+00`.
+- Destructive GO batch: `2`.
+- Transaction IDs: `26899ac1-d3c2-4382-8954-06d98823278a`, `5815f81f-870a-4c3c-9879-ddeef0db4b1e`.
+- Entry IDs: `4469`, `4470`, `4471`, `4472`.
+- Recovery manifest SHA: `abb6b98096dd3aa04c98e450d8aea5eb9b6c5a19c2c993a134e2ca71f7caeaea`.
+- Primary: `v1/sha256/5e4ce1100e82555135bd761951beaaa83095a13d966306c003b7f474bf55f367.jsonl.gz`.
+- Durable archive: `recovery/v1/sha256/5e4ce1100e82555135bd761951beaaa83095a13d966306c003b7f474bf55f367.jsonl.gz`.
+- Durable manifest: `recovery/v1/sha256/5e4ce1100e82555135bd761951beaaa83095a13d966306c003b7f474bf55f367.recovery.json.gz`.
+
+### Batch 3 — production-ledger-bot-only-retention-7d-v1
+
+- Raw archive SHA: `361ef011cfffae4fef297c1336af2127bcdfed8c633126d3149a866dcc1205d8`.
+- Compressed archive / recovery archive SHA: `bec1c7db4fd65a3af000ee943c71cc100208af4a7f7cd1ab15706f9826d06ce1`.
+- Transaction proof / prune SHA: `30998c2ebc5c57f806f3221c0646762ce94b0e35edc91c60fccec1659d222265`.
+- Entry proof / prune SHA: `03d3abb1b360a614b48081beb0e9cf8fe51aadb79cacb8b6e4a9017d06951a9c`.
+- Proof verified at: `2026-09-22 11:59:35.095601+00`.
+- Exact cutoff: `2026-09-15 11:59:30.415+00`.
+- Pruned at: `2026-09-22 14:46:43.156875+00`.
+- Destructive GO at: `2026-09-22 13:00:06.487919+00`.
+- Destructive GO batch: `3`.
+- Transaction IDs: `856278b7-ddb3-4c46-af8f-a7fefda7f1c8`, `9e010041-66e0-4d95-9b4a-db95ca1389b2`.
+- Entry IDs: `4741`, `4742`, `4743`, `4744`.
+- Recovery manifest SHA: `cd1248863ff318addbfe581d037f70778afdd79176650af05519394f5231c189`.
+- Primary: `v1/sha256/bec1c7db4fd65a3af000ee943c71cc100208af4a7f7cd1ab15706f9826d06ce1.jsonl.gz`.
+- Durable archive: `recovery/v1/sha256/bec1c7db4fd65a3af000ee943c71cc100208af4a7f7cd1ab15706f9826d06ce1.jsonl.gz`.
+- Durable manifest: `recovery/v1/sha256/bec1c7db4fd65a3af000ee943c71cc100208af4a7f7cd1ab15706f9826d06ce1.recovery.json.gz`.
+- Bot table: `396a48fd-4b61-4992-8635-0820f3b68c74`; proof/cleanup keys SHA `2e78bf8cf3e598f0dcd83a61c81582f8746070459122307124d38d4ff0d602f5`, cleaned at `2026-09-22 14:46:43.156875+00`, count2, out-of-scope SHA `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. Table/account now absent is the expected retired state; no live bot marker can be required as a substitute for immutable receipts.
+
+### Batch 4 — production-ledger-closed-human-table-retention-30d-v1
+
+- Raw archive SHA: `20f8b84b3eeffec797d994fedbe4dc12fce48fe75b47e97568177b5b7872f90a`.
+- Compressed archive / recovery archive SHA: `28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e`.
+- Transaction proof / prune SHA: `0d655736aff808a8604c4acf07ad3d09422ba9becbc39c6af26b727a847a0345`.
+- Entry proof / prune SHA: `05ae84b7b64161c146501c8c114e6637cd65c6eef7c1373905ed92e87e241eda`.
+- Proof verified at: `2026-10-14 19:28:07.024825+00`.
+- Exact cutoff: `2026-09-14 18:39:21.779+00`.
+- Pruned at: `2026-10-14 19:39:19.683188+00`.
+- Destructive GO at: `2026-10-14 19:39:17.466354+00`.
+- Destructive GO batch: `4`.
+- Transaction IDs: `8948e05e-ca00-4fc4-97ec-baff3ce710a1`, `f9529116-fc6f-419c-a563-90487d6845ef`.
+- Entry IDs: `4747`, `4748`, `4749`, `4750`.
+- Recovery manifest SHA: `72e2f005c82dda1171380b3748078747ab68ac9c2e47c123a61b274c837bdd8e`.
+- Primary: `v1/sha256/28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e.jsonl.gz`.
+- Durable archive: `recovery/v1/sha256/28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e.jsonl.gz`.
+- Durable manifest: `recovery/v1/sha256/28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e.recovery.json.gz`.
+- Human table: `7f3d73e4-36c5-4b66-afe6-d1d41bea13e2`; completion marker `2026-10-14T20:39:44.985066Z`. Retained mappings2 and null registry-cleanup tuple are intentional.
+
+### Escrow retirement bound to batch3
+
+Account `c29325f1-0715-453e-b090-fde88fa2ada7`, count1, account-set SHA `c342d5eb1395883fa642c17839a5a251438e59355ee9cba4c7f1fc6dffc0112f`. Immutable snapshot SHA `a35ad9c46440bed7c882a901c26ca18e832ce1ef1b9fff0b0da7ec8447e201ae`; object SHA `ae887c5e1b3d9441089d53604a7fb49a9fdb33ec9f3a264051db0acff3b6dc87` at `account-recovery/v1/sha256/ae887c5e1b3d9441089d53604a7fb49a9fdb33ec9f3a264051db0acff3b6dc87.json.gz`. Retirement receipt `2026-09-22T19:44:42.167617Z` from recorded T019 evidence; snapshot/account absence/no references remain a mandatory fresh E3 preflight check.
+
+### PR B approved design decisions
+
+- Decision: keep cap2 on manual target/proof/prune/lifecycle APIs and add explicit locked automatic context5000 across existing pipeline. Reason: target-only caps and SQL proof currently block5000 while global enabled alone is too broad. Rejected: global constant5000, env cap override, weakening full-table/USER predicates.
+- Decision: E3 adds one narrow existing-30d automatic GO adapter and updates protected callers/ACLs, using the existing economic core. Reason: current `--automatic` rejects that class and no SQL automatic GO exists. Rejected: CLI-only admission or a second pruning implementation.
+- Decision: same-batch automatic resume only if committed/proven and durable-complete; unknown/pending/partial state stops. Reason: preserve exact receipts and one-batch limit. Rejected: new export fallback, automatic proof/recovery repair or manual cap bypass.
+- Decision: E3 binds owner-reviewed Storage preflight digest/time (<=15min), while SQL verifies exact immutable database evidence under lock. Reason: SQL cannot retrieve private Storage bytes. Rejected: new Storage extension/evidence service or treating hash strings alone as downloaded proof.
+- Decision: one default-off UTC timer, dedicated Actions-only token, local flock and filtered nonterminal-run total_count guards. Reason: bounded calls avoid scanning growing completed-run history and cannot hide active runs behind pagination. Rejected: duplicate native cron, backlog catch-up, DB credentials in scheduler and retrying uncertain dispatch.
+
+Architecture decisions are resolved and implementation was authorized; activation remains separately owner-gated. Exact implementation/E3 hashes are recorded in the handoff, never accepted as rollout permission. Before authoring/apply, reconcile upstream inventory/live history and obtain fresh private escrow/recovery/runtime attestation. These are evidence steps, not a reason to re-run completed canaries.
+
+### Escrow / #992 dependency retained
+
+Code review confirms `PRODUCTION_ESCROW_CANDIDATE_SQL` requires an absent bot table, whereas bot pruning sets its lifecycle marker without deleting `poker_tables`. With WS cleanup=0, future escrow schedules may legitimately find no candidate for newly completed bot tables. Keep the selector and account safety contract unchanged; document the backlog in T025. The completed batch3 retirement is unaffected. #992 cleanup requires its own audit and owner GO, outside PR B.
+
+## PR B implementation / review handoff — 2026-10-15
+
+Base main: `2b212b795c1e0648d61ee8d06b1bb3d0b2ff164f`; branch `feat/891-production-retention-pr-b`. E3 file `20260914092000_chips_ledger_production_retention_activation.sql` SHA-256: `ae8b44f133d716a35964b79b2e81788ae60b7fdc59c6249b88b366c33d6261a5`. Manifest now validates111 source migrations and8 replacements, preserving every previous hash. The Draft PR identifies the final implementation commit.
+
+User review required and implementation enforces manual cap2 after E3 and activated-policy automatic cap5000 at JS and lowest SQL boundaries, never GUC/env alone. SQL preserves one core per financial method via explicit-context overloads/manual delegates. Missing existing-30d automatic GO and safe same-batch resume are included; human completion is verified before SUCCESS. Disable-only clearing of activation fields repairs the original OFF constraint; reapply cannot reactivate.
+
+Storage evidence is a separate operator preflight: private bucket plus primary/full recovery/manifest and escrow snapshot bytes are downloaded and verified through existing helpers before apply. The owner attestation binds those results, exact receipts, code/runtime identities and observation time; E3 checks pinned DB state under lock and <=15min freshness again before activation. SQL does not perform Storage HTTP requests, prove Storage availability or eliminate TOCTOU. Any unavailable/changed Storage evidence invalidates the attestation and stops the operator before E3.
+
+Validation: `npm test` PASS (147 suites; existing opt-in DB skips remain, while the dedicated disposable PostgreSQL migration suite was run explicitly and PASS). Export/store/prune, Stage/Production automation and workflow/scheduler guard PASS. Syntax, CI guards, CSP (55 served documents), authoritative transport, migration inventory and whitespace PASS. `check:all` FAIL is the existing five missing XP badge anchors: `poker/designs/luxury-lobby/{index,landscape,portrait}.html`, `specs/1086-poker-felt/design/index.html`, `specs/792-premium-table-themes/design/index.html`. These files and the guard are unchanged. Remote checks are reported on the Draft PR.
+
+Independent whole-branch review identified no P1; its scheduler skip-log finding was corrected and the guard rerun. This is code/test evidence, not Production rollout PASS. No Production connection/write, workflow dispatch, migration application, token/switch activation, scheduler installation, merge/deploy or WS cleanup change occurred in implementation. All T023+ gates remain closed.
+
+Final fail-closed follow-up: completed bot cycles must revalidate as `already_cleaned`; existing30d uses `already_pruned`. Both reverify durable recovery before selecting a new archive. Escrow automatic admission is freshly checked under the lock and again by the SQL automatic guard inside execution, retaining the unchanged2-account retirement contract. Fundamental negative tests PASS; reviewer found no blocker in either follow-up.
+
+### PR #1108 catalog correction — 2026-10-15
+
+The original E3 `$before$` pins were calculated from authored E1 SQL, not the deployed Production `pg_proc.prosrc`. E2 does not replace these routines. A repeatable-read, read-only connection to `otbqfijerkieoxwpxjnm` / `7575202818581710058` reproduced 14 mismatches out of 18. All 18 required signatures remain pinned individually using the original exact byte hashing algorithm (only the system identifier is replaced); no fallback or whitespace normalization is accepted.
+
+All 14 deployed definitions were compared with E1 and the E3 replacements, including quoted strings, security definer/invoker, owner and empty search_path. Nine differ only in formatting/comments; four additionally omit optional alias `AS`. The bot lifecycle gate's first NULL-table candidate prefilter has three LIKE prefixes instead of eleven: the eight omitted `poker:` prefixes cannot pass the following mandatory join/seed regex. Separate poker leave/inactive-cleanup and v1 registry branches are unchanged. This is equivalent eligibility, not permission to broaden accepted history. E3 financial bodies remain unchanged.
+
+| Required function (public prefix omitted) | Difference | Reviewed deployed SHA-256 |
+|---|---|---|
+| `chips_assert_archive_prune_target(text,bigint)` | Formatting/comments only | `ffac8f9ad0cd0286adfd36abcd6021e3a50c73ccb5b71b75f16cd5536396fab1` |
+| `chips_assert_bot_only_archive_proof_lifecycle_gate(uuid,bigint,timestamp with time zone,uuid[],text[])` | Redundant LIKE prefilter; same mandatory regex/union branches | `e6c20f8264a6f5fd13588655b3eb78845629375c953aaa05eefd7bd1a6d8d004` |
+| `chips_assert_closed_human_table_lifecycle_gate(uuid,timestamp with time zone,bigint)` | Formatting/comments only | `acdfb054abff03c1f820770ef29574e77360f4bfe5c2e3c4622bdaef41bd6a65` |
+| `chips_assert_production_retention_control(text,bigint,boolean)` | Formatting/comments only | `51bd8a947ef47ff98f1c97530ea9c6773b35e47fb164594dfb285ff548caeb37` |
+| `chips_auto_prune_and_cleanup_bot_only_archive_batch(text,uuid[],bigint[],text[],uuid)` | Formatting and optional alias AS | `ad9becaa511c1bef8a059908f814e7ffbf79755bbf753dde5c92270816313b31` |
+| `chips_auto_prune_closed_human_table_archive_batch(text,uuid[],bigint[],uuid)` | Formatting and optional alias AS | `6397d9e49b7c80a79655056b080ff16c3c12e1d54a34444b922bc4799c606f21` |
+| `chips_complete_closed_human_table_retention(uuid,timestamptz)` | Formatting/comments only | `398f459c1f5a684bcbf7b8b4d774b5e3d9acb04b84cd63fcbfd54485b8b719c0` |
+| `chips_guard_archive_batch_mutations()` | Formatting/comments only | `09da4d727aaaf195100bcb1c97df80d76d726aa9a00cff36a3e51927cd4ff34e` |
+| `chips_guard_human_retention_marker()` | Formatting/comments only | `40a77a77a211596de75dfdff2a3650d375c80c849416eac714506154aff6d712` |
+| `chips_prune_and_cleanup_bot_only_archive_batch(text,uuid[],bigint[],text[],uuid,boolean,bigint)` | Formatting/comments only | `1cf157cb8a30162b9cd5151725d624ee6ddde4c0a57eb8543d93ea2f3405cff2` |
+| `chips_prune_closed_human_table_archive_batch(text,uuid[],bigint[],uuid,boolean,bigint)` | Formatting and optional alias AS | `037921f26080ca4822fdfed2311c9fb55c1a0cee7b27dd38f82b5866977eb63c` |
+| `chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)` | Formatting/comments only | `2eee1a2d728db25470008e93772c07c807d99853ba7cf581752b5eec1890462f` |
+| `chips_register_bot_only_archive_proof(text,uuid[],bigint[],uuid,text[],text)` | Formatting/comments only | `e183f1c0df737a4b256ee5a8f9969f419e1a33b332cd1b24f96049c0ad286300` |
+| `chips_retire_production_escrow_accounts(bigint,uuid[],text,text,text,boolean,text)` | Formatting and optional alias AS | `251b96819aa427dccbf7eddb56995cf6f9696aa8c5b825849bc2f4168d497551` |
+
+Five routines are not replaced by E3: archive target, closed-human lifecycle gate, lifecycle completion, human marker guard and escrow retirement. Their `$after$` pins must retain the reviewed deployed hashes too. All other replacement body pins remain unchanged. The test-only frozen deployed catalog restores these 14 definitions solely in the disposable PostgreSQL fixture; it is not a migration or operational repair. Full activation/replay tests now start from the deployed catalog, and a raw-source comment mutation must fail the catalog guard.
+
+Final fresh Production fingerprint preflight: **18/18 PASS**, transaction read-only ON, E3 absent, retention OFF, cap 2. No Production DDL/DML, activation, workflow dispatch or configuration change was performed. Breaking/financial impact: no new runtime behavior beyond the already reviewed E3 proposal; this corrects the exact baseline and retained-function replay pins. Any subsequent catalog drift still blocks E3. Storage preflight, fresh evidence and all separate owner gates remain mandatory; fingerprint PASS alone does not authorize E3.

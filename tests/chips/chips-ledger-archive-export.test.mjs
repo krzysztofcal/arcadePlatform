@@ -1,6 +1,8 @@
+import { resolveProductionAutomaticContext } from "../../scripts/ops/_shared/chips-ledger-retention-profile.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  maxBatchSizeForTarget,
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
@@ -359,3 +361,17 @@ assert.match(CLOSED_HUMAN_TABLE_CANDIDATE_SQL, /chips_transaction_idempotency/);
 assert.equal(CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, "stage-ledger-closed-human-table-retention-30d-v1");
 
 process.stdout.write("chips-ledger-archive-export tests passed\n");
+
+const activatedProductionContext = resolveProductionAutomaticContext({
+  projectRef: "otbqfijerkieoxwpxjnm", systemIdentifier: "7575202818581710058", fenceActive: true,
+  control: { enabled: true, max_transactions: 5000, activated_at: "2026-10-14", existing_30d_canary_batch_id: "2" }, policies: [],
+}, "production-ledger-auto-retention-30d-v1");
+assert.equal(maxBatchSizeForTarget("prod"),2);
+assert.equal(maxBatchSizeForTarget("prod",activatedProductionContext),5000);
+assert.throws(()=>maxBatchSizeForTarget("prod",{maxTransactions:5000}),/verified automatic context/);
+await assert.rejects(() => runExport({
+  argv: ["--target","prod","--batch-size","5001","--output","/tmp/chips-ledger-prod-over-automatic-limit.jsonl.gz"],
+  env: { EXPECTED_SUPABASE_STAGE_PROJECT_REF:"krydukthwdvccggbyjfw", EXPECTED_SUPABASE_PROD_PROJECT_REF:"otbqfijerkieoxwpxjnm",
+    SUPABASE_PROD_DB_URL:"postgresql://postgres.otbqfijerkieoxwpxjnm@db.otbqfijerkieoxwpxjnm.supabase.co:5432/postgres" },
+  deps: { automaticContext:activatedProductionContext },
+}), /--batch-size must be between 1 and 5000/);

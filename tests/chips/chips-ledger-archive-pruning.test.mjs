@@ -1,3 +1,4 @@
+import { resolveProductionAutomaticContext } from "../../scripts/ops/_shared/chips-ledger-retention-profile.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -6,6 +7,7 @@ import {
   BOT_ONLY_RETENTION_POLICY_ID,
   CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  maxBatchSizeForTarget,
   buildArchiveBytes,
   buildExportRecord,
   buildManifest,
@@ -907,3 +909,13 @@ assert.throws(
 );
 
 process.stdout.write("chips-ledger-archive-pruning tests passed\n");
+
+const activatedProductionContext = resolveProductionAutomaticContext({
+  projectRef: "otbqfijerkieoxwpxjnm", systemIdentifier: "7575202818581710058", fenceActive: true,
+  control: { enabled: true, max_transactions: 5000, activated_at: "2026-10-14", existing_30d_canary_batch_id: "2" }, policies: [],
+}, "production-ledger-auto-retention-30d-v1");
+const boundedProofRecords=Array.from({length:5001},(_,i)=>({transaction:{id:`00000000-0000-4000-8000-${String(i+1).padStart(12,"0")}`},entries:[{id:String(i+1)}]}));
+assert.equal(computeArchiveIdProofs(boundedProofRecords.slice(0,2),{maxBatchSize:maxBatchSizeForTarget("prod")}).transactionIds.length,2);
+assert.throws(()=>computeArchiveIdProofs(boundedProofRecords.slice(0,3),{maxBatchSize:maxBatchSizeForTarget("prod")}),/1 to 2/);
+assert.equal(computeArchiveIdProofs(boundedProofRecords.slice(0,5000),{maxBatchSize:maxBatchSizeForTarget("prod",activatedProductionContext)}).transactionIds.length,5000);
+assert.throws(()=>computeArchiveIdProofs(boundedProofRecords,{maxBatchSize:maxBatchSizeForTarget("prod",activatedProductionContext)}),/1 to 5000/);

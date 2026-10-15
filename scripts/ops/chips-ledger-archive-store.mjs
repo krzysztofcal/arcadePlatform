@@ -1,3 +1,4 @@
+import { effectiveProductionCap, assertProductionAutomaticContext } from "./_shared/chips-ledger-retention-profile.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -267,7 +268,8 @@ function verifyManifestShape(manifest, artifactName, target, expectedLegacyStage
   if (manifest.cutoff.rule !== "transaction.created_at < cutoff") fail("local manifest cutoff rule is unsupported");
 
   const batch = manifest.batch;
-  const maxBatchSize = maxBatchSizeForTarget(target.target);
+  const maxBatchSize = maxBatchSizeForTarget(target.target, target.automaticContext);
+  if (target.target === "prod") effectiveProductionCap(target.automaticContext, manifest.source_policy_id || "");
   if (!batch || !Number.isSafeInteger(batch.limit) || batch.limit < 1 || batch.limit > maxBatchSize) fail("local manifest batch limit is invalid for target");
   assertSafeInteger(batch.transactions, "batch.transactions");
   assertSafeInteger(batch.entries, "batch.entries");
@@ -1597,7 +1599,7 @@ export async function storeArchive({ argv = process.argv.slice(2), env = process
   if (!args.target) fail("--target is required; no default target is allowed");
   if (!args.artifact) fail("--artifact is required; no default path is allowed");
   if (!args.manifest) fail("--manifest is required; no default path is allowed");
-  const storageTarget = deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {});
+  const storageTarget = { ...(deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {})), automaticContext: deps.automaticContext };
   const expectedLegacyStageAllowlistEvidence = deps.legacyStageAllowlistPlan?.archiveManifest
     ? structuredClone(deps.legacyStageAllowlistPlan.archiveManifest)
     : null;
@@ -1612,6 +1614,7 @@ export async function storeArchive({ argv = process.argv.slice(2), env = process
   const manifestStore = deps.manifestStore || createManifestStore(sql, storageTarget.target);
   const adapterDeps = { ...deps, manifestStore };
   try {
+    await assertProductionAutomaticContext(sql, deps.automaticContext, local.manifest.source_policy_id, local.manifest.batch.transactions);
     const batch = await loadOrCreatePendingBatch(local, storageTarget, adapterDeps);
     await ensureArchiveBucket(storageTarget, deps);
     const object = await uploadOrVerifyObject(local, storageTarget, { ...deps, manifestStatus: batch.row.status });

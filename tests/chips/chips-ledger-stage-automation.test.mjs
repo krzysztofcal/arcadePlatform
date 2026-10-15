@@ -55,6 +55,8 @@ import {
   PRODUCTION_PROJECT_REF,
   PRODUCTION_SYSTEM_IDENTIFIER,
   resolveRetentionProfile,
+  resolveProductionAutomaticContext,
+  effectiveProductionCap,
   validateRetentionEnvironment,
 } from "../../scripts/ops/_shared/chips-ledger-retention-profile.mjs";
 import {
@@ -89,6 +91,23 @@ const PRODUCTION_ENV = {
   EXPECTED_SUPABASE_PROD_PROJECT_REF: PRODUCTION_PROJECT_REF,
   DEPLOYED_COMMIT_SHA: "a".repeat(40),
 };
+
+const activatedState = {
+  projectRef: PRODUCTION_PROJECT_REF, systemIdentifier: PRODUCTION_SYSTEM_IDENTIFIER,
+  fenceActive: true, control: { enabled: true, max_transactions: 5000, activated_at: "2026-10-14", existing_30d_canary_batch_id: "2" },
+  policies: [{ policy_id: "production-ledger-closed-human-table-retention-30d-v1", enabled: true, activated_at: "2026-10-14", canary_batch_id: "4" }],
+};
+const humanAutomaticContext = resolveProductionAutomaticContext(activatedState, "production-ledger-closed-human-table-retention-30d-v1");
+assert.equal(effectiveProductionCap(), 2, "manual after E3 remains capped2");
+assert.equal(effectiveProductionCap(humanAutomaticContext), 5000);
+assert.throws(() => effectiveProductionCap({ ...humanAutomaticContext }), /verified automatic context/);
+for (const bad of [
+  { ...activatedState, systemIdentifier: "wrong" },
+  { ...activatedState, fenceActive: false },
+  { ...activatedState, control: { ...activatedState.control, enabled: false } },
+  { ...activatedState, policies: [{ ...activatedState.policies[0], enabled: false }] },
+]) assert.throws(() => resolveProductionAutomaticContext(bad, "production-ledger-closed-human-table-retention-30d-v1"), /automatic context/);
+assert.throws(() => resolveProductionAutomaticContext(activatedState, "unknown"), /automatic context/);
 
 const productionProfile = validateRetentionEnvironment("production", PRODUCTION_ENV, { requireCommitSha: true });
 assert.equal(productionProfile.projectRef, PRODUCTION_PROJECT_REF);
@@ -310,6 +329,7 @@ function makeProductionResumeHarness(row, options = {}) {
       if (query.includes("from public.chips_ledger_archive_batches")) {
         return query.includes("where project_ref") ? [activeSummary] : [row];
       }
+      if (query.includes("chips_assert_production_retention_control")) return [{ result: { max_transactions: 5000 } }];
       throw new Error(`unexpected Production resume SQL: ${query}`);
     },
     begin: async (callback) => callback({ unsafe: async (query, values = []) => sql.unsafe(query, values) }),
@@ -482,6 +502,7 @@ function makeProductionLifecycleHarness(options = {}) {
     pruned_transaction_ids_sha256: row.archived_transaction_ids_sha256,
     pruned_entry_ids_sha256: row.archived_entry_ids_sha256 }, options.row || {});
   const harness = makeProductionResumeHarness(row);
+  const lifecycleEvidence = options.evidence || productionResumeEvidence;
   let marker = options.marker || null;
   const calls = { completion: 0, dry: 0 };
   const baseSql = harness.deps.sql.unsafe;
@@ -492,7 +513,7 @@ function makeProductionLifecycleHarness(options = {}) {
     if (query.includes("from public.chips_production_bot_only_retention_policy")) return [{ enabled: false }, { enabled: false }, { enabled: false }];
     if (query.includes("chips_ledger_archive_batches") && query.includes("for update")) return [{ ...row, cutoff: new Date(row.cutoff) }];
     if (query.includes("human_retention_complete_at") && query.includes("poker_tables")) return [{ id: productionLifecycleTable, status: "CLOSED", has_human_participant: true, human_retention_complete_at: marker }];
-    if (query.includes("from public.chips_transaction_idempotency")) return productionResumeEvidence.transactionIds.map(transaction_id => ({ transaction_id, archive_batch_id: "2", table_id: productionLifecycleTable }));
+    if (query.includes("from public.chips_transaction_idempotency")) return lifecycleEvidence.transactionIds.map(transaction_id => ({ transaction_id, archive_batch_id: "2", table_id: productionLifecycleTable }));
     if (query.includes("chips_assert_closed_human_table_lifecycle_gate")) return [{}];
     if (query.includes("chips_complete_closed_human_table_retention")) {
       calls.completion += 1;
@@ -506,7 +527,7 @@ function makeProductionLifecycleHarness(options = {}) {
     assert.equal(argv.includes("--register-proof"), false);
     calls.dry += 1;
     return { state: options.dryState || "already_pruned", read_only: true, archiveSha256: options.badArchive ? "9".repeat(64) : row.compressed_sha256,
-      evidence: { ...productionResumeEvidence, transactionCount: 2, entryCount: 4,
+      evidence: { ...lifecycleEvidence, transactionCount: Number(row.transaction_count), entryCount: Number(row.entry_count),
         closedHumanTableId: options.badTable ? "00000000-0000-4000-8000-000000000099" : productionLifecycleTable } };
   };
   return { ...harness, row, lifecycleCalls: calls };
@@ -611,9 +632,9 @@ assert.equal(completeCanaryRetry.lifecycleCalls.completion, 0);
 const automaticLifecycleResume = makeProductionLifecycleHarness();
 const automaticLifecycleResult = await runProductionAutomation({ env: { ...PRODUCTION_ENV,
   CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "1", CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR: "arcade-production-dispatch", GITHUB_ACTOR: "arcade-production-dispatch" },
-  policy: "closed-human-30d", mode: "automatic", deps: { ...automaticLifecycleResume.deps,
+  policy: "closed-human-30d", mode: "automatic", deps: { ...automaticLifecycleResume.deps, sqlRead: async () => activatedState,
     read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier,
-      control: { enabled: true }, policies: [{ policy_id: "production-ledger-closed-human-table-retention-30d-v1", enabled: true }] }) } });
+      ...activatedState }) } });
 assert.equal(automaticLifecycleResult.state, "completed");
 assert.equal(automaticLifecycleResult.resumed, true);
 assert.equal(automaticLifecycleResume.lifecycleCalls.completion, 1);
@@ -4287,3 +4308,59 @@ for (const scenario of ["transient", "busy", "exhausted", "sql-timeout"]) {
 }
 
 process.stdout.write("chips-ledger-stage-automation tests passed\n");
+
+const automaticPreparedResume=makeProductionResumeHarness(makeProductionResumeRow());
+const automaticPreparedResult=await runProductionAutomation({policy:"existing-30d",mode:"automatic",
+ env:{...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR:"arcade-production-dispatch",GITHUB_ACTOR:"arcade-production-dispatch"},
+ deps:{...automaticPreparedResume.deps,read:async()=>activatedState,sqlRead:async()=>activatedState}});
+assert.equal(automaticPreparedResult.state,"pruned");
+assert.equal(automaticPreparedResume.calls.export,0);
+assert.equal(automaticPreparedResume.calls.store,0);
+assert.equal(automaticPreparedResume.calls.authorize,0);
+assert.equal(automaticPreparedResume.calls.execute,1);
+assert.ok(automaticPreparedResume.pruneCalls.at(-1).includes("--automatic"));
+assert.ok(!automaticPreparedResume.pruneCalls.at(-1).includes("--approved-batch-id"));
+
+const threeHumanIds=[...productionResumeEvidence.transactionIds,"00000000-0000-4000-8000-00000000bbbb"];
+const threeHumanEntryIds=[...productionResumeEvidence.entryIds,"90001","90002"];
+const threeHumanEvidence={...productionResumeEvidence,transactionIds:threeHumanIds,entryIds:threeHumanEntryIds,transactionCount:3,entryCount:6,
+ transactionIdsSha256:crypto.createHash("sha256").update(threeHumanIds.map(x=>x+"\n").join("")).digest("hex"),
+ entryIdsSha256:crypto.createHash("sha256").update(threeHumanEntryIds.map(x=>x+"\n").join("")).digest("hex")};
+const threeHumanCompletion=makeProductionLifecycleHarness({evidence:threeHumanEvidence,row:{transaction_count:3,entry_count:6,pruned_transaction_count:3,pruned_entry_count:6,
+ archived_transaction_ids_sha256:threeHumanEvidence.transactionIdsSha256,pruned_transaction_ids_sha256:threeHumanEvidence.transactionIdsSha256,
+ archived_entry_ids_sha256:threeHumanEvidence.entryIdsSha256,pruned_entry_ids_sha256:threeHumanEvidence.entryIdsSha256}});
+const inspectThreeHuman=threeHumanCompletion.deps.inspectDurableRecovery;
+threeHumanCompletion.deps.inspectDurableRecovery=async(...args)=>({...await inspectThreeHuman(...args),transactionIdsSha256:threeHumanEvidence.transactionIdsSha256,entryIdsSha256:threeHumanEvidence.entryIdsSha256});
+const threeHumanResult=await runProductionAutomation({policy:"closed-human-30d",mode:"automatic",
+ env:{...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR:"arcade-production-dispatch",GITHUB_ACTOR:"arcade-production-dispatch"},
+ deps:{...threeHumanCompletion.deps,read:async()=>activatedState,sqlRead:async()=>activatedState}});
+assert.equal(threeHumanResult.state,"completed");
+assert.equal(threeHumanResult.transactions,3);
+assert.equal(threeHumanResult.maxTransactions,5000);
+assert.equal(threeHumanCompletion.calls.execute,0);
+assert.equal(threeHumanCompletion.lifecycleCalls.completion,1);
+// A completed prune is not a completed bot cycle without registry cleanup;
+// lost durable recovery must stop before any new archive selection.
+const terminalAutomaticEnv={...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR:"arcade-production-dispatch",GITHUB_ACTOR:"arcade-production-dispatch"};
+const incompleteBotTerminalRow={...makeProductionResumeRow(),source_policy_id:"production-ledger-bot-only-retention-7d-v1",pruned_at:"2026-08-15T00:03:00Z"};
+const incompleteBotTerminal=makeProductionResumeHarness(incompleteBotTerminalRow);
+const botActivatedState={...activatedState,policies:[...activatedState.policies,{policy_id:incompleteBotTerminalRow.source_policy_id,enabled:true,activated_at:"2026-10-14",canary_batch_id:"3"}]};
+await assert.rejects(runProductionAutomation({policy:"bot-only-7d",mode:"automatic",env:terminalAutomaticEnv,
+ deps:{...incompleteBotTerminal.deps,read:async()=>botActivatedState,sqlRead:async()=>botActivatedState,
+ pruneArchive:async()=>({state:"already_pruned",evidence:productionResumeEvidence})}}),/terminal/);
+assert.equal(incompleteBotTerminal.calls.export,0);
+const missingTerminalRecovery=makeProductionResumeHarness({...makeProductionResumeRow(),pruned_at:"2026-08-15T00:03:00Z"});
+await assert.rejects(runProductionAutomation({policy:"existing-30d",mode:"automatic",env:terminalAutomaticEnv,
+ deps:{...missingTerminalRecovery.deps,read:async()=>activatedState,sqlRead:async()=>activatedState,
+ pruneArchive:async()=>({state:"already_pruned",evidence:productionResumeEvidence}),inspectDurableRecovery:async()=>null}}),/durable recovery/);
+assert.equal(missingTerminalRecovery.calls.export,0);
+const escrowActivatedState={...activatedState,policies:[...activatedState.policies,{policy_id:"production-ledger-escrow-account-retention-v1",enabled:true,activated_at:"2026-10-14",canary_batch_id:"3"}]};
+const escrowGateSql={unsafe:async query=>{
+ if(query.includes("pg_try_advisory_lock"))return[{acquired:true,backend_pid:"escrow-gate"}];
+ if(query.includes("pg_control_system"))return[{system_identifier:PRODUCTION_SYSTEM_IDENTIFIER}];
+ if(query.includes("chips_assert_production_retention_control"))throw new Error("fresh escrow automatic policy gate rejected");
+ if(query.includes("pg_advisory_unlock"))return[{released:true}];
+ throw new Error("escrow must validate automatic policy before selecting accounts");
+},begin:async()=>{throw new Error("unexpected escrow write");}};
+await assert.rejects(runProductionAutomation({policy:"escrow",mode:"automatic",env:terminalAutomaticEnv,
+ deps:{sql:escrowGateSql,read:async()=>escrowActivatedState,sqlRead:async()=>escrowActivatedState}}),/fresh escrow automatic policy gate rejected/);

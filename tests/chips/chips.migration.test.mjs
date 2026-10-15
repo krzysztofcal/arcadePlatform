@@ -386,6 +386,9 @@ const runProductionEquivalentFixture = async (sql) => {
   assert.match(activatedRows[0].eligibility_default || "", /true/i, "E2 must make future bot eligibility default true");
   assert.equal(activatedRows[0].retention_enabled, false, "E2 must not activate cleanup");
   assert.equal(Number(activatedRows[0].max_transactions), 2, "E2 must preserve the cap2 pre-activation contract");
+  // Exercise the deployed catalog, whose prosrc differs from authored E1 SQL.
+  await sql.unsafe(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/chips-production-pre-e3-catalog.sql"), "utf8")
+    .replaceAll(canonicalProductionSystemIdentifier, fixtureSystemIdentifier));
   await assertProductionRetentionSafetyContracts(sql);
   await assertProductionClosedHumanAutomaticP9273RegistryBinding(sql);
   await assertProductionQuarantineContract(sql, {
@@ -433,7 +436,146 @@ const runProductionEquivalentFixture = async (sql) => {
   assert.deepEqual(productionDarkState.map((row) => [row.cron_extension, row.cron_job_table, Number(row.refill_mints), Number(row.entry_count), row.p2_recorded]), [
     [false, false, productionMintsBeforeHourly, productionEntriesBeforeHourly, true],
   ], "Production equivalent creates no scheduler or ledger mutation and records only its own migration version");
+  await assertProductionE3Activation(sql, fixtureSql);
 };
+
+// All mutations below target the disposable baseline fixture only.
+async function assertProductionE3Activation(sql, fixtureSql) {
+  const rejectSql = (tx, query, values, pattern) => assert.rejects(() => tx.savepoint(sp => sp.unsafe(query, values)), pattern);
+  const file = "20260914092000_chips_ledger_production_retention_activation.sql";
+  const e3 = fixtureSql(file);
+  const before = JSON.parse(e3.match(/\$before\$(.*?)\$before\$/s)[1]);
+  assert.equal(Object.keys(before).length, 18, "Keep all required pre-E3 routines");
+  for (const [signature, expected] of Object.entries(before)) {
+    const [row] = await sql.unsafe(`select encode(extensions.digest(convert_to(replace(prosrc,$2,'<production-system-identifier>'),'UTF8'),'sha256'),'hex') as hash from pg_catalog.pg_proc where oid=to_regprocedure($1)`, [signature, (await sql.unsafe("select system_identifier::text from pg_control_system()"))[0].system_identifier]);
+    assert.equal(row?.hash, expected, `Deployed catalog fingerprint: ${signature}`);
+  }
+  // Exact production pins seed a disposable receipt fixture, never a remote DB.
+  const pins = JSON.parse(e3.match(/\$pins\$(.*?)\$pins\$/s)[1]);
+  assert.deepEqual(pins.map(b => b.compressed_sha256), [
+    "5e4ce1100e82555135bd761951beaaa83095a13d966306c003b7f474bf55f367",
+    "bec1c7db4fd65a3af000ee943c71cc100208af4a7f7cd1ab15706f9826d06ce1",
+    "28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e",
+  ]);
+  await sql.unsafe("insert into supabase_migrations.schema_migrations(version) values('20260914090000'),('20260914091000') on conflict do nothing;");
+  const catalogGuard = e3.match(/do \$catalog\$.*?\$catalog\$;/s)[0];
+  await sql.unsafe(catalogGuard);
+  // Even harmless raw-source drift must fail; no normalization fallback.
+  await sql.begin(async tx => {
+    const [routine] = await tx.unsafe("select pg_get_functiondef('public.chips_assert_production_retention_control(text,bigint,boolean)'::regprocedure) as definition");
+    await tx.unsafe(routine.definition.replace("begin", "begin /* catalog drift */"));
+    await rejectSql(tx, catalogGuard, [], /E3 contract fingerprint mismatch/);
+    await tx.unsafe(routine.definition);
+    await tx.unsafe(catalogGuard);
+  });
+  await sql.unsafe("set chips.production_activation_confirmation=''; set chips.production_preflight_sha256=''; set chips.production_preflight_at='';");
+  await assert.rejects(() => sql.unsafe(e3), /attestation/);
+  await sql.unsafe("rollback;");
+  assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled, false);
+  assert.equal((await sql.unsafe("select to_regprocedure('public.chips_assert_production_retention_control(text,bigint,boolean,boolean)') as f"))[0].f, null, "Rejected E3 must rollback all routine changes");
+  await sql.unsafe("set session_replication_role='replica';");
+  for (const b of pins) {
+    const row = { ...b, ...(b.batch_id===3?{bot_only_newest_created_at:"2026-09-14"}:{}), committed_at: b.archive_proof_verified_at, raw_bytes: 200, compressed_bytes: 200,
+      credits: 200, debits: 200, net_amount: 0, tx_types: { TABLE_BUY_IN: 1, TABLE_CASH_OUT: 1 },
+      cursor_end_created_at: "2026-07-01", cursor_end_id: "00000000-0000-4000-8000-000000000999", first_created_at: "2026-06-01", last_created_at: "2026-07-01" };
+    await sql.unsafe(`insert into public.chips_ledger_archive_batches (${Object.keys(row).join(",")}) overriding system value values (${Object.keys(row).map((key, i) => "$"+(i+1)+(/_at$|^cutoff$/.test(key)?"::timestamptz":"")).join(",")})`, Object.entries(row).map(([key,x]) => x && /_at$|^cutoff$/.test(key) ? sql.typed(x,25) : x));
+  }
+  const tableId="7f3d73e4-36c5-4b66-afe6-d1d41bea13e2";
+  await sql.unsafe("insert into public.poker_tables(id,status,has_human_participant,human_retention_complete_at) values($1,'CLOSED',true,'2026-10-14T20:39:44.985066Z')",[tableId]);
+  await sql.unsafe("insert into public.poker_state(table_id,state) values($1,'{\"phase\":\"HAND_DONE\",\"handId\":\"\"}'::jsonb)",[tableId]);
+  await sql.unsafe("insert into public.chips_accounts(account_type,system_key,status,balance,next_entry_seq) values('ESCROW',$1,'active',0,3)",["POKER_TABLE:"+tableId]);
+  for (const [batchId, ids] of [[2,["26899ac1-d3c2-4382-8954-06d98823278a","5815f81f-870a-4c3c-9879-ddeef0db4b1e"]],[4,["8948e05e-ca00-4fc4-97ec-baff3ce710a1","f9529116-fc6f-419c-a563-90487d6845ef"]]]) {
+    for (const id of ids) await sql.unsafe("insert into public.chips_transaction_idempotency(idempotency_key,transaction_id,payload_hash,tx_type,user_id,transaction_created_at,archive_batch_id,table_id,key_format_version,key_format) values($1,$2,$3,'TABLE_BUY_IN',$4,'2026-07-01',$5,$6,1,'fixture')",["e3:"+id,id,"a".repeat(64),primaryUserId,batchId,batchId===4?tableId:"3cf6fd0f-181a-4e5a-9e63-78ba98e436a8"]);
+  }
+  await sql.unsafe("update public.chips_production_retention_control set existing_30d_canary_batch_id=2;");
+  await sql.unsafe("update public.chips_production_bot_only_retention_policy set canary_batch_id=3,canary_confirmation='GO 3';");
+  await sql.unsafe("update public.chips_production_closed_human_table_retention_policy set canary_batch_id=4,canary_confirmation='GO 4';");
+  await sql.unsafe("update public.chips_production_escrow_account_retention_policy set canary_batch_id=3,canary_account_ids_sha256='c342d5eb1395883fa642c17839a5a251438e59355ee9cba4c7f1fc6dffc0112f',canary_confirmation='GO 3';");
+  await sql.unsafe("set session_replication_role='origin';");
+  const sha="a".repeat(64);
+  await sql.unsafe(`set chips.production_preflight_sha256='${sha}'; set chips.production_activation_confirmation='ACTIVATE PRODUCTION RETENTION otbqfijerkieoxwpxjnm ${sha}';`);
+  await sql.unsafe("select set_config('chips.production_preflight_at',(clock_timestamp()-interval '16 minutes')::text,false)");
+  await assert.rejects(() => sql.unsafe(e3), /attestation/);
+  await sql.unsafe("rollback;");
+  await sql.unsafe("select set_config('chips.production_preflight_at',clock_timestamp()::text,false)");
+  // Receipt drift must rollback routine installation and control activation.
+  await sql.unsafe("set session_replication_role='replica'; update public.chips_ledger_archive_batches set destructive_go_at=null,destructive_go_batch_id=null where batch_id=4; set session_replication_role='origin';");
+  await assert.rejects(() => sql.unsafe(e3), /evidence drift|timestamp drift/);
+  await sql.unsafe("rollback;");
+  await sql.unsafe("set session_replication_role='replica'; update public.chips_ledger_archive_batches set destructive_go_at='2026-10-14T19:39:17.466354Z',destructive_go_batch_id=4 where batch_id=4; set session_replication_role='origin';");
+  for (const [change,restore] of [
+    ["update public.chips_ledger_archive_batches set archived_entry_ids_sha256=repeat('0',64),pruned_entry_ids_sha256=repeat('0',64) where batch_id=4", "update public.chips_ledger_archive_batches set archived_entry_ids_sha256='05ae84b7b64161c146501c8c114e6637cd65c6eef7c1373905ed92e87e241eda',pruned_entry_ids_sha256='05ae84b7b64161c146501c8c114e6637cd65c6eef7c1373905ed92e87e241eda' where batch_id=4"],
+    ["update public.chips_ledger_archive_batches set cutoff='2026-09-13' where batch_id=4", "update public.chips_ledger_archive_batches set cutoff='2026-09-14T18:39:21.779Z' where batch_id=4"],
+    ["update public.chips_ledger_archive_batches set account_retirement_recovery_object_sha256=repeat('0',64),account_retirement_recovery_object_path='account-recovery/v1/sha256/'||repeat('0',64)||'.json.gz' where batch_id=3", "update public.chips_ledger_archive_batches set account_retirement_recovery_object_sha256='ae887c5e1b3d9441089d53604a7fb49a9fdb33ec9f3a264051db0acff3b6dc87',account_retirement_recovery_object_path='account-recovery/v1/sha256/ae887c5e1b3d9441089d53604a7fb49a9fdb33ec9f3a264051db0acff3b6dc87.json.gz' where batch_id=3"],
+    ["update public.poker_tables set human_retention_complete_at=null where id='7f3d73e4-36c5-4b66-afe6-d1d41bea13e2'", "update public.poker_tables set human_retention_complete_at='2026-10-14T20:39:44.985066Z' where id='7f3d73e4-36c5-4b66-afe6-d1d41bea13e2'"],
+  ]) {
+    await sql.unsafe("set session_replication_role='replica'; "+change+"; set session_replication_role='origin';");
+    await assert.rejects(()=>sql.unsafe(e3),/E3 canary|E3 human/);
+    await sql.unsafe("rollback");
+    assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false);
+    await sql.unsafe("set session_replication_role='replica'; "+restore+"; set session_replication_role='origin';");
+  }
+  const accountingBefore=await sql.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id");
+  await sql.unsafe(e3);
+  assert.deepEqual(Array.from(await sql.unsafe("select enabled,max_transactions from public.chips_production_retention_control")), [{enabled:true,max_transactions:5000}]);
+  assert.deepEqual(await sql.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id"),accountingBefore);
+  await sql.begin(async tx => {
+    await tx.unsafe("select pg_advisory_xact_lock(hashtextextended('chips-ledger-production-automation-v1:otbqfijerkieoxwpxjnm',0))");
+    for (const n of [2,5000]) {
+      const x=await tx.unsafe("select public.chips_assert_production_retention_control('production-ledger-auto-retention-30d-v1',$1,false,true) as r",[n]);
+      assert.equal(x[0].r.max_transactions,5000);
+    }
+    for (const [n,auto] of [[3,false],[5000,false],[5001,true]]) {
+      await rejectSql(tx,"select public.chips_assert_production_retention_control('production-ledger-auto-retention-30d-v1',$1,false,$2)",[n,auto], /cap/);
+    }
+    assert.equal((await tx.unsafe("select public.chips_assert_production_retention_control('production-ledger-auto-retention-30d-v1',2,false) as r"))[0].r.max_transactions,2);
+    await rejectSql(tx,"select public.chips_assert_archive_prune_target('otbqfijerkieoxwpxjnm',3)", [], /2/);
+    await rejectSql(tx,"select public.chips_assert_production_retention_control(null,3,false,true)", [], /context/);
+    await tx.unsafe("set local chips.production_automatic='1'; set local role authenticated");
+    await rejectSql(tx,"select public.chips_assert_production_retention_control('production-ledger-auto-retention-30d-v1',5000,false,true)", [], /permission/);
+    await tx.unsafe("reset role");
+  });
+  // Exercise the real shared prune core above the manual cap, not just its
+  // numeric guard. Exact whole-table SYSTEM/ESCROW history conserves balances.
+  await sql.begin(async tx => {
+    await tx.unsafe("set transaction isolation level serializable;");
+    await tx.unsafe("select pg_advisory_xact_lock(hashtextextended('chips-ledger-production-automation-v1:otbqfijerkieoxwpxjnm',0))");
+    await tx.unsafe("set local session_replication_role='replica'");
+    const table="00000000-0000-4000-8000-00000000ba01";
+    const system="00000000-0000-4000-8000-00000000ba02";
+    const escrow="00000000-0000-4000-8000-00000000ba03";
+    const ids=["00000000-0000-4000-8000-00000000ba11","00000000-0000-4000-8000-00000000ba12","00000000-0000-4000-8000-00000000ba13"];
+    await tx.unsafe("insert into public.poker_tables(id,status,has_human_participant,bot_only_proof_eligible) values($1,'CLOSED',false,false)",[table]);
+    await tx.unsafe("insert into public.chips_accounts(id,account_type,system_key,status,balance,next_entry_seq) values($1,'SYSTEM','E3_AUTOMATIC_TEST','active',0,4),($2,'ESCROW',$3,'active',0,4)",[system,escrow,"POKER_TABLE:"+table]);
+    const entries=[];
+    for (let i=0;i<3;i++) {
+      const amount=[100,-40,-60][i]; const type=i===0?"TABLE_BUY_IN":"TABLE_CASH_OUT";
+      const at=`2026-08-0${i+1}T00:00:00Z`; const key=`poker:deferred-leave:v1:${table}:fixture${i}`;
+      await tx.unsafe("insert into public.chips_transactions(id,reference,metadata,idempotency_key,payload_hash,tx_type,user_id,created_at) values($1,$2,$3::jsonb,$4,$5,$6,null,$7::timestamptz)",[ids[i],"table:"+table,JSON.stringify({tableId:table}),key,"a".repeat(64),type,at]);
+      const rows=await tx.unsafe("insert into public.chips_entries(transaction_id,account_id,entry_seq,amount,metadata,created_at) values($1,$2,$3,$4,'{}',$6::timestamptz),($1,$5,$3,-$4,'{}',$6::timestamptz) returning id::text",[ids[i],escrow,i+1,amount,system,at]);
+      entries.push(...rows.map(x=>x.id));
+      await tx.unsafe("insert into public.chips_transaction_idempotency(idempotency_key,transaction_id,payload_hash,tx_type,user_id,transaction_created_at,table_id,key_format_version,key_format) values($1,$2,$3,$4,null,$5::timestamptz,$6,1,'fixture')",[key,ids[i],"a".repeat(64),type,at,table]);
+    }
+    const archivePath=`v1/sha256/${"9".repeat(64)}.jsonl.gz`;
+    await tx.unsafe(`insert into public.chips_ledger_archive_batches(batch_id,object_path,project_ref,format_version,source_policy_id,cutoff,cursor_end_created_at,cursor_end_id,first_created_at,last_created_at,transaction_count,entry_count,tx_types,raw_bytes,compressed_bytes,raw_sha256,compressed_sha256,credits,debits,net_amount,status,committed_at,archive_proof_verified_at,archived_transaction_ids_sha256,archived_entry_ids_sha256)
+      overriding system value values(9000,$1,'otbqfijerkieoxwpxjnm',1,'production-ledger-auto-retention-30d-v1','2026-09-14','2026-08-03',$2,'2026-08-01','2026-08-03',3,6,'{"TABLE_BUY_IN":1,"TABLE_CASH_OUT":2}',1,1,$3,$4,200,200,0,'committed',now(),now(),public.chips_archive_uuid_ids_sha256($5::uuid[]),public.chips_archive_bigint_ids_sha256($6::bigint[]))`,[archivePath,ids[2],"8".repeat(64),"9".repeat(64),ids,entries]);
+    await tx.unsafe("set local session_replication_role='origin'");
+    const before=await tx.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id");
+    await rejectSql(tx,"select public.chips_prune_committed_archive_batch($1,$2::uuid[],$3::bigint[],false)",[archivePath,ids,entries],/cap/);
+    const dry=await tx.unsafe("select public.chips_prune_committed_archive_batch($1,$2::uuid[],$3::bigint[],false,true) as r",[archivePath,ids,entries]);
+    assert.equal(dry[0].r.state,"ready");
+    const result=await tx.unsafe("select public.chips_auto_prune_production_existing_30d_archive_batch($1,$2::uuid[],$3::bigint[]) as r",[archivePath,ids,entries]);
+    assert.equal(result[0].r.state,"pruned");
+    assert.equal(result[0].r.transactions,3); assert.equal(result[0].r.entries,6);
+    assert.deepEqual(await tx.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id"),before);
+    assert.equal((await tx.unsafe("select count(*)::int as n from public.chips_transaction_idempotency where archive_batch_id=9000"))[0].n,3);
+    const replay=await tx.unsafe("select public.chips_auto_prune_production_existing_30d_archive_batch($1,$2::uuid[],$3::bigint[]) as r",[archivePath,ids,entries]);
+    assert.equal(replay[0].r.state,"already_pruned");
+  });
+  await sql.unsafe("select public.chips_set_production_retention_enabled(false,2,'DISABLE PRODUCTION RETENTION')");
+  await sql.unsafe(e3);
+  assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false,"E3 replay must not reactivate");
+}
 
 const assertProductionRetentionSafetyContracts = async (sql) => {
   const existingTableId = "00000000-0000-4000-8000-00000000e901";

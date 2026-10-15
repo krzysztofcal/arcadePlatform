@@ -992,7 +992,7 @@
       "status": "awaiting-production-go",
       "replacement": "20261003183626_poker_demand_refill_production_contract.sql",
       "required_effects": [
-        "§32 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
+        "\u00a732 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
       ],
       "omitted_effects": [
         "No Production mutation, Cron removal, control activation or migration-time MINT"
@@ -1006,7 +1006,7 @@
       "status": "awaiting-production-go",
       "replacement": "20261003183626_poker_demand_refill_production_contract.sql",
       "required_effects": [
-        "§32 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
+        "\u00a732 nullable hourly caps and shared DB demand/Cron allowance with existing control and canonical identity"
       ],
       "omitted_effects": [
         "No Production mutation, Cron removal, control activation or migration-time MINT"
@@ -1019,7 +1019,7 @@
       "category": "needs-production-equivalent",
       "status": "awaiting-production-go",
       "required_effects": [
-        "§32 Stage removes the exact poker-bot-pool-refill-hourly Cron job and drops only the temporary public.poker_bot_pool_refill_hourly() wrapper after accepted demand smoke"
+        "\u00a732 Stage removes the exact poker-bot-pool-refill-hourly Cron job and drops only the temporary public.poker_bot_pool_refill_hourly() wrapper after accepted demand smoke"
       ],
       "omitted_effects": [
         "Production remains untouched; demand core, refill control kill switch/identity guard, pg_cron extension and ledger/pool state are preserved"
@@ -1088,6 +1088,16 @@
       "sha256": "f6d8334cf642df7c9c4ac3b633d4898254d5af09290814cdce54e253bc650cab"
     },
     {
+      "file": "20260914092000_chips_ledger_production_retention_activation.sql",
+      "purpose": "E3 owner-gated Production policy/control activation and explicit automatic cap5000; manual cap2; never automatic apply",
+      "sha256": "ae8b44f133d716a35964b79b2e81788ae60b7fdc59c6249b88b366c33d6261a5",
+      "prerequisites": [
+        "20260914090000_chips_ledger_production_retention_contract.sql",
+        "20260914091000_chips_ledger_production_table_fence_activation.sql"
+      ],
+      "evidence": "specs/004-production-retention/research.md: immutable canaries2/3/4, escrow3 and human lifecycle completion; fresh external private Storage attestation required at apply"
+    },
+    {
       "file": "20260929201500_poker_bot_quarantine_production_contract.sql",
       "purpose": "P1 final Production #1018 bot quarantine and exact pools contract; dark/off",
       "sha256": "be8fc7227930e3f66da8a35214af3c7d2e1a0595730fa15b127b078350648bd3",
@@ -1106,7 +1116,7 @@
     },
     {
       "file": "20261003183626_poker_demand_refill_production_contract.sql",
-      "purpose": "§32 Production hourly cap and shared demand refill contract; separate GO only",
+      "purpose": "\u00a732 Production hourly cap and shared demand refill contract; separate GO only",
       "sha256": "db23077155394845da289d9e1f59b50cbeae3f1400a1b609cffea1d9cc19a39b",
       "prerequisites": [
         "20260930211624_poker_bot_pool_refill_hourly.sql"
@@ -1114,7 +1124,7 @@
     },
     {
       "file": "20261004114411_poker_demand_refill_production_scheduler_decommission.sql",
-      "purpose": "§32 Production scheduler decommission after accepted demand rollout; exact Cron job/hourly wrapper only",
+      "purpose": "\u00a732 Production scheduler decommission after accepted demand rollout; exact Cron job/hourly wrapper only",
       "sha256": "0984f91bfe20272e9df69d6871cb276d9100b6428b7d4d1d27ffdf4f3144d61c",
       "prerequisites": [
         "20261003183626_poker_demand_refill_production_contract.sql"

@@ -1,0 +1,11 @@
+[Unit]
+Description=Production Chips Ledger UTC retention slots (owner-enabled only)
+
+[Timer]
+OnCalendar=*-*-* *:09,24,39:00 UTC
+AccuracySec=1s
+Persistent=false
+Unit=arcade-chips-ledger-production-dispatch.service
+
+[Install]
+WantedBy=timers.target

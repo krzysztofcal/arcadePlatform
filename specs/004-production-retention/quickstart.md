@@ -1,3 +1,5 @@
+> **Current handoff — 2026-10-14:** all four Production canary classes PASS; batch4 marker is complete. T020–T022 implementation is authorized and locally verified for Draft PR B. T023+ still require separate owner GO. Older age/failure/marker-pending sections below are historical and superseded by this handoff.
+
 # Handoff / operational sequence (not authorization)
 
 This document describes later execution by another agent and owner. No commands here authorize a Production write. No Production operation has been performed in planning or implementation.
@@ -52,9 +54,9 @@ Owner-authorized emergency sequence: workflow variable0, disable Production time
 
 Planning READY FOR IMPLEMENTATION means an agent can implement PR A from these decisions. It does not mean Production rollout ready or PR merge-ready. Missing user runtime verification must be reported as `implementation ready, awaiting manual runtime verification`. Production activation cannot be marked ready until fresh canaries and owner authorizations exist.
 
-## Current owner-gated handoff — 2026-09-22
+## Historical handoff — 2026-09-22
 
-The planning text above is historical. Current evidence is recorded in [research.md](research.md): T017 existing-30d, T018 bot-only-7d and T019 escrow account retirement are PASS; T018 closed-human-30d remains open because the exact 30-day selector currently returns no candidate. The earliest age lower bound for the only currently viable human table is `2026-10-14T13:32:28.499939Z`; this does not guarantee later eligibility. T020/PR B activation remains blocked, and Production global control, policies and scheduler remain OFF.
+At this date human eligibility still required natural age. That waiting status is superseded by all four canary PASS results and the exact final lifecycle receipt recorded in research.md. Global control, policies and scheduler remain OFF pending separately approved PR B operations.
 
 ## T018 batch 4 recovery gate — 2026-10-14
 
@@ -79,3 +81,29 @@ Only after review/owner merge and separate **marker-only Production GO**, dispat
 Require already_pruned dry-run, exact immutable proof/archive and both recovery copies, complete receipts, retained mappings, fenceON/control+policiesOFF/cap2. Invoke the existing protected marker routine only; verify persisted marker, idempotent re-check and unchanged ledger/registry/accounts/receipts. Existing marker returns already_complete without another write. Any mismatch/unknown result stops; do not repeat CANARY or repair receipts.
 
 This fixes future automatic finalization as well: pruning success is followed by marker verification, and interrupted pruning can resume only its marker without another execute/export in that invocation. This does not enable automation, scheduler or #992 cleanup. No commands in this document authorize a Production write or PR B.
+
+## PR B validation / operator gates (current)
+
+Implementation is pending approval of plan.md. During T020–T022, validate only disposable fixtures and existing deterministic suites. No Stage migration apply, Production workflow dispatch, E3 apply, scheduler install/token provisioning or #992 cleanup change is part of implementation/CI/merge.
+
+Draft handoff must contain: exact final code SHA, actual E3 SQL SHA and eighth manifest entry, pinned2/3/4 archive/proof/recovery/marker/account receipts from research, cap boundaries at every SQL/JS layer, dedicated scheduler identity/slots/switches, no-auto-apply/install evidence and test pass/skip/failure details. Current unrelated XP-anchor baseline must be documented without UI scope expansion. Keep #891 open and remove only its obsolete T018 age BLOCKED status after the reviewed handoff.
+
+T023 apply checklist (separate owner GO): fresh canonical target/history/catalog/runtime evidence, private primary+both recovery and escrow snapshot GET/byte/SHA/MIME checks, exact unchanged canary GO/proof/prune/registry/marker/retirement, source inventory current, fenceON/policiesOFF/globalOFF/cap2, GitHub/local switches0 and cleanup0 freshly confirmed by operator if direct access is denied. Bind preflight digest/observed time (<=15min), reviewed code/E3 file SHA and exact activation confirmation. Apply only E3 in one transaction under Production lock; compare accounting/receipts/history afterward. No directory db push/history repair.
+
+T024 checklist (separate owner GO): protected Production credentials remain only in Actions; dedicated `arcade-production-dispatch` Actions-only token stays in root-protected external dispatcher configuration, with isolated gh auth and no DB/Storage/WS credentials. Review/install exact script/unit hashes only on the sole approved VPS. Enable local/GitHub switches and timer only after E3 PASS. Verify Stage scheduler unchanged and no native cron. E3/merge never installs anything.
+
+T025 observation: normal UTC slots (daily02:09 existing; other hourly:09 bot; hourly:24 human; hourly:39 escrow), one class/batch per run including proven resume. Verify exact workflow/application SHA, target, bound, private recovery, receipts, human marker, registry semantics, accounts/conservation. No-candidate proves scheduler delivery, not destructive validation. Skip active/off slots rather than catch up. Unknown commit/dispatch outcome: read receipt/run state, do not repeat blindly.
+
+Disable procedure remains independently owner-controlled: local/GitHub switches0, stop timer, review in-flight receipt, existing DB disable function under shared lock. Preserve all archives/registry/markers; do not undo pruning. Reactivation requires fresh review/GO. WS cleanup stays0 until separate #992 audit/authorization; PR B does not authorize it.
+
+Escrow dependency: preserve the existing missing-table predicate. Bot pruning alone leaves the table with its completion marker; while #992 cleanup=0, escrow can correctly return no-candidate for those new tables. Record this backlog/dependency during T025; do not broaden retirement or enable WS cleanup to force a result.
+
+## PR B code handoff — 2026-10-15
+
+E3 SHA-256 `ae8b44f133d716a35964b79b2e81788ae60b7fdc59c6249b88b366c33d6261a5`; final code SHA and CI links are on the Draft PR. Apply only the exact reviewed file after separate owner approval, never a directory glob or Stage migration command. Before application the operator must obtain a new private Storage/DB/runtime attestation; the historical PASS matrix is not a fresh Storage availability check.
+
+Owner supplies session settings `chips.production_project_ref`, `chips.production_activation_confirmation`, `chips.production_preflight_sha256`, `chips.production_preflight_at`. Confirmation must be `ACTIVATE PRODUCTION RETENTION otbqfijerkieoxwpxjnm <preflight-sha256>`; digest is64 lowercase hex and observed time is no older than15min/no future. The existing archive/recovery helpers verify private primary/both durable objects and escrow snapshot, exact bytes/MIME/SHA/receipt/identity, immediately before apply. SQL revalidates DB only; changed/unavailable Storage or identity/hash/receipt drift means STOP and a new reviewed attestation. SQL checks freshness again after locked DB checks.
+
+The scheduler service defaults toOFF even when its optional environment file is absent. Later provisioning is root-owned `/etc/arcadeplatform/production-retention-dispatch.env`, mode0600, containing only the explicit switch and dedicated Actions-only `GH_TOKEN`; never DB/Storage/WS secrets. Use the dedicated actor `arcade-production-dispatch`, required narrow repository Actions read/write and metadata permissions, protected `production-ledger` environment and fixed github.com origin. Install only the three reviewed script/unit files under their prescribed paths after T024 GO; no bootstrap/Infra install hook exists. Enabling local/GitHub switches or starting the timer requires that separate authorization. No live provisioning is performed by this PR.
+
+Breaking/financial impact: E3 increases only activated automatic transaction capacity to5000 and enables destructive retention under proven policies. Old manual APIs remain max2; API roles remain denied. Shared modules require Stage regression evidence. Disable-only stays available under lock and clears control activation fields; reapply cannot reactivate. Saldo/sequence/conservation are invariant; recovery is private evidence, not an automatic hot-ledger restore. WS cleanup remains0 and escrow may correctly have no candidate until separately authorized #992 cleanup.
