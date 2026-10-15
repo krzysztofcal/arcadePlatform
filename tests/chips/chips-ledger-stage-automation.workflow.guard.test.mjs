@@ -484,8 +484,6 @@ assert.deepEqual(
 assert.doesNotMatch(productionWorkflow, /^  (push|pull_request|schedule):/m);
 assert.match(productionWorkflow, /^  workflow_dispatch:$/m);
 assert.match(productionWorkflow, /vars\.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED == '1'/);
-assert.match(productionWorkflow, /vars\.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR/);
-assert.match(productionWorkflow, /arcade-production-dispatch/);
 assert.match(productionWorkflow, /github\.ref == 'refs\/heads\/main'/);
 assert.match(productionWorkflow, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(productionWorkflow, /github\.event\.repository\.fork != true/);
@@ -510,10 +508,8 @@ for (const character of productionJobIf) {
 }
 assert.equal(productionJobIfParenthesisBalance, 0, "production-archive.if parentheses must balance");
 assert.match(productionJobIf, /inputs\.mode != 'automatic'/);
-assert.match(productionJobIf, /inputs\.mode == 'automatic'/);
 assert.match(productionJobIf, /github\.actor == github\.repository_owner/);
-assert.match(productionJobIf, /github\.actor == vars\.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR/);
-assert.match(productionWorkflow, /test "\$GITHUB_ACTOR" = "arcade-production-dispatch"/);
+assert.match(productionWorkflow, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(productionWorkflow, /node scripts\/ops\/chips-ledger-production-automation\.mjs/);
 assert.match(productionWorkflow, /--policy "\$PRODUCTION_POLICY"/);
 assert.match(productionWorkflow, /--mode "\$PRODUCTION_MODE"/);
@@ -528,7 +524,6 @@ assert.deepEqual(Object.keys(productionEnv).sort(), [
   "CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256",
   "CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED",
   "CHIPS_LEDGER_PRODUCTION_CANARY",
-  "CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR",
   "DEPLOYED_COMMIT_SHA",
   "EXPECTED_SUPABASE_PROD_PROJECT_REF",
   "SUPABASE_PROD_DB_URL",
@@ -617,7 +612,7 @@ try {
   fs.writeFileSync(date, '#!/bin/bash\nprintf "%s\\n" "$TEST_SLOT"\n', { mode: 0o700 });
   fs.writeFileSync(gh, `#!/bin/bash
 printf '%s\\n' "$*" >> "$TEST_LOG"
-if [[ "$*" == *"api user"* ]]; then echo 'arcade-production-dispatch'; exit 0; fi
+if [[ "$*" == *"api user"* ]]; then echo "\${TEST_ACTOR:-krzysztofcal}"; exit 0; fi
 if [[ "$*" == *"/runs?"* ]]; then
  if [[ -n "\${TEST_STATUS:-}" && "$*" == *"status=$TEST_STATUS"* ]]; then if [[ -n "\${TEST_BODY:-}" ]]; then printf "%s" "$TEST_BODY"; else echo '{"total_count":1,"workflow_runs":[{}]}'; fi;
  else echo '{"total_count":0,"workflow_runs":[]}'; fi
@@ -645,6 +640,8 @@ fi
   assert.equal(run("03:40").calls, "");
   assert.equal(run("03:24", {}, true).calls, "", "held flock must prevent all API work");
   assert.notEqual(run("03:24", { GH_TOKEN: "" }).status, 0);
+  const wrongActor=run("03:24",{TEST_ACTOR:"untrusted"});assert.notEqual(wrongActor.status,0);assert.doesNotMatch(wrongActor.calls,/workflow run/);
+
   for (const status of ["requested", "waiting", "pending", "queued", "in_progress"]) {
     const result = run("03:24", { TEST_STATUS: status });
     assert.equal(result.status, 0);

@@ -71,7 +71,6 @@ export const PRODUCTION_POLICIES = Object.freeze({
   escrow: PRODUCTION_ESCROW_RETENTION_POLICY_ID,
 });
 export const PRODUCTION_MODES = Object.freeze(["diagnostic", "prepare", "canary", "automatic", "lifecycle-completion"]);
-export const PRODUCTION_DISPATCH_ACTOR = "arcade-production-dispatch";
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
@@ -224,9 +223,12 @@ function requireCanaryAuthorization({ mode, env, batchId, confirmation, policy, 
 function requireAutomaticAuthorization({ env, mode }) {
   if (mode !== "automatic") return;
   if (env.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED !== "1") fail("Production automatic cleanup is disabled");
-  if (text(env.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR) !== text(env.GITHUB_ACTOR)
-    || text(env.GITHUB_ACTOR) !== PRODUCTION_DISPATCH_ACTOR) {
-    fail("Production automatic cleanup requires the dedicated dispatch actor");
+  const ownerWorkflow = {
+    GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+    GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY_OWNER: "krzysztofcal", GITHUB_ACTOR: "krzysztofcal",
+  };
+  for (const [key, expected] of Object.entries(ownerWorkflow)) {
+    if (text(env[key]) !== expected) fail(`Production automatic cleanup requires canonical owner workflow ${key}`);
   }
 }
 

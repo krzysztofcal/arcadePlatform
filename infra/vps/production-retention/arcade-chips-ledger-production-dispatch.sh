@@ -25,7 +25,7 @@ chmod 700 "$GH_CONFIG_DIR"
 exec 9>"$RUNTIME_DIRECTORY/dispatch.lock"
 flock -n 9 || { echo "skip: Production dispatcher lock busy"; exit 0; }
 actor="$(timeout 30s "$GH_BIN" api user --jq .login)"
-[[ "$actor" == "arcade-production-dispatch" ]] || { echo 'Production dispatcher actor mismatch' >&2; exit 1; }
+[[ "$actor" == "krzysztofcal" ]] || { echo 'Production dispatcher requires repository owner' >&2; exit 1; }
 for status in requested waiting pending queued in_progress; do
   runs="$(timeout 30s "$GH_BIN" api "repos/$REPO/actions/workflows/$WORKFLOW/runs?status=$status&per_page=1" \
     -H 'X-GitHub-Api-Version: 2026-03-10')"

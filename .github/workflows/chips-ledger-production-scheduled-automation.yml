@@ -62,7 +62,7 @@ permissions:
 
 jobs:
   production-archive:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && ((inputs.mode != 'automatic' && github.actor == github.repository_owner) || (inputs.mode == 'automatic' && vars.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED == '1' && github.actor == vars.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR && vars.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR == 'arcade-production-dispatch')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && (inputs.mode != 'automatic' || vars.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED == '1') }}
     runs-on: ubuntu-latest
     environment: production-ledger
     timeout-minutes: 60
@@ -72,7 +72,6 @@ jobs:
       SUPABASE_PROD_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
       EXPECTED_SUPABASE_PROD_PROJECT_REF: otbqfijerkieoxwpxjnm
       CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: ${{ vars.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED || '0' }}
-      CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR: ${{ vars.CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR || '' }}
       CHIPS_LEDGER_PRODUCTION_CANARY: ${{ inputs.mode == 'canary' && '1' || '' }}
       CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256: ${{ inputs.account_ids_sha256 || '' }}
       DEPLOYED_COMMIT_SHA: ${{ github.sha }}
@@ -123,12 +122,9 @@ jobs:
             test -z "$PRODUCTION_CUTOFF"
             test -z "$PRODUCTION_COMPLETION_CONFIRMATION"
           fi
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
           if [[ "$PRODUCTION_MODE" == "automatic" ]]; then
             test "${CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:-0}" = "1"
-            test "$GITHUB_ACTOR" = "${CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR:-}"
-            test "$GITHUB_ACTOR" = "arcade-production-dispatch"
-          else
-            test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
           fi
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
 
