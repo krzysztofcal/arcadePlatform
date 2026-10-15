@@ -1090,7 +1090,7 @@
     {
       "file": "20260914092000_chips_ledger_production_retention_activation.sql",
       "purpose": "E3 owner-gated Production policy/control activation and explicit automatic cap5000; manual cap2; never automatic apply",
-      "sha256": "682a282d25980b96f00443470800c2e91b28805bb8697c0305ef372585f60b80",
+      "sha256": "ae8b44f133d716a35964b79b2e81788ae60b7fdc59c6249b88b366c33d6261a5",
       "prerequisites": [
         "20260914090000_chips_ledger_production_retention_contract.sql",
         "20260914091000_chips_ledger_production_table_fence_activation.sql"

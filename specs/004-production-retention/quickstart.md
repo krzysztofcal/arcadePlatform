@@ -100,7 +100,7 @@ Escrow dependency: preserve the existing missing-table predicate. Bot pruning al
 
 ## PR B code handoff — 2026-10-15
 
-E3 SHA-256 `682a282d25980b96f00443470800c2e91b28805bb8697c0305ef372585f60b80`; final code SHA and CI links are on the Draft PR. Apply only the exact reviewed file after separate owner approval, never a directory glob or Stage migration command. Before application the operator must obtain a new private Storage/DB/runtime attestation; the historical PASS matrix is not a fresh Storage availability check.
+E3 SHA-256 `ae8b44f133d716a35964b79b2e81788ae60b7fdc59c6249b88b366c33d6261a5`; final code SHA and CI links are on the Draft PR. Apply only the exact reviewed file after separate owner approval, never a directory glob or Stage migration command. Before application the operator must obtain a new private Storage/DB/runtime attestation; the historical PASS matrix is not a fresh Storage availability check.
 
 Owner supplies session settings `chips.production_project_ref`, `chips.production_activation_confirmation`, `chips.production_preflight_sha256`, `chips.production_preflight_at`. Confirmation must be `ACTIVATE PRODUCTION RETENTION otbqfijerkieoxwpxjnm <preflight-sha256>`; digest is64 lowercase hex and observed time is no older than15min/no future. The existing archive/recovery helpers verify private primary/both durable objects and escrow snapshot, exact bytes/MIME/SHA/receipt/identity, immediately before apply. SQL revalidates DB only; changed/unavailable Storage or identity/hash/receipt drift means STOP and a new reviewed attestation. SQL checks freshness again after locked DB checks.
 

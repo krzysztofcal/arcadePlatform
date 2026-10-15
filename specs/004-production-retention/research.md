@@ -342,7 +342,7 @@ Code review confirms `PRODUCTION_ESCROW_CANDIDATE_SQL` requires an absent bot ta
 
 ## PR B implementation / review handoff — 2026-10-15
 
-Base main: `2b212b795c1e0648d61ee8d06b1bb3d0b2ff164f`; branch `feat/891-production-retention-pr-b`. E3 file `20260914092000_chips_ledger_production_retention_activation.sql` SHA-256: `682a282d25980b96f00443470800c2e91b28805bb8697c0305ef372585f60b80`. Manifest now validates111 source migrations and8 replacements, preserving every previous hash. The Draft PR identifies the final implementation commit.
+Base main: `2b212b795c1e0648d61ee8d06b1bb3d0b2ff164f`; branch `feat/891-production-retention-pr-b`. E3 file `20260914092000_chips_ledger_production_retention_activation.sql` SHA-256: `ae8b44f133d716a35964b79b2e81788ae60b7fdc59c6249b88b366c33d6261a5`. Manifest now validates111 source migrations and8 replacements, preserving every previous hash. The Draft PR identifies the final implementation commit.
 
 User review required and implementation enforces manual cap2 after E3 and activated-policy automatic cap5000 at JS and lowest SQL boundaries, never GUC/env alone. SQL preserves one core per financial method via explicit-context overloads/manual delegates. Missing existing-30d automatic GO and safe same-batch resume are included; human completion is verified before SUCCESS. Disable-only clearing of activation fields repairs the original OFF constraint; reapply cannot reactivate.
 
@@ -353,3 +353,30 @@ Validation: `npm test` PASS (147 suites; existing opt-in DB skips remain, while 
 Independent whole-branch review identified no P1; its scheduler skip-log finding was corrected and the guard rerun. This is code/test evidence, not Production rollout PASS. No Production connection/write, workflow dispatch, migration application, token/switch activation, scheduler installation, merge/deploy or WS cleanup change occurred in implementation. All T023+ gates remain closed.
 
 Final fail-closed follow-up: completed bot cycles must revalidate as `already_cleaned`; existing30d uses `already_pruned`. Both reverify durable recovery before selecting a new archive. Escrow automatic admission is freshly checked under the lock and again by the SQL automatic guard inside execution, retaining the unchanged2-account retirement contract. Fundamental negative tests PASS; reviewer found no blocker in either follow-up.
+
+### PR #1108 catalog correction — 2026-10-15
+
+The original E3 `$before$` pins were calculated from authored E1 SQL, not the deployed Production `pg_proc.prosrc`. E2 does not replace these routines. A repeatable-read, read-only connection to `otbqfijerkieoxwpxjnm` / `7575202818581710058` reproduced 14 mismatches out of 18. All 18 required signatures remain pinned individually using the original exact byte hashing algorithm (only the system identifier is replaced); no fallback or whitespace normalization is accepted.
+
+All 14 deployed definitions were compared with E1 and the E3 replacements, including quoted strings, security definer/invoker, owner and empty search_path. Nine differ only in formatting/comments; four additionally omit optional alias `AS`. The bot lifecycle gate's first NULL-table candidate prefilter has three LIKE prefixes instead of eleven: the eight omitted `poker:` prefixes cannot pass the following mandatory join/seed regex. Separate poker leave/inactive-cleanup and v1 registry branches are unchanged. This is equivalent eligibility, not permission to broaden accepted history. E3 financial bodies remain unchanged.
+
+| Required function (public prefix omitted) | Difference | Reviewed deployed SHA-256 |
+|---|---|---|
+| `chips_assert_archive_prune_target(text,bigint)` | Formatting/comments only | `ffac8f9ad0cd0286adfd36abcd6021e3a50c73ccb5b71b75f16cd5536396fab1` |
+| `chips_assert_bot_only_archive_proof_lifecycle_gate(uuid,bigint,timestamp with time zone,uuid[],text[])` | Redundant LIKE prefilter; same mandatory regex/union branches | `e6c20f8264a6f5fd13588655b3eb78845629375c953aaa05eefd7bd1a6d8d004` |
+| `chips_assert_closed_human_table_lifecycle_gate(uuid,timestamp with time zone,bigint)` | Formatting/comments only | `acdfb054abff03c1f820770ef29574e77360f4bfe5c2e3c4622bdaef41bd6a65` |
+| `chips_assert_production_retention_control(text,bigint,boolean)` | Formatting/comments only | `51bd8a947ef47ff98f1c97530ea9c6773b35e47fb164594dfb285ff548caeb37` |
+| `chips_auto_prune_and_cleanup_bot_only_archive_batch(text,uuid[],bigint[],text[],uuid)` | Formatting and optional alias AS | `ad9becaa511c1bef8a059908f814e7ffbf79755bbf753dde5c92270816313b31` |
+| `chips_auto_prune_closed_human_table_archive_batch(text,uuid[],bigint[],uuid)` | Formatting and optional alias AS | `6397d9e49b7c80a79655056b080ff16c3c12e1d54a34444b922bc4799c606f21` |
+| `chips_complete_closed_human_table_retention(uuid,timestamptz)` | Formatting/comments only | `398f459c1f5a684bcbf7b8b4d774b5e3d9acb04b84cd63fcbfd54485b8b719c0` |
+| `chips_guard_archive_batch_mutations()` | Formatting/comments only | `09da4d727aaaf195100bcb1c97df80d76d726aa9a00cff36a3e51927cd4ff34e` |
+| `chips_guard_human_retention_marker()` | Formatting/comments only | `40a77a77a211596de75dfdff2a3650d375c80c849416eac714506154aff6d712` |
+| `chips_prune_and_cleanup_bot_only_archive_batch(text,uuid[],bigint[],text[],uuid,boolean,bigint)` | Formatting/comments only | `1cf157cb8a30162b9cd5151725d624ee6ddde4c0a57eb8543d93ea2f3405cff2` |
+| `chips_prune_closed_human_table_archive_batch(text,uuid[],bigint[],uuid,boolean,bigint)` | Formatting and optional alias AS | `037921f26080ca4822fdfed2311c9fb55c1a0cee7b27dd38f82b5866977eb63c` |
+| `chips_register_archive_id_proof(text,uuid[],bigint[],text,integer,timestamptz,timestamptz,uuid,timestamptz,uuid,timestamptz,timestamptz,jsonb,bigint,bigint,text,text,numeric,numeric,numeric)` | Formatting/comments only | `2eee1a2d728db25470008e93772c07c807d99853ba7cf581752b5eec1890462f` |
+| `chips_register_bot_only_archive_proof(text,uuid[],bigint[],uuid,text[],text)` | Formatting/comments only | `e183f1c0df737a4b256ee5a8f9969f419e1a33b332cd1b24f96049c0ad286300` |
+| `chips_retire_production_escrow_accounts(bigint,uuid[],text,text,text,boolean,text)` | Formatting and optional alias AS | `251b96819aa427dccbf7eddb56995cf6f9696aa8c5b825849bc2f4168d497551` |
+
+Five routines are not replaced by E3: archive target, closed-human lifecycle gate, lifecycle completion, human marker guard and escrow retirement. Their `$after$` pins must retain the reviewed deployed hashes too. All other replacement body pins remain unchanged. The test-only frozen deployed catalog restores these 14 definitions solely in the disposable PostgreSQL fixture; it is not a migration or operational repair. Full activation/replay tests now start from the deployed catalog, and a raw-source comment mutation must fail the catalog guard.
+
+Final fresh Production fingerprint preflight: **18/18 PASS**, transaction read-only ON, E3 absent, retention OFF, cap 2. No Production DDL/DML, activation, workflow dispatch or configuration change was performed. Breaking/financial impact: no new runtime behavior beyond the already reviewed E3 proposal; this corrects the exact baseline and retained-function replay pins. Any subsequent catalog drift still blocks E3. Storage preflight, fresh evidence and all separate owner gates remain mandatory; fingerprint PASS alone does not authorize E3.

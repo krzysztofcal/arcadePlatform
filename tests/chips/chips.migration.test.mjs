@@ -386,6 +386,9 @@ const runProductionEquivalentFixture = async (sql) => {
   assert.match(activatedRows[0].eligibility_default || "", /true/i, "E2 must make future bot eligibility default true");
   assert.equal(activatedRows[0].retention_enabled, false, "E2 must not activate cleanup");
   assert.equal(Number(activatedRows[0].max_transactions), 2, "E2 must preserve the cap2 pre-activation contract");
+  // Exercise the deployed catalog, whose prosrc differs from authored E1 SQL.
+  await sql.unsafe(fs.readFileSync(path.join(process.cwd(), "tests/fixtures/chips-production-pre-e3-catalog.sql"), "utf8")
+    .replaceAll(canonicalProductionSystemIdentifier, fixtureSystemIdentifier));
   await assertProductionRetentionSafetyContracts(sql);
   await assertProductionClosedHumanAutomaticP9273RegistryBinding(sql);
   await assertProductionQuarantineContract(sql, {
@@ -441,6 +444,12 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   const rejectSql = (tx, query, values, pattern) => assert.rejects(() => tx.savepoint(sp => sp.unsafe(query, values)), pattern);
   const file = "20260914092000_chips_ledger_production_retention_activation.sql";
   const e3 = fixtureSql(file);
+  const before = JSON.parse(e3.match(/\$before\$(.*?)\$before\$/s)[1]);
+  assert.equal(Object.keys(before).length, 18, "Keep all required pre-E3 routines");
+  for (const [signature, expected] of Object.entries(before)) {
+    const [row] = await sql.unsafe(`select encode(extensions.digest(convert_to(replace(prosrc,$2,'<production-system-identifier>'),'UTF8'),'sha256'),'hex') as hash from pg_catalog.pg_proc where oid=to_regprocedure($1)`, [signature, (await sql.unsafe("select system_identifier::text from pg_control_system()"))[0].system_identifier]);
+    assert.equal(row?.hash, expected, `Deployed catalog fingerprint: ${signature}`);
+  }
   // Exact production pins seed a disposable receipt fixture, never a remote DB.
   const pins = JSON.parse(e3.match(/\$pins\$(.*?)\$pins\$/s)[1]);
   assert.deepEqual(pins.map(b => b.compressed_sha256), [
@@ -449,6 +458,16 @@ async function assertProductionE3Activation(sql, fixtureSql) {
     "28a2a4332723d3e60a7dfd04ab48f73132091782109780cb21c1696be39f947e",
   ]);
   await sql.unsafe("insert into supabase_migrations.schema_migrations(version) values('20260914090000'),('20260914091000') on conflict do nothing;");
+  const catalogGuard = e3.match(/do \$catalog\$.*?\$catalog\$;/s)[0];
+  await sql.unsafe(catalogGuard);
+  // Even harmless raw-source drift must fail; no normalization fallback.
+  await sql.begin(async tx => {
+    const [routine] = await tx.unsafe("select pg_get_functiondef('public.chips_assert_production_retention_control(text,bigint,boolean)'::regprocedure) as definition");
+    await tx.unsafe(routine.definition.replace("begin", "begin /* catalog drift */"));
+    await rejectSql(tx, catalogGuard, [], /E3 contract fingerprint mismatch/);
+    await tx.unsafe(routine.definition);
+    await tx.unsafe(catalogGuard);
+  });
   await sql.unsafe("set chips.production_activation_confirmation=''; set chips.production_preflight_sha256=''; set chips.production_preflight_at='';");
   await assert.rejects(() => sql.unsafe(e3), /attestation/);
   await sql.unsafe("rollback;");
