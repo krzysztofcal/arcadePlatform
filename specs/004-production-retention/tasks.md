@@ -108,3 +108,9 @@ Existing JS pipeline carries a verified automatic policy context; SQL explicit-c
 147 repository suites PASS; disposable PostgreSQL E3/ledger contract PASS; syntax/CI guards/CSP/inventory/whitespace PASS. `check:all` has the five unchanged XP-anchor design-file failures documented in plan/research, not a PR B regression. Draft PR records exact commit and remote checks. T023–T025 remain unchecked/owner-only; no Production writes, activation, scheduler/token installation, merge, deploy or #992 change.
 
 - [x] PR #1108 corrective catalog review: compare all 14 live mismatches semantically, preserve 18 exact pins, retain five unchanged after-pins, exercise frozen deployed catalog and strict drift rejection; fresh read-only Production 18/18 PASS. No E3 apply authorized.
+
+## T023 P1 DDL permission correction
+
+- [x] T023-R1 Correct E3 temporary namespace CREATE and caller INHERIT/SET delegation, explicit grantor-scoped cleanup and fail-closed preexisting delegation guard. Preserve all financial bodies/ACL/RLS/fingerprints.
+- [x] T023-R2 Extend only the existing PostgreSQL fixture with actual non-superuser postgres, provider-style ADMIN=true/INHERIT=false/SET=false membership, missing CREATE/SET rejection, late rollback/no grant leak, complete activation and original permissions restored. Run full migration suite and existing CI.
+- [ ] T023-R3 OWNER GATE — corrective Draft PR review/merge, new E3 hash and fresh DDL/DB/Storage/runtime/operator preflight; separate new activation GO. Previous failed attempt is not authorization to retry or grant privileges. T023 stays unchecked.
