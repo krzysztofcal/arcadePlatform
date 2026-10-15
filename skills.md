@@ -203,6 +203,15 @@ When solving a problem:
 
 ---
 
+## 🧹 YAGNI / Removing unused code (MANDATORY)
+
+- Start with existing working mechanisms (especially Stage counterparts); justify and explicitly review any new Production-specific infrastructure or identity.
+- When replacing a mechanism, remove the unused code paths, configuration, scripts, tests, documentation and deployment artifacts in the same change. Do not keep unused fallback or compatibility code "just in case".
+- Check actual references and runtime/CI usage before deletion; preserve required financial/security guards, immutable migrations and audit/recovery evidence.
+- Prefer one supported operational path, minimal dependencies and only fundamental tests for functionality that remains. Document breaking impacts and any cleanup requiring separate operator approval.
+
+---
+
 ## ❗ Common Pitfalls
 
 - Using DB instead of WS state
