@@ -126,7 +126,13 @@ jobs:
           CHIPS_RESET_CLI_TEST_DB_URL: ${{ env.CHIPS_MIGRATIONS_TEST_DB_URL }}
 
       - name: Apply migrations and run migration contracts
-        run: node tests/chips/chips.migration.test.mjs
+        # This job owns the fresh disposable PostgreSQL service above. Never
+        # propagate this consent to a persistent/shared local cluster.
+        env:
+          CHIPS_MIGRATIONS_DISPOSABLE_CLUSTER_CONFIRMATION: I_CONFIRM_THIS_CLUSTER_IS_DEDICATED_AND_DISPOSABLE
+        run: |
+          export CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER="$(psql "$CHIPS_MIGRATIONS_TEST_DB_URL" -X -At -v ON_ERROR_STOP=1 -c 'select system_identifier::text from pg_catalog.pg_control_system()')"
+          node tests/chips/chips.migration.test.mjs
 
       - name: Daily Bonus atomic claim contracts (disposable PostgreSQL)
         run: node --test tests/bonus-campaigns.transaction.test.mjs

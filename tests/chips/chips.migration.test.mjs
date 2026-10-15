@@ -577,10 +577,24 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false,"E3 replay must not reactivate");
 }
 
+const disposableClusterConfirmation = "I_CONFIRM_THIS_CLUSTER_IS_DEDICATED_AND_DISPOSABLE";
+async function assertDisposableRoleFixtureCluster(sql, env = process.env) {
+  const target = new URL(dbUrl);
+  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(target.hostname), "Global role fixture requires a local dedicated disposable cluster");
+  assert.equal(env.CHIPS_MIGRATIONS_DISPOSABLE_CLUSTER_CONFIRMATION,disposableClusterConfirmation,
+    "Global role fixture requires explicit confirmation of a dedicated disposable cluster");
+  assert.match(env.CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER || "", /^[0-9]+$/,
+    "Global role fixture requires the approved disposable cluster identity");
+  const [cluster] = await sql.unsafe(`select system_identifier::text,
+    (select coalesce(rolpassword like 'md5%',false) from pg_catalog.pg_authid where rolname='postgres') postgres_password_is_md5
+    from pg_catalog.pg_control_system()`);
+  assert.equal(cluster?.system_identifier,env.CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER,"Disposable cluster identity mismatch");
+  assert.equal(cluster?.postgres_password_is_md5,false,"Refusing to rename an MD5-password role, even in a disposable cluster");
+}
+
 // Only the disposable local PG16+ service is allowed to change fixture roles.
 async function assertProductionE3NonSuperuserDelegation(sql, e3) {
-  const target = new URL(dbUrl);
-  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(target.hostname), "DDL role fixture must be isolated/local");
+  await assertDisposableRoleFixtureCluster(sql);
   const password = crypto.randomBytes(24).toString("hex");
   await sql.unsafe(`create role chips_e3_fixture_admin login superuser password '${password}'`);
   const adminUrl = new URL(dbUrl); adminUrl.username = "chips_e3_fixture_admin"; adminUrl.password = password;
@@ -4718,7 +4732,19 @@ async function assertEscrowDryRunReadOnlyConcurrency(sql) {
 }
 
 async function main() {
+  // Fundamental consent regressions run before any connection or fixture DDL.
+  let reads = 0;
+  const fixture = { unsafe: async query => { assert.match(query,/^select system_identifier/); reads++; return [{system_identifier:"42",postgres_password_is_md5:false}]; } };
+  const approved = { CHIPS_MIGRATIONS_DISPOSABLE_CLUSTER_CONFIRMATION:disposableClusterConfirmation, CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER:"42" };
+  await assert.rejects(() => assertDisposableRoleFixtureCluster(fixture, {}), /dedicated disposable cluster/);
+  assert.equal(reads,0,"Missing isolation consent must fail before DB access/CREATE ROLE");
+  await assert.rejects(() => assertDisposableRoleFixtureCluster(fixture, {...approved,CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER:undefined}), /identity/);
+  assert.equal(reads,0,"Missing cluster identity must fail before DB access/CREATE ROLE");
+  await assert.rejects(() => assertDisposableRoleFixtureCluster(fixture, {...approved,CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER:"43"}), /identity/);
+  await assertDisposableRoleFixtureCluster(fixture, approved);
+  await assert.rejects(() => assertDisposableRoleFixtureCluster({unsafe:async()=>[{system_identifier:"42",postgres_password_is_md5:true}]},approved), /MD5/);
   const sql = postgres(dbUrl, { max: 1 });
+  await assertDisposableRoleFixtureCluster(sql);
   await dropAndRecreateSchema(sql);
 
   await runMigrations(sql, migrationsWithoutBootstrapSeeds);
