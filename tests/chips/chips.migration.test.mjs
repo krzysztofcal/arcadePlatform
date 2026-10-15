@@ -516,7 +516,7 @@ async function assertProductionE3Activation(sql, fixtureSql) {
     await sql.unsafe("set session_replication_role='replica'; "+restore+"; set session_replication_role='origin';");
   }
   const accountingBefore=await sql.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id");
-  await sql.unsafe(e3);
+  await assertProductionE3NonSuperuserDelegation(sql, e3);
   assert.deepEqual(Array.from(await sql.unsafe("select enabled,max_transactions from public.chips_production_retention_control")), [{enabled:true,max_transactions:5000}]);
   assert.deepEqual(await sql.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id"),accountingBefore);
   await sql.begin(async tx => {
@@ -575,6 +575,104 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   await sql.unsafe("select public.chips_set_production_retention_enabled(false,2,'DISABLE PRODUCTION RETENTION')");
   await sql.unsafe(e3);
   assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false,"E3 replay must not reactivate");
+}
+
+const disposableClusterConfirmation = "I_CONFIRM_THIS_CLUSTER_IS_DEDICATED_AND_DISPOSABLE";
+async function assertDisposableRoleFixtureCluster(sql, env = process.env) {
+  const target = new URL(dbUrl);
+  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(target.hostname), "Global role fixture requires a local dedicated disposable cluster");
+  assert.equal(env.CHIPS_MIGRATIONS_DISPOSABLE_CLUSTER_CONFIRMATION,disposableClusterConfirmation,
+    "Global role fixture requires explicit confirmation of a dedicated disposable cluster");
+  assert.match(env.CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER || "", /^[0-9]+$/,
+    "Global role fixture requires the approved disposable cluster identity");
+  const [cluster] = await sql.unsafe(`select system_identifier::text,
+    (select coalesce(rolpassword like 'md5%',false) from pg_catalog.pg_authid where rolname='postgres') postgres_password_is_md5
+    from pg_catalog.pg_control_system()`);
+  assert.equal(cluster?.system_identifier,env.CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER,"Disposable cluster identity mismatch");
+  assert.equal(cluster?.postgres_password_is_md5,false,"Refusing to rename an MD5-password role, even in a disposable cluster");
+}
+
+// Only the disposable local PG16+ service is allowed to change fixture roles.
+async function assertProductionE3NonSuperuserDelegation(sql, e3) {
+  await assertDisposableRoleFixtureCluster(sql);
+  const password = crypto.randomBytes(24).toString("hex");
+  await sql.unsafe(`create role chips_e3_fixture_admin login superuser password '${password}'`);
+  const adminUrl = new URL(dbUrl); adminUrl.username = "chips_e3_fixture_admin"; adminUrl.password = password;
+  const admin = postgres(adminUrl.toString(), { max: 1, prepare: false });
+  const ownerUrl = new URL(dbUrl); ownerUrl.password = password;
+  const owner = postgres(ownerUrl.toString(), { max: 1, prepare: false });
+  const settings = await sql.unsafe("select name,current_setting(name,true) value from unnest(array['chips.production_project_ref','chips.production_preflight_sha256','chips.production_activation_confirmation','chips.production_preflight_at']) name");
+  // PostgreSQL's bootstrap superuser cannot become NOSUPERUSER. Rename it
+  // temporarily and create the real postgres identity, without rewriting E3.
+  const moveFixtureObjects = async (from, to) => {
+    const commands = await admin.unsafe(`
+      select format('alter %s %I.%I owner to %I',case relkind when 'S' then 'sequence' when 'v' then 'view' when 'm' then 'materialized view' else 'table' end,n.nspname,c.relname,$2::text) command
+      from pg_class c join pg_namespace n on n.oid=c.relnamespace where c.relowner=to_regrole($1) and n.nspname in ('public','supabase_migrations') and c.relkind in ('r','p','S','v','m') order by c.relkind='S'
+    `, [from,to]);
+    for (const row of commands) await admin.unsafe(row.command);
+    const routines = await admin.unsafe("select format('alter function %s owner to %I',p.oid::regprocedure,$2::text) command from pg_proc p where p.proowner=to_regrole($1) and p.pronamespace='public'::regnamespace", [from,to]);
+    for (const row of routines) await admin.unsafe(row.command);
+    const schemas = await admin.unsafe("select format('alter schema %I owner to %I',nspname,$2::text) command from pg_namespace where nspowner=to_regrole($1) and nspname in ('public','supabase_migrations','extensions')", [from,to]);
+    for (const row of schemas) await admin.unsafe(row.command);
+    const [database] = await admin.unsafe("select format('alter database %I owner to %I',current_database(),$1::text) command", [to]);
+    await admin.unsafe(database.command);
+  };
+  const permissions = async () => ({
+    membership: Array.from(await admin.unsafe("select grantor::regrole::text grantor,admin_option,inherit_option,set_option from pg_auth_members where roleid='chips_ledger_archive_pruner'::regrole and member='postgres'::regrole order by grantor::regrole::text")),
+    schema: Array.from(await admin.unsafe("select has_schema_privilege('chips_ledger_archive_pruner','public','USAGE') usage,has_schema_privilege('chips_ledger_archive_pruner','public','CREATE') create_privilege")),
+    schemaAcl: Array.from(await admin.unsafe("select nspacl::text from pg_namespace where nspname='public'")),
+  });
+  let renamed = false, created = false;
+  try {
+    await admin.unsafe("alter role postgres rename to chips_e3_fixture_bootstrap"); renamed = true;
+    await admin.unsafe(`create role postgres login nosuperuser inherit password '${password}'`); created = true;
+    await moveFixtureObjects("chips_e3_fixture_bootstrap", "postgres");
+    await admin.unsafe("grant execute on function pg_catalog.pg_control_system() to postgres");
+    await admin.unsafe("grant chips_ledger_archive_pruner to postgres with admin true,inherit false,set false");
+    await admin.unsafe("revoke create on schema public from chips_ledger_archive_pruner");
+    const baseline = await permissions();
+    assert.deepEqual(baseline.schema, [{ usage: true, create_privilege: false }]);
+    assert.deepEqual(baseline.membership, [{grantor:"chips_e3_fixture_bootstrap",admin_option:true,inherit_option:false,set_option:false}]);
+    assert.deepEqual(Array.from(await owner.unsafe("select current_user,session_user,rolsuper from pg_roles where rolname=current_user")), [{current_user:"postgres",session_user:"postgres",rolsuper:false}]);
+    assert.equal((await owner.unsafe("select pg_has_role('postgres','chips_ledger_archive_pruner','SET') allowed"))[0].allowed, false);
+    for (const row of settings) await owner.unsafe("select set_config($1,$2,false)", [row.name,row.value]);
+    const withoutCreate = e3.replace("grant create on schema public to chips_ledger_archive_pruner;", "-- missing CREATE delegation regression");
+    await assert.rejects(() => owner.unsafe(withoutCreate), /permission denied for schema public/);
+    await owner.unsafe("rollback");
+    assert.deepEqual(await permissions(), baseline, "DDL failure leaks no grant");
+    const withoutSet = e3.replace("grant chips_ledger_archive_pruner to postgres with admin false, inherit true, set true granted by postgres;", "-- missing role delegation regression");
+    await assert.rejects(() => owner.unsafe(withoutSet), /must be able to SET ROLE|must be owner|permission denied/);
+    await owner.unsafe("rollback");
+    assert.deepEqual(await permissions(), baseline, "missing SET/ownership privilege leaks no CREATE");
+    await owner.unsafe("select set_config('chips.production_preflight_at',(clock_timestamp()-interval '16 minutes')::text,false)");
+    await assert.rejects(() => owner.unsafe(e3), /attestation/);
+    await owner.unsafe("rollback");
+    assert.deepEqual(await permissions(), baseline, "late activation failure leaks no grant");
+    assert.equal((await owner.unsafe("select enabled from chips_production_retention_control"))[0].enabled, false);
+    await owner.unsafe("select set_config('chips.production_preflight_at',clock_timestamp()::text,false)");
+    await owner.unsafe(e3);
+    const afterPins = JSON.parse(e3.match(/\$after\$(.*?)\$after\$/s)[1]);
+    for (const [signature,expected] of Object.entries(afterPins)) {
+      const [routine] = await owner.unsafe("select encode(extensions.digest(convert_to(replace(prosrc,(select system_identifier::text from pg_control_system()),'<production-system-identifier>'),'UTF8'),'sha256'),'hex') hash from pg_proc where oid=to_regprocedure($1)", [signature]);
+      assert.equal(routine?.hash,expected, `non-superuser E3 after fingerprint: ${signature}`);
+    }
+    assert.deepEqual(await permissions(), baseline, "success preserves original grantor and all membership options");
+    assert.equal((await owner.unsafe("select pg_has_role('postgres','chips_ledger_archive_pruner','SET') allowed"))[0].allowed, false);
+    assert.deepEqual(Array.from(await owner.unsafe("select enabled,max_transactions from chips_production_retention_control")), [{enabled:true,max_transactions:5000}]);
+  } finally {
+    await owner.end({timeout:5});
+    if (created) {
+      await moveFixtureObjects("postgres", "chips_e3_fixture_bootstrap");
+      // Restore fixture API grants to the original bootstrap identity too.
+      const grants = await admin.unsafe("select format('grant execute on function %s to chips_e3_fixture_bootstrap',p.oid::regprocedure) command from pg_proc p where p.pronamespace='public'::regnamespace and has_function_privilege('postgres',p.oid,'EXECUTE')");
+      for (const row of grants) await admin.unsafe(row.command);
+      await admin.unsafe("revoke chips_ledger_archive_pruner from postgres");
+      await admin.unsafe("drop owned by postgres; drop role postgres");
+    }
+    if (renamed) await admin.unsafe("alter role chips_e3_fixture_bootstrap rename to postgres");
+    await admin.end({timeout:5});
+    await sql.unsafe("drop role chips_e3_fixture_admin");
+  }
 }
 
 const assertProductionRetentionSafetyContracts = async (sql) => {
@@ -4634,7 +4732,19 @@ async function assertEscrowDryRunReadOnlyConcurrency(sql) {
 }
 
 async function main() {
+  // Fundamental consent regressions run before any connection or fixture DDL.
+  let reads = 0;
+  const fixture = { unsafe: async query => { assert.match(query,/^select system_identifier/); reads++; return [{system_identifier:"42",postgres_password_is_md5:false}]; } };
+  const approved = { CHIPS_MIGRATIONS_DISPOSABLE_CLUSTER_CONFIRMATION:disposableClusterConfirmation, CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER:"42" };
+  await assert.rejects(() => assertDisposableRoleFixtureCluster(fixture, {}), /dedicated disposable cluster/);
+  assert.equal(reads,0,"Missing isolation consent must fail before DB access/CREATE ROLE");
+  await assert.rejects(() => assertDisposableRoleFixtureCluster(fixture, {...approved,CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER:undefined}), /identity/);
+  assert.equal(reads,0,"Missing cluster identity must fail before DB access/CREATE ROLE");
+  await assert.rejects(() => assertDisposableRoleFixtureCluster(fixture, {...approved,CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER:"43"}), /identity/);
+  await assertDisposableRoleFixtureCluster(fixture, approved);
+  await assert.rejects(() => assertDisposableRoleFixtureCluster({unsafe:async()=>[{system_identifier:"42",postgres_password_is_md5:true}]},approved), /MD5/);
   const sql = postgres(dbUrl, { max: 1 });
+  await assertDisposableRoleFixtureCluster(sql);
   await dropAndRecreateSchema(sql);
 
   await runMigrations(sql, migrationsWithoutBootstrapSeeds);

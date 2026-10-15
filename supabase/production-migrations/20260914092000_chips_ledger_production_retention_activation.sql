@@ -86,8 +86,21 @@ begin
 end;
 $catalog$;
 
--- Same temporary DDL ownership delegation as E1, revoked before commit.
-grant chips_ledger_archive_pruner to postgres;
+-- Supabase postgres is not a superuser. Ownership transfer needs both SET
+-- membership and CREATE for the destination owner. Never overwrite a managed
+-- grantor edge; only the new postgres-granted edge is removed below.
+do $ddl_delegation$
+begin
+ if not pg_catalog.has_schema_privilege(current_user,'public','CREATE WITH GRANT OPTION')
+ or not pg_catalog.has_schema_privilege('chips_ledger_archive_pruner','public','USAGE')
+ or pg_catalog.has_schema_privilege('chips_ledger_archive_pruner','public','CREATE')
+ or exists(select 1 from pg_catalog.pg_auth_members where roleid='chips_ledger_archive_pruner'::regrole and member='postgres'::regrole and grantor='postgres'::regrole) then
+  raise exception 'E3 unexpected DDL delegation baseline';
+ end if;
+end;
+$ddl_delegation$;
+grant chips_ledger_archive_pruner to postgres with admin false, inherit true, set true granted by postgres;
+grant create on schema public to chips_ledger_archive_pruner;
 
 create or replace function public.chips_assert_production_retention_control(
  p_policy_id text, p_transaction_count bigint, p_execute boolean, p_automatic boolean
@@ -2441,7 +2454,10 @@ alter function public.chips_activate_production_retention(text,text,timestamptz)
 revoke all on function public.chips_activate_production_retention(text,text,timestamptz) from public,anon,authenticated,service_role,chips_ledger_archive_pruner;
 grant execute on function public.chips_activate_production_retention(text,text,timestamptz) to postgres;
 
-revoke chips_ledger_archive_pruner from postgres;
+-- Revoke only this transaction's delegation, preserving the managed grantor
+-- and its original ADMIN/INHERIT/SET options. Failures roll back both grants.
+revoke create on schema public from chips_ledger_archive_pruner;
+revoke chips_ledger_archive_pruner from postgres granted by postgres;
 
 select public.chips_activate_production_retention(
  current_setting('chips.production_activation_confirmation',true),
