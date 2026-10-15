@@ -177,3 +177,36 @@ export function assertProfileIdentity(profile, { projectRef, systemIdentifier } 
   }
   return profile;
 }
+
+// Issued only after the orchestrator reads the locked Production state. The DB
+// guards independently revalidate activation; this capability is not an env cap.
+const automaticContexts = new WeakSet();
+export function resolveProductionAutomaticContext(state, policyId) {
+  const profile = RETENTION_TARGETS.production;
+  const policy = state?.policies?.find(row => row.policy_id === policyId);
+  if (state?.projectRef !== profile.projectRef || state?.systemIdentifier !== profile.systemIdentifier
+    || state.fenceActive !== true || state.control?.enabled !== true
+    || Number(state.control.max_transactions) !== 5000 || !state.control.activated_at
+    || !Object.values(profile.policies).includes(policyId)
+    || (policyId === profile.policies.existing30d
+      ? String(state.control.existing_30d_canary_batch_id) !== "2"
+      : !policy || policy.enabled !== true || !policy.activated_at || !policy.canary_batch_id)) {
+    fail("Production automatic context requires exact activated identity/control/fence/policy");
+  }
+  const context = Object.freeze({ target: "prod", policyId, maxTransactions: 5000 });
+  automaticContexts.add(context);
+  return context;
+}
+export function effectiveProductionCap(context = null, policyId = null) {
+  if (context == null) return 2;
+  if (!automaticContexts.has(context) || (policyId != null && context.policyId !== policyId)) {
+    fail("a verified automatic context bound to the archive policy is required");
+  }
+  return 5000;
+}
+export async function assertProductionAutomaticContext(sql, context, policyId, count = 1) {
+  effectiveProductionCap(context, policyId);
+  if (!context) return;
+  if (!policyId || context.policyId !== policyId) fail("automatic context policy binding is required");
+  await sql.unsafe("select public.chips_assert_production_retention_control($1::text, $2::bigint, false, true);", [policyId, count]);
+}

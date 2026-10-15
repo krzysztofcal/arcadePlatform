@@ -1,3 +1,4 @@
+import { effectiveProductionCap, assertProductionAutomaticContext } from "./_shared/chips-ledger-retention-profile.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -2235,9 +2236,9 @@ function parseBoundedInteger(value, name, { min, max }) {
   return parsed;
 }
 
-export function maxBatchSizeForTarget(target) {
+export function maxBatchSizeForTarget(target, automaticContext = null) {
   if (target === "stage") return MAX_BATCH_SIZE;
-  if (target === "prod") return PRODUCTION_MAX_BATCH_SIZE;
+  if (target === "prod") return effectiveProductionCap(automaticContext);
   fail("target must be exactly stage or prod");
 }
 
@@ -2302,7 +2303,7 @@ function resolveOptions(args, env, cwd, now, targetOptions = {}) {
         const days = args.cutoffDays == null ? DEFAULT_CUTOFF_DAYS : parseBoundedInteger(args.cutoffDays, "--cutoff-days", { min: 0, max: 36500 });
         return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
       })();
-  const maxBatchSize = maxBatchSizeForTarget(target.target);
+  const maxBatchSize = maxBatchSizeForTarget(target.target, targetOptions.automaticContext);
   const batchSize = args.batchSize == null
     ? Math.min(DEFAULT_BATCH_SIZE, maxBatchSize)
     : parseBoundedInteger(args.batchSize, "--batch-size", { min: 1, max: maxBatchSize });
@@ -2604,7 +2605,7 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
     process.stdout.write(HELP);
     return null;
   }
-  const options = resolveOptions(args, env, cwd, now, deps.targetOptions || {});
+  const options = resolveOptions(args, env, cwd, now, { ...(deps.targetOptions || {}), automaticContext: deps.automaticContext });
   const sql = deps.sql || postgres(options.dbUrl, {
     max: 1,
     prepare: false,
@@ -2621,6 +2622,7 @@ export async function runExport({ argv = process.argv.slice(2), env = process.en
     const legacyStageAllowlistPlan = selector === "legacy-stage-allowlist-v1"
       ? deps.legacyStageAllowlistPlan
       : null;
+    await assertProductionAutomaticContext(sql, deps.automaticContext, deps.sourcePolicyId, options.batchSize);
     const snapshot = await readSnapshot(sql, {
       ...options,
       selector,

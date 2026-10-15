@@ -1,3 +1,4 @@
+import { resolveProductionAutomaticContext } from "../../scripts/ops/_shared/chips-ledger-retention-profile.mjs";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -24,6 +25,7 @@ import {
   uploadOrVerifyPrivateObject,
   verifyArchiveBucket,
   verifyLocalArchive,
+  verifyArchiveBytes,
 } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
 const TX_ID = "00000000-0000-4000-8000-000000000001";
@@ -911,3 +913,15 @@ try {
 }
 
 process.stdout.write("chips-ledger-archive-storage tests passed\n");
+
+const activatedProductionContext = resolveProductionAutomaticContext({
+  projectRef: "otbqfijerkieoxwpxjnm", systemIdentifier: "7575202818581710058", fenceActive: true,
+  control: { enabled: true, max_transactions: 5000, activated_at: "2026-10-14", existing_30d_canary_batch_id: "2" }, policies: [],
+}, "production-ledger-auto-retention-30d-v1");
+const productionCapManifest = buildManifest({ target: "prod", cutoff: "2026-02-01T00:00:00Z", batchSize: 5000,
+  cursor: null, records: [record], archive, outputPath: artifactPath, sourcePolicyId: "production-ledger-auto-retention-30d-v1" });
+const productionCapTarget={target:"prod",projectRef:"otbqfijerkieoxwpxjnm"};
+const checkProductionCap=(manifest,target)=>verifyArchiveBytes({compressedBytes:archive.compressedBytes,manifest,target,artifactName:path.basename(artifactPath)});
+assert.throws(()=>checkProductionCap(productionCapManifest,productionCapTarget),/batch limit/);
+assert.equal(checkProductionCap(productionCapManifest,{...productionCapTarget,automaticContext:activatedProductionContext}).records.length,1);
+assert.throws(()=>checkProductionCap({...productionCapManifest,batch:{...productionCapManifest.batch,limit:5001}},{...productionCapTarget,automaticContext:activatedProductionContext}),/batch limit/);

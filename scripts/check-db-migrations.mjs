@@ -114,6 +114,7 @@ function validateProductionManifest() {
   for (const required of [
     "20260914090000_chips_ledger_production_retention_contract.sql",
     "20260914091000_chips_ledger_production_table_fence_activation.sql",
+    "20260914092000_chips_ledger_production_retention_activation.sql",
     "20260929201500_poker_bot_quarantine_production_contract.sql",
     "20260930211624_poker_bot_pool_refill_hourly.sql",
   ]) {

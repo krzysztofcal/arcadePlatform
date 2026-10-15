@@ -1,3 +1,4 @@
+import { effectiveProductionCap, assertProductionAutomaticContext } from "./_shared/chips-ledger-retention-profile.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,6 +8,7 @@ import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
   BOT_ONLY_RETENTION_POLICY_ID,
   CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
+  PRODUCTION_AUTOMATION_POLICY_ID,
   PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
   PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
   LEGACY_STAGE_ALLOWLIST_POLICY_ID,
@@ -563,13 +565,13 @@ function parseArgs(argv) {
   return args;
 }
 
-function targetPolicy(target) {
+function targetPolicy(target, automaticContext = null) {
   if (target === "stage") {
     return {
       target,
       projectRef: "krydukthwdvccggbyjfw",
       systemIdentifier: STAGE_SYSTEM_IDENTIFIER,
-      maxBatchSize: maxBatchSizeForTarget(target),
+      maxBatchSize: maxBatchSizeForTarget(target, automaticContext),
     };
   }
   if (target === "prod") {
@@ -577,7 +579,7 @@ function targetPolicy(target) {
       target,
       projectRef: "otbqfijerkieoxwpxjnm",
       systemIdentifier: PRODUCTION_SYSTEM_IDENTIFIER,
-      maxBatchSize: maxBatchSizeForTarget(target),
+      maxBatchSize: maxBatchSizeForTarget(target, automaticContext),
     };
   }
   fail("target must be exactly stage or prod");
@@ -655,7 +657,7 @@ export function exporterManifestFromDatabase(row, target, legacyStageAllowlistPl
     target: target.target,
     cutoff: { created_at: row.cutoff, rule: "transaction.created_at < cutoff" },
     batch: {
-      limit: targetPolicy(target.target).maxBatchSize,
+      limit: targetPolicy(target.target, target.automaticContext).maxBatchSize,
       transactions: row.transaction_count,
       entries: row.entry_count,
       tx_types: row.tx_types,
@@ -811,7 +813,7 @@ export function verifyRecoveryBundle({
     artifactName: path.basename(row.object_path),
     expectedLegacyStageAllowlistEvidence,
   });
-  const evidence = buildPruneEvidence(verified, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
+  const evidence = buildPruneEvidence(verified, { maxBatchSize: targetPolicy(target.target, target.automaticContext).maxBatchSize });
   if (evidence.transactionIdsSha256 !== expectedEvidence.transactionIdsSha256
     || evidence.entryIdsSha256 !== expectedEvidence.entryIdsSha256) {
     fail("recovery archive ID proof no longer matches");
@@ -883,7 +885,7 @@ function manifestSelectSql(target = "stage") {
   from public.chips_ledger_archive_batches batches where batches.object_path = $1;`;
 }
 
-export function createPruneStore(sql, target = "stage") {
+export function createPruneStore(sql, target = "stage", automaticContext = null) {
   if (!sql || typeof sql.unsafe !== "function" || typeof sql.begin !== "function") fail("PostgreSQL prune adapter is required");
   const timestampParam = (value) => value == null || typeof sql.typed !== "function" ? value : sql.typed(value, 25);
   return {
@@ -902,13 +904,14 @@ export function createPruneStore(sql, target = "stage") {
           $1, $2::uuid[], $3::bigint[], $4, $5::integer, $6::timestamptz,
           $7::timestamptz, $8::uuid, $9::timestamptz, $10::uuid,
           $11::timestamptz, $12::timestamptz, $13::jsonb, $14::bigint,
-          $15::bigint, $16, $17, $18::numeric, $19::numeric, $20::numeric
+          $15::bigint, $16, $17, $18::numeric, $19::numeric, $20::numeric${automaticContext ? ", $21::boolean" : ""}
         ) as result;`, [
           row.object_path, evidence.transactionIds, evidence.entryIds, row.project_ref,
           row.format_version, timestampParam(row.cutoff), timestampParam(row.cursor_start_created_at), row.cursor_start_id,
           timestampParam(row.cursor_end_created_at), row.cursor_end_id, timestampParam(row.first_created_at), timestampParam(row.last_created_at),
           row.tx_types, row.raw_bytes, row.compressed_bytes, row.raw_sha256, row.compressed_sha256,
           row.credits, row.debits, row.net_amount,
+          ...(automaticContext ? [true] : []),
         ]);
         return rows[0]?.result;
       });
@@ -924,12 +927,12 @@ export function createPruneStore(sql, target = "stage") {
         const production = row.project_ref === "otbqfijerkieoxwpxjnm";
         const rows = await tx.unsafe(production
           ? `select public.chips_register_bot_only_archive_proof(
-            $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[], $6::text
+            $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[], $6::text${automaticContext ? ", $7::boolean" : ""}
           ) as result;`
           : `select public.chips_register_bot_only_archive_proof(
             $1, $2::uuid[], $3::bigint[], $4::uuid, $5::text[]
           ) as result;`, production
-          ? [row.object_path, evidence.transactionIds, evidence.entryIds, evidence.tableId, evidence.registryKeys, evidence.outOfScopeKeysSha256]
+          ? [row.object_path, evidence.transactionIds, evidence.entryIds, evidence.tableId, evidence.registryKeys, evidence.outOfScopeKeysSha256, ...(automaticContext ? [true] : [])]
           : [row.object_path, evidence.transactionIds, evidence.entryIds, evidence.tableId, evidence.registryKeys]);
         return rows[0]?.result;
       });
@@ -1003,9 +1006,10 @@ export function createPruneStore(sql, target = "stage") {
         if (execute && targetName === "prod" && !automatic && approvedBatchId != null) {
           await tx.unsafe("set local chips.production_canary = '1';");
         }
-        const rows = await tx.unsafe(`select public.chips_prune_committed_archive_batch(
-          $1, $2::uuid[], $3::bigint[], $4::boolean
-        ) as result;`, [objectPath, evidence.transactionIds, evidence.entryIds, execute]);
+        const routine = automaticContext && execute ? "chips_auto_prune_production_existing_30d_archive_batch" : "chips_prune_committed_archive_batch";
+        const rows = await tx.unsafe(`select public.${routine}(
+          $1, $2::uuid[], $3::bigint[]${automaticContext && execute ? "" : ", $4::boolean"}${automaticContext && !execute ? ", $5::boolean" : ""}
+        ) as result;`, [objectPath, evidence.transactionIds, evidence.entryIds, ...(automaticContext && execute ? [] : [execute]), ...(automaticContext && !execute ? [true] : [])]);
         return rows[0]?.result;
       });
     },
@@ -1038,7 +1042,7 @@ export function createPruneStore(sql, target = "stage") {
               evidence.closedHumanTableId,
             ])
           : await tx.unsafe(`select public.chips_prune_closed_human_table_archive_batch(
-            $1, $2::uuid[], $3::bigint[], $4::uuid, $5::boolean, $6::bigint
+            $1, $2::uuid[], $3::bigint[], $4::uuid, $5::boolean, $6::bigint${automaticContext ? ", $7::boolean" : ""}
           ) as result;`, [
             objectPath,
             evidence.transactionIds,
@@ -1046,6 +1050,7 @@ export function createPruneStore(sql, target = "stage") {
             evidence.closedHumanTableId,
             execute,
             approvedBatchId,
+            ...(automaticContext ? [true] : []),
           ]);
         return rows[0]?.result;
       });
@@ -1090,7 +1095,7 @@ export function createPruneStore(sql, target = "stage") {
               evidence.tableId,
             ])
           : await tx.unsafe(`select public.chips_prune_and_cleanup_bot_only_archive_batch(
-            $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid, $6::boolean, $7::bigint
+            $1, $2::uuid[], $3::bigint[], $4::text[], $5::uuid, $6::boolean, $7::bigint${automaticContext ? ", $8::boolean" : ""}
           ) as result;`, [
             objectPath,
             evidence.transactionIds,
@@ -1099,6 +1104,7 @@ export function createPruneStore(sql, target = "stage") {
             evidence.tableId,
             execute,
             approvedBatchId,
+            ...(automaticContext ? [true] : []),
           ]);
         return rows[0]?.result;
       });
@@ -1482,7 +1488,7 @@ async function revalidateLegacyExecuteAttempt({
     artifactName: path.basename(row.object_path),
     expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
   });
-  const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
+  const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target, target.automaticContext).maxBatchSize });
   assertProofMatches(row, evidence);
   if (!recoveryBundle) fail("legacy execute retry recovery bundle is unavailable");
   verifyRecoveryBundle({
@@ -1885,14 +1891,14 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
   if (args.approvedBatchId != null && !/^[1-9][0-9]*$/.test(args.approvedBatchId)) fail("--approved-batch-id must be a positive integer");
   if (args.automatic && args.approvedBatchId != null) fail("--automatic cannot be combined with --approved-batch-id");
 
-  const target = deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {});
+  const target = { ...(deps.storageTarget || resolveStorageTarget(args.target, env, deps.targetOptions || {})), automaticContext: deps.automaticContext };
   const sql = deps.sql || (deps.pruneStore ? null : postgres(target.dbUrl, {
     max: 1,
     prepare: false,
     connect_timeout: 10,
     idle_timeout: 30,
   }));
-  const store = deps.pruneStore || createPruneStore(sql, target.target);
+  const store = deps.pruneStore || createPruneStore(sql, target.target, deps.automaticContext);
   const storageVerificationContext = deps.storageVerificationContext || null;
   const verifyBucket = deps.verifyBucket
     || ((storageTarget, options = {}) => {
@@ -1914,6 +1920,11 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     const identity = await store.getIdentity();
     row = await store.getManifest(args.objectPath);
     assertTargetIdentity(identity, row, target);
+    if (target.target === "prod") {
+      effectiveProductionCap(deps.automaticContext, row.source_policy_id);
+      await assertProductionAutomaticContext(sql, deps.automaticContext, row.source_policy_id, Number(row.transaction_count));
+      if (args.automatic && !deps.automaticContext) fail("Production automatic requires verified context");
+    }
     if (row.status !== "committed" || !row.committed_at) fail("archive manifest is not committed");
     if (row.compressed_sha256 !== args.confirmSha) fail("--confirm-sha does not match committed manifest");
 
@@ -1933,7 +1944,7 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
       artifactName: path.basename(row.object_path),
       expectedLegacyStageAllowlistEvidence: deps.legacyStageAllowlistPlan?.archiveManifest || null,
     });
-    const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target).maxBatchSize });
+    const evidence = buildPruneEvidence(localArchive, { maxBatchSize: targetPolicy(target.target, target.automaticContext).maxBatchSize });
     const isClosedHumanPolicy = [CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID, PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID].includes(row.source_policy_id);
     if (isClosedHumanPolicy && row.source_policy_id === CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID && target.target !== "stage") {
       fail("Stage closed-human execution is only valid for canonical Stage");
@@ -1955,7 +1966,8 @@ export async function pruneArchive({ argv = process.argv.slice(2), env = process
     if (args.automatic && !(
       row.format_version === BOT_ONLY_EXPORT_SCHEMA_VERSION
       && [BOT_ONLY_RETENTION_POLICY_ID, PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID].includes(row.source_policy_id)
-      ) && !(isClosedHumanPolicy && closedHumanAutomatic)) {
+      ) && !(isClosedHumanPolicy && closedHumanAutomatic)
+      && !(target.target === "prod" && deps.automaticContext && row.source_policy_id === PRODUCTION_AUTOMATION_POLICY_ID)) {
       fail("--automatic is only valid for an enabled target-bound automatic policy");
     }
 

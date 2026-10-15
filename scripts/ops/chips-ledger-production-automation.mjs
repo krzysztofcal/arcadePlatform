@@ -27,7 +27,7 @@ import {
   releaseRetentionAdvisoryLock,
   runRetentionCycle,
 } from "./_shared/chips-ledger-retention-cycle.mjs";
-import { validateRetentionEnvironment } from "./_shared/chips-ledger-retention-profile.mjs";
+import { validateRetentionEnvironment, resolveProductionAutomaticContext, effectiveProductionCap, assertProductionAutomaticContext } from "./_shared/chips-ledger-retention-profile.mjs";
 import {
   accountIdsSha256,
   assertProductionEscrowProfile,
@@ -48,7 +48,7 @@ import { ensurePrivateDirectory } from "./_shared/chips-ledger-archive-files.mjs
 
 const PRODUCTION_STATE_SQL = Object.freeze({
   identity: "select system_identifier::text as system_identifier from pg_catalog.pg_control_system();",
-  control: `select enabled, max_transactions, activated_at::text as activated_at
+  control: `select enabled, max_transactions, activated_at::text as activated_at, existing_30d_canary_batch_id::text as existing_30d_canary_batch_id
       from public.chips_production_retention_control where control_id is true;`,
   fence: `select enforcement_active from public.chips_table_fence_control where control_id is true;`,
   policies: `select policy_id, enabled, canary_batch_id::text as canary_batch_id,
@@ -246,16 +246,16 @@ function requireLifecycleAuthorization({ env, mode, policy, batchId, tableId, cu
     || env.GITHUB_SHA !== env.DEPLOYED_COMMIT_SHA) fail("Production lifecycle completion requires exact-SHA owner/main dispatch");
 }
 
-function productionExportArgs(policy, outputPath, manifestPath) {
+function productionExportArgs(policy, outputPath, manifestPath, automaticContext = null) {
   const cutoffDays = policy === "bot-only-7d" || policy === "escrow"
     ? BOT_ONLY_RETENTION_DAYS
     : DEFAULT_CUTOFF_DAYS;
-  return ["--target", "prod", "--output", outputPath, "--manifest", manifestPath, "--cutoff-days", String(cutoffDays), "--batch-size", "2"];
+  return ["--target", "prod", "--output", outputPath, "--manifest", manifestPath, "--cutoff-days", String(cutoffDays), "--batch-size", String(effectiveProductionCap(automaticContext))];
 }
 
-async function readProductionState({ profile, deps = {} } = {}) {
+async function readProductionState({ profile, deps = {}, session = null } = {}) {
   if (typeof deps.sqlRead === "function") return deps.sqlRead({ profile });
-  const sql = postgres(profile.dbUrl, {
+  const sql = session || postgres(profile.dbUrl, {
     max: 1,
     prepare: false,
     connect_timeout: 10,
@@ -283,7 +283,7 @@ async function readProductionState({ profile, deps = {} } = {}) {
       };
     });
   } finally {
-    await sql.end({ timeout: 5 });
+    if (!session) await sql.end({ timeout: 5 });
   }
 }
 
@@ -404,7 +404,7 @@ async function resumeProductionPrepareBatch({ activeRow, profile, env, policy, b
     recoveryManifestSha256: durable.recoveryManifest.sha256 };
 }
 
-function assertProductionHumanPrunedBatch(row, batchId, cutoff = null) {
+function assertProductionHumanPrunedBatch(row, batchId, cutoff = null, automaticContext = null) {
   if (!row || text(row.batch_id) !== text(batchId) || row.project_ref !== "otbqfijerkieoxwpxjnm"
     || row.source_policy_id !== PRODUCTION_POLICIES["closed-human-30d"] || row.status !== "committed"
     || Number(row.format_version) !== 1 || !row.committed_at || !row.cutoff || !Number.isFinite(new Date(row.cutoff).getTime())
@@ -412,7 +412,7 @@ function assertProductionHumanPrunedBatch(row, batchId, cutoff = null) {
     || !row.archive_proof_verified_at || !SHA256_RE.test(text(row.compressed_sha256))
     || !SHA256_RE.test(text(row.archived_transaction_ids_sha256)) || !SHA256_RE.test(text(row.archived_entry_ids_sha256))
     || row.object_path !== `v1/sha256/${row.compressed_sha256}.jsonl.gz`
-    || !Number.isSafeInteger(Number(row.transaction_count)) || Number(row.transaction_count) < 1 || Number(row.transaction_count) > 2
+    || !Number.isSafeInteger(Number(row.transaction_count)) || Number(row.transaction_count) < 1 || Number(row.transaction_count) > effectiveProductionCap(automaticContext, row.source_policy_id)
     || Number(row.entry_count) !== Number(row.transaction_count) * 2
     || !row.pruned_at || Number(row.pruned_transaction_count) !== Number(row.transaction_count)
     || Number(row.pruned_entry_count) !== Number(row.entry_count)
@@ -425,15 +425,15 @@ function assertProductionHumanPrunedBatch(row, batchId, cutoff = null) {
 
 async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, storageTarget,
   verifyBucket, storageDeps, env, profile, row, batchId, tableId = null, cutoff = null,
-  tempRoot, deps, allowComplete = true, manualOnly = false }) {
+  tempRoot, deps, allowComplete = true, manualOnly = false, automaticContext = null }) {
   row = await pruneStore.getManifest(row.object_path);
-  assertProductionHumanPrunedBatch(row, batchId, cutoff);
+  assertProductionHumanPrunedBatch(row, batchId, cutoff, automaticContext);
   await assertRetentionAdvisoryLock(sql, lockSession);
   await verifyBucket(storageTarget);
   const dry = await (deps.pruneArchive || pruneArchive)({
     argv: ["--target", "prod", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256],
     env, cwd: tempRoot, deps: { ...storageDeps, sql, pruneStore, storageTarget,
-      targetOptions: productionTargetOptions(), verifyBucket, emit: false } });
+      targetOptions: productionTargetOptions(), verifyBucket, emit: false, automaticContext } });
   const evidence = dry?.evidence;
   if (dry?.state !== "already_pruned" || dry.read_only !== true || dry.archiveSha256 !== row.compressed_sha256
     || !evidence || evidence.transactionCount !== Number(row.transaction_count) || evidence.entryCount !== Number(row.entry_count)
@@ -463,9 +463,10 @@ async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, 
         fail("locked manual completion requires fence ON, policies/control OFF and cap 2");
       }
     }
+    await assertProductionAutomaticContext(tx, automaticContext, PRODUCTION_POLICIES["closed-human-30d"], Number(row.transaction_count));
     const locked = await tx.unsafe("select * from public.chips_ledger_archive_batches where batch_id = $1::bigint and cutoff = $2::timestamptz for update;", [batchId, timestampValue]);
     if (locked.length !== 1) fail("exact lifecycle batch/cutoff is missing or ambiguous");
-    assertProductionHumanPrunedBatch(locked[0], batchId, cutoff);
+    assertProductionHumanPrunedBatch(locked[0], batchId, cutoff, automaticContext);
     for (const field of ["object_path", "compressed_sha256", "raw_sha256", "archived_transaction_ids_sha256", "archived_entry_ids_sha256"]) {
       if (locked[0][field] !== row[field]) fail("lifecycle locked manifest differs from verified archive");
     }
@@ -492,7 +493,7 @@ async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, 
     return { state: markerBefore ? "already_complete" : "completed", marker: after[0].human_retention_complete_at };
   });
   await assertRetentionAdvisoryLock(sql, lockSession);
-  return { ...lifecycle, batchId: String(batchId), tableId, cutoff, dryRun: "already_pruned",
+  return { ...lifecycle, maxTransactions: effectiveProductionCap(automaticContext), batchId: String(batchId), tableId, cutoff, dryRun: "already_pruned",
     transactions: evidence.transactionCount, entries: evidence.entryCount, compressedSha256: row.compressed_sha256,
     transactionProofSha256: row.archived_transaction_ids_sha256, entryProofSha256: row.archived_entry_ids_sha256,
     pruneReceipt: { at: row.pruned_at, transactions: Number(row.pruned_transaction_count), entries: Number(row.pruned_entry_count) },
@@ -516,9 +517,10 @@ async function resumeProductionCanaryBatch({
   storageDeps,
   tempRoot,
   deps,
+  automaticContext = null,
 }) {
   const sourcePolicyId = PRODUCTION_POLICIES[policy];
-  if (mode !== "canary") fail("only Production canary may resume an active batch");
+  if (mode !== "canary" && mode !== "automatic") fail("only Production canary or activated automatic may resume an active batch");
   if (text(activeRow?.batch_id) !== text(batchId)) {
     fail("exact active Production batch ID does not match --batch-id");
   }
@@ -541,6 +543,7 @@ async function resumeProductionCanaryBatch({
     targetOptions: productionTargetOptions(),
     verifyBucket,
     emit: false,
+    automaticContext,
   };
   const dry = await runPrune({
     argv: ["--target", "prod", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256],
@@ -563,18 +566,20 @@ async function resumeProductionCanaryBatch({
   assertDurableRecoveryReady(durable);
 
   await assertRetentionAdvisoryLock(sql, lockSession);
-  const authorization = await authorizeProductionBatch({ sql, policy, batchId, confirmation, deps });
-  if (!authorization
-    || text(authorization.state) !== "authorized"
-    || text(authorization.batch_id) !== text(batchId)) {
-    fail("Production canary authorization did not persist the exact batch GO");
+  if (mode === "canary") {
+    const authorization = await authorizeProductionBatch({ sql, policy, batchId, confirmation, deps });
+    if (!authorization
+      || text(authorization.state) !== "authorized"
+      || text(authorization.batch_id) !== text(batchId)) {
+      fail("Production canary authorization did not persist the exact batch GO");
+    }
+    row = await pruneStore.getManifest(activeRow.object_path);
+    assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicyId });
+    if (!row.destructive_go_at || text(row.destructive_go_batch_id) !== text(batchId)) {
+      fail("Production canary authorization did not persist the exact destructive GO");
+    }
   }
-  row = await pruneStore.getManifest(activeRow.object_path);
-  assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicyId });
-  if (!row.destructive_go_at || text(row.destructive_go_batch_id) !== text(batchId)) {
-    fail("Production canary authorization did not persist the exact destructive GO");
-  }
-
+  await assertProductionAutomaticContext(sql, automaticContext, sourcePolicyId, Number(row.transaction_count));
   await assertRetentionAdvisoryLock(sql, lockSession);
   const recoveryDir = archiveRecoveryDir(tempRoot);
   const executed = await runPrune({
@@ -584,7 +589,7 @@ async function resumeProductionCanaryBatch({
       "--confirm-sha", row.compressed_sha256,
       "--execute",
       "--recovery-dir", recoveryDir,
-      "--approved-batch-id", String(batchId),
+      ...(mode === "automatic" ? ["--automatic"] : ["--approved-batch-id", String(batchId)]),
     ],
     env,
     cwd: tempRoot,
@@ -594,6 +599,7 @@ async function resumeProductionCanaryBatch({
     },
   });
   return {
+    maxTransactions: effectiveProductionCap(automaticContext),
     state: executed?.state || "unknown",
     receipt: executed?.state || "unknown",
     projectRef: profile.projectRef,
@@ -661,7 +667,10 @@ async function runProductionEscrowDatabaseFunction({ sql, candidate, recovery, e
     await tx.unsafe("set local lock_timeout = '5s';");
     await tx.unsafe("set local statement_timeout = '30s';");
     if (canary) await tx.unsafe("set local chips.production_canary = '1';");
-    if (automatic) await tx.unsafe("set local chips.production_automatic = '1';");
+    if (automatic) {
+      await tx.unsafe("select public.chips_assert_production_retention_control($1::text, $2::bigint, true, true);", [PRODUCTION_POLICIES.escrow, candidate.accountIds.length]);
+      await tx.unsafe("set local chips.production_automatic = '1';");
+    }
     const rows = await tx.unsafe(`select public.chips_retire_production_escrow_accounts(
       $1::bigint, $2::uuid[], $3::text, $4::text, $5::text, $6::boolean, $7::text
     ) as result;`, [
@@ -716,6 +725,11 @@ async function runProductionEscrowCycle({
     if (!lockSession) return { state: "no-op", mode, policy: "escrow", policyId: PRODUCTION_POLICIES.escrow, reason: "advisory_lock_busy", processed: 0 };
     const identityRows = await sql.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
     if (text(identityRows[0]?.system_identifier) !== profile.systemIdentifier) fail("database is not canonical Production");
+    if (mode === "automatic") {
+      const state = await readProductionState({ profile, deps, session: sql });
+      const context = resolveProductionAutomaticContext(state, PRODUCTION_POLICIES.escrow);
+      await assertProductionAutomaticContext(sql, context, PRODUCTION_POLICIES.escrow);
+    }
     const candidates = await sql.unsafe(PRODUCTION_ESCROW_CANDIDATE_SQL, [
       profile.projectRef,
       PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
@@ -763,6 +777,7 @@ async function runProductionEscrowCycle({
     });
     if (dry?.state !== "eligible") fail(`Production escrow dry-run did not become eligible: ${dry?.state || "unknown"}`);
     const prepared = {
+      maxTransactions: 2,
       state: "prepared",
       mode,
       policy: "escrow",
@@ -861,9 +876,10 @@ async function runProductionArchiveCycle({
   const tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-production-automation-"));
   ensurePrivateDirectory(tempRoot);
   const moduleEnv = env;
-  const storageTarget = deps.storageTarget || resolveStorageTarget("prod", moduleEnv, productionTargetOptions());
+  let storageTarget = deps.storageTarget || resolveStorageTarget("prod", moduleEnv, productionTargetOptions());
   const { storageDeps, verifyBucket } = productionStorageDeps(deps, storageTarget);
-  const pruneStore = deps.pruneStore || createPruneStore(sql, storageTarget.target);
+  let pruneStore = deps.pruneStore || createPruneStore(sql, storageTarget.target);
+  let automaticContext = null;
   const sourcePolicyId = PRODUCTION_POLICIES[policy];
   try {
     if (mode === "automatic") {
@@ -890,9 +906,16 @@ async function runProductionArchiveCycle({
     }
     const identityRows = await sql.unsafe("select system_identifier::text as system_identifier from pg_catalog.pg_control_system();");
     if (text(identityRows[0]?.system_identifier) !== profile.systemIdentifier) fail("database is not canonical Production");
+    if (mode === "automatic") {
+      identity = await readProductionState({ profile, deps, session: sql });
+      automaticContext = resolveProductionAutomaticContext(identity, sourcePolicyId);
+      storageTarget = { ...storageTarget, automaticContext };
+      storageDeps.automaticContext = automaticContext;
+      pruneStore = deps.pruneStore || createPruneStore(sql, storageTarget.target, automaticContext);
+    }
     const ownRows = await sql.unsafe(PRODUCTION_OWN_BATCHES_SQL, [profile.projectRef, sourcePolicyId]);
     const finalize = (row, extra = {}) => finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore,
-      storageTarget, verifyBucket, storageDeps, env: moduleEnv, profile, row, batchId: row.batch_id, tempRoot, deps, ...extra });
+      storageTarget, verifyBucket, storageDeps, env: moduleEnv, profile, row, batchId: row.batch_id, tempRoot, deps, automaticContext, ...extra });
     if (mode === "lifecycle-completion") {
       if (identity?.control?.enabled !== false || Number(identity.control.max_transactions) !== 2
         || identity.fenceActive !== true || identity.policies?.length !== 3 || identity.policies.some(p => p.enabled !== false)) {
@@ -910,7 +933,7 @@ async function runProductionArchiveCycle({
     }
     const cycle = findOwnCycle(ownRows, sourcePolicyId);
     if (cycle.active) {
-      if (mode !== "canary" && mode !== "prepare") {
+      if (mode !== "canary" && mode !== "prepare" && mode !== "automatic") {
         fail("Production retention has an incomplete active batch; resume it through the reviewed recovery path");
       }
       const resume = mode === "prepare" ? resumeProductionPrepareBatch : resumeProductionCanaryBatch;
@@ -920,8 +943,9 @@ async function runProductionArchiveCycle({
         env: moduleEnv,
         policy,
         mode,
-        batchId,
+        batchId: mode === "automatic" ? cycle.active.batch_id : batchId,
         confirmation,
+        automaticContext,
         sql,
         lockSession,
         pruneStore,
@@ -931,7 +955,7 @@ async function runProductionArchiveCycle({
         tempRoot,
         deps,
       });
-      if (policy === "closed-human-30d" && mode === "canary") {
+      if (policy === "closed-human-30d" && (mode === "canary" || mode === "automatic")) {
         const lifecycle = await finalize(cycle.active);
         return { ...resumed, mode, policy, policyId: sourcePolicyId, lifecycle, databaseWrites: resumed.databaseWrites + lifecycle.databaseWrites };
       }
@@ -943,20 +967,24 @@ async function runProductionArchiveCycle({
       if (lifecycle.state === "completed") return { ...lifecycle, mode, policy, policyId: sourcePolicyId, resumed: true };
     }
     if (cycle.latestCompleted && policy !== "closed-human-30d") {
-      const completed = await pruneArchive({
+      const completed = await (deps.pruneArchive || pruneArchive)({
         argv: ["--target", "prod", "--object-path", cycle.latestCompleted.object_path, "--confirm-sha", cycle.latestCompleted.compressed_sha256],
         env: moduleEnv,
         cwd: tempRoot,
         deps: { ...storageDeps, sql, pruneStore, storageTarget, targetOptions: productionTargetOptions(), verifyBucket, emit: false },
       });
-      if (completed.state !== "already_pruned" && completed.state !== "already_cleaned") {
+      const expectedTerminal = policy === "bot-only-7d" ? "already_cleaned" : "already_pruned";
+      if (completed.state !== expectedTerminal) {
         fail(`completed Production cycle did not revalidate as terminal: ${completed.state}`);
       }
+      const terminalRow = await pruneStore.getManifest(cycle.latestCompleted.object_path);
+      const durable = await (deps.inspectDurableRecovery || inspectDurableRecovery)(storageTarget, terminalRow, profile, completed.evidence, storageDeps);
+      assertResumeRecoveryState(terminalRow, durable, profile);
     }
     await verifyBucket(storageTarget);
     const outputPath = path.join(tempRoot, "archive.jsonl.gz");
     const manifestPath = path.join(tempRoot, "archive.manifest.json");
-    const invocation = buildProductionExportInvocation(policy, { outputPath, manifestPath });
+    const invocation = buildProductionExportInvocation(policy, { outputPath, manifestPath, automaticContext });
     const exported = await invocation.run({
       env: moduleEnv,
       cwd: tempRoot,
@@ -967,7 +995,7 @@ async function runProductionArchiveCycle({
         emit: false,
       },
     });
-    if (exported.noCandidate) return { state: "no-op", mode, policy, policyId: sourcePolicyId, reason: "no_eligible_candidate", processed: 0 };
+    if (exported.noCandidate) return { state: "no-op", mode, policy, policyId: sourcePolicyId, maxTransactions: effectiveProductionCap(automaticContext), reason: "no_eligible_candidate", processed: 0 };
     await ensureArchiveBucket(storageTarget, storageDeps);
     const stored = await storeArchive({
       argv: ["--target", "prod", "--artifact", outputPath, "--manifest", manifestPath],
@@ -994,6 +1022,7 @@ async function runProductionArchiveCycle({
     const main = await downloadPrivateArchiveObject(storageTarget, row.object_path, storageDeps);
     const durable = await persistDurableRecovery(storageTarget, row, profile, dry.evidence, main.bytes, storageDeps);
     const prepared = {
+      maxTransactions: effectiveProductionCap(automaticContext),
       state: "prepared",
       mode,
       policy,
@@ -1122,7 +1151,7 @@ export async function runProductionAutomation({
     policyId: sourcePolicyId,
     projectRef: profile.projectRef,
     systemIdentifier: profile.systemIdentifier,
-    maxTransactions: 2,
+    maxTransactions: cycle.maxTransactions || 2,
     accountIdsSha256: accountIdsSha256 || null,
     recoveryObjectPath: recoveryObjectPath || null,
   };
@@ -1130,7 +1159,7 @@ export async function runProductionAutomation({
   return result;
 }
 
-export function buildProductionExportInvocation(policy, { outputPath, manifestPath }) {
+export function buildProductionExportInvocation(policy, { outputPath, manifestPath, automaticContext = null }) {
   const selectedPolicy = policyKey(policy);
   if (!outputPath || !manifestPath) fail("Production export requires private output and manifest paths");
   const archivePolicyId = archivePolicyIdFor(selectedPolicy);
@@ -1140,9 +1169,9 @@ export function buildProductionExportInvocation(policy, { outputPath, manifestPa
     archivePolicyId,
     selector: selectorForPolicy(selectedPolicy),
     schemaVersion: selectedPolicy === "bot-only-7d" || selectedPolicy === "escrow" ? BOT_ONLY_EXPORT_SCHEMA_VERSION : 1,
-    argv: productionExportArgs(selectedPolicy, outputPath, manifestPath),
+    argv: productionExportArgs(selectedPolicy, outputPath, manifestPath, automaticContext),
     run: (deps = {}) => runExport({
-      argv: productionExportArgs(selectedPolicy, outputPath, manifestPath),
+      argv: productionExportArgs(selectedPolicy, outputPath, manifestPath, automaticContext),
       ...deps,
       deps: {
         ...(deps.deps || {}),
@@ -1150,6 +1179,7 @@ export function buildProductionExportInvocation(policy, { outputPath, manifestPa
         selector: selectorForPolicy(selectedPolicy),
         schemaVersion: selectedPolicy === "bot-only-7d" || selectedPolicy === "escrow" ? BOT_ONLY_EXPORT_SCHEMA_VERSION : 1,
         sourcePolicyId: archivePolicyId,
+        automaticContext,
       },
     }),
   };

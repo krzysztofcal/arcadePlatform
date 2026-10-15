@@ -1,3 +1,5 @@
+import os from "node:os";
+import path from "node:path";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -604,3 +606,63 @@ assert.equal(norm10M.systemKey, null);
 assert.equal(norm10M.reason, "tier_disabled");
 
 process.stdout.write("chips-ledger-stage-automation workflow guard passed\n");
+
+// Production scheduling uses isolated fake executables; never dispatch remotely.
+const dispatcherPath = path.resolve("infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh");
+const schedulerFixture = fs.mkdtempSync(path.join(os.tmpdir(), "production-dispatch-test-"));
+try {
+  const gh = path.join(schedulerFixture, "gh");
+  const date = path.join(schedulerFixture, "date");
+  const log = path.join(schedulerFixture, "calls");
+  fs.writeFileSync(date, '#!/bin/bash\nprintf "%s\\n" "$TEST_SLOT"\n', { mode: 0o700 });
+  fs.writeFileSync(gh, `#!/bin/bash
+printf '%s\\n' "$*" >> "$TEST_LOG"
+if [[ "$*" == *"api user"* ]]; then echo 'arcade-production-dispatch'; exit 0; fi
+if [[ "$*" == *"/runs?"* ]]; then
+ if [[ -n "\${TEST_STATUS:-}" && "$*" == *"status=$TEST_STATUS"* ]]; then if [[ -n "\${TEST_BODY:-}" ]]; then printf "%s" "$TEST_BODY"; else echo '{"total_count":1,"workflow_runs":[{}]}'; fi;
+ else echo '{"total_count":0,"workflow_runs":[]}'; fi
+ exit 0
+fi
+[[ "\${TEST_DISPATCH_FAIL:-0}" == "0" ]]
+`, { mode: 0o700 });
+  const run = (slot, extra = {}, heldLock = false) => {
+    fs.writeFileSync(log, "");
+    const result = spawnSync(heldLock ? "flock" : "bash", heldLock ? [path.join(schedulerFixture,"dispatch.lock"),"bash",dispatcherPath] : [dispatcherPath], { encoding: "utf8", env: { ...process.env,
+      PATH: `${schedulerFixture}:${process.env.PATH}`, GH_BIN: gh, TEST_SLOT: slot, TEST_LOG: log,
+      GH_TOKEN: "fake-test-only", RUNTIME_DIRECTORY: schedulerFixture,
+      CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "1", ...extra } });
+    return { ...result, calls: fs.readFileSync(log, "utf8") };
+  };
+  assert.equal(run("02:09", { CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "0" }).calls, "");
+  for (const [slot, policy] of [["02:09", "existing-30d"], ["03:09", "bot-only-7d"], ["03:24", "closed-human-30d"], ["03:39", "escrow"]]) {
+    const result = run(slot);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.calls, new RegExp(`policy=${policy}`));
+    assert.equal((result.calls.match(/workflow run/g) || []).length, 1);
+    assert.match(result.calls, /mode=automatic/);
+    assert.doesNotMatch(result.calls, /batch_id=|confirmation=/);
+  }
+  assert.equal(run("03:40").calls, "");
+  assert.equal(run("03:24", {}, true).calls, "", "held flock must prevent all API work");
+  assert.notEqual(run("03:24", { GH_TOKEN: "" }).status, 0);
+  for (const status of ["requested", "waiting", "pending", "queued", "in_progress"]) {
+    const result = run("03:24", { TEST_STATUS: status });
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.calls, /workflow run/);
+  }
+  const malformed = run("03:24", { TEST_STATUS: "requested", TEST_BODY: '{"total_count":0,"workflow_runs":[{}]}' });
+  assert.notEqual(malformed.status, 0);
+  assert.doesNotMatch(malformed.calls, /workflow run/);
+  const uncertain = run("03:24", { TEST_DISPATCH_FAIL: "1" });
+  assert.notEqual(uncertain.status, 0);
+  assert.equal((uncertain.calls.match(/workflow run/g) || []).length, 1);
+  const unit = fs.readFileSync("infra/vps/production-retention/arcade-chips-ledger-production-dispatch.service", "utf8");
+  const timer = fs.readFileSync("infra/vps/production-retention/arcade-chips-ledger-production-dispatch.timer", "utf8");
+  assert.match(unit, /production-retention-dispatch.env/);
+  assert.match(unit, /RuntimeDirectoryMode=0700/);
+  assert.match(timer, /OnCalendar=\*-\*-\* \*:09,24,39:00 UTC/);
+  assert.match(timer, /Persistent=false/);
+  for (const file of ["infra/vps/bootstrap.sh", ".github/workflows/infra-vps.yml"]) {
+    assert.doesNotMatch(fs.readFileSync(file, "utf8"), /production-retention\/|production-retention-dispatch/);
+  }
+} finally { fs.rmSync(schedulerFixture, { recursive: true, force: true }); }
