@@ -85,6 +85,8 @@ const ENV = {
 };
 
 const PRODUCTION_ENV = {
+  GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform",
+  GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY_OWNER: "krzysztofcal", GITHUB_ACTOR: "krzysztofcal",
   SUPABASE_PROD_DB_URL: "postgresql://postgres.otbqfijerkieoxwpxjnm@db.otbqfijerkieoxwpxjnm.supabase.co:5432/postgres",
   SUPABASE_PROD_URL: "https://otbqfijerkieoxwpxjnm.supabase.co",
   SUPABASE_PROD_SERVICE_ROLE_KEY: "production-test-key",
@@ -136,6 +138,12 @@ const productionDisabled = await runProductionAutomation({
 });
 assert.equal(productionDisabled.state, "disabled");
 assert.equal(productionDisabled.processed, 0);
+for (const [key, value] of Object.entries({ GITHUB_ACTOR: "untrusted", GITHUB_REPOSITORY_OWNER: "untrusted", GITHUB_REPOSITORY: "other/repo", GITHUB_REF: "refs/heads/other", GITHUB_EVENT_NAME: "push" })) {
+  await assert.rejects(runProductionAutomation({env:{...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",[key]:value},policy:"existing-30d",mode:"automatic"}), /canonical owner workflow/);
+}
+await assert.rejects(runProductionAutomation({env:{...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",GITHUB_ACTOR:""},policy:"existing-30d",mode:"automatic"}), /canonical owner workflow/);
+await assert.rejects(runProductionAutomation({env:PRODUCTION_ENV,policy:"existing-30d",mode:"unknown"}), /Production mode/);
+
 const productionDiagnostic = await runProductionAutomation({
   env: PRODUCTION_ENV,
   policy: "bot-only-7d",
@@ -631,7 +639,7 @@ assert.equal(completeCanaryRetry.calls.execute, 0);
 assert.equal(completeCanaryRetry.lifecycleCalls.completion, 0);
 const automaticLifecycleResume = makeProductionLifecycleHarness();
 const automaticLifecycleResult = await runProductionAutomation({ env: { ...PRODUCTION_ENV,
-  CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "1", CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR: "arcade-production-dispatch", GITHUB_ACTOR: "arcade-production-dispatch" },
+  CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "1", GITHUB_ACTOR: "krzysztofcal" },
   policy: "closed-human-30d", mode: "automatic", deps: { ...automaticLifecycleResume.deps, sqlRead: async () => activatedState,
     read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier,
       ...activatedState }) } });
@@ -4311,7 +4319,7 @@ process.stdout.write("chips-ledger-stage-automation tests passed\n");
 
 const automaticPreparedResume=makeProductionResumeHarness(makeProductionResumeRow());
 const automaticPreparedResult=await runProductionAutomation({policy:"existing-30d",mode:"automatic",
- env:{...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR:"arcade-production-dispatch",GITHUB_ACTOR:"arcade-production-dispatch"},
+ env:{...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",GITHUB_ACTOR:"krzysztofcal"},
  deps:{...automaticPreparedResume.deps,read:async()=>activatedState,sqlRead:async()=>activatedState}});
 assert.equal(automaticPreparedResult.state,"pruned");
 assert.equal(automaticPreparedResume.calls.export,0);
@@ -4332,7 +4340,7 @@ const threeHumanCompletion=makeProductionLifecycleHarness({evidence:threeHumanEv
 const inspectThreeHuman=threeHumanCompletion.deps.inspectDurableRecovery;
 threeHumanCompletion.deps.inspectDurableRecovery=async(...args)=>({...await inspectThreeHuman(...args),transactionIdsSha256:threeHumanEvidence.transactionIdsSha256,entryIdsSha256:threeHumanEvidence.entryIdsSha256});
 const threeHumanResult=await runProductionAutomation({policy:"closed-human-30d",mode:"automatic",
- env:{...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR:"arcade-production-dispatch",GITHUB_ACTOR:"arcade-production-dispatch"},
+ env:{...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",GITHUB_ACTOR:"krzysztofcal"},
  deps:{...threeHumanCompletion.deps,read:async()=>activatedState,sqlRead:async()=>activatedState}});
 assert.equal(threeHumanResult.state,"completed");
 assert.equal(threeHumanResult.transactions,3);
@@ -4341,7 +4349,7 @@ assert.equal(threeHumanCompletion.calls.execute,0);
 assert.equal(threeHumanCompletion.lifecycleCalls.completion,1);
 // A completed prune is not a completed bot cycle without registry cleanup;
 // lost durable recovery must stop before any new archive selection.
-const terminalAutomaticEnv={...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",CHIPS_LEDGER_PRODUCTION_DISPATCH_ACTOR:"arcade-production-dispatch",GITHUB_ACTOR:"arcade-production-dispatch"};
+const terminalAutomaticEnv={...PRODUCTION_ENV,CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:"1",GITHUB_ACTOR:"krzysztofcal"};
 const incompleteBotTerminalRow={...makeProductionResumeRow(),source_policy_id:"production-ledger-bot-only-retention-7d-v1",pruned_at:"2026-08-15T00:03:00Z"};
 const incompleteBotTerminal=makeProductionResumeHarness(incompleteBotTerminalRow);
 const botActivatedState={...activatedState,policies:[...activatedState.policies,{policy_id:incompleteBotTerminalRow.source_policy_id,enabled:true,activated_at:"2026-10-14",canary_batch_id:"3"}]};
