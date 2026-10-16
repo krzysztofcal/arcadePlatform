@@ -1,6 +1,6 @@
 # #1113 — Google OAuth branding for Arcade Hub
 
-**Status:** approved name/logo verified and published in Google Production; desktop display/login/UUID PASS; physical-phone smoke pending. 2026-10-16.
+**Status:** approved name/logo verified and published in Google Production; desktop display/login/UUID PASS; owner-confirmed physical-phone branding/login PASS. 2026-10-16.
 **Reviewed main:** `846b2993f3d9cd95d11c1061d9a1175e33464b76`.
 **Source:** https://github.com/krzysztofcal/arcadePlatform/issues/1113
 
@@ -20,11 +20,11 @@ Google Login V1 from completed #1100 remains unchanged. Production Supabase `otb
 - No paid add-on, extra scope, alternate OAuth client or Stage mutation without separate explicit approval.
 - Fail/partial/Google domain or homepage rejection means STOP and report; no automatic domain/client workaround or access expansion.
 
-## Owner gates
+## Historical owner gates (superseded by execution and final acceptance)
 
 Current authorization covers this audit and local documentation only. A separate GO must identify approved Branding edits and whether Verify Branding / Publish branding are authorized. The owner explicitly selected the attached KCSWH logo; no substitution or name-only publication is allowed. Any Google policy/2FA/owner-only step needs the owner's actual action. Any homepage-code/deployment, DNS or custom-domain change needs a new scoped proposal and approval; the audit does not authorize it.
 
-## Approved logo requirement / current blocker
+## Historical approved logo requirement / resolved input blocker
 
 Owner approved **Arcade Hub by KCSWH** plus their supplied KCSWH logo, unchanged appearance/proportions/transparency, in existing Production project. Preserve every current URL/domain/client/callback/scope. Verify Branding and publish only after verified PASS/Ready to publish. This supersedes the earlier name-only proposal.
 
@@ -42,4 +42,4 @@ The earlier missing-control diagnosis is superseded. The blue **Information and 
 
 Owner-authorized Verify branding clicked once2026-10-16T22:10:08.811Z; actual verified/ready-to-publish message checked before one Publish branding click22:11:45.695Z. Readback22:12:46.298Z explicitly says verified and being shown to users; UI response metadata confirms VERIFIED/COMPLIANT and verified nameArcade Hub by KCSWH. No bypass, alternate client, paid domain, scope/DNS/app change.
 
-Desktop real Google chooser/reconfirmation displays approved name and logo. Normal Google button and a separate same-basic-scope consent re-prompt both authenticate the known pre-existing Production user with the same UUID; correct clean account callback, reload session and profileHTTP200 PASS. Physical mobile display/login is still PENDING; current password-login regression NOT TESTED (historical#1100 acceptance retained). Keep#1113 open until owner physical-device acceptance and remaining checks are explicitly settled.
+Desktop real Google chooser/reconfirmation displays approved name and logo. Normal Google button and a separate same-basic-scope consent re-prompt both authenticate the known pre-existing Production user with the same UUID; correct clean account callback, reload session and profileHTTP200 PASS. Physical-phone branding and Google login in a private tab are PASS by explicit owner confirmation, separately from agent desktop evidence. Current password-login regression NOT TESTED (historical#1100 acceptance retained). Owner accepts the existing private Google account as public support email; developer contact remains contact@kcswh.pl. Owner explicitly authorized final documentation, merge of#1121 and closure of#1113 after successful checks.

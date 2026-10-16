@@ -1,4 +1,4 @@
-> **Current result (supersedes historical blockers):** Google branding is verified/published, desktop Google display and existing-user identity checks PASS. The apparent missing button was in the blue Information and summary side panel. Physical-phone smoke remains pending; see final record below.
+> **Current result (supersedes historical blockers):** Google branding is verified/published, desktop Google display and existing-user identity checks PASS. The apparent missing button was in the blue Information and summary side panel. Owner-confirmed physical-phone branding/login PASS; see final record below.
 
 # #1113 read-only audit — 2026-10-16 UTC
 
@@ -90,10 +90,16 @@ Before login, a read-only Auth admin lookup of exactly the previously owner-acce
 | Desktop Google visible name/logo and normal login | PASS |
 | Same existing UUID, repeat/reconfirmation, callback, reload/profile | PASS |
 | No extra OAuth scopes / no app/provider/client/callback/DNS change | PASS |
-| Physical phone Google display/login | PENDING — owner device needed |
+| Physical phone Google display/login | PASS — explicit owner confirmation in a private tab; not agent-run |
 | Current password login/logout regression | NOT TESTED; historical#1100 result retained |
 | Production new-user signup | NOT TESTED; no new account created |
 
-Physical-phone acceptance is required before calling#1113 complete. Existing GO covers the owner's normal smoke; no configuration or publication action remains.
+## Final owner acceptance and completion authorization
 
-The current scope does not manufacture a new password-testing blocker for a Google-branding-only configuration change. Password auth settings/source were not changed; historical#1100 acceptance is retained and the absence of a fresh password smoke is disclosed. Remaining required real-device evidence is the physical phone Google display/login/return/reload result under existing GO. No issue closure or PR merge until owner acceptance.
+The owner personally confirmed correct Google branding and successful Google login on a physical phone in a private tab. This closes the required device-display/login acceptance; it is owner-reported, not agent automation. No extra phone UUID, logout, reload or new-user test is claimed. Instrumented desktop same-UUID/callback/reload/profile results above remain the agent's evidence.
+
+After inspecting Google's Developer info, the owner deliberately accepted the existing private Gmail as public User support email. Developer contact remains contact@kcswh.pl, used separately for Google notifications. No email/configuration change was made; the private address is not reproduced here.
+
+Owner then explicitly authorized final documentation, Ready for Review, merge of#1121 and closure of#1113 conditional on successful final diff/main/CI verification. No additional login tests or live configuration operations are part of finalization. Historical audit findings and superseded input/UI checkpoints above are retained.
+
+Fresh password login and new-user signup remain NOT TESTED for this branding-only change. Historical#1100 acceptance and unchanged auth implementation are retained; no new password-smoke blocker or unsupported PASS is introduced. Existing SDK-managed provider-token persistence remains the disclosed#1100 limitation. No runtime breaking change or additional service cost.

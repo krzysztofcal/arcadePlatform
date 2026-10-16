@@ -1,4 +1,4 @@
-> **Current result:** name + owner KCSWH logo verified and published under existing GO. Desktop Google display/normal login/reconfirmation/UUID PASS. Physical phone smoke pending. Earlier input/UI findings below are historical and superseded by the actual Information and summary path documented at the end.
+> **Current result:** name + owner KCSWH logo verified and published under existing GO. Desktop Google display/normal login/reconfirmation/UUID PASS. Owner-confirmed physical-phone branding/login PASS. Earlier input/UI findings below are historical and superseded by the actual Information and summary path documented at the end.
 
 # #1113 minimal implementation plan — review only
 
@@ -46,6 +46,8 @@ Historical closed-panel diagnostic: the main form showed no Verify control even 
 2. The side panel contains Verification status / Verify branding. One approved request completed; the panel explicitly said branding verified and Publish branding available before publication.
 3. Publish branding clicked once under existing owner GO. Actual post-read says branding verified and shown to users; VERIFIED/COMPLIANT. No re-verification/publication is needed now. Previous owner-session/blocker instructions are obsolete.
 4. Desktop normal public Google button was tested with the already-approved, positively identified existing Production user. Separate test-only SDK prompt=consent re-confirmed the same basic scopes without source/config changes or revoking grants. Both return the same UUID. The Google returning-user screen shows re-login confirmation, not a first-time new-user signup.
-5. Remaining owner action: on a physical phone open https://play.kcswh.pl/account.html, use Google with the existing Arcade account, confirm exact brand/logo and successful return/reload. A private tab can expose the login button if an existing session hides it; never use a new Google account merely to manufacture first consent. Share a redacted screenshot or explicit result; no passwords/tokens/UUID in chat. Fresh password login was not repeated for this branding-only change; the accepted#1100 result and unchanged password/provider/source contract are retained, without claiming a new password-smoke PASS.
+5. Owner confirmed actual physical-phone branding and working Google login in a private tab. This is owner-reported evidence, not an agent-run mobile or instrumented UUID/reload test. Desktop instrumented identity/callback/reload results remain separate.
+6. Owner deliberately retains the existing private Gmail as public User support email. Developer contact remains contact@kcswh.pl; these are separate Google fields. Do not change either address or publish the private address in documentation.
+7. Final owner GO covers documentation, Ready for Review, merge of#1121 and closing#1113 after final diff/main/CI verification. No further login tests, Google/Supabase/OAuth/DNS changes or deployment are authorized or required.
 
-No new approval round is required for the already-approved physical-phone smoke. Keep this evidence PR Draft and#1113 open pending real device acceptance; no app deployment or auth rewrite is part of the handoff.
+Fresh password smoke and new-user signup were not repeated for this branding-only change; preserve historical#1100 acceptance and disclosed limitations. Historical audit and input/UI checkpoints above remain intact.
