@@ -1,6 +1,6 @@
 # #1113 — Google OAuth branding for Arcade Hub
 
-**Status:** owner GO received for name + supplied KCSWH logo, verification and publication only after PASS; input-file preflight blocked before any configuration change. 2026-10-16.
+**Status:** approved name and compliant KCSWH logo saved in Google Production; verification submission blocked by unavailable Verify Branding control; no publication. 2026-10-16.
 **Reviewed main:** `846b2993f3d9cd95d11c1061d9a1175e33464b76`.
 **Source:** https://github.com/krzysztofcal/arcadePlatform/issues/1113
 
@@ -29,3 +29,9 @@ Current authorization covers this audit and local documentation only. A separate
 Owner approved **Arcade Hub by KCSWH** plus their supplied KCSWH logo, unchanged appearance/proportions/transparency, in existing Production project. Preserve every current URL/domain/client/callback/scope. Verify Branding and publish only after verified PASS/Ready to publish. This supersedes the earlier name-only proposal.
 
 The accessible attachment is actually **1254x1254**, 8-bit RGBA PNG, **1,389,582bytes**, SHA-256 `3173da777671b9962732e8808afd02d767a0ce43c70a954181c280415076cd29`, rather than the described120x120 asset. It exceeds Google's1MB upload limit. No resize, crop, background replacement or generative alteration was performed. Need an upload-compliant version of the same logo (or explicit instruction for deterministic resizing); the existing configuration GO remains valid for the approved scope. This is a local input validation blocker, not a Google verification rejection.
+
+## Compliant replacement and execution outcome
+
+Owner supplied the replacement [KCSWH PNG](assets/kcswh-oauth-120.png):120x120 RGBA,25,519bytes, SHA-256 `e3c972a22ad46db47991459ffa4c188ba7fb5177e1f9fa04252b3b0426777b51`. The previous input-size blocker is resolved; owner authorization remains effective. Saved name and supplied logo in the existing Google project at2026-10-16T21:52:15.159Z (single explicit Save). Google-served120x120 PNG is re-encoded, but all RGBA pixels and alpha are exactly equal to the source. No resampling/substitution/background change by the agent.
+
+Google readback: `NEED_VERIFICATION`, requirement `UNVERIFIED_LOGO`, compliance status unspecified/not evaluated. No rejection result or Ready to publish. Verification Center says branding is not shown and points to Branding, where this session has no Verify Branding control (PL/EN and accessibility tree checked). No verification request was sent; no publication attempted. Owner session check is the next required operational step, not a new general GO. Mobile/desktop branded consent and new auth/UUID regression remain NOT TESTED pending verified publication.

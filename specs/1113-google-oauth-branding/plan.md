@@ -1,4 +1,4 @@
-> **Owner decision:** name + KCSWH logo are authorized together, Verify Branding is authorized, Publish is authorized only after PASS/Ready to publish. Do not fall back to a logo-free publication. Input attachment exceeds the Google size limit; stop before config changes until a compliant asset is available.
+> **Owner decision:** name + KCSWH logo are authorized together, Verify Branding is authorized, Publish is authorized only after PASS/Ready to publish. Do not fall back to a logo-free publication. Replacement input is compliant; approved name/logo are saved. Verify Branding control is unavailable in the accessible session, so stop before submission/publication until the UI issue is resolved.
 
 # #1113 minimal implementation plan — review only
 
@@ -33,3 +33,9 @@ No implementation edits proposed now. Existing entry points `js/auth/supabaseCli
 ## Costs / impact
 
 Estimated incremental infrastructure cost for this plan:0. Existing services/domain retained; no paid-scope assessment or new APIs. No app-runtime breaking change is expected from display-name-only branding, but the name users see changes, Google may reject the draft, and a verified name does not guarantee removal of callback-domain text everywhere. Google may take minutes automatically or roughly2–3business days manually; no approval deadline is promised. Supabase custom domain is a separate paid/risky callback migration (~$10/month add-on on an eligible paid plan), explicitly not selected.
+
+## Current execution handoff
+
+Name/logo Save completed once under owner GO; all configured URLs and domains read back unchanged. The uploaded image is exactly the replacement PNG above; downloaded Google image has equal decoded RGBA/alpha, despite different PNG compression. Supabase read-only after-check preserves Google enabled/client ID/site URL/allowlist/signup/manual linking. No OAuth client/callback/scope/DNS/app/Stage changes.
+
+Google does not expose Verify Branding in the available session even though its read metadata says NEED_VERIFICATION/UNVERIFIED_LOGO. Verification Center remains a circular link to Branding. Do not invent unsupported mutation calls, change scopes/domains/Audience, publish unverified branding or claim Google rejected the image. Ask the owner to inspect the exact project's Branding page in their owner session and, if Verify Branding is available, use the already-authorized operation and provide its result. Existing GO permits publication only after actual PASS/Ready to publish; pending/rejected/unknown is never sufficient.
