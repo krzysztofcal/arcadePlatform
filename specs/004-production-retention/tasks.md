@@ -136,3 +136,10 @@ Owner decision: reuse the Stage identity model (`krzysztofcal`) with a **separat
 T025 remains the existing single observation task: each of the four normal scheduled classes only after T024 is fully authorized/configured; no-candidate proves delivery, prior canaries retain destructive proof.
 
 T023 completion evidence: E3 committed once 2026-10-15T16:00:54.453Z; original runner FAIL is preserved (post-check metadata expectations), original S4 is absent. Independent read-only `post-commit-verified` F0=16:47:51.835880Z/F1=16:48:35.659339Z and final DB state16:49:03.869134Z passed 29 function fingerprints/owner/security/ACL, private Storage 10 objects, protected history and exact financial deltas. Report SHA256 `93bb53d9d1384ee1205aa8d0d73825fba94a3799dd69ad0d06156aba91528153`. No reapply, rollback, repair, receipt rewrite or original-S4 backfill. E3 stays byte-identical.
+
+
+### Follow-up #1119 — release acceptance remains open
+
+- [ ] Resolve completed-human revalidation after marker-gated WS table removal; see specs/1119-production-human-terminal-revalidation/tasks.md.
+- [ ] After owner code review/merge and separate Production authorization, observe the next natural human slot and independently reconcile financial/recovery evidence. Do not replay canary or dispatch manually for verification.
+- [ ] Correct the superseded Draft PR #1118 closure recommendation. Historical T025/T026 observations do not authorize closing #891/#992 while #1119 remains unverified in Production.

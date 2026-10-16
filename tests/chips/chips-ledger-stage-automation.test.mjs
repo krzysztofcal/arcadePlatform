@@ -503,6 +503,7 @@ assert.equal(overCapPrepare.prepareCalls.persist, 0);
 const productionLifecycleTable = "00000000-0000-4000-8000-000000000020";
 const productionLifecycleCutoff = "2026-08-14T00:00:00.000Z";
 function makeProductionLifecycleHarness(options = {}) {
+  const lifecycleTable = options.tableId || productionLifecycleTable;
   const row = makeProductionResumeRow();
   Object.assign(row, { source_policy_id: "production-ledger-closed-human-table-retention-30d-v1",
     destructive_go_at: "2026-08-15T00:02:00Z", destructive_go_batch_id: "2",
@@ -512,7 +513,9 @@ function makeProductionLifecycleHarness(options = {}) {
   const harness = makeProductionResumeHarness(row);
   const lifecycleEvidence = options.evidence || productionResumeEvidence;
   let marker = options.marker || null;
-  const calls = { completion: 0, dry: 0 };
+  let tablePresent = !options.tableAbsent;
+  const lifecycleObjects = new Map();
+  const calls = { completion: 0, dry: 0, uploads: 0, verify: 0 };
   const baseSql = harness.deps.sql.unsafe;
   harness.deps.sql.unsafe = async (query, values) => {
     if (query.startsWith("set ")) return [];
@@ -520,13 +523,16 @@ function makeProductionLifecycleHarness(options = {}) {
     if (query.includes("from public.chips_table_fence_control")) return [{ enforcement_active: true }];
     if (query.includes("from public.chips_production_bot_only_retention_policy")) return [{ enabled: false }, { enabled: false }, { enabled: false }];
     if (query.includes("chips_ledger_archive_batches") && query.includes("for update")) return [{ ...row, cutoff: new Date(row.cutoff) }];
-    if (query.includes("human_retention_complete_at") && query.includes("poker_tables")) return [{ id: productionLifecycleTable, status: "CLOSED", has_human_participant: true, human_retention_complete_at: marker }];
-    if (query.includes("from public.chips_transaction_idempotency")) return lifecycleEvidence.transactionIds.map(transaction_id => ({ transaction_id, archive_batch_id: "2", table_id: productionLifecycleTable }));
-    if (query.includes("chips_assert_closed_human_table_lifecycle_gate")) return [{}];
+    if (query.includes("human_retention_complete_at") && query.includes("poker_tables")) return tablePresent ? [{ id: lifecycleTable, status: "CLOSED", has_human_participant: true, human_retention_complete_at: marker }] : [];
+    if (query.includes("count(*)::text as invalid")) return [{ invalid: options.invalidHistory ? "1" : "0" }];
+    if (query.includes("from public.chips_accounts a")) return [{ id: "escrow-test", status: "active", balance: "0", hot_entries: "0", ...options.escrow }];
+    if (query.includes("from public.chips_transaction_idempotency")) return lifecycleEvidence.transactionIds.map(transaction_id => ({ transaction_id, archive_batch_id: String(row.batch_id), table_id: lifecycleTable }));
+    if (query.includes("schema_migrations")) return options.e3Evidence || [];
+    if (query.includes("chips_assert_closed_human_table_lifecycle_gate")) { if (!tablePresent || options.incompleteLifecycle) throw Object.assign(new Error("Human table terminal lifecycle is incomplete"), { code: "P9231" }); return [{}]; }
     if (query.includes("chips_complete_closed_human_table_retention")) {
       calls.completion += 1;
       if (!options.missingMarker) marker ||= "2026-08-15T00:04:00Z";
-      return [{ result: { state: "human_retention_complete", table_id: productionLifecycleTable } }];
+      return [{ result: { state: "human_retention_complete", table_id: lifecycleTable } }];
     }
     return baseSql(query, values);
   };
@@ -534,11 +540,30 @@ function makeProductionLifecycleHarness(options = {}) {
     assert.equal(argv.includes("--execute"), false, "completed pruning must never execute again");
     assert.equal(argv.includes("--register-proof"), false);
     calls.dry += 1;
+    if (!tablePresent) throw Object.assign(new Error("Human table terminal lifecycle is incomplete"), { code: "P9231" });
     return { state: options.dryState || "already_pruned", read_only: true, archiveSha256: options.badArchive ? "9".repeat(64) : row.compressed_sha256,
       evidence: { ...lifecycleEvidence, transactionCount: Number(row.transaction_count), entryCount: Number(row.entry_count),
-        closedHumanTableId: options.badTable ? "00000000-0000-4000-8000-000000000099" : productionLifecycleTable } };
+        closedHumanTableId: options.badTable ? "00000000-0000-4000-8000-000000000099" : lifecycleTable } };
   };
-  return { ...harness, row, lifecycleCalls: calls };
+  harness.deps.downloadArchive = async () => ({ bytes: productionResumeArchiveBytes });
+  harness.deps.verifyArchiveBytes = () => ({ records: [] });
+  harness.deps.buildPruneEvidence = () => ({ ...lifecycleEvidence, closedHumanTableId: lifecycleTable });
+  harness.deps.pruneStore.verifyCommitted = async () => {
+    calls.verify += 1;
+    return { pruned_at: row.pruned_at, pruned_transaction_count: String(row.pruned_transaction_count), pruned_entry_count: String(row.pruned_entry_count),
+      pruned_transaction_ids_sha256: row.pruned_transaction_ids_sha256, pruned_entry_ids_sha256: row.pruned_entry_ids_sha256,
+      mapping_count: String(row.transaction_count), extra_mapping_count: "0", remaining_mapping_count: String(row.transaction_count),
+      hot_transaction_count: "0", hot_entry_count: "0", ...options.verification };
+  };
+  harness.deps.readPrivateObjectIfExists = async (_target, objectPath) => lifecycleObjects.get(objectPath) || null;
+  harness.deps.uploadOrVerifyPrivateObject = async ({ objectPath, bytes }) => {
+    const existing = lifecycleObjects.get(objectPath);
+    if (existing) { assert.deepEqual(existing.bytes, bytes); return { ...existing, uploaded: false }; }
+    calls.uploads += 1;
+    const object = { objectPath, bytes, sha256: crypto.createHash("sha256").update(bytes).digest("hex"), size: bytes.length, mimeType: "application/gzip", uploaded: true };
+    lifecycleObjects.set(objectPath, object);return object;
+  };
+  return { ...harness, row, lifecycleCalls: calls, lifecycleObjects, cleanup: () => { assert(marker, "WS cleanup requires completed marker"); tablePresent = false; } };
 }
 const productionLifecycleEnv = { ...PRODUCTION_ENV, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform", GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY_OWNER: "krzysztofcal", GITHUB_ACTOR: "krzysztofcal", GITHUB_SHA: PRODUCTION_ENV.DEPLOYED_COMMIT_SHA };
 async function runProductionLifecycle(harness, args = {}) {
@@ -648,6 +673,116 @@ assert.equal(automaticLifecycleResult.resumed, true);
 assert.equal(automaticLifecycleResume.lifecycleCalls.completion, 1);
 assert.equal(automaticLifecycleResume.calls.execute, 0);
 assert.equal(automaticLifecycleResume.calls.export, 0);
+// #1119: publish committed marker evidence, then legal WS removal must not
+// re-enter the live-table SQL dry-run or prevent the next selector invocation.
+const removedHumanCycle = makeProductionLifecycleHarness();
+const runRemovedHumanCycle = h => runProductionAutomation({ env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "1", GITHUB_ACTOR: "krzysztofcal" },
+  policy: "closed-human-30d", mode: "automatic", deps: { ...h.deps, sqlRead: async () => activatedState, read: async () => activatedState } });
+assert.equal((await runRemovedHumanCycle(removedHumanCycle)).state, "completed");
+removedHumanCycle.cleanup();
+const removedHumanSql = removedHumanCycle.deps.sql.unsafe;
+removedHumanCycle.deps.sql.unsafe = async (query, values) => {
+  if (/^\s*with\b/i.test(query) && query.includes("poker_tables")) { removedHumanCycle.calls.export += 1; return []; }
+  if (/^\s*select\s+e\.id::text/.test(query)) return [];
+  return removedHumanSql(query, values);
+};
+assert.equal((await runRemovedHumanCycle(removedHumanCycle)).state, "no-op");
+assert.equal(removedHumanCycle.lifecycleCalls.completion, 1);
+assert.equal(removedHumanCycle.lifecycleCalls.uploads, 1);
+assert.equal(removedHumanCycle.lifecycleCalls.dry, 0, "automatic terminal verification must not call live-table dry-run");
+assert.equal(removedHumanCycle.calls.execute, 0);
+assert.equal(removedHumanCycle.calls.store, 0);
+assert.equal(removedHumanCycle.calls.export, 1, "only the subsequent candidate selector is invoked");
+
+// Missing table alone is never evidence; immutable completion must bind the
+// exact financial receipt, and every independent negative still fails closed.
+const unprovedAbsentHuman = makeProductionLifecycleHarness({ tableAbsent: true });
+await assert.rejects(runRemovedHumanCycle(unprovedAbsentHuman), /no durable lifecycle/);
+assert.equal(unprovedAbsentHuman.lifecycleCalls.uploads, 0);
+for (const options of [
+  { row: { destructive_go_at: null, destructive_go_batch_id: null } },
+  { row: { pruned_entry_count: 3 } }, { row: { archived_transaction_ids_sha256: "9".repeat(64) } },
+  { verification: { hot_transaction_count: "1" } }, { verification: { hot_entry_count: "1" } },
+  { verification: { mapping_count: "1" } }, { verification: { extra_mapping_count: "1" } },
+  { invalidHistory: true }, { escrow: { balance: "1" } }, { escrow: { hot_entries: "1" } },
+]) {
+  const h = makeProductionLifecycleHarness({ ...options, tableAbsent: true });
+  await assert.rejects(runRemovedHumanCycle(h));
+  assert.equal(h.calls.execute, 0);assert.equal(h.calls.export, 0);assert.equal(h.lifecycleCalls.uploads, 0);
+}
+const incompletePresentHuman = makeProductionLifecycleHarness({ incompleteLifecycle: true });
+await assert.rejects(runRemovedHumanCycle(incompletePresentHuman), /terminal lifecycle/);
+assert.equal(incompletePresentHuman.lifecycleCalls.completion, 0);
+assert.equal(incompletePresentHuman.lifecycleCalls.uploads, 0);
+const publicationFailure = makeProductionLifecycleHarness();
+publicationFailure.deps.uploadOrVerifyPrivateObject = async () => { throw new Error("Storage unavailable"); };
+await assert.rejects(runRemovedHumanCycle(publicationFailure), /Storage unavailable/);
+assert.equal(publicationFailure.lifecycleCalls.completion, 1, "committed marker is not rolled back or replayed after Storage failure");
+publicationFailure.cleanup();
+await assert.rejects(runRemovedHumanCycle(publicationFailure), /no durable lifecycle/);
+assert.equal(publicationFailure.lifecycleCalls.completion, 1);
+for (const mutate of [
+  object => { object.mimeType = "text/plain"; },
+  object => { object.sha256 = "0".repeat(64); },
+  object => { object.bytes = Buffer.from("not gzip");object.sha256 = crypto.createHash("sha256").update(object.bytes).digest("hex"); },
+  ...[r => { r.table_id = "00000000-0000-4000-8000-000000000099"; },
+    r => { r.batch_id = "999"; }, r => { r.system_identifier = STAGE_SYSTEM_IDENTIFIER; },
+    r => { delete r.marker_at; }, r => { r.marker_at = "2026-08-15T00:01:00Z"; },
+    r => { r.cutoff = "2026-08-13T00:00:00Z"; }, r => { r.transaction_ids_sha256 = "9".repeat(64); },
+    r => { r.extra = true; }].map(change => object => {
+      const receipt = JSON.parse(gunzipSync(object.bytes));change(receipt);
+      object.bytes = gzipSync(Buffer.from(JSON.stringify(receipt)));object.sha256 = crypto.createHash("sha256").update(object.bytes).digest("hex");
+    }),
+]) {
+  const h = makeProductionLifecycleHarness();await runRemovedHumanCycle(h);h.cleanup();
+  mutate([...h.lifecycleObjects.values()][0]);await assert.rejects(runRemovedHumanCycle(h));
+  assert.equal(h.calls.execute, 0);assert.equal(h.calls.export, 0);assert.equal(h.lifecycleCalls.uploads, 1);
+}
+const lostHumanRecovery = makeProductionLifecycleHarness({ tableAbsent: true });
+lostHumanRecovery.deps.inspectDurableRecovery = async () => null;
+await assert.rejects(runRemovedHumanCycle(lostHumanRecovery), /recovery/i);
+const badHumanRegistry = makeProductionLifecycleHarness({ tableAbsent: true });
+const badHumanSql = badHumanRegistry.deps.sql.unsafe;
+badHumanRegistry.deps.sql.unsafe = async (q,v) => q.startsWith("select transaction_id::text")
+  ? [{ transaction_id: productionResumeEvidence.transactionIds[0], archive_batch_id: "999", table_id: productionLifecycleTable }] : badHumanSql(q,v);
+await assert.rejects(runRemovedHumanCycle(badHumanRegistry), /retained registry/);
+assert.equal(badHumanRegistry.calls.export, 0);
+
+// Only the E3-checked activation canary may use its existing durable
+// activation as legacy marker evidence; arbitrary historical batches may not.
+const e3HumanTable = "7f3d73e4-36c5-4b66-afe6-d1d41bea13e2";
+const e3HumanAnchor = { canary_batch_id: "4", canary_confirmation: "GO 4", activated_at: "2026-10-15T00:00:00Z",
+  control_activated_at: "2026-10-15T00:00:01Z", activation_confirmation: `ACTIVATE PRODUCTION RETENTION ${PRODUCTION_PROJECT_REF} ${"a".repeat(64)}` };
+function nextHumanSelector(h) {
+  const original = h.deps.sql.unsafe;
+  h.deps.sql.unsafe = async (q,v) => {
+    if (/^\s*with\b/i.test(q) && q.includes("poker_tables")) { h.calls.export += 1; return []; }
+    if (/^\s*select\s+e\.id::text/.test(q)) return [];
+    return original(q,v);
+  };
+}
+const removedE3Human = makeProductionLifecycleHarness({ tableAbsent: true, tableId: e3HumanTable,
+  row: { batch_id: "4", destructive_go_batch_id: "4" }, e3Evidence: [e3HumanAnchor] });
+nextHumanSelector(removedE3Human);
+const removedE3HumanResult = await runRemovedHumanCycle(removedE3Human);
+assert.equal(removedE3HumanResult.state, "no-op");
+assert.equal(removedE3HumanResult.completedLifecycle.completionEvidence, "e3_activation_canary");
+assert.equal(removedE3HumanResult.completedLifecycle.marker, null, "do not invent an expired live marker");
+assert.equal(removedE3HumanResult.storageWrites, 0);
+assert.equal(removedE3HumanResult.databaseWrites, 0);
+assert.equal(removedE3Human.lifecycleCalls.dry, 0);
+assert.equal(removedE3Human.calls.export, 1);
+for (const anchor of [[], [{ ...e3HumanAnchor, canary_batch_id: "3" }], [{ ...e3HumanAnchor, canary_confirmation: "GO 3" }],
+  [{ ...e3HumanAnchor, activation_confirmation: "unverified" }], [{ ...e3HumanAnchor, activated_at: "2026-08-14T00:00:00Z" }]]) {
+  const h=makeProductionLifecycleHarness({ tableAbsent: true, tableId: e3HumanTable,
+    row: { batch_id: "4", destructive_go_batch_id: "4" }, e3Evidence: anchor });
+  await assert.rejects(runRemovedHumanCycle(h));assert.equal(h.calls.export,0);assert.equal(h.lifecycleCalls.uploads,0);
+}
+const unavailableCompletionReceipt=makeProductionLifecycleHarness({ tableAbsent: true });
+unavailableCompletionReceipt.deps.readPrivateObjectIfExists=async()=>{throw new Error("Storage unavailable");};
+await assert.rejects(runRemovedHumanCycle(unavailableCompletionReceipt),/Storage unavailable/);
+assert.equal(unavailableCompletionReceipt.calls.export,0);
+
 // Future CANARY: pruning once, then verified marker, with no second execute.
 const futureHumanCanary = makeProductionLifecycleHarness();
 Object.assign(futureHumanCanary.row, { destructive_go_at: null, destructive_go_batch_id: null, pruned_at: null, pruned_transaction_count: null, pruned_entry_count: null,

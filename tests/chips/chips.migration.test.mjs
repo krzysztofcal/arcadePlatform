@@ -517,6 +517,7 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   }
   const accountingBefore=await sql.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id");
   await assertProductionE3NonSuperuserDelegation(sql, e3);
+  await assertProductionHumanCompletedCleanup(sql);
   assert.deepEqual(Array.from(await sql.unsafe("select enabled,max_transactions from public.chips_production_retention_control")), [{enabled:true,max_transactions:5000}]);
   assert.deepEqual(await sql.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id"),accountingBefore);
   await sql.begin(async tx => {
@@ -575,6 +576,39 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   await sql.unsafe("select public.chips_set_production_retention_enabled(false,2,'DISABLE PRODUCTION RETENTION')");
   await sql.unsafe(e3);
   assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false,"E3 replay must not reactivate");
+}
+
+// #1119: real Production-equivalent marker and the unchanged WS cleanup SQL.
+// The orchestration/immutable Storage cases live in the existing automation suite.
+async function assertProductionHumanCompletedCleanup(sql) {
+  const { createClosedTableCleanup } = await import("../../ws-server/poker/persistence/closed-table-cleanup.mjs");
+  const rollback = new Error("human-completed-cleanup-fixture-rollback");
+  try {
+    await sql.begin(async tx => {
+      const tableId = "7f3d73e4-36c5-4b66-afe6-d1d41bea13e2";
+      const incomplete = "00000000-0000-4000-8000-00000000cb19";
+      await tx.unsafe("update public.poker_tables set updated_at=now()-interval '8 days' where id=$1::uuid",[tableId]);
+      await tx.unsafe("insert into public.poker_tables(id,status,has_human_participant,updated_at) values($1,'CLOSED',true,now()-interval '8 days')",[incomplete]);
+      await tx.unsafe("insert into public.poker_state(table_id,state) values($1,'{\"phase\":\"HAND_DONE\",\"handId\":\"\"}'::jsonb)",[incomplete]);
+      await tx.unsafe("insert into public.chips_accounts(account_type,system_key,status,balance,next_entry_seq) values('ESCROW',$1,'active',0,1)",["POKER_TABLE:"+incomplete]);
+      const accountingBefore=await tx.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id");
+      const batchBefore=await tx.unsafe("select to_jsonb(b) as data from public.chips_ledger_archive_batches b where batch_id=4");
+      const registryBefore=await tx.unsafe("select to_jsonb(r) as data from public.chips_transaction_idempotency r where archive_batch_id=4 order by transaction_id");
+      const markerBefore=(await tx.unsafe("select human_retention_complete_at::text as marker from public.poker_tables where id=$1",[tableId]))[0].marker;
+      assert.ok(markerBefore);
+      const completion=await tx.unsafe("select public.chips_complete_closed_human_table_retention($1,$2::timestamptz) as result",[tableId,sql.typed("2026-09-14T18:39:21.779Z",25)]);
+      assert.equal(completion[0].result.state,"human_retention_complete");
+      const cleanup=createClosedTableCleanup({env:{SUPABASE_URL:"https://otbqfijerkieoxwpxjnm.supabase.co"},beginSql:fn=>fn(tx)});
+      const swept=await cleanup.sweep({claimTableIds:ids=>({claimed:ids.filter(id=>id===tableId),skipped:ids.filter(id=>id!==tableId)})});
+      assert.equal(swept.deleted,1);assert.equal(swept.ok,true);
+      assert.equal((await tx.unsafe("select count(*)::int n from public.poker_tables where id=$1",[incomplete]))[0].n,1,"unmarked table must remain protected");
+      await assert.rejects(()=>tx.savepoint(sp=>sp.unsafe("select public.chips_assert_closed_human_table_lifecycle_gate($1,$2::timestamptz,null)",[tableId,sql.typed("2026-09-14T18:39:21.779Z",25)])),e=>e.code==="P9231","old live-table gate rejects legally removed completed history");
+      assert.deepEqual(await tx.unsafe("select to_jsonb(b) as data from public.chips_ledger_archive_batches b where batch_id=4"),batchBefore);
+      assert.deepEqual(await tx.unsafe("select to_jsonb(r) as data from public.chips_transaction_idempotency r where archive_batch_id=4 order by transaction_id"),registryBefore);
+      assert.deepEqual(await tx.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id"),accountingBefore);
+      throw rollback;
+    });
+  } catch(error) { if(error!==rollback)throw error; }
 }
 
 const disposableClusterConfirmation = "I_CONFIRM_THIS_CLUSTER_IS_DEDICATED_AND_DISPOSABLE";

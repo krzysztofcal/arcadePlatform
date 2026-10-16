@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { gzipSync, gunzipSync } from "node:zlib";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,8 @@ import {
   BOT_ONLY_RETENTION_DAYS,
   DEFAULT_CUTOFF_DAYS,
   runExport,
+  normalizeTimestamp,
+  timestampToMicros,
   PRODUCTION_AUTOMATION_POLICY_ID,
   PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
   PRODUCTION_CLOSED_HUMAN_TABLE_RETENTION_POLICY_ID,
@@ -29,6 +32,7 @@ import {
 } from "./_shared/chips-ledger-retention-cycle.mjs";
 import { validateRetentionEnvironment, resolveProductionAutomaticContext, effectiveProductionCap, assertProductionAutomaticContext } from "./_shared/chips-ledger-retention-profile.mjs";
 import {
+  canonicalJson,
   accountIdsSha256,
   assertProductionEscrowProfile,
   buildAccountRecoverySnapshot,
@@ -39,11 +43,14 @@ import {
 import {
   createStorageVerificationContext,
   downloadPrivateArchiveObject,
+  readPrivateObjectIfExists,
+  uploadOrVerifyPrivateObject,
+  verifyArchiveBytes,
   ensureArchiveBucket,
   resolveStorageTarget,
   storeArchive,
 } from "./chips-ledger-archive-store.mjs";
-import { createPruneStore, pruneArchive } from "./chips-ledger-archive-prune.mjs";
+import { createPruneStore, pruneArchive, buildPruneEvidence, exporterManifestFromDatabase } from "./chips-ledger-archive-prune.mjs";
 import { ensurePrivateDirectory } from "./_shared/chips-ledger-archive-files.mjs";
 
 const PRODUCTION_STATE_SQL = Object.freeze({
@@ -425,6 +432,108 @@ function assertProductionHumanPrunedBatch(row, batchId, cutoff = null, automatic
     || text(row.destructive_go_batch_id) !== text(batchId)) fail("closed-human lifecycle batch identity, cutoff, proof or prune receipt differs");
 }
 
+// A completed archive has durable financial evidence, but its live table may
+// have been removed by marker-gated WS cleanup. Never replay its policy SQL.
+async function verifyProductionHumanCompletedEvidence({ row, profile, storageTarget, pruneStore, storageDeps }) {
+  const downloaded = await (storageDeps.downloadArchive || downloadPrivateArchiveObject)(storageTarget, row.object_path, storageDeps);
+  const bytes = Buffer.from(downloaded.bytes);
+  if (crypto.createHash("sha256").update(bytes).digest("hex") !== row.compressed_sha256) fail("completed human archive SHA differs");
+  const archive = (storageDeps.verifyArchiveBytes || verifyArchiveBytes)({ compressedBytes: bytes,
+    manifest: exporterManifestFromDatabase(row, storageTarget), target: storageTarget, artifactName: path.basename(row.object_path) });
+  const evidence = (storageDeps.buildPruneEvidence || buildPruneEvidence)(archive, { maxBatchSize: effectiveProductionCap(storageTarget.automaticContext, row.source_policy_id) });
+  if (!evidence.closedHumanTableId || evidence.transactionCount !== Number(row.transaction_count)
+    || evidence.entryCount !== Number(row.entry_count) || evidence.transactionIdsSha256 !== row.archived_transaction_ids_sha256
+    || evidence.entryIdsSha256 !== row.archived_entry_ids_sha256) fail("completed human archive proof differs");
+  const durable = await (storageDeps.inspectDurableRecovery || inspectDurableRecovery)(storageTarget, row, profile, evidence, storageDeps);
+  assertResumeRecoveryState(row, durable, profile);
+  const committed = await pruneStore.verifyCommitted(row, evidence);
+  if (!committed?.pruned_at || Number(committed.pruned_transaction_count) !== evidence.transactionCount
+    || Number(committed.pruned_entry_count) !== evidence.entryCount
+    || committed.pruned_transaction_ids_sha256 !== evidence.transactionIdsSha256
+    || committed.pruned_entry_ids_sha256 !== evidence.entryIdsSha256
+    || Number(committed.mapping_count) !== evidence.transactionCount || Number(committed.remaining_mapping_count) !== evidence.transactionCount
+    || String(committed.extra_mapping_count) !== "0" || String(committed.hot_transaction_count) !== "0"
+    || String(committed.hot_entry_count) !== "0") fail("completed human receipt, registry or hot rows differ");
+  return { state: "already_pruned", read_only: true, archiveSha256: row.compressed_sha256, evidence, durable };
+}
+
+function humanLifecycleReceipt(row, profile, tableId, marker) {
+  const markerAt = normalizeTimestamp(marker, "human completion marker");
+  if (timestampToMicros(markerAt) < timestampToMicros(row.pruned_at) || Date.parse(markerAt) > Date.now()) fail("human lifecycle receipt marker time is invalid");
+  return { schema_version: 1, artifact_type: "production_closed_human_lifecycle", project_ref: profile.projectRef,
+    system_identifier: profile.systemIdentifier, policy_id: row.source_policy_id, batch_id: String(row.batch_id), table_id: tableId,
+    cutoff: normalizeTimestamp(row.cutoff), archive_sha256: row.compressed_sha256, raw_sha256: row.raw_sha256,
+    transaction_ids_sha256: row.archived_transaction_ids_sha256, entry_ids_sha256: row.archived_entry_ids_sha256,
+    transactions: Number(row.transaction_count), entries: Number(row.entry_count), destructive_go_at: normalizeTimestamp(row.destructive_go_at),
+    pruned_at: normalizeTimestamp(row.pruned_at), marker_at: markerAt };
+}
+
+function humanLifecycleReceiptPath(row) {
+  return `recovery/v1/sha256/${row.compressed_sha256}.human-lifecycle.json.gz`;
+}
+
+async function readHumanLifecycleReceipt({ row, profile, tableId, storageTarget, storageDeps }) {
+  const object = await (storageDeps.readPrivateObjectIfExists || readPrivateObjectIfExists)(storageTarget, humanLifecycleReceiptPath(row), storageDeps);
+  if (!object) return null;
+  if (object.mimeType !== "application/gzip" || object.bytes.length > 16384
+    || object.sha256 !== crypto.createHash("sha256").update(object.bytes).digest("hex")) fail("human lifecycle receipt MIME, size or SHA differs");
+  let receipt;
+  try { receipt = JSON.parse(gunzipSync(object.bytes, { maxOutputLength: 16384 }).toString("utf8")); }
+  catch { fail("human lifecycle receipt gzip/JSON is invalid"); }
+  if (canonicalJson(receipt) !== canonicalJson(humanLifecycleReceipt(row, profile, tableId, receipt?.marker_at))) fail("human lifecycle receipt binding differs");
+  return receipt;
+}
+
+async function persistHumanLifecycleReceipt({ row, profile, tableId, marker, storageTarget, storageDeps }) {
+  const receipt = humanLifecycleReceipt(row, profile, tableId, marker);
+  const existing = await readHumanLifecycleReceipt({ row, profile, tableId, storageTarget, storageDeps });
+  if (existing) {
+    if (canonicalJson(existing) !== canonicalJson(receipt)) fail("human lifecycle receipt marker differs");
+    return 0;
+  }
+  const bytes = gzipSync(Buffer.from(`${JSON.stringify(receipt)}\n`), { level: 9, mtime: 0 });
+  const uploaded = await (storageDeps.uploadOrVerifyPrivateObject || uploadOrVerifyPrivateObject)({
+    storageTarget, objectPath: humanLifecycleReceiptPath(row), bytes, deps: storageDeps });
+  const verified = await readHumanLifecycleReceipt({ row, profile, tableId, storageTarget, storageDeps });
+  if (!verified || canonicalJson(verified) !== canonicalJson(receipt)) fail("human lifecycle receipt persistence is incomplete");
+  return uploaded.uploaded ? 1 : 0;
+}
+
+async function verifyAbsentHumanLifecycle({ tx, row, profile, tableId, cutoff, storageTarget, storageDeps }) {
+  // Mirror the table-independent half of the SQL lifecycle gate; additionally
+  // require exact GO and no remaining entries in the table's zero escrow.
+  const history = await tx.unsafe(`select count(*)::text as invalid from public.chips_transaction_idempotency r
+    left join public.chips_ledger_archive_batches b on b.batch_id = r.archive_batch_id
+    where r.table_id = $1::uuid and (r.transaction_created_at >= $2::timestamptz or r.archive_batch_id is null
+      or not coalesce(b.status = 'committed' and b.archive_proof_verified_at is not null and b.pruned_at is not null
+        and b.destructive_go_at is not null and b.destructive_go_batch_id = b.batch_id
+        and b.pruned_transaction_count = b.transaction_count and b.pruned_entry_count = b.entry_count
+        and b.pruned_transaction_ids_sha256 = b.archived_transaction_ids_sha256 and b.pruned_entry_ids_sha256 = b.archived_entry_ids_sha256
+        and b.source_policy_id in ('production-ledger-auto-retention-30d-v1', 'production-ledger-closed-human-table-retention-30d-v1'), false));`, [tableId, cutoff]);
+  const escrow = await tx.unsafe(`select a.id, a.status, a.balance::text,
+    (select count(*)::text from public.chips_entries e where e.account_id = a.id) as hot_entries
+    from public.chips_accounts a where a.account_type = 'ESCROW' and a.system_key = $1 for update;`, [`POKER_TABLE:${tableId}`]);
+  if (history.length !== 1 || history[0].invalid !== "0" || escrow.length !== 1 || escrow[0].status !== "active"
+    || escrow[0].balance !== "0" || escrow[0].hot_entries !== "0") fail("absent human table history or escrow is incomplete");
+  const receipt = await readHumanLifecycleReceipt({ row, profile, tableId, storageTarget, storageDeps });
+  if (receipt) return { state: "already_pruned_table_absent", marker: receipt.marker_at, completionEvidence: "immutable_lifecycle_receipt" };
+  // E3 checked the exact historical canary marker before atomically activating
+  // this immutable canary binding. It cannot prove completion of any other batch.
+  const activation = await tx.unsafe(`select p.canary_batch_id::text, p.canary_confirmation, p.activated_at::text,
+      c.activated_at::text as control_activated_at, c.activation_confirmation
+    from public.chips_production_closed_human_table_retention_policy p cross join public.chips_production_retention_control c
+    where p.policy_id = $1 and p.canary_batch_id = $2::bigint and p.canary_batch_id = 4 and p.canary_confirmation = 'GO 4'
+      and p.enabled is true and p.activated_at is not null and c.enabled is true and c.max_transactions = 5000 and c.activated_at is not null
+      and exists(select 1 from supabase_migrations.schema_migrations where version = '20260914092000');`, [row.source_policy_id, row.batch_id]);
+  const anchor = activation[0];
+  if (activation.length !== 1 || String(row.batch_id) !== "4" || anchor.canary_batch_id !== "4" || anchor.canary_confirmation !== "GO 4"
+    || tableId !== "7f3d73e4-36c5-4b66-afe6-d1d41bea13e2"
+    || !/^ACTIVATE PRODUCTION RETENTION otbqfijerkieoxwpxjnm [0-9a-f]{64}$/.test(anchor.activation_confirmation)
+    || !(timestampToMicros(anchor.activated_at) >= timestampToMicros(row.pruned_at))
+    || !(timestampToMicros(anchor.control_activated_at) >= timestampToMicros(row.pruned_at))) fail("absent human table has no durable lifecycle completion evidence");
+  return { state: "already_pruned_table_absent", marker: null, completionEvidence: "e3_activation_canary" };
+}
+
 async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, storageTarget,
   verifyBucket, storageDeps, env, profile, row, batchId, tableId = null, cutoff = null,
   tempRoot, deps, allowComplete = true, manualOnly = false, automaticContext = null }) {
@@ -432,7 +541,9 @@ async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, 
   assertProductionHumanPrunedBatch(row, batchId, cutoff, automaticContext);
   await assertRetentionAdvisoryLock(sql, lockSession);
   await verifyBucket(storageTarget);
-  const dry = await (deps.pruneArchive || pruneArchive)({
+  const dry = automaticContext
+    ? await verifyProductionHumanCompletedEvidence({ row, profile, storageTarget, pruneStore, storageDeps })
+    : await (deps.pruneArchive || pruneArchive)({
     argv: ["--target", "prod", "--object-path", row.object_path, "--confirm-sha", row.compressed_sha256],
     env, cwd: tempRoot, deps: { ...storageDeps, sql, pruneStore, storageTarget,
       targetOptions: productionTargetOptions(), verifyBucket, emit: false, automaticContext } });
@@ -446,7 +557,7 @@ async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, 
   tableId = evidence.closedHumanTableId;
   cutoff ||= row.cutoff;
   const timestampValue = typeof sql.typed === "function" ? sql.typed(cutoff, 25) : cutoff;
-  const durable = await (deps.inspectDurableRecovery || inspectDurableRecovery)(storageTarget, row, profile, evidence, storageDeps);
+  const durable = dry.durable || await (deps.inspectDurableRecovery || inspectDurableRecovery)(storageTarget, row, profile, evidence, storageDeps);
   assertResumeRecoveryState(row, durable, profile);
   await assertRetentionAdvisoryLock(sql, lockSession);
   const lifecycle = await sql.begin(async tx => {
@@ -474,11 +585,13 @@ async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, 
     }
     const markerQuery = "select id::text, status::text, has_human_participant, human_retention_complete_at::text from public.poker_tables where id = $1::uuid";
     const marker = await tx.unsafe(`${markerQuery} for update;`, [tableId]);
-    if (marker.length !== 1 || marker[0].id !== tableId || marker[0].status !== "CLOSED" || marker[0].has_human_participant !== true) fail("lifecycle table identity differs");
+    if (marker.length > 1 || (marker.length === 1 && (marker[0].id !== tableId || marker[0].status !== "CLOSED" || marker[0].has_human_participant !== true))
+      || (marker.length === 0 && !automaticContext)) fail("lifecycle table identity differs");
     const registry = await tx.unsafe("select transaction_id::text, archive_batch_id::text, table_id::text from public.chips_transaction_idempotency where table_id = $1::uuid order by transaction_id;", [tableId]);
     const bound = registry.filter(r => evidence.transactionIds.includes(r.transaction_id));
     if (bound.length !== evidence.transactionCount || bound.some(r => r.archive_batch_id !== String(batchId) || r.table_id !== tableId)
       || new Set(bound.map(r => r.transaction_id)).size !== evidence.transactionCount) fail("lifecycle retained registry binding differs");
+    if (marker.length === 0) return verifyAbsentHumanLifecycle({ tx, row, profile, tableId, cutoff: timestampValue, storageTarget, storageDeps });
     await tx.unsafe("select public.chips_assert_closed_human_table_lifecycle_gate($1::uuid, $2::timestamptz, null);", [tableId, timestampValue]);
     const markerBefore = marker[0].human_retention_complete_at;
     if (!markerBefore) {
@@ -495,11 +608,14 @@ async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, 
     return { state: markerBefore ? "already_complete" : "completed", marker: after[0].human_retention_complete_at };
   });
   await assertRetentionAdvisoryLock(sql, lockSession);
-  return { ...lifecycle, maxTransactions: effectiveProductionCap(automaticContext), batchId: String(batchId), tableId, cutoff, dryRun: "already_pruned",
+  const receiptWrites = automaticContext && lifecycle.state !== "already_pruned_table_absent"
+    ? await persistHumanLifecycleReceipt({ row, profile, tableId, marker: lifecycle.marker, storageTarget, storageDeps }) : 0;
+  await assertRetentionAdvisoryLock(sql, lockSession);
+  return { ...lifecycle, maxTransactions: effectiveProductionCap(automaticContext), batchId: String(batchId), tableId, cutoff, dryRun: automaticContext ? "verified_completed_evidence" : "already_pruned",
     transactions: evidence.transactionCount, entries: evidence.entryCount, compressedSha256: row.compressed_sha256,
     transactionProofSha256: row.archived_transaction_ids_sha256, entryProofSha256: row.archived_entry_ids_sha256,
     pruneReceipt: { at: row.pruned_at, transactions: Number(row.pruned_transaction_count), entries: Number(row.pruned_entry_count) },
-    storageWrites: 0, databaseWrites: lifecycle.state === "completed" ? 1 : 0,
+    storageWrites: receiptWrites, databaseWrites: lifecycle.state === "completed" ? 1 : 0,
     recoveryArchiveSha256: durable.recoveryArchive.sha256, recoveryManifestSha256: durable.recoveryManifest.sha256 };
 }
 
@@ -959,14 +1075,15 @@ async function runProductionArchiveCycle({
       });
       if (policy === "closed-human-30d" && (mode === "canary" || mode === "automatic")) {
         const lifecycle = await finalize(cycle.active);
-        return { ...resumed, mode, policy, policyId: sourcePolicyId, lifecycle, databaseWrites: resumed.databaseWrites + lifecycle.databaseWrites };
+        return { ...resumed, mode, policy, policyId: sourcePolicyId, lifecycle, storageWrites: (resumed.storageWrites || 0) + lifecycle.storageWrites, databaseWrites: resumed.databaseWrites + lifecycle.databaseWrites };
       }
       return { state: resumed.state, mode, policy, policyId: sourcePolicyId, ...resumed };
     }
     if (mode === "prepare" && batchId != null) fail("exact active Production batch ID is not available for PREPARE");
+    let completedLifecycle = null;
     if (cycle.latestCompleted && policy === "closed-human-30d") {
-      const lifecycle = await finalize(cycle.latestCompleted, { allowComplete: mode === "automatic" });
-      if (lifecycle.state === "completed") return { ...lifecycle, mode, policy, policyId: sourcePolicyId, resumed: true };
+      completedLifecycle = await finalize(cycle.latestCompleted, { allowComplete: mode === "automatic" });
+      if (completedLifecycle.state === "completed") return { ...completedLifecycle, mode, policy, policyId: sourcePolicyId, resumed: true };
     }
     if (cycle.latestCompleted && policy !== "closed-human-30d") {
       const completed = await (deps.pruneArchive || pruneArchive)({
@@ -997,7 +1114,7 @@ async function runProductionArchiveCycle({
         emit: false,
       },
     });
-    if (exported.noCandidate) return { state: "no-op", mode, policy, policyId: sourcePolicyId, maxTransactions: effectiveProductionCap(automaticContext), reason: "no_eligible_candidate", processed: 0 };
+    if (exported.noCandidate) return { state: "no-op", mode, policy, policyId: sourcePolicyId, maxTransactions: effectiveProductionCap(automaticContext), reason: "no_eligible_candidate", processed: 0, ...(completedLifecycle ? { completedLifecycle, storageWrites: completedLifecycle.storageWrites, databaseWrites: completedLifecycle.databaseWrites } : {}) };
     await ensureArchiveBucket(storageTarget, storageDeps);
     const stored = await storeArchive({
       argv: ["--target", "prod", "--artifact", outputPath, "--manifest", manifestPath],
@@ -1037,8 +1154,9 @@ async function runProductionArchiveCycle({
       compressedSha256: row.compressed_sha256,
       recoveryArchiveSha256: durable.recoveryArchive.sha256,
       recoveryManifestSha256: durable.recoveryManifest.sha256,
-      storageWrites: 2,
+      storageWrites: 2 + (completedLifecycle?.storageWrites || 0),
       databaseWrites: 2,
+      ...(completedLifecycle ? { completedLifecycle } : {}),
     };
     if (mode === "prepare") return prepared;
     if (mode === "canary") {
@@ -1065,7 +1183,7 @@ async function runProductionArchiveCycle({
       },
     });
     const lifecycle = policy === "closed-human-30d" ? await finalize(row) : null;
-    return { ...prepared, state: executed.state, receipt: executed.state, storageWrites: 2, databaseWrites: 3 + (lifecycle?.databaseWrites || 0), ...(lifecycle ? { lifecycle } : {}) };
+    return { ...prepared, state: executed.state, receipt: executed.state, storageWrites: prepared.storageWrites + (lifecycle?.storageWrites || 0), databaseWrites: 3 + (lifecycle?.databaseWrites || 0), ...(lifecycle ? { lifecycle } : {}) };
   } finally {
     if (lockSession) await releaseRetentionAdvisoryLock(sql, lockSession);
     if (ownsSql) await sql.end({ timeout: 5 });
