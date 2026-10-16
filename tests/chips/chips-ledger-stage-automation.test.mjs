@@ -330,6 +330,7 @@ function makeProductionResumeHarness(row, options = {}) {
   const session = { backendPid: "production-resume-session", lockLost: false };
   const sql = {
     unsafe: async (query) => {
+      if (query === "select batch_id from public.chips_production_human_lifecycle_receipts limit 0;") return [];
       if (query.includes("pg_try_advisory_lock")) return [{ acquired: true, backend_pid: session.backendPid }];
       if (query.includes("pg_backend_pid")) return [{ backend_pid: session.lockLost ? "lost-production-session" : session.backendPid }];
       if (query.includes("pg_advisory_unlock")) return [{ released: true }];
@@ -514,10 +515,23 @@ function makeProductionLifecycleHarness(options = {}) {
   const lifecycleEvidence = options.evidence || productionResumeEvidence;
   let marker = options.marker || null;
   let tablePresent = !options.tableAbsent;
-  const lifecycleObjects = new Map();
-  const calls = { completion: 0, dry: 0, uploads: 0, verify: 0 };
+  const lifecycleReceipts = new Map();
+  const calls = { completion: 0, dry: 0, receipts: 0, verify: 0 };
+  let inTransaction = false;
   const baseSql = harness.deps.sql.unsafe;
   harness.deps.sql.unsafe = async (query, values) => {
+    if (query.includes("from public.chips_production_human_lifecycle_receipts")) return [...lifecycleReceipts.values()];
+    if (query.startsWith("insert into public.chips_production_human_lifecycle_receipts")) {
+      assert.equal(inTransaction, true, "receipt must commit atomically with marker");
+      assert.ok(marker, "receipt requires marker in the same transaction");
+      if (options.beforeReceipt) options.beforeReceipt();
+      if (options.receiptFailure) throw new Error("receipt insert failed");
+      calls.receipts += 1;
+      lifecycleReceipts.set(String(values[0]), {batch_id:String(values[0]), table_id:values[1],cutoff:values[2],marker_at:values[3],
+        compressed_sha256:values[4],transaction_ids_sha256:values[5],entry_ids_sha256:values[6]});
+      return [{batch_id:values[0]}];
+    }
+
     if (query.startsWith("set ")) return [];
     if (query.includes("from public.chips_production_retention_control")) return [{ enabled: options.enabledControl || false, max_transactions: 2 }];
     if (query.includes("from public.chips_table_fence_control")) return [{ enforcement_active: true }];
@@ -555,15 +569,15 @@ function makeProductionLifecycleHarness(options = {}) {
       mapping_count: String(row.transaction_count), extra_mapping_count: "0", remaining_mapping_count: String(row.transaction_count),
       hot_transaction_count: "0", hot_entry_count: "0", ...options.verification };
   };
-  harness.deps.readPrivateObjectIfExists = async (_target, objectPath) => lifecycleObjects.get(objectPath) || null;
-  harness.deps.uploadOrVerifyPrivateObject = async ({ objectPath, bytes }) => {
-    const existing = lifecycleObjects.get(objectPath);
-    if (existing) { assert.deepEqual(existing.bytes, bytes); return { ...existing, uploaded: false }; }
-    calls.uploads += 1;
-    const object = { objectPath, bytes, sha256: crypto.createHash("sha256").update(bytes).digest("hex"), size: bytes.length, mimeType: "application/gzip", uploaded: true };
-    lifecycleObjects.set(objectPath, object);return object;
+  harness.deps.sql.begin = async callback => {
+    const beforeMarker = marker;
+    const beforeReceipts = new Map(lifecycleReceipts);
+    inTransaction = true;
+    try { return await callback({ unsafe: (q,v) => harness.deps.sql.unsafe(q,v) }); }
+    catch(error) { marker=beforeMarker;lifecycleReceipts.clear();for(const [key,value] of beforeReceipts)lifecycleReceipts.set(key,value);throw error; }
+    finally { inTransaction = false; }
   };
-  return { ...harness, row, lifecycleCalls: calls, lifecycleObjects, cleanup: () => { assert(marker, "WS cleanup requires completed marker"); tablePresent = false; } };
+  return { ...harness, row, lifecycleCalls: calls, lifecycleReceipts, cleanup: () => { assert.equal(inTransaction,false,"WS cannot delete a locked table");assert(marker, "WS cleanup requires completed marker"); tablePresent = false; } };
 }
 const productionLifecycleEnv = { ...PRODUCTION_ENV, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REPOSITORY: "krzysztofcal/arcadePlatform", GITHUB_REF: "refs/heads/main", GITHUB_REPOSITORY_OWNER: "krzysztofcal", GITHUB_ACTOR: "krzysztofcal", GITHUB_SHA: PRODUCTION_ENV.DEPLOYED_COMMIT_SHA };
 async function runProductionLifecycle(harness, args = {}) {
@@ -660,6 +674,7 @@ const completeCanaryRetry = makeProductionLifecycleHarness({ marker: "2026-08-15
 assert.equal((await runProductionAutomation({ env: { ...PRODUCTION_ENV, CHIPS_LEDGER_PRODUCTION_CANARY: "1" },
   policy: "closed-human-30d", mode: "canary", batchId: "2", confirmation: "GO 2",
   deps: { ...completeCanaryRetry.deps, read: async ({ profile }) => ({ projectRef: profile.projectRef, systemIdentifier: profile.systemIdentifier }) } })).state, "already_pruned");
+assert.equal(completeCanaryRetry.lifecycleReceipts.size, 1, "manual CANARY must preserve a durable completion receipt before returning");
 assert.equal(completeCanaryRetry.calls.execute, 0);
 assert.equal(completeCanaryRetry.lifecycleCalls.completion, 0);
 const automaticLifecycleResume = makeProductionLifecycleHarness();
@@ -688,7 +703,7 @@ removedHumanCycle.deps.sql.unsafe = async (query, values) => {
 };
 assert.equal((await runRemovedHumanCycle(removedHumanCycle)).state, "no-op");
 assert.equal(removedHumanCycle.lifecycleCalls.completion, 1);
-assert.equal(removedHumanCycle.lifecycleCalls.uploads, 1);
+assert.equal(removedHumanCycle.lifecycleCalls.receipts, 1);
 assert.equal(removedHumanCycle.lifecycleCalls.dry, 0, "automatic terminal verification must not call live-table dry-run");
 assert.equal(removedHumanCycle.calls.execute, 0);
 assert.equal(removedHumanCycle.calls.store, 0);
@@ -698,7 +713,7 @@ assert.equal(removedHumanCycle.calls.export, 1, "only the subsequent candidate s
 // exact financial receipt, and every independent negative still fails closed.
 const unprovedAbsentHuman = makeProductionLifecycleHarness({ tableAbsent: true });
 await assert.rejects(runRemovedHumanCycle(unprovedAbsentHuman), /no durable lifecycle/);
-assert.equal(unprovedAbsentHuman.lifecycleCalls.uploads, 0);
+assert.equal(unprovedAbsentHuman.lifecycleCalls.receipts, 0);
 for (const options of [
   { row: { destructive_go_at: null, destructive_go_batch_id: null } },
   { row: { pruned_entry_count: 3 } }, { row: { archived_transaction_ids_sha256: "9".repeat(64) } },
@@ -708,35 +723,38 @@ for (const options of [
 ]) {
   const h = makeProductionLifecycleHarness({ ...options, tableAbsent: true });
   await assert.rejects(runRemovedHumanCycle(h));
-  assert.equal(h.calls.execute, 0);assert.equal(h.calls.export, 0);assert.equal(h.lifecycleCalls.uploads, 0);
+  assert.equal(h.calls.execute, 0);assert.equal(h.calls.export, 0);assert.equal(h.lifecycleCalls.receipts, 0);
 }
+const missingReceiptSchema = makeProductionLifecycleHarness();
+const missingSchemaSql = missingReceiptSchema.deps.sql.unsafe;
+missingReceiptSchema.deps.sql.unsafe = async(q,v)=>{
+  if(q === "select batch_id from public.chips_production_human_lifecycle_receipts limit 0;")throw new Error("receipt schema missing");
+  return missingSchemaSql(q,v);
+};
+await assert.rejects(runRemovedHumanCycle(missingReceiptSchema),/receipt schema missing/);
+assert.equal(missingReceiptSchema.calls.export,0);assert.equal(missingReceiptSchema.calls.execute,0);assert.equal(missingReceiptSchema.lifecycleCalls.completion,0);
 const incompletePresentHuman = makeProductionLifecycleHarness({ incompleteLifecycle: true });
 await assert.rejects(runRemovedHumanCycle(incompletePresentHuman), /terminal lifecycle/);
 assert.equal(incompletePresentHuman.lifecycleCalls.completion, 0);
-assert.equal(incompletePresentHuman.lifecycleCalls.uploads, 0);
-const publicationFailure = makeProductionLifecycleHarness();
-publicationFailure.deps.uploadOrVerifyPrivateObject = async () => { throw new Error("Storage unavailable"); };
-await assert.rejects(runRemovedHumanCycle(publicationFailure), /Storage unavailable/);
-assert.equal(publicationFailure.lifecycleCalls.completion, 1, "committed marker is not rolled back or replayed after Storage failure");
-publicationFailure.cleanup();
-await assert.rejects(runRemovedHumanCycle(publicationFailure), /no durable lifecycle/);
-assert.equal(publicationFailure.lifecycleCalls.completion, 1);
+assert.equal(incompletePresentHuman.lifecycleCalls.receipts, 0);
+let guardedPublication;
+guardedPublication=makeProductionLifecycleHarness({beforeReceipt:()=>assert.throws(()=>guardedPublication.cleanup(),/locked table/)});
+await runRemovedHumanCycle(guardedPublication);
+guardedPublication.cleanup();
+const publicationFailure = makeProductionLifecycleHarness({receiptFailure:true});
+await assert.rejects(runRemovedHumanCycle(publicationFailure), /receipt insert failed/);
+assert.equal(publicationFailure.lifecycleReceipts.size, 0);
+assert.throws(()=>publicationFailure.cleanup(), /completed marker/, "receipt failure rolls marker back and WS cannot remove the table");
+assert.equal(publicationFailure.calls.execute,0);
 for (const mutate of [
-  object => { object.mimeType = "text/plain"; },
-  object => { object.sha256 = "0".repeat(64); },
-  object => { object.bytes = Buffer.from("not gzip");object.sha256 = crypto.createHash("sha256").update(object.bytes).digest("hex"); },
-  ...[r => { r.table_id = "00000000-0000-4000-8000-000000000099"; },
-    r => { r.batch_id = "999"; }, r => { r.system_identifier = STAGE_SYSTEM_IDENTIFIER; },
-    r => { delete r.marker_at; }, r => { r.marker_at = "2026-08-15T00:01:00Z"; },
-    r => { r.cutoff = "2026-08-13T00:00:00Z"; }, r => { r.transaction_ids_sha256 = "9".repeat(64); },
-    r => { r.extra = true; }].map(change => object => {
-      const receipt = JSON.parse(gunzipSync(object.bytes));change(receipt);
-      object.bytes = gzipSync(Buffer.from(JSON.stringify(receipt)));object.sha256 = crypto.createHash("sha256").update(object.bytes).digest("hex");
-    }),
+  r => { r.table_id = "00000000-0000-4000-8000-000000000099"; },
+  r => { r.batch_id = "999"; }, r => { delete r.marker_at; },
+  r => { r.marker_at = "2026-08-15T00:01:00Z"; },
+  r => { r.cutoff = "2026-08-13T00:00:00Z"; }, r => { r.transaction_ids_sha256 = "9".repeat(64); },
 ]) {
   const h = makeProductionLifecycleHarness();await runRemovedHumanCycle(h);h.cleanup();
-  mutate([...h.lifecycleObjects.values()][0]);await assert.rejects(runRemovedHumanCycle(h));
-  assert.equal(h.calls.execute, 0);assert.equal(h.calls.export, 0);assert.equal(h.lifecycleCalls.uploads, 1);
+  mutate([...h.lifecycleReceipts.values()][0]);await assert.rejects(runRemovedHumanCycle(h));
+  assert.equal(h.calls.execute, 0);assert.equal(h.calls.export, 0);assert.equal(h.lifecycleCalls.receipts, 1);
 }
 const lostHumanRecovery = makeProductionLifecycleHarness({ tableAbsent: true });
 lostHumanRecovery.deps.inspectDurableRecovery = async () => null;
@@ -776,11 +794,15 @@ for (const anchor of [[], [{ ...e3HumanAnchor, canary_batch_id: "3" }], [{ ...e3
   [{ ...e3HumanAnchor, activation_confirmation: "unverified" }], [{ ...e3HumanAnchor, activated_at: "2026-08-14T00:00:00Z" }]]) {
   const h=makeProductionLifecycleHarness({ tableAbsent: true, tableId: e3HumanTable,
     row: { batch_id: "4", destructive_go_batch_id: "4" }, e3Evidence: anchor });
-  await assert.rejects(runRemovedHumanCycle(h));assert.equal(h.calls.export,0);assert.equal(h.lifecycleCalls.uploads,0);
+  await assert.rejects(runRemovedHumanCycle(h));assert.equal(h.calls.export,0);assert.equal(h.lifecycleCalls.receipts,0);
 }
 const unavailableCompletionReceipt=makeProductionLifecycleHarness({ tableAbsent: true });
-unavailableCompletionReceipt.deps.readPrivateObjectIfExists=async()=>{throw new Error("Storage unavailable");};
-await assert.rejects(runRemovedHumanCycle(unavailableCompletionReceipt),/Storage unavailable/);
+const unavailableReceiptSql=unavailableCompletionReceipt.deps.sql.unsafe;
+unavailableCompletionReceipt.deps.sql.unsafe=async(q,v)=>{
+  if(q.includes("from public.chips_production_human_lifecycle_receipts"))throw new Error("receipt DB unavailable");
+  return unavailableReceiptSql(q,v);
+};
+await assert.rejects(runRemovedHumanCycle(unavailableCompletionReceipt),/receipt DB unavailable/);
 assert.equal(unavailableCompletionReceipt.calls.export,0);
 
 // Future CANARY: pruning once, then verified marker, with no second execute.
@@ -814,6 +836,14 @@ assert.equal(futureHumanCanaryResult.state, "pruned");
 assert.ok(futureHumanCanaryResult.lifecycle.marker);
 assert.equal(futureHumanCanary.calls.execute, 1);
 assert.equal(futureHumanCanary.lifecycleCalls.completion, 1);
+assert.equal(futureHumanCanary.lifecycleReceipts.size,1,"manual CANARY has a durable receipt for non-legacy batch 2");
+futureHumanCanary.cleanup();
+nextHumanSelector(futureHumanCanary);
+const afterManualCleanup=await runRemovedHumanCycle(futureHumanCanary);
+assert.equal(afterManualCleanup.state,"no-op");
+assert.equal(afterManualCleanup.completedLifecycle.completionEvidence,"immutable_database_lifecycle_receipt");
+assert.equal(futureHumanCanary.calls.execute,1,"automatic does not repeat manual pruning");
+assert.equal(futureHumanCanary.lifecycleCalls.receipts,1);
 
 let productionPreparedResumeRow = null;
 const productionPrepareForResume = await runProductionAutomation({

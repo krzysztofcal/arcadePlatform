@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
-import { gzipSync, gunzipSync } from "node:zlib";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +9,6 @@ import {
   BOT_ONLY_RETENTION_DAYS,
   DEFAULT_CUTOFF_DAYS,
   runExport,
-  normalizeTimestamp,
   timestampToMicros,
   PRODUCTION_AUTOMATION_POLICY_ID,
   PRODUCTION_BOT_ONLY_RETENTION_POLICY_ID,
@@ -32,7 +30,6 @@ import {
 } from "./_shared/chips-ledger-retention-cycle.mjs";
 import { validateRetentionEnvironment, resolveProductionAutomaticContext, effectiveProductionCap, assertProductionAutomaticContext } from "./_shared/chips-ledger-retention-profile.mjs";
 import {
-  canonicalJson,
   accountIdsSha256,
   assertProductionEscrowProfile,
   buildAccountRecoverySnapshot,
@@ -43,8 +40,6 @@ import {
 import {
   createStorageVerificationContext,
   downloadPrivateArchiveObject,
-  readPrivateObjectIfExists,
-  uploadOrVerifyPrivateObject,
   verifyArchiveBytes,
   ensureArchiveBucket,
   resolveStorageTarget,
@@ -457,49 +452,37 @@ async function verifyProductionHumanCompletedEvidence({ row, profile, storageTar
   return { state: "already_pruned", read_only: true, archiveSha256: row.compressed_sha256, evidence, durable };
 }
 
-function humanLifecycleReceipt(row, profile, tableId, marker) {
-  const markerAt = normalizeTimestamp(marker, "human completion marker");
-  if (timestampToMicros(markerAt) < timestampToMicros(row.pruned_at) || Date.parse(markerAt) > Date.now()) fail("human lifecycle receipt marker time is invalid");
-  return { schema_version: 1, artifact_type: "production_closed_human_lifecycle", project_ref: profile.projectRef,
-    system_identifier: profile.systemIdentifier, policy_id: row.source_policy_id, batch_id: String(row.batch_id), table_id: tableId,
-    cutoff: normalizeTimestamp(row.cutoff), archive_sha256: row.compressed_sha256, raw_sha256: row.raw_sha256,
-    transaction_ids_sha256: row.archived_transaction_ids_sha256, entry_ids_sha256: row.archived_entry_ids_sha256,
-    transactions: Number(row.transaction_count), entries: Number(row.entry_count), destructive_go_at: normalizeTimestamp(row.destructive_go_at),
-    pruned_at: normalizeTimestamp(row.pruned_at), marker_at: markerAt };
-}
-
-function humanLifecycleReceiptPath(row) {
-  return `recovery/v1/sha256/${row.compressed_sha256}.human-lifecycle.json.gz`;
-}
-
-async function readHumanLifecycleReceipt({ row, profile, tableId, storageTarget, storageDeps }) {
-  const object = await (storageDeps.readPrivateObjectIfExists || readPrivateObjectIfExists)(storageTarget, humanLifecycleReceiptPath(row), storageDeps);
-  if (!object) return null;
-  if (object.mimeType !== "application/gzip" || object.bytes.length > 16384
-    || object.sha256 !== crypto.createHash("sha256").update(object.bytes).digest("hex")) fail("human lifecycle receipt MIME, size or SHA differs");
-  let receipt;
-  try { receipt = JSON.parse(gunzipSync(object.bytes, { maxOutputLength: 16384 }).toString("utf8")); }
-  catch { fail("human lifecycle receipt gzip/JSON is invalid"); }
-  if (canonicalJson(receipt) !== canonicalJson(humanLifecycleReceipt(row, profile, tableId, receipt?.marker_at))) fail("human lifecycle receipt binding differs");
+// This durable row commits atomically with the live marker. It has no FK to
+// poker_tables, so marker-gated WS deletion cannot remove the completion proof.
+async function readHumanLifecycleReceipt({ tx, row, tableId, marker = null }) {
+  const receipts = await tx.unsafe(`select batch_id::text, table_id::text, cutoff::text, marker_at::text,
+      compressed_sha256, transaction_ids_sha256, entry_ids_sha256
+    from public.chips_production_human_lifecycle_receipts where batch_id = $1::bigint;`, [row.batch_id]);
+  if (!receipts.length) return null;
+  const receipt = receipts[0];
+  if (receipts.length !== 1 || receipt.batch_id !== String(row.batch_id) || receipt.table_id !== tableId
+    || timestampToMicros(receipt.cutoff) !== timestampToMicros(row.cutoff)
+    || receipt.compressed_sha256 !== row.compressed_sha256
+    || receipt.transaction_ids_sha256 !== row.archived_transaction_ids_sha256
+    || receipt.entry_ids_sha256 !== row.archived_entry_ids_sha256
+    || timestampToMicros(receipt.marker_at) < timestampToMicros(row.pruned_at)
+    || Date.parse(receipt.marker_at) > Date.now()
+    || (marker != null && timestampToMicros(receipt.marker_at) !== timestampToMicros(marker))) fail("human lifecycle receipt binding differs");
   return receipt;
 }
 
-async function persistHumanLifecycleReceipt({ row, profile, tableId, marker, storageTarget, storageDeps }) {
-  const receipt = humanLifecycleReceipt(row, profile, tableId, marker);
-  const existing = await readHumanLifecycleReceipt({ row, profile, tableId, storageTarget, storageDeps });
-  if (existing) {
-    if (canonicalJson(existing) !== canonicalJson(receipt)) fail("human lifecycle receipt marker differs");
-    return 0;
-  }
-  const bytes = gzipSync(Buffer.from(`${JSON.stringify(receipt)}\n`), { level: 9, mtime: 0 });
-  const uploaded = await (storageDeps.uploadOrVerifyPrivateObject || uploadOrVerifyPrivateObject)({
-    storageTarget, objectPath: humanLifecycleReceiptPath(row), bytes, deps: storageDeps });
-  const verified = await readHumanLifecycleReceipt({ row, profile, tableId, storageTarget, storageDeps });
-  if (!verified || canonicalJson(verified) !== canonicalJson(receipt)) fail("human lifecycle receipt persistence is incomplete");
-  return uploaded.uploaded ? 1 : 0;
+export async function persistHumanLifecycleReceipt({ tx, row, tableId, marker }) {
+  const timestamp = value => typeof tx.typed === "function" ? tx.typed(value,25) : value;
+  if (await readHumanLifecycleReceipt({ tx, row, tableId, marker })) return 0;
+  const inserted = await tx.unsafe(`insert into public.chips_production_human_lifecycle_receipts
+    (batch_id, table_id, cutoff, marker_at, compressed_sha256, transaction_ids_sha256, entry_ids_sha256)
+    values ($1::bigint,$2::uuid,$3::timestamptz,$4::timestamptz,$5,$6,$7) returning batch_id;`,
+    [row.batch_id, tableId, timestamp(row.cutoff), timestamp(marker), row.compressed_sha256, row.archived_transaction_ids_sha256, row.archived_entry_ids_sha256]);
+  if (inserted.length !== 1 || !await readHumanLifecycleReceipt({ tx, row, tableId, marker })) fail("human lifecycle receipt persistence is incomplete");
+  return 1;
 }
 
-async function verifyAbsentHumanLifecycle({ tx, row, profile, tableId, cutoff, storageTarget, storageDeps }) {
+export async function verifyAbsentHumanLifecycle({ tx, row, tableId, cutoff }) {
   // Mirror the table-independent half of the SQL lifecycle gate; additionally
   // require exact GO and no remaining entries in the table's zero escrow.
   const history = await tx.unsafe(`select count(*)::text as invalid from public.chips_transaction_idempotency r
@@ -515,8 +498,8 @@ async function verifyAbsentHumanLifecycle({ tx, row, profile, tableId, cutoff, s
     from public.chips_accounts a where a.account_type = 'ESCROW' and a.system_key = $1 for update;`, [`POKER_TABLE:${tableId}`]);
   if (history.length !== 1 || history[0].invalid !== "0" || escrow.length !== 1 || escrow[0].status !== "active"
     || escrow[0].balance !== "0" || escrow[0].hot_entries !== "0") fail("absent human table history or escrow is incomplete");
-  const receipt = await readHumanLifecycleReceipt({ row, profile, tableId, storageTarget, storageDeps });
-  if (receipt) return { state: "already_pruned_table_absent", marker: receipt.marker_at, completionEvidence: "immutable_lifecycle_receipt" };
+  const receipt = await readHumanLifecycleReceipt({ tx, row, tableId });
+  if (receipt) return { state: "already_pruned_table_absent", marker: receipt.marker_at, completionEvidence: "immutable_database_lifecycle_receipt" };
   // E3 checked the exact historical canary marker before atomically activating
   // this immutable canary binding. It cannot prove completion of any other batch.
   const activation = await tx.unsafe(`select p.canary_batch_id::text, p.canary_confirmation, p.activated_at::text,
@@ -591,9 +574,13 @@ async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, 
     const bound = registry.filter(r => evidence.transactionIds.includes(r.transaction_id));
     if (bound.length !== evidence.transactionCount || bound.some(r => r.archive_batch_id !== String(batchId) || r.table_id !== tableId)
       || new Set(bound.map(r => r.transaction_id)).size !== evidence.transactionCount) fail("lifecycle retained registry binding differs");
-    if (marker.length === 0) return verifyAbsentHumanLifecycle({ tx, row, profile, tableId, cutoff: timestampValue, storageTarget, storageDeps });
+    if (marker.length === 0) return verifyAbsentHumanLifecycle({ tx, row, tableId, cutoff: timestampValue });
     await tx.unsafe("select public.chips_assert_closed_human_table_lifecycle_gate($1::uuid, $2::timestamptz, null);", [tableId, timestampValue]);
     const markerBefore = marker[0].human_retention_complete_at;
+    // Fail before mutation if the additive receipt migration is unavailable.
+    // A receipt without its marker cannot be produced by an atomic completion.
+    const priorReceipt = await readHumanLifecycleReceipt({ tx, row, tableId, marker: markerBefore });
+    if (priorReceipt && !markerBefore) fail("human lifecycle receipt has no committed live marker");
     if (!markerBefore) {
       if (!allowComplete) fail("closed-human lifecycle marker is missing; use separately authorized lifecycle-completion");
       await assertRetentionAdvisoryLock(tx, lockSession);
@@ -605,17 +592,16 @@ async function finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore, 
     const after = await tx.unsafe(markerQuery, [tableId]);
     if (after.length !== 1 || !after[0].human_retention_complete_at
       || (markerBefore && after[0].human_retention_complete_at !== markerBefore)) fail("lifecycle marker was not persisted or changed");
-    return { state: markerBefore ? "already_complete" : "completed", marker: after[0].human_retention_complete_at };
+    const receiptWrites = await persistHumanLifecycleReceipt({ tx, row, tableId, marker: after[0].human_retention_complete_at });
+    await assertRetentionAdvisoryLock(tx, lockSession);
+    return { state: markerBefore ? "already_complete" : "completed", marker: after[0].human_retention_complete_at, receiptWrites };
   });
-  await assertRetentionAdvisoryLock(sql, lockSession);
-  const receiptWrites = automaticContext && lifecycle.state !== "already_pruned_table_absent"
-    ? await persistHumanLifecycleReceipt({ row, profile, tableId, marker: lifecycle.marker, storageTarget, storageDeps }) : 0;
   await assertRetentionAdvisoryLock(sql, lockSession);
   return { ...lifecycle, maxTransactions: effectiveProductionCap(automaticContext), batchId: String(batchId), tableId, cutoff, dryRun: automaticContext ? "verified_completed_evidence" : "already_pruned",
     transactions: evidence.transactionCount, entries: evidence.entryCount, compressedSha256: row.compressed_sha256,
     transactionProofSha256: row.archived_transaction_ids_sha256, entryProofSha256: row.archived_entry_ids_sha256,
     pruneReceipt: { at: row.pruned_at, transactions: Number(row.pruned_transaction_count), entries: Number(row.pruned_entry_count) },
-    storageWrites: receiptWrites, databaseWrites: lifecycle.state === "completed" ? 1 : 0,
+    storageWrites: 0, databaseWrites: (lifecycle.state === "completed" ? 1 : 0) + (lifecycle.receiptWrites || 0),
     recoveryArchiveSha256: durable.recoveryArchive.sha256, recoveryManifestSha256: durable.recoveryManifest.sha256 };
 }
 
@@ -1031,6 +1017,8 @@ async function runProductionArchiveCycle({
       storageDeps.automaticContext = automaticContext;
       pruneStore = deps.pruneStore || createPruneStore(sql, storageTarget.target, automaticContext);
     }
+    // Reject a missing additive schema before any new export, GO or pruning.
+    if (policy === "closed-human-30d") await sql.unsafe("select batch_id from public.chips_production_human_lifecycle_receipts limit 0;");
     const ownRows = await sql.unsafe(PRODUCTION_OWN_BATCHES_SQL, [profile.projectRef, sourcePolicyId]);
     const finalize = (row, extra = {}) => finalizeProductionHumanLifecycle({ sql, lockSession, pruneStore,
       storageTarget, verifyBucket, storageDeps, env: moduleEnv, profile, row, batchId: row.batch_id, tempRoot, deps, automaticContext, ...extra });
@@ -1075,7 +1063,7 @@ async function runProductionArchiveCycle({
       });
       if (policy === "closed-human-30d" && (mode === "canary" || mode === "automatic")) {
         const lifecycle = await finalize(cycle.active);
-        return { ...resumed, mode, policy, policyId: sourcePolicyId, lifecycle, storageWrites: (resumed.storageWrites || 0) + lifecycle.storageWrites, databaseWrites: resumed.databaseWrites + lifecycle.databaseWrites };
+        return { ...resumed, mode, policy, policyId: sourcePolicyId, lifecycle, storageWrites: resumed.storageWrites || 0, databaseWrites: resumed.databaseWrites + lifecycle.databaseWrites };
       }
       return { state: resumed.state, mode, policy, policyId: sourcePolicyId, ...resumed };
     }
@@ -1154,8 +1142,8 @@ async function runProductionArchiveCycle({
       compressedSha256: row.compressed_sha256,
       recoveryArchiveSha256: durable.recoveryArchive.sha256,
       recoveryManifestSha256: durable.recoveryManifest.sha256,
-      storageWrites: 2 + (completedLifecycle?.storageWrites || 0),
-      databaseWrites: 2,
+      storageWrites: 2,
+      databaseWrites: 2 + (completedLifecycle?.databaseWrites || 0),
       ...(completedLifecycle ? { completedLifecycle } : {}),
     };
     if (mode === "prepare") return prepared;
@@ -1183,7 +1171,7 @@ async function runProductionArchiveCycle({
       },
     });
     const lifecycle = policy === "closed-human-30d" ? await finalize(row) : null;
-    return { ...prepared, state: executed.state, receipt: executed.state, storageWrites: prepared.storageWrites + (lifecycle?.storageWrites || 0), databaseWrites: 3 + (lifecycle?.databaseWrites || 0), ...(lifecycle ? { lifecycle } : {}) };
+    return { ...prepared, state: executed.state, receipt: executed.state, storageWrites: prepared.storageWrites, databaseWrites: 3 + (completedLifecycle?.databaseWrites || 0) + (lifecycle?.databaseWrites || 0), ...(lifecycle ? { lifecycle } : {}) };
   } finally {
     if (lockSession) await releaseRetentionAdvisoryLock(sql, lockSession);
     if (ownsSql) await sql.end({ timeout: 5 });

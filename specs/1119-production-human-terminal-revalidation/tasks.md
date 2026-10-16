@@ -1,16 +1,15 @@
 # #1119 tasks
 
-- [x] T001 Read current issue/main/instructions, trace P9231 through latestCompleted/dry-run/SQL guard; identify absent durable lifecycle evidence for non-canary history.
-- [x] T002 Document safety contract and narrow E3-canary legacy evidence, new immutable completion receipt, unchanged manual/Stage/SQL boundaries; Constitution Check fundamental tests only.
-- [x] T003 Extend existing Production lifecycle tests; observe regression before implementation.
-- [x] T004 Implement completed read-only evidence verifier and strict lifecycle receipt publication/verification in existing Production module.
-- [x] T005 Prove legal cleanup permits next candidate and incomplete/ambiguous evidence fails closed; preserve existing manual/other-policy regressions.
-- [x] T006 Run appropriate existing suites/guards and CI, self-review/simplify, document breaking/financial impact and correct #1118 recommendation; open Draft PR.
-- [ ] T007 OWNER GATE: review/merge by owner; separate Production authorization and natural post-fix closed-human observation with financial/recovery proof. No task implementation authorizes Production mutation or dispatch. Keep #891/#992/#1119 open.
+- [x] T001 Trace P9231 through latestCompleted/dry-run/live SQL; retain exact financial evidence and historical E3 canary proof.
+- [x] T002 Review findings: establish atomic DB receipt/marker contract; explain why cross-service publication is insufficient; Constitution Check fundamental tests only.
+- [x] T003 Reproduce missing manual CANARY evidence before correction; extend existing fundamental orchestration tests without deleting valuable financial coverage.
+- [x] T004 Replace unmerged Storage completion receipts with typed immutable DB receipts; all completion paths publish atomically; absent terminal verification remains fail-closed.
+- [x] T005 Verify new Production-only migration under non-superuser postgres, actual terminal SQL-backed path, concurrent WS cleanup, immutable evidence and unchanged finances/registry.
+- [x] T006 Run relevant tests/guards/CI and self-review; update existing Draft PR #1120 with exact SHA, new migration hash and breaking impact; #1118 closure recommendation remains withdrawn.
+- [ ] T007 OWNER GATES: code review/merge by owner; separate exact new-migration authorization/application before changed human workflow; separate rollout/natural Production verification. Keep #891/#992/#1119 open. No manual destructive replay or E3 reapplication.
 
-## Implementation validation
+## Validation record
 
-- Existing automation regression was RED with P9231 before the fix; focused suite now PASS, including receipt corruption/missing recovery/history/GO/hot rows, legacy activation evidence, incomplete live lifecycle and publication interruption. The next real exporter selector is reached without replaying the old archive. Existing CANARY/new pruning and other policy tests remain intact.
-- Existing full test runner: 147 suites PASS. PostgreSQL 17 dedicated disposable cluster: full chips migration suite PASS, including actual marker completion and unchanged WS cleanup, incomplete-table protection and unchanged batch/registry/account state. Minimal Supabase auth/storage bootstrap matches existing CI.
-- Syntax: 226 files PASS; CSP: 55 documents PASS; lifecycle/badge/XP guards PASS; migration inventory: 111 files / 8 Production replacements PASS; diff whitespace PASS. GitHub checks are recorded on the Draft PR rather than assumed from local results.
-- No Production read/write, dispatch, retry, migration application, configuration change, merge or deployment. E3 SHA remains byte-identical.
+Previous revision: 147 suites and PostgreSQL16/17 PASS, but review found the post-commit publication gap and missing manual receipt. Those results do not validate the corrected atomic design. Current manual regression reproduced RED (missing receipt). New test/CI results are recorded on the updated Draft PR after completion. No Production operation is permitted during implementation.
+
+Corrected design validation: focused automation suite PASS (manual non-canary completion → legal cleanup → automatic, locked insertion, receipt failure rolls marker back, missing schema stops before export/prune). Dedicated PostgreSQL17 full suite PASS: non-superuser DDL with unchanged schema/membership, actual receipt helper and terminal verifier, competing unchanged WS cleanup skips locked row, real marker rollback on rejected receipt, idempotence, forced RLS/ACL/immutability and byte-equivalent ledger/registry/batch/account state. Existing full runner 147 suites PASS; syntax226/CSP55/inventory111+9 and lifecycle/badge/XP guards PASS. Applicable exact-head CI is recorded on Draft PR #1120.
