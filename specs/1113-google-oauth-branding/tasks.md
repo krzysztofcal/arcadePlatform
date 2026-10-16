@@ -9,7 +9,7 @@
 - [x] T005b Open blue Information and summary icon beside Branding; real Verify branding submitted once22:10:08.811Z, positive verification checked. Earlier main-form-only diagnosis superseded. No rejection/workaround.
 - [x] T006 Publish verified approved branding once22:11:45.695Z; readback verified/shown-to-users and VERIFIED/COMPLIANT. Existing client/scopes/domains/provider/Stage preserved.
 - [x] T007a Desktop actual normal Google button + existing-account re-confirmation: name/logo visible, same UUID twice, clean callback, profileHTTP200, reload PASS. No grant revocation/new account.
-- [ ] T007b Owner physical-phone display/login/return/reload smoke; no emulation substituted. Current password regression remains NOT TESTED; settle/report it explicitly before final acceptance.
+- [ ] T007b Owner physical-phone display/login/return/reload smoke; no emulation substituted. Fresh password smoke was not repeated for this branding-only change; retain unchanged contract/#1100 acceptance and disclose NOT TESTED rather than adding an unsupported PASS or an unrequested new gate.
 - [ ] T008 Keep Draft#1121 updated with actual verification/publication/desktop evidence; record owner phone result when supplied, then request final acceptance. No automatic issue closure/merge/deploy.
 
 Only the owner-approved Google Branding operations above are authorized after asset validation. No implementation code, test framework, new dependency, migration, Google client, paid service, deployment or infrastructure is authorized. Existing finance/WS/Stage remain untouched.
