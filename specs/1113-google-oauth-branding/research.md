@@ -35,3 +35,11 @@ Private redacted diagnostic files remain under /tmp/1113-branding-audit, outside
 - https://supabase.com/docs/guides/platform/manage-your-usage/custom-domains — current$0.0137/hour (~$10/month) optional add-on, not selected.
 
 Supabase changelog index fetch was unavailable; no Supabase feature, SDK, API contract or configuration was modified based on an unverified update. Current official Google-provider/Management API documentation and real GET behavior were used.
+
+## Owner GO / attachment preflight — 2026-10-16
+
+Owner approved name **Arcade Hub by KCSWH**, the exact supplied KCSWH artwork, preserving appearance/proportions/transparency, unchanged existing URLs/domains/client/callback/scopes, Verify Branding, and Publish only after PASS. Real device/auth/UUID verification follows successful publication. No alternate logo, OAuth client, paid domain, DNS or application change is allowed.
+
+PNG header and file-byte inspection:1254x1254, bitdepth8/color type6(RGBA with alpha),1,389,582bytes, SHA-2563173da777671b9962732e8808afd02d767a0ce43c70a954181c280415076cd29. Thus it is not the described120x120 input and exceeds the1MB maximum confirmed in the Google Branding UI and official [Branding requirements](https://support.google.com/cloud/answer/15549049?hl=en). A memory-only lossless IDAT recompression assessment did not reduce it below the limit; no derivative file was written and original bytes were untouched. No resampling or visual modification was attempted.
+
+**STOP / input blocked:** requested upload-compliant same-logo input (or explicit deterministic resizing instruction) before configuration changes. No app-name save, logo upload, verification submission or publication occurred; this is not a rejection by Google. Mobile/desktop branded consent and auth/UUID regression remain NOT TESTED. Existing owner GO is retained; no new general configuration authorization is required after resolving the asset constraint.

@@ -1,3 +1,5 @@
+> **Owner decision:** name + KCSWH logo are authorized together, Verify Branding is authorized, Publish is authorized only after PASS/Ready to publish. Do not fall back to a logo-free publication. Input attachment exceeds the Google size limit; stop before config changes until a compliant asset is available.
+
 # #1113 minimal implementation plan — review only
 
 ## Constitution / scope
@@ -9,7 +11,7 @@ KISS/YAGNI: existing Google project, client, Supabase provider, public legal pag
 | Setting | Observed | Proposal |
 |---|---|---|
 | App name | Arcade Hub | Arcade Hub by KCSWH |
-| Logo | None | Keep absent for smallest first submission; optional owner-approved existing-mark PNG/JPG/BMP, square120x120, <=1MB, only if approved |
+| Logo | None | Owner-supplied KCSWH PNG is mandatory; preserve its appearance/proportions/alpha. Upload only a compliant version of the same artwork. |
 | Support email | Existing eligible owner address | Preserve; do not invent/change it to an arbitrary mailbox |
 | Developer contact | contact@kcswh.pl | Preserve |
 | Homepage | https://play.kcswh.pl/ | Preserve initially; review Google's exact identity/homepage findings before publishing |
@@ -19,7 +21,7 @@ KISS/YAGNI: existing Google project, client, Supabase provider, public legal pag
 | Audience / scopes / Web client | External/In production; basic3; existing exact origin/callback | No changes |
 
 1. Re-read exact Production project/client and proposed fields immediately before editing; take only redacted configuration baseline. Do not export secrets.
-2. After owner GO, change only the approved name (and optional approved logo), save Draft Branding. No client rotation, Supabase or DNS operation.
+2. After owner GO, change only the approved name (and approved KCSWH logo), save Draft Branding. No client rotation, Supabase or DNS operation.
 3. If covered by GO, run **Verify Branding**, inspect the complete result. No clicks were performed in this audit. Google may flag app-name/homepage consistency or hosted callback-domain ownership. Table absence of blockers has not been established because verification has not been submitted. If findings require extra edits, STOP with concrete proposal; do not remove the working callback/domain or claim ownership of supabase.co.
 4. Only after verified/Ready to publish and owner authorization for publication, **Publish branding**. Audience already In production is not equivalent to published verified branding. Google documents a7-day valid verification result; publish in the approved window or re-review as required, never infer approval.
 5. After propagation and separately authorized nonfinancial smoke with an owner-selected consenting existing account: capture sanitized name/logo/domain display on phone and desktop, Google basic permissions, callback to account.html, UUID equality on repeat login, session/reload/logout, password regression. Do not revoke permissions, create/delete users or perform financial/gameplay actions merely to force a new screen; agree any account-level consent reset separately if needed. Until then all new #1113 device/login checks are NOT TESTED.
