@@ -1,3 +1,5 @@
+> **Current verified status — 2026-10-16 17:45 UTC:** T017–T026 PASS in the approved four-class scope. E3 is already committed/post-commit-verified; do not apply it again. Production automation and marker-gated WS cleanup are enabled by prior owner authorization. #1119 is resolved in merged #1120 and migration `20261016120000` (SHA-256 `9d5c100c6f81273bc009a412f67b027549a1036c1a70e83e4fd0b1c5f07554bf`), committed once at16:46:15.202Z. Natural human run [38939398243](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38939398243) on main `9f8b99c5489945da581a4b66cd11272b13e0ed36` passed after legal table removal, with no replay. Earlier BLOCKED/OFF/pending/withdrawn recommendations below are dated historical records, superseded by this status and the final closure review in research.md. Recommend owner-reviewed closure of #891/#992; do not close or merge automatically.
+
 # Implementation Plan: Production retention, two gated PRs
 
 **Date**: 2026-10-14 (PR B refresh; PR A design retained below) · **Feature**: `004-production-retention`
@@ -359,3 +361,7 @@ Installed units are loaded but timer inactive/disabled. After review and owner m
 ## Current operational outcome — 2026-10-16
 
 T023 post-commit-verified remains final; never reapply E3. T024 deployed/enabled by owner; T025 natural four-class observation and independent financial/archive verification PASS; T026 final scope/isolation review PASS, detailed evidence in research.md. Recommend #891 closure after review. #992 subsequently received separate owner GO; override removed and first natural bounded cleanup/post-enable financial and Storage verification PASS (research.md). No further operational change is authorized by this documentation. This documentation PR changes no code or Production configuration.
+
+## Final implementation/operational assessment — 2026-10-16
+
+Implementation and separately authorized rollout are complete for the four-class contract, including #1119's atomic human completion receipt. Current main is9f8b99c5489945da581a4b66cd11272b13e0ed36. This documentation update changes no runtime, migration, SQL hash, scheduler, eligibility or financial contract. T026 re-review confirms scope/Stage isolation, private immutable recovery, exact batch/identity/GO, manual2/authorized-automatic5000 caps and bounded dispatch remain. Natural escrow retirement after #992 is now actually observed, superseding its earlier pending observation. Future human receipt insertion is covered by merged PostgreSQL tests, not claimed as a new Production event. Closure recommendation is tied to the evidence matrix in research.md, not a long-term capacity guarantee or #889 scope expansion.

@@ -1,7 +1,7 @@
 # Feature Specification: Production ledger retention rollout (#891)
 
 **Feature**: `004-production-retention` · **Branch**: `agent/891-production-retention-plan`
-**Created**: 2026-09-13 · **Status**: Planning complete; implementation and all Production mutations pending.
+**Created**: 2026-09-13 · **Status**: Production rollout and T025/T026 verified; owner closure review pending (2026-10-16). Historical design scenarios below are retained; current operational evidence is in research.md.
 **Source**: https://github.com/krzysztofcal/arcadePlatform/issues/891
 **Baseline main**: `f7983d78333b51a393c0e9a6d3dfe48ce1224c74`
 

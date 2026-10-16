@@ -1,3 +1,5 @@
+> **Current verified status — 2026-10-16 17:45 UTC:** T017–T026 PASS in the approved four-class scope. E3 is already committed/post-commit-verified; do not apply it again. Production automation and marker-gated WS cleanup are enabled by prior owner authorization. #1119 is resolved in merged #1120 and migration `20261016120000` (SHA-256 `9d5c100c6f81273bc009a412f67b027549a1036c1a70e83e4fd0b1c5f07554bf`), committed once at16:46:15.202Z. Natural human run [38939398243](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38939398243) on main `9f8b99c5489945da581a4b66cd11272b13e0ed36` passed after legal table removal, with no replay. Earlier BLOCKED/OFF/pending/withdrawn recommendations below are dated historical records, superseded by this status and the final closure review in research.md. Recommend owner-reviewed closure of #891/#992; do not close or merge automatically.
+
 # Tasks: Production retention (#891)
 
 **Input**: spec.md, research.md, migration-inventory.md, plan.md, data-model.md, quickstart.md in this directory.
@@ -144,3 +146,14 @@ T024/T024-UPDATE completed under owner authorization: exact owner-PAT dispatcher
 ## #992 follow-up operational outcome — 2026-10-16
 
 Separate owner GO was received and operator root restored cleanup UNSET/default7d with one restart. First natural sweep deleted exactly11marked tables (1human/10bot); all unmarked tables protected, accounting/registry/receipts unchanged,43StorageGETs/recovery PASS. This supersedes prior pending #992 enable gates without changing the T023–T026 scope. Low VPS disk capacity remains a separate operational limitation; see research.md. No financial evidence was discarded and no destructive retry was performed.
+
+
+### Follow-up #1119 — release acceptance remains open
+
+- [x] Resolve completed-human revalidation after marker-gated WS table removal; see specs/1119-production-human-terminal-revalidation/tasks.md.
+- [x] After owner code review/merge and separate Production authorization, observe the next natural human slot and independently reconcile financial/recovery evidence. Do not replay canary or dispatch manually for verification.
+- [x] Correct the superseded Draft PR #1118 closure recommendation. Historical T025/T026 observations do not authorize closing #891/#992 while #1119 remains unverified in Production.
+
+## Final closure review — 2026-10-16
+
+T025/T026 remain complete after the #1119 repair, exact owner-authorized migration and natural post-fix observation. Fresh full archive/recovery/registry/financial and cleanup eligibility checks PASS; see research.md. No new operational authorization is granted. New automatic human batch receipt insertion was not observed because the post-fix slot had no candidate; the merged fundamental PostgreSQL tests cover that atomic path. Close only after owner accepts the documented scope and limitation.
