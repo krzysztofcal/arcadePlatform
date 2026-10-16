@@ -140,3 +140,7 @@ T023 completion evidence: E3 committed once 2026-10-15T16:00:54.453Z; original r
 ## Current rollout verification — 2026-10-16
 
 T024/T024-UPDATE completed under owner authorization: exact owner-PAT dispatcher installed, token provisioned root:root0600 without disclosure, repository switch1/environment override absent, local switch1, sole Production timer enabled at2026-10-15T19:11:30Z; Stage unchanged. T025/T026 operational evidence and remaining #992 gate are recorded in research.md. This completion does not authorize WS cleanup. Historical OFF/pending statements above describe their dated rollout stages.
+
+## #992 follow-up operational outcome — 2026-10-16
+
+Separate owner GO was received and operator root restored cleanup UNSET/default7d with one restart. First natural sweep deleted exactly11marked tables (1human/10bot); all unmarked tables protected, accounting/registry/receipts unchanged,43StorageGETs/recovery PASS. This supersedes prior pending #992 enable gates without changing the T023–T026 scope. Low VPS disk capacity remains a separate operational limitation; see research.md. No financial evidence was discarded and no destructive retry was performed.
