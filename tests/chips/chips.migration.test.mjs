@@ -516,7 +516,7 @@ async function assertProductionE3Activation(sql, fixtureSql) {
     await sql.unsafe("set session_replication_role='replica'; "+restore+"; set session_replication_role='origin';");
   }
   const accountingBefore=await sql.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id");
-  await assertProductionE3NonSuperuserDelegation(sql, e3);
+  await assertProductionE3NonSuperuserDelegation(sql, e3, fixtureSql("20261016120000_chips_ledger_production_human_lifecycle_receipts.sql"));
   assert.deepEqual(Array.from(await sql.unsafe("select enabled,max_transactions from public.chips_production_retention_control")), [{enabled:true,max_transactions:5000}]);
   assert.deepEqual(await sql.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id"),accountingBefore);
   await sql.begin(async tx => {
@@ -577,6 +577,75 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false,"E3 replay must not reactivate");
 }
 
+// #1119: real Production-equivalent marker and the unchanged WS cleanup SQL.
+// The orchestration/immutable Storage cases live in the existing automation suite.
+async function assertProductionHumanCompletedCleanup(sql, observer) {
+  const { persistHumanLifecycleReceipt, verifyAbsentHumanLifecycle } = await import("../../scripts/ops/chips-ledger-production-automation.mjs");
+  const tableId = "7f3d73e4-36c5-4b66-afe6-d1d41bea13e2";
+  const [{updated_at:originalAge}] = await sql.unsafe("select updated_at::text from public.poker_tables where id=$1",[tableId]);
+  await observer.unsafe("update public.poker_tables set updated_at=now()-interval '8 days' where id=$1",[tableId]);
+  const { createClosedTableCleanup } = await import("../../ws-server/poker/persistence/closed-table-cleanup.mjs");
+  const rollback = new Error("human-completed-cleanup-fixture-rollback");
+  try {
+    await sql.begin(async tx => {
+      const tableId = "7f3d73e4-36c5-4b66-afe6-d1d41bea13e2";
+      const incomplete = "00000000-0000-4000-8000-00000000cb19";
+
+      await tx.unsafe("insert into public.poker_tables(id,status,has_human_participant,updated_at) values($1,'CLOSED',true,now()-interval '8 days')",[incomplete]);
+      await tx.unsafe("insert into public.poker_state(table_id,state) values($1,'{\"phase\":\"HAND_DONE\",\"handId\":\"\"}'::jsonb)",[incomplete]);
+      await tx.unsafe("insert into public.chips_accounts(account_type,system_key,status,balance,next_entry_seq) values('ESCROW',$1,'active',0,1)",["POKER_TABLE:"+incomplete]);
+      const accountingBefore=await tx.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id");
+      const ledgerBefore=await tx.unsafe("select to_jsonb(t) data from public.chips_transactions t order by id");
+      const entriesBefore=await tx.unsafe("select to_jsonb(e) data from public.chips_entries e order by id");
+      const batchBefore=await tx.unsafe("select to_jsonb(b) as data from public.chips_ledger_archive_batches b where batch_id=4");
+      const registryBefore=await tx.unsafe("select to_jsonb(r) as data from public.chips_transaction_idempotency r where archive_batch_id=4 order by transaction_id");
+      const markerBefore=(await tx.unsafe("select human_retention_complete_at::text as marker from public.poker_tables where id=$1",[tableId]))[0].marker;
+      assert.ok(markerBefore);
+      const completion=await tx.unsafe("select public.chips_complete_closed_human_table_retention($1,$2::timestamptz) as result",[tableId,sql.typed("2026-09-14T18:39:21.779Z",25)]);
+      assert.equal(completion[0].result.state,"human_retention_complete");
+      const [row]=await tx.unsafe("select *, cutoff::text,pruned_at::text from public.chips_ledger_archive_batches where batch_id=4");
+      await assert.rejects(()=>tx.savepoint(async sp=>{
+        await sp.unsafe("select public.chips_complete_closed_human_table_retention($1,$2::timestamptz)",[incomplete,sp.typed(row.cutoff,25)]);
+        const [{marker:newMarker}]=await sp.unsafe("select human_retention_complete_at::text marker from public.poker_tables where id=$1",[incomplete]);
+        assert.ok(newMarker,"real new marker is visible only inside the receipt transaction");
+        await persistHumanLifecycleReceipt({tx:sp,row,tableId:incomplete,marker:newMarker});
+      }),/retained binding mismatch/);
+      assert.equal((await tx.unsafe("select human_retention_complete_at marker from public.poker_tables where id=$1",[incomplete]))[0].marker,null,"receipt rejection rolls the new marker back");
+      assert.equal((await tx.unsafe("select count(*)::int n from public.chips_production_human_lifecycle_receipts"))[0].n,0);
+      const marker=(await tx.unsafe("select human_retention_complete_at::text marker from public.poker_tables where id=$1 for update",[tableId]))[0].marker;
+      assert.equal(await persistHumanLifecycleReceipt({tx,row,tableId,marker}),1);
+      assert.equal(await persistHumanLifecycleReceipt({tx,row,tableId,marker}),0,"receipt insertion is idempotent");
+      for(const query of ["update public.chips_production_human_lifecycle_receipts set marker_at=now()", "delete from public.chips_production_human_lifecycle_receipts"]) {
+        const rejected=await tx.unsafe(query);
+        assert.equal(rejected.count,0,"forced RLS denies owner UPDATE/DELETE without a mutation policy");
+      }
+      await assert.rejects(()=>tx.savepoint(sp=>sp.unsafe("truncate public.chips_production_human_lifecycle_receipts")),/immutable/);
+      const denied=await tx.unsafe("select has_table_privilege('anon','public.chips_production_human_lifecycle_receipts','SELECT') s,has_table_privilege('authenticated','public.chips_production_human_lifecycle_receipts','INSERT') i,has_table_privilege('service_role','public.chips_production_human_lifecycle_receipts','INSERT') w");
+      assert.deepEqual(denied.map(r=>[r.s,r.i,r.w]),[[false,false,false]]);
+      const competingCleanup=createClosedTableCleanup({env:{SUPABASE_URL:"https://otbqfijerkieoxwpxjnm.supabase.co"},beginSql:fn=>observer.begin(fn)});
+      const competing=await competingCleanup.sweep({claimTableIds:ids=>({claimed:ids.filter(id=>id===tableId),skipped:ids.filter(id=>id!==tableId)})});
+      assert.equal(competing.ok,true);assert.equal(competing.claimed,1);assert.equal(competing.deleted,0,"WS SKIP LOCKED cannot delete before receipt transaction commits");
+      const cleanup=createClosedTableCleanup({env:{SUPABASE_URL:"https://otbqfijerkieoxwpxjnm.supabase.co"},beginSql:fn=>fn(tx)});
+      const swept=await cleanup.sweep({claimTableIds:ids=>({claimed:ids.filter(id=>id===tableId),skipped:ids.filter(id=>id!==tableId)})});
+      assert.equal(swept.deleted,1);assert.equal(swept.ok,true);
+      const terminal=await verifyAbsentHumanLifecycle({tx,row,tableId,cutoff:sql.typed(row.cutoff,25)});
+      assert.equal(terminal.state,"already_pruned_table_absent");
+      assert.equal(terminal.completionEvidence,"immutable_database_lifecycle_receipt","execute actual new SQL-backed terminal path, not legacy anchor");
+      assert.equal((await tx.unsafe("select count(*)::int n from public.chips_transactions where id in (select transaction_id from public.chips_transaction_idempotency where archive_batch_id=4)"))[0].n,0);
+      assert.equal((await tx.unsafe("select count(*)::int n from public.poker_tables where id=$1",[incomplete]))[0].n,1,"unmarked table must remain protected");
+      await assert.rejects(()=>tx.savepoint(sp=>sp.unsafe("select public.chips_assert_closed_human_table_lifecycle_gate($1,$2::timestamptz,null)",[tableId,sql.typed("2026-09-14T18:39:21.779Z",25)])),e=>e.code==="P9231","old live-table gate rejects legally removed completed history");
+      assert.deepEqual(await tx.unsafe("select to_jsonb(b) as data from public.chips_ledger_archive_batches b where batch_id=4"),batchBefore);
+      assert.deepEqual(await tx.unsafe("select to_jsonb(r) as data from public.chips_transaction_idempotency r where archive_batch_id=4 order by transaction_id"),registryBefore);
+      assert.deepEqual(await tx.unsafe("select id,balance::text,next_entry_seq::text from public.chips_accounts order by id"),accountingBefore);
+      assert.deepEqual(await tx.unsafe("select to_jsonb(t) data from public.chips_transactions t order by id"),ledgerBefore);
+      assert.deepEqual(await tx.unsafe("select to_jsonb(e) data from public.chips_entries e order by id"),entriesBefore);
+      throw rollback;
+    });
+  } catch(error) { if(error!==rollback)throw error; }
+  finally { await observer.unsafe("update public.poker_tables set updated_at=$2::timestamptz where id=$1",[tableId,observer.typed(originalAge,25)]); }
+  assert.equal((await sql.unsafe("select count(*)::int n from public.chips_production_human_lifecycle_receipts"))[0].n,0,"rollback leaves no completion receipt");
+}
+
 const disposableClusterConfirmation = "I_CONFIRM_THIS_CLUSTER_IS_DEDICATED_AND_DISPOSABLE";
 async function assertDisposableRoleFixtureCluster(sql, env = process.env) {
   const target = new URL(dbUrl);
@@ -593,7 +662,7 @@ async function assertDisposableRoleFixtureCluster(sql, env = process.env) {
 }
 
 // Only the disposable local PG16+ service is allowed to change fixture roles.
-async function assertProductionE3NonSuperuserDelegation(sql, e3) {
+async function assertProductionE3NonSuperuserDelegation(sql, e3, receiptSql) {
   await assertDisposableRoleFixtureCluster(sql);
   const password = crypto.randomBytes(24).toString("hex");
   await sql.unsafe(`create role chips_e3_fixture_admin login superuser password '${password}'`);
@@ -627,6 +696,10 @@ async function assertProductionE3NonSuperuserDelegation(sql, e3) {
     await admin.unsafe("alter role postgres rename to chips_e3_fixture_bootstrap"); renamed = true;
     await admin.unsafe(`create role postgres login nosuperuser inherit password '${password}'`); created = true;
     await moveFixtureObjects("chips_e3_fixture_bootstrap", "postgres");
+    // Renaming the bootstrap role preserves its old API ACL OID. Copy that
+    // existing Production owner access to the temporary non-superuser identity.
+    const ownerApiGrants=await admin.unsafe("select format('grant execute on function %s to postgres',p.oid::regprocedure) command from pg_proc p where p.pronamespace='public'::regnamespace and exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.grantee='chips_e3_fixture_bootstrap'::regrole and a.privilege_type='EXECUTE')");
+    for(const row of ownerApiGrants)await admin.unsafe(row.command);
     await admin.unsafe("grant execute on function pg_catalog.pg_control_system() to postgres");
     await admin.unsafe("grant chips_ledger_archive_pruner to postgres with admin true,inherit false,set false");
     await admin.unsafe("revoke create on schema public from chips_ledger_archive_pruner");
@@ -659,6 +732,12 @@ async function assertProductionE3NonSuperuserDelegation(sql, e3) {
     assert.deepEqual(await permissions(), baseline, "success preserves original grantor and all membership options");
     assert.equal((await owner.unsafe("select pg_has_role('postgres','chips_ledger_archive_pruner','SET') allowed"))[0].allowed, false);
     assert.deepEqual(Array.from(await owner.unsafe("select enabled,max_transactions from chips_production_retention_control")), [{enabled:true,max_transactions:5000}]);
+    await assert.rejects(()=>owner.unsafe(receiptSql),/exact owner confirmation/);
+    await owner.unsafe("rollback");
+    await owner.unsafe("set chips.production_lifecycle_receipts_confirmation='INSTALL PRODUCTION HUMAN LIFECYCLE RECEIPTS otbqfijerkieoxwpxjnm'");
+    await owner.unsafe(receiptSql);
+    assert.deepEqual(await permissions(),baseline,"additive receipts need no CREATE/INHERIT/SET delegation");
+    await assertProductionHumanCompletedCleanup(owner,admin);
   } finally {
     await owner.end({timeout:5});
     if (created) {

@@ -1134,6 +1134,14 @@
       "file": "20261004222426_poker_gift_purchases_production_contract.sql",
       "purpose": "#1042 empty receipt schema; separate owner GO only",
       "sha256": "8f8a3bd3c86cf38aaddc4fbddafc02e275640ae3b260558046ef5707dab72415"
+    },
+    {
+      "file": "20261016120000_chips_ledger_production_human_lifecycle_receipts.sql",
+      "purpose": "#1119 owner-gated empty immutable completion receipts; atomic with marker; no backfill/activation/pruning",
+      "sha256": "9d5c100c6f81273bc009a412f67b027549a1036c1a70e83e4fd0b1c5f07554bf",
+      "prerequisites": [
+        "20260914092000_chips_ledger_production_retention_activation.sql"
+      ]
     }
   ],
   "provenance_rules": [
