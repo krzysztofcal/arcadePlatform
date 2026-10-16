@@ -1,3 +1,5 @@
+> **Current verified status — 2026-10-16 17:45 UTC:** T017–T026 PASS in the approved four-class scope. E3 is already committed/post-commit-verified; do not apply it again. Production automation and marker-gated WS cleanup are enabled by prior owner authorization. #1119 is resolved in merged #1120 and migration `20261016120000` (SHA-256 `9d5c100c6f81273bc009a412f67b027549a1036c1a70e83e4fd0b1c5f07554bf`), committed once at16:46:15.202Z. Natural human run [38939398243](https://github.com/krzysztofcal/arcadePlatform/actions/runs/38939398243) on main `9f8b99c5489945da581a4b66cd11272b13e0ed36` passed after legal table removal, with no replay. Earlier BLOCKED/OFF/pending/withdrawn recommendations below are dated historical records, superseded by this status and the final closure review in research.md. Recommend owner-reviewed closure of #891/#992; do not close or merge automatically.
+
 # Tasks: Production retention (#891)
 
 **Input**: spec.md, research.md, migration-inventory.md, plan.md, data-model.md, quickstart.md in this directory.
@@ -54,9 +56,9 @@ These are later operational tasks, not implicit implementation permissions. Sepa
 ## Phase 6 — owner-gated activation, observation and handoff (US3)
 
 - [x] T023 [US3] OWNER GATE — after owner review/merge, refresh canary/runtime/identity evidence and separately authorize/apply exact E3. Verify own history, Production policies enabled and globalcap5000; keep GitHub workflow switch0 while confirming SQL state. Retain cap2 for manual null-policy API. Record exact SHA/hash/receipts. Dependency: T022 and explicit authorization; changed runtime or stale proof blocks.
-- [ ] T024 [US3] OWNER GATE — configure protected `production-ledger` credentials, repository-owner `krzysztofcal` and a separate Production fine-grained PAT; separately authorize installation of T021 units/script and switch `CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED=1`. Verify Production timer is sole owner, Stage timer unchanged, no native Production schedule and PostgreSQL session lock/global workflow concurrency shared across modes. Never publish secret values. Dependency: T023 plus explicit operational authorization.
-- [ ] T025 [US3] Observe normal scheduled invocation of each of the four classes, capture Actions run/SHA/project/system/one-batch bounds and complete post-check; no-candidate confirms scheduling only, destructive proof comes from canary. Verify independent wallet/accounting state, expected hot-row/account deltas, durable recovery and no unexpected TABLE errors. Record kill-switch procedure and remaining capacity horizon in `research.md`/`quickstart.md`; do not claim bounded all-ledger growth (#889 broader classes remain out of scope). Dependency: T024. No agent broad authenticated smoke; owner performs relevant runtime scenario.
-- [ ] T026 [US3] Final own review: compare implementation to spec FR001–012/SC001–005 and inventory, remove unused extraction/config/tests, confirm only explicitly planned files changed, no legacy Production API/history repair/cap bypass/Stage credential leakage; record check results, final runtime SHA/HEAD and owner runtime evidence. State pending verification honestly and do not merge. Dependency: T025 for rollout completion; implementation-only handoff may occur at T014/T022 with later owner-gated tasks unchecked.
+- [x] T024 [US3] OWNER GATE — configure protected `production-ledger` credentials, repository-owner `krzysztofcal` and a separate Production fine-grained PAT; separately authorize installation of T021 units/script and switch `CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED=1`. Verify Production timer is sole owner, Stage timer unchanged, no native Production schedule and PostgreSQL session lock/global workflow concurrency shared across modes. Never publish secret values. Dependency: T023 plus explicit operational authorization.
+- [x] T025 [US3] Observe normal scheduled invocation of each of the four classes, capture Actions run/SHA/project/system/one-batch bounds and complete post-check; no-candidate confirms scheduling only, destructive proof comes from canary. Verify independent wallet/accounting state, expected hot-row/account deltas, durable recovery and no unexpected TABLE errors. Record kill-switch procedure and remaining capacity horizon in `research.md`/`quickstart.md`; do not claim bounded all-ledger growth (#889 broader classes remain out of scope). Dependency: T024. No agent broad authenticated smoke; owner performs relevant runtime scenario.
+- [x] T026 [US3] Final own review: compare implementation to spec FR001–012/SC001–005 and inventory, remove unused extraction/config/tests, confirm only explicitly planned files changed, no legacy Production API/history repair/cap bypass/Stage credential leakage; record check results, final runtime SHA/HEAD and owner runtime evidence. State pending verification honestly and do not merge. Dependency: T025 for rollout completion; implementation-only handoff may occur at T014/T022 with later owner-gated tasks unchecked.
 
 ## Dependency / parallel execution
 
@@ -131,15 +133,27 @@ These are local tooling tasks, not permission to execute T023. See [plan.md](pla
 Owner decision: reuse the Stage identity model (`krzysztofcal`) with a **separate Production-only fine-grained PAT**, not another account/App. Remove the unused actor constant/configuration/branches; keep one VPS scheduler, isolated gh configuration, root-protected token environment, defaultOFF, workflow/main/exact SHA, Production identity, financial caps/recovery/receipt/concurrency/session-lock guards. No Stage mechanism or E3 change; `skills.md` YAGNI change remains solely in PR #1111.
 
 - [x] T024-AUTH Implement owner-only Production dispatch, JS and workflow boundaries; remove unused actor configuration; retain/extend existing fundamental authorization/scheduler/Stage regressions. This check records implementation, not activation.
-- [ ] T024-UPDATE After review/owner merge, operator root replaces only the installed Production script using exact old/new SHA guards while timer/service remain OFF; dedicated Production PAT and GitHub/local switch gates remain pending. No dispatch as part of this correction.
+- [x] T024-UPDATE After review/owner merge, operator root replaces only the installed Production script using exact old/new SHA guards while timer/service remain OFF; dedicated Production PAT and GitHub/local switch gates remain pending. No dispatch as part of this correction.
 
 T025 remains the existing single observation task: each of the four normal scheduled classes only after T024 is fully authorized/configured; no-candidate proves delivery, prior canaries retain destructive proof.
 
 T023 completion evidence: E3 committed once 2026-10-15T16:00:54.453Z; original runner FAIL is preserved (post-check metadata expectations), original S4 is absent. Independent read-only `post-commit-verified` F0=16:47:51.835880Z/F1=16:48:35.659339Z and final DB state16:49:03.869134Z passed 29 function fingerprints/owner/security/ACL, private Storage 10 objects, protected history and exact financial deltas. Report SHA256 `93bb53d9d1384ee1205aa8d0d73825fba94a3799dd69ad0d06156aba91528153`. No reapply, rollback, repair, receipt rewrite or original-S4 backfill. E3 stays byte-identical.
 
+## Current rollout verification — 2026-10-16
+
+T024/T024-UPDATE completed under owner authorization: exact owner-PAT dispatcher installed, token provisioned root:root0600 without disclosure, repository switch1/environment override absent, local switch1, sole Production timer enabled at2026-10-15T19:11:30Z; Stage unchanged. T025/T026 operational evidence and remaining #992 gate are recorded in research.md. This completion does not authorize WS cleanup. Historical OFF/pending statements above describe their dated rollout stages.
+
+## #992 follow-up operational outcome — 2026-10-16
+
+Separate owner GO was received and operator root restored cleanup UNSET/default7d with one restart. First natural sweep deleted exactly11marked tables (1human/10bot); all unmarked tables protected, accounting/registry/receipts unchanged,43StorageGETs/recovery PASS. This supersedes prior pending #992 enable gates without changing the T023–T026 scope. Low VPS disk capacity remains a separate operational limitation; see research.md. No financial evidence was discarded and no destructive retry was performed.
+
 
 ### Follow-up #1119 — release acceptance remains open
 
-- [ ] Resolve completed-human revalidation after marker-gated WS table removal; see specs/1119-production-human-terminal-revalidation/tasks.md.
-- [ ] After owner code review/merge and separate Production authorization, observe the next natural human slot and independently reconcile financial/recovery evidence. Do not replay canary or dispatch manually for verification.
-- [ ] Correct the superseded Draft PR #1118 closure recommendation. Historical T025/T026 observations do not authorize closing #891/#992 while #1119 remains unverified in Production.
+- [x] Resolve completed-human revalidation after marker-gated WS table removal; see specs/1119-production-human-terminal-revalidation/tasks.md.
+- [x] After owner code review/merge and separate Production authorization, observe the next natural human slot and independently reconcile financial/recovery evidence. Do not replay canary or dispatch manually for verification.
+- [x] Correct the superseded Draft PR #1118 closure recommendation. Historical T025/T026 observations do not authorize closing #891/#992 while #1119 remains unverified in Production.
+
+## Final closure review — 2026-10-16
+
+T025/T026 remain complete after the #1119 repair, exact owner-authorized migration and natural post-fix observation. Fresh full archive/recovery/registry/financial and cleanup eligibility checks PASS; see research.md. No new operational authorization is granted. New automatic human batch receipt insertion was not observed because the post-fix slot had no candidate; the merged fundamental PostgreSQL tests cover that atomic path. Close only after owner accepts the documented scope and limitation.
