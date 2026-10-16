@@ -1,0 +1,1166 @@
+{
+  "auditDate": "2026-10-16",
+  "sourceMain": "730df7ee7f511eb6b7a3eaa93b73a8d4f1fbe384",
+  "scope": "Read-only schema metadata only; no user data, secrets, balances or object records.",
+  "authForeignKeys": [
+    {
+      "schema": "public",
+      "relation": "bonus_campaign_eligible_users",
+      "conname": "bonus_campaign_eligible_users_created_by_fkey",
+      "contype": "f",
+      "definition": "FOREIGN KEY (created_by) REFERENCES auth.users(id)"
+    },
+    {
+      "schema": "public",
+      "relation": "bonus_campaign_eligible_users",
+      "conname": "bonus_campaign_eligible_users_user_id_fkey",
+      "contype": "f",
+      "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+    },
+    {
+      "schema": "public",
+      "relation": "bonus_campaigns",
+      "conname": "bonus_campaigns_created_by_fkey",
+      "contype": "f",
+      "definition": "FOREIGN KEY (created_by) REFERENCES auth.users(id)"
+    },
+    {
+      "schema": "public",
+      "relation": "bonus_claims",
+      "conname": "bonus_claims_user_id_fkey",
+      "contype": "f",
+      "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+    },
+    {
+      "schema": "public",
+      "relation": "chips_accounts",
+      "conname": "chips_accounts_user_id_fkey",
+      "contype": "f",
+      "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id)"
+    },
+    {
+      "schema": "public",
+      "relation": "favorites",
+      "conname": "favorites_user_id_fkey",
+      "contype": "f",
+      "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+    },
+    {
+      "schema": "public",
+      "relation": "profile_avatar_uploads",
+      "conname": "profile_avatar_uploads_user_id_fkey",
+      "contype": "f",
+      "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+    },
+    {
+      "schema": "public",
+      "relation": "user_profiles",
+      "conname": "user_profiles_user_id_fkey",
+      "contype": "f",
+      "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+    }
+  ],
+  "ledgerOwnershipChecks": [
+    {
+      "schema": "public",
+      "relation": "chips_accounts",
+      "conname": "chips_accounts_user_or_system_key",
+      "contype": "c",
+      "definition": "CHECK ((((account_type = 'USER'::chips_account_type) AND (user_id IS NOT NULL) AND (system_key IS NULL)) OR ((account_type <> 'USER'::chips_account_type) AND (user_id IS NULL) AND (system_key IS NOT NULL))))"
+    },
+    {
+      "schema": "public",
+      "relation": "chips_accounts",
+      "conname": "chips_accounts_user_system_exclusive",
+      "contype": "c",
+      "definition": "CHECK ((((account_type = 'USER'::chips_account_type) AND (user_id IS NOT NULL) AND (system_key IS NULL)) OR ((account_type <> 'USER'::chips_account_type) AND (user_id IS NULL) AND (system_key IS NOT NULL))))"
+    }
+  ],
+  "stageOnlyConstraints": [
+    {
+      "schema": "public",
+      "relation": "chips_entries",
+      "conname": "chips_entries_table_transaction_binding",
+      "contype": "t",
+      "definition": "TRIGGER DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "public",
+      "relation": "chips_transaction_idempotency",
+      "conname": "chips_transaction_idempotency_key_format_check",
+      "contype": "c",
+      "definition": "CHECK (((key_format IS NULL) OR (length(TRIM(BOTH FROM key_format)) > 0)))"
+    },
+    {
+      "schema": "public",
+      "relation": "chips_transaction_idempotency",
+      "conname": "chips_transaction_idempotency_key_format_version_check",
+      "contype": "c",
+      "definition": "CHECK (((key_format_version IS NULL) OR (key_format_version = 1)))"
+    },
+    {
+      "schema": "public",
+      "relation": "chips_transactions",
+      "conname": "chips_table_transaction_binding",
+      "contype": "t",
+      "definition": "TRIGGER DEFERRABLE INITIALLY DEFERRED"
+    }
+  ],
+  "productionOnlyConstraints": [
+    {
+      "schema": "public",
+      "relation": "chips_entries",
+      "conname": "chips_entries_table_binding",
+      "contype": "t",
+      "definition": "TRIGGER DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "public",
+      "relation": "chips_transactions",
+      "conname": "chips_transactions_table_binding",
+      "contype": "t",
+      "definition": "TRIGGER DEFERRABLE INITIALLY DEFERRED"
+    }
+  ],
+  "clientPolicies": [
+    {
+      "schemaname": "public",
+      "tablename": "chips_accounts",
+      "policyname": "chips_accounts_select_own_user",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "((account_type = 'USER'::chips_account_type) AND (user_id = auth.uid()))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "chips_accounts",
+      "policyname": "deny_all_chips_accounts",
+      "roles": "{public}",
+      "cmd": "ALL",
+      "qual": "false",
+      "with_check": "false"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "chips_entries",
+      "policyname": "chips_entries_select_own_user",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM chips_accounts a\n  WHERE ((a.id = chips_entries.account_id) AND (a.account_type = 'USER'::chips_account_type) AND (a.user_id = auth.uid()))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "chips_entries",
+      "policyname": "deny_all_chips_entries",
+      "roles": "{public}",
+      "cmd": "ALL",
+      "qual": "false",
+      "with_check": "false"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "favorites",
+      "policyname": "favorites_delete_own",
+      "roles": "{public}",
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "favorites",
+      "policyname": "favorites_insert_own",
+      "roles": "{public}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "(auth.uid() = user_id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "favorites",
+      "policyname": "favorites_select_own",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "poker_actions",
+      "policyname": "poker_actions_read_if_seated",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM poker_seats s\n  WHERE ((s.table_id = poker_actions.table_id) AND (s.user_id = auth.uid()))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "poker_requests",
+      "policyname": "poker_requests_read_if_seated",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM poker_seats s\n  WHERE ((s.table_id = poker_requests.table_id) AND (s.user_id = auth.uid()))))",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "poker_seats",
+      "policyname": "poker_seats_read_own",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "with_check": null
+    },
+    {
+      "schemaname": "public",
+      "tablename": "poker_tables",
+      "policyname": "poker_tables_read_if_seated",
+      "roles": "{public}",
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM poker_seats s\n  WHERE ((s.table_id = poker_tables.id) AND (s.user_id = auth.uid()))))",
+      "with_check": null
+    }
+  ],
+  "migrations": {
+    "Stage": [
+      {
+        "version": "20251218213520",
+        "name": "chips_ledger"
+      },
+      {
+        "version": "20251218230000",
+        "name": "chips_ledger_fixups"
+      },
+      {
+        "version": "20251218234500",
+        "name": "raise_insufficient_funds"
+      },
+      {
+        "version": "20251219000000",
+        "name": "chips_schema"
+      },
+      {
+        "version": "20251219000500",
+        "name": "chips_seed_system_accounts"
+      },
+      {
+        "version": "20251219001000",
+        "name": "chips_entry_sequence_restore"
+      },
+      {
+        "version": "20251219002000",
+        "name": "chips_accounts_block_negative_balance"
+      },
+      {
+        "version": "20251219003000",
+        "name": "chips_transactions_idempotency_unique"
+      },
+      {
+        "version": "20251220000000",
+        "name": "chips_allow_genesis_overdraft"
+      },
+      {
+        "version": "20251221000000",
+        "name": "chips_seed_treasury_genesis"
+      },
+      {
+        "version": "20251223000000",
+        "name": "chips_entry_trigger_fix"
+      },
+      {
+        "version": "20251224000000",
+        "name": "chips_transactions_user_id"
+      },
+      {
+        "version": "20251224213000",
+        "name": "favorites_schema"
+      },
+      {
+        "version": "20260115000000",
+        "name": "fix_security_invoker_v_user_chips_entries"
+      },
+      {
+        "version": "20260116000000",
+        "name": "poker_chips_tx_types"
+      },
+      {
+        "version": "20260116120000",
+        "name": "poker_tables"
+      },
+      {
+        "version": "20260117090000",
+        "name": "poker_phase1_authoritative_seats"
+      },
+      {
+        "version": "20260117100000",
+        "name": "poker_hole_cards"
+      },
+      {
+        "version": "20260117110000",
+        "name": "poker_state_lockdown"
+      },
+      {
+        "version": "20260117111000",
+        "name": "poker_hole_cards_lockdown"
+      },
+      {
+        "version": "20260117120001",
+        "name": "poker_actions_hand_history"
+      },
+      {
+        "version": "20260117130000",
+        "name": "enable_poker_rls"
+      },
+      {
+        "version": "20260118000000",
+        "name": "poker_requests_idempotency_scope"
+      },
+      {
+        "version": "20260207000000",
+        "name": "chips_entries_ledger_cursor_idx"
+      },
+      {
+        "version": "20260210000000",
+        "name": "poker_seats_is_bot"
+      },
+      {
+        "version": "20260212000000",
+        "name": "poker_seats_bot_profile_leave_after_hand"
+      },
+      {
+        "version": "20260213000000",
+        "name": "poker_hole_cards_drop_auth_users_fk"
+      },
+      {
+        "version": "20260423160000",
+        "name": "chips_admin_adjust_tx_type"
+      },
+      {
+        "version": "20260702000000",
+        "name": "chips_welcome_bonus_tx_type"
+      },
+      {
+        "version": "20260707090000",
+        "name": "bonus_campaigns"
+      },
+      {
+        "version": "20260707113000",
+        "name": "bonus_claim_policy"
+      },
+      {
+        "version": "20260710130000",
+        "name": "user_profiles"
+      },
+      {
+        "version": "20260710133000",
+        "name": "user_profiles_reserved_handles"
+      },
+      {
+        "version": "20260711103000",
+        "name": "profile_avatar_storage"
+      },
+      {
+        "version": "20260713090000",
+        "name": "user_profile_provisioning_visibility"
+      },
+      {
+        "version": "20260718090000",
+        "name": "poker_requests_action_payload_hash"
+      },
+      {
+        "version": "20260724212000",
+        "name": "poker_actions_audit_uniqueness"
+      },
+      {
+        "version": "20260729100000",
+        "name": "poker_managed_table_profiles"
+      },
+      {
+        "version": "20260730160000",
+        "name": "poker_tables_has_human_participant"
+      },
+      {
+        "version": "20260730160001",
+        "name": "poker_actions_hand_settled_cleanup_idx"
+      },
+      {
+        "version": "20260731000000",
+        "name": "poker_jsonb_native_types"
+      },
+      {
+        "version": "20260802130000",
+        "name": "poker_managed_table_profiles_desired_count_100"
+      },
+      {
+        "version": "20260804160000",
+        "name": "poker_managed_table_profiles_enable_rls"
+      },
+      {
+        "version": "20260808130000",
+        "name": "poker_table_buy_in"
+      },
+      {
+        "version": "20260809224000",
+        "name": "poker_managed_table_profiles_canonical_stakes"
+      },
+      {
+        "version": "20260810100000",
+        "name": "poker_bot_bankroll"
+      },
+      {
+        "version": "20260810120000",
+        "name": "chips_ledger_schema_cleanup"
+      },
+      {
+        "version": "20260811150000",
+        "name": "chips_ledger_archive_storage"
+      },
+      {
+        "version": "20260811170000",
+        "name": "chips_transaction_idempotency_registry"
+      },
+      {
+        "version": "20260811173000",
+        "name": "chips_transaction_idempotency_backfill_gap"
+      },
+      {
+        "version": "20260812100000",
+        "name": "chips_ledger_archive_pruning"
+      },
+      {
+        "version": "20260812103000",
+        "name": "chips_ledger_archive_pruning_acl_fix"
+      },
+      {
+        "version": "20260812110000",
+        "name": "chips_ledger_archive_pruning_hardening"
+      },
+      {
+        "version": "20260813090000",
+        "name": "chips_ledger_archive_production_canary"
+      },
+      {
+        "version": "20260813120000",
+        "name": "chips_ledger_stage_automation"
+      },
+      {
+        "version": "20260818100000",
+        "name": "chips_ledger_bot_only_retention"
+      },
+      {
+        "version": "20260819220000",
+        "name": "chips_ledger_bot_only_retention_hardening"
+      },
+      {
+        "version": "20260823090000",
+        "name": "chips_ledger_table_metadata_fence_hardening"
+      },
+      {
+        "version": "20260824120000",
+        "name": "chips_ledger_legacy_stage_allowlist"
+      },
+      {
+        "version": "20260824140000",
+        "name": "chips_ledger_legacy_stage_allowlist_freeze_guard"
+      },
+      {
+        "version": "20260825100000",
+        "name": "chips_ledger_legacy_stage_allowlist_cleanup_hardening"
+      },
+      {
+        "version": "20260825120000",
+        "name": "chips_ledger_stage_cleanup_orchestration"
+      },
+      {
+        "version": "20260826100000",
+        "name": "chips_ledger_bot_only_lifecycle_gate_scope"
+      },
+      {
+        "version": "20260828100000",
+        "name": "chips_ledger_bot_only_lifecycle_receipt_hardening"
+      },
+      {
+        "version": "20260829100000",
+        "name": "chips_ledger_bot_only_lifecycle_missing_table_hardening"
+      },
+      {
+        "version": "20260831120000",
+        "name": "chips_ledger_legacy_stage_lifecycle_completion"
+      },
+      {
+        "version": "20260831130000",
+        "name": "chips_ledger_legacy_stage_lifecycle_stage_assertion"
+      },
+      {
+        "version": "20260901100000",
+        "name": "chips_ledger_legacy_stage_read_only_dry_run"
+      },
+      {
+        "version": "20260902100000",
+        "name": "chips_ledger_escrow_account_retirement"
+      },
+      {
+        "version": "20260902110000",
+        "name": "chips_ledger_escrow_account_retention_canary_revalidation"
+      },
+      {
+        "version": "20260903100000",
+        "name": "chips_ledger_bot_only_candidate_selector_index"
+      },
+      {
+        "version": "20260903120000",
+        "name": "chips_ledger_bot_only_candidate_selector_index_rollback"
+      },
+      {
+        "version": "20260904100000",
+        "name": "chips_ledger_closed_human_table_retention"
+      },
+      {
+        "version": "20260904160000",
+        "name": "chips_ledger_closed_human_candidate_access_idx"
+      },
+      {
+        "version": "20260904170000",
+        "name": "chips_ledger_closed_human_prune_whitelist"
+      },
+      {
+        "version": "20260904180000",
+        "name": "chips_ledger_closed_human_canary_execute"
+      },
+      {
+        "version": "20260905100000",
+        "name": "chips_ledger_closed_human_policy_rls_select"
+      },
+      {
+        "version": "20260905110000",
+        "name": "chips_ledger_closed_human_lifecycle_completion_owner"
+      },
+      {
+        "version": "20260905120000",
+        "name": "chips_ledger_closed_human_lifecycle_marker_rls"
+      },
+      {
+        "version": "20260905130000",
+        "name": "chips_ledger_closed_human_lifecycle_completion_acl"
+      },
+      {
+        "version": "20260905140000",
+        "name": "chips_ledger_closed_human_automatic_activation"
+      },
+      {
+        "version": "20260905150000",
+        "name": "chips_ledger_closed_human_activation_post_prune"
+      },
+      {
+        "version": "20260905160000",
+        "name": "chips_ledger_bot_only_proof_perf"
+      },
+      {
+        "version": "20260905161000",
+        "name": "chips_ledger_bot_only_proof_perf_fix"
+      },
+      {
+        "version": "20260905170000",
+        "name": "chips_ledger_retention_access_paths"
+      },
+      {
+        "version": "20260905171000",
+        "name": "chips_ledger_bot_only_proof_type_access_path"
+      },
+      {
+        "version": "20260905172000",
+        "name": "chips_ledger_bot_only_proof_seqscan_guard"
+      },
+      {
+        "version": "20260905173000",
+        "name": "chips_ledger_bot_only_proof_remove_seqscan_hint"
+      },
+      {
+        "version": "20260906100000",
+        "name": "chips_ledger_escrow_execute_candidate_access"
+      },
+      {
+        "version": "20260906110000",
+        "name": "chips_transaction_idempotency_archive_batch_lookup_idx"
+      },
+      {
+        "version": "20260906120000",
+        "name": "chips_ledger_bot_only_scoped_cleanup_lifecycle_gate"
+      },
+      {
+        "version": "20260906130000",
+        "name": "chips_transaction_idempotency_transaction_id_table_id_idx"
+      },
+      {
+        "version": "20260907100000",
+        "name": "chips_ledger_bot_only_candidate_query_shape"
+      },
+      {
+        "version": "20260907110000",
+        "name": "chips_accounts_system_key_pattern_idx"
+      },
+      {
+        "version": "20260907120000",
+        "name": "chips_ledger_closed_human_automatic_p9273_registry_binding"
+      },
+      {
+        "version": "20260911100000",
+        "name": "chips_ledger_missing_table_bot_registry_retirement"
+      },
+      {
+        "version": "20260912083727",
+        "name": "chips_archive_prune_registry_cleaned_retry"
+      },
+      {
+        "version": "20260927100000",
+        "name": "poker_bot_quarantine_policy"
+      },
+      {
+        "version": "20260927110000",
+        "name": "poker_force_restricted"
+      },
+      {
+        "version": "20260929130000",
+        "name": "poker_access_policy_recovery_threshold"
+      },
+      {
+        "version": "20260929163000",
+        "name": "poker_access_policy_hysteresis_bps"
+      },
+      {
+        "version": "20260930075513",
+        "name": "poker_bot_tier_catalog_expansion"
+      },
+      {
+        "version": "20260930211623",
+        "name": "poker_bot_pool_refill_hourly"
+      },
+      {
+        "version": "20260930223409",
+        "name": "poker_bot_pool_refill_lock_timeout"
+      },
+      {
+        "version": "20261001200000",
+        "name": "poker_demand_refill_caps"
+      },
+      {
+        "version": "20261003183317",
+        "name": "poker_demand_refill_core"
+      },
+      {
+        "version": "20261004073000",
+        "name": "poker_demand_refill_scheduler_decommission"
+      },
+      {
+        "version": "20261004220956",
+        "name": "poker_gift_purchases"
+      },
+      {
+        "version": "20261011090000",
+        "name": "chips_stage_escrow_demand_refill_identity"
+      },
+      {
+        "version": "20261011200000",
+        "name": "poker_single_player_table_flag"
+      },
+      {
+        "version": "20261012095657",
+        "name": "poker_single_player_request_lookup"
+      }
+    ],
+    "Production": [
+      {
+        "version": "20251218213520",
+        "name": "chips_ledger"
+      },
+      {
+        "version": "20251218230000",
+        "name": "chips_ledger_fixups"
+      },
+      {
+        "version": "20251218234500",
+        "name": "raise_insufficient_funds"
+      },
+      {
+        "version": "20251219000000",
+        "name": "chips_schema"
+      },
+      {
+        "version": "20251219000500",
+        "name": "chips_seed_system_accounts"
+      },
+      {
+        "version": "20251219001000",
+        "name": "chips_entry_sequence_restore"
+      },
+      {
+        "version": "20251219002000",
+        "name": "chips_accounts_block_negative_balance"
+      },
+      {
+        "version": "20251219003000",
+        "name": "chips_transactions_idempotency_unique"
+      },
+      {
+        "version": "20251220000000",
+        "name": "chips_allow_genesis_overdraft"
+      },
+      {
+        "version": "20251221000000",
+        "name": "chips_seed_treasury_genesis"
+      },
+      {
+        "version": "20251223000000",
+        "name": "chips_entry_trigger_fix"
+      },
+      {
+        "version": "20251224000000",
+        "name": "chips_transactions_user_id"
+      },
+      {
+        "version": "20251224213000",
+        "name": "favorites_schema"
+      },
+      {
+        "version": "20260115000000",
+        "name": "fix_security_invoker_v_user_chips_entries"
+      },
+      {
+        "version": "20260116000000",
+        "name": "poker_chips_tx_types"
+      },
+      {
+        "version": "20260116120000",
+        "name": "poker_tables"
+      },
+      {
+        "version": "20260117090000",
+        "name": "poker_phase1_authoritative_seats"
+      },
+      {
+        "version": "20260117100000",
+        "name": "poker_hole_cards"
+      },
+      {
+        "version": "20260117110000",
+        "name": "poker_state_lockdown"
+      },
+      {
+        "version": "20260117111000",
+        "name": "poker_hole_cards_lockdown"
+      },
+      {
+        "version": "20260117120001",
+        "name": "poker_actions_hand_history"
+      },
+      {
+        "version": "20260117130000",
+        "name": "enable_poker_rls"
+      },
+      {
+        "version": "20260118000000",
+        "name": "poker_requests_idempotency_scope"
+      },
+      {
+        "version": "20260207000000",
+        "name": "chips_entries_ledger_cursor_idx"
+      },
+      {
+        "version": "20260210000000",
+        "name": "poker_seats_is_bot"
+      },
+      {
+        "version": "20260212000000",
+        "name": "poker_seats_bot_profile_leave_after_hand"
+      },
+      {
+        "version": "20260213000000",
+        "name": "poker_hole_cards_drop_auth_users_fk"
+      },
+      {
+        "version": "20260423160000",
+        "name": "chips_admin_adjust_tx_type"
+      },
+      {
+        "version": "20260702000000",
+        "name": "chips_welcome_bonus_tx_type"
+      },
+      {
+        "version": "20260707090000",
+        "name": "bonus_campaigns"
+      },
+      {
+        "version": "20260707113000",
+        "name": "bonus_claim_policy"
+      },
+      {
+        "version": "20260710130000",
+        "name": "user_profiles"
+      },
+      {
+        "version": "20260710133000",
+        "name": "user_profiles_reserved_handles"
+      },
+      {
+        "version": "20260711103000",
+        "name": "profile_avatar_storage"
+      },
+      {
+        "version": "20260713090000",
+        "name": "user_profile_provisioning_visibility"
+      },
+      {
+        "version": "20260718090000",
+        "name": "poker_requests_action_payload_hash"
+      },
+      {
+        "version": "20260724212000",
+        "name": "poker_actions_audit_uniqueness"
+      },
+      {
+        "version": "20260729100000",
+        "name": "poker_managed_table_profiles"
+      },
+      {
+        "version": "20260730160000",
+        "name": "poker_tables_has_human_participant"
+      },
+      {
+        "version": "20260730160001",
+        "name": "poker_actions_hand_settled_cleanup_idx"
+      },
+      {
+        "version": "20260731000000",
+        "name": "poker_jsonb_native_types"
+      },
+      {
+        "version": "20260802130000",
+        "name": "poker_managed_table_profiles_desired_count_100"
+      },
+      {
+        "version": "20260804160000",
+        "name": "poker_managed_table_profiles_enable_rls"
+      },
+      {
+        "version": "20260808130000",
+        "name": "poker_table_buy_in"
+      },
+      {
+        "version": "20260809224000",
+        "name": "poker_managed_table_profiles_canonical_stakes"
+      },
+      {
+        "version": "20260810100000",
+        "name": "poker_bot_bankroll"
+      },
+      {
+        "version": "20260810120000",
+        "name": "chips_ledger_schema_cleanup"
+      },
+      {
+        "version": "20260811150000",
+        "name": "chips_ledger_archive_storage"
+      },
+      {
+        "version": "20260811170000",
+        "name": "chips_transaction_idempotency_registry"
+      },
+      {
+        "version": "20260811173000",
+        "name": "chips_transaction_idempotency_backfill_gap"
+      },
+      {
+        "version": "20260812100000",
+        "name": "chips_ledger_archive_pruning"
+      },
+      {
+        "version": "20260812103000",
+        "name": "chips_ledger_archive_pruning_acl_fix"
+      },
+      {
+        "version": "20260812110000",
+        "name": "chips_ledger_archive_pruning_hardening"
+      },
+      {
+        "version": "20260813090000",
+        "name": "chips_ledger_archive_production_canary"
+      },
+      {
+        "version": "20260914090000",
+        "name": null
+      },
+      {
+        "version": "20260914091000",
+        "name": null
+      },
+      {
+        "version": "20260914092000",
+        "name": null
+      },
+      {
+        "version": "20260929201500",
+        "name": null
+      },
+      {
+        "version": "20260930211624",
+        "name": null
+      },
+      {
+        "version": "20261003183626",
+        "name": null
+      },
+      {
+        "version": "20261004114411",
+        "name": null
+      },
+      {
+        "version": "20261004222426",
+        "name": null
+      },
+      {
+        "version": "20261011200000",
+        "name": null
+      },
+      {
+        "version": "20261012095657",
+        "name": null
+      },
+      {
+        "version": "20261016120000",
+        "name": null
+      }
+    ]
+  },
+  "identityColumns": [
+    {
+      "table_schema": "public",
+      "table_name": "bonus_campaign_eligible_users",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "bonus_campaign_eligible_users",
+      "column_name": "created_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "bonus_campaigns",
+      "column_name": "created_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "bonus_claims",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "account_type",
+      "data_type": "USER-DEFINED"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "status",
+      "data_type": "USER-DEFINED"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "label",
+      "data_type": "text"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "balance",
+      "data_type": "bigint"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "next_entry_seq",
+      "data_type": "bigint"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "system_key",
+      "data_type": "text"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "poker_auto_class",
+      "data_type": "text"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "poker_access_override",
+      "data_type": "text"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "poker_access_revision",
+      "data_type": "bigint"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "poker_auto_slow_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "poker_access_updated_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_accounts",
+      "column_name": "poker_access_updated_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_ledger_archive_batches",
+      "column_name": "bot_only_identity_count",
+      "data_type": "bigint"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_transaction_idempotency",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_transactions",
+      "column_name": "created_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "chips_transactions",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "favorites",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_actions",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_gift_purchases",
+      "column_name": "buyer_user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_gift_purchases",
+      "column_name": "recipient_user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_hole_cards",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_requests",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_seats",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_seats",
+      "column_name": "bot_profile",
+      "data_type": "text"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_tables",
+      "column_name": "created_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "poker_tables",
+      "column_name": "managed_profile_key",
+      "data_type": "text"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "profile_avatar_uploads",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "user_profiles",
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "user_profiles",
+      "column_name": "avatar_key",
+      "data_type": "text"
+    },
+    {
+      "table_schema": "public",
+      "table_name": "user_profiles",
+      "column_name": "avatar_variant",
+      "data_type": "text"
+    }
+  ]
+}
