@@ -6,9 +6,10 @@
 - [x] T004 OWNER GO: name **Arcade Hub by KCSWH** plus attached KCSWH logo, Verify Branding, Publish only after PASS/Ready to publish. Keep current support/legal/client/domains/callback/scopes. No logo-free fallback.
 - [x] T004a Resolve attachment preflight: owner supplied compliant120x120/25,519byte RGBA replacement; byte-exact approved asset preserved, no resizing. Earlier oversized-input record retained historically.
 - [x] T005a Saved only approved name + KCSWH logo once,2026-10-16T21:52:15.159Z; unchanged URLs/domains, exact RGBA/alpha logo preservation, Supabase readback unchanged.
-- [ ] T005b Verify Branding: UI blocked despite NEED_VERIFICATION/UNVERIFIED_LOGO. Verify control absent in available PL/EN session; owner session check required. No submission, rejection or PASS claimed. Stop on actual issues; no domain/scope/client workaround.
-- [ ] T006 Publish only verified approved branding when publication is authorized; record actual status/propagation. Preserve Stage and Google Login V1.
-- [ ] T007 Owner-consented phone/desktop actual display and nonfinancial auth/UUID/password regression; sanitize evidence. Report residual domain text and PASS/FAIL/NOT TESTED accurately. No account deletion/recreation or OAuth grant revocation without separate approval.
-- [ ] T008 Update final SpecKit/issue result through normal repository review. Do not close on Console field values alone; no automatic merge/deploy.
+- [x] T005b Open blue Information and summary icon beside Branding; real Verify branding submitted once22:10:08.811Z, positive verification checked. Earlier main-form-only diagnosis superseded. No rejection/workaround.
+- [x] T006 Publish verified approved branding once22:11:45.695Z; readback verified/shown-to-users and VERIFIED/COMPLIANT. Existing client/scopes/domains/provider/Stage preserved.
+- [x] T007a Desktop actual normal Google button + existing-account re-confirmation: name/logo visible, same UUID twice, clean callback, profileHTTP200, reload PASS. No grant revocation/new account.
+- [ ] T007b Owner physical-phone display/login/return/reload smoke; no emulation substituted. Current password regression remains NOT TESTED; settle/report it explicitly before final acceptance.
+- [ ] T008 Keep Draft#1121 updated with actual verification/publication/desktop evidence; record owner phone result when supplied, then request final acceptance. No automatic issue closure/merge/deploy.
 
 Only the owner-approved Google Branding operations above are authorized after asset validation. No implementation code, test framework, new dependency, migration, Google client, paid service, deployment or infrastructure is authorized. Existing finance/WS/Stage remain untouched.

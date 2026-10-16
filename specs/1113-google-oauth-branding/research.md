@@ -1,3 +1,5 @@
+> **Current result (supersedes historical blockers):** Google branding is verified/published, desktop Google display and existing-user identity checks PASS. The apparent missing button was in the blue Information and summary side panel. Physical-phone smoke remains pending; see final record below.
+
 # #1113 read-only audit — 2026-10-16 UTC
 
 Reviewed current agents.md/skills.md on main846b2993f3d9cd95d11c1061d9a1175e33464b76, issue#1113 and completed#1100, specs/1100-google-login/production-audit.md and production-rollout.md. Historical preparation statements in those files do not override #1100's final owner-accepted completion record. No #1100 implementation or accepted auth limitation is silently reopened.
@@ -59,3 +61,37 @@ Read-only Google Console OAUTH_GRAPHQL responses (observed through the UI, not r
 One browser-automation transport timed out before changes; direct existing browser diagnostics then performed the approved Save. No repeated Save, no Verify/Submit/Publish clicks. No Google login attempt, consent/grant reset, account/UUID mutation, app/Stage/DNS/custom-domain change, deployment or paid service. New phone/desktop branded-consent and authentication regression remain NOT TESTED. #1113 must remain open.
 
 Next owner action: open https://console.cloud.google.com/auth/branding?project=arcade-hub-prod-1100 in the owner session. If Verify Branding is present, run the already-approved verification and provide its actual status/issues; if absent, provide a sanitized bottom-of-page screenshot for diagnosing the Console discrepancy. Do not publish without PASS. No new general authorization is needed; owner/Console access is the current dependency.
+
+## Owner screenshot follow-up / corrected cause — 2026-10-16
+
+Owner's phone screenshot independently showed the saved name/logo and no Verify control in the main form. A [firsthand community reply](https://discuss.google.dev/t/verification-center-prepare-for-verification-permanently-disabled-branding-page-has-no-verify-branding-button/381088/17) pointed to the blue icon at the right of Branding. This was treated as a hypothesis and verified locally, not as an official Google bug diagnosis. Its accessible label is **Information and summary**; clicking it immediately revealed the real Verification status / Verify branding side panel. Earlier main-form/verification-center/English/legacy-route scans did not inspect that closed panel. The earlier unavailable-control inference was premature; no Google incident/escalation or configuration workaround was needed. Owner screenshot is private and is not committed because it includes personal contact data.
+
+## Actual verification and publication
+
+- Verify branding request:one click at2026-10-16T22:10:08.811Z. Google showed Verification in progress (up to5minutes), then explicitly confirmed branding verified with Publish branding available (7-day validity).
+- The local read watcher initially recognized only the literal Ready to publish label, so classified Google's equivalent verified-message wording as UNKNOWN. This was a reader classification issue, not a Google failure; the actual text and enabled Publish control were inspected and preserved before publishing. No re-verification was issued.
+- Publish branding:one click at22:11:45.695Z, only after positive verification. Readback22:12:46.298Z: **Your branding has been verified and is being shown to users.**
+- Independent subsequent Console read metadata:verifiedBrand.displayName=Arcade Hub by KCSWH; visibilityEXTERNAL/publishStatePRODUCTION; verificationStateVERIFIED; verificationDisplayStatusVERIFIED; complianceStatusCOMPLIANT. Current published logo is the approved asset. Google's normal policy bookkeeping distinguishes reviewed/unreviewed domains after approval; effective configured domain inputs and OAuth origin/callback are preserved, not edited by the agent.
+- No name/logo/domain rejection. No Google client/secret rotation, scopes/Audience/DNS/Supabase/app/Stage/infra/deployment changes. No unsupported write API.
+
+## Desktop actual Google auth evidence
+
+Before login, a read-only Auth admin lookup of exactly the previously owner-accepted#1100 test user's UUID confirmed it still exists in Production with the expected verified Google email. No user enumeration, new account, deletion, linking, password read or financial operation. Private identity values are not included here.
+
+1. Normal existing public Google button, initiated2026-10-16T22:15:24Z. Google real desktop account chooser22:15:25.357Z: **Arcade Hub by KCSWH visible**, approved KCSWH logo visible, technical project-host text not visible. Selected only the known existing Google identity. Callback and session-after-reload22:16:40.209Z PASS, same pre-existing UUID. An intermediate local read crossed a navigation boundary; current app/session read confirmed successful completion instead of retrying the OAuth flow.
+2. Separate test-only existing SDK flow requested prompt=consent with exactly openid/email/profile and the same client/callback; no application code/config or OAuth grants were reset. Actual Google returning-user re-confirmation22:18:22.280Z showed the approved name/logo and **Zalogujesz się ponownie w usłudze Arcade Hub by KCSWH**. This is not claimed as new-user consent/signup or a new-permission grant. The re-confirmation did not independently list email/profile details; basic-scope equality is supplied by request/config readback, not inferred from absent text. Completed22:18:27.416Z: same UUID, clean callback, profileHTTP200.
+3. Token audit booleans:provider token absent from app KLog/non-SDK storage; SDK-managed provider token remains present, the accepted#1100 limitation, not a new zero-token-persistence claim. No session/access/provider tokens in report, source or public artifacts.
+4. Private diagnostic crops are incomplete and not published as comprehensive device-screen evidence. Actual name/logo checks use the live Google DOM/asset identity; no fabricated screenshot or mobile-emulation claim.
+
+| Final verification item | Result |
+|---|---|
+| Exact owner logo120x120/RGBA/alpha and name | PASS |
+| Google brand verification and publication | PASS |
+| Desktop Google visible name/logo and normal login | PASS |
+| Same existing UUID, repeat/reconfirmation, callback, reload/profile | PASS |
+| No extra OAuth scopes / no app/provider/client/callback/DNS change | PASS |
+| Physical phone Google display/login | PENDING — owner device needed |
+| Current password login/logout regression | NOT TESTED; historical#1100 result retained |
+| Production new-user signup | NOT TESTED; no new account created |
+
+Physical-phone acceptance is required before calling#1113 complete. Existing GO covers the owner's normal smoke; no configuration or publication action remains.

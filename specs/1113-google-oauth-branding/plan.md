@@ -1,4 +1,4 @@
-> **Owner decision:** name + KCSWH logo are authorized together, Verify Branding is authorized, Publish is authorized only after PASS/Ready to publish. Do not fall back to a logo-free publication. Replacement input is compliant; approved name/logo are saved. Verify Branding control is unavailable in the accessible session, so stop before submission/publication until the UI issue is resolved.
+> **Current result:** name + owner KCSWH logo verified and published under existing GO. Desktop Google display/normal login/reconfirmation/UUID PASS. Physical phone smoke pending. Earlier input/UI findings below are historical and superseded by the actual Information and summary path documented at the end.
 
 # #1113 minimal implementation plan — review only
 
@@ -36,6 +36,16 @@ Estimated incremental infrastructure cost for this plan:0. Existing services/dom
 
 ## Current execution handoff
 
-Name/logo Save completed once under owner GO; all configured URLs and domains read back unchanged. The uploaded image is exactly the replacement PNG above; downloaded Google image has equal decoded RGBA/alpha, despite different PNG compression. Supabase read-only after-check preserves Google enabled/client ID/site URL/allowlist/signup/manual linking. No OAuth client/callback/scope/DNS/app/Stage changes.
+Historical pre-verification checkpoint: Name/logo Save completed once under owner GO; all configured URLs and domains read back unchanged. The uploaded image is exactly the replacement PNG above; downloaded Google image has equal decoded RGBA/alpha, despite different PNG compression. Supabase read-only after-check preserves Google enabled/client ID/site URL/allowlist/signup/manual linking. No OAuth client/callback/scope/DNS/app/Stage changes.
 
-Google does not expose Verify Branding in the available session even though its read metadata says NEED_VERIFICATION/UNVERIFIED_LOGO. Verification Center remains a circular link to Branding. Do not invent unsupported mutation calls, change scopes/domains/Audience, publish unverified branding or claim Google rejected the image. Ask the owner to inspect the exact project's Branding page in their owner session and, if Verify Branding is available, use the already-authorized operation and provide its result. Existing GO permits publication only after actual PASS/Ready to publish; pending/rejected/unknown is never sufficient.
+Earlier incomplete diagnosis (superseded below): Google did not expose Verify Branding in the inspected main form even though its read metadata said NEED_VERIFICATION/UNVERIFIED_LOGO. Verification Center remains a circular link to Branding. Do not invent unsupported mutation calls, change scopes/domains/Audience, publish unverified branding or claim Google rejected the image. Ask the owner to inspect the exact project's Branding page in their owner session and, if Verify Branding is available, use the already-authorized operation and provide its result. Existing GO permits publication only after actual PASS/Ready to publish; pending/rejected/unknown is never sufficient.
+
+## Resolved standard UI path / current handoff
+
+1. Select existing Productionprojectarcade-hub-prod-1100, Google Auth Platform → Branding. Click the **blue Information and summary icon at the right of the Branding heading**. It has no visible button text, so identify it by accessible label, not text-only button enumeration.
+2. The side panel contains Verification status / Verify branding. One approved request completed; the panel explicitly said branding verified and Publish branding available before publication.
+3. Publish branding clicked once under existing owner GO. Actual post-read says branding verified and shown to users; VERIFIED/COMPLIANT. No re-verification/publication is needed now. Previous owner-session/blocker instructions are obsolete.
+4. Desktop normal public Google button was tested with the already-approved, positively identified existing Production user. Separate test-only SDK prompt=consent re-confirmed the same basic scopes without source/config changes or revoking grants. Both return the same UUID. The Google returning-user screen shows re-login confirmation, not a first-time new-user signup.
+5. Remaining owner action: on a physical phone open https://play.kcswh.pl/account.html, use Google with the existing Arcade account, confirm exact brand/logo and successful return/reload. A private tab can expose the login button if an existing session hides it; never use a new Google account merely to manufacture first consent. Share a redacted screenshot or explicit result; no passwords/tokens/UUID in chat. Current password regression remains NOT TESTED, not silently inferred from the Google flow.
+
+No new approval round is required for the already-approved physical-phone smoke. Keep this evidence PR Draft and#1113 open pending real device acceptance; no app deployment or auth rewrite is part of the handoff.

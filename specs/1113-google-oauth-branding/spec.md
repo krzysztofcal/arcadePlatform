@@ -1,6 +1,6 @@
 # #1113 — Google OAuth branding for Arcade Hub
 
-**Status:** approved name and compliant KCSWH logo saved in Google Production; verification submission blocked by unavailable Verify Branding control; no publication. 2026-10-16.
+**Status:** approved name/logo verified and published in Google Production; desktop display/login/UUID PASS; physical-phone smoke pending. 2026-10-16.
 **Reviewed main:** `846b2993f3d9cd95d11c1061d9a1175e33464b76`.
 **Source:** https://github.com/krzysztofcal/arcadePlatform/issues/1113
 
@@ -35,3 +35,11 @@ The accessible attachment is actually **1254x1254**, 8-bit RGBA PNG, **1,389,582
 Owner supplied the replacement [KCSWH PNG](assets/kcswh-oauth-120.png):120x120 RGBA,25,519bytes, SHA-256 `e3c972a22ad46db47991459ffa4c188ba7fb5177e1f9fa04252b3b0426777b51`. The previous input-size blocker is resolved; owner authorization remains effective. Saved name and supplied logo in the existing Google project at2026-10-16T21:52:15.159Z (single explicit Save). Google-served120x120 PNG is re-encoded, but all RGBA pixels and alpha are exactly equal to the source. No resampling/substitution/background change by the agent.
 
 Google readback: `NEED_VERIFICATION`, requirement `UNVERIFIED_LOGO`, compliance status unspecified/not evaluated. No rejection result or Ready to publish. Verification Center says branding is not shown and points to Branding, where this session has no Verify Branding control (PL/EN and accessibility tree checked). No verification request was sent; no publication attempted. Owner session check is the next required operational step, not a new general GO. Mobile/desktop branded consent and new auth/UUID regression remain NOT TESTED pending verified publication.
+
+## Current outcome — verified and published
+
+The earlier missing-control diagnosis is superseded. The blue **Information and summary** icon beside the Branding heading opens a side panel containing Verification status and Verify branding. The main-form/text-only enumeration missed this accessible icon; there was no demonstrated Google platform block. Owner screenshot and a community report led to the actual UI path.
+
+Owner-authorized Verify branding clicked once2026-10-16T22:10:08.811Z; actual verified/ready-to-publish message checked before one Publish branding click22:11:45.695Z. Readback22:12:46.298Z explicitly says verified and being shown to users; UI response metadata confirms VERIFIED/COMPLIANT and verified nameArcade Hub by KCSWH. No bypass, alternate client, paid domain, scope/DNS/app change.
+
+Desktop real Google chooser/reconfirmation displays approved name and logo. Normal Google button and a separate same-basic-scope consent re-prompt both authenticate the known pre-existing Production user with the same UUID; correct clean account callback, reload session and profileHTTP200 PASS. Physical mobile display/login is still PENDING; current password-login regression NOT TESTED (historical#1100 acceptance retained). Keep#1113 open until owner physical-device acceptance and remaining checks are explicitly settled.
