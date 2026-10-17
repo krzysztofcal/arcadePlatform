@@ -820,4 +820,37 @@ for (const managed of [false, true]) {
   assert.equal(ctx.calls.cashouts, 0);
 }
 
+// All-in leave must keep the participant eligible when private cards are loaded.
+{
+  const ctx = makeMocks();
+  ctx.state.value = { ...ctx.state.value, phase: "FLOP", handId: "all-in-hand", handSeed: "seed",
+    communityDealt: 3, community: ["AS", "KH", "2C"], turnUserId: "bot-1",
+    seats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    handSeats: [{ userId, seatNo: 1 }, { userId: "bot-1", seatNo: 2, isBot: true }],
+    stacks: { [userId]: 0, "bot-1": 100 }, allInByUserId: { [userId]: true },
+    contributionsByUserId: { [userId]: 50, "bot-1": 50 }, foldedByUserId: { [userId]: false } };
+  ctx.mocks.applyLeaveTable = realApplyLeaveTable;
+  ctx.mocks.isBotTurn = () => true;
+  let required;
+  ctx.mocks.loadHoleCardsByUserId = async (_tx, args) => { required = args.requiredUserIds; return { holeCardsByUserId: {} }; };
+  const execute = loadExecutePokerLeave(ctx.mocks);
+  const args = { beginSql: ctx.beginSql, tableId, userId, requestId: "all-in-leave", includeState: true, klog: () => {}, klogVerbose: () => {} };
+  const result = await execute(args);
+  assert.equal(result.cashedOut, 0);
+  assert.equal(ctx.calls.deleteSeat, 0);
+  assert.equal(ctx.calls.cashouts, 0);
+  assert.equal(ctx.state.value.pendingDetachByUserId[userId], true);
+  assert.notEqual(ctx.state.value.leftTableByUserId[userId], true);
+  assert.equal(ctx.state.value.foldedByUserId[userId], false);
+  assert.ok(required.includes(userId), "all-in participant still requires private showdown cards");
+  await execute(args);
+  assert.equal(ctx.calls.cashouts, 0);
+  ctx.state.value = { ...ctx.state.value, phase: "HAND_DONE", stacks: { [userId]: 75, "bot-1": 75 } };
+  const settled = await execute({ ...args, requestId: "all-in-settled-leave", hasConnectedHumanPresence: () => true });
+  assert.equal(settled.cashedOut, 75);
+  assert.equal(ctx.calls.cashouts, 1);
+  assert.equal(ctx.state.value.pendingDetachByUserId[userId], undefined);
+  assert.equal(ctx.state.value.leftTableByUserId[userId], true);
+}
+
 console.log("poker-domain leave behavior test passed");

@@ -75,7 +75,11 @@ function isValidAuthoritativeLeaveSuccessShape(result, expectedTableId, leavingU
     return true;
   }
 
-  return state?.leftTableByUserId?.[leavingUserId] === true;
+  return state?.leftTableByUserId?.[leavingUserId] === true
+    || (state.pendingDetachByUserId?.[leavingUserId] === true
+      && ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(state.phase)
+      && state.allInByUserId?.[leavingUserId] === true && state.stacks?.[leavingUserId] === 0
+      && !state.foldedByUserId?.[leavingUserId]);
 }
 
 function normalizeValidatedResult({ result, tableId, userId, requestId, klog }) {

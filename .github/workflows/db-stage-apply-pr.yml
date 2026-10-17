@@ -15,8 +15,9 @@ concurrency:
 jobs:
   apply-stage:
     # Only same-repository PR heads targeting this repository's main branch may
-    # reach the self-hosted runner. Fork PRs are skipped before runner allocation.
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' }}
+    # reach the self-hosted runner. Drafts/forks are skipped before allocation.
+    # Preparing schema in a Draft PR is not authorization to mutate shared Stage.
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main' }}
     runs-on: [self-hosted, linux, x64, stage-db-ipv6]
     permissions:
       contents: read

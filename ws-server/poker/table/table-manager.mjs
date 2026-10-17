@@ -2105,7 +2105,12 @@ export function createTableManager({
     const leftTableByUserId = normalizedState?.leftTableByUserId && typeof normalizedState.leftTableByUserId === "object" && !Array.isArray(normalizedState.leftTableByUserId)
       ? normalizedState.leftTableByUserId
       : {};
-    const leavingUserRetainedInState = authoritativeSeatsContainUser(stateSeats, userId) && leftTableByUserId?.[userId] === true;
+    const pendingAllInDetach = normalizedState?.pendingDetachByUserId?.[userId] === true
+      && ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(normalizedState.phase)
+      && normalizedState.allInByUserId?.[userId] === true && normalizedState.stacks?.[userId] === 0
+      && !normalizedState.foldedByUserId?.[userId];
+    const leavingUserRetainedInState = authoritativeSeatsContainUser(stateSeats, userId)
+      && (leftTableByUserId?.[userId] === true || pendingAllInDetach);
     const authoritativeStateValid = normalizedState
       && stateTableId === tableId
       && hasValidAuthoritativeSeats(stateSeats);
@@ -2137,7 +2142,8 @@ export function createTableManager({
         };
       })
       .filter(Boolean)
-      .filter((member) => leftTableByUserId?.[member.userId] !== true)
+      .filter((member) => leftTableByUserId?.[member.userId] !== true
+        && normalizedState?.pendingDetachByUserId?.[member.userId] !== true)
       .sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
 
     const nextSeats = {};
@@ -2633,12 +2639,14 @@ export function createTableManager({
       const membership = normalizeAuthoritativeMembers(table)
         .find((member) => member.userId === normalizedUserId
           && authoritativePokerState?.leftTableByUserId?.[normalizedUserId] !== true
+          && authoritativePokerState?.pendingDetachByUserId?.[normalizedUserId] !== true
           && !isCoreStateBotUser(table.coreState, normalizedUserId));
       const authoritativePokerSeat = normalizeAuthoritativePokerSeat(authoritativePokerState, normalizedUserId);
       const authoritativePokerStack = readAuthoritativePokerStack(authoritativePokerState, normalizedUserId);
       const deferredLeave = Boolean(authoritativePokerSeat
         && authoritativePokerStack !== null
-        && authoritativePokerState?.leftTableByUserId?.[normalizedUserId] === true
+        && (authoritativePokerState?.leftTableByUserId?.[normalizedUserId] === true
+          || authoritativePokerState?.pendingDetachByUserId?.[normalizedUserId] === true)
         && authoritativePokerSeat.isBot !== true
         && !isCoreStateBotUser(table.coreState, normalizedUserId));
       if (!membership && !deferredLeave) {

@@ -280,3 +280,18 @@ test("buildAuthoritativeLeaveRestore applies authoritative closed table status",
   manager.restoreTableFromPersisted("t4", restored.restoredTable);
   assert.equal(manager.isTableClosed("t4"), true);
 });
+
+
+test("pending all-in restore removes membership but preserves private showdown cards", () => {
+  const manager = createTableManager();
+  const cards = ["AS", "AH"];
+  manager.restoreTableFromPersisted("pending", { tableId: "pending", tableStatus: "OPEN", coreState: {
+    pokerState: { handId: "pending-hand", holeCardsByUserId: { u1: cards } }, members: [], seats: {} } });
+  const restored = manager.buildAuthoritativeLeaveRestore({ tableId: "pending", userId: "u1", stateVersion: 2,
+    pokerState: { tableId: "pending", handId: "pending-hand", phase: "FLOP",
+      seats: [{ userId: "u1", seatNo: 1 }, { userId: "u2", seatNo: 2 }],
+      stacks: { u1: 0, u2: 100 }, allInByUserId: { u1: true }, pendingDetachByUserId: { u1: true } } });
+  assert.equal(restored.ok, true);
+  assert.deepEqual(restored.restoredTable.coreState.members, [{ userId: "u2", seat: 2 }]);
+  assert.deepEqual(restored.restoredTable.coreState.pokerState.holeCardsByUserId.u1, cards);
+});
