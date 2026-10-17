@@ -128,3 +128,14 @@ test('Auth deletion requires authorized durable intent before even not-found rec
   assert.equal(calls, 0);
   assert.deepEqual(await deleteAuthUser({ ...options, authorizeDeletion: async () => {} }), { done: true, reconciled: true });
 });
+
+
+test('lost authorization before DELETE is not swallowed as an uncertain provider response', async () => {
+  let authorizations = 0;
+  const calls = [];
+  await assert.rejects(deleteAuthUser({ userId: OWNER, supabaseUrl: 'https://stage.example.test', serviceRoleKey: 'test-only',
+    authorizeDeletion: async () => { if (++authorizations === 2) throw new Error('lease_lost'); },
+    fetchImpl: async (url, options) => { calls.push(options.method || 'GET'); return new Response(JSON.stringify({ id: OWNER }), { status: 200 }); }
+  }), /lease_lost/);
+  assert.deepEqual(calls, ['GET']);
+});

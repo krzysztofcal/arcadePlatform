@@ -132,13 +132,14 @@ export async function deleteAuthUser({ userId, supabaseUrl, serviceRoleKey, auth
   if (!before.ok) throw new Error('auth_lookup_failed');
   const existing = await before.json();
   if ((existing?.id || existing?.user?.id) !== userId) throw new Error('auth_identity_mismatch');
+  await authorizeDeletion(userId);
   try {
-    await authorizeDeletion(userId);
     const removed = await fetchImpl(url, { method: 'DELETE', headers, signal: AbortSignal.timeout(15000) });
     if (removed.ok) return { done: true };
   } catch {
     // A lost response may follow a committed delete. Reconcile exact old UUID.
   }
+  await authorizeDeletion(userId);
   const after = await read();
   if (after.status === 404) return { done: true, reconciled: true };
   throw new Error('auth_delete_unconfirmed');
