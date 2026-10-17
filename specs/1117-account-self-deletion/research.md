@@ -306,3 +306,36 @@ Task numbering/dependencies stay at 22; foundation T005/T007 installs every writ
 ## Preview authorization after documentation review
 
 Owner explicitly authorized Netlify Deploy Preview for PR #1122 after the required `netlify/playkcswh/deploy-preview` check remained absent due to `[skip netlify]`. Remove the skip marker from PR title and publish an unmarked documentation commit to obtain that required check. Earlier no-deployment statements describe the audit/revision stages; this limited authorization does not permit implementation, Stage migrations, WS deployment, Production deployment or merge. No application/configuration/migration files change.
+
+## R6 resumption — 2026-10-17, 14:06–14:08 UTC
+
+Baseline verified against remote main `9a43f4cf` (merged #1122); #1123 remains Draft. **Email/password: BLOCKED. Google-only: BLOCKED. Neither has passed R6; no new security counterexample was executed.** Earlier Stage results are historical observations, not tests repeated in this resumption.
+
+### OVH job and HTTP 409 accounting
+
+The exact disposable mailbox's `task/account/{id}` reports `action:addAccount`, submitted at 13:03:27 UTC; `task/all/{id}` still reports `function:account/create,status:todo` at 14:06 UTC. Exact mailbox GET returns 200 with the PoC description. A fresh DELETE returns 409 explicitly because this mailbox is already being processed. Scoped forwarding lookup is empty: the earlier test forward remains removed. This is an accepted asynchronous provisioning job, not a completed mailbox or a paid commercial order; no new paid order was placed.
+
+The demonstrated immediate cause of 409 is the pending create operation. Why OVH has not executed it is **not exposed**; do not blame SMTP, MX, password policy or Supabase without evidence. The current [OVH email-domain API schema](https://eu.api.ovh.com/1.0/email/domain.json) exposes GET only for account/all task details, with no mailbox-task cancel/relaunch operation. Domain/DNS task endpoints are different resources. Do not reset the domain, change shared DNS or loop locked deletions. No usable inbox is confirmed and the old mailbox password was discarded. After provisioning, reset only this fixture's password and confirm IMAP before preparing Auth tests. Provider completion/unlock is also required for cleanup; support escalation may be necessary, but no support message was sent under this task.
+
+### Independent Google attempt
+
+Existing Playwright/Chromium used a fresh context without reused cookies. Real Stage authorize navigation again reached Google's rendered public sign-in page for the pinned Stage project. An initial input-selector check did not match; a separate rendered-page check confirmed sign-in, so this is not evidence of Google rejecting automation. No credentials submitted, OAuth callback completed or Google Supabase user created. Existing Stage Google scripts depend on a prior signed-in browser and an existing password-linked user; they do not supply an authorized disposable Google-only identity. They were inspected as tooling and not run against that account. No configured provisioning integration supplies a dedicated Google identity; prior signup stopped at mandatory owner age/profile information. No private account, invented owner information, provider forgery or CAPTCHA/MFA bypass was used.
+
+The one human action needed for this branch is **one genuine sign-in of a dedicated disposable Google test identity in an isolated browser context**: automation lacks authorized identity credentials/provisioning access. No CAPTCHA/MFA failure was observed. This is a prerequisite, not an already scheduled action or a request to run the scenarios. Do not send credentials through GitHub. The identity must also have an authorized programmatic inbox route for subsequent OTP tests; ordinary private Gmail is excluded.
+
+| Scenario | This resumption | Cumulative evidence / disposition |
+|---|---|---|
+| Password login, existing-user-only OTP send, invalid-code rejection, reauthenticate with/without original session | NOT RUN again | Earlier actual Stage observations above; accepted send is not delivered OTP |
+| Receive real OTP; valid verify and same UUID | NOT RUN | Inbox provisioning unresolved |
+| Pre-request code, concurrent login, two windows/requests, resend | NOT RUN | No valid received code or freshness/request-binding conclusion |
+| Replay, five-minute expiry, wrong UUID/session/request, email change, lost successful verification response | NOT RUN | Random invalid-code rejection is not a substitute |
+| Real Google authorize navigation | Executed | Sign-in page reached; login/callback and Google-only assertions NOT RUN |
+| Provider cleanup | Executed | Forward absent; mailbox DELETE 409, create job todo; cleanup incomplete |
+
+No new Supabase fixture/session created. Cumulative fixtures: one password fixture created/deleted, zero Google fixtures; earlier exact-UUID cleanup verified user/session/profile absence. Newly opened browser contexts closed. The mode-0600 local manifest retains only scoped resource identifiers/status, no credentials/OTP/token. **One locked OVH mailbox remains; do not report full cleanup.** Defer a new fixture until inbox readiness and outstanding cleanup are resolved; respect the two-identity total budget.
+
+### Recommendation / implementation gate
+
+Do **not** start deletion implementation assuming common login OTP passes R6. This PoC has not established request/purpose freshness; a provider 3600-second expiry plus a local five-minute receipt cannot by itself prove when/why the code was issued. BLOCKED means unavailable valid-code experiments; record a reproduced binding violation as FAIL immediately. JWT iat/refresh, Auth-internal nonce reads and password-change workarounds remain prohibited.
+
+Simplest next step: finish the same bounded real-code matrix after inbox recovery, without redesigning V1. If login OTP fails, a separate review/PoC could evaluate native Supabase MFA with an **already enrolled** factor: public [challenge](https://supabase.com/docs/reference/javascript/auth-mfa-challenge) and [verify](https://supabase.com/docs/reference/javascript/auth-mfa-verify) expose a provider challenge ID. Server mapping to original UUID/session/request/purpose, <=5-minute expiry, replay and lost-response handling would still need hostile runtime verification. This is a research candidate, not a proven solution or approved plan change. Immediate factor enrollment by a stolen session is not fresh identity proof; requiring pre-enrollment changes deletion UX and needs approval. Do not build a custom OTP service or assume Stage MFA availability/configuration.
