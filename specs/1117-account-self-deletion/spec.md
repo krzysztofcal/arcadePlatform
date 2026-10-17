@@ -2,8 +2,8 @@
 
 **Feature Branch**: `docs/1117-account-self-deletion`
 **Created**: 2026-10-16
-**Status**: Proposed architecture; owner review and separate implementation GO required
-**Input**: [#1117](https://github.com/krzysztofcal/arcadePlatform/issues/1117), including owner decisions recorded in its body as 2026-10-17. Audit date follows this session's UTC date; the issue's future-dated labels are preserved as source labels, not treated as deployment evidence.
+**Status**: Revised 2026-10-17 after owner review; R5 legal and R6 feasibility gates remain, separate GO required
+**Input**: [#1117](https://github.com/krzysztofcal/arcadePlatform/issues/1117), including owner decisions recorded in its body as 2026-10-17. Initial audit dated 2026-10-16; revision dated 2026-10-17. Issue decision labels are source labels, not deployment evidence.
 
 ## Scope and authorization
 
@@ -20,7 +20,7 @@ An authenticated owner can initiate deletion at any time, including during multi
 1. Given a password or Google-only account, when fresh proof and explicit confirmation succeed, then one durable request is accepted; response distinguishes accepted/pending from completed.
 2. Given an old JWT, signed WS token, existing socket, XP session or concurrent JOIN/bonus/profile write, when acceptance commits, then no later user operation can commit or expose private account state. Operations that already committed are included in settlement/cleanup.
 3. Given another user's UUID, expired/replayed proof, checkbox without proof or refreshed JWT, when deletion is requested, then it is denied without destructive effects.
-4. Given a service outage before durable acceptance, then report retryable failure and no success; after acceptance, closing the browser does not cancel work.
+4. Given a service outage before durable intent, then report retryable failure and no success; after durable intent (including suspension preparation), closing the browser does not cancel work.
 
 ### US2 — Safely settle, forfeit and erase (P1)
 
@@ -40,7 +40,7 @@ After actual hard Auth deletion, the same verified email/password or Google iden
 
 **Independent test**: backend bonus concurrency tests; later authorized disposable-account Auth integration smoke.
 
-1. Given the same verified email across password/Google and recreated UUIDs, then welcome payments 1–3 can succeed under current campaign configuration, payment 4 is denied within the retained evidence horizon; failed attempts and replays do not consume slots.
+1. Given the same verified email across password/Google and recreated UUIDs, then welcome payments 1–3 can succeed under current campaign configuration, payment 4 is denied without timeout while the same welcome program operates; failed attempts and replays do not consume slots.
 2. Given today's paid Poker Daily reward, when a new UUID claims, then deny until next UTC day; start the new account's streak fresh. One-time campaign payments remain once per verified identity/campaign. Other daily/weekly/monthly policies do not change.
 3. Given unknown/unverified identity or unavailable HMAC infrastructure, then reward claim fails closed while registration, login and deletion remain possible.
 4. Given no remaining welcome reward and Daily below minimum buy-in, then clearly explain the available balance; do not promise immediate Poker access or create a replacement CH source.
@@ -52,18 +52,18 @@ Concurrent actions/settlement/claims; multi-tab deletion; old WS reconnect; pers
 ## Requirements
 
 - **FR-001**: Accept verified owner intent regardless of wallet, seats or active hand. Use one request per old UUID, durable state and an idempotent operation key. Never accept submitted target UUID/email as authority.
-- **FR-002**: Durable acceptance is the suspension linearization point. All ordinary HTTP, WS, database/RLS, CH, XP and profile operations serialize against it. Internal settlement/Leave/BURN are narrow privileged exceptions, never a client-selected flag.
+- **FR-002**: Durable intent starts SQL suspension; accepted_at is recorded only after Redis atomic fence is confirmed. A persisted suspension_preparing step resumes without login. Fully acknowledged acceptance is the cross-runtime authorization barrier; Postgres and Redis are not one atomic transaction. All ordinary HTTP, WS, database/RLS, CH, XP and profile operations serialize against it. Internal settlement/Leave/BURN are narrow privileged exceptions, never a client-selected flag.
 - **FR-003**: Recover `PENDING → PROCESSING → FINALIZING → COMPLETED` without user login. Retry transient errors durably; financial ambiguity enters an actionable incident and stays suspended. Do not keep an HTTP invocation alive to await a hand.
 - **FR-004**: Reuse authoritative table queues, persistence/recovery, normal cash-out and balanced canonical BURN (USER debit / GENESIS credit). Do not confiscate shared pot, alter balances directly or erase ledger/escrow/idempotency evidence.
 - **FR-005**: Seal financial obligations before BURN/retirement; no late USER postings after closure. Retain USER account ID/type and historical identity semantics. Hard Auth deletion comes after finances, cleanup and Storage safety checks.
 - **FR-006**: Remove removable identity data and invalidate browser/Redis/WS caches; prevent stale services from repopulating them. Historical identifiers embedded in financial proofs are pseudonymous retained audit, not a new account's data.
 - **FR-007**: New UUID, profile, wallet, handle allocation and sessions after hard deletion; no restored XP/streak/assets/roles. Pending deletion is not immediately re-registerable. No anti-farming block on signup itself.
-- **FR-008**: Welcome cap three confirmed payouts per verified normalized email identity within the approved retained-evidence period; no cooldown. Increment proof atomically with new ledger payout, never on signup, failure or replay.
+- **FR-008**: Welcome cap three confirmed payouts per recognized verified normalized email without timeout; no rolling expiry/cooldown. Retain minimized proof for the justified program purpose, subject to approved GDPR rights handling and explicit historical-coverage limitations. Increment proof atomically with new ledger payout, never on signup, failure or replay.
 - **FR-009**: Poker Daily at most one payout per identity/UTC day across all Poker Daily campaigns; `once` promotions at most one per identity/stable campaign ID. Keep amounts and active-account streak rules; recreated account starts fresh. Do not widen other policies.
-- **FR-010**: Derive identity server-side from authoritative confirmed email, never editable metadata. Versioned HMAC, server-only access, bounded retention and key rotation; no raw email, plain SHA, IP/device fingerprint or permanent tracking registry.
-- **FR-011**: Privacy basis/window, historical coverage, email normalization and deletion-request treatment require owner/privacy review before implementation. The plan is complete as a review package but these gates remain explicitly unresolved; do not silently select a lawful basis.
-- **FR-012**: Fresh proof must work for password and Google-only users, bind old UUID/session/purpose and expire after five minutes, single use. JWT `iat`, refresh and Google account selection alone are insufficient.
-- **FR-013**: Bilingual accessible Danger Zone below account settings, cancel/focus handling, clear forfeiture and retention disclosures; pending/completed/incident states. JSP-compatible JS, one CSS selector per line, `klog`, CSP SHA updates when new inline scripts require them. No new packages/frameworks.
+- **FR-010**: Derive identity server-side from authoritative confirmed email, never editable metadata. Versioned HMAC, server-only access, purpose-bound retention and recognition-safe key lifecycle; no raw email, plain SHA, IP/device fingerprint or permanent tracking registry.
+- **FR-011**: Privacy basis/purpose-bound retention, historical coverage, email normalization and deletion-request treatment require owner/privacy review before implementation. The plan is complete as a review package but these gates remain explicitly unresolved; do not silently select a lawful basis.
+- **FR-012**: Fresh proof must work for password and Google-only users, bind old UUID/original session/purpose/request_id/challenge generation and expire after five minutes, single use. JWT `iat`, refresh and Google account selection alone are insufficient.
+- **FR-013**: Bilingual accessible Danger Zone below account settings, cancel/focus handling, clear forfeiture and retention disclosures; pending/completed/incident states, including potentially more than two hours waiting_storage_expiry; not-before time is not a completion promise. JSP-compatible JS, one CSS selector per line, `klog`, CSP SHA updates when new inline scripts require them. No new packages/frameworks.
 - **FR-014**: Fundamental deterministic backend/WS/ledger tests only. Future Stage destructive smoke, migrations and all deployments require separate task GO under the current explicit restriction; Production always separate GO. Never merge automatically.
 
 ## Key Entities
@@ -73,11 +73,11 @@ Deletion request and single-use proof; live USER account and retired USER financ
 ## Success Criteria
 
 - **SC-001**: Every accepted request has a durable progress record; duplicate/restart tests produce one financial result and truthful status.
-- **SC-002**: No user mutation linearizes after suspension in concurrent HTTP/WS/SQL/Redis tests; no old private subscriptions deliver after the barrier.
+- **SC-002**: No new operation linearizes after confirmed suspension/accepted_at in concurrent HTTP/WS/SQL/Redis tests; SQL intent already denies new SQL/WS authorization while Redis preparation is retried; no old private subscriptions deliver after the barrier.
 - **SC-003**: Opponent balances/pots and total ledger conservation hold for non-all-in/all-in/side-pot multi-table scenarios; former user's final wallet zero, USER closed, historical receipts replay safely.
 - **SC-004**: Auth hard-delete/recreate yields a different UUID, independent data and rejects old JWT/WS/XP credentials. Same-email and Google-only flows both verified before release.
-- **SC-005**: Concurrent/replayed welcome attempts cannot pay a fourth retained-period reward; Daily/once identity uniqueness and UTC boundaries hold; unchanged policies retain baseline behavior.
-- **SC-006**: Private proof records are inaccessible to anon/authenticated roles; expiry, key rotation and deletion handling match approved disclosure. No unnecessary personal data appears in logs or public status.
+- **SC-005**: Concurrent/replayed welcome attempts cannot pay a fourth welcome reward without timeout for the same program; Daily/once identity uniqueness and UTC boundaries hold; unchanged policies retain baseline behavior.
+- **SC-006**: Private proof records are inaccessible to anon/authenticated roles; program/campaign closure purge, Daily expiry, key continuity and rights handling match approved disclosure. No unnecessary personal data appears in logs or public status.
 
 ## Assumptions and review decisions
 
