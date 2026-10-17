@@ -19,7 +19,7 @@ One durable private request per old UUID; persisted step/lease/receipt/retry and
 
 ## Infrastructure and remaining evidence
 
-Current main baseline 9a43f4cf. DB Stage Apply PR currently runs for drafts; implementation must guard drafts before including schema changes and must not dispatch/apply migrations under current authorization. Production FK evidence in catalog-evidence.json is prior read-only audit evidence, not a new live comparison. Preserve exact target separation. Read-only catalog refresh may inspect constraints/policies only, never unrelated user data/secrets. No shared Stage/Production mutations are intended.
+Current main baseline 9a43f4cf. DB Stage Apply PR currently runs for drafts; implementation must guard drafts before including schema changes and must not dispatch/apply migrations under current authorization. V2 read-only Stage and Production pg_constraint refresh confirmed the same eight public Auth FKs and both USER ownership checks; catalog-evidence.json records the scoped result. Original detailed inventory remains historical. Preserve exact target separation. Read-only catalog refresh may inspect constraints/policies only, never unrelated user data/secrets. No shared Stage/Production mutations are intended.
 
 ## Primary documentation
 
@@ -31,3 +31,7 @@ Current main baseline 9a43f4cf. DB Stage Apply PR currently runs for drafts; imp
 ## Targeted review requirements
 
 Review all-in settlement, late credits/final seal, both USER checks/retention proofs, SQL lock order and leases, all Redis writers, same-email new UUID, claim atomicity/quota, upload-capability horizon, secret/log minimization and false completion. Existing tests do not establish live configuration; unfinished work stays unchecked in tasks.md. No implementation milestone is labeled full feature completion until integrated evidence exists.
+
+## Initial implementation evidence
+
+Durable request/lease/ACTIVE foundation and official Auth HTTP adapter are implemented but not wired to public acceptance or WS scheduler. Transactional adapters must call assertDeletionLease in their effect transaction; Auth requires durable-intent authorization before reconciliation/deletion. Financial incidents survive stale workers. Phase-specific receipts and actual financial/Storage/fence adapters remain unfinished. All-in pending detach now preserves showdown eligibility and post-settlement cash-out through existing Leave. Local schema proposal is outside automatic migrations; no Production inventory bypass. Draft workflow guard and dedicated CI fundamentals job are included. No feature activation or live destructive probe was performed.

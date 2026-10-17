@@ -301,3 +301,14 @@ test("authoritative leave still rejects retained seat without leftTable flag", a
   assert.equal(result.ok, false);
   assert.equal(result.code, "authoritative_state_invalid");
 });
+
+
+test("authoritative leave accepts live all-in pending detach and rejects malformed pending state", async () => {
+  for (const valid of [true, false]) {
+    const execute = createAuthoritativeLeaveExecutor({ env: {}, klog: () => {}, beginSql: async fn => fn({}),
+      loadAuthoritativeLeaveModule: async () => ({ executePokerLeave: async () => ({ ok: true,
+        state: { version: 1, state: { tableId: "t1", phase: "FLOP", seats: [{ userId: "u1", seatNo: 1 }],
+          stacks: { u1: valid ? 0 : 100 }, allInByUserId: { u1: true }, pendingDetachByUserId: { u1: true } } } }) }) });
+    assert.equal((await execute({ tableId: "t1", userId: "u1" })).ok, valid);
+  }
+});

@@ -1162,5 +1162,20 @@
       "column_name": "avatar_variant",
       "data_type": "text"
     }
-  ]
+  ],
+  "v2ConstraintReview": {
+    "date": "2026-10-17",
+    "sourceMain": "9a43f4cfcec5d590c2ab7185ad2be0d153fdbb2f",
+    "targets": [
+      "Stage",
+      "Production"
+    ],
+    "scope": "Read-only pg_constraint metadata only; no user rows, balances, secrets or mutations.",
+    "publicAuthForeignKeysPerTarget": 8,
+    "matchingOwnershipChecks": [
+      "chips_accounts_user_or_system_key",
+      "chips_accounts_user_system_exclusive"
+    ],
+    "result": "Both targets retain restrictive live USER Auth FK and both non-null USER ownership checks; retirement requires coordinated later migration."
+  }
 }

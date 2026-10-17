@@ -3,8 +3,9 @@
 Implementation GO granted in current conversation; destructive Stage/Production/deployment/merge excluded. Supersedes V1 T001–T022 and blocked OTP PoC gates. Only fundamental backend/SQL/WS tests. No generic tooling/dependency cleanup. Keep incomplete items unchecked.
 
 - [x] T01a Synchronize all seven SpecKit artifacts with approved issue V2; remove custom OTP/challenge/receipt and old PoC PASS requirements; preserve ledger/bonus/retention/Storage/writer safety.
-- [ ] T01b Refresh scoped catalog FK/policies evidence read-only; review exact writer/Storage/WS dependencies. Before migration-bearing Draft PR add draft guard to .github/workflows/db-stage-apply-pr.yml; no intended shared Stage apply.
-- [ ] T02a Add private durable request schema and shared/account-deletion.mjs request/status/phase/lease helpers with one request/UUID and fail-closed state. Fundamental duplicate/ownership/restart/lease/error tests.
+- [x] T01b Refresh scoped catalog FK/policies evidence read-only; review exact writer/Storage/WS dependencies. Before migration-bearing Draft PR add draft guard to .github/workflows/db-stage-apply-pr.yml; no intended shared Stage apply.
+- [x] T02a Add local-only durable request schema proposal at supabase/manual/1117-account-deletion-requests-v2.sql and shared/account-deletion.mjs request/status/phase/lease foundation with one request/UUID; local PGlite duplicate/ownership/no-table/lease/error tests. Official Auth adapter requires authorized intent and exact-UUID reconciliation. This is not a complete finalizer or canonical applied migration.
+- [ ] T02d Add actual phase-specific durable intents/receipts and concrete transactional adapters, then prepare reviewed canonical migration/inventory update under separate Stage application GO. No public acceptance before remaining integration tasks.
 - [ ] T02b Integrate netlify/functions/account-delete.mjs POST/GET with verified Supabase owner, strict origin/body/consent and idempotency. Do not activate acceptance until T02c/T04/T05/T06 complete.
 - [ ] T02c Integrate ACTIVE guards at SQL effects and RLS, ws-mint-token/WS auth/private sends and active sockets, CH/bonus/XP/profile APIs, store-upstash raw+Lua writes including admin/sync/guest conversion. Durable preparing then confirmed Redis fence; no PG+Redis atomicity claim. Fundamental delayed writer/restart/active socket tests.
 - [ ] T03 Update account.html, js/account-page.js, js/auth/supabaseClient.js, js/i18n.js with explicit owner confirmation and real pending/completed/intervention status. Optional supported isolated password/Google login, no custom OTP. Real Stage smoke separately authorized before activation; no UI snapshot tests.
@@ -17,3 +18,7 @@ Implementation GO granted in current conversation; destructive Stage/Production/
 - [ ] T07b Separate authorized Stage migration/fixtures, genuine password/Google smoke, exact-SHA WS Preview Deploy and smoke, privacy/legal approval, then separate Production GO. Not authorized in current task; never merge automatically.
 
 Dependencies: T01 before code; T02a before endpoint/fences/finalizer. T02c and T04/T05/T06 before feature activation/T03 user exposure. T07a is code review evidence, not T07b release evidence. No automatic Stage apply is intended while this PR remains Draft.
+
+## Current delivery evidence
+
+Draft preparation only: V2 artifacts, read-only catalog review, durable lifecycle/official Auth adapter foundation and all-in Leave prerequisite implemented. T04a remains unchecked until multi-table/restart integration evidence is complete; reducer/domain/adapter local tests alone are not full account-deletion E2E. No account-delete endpoint/UI, global ACTIVE fences, BURN/retirement, bonus HMAC, Storage cleanup or WS tick is activated. Full deletion remains unfinished. Local/CI test outcomes recorded in PR; Stage/Production schemas unchanged.

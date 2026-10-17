@@ -23,3 +23,7 @@ Process up to ten requests per existing WS tick, one bounded step per request. P
 ## Activation gates and impacts
 
 Required before exposing: all fences, Poker/BURN/retirement, anti-farming atomicity, Storage legacy cutover evidence, privacy/legal approval, real password/Google smoke and exact-SHA WS preview. JWT/WS denials, USER retirement joins/proofs, all-in Leave behavior, identity bonus quotas, XP/cache/Storage and delayed-completion UI are breaking impacts to review. Schema files are proposals until separately authorized application. Never merge/deploy automatically.
+
+## Preparation delivery boundary
+
+The first draft implements the durable lifecycle/lease foundation, official Auth adapter and all-in Leave prerequisite. SQL is a **local-only proposal** at `supabase/manual/1117-account-deletion-requests-v2.sql`, generated via CLI then held outside automatic migration discovery. The existing migration validator binds the entire migrations directory to a fixed reviewed Production inventory; changing that inventory is a separately reviewed migration-preparation task, not permission to bypass it. No canonical migration is published/applied in this draft. The draft guard independently prevents accidental Stage application of later migration-bearing drafts. No endpoint/UI accepts deletion until all required writer/financial/bonus/Storage integrations pass. This is unfinished implementation, not feature activation.

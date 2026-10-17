@@ -17,3 +17,5 @@ Private versioned HMAC verified-email identity, welcome paid count saturated at 
 ## Storage and cache
 
 Preserve signed upload paths through provider capability expiry plus validated in-flight/clock grace and confirmed final removal. Five-minute finalize TTL is not upload capability expiry. Quiesce all legacy issuers before cutoff; prove bucket temporary-only before global orphan sweep, include records already lost. Do not complete while late upload can recreate files. Existing request manifest holds only required paths. Redis permits/epoch guard every UUID-associated create/renew write including admin/sync/guest conversion and memory parity. Removal-only operations remain exact-target and do not remove fences.
+
+Local-only initial schema proposal: `supabase/manual/1117-account-deletion-requests-v2.sql`; executed only in PGlite tests. No automatic migration or live schema has changed. Current proposal implements request/phase/lease/error foundation only; financial receipts, retirement/reward/Storage integrations remain unfinished.
