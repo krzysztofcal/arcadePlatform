@@ -142,6 +142,36 @@ Documentation checked 2026-10-17:
 
 **Separate-GO Stage PoC only:** two disposable users (password and Google-only), existing configured delivery, no funded play/bonuses. Verify original and newly created session IDs, same UUID, trusted email source, actual OTP vs magic-link template, single-use/expiry/invalid codes, resend, old OTP issued before challenge, two tabs/challenge replacement, concurrent ordinary login OTP, wrong UUID/session, email change and replay after confirmation. Simulate lost verification response; require a new challenge if success cannot be proved without reusing a consumed provider OTP. Verify no auto-signup/linking/role change or proof via refresh. Capture only boolean assertions/redacted references, revoke/delete PoC accounts with explicit GO. No PoC executed in this review. R6 remains UNRESOLVED; provider API docs alone do not establish the full secure deletion contract. PoC acceptance requires observed negative results for both fixture types on supported public API; one successful OTP login or UUID comparison is not sufficient. If request/purpose freshness isolation cannot be demonstrated against concurrent login, record FAILED and return to review, without replacing proof by JWT validation/refresh.
 
+## R6 Stage PoC attempt — 2026-10-17: BLOCKED before Auth execution
+
+Baseline: current main `9a43f4cfcec5d590c2ab7185ad2be0d153fdbb2f` (merged #1122). Owner authorized only R6 PoC on pinned Stage `krydukthwdvccggbyjfw`, maximum two disposable users; no T004–T022 implementation, migrations, deployment or other economy/user operations. Preparation read current agents.md/skills.md, merged R6 contract/quickstart and local Stage-account runbook; reviewed public Supabase reauthenticate/signInWithOtp/verifyOtp documentation again. Changelog markdown fetch failed; no provider-version/config conclusion is inferred from it.
+
+| Account type | Runtime R6 verdict | Reason |
+|---|---|---|
+| Email/password disposable fixture | **BLOCKED** | No specifically authorized disposable email identity and test-inbox mapping provided. Local ordinary Preview credential file exists (existence checked only, contents not read); runbook does not designate it disposable or authorize deletion. It is not reused for this PoC. |
+| Google-only disposable fixture | **BLOCKED** | No designated test Google identity with authorized interactive sign-in and inbox access. Do not substitute an ordinary connected personal Google account or forge Google identity/provider metadata. |
+
+A Gmail connector is callable, but that alone does not identify or authorize the test inbox/Google fixture. No inbox was searched/read, no OAuth consent or browser login initiated. Need owner to designate the controlled test addresses/Google identity and approve specific mailbox access or user-assisted OTP delivery, plus interactive Google sign-in when required. Do not request passwords/OTPs in public GitHub comments or commit credentials; establish secure local/user-assisted access only. Existing task GO already covers creation/deletion of the designated disposable Supabase fixtures, so do not ask for another general PoC GO once these missing inputs are resolved.
+
+### Actual execution / scenario results
+
+| Scenario / observation | Email/password | Google-only |
+|---|---|---|
+| Stage Auth settings/SMTP/template/provider behavior | NOT OBSERVED: no authenticated or management API inspection | NOT OBSERVED |
+| Disposable create, login, shouldCreateUser:false, actual OTP delivery/template, returned UUID equality | NOT RUN — prerequisite blocked | NOT RUN — prerequisite blocked |
+| Bind proof to original session_id/UUID/request_id/account_delete/5min | NOT RUN | NOT RUN |
+| Old OTP; concurrent ordinary login; two windows; resend | NOT RUN | NOT RUN |
+| Replay; expiry; wrong session; wrong UUID/account | NOT RUN | NOT RUN |
+| Email change; lost verification response; no unintended signup/link/role/session replacement | NOT RUN | NOT RUN |
+
+**Stage public Auth APIs actually exercised: none.** No signInWithOtp, verifyOtp, reauthenticate, signup, sign-in, updateUser, admin create/delete or settings/config request was sent. Reading documentation/source is not a test or a PASS/FAIL observation of Stage. No mocks were used. Accounts created: **0**; accounts deleted: **0**; fixture sessions/tokens: **0**; no test cleanup pending. No Stage/Production data or secrets read, no email contents read, no Poker/CH/bonus call, no deployment/migration/service/config change. Temporary work contains documentation only.
+
+### Security conclusion and next action
+
+Whether public Supabase API meets the required request-scoped freshness for either account type remains **unproven**. Keep common signInWithOtp(existing user only)+verifyOtp as a candidate, not an approved implementation. reauthenticate nonce and JWT validation/refresh are not replacement proof. After controlled access is supplied, execute the minimal positive and negative matrix against actual Stage; a reproduced stale/concurrent OTP acceptance without required binding makes that candidate **FAIL**, not BLOCKED/PASS. Unsupported public API binding also means FAIL once established, never an Auth-internal workaround. If it fails, return to owner design review: compare supported dedicated provider step-up/re-auth proof or existing assisted deletion/rights process; any alternative must independently prove freshness/purpose/session/UUID binding. Do not build a custom OTP service or production endpoint under this GO.
+
+This is a blocked PoC report, not successful validation or execution of implementation tasks. Documentation-only follow-up Draft PR deliberately uses skip markers because this task forbids deployment; the required Netlify preview check may therefore remain absent. Do not describe that PR as merge-ready or change branch protection to hide the missing check. Stop for owner input/review.
+
 ## Signed uploads — legacy-safe rollout and physical cleanup
 
 Verified provider [signed upload contract](https://supabase.com/docs/reference/javascript/storage-from-createsigneduploadurl): valid for two hours without further authentication. Current `createPendingUpload()` sets application expires_at to five minutes but passes only upsert:false to provider signing. `cleanupExpiredUploads()` deletes the object then its tracking row after that application deadline; `finalizeAvatar()` also drops pending tracking in finally. A signed URL can then recreate the now-untracked pending path. Thus copying only surviving rows at deletion acceptance misses already-cleaned legacy paths.
