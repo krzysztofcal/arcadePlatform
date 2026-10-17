@@ -31,6 +31,10 @@ Extend existing profile_avatar_uploads with signing intent, capability_not_after
 
 Table obligations reference existing authoritative receipts; do not add a duplicate escrow/settlement ledger. All-in pending detach must preserve the existing hand participant until settled; use existing deferred seat semantics with narrowly extended marker. No Auth cascade can delete active financial obligations.
 
+## Redis mutation ownership (existing structures only)
+
+No new registry/table. Existing permits/epoch fence each UUID's creating/renewing operations, including raw SET/SETEX/projection writes moved into existing-store guarded execution. Random server-session keys carry a validated owner in their value; touch checks existing owner/session atomically and does not create missing sessions. Hashed state/migration keys use trusted existing key builders; no prefix-based ownership guess. Admin/sync use target UUID context. Cleanup manifest/index/legacy scan must cover these keys and exact leaderboard members; removal keeps BLOCKED/epoch evidence and other users/shared sets intact. Current memory adapter mirrors denial semantics, not an unfenced fallback.
+
 ## FK treatment
 
 `chips_accounts.user_id` retained for live only. `bonus_campaigns.created_by` and `bonus_campaign_eligible_users.created_by` become nullable SET NULL (or equivalent audited scrub before hard delete); other users/campaigns survive. Own profile/favorites/bonus eligibility/bonus_claims/avatar-upload cascades stay after independent proof/path preservation. Poker and financial UUIDs without Auth FK require explicit retention/cleanup, not blind cascading.

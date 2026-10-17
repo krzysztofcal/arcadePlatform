@@ -27,6 +27,10 @@ No new public gameplay command. Existing Leave/settlement/queue adapters are reu
 
 Keep current welcome/bonus response shapes and existing UUID idempotency keys. Add reasons `welcome_bonus_limit_reached`, `already_claimed_by_identity`, `verified_email_required`, `reward_identity_unavailable` with eligible=false. Recreated account must not receive old UUID/transaction receipt or streak via status; show denial and next UTC eligibility only. A replay by original valid active UUID can retain existing receipt semantics. GET is advisory; POST checks identity, account, UTC/campaign policy and pays atomically. No extra CH source or signup rejection.
 
+## Internal Redis write contract (T005/T007/T013/T014)
+
+Existing store helper accepts only trusted target UUID/current epoch and bounded server-built mutations, not a public arbitrary-key/command interface. ACTIVE+matching epoch check and all creating/renewing writes execute in one Redis Lua call; no client-side check then raw SETEX/ZADD. Session touch checks stored owner and existing session in that call. Snapshot/status-only/boost/admin backfill/visibility-sync use this same contract, with explicit denial propagation. Specialized award/migration/visibility scripts retain their logic and add matching checks. Removal-only persisted cleanup/prune is exact-owner, replay-safe and cannot restore data, clear fence/epoch or delete shared sets. No cross-store atomicity is asserted. Refer to research.md inventory for every caller; feature activation requires old raw writers drained.
+
 ## Closure and recovery contract
 
 Only finalizer may close/retire USER or hard-delete Auth. Completed means financial seal/receipt, required private cleanup, capability horizon and verified Auth removal all done. Retry unknown outcome by original idempotency/progress evidence. No API returns completed for a durable intent alone. Incident does not re-enable account; operator tooling must use current access controls and preserve audit evidence.

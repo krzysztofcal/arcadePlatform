@@ -45,6 +45,10 @@ Post-design: no constitution exception requested. Privacy/provider unknowns bloc
 
 `_shared/` targets above mean `netlify/functions/_shared/`. New symbols are proposed interfaces, not claims that they already exist. Exact entities: [data-model.md](data-model.md); HTTP/WS contracts: [contracts/account-deletion.md](contracts/account-deletion.md).
 
+### Targeted Redis writer completion (no architecture change)
+
+T005/T007 cover the complete mutation inventory in research.md, including raw writes below the HTTP/award layer. Reuse `_shared/store-upstash.mjs` for one narrow guarded-user mutation helper; extend existing specialized Lua, keep memory semantics equivalent. Cover `_shared/xp-status.mjs` status/conversion snapshot → saveUserProfile, start-session create/touch, calculate-xp state/boost, admin maintenance backfill/provisioning/prune and visibility sync. Admin permission does not authorize writing a suspended target; stale pages/scores are not authority. Creation/renewal requires ACTIVE+epoch atomically; exact-owner removal-only cleanup/prune does not require ACTIVE, never clears lifecycle fence or shared sets. T013/T014 final cleanup and delayed-retry tests cover all these call chains. Old raw writer invocation drain is an activation prerequisite, not another worker/cron. No public API or package addition.
+
 ## Six implementation stages and dependencies
 
 ### 1. Resolve gates and establish database invariants
