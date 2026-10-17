@@ -1,53 +1,21 @@
-# Validation guide — execute only after implementation GO
+# Verification — #1117 V2
 
-Current delivery is documentation only. No commands below authorize runtime changes or destructive fixtures. Run appropriate deterministic tests using existing installed packages; no dependency installation or broad UI suite required.
+## Scope
 
-## Fundamental local checks
+Use local/disposable test databases and memory adapters only. No destructive Stage, deployment, production mutation or automatic migration apply under this task. Keep PR DRAFT; modified Stage migration workflow skips drafts. Do not make ready/dispatch migration until separately authorized. Never use ordinary Preview/personal users as deletion fixtures. Historic OVH/OTP PoC is discontinued, no PASS gate or new mail infrastructure.
 
-From repository root, after future implementation:
+## Fundamental checks
 
-```sh
-node --test tests/account-deletion.behavior.test.mjs tests/auth-identity.test.mjs tests/admin-auth.behavior.test.mjs
-node --test tests/chips-ledger.test.mjs tests/welcome-bonus.behavior.test.mjs tests/bonus-campaigns.behavior.test.mjs tests/bonus-campaigns.transaction.test.mjs tests/bonus-campaigns-endpoint.behavior.test.mjs
-node --test tests/start-session.test.mjs tests/calculate-xp.test.mjs tests/xp-ledger.behavior.test.mjs tests/profile-avatar.behavior.test.mjs tests/xp-leaderboard-maintenance.behavior.test.mjs
-node --test tests/poker-reducer.applyLeaveTable-exported.behavior.test.mjs ws-server/server.leave-race.behavior.test.mjs ws-server/poker/persistence/authoritative-leave-adapter.behavior.test.mjs ws-server/poker/persistence/deferred-leave-finalization-adapter.behavior.test.mjs
-node --test tests/chips/chips-ledger-closed-human-retention.test.mjs tests/chips/chips-ledger-archive-pruning.test.mjs
-npm run syntax
-npm run check:csp-inline
-```
+1. Verified owner vs arbitrary target UUID, origin/content/body rejection, explicit confirmation; duplicate POST/lost response one request, status cannot enumerate users.
+2. Persist SQL intent then Redis fence; delayed writer cannot recreate profile/XP/session/ranking; raw SETEX/ZADD, admin target, sync, guest conversion, Redis epoch restart and already-active WS delivery tested. No cross-store atomicity assertion.
+3. Multi-table active/all-in side-pot Leave, normal showdown, opponent/escrow conservation, deferred settlement and final single BURN including late winnings; replay uses frozen original receipt.
+4. Retirement satisfies both USER CHECKs, FK deletion, history/idempotency/archive proofs; no new posting to retired wallet or old UUID.
+5. Existing tick advances no-table requests; crash/outage/lost successful BURN/Auth response, lease takeover/stale result, bounded retry and financial mismatch incident. No destructive step after unresolved financial inconsistency.
+6. Signed upload issued before request/legacy lost row; late PUT before horizon, delayed final cleanup, no false COMPLETED; bucket/issuer cutover gate.
+7. Same email/Google new UUID, clean resources/roles/streak; max three Welcome, one Daily per UTC day, one once per campaign; atomic rollback/replay and global quota survive cascade. Privacy retention/rotation approved before release.
 
-Use existing test-specific env/memory/PGlite fixtures; do not point database integration tests at Stage/Production implicitly. Verify test harness behavior before execution. `tests/chips/chips.integration.test.mjs` requires a deliberately isolated database fixture and explicit environment check; run only against approved local/disposable target. Test additions must assert business effects, not mirror source text. Expected results: no duplicate grants/BURN, conserved entries, correct pot/side-pot, old credentials and anonymous UUID sources rejected, receipts/limits survive recreation, cleanup retries and no false completion. Missing packages or environment are reported, not permission to reconfigure services.
+Use existing Node test runner/PGlite, extend critical tests where available; no UI snapshot suite. Run npm run syntax and npm run check:csp-inline as appropriate. CI runtime validation is not deployment evidence. Record actual commands/results in PR and tasks, not mocks described as Stage success.
 
-## Authorized Stage integration later
+## Later Stage activation
 
-Prerequisites: separate GO for migrations/shared Stage effects, disposable destructive tests and each deployment; approved R5/R6; verified Stage target; exact-SHA WS Preview Deploy success for runtime-affecting SHA before E2E. Never use Production or the pinned ordinary preview account as a deletion fixture. Never print credentials/emails/JWTs. Test metadata/results should use synthetic references and aggregate invariants only.
-
-1. Fresh password and Google-only fixture: challenge/confirm, forged subject/proof denial, old JWT and socket/mint/RLS read/write denial after accepted marker. UI distinguishes pending from completed.
-2. Multi-table non-all-in + all-in side-pot: confirm during hand, attempt concurrent JOIN/rebuy/gift/bonus/action, verify normal authoritative settlement, own cash-out burned once, opponents/escrow conserved. Restart WS after intent/settlement/cleanup checkpoints; requests with no tables also resume.
-3. Inject transient Storage/Redis/Auth failures and lost successful Auth response. Verify retry/incident, no duplicate financial mutation, original payload/registry preserved, and no Auth removal while obligations unresolved.
-4. Issue signed avatar upload before confirmation; attempt late PUT during its actual validity and concurrent finalize. Verify immediate finalize denial, tracked path cleanup after capability horizon, no orphan origin object and no premature completed label. Document CDN/browser/backups limits without claiming remote copies erased.
-5. Hard-delete/recreate same email/password and same Google: new UUID/profile/wallet/handle allocation and zero inherited XP/assets/roles/streak/sessions; old guest conversion source rejected. New valid user remains usable.
-6. Across recreated UUIDs and login methods, pay welcome 1/2/3 and deny 4, with parallel/replay/rollback cases. Claim Poker Daily, recreate same UTC day, deny; next UTC day eligible with fresh streak. Once campaign denied after recreation; unrelated weekly/monthly unchanged. Verify campaign global quota does not reopen on cascade.
-7. Check private proof/schema access with anon/authenticated roles and key-recognition continuity/Daily-expiry fixtures; no raw email or digests in public responses/logs. Review retention/import limits against approved policy.
-
-Owner may perform authenticated manual checks. If pending: report `implementation ready, awaiting manual runtime verification`, never merge-ready. Record target/SHA/test result without PII. Production needs a separate reviewed contract/GO; rollback stops new acceptance while preserving recovery for already accepted irreversible requests.
-
-## Checks for this docs-only delivery
-
-Validate artifact links, task numbering and requirement/gate coverage, exact existing source/test paths, no unfinished template placeholders and diff limited to `specs/1117-account-self-deletion/` plus SpecKit feature pointer. Runtime suites are intentionally not executed for a documentation-only change.
-
-## Targeted raw-Redis regression coverage (future implementation only)
-
-Extend existing start-session/calculate-xp/xp-ledger/xp-leaderboard-maintenance backend tests plus `tests/xp-leaderboard-foundation.behavior.test.mjs` and `tests/store-upstash.force-memory-test-mode.behavior.test.mjs` for visibility/store parity. Pause immediately before final raw-equivalent mutation in each inventory chain: profile/status SET, session create/touch SETEX, combo/boost SETEX, admin ZADD and visibility sync. Commit BLOCKED/accepted_at, run cleanup, then resume/retry old mutation and assert no recreated data or renewed session TTL. Repeat after Redis recovery epoch change and VPS restart; memory adapter must deny the same cases. Check admin actor ACTIVE with target BLOCKED and stale admin page/score. Exact-old-UUID removal-only ZREM/DEL must remain possible and idempotent without removing another member/new account or lifecycle fence. New generic/visual suites are unnecessary. Repeat writer/caller scan and verify old raw-writer drain before activation; a timeout is not evidence of cancellation.
-
-Storage gate evidence must establish bucket temporary-only scope from configuration/issuer/consumer checklist and scoped metadata reconciliation, and every old URL issuer disabled/drained before T_cutover. Mixed/unknown bucket content blocks broad orphan cleanup. Cover previously issued URL, row already lost and late orphan object, not only surviving rows; completion waits for confirmed safe removal. No runtime inspection/PoC is authorized by this guide.
-
-## Revision 2026-10-17 — minimal feasibility PoC (separate GO, not executed)
-
-Use only two disposable Stage identities (email/password, Google-only), no financial claims/joins. Verify supported send/verify API, numeric OTP vs magic-link template, shouldCreateUser:false, exact same UUID/no identity linking; original initiating session stays bound while OTP may create another session. Negative cases: code issued before deletion challenge, concurrent normal-login code, two tabs/resend/challenge replacement, wrong UUID/session/request, email change, five-minute expiry, consumed code replay and lost provider verification response. JWT refresh/iat and ordinary login cannot pass. Record only boolean assertions and redacted fixture labels. A candidate fails if provider code cannot be shown fresh and bound to this request; no auth.users nonce-reading/password-change workaround. Cleanup fixture sessions/accounts only within that explicit GO.
-
-Storage feasibility checks require additional scoped GO: prove real signed capability expiry and finite in-flight/clock grace on this deployment; validate dedicated pending-bucket scope. No unknown-user object contents/PII read. Rollout evidence must include last old issuer/cleanup invocation, surviving-row tracking preservation, legacy missing-row reconciliation after T_cutover+2h+grace, and rollback invalidation. Old row deleted after five minutes followed by late upload must be a fundamental deterministic regression scenario.
-
-Additional fundamental assertions: no-timeout welcome count stays exhausted after >12 months; once campaign pause/reopen/rename retains denial; real program/campaign final closure purges proof under approved rights policy without reusable old program; Daily cannot backdate after proof expiry. Campaign global quota survives Auth cascade/pruning. Recovery handles no-table requests, VPS restart, Supabase outage, success-with-lost-response BURN/cash-out/Auth delete, lease takeover and exact-owner cleanup. Scheduled >2h Storage waits never trigger 30min overdue incident; real financial mismatch immediately blocks destructive steps. Inject delayed Redis operation after timeout and Redis restart/flush; ACTIVE permit/recovery epoch and startup reconciliation (missing permit denies; old delayed initialization cannot override BLOCKED) must prevent post-acceptance XP mutation. Race private WS delivery against acceptance, not just frame processing.
-
-Docs-only review result: R1/R2/R3/R4/R7/R8 require future changes/tests; R5 legal/LIA/rights policy and R6 secure OTP feasibility unresolved. Not ready for unrestricted implementation GO; a separately scoped PoC GO may resolve R6 and Storage grace. No probe/deployment/environment mutation was performed for this revision.
+Separate GO for disposable destructive fixtures/migration/deploy. Standard password and genuine Google owner-confirmation smoke before enabling. Exact runtime SHA WS Preview Deploy and smoke required for runtime changes. No requirement to prove old login OTP request binding, no admin nonce reading or provider forgery. Completion requires official Admin hard-delete successful/reconciled and prior obligations satisfied. Production always separate GO.
