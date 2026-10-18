@@ -7,6 +7,13 @@ import { cleanupDeletionAvatars } from '../../../shared/account-deletion-storage
 export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconnectUser, klog, env = process.env,
   blockIdentity = blockRedisIdentity, retireWallet = retireUserForDeletion,
   cleanupAvatars = cleanupDeletionAvatars, cleanupRedis = cleanupRedisIdentity, deleteAuth = deleteAuthUser, redisIsMemory = isMemoryStore }) {
+  // Bound lock/query waits within each effect transaction, below lease horizon.
+  const rawBeginSql = beginSql;
+  beginSql = (fn) => rawBeginSql(async (tx) => {
+    await tx.unsafe("set local statement_timeout='5s';");
+    await tx.unsafe("set local lock_timeout='5s';");
+    return fn(tx);
+  });
   let running = false;
   const transactionFor = (context, fn) => beginSql(async (tx) => {
     await lockAccountLifecycle(tx,[context.userId]);
@@ -86,7 +93,11 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
     running = true;
     try {
       const rows = await scanDeletionRequests(beginSql);
-      for (const row of rows) await advanceDeletion({beginSql,requestId:row.request_id,steps});
+      for (const row of rows) {
+        const outcome = await advanceDeletion({beginSql,requestId:row.request_id,steps});
+        if (outcome.incident) klog('account_deletion_operator_incident',{
+          requestId:row.request_id,code:outcome.financial ? 'financial_mismatch' : 'progress_overdue'});
+      }
     } catch { klog('account_deletion_tick_failed',{code:'dependency_unavailable'}); }
     finally { running=false; }
   }, steps };

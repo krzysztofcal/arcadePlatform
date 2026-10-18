@@ -96,6 +96,7 @@ export async function advanceDeletion({ beginSql, requestId, steps }) {
     if (result?.done !== true) throw Object.assign(new Error('dependency_unavailable'), { code: 'dependency_unavailable' });
   } catch (error) {
     const financial = error?.code === 'financial_mismatch';
+    let incident = financial;
     if (financial) {
       // A discovered financial discrepancy must not vanish when a lease expires.
       // SQL adapters serialize this condition with actual effects using assertLease.
@@ -104,13 +105,14 @@ export async function advanceDeletion({ beginSql, requestId, steps }) {
         error_code='financial_mismatch', incident=true, lease_until=null
         where request_id=$1;`, [requestId]));
     } else {
-      await beginSql((tx) => tx.unsafe(`update public.account_deletion_requests set
+      const [retried] = await beginSql((tx) => tx.unsafe(`update public.account_deletion_requests set
         status='RETRY', error_code='dependency_unavailable', incident=incident or actionable_since<clock_timestamp()-interval '30 minutes',
         lease_until=null, next_attempt_at=clock_timestamp()+interval '30 seconds'
-        where request_id=$1 and lease_generation=$2 and status='PROCESSING' and lease_until>clock_timestamp();`,
+        where request_id=$1 and lease_generation=$2 and status='PROCESSING' and lease_until>clock_timestamp() returning incident;`,
       [requestId, row.lease_generation]));
+      incident = retried?.incident === true && row.incident !== true;
     }
-    return { advanced: false, retryable: !financial };
+    return { advanced: false, retryable: !financial, incident, financial };
   }
   return beginSql(async (tx) => {
     const next = PHASES[PHASES.indexOf(row.phase) + 1];
