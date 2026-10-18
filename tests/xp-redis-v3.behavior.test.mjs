@@ -231,3 +231,35 @@ test('existing deploy-context generator bakes validated pins and refuses incompl
     assert.match(preservedPin,/BUILD_XP_REDIS_VERSION = "3"/);
   }finally{await rm(cwd,{recursive:true,force:true});}
 });
+
+test('V3 missing Redis credentials denies reads, writes, rate limits and XP HTTP without memory fallback',async()=>{
+  const {mkdtemp,cp,writeFile,rm,symlink}=await import('node:fs/promises');
+  const {tmpdir}=await import('node:os');const {join,resolve}=await import('node:path');const {spawnSync}=await import('node:child_process');
+  const cwd=await mkdtemp(join(tmpdir(),'xp-unavailable-'));
+  try {
+    await cp(resolve('netlify'),join(cwd,'netlify'),{recursive:true});
+    await cp(resolve('shared'),join(cwd,'shared'),{recursive:true});
+    await symlink(resolve('node_modules'),join(cwd,'node_modules'),'dir');
+    await writeFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'export const BUILD_DEPLOY_CONTEXT="deploy-preview"; export const BUILD_DEPLOY_ORIGIN=null; export const BUILD_XP_REDIS_VERSION="3"; export const BUILD_XP_REDIS_ENV="stage";');
+    const script=`import assert from 'node:assert/strict';
+      globalThis.fetch=()=>{throw new Error('unexpected network');};
+      const m=await import('./netlify/functions/_shared/store-upstash.mjs');
+      assert.equal(m.isMemoryStore,false); assert.equal(m.xpStoreUnavailable,true);
+      for(const operation of [()=>m.store.get('key'),()=>m.store.set('key','value'),()=>m.atomicRateLimitIncr('key'),()=>m.getUserProfile('id'),()=>m.saveUserProfile({userId:'id',totalXp:1})])await assert.rejects(operation,{code:'xp_store_unavailable',status:503});
+      for(const name of ['calculate-xp','start-session','xp-leaderboard','xp-leaderboard-me','profile-public','admin-xp-leaderboard-maintenance']){
+        const {handler}=await import('./netlify/functions/'+name+'.mjs');
+        const result=await handler({httpMethod:'POST',headers:{origin:'https://deploy-preview-1124--playkcswh.netlify.app'},body:'{}'});
+        assert.equal(result.statusCode,503,name); assert.equal(JSON.parse(result.body).error,'xp_store_unavailable',name);
+      }`;
+    for(const [url,token] of [['',''],['https://fixture.invalid',''],['','fixture'],[' ','fixture']]){
+      const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd,encoding:'utf8',env:{...process.env,XP_CORS_ALLOW:'https://deploy-preview-1124--playkcswh.netlify.app',XP_TEST_MODE:'0',ACCOUNT_DELETION_ENABLED:'0',CONTEXT:'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:'stage',XP_KEY_NS:namespace,UPSTASH_REDIS_REST_URL:url,UPSTASH_REDIS_REST_TOKEN:token}});
+      assert.equal(result.status,0,result.stderr+result.stdout);
+    }
+    const memoryScript="import assert from 'node:assert/strict'; const m=await import('./netlify/functions/_shared/store-upstash.mjs'); assert.equal(m.isMemoryStore,true); assert.equal(m.xpStoreUnavailable,false); await m.store.set('fixture','ok'); assert.equal(await m.store.get('fixture'),'ok');";
+    for (const version of ['3','2']) {
+      if(version==='2') await writeFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'export const BUILD_DEPLOY_CONTEXT="unknown"; export const BUILD_DEPLOY_ORIGIN=null; export const BUILD_XP_REDIS_VERSION=null; export const BUILD_XP_REDIS_ENV=null;');
+      const result=spawnSync(process.execPath,['--input-type=module','-e',memoryScript],{cwd,encoding:'utf8',env:{...process.env,XP_TEST_MODE:version==='3'?'1':'0',XP_REDIS_VERSION:version,XP_REDIS_ENV:version==='3'?'stage':'',XP_KEY_NS:version==='3'?namespace:'kcswh:xp:v2',UPSTASH_REDIS_REST_URL:'',UPSTASH_REDIS_REST_TOKEN:''}});
+      assert.equal(result.status,0,result.stderr+result.stdout);
+    }
+  } finally { await rm(cwd,{recursive:true,force:true}); }
+});

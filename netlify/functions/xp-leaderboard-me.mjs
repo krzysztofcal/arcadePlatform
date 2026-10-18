@@ -1,3 +1,4 @@
+import { xpStoreUnavailableResponse } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import {
   allowLeaderboardRead,
@@ -25,6 +26,8 @@ function createXpLeaderboardMeHandler(deps = {}) {
     const cors = leaderboardCors(origin);
     if (!cors) return json(403, baseHeaders(), { error: "forbidden_origin" });
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
+    const unavailable = xpStoreUnavailableResponse(cors);
+    if (unavailable) return unavailable;
     if (event.httpMethod !== "GET") return json(405, cors, { error: "method_not_allowed" });
     if (!enabled(env, event)) return json(404, cors, { error: "not_found" });
     const auth = await verifyJwt(extractBearerToken(event.headers));

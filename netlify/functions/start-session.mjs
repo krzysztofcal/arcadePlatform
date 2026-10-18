@@ -1,7 +1,7 @@
 import { getXpPolicy } from "./_shared/xp-identity.mjs";
 import { createXpLedgerKeys, resolveXpNamespace } from "./_shared/xp-ledger.mjs";
 import crypto from "node:crypto";
-import { store, guardedUserMutation, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
+import { xpStoreUnavailableResponse, store, guardedUserMutation, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { buildApiCorsPolicy, buildCorsHeaders } from "./_shared/api-cors.mjs";
 import {
@@ -198,6 +198,9 @@ export async function handler(event) {
   }
 
   // Only accept POST requests
+  const unavailable = xpStoreUnavailableResponse(corsHeaders(origin) || {});
+  if (unavailable) return unavailable;
+
   if (event.httpMethod !== "POST") {
     return json(405, { error: "method_not_allowed" }, origin);
   }

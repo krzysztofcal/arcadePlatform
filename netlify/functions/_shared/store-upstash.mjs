@@ -182,7 +182,15 @@ export async function cleanupRedisIdentity({ userId, limit = 50, namespace = XP_
 }
 
 // Track whether we're using memory store (for fallback logic)
-export const isMemoryStore = FORCE_MEMORY_STORE || !BASE || !TOKEN;
+export const xpStoreUnavailable = isXpV3(XP_NAMESPACE) && !FORCE_MEMORY_STORE && (!BASE?.trim() || !TOKEN?.trim());
+export function assertXpStoreAvailable() {
+  if (xpStoreUnavailable) throw Object.assign(new Error("xp_store_unavailable"), { code: "xp_store_unavailable", status: 503 });
+}
+export function xpStoreUnavailableResponse(headers = {}) {
+  if (!xpStoreUnavailable) return null;
+  return { statusCode: 503, headers: { ...headers, "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }, body: JSON.stringify({ error: "xp_store_unavailable" }) };
+}
+export const isMemoryStore = FORCE_MEMORY_STORE || (!xpStoreUnavailable && (!BASE || !TOKEN));
 
 // Log memory-store fallback once on cold start
 let didLogMemoryFallback = false;
@@ -650,7 +658,10 @@ const remoteStore = {
   },
 };
 
-export const store = isMemoryStore ? createMemoryStore() : remoteStore;
+// Keep imports safe for independent Poker/CH processing; every Redis operation
+// rejects rather than allocating a volatile store when V3 credentials are absent.
+const unavailableStore = Object.fromEntries(Object.keys(remoteStore).map((operation) => [operation, async () => { assertXpStoreAvailable(); }]));
+export const store = xpStoreUnavailable ? unavailableStore : isMemoryStore ? createMemoryStore() : remoteStore;
 export const __remoteStoreForTests = remoteStore;
 export const __createMemoryStoreForTests = createMemoryStore;
 export const __setNxExScriptForTests = SET_NX_EX_SCRIPT;
@@ -673,6 +684,7 @@ return {count, 0}
 `;
 
 export async function atomicRateLimitIncr(key, ttlSeconds = 60, identity = null) {
+  assertXpStoreAvailable();
   if ((process.env.ACCOUNT_DELETION_ENABLED==='1' || isXpV3(XP_NAMESPACE)) && identity?.userId) {
     const result=await guardedRedisEval({store:identity.store || store,userIds:[identity.userId],
       anonymousIds:identity.anonymous ? [identity.userId] : [],beginSql:identity.beginSql,
@@ -716,6 +728,7 @@ function normalizeUserProfile(raw, userId) {
 }
 
 export async function getUserProfile(userId) {
+  assertXpStoreAvailable();
   if (!userId) return null;
   try {
     return normalizeUserProfile(await store.get(profileKey(userId)), userId);
@@ -749,6 +762,7 @@ export async function getUserXpTotalStrict(userId) {
 }
 
 export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
+  assertXpStoreAvailable();
   if (!userId) return null;
   const existing = await getUserProfile(userId);
   const timestamp = new Date(now).toISOString();

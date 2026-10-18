@@ -170,6 +170,7 @@ async function readXpTotals({ store, keys, userId, sessionId, dayKey, onError = 
       lastSync: hasSession ? sanitizeXpCounter(values[3]) : 0,
     };
   } catch (error) {
+    if (error?.code === "xp_store_unavailable") throw error;
     if (onError === "zero") return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
     throw error;
   }
