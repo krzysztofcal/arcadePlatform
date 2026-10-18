@@ -69,7 +69,7 @@ create trigger chips_entries_retired_user_v2 before insert on public.chips_entri
   for each row execute function public.chips_guard_retired_entry_v2();
 revoke all on function public.chips_guard_user_retirement_v2(),public.chips_guard_retired_entry_v2() from public,anon,authenticated;
 -- Historical USER remains USER: existing escrow/bot-only retirement classifiers
--- must continue rejecting it. Closed-human archive pruning currently also rejects
--- closed USER status; retain that fail-closed hold until its owner-sensitive
--- classifier/proof contract is separately reviewed. No entry/hash rewriting.
+-- must continue rejecting it. The separate forward retention proposal permits
+-- only verified closed-zero retired USER in the existing closed-human branch,
+-- preserving all policy/receipt guards. No entry/hash rewriting.
 commit;

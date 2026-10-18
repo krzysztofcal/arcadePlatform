@@ -27,4 +27,4 @@ No new service/worker/framework, no Google account deletion or provider physical
 
 ## Current implementation boundary
 
-Prepared code is disabled and unfinished. Legacy Redis ownership/erasure, retired USER archive proofs and complete final-effect writer coverage remain implementation blockers. New acceptance requires both runtime flag and default-false database release row. None of the local-only schema proposals is applied. Focused local tests do not authorize activation or establish all R1–R8 PASS.
+Prepared code is disabled and unfinished. Legacy Redis standardization/cutover and complete final-effect writer coverage remain implementation blockers; retired USER archive compatibility is prepared locally. New acceptance requires both runtime flag and default-false database release row. None of the local-only schema proposals is applied. Focused local tests do not authorize activation or establish all R1–R8 PASS.

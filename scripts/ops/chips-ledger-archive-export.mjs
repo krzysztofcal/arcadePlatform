@@ -498,12 +498,23 @@ with candidate_human_tables as materialized (
          count(*) filter (where a.account_type::text = 'ESCROW') as escrow_entry_count,
          count(*) filter (where a.account_type::text = 'ESCROW'
              and a.system_key = 'POKER_TABLE:' || h.table_id::text) as matching_escrow_count,
-         bool_and(a.status::text = 'active') as active_accounts,
+         bool_and(a.status::text = 'active' or (
+           a.account_type::text = 'USER' and a.status::text = 'closed'
+           and a.user_id is null and a.system_key is null and a.balance = 0
+           and to_jsonb(a)->>'retired_user_id' = h.user_id::text
+           and to_jsonb(a)->>'retired_at' is not null
+         )) as active_accounts,
          sum(e.amount) as net_amount,
          sum(e.amount) filter (where a.account_type::text = 'USER') as user_amount,
          sum(e.amount) filter (where a.account_type::text = 'SYSTEM') as system_amount,
          sum(e.amount) filter (where a.account_type::text = 'ESCROW') as escrow_amount,
-         count(*) filter (where a.account_type::text = 'USER' and a.user_id = h.user_id) as matching_user_count
+         count(*) filter (where a.account_type::text = 'USER' and (
+           (a.user_id = h.user_id and a.status::text = 'active'
+             and to_jsonb(a)->>'retired_user_id' is null)
+           or (a.user_id is null and a.system_key is null and a.status::text = 'closed'
+             and a.balance = 0 and to_jsonb(a)->>'retired_user_id' = h.user_id::text
+             and to_jsonb(a)->>'retired_at' is not null)
+         )) as matching_user_count
     from hot h
     join public.chips_entries e on e.transaction_id = h.id
     join public.chips_accounts a on a.id = e.account_id
@@ -1509,7 +1520,7 @@ select
   e.created_at::text as created_at,
   a.id::text as account_row_id,
   a.account_type::text as account_type,
-  a.user_id::text as account_user_id,
+  coalesce(a.user_id, (to_jsonb(a)->>'retired_user_id')::uuid)::text as account_user_id,
   a.system_key as account_system_key,
   a.status::text as account_status,
   a.label as account_label

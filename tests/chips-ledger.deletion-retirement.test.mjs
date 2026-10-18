@@ -170,3 +170,58 @@ test('WS historical buy-in replays against retired wallet without another debit 
   assert.equal(Number(replay.account.balance),0);
   assert.equal((await db.query("select count(*)::int n from chips_accounts where account_type='USER'")).rows[0].n,1);
 });
+
+
+test('forward retention proposal matches only the original retired USER and preserves the effective prune guards',async()=>{
+  const local=new PGlite();
+  try {
+    await local.exec(`create role anon; create role authenticated; create role service_role; create role chips_ledger_archive_pruner;
+      create table chips_accounts(id uuid,account_type text,user_id uuid,retired_user_id uuid,retired_at timestamptz,
+        system_key text,status text,balance bigint);
+      create table chips_ledger_archive_batches(batch_id bigint);`);
+    const baseline=await readFile('supabase/migrations/20260904170000_chips_ledger_closed_human_prune_whitelist.sql','utf8');
+    const functionSql=baseline.slice(baseline.indexOf('create or replace function'),baseline.indexOf('$$;',baseline.indexOf('create or replace function'))+3);
+    await local.exec(functionSql);
+    const retryPatch=await readFile('supabase/migrations/20260912083727_chips_archive_prune_registry_cleaned_retry.sql','utf8');
+    await local.exec('do $prune_retry_patch$'+retryPatch.split('$prune_retry_patch$')[1]+'$prune_retry_patch$;');
+    const before=(await local.query("select pg_get_functiondef('public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure) definition")).rows[0].definition;
+    await local.exec(await readFile('supabase/manual/1117-account-deletion-retention-v2.sql','utf8'));
+    const after=(await local.query("select pg_get_functiondef('public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure) definition")).rows[0].definition;
+    const proposal=await readFile('supabase/manual/1117-account-deletion-retention-v2.sql','utf8');
+    const needle=proposal.split('$needle$')[1], replacement=proposal.split('$replacement$')[1];
+    assert.equal(after,before.replace(needle,replacement));
+    assert.match(after,/batch.registry_cleaned_keys_sha256/);
+    const matches=async(overrides={})=>{
+      const account={account_type:'USER',user_id:null,retired_user_id:USER,retired_at:'2026-10-01T00:00:00Z',system_key:null,status:'closed',balance:0,...overrides};
+      return (await local.query(`select chips_retention_user_matches_v2(jsonb_populate_record(null::chips_accounts,$1::jsonb),$2::uuid) matches`,[JSON.stringify(account),USER])).rows[0].matches;
+    };
+    assert.equal(await matches(),true);
+    assert.equal(await matches({user_id:USER,retired_user_id:null,retired_at:null,status:'active',balance:50}),true);
+    for(const invalid of [{retired_user_id:OTHER},{balance:1},{retired_at:null},{status:'frozen'},{user_id:USER},{account_type:'ESCROW'},{system_key:'GENESIS'}])
+      assert.equal(await matches(invalid),false);
+    assert.equal(await matches({retired_user_id:null}),false);
+    // Execute the actual export shape CTE, not a second handwritten classifier.
+    const {CLOSED_HUMAN_TABLE_CANDIDATE_SQL}=await import('../scripts/ops/chips-ledger-archive-export.mjs');
+    const shape=CLOSED_HUMAN_TABLE_CANDIDATE_SQL.split('), shaped as materialized (')[1].split('), eligible as (')[0];
+    await local.exec('create table chips_entries(id bigint,transaction_id uuid,account_id uuid,amount bigint)');
+    await local.query(`insert into chips_accounts values($1,'USER',null,$1,now(),null,'closed',0),
+      ($2,'ESCROW',null,null,null,$3,'active',0)`,[USER,OTHER,'POKER_TABLE:'+REQUEST]);
+    await local.query('insert into chips_entries values(1,$1,$2,-100),(2,$1,$3,100)',[REQUEST,USER,OTHER]);
+    const shaped=async(owner=USER)=>(await local.query(`with hot as (
+      select $1::uuid id,$2::uuid user_id,$3::uuid table_id
+    ), shaped as materialized (${shape}) select * from shaped`,[REQUEST,owner,REQUEST])).rows[0];
+    assert.equal((await shaped()).active_accounts,true);
+    assert.equal(Number((await shaped()).matching_user_count),1);
+    assert.equal(Number((await shaped(OTHER)).matching_user_count),0);
+    await local.query('update chips_accounts set balance=1 where id=$1',[USER]);
+    assert.equal((await shaped()).active_accounts,false);
+    await local.query('update chips_accounts set balance=0 where id=$1',[USER]);
+    // Pre-retirement schemas lack both new columns; export must still work before rollout.
+    await local.exec('drop function chips_retention_user_matches_v2(chips_accounts,uuid); alter table chips_accounts drop column retired_user_id; alter table chips_accounts drop column retired_at;');
+    await local.query("update chips_accounts set user_id=$1,status='active' where id=$1",[USER]);
+    assert.equal((await shaped()).active_accounts,true);
+    assert.equal(Number((await shaped()).matching_user_count),1);
+    // A changed/unexpected function definition must hold pruning, never silently broaden it.
+    await assert.rejects(local.exec(proposal));
+  } finally { await local.close(); }
+});
