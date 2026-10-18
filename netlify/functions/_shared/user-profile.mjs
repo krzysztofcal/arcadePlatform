@@ -182,9 +182,11 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
 async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
   await ensureUserProfile(userId, deps);
   if (avatarKey !== null && !/^[0-9a-f-]{36}\.webp$/i.test(String(avatarKey || ""))) throw profileError("invalid_avatar_key");
+  const env = deps.env || process.env;
+  const tracking = env.ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED === "1" || accountDeletionEnabled(env);
   const runTransaction = deps.beginSql || beginSql;
   return runTransaction(async (tx) => {
-    if (accountDeletionEnabled(deps.env || process.env)) await assertAccountActive(tx, userId);
+    if (tracking) await assertAccountActive(tx, userId);
     const currentRows = await tx.unsafe(
       `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
        from public.user_profiles where user_id = $1 for update;`,
@@ -192,7 +194,7 @@ async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
     );
     const current = normalizeProfileRow(currentRows?.[0]);
     if (!current) throw profileError("profile_not_found", 404);
-    if (accountDeletionEnabled(deps.env || process.env)) {
+    if (tracking) {
       for (const key of new Set([current.avatarKey, avatarKey].filter(Boolean))) {
         await tx.unsafe(`insert into private.account_avatar_objects(user_id, output_path) values($1,$2)
 on conflict (user_id,output_path) do nothing;`, [userId,key]);

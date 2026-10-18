@@ -10,7 +10,11 @@ const MAX_SOURCE_BYTES = 1024 * 1024;
 const MAX_DIMENSION = 1024;
 const PENDING_TTL_MS = 5 * 60 * 1000;
 const CAPABILITY_MS = 2 * 60 * 60 * 1000;
-function enabled(deps) { return accountDeletionEnabled(deps.env || process.env); }
+// Tracking must be deployed before deletion acceptance; it is not activation.
+function enabled(deps) {
+  const env = deps.env || process.env;
+  return env.ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED === "1" || accountDeletionEnabled(env);
+}
 function capabilityGrace(deps) {
   const seconds = Number((deps.env || process.env).ACCOUNT_DELETION_AVATAR_GRACE_SECONDS);
   if (!Number.isSafeInteger(seconds) || seconds < 60 || seconds > 86400) throw avatarError('avatar_tracking_unavailable', 503);

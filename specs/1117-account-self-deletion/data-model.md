@@ -1,3 +1,7 @@
+## Current closeout status
+
+Preview remains blocked by Netlify branch-env write HTTP403; shared V2 and skip marker unchanged. Real Stage RLS, password/official Auth cleanup and same-email Admin recreation verified, distinct from public signup/UI/full deletion. Storage tracking now has a separate pre-activation flag (default off); no schema/config/activation changes. See research.md latest closeout for actual PASS/failed retry/NOT TESTED evidence, legacy issuer constraints, retained bonus-history audit and minimal privacy/key policy.
+
 ## Current owner decision / verified Stage scope
 
 Supersedes historical authorization below: isolated Stage schema/test/configuration and exact-SHA Preview deployment are authorized. Shared V2 reset and Production changes/activation, paid resources and merge are not. Free monthly headroom is an accepted risk, not a gate. Canonical migration `20261018184941_account_self_deletion_v2.sql` is applied only to verified Stage, with release=false and no Storage/reward/Redis cutover approvals. Real password/Auth/Postgres/Upstash components and positive-wallet BURN were tested; full deletion/Google/all-in/re-registration remains unverified. See [research.md](research.md) for exact evidence, findings, NOT TESTED matrix and owner decisions; [redis-cutover.md](redis-cutover.md) for protected reset scope. Local fixtures are not real Stage E2E proof.

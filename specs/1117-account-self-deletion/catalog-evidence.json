@@ -1226,5 +1226,77 @@
     "component_owner_index_cleanup": "PASS; operator teardown only, not release-gated finalizer",
     "epoch_loss": "PASS: writes deny",
     "automatic_epoch_change_recovery": "NOT PROVED: stale ACTIVE permits deny until operator reconciliation"
+  },
+  "stageCloseoutContinuation20261018": {
+    "preview": {
+      "status": "BLOCKED",
+      "expected_url": "https://deploy-preview-1124--playkcswh.netlify.app",
+      "http_status": 404,
+      "branch_env_write_status": 403,
+      "existing_values_and_scopes_changed": false,
+      "skip_retained": true,
+      "production_changes": false
+    },
+    "real_rls": {
+      "favorites_owner_read_write": true,
+      "other_owner_denied": true,
+      "positive_ch_owner_read_other_denied": true,
+      "private_profiles_and_unseated_poker_denied": true,
+      "deleting_old_jwt_blocked": true,
+      "control_profile_and_favorites_preserved": true
+    },
+    "auth": {
+      "disposable_created": 3,
+      "disposable_removed": 3,
+      "same_email_Admin_recreation_new_UUID": true,
+      "public_password_login": true,
+      "public_signup_confirmation": "NOT TESTED",
+      "google": "NOT TESTED"
+    },
+    "financial": {
+      "mint_ch": 75,
+      "burn_ch": 75,
+      "burn_count": 1,
+      "initial_5_second_tick": "RETRY dependency_unavailable",
+      "operator_retry_15_second_budget": "PASS; unchanged canonical adapter",
+      "automatic_recovery": "NOT PROVED",
+      "history_preserved": true
+    },
+    "bonus_retained_sources": {
+      "welcome_hot_and_registry": 8,
+      "promo_hot_and_registry": 18,
+      "missing_hot": 0,
+      "missing_replay": 0,
+      "missing_current_verified_auth": 0,
+      "claims_without_registry": 0,
+      "reward_archive_batches": 1,
+      "reward_archive_pruned": false,
+      "historical_verified_email_at_payout": "UNPROVEN",
+      "history_ready": false
+    },
+    "storage": {
+      "metadata_limit": 100,
+      "ready_preview_deploys_in_page": 77,
+      "full_historical_inventory": false,
+      "probed_immutable_deploy_ids": true,
+      "probes": [
+        {
+          "url": "https://6ad2c7449572266f24557eab--playkcswh.netlify.app",
+          "sha": "9fe720b60e798ba3555f1949a2796a851a316d1b",
+          "unauthenticated_upload_endpoint_status": 401
+        },
+        {
+          "url": "https://6ad2a6a203a02137c5c7b76c--playkcswh.netlify.app",
+          "sha": "ac113f21ec703c2024575914d461de0287797036",
+          "unauthenticated_upload_endpoint_status": 401
+        },
+        {
+          "url": "https://6ad2a37557bf69a6c0941199--playkcswh.netlify.app",
+          "sha": "68c96a8fa60452316541696dd1fe12141d113b70",
+          "unauthenticated_upload_endpoint_status": 401
+        }
+      ]
+    },
+    "deletion_activation": false
   }
 }

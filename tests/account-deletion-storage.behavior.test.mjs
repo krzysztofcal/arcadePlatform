@@ -117,3 +117,19 @@ test('uncertain output write blocks completion and failed delete remains retryab
   await executeSql("update public.profile_avatar_uploads set capability_until=clock_timestamp()-interval '1 second',output_path=$2,output_write_started_at=clock_timestamp() where id=$1",[pending.uploadId,randomUUID()+'.webp']);
   await assert.rejects(cleanup(),/dependency_unavailable/);
 });
+
+
+test('capability tracking can precede deletion activation and retains expired finalize manifests',async()=>{
+  const {userId,deps,executeSql,removed}=await fixture();
+  const tracking={...deps,env:{...env,ACCOUNT_DELETION_ENABLED:'0',ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED:'1'}};
+  await updateUserAvatarKey(userId,randomUUID()+'.webp',tracking);
+  assert.equal((await executeSql('select count(*)::int n from private.account_avatar_objects'))[0].n,1);
+  await createPendingUpload(userId,{mimeType:'image/png',size:100},tracking);
+  const [row]=await executeSql('select * from public.profile_avatar_uploads');
+  assert.equal(row.tracking_version,2);assert.ok(row.signing_finished_at);
+  assert.ok(Date.parse(row.capability_until)-Date.parse(row.signing_finished_at)>=7500000);
+  await executeSql("update public.profile_avatar_uploads set expires_at=clock_timestamp()-interval '10 minutes'");
+  await cleanupExpiredUploads(tracking);
+  assert.equal((await executeSql('select count(*)::int n from public.profile_avatar_uploads'))[0].n,1);
+  assert.equal(removed.length,0);
+});
