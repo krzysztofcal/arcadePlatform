@@ -1,6 +1,6 @@
-## Current Preview isolation authorization — blocked by API 403
+## Current Preview isolation authorization — verified
 
-Owner authorizes Stage-only Preview deployment, not deletion activation. Netlify environment write returned HTTP403; no V3 branch values were installed, build floor was not changed and skip marker was retained. The following is the pending configuration, not applied state. Raise only committed Stage build floor to V3 (Production floor remains V2); configure only branch feat/1117-account-deletion-v2 build/functions values: XP_REDIS_VERSION=3, XP_REDIS_ENV=stage, XP_KEY_NS=kcswh:stage:xp:v3, ACCOUNT_DELETION_ENABLED=0. Preserve every existing context value/scope, use existing shared credentials, verify pinned Stage Supabase before build. No epoch/cutover/Storage/HMAC approval is created; missing epoch must deny XP writes. Remove PR skip marker only after isolation verification; Draft Stage migration job remains skipped. Existing WS main-definition requirement remains; no branch workflow dispatch.
+Preview is now deployed with branch-only Stage configuration: `XP_REDIS_VERSION=3`, `XP_REDIS_ENV=stage`, `XP_KEY_NS=kcswh:stage:xp:v3`, `ACCOUNT_DELETION_ENABLED=0`. Netlify Free accepts default all scopes; the earlier403 was the paid granular-scopes restriction, not missing branch access. Other contexts retain V2 and Production is unchanged. The committed Stage build floor is3; Production remains2. This is isolated Preview preparation, not a legacy reset/cutover attestation or deletion activation. See research.md latest evidence for automatic real-Stage BURN recovery and remaining gates.
 
 ## Current owner decision / verified Stage scope
 

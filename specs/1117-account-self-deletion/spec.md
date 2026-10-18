@@ -1,6 +1,6 @@
 ## Current closeout status
 
-Preview remains blocked by Netlify branch-env write HTTP403; shared V2 and skip marker unchanged. Real Stage RLS, password/official Auth cleanup and same-email Admin recreation verified, distinct from public signup/UI/full deletion. Storage tracking now has a separate pre-activation flag (default off); no schema/config/activation changes. See research.md latest closeout for actual PASS/failed retry/NOT TESTED evidence, legacy issuer constraints, retained bonus-history audit and minimal privacy/key policy.
+Preview is now deployed with branch-only Stage configuration: `XP_REDIS_VERSION=3`, `XP_REDIS_ENV=stage`, `XP_KEY_NS=kcswh:stage:xp:v3`, `ACCOUNT_DELETION_ENABLED=0`. Netlify Free accepts default all scopes; the earlier403 was the paid granular-scopes restriction, not missing branch access. Other contexts retain V2 and Production is unchanged. The committed Stage build floor is3; Production remains2. This is isolated Preview preparation, not a legacy reset/cutover attestation or deletion activation. See research.md latest evidence for automatic real-Stage BURN recovery and remaining gates.
 
 ## Current owner decision / verified Stage scope
 

@@ -47,7 +47,19 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
       if (rows.length) return {waitUntil:new Date(Date.now()+15000).toISOString(),actionableAt:deadline};
       return {done:true};
     },
-    burn: (context) => beginSql((tx) => retireWallet({tx,userId:context.userId,requestId:context.requestId,assertLease:context.assertLease})),
+    burn: async (context) => {
+      const started = Date.now();
+      try {
+        return await beginSql((tx) => retireWallet({tx,userId:context.userId,requestId:context.requestId,assertLease:context.assertLease}));
+      } catch (error) {
+        // Keep provider messages, SQL and parameters out of logs; preserve the
+        // original error so durable retry/financial-incident rules still apply.
+        klog('account_deletion_burn_failed', { requestId:context.requestId,
+          sqlState:/^[0-9A-Z]{5}$/.test(error?.code || '') ? error.code : null,
+          durationMs:Date.now()-started });
+        throw error;
+      }
+    },
     cleanup: async (context) => {
       const avatar = await cleanupAvatars({...context,env,beginSql});
       if (avatar?.waitUntil) return avatar;

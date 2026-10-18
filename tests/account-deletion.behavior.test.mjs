@@ -208,3 +208,18 @@ test('privileged profile/favorite writes cannot recreate a suspended owner; exac
  assert.equal((await db.query('select count(*)::int n from favorites where user_id=$1',[OWNER])).rows[0].n,0);
  assert.equal((await db.query('select count(*)::int n from favorites where user_id=$1',[OTHER])).rows[0].n,1);
 });
+
+
+test('BURN diagnostic redacts provider details and preserves the original failure',async()=>{
+ const {createAccountDeletionRuntime}=await import('../ws-server/poker/runtime/account-deletion.mjs');
+ const failure=Object.assign(new Error('private SQL/token must not be logged'),{code:'57014'});
+ const logs=[];
+ const runtime=createAccountDeletionRuntime({beginSql:async fn=>fn({unsafe:async()=>[]}),
+  env:{ACCOUNT_DELETION_ENABLED:'1'},klog:(event,data)=>logs.push({event,data}),
+  retireWallet:async()=>{throw failure;}});
+ await assert.rejects(runtime.steps.burn({userId:OWNER,requestId:OTHER}),error=>error===failure);
+ assert.equal(logs.length,1);assert.equal(logs[0].event,'account_deletion_burn_failed');
+ assert.equal(logs[0].data.sqlState,'57014');assert.equal(logs[0].data.requestId,OTHER);
+ assert.equal(typeof logs[0].data.durationMs,'number');
+ assert.doesNotMatch(JSON.stringify(logs),/private SQL|token|message|stack/);
+});

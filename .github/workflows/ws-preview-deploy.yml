@@ -7,6 +7,14 @@ on:
         description: Git ref to deploy to the preview WS host
         required: true
         type: string
+      xpRedisVersion:
+        description: Stage Redis artifact version (must match Preview runtime configuration)
+        required: true
+        default: '2'
+        type: choice
+        options:
+          - '2'
+          - '3'
 
 concurrency:
   group: ws-preview-deploy
@@ -85,7 +93,7 @@ jobs:
           RELEASE_SHA: ${{ steps.selected_ref.outputs.sha }}
           DEPLOY_REF: ${{ inputs.ref }}
           RELEASE_ENVIRONMENT: preview
-          XP_REDIS_VERSION: ${{ vars.XP_REDIS_VERSION_STAGE }}
+          XP_REDIS_VERSION: ${{ inputs.xpRedisVersion }}
         run: |
           set -euo pipefail
           if [[ "$XP_REDIS_VERSION" == "3" ]]; then
