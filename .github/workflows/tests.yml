@@ -140,6 +140,9 @@ jobs:
       - name: Run PostgreSQL legacy Stage allowlist audit contracts
         run: node tests/chips/chips-ledger-legacy-stage-allowlist-audit.test.mjs
 
+      - name: Run Stage ESCROW retention guards
+        run: node --test tests/chips/chips-ledger-stage-escrow-retention.test.mjs tests/chips/chips-ledger-stage-escrow-retention.workflow.guard.test.mjs
+
       - name: Run PostgreSQL bot-only retention contracts
         run: node tests/chips/chips-ledger-bot-only-retention.test.mjs
 
