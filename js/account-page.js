@@ -235,6 +235,8 @@
       setBlockVisibility(nodes.signupConfirmation, false);
     }
     if (previousUserKey !== nextUserKey){
+      if (nextUserKey && deletionOwnerId && nextUserKey !== deletionOwnerId) clearDeletionView();
+      if (nextUserKey) restoreDeletionView(nextUserKey);
       publicProfileGeneration += 1;
       publicProfileInFlight = null;
       if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
@@ -1232,6 +1234,7 @@
   }
 
   function handleSignOut(){
+    clearDeletionView();
     setStatus(t('signingOut', 'Signing out...'), 'info');
     if (!auth || !auth.signOut){
       setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
@@ -1244,6 +1247,78 @@
     }).catch(function(err){
       var msg = err && err.message ? String(err.message) : t('signOutError', 'Could not sign out right now.');
       setStatus(msg, 'error');
+    });
+  }
+
+  var deletionPollTimer = null;
+  var deletionPollGeneration = 0;
+  var deletionOwnerId = '';
+  function clearDeletionView(){
+    deletionPollGeneration++;
+    if (deletionPollTimer) window.clearTimeout(deletionPollTimer);
+    deletionPollTimer = null; deletionOwnerId = '';
+    try { window.sessionStorage.removeItem('arcade:account-deletion-status'); } catch (_err){}
+    if (nodes.deleteBtn) nodes.deleteBtn.disabled = false;
+    if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deletion permanently forfeits your account resources.');
+  }
+  function restoreDeletionView(ownerId){
+    try {
+      var saved = JSON.parse(window.sessionStorage.getItem('arcade:account-deletion-status') || 'null');
+      if (saved && saved.ownerId === ownerId && saved.statusToken && saved.requestId) watchDeletion(saved);
+      else if (saved) clearDeletionView();
+    } catch (_err){}
+  }
+  function deletionMessage(state){
+    if (state.completed) return t('accountDeletionCompleted', 'Your Arcade account has been deleted. You may register a new account.');
+    if (state.status === 'ERROR' || state.requiresIntervention) return t('accountDeletionIncident', 'Your account is blocked. Deletion requires operator assistance. Keep this reference: ') + state.requestId;
+    if (!state.accepted) return t('accountDeletionPreparing', 'Request saved. We are securing your account and will continue automatically.');
+    return t('accountDeletionPending', 'Account blocked; deletion is in progress. Poker settlement and file cleanup may take over two hours. You do not need to stay signed in.');
+  }
+  function watchDeletion(state){
+    state.ownerId = state.ownerId || getUserKey(currentUser) || deletionOwnerId;
+    if (getUserKey(currentUser) && state.ownerId !== getUserKey(currentUser)) return;
+    deletionOwnerId = state.ownerId;
+    try {
+      if (state.completed) window.sessionStorage.removeItem('arcade:account-deletion-status');
+      else window.sessionStorage.setItem('arcade:account-deletion-status', JSON.stringify(state));
+    } catch (_err){}
+    if (!currentUser) setStatus(deletionMessage(state), state.completed ? 'success' : 'info');
+    if (nodes.deleteNote) nodes.deleteNote.textContent = deletionMessage(state);
+    if (nodes.deleteBtn) nodes.deleteBtn.disabled = true;
+    if (deletionPollTimer) window.clearTimeout(deletionPollTimer);
+    if (state.completed || !state.statusToken) return;
+    var generation = deletionPollGeneration;
+    deletionPollTimer = window.setTimeout(function(){
+      window.fetch('/.netlify/functions/account-delete?requestId=' + encodeURIComponent(state.requestId), {
+        headers: { Authorization: 'Deletion ' + state.statusToken }, cache: 'no-store'
+      }).then(function(response){ if (!response.ok) { var error = new Error('status_unavailable'); error.status = response.status; throw error; } return response.json(); })
+      .then(function(next){ if (generation !== deletionPollGeneration) return; next.statusToken = state.statusToken; next.ownerId = state.ownerId; watchDeletion(next); })
+      .catch(function(error){
+        if (generation !== deletionPollGeneration) return;
+        if (nodes.deleteNote) nodes.deleteNote.textContent = t('accountDeletionStatusUnavailable', 'Status is temporarily unavailable. Your saved request continues automatically. Reference: ') + state.requestId;
+        if (error.status !== 401 && error.status !== 404) deletionPollTimer = window.setTimeout(function(){ if (generation === deletionPollGeneration) watchDeletion(state); },10000);
+      });
+    }, 5000);
+  }
+  function handleDeleteAccount(event){
+    event.preventDefault();
+    if (!currentUser || !auth || !auth.getClient) return;
+    var confirmation = window.prompt(t('accountDeletionConfirm', 'All CH (including Poker winnings), XP, achievements and profile data will be lost permanently. Existing Poker hands will settle safely. Type DELETE_ACCOUNT to confirm.'));
+    if (confirmation !== 'DELETE_ACCOUNT') return;
+    nodes.deleteBtn.disabled = true;
+    var generation = deletionPollGeneration;
+    var ownerId = getUserKey(currentUser);
+    auth.getClient().auth.getSession().then(function(result){
+      var token = result && result.data && result.data.session && result.data.session.access_token;
+      if (!token) throw new Error('unauthorized');
+      return window.fetch('/.netlify/functions/account-delete', { method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }, cache: 'no-store',
+        body: JSON.stringify({ confirmation: confirmation, acknowledgeForfeiture: true })
+      });
+    }).then(function(response){ if (!response.ok) throw new Error('deletion_unavailable'); return response.json(); })
+    .then(watchDeletion).catch(function(){
+      nodes.deleteBtn.disabled = false;
+      if (nodes.deleteNote) nodes.deleteNote.textContent = t('accountDeletionUnavailable', 'Account deletion is unavailable or the response was lost. Check status before trying again. Repeated confirmation returns the same saved request.');
     });
   }
 
@@ -1267,11 +1342,7 @@
     if (nodes.publicAvatarInput){ nodes.publicAvatarInput.addEventListener('change', handleAvatarSelected); }
     if (nodes.publicAvatarRemove){ nodes.publicAvatarRemove.addEventListener('click', handleAvatarRemove); }
     if (nodes.deleteBtn && nodes.deleteNote){
-      nodes.deleteBtn.addEventListener('click', function(e){
-        e.preventDefault();
-        setStatus(t('deleteAccountSupport', 'Contact support to request account deletion for this profile.'), 'info');
-        nodes.deleteNote.focus();
-      });
+      nodes.deleteBtn.addEventListener('click', handleDeleteAccount);
     }
 
     doc.addEventListener('auth:signin-request', function(){

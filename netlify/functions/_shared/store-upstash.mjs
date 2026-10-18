@@ -1,11 +1,148 @@
 // Minimal Upstash REST client (no extra deps).
-import { klog } from "./supabase-admin.mjs";
+import { createHash } from "node:crypto";
+import { klog, beginSql } from "./supabase-admin.mjs";
+import { assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const XP_NAMESPACE = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
 const USER_PROFILE_PREFIX = "kcswh:xp:user:";
 const FORCE_MEMORY_STORE = process.env.XP_TEST_MODE === "1";
+
+// UUID ownership is supplied explicitly by server callers, never inferred from keys.
+const ACCOUNT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EPOCH_KEY = 'account-deletion:redis:epoch';
+const permitKey = (id) => 'account-deletion:redis:permit:' + id;
+const fenceError = () => Object.assign(new Error('account_redis_fenced'), { code: 'account_redis_fenced' });
+const INIT_PERMIT = `-- account-permit-init
+if redis.call('GET',KEYS[1]) ~= ARGV[1] then return 0 end
+local current=redis.call('GET',KEYS[2])
+if current == 'BLOCKED' then return 0 end
+if not current then redis.call('SET',KEYS[2],'ACTIVE:'..ARGV[1],'NX') end
+return redis.call('GET',KEYS[2]) == 'ACTIVE:'..ARGV[1] and 1 or 0`;
+// Missing/old permits deny at execution. Only an authoritative SQL check under
+// the lifecycle lock may initialize one. BLOCKED is never overwritten.
+export async function withRedisIdentityPermit(userIds, fn, deps = {}) {
+  if (process.env.ACCOUNT_DELETION_ENABLED !== '1') return fn(null);
+  if (!Array.isArray(userIds) || !userIds.length || userIds.some((id) => typeof id !== 'string' || !id.trim())) throw fenceError();
+  const ids = [...new Set(userIds.filter((id) => ACCOUNT_UUID.test(String(id))).map((id) => id.toLowerCase()))].sort();
+  if (!ids.length) return fn(null); // Existing non-UUID anonymous identities.
+  const target = deps.store || store;
+  if (isMemoryStore && target === store && !FORCE_MEMORY_STORE) throw fenceError();
+  const transaction = deps.beginSql || beginSql;
+  return transaction(async (tx) => {
+    const anonymous = new Set((deps.anonymousIds || []).map((id) => String(id).toLowerCase()));
+    for (const id of ids) {
+      if (!anonymous.has(id)) { await assertAccountActive(tx, id); continue; }
+      // Browser anonymous IDs are UUIDs too. They must never alias a current
+      // Auth identity or an old deletion identity, even as a conversion source.
+      await lockAccountLifecycle(tx, [id]);
+      const [identity] = await tx.unsafe(`select exists(select 1 from auth.users where id=$1) as present,
+        exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting,
+        exists(select 1 from public.chips_accounts where retired_user_id=$1) as retired;`, [id]);
+      if (identity?.present !== false || identity?.deleting !== false || identity?.retired !== false) throw fenceError();
+    }
+    // Recovery must install a fresh epoch after quiescing old issuers. Requests
+    // never initialize it: a delayed NX epoch initializer could replay after flush.
+    const epoch = await target.get(EPOCH_KEY);
+    if (!epoch) throw fenceError();
+    for (const id of ids) {
+      if (Number(await target.eval(INIT_PERMIT, [EPOCH_KEY, permitKey(id)], [epoch])) !== 1) throw fenceError();
+    }
+    return fn({ epoch, ids });
+  });
+}
+
+// Blocking is sticky even across an epoch change. Flush removes it, but missing
+// permits still deny and SQL prevents a suspended UUID from initializing again.
+export async function blockRedisIdentity(userId, target = store) {
+  if (!ACCOUNT_UUID.test(String(userId))) throw fenceError();
+  if (await target.set(permitKey(userId.toLowerCase()), 'BLOCKED') !== 'OK') throw fenceError();
+}
+
+export async function guardedRedisEval({ store: target = store, userIds, anonymousIds = [], script, keys, args, beginSql: transaction }) {
+  return withRedisIdentityPermit(userIds, async (permit) => {
+    if (!permit) return target.eval(script, keys, args);
+    const n = permit.ids.length;
+    const prefix = `-- account-guard:${n}\nlocal expected=ARGV[1]\nif redis.call('GET',KEYS[1]) ~= expected then return redis.error_reply('account_redis_fenced') end\nfor i=2,${n + 1} do if redis.call('GET',KEYS[i]) ~= 'ACTIVE:'..expected then return redis.error_reply('account_redis_fenced') end end\nfor i=1,${n + 1} do table.remove(KEYS,1) end\ntable.remove(ARGV,1)\n-- account-guard-end\n`;
+    return target.eval(prefix + script, [EPOCH_KEY, ...permit.ids.map(permitKey), ...keys], [permit.epoch, ...args]);
+  }, { store: target, anonymousIds, ...(transaction ? { beginSql: transaction } : {}) });
+}
+
+// Narrow server-only mutation vocabulary; do not expose commands/keys over HTTP.
+const MUTATE = `-- account-user-mutate
+local op=ARGV[1]
+if op=='set' then return redis.call('SET',KEYS[1],ARGV[2]) end
+if op=='setex' then return redis.call('SETEX',KEYS[1],ARGV[3],ARGV[2]) end
+if op=='zadd' then return redis.call('ZADD',KEYS[1],ARGV[3],ARGV[2]) end
+if op=='touch' then
+ local raw=redis.call('GET',KEYS[1]); if not raw then return 0 end
+ local data=cjson.decode(raw); if data.userId~=ARGV[4] then return redis.error_reply('session_owner_mismatch') end
+ data.lastActivity=tonumber(ARGV[2]); redis.call('SETEX',KEYS[1],ARGV[3],cjson.encode(data)); return 1
+end
+return redis.error_reply('invalid_guarded_operation')`;
+export async function guardedUserMutation({ store: target = store, userId, anonymous = false, operation, key, value, ttl, score, beginSql: transaction }) {
+  if (!['set', 'setex', 'zadd', 'touch'].includes(operation)) throw new TypeError('invalid_guarded_operation');
+  if (process.env.ACCOUNT_DELETION_ENABLED !== '1') {
+    if (operation === 'set') return target.set(key, value);
+    if (operation === 'setex') return target.setex(key, ttl, value);
+    if (operation === 'zadd') return target.zadd(key, score, value);
+    const raw = await target.get(key); if (!raw) return 0;
+    const data = JSON.parse(raw); if (data.userId !== userId) throw new Error('session_owner_mismatch');
+    data.lastActivity = Number(value); await target.setex(key, ttl, JSON.stringify(data)); return 1;
+  }
+  return guardedRedisEval({ store: target, userIds: [userId], anonymousIds: anonymous ? [userId] : [], script: MUTATE, keys: [key],
+    args: [operation, String(value), String(ttl ?? score ?? ''), String(userId)], beginSql: transaction });
+}
+
+const REMOVE_OWNED_SESSION = `-- account-remove-owned-session
+if redis.call('GET',KEYS[1])~='BLOCKED' then return redis.error_reply('account_redis_fenced') end
+local raw=redis.call('GET',KEYS[2]); if not raw then return 0 end
+local data=cjson.decode(raw); if data.userId~=ARGV[1] then return 0 end
+return redis.call('DEL',KEYS[2])`;
+
+// Removal-only bounded subset. Legacy opaque session/migration hashes have no
+// complete owner index, so a full scan is NOT proof of complete user erasure.
+// Caller persists cursor progress; activation needs a reviewed legacy cutover.
+export async function cleanupRedisIdentity({ userId, cursor = null, limit = 50, namespace = XP_NAMESPACE, store: target = store }) {
+  if (!ACCOUNT_UUID.test(String(userId)) || !/^[A-Za-z0-9:_-]+$/.test(namespace)) throw fenceError();
+  userId = userId.toLowerCase();
+  if (await target.get(permitKey(userId)) !== 'BLOCKED') throw fenceError();
+  const budget = Math.max(1, Math.min(100, Math.floor(Number(limit) || 50)));
+  const hash = (value) => createHash('sha256').update(value).digest('hex');
+  const board = namespace + ':leaderboard:v1:';
+  // Exact-owner keys only; never DEL a shared leaderboard or lifecycle fence.
+  for (const key of [USER_PROFILE_PREFIX + userId, namespace + ':total:' + userId,
+    board + 'hidden:' + userId, namespace + ':migration:user:' + hash(userId)]) await target.del(key);
+  const start = cursor?.scanCursor || '0';
+  const page = await target.scan(start, { match: namespace + ':*', count: budget });
+  const position = page.cursor;
+  const batch = page.keys.slice(0, budget);
+  for (const key of batch) {
+    if (typeof key !== 'string' || !key.startsWith(namespace + ':')) continue;
+    if (key.startsWith(namespace + ':daily:' + userId + ':') || key.startsWith(namespace + ':ratelimit:user:' + userId + ':')) {
+      await target.del(key);
+    } else if (key === board + 'all_time' || key.startsWith(board + 'day:') || key.startsWith(board + 'week:')) {
+      await target.zrem(key, userId);
+    } else if (key.startsWith(namespace + ':server-session:')) {
+      const raw = await target.get(key);
+      let owner; try { owner = JSON.parse(raw)?.userId; } catch { continue; }
+      if (owner !== userId) continue;
+      await target.eval(REMOVE_OWNED_SESSION, [permitKey(userId), key], [userId]);
+      const sessionId = key.slice((namespace + ':server-session:').length);
+      const digest = hash(userId + '|' + sessionId);
+      for (const family of ['session:', 'session:last:', 'session:state:', 'registry:', 'lock:']) {
+        await target.del(namespace + ':' + family + digest);
+      }
+    }
+  }
+  // SCAN COUNT is a hint. Do not persist page keys containing unrelated users'
+  // identifiers. An oversized page cannot be proved drained within this budget.
+  const overflow = page.keys.length > budget;
+  const scanned = position === '0' && !overflow;
+  return { done: false, reason: overflow ? 'redis_cleanup_page_overflow' : scanned ? 'legacy_redis_ownership_unproven' : 'redis_cleanup_scanning',
+    cursor: scanned ? null : { scanCursor: overflow ? start : position }, scanned };
+}
 
 // Track whether we're using memory store (for fallback logic)
 export const isMemoryStore = FORCE_MEMORY_STORE || !BASE || !TOKEN;
@@ -23,6 +160,8 @@ if (isMemoryStore && !didLogMemoryFallback) {
 
 function createMemoryStore() {
   const memory = new Map();
+  const scanPages = new Map();
+  let nextScanCursor = 1;
 
   function sweep(key) {
     const entry = memory.get(key);
@@ -86,6 +225,19 @@ function createMemoryStore() {
   }
 
   return {
+    async scan(cursor = '0', { match = '*', count = 100 } = {}) {
+      const escaped = match.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+      const pattern = new RegExp('^' + escaped + '$');
+      const candidates = String(cursor) === '0'
+        ? [...memory.keys()].filter((key) => sweep(key) && pattern.test(key)).sort()
+        : scanPages.get(String(cursor));
+      if (!candidates) throw new Error('invalid_scan_cursor');
+      const keys = candidates.slice(0, count);
+      const remaining = candidates.slice(count);
+      const next = remaining.length ? String(nextScanCursor++) : '0';
+      if (remaining.length) scanPages.set(next, remaining);
+      return { cursor: next, keys };
+    },
     async get(key) { return getValue(key); },
     async mget(keys) { return keys.map((key) => getValue(key)); },
     async set(key, value) { setValue(key, value, null); return "OK"; },
@@ -165,6 +317,33 @@ function createMemoryStore() {
     },
     async zcard(key) { return getSortedSet(key)?.size ?? 0; },
     async eval(_script, keys = [], argv = []) {
+      if (_script.startsWith('-- account-remove-owned-session')) {
+        if (getValue(keys[0]) !== 'BLOCKED') throw fenceError();
+        const raw = getValue(keys[1]); if (!raw || JSON.parse(raw)?.userId !== argv[0]) return 0;
+        memory.delete(keys[1]); return 1;
+      }
+      if (_script.startsWith('-- account-permit-init')) {
+        if (getValue(keys[0]) !== argv[0] || getValue(keys[1]) === 'BLOCKED') return 0;
+        if (!getValue(keys[1])) setValue(keys[1], 'ACTIVE:' + argv[0], null);
+        return getValue(keys[1]) === 'ACTIVE:' + argv[0] ? 1 : 0;
+      }
+      if (_script.startsWith('-- account-guard:')) {
+        const count = Number(_script.split('\n')[0].split(':')[1]);
+        if (getValue(keys[0]) !== argv[0] || keys.slice(1, count + 1).some((key) => getValue(key) !== 'ACTIVE:' + argv[0])) throw fenceError();
+        return this.eval(_script.split('-- account-guard-end\n')[1], keys.slice(count + 1), argv.slice(1));
+      }
+      if (_script.startsWith('-- account-user-mutate')) {
+        const [op, value, parameter, owner] = argv;
+        if (op === 'set') { setValue(keys[0], value, null); return 'OK'; }
+        if (op === 'setex') { setValue(keys[0], value, Number(parameter) * 1000); return 'OK'; }
+        if (op === 'zadd') return zaddValue(keys[0], parameter, value);
+        if (op === 'touch') {
+          const raw = getValue(keys[0]); if (!raw) return 0;
+          const data = JSON.parse(raw); if (data.userId !== owner) throw new Error('session_owner_mismatch');
+          data.lastActivity = Number(value); setValue(keys[0], JSON.stringify(data), Number(parameter) * 1000); return 1;
+        }
+        throw new TypeError('invalid_guarded_operation');
+      }
       // Memory impl supports the XP award signatures used by calculate-xp.
       if (((keys.length === 8 || keys.length === 9) && argv.length === 10) || (keys.length === 5 && argv.length === 7) || (keys.length === 4 && argv.length === 6)) {
         const [sessionKey, sessionSyncKey, dailyKey, totalKey, maybeLockKey] = keys;
@@ -326,6 +505,7 @@ async function call(cmd, ...args) {
   });
   if (!res.ok) throw new Error(`Upstash ${cmd} failed: ${res.status}`);
   const data = await res.json();
+  if (data?.error) throw Object.assign(new Error("redis_command_failed"), { code: String(data.error).includes("account_redis_fenced") ? "account_redis_fenced" : "redis_command_failed" });
   return data.result;
 }
 
@@ -337,6 +517,11 @@ return redis.call('SET', key, value, 'EX', ttlSec, 'NX')
 `;
 
 const remoteStore = {
+  async scan(cursor = '0', { match = '*', count = 100 } = {}) {
+    const result = await call('SCAN', String(cursor), 'MATCH', match, 'COUNT', String(count));
+    if (!Array.isArray(result) || !Array.isArray(result[1])) throw new Error('invalid_scan_result');
+    return { cursor: String(result[0]), keys: result[1] };
+  },
   async get(key) { return call("GET", key); },
   async mget(keys) { return keys.length ? call("MGET", ...keys) : []; },
   async set(key, value) { return call("SET", key, String(value)); },
@@ -377,6 +562,7 @@ const remoteStore = {
     // See: https://github.com/upstash/redis-js/blob/main/pkg/commands/eval.ts
     const body = ["eval", script, keys.length, ...keys, ...argv];
     const res = await fetch(BASE, {
+      ...(process.env.ACCOUNT_DELETION_ENABLED === '1' ? { signal: AbortSignal.timeout(10000) } : {}),
       method: "POST",
       headers: {
         Authorization: `Bearer ${TOKEN}`,
@@ -405,6 +591,7 @@ const remoteStore = {
       throw new Error(`Upstash eval failed: ${res.status} ${res.statusText}`);
     }
     const data = await res.json();
+    if (data?.error) throw Object.assign(new Error("redis_eval_failed"), { code: String(data.error).includes("account_redis_fenced") ? "account_redis_fenced" : "redis_eval_failed" });
     return data.result;
   },
 };
@@ -512,9 +699,10 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
     updatedAt: timestamp,
   };
   try {
-    await store.set(profileKey(userId), JSON.stringify(profile));
+    await guardedUserMutation({ userId, operation: "set", key: profileKey(userId), value: JSON.stringify(profile) });
     return profile;
   } catch (err) {
+    if (process.env.ACCOUNT_DELETION_ENABLED === "1") throw err;
     klog("upstash_save_user_profile_failed", { userId, error: err?.message });
     return existing || profile;
   }

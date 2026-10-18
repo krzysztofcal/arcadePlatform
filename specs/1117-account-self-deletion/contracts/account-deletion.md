@@ -8,9 +8,9 @@ Proposed interfaces are not activation approval. No custom OTP/challenge endpoin
 
 Before endpoint activation all SQL/Redis/WS/private-delivery fences and finalization integrations must pass. Without complete configuration return 503 before acceptance, never a fake PENDING. Duplicate accepted request returns existing state even if ordinary app authorization is now suspended. SQL preparing intent persists despite Redis outage; response must distinguish preparing from fully accepted. `accepted:true` requires acknowledged full fence; `completed:true` only after safe final cleanup and successful/reconciled Auth removal.
 
-`GET` returns minimal owner-matched request state, no arbitrary UUID lookup. While blocked, this endpoint alone may validate identity for status/replay; general APIs deny. After hard deletion, status delivery must use an explicitly reviewed bounded read-only channel or support reference; lack of browser access does not stop recovery.
+`GET` returns minimal owner-matched request state, no arbitrary UUID lookup. While blocked, this endpoint alone may validate identity for status/replay; general APIs deny. After hard deletion, status delivery uses a 24-hour read-only capability (SHA-256 hash/expiry stored, no financial authority) or support reference; lack of browser access does not stop recovery.
 
-Status: `{requestId,status,phase,accepted,completed,retryable,notBefore?}`; phase may be preparing/processing_poker/waiting_storage/retrying_dependency/operator_review/completed. Do not expose table IDs, balances, HMACs, old history or internal errors. UI distinguishes accepted, processing, completed, intervention; Storage may exceed two hours. 400 invalid confirmation/body; 401 invalid auth; 403 wrong origin/owner; 405 unsupported method; 503 unavailable/incomplete safety dependencies. Balances and active tables never require user manual clearance.
+Implemented status: `{requestId,status,phase,accepted,completed,retryable,requiresIntervention}`; durable phase is preparing/poker/burn/cleanup/auth/completed. POST additionally returns a statusToken once; GET accepts `Authorization: Deletion <token>` with requestId (never token in URL). Duplicate POST rotates this read-only token. Expiry returns 404; recovery continues without browser access. Do not expose table IDs, balances, HMACs, old history or internal errors. UI distinguishes accepted, processing, completed, intervention; Storage may exceed two hours. 400 invalid confirmation/body; 401 invalid auth; 403 wrong origin/owner; 405 unsupported method; 503 unavailable/incomplete safety dependencies. Balances and active tables never require user manual clearance.
 
 ## Internal finalization
 
@@ -19,3 +19,7 @@ requestDeletion derives identity from trusted caller; assertAccountActive denies
 ## Existing API impacts
 
 Protected HTTP/WS/JWT operations require ACTIVE at final effect boundary, including admin recipients and Redis raw writers. Internal settlement is explicit trusted code, not client flags. New account same email/Google has new UUID and resources; welcome fourth payout denied, Poker Daily same-day denied, once campaign repeat denied by recognized identity. Global campaign quota survives bonus_claims cascade. Existing other campaign responses and ordinary Poker Leave compatibility retained.
+
+## Disabled preparation boundary
+
+New POST requires ACCOUNT_DELETION_ENABLED=1 and account_deletion_release.enabled=true. Both are unapproved for activation. Legacy Redis cleanup currently returns incomplete for unprovable ownership; Auth deletion must not run, not even for no-table/zero-balance users. No false COMPLETED. Existing deletion recovery remains independent of the new-acceptance release row.

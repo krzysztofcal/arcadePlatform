@@ -1,3 +1,4 @@
+import { rewardProtectionEnabled, resolveRewardIdentity, lockRewardIdentity, rewardPaidCount, recordRewardPayout } from "./reward-identities.mjs";
 import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 
@@ -134,7 +135,13 @@ limit 1;
   return rows?.[0] || null;
 }
 
-async function fetchCampaignClaimCount(campaignId, runSql = executeSql) {
+async function fetchCampaignClaimCount(campaignId, runSql = executeSql, protectedMode = false) {
+  if (protectedMode) {
+    const rows = await runSql('select paid_count as claim_count from private.bonus_campaign_paid_totals where campaign_id = $1;', [campaignId]);
+    if (rows?.[0]) return Number(rows[0].claim_count);
+    // Campaigns created after activation have no paid outcomes yet. Historical
+    // campaigns are seeded by the reviewed activation proposal.
+  }
   const rows = await runSql(
     `
 select count(*)::bigint as claim_count
@@ -248,7 +255,7 @@ async function validDailyEvidence(claim, campaign, userId, runSql) {
   return paid;
 }
 
-async function campaignStatus(userId, campaign, now, runSql) {
+async function campaignStatus(userId, campaign, now, runSql, deps = {}) {
   const base = { campaign, eligible: false, alreadyClaimed: false, reason: "campaign_not_found", transactionId: null };
   if (!campaign) return base;
   const daily = campaign.campaignType === "poker_daily";
@@ -277,6 +284,13 @@ async function campaignStatus(userId, campaign, now, runSql) {
     }
     return { ...base, alreadyClaimed: true, reason: "already_claimed", transactionId: claim?.transaction_id || transaction?.id };
   }
+  if (rewardProtectionEnabled(deps.env || process.env) && (daily || campaign.claimPolicy === 'once')) {
+    const identity = await resolveRewardIdentity(userId, runSql, deps.env || process.env);
+    const scope = daily ? 'poker_daily' : `campaign:${campaign.id}`;
+    if (await rewardPaidCount(identity, scope, daily ? claimPeriodKey : 'once', runSql) > 0) {
+      return { ...base, reason: 'already_claimed', alreadyClaimed: true };
+    }
+  }
   if (daily) {
     const yesterday = buildClaimPeriodKey("daily", new Date(now.getTime() - 86400000));
     const previous = await fetchClaim(campaign.id, userId, yesterday, runSql);
@@ -289,14 +303,14 @@ async function campaignStatus(userId, campaign, now, runSql) {
   if (campaign.status !== "active" || !campaign.startsAt || Date.parse(campaign.startsAt) > now.getTime()
     || (campaign.endsAt && Date.parse(campaign.endsAt) <= now.getTime())) return { ...base, reason: "campaign_inactive" };
   if (Number.isInteger(campaign.maxTotalClaims) && campaign.maxTotalClaims > 0
-    && await fetchCampaignClaimCount(campaign.id, runSql) >= campaign.maxTotalClaims) return { ...base, reason: "max_total_claims_reached" };
+    && await fetchCampaignClaimCount(campaign.id, runSql, rewardProtectionEnabled(deps.env || process.env)) >= campaign.maxTotalClaims) return { ...base, reason: "max_total_claims_reached" };
   return { ...base, eligible: true, reason: "eligible" };
 }
 
 async function getBonusCampaignStatus(userId, campaignCode, deps = {}) {
   const runSql = deps.executeSql || executeSql;
   const rows = await fetchActiveCampaignRows(runSql, campaignCode);
-  return campaignStatus(userId, normalizeCampaign(rows?.[0]), deps.now ? new Date(deps.now) : new Date(), runSql);
+  return campaignStatus(userId, normalizeCampaign(rows?.[0]), deps.now ? new Date(deps.now) : new Date(), runSql, deps);
 }
 
 async function listBonusCampaignStatuses(userId, deps = {}) {
@@ -304,7 +318,7 @@ async function listBonusCampaignStatuses(userId, deps = {}) {
   const rows = await fetchActiveCampaignRows(runSql, null);
   const items = [];
   for (const row of rows) {
-    const status = await campaignStatus(userId, normalizeCampaign(row), deps.now ? new Date(deps.now) : new Date(), runSql);
+    const status = await campaignStatus(userId, normalizeCampaign(row), deps.now ? new Date(deps.now) : new Date(), runSql, deps);
     if (status.campaign) items.push(publicStatus(status));
   }
   if (!deps.includeDailyStatus) return { items };
@@ -313,7 +327,7 @@ select * from public.bonus_campaigns
 where campaign_type = 'poker_daily' and status in ('active', 'paused', 'ended')
 order by (status = 'active') desc, created_at desc, id desc limit 1;
 `, []);
-  const status = await campaignStatus(userId, normalizeCampaign(dailyRows?.[0]), deps.now ? new Date(deps.now) : new Date(), runSql);
+  const status = await campaignStatus(userId, normalizeCampaign(dailyRows?.[0]), deps.now ? new Date(deps.now) : new Date(), runSql, deps);
   return { items, dailyBonus: status.campaign ? publicStatus(status) : null };
 }
 
@@ -375,6 +389,7 @@ async function transactionClock(deps, runSql) {
 }
 
 async function claimBonusCampaign(userId, campaignCode, deps = {}) {
+  const protectedMode = rewardProtectionEnabled(deps.env || process.env);
   const writeTransaction = deps.postTransaction || postTransaction;
   const begin = deps.beginSql || beginSql;
   const preflight = await getBonusCampaignStatus(userId, campaignCode, deps);
@@ -383,9 +398,14 @@ async function claimBonusCampaign(userId, campaignCode, deps = {}) {
   try {
     return await begin(async (sqlTx) => {
       const txSql = (query, params = []) => sqlTx.unsafe(query, params);
+      // Auth row precedes campaign and identity locks; no network calls under locks.
+      if (protectedMode) await txSql('select id from auth.users where id = $1 for update;', [userId]);
       const campaign = normalizeCampaign(await lockCampaign(preflight.campaign.id, txSql));
+      const protectedClaim = protectedMode && campaign && (campaign.campaignType === 'poker_daily' || campaign.claimPolicy === 'once');
+      const identity = protectedClaim ? await resolveRewardIdentity(userId, txSql, deps.env || process.env) : null;
+      if (identity) await lockRewardIdentity(identity, txSql);
       const now = await transactionClock(deps, txSql);
-      const status = await campaignStatus(userId, campaign, now, txSql);
+      const status = await campaignStatus(userId, campaign, now, txSql, deps);
       if (!status.eligible) return { ...status, ...empty };
       const finalNow = await transactionClock(deps, txSql);
       if (buildClaimPeriodKey(campaign.claimPolicy, finalNow) !== status.claimPeriodKey
@@ -411,6 +431,15 @@ async function claimBonusCampaign(userId, campaignCode, deps = {}) {
         idempotencyKey: status.idempotencyKey, claimPeriodKey: status.claimPeriodKey,
         decisionAt: finalNow.toISOString() }, txSql);
       if (!claim?.id || claim.transaction_id !== transactionId) throw new Error("bonus_claim_write_failed");
+      if (identity) await recordRewardPayout(identity, campaign.campaignType === 'poker_daily' ? 'poker_daily' : `campaign:${campaign.id}`,
+        campaign.campaignType === 'poker_daily' ? status.claimPeriodKey : 'once', transactionId, txSql);
+      if (protectedMode) {
+        // Campaign row lock serializes quota checks and increments, for every
+        // policy, including unrelated recurring campaigns whose behavior stays intact.
+        await txSql(`insert into private.bonus_campaign_paid_totals (campaign_id, paid_count)
+values ($1, (select count(*) from public.bonus_claims where campaign_id = $1))
+on conflict (campaign_id) do update set paid_count = private.bonus_campaign_paid_totals.paid_count + 1;`, [campaign.id]);
+      }
       klog("bonus_campaign_claimed", { userId, campaignCode, transactionId, amount: award.amount });
       return { ...status, eligible: false, alreadyClaimed: true, claimed: true, reason: "claimed",
         transactionId, claim, transaction: result.transaction, entries: result.entries || [], account: result.account || null };

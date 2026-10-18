@@ -24,3 +24,7 @@ Source of truth: https://github.com/krzysztofcal/arcadePlatform/issues/1117 (own
 ## Non-goals and release requirements
 
 No new service/worker/framework, no Google account deletion or provider physical-erasure certificate, no blanket financial cascade, no custom email infrastructure. Storage signed-upload capabilities issued before deletion must expire and be safely cleaned before COMPLETED; track paths beyond five-minute finalize eligibility, including legacy missing records. Real cleanup/smoke, exact-SHA WS Preview Deploy, privacy approval and Production GO remain separate gates. Fundamental backend/SQL/WS tests only; no UI snapshots.
+
+## Current implementation boundary
+
+Prepared code is disabled and unfinished. Legacy Redis ownership/erasure, retired USER archive proofs and complete final-effect writer coverage remain implementation blockers. New acceptance requires both runtime flag and default-false database release row. None of the local-only schema proposals is applied. Focused local tests do not authorize activation or establish all R1–R8 PASS.

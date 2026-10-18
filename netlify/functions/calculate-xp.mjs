@@ -14,7 +14,7 @@
  */
 
 import crypto from "node:crypto";
-import { store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
+import { guardedUserMutation, store, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { validateServerSession, touchSession } from "./start-session.mjs";
 import { nextWarsawResetMs, warsawDayKey } from "./_shared/time-utils.mjs";
@@ -512,11 +512,11 @@ async function getSessionState(userId, sessionId) {
   }
 }
 
-async function saveSessionState(userId, sessionId, state) {
+async function saveSessionState(userId, sessionId, state, anonymous = false) {
   const key = keySessionState(userId, sessionId);
   const ttlSeconds = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC : 604800;
   try {
-    await store.setex(key, ttlSeconds, JSON.stringify(state));
+    await guardedUserMutation({ userId, anonymous, operation: "setex", key, ttl: ttlSeconds, value: JSON.stringify(state) });
     return true;
   } catch (err) {
     if (DEBUG_ENABLED) {
@@ -710,6 +710,7 @@ export async function handler(event) {
       return result;
     } catch (err) {
       klog("calc_anon_migration_failed", { error: err?.message });
+      if (process.env.ACCOUNT_DELETION_ENABLED === "1") throw err;
       return null;
     }
   };
@@ -805,7 +806,7 @@ export async function handler(event) {
     }, origin);
   }
 
-  if (validatedServerSessionId) touchSession(validatedServerSessionId).catch(() => {});
+  if (validatedServerSessionId) touchSession(validatedServerSessionId, { userId, anonymous: !supabaseUserId }).catch(() => {});
   const conversion = await convertAnonymousXp();
 
   const {
@@ -910,7 +911,7 @@ export async function handler(event) {
 
   // Award XP atomically with caps
   const awardResult = await executeAtomicXpAward({
-    store,
+    store, userId, anonymous: !supabaseUserId,
     keys: [
       sessionKeyK,
       sessionSyncKeyK,
@@ -952,7 +953,7 @@ export async function handler(event) {
   // Update session state
   sessionState.combo = updatedCombo;
   sessionState.lastWindowEnd = windowEnd;
-  await saveSessionState(userId, sessionId, sessionState);
+  await saveSessionState(userId, sessionId, sessionState, !supabaseUserId);
 
   // Build response
   const payload = {
@@ -1015,14 +1016,14 @@ export async function handler(event) {
 // Boost Management (called from other endpoints)
 // ============================================================================
 
-export async function applyBoost(userId, sessionId, multiplier, durationMs) {
+export async function applyBoost(userId, sessionId, multiplier, durationMs, { anonymous = false } = {}) {
   if (!userId || !sessionId) return false;
 
   const sessionState = await getSessionState(userId, sessionId);
   sessionState.boostMultiplier = Math.max(1, Math.min(5, multiplier));
   sessionState.boostExpiresAt = Date.now() + Math.max(0, durationMs);
 
-  return saveSessionState(userId, sessionId, sessionState);
+  return saveSessionState(userId, sessionId, sessionState, anonymous);
 }
 
 // Export game rules for reference

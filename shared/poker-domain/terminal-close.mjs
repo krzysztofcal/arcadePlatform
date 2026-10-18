@@ -1,3 +1,6 @@
+import { postTransaction as ledgerPostTransaction, postPokerLeaveCashout } from "../../netlify/functions/_shared/chips-ledger.mjs";
+import { lockAccountLifecycle } from "../account-deletion.mjs";
+
 const TERMINAL_ACCOUNTING_ERROR = "terminal_accounting_invariant_failed";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LIVE_ACTION_PHASES = new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
@@ -506,7 +509,7 @@ function classifyClaims({ state, seatRows, escrowBefore }) {
 }
 
 async function postTerminalHumanCashout({ postTransaction, tx, tableId, toStateVersion, claim, createdBy, closeReason }) {
-  return postTransaction({
+  const input = {
     userId: claim.userId,
     txType: "TABLE_CASH_OUT",
     idempotencyKey: `poker:human-terminal-cashout:v1:${tableId}:${toStateVersion}:${claim.seatNo}:${claim.userId}`,
@@ -527,7 +530,12 @@ async function postTerminalHumanCashout({ postTransaction, tx, tableId, toStateV
     ],
     createdBy,
     tx
-  });
+  };
+  if (process.env.ACCOUNT_DELETION_ENABLED === "1" && postTransaction === ledgerPostTransaction) {
+    return postPokerLeaveCashout({ tx, tableId, userId: claim.userId, amount: claim.amount,
+      idempotencyKey: input.idempotencyKey, createdBy, description: input.description, metadata: input.metadata });
+  }
+  return postTransaction(input);
 }
 
 export async function executeTerminalPokerCloseInTx({
@@ -580,6 +588,10 @@ export async function executeTerminalPokerCloseInTx({
     "select user_id, seat_no, status, is_bot, stack from public.poker_seats where table_id = $1 order by seat_no asc for update;",
     [tableId]
   );
+
+  if (process.env.ACCOUNT_DELETION_ENABLED === "1") {
+    await lockAccountLifecycle(tx, seatRows.filter((seat) => seat.is_bot !== true).map((seat) => seat.user_id));
+  }
 
   const escrowSystemKey = `POKER_TABLE:${tableId}`;
   const escrowRows = await tx.unsafe(

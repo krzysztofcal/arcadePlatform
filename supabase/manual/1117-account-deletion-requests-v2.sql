@@ -6,6 +6,10 @@ create table public.account_deletion_requests (
   status text not null default 'PENDING' check (status in ('PENDING','PROCESSING','RETRY','ERROR','COMPLETED')),
   phase text not null default 'preparing' check (phase in ('preparing','poker','burn','cleanup','auth','completed')),
   accepted_at timestamptz,
+  progress jsonb not null default '{}'::jsonb,
+  status_token_hash text,
+  status_token_expires_at timestamptz,
+  actionable_since timestamptz not null default clock_timestamp(),
   created_at timestamptz not null default clock_timestamp(),
   progress_at timestamptz not null default clock_timestamp(),
   completed_at timestamptz,
@@ -25,3 +29,35 @@ alter table public.account_deletion_requests enable row level security;
 revoke all on table public.account_deletion_requests from public, anon, authenticated;
 -- Trusted backend SQL only. No client RLS policy or public SECURITY DEFINER API.
 grant select, insert, update on public.account_deletion_requests to service_role;
+
+-- Operator enables only after all implementation/privacy/Storage/recovery gates pass.
+create table public.account_deletion_release (id boolean primary key default true check(id), enabled boolean not null default false);
+insert into public.account_deletion_release(id,enabled) values(true,false);
+alter table public.account_deletion_release enable row level security;
+revoke all on table public.account_deletion_release from public,anon,authenticated;
+grant select on table public.account_deletion_release to service_role;
+
+-- Narrow self-only status used by the dependency-light WS token mint function.
+-- SECURITY DEFINER is required to read the private lifecycle table; no target argument.
+create function public.account_is_active() returns boolean language sql stable security definer set search_path='' as $$
+ select exists(select 1 from auth.users where id=auth.uid())
+ and not exists(select 1 from public.account_deletion_requests where old_user_id=auth.uid());
+$$;
+revoke all on function public.account_is_active() from public,anon;
+grant execute on function public.account_is_active() to authenticated;
+alter table public.bonus_campaigns alter column created_by drop not null;
+alter table public.bonus_campaign_eligible_users alter column created_by drop not null;
+-- Fence direct authenticated Supabase access as well as backend API calls.
+-- Preserve each existing self-owner predicate; do not widen role/table grants.
+do $$
+declare p record; statement text;
+begin
+ for p in select * from pg_policies where schemaname='public'
+   and (coalesce(qual,'') like '%auth.uid()%' or coalesce(with_check,'') like '%auth.uid()%')
+ loop
+  statement := format('alter policy %I on %I.%I',p.policyname,p.schemaname,p.tablename);
+  if p.qual is not null then statement := statement || format(' using ((%s) and public.account_is_active())',p.qual); end if;
+  if p.with_check is not null then statement := statement || format(' with check ((%s) and public.account_is_active())',p.with_check); end if;
+  execute statement;
+ end loop;
+end $$;

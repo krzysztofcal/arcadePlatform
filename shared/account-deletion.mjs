@@ -1,4 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
+
+export function accountDeletionEnabled(env = process.env) { return env.ACCOUNT_DELETION_ENABLED === '1'; }
 
 const PHASES = ['preparing', 'poker', 'burn', 'cleanup', 'auth', 'completed'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,7 +40,7 @@ export async function requestDeletion(tx, userId) {
 export function deletionStatus(row) {
   if (!row) return null;
   return { requestId: row.request_id, status: row.status, phase: row.phase,
-    accepted: row.accepted_at != null, completed: row.status === 'COMPLETED',
+    accepted: row.accepted_at != null, completed: row.status === 'COMPLETED', requiresIntervention: row.incident === true,
     retryable: !['ERROR', 'COMPLETED'].includes(row.status) };
 }
 
@@ -79,7 +81,17 @@ export async function advanceDeletion({ beginSql, requestId, steps }) {
   try {
     result = await steps[row.phase]({ userId: row.old_user_id, requestId: row.request_id,
       generation: row.lease_generation, phase: row.phase,
+      beginSql, progress: row.progress || {},
       assertLease: (tx) => assertDeletionLease(tx, { requestId: row.request_id, generation: row.lease_generation, phase: row.phase }) });
+    if (result?.waitUntil) {
+      const until = new Date(result.waitUntil);
+      if (!Number.isFinite(until.getTime()) || until.getTime() <= Date.now()) throw new Error('invalid_wait');
+      await beginSql((tx) => tx.unsafe(`update public.account_deletion_requests set
+        status='PENDING',lease_until=null,next_attempt_at=$3,actionable_since=$4
+        where request_id=$1 and lease_generation=$2 and status='PROCESSING' and lease_until>clock_timestamp();`,
+      [requestId,row.lease_generation,until.toISOString(),result.actionableAt || until.toISOString()]));
+      return { advanced:false, waiting:true };
+    }
     // Explicit success only; a missing/uncertain outcome never completes a phase.
     if (result?.done !== true) throw Object.assign(new Error('dependency_unavailable'), { code: 'dependency_unavailable' });
   } catch (error) {
@@ -93,7 +105,7 @@ export async function advanceDeletion({ beginSql, requestId, steps }) {
         where request_id=$1;`, [requestId]));
     } else {
       await beginSql((tx) => tx.unsafe(`update public.account_deletion_requests set
-        status='RETRY', error_code='dependency_unavailable', incident=incident or progress_at<clock_timestamp()-interval '30 minutes',
+        status='RETRY', error_code='dependency_unavailable', incident=incident or actionable_since<clock_timestamp()-interval '30 minutes',
         lease_until=null, next_attempt_at=clock_timestamp()+interval '30 seconds'
         where request_id=$1 and lease_generation=$2 and status='PROCESSING' and lease_until>clock_timestamp();`,
       [requestId, row.lease_generation]));
@@ -104,10 +116,11 @@ export async function advanceDeletion({ beginSql, requestId, steps }) {
     const next = PHASES[PHASES.indexOf(row.phase) + 1];
     const [updated] = await tx.unsafe(`update public.account_deletion_requests set phase=$3,
       status=$4, accepted_at=coalesce(accepted_at,clock_timestamp()), progress_at=clock_timestamp(),
+      actionable_since=clock_timestamp(), progress=jsonb_set(progress,ARRAY[$5::text],coalesce(progress->$5::text,'{}'::jsonb) || $6::jsonb),
       completed_at=case when $3='completed' then clock_timestamp() else null end,
       lease_until=null, error_code=null, next_attempt_at=clock_timestamp()
       where request_id=$1 and lease_generation=$2 and status='PROCESSING' and lease_until>clock_timestamp() returning *;`,
-    [requestId, row.lease_generation, next, next === 'completed' ? 'COMPLETED' : 'PENDING']);
+    [requestId, row.lease_generation, next, next === 'completed' ? 'COMPLETED' : 'PENDING', row.phase, JSON.stringify({ done:true })]);
     return { advanced: !!updated, state: deletionStatus(updated) };
   });
 }
@@ -143,4 +156,43 @@ export async function deleteAuthUser({ userId, supabaseUrl, serviceRoleKey, auth
   const after = await read();
   if (after.status === 404) return { done: true, reconciled: true };
   throw new Error('auth_delete_unconfirmed');
+}
+
+
+export async function scanDeletionRequests(beginSql, limit = 10) {
+  limit = Math.max(1, Math.min(10, Number(limit) || 10));
+  return beginSql((tx) => tx.unsafe(`select request_id from public.account_deletion_requests
+    where status in ('PENDING','PROCESSING','RETRY') and next_attempt_at<=clock_timestamp()
+      and (lease_until is null or lease_until<clock_timestamp()) order by next_attempt_at limit $1;`, [limit]));
+}
+
+export async function issueDeletionStatusAccess(tx, userId) {
+  const token = randomBytes(32).toString('base64url');
+  const hash = createHash('sha256').update(token).digest('hex');
+  const [row] = await tx.unsafe(`update public.account_deletion_requests set status_token_hash=$2,
+    status_token_expires_at=clock_timestamp()+interval '24 hours' where old_user_id=$1 returning *;`, [requireUuid(userId),hash]);
+  if (!row) throw new Error('deletion_request_missing');
+  return { ...deletionStatus(row), statusToken:token };
+}
+
+export async function readDeletionStatusAccess(tx, requestId, token) {
+  requireUuid(requestId);
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  const [row] = await tx.unsafe(`select * from public.account_deletion_requests where request_id=$1
+    and status_token_hash=$2 and status_token_expires_at>clock_timestamp();`,
+  [requestId,createHash('sha256').update(token).digest('hex')]);
+  return deletionStatus(row);
+}
+
+
+// Authorization and synchronous transport enqueue share the acceptance lock.
+// A frame already enqueued before acceptance cannot be recalled from the network.
+export function queueAccountPrivateFrame({ws,connection,ownerId,frame,beginSql,close}) {
+  ws.__deletionSendCount=(ws.__deletionSendCount || 0)+1;
+  if (ws.__deletionSendCount>100) { ws.__deletionSendCount--; close('send_queue_full'); return Promise.resolve(); }
+  ws.__deletionSendTail=(ws.__deletionSendTail || Promise.resolve()).then(() => beginSql(async(tx)=>{
+    await assertAccountActive(tx,ownerId);
+    if (ws.readyState===1 && connection.session?.userId===ownerId && !connection.sessionInvalidated) ws.send(JSON.stringify(frame));
+  })).catch(()=>close('account_not_active')).finally(()=>{ws.__deletionSendCount--;});
+  return ws.__deletionSendTail;
 }

@@ -1,3 +1,4 @@
+import { guardedUserMutation } from "./store-upstash.mjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { executeSql, klog } from "./supabase-admin.mjs";
 import { store as defaultStore } from "./store-upstash.mjs";
@@ -236,7 +237,7 @@ async function setProjectionScore({ store, key, member, score, dryRun }) {
   const current = normalizeCounter(await store.zscore(key, member));
   if (current === score) return "unchanged";
   if (!dryRun) {
-    if (score > 0) await store.zadd(key, score, member);
+    if (score > 0) await guardedUserMutation({ store, userId: member, operation: "zadd", key, score, value: member });
     else await store.zrem(key, member);
   }
   return score > 0 ? "updated" : "removed";

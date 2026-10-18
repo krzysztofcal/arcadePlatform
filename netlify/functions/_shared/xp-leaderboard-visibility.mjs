@@ -1,3 +1,4 @@
+import { guardedRedisEval } from "./store-upstash.mjs";
 import { store as defaultStore } from "./store-upstash.mjs";
 import { createXpLeaderboardKeys, getXpLeaderboardPeriods, getXpLeaderboardWeekDayKeys } from "./xp-leaderboard.mjs";
 
@@ -50,9 +51,7 @@ async function syncUserLeaderboardVisibility(userId, visible, deps = {}) {
   const periods = getXpLeaderboardPeriods(now);
   const weekDayKeys = getXpLeaderboardWeekDayKeys(now);
   const keys = createXpLeaderboardKeys({ namespace });
-  const result = await store.eval(
-    SYNC_LEADERBOARD_VISIBILITY_SCRIPT,
-    [
+  const result = await guardedRedisEval({ store, userIds: [userId], script: SYNC_LEADERBOARD_VISIBILITY_SCRIPT, keys: [
       keys.hidden(userId),
       keys.allTime(),
       keys.day(periods.dayKey),
@@ -60,9 +59,7 @@ async function syncUserLeaderboardVisibility(userId, visible, deps = {}) {
       `${namespace}:total:${userId}`,
       `${namespace}:daily:${userId}:${periods.dayKey}`,
       ...weekDayKeys.map((dayKey) => `${namespace}:daily:${userId}:${dayKey}`),
-    ],
-    [visible ? "1" : "0", userId, String(periods.dayExpiresAtSec), String(periods.weekExpiresAtSec)],
-  );
+    ], args: [visible ? "1" : "0", userId, String(periods.dayExpiresAtSec), String(periods.weekExpiresAtSec)] });
   return {
     visible,
     allTime: Math.max(0, Math.floor(Number(result?.[0]) || 0)),

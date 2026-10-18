@@ -105,6 +105,13 @@ jobs:
         run: >-
           node --test --test-concurrency=1
           tests/account-deletion.behavior.test.mjs
+          tests/account-delete.endpoint.behavior.test.mjs
+          tests/account-deletion-redis.behavior.test.mjs
+          tests/account-deletion-storage.behavior.test.mjs
+          tests/chips-ledger.deletion-retirement.test.mjs
+          tests/reward-identities.behavior.test.mjs
+          tests/xp-ledger.behavior.test.mjs
+          ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs
           tests/poker-reducer.applyLeaveTable-marks-acted-for-participating-leaver.unit.test.mjs
           shared/poker-domain/leave.behavior.test.mjs
           shared/poker-domain/deferred-leave-finalization.behavior.test.mjs

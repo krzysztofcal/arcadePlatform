@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive } from "../../../shared/account-deletion.mjs";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 import { syncUserLeaderboardVisibility } from "./xp-leaderboard-visibility.mjs";
 import { projectPublicAvatar } from "../../../shared/profile-avatar-projection.mjs";
@@ -97,6 +98,12 @@ async function readProfile(userId, runSql = executeSql) {
 }
 
 async function ensureUserProfile(userId, deps = {}) {
+  if (accountDeletionEnabled(deps.env || process.env) && !deps.profileTx) {
+    return (deps.beginSql || beginSql)(async (tx) => {
+      await assertAccountActive(tx, userId);
+      return ensureUserProfile(userId, { ...deps, profileTx: tx, executeSql: (q,p) => tx.unsafe(q,p) });
+    });
+  }
   if (typeof userId !== "string" || !userId.trim()) throw profileError("unauthorized", 401);
   const runSql = deps.executeSql || executeSql;
   const rows = await runSql(
@@ -138,8 +145,9 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
   const runTransaction = deps.beginSql || beginSql;
   const syncVisibility = deps.syncLeaderboardVisibility || syncUserLeaderboardVisibility;
   try {
-    if (hasLeaderboardVisible && !leaderboardVisible) await syncVisibility(userId, false, deps);
+    if (!accountDeletionEnabled(deps.env || process.env) && hasLeaderboardVisible && !leaderboardVisible) await syncVisibility(userId, false, deps);
     const updatedProfile = await runTransaction(async (tx) => {
+      if (accountDeletionEnabled(deps.env || process.env)) await assertAccountActive(tx, userId);
       const rows = await tx.unsafe(
         `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
          from public.user_profiles where user_id = $1 for update;`,
@@ -163,7 +171,7 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
       );
       return normalizeProfileRow(updated?.[0]);
     });
-    if (hasLeaderboardVisible && updatedProfile.leaderboardVisible) await syncVisibility(userId, true, deps);
+    if (hasLeaderboardVisible && (updatedProfile.leaderboardVisible || accountDeletionEnabled(deps.env || process.env))) await syncVisibility(userId, updatedProfile.leaderboardVisible, deps);
     return updatedProfile;
   } catch (error) {
     if (isHandleConflict(error)) throw profileError("handle_taken", 409);
@@ -176,6 +184,7 @@ async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
   if (avatarKey !== null && !/^[0-9a-f-]{36}\.webp$/i.test(String(avatarKey || ""))) throw profileError("invalid_avatar_key");
   const runTransaction = deps.beginSql || beginSql;
   return runTransaction(async (tx) => {
+    if (accountDeletionEnabled(deps.env || process.env)) await assertAccountActive(tx, userId);
     const currentRows = await tx.unsafe(
       `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
        from public.user_profiles where user_id = $1 for update;`,
@@ -183,6 +192,12 @@ async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
     );
     const current = normalizeProfileRow(currentRows?.[0]);
     if (!current) throw profileError("profile_not_found", 404);
+    if (accountDeletionEnabled(deps.env || process.env)) {
+      for (const key of new Set([current.avatarKey, avatarKey].filter(Boolean))) {
+        await tx.unsafe(`insert into private.account_avatar_objects(user_id, output_path) values($1,$2)
+on conflict (user_id,output_path) do nothing;`, [userId,key]);
+      }
+    }
     const updatedRows = await tx.unsafe(
       `update public.user_profiles set avatar_key = $1 where user_id = $2
        returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible;`,

@@ -1,3 +1,4 @@
+import { guardedRedisEval } from "./store-upstash.mjs";
 import crypto from "node:crypto";
 
 const asNumber = (raw, fallback) => {
@@ -131,18 +132,14 @@ export async function migrateAnonXpToUser({ store, namespace, anonId, userId, co
   if (!anonId || !userId || anonId === userId) {
     return { converted: 0, userTotal: null, anonTotal: 0, alreadyConverted: false };
   }
-  const result = await store.eval(
-    ANON_CONVERSION_SCRIPT,
-    [
+  const result = await guardedRedisEval({ store, userIds: [anonId, userId], anonymousIds: [anonId], script: ANON_CONVERSION_SCRIPT, keys: [
       keyTotal(namespace, anonId),
       keyTotal(namespace, userId),
       keyMigration(namespace, anonId, userId),
       keyUserMigration(namespace, userId),
       ...(leaderboardAllTimeKey ? [leaderboardAllTimeKey] : []),
       ...(leaderboardAllTimeKey && leaderboardHiddenKey ? [leaderboardHiddenKey] : []),
-    ],
-    [String(Math.max(0, Number(conversionCap) || 0)), ...(leaderboardAllTimeKey ? [userId] : [])],
-  );
+    ], args: [String(Math.max(0, Number(conversionCap) || 0)), ...(leaderboardAllTimeKey ? [userId] : [])] });
   return {
     converted: Math.max(0, Math.floor(Number(result?.[0]) || 0)),
     userTotal: Math.max(0, Math.floor(Number(result?.[1]) || 0)),

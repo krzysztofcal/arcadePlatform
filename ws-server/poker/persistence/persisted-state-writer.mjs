@@ -1,3 +1,4 @@
+import { assertAccountActive } from "../../../shared/account-deletion.mjs";
 import { attemptDemandRefill } from "../../../shared/poker-domain/demand-refill.mjs";
 import { createHash } from "node:crypto";
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
@@ -1008,6 +1009,17 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const persistedState = sanitizePersistedState(nextState);
       const holeCardState = normalizeJsonState(privateStateForHoleCards) || {};
       const payload = persistedState;
+      if (env.ACCOUNT_DELETION_ENABLED === "1") {
+        // Match JOIN/Leave ordering. Internal settlement/bot writers also take
+        // the table lock first, but only durable human ACT requires ACTIVE.
+        const tables = await tx.unsafe("select id from public.poker_tables where id = $1 for update;", [tableId]);
+        if (!tables?.length) throw Object.assign(new Error("table_not_found"), { code: "table_not_found" });
+        if (durableActionPlan.supplied) {
+          // handleActCommand derives this identity from connState.session,
+          // not frame.payload or the advisory accepted-action audit object.
+          await assertAccountActive(tx, durableActionPlan.request.userId);
+        }
+      }
       if (durableActionPlan.supplied) {
         const reservation = await reserveDurableActionRequest(tx, { tableId, request: durableActionPlan.request });
         if (reservation.outcome !== "reserved") {
@@ -1349,7 +1361,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       return {
         ok: false,
         ...(durableActionPlan.supplied ? { outcome: "failure" } : {}),
-        reason: boundedBankrollExhausted
+        reason: error?.code === "account_not_active" ? "account_not_active" : boundedBankrollExhausted
           ? "bot_bounded_bankroll_exhausted"
           : replacementSeatProjectionConflict ? "replacement_seat_projection_conflict"
             : settledAccessTransitionConflict ? "settled_access_transition_conflict"

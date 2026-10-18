@@ -1,4 +1,5 @@
-import { executeSql, klog } from "./supabase-admin.mjs";
+import { rewardProtectionEnabled, resolveRewardIdentity, lockRewardIdentity, rewardPaidCount, recordRewardPayout } from "./reward-identities.mjs";
+import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 
 const DEFAULT_BONUS_AMOUNT = 500;
@@ -114,6 +115,14 @@ async function getWelcomeBonusStatus(userId, deps = {}) {
     };
   }
 
+  if (rewardProtectionEnabled(env)) {
+    const identity = await resolveRewardIdentity(userId, runSql, env);
+    if (await rewardPaidCount(identity, 'welcome', null, runSql) >= 3) {
+      return { eligible: false, alreadyClaimed: false, amount: config.amount,
+        reason: 'welcome_limit_reached', idempotencyKey, startAt: config.startAt, createdAt };
+    }
+  }
+
   const eligible = Date.parse(createdAt) >= Date.parse(config.startAt);
   return {
     eligible,
@@ -145,6 +154,15 @@ function buildWelcomeBonusEntries(userId, amount) {
 }
 
 async function claimWelcomeBonus(userId, deps = {}) {
+  const env = deps.env || process.env;
+  if (rewardProtectionEnabled(env) && !deps.rewardTx) {
+    return (deps.beginSql || beginSql)(async (tx) => {
+      const runSql = (query, params = []) => tx.unsafe(query, params);
+      const identity = await resolveRewardIdentity(userId, runSql, env, true);
+      await lockRewardIdentity(identity, runSql);
+      return claimWelcomeBonus(userId, { ...deps, executeSql: runSql, rewardTx: tx, rewardIdentity: identity });
+    });
+  }
   const writeTransaction = deps.postTransaction || postTransaction;
   const status = await getWelcomeBonusStatus(userId, deps);
   const baseLog = {
@@ -178,8 +196,13 @@ async function claimWelcomeBonus(userId, deps = {}) {
       metadata,
       entries: buildWelcomeBonusEntries(userId, status.amount),
       createdBy: userId,
+      ...(deps.rewardTx ? { tx: deps.rewardTx } : {}),
     });
     const transactionId = result?.transaction?.id || null;
+    if (deps.rewardTx) {
+      if (!transactionId) throw new Error('reward_proof_write_failed');
+      await recordRewardPayout(deps.rewardIdentity, 'welcome', status.idempotencyKey, transactionId, deps.executeSql);
+    }
     klog("welcome_bonus_claimed", {
       ...baseLog,
       transactionId,

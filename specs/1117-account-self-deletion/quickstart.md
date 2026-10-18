@@ -19,3 +19,9 @@ Use existing Node test runner/PGlite, extend critical tests where available; no 
 ## Later Stage activation
 
 Separate GO for disposable destructive fixtures/migration/deploy. Standard password and genuine Google owner-confirmation smoke before enabling. Exact runtime SHA WS Preview Deploy and smoke required for runtime changes. No requirement to prove old login OTP request binding, no admin nonce reading or provider forgery. Completion requires official Admin hard-delete successful/reconciled and prior obligations satisfied. Production always separate GO.
+
+## Current local evidence and stop conditions
+
+CI account-deletion-fundamentals runs the maintained Node/PGlite endpoint, request/recovery/private-send, Redis/XP, Storage, retirement/WS-buy-in, reward and Leave suites: 109 passed locally. No real Stage/Google/password deletion smoke or PostgreSQL multi-connection contention run. Legacy Vitest-only files cannot run with current declared dependencies; no framework was added.
+
+Do not enable the runtime flag/release row before legacy Redis cleanup, archive/proof compatibility and final-effect inventory are complete. Redis cleanup currently explicitly reports unproven legacy ownership and prevents Auth deletion. Do not override this as an operator shortcut. HMAC approval/history and avatar legacy cutover rows require independent reviewed evidence; proposals seed no such approval. Stop new acceptance via database release=false while preserving guards/recovery; never roll back to old unfenced writers after acceptance.

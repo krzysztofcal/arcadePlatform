@@ -2,7 +2,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { requestDeletion, assertAccountActive, getDeletionStatus, advanceDeletion, assertDeletionLease, deleteAuthUser } from '../shared/account-deletion.mjs';
+import { requestDeletion, assertAccountActive, getDeletionStatus, advanceDeletion, assertDeletionLease, deleteAuthUser, issueDeletionStatusAccess, readDeletionStatusAccess, queueAccountPrivateFrame } from '../shared/account-deletion.mjs';
 
 const OWNER = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -14,7 +14,7 @@ async function fixture(t) {
   database = new PGlite();
   const db = database;
   await db.exec(`create role anon; create role authenticated; create role service_role;
-    create schema auth; create table auth.users(id uuid primary key);`);
+    create schema auth; create table auth.users(id uuid primary key); create table public.poker_state(table_id uuid,state jsonb); create table public.poker_seats(table_id uuid,user_id uuid); create table public.bonus_campaigns(created_by uuid); create table public.bonus_campaign_eligible_users(created_by uuid); create function auth.uid() returns uuid language sql as $$ select null::uuid $$;`);
   await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-requests-v2.sql', import.meta.url), 'utf8'));
   }
   const db = database;
@@ -138,4 +138,59 @@ test('lost authorization before DELETE is not swallowed as an uncertain provider
     fetchImpl: async (url, options) => { calls.push(options.method || 'GET'); return new Response(JSON.stringify({ id: OWNER }), { status: 200 }); }
   }), /lease_lost/);
   assert.deepEqual(calls, ['GET']);
+});
+
+
+test('bounded status capability reveals only its request after Auth removal and expires',async(t)=>{
+ const {db,beginSql}=await fixture(t);
+ await beginSql(tx=>requestDeletion(tx,OWNER));
+ const issued=await beginSql(tx=>issueDeletionStatusAccess(tx,OWNER));
+ await db.query('delete from auth.users where id=$1',[OWNER]);
+ assert.equal((await beginSql(tx=>readDeletionStatusAccess(tx,issued.requestId,issued.statusToken))).requestId,issued.requestId);
+ assert.equal(await beginSql(tx=>readDeletionStatusAccess(tx,OTHER,issued.statusToken)),null);
+ assert.equal(await beginSql(tx=>readDeletionStatusAccess(tx,issued.requestId,'bad')),null);
+ await db.exec("update public.account_deletion_requests set status_token_expires_at=clock_timestamp()-interval '1 second'");
+ assert.equal(await beginSql(tx=>readDeletionStatusAccess(tx,issued.requestId,issued.statusToken)),null);
+ const stored=(await db.query('select status_token_hash from public.account_deletion_requests')).rows[0];
+ assert.notEqual(stored.status_token_hash,issued.statusToken);
+});
+
+test('planned wait persists cursor deadline without acceptance or destructive progression',async(t)=>{
+ const {db,beginSql}=await fixture(t);const row=await beginSql(tx=>requestDeletion(tx,OWNER));
+ const steps=Object.fromEntries(phases.map(p=>[p,async()=>({done:true})]));
+ steps.preparing=async()=>({waitUntil:new Date(Date.now()+10000).toISOString()});
+ assert.equal((await advanceDeletion({beginSql,requestId:row.request_id,steps})).waiting,true);
+ const state=(await db.query('select * from public.account_deletion_requests')).rows[0];
+ assert.equal(state.phase,'preparing');assert.equal(state.accepted_at,null);assert.equal(state.incident,false);
+ assert.equal((await advanceDeletion({beginSql,requestId:row.request_id,steps})).advanced,false);
+});
+
+test('real WS phase coordinator resumes no-table request; incomplete cleanup never invokes Auth',async(t)=>{
+ const {createAccountDeletionRuntime}=await import('../ws-server/poker/runtime/account-deletion.mjs');
+ const {db,beginSql}=await fixture(t);const request=await beginSql(tx=>requestDeletion(tx,OWNER));
+ const observed=[];
+ const runtime=createAccountDeletionRuntime({beginSql,env:{ACCOUNT_DELETION_ENABLED:'1'},redisIsMemory:false,klog:()=>{},
+  blockIdentity:async id=>{assert.equal(id,OWNER);observed.push('blocked');},disconnectUser:async()=>observed.push('disconnected'),
+  leaveFromTable:async()=>{throw new Error('unexpected table');},
+  retireWallet:async({tx,assertLease})=>{const row=await assertLease(tx);assert.equal(row.progress.poker.done,true);await tx.unsafe("update public.account_deletion_requests set progress=jsonb_set(progress,'{walletRetirement}', '{\"retiredAt\":\"test-only\"}'::jsonb) where request_id=$1",[request.request_id]);return {done:true};},
+  cleanupAvatars:async()=>({done:true}),cleanupRedis:async()=>({done:false,reason:'legacy_unproven'}),deleteAuth:async()=>{observed.push('auth');return {done:true};}
+ });
+ await runtime.tick();await runtime.tick();await runtime.tick();await runtime.tick();
+ const state=(await db.query('select * from public.account_deletion_requests')).rows[0];
+ assert.equal(state.phase,'cleanup');assert.equal(state.status,'RETRY');assert.equal(state.completed_at,null);
+ assert.deepEqual(observed,['blocked','disconnected']);
+});
+
+
+test('private WS enqueue rejects an already active socket after durable deletion intent',async(t)=>{
+ const {beginSql}=await fixture(t);const sent=[];const closed=[];
+ const ws={readyState:1,send:value=>sent.push(JSON.parse(value))};
+ const connection={session:{userId:OWNER}};
+ const send=()=>queueAccountPrivateFrame({ws,connection,ownerId:OWNER,frame:{private:'synthetic-cards'},beginSql,close:reason=>closed.push(reason)});
+ await send();assert.equal(sent.length,1);
+ await beginSql(tx=>requestDeletion(tx,OWNER));
+ await send();assert.equal(sent.length,1);assert.deepEqual(closed,['account_not_active']);
+ connection.session.userId=OTHER;
+ await queueAccountPrivateFrame({ws,connection,ownerId:OTHER,frame:{private:'other-owner'},beginSql,close:reason=>closed.push(reason)});
+ assert.equal(sent.length,2);
 });

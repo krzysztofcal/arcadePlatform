@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { store } from "./_shared/store-upstash.mjs";
+import { store, guardedUserMutation } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { buildApiCorsPolicy, buildCorsHeaders } from "./_shared/api-cors.mjs";
 import {
@@ -99,10 +99,10 @@ async function checkSessionRateLimit(ip) {
 }
 
 // Store session metadata in Redis
-async function storeSession({ sessionId, userId, createdAt, fingerprint, ip }) {
+async function storeSession({ sessionId, userId, anonymous = false, createdAt, fingerprint, ip }) {
   const key = keyServerSession(sessionId);
   const sessionData = JSON.stringify({
-    userId,
+    userId, identityMode: anonymous ? "anonymous" : "user",
     createdAt,
     fingerprint,
     ipHash: hash(ip || "unknown").substring(0, 16), // Store hashed IP for audit, not validation
@@ -110,7 +110,7 @@ async function storeSession({ sessionId, userId, createdAt, fingerprint, ip }) {
   });
 
   try {
-    await store.setex(key, SESSION_TTL_SEC, sessionData);
+    await guardedUserMutation({ userId, anonymous, operation: "setex", key, ttl: SESSION_TTL_SEC, value: sessionData });
     return { stored: true };
   } catch (err) {
     klog("xp_session_store_failed", { outcome: "unavailable" });
@@ -153,7 +153,7 @@ export async function validateServerSession({ sessionId, userId, fingerprint }) 
 }
 
 // Update session last activity
-export async function touchSession(sessionId) {
+export async function touchSession(sessionId, { userId = null, anonymous = false } = {}) {
   const key = keyServerSession(sessionId);
 
   try {
@@ -161,10 +161,10 @@ export async function touchSession(sessionId) {
     if (!raw) return { updated: false };
 
     const data = JSON.parse(raw);
-    data.lastActivity = Date.now();
-
-    await store.setex(key, SESSION_TTL_SEC, JSON.stringify(data));
-    return { updated: true };
+    if (userId && data.userId !== userId) return { updated: false };
+    const updated = await guardedUserMutation({ userId: data.userId, anonymous: anonymous || data.identityMode === "anonymous", operation: "touch", key,
+      ttl: SESSION_TTL_SEC, value: Date.now() });
+    return { updated: Number(updated) === 1 };
   } catch {
     return { updated: false };
   }
@@ -285,7 +285,7 @@ export async function handler(event) {
   // Store session in Redis
   const storeResult = await storeSession({
     sessionId,
-    userId: identityId,
+    userId: identityId, anonymous: !supabaseUserId,
     createdAt: now,
     fingerprint,
     ip: clientIp,

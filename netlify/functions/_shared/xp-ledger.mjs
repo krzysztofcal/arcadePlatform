@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { guardedRedisEval } from "./store-upstash.mjs";
 
 const sanitizeXpCounter = (value) => Math.max(0, Math.floor(Number(value) || 0));
 const hashLedgerPart = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
@@ -124,12 +125,15 @@ async function readXpTotals({ store, keys, userId, sessionId, dayKey, onError = 
   }
 }
 
-async function executeAtomicXpAward({ store, script = XP_ATOMIC_AWARD_SCRIPT, keys, args, retryLocked = false, retryDelay, onEvalError }) {
+async function executeAtomicXpAward({ store, userId, anonymous = false, beginSql, script = XP_ATOMIC_AWARD_SCRIPT, keys, args, retryLocked = false, retryDelay, onEvalError }) {
   if (!store || typeof store.eval !== "function" || typeof script !== "string" || !Array.isArray(keys) || !Array.isArray(args)) {
     throw new TypeError("invalid_xp_award_dependencies");
   }
   const run = async () => {
-    try { return await store.eval(script, keys, args.map(String)); }
+    try {
+      if (process.env.ACCOUNT_DELETION_ENABLED === '1' && !userId) throw new Error('xp_award_identity_required');
+      return await guardedRedisEval({ store, userIds: [userId], anonymousIds: anonymous ? [userId] : [], script, keys, args: args.map(String), beginSql });
+    }
     catch (error) { if (typeof onEvalError === "function") onEvalError(error); throw error; }
   };
   let result = await run();
