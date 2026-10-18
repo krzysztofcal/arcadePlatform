@@ -1148,5 +1148,14 @@
     "Source hashes are immutable inventory evidence.",
     "Only E1/E2/P1 are applied Production versions; omitted source versions are never marked applied.",
     "Manifest entries classify every current main migration; new unclassified files fail the repository guard."
+  ],
+  "forward_only": [
+    {
+      "file": "20261018184941_account_self_deletion_v2.sql",
+      "version": "20261018184941",
+      "sha256": "6552d447ea64e9b4c20d2cc2fd135f688528c5049b3c50674df8b94e21992c88",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 disabled account-deletion schema; Stage application authorized; Production not authorized; no reset/approval/activation"
+    }
   ]
 }

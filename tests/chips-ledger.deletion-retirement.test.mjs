@@ -184,10 +184,14 @@ test('forward retention proposal matches only the original retired USER and pres
     const baseline=await readFile('supabase/migrations/20260904170000_chips_ledger_closed_human_prune_whitelist.sql','utf8');
     const functionSql=baseline.slice(baseline.indexOf('create or replace function'),baseline.indexOf('$$;',baseline.indexOf('create or replace function'))+3);
     await local.exec(functionSql);
+    await local.exec("alter function chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean) owner to chips_ledger_archive_pruner;");
     const retryPatch=await readFile('supabase/migrations/20260912083727_chips_archive_prune_registry_cleaned_retry.sql','utf8');
     await local.exec('do $prune_retry_patch$'+retryPatch.split('$prune_retry_patch$')[1]+'$prune_retry_patch$;');
     const before=(await local.query("select pg_get_functiondef('public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure) definition")).rows[0].definition;
+    const membershipsBefore=(await local.query('select * from pg_auth_members order by oid')).rows;
     await local.exec(await readFile('supabase/manual/1117-account-deletion-retention-v2.sql','utf8'));
+    assert.deepEqual((await local.query('select * from pg_auth_members order by oid')).rows,membershipsBefore);
+    assert.equal((await local.query("select has_schema_privilege('chips_ledger_archive_pruner','public','CREATE') allowed")).rows[0].allowed,false);
     const after=(await local.query("select pg_get_functiondef('public.chips_prune_committed_archive_batch_internal(text,uuid[],bigint[],boolean)'::regprocedure) definition")).rows[0].definition;
     const proposal=await readFile('supabase/manual/1117-account-deletion-retention-v2.sql','utf8');
     const needle=proposal.split('$needle$')[1], replacement=proposal.split('$replacement$')[1];

@@ -78,7 +78,17 @@ function validateProductionManifest() {
     || manifest.history_policy?.missing_count !== missing.length) {
     fail("Production migration history counters must match the reviewed inventory");
   }
-  const expectedSourceFiles = [...sorted];
+  const forward = Array.isArray(manifest.forward_only) ? manifest.forward_only : [];
+  const historicalFiles = sorted.filter(file => !forward.some(entry => entry.file === file));
+  for (const entry of forward) {
+    if (!entry || entry.category !== "needs-production-equivalent" || !/^\d{14}$/.test(entry.version)
+      || entry.version !== entry.file?.slice(0,14) || entry.version <= "20261016120000"
+      || !sorted.includes(entry.file) || entry.sha256 !== sha256(path.join(MIGRATIONS_DIR, entry.file))) {
+      fail("Invalid or unsealed forward-only migration inventory");
+    }
+  }
+  if (new Set(forward.map(entry => entry.file)).size !== forward.length) fail("Duplicate forward-only migration inventory");
+  const expectedSourceFiles = historicalFiles;
   const manifestSourceFiles = [...baseline, ...missing].map((entry) => entry?.file).sort();
   if (JSON.stringify(manifestSourceFiles) !== JSON.stringify(expectedSourceFiles)) {
     fail("Production migration manifest is not exhaustive for supabase/migrations");

@@ -51,6 +51,8 @@ test('missing/stale permits and rotated epoch deny captured commands before any 
     return original.call(this, script, keys, args);
   };
   await guardedUserMutation(input);
+  assert.doesNotMatch(captured[0], /table\.remove\((?:KEYS|ARGV)/);
+  assert.match(captured[0], /local KEYS,ARGV=operationKeys,operationArgs/);
   await input.store.del(permit(OWNER));
   await assert.rejects(original.call(input.store, ...captured), { code: 'account_redis_fenced' });
   await input.store.set(permit(OWNER), 'ACTIVE:epoch-one');

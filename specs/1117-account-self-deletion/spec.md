@@ -1,3 +1,7 @@
+## Current owner decision / verified Stage scope
+
+Supersedes historical authorization below: isolated Stage schema/test/configuration and exact-SHA Preview deployment are authorized. Shared V2 reset and Production changes/activation, paid resources and merge are not. Free monthly headroom is an accepted risk, not a gate. Canonical migration `20261018184941_account_self_deletion_v2.sql` is applied only to verified Stage, with release=false and no Storage/reward/Redis cutover approvals. Real password/Auth/Postgres/Upstash components and positive-wallet BURN were tested; full deletion/Google/all-in/re-registration remains unverified. See [research.md](research.md) for exact evidence, findings, NOT TESTED matrix and owner decisions; [redis-cutover.md](redis-cutover.md) for protected reset scope. Local fixtures are not real Stage E2E proof.
+
 # Account Danger Zone — issue #1117, V2
 
 Source of truth: https://github.com/krzysztofcal/arcadePlatform/issues/1117 (owner V2 decision, 2026-10-17). Current task grants implementation and fundamental local/CI tests; no destructive Stage, Production migration/deployment or merge. This replaces V1's request-bound OTP/challenge/receipt design. PR #1123 is historical PoC evidence, not an implementation prerequisite.
@@ -37,7 +41,7 @@ All generators/writers must switch together after approved drain and legacy reco
 
 ### Latest Redis decision — 18 October 2026
 
-Use one reviewed V3 per-environment contract and a controlled XP-only legacy reset, not historical XP migration. No dual-read/import from legacy after cutover. Use the existing single Upstash Free database with stage/prod namespaces; shared endpoint/credentials are explicitly accepted. No new database/account/instance/subscription or paid upgrade. Immutable build pins plus runtime configuration must reject cross-environment/downgrade errors; combined Free quota verification remains an operational gate. Keep T04d/T02f and financial retention unchanged. Detailed scope, drain, backup, rollback and GO/NO-GO are in [redis-cutover.md](redis-cutover.md); live reset/configuration/deploy/apply remain unauthorized.
+Use one reviewed V3 per-environment contract and a controlled XP-only legacy reset, not historical XP migration. No dual-read/import from legacy after cutover. Use the existing single Upstash Free database with stage/prod namespaces; shared endpoint/credentials are explicitly accepted. No new database/account/instance/subscription or paid upgrade. Immutable build pins plus runtime configuration must reject cross-environment/downgrade errors; owner accepts combined Free-quota exhaustion risk; billing/monthly headroom is not a release gate. Keep T04d/T02f and financial retention unchanged. Detailed scope, drain, backup, rollback and GO/NO-GO are in [redis-cutover.md](redis-cutover.md); live reset/configuration/deploy/apply remain unauthorized.
 
 ### Follow-up review: Free-only / immutable configuration / elapsed TTL
 

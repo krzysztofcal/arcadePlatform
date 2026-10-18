@@ -1,6 +1,6 @@
 # Redis V3 / one-time XP reset — requires separate operational GO
 
-The owner's later 18 October decision replaces XP preservation/migration. Code preparation and local tests are authorized; none of these live steps has run. No FLUSHDB/FLUSHALL, no guessing owners of 359 hashes, no Auth/session-JWT secret rotation.
+The owner's later 18 October decision replaces XP preservation/migration. Stage-only integration/schema/Preview operations are now authorized after isolation preflight. Shared V2 backup/reset and all Production changes still need separate GO. No live shared V2 reset or drain has run. No FLUSHDB/FLUSHALL, no guessing owners of 359 hashes, no Auth/session-JWT secret rotation.
 
 ## Isolation and cost
 
@@ -10,7 +10,7 @@ Before cutover legacy/default V2 remains supported. The existing generator has a
 
 Netlify's existing build generator validates/bakes pins from the approved build configuration. Existing WS Preview/Production packaging prepares the generated context using **future, separately authorized** repository variables `XP_REDIS_VERSION_STAGE` / `XP_REDIS_VERSION_PROD` and trusted hardcoded stage/prod target; absent variables preserve the pre-cutover artifact. Each corresponding service runtime still needs its matching explicit configuration. The existing generator's `--server-context-only` option prepares context without rewriting browser artifacts. Direct Docker builds must package that same reviewed pinned context. Manual workflow invocations/configuration changes are NOT authorized now. Old binaries/URLs/artifacts must be retired; never rebuild an activated target back into an unpinned legacy artifact.
 
-Free capacity evidence and budget are in research.md. Failure to verify real monthly headroom is a NO-GO for activation, not approval for a paid upgrade. Under quota/storage errors XP returns failure and deletion retains durable SQL intent/retry/fences, never false completion; Poker/CH settlement remains independent of the XP cache. No new polling worker/cron.
+Free capacity evidence and budget are in research.md. Owner accepts Free-limit exhaustion risk; monthly/billing headroom is not a GO/NO-GO condition and never authorizes paid upgrades. Under quota/storage errors XP returns failure and deletion retains durable SQL intent/retry/fences, never false completion; Poker/CH settlement remains independent of the XP cache. No new polling worker/cron.
 
 ## Supported key contract
 
@@ -30,7 +30,7 @@ Allow only `kcswh:xp:v2:` families: total, daily, session (including last/state)
 
 ## Ordered cutover and GO/NO-GO
 
-1. Prepare the separately authorized configuration commit raising only the target XP_REDIS_MIN_VERSION to 3, plus corresponding build/runtime variables. Confirm existing Free plan/quota/headroom read-only; accept no paid upgrade. Obtain separate configuration GO for the two namespaces and immutable build pins. Inventory both runtimes and Netlify contexts; current `all` context shares Production Redis+v2, so a Stage-labelled reset would affect Production.
+1. Prepare the separately authorized configuration commit raising only the target XP_REDIS_MIN_VERSION to 3, plus corresponding build/runtime variables. No billing/monthly-headroom gate: owner accepts Free exhaustion risk; no paid upgrade. Obtain separate configuration GO for the two namespaces and immutable build pins. Inventory both runtimes and Netlify contexts; current `all` context shares Production Redis+v2, so a Stage-labelled reset would affect Production.
 2. Obtain separate approved Stage schema/runtime deploy GO. Verify exact SHA and WS smoke while deletion release remains false. Prepare V3 target/config and trusted environment-scoped epoch and pinned artifact on the existing endpoint. No activation with old raw writers reachable.
 3. Quiesce XP grants/conversion/session issuance/admin backfill/visibility on **all old deployments, WS processes, retries and direct clients**. Preserve Poker/CH service; do not stop settlement or roll back its guards. Retire old deployment URLs/issuers or prove that old secrets/API access can no longer write v2. A new namespace alone does not stop old deployments from returning stale XP. Verify a bounded no-write observation covering in-flight HTTP timeouts and queued retries; document handling of indefinitely delayed clients.
 4. Capture exact XP key/type/TTL/value snapshot into access-restricted encrypted backup outside GitHub. Backup can contain personal data: least access, short approved rollback retention and erasure handling. Inventory unknown/mixed fields. Capture non-XP invariants (Auth/profile/avatar/Poker/CH/ledger/bonus/archive counts/checksums) without exporting user data to PR. Review manifest SHA, target endpoint fingerprint, shared-Production reset scope and backup restoration drill; obtain **separate exact reset GO**. No one-sided Stage reset in shared v2.
@@ -50,4 +50,8 @@ The planner/observation validator are pure; no live executor is shipped. Verify 
 
 ### P2: missing Redis credentials after V3 activation (2026-10-18)
 
-Preflight requires both nonblank Upstash REST URL and token in every V3 runtime (Netlify/WS/jobs). Missing credentials yield no-store HTTP 503 / rejecting Redis operations, never memory fallback or false zero XP. Keep current TTL snapshot/deadline protections. Actual Free entitlement/monthly headroom still needs verification; no new database or costs. Reset remains separately authorized, XP-only and allowlisted, with manifest/value/owner/TTL validation, backup/rollback and NO-GO on uncertainty. Stage configuration/deploy/provider smoke also require separate GO.
+Preflight requires both nonblank Upstash REST URL and token in every V3 runtime (Netlify/WS/jobs). Missing credentials yield no-store HTTP 503 / rejecting Redis operations, never memory fallback or false zero XP. Keep current TTL snapshot/deadline protections. Owner accepts Free-quota exhaustion risk; billing/monthly headroom verification is not required; no new database or costs. Reset remains separately authorized, XP-only and allowlisted, with manifest/value/owner/TTL validation, backup/rollback and NO-GO on uncertainty. Isolated Stage configuration/deploy/provider smoke is authorized in the current task; shared V2/Production effects remain excluded.
+
+## Current Stage outcome
+
+Pinned Stage schema applied; release remains false. Real isolated V3 fixture writes/indexing and owner-index Lua teardown preserve the second UUID. Actual cleanupRedisIdentity returns done:false / redis_cutover_unconfirmed because shared V2 reset/drain is not authorized or proved. No attestation was seeded. Missing epoch/changed ACTIVE permit deny rather than restore stale writes. No shared V2 key or production namespace was modified. An actual Redis/VPS restart is NOT TESTED. See research.md for provider/runtime evidence and blockers.

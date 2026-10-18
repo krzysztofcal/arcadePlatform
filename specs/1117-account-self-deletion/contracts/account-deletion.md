@@ -1,3 +1,7 @@
+## Verified Stage boundary
+
+Stage schema is applied with release=false. Missing Storage/legacy Redis cutover still forbids completion. Real tests found and fixed readonly Lua argument mutation and postgres.js JSON parameter encoding. Official Auth fixture teardown is not a successful account-delete finalizer. See research.md current evidence/NOT TESTED matrix and tasks.md current authorization. No monthly billing gate remains; quota errors remain unavailable/retryable.
+
 # Account deletion contract — V2
 
 Proposed interfaces are not activation approval. No custom OTP/challenge endpoint or proof receipt. Official Supabase Auth only; backend service-role secret never reaches browser/logs.
@@ -32,7 +36,7 @@ Configured Preview/Production currently share Redis/namespace. No reset, forced 
 
 ### Latest Redis decision — 18 October 2026
 
-Use one reviewed V3 per-environment contract and a controlled XP-only legacy reset, not historical XP migration. No dual-read/import from legacy after cutover. Use the existing single Upstash Free database with stage/prod namespaces; shared endpoint/credentials are explicitly accepted. No new database/account/instance/subscription or paid upgrade. Immutable build pins plus runtime configuration must reject cross-environment/downgrade errors; combined Free quota verification remains an operational gate. Keep T04d/T02f and financial retention unchanged. Detailed scope, drain, backup, rollback and GO/NO-GO are in [redis-cutover.md](../redis-cutover.md); live reset/configuration/deploy/apply remain unauthorized.
+Use one reviewed V3 per-environment contract and a controlled XP-only legacy reset, not historical XP migration. No dual-read/import from legacy after cutover. Use the existing single Upstash Free database with stage/prod namespaces; shared endpoint/credentials are explicitly accepted. No new database/account/instance/subscription or paid upgrade. Immutable build pins plus runtime configuration must reject cross-environment/downgrade errors; owner accepts combined Free-quota exhaustion risk; billing/monthly headroom is not a release gate. Keep T04d/T02f and financial retention unchanged. Detailed scope, drain, backup, rollback and GO/NO-GO are in [redis-cutover.md](../redis-cutover.md); live reset/configuration/deploy/apply remain unauthorized.
 
 ### Follow-up review: Free-only / immutable configuration / elapsed TTL
 

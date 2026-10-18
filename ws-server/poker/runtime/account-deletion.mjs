@@ -37,7 +37,7 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
             exists(select 1 from jsonb_array_elements(coalesce(s.state->'handSeats',s.state->'seats','[]'::jsonb)) h where h->>'userId'=$1::text));`,[context.userId]));
       const deadline = context.progress?.poker?.waitDeadline || new Date(Date.now()+30*60*1000).toISOString();
       if (rows.length && !context.progress?.poker?.waitDeadline) await transactionFor(context,(tx) => tx.unsafe(
-        `update public.account_deletion_requests set progress=jsonb_set(progress,'{poker}', $2::jsonb) where request_id=$1;`,
+        `update public.account_deletion_requests set progress=jsonb_set(progress,'{poker}', ($2::text)::jsonb) where request_id=$1;`,
         [context.requestId,JSON.stringify({waitDeadline:deadline})]));
       if (rows.length && Date.parse(deadline) <= Date.now()) throw new Error('poker_progress_overdue');
       for (const row of rows.slice(0,5)) {
@@ -53,7 +53,7 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
       if (avatar?.waitUntil) return avatar;
       if (avatar?.done !== true) throw new Error('storage_cleanup_unconfirmed');
       const redis = await cleanupRedis({userId:context.userId,cursor:context.progress?.redisCleanupCursor || null,beginSql,env});
-      await transactionFor(context,(tx) => tx.unsafe(`update public.account_deletion_requests set progress=jsonb_set(progress,'{redisCleanupCursor}',$2::jsonb),
+      await transactionFor(context,(tx) => tx.unsafe(`update public.account_deletion_requests set progress=jsonb_set(progress,'{redisCleanupCursor}',($2::text)::jsonb),
         progress_at=case when $3 then clock_timestamp() else progress_at end,
         actionable_since=case when $3 then clock_timestamp() else actionable_since end where request_id=$1;`,[context.requestId,JSON.stringify(redis?.cursor || null),redis?.reason === 'redis_cleanup_scanning' && JSON.stringify(redis.cursor) !== JSON.stringify(context.progress?.redisCleanupCursor)]));
       // V3 owner index and durable legacy cutover attestation are required.

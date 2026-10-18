@@ -104,7 +104,7 @@ export async function guardedRedisEval({ store: target = store, userIds, anonymo
   return withRedisIdentityPermit(userIds, async (permit) => {
     if (!permit) return target.eval(script, keys, args);
     const n = permit.ids.length;
-    const prefix = `-- account-guard:${n}\nlocal expected=ARGV[1]\nif redis.call('GET',KEYS[1]) ~= expected then return redis.error_reply('account_redis_fenced') end\nfor i=2,${n + 1} do if redis.call('GET',KEYS[i]) ~= 'ACTIVE:'..expected then return redis.error_reply('account_redis_fenced') end end\nfor i=1,${n + 1} do table.remove(KEYS,1) end\ntable.remove(ARGV,1)\n-- account-guard-end\n`;
+    const prefix = `-- account-guard:${n}\nlocal expected=ARGV[1]\nif redis.call('GET',KEYS[1]) ~= expected then return redis.error_reply('account_redis_fenced') end\nfor i=2,${n + 1} do if redis.call('GET',KEYS[i]) ~= 'ACTIVE:'..expected then return redis.error_reply('account_redis_fenced') end end\nlocal operationKeys,operationArgs={},{}\nfor i=${n + 2},#KEYS do operationKeys[#operationKeys+1]=KEYS[i] end\nfor i=2,#ARGV do operationArgs[#operationArgs+1]=ARGV[i] end\nlocal KEYS,ARGV=operationKeys,operationArgs\n-- account-guard-end\n`;
     return target.eval(prefix + script, [EPOCH_KEY, ...permit.ids.map(permitKey), ...keys], [permit.epoch, ...args]);
   }, { store: target, anonymousIds, ...(transaction ? { beginSql: transaction } : {}) });
 }

@@ -118,7 +118,7 @@ export async function advanceDeletion({ beginSql, requestId, steps }) {
     const next = PHASES[PHASES.indexOf(row.phase) + 1];
     const [updated] = await tx.unsafe(`update public.account_deletion_requests set phase=$3,
       status=$4, accepted_at=coalesce(accepted_at,clock_timestamp()), progress_at=clock_timestamp(),
-      actionable_since=clock_timestamp(), progress=jsonb_set(progress,ARRAY[$5::text],coalesce(progress->$5::text,'{}'::jsonb) || $6::jsonb),
+      actionable_since=clock_timestamp(), progress=jsonb_set(progress,ARRAY[$5::text],coalesce(progress->$5::text,'{}'::jsonb) || ($6::text)::jsonb),
       completed_at=case when $3='completed' then clock_timestamp() else null end,
       lease_until=null, error_code=null, next_attempt_at=clock_timestamp()
       where request_id=$1 and lease_generation=$2 and status='PROCESSING' and lease_until>clock_timestamp() returning *;`,

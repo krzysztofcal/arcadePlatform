@@ -1336,7 +1336,7 @@ async function retireUserForDeletion({ tx, userId, requestId, assertLease }) {
   const receipt = { version: 1, accountId: account.id, amount, burnPayload: burnPayload ? JSON.stringify(burnPayload) : null, noBurn: amount === 0 };
   const store = async () => {
     const rows = await tx.unsafe(`update public.account_deletion_requests
-      set progress=jsonb_set(progress,'{walletRetirement}',$2::jsonb),progress_at=clock_timestamp()
+      set progress=jsonb_set(progress,'{walletRetirement}',($2::text)::jsonb),progress_at=clock_timestamp()
       where request_id=$1 returning request_id;`, [requestId, JSON.stringify(receipt)]);
     if (rows.length !== 1) throw financialMismatch();
   };

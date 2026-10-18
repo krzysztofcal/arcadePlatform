@@ -18,6 +18,21 @@ grant execute on function public.chips_retention_user_matches_v2(public.chips_ac
 -- Patch only the human branch in the CURRENT function, retaining subsequent
 -- #981 registry-cleaned retry behavior and all installed policy/receipt guards.
 -- Exact matches fail closed on an unexpected definition; no migration is edited.
+-- Follow the existing archive-function migration pattern: replace as the
+-- established owner, retaining SECURITY DEFINER owner and execution ACLs.
+-- CREATE is transaction-local in effect: revoked before COMMIT, never exposed.
+do $pruner_access$
+declare membership jsonb;
+begin
+ select to_jsonb(m) into membership from pg_auth_members m
+ where m.roleid='chips_ledger_archive_pruner'::regrole and m.member=current_user::regrole
+   and m.grantor=current_user::regrole;
+ perform set_config('arcade1117.pruner_membership',coalesce(membership::text,'null'),true);
+ perform set_config('arcade1117.pruner_create',has_schema_privilege('chips_ledger_archive_pruner','public','CREATE')::text,true);
+ execute format('grant chips_ledger_archive_pruner to %I with set true',current_user);
+end $pruner_access$;
+grant create on schema public to chips_ledger_archive_pruner;
+set local role chips_ledger_archive_pruner;
 do $retention_patch$
 declare
   definition text;
@@ -41,4 +56,17 @@ begin
   execute pg_catalog.replace(definition,needle,replacement);
 end;
 $retention_patch$;
+reset role;
+do $restore_pruner_access$
+declare membership jsonb := current_setting('arcade1117.pruner_membership')::jsonb;
+begin
+ if not current_setting('arcade1117.pruner_create')::boolean then
+   revoke create on schema public from chips_ledger_archive_pruner;
+ end if;
+ if membership='null'::jsonb then
+   execute format('revoke chips_ledger_archive_pruner from %I',current_user);
+ else
+   execute format('grant chips_ledger_archive_pruner to %I with set %s',current_user,membership->>'set_option');
+ end if;
+end $restore_pruner_access$;
 commit;

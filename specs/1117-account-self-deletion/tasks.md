@@ -1,3 +1,7 @@
+## Current owner authorization (supersedes historical restrictions below)
+
+Stage-only schema/configuration/exact-SHA Preview deployment and integration tests on new disposable fixtures are authorized after verified isolation. Production, shared V2 reset, paid resources and merge remain unauthorized. One existing Free database with stage/prod namespaces; monthly quota/headroom is an accepted risk, not GO/NO-GO. T02d includes one forward-only canonical migration assembled from reviewed proposals, additive classification in the existing inventory/guard (no historical hashes changed), transactional Stage preflight and explicit Stage application while release remains false. T05d4 can verify isolated V3 components but must not attest shared legacy reset or drain without evidence.
+
 # Tasks — #1117 V2
 
 Implementation GO granted in current conversation; destructive Stage/Production/deployment/merge excluded. Supersedes V1 T001–T022 and blocked OTP PoC gates. Only fundamental backend/SQL/WS tests. No generic tooling/dependency cleanup. Keep incomplete items unchecked.
@@ -5,7 +9,7 @@ Implementation GO granted in current conversation; destructive Stage/Production/
 - [x] T01a Synchronize all seven SpecKit artifacts with approved issue V2; remove custom OTP/challenge/receipt and old PoC PASS requirements; preserve ledger/bonus/retention/Storage/writer safety.
 - [x] T01b Refresh scoped catalog FK/policies evidence read-only; review exact writer/Storage/WS dependencies. Before migration-bearing Draft PR add draft guard to .github/workflows/db-stage-apply-pr.yml; no intended shared Stage apply.
 - [x] T02a Add local-only durable request schema proposal at supabase/manual/1117-account-deletion-requests-v2.sql and shared/account-deletion.mjs request/status/phase/lease foundation with one request/UUID; local PGlite duplicate/ownership/no-table/lease/error tests. Official Auth adapter requires authorized intent and exact-UUID reconciliation. This is not a complete finalizer or canonical applied migration.
-- [ ] T02d Add actual phase-specific durable intents/receipts and concrete transactional adapters, then prepare reviewed canonical migration/inventory update under separate Stage application GO. No public acceptance before remaining integration tasks.
+- [x] T02d Durable intents/adapters and canonical migration/inventory prepared and applied atomically only to verified Stage. Pruner ACL restoration and real driver JSON encoding fixed/verified. Production equivalence/application still separate; acceptance remains false.
 - [x] T02b Integrate netlify/functions/account-delete.mjs POST/GET with verified Supabase owner, strict origin/body/consent and idempotency. Do not activate acceptance until T02c/T04/T05/T06 complete.
 - [ ] T02c Integrate ACTIVE guards at SQL effects and RLS, ws-mint-token/WS auth/private sends and active sockets, CH/bonus/XP/profile APIs, store-upstash raw+Lua writes including admin/sync/guest conversion. Durable preparing then confirmed Redis fence; no PG+Redis atomicity claim. Fundamental delayed writer/restart/active socket tests.
 - [x] T03 Update account.html, js/account-page.js, js/i18n.js (existing auth client suffices; no client auth rewrite) with explicit owner confirmation and real pending/completed/intervention status. Optional supported isolated password/Google login, no custom OTP. Real Stage smoke separately authorized before activation; no UI snapshot tests.
@@ -61,4 +65,13 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 ### P2: missing Redis credentials after V3 activation (2026-10-18)
 
 - [x] P2 credential failure: deny V3 Redis reads/writes/rate limits without URL/token; return 503 from XP HTTP paths; preserve V2/test memory and Poker/CH isolation. Fundamental configuration regression: missing URL/token/blank URL, real module imports, no network, HTTP 503, V2/test compatibility. Existing TTL tests retained.
-- [ ] Operational gates remain: verify real Free entitlement/usage, approve allowlisted reset, authorize exact-SHA Stage deployment and real integration smoke; no live action performed.
+- [ ] Operational gates remain: approve allowlisted reset, authorize exact-SHA Stage deployment and real integration smoke; no live action performed.
+
+## Current real-service task outcomes
+
+- [x] Stage identity/isolation preflight, canonical schema apply/history/hash, release false, real password Auth fixtures and official cleanup.
+- [x] Real Upstash readonly Lua fix; real driver JSON phase/retirement fix; positive 75 CH canonical BURN once/retired USER; control UUID preserved in owner-index component teardown.
+- [ ] T05d4 full cutover: shared V2 reset/drain remains unauthorized; no false attestation or done:true. Isolated V3 component verification completed.
+- [ ] T05e: correct bucket configuration/current inventory verified; old issuer drain, signed capabilities/uncertain paths and expiry evidence still missing.
+- [ ] T06b: surviving-history aggregates verified; archived/deleted coverage, legal/LIA/rights/privacy and rotation continuity remain unapproved. history_ready not seeded.
+- [ ] T07b: partial real services verified; live all-in deletion, Google, public re-registration, frontend-to-COMPLETED and actual Redis/VPS restart not verified. Exact-SHA Preview deploy/CI evidence recorded after workflow completion.
