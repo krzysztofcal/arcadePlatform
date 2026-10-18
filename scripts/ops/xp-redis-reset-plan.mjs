@@ -41,10 +41,33 @@ export function buildLegacyXpResetPlan(records) {
     if(seen.has(record.key))throw new Error('duplicate_reset_key');seen.add(record.key);
     const action=legacyXpResetAction(record.key,record);
     if(action) {
-      if(record.value===undefined || !Number.isSafeInteger(record.pttl) || record.pttl < -1) throw new Error('reset_snapshot_incomplete');
-      operations.push({...action,expected:{type:record.type,pttl:record.pttl,valueHash:createHash('sha256').update(JSON.stringify(record.value)).digest('hex')}});
+      if(record.value===undefined || !Number.isSafeInteger(record.pttl) || record.pttl < -1 || !Number.isSafeInteger(record.capturedAtMs) || record.capturedAtMs < 0 || record.pttl>=0 && !Number.isSafeInteger(record.capturedAtMs+record.pttl)) throw new Error('reset_snapshot_incomplete');
+      operations.push({...action,expected:{type:record.type,pttl:record.pttl,capturedAtMs:record.capturedAtMs,expiresAtMs:record.pttl<0 ? null : record.capturedAtMs+record.pttl,valueHash:createHash('sha256').update(JSON.stringify(record.value)).digest('hex')}});
     } else preserved++;
   }
   const manifest=JSON.stringify({version:1,namespace:NS.slice(0,-1),operations});
   return {operations,preserved,manifestHash:createHash('sha256').update(manifest).digest('hex')};
+}
+
+// Pure contract for a future executor, NOT authority to execute a reset.
+// nowMs/capturedAtMs must come from Redis TIME, not unrelated host clocks.
+export function validateLegacyXpResetObservation(action, observation, {nowMs, toleranceMs=1000}={}) {
+  if (!action?.expected || !Number.isSafeInteger(nowMs) || !Number.isSafeInteger(toleranceMs) || toleranceMs<0 || toleranceMs>1000) throw new Error('reset_clock_unproven');
+  const expected=action.expected;
+  if (nowMs<expected.capturedAtMs) throw new Error('reset_clock_unproven');
+  if (observation?.pttl===-2 && observation.type==='none') {
+    if (expected.expiresAtMs!==null && nowMs>=expected.expiresAtMs) return {action:'SKIP_EXPIRED'};
+    // A persistent/missing-before-deadline key might have been replaced/deleted
+    // by another writer. Lost-response retries require a prior trusted receipt.
+    throw new Error('reset_absence_unproven');
+  }
+  if (!observation || observation.type!==expected.type || observation.value===undefined ||
+      createHash('sha256').update(JSON.stringify(observation.value)).digest('hex')!==expected.valueHash) throw new Error('reset_content_changed');
+  if (!Number.isSafeInteger(observation.pttl) || observation.pttl < -1) throw new Error('reset_expiry_unproven');
+  if (expected.expiresAtMs===null) {
+    if (observation.pttl!==-1) throw new Error('reset_expiry_changed');
+  } else {
+    if (observation.pttl<0 || Math.abs(nowMs+observation.pttl-expected.expiresAtMs)>toleranceMs) throw new Error('reset_expiry_changed');
+  }
+  return {action:action.operation,preserveCurrentTtl:action.operation==='SET'};
 }

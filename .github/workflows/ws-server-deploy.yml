@@ -452,8 +452,14 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           DEPLOY_REF: ${{ github.ref_name }}
           RELEASE_ENVIRONMENT: production
+          XP_REDIS_VERSION: ${{ vars.XP_REDIS_VERSION_PROD }}
         run: |
           set -euo pipefail
+          if [[ "$XP_REDIS_VERSION" == "3" ]]; then
+            export XP_REDIS_ENV=prod XP_KEY_NS=kcswh:prod:xp:v3
+          fi
+          CONTEXT=production node scripts/generate-build-info.js --server-context-only
+
           ARTIFACT_DIR="$GITHUB_WORKSPACE/.artifacts/ws-server"
           STAGE_ROOT="$ARTIFACT_DIR/stage"
           STAGE_WS_DIR="$STAGE_ROOT/ws-server"
@@ -504,6 +510,7 @@ jobs:
             cp netlify/functions/_shared/poker-*.mjs "$STAGE_ROOT"/netlify/functions/_shared/
             cp netlify/functions/_shared/supabase-admin.mjs "$STAGE_ROOT"/netlify/functions/_shared/
             cp netlify/functions/_shared/api-cors.mjs "$STAGE_ROOT"/netlify/functions/_shared/
+            cp netlify/functions/_shared/store-upstash.mjs netlify/functions/_shared/xp-ledger.mjs "$STAGE_ROOT"/netlify/functions/_shared/
             mkdir -p "$STAGE_ROOT"/netlify/functions/_generated
             cp netlify/functions/_generated/deploy-context.mjs "$STAGE_ROOT"/netlify/functions/_generated/
           fi

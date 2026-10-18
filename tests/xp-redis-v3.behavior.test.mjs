@@ -5,6 +5,7 @@ process.env.XP_TEST_MODE='1';
 process.env.ACCOUNT_DELETION_ENABLED='1';
 process.env.XP_KEY_NS='kcswh:stage:xp:v3';
 process.env.XP_REDIS_ENV='stage';
+process.env.XP_REDIS_VERSION='3';
 const {createXpLedgerKeys,resolveXpNamespace,xpOwnerPrefix,executeAtomicXpAward}=await import('../netlify/functions/_shared/xp-ledger.mjs');
 const {__createMemoryStoreForTests:memoryStore,guardedUserMutation,guardedRedisEval,blockRedisIdentity,cleanupRedisIdentity}=await import('../netlify/functions/_shared/store-upstash.mjs');
 const {createXpLeaderboardKeys,getXpLeaderboardPeriods}=await import('../netlify/functions/_shared/xp-leaderboard.mjs');
@@ -29,7 +30,7 @@ test('V3 separates environments and anonymous UUIDs; invalid target/context fail
   assert.notEqual(anon.total(OWNER),keys.total(OWNER));
   assert.notEqual(createXpLedgerKeys({namespace:'kcswh:prod:xp:v3'}).total(OWNER),keys.total(OWNER));
   assert.throws(()=>keys.total('not-uuid'),/xp_uuid_required/);
-  assert.throws(()=>resolveXpNamespace({XP_KEY_NS:namespace,XP_REDIS_ENV:'stage',ARCADE_DEPLOY_TARGET:'unknown'},'unknown'),/unpinned/);
+  assert.throws(()=>resolveXpNamespace({XP_KEY_NS:namespace,XP_REDIS_ENV:'stage',XP_REDIS_VERSION:'3',ARCADE_DEPLOY_TARGET:'unknown'},'unknown',{version:'3',environment:'stage'}),/unpinned/);
   assert.throws(()=>resolveXpNamespace({XP_KEY_NS:'kcswh:prod:xp:v3',XP_REDIS_ENV:'prod'},'development'),/mismatch/);
   assert.throws(()=>resolveXpNamespace({XP_KEY_NS:namespace,XP_REDIS_ENV:'prod'},'deploy-preview'),/mismatch/);
   assert.throws(()=>resolveXpNamespace({XP_KEY_NS:namespace,XP_REDIS_ENV:'stage'},'production'),/mismatch/);
@@ -41,6 +42,7 @@ test('every private family/raw writer is indexed, bounded retry cleans only owne
   const owned=[keys.total(OWNER),keys.daily(OWNER,'2026-10-18'),keys.session(OWNER,'sid'),keys.sessionSync(OWNER,'sid'),keys.sessionState(OWNER,'sid'),keys.serverSession(OWNER,'sid'),keys.registry(OWNER,'sid'),keys.lock(OWNER,'sid'),keys.profile(OWNER),keys.hidden(OWNER),keys.rateLimit(OWNER,1),keys.migration(GUEST,OWNER),keys.userMigration(OWNER)];
   for(const key of owned)await put(store,OWNER,key);
   await put(store,OTHER,keys.total(OTHER),'42');
+  const foreign='kcswh:prod:xp:v3:user:'+OWNER+':total';await store.set(foreign,'99');
   for(const id of [OWNER,OTHER]) await guardedUserMutation({store,userId:id,key:boards.allTime(),value:id,score:9,operation:'zadd',beginSql:active});
   // Session writes and renewals use the same fence/index, not a raw SETEX.
   await put(store,OWNER,keys.serverSession(OWNER,'sid'),JSON.stringify({userId:OWNER}),{operation:'setex',ttl:60});
@@ -55,6 +57,7 @@ test('every private family/raw writer is indexed, bounded retry cleans only owne
   assert.equal((await cleanupRedisIdentity(input)).done,true); // response lost/restart retry
   for(const key of owned)assert.equal(await store.get(key),null);
   assert.equal(await store.get(keys.total(OTHER)),'42');
+  assert.equal(await store.get(foreign),'99');
   assert.equal(await store.zscore(boards.allTime(),OWNER),null);
   assert.equal(await store.zscore(boards.allTime(),OTHER),9);
   assert.equal(await store.get(permit(OWNER)),'BLOCKED');
@@ -101,8 +104,14 @@ test('new XP starts at zero despite old totals/markers; real conversion sources 
   assert.equal((await migrateAnonXpToUser({store,namespace,anonId:GUEST,userId:OWNER,conversionCap:100,beginSql})).converted,0);
   assert.ok(await store.ttl(keys.migration(GUEST,OWNER))>0);
   const periods=getXpLeaderboardPeriods();
+  const originalEval=store.eval;let awardScript;
+  store.eval=async function(script,keys,args){if(script.startsWith('-- account-guard:') && script.includes('local sessionKey = KEYS[1]'))awardScript=script;return originalEval.call(this,script,keys,args);};
   const result=await executeAtomicXpAward({store,userId:OWNER,beginSql:active,keys:[keys.session(OWNER,'s'),keys.sessionSync(OWNER,'s'),keys.daily(OWNER,periods.dayKey),keys.total(OWNER),keys.lock(OWNER,'s'),boards.allTime(),boards.day(periods.dayKey),boards.week(periods.weekKey),keys.hidden(OWNER)],args:[Date.now(),5,3000,300,Date.now(),5000,60000,OWNER,periods.dayExpiresAtSec,periods.weekExpiresAtSec]});
   assert.equal(result.lifetime,12);
+  // Several private keys + shared boards register in one owner ZADD, without
+  // moving registration outside the lifecycle/epoch-fenced script.
+  const registration=awardScript.split('-- xp-owner-index-end')[0];
+  assert.equal((registration.match(/redis.call\('ZADD'/g)||[]).length,1);
   assert.equal(await store.get('kcswh:xp:v2:total:'+GUEST),'9000');
 });
 
@@ -114,7 +123,7 @@ test('XP-only reset manifest is deterministic and preserves mixed profiles, fenc
     {key:'kcswh:xp:user:'+OWNER,type:'string',value:JSON.stringify({userId:OWNER,totalXp:99,displayName:'Fixture',avatar:'preserve'})},
     {key:'kcswh:xp:user:'+OTHER,type:'string',value:JSON.stringify({userId:OTHER,totalXp:9,createdAt:'old'})},
     ...['auth:users','poker:table','chips:wallet','bonus:proof','archive:receipt',namespace+':user:'+OTHER+':total',EPOCH,'account-deletion:redis:permit:'+OWNER,'kcswh:xp:v2:unknown:mixed'].map(key=>({key,type:'string',value:'preserve'}))];
-  for(const record of records)record.pttl=-1;
+  for(const record of records){record.pttl=-1;record.capturedAtMs=1000;}
   const plan=buildLegacyXpResetPlan(records);
   assert.notEqual(plan.manifestHash,buildLegacyXpResetPlan(records.map(record=>record.key===records[0].key?{...record,value:"changed"}:record)).manifestHash);
   assert.throws(()=>buildLegacyXpResetPlan([{key:records[0].key,type:"string",value:"99"}]),/snapshot_incomplete/);
@@ -170,4 +179,49 @@ test('administrative backfill atomically indexes and expires day/week boards, al
   assert.equal(result.failed,0);assert.equal(result.unchanged,3);
   await blockRedisIdentity(OWNER,store);
   assert.equal((await runLeaderboardMaintenance(request,deps)).failed,1);
+});
+
+test('immutable V3 artifact pin denies missing/foreign/downgraded runtime config in every deploy context',()=>{
+  assert.equal(resolveXpNamespace({},'unknown',{version:null,environment:null}),'kcswh:xp:v2');
+  for(const [environment,contexts] of [['stage',['deploy-preview','branch-deploy','development']],['prod',['production']]]){
+    const pin={version:'3',environment};const valid={XP_REDIS_VERSION:'3',XP_REDIS_ENV:environment,XP_KEY_NS:`kcswh:${environment}:xp:v3`};
+    for(const context of contexts){
+      assert.equal(resolveXpNamespace(valid,context,pin),valid.XP_KEY_NS);
+      for(const config of [{},{...valid,XP_KEY_NS:undefined},{...valid,XP_REDIS_ENV:undefined},{...valid,XP_REDIS_VERSION:undefined},{...valid,XP_REDIS_VERSION:'2'},{...valid,XP_KEY_NS:'kcswh:xp:v2'},{...valid,XP_KEY_NS:'kcswh:other:xp:v3'},{...valid,ARCADE_DEPLOY_TARGET:environment==='stage'?'production':'deploy-preview'}])assert.throws(()=>resolveXpNamespace(config,context,pin));
+    }
+    assert.throws(()=>resolveXpNamespace(valid,'unknown',{version:null,environment:null}),/pin_invalid/);
+  }
+});
+
+test('reset accepts elapsed TTL, rejects changed content/owner/type/renewal and uncertain absence',async()=>{
+  const {buildLegacyXpResetPlan,validateLegacyXpResetObservation:check}=await import('../scripts/ops/xp-redis-reset-plan.mjs');
+  const record={key:'kcswh:xp:user:'+OWNER,type:'string',value:JSON.stringify({userId:OWNER,totalXp:7,avatar:'preserve'}),pttl:5000,capturedAtMs:100000};
+  const [action]=buildLegacyXpResetPlan([record]).operations;
+  assert.deepEqual(check(action,{...record,pttl:3000},{nowMs:102000,toleranceMs:0}),{action:'SET',preserveCurrentTtl:true});
+  assert.deepEqual(check(action,{type:'none',pttl:-2},{nowMs:105000}),{action:'SKIP_EXPIRED'});
+  for(const current of [{...record,value:'changed'},{...record,value:JSON.stringify({userId:OTHER,totalXp:7,avatar:'preserve'})},{...record,type:'hash'},{...record,pttl:9000},{...record,pttl:-1},{type:'none',pttl:-2}])assert.throws(()=>check(action,current,{nowMs:102000,toleranceMs:0}));
+  const [persistent]=buildLegacyXpResetPlan([{...record,pttl:-1}]).operations;
+  assert.equal(check(persistent,{...record,pttl:-1},{nowMs:999999}).action,'SET');
+  assert.throws(()=>check(persistent,{...record,pttl:2000},{nowMs:102000}));
+  assert.throws(()=>check(persistent,{type:'none',pttl:-2},{nowMs:999999}));
+  assert.throws(()=>check(action,{...record,pttl:3000},{nowMs:102000,toleranceMs:2000}));
+});
+
+test('existing deploy-context generator bakes validated pins and refuses incomplete V3 builds',async()=>{
+  const {mkdtemp,readFile,rm,mkdir,copyFile}=await import('node:fs/promises');
+  const {tmpdir}=await import('node:os');const {join,resolve}=await import('node:path');const {spawnSync}=await import('node:child_process');
+  const cwd=await mkdtemp(join(tmpdir(),'xp-pin-'));const script=resolve('scripts/generate-build-info.js');
+  try{
+    const base={...process.env,CONTEXT:'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:'stage',XP_KEY_NS:namespace};
+    assert.equal(spawnSync(process.execPath,[script,'--server-context-only'],{cwd,env:base}).status,0);
+    const context=await readFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'utf8');
+    assert.match(context,/BUILD_XP_REDIS_VERSION = "3"/);assert.match(context,/BUILD_XP_REDIS_ENV = "stage"/);
+    await mkdir(join(cwd,'netlify/functions/_shared'),{recursive:true});
+    await copyFile(resolve('netlify/functions/_shared/xp-ledger.mjs'),join(cwd,'netlify/functions/_shared/xp-ledger.mjs'));
+    const entry=['--input-type=module','-e','import {resolveXpNamespace} from "./netlify/functions/_shared/xp-ledger.mjs"; resolveXpNamespace();'];
+    assert.equal(spawnSync(process.execPath,entry,{cwd,env:{...base,XP_TEST_MODE:'0'}}).status,0);
+    assert.notEqual(spawnSync(process.execPath,entry,{cwd,env:{...base,XP_TEST_MODE:'0',XP_REDIS_VERSION:'',XP_REDIS_ENV:'',XP_KEY_NS:''}}).status,0);
+
+    for(const env of [{...base,XP_KEY_NS:''},{...base,XP_REDIS_ENV:''},{...base,XP_REDIS_VERSION:''},{...base,CONTEXT:'production'}])assert.notEqual(spawnSync(process.execPath,[script,'--server-context-only'],{cwd,env}).status,0);
+  }finally{await rm(cwd,{recursive:true,force:true});}
 });

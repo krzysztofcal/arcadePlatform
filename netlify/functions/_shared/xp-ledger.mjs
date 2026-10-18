@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { BUILD_DEPLOY_CONTEXT } from "../_generated/deploy-context.mjs";
+import { BUILD_DEPLOY_CONTEXT, BUILD_XP_REDIS_VERSION, BUILD_XP_REDIS_ENV } from "../_generated/deploy-context.mjs";
 
 const sanitizeXpCounter = (value) => Math.max(0, Math.floor(Number(value) || 0));
 const hashLedgerPart = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
@@ -94,17 +94,36 @@ const XP_ATOMIC_AWARD_SCRIPT = `
 `;
 
 // V3 is opt-in at the separately authorized cutover. Legacy is never read by V3.
-export function resolveXpNamespace(env = process.env, buildContext = BUILD_DEPLOY_CONTEXT) {
-  const namespace = env.XP_KEY_NS || "kcswh:xp:v2";
-  if (namespace === "kcswh:xp:v2" || env.XP_TEST_MODE === "1" && /^(test|e2e):[A-Za-z0-9:_-]+$/.test(namespace)) return namespace;
-  const match = /^kcswh:(stage|prod):xp:v3$/.exec(namespace);
-  if (!match || env.XP_REDIS_ENV !== match[1]) throw new Error("xp_redis_environment_mismatch");
-  const context = buildContext !== "unknown" ? buildContext : env.ARCADE_DEPLOY_TARGET || env.CONTEXT || env.NETLIFY_CONTEXT;
-  if (!["production", "deploy-preview", "branch-deploy", "development"].includes(context) && env.XP_TEST_MODE !== "1") throw new Error("xp_redis_environment_unpinned");
-  if (context === "production" && match[1] !== "prod") throw new Error("xp_redis_environment_mismatch");
-  if (["deploy-preview", "branch-deploy", "development"].includes(context) && match[1] !== "stage") throw new Error("xp_redis_environment_mismatch");
+export function resolveXpNamespace(env = process.env, buildContext = BUILD_DEPLOY_CONTEXT,
+  pin = {version:BUILD_XP_REDIS_VERSION,environment:BUILD_XP_REDIS_ENV}) {
+  const version = env.XP_REDIS_VERSION;
+  const namespace = env.XP_KEY_NS;
+  const environment = env.XP_REDIS_ENV;
+  const testing = env.XP_TEST_MODE === "1";
+  const v3Intent = pin.version === "3" || version === "3" || !!environment || /:v3(?:$|:)/.test(namespace || "");
+  if (!v3Intent) {
+    if (version && version !== "2") throw new Error("xp_redis_version_invalid");
+    if (pin.version || pin.environment) throw new Error("xp_redis_build_pin_invalid");
+    if (!namespace || namespace === "kcswh:xp:v2") return "kcswh:xp:v2";
+    if (testing && /^(test|e2e):[A-Za-z0-9:_-]+$/.test(namespace)) return namespace;
+    throw new Error("xp_redis_environment_mismatch");
+  }
+  if (version !== "3" || !["stage","prod"].includes(environment) || namespace !== `kcswh:${environment}:xp:v3`) {
+    throw new Error("xp_redis_environment_mismatch");
+  }
+  // An environment flag alone is removable. Activation requires an immutable
+  // pin in the Netlify/WS/background artifact; missing runtime vars then deny.
+  if (!testing && (pin.version !== "3" || pin.environment !== environment)) throw new Error("xp_redis_build_pin_invalid");
+  if (pin.version && (pin.version !== "3" || pin.environment !== environment)) throw new Error("xp_redis_build_pin_invalid");
+  const contexts = [buildContext,env.ARCADE_DEPLOY_TARGET,env.CONTEXT,env.NETLIFY_CONTEXT].filter(value=>value && value!=="unknown");
+  if (!contexts.length && !testing) throw new Error("xp_redis_environment_unpinned");
+  for (const context of contexts) {
+    if (!["production","deploy-preview","branch-deploy","development","dev"].includes(context)) throw new Error("xp_redis_environment_unpinned");
+    if ((context === "production" ? "prod" : "stage") !== environment) throw new Error("xp_redis_environment_mismatch");
+  }
   return namespace;
 }
+
 export const isXpV3 = (namespace) => /^kcswh:(stage|prod):xp:v3$/.test(namespace);
 export function xpOwnerPrefix(namespace, userId, anonymous = false) {
   if (!isXpV3(namespace)) throw new Error("xp_v3_namespace_required");

@@ -8,6 +8,7 @@ process.env.ACCOUNT_DELETION_ENABLED='1';
 process.env.XP_TEST_MODE='1';
 process.env.XP_KEY_NS='kcswh:stage:xp:v3';
 process.env.XP_REDIS_ENV='stage';
+process.env.XP_REDIS_VERSION='3';
 let db;
 after(async()=> { delete process.env.ACCOUNT_DELETION_ENABLED; await db?.close(); });
 async function fixture(balance=75) {
