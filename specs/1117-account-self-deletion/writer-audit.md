@@ -1,0 +1,21 @@
+# T02f — final effect audit, 2026-10-18
+
+Scope: current app paths on main 9a43f4cf plus Draft #1124. No live data queried. Guards below require the local SQL proposals/runtime flag before release; arbitrary future owner-level database maintenance is not made safe by an HTTP JWT check. Operators must use guarded app paths and preserve lifecycle state.
+
+| Current writer | Final guard / trusted exception |
+| --- | --- |
+| HTTP chips-tx, admin-ledger-adjust, Welcome/campaign grants | Main chips-ledger locks sorted actual USER recipients plus initiating actor inside transaction. Deleted recipient/actor denied; ledger/reward proof/bonus_claims atomic. Historical replay reads existing immutable receipt. |
+| WS JOIN/rebuy, escrow buy-in | Separate WS chips-ledger guards actual USER entries before wallet creation; bot SYSTEM↔ESCROW remains allowed. Table/user-slot locks precede lifecycle. |
+| HTTP create-table/quick-seat | Shared createPokerTableWithState checks owner after slot/capacity locks immediately before new table insert. Quick-seat replay locks table then lifecycle before renewal; recommendations alone cannot JOIN. |
+| Human ACT, start_hand, rollover | Persisted-state writer checks durable actor after table lock, before reservation/CAS. New-hand participants and explicit start actor require ACTIVE; ongoing internal settlement/bot turns without new deal remain allowed. File test adapter cannot run deletion-enabled runtime. |
+| Leave/deferred all-in/terminal close | Existing authoritative path; narrow internal cash-out authorization validates actual table/stack/phase. No blanket client bypass. Deleting user retains showdown rights; final BURN waits for obligations. |
+| Gift purchases | Table/ordered seats, then sorted buyer/human-recipient lifecycle locks before BURN/receipt; bot recipient has no Auth requirement. |
+| WS auth/resume/reaction/private delivery/heartbeat | Auth binding and resume happen under lifecycle lock; reactions under same boundary; private enqueue checks immediately before send. Heartbeat locks table then lifecycle. Preparing closes sockets, forgets exact owner sessions/private replay fragments; invalidated sockets cannot repopulate replay. |
+| Favorites/profile/avatar | Same SQL transaction ACTIVE guard; raw privileged profile/favorite/upload/claim/eligibility writes also use narrow proposal triggers. Trigger try-lock fails with serialization error instead of row→lifecycle deadlock; DELETE cleanup allowed. Signed upload intents/paths retained through capability horizon. |
+| Admin campaign/policy/table actions/poker override | Campaign/policy/table/slot locks before initiating actor lifecycle; override also target ACTIVE. Admin table settlement may finish obligations of deleting participants; suspended admin cannot initiate it. Unchanged historical campaign creator is preserved until scrub. |
+| XP awards/conversion/profile/session/state/boost/visibility/admin maintenance | store-upstash permit+epoch in actual raw/Lua mutation; conversion source explicit anonymous (cannot alias Auth/deleted/retired UUID). UUID user rate-limit increments fenced too. IP limiter and shared board expiry carry no user ownership. Final key format/cutover tracked separately in T05d. |
+| Direct Supabase client writes | Existing self RLS policies tightened by self-only account_is_active; financial INSERT/UPDATE/DELETE was already denied. SQL triggers protect supported personal writes even through ensure_user_profile/service helper. |
+| Retired HTTP gameplay / unused legacy helpers | poker-act/start-hand/heartbeat routes return 410; no competing writer is reactivated. Unreferenced historical helper is not assumed to be a production settlement path. |
+| Background archive/janitor/bot policy/cleanup | Removal-only or existing internal financial maintenance. No new user grants/identity restoration; retired USER compatibility separately T04d. |
+
+Fundamental evidence: targeted actor/recipient denial, privileged profile/favorites rejection, delayed rate-limit write, start-hand CAS denial, durable ACT denial, session/replay purge and internal-settlement continuation. Tests use local fixtures; actual PostgreSQL contention and exact-SHA deployed WS smoke remain release gates. No claim of PostgreSQL+Redis/network atomicity; already queued bytes cannot be recalled.

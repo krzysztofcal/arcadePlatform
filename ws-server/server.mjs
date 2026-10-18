@@ -1,4 +1,4 @@
-import { accountDeletionEnabled, assertAccountActive, queueAccountPrivateFrame } from '../shared/account-deletion.mjs';
+import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle, queueAccountPrivateFrame } from '../shared/account-deletion.mjs';
 import { createGiftAdapter } from './poker/persistence/gift-adapter.mjs';
 import { handleGiftSendCommand } from './poker/handlers/gift.mjs';
 import http from "http";
@@ -926,6 +926,11 @@ async function mutatePokerAccessForUser({ userId, override, expectedRevision, ac
       }
       // JOIN holds this same user lock before table/account row locks.
       await lockUserTableSlots(tx, normalizedUserId);
+      if (accountDeletionEnabled()) {
+        await lockAccountLifecycle(tx, [normalizedUserId, normalizedActorId]);
+        await assertAccountActive(tx, normalizedUserId);
+        await assertAccountActive(tx, normalizedActorId);
+      }
       const rows = await tx.unsafe(`
 select user_id, poker_auto_class, poker_access_override, poker_access_revision,
        poker_auto_slow_at, poker_access_updated_at, poker_access_updated_by
@@ -1224,6 +1229,7 @@ async function runAccountDeletionTick() {
     return createAccountDeletionRuntime({beginSql,klog:klogSafe,
       disconnectUser: async (userId) => {
         for (const socket of sessionStore.connectionsForUser(userId) || []) invalidateSocketSession(socket,{reason:'account_deletion_pending',send_stale:false});
+        for (const sessionId of sessionStore.forgetUser(userId)) streamLog.forgetReceiver(sessionId);
       },
       leaveFromTable: async ({tableId,userId,requestId}) => enqueueTableCommand({tableId,commandName:'account_delete_leave',run:async () => {
         const executeLeave = await loadAuthoritativeLeaveExecutor();
@@ -1323,6 +1329,10 @@ async function touchPersistedSeatLastSeen({ tableId, userId }) {
   try {
     const beginSqlWs = await loadBeginSqlWs();
     await beginSqlWs(async (tx) => {
+      if (accountDeletionEnabled()) {
+        await tx.unsafe('select id from public.poker_tables where id=$1 for update;',[tableId]);
+        await assertAccountActive(tx,userId);
+      }
       await tx.unsafe(
         "update public.poker_seats set last_seen_at = now() where table_id = $1 and user_id = $2 and status = 'ACTIVE';",
         [tableId, userId]
@@ -1693,6 +1703,7 @@ function requiresRequestId(frameType) {
 }
 
 function recordStatefulFrame({ ws, connState, tableId, frame }) {
+  if (accountDeletionEnabled() && (connState.sessionInvalidated || ws.readyState!==WebSocket.OPEN)) return null;
   const replayFrame = streamLog.append({
     tableId,
     frame,
@@ -2095,6 +2106,7 @@ async function persistMutatedState({
   tableId,
   expectedVersion,
   mutationKind,
+  actorUserId = null,
   acceptedActionAudit = null,
   nextStateOverride = null,
   privateStateForHoleCardsOverride = null,
@@ -2149,7 +2161,7 @@ async function persistMutatedState({
     privateStateForHoleCards,
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    meta: { mutationKind },
+    meta: { mutationKind, actorUserId },
     acceptedActionAudit,
     replacementFundings,
     managedBotTopUps,
@@ -4983,14 +4995,20 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "auth") {
-      if (accountDeletionEnabled()) {
-        const identity = verifyToken({token:frame.payload.token});
-        if (identity.ok && identity.identityMode !== 'guest') {
-          try { const transact = await loadBeginSqlWs(); await transact((tx) => assertAccountActive(tx,identity.userId)); }
-          catch { invalidateSocketSession(ws,{reason:'account_not_active',send_stale:false}); return; }
-        }
-      }
-      const response = handleAuth({ frame, connState, nowTs, verifyToken });
+      const bind = () => {
+        const response = handleAuth({frame,connState,nowTs,verifyToken});
+        if (response.ok && response.frame.type==='authOk' && connState.session.userId)
+          sessionStore.trackConnection({ws,userId:connState.session.userId,sessionId:connState.session.sessionId});
+        return response;
+      };
+      let response;
+      const identity = accountDeletionEnabled() ? verifyToken({token:frame.payload.token}) : null;
+      if (identity?.ok && identity.identityMode!=='guest') {
+        try {
+          const transact=await loadBeginSqlWs();
+          response=await transact(async tx=>{await assertAccountActive(tx,identity.userId);return bind();});
+        } catch {invalidateSocketSession(ws,{reason:'account_not_active',send_stale:false});return;}
+      } else response=bind();
       if (!response.ok) {
         sendError(ws, connState, {
           code: response.code,
@@ -5002,7 +5020,6 @@ wss.on("connection", (ws) => {
 
       sendFrame(ws, response.frame);
       if (response.frame.type === "authOk" && connState.session.userId) {
-        sessionStore.trackConnection({ ws, userId: connState.session.userId, sessionId: connState.session.sessionId });
         await refreshConnectionPokerAccess(ws, connState, {
           requestId: frame.requestId ?? null,
           reason: "auth_refresh"
@@ -5091,6 +5108,7 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "reaction_send") {
+      const react = async () => {
       const resolvedRoomId = resolveRoomId(frame);
       if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
@@ -5235,6 +5253,14 @@ wss.on("connection", (ws) => {
           { targetUserId: senderUserId }
         ));
       }
+      };
+      if (accountDeletionEnabled() && connState.session.identityMode !== "guest") {
+        const transact = await loadBeginSqlWs();
+        await transact(async (tx) => {
+          await assertAccountActive(tx, connState.session.userId);
+          await react();
+        });
+      } else await react();
       return;
     }
 
@@ -5496,11 +5522,12 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      const rebound = sessionStore.rebindSession({
-        sessionId: resumeSessionId,
-        userId: connState.session.userId,
-        ws
-      });
+      const rebind = () => sessionStore.rebindSession({sessionId:resumeSessionId,userId:connState.session.userId,ws});
+      let rebound;
+      if (accountDeletionEnabled() && !isGuestSession(connState)) {
+        try {const transact=await loadBeginSqlWs();rebound=await transact(async tx=>{await assertAccountActive(tx,connState.session.userId);return rebind();});}
+        catch {invalidateSocketSession(ws,{reason:'account_not_active',send_stale:false});return;}
+      } else rebound=rebind();
       if (!rebound.ok) {
         sendResumeRequired(ws, connState, {
           requestId: frame.requestId ?? null,

@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive } from '../../../shared/account-deletion.mjs';
 import { hasPokerPoolSchema } from "../../../shared/poker-domain/bot-access.mjs";
 import { assertPendingPokerTableCapacity, lockUserTableSlots } from "../../../shared/poker-domain/table-participation.mjs";
 
@@ -20,6 +21,7 @@ export const createPokerTableWithState = async (tx, {
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("poker_table_buy_in_invalid");
   }
+  if (accountDeletionEnabled()) await assertAccountActive(tx, userId);
   const tableRows = await tx.unsafe(
     `
 insert into public.poker_tables (

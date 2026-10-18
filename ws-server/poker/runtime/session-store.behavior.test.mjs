@@ -125,3 +125,21 @@ test("rebindSession does not expire active session even if age exceeded ttl", ()
   assert.equal(store.sessionForId("sess_active_old"), session);
 });
 
+
+
+test('forgetUser removes exact sessions and replay fragments, preserving another user',async()=>{
+ const {createStreamLog}=await import('./stream-log.mjs');
+ const store=createSessionStore();const log=createStreamLog();
+ for(const [id,user] of [['owner-session','owner'],['other-session','other']]) {
+  const session=createSession({sessionId:id,nowTs:()=> '2026-10-18T00:00:00Z'});session.userId=user;
+  store.registerSession({session});store.trackConnection({ws:{},userId:user,sessionId:id});
+  log.append({tableId:'table',receiverKey:id,frame:{private:'synthetic'}});
+ }
+ for(const id of store.forgetUser('owner')) log.forgetReceiver(id);
+ assert.equal(store.sessionForId('owner-session'),null);
+ assert.equal(store.connectionsForUser('owner').length,0);
+ assert.equal(store.rebindSession({sessionId:'owner-session',userId:'owner',ws:{}}).ok,false);
+ assert.ok(store.sessionForId('other-session'));
+ assert.equal(log.eventsAfter({tableId:'table',receiverKey:'other-session',lastSeq:1}).frames.length,1);
+ assert.equal(log.eventsAfter({tableId:'table',receiverKey:'owner-session',lastSeq:0}).frames.length,0);
+});

@@ -317,6 +317,11 @@ function createMemoryStore() {
     },
     async zcard(key) { return getSortedSet(key)?.size ?? 0; },
     async eval(_script, keys = [], argv = []) {
+      if (_script.startsWith('-- account-rate-limit')) {
+        const old=sweep(keys[0]);const count=Number(old?.value || 0)+1;
+        setValue(keys[0],count,old?.expiry ? Math.max(1,old.expiry-Date.now()) : Number(argv[0])*1000);
+        return [count,old?.expiry ? 0 : 1];
+      }
       if (_script.startsWith('-- account-remove-owned-session')) {
         if (getValue(keys[0]) !== 'BLOCKED') throw fenceError();
         const raw = getValue(keys[1]); if (!raw || JSON.parse(raw)?.userId !== argv[0]) return 0;
@@ -606,7 +611,7 @@ export const __setNxExScriptForTests = SET_NX_EX_SCRIPT;
  * Atomic in Upstash via Lua EVAL; memory fallback is best-effort (non-atomic).
  * Returns { count, ttlSet } where ttlSet indicates if TTL was (re)applied.
  */
-const RATE_LIMIT_SCRIPT = `
+const RATE_LIMIT_SCRIPT = `-- account-rate-limit
 local key = KEYS[1]
 local ttl_seconds = tonumber(ARGV[1])
 local count = redis.call('INCR', key)
@@ -618,7 +623,13 @@ end
 return {count, 0}
 `;
 
-export async function atomicRateLimitIncr(key, ttlSeconds = 60) {
+export async function atomicRateLimitIncr(key, ttlSeconds = 60, identity = null) {
+  if (process.env.ACCOUNT_DELETION_ENABLED==='1' && identity?.userId) {
+    const result=await guardedRedisEval({store:identity.store || store,userIds:[identity.userId],
+      anonymousIds:identity.anonymous ? [identity.userId] : [],beginSql:identity.beginSql,
+      script:RATE_LIMIT_SCRIPT,keys:[key],args:[String(Math.max(1,ttlSeconds))]});
+    return {count:Number(result[0]) || 0,ttlSet:result[1]===1};
+  }
   // Memory store doesn't support the rate-limit Lua script; use non-atomic fallback
   if (isMemoryStore) {
     const count = await store.incrBy(key, 1);

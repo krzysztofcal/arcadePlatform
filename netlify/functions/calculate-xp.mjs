@@ -530,7 +530,7 @@ async function saveSessionState(userId, sessionId, state, anonymous = false) {
 // Rate Limiting
 // ============================================================================
 
-async function checkRateLimit({ userId, ip }) {
+async function checkRateLimit({ userId, ip, anonymous = false }) {
   if (!RATE_LIMIT_ENABLED) return { allowed: true };
 
   const checks = [];
@@ -539,7 +539,7 @@ async function checkRateLimit({ userId, ip }) {
   if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
     const userKey = keyRateLimitUser(userId);
     checks.push(
-      atomicRateLimitIncr(userKey, 60)
+      atomicRateLimitIncr(userKey, 60, {userId,anonymous})
         .then(({ count }) => ({
           type: 'user',
           count,
@@ -746,7 +746,7 @@ export async function handler(event) {
     || event.headers?.["x-real-ip"]
     || "unknown";
 
-  const rateLimitResult = await checkRateLimit({ userId, ip: clientIp });
+  const rateLimitResult = await checkRateLimit({ userId, ip: clientIp, anonymous: !supabaseUserId });
   if (!rateLimitResult.allowed) {
     return json(429, {
       error: "rate_limit_exceeded",

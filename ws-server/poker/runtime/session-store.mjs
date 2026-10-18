@@ -132,7 +132,16 @@ export function createSessionStore({ sessionTtlMs = 60_000 } = {}) {
     return expiredSessionIds;
   }
 
+  function forgetUser(userId) {
+    for (const ws of connectionsForUser(userId)) untrackConnection({ws,userId});
+    const removed=[];
+    for (const [id,session] of sessionById) if (session.userId===userId) {
+      sessionById.delete(id);socketBySessionId.delete(id);removed.push(id);
+    }
+    return removed;
+  }
   return {
+    forgetUser,
     registerSession,
     sessionForId,
     trackConnection,

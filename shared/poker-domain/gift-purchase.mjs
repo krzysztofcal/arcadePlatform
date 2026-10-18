@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle } from '../account-deletion.mjs';
 import { createHash } from 'node:crypto';
 import { resolveGift } from './gift-catalog.mjs';
 
@@ -7,7 +8,7 @@ function result(receipt, replayed) {
   return { ok: true, replayed, event: { eventId: receipt.id, senderSeatNo: Number(receipt.sender_seat_no), recipientSeatNo: Number(receipt.recipient_seat_no), giftKey: receipt.gift_key } };
 }
 
-export async function executePokerGiftPurchase({ beginSql, postTransaction, tableId, buyerUserId, requestId, giftKey, recipientSeatNo }) {
+export async function executePokerGiftPurchase({ beginSql, postTransaction, tableId, buyerUserId, requestId, giftKey, recipientSeatNo, env = process.env }) {
   tableId = uuid(tableId);
   buyerUserId = uuid(buyerUserId);
   const gift = resolveGift(giftKey);
@@ -39,6 +40,11 @@ export async function executePokerGiftPurchase({ beginSql, postTransaction, tabl
     if (sender.is_bot !== false) fail('invalid_sender');
     const recipient = seats.find((seat) => Number(seat.seat_no) === recipientSeatNo && seat.status === 'ACTIVE');
     if (!recipient || recipient.user_id === sender.user_id) fail('gift_target_unavailable');
+    if (accountDeletionEnabled(env)) {
+      const ids = [buyerUserId, ...(recipient.is_bot === false ? [recipient.user_id] : [])];
+      await lockAccountLifecycle(tx, ids);
+      for (const id of ids) await assertAccountActive(tx, id);
+    }
     // Bind SQL-formatted participation as text: the driver serializes timestamp parameters through JS Date.
     if (!sender.participation || !recipient.participation) fail('gift_purchase_failed');
     const ledger = await postTransaction({ tx, txType: 'BURN', userId: buyerUserId, createdBy: buyerUserId,

@@ -111,6 +111,9 @@ jobs:
           tests/chips-ledger.deletion-retirement.test.mjs
           tests/reward-identities.behavior.test.mjs
           tests/xp-ledger.behavior.test.mjs
+          shared/poker-domain/gift-purchase.behavior.test.mjs
+          ws-server/poker/runtime/session-store.behavior.test.mjs
+          ws-server/poker/runtime/stream-log.behavior.test.mjs
           ws-server/poker/persistence/persisted-state-writer.behavior.test.mjs
           tests/poker-reducer.applyLeaveTable-marks-acted-for-participating-leaver.unit.test.mjs
           shared/poker-domain/leave.behavior.test.mjs

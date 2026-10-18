@@ -1539,3 +1539,20 @@ test("enabled writer allows active durable actor and internal settlement without
     assert.equal(activeChecks, internal ? 0 : 1);
   }
 });
+
+
+test('new hand commit denies a suspended actor after table lock; ongoing internal settlement stays separate',async()=>{
+ const tableId='00000000-0000-4000-8000-000000000377';
+ const actor='00000000-0000-4000-8000-000000000378';
+ const h=createDurableActionDbHarness({tableId});
+ const writer=createPersistedStateWriter({env:{SUPABASE_DB_URL:'postgres://example.invalid/db',ACCOUNT_DELETION_ENABLED:'1'},
+  beginSql:fn=>h.beginSql(tx=>fn({unsafe:async(q,p)=>{
+   if(q.startsWith('select id from public.poker_tables')) return [{id:tableId}];
+   if(q.startsWith('select user_id from public.poker_seats')) return [{user_id:actor}];
+   if(q.includes('as present')) return [{present:true,deleting:true}];
+   return tx.unsafe(q,p);
+  }})),klog:()=>{}});
+ const out=await writer.writeMutation({tableId,expectedVersion:1,
+  nextState:{tableId,phase:'PREFLOP',handId:'new-hand'},meta:{mutationKind:'start_hand',actorUserId:actor}});
+ assert.equal(out.ok,false);assert.equal(out.reason,'account_not_active');assert.equal(h.durable.casCount,0);
+});

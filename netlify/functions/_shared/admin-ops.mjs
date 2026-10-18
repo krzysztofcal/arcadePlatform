@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle } from '../../../shared/account-deletion.mjs';
 import { parseAdminUserIds } from "./admin-auth.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "./poker-idempotency.mjs";
@@ -489,6 +490,10 @@ async function runAdminTableAction({
     const snapshot = await loadPersistedTableSnapshotTx(tx, tableId);
     if (!snapshot?.table) {
       throw notFound("table_not_found", "table_not_found");
+    }
+    if (accountDeletionEnabled(env)) {
+      await lockAccountLifecycle(tx,[adminUserId,...(snapshot.seats || []).filter(s=>s.is_bot===false).map(s=>s.user_id)]);
+      await assertAccountActive(tx,adminUserId);
     }
     const classification = evaluatePersistedTableSnapshot(snapshot, env);
     const resolved = resolveRequestedTableAction(requestedAction, classification);

@@ -14,7 +14,7 @@ async function fixture(t) {
   database = new PGlite();
   const db = database;
   await db.exec(`create role anon; create role authenticated; create role service_role;
-    create schema auth; create table auth.users(id uuid primary key); create table public.poker_state(table_id uuid,state jsonb); create table public.poker_seats(table_id uuid,user_id uuid); create table public.bonus_campaigns(created_by uuid); create table public.bonus_campaign_eligible_users(created_by uuid); create function auth.uid() returns uuid language sql as $$ select null::uuid $$;`);
+    create schema auth; create table auth.users(id uuid primary key); create table public.user_profiles(user_id uuid,display_name text); create table public.favorites(user_id uuid,game_id text); create table public.poker_state(table_id uuid,state jsonb); create table public.poker_seats(table_id uuid,user_id uuid); create table public.bonus_campaigns(created_by uuid); create table public.bonus_campaign_eligible_users(created_by uuid); create function auth.uid() returns uuid language sql as $$ select null::uuid $$;`);
   await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-requests-v2.sql', import.meta.url), 'utf8'));
   }
   const db = database;
@@ -193,4 +193,18 @@ test('private WS enqueue rejects an already active socket after durable deletion
  connection.session.userId=OTHER;
  await queueAccountPrivateFrame({ws,connection,ownerId:OTHER,frame:{private:'other-owner'},beginSql,close:reason=>closed.push(reason)});
  assert.equal(sent.length,2);
+});
+
+
+test('privileged profile/favorite writes cannot recreate a suspended owner; exact cleanup and other owner survive',async(t)=>{
+ const {db,beginSql}=await fixture(t);
+ await db.query('insert into user_profiles values($1,$2)',[OWNER,'synthetic']);
+ await db.query('insert into favorites values($1,$2)',[OWNER,'snake']);
+ await beginSql(tx=>requestDeletion(tx,OWNER));
+ await assert.rejects(db.query('insert into favorites values($1,$2)',[OWNER,'tetris']),{code:'42501'});
+ await assert.rejects(db.query('update user_profiles set display_name=$2 where user_id=$1',[OWNER,'late']),{code:'42501'});
+ await db.query('insert into favorites values($1,$2)',[OTHER,'tetris']);
+ await db.query('delete from favorites where user_id=$1',[OWNER]);
+ assert.equal((await db.query('select count(*)::int n from favorites where user_id=$1',[OWNER])).rows[0].n,0);
+ assert.equal((await db.query('select count(*)::int n from favorites where user_id=$1',[OTHER])).rows[0].n,1);
 });

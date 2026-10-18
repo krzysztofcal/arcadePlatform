@@ -59,7 +59,8 @@ export async function handleStartHandCommand({ frame, ws, connState, tableManage
   const persisted = await persistMutatedState({
     tableId,
     expectedVersion,
-    mutationKind: "start_hand"
+    mutationKind: "start_hand",
+    actorUserId: connState.session.userId
   });
   if (!persisted?.ok) {
     await recoverFromPersistConflict({

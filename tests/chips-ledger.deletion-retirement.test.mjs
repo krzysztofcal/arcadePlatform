@@ -86,6 +86,8 @@ test('zero wallet records no-burn evidence and never creates an empty transactio
 
 test('late credit, forged internal option, unresolved Poker and stale lease cannot destroy finances',async()=>{
   const {begin,retire}=await fixture();
+  await assert.rejects(begin(tx=>postTransaction({tx,userId:OTHER,createdBy:USER,txType:'ADMIN_ADJUST',idempotencyKey:'suspended-admin',
+    entries:[{accountType:'USER',userId:OTHER,amount:10},{accountType:'SYSTEM',systemKey:'GENESIS',amount:-10}]})),{code:'account_not_active'});
   const credit={userId:OTHER,txType:'ADMIN_ADJUST',idempotencyKey:'late',internalAuthorization:'deletion',
     entries:[{accountType:'SYSTEM',systemKey:'GENESIS',amount:-10},{accountType:'USER',userId:USER,amount:10}]};
   await assert.rejects(begin(tx=>postTransaction({...credit,tx})),{code:'account_not_active'});

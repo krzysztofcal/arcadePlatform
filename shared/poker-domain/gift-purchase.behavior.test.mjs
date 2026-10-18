@@ -152,3 +152,20 @@ test('postgres timestamp binding preserves exact receipt participation for recov
     assert.deepEqual(summary.seats[0].recentGifts, [{ eventId: purchase.event.eventId, giftKey: 'beer' }]);
   } finally { await f.db.close(); }
 });
+
+
+test('deleting sender or human recipient prevents a new gift before payment, while bot recipients need no Auth',async()=>{
+ const f=await fixture();
+ try {
+  await f.db.exec(`create schema auth; create table auth.users(id uuid primary key);
+   create table account_deletion_requests(old_user_id uuid);
+   insert into auth.users values('${buyerUserId}'),('${humanId}');`);
+  await f.db.query('insert into account_deletion_requests values($1)',[humanId]);
+  await assert.rejects(f.buy({env:{ACCOUNT_DELETION_ENABLED:'1'}}),{code:'account_not_active'});
+  assert.equal((await f.db.query('select count(*)::int n from test_burns')).rows[0].n,0);
+  assert.equal((await f.buy({env:{ACCOUNT_DELETION_ENABLED:'1'},recipientSeatNo:3})).ok,true);
+  await f.db.query('insert into account_deletion_requests values($1)',[buyerUserId]);
+  await f.db.exec("update poker_gift_purchases set created_at=clock_timestamp()-interval '4 seconds'");
+  await assert.rejects(f.buy({env:{ACCOUNT_DELETION_ENABLED:'1'},recipientSeatNo:3,requestId:'late'}),{code:'account_not_active'});
+ } finally {await f.db.close();}
+});

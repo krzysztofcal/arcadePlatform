@@ -190,3 +190,14 @@ test('UUID conversion source is explicitly anonymous and both source and target 
     script: 'conversion-fixture', keys: [], args: [] }), { code: 'account_redis_fenced' });
   assert.equal(invoked, 1);
 });
+
+
+test('UUID rate-limit increments are fenced too, including delayed calls after deletion',async()=>{
+ const {atomicRateLimitIncr}=await import('../netlify/functions/_shared/store-upstash.mjs');
+ const f=await fixture();const identity={userId:OWNER,beginSql:active,store:f.store};
+ assert.equal((await atomicRateLimitIncr('owner-rate',60,identity)).count,1);
+ assert.ok(await f.store.ttl('owner-rate')>0);
+ await blockRedisIdentity(OWNER,f.store);await f.store.del('owner-rate');
+ await assert.rejects(atomicRateLimitIncr('owner-rate',60,identity),{code:'account_redis_fenced'});
+ assert.equal(await f.store.get('owner-rate'),null);
+});

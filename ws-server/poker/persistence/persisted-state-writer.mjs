@@ -1,4 +1,4 @@
-import { assertAccountActive } from "../../../shared/account-deletion.mjs";
+import { assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 import { attemptDemandRefill } from "../../../shared/poker-domain/demand-refill.mjs";
 import { createHash } from "node:crypto";
 import { beginSqlWs } from "../bootstrap/persisted-bootstrap-db.mjs";
@@ -1001,6 +1001,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
     tableMarkerTransition,
     botFundingSystemKey = null,
     durableActionPlan,
+    meta = null,
     demandRefillBuyIn = null,
     demandRefillPoolClass = null,
   }) {
@@ -1011,9 +1012,20 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
       const payload = persistedState;
       if (env.ACCOUNT_DELETION_ENABLED === "1") {
         // Match JOIN/Leave ordering. Internal settlement/bot writers also take
-        // the table lock first, but only durable human ACT requires ACTIVE.
+        // the table lock first. Human ACT and new-hand entry require ACTIVE;
+        // ongoing trusted settlement remains possible for suspended participants.
         const tables = await tx.unsafe("select id from public.poker_tables where id = $1 for update;", [tableId]);
         if (!tables?.length) throw Object.assign(new Error("table_not_found"), { code: "table_not_found" });
+        if (['start_hand','settled_rollover'].includes(meta?.mutationKind)) {
+          const participants = ['PREFLOP','FLOP','TURN','RIVER','SHOWDOWN'].includes(holeCardState.phase)
+            ? Object.keys(holeCardState.holeCardsByUserId || {}) : [];
+          const humans = participants.length ? await tx.unsafe(
+            'select user_id from public.poker_seats where table_id=$1 and is_bot=false and user_id=any($2::uuid[]) order by user_id;',
+            [tableId,participants]) : [];
+          const ids = [...new Set([...humans.map(h=>h.user_id),...(meta.actorUserId ? [meta.actorUserId] : [])])].sort();
+          await lockAccountLifecycle(tx,ids);
+          for (const id of ids) await assertAccountActive(tx,id);
+        }
         if (durableActionPlan.supplied) {
           // handleActCommand derives this identity from connState.session,
           // not frame.payload or the advisory accepted-action audit object.
@@ -1308,6 +1320,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         return { ok: false, reason: "conflict" };
       }
       if (env.WS_PERSISTED_STATE_FILE) {
+        if (env.ACCOUNT_DELETION_ENABLED === "1") return {ok:false,reason:"deletion_requires_sql_runtime"};
         if (durableActionPlan.supplied) {
           return { ok: false, outcome: "failure", reason: "durable_action_store_unavailable" };
         }
@@ -1339,6 +1352,7 @@ export function createPersistedStateWriter({ env = process.env, beginSql = begin
         tableMarkerTransition,
         botFundingSystemKey,
         durableActionPlan,
+        meta,
         demandRefillBuyIn,
         demandRefillPoolClass,
       });

@@ -61,3 +61,41 @@ begin
   execute statement;
  end loop;
 end $$;
+
+-- Guard privileged profile/favorite/claim helpers too, not only HTTP ingress.
+-- Try-lock avoids row->lifecycle waits deadlocking with lifecycle-first writers.
+-- Cleanup DELETE remains possible; unchanged campaign creator is historical data.
+create function public.account_guard_owned_write_v2() returns trigger
+language plpgsql security definer set search_path='' as $$
+declare column_name text; owner_id uuid; owners uuid[] := '{}'::uuid[];
+begin
+  foreach column_name in array tg_argv loop
+    if column_name='created_by' and tg_op='UPDATE'
+      and (to_jsonb(new)->>column_name) is not distinct from (to_jsonb(old)->>column_name) then continue; end if;
+    owner_id := (to_jsonb(new)->>column_name)::uuid;
+    if owner_id is not null then owners := array_append(owners,owner_id); end if;
+  end loop;
+  for owner_id in select distinct x from unnest(owners) x order by x loop
+    if not pg_catalog.pg_try_advisory_xact_lock(pg_catalog.hashtextextended('account-lifecycle:'||owner_id::text,0)) then
+      raise exception using errcode='40001', message='Account lifecycle busy';
+    end if;
+    if not exists(select 1 from auth.users where id=owner_id)
+      or exists(select 1 from public.account_deletion_requests where old_user_id=owner_id) then
+      raise exception using errcode='42501', message='Account is not active';
+    end if;
+  end loop;
+  return new;
+end$$;
+revoke all on function public.account_guard_owned_write_v2() from public,anon,authenticated;
+do $$
+declare t text;
+begin
+  foreach t in array array['favorites','user_profiles','profile_avatar_uploads','bonus_claims','bonus_campaign_eligible_users'] loop
+    if exists(select 1 from information_schema.columns where table_schema='public' and table_name=t and column_name='user_id') then
+      execute format('create trigger account_owned_write_v2 before insert or update on public.%I for each row execute function public.account_guard_owned_write_v2(''user_id'')',t);
+    end if;
+  end loop;
+  if to_regclass('public.bonus_campaigns') is not null then
+    execute 'create trigger account_creator_write_v2 before insert or update on public.bonus_campaigns for each row execute function public.account_guard_owned_write_v2(''created_by'')';
+  end if;
+end$$;

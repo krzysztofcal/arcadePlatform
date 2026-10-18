@@ -1032,7 +1032,11 @@ async function postTransaction({
       // IMPORTANT: inside this block use ONLY `activeTx` for all SQL to keep it atomic.
       const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
       userEntryIds.sort();
-      if (deletionEnabled()) await lockAccountLifecycle(activeTx, userEntryIds);
+      if (deletionEnabled()) {
+        const actor = createdBy && userEntryIds.length && internalAuthorization?.capability !== INTERNAL_DELETION ? createdBy : null;
+        await lockAccountLifecycle(activeTx,[...userEntryIds,...(actor ? [actor] : [])]);
+        if (actor) await assertAccountActive(activeTx,actor);
+      }
       const userAccountById = new Map();
       for (const userEntryId of userEntryIds) {
         userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, activeTx, internalAuthorization));
