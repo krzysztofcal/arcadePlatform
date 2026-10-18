@@ -238,13 +238,20 @@ function normalizeDeployOrigin(raw) {
   }
 }
 
+// Committed activation floor, changed only by the separately approved cutover.
+// Unlike deployment variables it survives their accidental deletion on rebuild.
+const XP_REDIS_MIN_VERSION = Object.freeze({ stage: '2', prod: '2' });
 function generateServerDeployContext(context, deployPrimeUrl) {
   const supported = new Set(['production', 'deploy-preview', 'branch-deploy', 'dev', 'development']);
   const value = supported.has(context) ? context : 'unknown';
   const version = process.env.XP_REDIS_VERSION;
   const environment = process.env.XP_REDIS_ENV;
   const namespace = process.env.XP_KEY_NS;
-  const v3 = version === '3' || !!environment || /:v3(?:$|:)/.test(namespace || '');
+  const target = value === 'production' ? 'prod' : ['deploy-preview','branch-deploy','dev','development'].includes(value) ? 'stage' : null;
+  if (!target && Object.values(XP_REDIS_MIN_VERSION).includes('3')) throw new Error('xp_redis_build_context_required');
+  const requiredVersion = target ? XP_REDIS_MIN_VERSION[target] : '2';
+  const v3 = requiredVersion === '3' || version === '3' || !!environment || /:v3(?:$|:)/.test(namespace || '');
+  if (v3 && requiredVersion !== '3') throw new Error('xp_redis_cutover_not_approved');
   if (v3 && (version !== '3' || !['stage','prod'].includes(environment) || namespace !== `kcswh:${environment}:xp:v3` ||
       (value === 'production' ? environment !== 'prod' : !['deploy-preview','branch-deploy','dev','development'].includes(value) || environment !== 'stage'))) {
     throw new Error('xp_redis_build_configuration_invalid');
