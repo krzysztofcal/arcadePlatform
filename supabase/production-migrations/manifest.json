@@ -1156,6 +1156,13 @@
       "sha256": "6552d447ea64e9b4c20d2cc2fd135f688528c5049b3c50674df8b94e21992c88",
       "category": "needs-production-equivalent",
       "purpose": "#1117 disabled account-deletion schema; Stage application authorized; Production not authorized; no reset/approval/activation"
+    },
+    {
+      "file": "20261018190323_account_retirement_escrow_compatibility.sql",
+      "version": "20261018190323",
+      "sha256": "3d7375771822df62ec8972abb5748f950847eba0ff2ed84d77937f370d543323",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 known USER trigger compatibility with exact Stage escrow dependency inventory; unknown dependencies still fail closed; separate Production GO"
     }
   ]
 }

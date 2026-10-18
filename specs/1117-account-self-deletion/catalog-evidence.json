@@ -1177,5 +1177,54 @@
       "chips_accounts_user_system_exclusive"
     ],
     "result": "Both targets retain restrictive live USER Auth FK and both non-null USER ownership checks; retirement requires coordinated later migration."
+  },
+  "stageIntegration20261018": {
+    "target_ref": "krydukthwdvccggbyjfw",
+    "system_identifier": "7656985631720456337",
+    "production_mutations": false,
+    "shared_v2_reset": false,
+    "feature_enabled": false,
+    "migrations": [
+      {
+        "stage_system_identifier": "7656985631720456337",
+        "file": "20261018184941_account_self_deletion_v2.sql",
+        "sha256": "6552d447ea64e9b4c20d2cc2fd135f688528c5049b3c50674df8b94e21992c88",
+        "release_enabled": false,
+        "redis_cutover_approved": false
+      },
+      {
+        "stage_system_identifier": "7656985631720456337",
+        "file": "20261018190323_account_retirement_escrow_compatibility.sql",
+        "sha256": "3d7375771822df62ec8972abb5748f950847eba0ff2ed84d77937f370d543323",
+        "release_enabled": false,
+        "redis_cutover_approved": false
+      }
+    ],
+    "disposable_auth_accounts_created": 5,
+    "disposable_auth_accounts_deleted": 5,
+    "fixture_sessions_profiles_removed": true,
+    "financial_fixture": {
+      "mint_ch": 75,
+      "burn_ch": 75,
+      "burn_count": 1,
+      "retired_user": true,
+      "immutable_history_preserved": true
+    },
+    "cutover_storage_approvals_seeded": false,
+    "completion_proved": false,
+    "google_authenticated": "NOT TESTED",
+    "google_authorize_redirect": {
+      "status": 302,
+      "host": "accounts.google.com"
+    },
+    "ws_deploy_run": 39156649252,
+    "ws_runtime_sha": "f771972b98dc0e877cb0c243e1fbbcbf7b0a1850",
+    "ws_deploy": "PASS",
+    "basic_ws_hello": "PASS",
+    "frontend_preview_http_status": 404,
+    "full_poker_delete_flow": "NOT TESTED",
+    "component_owner_index_cleanup": "PASS; operator teardown only, not release-gated finalizer",
+    "epoch_loss": "PASS: writes deny",
+    "automatic_epoch_change_recovery": "NOT PROVED: stale ACTIVE permits deny until operator reconciliation"
   }
 }
