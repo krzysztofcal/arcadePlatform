@@ -40,6 +40,7 @@ import {
   parseRetentionArgs,
   readOnlyEscrowAudit,
   RETENTION_ACCOUNT_INVARIANTS_SQL,
+  RETENTION_UNKNOWN_DELETE_TRIGGER_SQL,
   registryCountFor,
   RETENTION_REGISTRY_BATCH_COUNTS_SQL,
   RETENTION_REGISTRY_TABLE_COUNTS_SQL,
@@ -1300,4 +1301,56 @@ test("prepare archive verification accepts raw SQL text archive_batches rows", a
   assert.equal(verified.recoveryState, "complete");
   assert.equal(verified.primary.archiveSha256, row.compressed_sha256);
   assert.equal(verified.evidence.transactionIdsSha256, evidence.transactionIdsSha256);
+});
+
+
+test("DELETE dependency catalog accepts only the exact approved USER retirement trigger", async () => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const db = new PGlite();
+  try {
+    await db.exec(`create table public.chips_accounts(id integer);
+      create table public.other_accounts(id integer);
+      create function public.chips_guard_user_retirement_v2() returns trigger language plpgsql
+        as $$begin return old; end$$;
+      create function public.other_retirement_guard() returns trigger language plpgsql
+        as $$begin return old; end$$;`);
+    const unknown = async () => (await db.query(RETENTION_UNKNOWN_DELETE_TRIGGER_SQL)).rows.map(row => row.trigger_name);
+    assert.deepEqual(await unknown(), []);
+    const approved = `create trigger chips_accounts_user_retirement_v2
+      before insert or update or delete on public.chips_accounts
+      for each row execute function public.chips_guard_user_retirement_v2()`;
+    await db.exec(approved);
+    assert.deepEqual(await unknown(), [], "known trigger must not block ESCROW retirement");
+    for (const mutation of [
+      "alter table public.chips_accounts disable trigger chips_accounts_user_retirement_v2",
+      "alter table public.chips_accounts enable replica trigger chips_accounts_user_retirement_v2",
+      "alter table public.chips_accounts enable always trigger chips_accounts_user_retirement_v2",
+    ]) {
+      await db.exec(mutation);
+      assert.deepEqual(await unknown(), ["chips_accounts_user_retirement_v2"]);
+    }
+    await db.exec("drop trigger chips_accounts_user_retirement_v2 on public.chips_accounts");
+    for (const changed of [
+      approved.replace("public.chips_guard_user_retirement_v2()", "public.other_retirement_guard()"),
+      approved.replace("before insert or update or delete", "before delete"),
+      approved.replace("before insert or update or delete", "after insert or update or delete"),
+      approved.replace("for each row", "for each statement"),
+      approved.replace("retirement_v2()", "retirement_v2('unexpected')"),
+      approved.replace("create trigger chips_accounts_user_retirement_v2", "create trigger unknown_delete_dependency"),
+    ]) {
+      await db.exec(changed);
+      assert.equal((await unknown()).length, 1, changed);
+      await db.exec(`drop trigger ${changed.includes("unknown_delete_dependency") ? "unknown_delete_dependency" : "chips_accounts_user_retirement_v2"} on public.chips_accounts`);
+    }
+    // A matching name/function on another table cannot authorize a foreign dependency.
+    await db.exec(approved.replace("on public.chips_accounts", "on public.other_accounts"));
+    await db.exec(approved.replace("create trigger chips_accounts_user_retirement_v2", "create trigger foreign_dependency"));
+    assert.deepEqual(await unknown(), ["foreign_dependency"]);
+    await db.exec("drop trigger foreign_dependency on public.chips_accounts; drop function public.chips_guard_user_retirement_v2() cascade;");
+    assert.deepEqual(await unknown(), [], "pre-V2 catalog remains supported without the optional function");
+    await db.exec(approved.replace("public.chips_guard_user_retirement_v2()", "public.other_retirement_guard()"));
+    assert.deepEqual(await unknown(), ["chips_accounts_user_retirement_v2"], "missing optional function cannot authorize a lookalike");
+  } finally {
+    await db.close();
+  }
 });
