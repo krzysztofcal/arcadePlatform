@@ -110,11 +110,14 @@ test('XP-only reset manifest is deterministic and preserves mixed profiles, fenc
   const {buildLegacyXpResetPlan}=await import('../scripts/ops/xp-redis-reset-plan.mjs');
   const records=[{key:'kcswh:xp:v2:total:'+OWNER,type:'string',value:'99'},
     {key:'kcswh:xp:v2:migration:'+'a'.repeat(64),type:'string',value:'9'},
-    {key:'kcswh:xp:v2:leaderboard:v1:all_time',type:'zset'},
+    {key:'kcswh:xp:v2:leaderboard:v1:all_time',type:'zset',value:[[OWNER,99]]},
     {key:'kcswh:xp:user:'+OWNER,type:'string',value:JSON.stringify({userId:OWNER,totalXp:99,displayName:'Fixture',avatar:'preserve'})},
     {key:'kcswh:xp:user:'+OTHER,type:'string',value:JSON.stringify({userId:OTHER,totalXp:9,createdAt:'old'})},
     ...['auth:users','poker:table','chips:wallet','bonus:proof','archive:receipt',namespace+':user:'+OTHER+':total',EPOCH,'account-deletion:redis:permit:'+OWNER,'kcswh:xp:v2:unknown:mixed'].map(key=>({key,type:'string',value:'preserve'}))];
+  for(const record of records)record.pttl=-1;
   const plan=buildLegacyXpResetPlan(records);
+  assert.notEqual(plan.manifestHash,buildLegacyXpResetPlan(records.map(record=>record.key===records[0].key?{...record,value:"changed"}:record)).manifestHash);
+  assert.throws(()=>buildLegacyXpResetPlan([{key:records[0].key,type:"string",value:"99"}]),/snapshot_incomplete/);
   assert.equal(plan.manifestHash,buildLegacyXpResetPlan([...records].reverse()).manifestHash);
   const local=new Map(records.map(record=>[record.key,record.value??'board']));
   for(const action of plan.operations){if(action.operation==='DEL')local.delete(action.key);else local.set(action.key,action.value);}

@@ -40,7 +40,10 @@ export function buildLegacyXpResetPlan(records) {
   for(const record of [...records].sort((a,b)=>a.key.localeCompare(b.key))) {
     if(seen.has(record.key))throw new Error('duplicate_reset_key');seen.add(record.key);
     const action=legacyXpResetAction(record.key,record);
-    if(action)operations.push(action);else preserved++;
+    if(action) {
+      if(record.value===undefined || !Number.isSafeInteger(record.pttl) || record.pttl < -1) throw new Error('reset_snapshot_incomplete');
+      operations.push({...action,expected:{type:record.type,pttl:record.pttl,valueHash:createHash('sha256').update(JSON.stringify(record.value)).digest('hex')}});
+    } else preserved++;
   }
   const manifest=JSON.stringify({version:1,namespace:NS.slice(0,-1),operations});
   return {operations,preserved,manifestHash:createHash('sha256').update(manifest).digest('hex')};
