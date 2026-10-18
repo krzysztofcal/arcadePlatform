@@ -89,3 +89,5 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [ ] T06b approval/coverage: historical verified-email-at-payout and legal/LIA/privacy decisions unresolved; history_ready remains false.
 - [ ] T05d4 coordinated V2 retirement/backup/reset/attestation; final ordered plan below redis-cutover.md, no live reset.
 - [ ] T07b full E2E/Google/live all-in/provider expiry/restart proof and working Preview.
+
+- [ ] Owner/security review: agent temporary Netlify snapshot had local0664 permissions and included Production contexts; removed, never published. Access by another local actor cannot be excluded. Any shared/Production credential rotation requires separate GO; see research.md incident.
