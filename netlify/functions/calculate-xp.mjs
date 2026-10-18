@@ -1,3 +1,4 @@
+import { resolveXpNamespace } from "./_shared/xp-ledger.mjs";
 /**
  * Server-Side XP Calculation Endpoint
  *
@@ -66,7 +67,7 @@ const REQUIRE_ACTIVITY = process.env.XP_REQUIRE_ACTIVITY === "1"; // Require act
 // Session & Security
 const SESSION_TTL_SEC = XP_POLICY.sessionTtlSec;
 const SESSION_TTL_MS = XP_POLICY.sessionTtlMs;
-const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const KEY_NS = resolveXpNamespace();
 const DRIFT_MS = Math.max(0, asNumber(process.env.XP_DRIFT_MS, 30_000));
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const SESSION_CONFIG = resolveXpSessionSecret(process.env);
@@ -197,7 +198,7 @@ const publicSessionReason = (reason) => {
   return "invalid";
 };
 
-async function validateXpAwardSession({ sessionToken, userId, headers }) {
+async function validateXpAwardSession({ sessionToken, userId, headers, anonymous = false }) {
   if (!SESSION_CONFIG.valid) return { kind: "misconfigured", reason: SESSION_CONFIG.reason };
   if (!sessionToken) return { kind: "invalid", reason: "missing_session_token" };
 
@@ -210,7 +211,7 @@ async function validateXpAwardSession({ sessionToken, userId, headers }) {
   const serverValidation = await validateServerSession({
     sessionId: tokenResult.sessionId,
     userId,
-    fingerprint,
+    fingerprint, anonymous,
   });
   if (serverValidation.unavailable === true) return { kind: "unavailable", reason: "session_store_unavailable" };
   if (!serverValidation.valid) return { kind: "invalid", reason: serverValidation.reason || "session_invalid" };
@@ -224,16 +225,17 @@ const getNextResetEpoch = (ms = Date.now()) => nextWarsawResetMs(ms);
 // Redis Keys
 const XP_LEDGER_KEYS = createXpLedgerKeys({ namespace: KEY_NS });
 const XP_LEADERBOARD_KEYS = createXpLeaderboardKeys({ namespace: KEY_NS });
-const keyDaily = (u, day = getDailyKey()) => XP_LEDGER_KEYS.daily(u, day);
-const keyTotal = XP_LEDGER_KEYS.total;
-const keySession = XP_LEDGER_KEYS.session;
-const keySessionSync = XP_LEDGER_KEYS.sessionSync;
-const keySessionState = XP_LEDGER_KEYS.sessionState;
-const keyRateLimitUser = (userId) => `${KEY_NS}:ratelimit:user:${userId}:${Math.floor(Date.now() / 60000)}`;
+const ledgerKeys = (anonymous = false) => anonymous ? createXpLedgerKeys({namespace:KEY_NS, anonymous:true}) : XP_LEDGER_KEYS;
+const keyDaily = (u, day = getDailyKey(), anonymous = false) => ledgerKeys(anonymous).daily(u, day);
+const keyTotal = (id, anonymous = false) => ledgerKeys(anonymous).total(id);
+const keySession = (id, sid, anonymous = false) => ledgerKeys(anonymous).session(id, sid);
+const keySessionSync = (id, sid, anonymous = false) => ledgerKeys(anonymous).sessionSync(id, sid);
+const keySessionState = (id, sid, anonymous = false) => ledgerKeys(anonymous).sessionState(id, sid);
+const keyRateLimitUser = (userId, anonymous = false) => ledgerKeys(anonymous).rateLimit(userId, Math.floor(Date.now() / 60000));
 const keyRateLimitIp = (ip) => `${KEY_NS}:ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 
-async function getTotals({ userId, sessionId, now }) {
-  return readXpTotals({ store, keys: XP_LEDGER_KEYS, userId, sessionId, dayKey: getDailyKey(now || Date.now()) });
+async function getTotals({ userId, sessionId, now, anonymous = false }) {
+  return readXpTotals({ store, keys: ledgerKeys(anonymous), userId, sessionId, dayKey: getDailyKey(now || Date.now()) });
 }
 
 // ============================================================================
@@ -477,8 +479,8 @@ function calculateXP({
 // Session State Management
 // ============================================================================
 
-async function getSessionState(userId, sessionId) {
-  const key = keySessionState(userId, sessionId);
+async function getSessionState(userId, sessionId, anonymous = false) {
+  const key = keySessionState(userId, sessionId, anonymous);
   try {
     const data = await store.get(key);
     if (!data) {
@@ -513,7 +515,7 @@ async function getSessionState(userId, sessionId) {
 }
 
 async function saveSessionState(userId, sessionId, state, anonymous = false) {
-  const key = keySessionState(userId, sessionId);
+  const key = keySessionState(userId, sessionId, anonymous);
   const ttlSeconds = SESSION_TTL_SEC > 0 ? SESSION_TTL_SEC : 604800;
   try {
     await guardedUserMutation({ userId, anonymous, operation: "setex", key, ttl: ttlSeconds, value: JSON.stringify(state) });
@@ -537,7 +539,7 @@ async function checkRateLimit({ userId, ip, anonymous = false }) {
 
   // Check userId rate limit (atomic increment + TTL via Lua script)
   if (userId && RATE_LIMIT_PER_USER_PER_MIN > 0) {
-    const userKey = keyRateLimitUser(userId);
+    const userKey = keyRateLimitUser(userId, anonymous);
     checks.push(
       atomicRateLimitIncr(userKey, 60, {userId,anonymous})
         .then(({ count }) => ({
@@ -720,7 +722,7 @@ export async function handler(event) {
     const dayKey = getDailyKey(now);
     try {
       const result = await readCanonicalXpStatus({
-        readTotals: () => getTotals({ userId, sessionId, now }),
+        readTotals: () => getTotals({ userId, sessionId, now, anonymous: !supabaseUserId }),
         dailyCap: DAILY_CAP,
         deltaCap: DELTA_CAP,
         sessionId,
@@ -759,7 +761,7 @@ export async function handler(event) {
   const sessionToken = body.sessionToken || event.headers?.["x-session-token"];
   let validatedServerSessionId = null;
   if (REQUIRE_SERVER_SESSION || SERVER_SESSION_WARN_MODE) {
-    const validation = await validateXpAwardSession({ sessionToken, userId, headers: event.headers });
+    const validation = await validateXpAwardSession({ sessionToken, userId, headers: event.headers, anonymous: !supabaseUserId });
     if (validation.kind === "misconfigured") {
       klog("calc_session_config_invalid", { outcome: "misconfigured", reason: validation.reason });
       return json(500, { error: "server_config" }, origin);
@@ -840,7 +842,7 @@ export async function handler(event) {
   }
 
   // Get or create session state
-  const sessionState = await getSessionState(userId, sessionId);
+  const sessionState = await getSessionState(userId, sessionId, !supabaseUserId);
 
   // Check for stale/duplicate requests
   if (sessionState.lastWindowEnd > 0 && windowEnd <= sessionState.lastWindowEnd) {
@@ -900,11 +902,11 @@ export async function handler(event) {
   const leaderboardPeriods = getXpLeaderboardPeriods(now);
 
   // Redis keys
-  const todayKey = keyDaily(userId, dayKeyNow);
-  const totalKeyK = keyTotal(userId);
-  const sessionKeyK = keySession(userId, sessionId);
-  const sessionSyncKeyK = keySessionSync(userId, sessionId);
-  const lockKeyK = XP_LEDGER_KEYS.lock(userId, sessionId);
+  const todayKey = keyDaily(userId, dayKeyNow, !supabaseUserId);
+  const totalKeyK = keyTotal(userId, !supabaseUserId);
+  const sessionKeyK = keySession(userId, sessionId, !supabaseUserId);
+  const sessionSyncKeyK = keySessionSync(userId, sessionId, !supabaseUserId);
+  const lockKeyK = ledgerKeys(!supabaseUserId).lock(userId, sessionId);
   const leaderboardAllTimeKey = XP_LEADERBOARD_KEYS.allTime();
   const leaderboardDayKey = XP_LEADERBOARD_KEYS.day(leaderboardPeriods.dayKey);
   const leaderboardWeekKey = XP_LEADERBOARD_KEYS.week(leaderboardPeriods.weekKey);
@@ -921,7 +923,7 @@ export async function handler(event) {
       leaderboardAllTimeKey,
       leaderboardDayKey,
       leaderboardWeekKey,
-      XP_LEADERBOARD_KEYS.hidden(supabaseUserId || userId),
+      supabaseUserId ? XP_LEADERBOARD_KEYS.hidden(supabaseUserId) : "",
     ],
     args: [
       now,
@@ -1019,7 +1021,7 @@ export async function handler(event) {
 export async function applyBoost(userId, sessionId, multiplier, durationMs, { anonymous = false } = {}) {
   if (!userId || !sessionId) return false;
 
-  const sessionState = await getSessionState(userId, sessionId);
+  const sessionState = await getSessionState(userId, sessionId, anonymous);
   sessionState.boostMultiplier = Math.max(1, Math.min(5, multiplier));
   sessionState.boostExpiresAt = Date.now() + Math.max(0, durationMs);
 

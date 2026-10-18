@@ -1,3 +1,4 @@
+import { createXpLedgerKeys, resolveXpNamespace } from "./xp-ledger.mjs";
 import { executeSql } from "./supabase-admin.mjs";
 import { store as defaultStore } from "./store-upstash.mjs";
 import { publicProfile } from "./user-profile.mjs";
@@ -97,7 +98,7 @@ function projectLeaderboardProfile(profile, { rank, xp, lifetimeXp }) {
 
 async function readLifetimeXp(store, namespace, candidates, period) {
   if (period === "all_time") return candidates.map((candidate) => candidate.score);
-  const values = await store.mget(candidates.map((candidate) => `${namespace}:total:${candidate.member}`));
+  const values = await store.mget(candidates.map((candidate) => createXpLedgerKeys({namespace}).total(candidate.member)));
   return values.map((value, index) => {
     if (value == null && candidates[index].score > 0) throw leaderboardError("leaderboard_projection_inconsistent", 503);
     const parsed = Number(value);
@@ -125,7 +126,7 @@ function visibleCompetitionRanks(candidates, profiles) {
 
 async function readLeaderboardPage(options, deps = {}) {
   const store = deps.store || defaultStore;
-  const namespace = deps.namespace || process.env.XP_KEY_NS || "kcswh:xp:v2";
+  const namespace = deps.namespace || resolveXpNamespace();
   const nowMs = Number.isFinite(deps.nowMs) ? deps.nowMs : Date.now();
   const readProfiles = deps.readProfiles || readLeaderboardProfiles;
   const { period, page, limit } = options;
@@ -183,7 +184,7 @@ async function readLeaderboardPage(options, deps = {}) {
 
 async function readLeaderboardMe(options, userId, deps = {}) {
   const store = deps.store || defaultStore;
-  const namespace = deps.namespace || process.env.XP_KEY_NS || "kcswh:xp:v2";
+  const namespace = deps.namespace || resolveXpNamespace();
   const nowMs = Number.isFinite(deps.nowMs) ? deps.nowMs : Date.now();
   const readProfiles = deps.readProfiles || readLeaderboardProfiles;
   const periodState = resolveLeaderboardPeriod({ period: options.period, namespace, nowMs });

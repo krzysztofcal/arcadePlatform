@@ -1,3 +1,5 @@
+import { getXpPolicy } from "./_shared/xp-identity.mjs";
+import { createXpLedgerKeys, resolveXpNamespace } from "./_shared/xp-ledger.mjs";
 import crypto from "node:crypto";
 import { store, guardedUserMutation } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
@@ -10,8 +12,8 @@ import {
 } from "./_shared/xp-server-session.mjs";
 
 // Configuration
-const SESSION_TTL_SEC = Math.max(0, Number(process.env.XP_SESSION_TTL_SEC) || 604800); // 7 days default
-const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const SESSION_TTL_SEC = getXpPolicy().sessionTtlSec; // 7 days default
+const KEY_NS = resolveXpNamespace();
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const API_CORS_POLICY = buildApiCorsPolicy();
 if (API_CORS_POLICY.invalidConfiguredOriginCount > 0) {
@@ -26,7 +28,7 @@ const SESSION_RATE_LIMIT_ENABLED = process.env.XP_SESSION_RATE_LIMIT_ENABLED !==
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
 // Key generators
-const keyServerSession = (sessionId) => `${KEY_NS}:server-session:${sessionId}`;
+const keyServerSession = (sessionId, userId, anonymous = false) => createXpLedgerKeys({namespace:KEY_NS, anonymous}).serverSession(userId, sessionId);
 const keySessionRateLimitIp = (ip) => `${KEY_NS}:session-ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 
 // CORS headers
@@ -100,7 +102,7 @@ async function checkSessionRateLimit(ip) {
 
 // Store session metadata in Redis
 async function storeSession({ sessionId, userId, anonymous = false, createdAt, fingerprint, ip }) {
-  const key = keyServerSession(sessionId);
+  const key = keyServerSession(sessionId, userId, anonymous);
   const sessionData = JSON.stringify({
     userId, identityMode: anonymous ? "anonymous" : "user",
     createdAt,
@@ -119,8 +121,8 @@ async function storeSession({ sessionId, userId, anonymous = false, createdAt, f
 }
 
 // Validate session exists and matches (userId is the identityId stored in the token)
-export async function validateServerSession({ sessionId, userId, fingerprint }) {
-  const key = keyServerSession(sessionId);
+export async function validateServerSession({ sessionId, userId, fingerprint, anonymous = false }) {
+  const key = keyServerSession(sessionId, userId, anonymous);
 
   try {
     const raw = await store.get(key);
@@ -153,8 +155,8 @@ export async function validateServerSession({ sessionId, userId, fingerprint }) 
 }
 
 // Update session last activity
-export async function touchSession(sessionId, { userId = null, anonymous = false } = {}) {
-  const key = keyServerSession(sessionId);
+export async function touchSession(sessionId, { userId = null, anonymous = false, beginSql } = {}) {
+  const key = keyServerSession(sessionId, userId, anonymous);
 
   try {
     const raw = await store.get(key);
@@ -163,7 +165,7 @@ export async function touchSession(sessionId, { userId = null, anonymous = false
     const data = JSON.parse(raw);
     if (userId && data.userId !== userId) return { updated: false };
     const updated = await guardedUserMutation({ userId: data.userId, anonymous: anonymous || data.identityMode === "anonymous", operation: "touch", key,
-      ttl: SESSION_TTL_SEC, value: Date.now() });
+      ttl: SESSION_TTL_SEC, value: Date.now(), beginSql });
     return { updated: Number(updated) === 1 };
   } catch {
     return { updated: false };

@@ -26,6 +26,10 @@ New POST requires ACCOUNT_DELETION_ENABLED=1 and account_deletion_release.enable
 
 ## Redis ownership/cutover contract — 18Oct owner requirement
 
-New private key discovery must be deterministic from server UUID and approved environment namespace. No whole-Redis SCAN in the ordinary deletion workflow. Prefix iteration is permitted only within that owner's namespace; shared projection member removals are exact. Legacy scanning is a one-time controlled inventory/migration procedure, not a runtime fallback. done:true requires verified writer drain, approved/verified legacy outcome, sticky BLOCKED+epoch and zero remaining private keys/member fragments. Missing proof or opaque legacy ownership remains incomplete.
+New private key discovery must be deterministic from server UUID and approved environment namespace. No whole-Redis SCAN in the ordinary deletion workflow. Prefix iteration is permitted only within that owner's namespace; shared projection member removals are exact. Legacy scanning is a one-time controlled inventory/reset procedure, not a runtime fallback. done:true requires verified writer drain, approved/verified legacy outcome, sticky BLOCKED+epoch and zero remaining private keys/member fragments. Missing proof or opaque legacy ownership remains incomplete.
 
 Configured Preview/Production currently share Redis/namespace. No reset, forced logout, copy/remove or configuration switch is authorized by this code-preparation task. Separate owner approval must identify the actual shared target and preservation/backup scope.
+
+### Latest Redis decision — 18 October 2026
+
+Use one reviewed V3 per-environment contract and a controlled XP-only legacy reset, not historical XP migration. No dual-read/import from legacy after cutover. Prefer independent Stage/Preview database under the existing Upstash account; current Production database stays in place. Actual account eligibility/cost approval is still an operational gate. Namespace fallback must reject cross-environment configuration. Keep T04d/T02f and financial retention unchanged. Detailed scope, drain, backup, rollback and GO/NO-GO are in [redis-cutover.md](../redis-cutover.md); live reset/provision/configuration/deploy/apply remain unauthorized.

@@ -105,8 +105,10 @@ jobs:
         run: >-
           node --test --test-concurrency=1
           tests/account-deletion.behavior.test.mjs
+          tests/account-deletion.e2e.test.mjs
           tests/account-delete.endpoint.behavior.test.mjs
           tests/account-deletion-redis.behavior.test.mjs
+          tests/xp-redis-v3.behavior.test.mjs
           tests/account-deletion-storage.behavior.test.mjs
           tests/chips-ledger.deletion-retirement.test.mjs
           tests/reward-identities.behavior.test.mjs

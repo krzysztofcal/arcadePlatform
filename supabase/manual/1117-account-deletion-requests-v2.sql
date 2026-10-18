@@ -31,7 +31,7 @@ revoke all on table public.account_deletion_requests from public, anon, authenti
 grant select, insert, update on public.account_deletion_requests to service_role;
 
 -- Operator enables only after all implementation/privacy/Storage/recovery gates pass.
-create table public.account_deletion_release (id boolean primary key default true check(id), enabled boolean not null default false);
+create table public.account_deletion_release (id boolean primary key default true check(id), enabled boolean not null default false, redis_cutover jsonb not null default '{}'::jsonb);
 insert into public.account_deletion_release(id,enabled) values(true,false);
 alter table public.account_deletion_release enable row level security;
 revoke all on table public.account_deletion_release from public,anon,authenticated;

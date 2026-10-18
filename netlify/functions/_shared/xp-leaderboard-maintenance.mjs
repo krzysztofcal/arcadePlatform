@@ -1,3 +1,4 @@
+import { createXpLedgerKeys, resolveXpNamespace } from "./xp-ledger.mjs";
 import { guardedUserMutation } from "./store-upstash.mjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { executeSql, klog } from "./supabase-admin.mjs";
@@ -222,9 +223,9 @@ async function listProfilesPage({ page, limit, runSql = executeSql }) {
 }
 
 async function readCanonicalProjection({ store, namespace, userId, periods, weekDayKeys }) {
-  const totalKey = `${namespace}:total:${userId}`;
-  const dayKey = `${namespace}:daily:${userId}:${periods.dayKey}`;
-  const weekKeys = weekDayKeys.map((key) => `${namespace}:daily:${userId}:${key}`);
+  const totalKey = createXpLedgerKeys({namespace}).total(userId);
+  const dayKey = createXpLedgerKeys({namespace}).daily(userId, periods.dayKey);
+  const weekKeys = weekDayKeys.map((key) => createXpLedgerKeys({namespace}).daily(userId, key));
   const values = await Promise.all([store.get(totalKey), store.get(dayKey), ...weekKeys.map((key) => store.get(key))]);
   return {
     allTime: normalizeCounter(values[0]),
@@ -245,7 +246,7 @@ async function setProjectionScore({ store, key, member, score, dryRun }) {
 
 async function runBackfill(request, deps = {}) {
   const store = deps.store || defaultStore;
-  const namespace = deps.namespace || process.env.XP_KEY_NS || "kcswh:xp:v2";
+  const namespace = deps.namespace || resolveXpNamespace();
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const periods = getXpLeaderboardPeriods(now);
   const weekDayKeys = getXpLeaderboardWeekDayKeys(now);
@@ -294,7 +295,7 @@ function selectLeaderboardKey({ period, namespace, now }) {
 
 async function runPrune(request, deps = {}) {
   const store = deps.store || defaultStore;
-  const namespace = deps.namespace || process.env.XP_KEY_NS || "kcswh:xp:v2";
+  const namespace = deps.namespace || resolveXpNamespace();
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const key = selectLeaderboardKey({ period: request.period, namespace, now });
   const candidates = await store.zrevrangeWithScores(key, request.offset, request.offset + request.limit - 1);

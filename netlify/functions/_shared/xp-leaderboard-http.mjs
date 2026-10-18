@@ -1,3 +1,4 @@
+import { resolveXpNamespace } from "./xp-ledger.mjs";
 import crypto from "node:crypto";
 import { atomicRateLimitIncr } from "./store-upstash.mjs";
 import { baseHeaders, corsHeaders, klog } from "./supabase-admin.mjs";
@@ -27,7 +28,7 @@ async function allowLeaderboardRead(event, { scope = "public", limit = 60, incre
   if (limit <= 0) return true;
   try {
     const ipHash = crypto.createHash("sha256").update(clientIp(event)).digest("hex");
-    const key = `kcswh:xp:leaderboard:ratelimit:${scope}:${ipHash}:${Math.floor(Date.now() / 60000)}`;
+    const key = `${resolveXpNamespace()}:leaderboard:ratelimit:${scope}:${ipHash}:${Math.floor(Date.now() / 60000)}`;
     const { count } = await increment(key, 60);
     return count <= limit;
   } catch (error) {

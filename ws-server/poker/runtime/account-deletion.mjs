@@ -52,11 +52,11 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
       const avatar = await cleanupAvatars({...context,env,beginSql});
       if (avatar?.waitUntil) return avatar;
       if (avatar?.done !== true) throw new Error('storage_cleanup_unconfirmed');
-      const redis = await cleanupRedis({userId:context.userId,cursor:context.progress?.redisCleanupCursor || null});
+      const redis = await cleanupRedis({userId:context.userId,cursor:context.progress?.redisCleanupCursor || null,beginSql,env});
       await transactionFor(context,(tx) => tx.unsafe(`update public.account_deletion_requests set progress=jsonb_set(progress,'{redisCleanupCursor}',$2::jsonb),
         progress_at=case when $3 then clock_timestamp() else progress_at end,
         actionable_since=case when $3 then clock_timestamp() else actionable_since end where request_id=$1;`,[context.requestId,JSON.stringify(redis?.cursor || null),redis?.reason === 'redis_cleanup_scanning' && JSON.stringify(redis.cursor) !== JSON.stringify(context.progress?.redisCleanupCursor)]));
-      // Historical hashes without proven ownership are an explicit release gate.
+      // V3 owner index and durable legacy cutover attestation are required.
       if (redis?.done !== true) throw new Error('redis_cleanup_unconfirmed');
       await beginSql(async (tx) => {
         // Claims lock campaign before lifecycle. Match that order when removing

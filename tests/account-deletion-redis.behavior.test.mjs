@@ -120,36 +120,17 @@ test('HTTP-200 Redis error replies cannot masquerade as successful fences or mut
   } finally { globalThis.fetch = original; }
 });
 
-test('bounded removal deletes exact owner subset and member, preserves fences and reports opaque legacy blocker', async () => {
+test('legacy cleanup cannot claim completeness or scan/delete shared historical data', async () => {
   const { cleanupRedisIdentity } = await import('../netlify/functions/_shared/store-upstash.mjs');
-  const input = await fixture(); const namespace = 'cleanup:test';
-  await blockRedisIdentity(OWNER, input.store);
-  const ownerDaily = `${namespace}:daily:${OWNER}:2026-10-18`;
-  const otherDaily = `${namespace}:daily:${OTHER}:2026-10-18`;
-  const board = `${namespace}:leaderboard:v1:all_time`;
-  const ownSession = `${namespace}:server-session:owned`;
-  const otherSession = `${namespace}:server-session:other`;
-  for (const [key, value] of [[ownerDaily, '10'], [otherDaily, '20'], [ownSession, JSON.stringify({ userId: OWNER })],
-    [otherSession, JSON.stringify({ userId: OTHER })], [`${namespace}:session:opaque-legacy-hash`, '30'], ['kcswh:xp:user:' + OWNER, '{}']]) await input.store.set(key, value);
-  await input.store.zadd(board, 10, OWNER); await input.store.zadd(board, 20, OTHER);
-  let progress; let pages = 0;
-  do {
-    progress = await cleanupRedisIdentity({ store: input.store, userId: OWNER, namespace, limit: 1, cursor: progress?.cursor });
-    assert.equal(progress.done, false);
-    assert.ok(++pages < 20);
-  } while (!progress.scanned);
-  assert.ok(pages > 1);
-  assert.equal(progress.reason, 'legacy_redis_ownership_unproven');
-  assert.equal(await input.store.get(ownerDaily), null);
-  assert.equal(await input.store.get(otherDaily), '20');
-  assert.equal(await input.store.get(ownSession), null);
-  assert.ok(await input.store.get(otherSession));
-  assert.equal(await input.store.zscore(board, OWNER), null);
-  assert.equal(await input.store.zscore(board, OTHER), 20);
-  assert.equal(await input.store.get(`${namespace}:session:opaque-legacy-hash`), '30');
-  assert.equal(await input.store.get(permit(OWNER)), 'BLOCKED');
-  assert.equal(await input.store.get(EPOCH), 'epoch-one');
-  await assert.rejects(cleanupRedisIdentity({ store: input.store, userId: OTHER, namespace }), { code: 'account_redis_fenced' });
+  const input = await fixture();
+  await blockRedisIdentity(OWNER,input.store);
+  await input.store.set('kcswh:xp:v2:total:'+OWNER,'10');
+  input.store.scan=async()=>{throw new Error('whole-namespace scan forbidden');};
+  const result=await cleanupRedisIdentity({store:input.store,userId:OWNER});
+  assert.equal(result.done,false);
+  assert.equal(result.reason,'legacy_redis_ownership_unproven');
+  assert.equal(await input.store.get('kcswh:xp:v2:total:'+OWNER),'10');
+  await assert.rejects(cleanupRedisIdentity({store:input.store,userId:OWNER,namespace:'kcswh:prod:xp:v3'}),{code:'account_redis_fenced'});
 });
 
 test('real UUID anonymous identities can create sessions, award XP and touch, while Auth/deleted UUID guest spoofing denies', async () => {

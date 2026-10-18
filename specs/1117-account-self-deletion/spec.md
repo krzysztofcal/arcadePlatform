@@ -27,10 +27,14 @@ No new service/worker/framework, no Google account deletion or provider physical
 
 ## Current implementation boundary
 
-Prepared code is disabled and unfinished. Legacy Redis standardization/cutover remains the implementation blocker; retired USER archive compatibility is prepared locally. New acceptance requires both runtime flag and default-false database release row. None of the local-only schema proposals is applied. Focused local tests do not authorize activation or establish all R1–R8 PASS.
+Prepared code is disabled and unfinished. Redis V3/reset preparation is locally implemented; live cutover and release evidence remain gated; retired USER archive compatibility is prepared locally. New acceptance requires both runtime flag and default-false database release row. None of the local-only schema proposals is applied. Focused local tests do not authorize activation or establish all R1–R8 PASS.
 
 ## Owner addition — Redis standard, 2026-10-18
 
 T05d now requires a lasting versioned per-owner key contract, not a permanent whole-Redis scan workaround. Proposed private namespaces: `kcswh:stage:xp:v3:user:<UUID>:...` and `kcswh:prod:xp:v3:user:<UUID>:...`; anonymous state has a separate hashed-anonymous-owner prefix. Owner comes from verified server identity/session. Shared leaderboards/IP limits/infrastructure stay shared inside the environment namespace; deletion removes only a member/fragment and preserves lifecycle fences. Transient state has justified finite TTL; permanent XP/profile and account-scoped conversion proof remain attributable until deletion. No email/session secret in keys.
 
-All generators/writers must switch together after approved drain and legacy reconciliation. No automatic reset, silent XP loss, forced logout or runtime switch. Stage and Production cutovers require separate GO. The read-only inventory found the current Netlify all-context Redis/namespace is shared, so a Stage-labelled reset is unsafe. T05d remains OPEN pending the concrete legacy-data decision in research.md.
+All generators/writers must switch together after approved drain and legacy reconciliation. Historical XP reset is approved in principle; no live reset, configuration or runtime switch is authorized by the current GO. Stage and Production cutovers require separate GO. The read-only inventory found the current Netlify all-context Redis/namespace is shared, so a Stage-labelled reset is unsafe. T05d code/local verification is prepared; live cutover is OPEN; the owner has selected XP reset over migration, with live execution separately gated.
+
+### Latest Redis decision — 18 October 2026
+
+Use one reviewed V3 per-environment contract and a controlled XP-only legacy reset, not historical XP migration. No dual-read/import from legacy after cutover. Prefer independent Stage/Preview database under the existing Upstash account; current Production database stays in place. Actual account eligibility/cost approval is still an operational gate. Namespace fallback must reject cross-environment configuration. Keep T04d/T02f and financial retention unchanged. Detailed scope, drain, backup, rollback and GO/NO-GO are in [redis-cutover.md](redis-cutover.md); live reset/provision/configuration/deploy/apply remain unauthorized.
