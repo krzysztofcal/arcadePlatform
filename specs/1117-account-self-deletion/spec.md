@@ -28,3 +28,9 @@ No new service/worker/framework, no Google account deletion or provider physical
 ## Current implementation boundary
 
 Prepared code is disabled and unfinished. Legacy Redis standardization/cutover remains the implementation blocker; retired USER archive compatibility is prepared locally. New acceptance requires both runtime flag and default-false database release row. None of the local-only schema proposals is applied. Focused local tests do not authorize activation or establish all R1–R8 PASS.
+
+## Owner addition — Redis standard, 2026-10-18
+
+T05d now requires a lasting versioned per-owner key contract, not a permanent whole-Redis scan workaround. Proposed private namespaces: `kcswh:stage:xp:v3:user:<UUID>:...` and `kcswh:prod:xp:v3:user:<UUID>:...`; anonymous state has a separate hashed-anonymous-owner prefix. Owner comes from verified server identity/session. Shared leaderboards/IP limits/infrastructure stay shared inside the environment namespace; deletion removes only a member/fragment and preserves lifecycle fences. Transient state has justified finite TTL; permanent XP/profile and account-scoped conversion proof remain attributable until deletion. No email/session secret in keys.
+
+All generators/writers must switch together after approved drain and legacy reconciliation. No automatic reset, silent XP loss, forced logout or runtime switch. Stage and Production cutovers require separate GO. The read-only inventory found the current Netlify all-context Redis/namespace is shared, so a Stage-labelled reset is unsafe. T05d remains OPEN pending the concrete legacy-data decision in research.md.

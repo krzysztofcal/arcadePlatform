@@ -23,3 +23,9 @@ Protected HTTP/WS/JWT operations require ACTIVE at final effect boundary, includ
 ## Disabled preparation boundary
 
 New POST requires ACCOUNT_DELETION_ENABLED=1 and account_deletion_release.enabled=true. Both are unapproved for activation. Legacy Redis cleanup currently returns incomplete for unprovable ownership; Auth deletion must not run, not even for no-table/zero-balance users. No false COMPLETED. Existing deletion recovery remains independent of the new-acceptance release row.
+
+## Redis ownership/cutover contract — 18Oct owner requirement
+
+New private key discovery must be deterministic from server UUID and approved environment namespace. No whole-Redis SCAN in the ordinary deletion workflow. Prefix iteration is permitted only within that owner's namespace; shared projection member removals are exact. Legacy scanning is a one-time controlled inventory/migration procedure, not a runtime fallback. done:true requires verified writer drain, approved/verified legacy outcome, sticky BLOCKED+epoch and zero remaining private keys/member fragments. Missing proof or opaque legacy ownership remains incomplete.
+
+Configured Preview/Production currently share Redis/namespace. No reset, forced logout, copy/remove or configuration switch is authorized by this code-preparation task. Separate owner approval must identify the actual shared target and preservation/backup scope.

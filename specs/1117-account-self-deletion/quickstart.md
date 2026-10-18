@@ -25,3 +25,9 @@ Separate GO for disposable destructive fixtures/migration/deploy. Standard passw
 CI account-deletion-fundamentals runs the maintained Node/PGlite endpoint, request/recovery/private-send, Redis/XP, Storage, retirement/WS-buy-in, reward and Leave suites: 109 passed locally. No real Stage/Google/password deletion smoke or PostgreSQL multi-connection contention run. Legacy Vitest-only files cannot run with current declared dependencies; no framework was added.
 
 Do not enable the runtime flag/release row before legacy Redis standardization/cutover are complete. Redis cleanup currently explicitly reports unproven legacy ownership and prevents Auth deletion. Do not override this as an operator shortcut. HMAC approval/history and avatar legacy cutover rows require independent reviewed evidence; proposals seed no such approval. Stop new acceptance via database release=false while preserving guards/recovery; never roll back to old unfenced writers after acceptance.
+
+## Required Redis cutover gate
+
+Read research.md inventory first: current Preview/Production Redis configuration is shared. Do not perform a Stage-only reset against it. No existing keys/values were copied, deleted or reset; no backup or drain was performed. Before writes, owner must approve target isolation, exact migration/legacy retirement scope, preservation of owner/friend accounts and existing XP/session behavior, protected backup/restore and the test plan.
+
+Use two disposable local UUIDs to prove private-prefix cleanup and shared-member preservation only after the V3 implementation exists. Current legacy cleanup still returns done:false; full positive-wallet/all-in→Auth completion is NOT RUN and must not be faked by replacing cleanup with unconditional success. Follow-up tasks require fixtures with real ledger/settlement and real local cleanup, provider HTTP only substituted.

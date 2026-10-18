@@ -90,11 +90,16 @@ revoke all on function public.account_guard_owned_write_v2() from public,anon,au
 do $$
 declare t text;
 begin
-  foreach t in array array['favorites','user_profiles','profile_avatar_uploads','bonus_claims','bonus_campaign_eligible_users'] loop
+  foreach t in array array['favorites','user_profiles','bonus_claims','bonus_campaign_eligible_users'] loop
     if exists(select 1 from information_schema.columns where table_schema='public' and table_name=t and column_name='user_id') then
       execute format('create trigger account_owned_write_v2 before insert or update on public.%I for each row execute function public.account_guard_owned_write_v2(''user_id'')',t);
     end if;
   end loop;
+  if to_regclass('public.profile_avatar_uploads') is not null then
+    -- Existing in-flight signing/output receipts MUST still finish after deletion
+    -- starts, so cleanup can prove the real external capability horizon.
+    execute 'create trigger account_upload_intent_v2 before insert on public.profile_avatar_uploads for each row execute function public.account_guard_owned_write_v2(''user_id'')';
+  end if;
   if to_regclass('public.bonus_campaigns') is not null then
     execute 'create trigger account_creator_write_v2 before insert or update on public.bonus_campaigns for each row execute function public.account_guard_owned_write_v2(''created_by'')';
   end if;

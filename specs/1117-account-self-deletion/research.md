@@ -55,3 +55,28 @@ CI portability review: XP policy imports remain dependency-light via lazy Redis 
 See writer-audit.md for supported HTTP/WS/SQL/admin/internal paths. Added final guards for favorites, gift buyer/recipient, administrator actor, table creation/replay, new hand entry, auth/resume binding and heartbeat. Preparing removes exact-owner local WS sessions and private replay fragments; invalidated sockets cannot recreate fragments. Existing internal settlement remains eligible for deleting participants. Narrow SQL try-lock triggers cover privileged profile/favorite/upload/claim helpers without blocking cleanup DELETE or unchanged historical creator. No broad database middleware/framework.
 
 75 focused lifecycle/Redis/ledger/persistence/session tests passed; admin/quick-seat/persistence regression 46 passed with explicit test-only XP_CORS_ALLOW=https://arcade.test. Initial test runs without that allowlist returned expected CORS denial, and a replay fixture used an invalid global-sequence offset; both diagnosed rather than disabling production guards. Real PostgreSQL contention and exact-SHA WS preview remain launch evidence.
+
+## Redis read-only inventory and decision boundary — 2026-10-18
+
+New issue requirement was read before Redis work. Existing main/agent results reused; no Redis implementation/cutover was started. Netlify linked-site environment assigns UPSTASH_REDIS_REST_URL/TOKEN, XP_KEY_NS and session TTL through `all`, with no matching TOML override. Preview and Production therefore select the same configured endpoint and `kcswh:xp:v2` namespace. This is NOT evidence for two isolated Redis datasets; environment ownership cannot be inferred from these legacy keys. No endpoint, credentials, UUIDs or raw keys are recorded here.
+
+At 2026-10-18 12:11 UTC, SCAN completed its read-only traversal (571 unique keys observed), TYPE/PTTL metadata only; no GET/value inspection, writer drain, backup or mutation. Concurrent writes/expiry mean this is observational inventory, not a cutover snapshot or completeness proof.
+
+| Family | Keys | Without TTL | Notes / writer / ownership |
+| --- | ---: | ---: | --- |
+| total | 80 | 80 | canonical XP, identity visible in key; store/xp-ledger/conversion; preserve |
+| daily | 96 | 96 | calculate-xp; identity+period in key, current/weekly reconciliation must be preserved |
+| profile | 25 | 25 | fixed legacy profile prefix, owner visible; saveUserProfile/maintenance; preserve |
+| migration pair | 359 | 359 | xp-identity; SHA-256(anonId\|UUID), numeric value not read; both original inputs not retained, cannot reverse/guess owner |
+| migration user | 2 | 2 | hash(UUID), matchable only from authorized known UUID inventory; conversion once proof must not silently reset |
+| server-session | 1 | 0 | start-session/touch; remaining TTL approximately 76,616s; owner in protected value not read; do not force logout |
+| shared all-time board | 1 | 1 | XP projection, preserve whole set; remove exact member only |
+| other namespace/infrastructure | 7 | 7 | outside current XP/profile prefix; not classified/read/deleted |
+
+No session/state/lock/registry keys were observed in this traversal; that is not historical proof none can return. Configured session TTL is 604800s. The existing theoretical no-TTL session setting still requires finite V3 bounds.
+
+**Recommended direction:** separate Stage/Production namespaces first; preserve canonical lifetime/profile/current required day/week data by verified copy, then retire legacy only after drain, protected backup and comparison. No blanket reset. For 359 opaque pair markers, preservation in a backup alone does not prove account erasure or safe conversion eligibility: the owner must approve explicit retirement/reset scope or supply a lawful deterministic ownership source. Do not label them unowned/nonpersonal just because their hash cannot be reversed. Existing per-user once conversion receipts must be reconciled, not reset. One live session must be migrated securely or rotated only with separate explicit approval. Account owner and friend must be included in preservation validation; neither is assumed disposable.
+
+**Decision required before continuing T05d:** confirm isolation/copy approach and authorized legacy resolution scope, including the risk of resetting anonymous conversion eligibility and session rotation. A Stage-labelled mutation would currently affect the shared Production XP dataset. No reset, migration, forced logout, configuration change or new namespace activation was performed. Key standard/cutover tasks and contract are synchronized across all seven artifacts; T05d remains OPEN. Full positive-wallet/all-in-to-Auth local integration is still NOT RUN pending actual proven Redis cleanup, while financial/Leave and guarded cleanup ordering are tested separately.
+
+Final verification for this preparation: 137/137 CI-equivalent fundamentals passed locally; 33/33 access-propagation/closed-table cleanup regression tests passed; syntax 228 files, CSP 55 served documents, project guards and canonical inventory passed. CI initially exposed the upload-tracking receipt exception: only NEW avatar intents are SQL-fenced; exact in-flight signing/output receipts remain writable to prove cleanup horizon. Source-extraction harness now injects the real lifecycle dependencies, and the pre-existing cleanup fixture uses a request clearly older than its one-hour threshold rather than an equality boundary. No retention behavior changed. Exact final-SHA GitHub CI is checked separately in PR.
