@@ -234,14 +234,14 @@ async function readCanonicalProjection({ store, namespace, userId, periods, week
   };
 }
 
-async function setProjectionScore({ store, key, member, score, dryRun }) {
+async function setProjectionScore({ store, key, member, score, dryRun, expiresAt, beginSql }) {
   const current = normalizeCounter(await store.zscore(key, member));
-  if (current === score) return "unchanged";
+  if (current === score && (!expiresAt || score <= 0)) return "unchanged";
   if (!dryRun) {
-    if (score > 0) await guardedUserMutation({ store, userId: member, operation: "zadd", key, score, value: member });
+    if (score > 0) await guardedUserMutation({ store, userId: member, operation: "zadd", key, score, value: member, expiresAt, beginSql });
     else await store.zrem(key, member);
   }
-  return score > 0 ? "updated" : "removed";
+  return current === score ? "unchanged" : score > 0 ? "updated" : "removed";
 }
 
 async function runBackfill(request, deps = {}) {
@@ -257,9 +257,9 @@ async function runBackfill(request, deps = {}) {
     try {
       const canonical = await readCanonicalProjection({ store, namespace, userId, periods, weekDayKeys });
       const results = await Promise.all([
-        setProjectionScore({ store, key: leaderboardKeys.allTime(), member: userId, score: canonical.allTime, dryRun: request.dryRun }),
-        setProjectionScore({ store, key: leaderboardKeys.day(periods.dayKey), member: userId, score: canonical.today, dryRun: request.dryRun }),
-        setProjectionScore({ store, key: leaderboardKeys.week(periods.weekKey), member: userId, score: canonical.week, dryRun: request.dryRun }),
+        setProjectionScore({ store, key: leaderboardKeys.allTime(), member: userId, score: canonical.allTime, dryRun: request.dryRun, beginSql:deps.beginSql }),
+        setProjectionScore({ store, key: leaderboardKeys.day(periods.dayKey), member: userId, score: canonical.today, dryRun: request.dryRun, expiresAt:periods.dayExpiresAtSec, beginSql:deps.beginSql }),
+        setProjectionScore({ store, key: leaderboardKeys.week(periods.weekKey), member: userId, score: canonical.week, dryRun: request.dryRun, expiresAt:periods.weekExpiresAtSec, beginSql:deps.beginSql }),
       ]);
       counts.processed += 1;
       for (const result of results) counts[result] += 1;
@@ -267,12 +267,7 @@ async function runBackfill(request, deps = {}) {
       counts.failed += 1;
     }
   }
-  if (!request.dryRun && counts.processed > 0) {
-    await Promise.all([
-      store.expire(leaderboardKeys.day(periods.dayKey), Math.max(1, periods.dayExpiresAtSec - Math.floor(now / 1000))),
-      store.expire(leaderboardKeys.week(periods.weekKey), Math.max(1, periods.weekExpiresAtSec - Math.floor(now / 1000))),
-    ]);
-  }
+
   return {
     operation: request.operation,
     dryRun: request.dryRun,

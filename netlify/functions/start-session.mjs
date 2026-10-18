@@ -1,7 +1,7 @@
 import { getXpPolicy } from "./_shared/xp-identity.mjs";
 import { createXpLedgerKeys, resolveXpNamespace } from "./_shared/xp-ledger.mjs";
 import crypto from "node:crypto";
-import { store, guardedUserMutation } from "./_shared/store-upstash.mjs";
+import { store, guardedUserMutation, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { buildApiCorsPolicy, buildCorsHeaders } from "./_shared/api-cors.mjs";
 import {
@@ -82,10 +82,7 @@ async function checkSessionRateLimit(ip) {
 
   const key = keySessionRateLimitIp(ip);
   try {
-    const count = await store.incrBy(key, 1);
-    if (count === 1) {
-      await store.expire(key, 60);
-    }
+    const { count } = await atomicRateLimitIncr(key, 60);
 
     if (count > SESSION_RATE_LIMIT_PER_IP_PER_MIN) {
       return {

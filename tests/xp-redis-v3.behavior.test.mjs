@@ -157,3 +157,17 @@ test('V3 server-session validation/touch isolates UUID, session and identity mod
   await store.del(keys.serverSession(OWNER,'real-sid'));
   assert.equal((await touchSession('real-sid',{userId:OWNER,beginSql:active})).updated,false);
 });
+
+test('administrative backfill atomically indexes and expires day/week boards, also for unchanged scores',async()=>{
+  const store=await fixture();const periods=getXpLeaderboardPeriods();
+  await put(store,OWNER,keys.total(OWNER),'7');await put(store,OWNER,keys.daily(OWNER,periods.dayKey),'7');
+  const {runLeaderboardMaintenance}=await import('../netlify/functions/_shared/xp-leaderboard-maintenance.mjs');
+  const request={operation:'backfill',dryRun:false,page:1,limit:1};
+  const deps={store,namespace,beginSql:active,listProfilesPage:async()=>[OWNER]};
+  assert.equal((await runLeaderboardMaintenance(request,deps)).failed,0);
+  for(const key of [boards.day(periods.dayKey),boards.week(periods.weekKey)])assert.ok(await store.ttl(key)>0);
+  const result=await runLeaderboardMaintenance(request,deps);
+  assert.equal(result.failed,0);assert.equal(result.unchanged,3);
+  await blockRedisIdentity(OWNER,store);
+  assert.equal((await runLeaderboardMaintenance(request,deps)).failed,1);
+});

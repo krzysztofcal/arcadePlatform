@@ -108,25 +108,29 @@ const MUTATE = `-- account-user-mutate
 local op=ARGV[1]
 if op=='set' then return redis.call('SET',KEYS[1],ARGV[2]) end
 if op=='setex' then return redis.call('SETEX',KEYS[1],ARGV[3],ARGV[2]) end
-if op=='zadd' then return redis.call('ZADD',KEYS[1],ARGV[3],ARGV[2]) end
+if op=='zadd' then
+ local result=redis.call('ZADD',KEYS[1],ARGV[3],ARGV[2])
+ if tonumber(ARGV[5]) and tonumber(ARGV[5]) > 0 then redis.call('EXPIREAT',KEYS[1],ARGV[5]) end
+ return result
+end
 if op=='touch' then
  local raw=redis.call('GET',KEYS[1]); if not raw then return 0 end
  local data=cjson.decode(raw); if data.userId~=ARGV[4] then return redis.error_reply('session_owner_mismatch') end
  data.lastActivity=tonumber(ARGV[2]); redis.call('SETEX',KEYS[1],ARGV[3],cjson.encode(data)); return 1
 end
 return redis.error_reply('invalid_guarded_operation')`;
-export async function guardedUserMutation({ store: target = store, userId, anonymous = false, operation, key, value, ttl, score, beginSql: transaction }) {
+export async function guardedUserMutation({ store: target = store, userId, anonymous = false, operation, key, value, ttl, score, expiresAt, beginSql: transaction }) {
   if (!['set', 'setex', 'zadd', 'touch'].includes(operation)) throw new TypeError('invalid_guarded_operation');
   if (process.env.ACCOUNT_DELETION_ENABLED !== '1' && !isXpV3(XP_NAMESPACE)) {
     if (operation === 'set') return target.set(key, value);
     if (operation === 'setex') return target.setex(key, ttl, value);
-    if (operation === 'zadd') return target.zadd(key, score, value);
+    if (operation === 'zadd') return expiresAt ? target.eval(MUTATE,[key],['zadd',String(value),String(score),String(userId),String(expiresAt)]) : target.zadd(key, score, value);
     const raw = await target.get(key); if (!raw) return 0;
     const data = JSON.parse(raw); if (data.userId !== userId) throw new Error('session_owner_mismatch');
     data.lastActivity = Number(value); await target.setex(key, ttl, JSON.stringify(data)); return 1;
   }
   return guardedRedisEval({ store: target, userIds: [userId], anonymousIds: anonymous ? [userId] : [], script: MUTATE, keys: [key],
-    args: [operation, String(value), String(ttl ?? score ?? ''), String(userId)], beginSql: transaction });
+    args: [operation, String(value), String(ttl ?? score ?? ''), String(userId),String(expiresAt || '')], beginSql: transaction });
 }
 
 const CLEAN_OWNER = `-- xp-clean-owner
@@ -380,7 +384,7 @@ function createMemoryStore() {
         const [op, value, parameter, owner] = argv;
         if (op === 'set') { setValue(keys[0], value, null); return 'OK'; }
         if (op === 'setex') { setValue(keys[0], value, Number(parameter) * 1000); return 'OK'; }
-        if (op === 'zadd') return zaddValue(keys[0], parameter, value);
+        if (op === 'zadd') {const result=zaddValue(keys[0],parameter,value);if(Number(argv[4])>0)setExpiryMs(keys[0],Math.max(1,Number(argv[4])*1000-Date.now()));return result;}
         if (op === 'touch') {
           const raw = getValue(keys[0]); if (!raw) return 0;
           const data = JSON.parse(raw); if (data.userId !== owner) throw new Error('session_owner_mismatch');
