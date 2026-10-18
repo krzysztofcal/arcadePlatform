@@ -216,8 +216,8 @@ test('existing deploy-context generator bakes validated pins and refuses incompl
     const source=(await readFile(originalScript,'utf8')).replace("stage: '2', prod: '2'","stage: '3', prod: '2'");
     await writeFile(script,source);
     const base={...process.env,CONTEXT:'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:'stage',XP_KEY_NS:namespace};
-    // The committed 2/2 policy does not authorize any V3 build yet.
-    assert.notEqual(spawnSync(process.execPath,[originalScript,'--server-context-only'],{cwd,env:base}).status,0);
+    // Stage V3 is authorized; Production remains V2.
+    assert.equal(spawnSync(process.execPath,[originalScript,'--server-context-only'],{cwd,env:base}).status,0);
     assert.equal(spawnSync(process.execPath,[script,'--server-context-only'],{cwd,env:base}).status,0);
     const context=await readFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'utf8');
     assert.match(context,/BUILD_XP_REDIS_VERSION = "3"/);assert.match(context,/BUILD_XP_REDIS_ENV = "stage"/);

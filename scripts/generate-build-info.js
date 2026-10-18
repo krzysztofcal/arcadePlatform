@@ -240,7 +240,7 @@ function normalizeDeployOrigin(raw) {
 
 // Committed activation floor, changed only by the separately approved cutover.
 // Unlike deployment variables it survives their accidental deletion on rebuild.
-const XP_REDIS_MIN_VERSION = Object.freeze({ stage: '2', prod: '2' });
+const XP_REDIS_MIN_VERSION = Object.freeze({ stage: '3', prod: '2' });
 function generateServerDeployContext(context, deployPrimeUrl) {
   const supported = new Set(['production', 'deploy-preview', 'branch-deploy', 'dev', 'development']);
   const value = supported.has(context) ? context : 'unknown';
