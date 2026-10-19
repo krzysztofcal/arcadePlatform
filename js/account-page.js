@@ -144,6 +144,7 @@
 
   function setStatus(message, tone){
     if (!nodes.status) return;
+    if (deletionReceivedOwnerId){ message = deletionReceivedMessage(); tone = 'success'; }
     nodes.status.textContent = message || '';
     nodes.status.dataset.tone = tone || '';
     nodes.status.hidden = !message;
@@ -226,6 +227,9 @@
   }
 
   function renderUser(user){
+    var incomingUserKey = getUserKey(user);
+    if (incomingUserKey && deletionReceivedOwnerId === incomingUserKey) user = null;
+    else if (incomingUserKey && deletionReceivedOwnerId) resetDeletionAttempt();
     var hasUser = !!user;
     var previousUserKey = getUserKey(currentUser);
     var nextUserKey = getUserKey(user);
@@ -235,8 +239,7 @@
       setBlockVisibility(nodes.signupConfirmation, false);
     }
     if (previousUserKey !== nextUserKey){
-      if (nextUserKey && deletionOwnerId && nextUserKey !== deletionOwnerId) clearDeletionView();
-      if (nextUserKey) restoreDeletionView(nextUserKey);
+      if (nextUserKey && deletionAttempt && nextUserKey !== deletionAttempt.ownerId) resetDeletionAttempt();
       publicProfileGeneration += 1;
       publicProfileInFlight = null;
       if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
@@ -1088,6 +1091,7 @@
   }
 
   function handleGoogleSignIn(){
+    if (deletionReceivedOwnerId) resetDeletionAttempt();
     if (!nodes.googleSignIn || nodes.googleSignIn.disabled) return;
     if (!auth || !auth.signInWithGoogle){
       setStatus(googleErrorMessage('google_unavailable'), 'error');
@@ -1108,6 +1112,7 @@
 
   function handleSignIn(e){
     e.preventDefault();
+    if (deletionReceivedOwnerId) resetDeletionAttempt();
     var email = nodes.signInEmail && nodes.signInEmail.value ? nodes.signInEmail.value.trim() : '';
     var password = nodes.signInPass && nodes.signInPass.value ? nodes.signInPass.value : '';
     if (!validEmail(email)){
@@ -1142,6 +1147,7 @@
 
   function handleSignUp(e){
     e.preventDefault();
+    if (deletionReceivedOwnerId) resetDeletionAttempt();
     var email = nodes.signUpEmail && nodes.signUpEmail.value ? nodes.signUpEmail.value.trim() : '';
     var password = nodes.signUpPass && nodes.signUpPass.value ? nodes.signUpPass.value : '';
     var passwordConfirm = nodes.signUpPassConfirm && nodes.signUpPassConfirm.value ? nodes.signUpPassConfirm.value : '';
@@ -1234,7 +1240,7 @@
   }
 
   function handleSignOut(){
-    clearDeletionView();
+    resetDeletionAttempt();
     setStatus(t('signingOut', 'Signing out...'), 'info');
     if (!auth || !auth.signOut){
       setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
@@ -1250,75 +1256,91 @@
     });
   }
 
-  var deletionPollTimer = null;
-  var deletionPollGeneration = 0;
-  var deletionOwnerId = '';
-  function clearDeletionView(){
-    deletionPollGeneration++;
-    if (deletionPollTimer) window.clearTimeout(deletionPollTimer);
-    deletionPollTimer = null; deletionOwnerId = '';
-    try { window.sessionStorage.removeItem('arcade:account-deletion-status'); } catch (_err){}
+  // Request recovery only. No cleanup polling or persisted tracking state.
+  var deletionAttempt = null;
+  var deletionReceivedOwnerId = '';
+  function deletionReceivedMessage(){
+    return t('accountDeletionReceived', 'We have received your account deletion request. You do not need to take any further action.');
+  }
+  function resetDeletionAttempt(){
+    deletionAttempt = null;
+    deletionReceivedOwnerId = '';
     if (nodes.deleteBtn) nodes.deleteBtn.disabled = false;
-    if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deletion permanently forfeits your account resources.');
+    if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deleting your account permanently forfeits CH, XP, achievements and profile data.');
   }
-  function restoreDeletionView(ownerId){
-    try {
-      var saved = JSON.parse(window.sessionStorage.getItem('arcade:account-deletion-status') || 'null');
-      if (saved && saved.ownerId === ownerId && saved.statusToken && saved.requestId) watchDeletion(saved);
-      else if (saved) clearDeletionView();
-    } catch (_err){}
-  }
-  function deletionMessage(state){
-    if (state.completed) return t('accountDeletionCompleted', 'Your Arcade account has been deleted. You may register a new account.');
-    if (state.status === 'ERROR' || state.requiresIntervention) return t('accountDeletionIncident', 'Your account is blocked. Deletion requires operator assistance. Keep this reference: ') + state.requestId;
-    if (!state.accepted) return t('accountDeletionPreparing', 'Request saved. We are securing your account and will continue automatically.');
-    return t('accountDeletionPending', 'Account blocked; deletion is in progress. Poker settlement and file cleanup may take over two hours. You do not need to stay signed in.');
-  }
-  function watchDeletion(state){
-    state.ownerId = state.ownerId || getUserKey(currentUser) || deletionOwnerId;
-    if (getUserKey(currentUser) && state.ownerId !== getUserKey(currentUser)) return;
-    deletionOwnerId = state.ownerId;
-    try {
-      if (state.completed) window.sessionStorage.removeItem('arcade:account-deletion-status');
-      else window.sessionStorage.setItem('arcade:account-deletion-status', JSON.stringify(state));
-    } catch (_err){}
-    if (!currentUser) setStatus(deletionMessage(state), state.completed ? 'success' : 'info');
-    if (nodes.deleteNote) nodes.deleteNote.textContent = deletionMessage(state);
-    if (nodes.deleteBtn) nodes.deleteBtn.disabled = true;
-    if (deletionPollTimer) window.clearTimeout(deletionPollTimer);
-    if (state.completed || !state.statusToken) return;
-    var generation = deletionPollGeneration;
-    deletionPollTimer = window.setTimeout(function(){
-      window.fetch('/.netlify/functions/account-delete?requestId=' + encodeURIComponent(state.requestId), {
-        headers: { Authorization: 'Deletion ' + state.statusToken }, cache: 'no-store'
-      }).then(function(response){ if (!response.ok) { var error = new Error('status_unavailable'); error.status = response.status; throw error; } return response.json(); })
-      .then(function(next){ if (generation !== deletionPollGeneration) return; next.statusToken = state.statusToken; next.ownerId = state.ownerId; watchDeletion(next); })
-      .catch(function(error){
-        if (generation !== deletionPollGeneration) return;
-        if (nodes.deleteNote) nodes.deleteNote.textContent = t('accountDeletionStatusUnavailable', 'Status is temporarily unavailable. Your saved request continues automatically. Reference: ') + state.requestId;
-        if (error.status !== 401 && error.status !== 404) deletionPollTimer = window.setTimeout(function(){ if (generation === deletionPollGeneration) watchDeletion(state); },10000);
+  function deletionRequest(token, method){
+    return window.fetch('/.netlify/functions/account-delete', {
+      method: method, cache: 'no-store',
+      headers: method === 'POST' ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { Authorization: 'Bearer ' + token },
+      body: method === 'POST' ? JSON.stringify({confirmation:'DELETE_ACCOUNT',acknowledgeForfeiture:true}) : undefined
+    }).then(function(response){
+      if (method === 'GET' && response.status === 404) return null;
+      if (response.status !== (method === 'POST' ? 202 : 200)) throw new Error('deletion_unavailable');
+      return response.json().then(function(state){
+        if (!state || typeof state.requestId !== 'string' || !state.requestId) throw new Error('deletion_unconfirmed');
+        return state;
       });
-    }, 5000);
+    });
+  }
+  function acknowledgeDeletion(attempt, client){
+    if (deletionAttempt !== attempt || getUserKey(currentUser) !== attempt.ownerId) return;
+    deletionReceivedOwnerId = attempt.ownerId;
+    if (nodes.deleteBtn) nodes.deleteBtn.disabled = true;
+    renderUser(null);
+    setStatus(deletionReceivedMessage(), 'success');
+    // SDK sign-out may fail during an Auth outage. It never cancels the durable
+    // request; SQL/WS guards still deny the old UUID and the acknowledgement stays.
+    return client.auth.signOut({scope:'local'}).then(function(result){
+      if (result && result.error) throw result.error;
+    }).catch(function(){ klog('account:deletion_signout_failed', {code:'auth_unavailable'}); });
   }
   function handleDeleteAccount(event){
     event.preventDefault();
     if (!currentUser || !auth || !auth.getClient) return;
-    var confirmation = window.prompt(t('accountDeletionConfirm', 'All CH (including Poker winnings), XP, achievements and profile data will be lost permanently. Existing Poker hands will settle safely. Type DELETE_ACCOUNT to confirm.'));
-    if (confirmation !== 'DELETE_ACCOUNT') return;
-    nodes.deleteBtn.disabled = true;
-    var generation = deletionPollGeneration;
     var ownerId = getUserKey(currentUser);
-    auth.getClient().auth.getSession().then(function(result){
-      var token = result && result.data && result.data.session && result.data.session.access_token;
-      if (!token) throw new Error('unauthorized');
-      return window.fetch('/.netlify/functions/account-delete', { method: 'POST',
-        headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }, cache: 'no-store',
-        body: JSON.stringify({ confirmation: confirmation, acknowledgeForfeiture: true })
-      });
-    }).then(function(response){ if (!response.ok) throw new Error('deletion_unavailable'); return response.json(); })
-    .then(watchDeletion).catch(function(){
-      nodes.deleteBtn.disabled = false;
-      if (nodes.deleteNote) nodes.deleteNote.textContent = t('accountDeletionUnavailable', 'Account deletion is unavailable or the response was lost. Check status before trying again. Repeated confirmation returns the same saved request.');
+    if (deletionAttempt && deletionAttempt.ownerId === ownerId && deletionAttempt.busy) return;
+    var attempt = deletionAttempt && deletionAttempt.ownerId === ownerId ? deletionAttempt : {ownerId:ownerId,confirmed:false};
+    deletionAttempt = attempt;
+    attempt.busy = true;
+    nodes.deleteBtn.disabled = true;
+    var client = auth.getClient();
+    var token;
+    if (!client || !client.auth || !client.auth.getSession || !client.auth.signOut){
+      attempt.busy = false; nodes.deleteBtn.disabled = false;
+      setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
+      return;
+    }
+    function isCurrent(){ return deletionAttempt === attempt && getUserKey(currentUser) === ownerId; }
+    client.auth.getSession().then(function(result){
+      var session = result && result.data && result.data.session;
+      if (!session || !session.access_token || !session.user || session.user.id !== ownerId) throw new Error('unauthorized');
+      token = session.access_token;
+      return deletionRequest(token, 'GET');
+    }).then(function(existing){
+      if (!isCurrent()) return;
+      // A persisted preparing request is enough: accepted/completed are backend
+      // lifecycle details, not prerequisites for leaving this page.
+      if (existing) return acknowledgeDeletion(attempt, client);
+      if (!attempt.confirmed){
+        attempt.confirmed = window.prompt(t('accountDeletionConfirm', 'All CH (including Poker winnings), XP, achievements and profile data will be lost permanently. Existing Poker hands will settle safely. Type DELETE_ACCOUNT to confirm.')) === 'DELETE_ACCOUNT';
+      }
+      if (!attempt.confirmed || !isCurrent()) return;
+      return deletionRequest(token, 'POST').catch(function(){
+        // A lost response is UNKNOWN. Reconcile once; do not start a timer or
+        // ask for consent again. A later click may safely replay the same POST.
+        return deletionRequest(token, 'GET').then(function(saved){
+          if (!saved) throw new Error('deletion_unconfirmed');
+          return saved;
+        });
+      }).then(function(){ return acknowledgeDeletion(attempt, client); });
+    }).catch(function(){
+      if (!isCurrent()) return;
+      var message = t('accountDeletionUnavailable', 'We could not confirm receipt of your request. Try again; any saved request continues automatically.');
+      if (nodes.deleteNote) nodes.deleteNote.textContent = message;
+      setStatus(message, 'error');
+    }).then(function(){
+      attempt.busy = false;
+      if (isCurrent() && !deletionReceivedOwnerId) nodes.deleteBtn.disabled = false;
     });
   }
 
@@ -1417,6 +1439,7 @@
   function init(){
     auth = (typeof window !== 'undefined' && window.SupabaseAuth) ? window.SupabaseAuth : null;
     selectNodes();
+    try { window.sessionStorage.removeItem('arcade:account-deletion-status'); } catch (_err){}
     setWelcomeBonusVisibility(false);
     wireEvents();
     hydrateUser();
@@ -1428,6 +1451,7 @@
       if (currentUser){ refreshWelcomeBonus(currentUser); }
       if (accountPokerProjection !== undefined) renderPokerState(accountPokerProjection);
       queueLedgerRender();
+      if (deletionReceivedOwnerId) setStatus(deletionReceivedMessage(), 'success');
     });
   }
 

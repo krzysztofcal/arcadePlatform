@@ -12,7 +12,7 @@ Source of truth: https://github.com/krzysztofcal/arcadePlatform/issues/1117 (own
 
 ## User journeys
 
-1. An authenticated owner opens Danger Zone in account.html, acknowledges permanent loss of all CH, XP, achievements and other resources, and explicitly confirms DELETE_ACCOUNT. Server derives UUID from verified Auth, validates origin and request, and durably accepts one request per UUID. Acceptance and completion are distinct.
+1. An authenticated owner opens Danger Zone in account.html, acknowledges permanent loss of all CH, XP, achievements and other resources, and explicitly confirms DELETE_ACCOUNT. Server derives UUID from verified Auth, validates origin and request, and durably accepts one request per UUID. On a confirmed durable POST202 (or recovery GET200 for the existing owner request), show only ‘Przyjęliśmy żądanie usunięcia konta. Nie musisz wykonywać żadnych dodatkowych czynności.’ and sign out through the official Auth client. Receipt is not technical completion: no cleanup polling, DELETING/COMPLETED UI, duration promise or persisted browser tracking. An uncertain HTTP result is reconciled by one owner GET or an idempotent retry, never an assumed failure or repeated consent for an existing request.
 2. Acceptance blocks old HTTP JWTs, new WS tokens, active sockets, game entry, transfers/purchases/bonuses/XP/profile writes. Trusted internal settlement may finish existing obligations. No manual Leave or continued browser session required.
 3. Existing authoritative Poker Leave/settlement handles every table. Non-all-in follows normal fold; all-in remains eligible for showdown and side-pots. Cash-out and winnings return before one atomic balanced idempotent BURN of the final wallet balance. Never directly zero balances or delete ledger history.
 4. Cleanup removes permitted profile/Storage/cache/XP/session data, prevents resurrection, retires financial USER without changing historical identity/classification, then calls official backend Supabase Admin hard-delete. Retry uncertain outcomes; never report completed on mere dispatch/error.
@@ -54,3 +54,8 @@ One existing Free database is the approved topology, with exact stage/prod names
 ### P2: missing Redis credentials after V3 activation (2026-10-18)
 
 After V3 activation, missing/blank Redis URL or token MUST return service unavailability for Redis-dependent XP operations, never volatile fallback, false zero XP or weaker rate limits. Explicit `XP_TEST_MODE=1` memory fixtures and pre-cutover V2 compatibility remain. Independent Poker/CH settlement MUST continue.
+
+
+## Latest UX/Stage preparation scope — 19 October 2026
+
+Frontend only submits/reconciles receipt and signs out; browser presence is never needed for WS tick, settlement, cleanup, retry, Auth-last or incident handling. Backend status/capability/lease/receipts remain for recovery/operators. Internal accepted=false during preparing does not negate the durable request or SQL authorization fence; it is not rendered to the user. Same email/Google registration may remain unavailable until actual completion, which UI does not promise immediately. Older frontend progress/polling requirements are superseded; historical technical status evidence remains valid. Current GO is local UX/code/tests and Stage procedure preparation ONLY; no Stage/Production reads/writes/deployment/configuration operation is executed. Use the A–E procedure in quickstart after separate scoped GO.

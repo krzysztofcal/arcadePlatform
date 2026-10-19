@@ -8,7 +8,9 @@ export function createAccountDeleteHandler(deps = {}) {
   const respond = (statusCode,headers,body) => ({statusCode,headers,body:JSON.stringify(body)});
   return async (event) => {
     const origin = event.headers?.origin || event.headers?.Origin;
-    const cors = origin && corsHeaders(origin);
+    // Same-origin browser GET may omit Origin. It is read-only and still
+    // requires the owner's bearer/capability; no Origin means no CORS grant.
+    const cors = event.httpMethod === 'GET' ? corsHeaders(origin) : origin && corsHeaders(origin);
     if (!cors) return respond(403,baseHeaders(),{error:'forbidden_origin'});
     const headers = {...cors,'access-control-allow-methods':'POST,GET,OPTIONS'};
     if (event.httpMethod === 'OPTIONS') return {statusCode:204,headers,body:''};
