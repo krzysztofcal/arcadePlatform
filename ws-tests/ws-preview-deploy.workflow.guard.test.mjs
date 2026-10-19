@@ -175,3 +175,33 @@ test("poker deployment doc states the unified preview Caddy ownership model", ()
   assert.match(text, /internal\/admin\/bot-reaction/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
 });
+
+
+test("protected Preview env preflight validates Stage V3 without disclosing credentials", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const source = helperText().replace(/^#!.*\n/, "").replace('import fs from "node:fs";', "");
+  const base = { SUPABASE_STAGE_PROJECT_REF:"krydukthwdvccggbyjfw",
+    SUPABASE_URL:"https://krydukthwdvccggbyjfw.supabase.co",
+    SUPABASE_DB_URL:"postgres://postgres.krydukthwdvccggbyjfw@pooler.invalid/stage",
+    POKER_WS_INTERNAL_TOKEN:"private-internal-token",PORT:"3001",WS_AUTHORITATIVE_JOIN_ENABLED:"1" };
+  const v3 = { XP_REDIS_VERSION:"3",XP_REDIS_ENV:"stage",XP_KEY_NS:"kcswh:stage:xp:v3",
+    UPSTASH_REDIS_REST_URL:"https://redis.invalid",UPSTASH_REDIS_REST_TOKEN:"private-redis-token" };
+  function run(overrides) {
+    const values={...base,...overrides};let output="";const process={argv:["node","helper"],
+      stdout:{write:text=>{output+=text;}},stderr:{write:text=>{output+=text;}}};
+    const fs={constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:()=>3,
+      fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600}),
+      readFileSync:()=>Object.entries(values).map(([k,v])=>k+"="+v).join("\n"),closeSync:()=>{}};
+    runInNewContext(source,{fs,process});
+    assert.doesNotMatch(output,/private-internal-token|private-redis-token/);
+    return {code:process.exitCode||0,output};
+  }
+  assert.match(run(v3).output,/PASS Redis V3 stage kcswh:stage:xp:v3/);
+  assert.equal(run(v3).code,0);
+  assert.match(run({}).output,/legacy Redis; V3 not verified/);
+  for (const changed of [
+    {XP_KEY_NS:"kcswh:prod:xp:v3"},{XP_REDIS_VERSION:""},{XP_REDIS_ENV:""},
+    {UPSTASH_REDIS_REST_URL:""},{UPSTASH_REDIS_REST_TOKEN:" "},{XP_TEST_MODE:"1"},
+    {CONTEXT:"production"},{SUPABASE_STAGE_PROJECT_REF:"wrong-project"},
+  ]) assert.equal(run({...v3,...changed}).code,1);
+});

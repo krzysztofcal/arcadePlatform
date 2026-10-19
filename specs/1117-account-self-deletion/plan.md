@@ -1,3 +1,11 @@
+## Current verification — 19 October 2026
+
+Owner authorizes Stage/Preview deployment and disposable funded Poker/deletion tests after positive isolation preflight. Production, shared V2 reset, paid resources and merge remain forbidden. Main now contains #1125 and #1126; their workflow/ESCROW guard changes are integrated without reverting either Stage migration. Successful main Stage automation runs are observable (e.g.39221672570); this agent only read their results.
+
+WS Preview is still runtime f771972b with generated context unknown/null V3 pins. The existing root-owned environment checker returns PASS for its old Stage checks, but does not inspect Redis. Its root0600 environment is not readable/editable by the agent; permitted sudo covers only the fixed checker and restart. Thus required runtime Redis V3/credential identity is unverified: **NO-GO for deploy**. The existing checker now has a reviewed V3-aware implementation and a fundamental executable regression; operator must install it and configure matching Stage V3 using existing credentials before the agent can prove preflight. Require explicit `PASS Redis V3 stage kcswh:stage:xp:v3`, then dispatch the main-defined WS workflow with exact PR runtime SHA and xpRedisVersion3. No feature/cutover marker is inferred from this configuration.
+
+Read-only Stage: deletion release=false, redis_cutover empty, avatar markers0, reward configs0, deletion requests0. Full frontend/Poker/deletion tests on the new WS remain BLOCKED, not PASS. Prior local/actual Stage component results retain their original scope. See research.md for the current evidence and Storage/HMAC closure conditions.
+
 ## Current Preview isolation authorization — verified
 
 Preview is now deployed with branch-only Stage configuration: `XP_REDIS_VERSION=3`, `XP_REDIS_ENV=stage`, `XP_KEY_NS=kcswh:stage:xp:v3`, `ACCOUNT_DELETION_ENABLED=0`. Netlify Free accepts default all scopes; the earlier403 was the paid granular-scopes restriction, not missing branch access. Other contexts retain V2 and Production is unchanged. The committed Stage build floor is3; Production remains2. This is isolated Preview preparation, not a legacy reset/cutover attestation or deletion activation. See research.md latest evidence for automatic real-Stage BURN recovery and remaining gates.
@@ -63,3 +71,7 @@ One existing Free database is the approved topology, with exact stage/prod names
 ### P2: missing Redis credentials after V3 activation (2026-10-18)
 
 `store-upstash.mjs` selects a rejecting adapter (503 `xp_store_unavailable`) for V3 with missing/blank credentials, keeping module imports safe for Poker/CH. Existing XP/session/leaderboard/public-XP/admin HTTP boundaries return no-store 503 before work. `readXpTotals` cannot convert this failure to zero. No TTL changes or new infrastructure.
+
+### Minimal V3 preflight integration
+
+Extend existing infra/vps/ws-preview-env-preflight.mjs, not a new service: pin actual Stage ref, validate complete Stage V3 namespace/version/credential presence and reject production/test contexts. Keep explicit legacy compatibility report before V3 so it cannot be confused with a V3 PASS. Verify through ws-tests/ws-preview-deploy.workflow.guard.test.mjs using the executable checker with fixture descriptors/environment; privileged metadata constraints remain unchanged. Root installation/configuration is an operator dependency, not permission to replace protected files through a writable deployment path. Main workflow definition and exact-runtime-SHA rule remain unchanged.

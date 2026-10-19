@@ -1,3 +1,11 @@
+## Current verification — 19 October 2026
+
+Owner authorizes Stage/Preview deployment and disposable funded Poker/deletion tests after positive isolation preflight. Production, shared V2 reset, paid resources and merge remain forbidden. Main now contains #1125 and #1126; their workflow/ESCROW guard changes are integrated without reverting either Stage migration. Successful main Stage automation runs are observable (e.g.39221672570); this agent only read their results.
+
+WS Preview is still runtime f771972b with generated context unknown/null V3 pins. The existing root-owned environment checker returns PASS for its old Stage checks, but does not inspect Redis. Its root0600 environment is not readable/editable by the agent; permitted sudo covers only the fixed checker and restart. Thus required runtime Redis V3/credential identity is unverified: **NO-GO for deploy**. The existing checker now has a reviewed V3-aware implementation and a fundamental executable regression; operator must install it and configure matching Stage V3 using existing credentials before the agent can prove preflight. Require explicit `PASS Redis V3 stage kcswh:stage:xp:v3`, then dispatch the main-defined WS workflow with exact PR runtime SHA and xpRedisVersion3. No feature/cutover marker is inferred from this configuration.
+
+Read-only Stage: deletion release=false, redis_cutover empty, avatar markers0, reward configs0, deletion requests0. Full frontend/Poker/deletion tests on the new WS remain BLOCKED, not PASS. Prior local/actual Stage component results retain their original scope. See research.md for the current evidence and Storage/HMAC closure conditions.
+
 ## Current closeout status
 
 Preview remains blocked by Netlify branch-env write HTTP403; shared V2 and skip marker unchanged. Real Stage RLS, password/official Auth cleanup and same-email Admin recreation verified, distinct from public signup/UI/full deletion. Storage tracking now has a separate pre-activation flag (default off); no schema/config/activation changes. See research.md latest closeout for actual PASS/failed retry/NOT TESTED evidence, legacy issuer constraints, retained bonus-history audit and minimal privacy/key policy.

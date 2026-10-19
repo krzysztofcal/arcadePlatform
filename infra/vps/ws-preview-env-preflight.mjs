@@ -76,7 +76,7 @@ try {
   }
 
   const stageRef = values.SUPABASE_STAGE_PROJECT_REF;
-  if (!/^[a-z0-9-]+$/.test(stageRef)) reject("preview env stage project ref is invalid");
+  if (stageRef !== "krydukthwdvccggbyjfw") reject("preview env stage project ref is invalid");
 
   const supabaseUrl = values.SUPABASE_URL || values.SUPABASE_URL_V2;
   if (!supabaseUrl) reject("preview env file must define stage Supabase URL and DB URL");
@@ -93,7 +93,22 @@ try {
     reject("preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF");
   }
 
-  process.stdout.write("PASS\n");
+  const v3 = values.XP_REDIS_VERSION === "3" || !!values.XP_REDIS_ENV || /:v3(?:$|:)/.test(values.XP_KEY_NS || "");
+  if (v3) {
+    if (values.XP_REDIS_VERSION !== "3" || values.XP_REDIS_ENV !== "stage"
+      || values.XP_KEY_NS !== "kcswh:stage:xp:v3" || values.XP_TEST_MODE === "1") {
+      reject("preview env Redis V3 configuration is invalid");
+    }
+    for (const key of ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"]) {
+      if (!values[key]?.trim()) reject(`preview env file must define ${key}`);
+    }
+    for (const key of ["ARCADE_DEPLOY_TARGET", "CONTEXT", "NETLIFY_CONTEXT"]) {
+      if (values[key] && !["deploy-preview", "branch-deploy", "development", "dev"].includes(values[key])) {
+        reject("preview env Redis deployment context is invalid");
+      }
+    }
+  }
+  process.stdout.write(v3 ? "PASS Redis V3 stage kcswh:stage:xp:v3\n" : "PASS legacy Redis; V3 not verified\n");
 } catch (error) {
   const reason = error instanceof PreflightError
     ? error.message

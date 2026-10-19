@@ -1,3 +1,11 @@
+## Current verification — 19 October 2026
+
+Owner authorizes Stage/Preview deployment and disposable funded Poker/deletion tests after positive isolation preflight. Production, shared V2 reset, paid resources and merge remain forbidden. Main now contains #1125 and #1126; their workflow/ESCROW guard changes are integrated without reverting either Stage migration. Successful main Stage automation runs are observable (e.g.39221672570); this agent only read their results.
+
+WS Preview is still runtime f771972b with generated context unknown/null V3 pins. The existing root-owned environment checker returns PASS for its old Stage checks, but does not inspect Redis. Its root0600 environment is not readable/editable by the agent; permitted sudo covers only the fixed checker and restart. Thus required runtime Redis V3/credential identity is unverified: **NO-GO for deploy**. The existing checker now has a reviewed V3-aware implementation and a fundamental executable regression; operator must install it and configure matching Stage V3 using existing credentials before the agent can prove preflight. Require explicit `PASS Redis V3 stage kcswh:stage:xp:v3`, then dispatch the main-defined WS workflow with exact PR runtime SHA and xpRedisVersion3. No feature/cutover marker is inferred from this configuration.
+
+Read-only Stage: deletion release=false, redis_cutover empty, avatar markers0, reward configs0, deletion requests0. Full frontend/Poker/deletion tests on the new WS remain BLOCKED, not PASS. Prior local/actual Stage component results retain their original scope. See research.md for the current evidence and Storage/HMAC closure conditions.
+
 ## Current owner authorization (supersedes historical restrictions below)
 
 Stage-only schema/configuration/exact-SHA Preview deployment and integration tests on new disposable fixtures are authorized after verified isolation. Production, shared V2 reset, paid resources and merge remain unauthorized. One existing Free database with stage/prod namespaces; monthly quota/headroom is an accepted risk, not GO/NO-GO. T02d includes one forward-only canonical migration assembled from reviewed proposals, additive classification in the existing inventory/guard (no historical hashes changed), transactional Stage preflight and explicit Stage application while release remains false. T05d4 can verify isolated V3 components but must not attest shared legacy reset or drain without evidence.
@@ -102,3 +110,13 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [ ] T05e remains operationally blocked by legacy issuers/old cleanup retirement and actual expiry/ownership proof; technical code audited, no false marker.
 - [ ] T06b remains blocked by unprovable historical verified-email-at-payout coverage and owner legal/LIA/privacy/key-continuity decisions; no fabricated proofs/history_ready.
 - [ ] T07b full frontend-to-COMPLETED, real all-in deletion and authenticated Google remain NOT TESTED. Shared WS exact-SHA redeploy awaits workflow integration and matching protected Stage runtime configuration.
+
+## Current continuation checklist (19 October)
+
+- [x] Integrate main #1125/#1126; preserve both conflict sides/evidence, exact ESCROW guard/tests and immutable migrations. Only research.md conflicted.
+- [x] Existing protected-env checker gains pinned Stage/V3 validation and explicit nonsecret V3/legacy result; fundamental regression covers complete configuration, missing fields, foreign namespace/project, test mode and Production context.
+- [ ] Operator installs reviewed checker and updates root0600 Stage Preview environment; no restart until exact artifact is ready. No sudo/environment permission bypass.
+- [ ] Positive actual V3 preflight, then main-defined exact-SHA WS deploy, browser auth/JOIN/game/Poker/all-in/deletion/recovery fixtures and truthful cleanup evidence.
+- [x] Refresh bounded Storage catalog/issuer and hot/archive reward audits read-only; no object/identity/financial mutation.
+- [ ] T05e actual issuer+cleanup drain, complete ownership reconciliation and capability/in-flight expiry proof. No cutover marker.
+- [ ] T06b authoritative historic verified-email reconciliation and owner legal/LIA/privacy/retention decision. No history_ready approval or key reset.
