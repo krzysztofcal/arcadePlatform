@@ -146,3 +146,16 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [x] Verify22 balanced unique transactions/registry receipts, tested UUID ownership/replay rejection, automatic deferred cash-out, canonical closure/escrow0/seats0 and Auth sessions0.
 - [x] Record retained3 test identities/1200CH under NO Auth-delete/BURN; preserve receipts/history. No manual data repair or source/runtime change.
 - [ ] T07b residual: full safe lifecycle/BURN/Auth-last/re-registration/Google and actual provider fault/restart coverage under new GO; T05e/T06b/Redis cutover still block activation. Positive human-winner payout/lost positive cash-out response not separately covered.
+
+
+## Read-only T05e/T06b closure work — 19 October 2026
+
+- [x] Audit current/history avatar issuer+cleanup source, existing cleanup uncertainty gates and fresh aggregate Stage bucket/profile/tracking metadata; inspect reward source and scoped receipt/claim/archive aggregates. No values/objects exported or markers changed.
+- [ ] T05e-a: operational inventory of all immutable Netlify issuer/cleanup revisions, aliases and privileged tools; record exact access-retirement/drain proof. Prepare only; execution needs separate GO.
+- [ ] T05e-b: establish provider-side in-flight upload completion bound (not client abort); choose evidence-based grace for profile-avatar.mjs and cleanupDeletionAvatars. Missing bound => NO-GO. Add only a fundamental boundary/uncertainty regression if behavior needs correction.
+- [ ] T05e-c: reconcile both bucket metadata sets with user_profiles/profile_avatar_uploads/account_avatar_objects; unresolved ownership or lost manifests blocks attestation. Output UUID filename/empty pending bucket are insufficient. Drain legacy cleanup before enabling tracking. Execute only after GO; confirm exact paths again after all horizons before cutover proposal.
+- [ ] T06b-a: reconcile hot/registry/replay/archive receipts once per transaction UUID; scope Daily/once and private global paid totals; prove verified-email-at-payout provenance including deleted identities. Missing history remains UNKNOWN/history_ready false, never fabricated seed.
+- [ ] T06b-b OWNER: approve lawful basis/LIA, minimal program/campaign retention, daily replay horizon, rights handling/privacy notice and historical-gap policy. Recommended preserve caps and pause protected claims pending evidence; changed business promise is separate approval.
+- [ ] T06b-c: prove restricted key/version backup continuity without exposing bytes; use existing key-check/fail-closed tests. Real key rotation requires old/new recognition/locking/receipt-dedupe design and separate GO before changing code/config.
+- [ ] SECURITY OWNER: establish snapshot scope/time/access/copy evidence where available, review potential Production/shared credential exposure and authorize coordinated rotation; assess incident duties. Exact deleted path absence does not prove no disclosure. No automatic rotation.
+- [ ] Before T05e/T06b completion: separate operational GO, real isolated Stage evidence and owner decisions; do not substitute local tests or financial Poker PASS for these gates.
