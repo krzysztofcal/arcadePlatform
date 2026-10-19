@@ -1163,6 +1163,13 @@
       "sha256": "3d7375771822df62ec8972abb5748f950847eba0ff2ed84d77937f370d543323",
       "category": "needs-production-equivalent",
       "purpose": "#1117 known USER trigger compatibility with exact Stage escrow dependency inventory; unknown dependencies still fail closed; separate Production GO"
+    },
+    {
+      "file": "20261019170000_account_avatar_manifest_guards.sql",
+      "version": "20261019170000",
+      "sha256": "32b56f4a458f4104c1886e5093df153ecf5b74ebeb18e393cbea20058049bd9a",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 local-only avatar protocol v3; trigger installed disabled; no Stage/Production application, activation or provider evidence authorized"
     }
   ]
 }

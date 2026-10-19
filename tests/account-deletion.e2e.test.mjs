@@ -46,6 +46,8 @@ async function fixture(balance=75) {
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-requests-v2.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-wallet-retirement-v2.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-avatar-tracking-v2.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261019170000_account_avatar_manifest_guards.sql',import.meta.url),'utf8'));
+    await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
   }
   await db.exec('truncate chips_entries,chips_transactions,chips_transaction_idempotency,chips_accounts,account_deletion_requests,poker_seats,poker_state,auth.users cascade');
   await db.query('insert into auth.users values($1),($2)',[USER,OTHER]);
@@ -92,7 +94,8 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
   const env={ACCOUNT_DELETION_ENABLED:'1',SUPABASE_URL:'https://local-fixture.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'fixture-only',
     UPSTASH_REDIS_REST_URL:'https://local-redis.invalid',ACCOUNT_DELETION_AVATAR_TRACKING_MARKER:'fixture',ACCOUNT_DELETION_AVATAR_GRACE_SECONDS:'60'};
   await db.query('update account_deletion_release set redis_cutover=$1',[{namespace,epoch:'fixture-epoch',endpoint_hash:createHash('sha256').update(env.UPSTASH_REDIS_REST_URL).digest('hex'),writers_drained:true,legacy_xp_reset_verified:true,manifest_hash:'f'.repeat(64)}]);
-  await db.exec("insert into private.avatar_tracking_cutover values('fixture',now()-interval '1 day',true,'profile-avatar-uploads','profile-avatars')");
+  await db.exec("insert into private.avatar_tracking_cutover(marker,cutover_at,legacy_inventory_verified,upload_bucket,public_bucket) values('fixture',now()-interval '1 day',true,'profile-avatar-uploads','profile-avatars')");
+  await db.exec("update private.avatar_tracking_cutover set provider_max_token_seconds=7200,provider_max_completion_seconds=0,provider_evidence='LOCAL FIXTURE ONLY'");
   const request=await begin(tx=>requestDeletion(tx,USER));
   let leaveCalls=0,authCalls=0,disconnected=0,authPresent=true;
   const fetchImpl=async(url,options={})=>{

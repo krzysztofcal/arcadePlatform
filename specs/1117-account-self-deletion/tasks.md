@@ -188,3 +188,12 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [ ] After separate GO, update existing consumePendingUpload/finalizeAvatar/finishSigning and canonical runtime purge/cleanup checks; promote audit reproductions into fundamental fixed-behavior regressions. No new table/service/secret rotation.
 - [ ] Obtain provider TTL/admitted-request/commit/retry closure evidence and separately approved exact-path isolated Stage campaign. UNKNOWN bound/direct uncontrolled writer => NO-GO; neither repeated cleanup nor finite sample proves no late recreation.
 - [ ] Keep T05e OPEN/COMPLETED unavailable until actual protocol, ownership and closure proofs. Shared credential retirement preference above is superseded; any alternative fence requires owner review if no-rotation proof remains impossible. Redis/HMAC/T07b unchanged.
+
+
+## T05e local implementation (latest checkpoint)
+
+- [x] T05e-1 prepare forward-only20261019170000_account_avatar_manifest_guards.sql: disabled-install v3 guard, immutable manifests, atomic consumption protocol, existing-table provider evidence fields, readiness and lease-bound prepare-purge/Auth-cascade path. No remote apply. Append only new source hash in Production inventory.
+- [x] T05e-2 existing profile-avatar signing/consume/finalize and Storage/runtime cleanup updated; exact output intent before I/O, RETURNING receipts, no lost manifest success, unknown provider evidence blocks done. No user-profile change, table/service/secret rotation or history-deploy edits.
+- [x] T05e-3 permanent fundamental regressions cover late signing/preserved legacy NO-GO, legacy DELETE, rejected untracked finalize, uncertain supported output, successful path/retry, wrong/expired lease and legitimate Auth cascade. Full local all-in/BURN/Auth fixture retained; not actual Stage proof.
+- [x] T05e-4 document deploy-supported-writer/tracking readiness BEFORE guard activation, legacy ownership/drain, separate provider evidence/cutover, forward-only rollback and breaking effects. PR Draft prevents automatic Stage apply; suppress Netlify deploys for this no-deploy task.
+- [ ] Real Stage migration/protocol activation, provider bounds, legacy reconciliation and isolated integration campaign require separate GO. No markers or evidence filled remotely; T05e OPEN/COMPLETED NO-GO, T06b/T07b/Redis gates unchanged.

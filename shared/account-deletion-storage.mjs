@@ -14,16 +14,19 @@ export async function cleanupDeletionAvatars({ userId, requestId, beginSql, asse
     || !/^https:\/\/[^/]+\.supabase\.co$/i.test(base) || !key || !assertLease || !beginSql) throw unavailable();
   const snapshot = () => beginSql(async (tx) => {
     await assertLease(tx);
+    const [guards] = await tx.unsafe('select private.account_avatar_guards_ready() as ready;');
+    if (guards?.ready !== true) throw unavailable();
     const [cutover] = await tx.unsafe(`select *, clock_timestamp() as server_now,
-cutover_at + (($2::bigint + 7200) * interval '1 second') as safe_after
+cutover_at + (($2::bigint + 7200 + provider_max_completion_seconds) * interval '1 second') as safe_after
 from private.avatar_tracking_cutover where marker=$1;`, [marker,grace]);
-    if (!cutover?.legacy_inventory_verified || cutover.upload_bucket !== UPLOAD || cutover.public_bucket !== OUTPUT) throw unavailable();
-    const [safety] = await tx.unsafe(`select count(*) filter (where tracking_version is distinct from 2
+    if (!Number.isSafeInteger(cutover?.provider_max_token_seconds) || cutover.provider_max_token_seconds < 1 || cutover.provider_max_token_seconds > 7200
+      || !Number.isSafeInteger(cutover?.provider_max_completion_seconds) || cutover.provider_max_completion_seconds < 0 || !cutover.provider_evidence || !cutover?.legacy_inventory_verified || cutover.upload_bucket !== UPLOAD || cutover.public_bucket !== OUTPUT) throw unavailable();
+    const [safety] = await tx.unsafe(`select count(*) filter (where tracking_version is distinct from 3
 or signing_finished_at is null or capability_until is null
 or (output_write_started_at is not null and output_write_finished_at is null))::int as uncertain,
 max(capability_until) as capability_until from public.profile_avatar_uploads where user_id=$1;`, [userId]);
     if (Number(safety?.uncertain || 0)) throw unavailable();
-    const wait = Math.max(Date.parse(cutover.safe_after), safety?.capability_until ? Date.parse(safety.capability_until) : 0);
+    const wait = Math.max(Date.parse(cutover.safe_after), safety?.capability_until ? Date.parse(safety.capability_until) + cutover.provider_max_completion_seconds * 1000 : 0);
     if (!Number.isFinite(wait)) throw unavailable();
     if (wait > Date.parse(cutover.server_now)) return { waitUntil: new Date(wait).toISOString() };
     // Preserve current selected key before a later profile/Auth cascade. Never list
@@ -55,15 +58,17 @@ order by id limit 5;`, [userId]);
       ]);
       await beginSql(async (tx) => {
         await assertLease(tx);
-        await tx.unsafe(`update public.profile_avatar_uploads set source_deleted_at=clock_timestamp(),
-output_deleted_at=case when output_path is not null then clock_timestamp() else null end where id=$1 and user_id=$2;`, [row.id,userId]);
+        const receipts = await tx.unsafe(`update public.profile_avatar_uploads set source_deleted_at=coalesce(source_deleted_at,clock_timestamp()),
+output_deleted_at=case when output_path is not null then coalesce(output_deleted_at,clock_timestamp()) else null end where id=$1 and user_id=$2 returning id;`, [row.id,userId]);
+        if (receipts.length !== 1) throw unavailable();
       });
     }),
     ...current.objects.map(async (row) => {
       await remove(OUTPUT,row.output_path);
       await beginSql(async (tx) => {
         await assertLease(tx);
-        await tx.unsafe('update private.account_avatar_objects set deleted_at=clock_timestamp() where user_id=$1 and output_path=$2;', [userId,row.output_path]);
+        const receipts = await tx.unsafe('update private.account_avatar_objects set deleted_at=coalesce(deleted_at,clock_timestamp()) where user_id=$1 and output_path=$2 returning output_path;', [userId,row.output_path]);
+        if (receipts.length !== 1) throw unavailable();
       });
     }),
   ]);

@@ -85,7 +85,9 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
         await tx.unsafe('delete from public.bonus_campaign_eligible_users where user_id=$1;',[context.userId]);
         await tx.unsafe('delete from public.bonus_claims where user_id=$1;',[context.userId]);
         await tx.unsafe('delete from public.favorites where user_id=$1;',[context.userId]);
-        await tx.unsafe('delete from public.profile_avatar_uploads where user_id=$1;',[context.userId]);
+        await tx.unsafe('select private.account_avatar_prepare_purge($1,$2,$3,$4);',
+          [context.userId,context.requestId,context.generation,env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER]);
+        // Public manifests survive until the authorized Auth FK cascade.
         await tx.unsafe('delete from private.account_avatar_objects where user_id=$1;',[context.userId]);
         await tx.unsafe('delete from public.user_profiles where user_id=$1;',[context.userId]);
       });
@@ -94,7 +96,11 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
     auth: (context) => deleteAuth({userId:context.userId,supabaseUrl:env.SUPABASE_URL || env.SUPABASE_URL_V2,
       serviceRoleKey:env.SUPABASE_SERVICE_ROLE_KEY,
       authorizeDeletion: (userId) => transactionFor(context,async (tx,request) => {
-        if (userId !== request.old_user_id || request.phase !== 'auth' || request.progress?.cleanup?.done !== true
+        const [guards] = await tx.unsafe('select private.account_avatar_guards_ready() as ready;');
+        if (guards?.ready !== true || request.progress?.avatarPurge?.owner !== userId
+          || request.progress?.avatarPurge?.requestId !== context.requestId
+          || request.progress?.avatarPurge?.marker !== env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER
+          || userId !== request.old_user_id || request.phase !== 'auth' || request.progress?.cleanup?.done !== true
           || request.progress?.poker?.done !== true || !request.progress?.walletRetirement?.retiredAt) throw new Error('deletion_prerequisites_missing');
         await tx.unsafe(`update public.account_deletion_requests set progress=jsonb_set(progress,'{authIntent}', 'true'::jsonb)
           where request_id=$1;`,[context.requestId]);

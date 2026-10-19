@@ -28,9 +28,10 @@ async function activeTransaction(userId, deps, fn) {
 }
 async function finishSigning(userId, id, deps) {
   const grace = capabilityGrace(deps);
-  await (deps.executeSql || executeSql)(`update public.profile_avatar_uploads
+  const rows = await (deps.executeSql || executeSql)(`update public.profile_avatar_uploads
 set signing_finished_at=clock_timestamp(), capability_until=clock_timestamp()+($3::bigint * interval '1 millisecond')
-where id=$1 and user_id=$2;`, [id,userId,CAPABILITY_MS + grace]);
+where id=$1 and user_id=$2 and signing_finished_at is null returning id;`, [id,userId,CAPABILITY_MS + grace]);
+  if (rows?.length !== 1) throw avatarError('avatar_tracking_unavailable',503);
 }
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 const FORMAT_MIME = Object.freeze({ jpeg: "image/jpeg", png: "image/png", webp: "image/webp" });
@@ -110,7 +111,7 @@ async function createPendingUpload(userId, payload, deps = {}) {
     capabilityGrace(deps);
     await activeTransaction(userId, deps, (tx) => tx.unsafe(`insert into public.profile_avatar_uploads
       (id,user_id,source_path,declared_mime_type,declared_size,expires_at,tracking_version)
-      values ($1,$2,$3,$4,$5,$6::timestamptz,2);`, [id,userId,sourcePath,mimeType,size,expiresAt]));
+      values ($1,$2,$3,$4,$5,$6::timestamptz,3);`, [id,userId,sourcePath,mimeType,size,expiresAt]));
   } else await runSql(
     `insert into public.profile_avatar_uploads
        (id, user_id, source_path, declared_mime_type, declared_size, expires_at)
@@ -149,14 +150,15 @@ async function createPendingUpload(userId, payload, deps = {}) {
 }
 
 async function consumePendingUpload(userId, uploadId, deps = {}) {
+  const outputPath = `${crypto.randomUUID()}.webp`;
   if (!/^[0-9a-f-]{36}$/i.test(String(uploadId || ""))) throw avatarError("invalid_upload");
   const runSql = deps.executeSql || executeSql;
   const consume = (sql) => sql(
     `update public.profile_avatar_uploads
-     set consumed_at = timezone('utc', now())
-     where id = $1 and user_id = $2 and consumed_at is null and expires_at > timezone('utc', now())
-     returning id::text, source_path, declared_mime_type, declared_size;`,
-    [uploadId, userId],
+     set consumed_at = timezone('utc', now())${enabled(deps) ? ', output_path=$3, output_write_started_at=clock_timestamp()' : ''}
+     where id = $1 and user_id = $2 and consumed_at is null and expires_at > timezone('utc', now())${enabled(deps) ? ' and tracking_version=3' : ''}
+     returning id::text, source_path, declared_mime_type, declared_size, output_path;`,
+    enabled(deps) ? [uploadId, userId, outputPath] : [uploadId, userId],
   );
   const rows = enabled(deps)
     ? await activeTransaction(userId, deps, (tx) => consume((q,p) => tx.unsafe(q,p)))
@@ -180,6 +182,7 @@ async function finalizeAvatar(userId, uploadId, deps = {}) {
   let newAvatarKey = null;
   let profileUpdated = false;
   let outputWriteConfirmed = false;
+  let outputAttempted = false;
   try {
     const { response } = await storageRequest(storagePath(UPLOAD_BUCKET, pending.source_path), { method: "GET" }, deps);
     const source = Buffer.from(await response.arrayBuffer());
@@ -194,12 +197,8 @@ async function finalizeAvatar(userId, uploadId, deps = {}) {
       throw avatarError("avatar_dimensions_too_large");
     }
     const processed = await image.rotate().resize(256, 256, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
-    newAvatarKey = `${crypto.randomUUID()}.webp`;
-    if (enabled(deps)) await activeTransaction(userId, deps, async (tx) => {
-      const rows = await tx.unsafe(`update public.profile_avatar_uploads set output_path=$3, output_write_started_at=clock_timestamp()
-where id=$1 and user_id=$2 and tracking_version=2 returning id;`, [uploadId,userId,newAvatarKey]);
-      if (!rows?.[0]) throw avatarError('avatar_tracking_unavailable',503);
-    });
+    newAvatarKey = enabled(deps) ? pending.output_path : `${crypto.randomUUID()}.webp`;
+    outputAttempted = true;
     await storageRequest(storagePath(PUBLIC_BUCKET, newAvatarKey, null), {
       method: "POST",
       headers: { "content-type": "image/webp", "cache-control": "31536000", "x-upsert": "false" },
@@ -214,8 +213,14 @@ where id=$1 and user_id=$2 and tracking_version=2 returning id;`, [uploadId,user
     if (newAvatarKey && !profileUpdated) await deleteStorageObject(PUBLIC_BUCKET, newAvatarKey, deps).catch(() => {});
     throw error;
   } finally {
-    if (enabled(deps) && outputWriteConfirmed) await runSql(`update public.profile_avatar_uploads
-set output_write_finished_at=clock_timestamp() where id=$1 and user_id=$2 and output_write_started_at is not null;`, [uploadId,userId]).catch(() => {});
+    // A confirmed POST or an attempt never made is terminal. A lost POST
+    // response remains uncertain even if compensating deletion appeared to work.
+    if (enabled(deps) && (outputWriteConfirmed || !outputAttempted)) {
+      const rows = await runSql(`update public.profile_avatar_uploads
+set output_write_finished_at=clock_timestamp() where id=$1 and user_id=$2 and output_write_started_at is not null
+and output_write_finished_at is null returning id;`, [uploadId,userId]);
+      if (rows?.length !== 1) throw avatarError('avatar_tracking_unavailable',503);
+    }
     try {
       await deleteStorageObject(UPLOAD_BUCKET, pending.source_path, deps);
       if (!enabled(deps)) await runSql(`delete from public.profile_avatar_uploads where id = $1 and user_id = $2;`, [uploadId, userId]);
