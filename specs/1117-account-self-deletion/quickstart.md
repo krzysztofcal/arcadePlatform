@@ -18,7 +18,7 @@ Supersedes historical authorization below: isolated Stage schema/test/configurat
 
 ## Scope
 
-Use local/disposable test databases and memory adapters only. No destructive Stage, deployment, production mutation or automatic migration apply under this task. Keep PR DRAFT; modified Stage migration workflow skips drafts. Do not make ready/dispatch migration until separately authorized. Never use ordinary Preview/personal users as deletion fixtures. Historic OVH/OTP PoC is discontinued, no PASS gate or new mail infrastructure.
+Use local/disposable fixtures for fundamental tests. Current owner GO additionally permits isolated Stage/Preview deployment and disposable funded integration tests after the positive preflight above. No Production mutation, shared V2 reset or activation through forged gates. Keep PR DRAFT; no new migration/apply is needed in this continuation. Never use ordinary Preview/personal users as deletion fixtures. Historic OVH/OTP PoC is discontinued, no PASS gate or new mail infrastructure.
 
 ## Fundamental checks
 

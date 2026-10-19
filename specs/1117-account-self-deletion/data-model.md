@@ -8,7 +8,7 @@ Read-only Stage: deletion release=false, redis_cutover empty, avatar markers0, r
 
 ## Current closeout status
 
-Preview remains blocked by Netlify branch-env write HTTP403; shared V2 and skip marker unchanged. Real Stage RLS, password/official Auth cleanup and same-email Admin recreation verified, distinct from public signup/UI/full deletion. Storage tracking now has a separate pre-activation flag (default off); no schema/config/activation changes. See research.md latest closeout for actual PASS/failed retry/NOT TESTED evidence, legacy issuer constraints, retained bonus-history audit and minimal privacy/key policy.
+Netlify Preview #1124 uses verified Stage Supabase and branch-only Redis V3 configuration, with deletion disabled. The earlier403/skip blocker is resolved. Current blocker is protected WS runtime V3 verification; see the current verification section above and research.md. Historical component smoke is not full deployed E2E.
 
 ## Current owner decision / verified Stage scope
 
