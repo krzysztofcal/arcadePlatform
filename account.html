@@ -312,7 +312,6 @@
           </section>
           <div class="account-panel__actions">
             <button type="button" class="account-panel__btn account-panel__btn--primary" id="signOutButton" data-i18n="signOut">Sign out</button>
-            <button type="button" class="account-panel__btn account-panel__btn--ghost" id="deleteAccountButton" data-i18n="deleteAccount">Delete account</button>
           </div>
           <div class="account-bonus" id="welcomeBonusPanel" hidden>
             <div class="account-bonus__title" id="welcomeBonusTitle">Available chip bonuses</div>
@@ -320,7 +319,11 @@
             <button type="button" class="account-bonus__btn" id="welcomeBonusClaimButton" data-i18n="claimBonus" hidden>Claim bonus</button>
             <p class="account-note" id="welcomeBonusStatus" aria-live="polite"></p>
           </div>
-          <p class="account-note" id="deleteAccountNote" data-i18n="deleteAccountNote" tabindex="-1">Deleting your account permanently forfeits CH, XP, achievements and profile data.</p>
+          <section aria-labelledby="accountDangerZoneTitle">
+            <h3 class="xp-card__title" id="accountDangerZoneTitle" data-i18n="accountDangerZone">Danger Zone</h3>
+            <button type="button" class="account-panel__btn account-panel__btn--ghost" id="deleteAccountButton" data-i18n="deleteAccount">Delete account</button>
+            <p class="account-note" id="deleteAccountNote" data-i18n="deleteAccountNote" tabindex="-1">Deleting your account permanently forfeits CH, XP, achievements and profile data.</p>
+          </section>
         </section>
 
         <section class="xp-card chip-panel" id="chipPanel" hidden data-i18n-aria="arcadeChips" aria-label="Arcade chips">

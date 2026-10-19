@@ -1322,7 +1322,7 @@
       // lifecycle details, not prerequisites for leaving this page.
       if (existing) return acknowledgeDeletion(attempt, client);
       if (!attempt.confirmed){
-        attempt.confirmed = window.prompt(t('accountDeletionConfirm', 'All CH (including Poker winnings), XP, achievements and profile data will be lost permanently. Existing Poker hands will settle safely. Type DELETE_ACCOUNT to confirm.')) === 'DELETE_ACCOUNT';
+        attempt.confirmed = window.confirm(t('accountDeletionConfirm', 'Your account will be permanently deleted. You will lose all CH (including Poker winnings), XP, achievements and profile data. This cannot be undone.'));
       }
       if (!attempt.confirmed || !isCurrent()) return;
       return deletionRequest(token, 'POST').catch(function(){
