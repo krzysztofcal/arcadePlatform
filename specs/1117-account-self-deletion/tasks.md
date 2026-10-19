@@ -178,3 +178,13 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [ ] Preserve tracking manifests across remaining legacy cleanup paths. If operational fence suffices, no code change; otherwise propose minimal forward-only public.profile_avatar_uploads DELETE guard plus canonical lease/progress-bound cleanup exception and fundamental regression. Do not alter Storage managed schema/applied migrations.
 - [ ] Obtain provider TTL/admitted-I/O guarantees, execute separately approved isolated multi-assertion Stage campaign, reconcile ownership and use existing exact cleanup/cutover proposal. No arbitrary grace or happy-path-only PASS.
 - [ ] T05e OPEN: no activation until actual fence/drain/ownership/cleanup evidence. Per-deploy manual removal, visitor SSO and blanket key rotation are not universal prerequisites; independent incident handling, Redis/HMAC/T07b gates remain.
+
+
+## No-rotation T05e verification outcome (latest direction)
+
+- [x] Trace identified legacy INSERT-before-sign, independent admitted signing, global old cleanup, consume/output/profile ordering and SQL-only final cleanup snapshot. Existing lifecycle trigger coverage confirmed; capability cancellation not claimed.
+- [x] Run6 existing Storage tests plus3 temporary PGlite/helper probes: new intent/profile writes denied, admitted legacy signing still returns, legacy cleanup loses live proof and legacy finalize can lose output ownership. Reproduction PASS is security NO-GO. No provider calls/implementation performed.
+- [ ] Review minimal forward-only public manifest protocol guard (new intent + consumption + proof preservation + canonical safe purge), not DELETE-only. Proposed <new_timestamp>_account_avatar_manifest_guards.sql; never edit applied migrations or Storage managed schema.
+- [ ] After separate GO, update existing consumePendingUpload/finalizeAvatar/finishSigning and canonical runtime purge/cleanup checks; promote audit reproductions into fundamental fixed-behavior regressions. No new table/service/secret rotation.
+- [ ] Obtain provider TTL/admitted-request/commit/retry closure evidence and separately approved exact-path isolated Stage campaign. UNKNOWN bound/direct uncontrolled writer => NO-GO; neither repeated cleanup nor finite sample proves no late recreation.
+- [ ] Keep T05e OPEN/COMPLETED unavailable until actual protocol, ownership and closure proofs. Shared credential retirement preference above is superseded; any alternative fence requires owner review if no-rotation proof remains impossible. Redis/HMAC/T07b unchanged.
