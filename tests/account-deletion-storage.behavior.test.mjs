@@ -8,7 +8,7 @@ import { requestDeletion } from '../shared/account-deletion.mjs';
 import { cleanupDeletionAvatars } from '../shared/account-deletion-storage.mjs';
 import { ensureUserProfile, updateUserProfile, updateUserAvatarKey } from '../netlify/functions/_shared/user-profile.mjs';
 import { createPendingUpload, finalizeAvatar, cleanupExpiredUploads } from '../netlify/functions/_shared/profile-avatar.mjs';
-const env = { ACCOUNT_DELETION_ENABLED:'1', ACCOUNT_DELETION_AVATAR_GRACE_SECONDS:'300', ACCOUNT_DELETION_AVATAR_TRACKING_MARKER:'local-verified-v2', SUPABASE_URL:'https://local-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY:'test-only-not-real' };
+const env = { ACCOUNT_DELETION_ENABLED:'1', ACCOUNT_DELETION_AVATAR_TRACKING_MARKER:'local-verified-v2', SUPABASE_URL:'https://local-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY:'test-only-not-real' };
 let db;
 after(async()=>{ if(db) await db.close(); });
 async function fixture() {
@@ -69,7 +69,7 @@ test('signed upload capability is retained after five minutes and acceptance dur
     return new Response(JSON.stringify({url:'/object/upload/sign/profile-avatar-uploads/pending/test?token=redacted'}));
   }}),/account_not_active/);
   const [row]=await executeSql('select * from public.profile_avatar_uploads');
-  assert.ok(row.signing_finished_at); assert.ok(new Date(row.capability_until)-new Date(row.signing_finished_at)>=7500000);
+  assert.ok(row.signing_finished_at); assert.ok(new Date(row.capability_until)-new Date(row.signing_finished_at)>=7200000);
   await seedClock("expires_at=clock_timestamp()-interval '10 minutes'");
   await cleanupExpiredUploads(deps);
   assert.equal(removed.length,0);
@@ -138,11 +138,25 @@ test('capability tracking can precede deletion activation and retains expired fi
   await createPendingUpload(userId,{mimeType:'image/png',size:100},tracking);
   const [row]=await executeSql('select * from public.profile_avatar_uploads');
   assert.equal(row.tracking_version,3);assert.ok(row.signing_finished_at);
-  assert.ok(Date.parse(row.capability_until)-Date.parse(row.signing_finished_at)>=7500000);
+  const horizon=Date.parse(row.capability_until)-Date.parse(row.signing_finished_at);
+  assert.ok(horizon>=7200000 && horizon<7201000,'documented 2h tracking horizon, no added margin');
   await seedClock("expires_at=clock_timestamp()-interval '10 minutes'");
   await cleanupExpiredUploads(tracking);
   assert.equal((await executeSql('select count(*)::int n from public.profile_avatar_uploads'))[0].n,1);
   assert.equal(removed.length,0);
+});
+
+test('older longer capability horizon and provider completion bound remain blocking without grace',async()=>{
+  const {userId,deps,cleanup,executeSql,removed}=await fixture();
+  await createPendingUpload(userId,{mimeType:'image/png',size:100},deps);
+  await seedClock("signing_finished_at=clock_timestamp()-interval '3 hours',capability_until=clock_timestamp()+interval '1 hour',expires_at=clock_timestamp()-interval '1 hour'");
+  await executeSql('update private.avatar_tracking_cutover set provider_max_completion_seconds=120');
+  const [manifest]=await executeSql('select capability_until from public.profile_avatar_uploads');
+  await cleanupExpiredUploads(deps);
+  const result=await cleanup();
+  assert.equal(Date.parse(result.waitUntil),Date.parse(manifest.capability_until)+120000);
+  assert.equal(result.done,undefined);assert.equal(removed.length,0);
+  assert.equal(Date.parse((await executeSql('select capability_until from public.profile_avatar_uploads'))[0].capability_until),Date.parse(manifest.capability_until));
 });
 
 test('v3 rejects legacy admission; already admitted legacy signing remains tracked and blocks completion',async()=>{
@@ -213,9 +227,11 @@ test('missing receipts/guard/provider evidence fail closed; canonical purge need
   await db.exec('alter table public.profile_avatar_uploads disable trigger account_avatar_manifest_guard_v3');
   await assert.rejects(cleanup(),/dependency_unavailable/);
   await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
-  await executeSql('update private.avatar_tracking_cutover set provider_max_completion_seconds=null');
-  await assert.rejects(cleanup(),/dependency_unavailable/);
-  await executeSql('update private.avatar_tracking_cutover set provider_max_completion_seconds=0');
+  for(const field of ['provider_max_token_seconds','provider_max_completion_seconds','provider_evidence']) {
+    await executeSql('update private.avatar_tracking_cutover set '+field+'=null');
+    await assert.rejects(cleanup(),/dependency_unavailable/);
+    await executeSql("update private.avatar_tracking_cutover set provider_max_token_seconds=7200,provider_max_completion_seconds=0,provider_evidence='LOCAL MODEL ONLY; not provider proof'");
+  }
   const req=await deletion();
   assert.deepEqual(await cleanup(),{done:true});
   await executeSql("update public.account_deletion_requests set status='PROCESSING',phase='cleanup',accepted_at=clock_timestamp(),lease_generation=4,lease_until=clock_timestamp()+interval '120 seconds' where request_id=$1",[req.request_id]);

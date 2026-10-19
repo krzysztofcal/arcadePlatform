@@ -92,7 +92,7 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
   const epochKey=namespace+':lifecycle:epoch';await store.set(epochKey,'fixture-epoch');
   for(const id of [USER,OTHER])await guardedUserMutation({store,userId:id,key:keys.profile(id),value:'private fixture',operation:'set',beginSql:begin});
   const env={ACCOUNT_DELETION_ENABLED:'1',SUPABASE_URL:'https://local-fixture.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'fixture-only',
-    UPSTASH_REDIS_REST_URL:'https://local-redis.invalid',ACCOUNT_DELETION_AVATAR_TRACKING_MARKER:'fixture',ACCOUNT_DELETION_AVATAR_GRACE_SECONDS:'60'};
+    UPSTASH_REDIS_REST_URL:'https://local-redis.invalid',ACCOUNT_DELETION_AVATAR_TRACKING_MARKER:'fixture'};
   await db.query('update account_deletion_release set redis_cutover=$1',[{namespace,epoch:'fixture-epoch',endpoint_hash:createHash('sha256').update(env.UPSTASH_REDIS_REST_URL).digest('hex'),writers_drained:true,legacy_xp_reset_verified:true,manifest_hash:'f'.repeat(64)}]);
   await db.exec("insert into private.avatar_tracking_cutover(marker,cutover_at,legacy_inventory_verified,upload_bucket,public_bucket) values('fixture',now()-interval '1 day',true,'profile-avatar-uploads','profile-avatars')");
   await db.exec("update private.avatar_tracking_cutover set provider_max_token_seconds=7200,provider_max_completion_seconds=0,provider_evidence='LOCAL FIXTURE ONLY'");

@@ -7,18 +7,17 @@ const AVATAR = /^[0-9a-f-]{36}\.webp$/i;
 
 export async function cleanupDeletionAvatars({ userId, requestId, beginSql, assertLease, env = process.env, fetch: fetchImpl = globalThis.fetch }) {
   const marker = env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER;
-  const grace = Number(env.ACCOUNT_DELETION_AVATAR_GRACE_SECONDS);
   const base = String(env.SUPABASE_URL || env.SUPABASE_URL_V2 || '').replace(/\/$/,'');
   const key = env.SUPABASE_SERVICE_ROLE_KEY;
-  if (env.ACCOUNT_DELETION_ENABLED !== '1' || !marker || !Number.isSafeInteger(grace) || grace < 60 || grace > 86400
+  if (env.ACCOUNT_DELETION_ENABLED !== '1' || !marker
     || !/^https:\/\/[^/]+\.supabase\.co$/i.test(base) || !key || !assertLease || !beginSql) throw unavailable();
   const snapshot = () => beginSql(async (tx) => {
     await assertLease(tx);
     const [guards] = await tx.unsafe('select private.account_avatar_guards_ready() as ready;');
     if (guards?.ready !== true) throw unavailable();
     const [cutover] = await tx.unsafe(`select *, clock_timestamp() as server_now,
-cutover_at + (($2::bigint + 7200 + provider_max_completion_seconds) * interval '1 second') as safe_after
-from private.avatar_tracking_cutover where marker=$1;`, [marker,grace]);
+cutover_at + ((7200 + provider_max_completion_seconds) * interval '1 second') as safe_after
+from private.avatar_tracking_cutover where marker=$1;`, [marker]);
     if (!Number.isSafeInteger(cutover?.provider_max_token_seconds) || cutover.provider_max_token_seconds < 1 || cutover.provider_max_token_seconds > 7200
       || !Number.isSafeInteger(cutover?.provider_max_completion_seconds) || cutover.provider_max_completion_seconds < 0 || !cutover.provider_evidence || !cutover?.legacy_inventory_verified || cutover.upload_bucket !== UPLOAD || cutover.public_bucket !== OUTPUT) throw unavailable();
     const [safety] = await tx.unsafe(`select count(*) filter (where tracking_version is distinct from 3

@@ -9,16 +9,12 @@ const PUBLIC_BUCKET = "profile-avatars";
 const MAX_SOURCE_BYTES = 1024 * 1024;
 const MAX_DIMENSION = 1024;
 const PENDING_TTL_MS = 5 * 60 * 1000;
+// Provisional documented capability horizon, NOT proof of provider write closure.
 const CAPABILITY_MS = 2 * 60 * 60 * 1000;
 // Tracking must be deployed before deletion acceptance; it is not activation.
 function enabled(deps) {
   const env = deps.env || process.env;
   return env.ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED === "1" || accountDeletionEnabled(env);
-}
-function capabilityGrace(deps) {
-  const seconds = Number((deps.env || process.env).ACCOUNT_DELETION_AVATAR_GRACE_SECONDS);
-  if (!Number.isSafeInteger(seconds) || seconds < 60 || seconds > 86400) throw avatarError('avatar_tracking_unavailable', 503);
-  return seconds * 1000;
 }
 async function activeTransaction(userId, deps, fn) {
   return (deps.beginSql || beginSql)(async (tx) => {
@@ -27,10 +23,9 @@ async function activeTransaction(userId, deps, fn) {
   });
 }
 async function finishSigning(userId, id, deps) {
-  const grace = capabilityGrace(deps);
   const rows = await (deps.executeSql || executeSql)(`update public.profile_avatar_uploads
 set signing_finished_at=clock_timestamp(), capability_until=clock_timestamp()+($3::bigint * interval '1 millisecond')
-where id=$1 and user_id=$2 and signing_finished_at is null returning id;`, [id,userId,CAPABILITY_MS + grace]);
+where id=$1 and user_id=$2 and signing_finished_at is null returning id;`, [id,userId,CAPABILITY_MS]);
   if (rows?.length !== 1) throw avatarError('avatar_tracking_unavailable',503);
 }
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -108,7 +103,6 @@ async function createPendingUpload(userId, payload, deps = {}) {
   const expiresAt = new Date(Date.now() + PENDING_TTL_MS).toISOString();
   const runSql = deps.executeSql || executeSql;
   if (enabled(deps)) {
-    capabilityGrace(deps);
     await activeTransaction(userId, deps, (tx) => tx.unsafe(`insert into public.profile_avatar_uploads
       (id,user_id,source_path,declared_mime_type,declared_size,expires_at,tracking_version)
       values ($1,$2,$3,$4,$5,$6::timestamptz,3);`, [id,userId,sourcePath,mimeType,size,expiresAt]));
