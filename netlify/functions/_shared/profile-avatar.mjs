@@ -24,7 +24,7 @@ async function activeTransaction(userId, deps, fn) {
 }
 async function finishSigning(userId, id, deps) {
   const rows = await (deps.executeSql || executeSql)(`update public.profile_avatar_uploads
-set signing_finished_at=clock_timestamp(), capability_until=clock_timestamp()+($3::bigint * interval '1 millisecond')
+set signing_finished_at=statement_timestamp(), capability_until=statement_timestamp()+($3::bigint * interval '1 millisecond')
 where id=$1 and user_id=$2 and signing_finished_at is null returning id;`, [id,userId,CAPABILITY_MS]);
   if (rows?.length !== 1) throw avatarError('avatar_tracking_unavailable',503);
 }

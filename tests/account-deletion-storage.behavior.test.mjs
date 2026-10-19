@@ -146,6 +146,16 @@ test('capability tracking can precede deletion activation and retains expired fi
   assert.equal(removed.length,0);
 });
 
+test('signing with active v3 guard records exactly 7200 seconds from one timestamp',async()=>{
+  const {userId,deps,executeSql}=await fixture();
+  assert.equal((await executeSql('select private.account_avatar_guards_ready() as ready'))[0].ready,true);
+  const pending=await createPendingUpload(userId,{mimeType:'image/png',size:100},deps);
+  const [receipt]=await executeSql(`select signing_finished_at is not null as finished,
+    capability_until=signing_finished_at+interval '7200 seconds' as exact_horizon
+    from public.profile_avatar_uploads where id=$1 and user_id=$2`,[pending.uploadId,userId]);
+  assert.deepEqual(receipt,{finished:true,exact_horizon:true});
+});
+
 test('older longer capability horizon and provider completion bound remain blocking without grace',async()=>{
   const {userId,deps,cleanup,executeSql,removed}=await fixture();
   await createPendingUpload(userId,{mimeType:'image/png',size:100},deps);
