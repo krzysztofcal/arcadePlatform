@@ -731,12 +731,16 @@ where constraint_name.contype = 'f'
        );`;
 
 export const RETENTION_UNKNOWN_DELETE_TRIGGER_SQL = `
-select trigger_name
-from information_schema.triggers
-where event_object_schema = 'public'
-  and event_object_table = 'chips_accounts'
-  and event_manipulation = 'DELETE'
-  and trigger_name <> 'chips_accounts_escrow_retirement_guard';`;
+select triggers.tgname as trigger_name
+from pg_catalog.pg_trigger triggers
+where triggers.tgrelid = 'public.chips_accounts'::pg_catalog.regclass
+  and not triggers.tgisinternal
+  and (triggers.tgtype::integer & 8) <> 0
+  and triggers.tgname <> 'chips_accounts_escrow_retirement_guard'
+  and not coalesce((triggers.tgname = 'chips_accounts_user_retirement_v2'
+    and triggers.tgfoid = pg_catalog.to_regprocedure('public.chips_guard_user_retirement_v2()')
+    and triggers.tgtype = 31 and triggers.tgenabled = 'O'
+    and triggers.tgnargs = 0), false);`;
 
 function normalizeRow(row) {
   if (!row || typeof row !== "object") return {};
