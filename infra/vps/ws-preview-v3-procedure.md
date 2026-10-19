@@ -1,15 +1,12 @@
-# WS Preview V3 — administrative procedure for review only
+# WS Preview V3 — reviewed administrative procedure
 
-No root execution, installation, restart, deploy or live Redis verification is authorized by this change. The old /tmp procedure and private JSON fragment were removed. Do not reuse the earlier sudo command. This procedure is configuration-only; it does not activate deletion or attest cutover/Storage/HMAC.
+## Current execution status — 19 October, after #1127
 
-## Current hard NO-GO
+Operator preparation completed under the separate administrative GO. Independently observed root-owned Preview base0755, env0600, protected bundle0755, backup directory0700 and exact reviewed code hashes below. The installed no-argument helper actually returned PASS LIVE Redis V3 stage; epochPresent=0; cutover NOT attested. This is not cutover/feature readiness. Main now includes #1127 (fb12d182); WS runtime is still the old f771972b release. No deployment/restart has been performed in the current integration task.
 
-Read-only metadata shows /opt/arcade-ws-preview is arcade:arcade0755, while .env.preview is root:root0600. The directory owner can rename/replace its entries; mode0600 on the file alone is insufficient. Both the installer and new preflight reject untrusted parent ownership or group/world write access. Under the current VPS layout apply fails before any target/backup/lock write.
+This runbook retains the approved install/apply/rollback instructions for audit/recovery, NOT permission to repeat them now. Do not change prepared config or weaken permissions without specific need and separate GO. This continuation permits only integration/local CI/test planning. Keep deletion disabled. No V2/Production operation or marker is authorized.
 
-The selected correction is root:root0755 on this ONE directory only, preserving all deploy subtrees. The exact audited procedure and rollback are below; execution still requires separate GO. No systemd, sudoers, recursive ownership change or Production modification is required.
-
-
-## Audited parent ownership correction — NOT EXECUTED (19 October)
+## Original permission audit and approved correction — operator completed
 
 Read-only stat/lstat/namei/getfacl and copilot access walk confirmed /opt root:root0755; Preview base arcade:arcade0755 (UID/GID1000), no symlink or extended/default ACL; .env.preview root:root0600, no extended ACL. copilot is in arcade-deploy (GID986); arcade is NOT. Traversal remains available through root0755. This supplements, rather than repeats/replaces, Phase A in docs/vps-disaster-recovery.md: its four deploy subtrees contain the workflow's five synchronization roots.
 
@@ -39,13 +36,13 @@ test "$(stat -c '%F:%a:%u:%g' -- /opt)" = 'directory:755:0:0' && test ! -L /opt/
 
 After an apply, first reconcile/roll back the two configuration files while their parent is still protected. Never weaken the parent as a shortcut to bypass failed security checks. Unexpected permissions/ACL/identity changes are NO-GO, not permission for forced repair.
 
-## Required main workflow delivery — NOT DEPLOYED
+## Main workflow delivery — merged #1127; WS NOT DEPLOYED
 
-Current main40f51d6c still ignores the helper's output. This PR changes the workflow to pass xpRedisVersion to the remote shell and require the EXACT live V3 Stage result for input3 BEFORE any rsync. An older helper, missing/legacy configuration, config-only result or failed live request therefore cannot deploy V3. Existing exact no-argument sudo permission is unchanged; new helper auto-verifies LIVE for V3, including before the FIRST deployment. Both extracted and installed generated deploy-context copies must be deploy-preview/3/stage. Existing metadata verification independently compares exact resolved RELEASE_SHA/ref at extraction, before restart and after health gates. The helper independently pins actual Supabase Stage and kcswh:stage:xp:v3, and the live check authenticates approved credentials. These checks do NOT activate deletion/cutover.
+Merged main fb12d182 includes the #1127 workflow-only correction, identical to this PR. The workflow to pass xpRedisVersion to the remote shell and require the EXACT live V3 Stage result for input3 BEFORE any rsync. An older helper, missing/legacy configuration, config-only result or failed live request therefore cannot deploy V3. Existing exact no-argument sudo permission is unchanged; new helper auto-verifies LIVE for V3, including before the FIRST deployment. Both extracted and installed generated deploy-context copies must be deploy-preview/3/stage. Existing metadata verification independently compares exact resolved RELEASE_SHA/ref at extraction, before restart and after health gates. The helper independently pins actual Supabase Stage and kcswh:stage:xp:v3, and the live check authenticates approved credentials. These checks do NOT activate deletion/cutover.
 
-The workflow definition must reach main before any V3 dispatch. Minimal delivery: separately reviewed workflow-only PR based on main with this YAML gate/context verification and its focused workflow tests (no feature/migration/config/deploy). Do not copy the entire #1124, execute PR workflow definitions, manually deploy, or broaden sudo. Root helper installation comes only from the separately reviewed protected bundle; a workflow merge does not install it or grant execution GO. No merge or extra PR created during this preparation. Until owner-reviewed main delivery AND root preparation/LIVE pass are complete, WS Preview Deploy remains BLOCKED.
+Owner merged the minimal workflow-only #1127 into main. That prerequisite is satisfied; no manual or PR-definition deployment is needed. The protected helper/configuration is also prepared and actual LIVE verified. Next separately authorized dispatch must use main as definition and the exact final runtime SHA with xpRedisVersion3. This does not authorize a restart/deployment in the current review, activation or fake cutover evidence.
 
-## Protected code staging — after review and separate GO
+## Protected code staging — completed; retain for audited recovery
 
 Operator stages only these two files from the reviewed exact commit, without executing them, under /usr/local/libexec/arcade-ws-preview-v3:
 
@@ -92,7 +89,7 @@ Necessary protected bookkeeping, not additional live configuration:
 - operation.lock — root:root0600, exclusive nonblocking flock.
 - Random .1117-* temporary files only inside the protected target/backup directories; fsync+atomic rename, cleaned on normal errors. SIGKILL may leave a protected temporary file: reconcile manually, never broad-delete unknown files.
 
-Protected bundle code files above are created only by the separate staging operation. No Production file, service/sudo config, account, database, V2/V3 Redis key, epoch or approval row is changed. No root backup exists yet from this preparation.
+Protected bundle code files above are created only by the separate staging operation. No Production file, service/sudo config, account, database, V2/V3 Redis key, epoch or approval row is changed. The protected backup directory now exists; no backup contents were printed or modified in this integration.
 
 ## Failure handling, repeat and rollback
 

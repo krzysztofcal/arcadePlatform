@@ -1,28 +1,12 @@
-## Latest review correction — 19 October 2026; preparation only
+## Current review boundary — 19 October 2026, after #1127
 
-Authoritative update to the earlier administrative review: choose ONLY Preview base owner correction arcade:arcade0755 → root:root0755, no recursive ownership/mode/ACL change. Preserve Phase A deployment layout from docs/vps-disaster-recovery.md. Read-only audit proves all five sync roots writable/traversable by copilot with basic ACLs: ws-server/shared/node_modules root:arcade-deploy2775; netlify/functions/_shared and _generated copilot:arcade-deploy2775. Intermediate netlify root:arcade-deploy2775 and functions copilot:arcade-deploy0775; no symlinks/access failures found in the five descendant trees. Full audit, guarded root one-liners and rollback limits are in infra/vps/ws-preview-v3-procedure.md. No permissions changed.
+Current authorization is synchronization, fundamental local/CI verification and Stage test planning ONLY. Do not dispatch WS Preview Deploy, restart, activate deletion, mutate/configure VPS, run funded/destructive Stage fixtures, reset Redis, change Production or merge #1124. Later deployment/runtime verification and disposable Stage tests require the next GO. Older milestones below retain their original evidence scope, not current authorization.
 
-No-argument privileged preflight now performs actual LIVE verification automatically whenever V3 is configured; --config-only is diagnostic, never a deploy proof. Keep explicit --verify-redis, protected manifest/descriptor checks, same read-only PING+exact Stage EXISTS, original backup/rollback, fixed Stage/deletion0 configuration and secret FIFO unchanged. Workflow requires exact LIVE Stage V3 output for xpRedisVersion3 before writes; validates BOTH extracted/installed generated context copies deploy-preview/3/stage and keeps exact-SHA/ref release verification. Legacy/missing config, wrong Stage/namespace, old helper or failed LIVE is NO-GO. No general sudo permission change.
+Main fb12d18260bfeadd7d8af01fcdcf69ccd7db3343 contains merged #1127. The workflow in #1124 is byte-identical to main: actual LIVE Stage V3 required before rsync, both generated contexts checked, exact resolved runtime SHA/ref checked before/after install. Keep each shared workflow test once; retain #1124-only helper tests separately in the same existing file. No runtime/security behavior changed in this integration.
 
-Main workflow still needs separately reviewed minimal workflow-only delivery (YAML and focused guards), not a PR-definition dispatch/manual deployment. Prepare here; no merge, root installation, parent chown, apply/rollback, LIVE Redis, restart, WS deploy, V2 reset, Production change or deletion activation performed/authorized. Current host remains NO-GO until separately approved operator execution and actual proof. Existing T05e/T06b/T07b/financial/cutover gates remain open.
+Operator prepared the VPS. Independently observed: Preview base root:root0755, env root:root0600, protected bundle root:root0755, backup directory root:root0700; installed helper and bundle hashes match the reviewed procedure. The allowed no-argument root checker returned **PASS LIVE Redis V3 stage; epochPresent=0; cutover NOT attested**. This proves protected matching Stage Supabase/V3 config and authenticated read-only Redis access, NOT cutover or deletion readiness. No configuration changed during this verification. ACCOUNT_DELETION_ENABLED remains0 in the approved preparation; no approval/epoch/history marker seeded.
 
-## Current authorization — administrative procedure REVIEW ONLY
-
-This continuation authorizes code/docs and unprivileged fixture tests only. Do NOT execute apply/rollback as root, install the bundle/helper, restart, deploy WS, merge or touch Redis data. The earlier /tmp command/private credential fragment are withdrawn and removed. Use the reviewed [administrative procedure](../../infra/vps/ws-preview-v3-procedure.md) only after a new explicit execution GO. Earlier Stage deployment authorization is paused for this preparation.
-
-New security NO-GO: /opt/arcade-ws-preview is owned by the service user arcade, so root0600 on its child environment is not sufficient against path replacement. Current scope does not change that directory or systemd. Selected layout is base root:root0755 with unchanged deployment subtrees; execution needs separate approval; the script refuses the current layout before writes. CONFIG-only checks are not a working Redis/namespace proof; explicit read-only LIVE verification remains pending, not PASS.
-
-## Current verification — 19 October 2026
-
-Owner authorizes Stage/Preview deployment and disposable funded Poker/deletion tests after positive isolation preflight. Production, shared V2 reset, paid resources and merge remain forbidden. Main now contains #1125 and #1126; their workflow/ESCROW guard changes are integrated without reverting either Stage migration. Successful main Stage automation runs are observable (e.g.39221672570); this agent only read their results.
-
-WS Preview is still runtime f771972b with generated context unknown/null V3 pins. The existing root-owned environment checker returns PASS for its old Stage checks, but does not inspect Redis. Its root0600 environment is not readable/editable by the agent; permitted sudo covers only the fixed checker and restart. Thus required runtime Redis V3/credential identity is unverified: **NO-GO for deploy**. The existing checker now has a reviewed V3-aware implementation and a fundamental executable regression; operator must install it and configure matching Stage V3 using existing credentials before the agent can prove preflight. Require explicit `PASS Redis V3 stage kcswh:stage:xp:v3`, then dispatch the main-defined WS workflow with exact PR runtime SHA and xpRedisVersion3. No feature/cutover marker is inferred from this configuration.
-
-Read-only Stage: deletion release=false, redis_cutover empty, avatar markers0, reward configs0, deletion requests0. Full frontend/Poker/deletion tests on the new WS remain BLOCKED, not PASS. Prior local/actual Stage component results retain their original scope. See research.md for the current evidence and Storage/HMAC closure conditions.
-
-## Current owner authorization (supersedes historical restrictions below)
-
-Stage-only schema/configuration/exact-SHA Preview deployment and integration tests on new disposable fixtures are authorized after verified isolation. Production, shared V2 reset, paid resources and merge remain unauthorized. One existing Free database with stage/prod namespaces; monthly quota/headroom is an accepted risk, not GO/NO-GO. T02d includes one forward-only canonical migration assembled from reviewed proposals, additive classification in the existing inventory/guard (no historical hashes changed), transactional Stage preflight and explicit Stage application while release remains false. T05d4 can verify isolated V3 components but must not attest shared legacy reset or drain without evidence.
+Installed runtime release metadata is still f771972b98dc0e877cb0c243e1fbbcbf7b0a1850 with generated unknown/null pins; that is the OLD deployment, not the reviewed candidate. Next dispatch must use workflow definition main, ref=the final pushed #1124 SHA and xpRedisVersion=3. Packaging generates deploy-preview/3/stage; installed release metadata and both generated contexts must be checked after the separately authorized deployment. No current exact-SHA runtime/Poker E2E PASS is claimed. T05e/T06b/T07b and Redis cutover remain open; see quickstart/research for the bounded test plan and prerequisites.
 
 # Tasks — #1117 V2
 
@@ -129,7 +113,7 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 
 - [x] Integrate main #1125/#1126; preserve both conflict sides/evidence, exact ESCROW guard/tests and immutable migrations. Only research.md conflicted.
 - [x] Existing protected-env checker gains pinned Stage/V3 validation and explicit nonsecret V3/legacy result; fundamental regression covers complete configuration, missing fields, foreign namespace/project, test mode and Production context.
-- [ ] Operator installs reviewed checker and updates root0600 Stage Preview environment; no restart until exact artifact is ready. No sudo/environment permission bypass.
+- [x] Operator prepared protected base/bundle/root0600 Stage env; independently verified hashes and actual LIVE PASS. No agent config rewrite or restart.
 - [ ] Positive actual V3 preflight, then main-defined exact-SHA WS deploy, browser auth/JOIN/game/Poker/all-in/deletion/recovery fixtures and truthful cleanup evidence.
 - [x] Refresh bounded Storage catalog/issuer and hot/archive reward audits read-only; no object/identity/financial mutation.
 - [ ] T05e actual issuer+cleanup drain, complete ownership reconciliation and capability/in-flight expiry proof. No cutover marker.
@@ -141,12 +125,19 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [x] Strict descriptor/parent/root-mode/single-link checks, fixed Stage settings/deletion0, immutable two-file backup, bounded lock, fsync/rename, resumable apply and rollback, changed-input/target/corrupt-backup NO-GO.
 - [x] Existing Stage Netlify source verified read-only via a pipe; no credential value printed/persisted, no Production context exported or Redis operation performed.
 - [x] CONFIG-only preflight no longer claims live proof. Separate LIVE mode tests only PING+exact Stage EXISTS with redirect/error/redaction/config-change checks; only mocked tests run.
-- [ ] Owner reviews protected parent-layout remediation, procedure/code hashes/backup window and separately authorizes operator staging/execution.
+- [x] Owner approved procedure and operator preparation; current metadata/hashes and LIVE result independently verified.
 - [ ] Actual root apply, LIVE proof, then resumed main-defined exact-SHA WS deployment and funded fixtures. NOT RUN in this preparation.
 
 ### Administrative review correction tasks
 - [x] Audit actual Preview parent, ACLs, intermediates, five roots and copilot access; preserve Phase A model.
 - [x] Prepare guarded nonrecursive base-owner correction and explicit unsafe-legacy rollback instructions.
 - [x] Enforce V3 LIVE via existing exact no-argument sudo helper; independent workflow gate and both generated contexts; fundamental positive/NO-GO fixtures.
-- [ ] Owner-reviewed workflow-only delivery to main; no merge in this task.
-- [ ] Separate GO and execution of parent correction/protected bundle/config apply/LIVE; then separately authorized exact-SHA WS deployment and Stage integration evidence.
+- [x] Owner merged workflow-only #1127 into main fb12d182; integrated here, shared workflow/tests retained once.
+- [x] Operator parent/bundle/config preparation and LIVE proof obtained.
+- [ ] Next owner GO: main-defined final exact-SHA deployment, runtime smoke and isolated Stage integration; not authorized/executed in this continuation.
+
+## Main integration / pre-deployment review
+- [x] Integrate main #1127; resolve only workflow-test conflict, preserve one copy of each main gate/context test plus the two helper-specific fixtures. Workflow identical to merged main; no runtime change.
+- [x] Repeat actual read-only LIVE preflight; epoch0 remains NOT a cutover attestation. No protected configuration changed.
+- [x] Prepare bounded Stage matrix in quickstart with explicit next-GO prerequisites and full-E2E blockers.
+- [ ] Exact-SHA WS Preview Deploy and runtime/browser evidence after next GO. No restart/dispatch in this review.
