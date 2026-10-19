@@ -1,3 +1,5 @@
+Current Stage checkpoint: v3 guard ENABLED under explicit GO; deletion OFF. Latest campaign results at end supersede earlier disabled checkpoints.
+
 ## Current verified Stage checkpoint — 19 October 2026, financial GO completed
 
 Deployed WS Preview runtime remains **d0cca7f5595637a215b61a6104abcbd69fd22ae9**, workflow run39251488130, main-defined V3 LIVE/deploy-context/exact-SHA gates intact. Operator config remains Stage/deploy-preview/3/stage with kcswh:stage:xp:v3; actual LIVE PASS epochPresent0 is NOT cutover attestation. Deletion flag0 and database releasefalse were verified; no configuration, epoch or approval marker changed. Current task now stops for owner review: no further Stage/financial/destructive operations, restart, deployment, Production change or merge.
@@ -229,3 +231,14 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [x] Record retained2 identities/sessions/profiles/manifests/synthetic outputs privately; no destructive teardown or capability closure claim.
 - [ ] T05e still OPEN: ENABLE guard only under next GO, then scoped C legacy/fault/isolation proof, historical ownership/drain, provider admitted-I/O closure guarantee and authentic attestation. Ordinary B PASS is not closure.
 - [ ] D WS Preview exact-SHA deployment/smoke remains separate GO; old deployed d0cca7f not latest Storage runtime. Redis cutover/HMAC/privacy/history and destructive T07b remain separately blocked.
+
+### Authorized legacy/fault C outcome
+
+- [x] Fresh Stage114/114+guardD/v2O/deletionOFF/Preview+RedisV3 preflight; no observed non-fixture pending uploads, SQL writers or conflicting Preview rollout.
+- [x] Activate ONLY manifest guard on Stage; actualO/readytrue/v2O verified. No migrator/rollback.
+- [x] Real fixture SQL legacy INSERT/consume/DELETE rejection, supported Netlify happy upload, UUID isolation, prior manifests/control unchanged.
+- [x] Pre-admitted legacy signing after protocol fence succeeds but remains uncertain; one Stage token TTL7200 observed, no universal completion guarantee.
+- [x] Current-helper real Stage POST + scoped injected lost response/failed compensation; retained output/manifest/no finish receipt; actual retry404/no second effect.
+- [x] Preserve private fixture residue (same2 users,4 sessions,5 manifests/3 real synthetic outputs), deletionOFF/no attestations/financial effects. No full deletion/provider-gated cleanup claim.
+- [ ] T05e OPEN: provider accepted-I/O bound/fence, historical/global ownership and narrow authoritative reconciliation for legacy/uncertain rows; no fabricated receipts. Separate GO before reconciliation/destructive teardown.
+- [ ] Separate D WS deployment, HMAC/legal/history, Redis cutover and actual full deletion T07b still gated.

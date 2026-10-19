@@ -1,3 +1,5 @@
+Latest operational state: Stage guard v3 is ENABLED; older disabled-installation instructions are historical. Deletion remains OFF.
+
 ## Current verified Stage checkpoint — 19 October 2026, financial GO completed
 
 Deployed WS Preview runtime remains **d0cca7f5595637a215b61a6104abcbd69fd22ae9**, workflow run39251488130, main-defined V3 LIVE/deploy-context/exact-SHA gates intact. Operator config remains Stage/deploy-preview/3/stage with kcswh:stage:xp:v3; actual LIVE PASS epochPresent0 is NOT cutover attestation. Deletion flag0 and database releasefalse were verified; no configuration, epoch or approval marker changed. Current task now stops for owner review: no further Stage/financial/destructive operations, restart, deployment, Production change or merge.
@@ -163,3 +165,7 @@ Remove capabilityGrace/config validation entirely. finishSigning persists receip
 ## Current Stage B result — supersedes earlier preparation-only checkpoints
 
 Single migration20261019170000 now actually installed on Stage;114 hashes match, v3 guard DISABLED/v2 enabled. Supported Netlify deploy6ad67a0ce55a608f20cd7d71 at56048623 captures tracking1 only on PR branch; deletion0/releasefalse, no grace/attestation. Granular Functions-only scope403 was resolved with documented default all-scopes restricted to the same branch (Free-compatible, no global/Production setting). Two disposable HTTP upload/finalize cases and UUID isolation PASS; retained fixture data recorded privately, not destructively cleaned. No C/D/deletion activation. T05e/T06b OPEN, T07b PARTIAL; see research for exact evidence/limitations. Owner boundary: v3 guard activation and legacy/fault campaign, separate exact-SHA WS deploy, actual provider guarantees, HMAC/privacy/history decisions and Redis cutover GO.
+
+## Current Stage C result
+
+Guard v3 nowO/readytrue, v2O;114/114 hashes unchanged, releasefalse/deletion0/tracking1. Fixture-scoped legacy INSERT/consume/DELETE rejection and supported Netlify upload/finalize PASS. Already-admitted legacy signing after protocol activation still succeeds (one token TTL7200 observed); retained legacy row is uncertain. Injected lost successful output POST response + blocked exact compensating DELETE leaves real object/tracked manifest with no finish receipt; retry safely rejects/no new effect. These are real service calls with explicitly labelled local fault injection, not provider guarantees. No full cleanup/request lease/provider approval was faked. Legacy/uncertain residue needs reviewed closure/reconciliation before eventual teardown. T05e remains OPEN; no guard rollback/Production/WS/cutover/deletion activation.

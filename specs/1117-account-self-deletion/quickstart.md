@@ -1,3 +1,5 @@
+Latest Stage state: manifest guard v3 ENABLED; deletion OFF, T05e OPEN. Earlier B disabled steps are historical and must not be replayed.
+
 ## Current scope: procedure preparation ONLY
 
 The A–E runbook below supersedes historical operational-GO statements in this file. No Stage/Production operation is authorized by the current UX task. No deployment, migrations/configuration, signed URL, upload, deletion, restart, activation or attestation has been performed. PR stays Draft with [skip netlify].
@@ -156,3 +158,7 @@ Revalidate exact Stage identity,113 matching history hashes/single pending manif
 ### B executed — stop at disabled guard (current state)
 
 Stage114/114 matching hashes/no pending;20261019170000 installed, v3 guardD/v2 guardsO, deletion releasefalse. Netlify approved supported code at56048623b575453c8f66f85565fcdb9dc0226f39 (deploy6ad67a0ce55a608f20cd7d71), branch-only tracking1/deletion0; default scopes permitted on Free, no Production/all-context value. Two real ordinary synthetic upload/finalize and UUID isolation tests PASS; detailed evidence and retained fixture inventory in research/private0600 file. No further B execution/reapply needed. No guard activation/C/D/deletion/fixture destructive cleanup in this GO. Do not treat two success cases/empty source bucket/7200s as provider closure or cutover proof. Next requires separate owner GO at actual boundary; WS remains d0cca7f, provider/HMAC/Redis/full E2E gates stay open.
+
+### C executed — guard ON, uncertainty retained
+
+Guard v3O/readytrue, v2O,114 matching migrations, releasefalse/deletion0/tracking1. Supported56048623 Netlify works; scoped legacy/fault campaign PASS (see research for method/limitations). DO NOT reapply migration, re-enable blindly, disable guard, run global cleanup or certify cutover. Same2 fixture users now4 sessions/5 manifests,3 real synthetic outputs, including admitted legacy capability and uncertain output; private inventories must be retained. No deletion request/lease/provider approval created; provider-gated Stage cleanup remains NOT TESTED. One issued token TTL7200 observed is not an in-flight maximum. Next work needs provider closure evidence and reviewed reconciliation/teardown GO; D/activation/Redis/financial/Production remain separately gated.
