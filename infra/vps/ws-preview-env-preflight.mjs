@@ -80,16 +80,15 @@ try {
 
   const supabaseUrl = values.SUPABASE_URL || values.SUPABASE_URL_V2;
   if (!supabaseUrl) reject("preview env file must define stage Supabase URL and DB URL");
-  if (!supabaseUrl.includes(`://${stageRef}.supabase.co`)) {
+  if (supabaseUrl.replace(/\/$/, "") !== `https://${stageRef}.supabase.co`) {
     reject("preview env SUPABASE_URL must target SUPABASE_STAGE_PROJECT_REF");
   }
 
-  const dbUrl = values.SUPABASE_DB_URL;
-  if (
-    !dbUrl.includes(`postgres.${stageRef}`)
-    && !dbUrl.includes(`//${stageRef}.`)
-    && !dbUrl.includes(`.${stageRef}.`)
-  ) {
+  const dbUrl = new URL(values.SUPABASE_DB_URL);
+  const dbUser = decodeURIComponent(dbUrl.username);
+  const directStage = dbUrl.hostname === `db.${stageRef}.supabase.co` && dbUser === "postgres";
+  const pooledStage = dbUrl.hostname.endsWith(".pooler.supabase.com") && dbUser === `postgres.${stageRef}`;
+  if (!["postgres:", "postgresql:"].includes(dbUrl.protocol) || (!directStage && !pooledStage)) {
     reject("preview env SUPABASE_DB_URL must target SUPABASE_STAGE_PROJECT_REF");
   }
 

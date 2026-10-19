@@ -182,7 +182,7 @@ test("protected Preview env preflight validates Stage V3 without disclosing cred
   const source = helperText().replace(/^#!.*\n/, "").replace('import fs from "node:fs";', "");
   const base = { SUPABASE_STAGE_PROJECT_REF:"krydukthwdvccggbyjfw",
     SUPABASE_URL:"https://krydukthwdvccggbyjfw.supabase.co",
-    SUPABASE_DB_URL:"postgres://postgres.krydukthwdvccggbyjfw@pooler.invalid/stage",
+    SUPABASE_DB_URL:"postgres://postgres.krydukthwdvccggbyjfw@aws-0-eu-west-3.pooler.supabase.com:6543/postgres",
     POKER_WS_INTERNAL_TOKEN:"private-internal-token",PORT:"3001",WS_AUTHORITATIVE_JOIN_ENABLED:"1" };
   const v3 = { XP_REDIS_VERSION:"3",XP_REDIS_ENV:"stage",XP_KEY_NS:"kcswh:stage:xp:v3",
     UPSTASH_REDIS_REST_URL:"https://redis.invalid",UPSTASH_REDIS_REST_TOKEN:"private-redis-token" };
@@ -192,16 +192,19 @@ test("protected Preview env preflight validates Stage V3 without disclosing cred
     const fs={constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:()=>3,
       fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600}),
       readFileSync:()=>Object.entries(values).map(([k,v])=>k+"="+v).join("\n"),closeSync:()=>{}};
-    runInNewContext(source,{fs,process});
+    runInNewContext(source,{fs,process,URL});
     assert.doesNotMatch(output,/private-internal-token|private-redis-token/);
     return {code:process.exitCode||0,output};
   }
   assert.match(run(v3).output,/PASS Redis V3 stage kcswh:stage:xp:v3/);
   assert.equal(run(v3).code,0);
+  assert.equal(run({...v3,SUPABASE_DB_URL:"postgres://postgres@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres"}).code,0);
   assert.match(run({}).output,/legacy Redis; V3 not verified/);
   for (const changed of [
     {XP_KEY_NS:"kcswh:prod:xp:v3"},{XP_REDIS_VERSION:""},{XP_REDIS_ENV:""},
     {UPSTASH_REDIS_REST_URL:""},{UPSTASH_REDIS_REST_TOKEN:" "},{XP_TEST_MODE:"1"},
     {CONTEXT:"production"},{SUPABASE_STAGE_PROJECT_REF:"wrong-project"},
+    {SUPABASE_URL:"https://krydukthwdvccggbyjfw.supabase.co.evil.invalid"},
+    {SUPABASE_DB_URL:"postgres://postgres.wrong-project@aws-0-eu-west-3.pooler.supabase.com/postgres?ref=krydukthwdvccggbyjfw"},
   ]) assert.equal(run({...v3,...changed}).code,1);
 });
