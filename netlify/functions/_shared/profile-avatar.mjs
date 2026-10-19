@@ -157,7 +157,7 @@ async function consumePendingUpload(userId, uploadId, deps = {}) {
     `update public.profile_avatar_uploads
      set consumed_at = timezone('utc', now())${enabled(deps) ? ', output_path=$3, output_write_started_at=clock_timestamp()' : ''}
      where id = $1 and user_id = $2 and consumed_at is null and expires_at > timezone('utc', now())${enabled(deps) ? ' and tracking_version=3' : ''}
-     returning id::text, source_path, declared_mime_type, declared_size, output_path;`,
+     returning id::text, source_path, declared_mime_type, declared_size${enabled(deps) ? ', output_path' : ''};`,
     enabled(deps) ? [uploadId, userId, outputPath] : [uploadId, userId],
   );
   const rows = enabled(deps)
