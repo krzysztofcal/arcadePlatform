@@ -1,3 +1,9 @@
+## Current authorization — administrative procedure REVIEW ONLY
+
+This continuation authorizes code/docs and unprivileged fixture tests only. Do NOT execute apply/rollback as root, install the bundle/helper, restart, deploy WS, merge or touch Redis data. The earlier /tmp command/private credential fragment are withdrawn and removed. Use the reviewed [administrative procedure](../../infra/vps/ws-preview-v3-procedure.md) only after a new explicit execution GO. Earlier Stage deployment authorization is paused for this preparation.
+
+New security NO-GO: /opt/arcade-ws-preview is owned by the service user arcade, so root0600 on its child environment is not sufficient against path replacement. Current scope does not change that directory or systemd. Operator must choose a protected layout compatible with deployment and obtain separate approval; the script refuses the current layout before writes. CONFIG-only checks are not a working Redis/namespace proof; explicit read-only LIVE verification remains pending, not PASS.
+
 ## Current verification — 19 October 2026
 
 Owner authorizes Stage/Preview deployment and disposable funded Poker/deletion tests after positive isolation preflight. Production, shared V2 reset, paid resources and merge remain forbidden. Main now contains #1125 and #1126; their workflow/ESCROW guard changes are integrated without reverting either Stage migration. Successful main Stage automation runs are observable (e.g.39221672570); this agent only read their results.
@@ -120,3 +126,12 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [x] Refresh bounded Storage catalog/issuer and hot/archive reward audits read-only; no object/identity/financial mutation.
 - [ ] T05e actual issuer+cleanup drain, complete ownership reconciliation and capability/in-flight expiry proof. No cutover marker.
 - [ ] T06b authoritative historic verified-email reconciliation and owner legal/LIA/privacy/retention decision. No history_ready approval or key reset.
+
+## Administrative procedure review checklist
+
+- [x] Replace unsafe /tmp procedure with reviewed repository script, protected-bundle requirement and explicit file allowlist; remove old script/private fragment.
+- [x] Strict descriptor/parent/root-mode/single-link checks, fixed Stage settings/deletion0, immutable two-file backup, bounded lock, fsync/rename, resumable apply and rollback, changed-input/target/corrupt-backup NO-GO.
+- [x] Existing Stage Netlify source verified read-only via a pipe; no credential value printed/persisted, no Production context exported or Redis operation performed.
+- [x] CONFIG-only preflight no longer claims live proof. Separate LIVE mode tests only PING+exact Stage EXISTS with redirect/error/redaction/config-change checks; only mocked tests run.
+- [ ] Owner reviews protected parent-layout remediation, procedure/code hashes/backup window and separately authorizes operator staging/execution.
+- [ ] Actual root apply, LIVE proof, then resumed main-defined exact-SHA WS deployment and funded fixtures. NOT RUN in this preparation.

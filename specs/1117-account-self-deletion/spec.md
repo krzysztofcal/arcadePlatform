@@ -1,3 +1,9 @@
+## Current authorization — administrative procedure REVIEW ONLY
+
+This continuation authorizes code/docs and unprivileged fixture tests only. Do NOT execute apply/rollback as root, install the bundle/helper, restart, deploy WS, merge or touch Redis data. The earlier /tmp command/private credential fragment are withdrawn and removed. Use the reviewed [administrative procedure](../../infra/vps/ws-preview-v3-procedure.md) only after a new explicit execution GO. Earlier Stage deployment authorization is paused for this preparation.
+
+New security NO-GO: /opt/arcade-ws-preview is owned by the service user arcade, so root0600 on its child environment is not sufficient against path replacement. Current scope does not change that directory or systemd. Operator must choose a protected layout compatible with deployment and obtain separate approval; the script refuses the current layout before writes. CONFIG-only checks are not a working Redis/namespace proof; explicit read-only LIVE verification remains pending, not PASS.
+
 ## Current verification — 19 October 2026
 
 Owner authorizes Stage/Preview deployment and disposable funded Poker/deletion tests after positive isolation preflight. Production, shared V2 reset, paid resources and merge remain forbidden. Main now contains #1125 and #1126; their workflow/ESCROW guard changes are integrated without reverting either Stage migration. Successful main Stage automation runs are observable (e.g.39221672570); this agent only read their results.

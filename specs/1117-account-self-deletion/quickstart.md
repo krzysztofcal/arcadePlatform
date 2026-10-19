@@ -1,3 +1,9 @@
+## Current authorization — administrative procedure REVIEW ONLY
+
+This continuation authorizes code/docs and unprivileged fixture tests only. Do NOT execute apply/rollback as root, install the bundle/helper, restart, deploy WS, merge or touch Redis data. The earlier /tmp command/private credential fragment are withdrawn and removed. Use the reviewed [administrative procedure](../../infra/vps/ws-preview-v3-procedure.md) only after a new explicit execution GO. Earlier Stage deployment authorization is paused for this preparation.
+
+New security NO-GO: /opt/arcade-ws-preview is owned by the service user arcade, so root0600 on its child environment is not sufficient against path replacement. Current scope does not change that directory or systemd. Operator must choose a protected layout compatible with deployment and obtain separate approval; the script refuses the current layout before writes. CONFIG-only checks are not a working Redis/namespace proof; explicit read-only LIVE verification remains pending, not PASS.
+
 ## Current verification — 19 October 2026
 
 Owner authorizes Stage/Preview deployment and disposable funded Poker/deletion tests after positive isolation preflight. Production, shared V2 reset, paid resources and merge remain forbidden. Main now contains #1125 and #1126; their workflow/ESCROW guard changes are integrated without reverting either Stage migration. Successful main Stage automation runs are observable (e.g.39221672570); this agent only read their results.
@@ -66,4 +72,8 @@ Run `node --test tests/xp-redis-v3.behavior.test.mjs`: credential-failure fixtur
 
 ### Before current WS Preview smoke
 
-First require the installed root preflight to report `PASS Redis V3 stage kcswh:stage:xp:v3`; legacy PASS is NO-GO for this artifact. Verify protected Stage env and generated artifact pins3/stage/deploy-preview, exact runtime SHA and service target. Dispatch only main workflow, input ref equal exact SHA and xpRedisVersion3; compare installed release metadata and context after success. Do not activate deletion to manufacture an E2E result. Use fresh disposable identities, canonical funding/ledger receipts and known-owner teardown only after that proof. Preserve the original HMAC and all financial history; never clear shared V2 or seed approval markers for smoke.
+After the administrative procedure review and separate execution GO, require both reviewed CONFIG and actual LIVE verification; neither the earlier PASS string nor CONFIG ONLY is sufficient. Verify protected Stage env and generated artifact pins3/stage/deploy-preview, exact runtime SHA and service target. Dispatch only main workflow, input ref equal exact SHA and xpRedisVersion3; compare installed release metadata and context after success. Do not activate deletion to manufacture an E2E result. Use fresh disposable identities, canonical funding/ledger receipts and known-owner teardown only after that proof. Preserve the original HMAC and all financial history; never clear shared V2 or seed approval markers for smoke.
+
+### Administrative procedure review handoff
+
+Review infra/vps/ws-preview-v3-procedure.md for the exact protected-bundle hashes, filesystem effects, single ROOT-shell FIFO command and separate rollback. Do not use the removed /tmp command. Do not run now: the service-owned parent is a known NO-GO and execution needs separate GO. Resolve the protected-directory decision without blindly breaking WS deployment. After approved apply, only actual PASS LIVE with approved endpoint/credential provenance plus exact artifact pins can resume deployment; CONFIG ONLY or mock results cannot.

@@ -1,3 +1,9 @@
+## Current authorization — administrative procedure REVIEW ONLY
+
+This continuation authorizes code/docs and unprivileged fixture tests only. Do NOT execute apply/rollback as root, install the bundle/helper, restart, deploy WS, merge or touch Redis data. The earlier /tmp command/private credential fragment are withdrawn and removed. Use the reviewed [administrative procedure](../../infra/vps/ws-preview-v3-procedure.md) only after a new explicit execution GO. Earlier Stage deployment authorization is paused for this preparation.
+
+New security NO-GO: /opt/arcade-ws-preview is owned by the service user arcade, so root0600 on its child environment is not sufficient against path replacement. Current scope does not change that directory or systemd. Operator must choose a protected layout compatible with deployment and obtain separate approval; the script refuses the current layout before writes. CONFIG-only checks are not a working Redis/namespace proof; explicit read-only LIVE verification remains pending, not PASS.
+
 ## Current verification — 19 October 2026
 
 Owner authorizes Stage/Preview deployment and disposable funded Poker/deletion tests after positive isolation preflight. Production, shared V2 reset, paid resources and merge remain forbidden. Main now contains #1125 and #1126; their workflow/ESCROW guard changes are integrated without reverting either Stage migration. Successful main Stage automation runs are observable (e.g.39221672570); this agent only read their results.
@@ -75,3 +81,7 @@ One existing Free database is the approved topology, with exact stage/prod names
 ### Minimal V3 preflight integration
 
 Extend existing infra/vps/ws-preview-env-preflight.mjs, not a new service: pin actual Stage ref, validate complete Stage V3 namespace/version/credential presence and reject production/test contexts. Keep explicit legacy compatibility report before V3 so it cannot be confused with a V3 PASS. Verify through ws-tests/ws-preview-deploy.workflow.guard.test.mjs using the executable checker with fixture descriptors/environment; privileged metadata constraints remain unchanged. Root installation/configuration is an operator dependency, not permission to replace protected files through a writable deployment path. Main workflow definition and exact-runtime-SHA rule remain unchanged.
+
+### Reviewed administrative preparation (no execution GO)
+
+Exact files: infra/vps/prepare-ws-preview-v3.py (Python stdlib only, fixed live targets), infra/vps/ws-preview-env-preflight.mjs (CONFIG vs explicit read-only LIVE), infra/vps/ws-preview-v3-procedure.md (staging/file list/rollback/operator gates), tests/ws-preview-config.test.py and existing ws-tests/ws-preview-deploy.workflow.guard.test.mjs. Register the Python fixture in the existing .github/workflows/ws-pr-checks.yml job; no new package/job/service. Protected root bundle staging, target parent remediation and actual apply are NOT performed. Use FIFO-only existing Netlify Stage credentials, not /tmp/JSON secret files or Production sources. Back up both originals, write/fsync/rename each file separately, persist resumable phase, refuse unexpected digests/metadata, and restore both originals with explicit rollback. No claim of cross-file atomicity or protection against an unrelated trusted root editor ignoring the operation lock.

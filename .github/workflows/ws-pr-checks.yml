@@ -201,6 +201,9 @@ jobs:
         run: node --test ws-tests/ws-auth-token-mint-doc.test.mjs
 
 
+      - name: Run Stage Preview configuration transaction fundamentals
+        run: python3 -I -B tests/ws-preview-config.test.py
+
       - name: Run ws preview deploy workflow guard test
         run: node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs
 

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 
 const WORKFLOW_PATH = ".github/workflows/ws-preview-deploy.yml";
 const HELPER_PATH = "infra/vps/ws-preview-env-preflight.mjs";
@@ -179,25 +180,27 @@ test("poker deployment doc states the unified preview Caddy ownership model", ()
 
 test("protected Preview env preflight validates Stage V3 without disclosing credentials", async () => {
   const { runInNewContext } = await import("node:vm");
-  const source = helperText().replace(/^#!.*\n/, "").replace('import fs from "node:fs";', "");
+  const source = helperText().replace(/^#!.*\n/, "").replace('import fs from "node:fs";', "").replace('import { createHash } from "node:crypto";', "");
   const base = { SUPABASE_STAGE_PROJECT_REF:"krydukthwdvccggbyjfw",
     SUPABASE_URL:"https://krydukthwdvccggbyjfw.supabase.co",
     SUPABASE_DB_URL:"postgres://postgres.krydukthwdvccggbyjfw@aws-0-eu-west-3.pooler.supabase.com:6543/postgres",
     POKER_WS_INTERNAL_TOKEN:"private-internal-token",PORT:"3001",WS_AUTHORITATIVE_JOIN_ENABLED:"1" };
   const v3 = { XP_REDIS_VERSION:"3",XP_REDIS_ENV:"stage",XP_KEY_NS:"kcswh:stage:xp:v3",
-    UPSTASH_REDIS_REST_URL:"https://redis.invalid",UPSTASH_REDIS_REST_TOKEN:"private-redis-token" };
-  function run(overrides) {
+    UPSTASH_REDIS_REST_URL:"https://fixture.upstash.io",UPSTASH_REDIS_REST_TOKEN:"private-redis-token" };
+  function run(overrides, parentUid=0) {
     const values={...base,...overrides};let output="";const process={argv:["node","helper"],
       stdout:{write:text=>{output+=text;}},stderr:{write:text=>{output+=text;}}};
     const fs={constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:()=>3,
-      fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600}),
+      fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600,nlink:1}),
+      lstatSync:()=>({isDirectory:()=>true,uid:parentUid,gid:0,mode:0o755}),
       readFileSync:()=>Object.entries(values).map(([k,v])=>k+"="+v).join("\n"),closeSync:()=>{}};
-    runInNewContext(source,{fs,process,URL});
+    runInNewContext(source,{fs,process,URL,createHash});
     assert.doesNotMatch(output,/private-internal-token|private-redis-token/);
     return {code:process.exitCode||0,output};
   }
-  assert.match(run(v3).output,/PASS Redis V3 stage kcswh:stage:xp:v3/);
+  assert.match(run(v3).output,/PASS CONFIG ONLY Redis V3 stage; live verification required/);
   assert.equal(run(v3).code,0);
+  assert.equal(run(v3,1001).code,1,"service-owned parent is not protected by file0600");
   assert.equal(run({...v3,SUPABASE_DB_URL:"postgres://postgres@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres"}).code,0);
   assert.match(run({}).output,/legacy Redis; V3 not verified/);
   for (const changed of [
@@ -207,4 +210,46 @@ test("protected Preview env preflight validates Stage V3 without disclosing cred
     {SUPABASE_URL:"https://krydukthwdvccggbyjfw.supabase.co.evil.invalid"},
     {SUPABASE_DB_URL:"postgres://postgres.wrong-project@aws-0-eu-west-3.pooler.supabase.com/postgres?ref=krydukthwdvccggbyjfw"},
   ]) assert.equal(run({...v3,...changed}).code,1);
+});
+
+
+test("explicit Redis live verification uses only PING and Stage EXISTS and redacts failures", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const source = helperText().replace(/^#!.*\n/, "").replace('import fs from "node:fs";', "").replace('import { createHash } from "node:crypto";', "");
+  const text = ["SUPABASE_STAGE_PROJECT_REF=krydukthwdvccggbyjfw",
+    "SUPABASE_URL=https://krydukthwdvccggbyjfw.supabase.co",
+    "SUPABASE_DB_URL=postgres://postgres.krydukthwdvccggbyjfw@aws-0-eu-west-3.pooler.supabase.com/postgres",
+    "POKER_WS_INTERNAL_TOKEN=private-internal-token", "PORT=3001", "WS_AUTHORITATIVE_JOIN_ENABLED=1",
+    "XP_REDIS_VERSION=3", "XP_REDIS_ENV=stage", "XP_KEY_NS=kcswh:stage:xp:v3",
+    "UPSTASH_REDIS_REST_URL=https://fixture.upstash.io", "UPSTASH_REDIS_REST_TOKEN=private-redis-token"].join("\n");
+  for (const scenario of ["ok", "quota", "redirect", "config-changed", "unapproved-config"]) {
+    const calls=[];let output="",reads=0,finish;
+    const completed=new Promise(resolve=>{finish=resolve;});
+    const process={argv:["node","helper","--verify-redis"],stdout:{write:s=>{output+=s;finish();}},
+      stderr:{write:s=>{output+=s;finish();}}};
+    const fs={constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:path=>path.endsWith("manifest.json")?4:3,
+      fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600,nlink:1}),
+      lstatSync:path=>({isDirectory:()=>true,uid:0,gid:0,mode:path==="/var/backups/arcade-ws-preview-v3"?0o700:0o755}),closeSync:()=>{},
+      readFileSync:fd=>{
+        if(fd===4)return JSON.stringify({version:1,phase:"complete",desired:{env:scenario==="unapproved-config"?"wrong":createHash("sha256").update(text).digest("hex")}});
+        reads++;return text+(scenario==="config-changed"&&reads>1?"\nCHANGED=1":"");
+      }};
+    const fetch=async(url,options)=>{
+      calls.push({url,options});
+      if(scenario==="redirect")throw new Error("private-redis-token must not leak");
+      return {ok:scenario!=="quota",json:async()=>[{result:"PONG"},{result:1}]};
+    };
+    runInNewContext(source,{fs,process,URL,fetch,AbortSignal,createHash});
+    await completed;
+    if(scenario==="unapproved-config"){
+      assert.equal(calls.length,0);assert.equal(process.exitCode,1);assert.doesNotMatch(output,/PASS|private-redis-token/);continue;
+    }
+    assert.equal(calls.length,1);
+    assert.equal(calls[0].url,"https://fixture.upstash.io/pipeline");
+    assert.equal(calls[0].options.redirect,"error");
+    assert.deepEqual(JSON.parse(calls[0].options.body),[["PING"],["EXISTS","kcswh:stage:xp:v3:lifecycle:epoch"]]);
+    assert.doesNotMatch(output,/private-redis-token|private-internal-token|fixture\.upstash/);
+    if(scenario==="ok")assert.match(output,/PASS LIVE.*cutover NOT attested/);
+    else {assert.equal(process.exitCode,1);assert.doesNotMatch(output,/PASS/);}
+  }
 });
