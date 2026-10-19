@@ -159,3 +159,13 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [ ] T06b-c: prove restricted key/version backup continuity without exposing bytes; use existing key-check/fail-closed tests. Real key rotation requires old/new recognition/locking/receipt-dedupe design and separate GO before changing code/config.
 - [ ] SECURITY OWNER: establish snapshot scope/time/access/copy evidence where available, review potential Production/shared credential exposure and authorize coordinated rotation; assess incident duties. Exact deleted path absence does not prove no disclosure. No automatic rotation.
 - [ ] Before T05e/T06b completion: separate operational GO, real isolated Stage evidence and owner decisions; do not substitute local tests or financial Poker PASS for these gates.
+
+
+## T05e-a/b read-only evidence increment — 19 October
+
+- [x] T05e-a progress: traverse all20 Netlify API pages (1964 retained records), classify1937 ready deploys by source helper blob, retain exact URL/SHA/context manifest and fingerprint; distinguish mutable aliases from immutable IDs. This is inventory progress, not retirement PASS.
+- [x] T05e-a progress: nonmutating GET of5 immutable source families and5 aliases confirms405 on signer/finalize/remove. Current55-function metadata has no scheduled entries; source search finds no independent avatar worker. Authenticated storage write, historical target/config validity and external tools remain unproved.
+- [ ] T05e-a remaining: resolve32 missing/unavailable source SHAs, verify uploaded bundle/effective target/tracking state for candidates and scope external issuers; retain full manifest before execution.267 no-helper-at-current-path versions are not excluded solely by that path test. Produce exact Stage-only retirement allowlist; Production impact requires separate GO. Then actual ingress fence+accepted-handler/retry drain, not authorized here.
+- [x] T05e-b progress: confirm standard REST+PUT application flow/no discovered TUS; docs/SDK7200s and upstream configurable lifetime; inspect pinned provider expiry-before-stream and post-body commit behavior. No Stage boundary experiment executed.
+- [ ] T05e-b remaining UNKNOWN: hosted provider version/effective TTL and hard stream/commit/retry bounds or effective revocation proof. Separately authorize two-capability isolated boundary experiment as described in research; observations alone are not an upper-bound guarantee. Do not choose arbitrary grace or certify PASS.
+- [ ] Execute six-step closure table only after scoped GO, including actual drain, tracking rollout, ownership reconciliation, proven horizons and repeat inventory. T05e remains OPEN; T06b OPEN and T07b PARTIAL unchanged. No new documentation-only tests required.
