@@ -210,13 +210,14 @@ jobs:
           PREVIEW_SERVICE_NAME: ${{ env.PREVIEW_SERVICE_NAME }}
           PREVIEW_REMOTE_TMP_DIR: ${{ env.PREVIEW_REMOTE_TMP_DIR }}
           PREVIEW_PORT: ${{ env.PREVIEW_PORT }}
+          XP_REDIS_VERSION: ${{ inputs.xpRedisVersion }}
         with:
           host: ${{ secrets.WS_PREVIEW_HOST }}
           username: ${{ secrets.WS_PREVIEW_USER }}
           key: ${{ secrets.WS_PREVIEW_SSH_KEY }}
           timeout: 2m
           command_timeout: 20m
-          envs: RELEASE_SHA,DEPLOY_REF,PREVIEW_BASE_DIR,PREVIEW_APP_DIR,PREVIEW_HOST,PREVIEW_LOCAL_HEALTHZ_URL,PREVIEW_PUBLIC_HEALTHZ_URL,PREVIEW_SERVICE_NAME,PREVIEW_REMOTE_TMP_DIR,PREVIEW_PORT
+          envs: RELEASE_SHA,DEPLOY_REF,PREVIEW_BASE_DIR,PREVIEW_APP_DIR,PREVIEW_HOST,PREVIEW_LOCAL_HEALTHZ_URL,PREVIEW_PUBLIC_HEALTHZ_URL,PREVIEW_SERVICE_NAME,PREVIEW_REMOTE_TMP_DIR,PREVIEW_PORT,XP_REDIS_VERSION
           script: |
             set -eu
             if ! command -v bash >/dev/null 2>&1; then
@@ -252,7 +253,14 @@ jobs:
             systemctl cat "$PREVIEW_SERVICE_NAME" >/dev/null 2>&1 || { echo "missing preview systemd unit: $PREVIEW_SERVICE_NAME"; exit 1; }
             test -d "$PREVIEW_BASE_DIR" || { echo "missing preview base dir: $PREVIEW_BASE_DIR"; exit 1; }
             test -d "$PREVIEW_APP_DIR" || { echo "missing preview app dir: $PREVIEW_APP_DIR"; exit 1; }
-            sudo -n /usr/local/sbin/arcade-ws-preview-env-preflight
+            PREFLIGHT_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-preview-env-preflight)"
+            # BEGIN REDIS DEPLOY GATE
+            case "$XP_REDIS_VERSION" in
+              3) [[ "$PREFLIGHT_RESULT" =~ ^PASS\ LIVE\ Redis\ V3\ stage\;\ epochPresent=[01]\;\ cutover\ NOT\ attested$ ]] || { echo "V3 deployment requires actual Stage Redis LIVE PASS"; exit 1; } ;;
+              2) [[ "$PREFLIGHT_RESULT" != *"Redis V3"* ]] || { echo "refusing Redis V3 runtime downgrade"; exit 1; } ;;
+              *) echo "invalid Redis deployment version"; exit 1 ;;
+            esac
+            # END REDIS DEPLOY GATE
 
             test -f "$TMP_ARCHIVE"
 
@@ -313,6 +321,23 @@ jobs:
             test -f "$TMP_EXTRACT_DIR/netlify/functions/_generated/deploy-context.mjs"
             test -d "$TMP_EXTRACT_DIR/node_modules/postgres"
 
+            verify_deploy_context() {
+              if [ "$XP_REDIS_VERSION" = "3" ]; then
+                node --input-type=module -e '
+                  import { pathToFileURL } from "node:url";
+                  const context = await import(pathToFileURL(process.argv[1]).href);
+                  if (context.BUILD_DEPLOY_CONTEXT !== "deploy-preview"
+                    || context.BUILD_XP_REDIS_VERSION !== "3"
+                    || context.BUILD_XP_REDIS_ENV !== "stage") {
+                    process.stderr.write("Preview generated V3 context mismatch\n");
+                    process.exit(1);
+                  }
+                ' "$1"
+              fi
+            }
+
+            verify_deploy_context "$TMP_EXTRACT_DIR/netlify/functions/_generated/deploy-context.mjs"
+            verify_deploy_context "$TMP_EXTRACT_DIR/ws-server/netlify/functions/_generated/deploy-context.mjs"
             verify_release_metadata "$TMP_EXTRACT_DIR/ws-server/release-metadata.json" extracted
 
             rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/ws-server/" "$PREVIEW_APP_DIR"/
@@ -325,6 +350,8 @@ jobs:
             mkdir -p "$PREVIEW_BASE_DIR/node_modules"
             rsync -a --no-owner --no-group --checksum --delete --omit-dir-times "$TMP_EXTRACT_DIR/node_modules/" "$PREVIEW_BASE_DIR/node_modules"/
 
+            verify_deploy_context "$PREVIEW_BASE_DIR/netlify/functions/_generated/deploy-context.mjs"
+            verify_deploy_context "$PREVIEW_APP_DIR/netlify/functions/_generated/deploy-context.mjs"
             verify_release_metadata "$PREVIEW_APP_DIR/release-metadata.json" installed-before-restart
             test -f "$PREVIEW_BASE_DIR/netlify/functions/_generated/deploy-context.mjs"
             (

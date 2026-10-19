@@ -187,12 +187,12 @@ test("protected Preview env preflight validates Stage V3 without disclosing cred
     POKER_WS_INTERNAL_TOKEN:"private-internal-token",PORT:"3001",WS_AUTHORITATIVE_JOIN_ENABLED:"1" };
   const v3 = { XP_REDIS_VERSION:"3",XP_REDIS_ENV:"stage",XP_KEY_NS:"kcswh:stage:xp:v3",
     UPSTASH_REDIS_REST_URL:"https://fixture.upstash.io",UPSTASH_REDIS_REST_TOKEN:"private-redis-token" };
-  function run(overrides, parentUid=0) {
-    const values={...base,...overrides};let output="";const process={argv:["node","helper"],
+  function run(overrides, parentUid=0, parentMode=0o755) {
+    const values={...base,...overrides};let output="";const process={argv:["node","helper","--config-only"],
       stdout:{write:text=>{output+=text;}},stderr:{write:text=>{output+=text;}}};
     const fs={constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:()=>3,
       fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600,nlink:1}),
-      lstatSync:()=>({isDirectory:()=>true,uid:parentUid,gid:0,mode:0o755}),
+      lstatSync:()=>({isDirectory:()=>true,uid:parentUid,gid:0,mode:parentMode}),
       readFileSync:()=>Object.entries(values).map(([k,v])=>k+"="+v).join("\n"),closeSync:()=>{}};
     runInNewContext(source,{fs,process,URL,createHash});
     assert.doesNotMatch(output,/private-internal-token|private-redis-token/);
@@ -201,6 +201,7 @@ test("protected Preview env preflight validates Stage V3 without disclosing cred
   assert.match(run(v3).output,/PASS CONFIG ONLY Redis V3 stage; live verification required/);
   assert.equal(run(v3).code,0);
   assert.equal(run(v3,1001).code,1,"service-owned parent is not protected by file0600");
+  assert.equal(run(v3,0,0o775).code,1,"root ownership cannot compensate for group-writable parent");
   assert.equal(run({...v3,SUPABASE_DB_URL:"postgres://postgres@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres"}).code,0);
   assert.match(run({}).output,/legacy Redis; V3 not verified/);
   for (const changed of [
@@ -222,10 +223,10 @@ test("explicit Redis live verification uses only PING and Stage EXISTS and redac
     "POKER_WS_INTERNAL_TOKEN=private-internal-token", "PORT=3001", "WS_AUTHORITATIVE_JOIN_ENABLED=1",
     "XP_REDIS_VERSION=3", "XP_REDIS_ENV=stage", "XP_KEY_NS=kcswh:stage:xp:v3",
     "UPSTASH_REDIS_REST_URL=https://fixture.upstash.io", "UPSTASH_REDIS_REST_TOKEN=private-redis-token"].join("\n");
-  for (const scenario of ["ok", "quota", "redirect", "config-changed", "unapproved-config"]) {
+  for (const scenario of ["ok", "default", "quota", "redirect", "config-changed", "unapproved-config"]) {
     const calls=[];let output="",reads=0,finish;
     const completed=new Promise(resolve=>{finish=resolve;});
-    const process={argv:["node","helper","--verify-redis"],stdout:{write:s=>{output+=s;finish();}},
+    const process={argv:scenario==="default"?["node","helper"]:["node","helper","--verify-redis"],stdout:{write:s=>{output+=s;finish();}},
       stderr:{write:s=>{output+=s;finish();}}};
     const fs={constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:path=>path.endsWith("manifest.json")?4:3,
       fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600,nlink:1}),
@@ -249,7 +250,39 @@ test("explicit Redis live verification uses only PING and Stage EXISTS and redac
     assert.equal(calls[0].options.redirect,"error");
     assert.deepEqual(JSON.parse(calls[0].options.body),[["PING"],["EXISTS","kcswh:stage:xp:v3:lifecycle:epoch"]]);
     assert.doesNotMatch(output,/private-redis-token|private-internal-token|fixture\.upstash/);
-    if(scenario==="ok")assert.match(output,/PASS LIVE.*cutover NOT attested/);
+    if(["ok","default"].includes(scenario))assert.match(output,/PASS LIVE.*cutover NOT attested/);
     else {assert.equal(process.exitCode,1);assert.doesNotMatch(output,/PASS/);}
   }
+});
+
+
+test("V3 deploy gate rejects legacy/config-only and accepts only actual LIVE output", async () => {
+  const {spawnSync}=await import("node:child_process");
+  const text=workflowText();
+  const block=text.match(/# BEGIN REDIS DEPLOY GATE\n([\s\S]*?)# END REDIS DEPLOY GATE/);
+  assert.ok(block,"missing independent Redis deployment gate");
+  for(const result of ["PASS", "PASS legacy Redis; V3 not verified", "PASS CONFIG ONLY Redis V3 stage; live verification required", "PASS LIVE Redis V3 stage; epochPresent=0; cutover NOT attested"]) {
+    const run=spawnSync("bash",["-ec",block[1]],{encoding:"utf8",env:{...process.env,XP_REDIS_VERSION:"3",PREFLIGHT_RESULT:result}});
+    assert.equal(run.status,result.startsWith("PASS LIVE")?0:1);
+  }
+});
+
+test("V3 generated context gate rejects foreign Stage/version and checks both artifact copies", async () => {
+  const {spawnSync}=await import("node:child_process");
+  const os=await import("node:os");
+  const path=await import("node:path");
+  const workflow=workflowText();
+  const match=workflow.match(/verify_deploy_context\(\) \{[\s\S]*?node --input-type=module -e '\n([\s\S]*?)\n\s+' "\$1"/);
+  assert.ok(match);
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"preview-context-"));
+  try {
+    const file=path.join(dir,"context.mjs");
+    for(const values of [ ["deploy-preview","3","stage"], ["production","3","stage"], ["deploy-preview","2","stage"], ["deploy-preview","3","prod"], ["unknown",null,null] ]) {
+      fs.writeFileSync(file,["BUILD_DEPLOY_CONTEXT","BUILD_XP_REDIS_VERSION","BUILD_XP_REDIS_ENV"].map((key,i)=>`export const ${key}=${JSON.stringify(values[i])};`).join("\n"));
+      const result=spawnSync(process.execPath,["--input-type=module","-e",match[1],file]);
+      assert.equal(result.status,values.join()==="deploy-preview,3,stage"?0:1);
+    }
+    assert.equal((workflow.match(/verify_deploy_context "\$/g)||[]).length,4);
+    assert.ok(workflow.indexOf('# END REDIS DEPLOY GATE')<workflow.indexOf('rsync -a --no-owner'));
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });

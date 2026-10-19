@@ -1,8 +1,16 @@
+## Latest review correction — 19 October 2026; preparation only
+
+Authoritative update to the earlier administrative review: choose ONLY Preview base owner correction arcade:arcade0755 → root:root0755, no recursive ownership/mode/ACL change. Preserve Phase A deployment layout from docs/vps-disaster-recovery.md. Read-only audit proves all five sync roots writable/traversable by copilot with basic ACLs: ws-server/shared/node_modules root:arcade-deploy2775; netlify/functions/_shared and _generated copilot:arcade-deploy2775. Intermediate netlify root:arcade-deploy2775 and functions copilot:arcade-deploy0775; no symlinks/access failures found in the five descendant trees. Full audit, guarded root one-liners and rollback limits are in infra/vps/ws-preview-v3-procedure.md. No permissions changed.
+
+No-argument privileged preflight now performs actual LIVE verification automatically whenever V3 is configured; --config-only is diagnostic, never a deploy proof. Keep explicit --verify-redis, protected manifest/descriptor checks, same read-only PING+exact Stage EXISTS, original backup/rollback, fixed Stage/deletion0 configuration and secret FIFO unchanged. Workflow requires exact LIVE Stage V3 output for xpRedisVersion3 before writes; validates BOTH extracted/installed generated context copies deploy-preview/3/stage and keeps exact-SHA/ref release verification. Legacy/missing config, wrong Stage/namespace, old helper or failed LIVE is NO-GO. No general sudo permission change.
+
+Main workflow still needs separately reviewed minimal workflow-only delivery (YAML and focused guards), not a PR-definition dispatch/manual deployment. Prepare here; no merge, root installation, parent chown, apply/rollback, LIVE Redis, restart, WS deploy, V2 reset, Production change or deletion activation performed/authorized. Current host remains NO-GO until separately approved operator execution and actual proof. Existing T05e/T06b/T07b/financial/cutover gates remain open.
+
 ## Current authorization — administrative procedure REVIEW ONLY
 
 This continuation authorizes code/docs and unprivileged fixture tests only. Do NOT execute apply/rollback as root, install the bundle/helper, restart, deploy WS, merge or touch Redis data. The earlier /tmp command/private credential fragment are withdrawn and removed. Use the reviewed [administrative procedure](../../infra/vps/ws-preview-v3-procedure.md) only after a new explicit execution GO. Earlier Stage deployment authorization is paused for this preparation.
 
-New security NO-GO: /opt/arcade-ws-preview is owned by the service user arcade, so root0600 on its child environment is not sufficient against path replacement. Current scope does not change that directory or systemd. Operator must choose a protected layout compatible with deployment and obtain separate approval; the script refuses the current layout before writes. CONFIG-only checks are not a working Redis/namespace proof; explicit read-only LIVE verification remains pending, not PASS.
+New security NO-GO: /opt/arcade-ws-preview is owned by the service user arcade, so root0600 on its child environment is not sufficient against path replacement. Current scope does not change that directory or systemd. Selected layout is base root:root0755 with unchanged deployment subtrees; execution needs separate approval; the script refuses the current layout before writes. CONFIG-only checks are not a working Redis/namespace proof; explicit read-only LIVE verification remains pending, not PASS.
 
 ## Current verification — 19 October 2026
 
@@ -135,3 +143,10 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [x] CONFIG-only preflight no longer claims live proof. Separate LIVE mode tests only PING+exact Stage EXISTS with redirect/error/redaction/config-change checks; only mocked tests run.
 - [ ] Owner reviews protected parent-layout remediation, procedure/code hashes/backup window and separately authorizes operator staging/execution.
 - [ ] Actual root apply, LIVE proof, then resumed main-defined exact-SHA WS deployment and funded fixtures. NOT RUN in this preparation.
+
+### Administrative review correction tasks
+- [x] Audit actual Preview parent, ACLs, intermediates, five roots and copilot access; preserve Phase A model.
+- [x] Prepare guarded nonrecursive base-owner correction and explicit unsafe-legacy rollback instructions.
+- [x] Enforce V3 LIVE via existing exact no-argument sudo helper; independent workflow gate and both generated contexts; fundamental positive/NO-GO fixtures.
+- [ ] Owner-reviewed workflow-only delivery to main; no merge in this task.
+- [ ] Separate GO and execution of parent correction/protected bundle/config apply/LIVE; then separately authorized exact-SHA WS deployment and Stage integration evidence.

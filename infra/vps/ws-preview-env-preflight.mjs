@@ -77,8 +77,9 @@ function assertProtectedParents() {
 
 let fd;
 try {
-  const live = process.argv.length === 3 && process.argv[2] === "--verify-redis";
-  if (process.argv.length !== 2 && !live) reject("unexpected arguments");
+  const explicitLive = process.argv.length === 3 && process.argv[2] === "--verify-redis";
+  const configOnly = process.argv.length === 3 && process.argv[2] === "--config-only";
+  if (process.argv.length !== 2 && !explicitLive && !configOnly) reject("unexpected arguments");
   if (
     typeof fs.constants.O_NOFOLLOW !== "number"
     || typeof fs.constants.O_NONBLOCK !== "number"
@@ -157,7 +158,8 @@ try {
       reject("preview Redis endpoint or credential format is invalid");
     }
   }
-  if (live) {
+  // The existing exact no-argument sudo contract must authenticate V3 on every deploy.
+  if (explicitLive || (v3 && !configOnly)) {
     if (!v3) reject("Redis V3 is required for live verification");
     assertApprovedSource(originalSource);
     // Explicit read-only mode: no redirects, key values, SCAN, V2 commands or writes.
