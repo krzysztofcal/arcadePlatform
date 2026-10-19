@@ -175,3 +175,35 @@ test("poker deployment doc states the unified preview Caddy ownership model", ()
   assert.match(text, /internal\/admin\/bot-reaction/);
   assert.doesNotMatch(text, /Caddyfile\.preview\.example/);
 });
+
+
+test("V3 deploy gate rejects legacy/config-only and accepts only actual LIVE output", async () => {
+  const {spawnSync}=await import("node:child_process");
+  const text=workflowText();
+  const block=text.match(/# BEGIN REDIS DEPLOY GATE\n([\s\S]*?)# END REDIS DEPLOY GATE/);
+  assert.ok(block,"missing independent Redis deployment gate");
+  for(const result of ["PASS", "PASS legacy Redis; V3 not verified", "PASS CONFIG ONLY Redis V3 stage; live verification required", "PASS LIVE Redis V3 stage; epochPresent=0; cutover NOT attested"]) {
+    const run=spawnSync("bash",["-ec",block[1]],{encoding:"utf8",env:{...process.env,XP_REDIS_VERSION:"3",PREFLIGHT_RESULT:result}});
+    assert.equal(run.status,result.startsWith("PASS LIVE")?0:1);
+  }
+});
+
+test("V3 generated context gate rejects foreign Stage/version and checks both artifact copies", async () => {
+  const {spawnSync}=await import("node:child_process");
+  const os=await import("node:os");
+  const path=await import("node:path");
+  const workflow=workflowText();
+  const match=workflow.match(/verify_deploy_context\(\) \{[\s\S]*?node --input-type=module -e '\n([\s\S]*?)\n\s+' "\$1"/);
+  assert.ok(match);
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"preview-context-"));
+  try {
+    const file=path.join(dir,"context.mjs");
+    for(const values of [ ["deploy-preview","3","stage"], ["production","3","stage"], ["deploy-preview","2","stage"], ["deploy-preview","3","prod"], ["unknown",null,null] ]) {
+      fs.writeFileSync(file,["BUILD_DEPLOY_CONTEXT","BUILD_XP_REDIS_VERSION","BUILD_XP_REDIS_ENV"].map((key,i)=>`export const ${key}=${JSON.stringify(values[i])};`).join("\n"));
+      const result=spawnSync(process.execPath,["--input-type=module","-e",match[1],file]);
+      assert.equal(result.status,values.join()==="deploy-preview,3,stage"?0:1);
+    }
+    assert.equal((workflow.match(/verify_deploy_context "\$/g)||[]).length,4);
+    assert.ok(workflow.indexOf('# END REDIS DEPLOY GATE')<workflow.indexOf('rsync -a --no-owner'));
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
