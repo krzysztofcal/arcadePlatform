@@ -207,3 +207,10 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [ ] A–E execution needs separate Stage/Preview GO, including fixture provisioning/storage effects/config/migration/deployment as applicable. No destructive account-delete/BURN/Auth cleanup or release activation is included. T05e OPEN/NO-GO; T06b privacy/history/key continuity, Redis cutover and T07b readiness remain open.
 
 - [x] T03 confirmation simplification: replace typed prompt with existing native confirm pattern; cancel sends no POST, internal consent fields/JWT/idempotency/recovery unchanged. No new challenge, component, CSS or endpoint. Local verification recorded in research; actual Stage UI remains separately gated.
+
+### Executed A/E read-only checkpoint — no rollout GO
+
+- [x] A evidence: actual Stage identity,113/113 applied/hash inventory (no drift), only20261019170000 pending, existing guards/schema, releasefalse/Netlify deletion0, Stage/V3 LIVE+both contexts, old WS/Preview SHAs and aggregate avatar tracking/ownership inventory. Direct WS process flag is unreadable; approved config proof is documented separately, not represented as direct observation.
+- [x] E evidence: actual hosted Storage1.80.2/healthy, version-matched upstream db422805 source and metadata-only config. Documented7200s versus configurable effective TTL distinguished; no guarantee for whole accepted I/O established.
+- [ ] Before B: revalidate pending/hash/disabled flags; direct operator WS flag confirmation if required. Separate GO for disabled migration+supported branch Preview, tracking/ordinary fixture smoke; later guard activation ONLY after supported-writer PASS. No B/C/D action performed.
+- [ ] T05e remains OPEN/COMPLETED NO-GO: effective hosted TTL, admitted-stream+commit/retry bound or effective provider write fence; historical ownership/drain/closure evidence and genuine attestation still missing. No fake markers.
