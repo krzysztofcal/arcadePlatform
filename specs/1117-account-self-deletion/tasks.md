@@ -220,3 +220,12 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 
 - [x] Remove ACCOUNT_DELETION_AVATAR_GRACE_SECONDS dependency/helper/validation from avatar signing and cleanup; no replacement setting. Fixed7200000 provisional horizon, preserve stored longer horizons/provider completion wait. Fundamental local no-config/missing-evidence/longer-horizon regressions; migration unchanged.
 - [ ] B remains NOT EXECUTED: after separate review/GO, revalidate preflight and install disabled migration, supported Preview/tracking and ordinary fixture smoke WITHOUT grace config. No guard activation, provider attestation or deletion implied.
+
+### Autonomous limited B actual execution
+
+- [x] Repeated mandatory preflight; applied ONLY20261019170000 with existing migrator; verified114/114 hashes/no pending, guardD, v2O, releasefalse.
+- [x] Supported Netlify Preview first0c5e376b (trackingOFF), then56048623 (branch trackingON/default scopes; no-cost granular-scope403 remedy); actual Stage config/build-info checked, Production unchanged.
+- [x] Real Stage subject/control password login + normal synthetic HTTP upload/PUT/finalize; v3 exact7200s manifests, output intent/receipt/profile links and cross-UUID404 PASS; pre-existing Storage metadata unchanged, no financial/bonus/deletion effects.
+- [x] Record retained2 identities/sessions/profiles/manifests/synthetic outputs privately; no destructive teardown or capability closure claim.
+- [ ] T05e still OPEN: ENABLE guard only under next GO, then scoped C legacy/fault/isolation proof, historical ownership/drain, provider admitted-I/O closure guarantee and authentic attestation. Ordinary B PASS is not closure.
+- [ ] D WS Preview exact-SHA deployment/smoke remains separate GO; old deployed d0cca7f not latest Storage runtime. Redis cutover/HMAC/privacy/history and destructive T07b remain separately blocked.
