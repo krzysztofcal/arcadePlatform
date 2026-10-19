@@ -98,3 +98,16 @@ All operations below are proposals requiring next GO; inventory/source facts are
 |6 Repeat and attest|cleanupDeletionAvatars exact paths/leases/receipts, existing private.avatar_tracking_cutover|Repeat metadata reconciliation after proven quiescence; no new unknown objects/manifests, no live legacy issuers/retries/capabilities, known owned deletions confirmed and no resurrection. Only then propose cutover_at anchored to proved drain and legacy_inventory_verified with evidence; no backdating to code-deploy time. Later canary deletion requires all Redis/HMAC gates too.|Separate cleanup/attestation GO. Never set marker as a substitute for steps1-5.|
 
 Smallest next decision: authorize an isolated standard-upload boundary experiment and scoped provider evidence collection; separately approve a reviewed Stage endpoint retirement list after target mapping. No blanket Production deploy deletion, key rotation or Auth operation is included. Without hard provider bounds/effective fence, Storage remains OPEN regardless of green CI.
+
+
+## Superseding T05e KISS choice — central authority fence + drain
+
+Do not execute the previous deploy list as1626 manual retirement tasks. Preferred B uses one demonstrated fence per effective legacy authority/target family, then drain, tracking and exact owned-path cleanup. A based on RLS/private bucket/Auth deletion FAILS against service_role and issued upload tokens; instantaneous shared signature revocation including admitted I/O is not proved. Existing public SQL lifecycle triggers already deny new intents/profile writes for the old UUID and must be retained.
+
+| Choice | Security | Complexity / user impact |
+|---|---|---|
+|A policy/config-only per-user block|Insufficient: RLS bypass, independent upload capabilities and accepted I/O remain.|Small diff but false completion risk; reject.|
+|A full provider credential/signature revocation|Conditional: must prove all relevant trust revoked and accepted I/O drained; not currently proven.|Project-wide service/Auth/Storage fallout possible; not a per-account routine.|
+|B shared legacy-authority fence + drain (recommended)|Deny new legacy I/O centrally; preserve manifests, account guards, wait proved old capability/in-flight horizon, existing exact cleanup.|One coordinated authority rollout per family, no per-deploy edits/new service. Old avatar clients may stop working; broader services if key shared.|
+
+Next review/GO must name the provider-supported fence and affected consumers before any key/configuration change. If it cannot be isolated, prepare one site-wide provider ingress fence or bulk approved retirement instead; do not silently broaden Production scope. Preserve manifests against all remaining cleanup paths; only if needed propose forward-only public-table delete guard and canonical lease/progress allowance. No applied migration changes. One isolated Stage campaign covers the assertions in research, but does not replace provider bounds or authority coverage. PASS requires proven common fence, completed accepted I/O/expiry, reconciled ownership and exact cleanup with no resurrection. Any unknown authority, uncertain write, erased ownership proof or unproved horizon remains NO-GO. T05e OPEN; no cutover/feature activation authorized.

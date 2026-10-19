@@ -169,3 +169,12 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [x] T05e-b progress: confirm standard REST+PUT application flow/no discovered TUS; docs/SDK7200s and upstream configurable lifetime; inspect pinned provider expiry-before-stream and post-body commit behavior. No Stage boundary experiment executed.
 - [ ] T05e-b remaining UNKNOWN: hosted provider version/effective TTL and hard stream/commit/retry bounds or effective revocation proof. Separately authorize two-capability isolated boundary experiment as described in research; observations alone are not an upper-bound guarantee. Do not choose arbitrary grace or certify PASS.
 - [ ] Execute six-step closure table only after scoped GO, including actual drain, tracking rollout, ownership reconciliation, proven horizons and repeat inventory. T05e remains OPEN; T06b OPEN and T07b PARTIAL unchanged. No new documentation-only tests required.
+
+
+## T05e simplified follow-up (supersedes per-deploy retirement requirement)
+
+- [x] Compare A/B against existing SQL intent/profile guards, service_role bypass and path-bound token authority; common guard blocks new intents for deleting UUID but does not revoke earlier capabilities. No runtime/Stage operation.
+- [ ] Identify/prove ONE supported common fence per legacy authority family (preferred B), its supported current consumers and impact; resolve unknown versions only for bypass/target coverage, not exhaustive per-deploy proof once covered. No implicit Production/secret-change GO.
+- [ ] Preserve tracking manifests across remaining legacy cleanup paths. If operational fence suffices, no code change; otherwise propose minimal forward-only public.profile_avatar_uploads DELETE guard plus canonical lease/progress-bound cleanup exception and fundamental regression. Do not alter Storage managed schema/applied migrations.
+- [ ] Obtain provider TTL/admitted-I/O guarantees, execute separately approved isolated multi-assertion Stage campaign, reconcile ownership and use existing exact cleanup/cutover proposal. No arbitrary grace or happy-path-only PASS.
+- [ ] T05e OPEN: no activation until actual fence/drain/ownership/cleanup evidence. Per-deploy manual removal, visitor SSO and blanket key rotation are not universal prerequisites; independent incident handling, Redis/HMAC/T07b gates remain.
