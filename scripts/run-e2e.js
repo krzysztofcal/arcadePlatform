@@ -46,7 +46,8 @@ if (existsSync(skipFile)) {
   process.exit(0);
 }
 
-const childEnv = { ...process.env };
+// Isolated harness only; live artifacts never opt into the volatile test store.
+const childEnv = { ...process.env, XP_TEST_MODE: '1' };
 
 if (!childEnv.XP_DAILY_SECRET) {
   childEnv.XP_DAILY_SECRET = 'test-secret-for-sessions-32chars!';

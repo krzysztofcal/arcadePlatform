@@ -120,3 +120,20 @@ test('Redis read quota/error never bypasses leaderboard rate limits',async()=>{
  const result=await handler({httpMethod:'GET',headers:{origin:'https://arcade.test'}});
  assert.equal(result.statusCode,503);
 });
+
+test('both actual build contexts require immutable V3 pins, never a V2 rebuild',async()=>{
+ const {mkdtemp,readFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os'); const {resolve,join}=await import('node:path'); const {spawnSync}=await import('node:child_process');
+ const cwd=await mkdtemp(join(tmpdir(),'xp-build-v3-'));
+ try {
+  for(const environment of ['stage','prod']) {
+   const env={...process.env,CONTEXT:environment==='prod'?'production':'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:environment,XP_KEY_NS:`kcswh:${environment}:xp:v3`};
+   const run=(override={})=>spawnSync(process.execPath,[resolve('scripts/generate-build-info.js'),'--server-context-only'],{cwd,env:{...env,...override},encoding:'utf8'});
+   assert.equal(run().status,0);
+   const pin=await readFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'utf8');
+   assert.match(pin,/BUILD_XP_REDIS_VERSION = "3"/);assert.ok(pin.includes(`BUILD_XP_REDIS_ENV = "${environment}"`));
+   assert.notEqual(run({XP_REDIS_VERSION:'2',XP_REDIS_ENV:'',XP_KEY_NS:'kcswh:xp:v2'}).status,0);
+   assert.notEqual(run({XP_REDIS_VERSION:'',XP_REDIS_ENV:'',XP_KEY_NS:''}).status,0);
+  }
+ } finally {await rm(cwd,{recursive:true,force:true});}
+});
