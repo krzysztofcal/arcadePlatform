@@ -102,6 +102,7 @@ export function resolveXpNamespace(env = process.env, buildContext = BUILD_DEPLO
   const testing = env.XP_TEST_MODE === "1";
   const v3Intent = pin.version === "3" || version === "3" || !!environment || /:v3(?:$|:)/.test(namespace || "");
   if (!v3Intent) {
+    if (!testing) throw new Error("xp_redis_v3_required");
     if (version && version !== "2") throw new Error("xp_redis_version_invalid");
     if (pin.version || pin.environment) throw new Error("xp_redis_build_pin_invalid");
     if (!namespace || namespace === "kcswh:xp:v2") return "kcswh:xp:v2";

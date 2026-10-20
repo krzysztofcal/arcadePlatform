@@ -33,7 +33,7 @@ async function allowLeaderboardRead(event, { scope = "public", limit = 60, incre
     return count <= limit;
   } catch (error) {
     klog("xp_leaderboard_rate_limit_failed", { scope, message: error?.message || "error" });
-    return true;
+    throw Object.assign(new Error("xp_store_unavailable"), {status:503,code:"xp_store_unavailable"});
   }
 }
 

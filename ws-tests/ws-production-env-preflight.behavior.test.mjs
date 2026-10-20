@@ -457,3 +457,16 @@ test("workflow guard confirms Production preflight is executed before current sw
     `HAVE_SWITCHED=1 (idx: ${haveSwitchedIdx}) must execute before service restart (idx: ${serviceRestartIdx})`
   );
 });
+
+test('V3 production gate denies legacy, foreign namespace, missing credentials and failed LIVE', () => {
+  const v3 = {XP_REDIS_VERSION:'3',XP_REDIS_ENV:'prod',XP_KEY_NS:'kcswh:prod:xp:v3',UPSTASH_REDIS_REST_URL:'https://fixture.upstash.io',UPSTASH_REDIS_REST_TOKEN:'synthetic',ACCOUNT_DELETION_ENABLED:'0'};
+  for (const override of [{XP_REDIS_VERSION:'2'},{XP_REDIS_ENV:'stage'},{XP_KEY_NS:'kcswh:stage:xp:v3'},{UPSTASH_REDIS_REST_TOKEN:''},{ACCOUNT_DELETION_ENABLED:'1'},{XP_TEST_MODE:'1'}]) {
+    withTempEnvFile(validEnvContent({...v3,...override}), envFile => {
+      assert.throws(() => runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>true,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}), PreflightError);
+    });
+  }
+  withTempEnvFile(validEnvContent(v3), envFile => {
+    assert.throws(() => runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>false,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}), PreflightError);
+    assert.equal(runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>true,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}),'PASS LIVE Redis V3 prod');
+  });
+});

@@ -29,11 +29,11 @@ function createXpLeaderboardHandler(deps = {}) {
     if (unavailable) return unavailable;
     if (event.httpMethod !== "GET") return json(405, cors, { error: "method_not_allowed" });
     if (!enabled(env, event)) return json(404, cors, { error: "not_found" });
-    if (!await allowRead(event)) {
-      return json(429, { ...cors, "cache-control": "no-store", "retry-after": "60" }, { error: "rate_limit_exceeded" });
-    }
     let options;
     try {
+      if (!await allowRead(event)) {
+        return json(429, { ...cors, "cache-control": "no-store", "retry-after": "60" }, { error: "rate_limit_exceeded" });
+      }
       options = parseLeaderboardQuery(event.queryStringParameters || {});
       const result = await readPage(options);
       klog("xp_leaderboard_read", {

@@ -36,16 +36,40 @@ export async function withRedisIdentityPermit(userIds, fn, deps = {}) {
   if (isMemoryStore && target === store && !FORCE_MEMORY_STORE) throw fenceError();
   const transaction = deps.beginSql || beginSql;
   return transaction(async (tx) => {
-    const anonymous = new Set((deps.anonymousIds || []).map((id) => String(id).toLowerCase()));
-    for (const id of ids) {
-      if (!anonymous.has(id)) { await assertAccountActive(tx, id); continue; }
-      // Browser anonymous IDs are UUIDs too. They must never alias a current
-      // Auth identity or an old deletion identity, even as a conversion source.
-      await lockAccountLifecycle(tx, [id]);
-      const [identity] = await tx.unsafe(`select exists(select 1 from auth.users where id=$1) as present,
-        exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting,
-        exists(select 1 from public.chips_accounts where retired_user_id=$1) as retired;`, [id]);
-      if (identity?.present !== false || identity?.deleting !== false || identity?.retired !== false) throw fenceError();
+    if (process.env.ACCOUNT_DELETION_ENABLED !== '1') {
+      // Preserve the deployed V3 pre-deletion-schema contract while acceptance
+      // is OFF. Observe installed lifecycle tables in this same transaction;
+      // never cache their absence across a later feature rollout.
+      for (const id of ids) await tx.unsafe('select pg_advisory_xact_lock(hashtextextended($1, 0));', ['account-lifecycle:' + id]);
+      const [schema] = await tx.unsafe(`select to_regclass('public.account_deletion_requests') is not null as lifecycle,
+        exists(select 1 from pg_attribute where attrelid=to_regclass('public.chips_accounts')
+          and attname='retired_user_id' and not attisdropped) as retirement;`);
+      if (typeof schema?.lifecycle !== 'boolean' || typeof schema?.retirement !== 'boolean') throw fenceError();
+      const anonymous = new Set((deps.anonymousIds || []).map(id => id.toLowerCase()));
+      for (const id of ids) {
+        const [identity] = await tx.unsafe('select exists(select 1 from auth.users where id=$1) as present;', [id]);
+        if (identity?.present !== !anonymous.has(id)) throw fenceError();
+        if (schema.lifecycle) {
+          const [request] = await tx.unsafe('select exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting;', [id]);
+          if (request?.deleting !== false) throw fenceError();
+        }
+        if (anonymous.has(id) && schema.retirement) {
+          const [retired] = await tx.unsafe('select exists(select 1 from public.chips_accounts where retired_user_id=$1) as retired;', [id]);
+          if (retired?.retired !== false) throw fenceError();
+        }
+    }
+    } else {
+      const anonymous = new Set((deps.anonymousIds || []).map((id) => String(id).toLowerCase()));
+      for (const id of ids) {
+        if (!anonymous.has(id)) { await assertAccountActive(tx, id); continue; }
+        // Browser anonymous IDs are UUIDs too. They must never alias a current
+        // Auth identity or an old deletion identity, even as a conversion source.
+        await lockAccountLifecycle(tx, [id]);
+        const [identity] = await tx.unsafe(`select exists(select 1 from auth.users where id=$1) as present,
+          exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting,
+          exists(select 1 from public.chips_accounts where retired_user_id=$1) as retired;`, [id]);
+        if (identity?.present !== false || identity?.deleting !== false || identity?.retired !== false) throw fenceError();
+    }
     }
     // Recovery must install a fresh epoch after quiescing old issuers. Requests
     // never initialize it: a delayed NX epoch initializer could replay after flush.
@@ -732,7 +756,8 @@ export async function getUserProfile(userId) {
   if (!userId) return null;
   try {
     return normalizeUserProfile(await store.get(profileKey(userId)), userId);
-  } catch {
+  } catch (error) {
+    if (isXpV3(XP_NAMESPACE)) throw error;
     return null;
   }
 }
@@ -776,7 +801,7 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
     await guardedUserMutation({ userId, operation: "set", key: profileKey(userId), value: JSON.stringify(profile) });
     return profile;
   } catch (err) {
-    if (process.env.ACCOUNT_DELETION_ENABLED === "1") throw err;
+    if (isXpV3(XP_NAMESPACE) || process.env.ACCOUNT_DELETION_ENABLED === "1") throw err;
     klog("upstash_save_user_profile_failed", { userId, error: err?.message });
     return existing || profile;
   }

@@ -1,3 +1,9 @@
+## Current release status — 20 October 2026 (supersedes historical checkpoints)
+
+Redis V3 operational migration is **COMPLETED** on Stage and Production, independently of Account Deletion. Owner merged #1129 as `82aee39d5b0bd006e72a199cc89963beaf5665c1`; closure is recorded in #1130 and `docs/ops/redis-v3-cutover.md`. Actual journal:570 exact legacy XP keys deleted,0 uncertain,0 V2 repopulation; protected backup/journal retained. Production Netlify/WS exact82aee39d, Stage avatar-v3 source134818252375239acb8356163a0b454222d99ef8 preserved; real XP/profile/ranking/refresh/WS smoke PASS in both environments. Do not repeat reset, rotate credentials, recreate epochs or roll back to V2. Old audit statements below about pending reset/ProductionV2 are historical, not current instructions.
+
+Account Deletion remains **OFF**, #1124 **DRAFT**, MVP **not merge-ready**. Existing runtime/Stage proofs do not cover newly integrated runtime or pending deletion migrations. The accepted theoretical post-expiry upload limitation is #1128, not an MVP blocker; real unknown operations/ownership remain blocking. No Stage mutation/deploy or Production change is authorized by this review.
+
 ## Current verified Stage checkpoint — 19 October 2026, financial GO completed
 
 ## Binding MVP decision — accepted invisible late-upload risk (20 October 2026)

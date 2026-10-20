@@ -32,11 +32,11 @@ function createXpLeaderboardMeHandler(deps = {}) {
     if (!enabled(env, event)) return json(404, cors, { error: "not_found" });
     const auth = await verifyJwt(extractBearerToken(event.headers));
     if (!auth.valid || !auth.userId) return json(401, { ...cors, "cache-control": "no-store" }, { error: "unauthorized" });
-    if (!await allowRead(event)) {
-      return json(429, { ...cors, "cache-control": "no-store", "retry-after": "60" }, { error: "rate_limit_exceeded" });
-    }
     let options;
     try {
+      if (!await allowRead(event)) {
+        return json(429, { ...cors, "cache-control": "no-store", "retry-after": "60" }, { error: "rate_limit_exceeded" });
+      }
       options = parseLeaderboardQuery(event.queryStringParameters || {}, { me: true });
       const result = await readMe(options, auth.userId);
       klog("xp_leaderboard_me_read", {

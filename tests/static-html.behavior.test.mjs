@@ -250,9 +250,7 @@ try {
     env: {
       ...process.env,
       CONTEXT: "deploy-preview",
-      XP_REDIS_VERSION: "3",
-      XP_REDIS_ENV: "stage",
-      XP_KEY_NS: "kcswh:stage:xp:v3",
+      XP_REDIS_VERSION: "3", XP_REDIS_ENV: "stage", XP_KEY_NS: "kcswh:stage:xp:v3",
       DEPLOY_PRIME_URL: "https://deploy-preview-388--arcade.netlify.app/build/path",
       SUPABASE_URL: "https://stageabc.supabase.co",
       SUPABASE_ANON_KEY: "stage-anon-key",

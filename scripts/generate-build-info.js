@@ -240,7 +240,7 @@ function normalizeDeployOrigin(raw) {
 
 // Committed activation floor, changed only by the separately approved cutover.
 // Unlike deployment variables it survives their accidental deletion on rebuild.
-const XP_REDIS_MIN_VERSION = Object.freeze({ stage: '3', prod: '2' });
+const XP_REDIS_MIN_VERSION = Object.freeze({ stage: '3', prod: '3' });
 function generateServerDeployContext(context, deployPrimeUrl) {
   const supported = new Set(['production', 'deploy-preview', 'branch-deploy', 'dev', 'development']);
   const value = supported.has(context) ? context : 'unknown';
@@ -308,7 +308,10 @@ window.BUILD_INFO = ${JSON.stringify(buildInfo, null, 2)};
   if (!generateSupabaseConfig(process.env)) {
     console.log("Supabase public config not generated: SUPABASE_URL/SUPABASE_ANON_KEY missing");
   }
-  generateServerDeployContext(buildInfo.context, process.env.DEPLOY_PRIME_URL);
+  // The separate static landing site has no Functions or XP Redis runtime.
+  if (path.resolve(process.cwd()) !== path.resolve(__dirname, "../landing")) {
+    generateServerDeployContext(buildInfo.context, process.env.DEPLOY_PRIME_URL);
+  }
 }
 
 if (process.argv.includes('--server-context-only')) generateServerDeployContext(process.env.CONTEXT || process.env.ARCADE_DEPLOY_TARGET, process.env.DEPLOY_PRIME_URL);

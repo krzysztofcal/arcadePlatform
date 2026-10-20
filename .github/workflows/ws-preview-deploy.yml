@@ -10,10 +10,9 @@ on:
       xpRedisVersion:
         description: Stage Redis artifact version (must match Preview runtime configuration)
         required: true
-        default: '2'
+        default: '3'
         type: choice
         options:
-          - '2'
           - '3'
 
 concurrency:
