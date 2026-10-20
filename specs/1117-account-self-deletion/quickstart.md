@@ -1,5 +1,10 @@
 Latest Stage state: manifest guard v3 ENABLED; deletion OFF, T05e OPEN. Earlier B disabled steps are historical and must not be replayed.
 
+## Current authorized Stage campaign — 20 October 2026
+
+Owner GO supersedes the earlier local-only restrictions below ONLY for the new MVP closure migration, Netlify #1124 / WS Preview deployment and newly created isolated Storage API objects. Pinned Stage krydukthwdvccggbyjfw/system7656985631720456337. Applied only20261020082604 via existing migrator after114/114 hash/no-drift preflight; post-check115/115 hashes, no pending/drift, guard v3+v2 enabled/readytrue, releasefalse. Migration hash d04a59b383eee60200cca69a7d3cbe63b6e6ffab1a6edc208f2ff25c42cc5158. No reset/cutover, reconciliation of retained fixtures, deletion activation, Auth cleanup or financial operation. Deployment and Storage results are recorded after verification; do not infer PASS from this authorization.
+
+
 ## Binding MVP decision — accepted invisible late-upload risk (20 October 2026)
 
 This owner decision supersedes earlier provider-terminal-bound/write-fence/support requirements below. Do not contact Supabase. MVP accepts the narrow possibility that an upload admitted before deletion completes invisibly after signed-URL expiry and after the final API-visible absence check. Neither COMPLETED nor this decision guarantees physical erasure of every provider copy. This exception does **not** waive observed incomplete signing/output writes, missing ownership, legacy/unknown manifests, or failed/unconfirmed Storage operations.
