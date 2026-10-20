@@ -2,7 +2,6 @@
 """Narrow Netlify adapter: read-only plan, unchanged-value permission probe, explicit apply.
 No build/deploy API, global env mutation, Auth or Redis data writes.
 """
-import hashlib
 import importlib.util
 import json
 import os
@@ -27,6 +26,19 @@ def read_private(path):
         operator.require(stat.S_ISREG(meta.st_mode) and meta.st_uid == os.getuid()
                          and meta.st_nlink == 1 and stat.S_IMODE(meta.st_mode) == 0o600, 'unsafe_private_file')
         return json.load(stream)
+
+
+def stage_overrides(rows):
+    updates = []
+    for row in rows:
+        if row['key'] in KEYS:
+            continue
+        preview = [v for v in row['values'] if v['context'] == 'deploy-preview']
+        branch = [v for v in row['values'] if v['context'] == 'branch' and v.get('context_parameter') == BRANCH]
+        operator.require(len(preview) <= 1 and len(branch) <= 1, 'ambiguous_stage_context')
+        if preview and not branch:
+            updates.append((row['key'], {'context': 'branch', 'context_parameter': BRANCH, 'value': preview[0]['value']}))
+    return updates
 
 
 def main(mode):
@@ -68,7 +80,9 @@ def main(mode):
     urls = [value(operator.REDIS_KEYS[0], stage).rstrip('/') for stage in (True, False)]
     operator.require(urls[0] == urls[1] and operator.digest(urls[0].encode()) == operator.ENDPOINT_HASH, 'redis_endpoint_mismatch')
     allowed = set()
-    if mode == 'probe':
+    if mode == 'prepare-stage':
+        updates = stage_overrides(before)
+    elif mode == 'probe':
         # Same effective value; add/replace ONLY the production namespace override.
         # This tests actual Production-scope permission without enabling V3.
         current = value('XP_KEY_NS', False)
@@ -86,6 +100,10 @@ def main(mode):
                        'XP_KEY_NS': f'kcswh:{target}:xp:v3', 'ACCOUNT_DELETION_ENABLED': '0'}
             for key, wanted in desired.items():
                 updates.append((key, {**context, 'value': wanted}))
+        # A branch context falls back to branch-deploy/all, NOT deploy-preview.
+        # Materialize existing explicit Stage preview overrides on this one branch;
+        # otherwise a manual exact-source build could inherit Production defaults.
+        updates.extend(stage_overrides(before))
         # Backup only Redis/settings, never the full env response or Supabase credentials.
         operator.SecureFiles(uid=os.getuid(), gid=os.getgid(), boundary=Path('/')).parents(PRIVATE / 'netlify-redis.before.json')
         operator.require(stat.S_IMODE(PRIVATE.stat().st_mode) == 0o700, 'unsafe_private_directory')
@@ -97,7 +115,7 @@ def main(mode):
     else:
         updates = []
     for key, update in updates:
-        operator.require(set(selected[key]['scopes']) >= {'builds', 'functions'}, 'missing_function_scope')
+        operator.require(key not in KEYS or set(selected[key]['scopes']) >= {'builds', 'functions'}, 'missing_function_scope')
         allowed.add((key, update['context'], update.get('context_parameter')))
         api(root + '/' + key + '?site_id=' + site_id, 'PATCH', update)
     after = api(root + '?site_id=' + site_id) if updates else before
@@ -125,7 +143,7 @@ def main(mode):
 if __name__ == '__main__':
     os.umask(0o077)
     try:
-        operator.require(len(sys.argv) == 2 and sys.argv[1] in ('plan', 'probe', 'apply'), 'invalid_arguments')
+        operator.require(len(sys.argv) == 2 and sys.argv[1] in ('plan', 'probe', 'prepare-stage', 'apply'), 'invalid_arguments')
         print(json.dumps(main(sys.argv[1])))
     except Exception as error:
         code = str(error) if isinstance(error, operator.Refused) else 'netlify_operation_failed'

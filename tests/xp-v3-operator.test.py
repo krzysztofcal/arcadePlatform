@@ -10,6 +10,18 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 class OperatorTests(unittest.TestCase):
+    def test_stage_branch_inherits_only_explicit_preview_overrides(self):
+        spec = importlib.util.spec_from_file_location('netlify_v3', 'scripts/ops/xp-redis-netlify-configure.py')
+        adapter = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(adapter)
+        rows = [
+            {'key': 'SUPABASE_URL', 'values': [{'context':'all','value':'production'}, {'context':'deploy-preview','value':'stage'}]},
+            {'key': 'EXISTING', 'values': [{'context':'branch','context_parameter':adapter.BRANCH,'value':'keep'}, {'context':'deploy-preview','value':'other'}]},
+            {'key': 'COMMON', 'values': [{'context':'all','value':'keep-common'}]},
+            {'key': 'UPSTASH_REDIS_REST_TOKEN', 'values': [{'context':'deploy-preview','value':'old'}]},
+        ]
+        self.assertEqual(adapter.stage_overrides(rows), [('SUPABASE_URL', {'context':'branch','context_parameter':adapter.BRANCH,'value':'stage'})])
+
     def env(self, target):
         ref = m.REFS[target]
         return (f'SUPABASE_URL=https://{ref}.supabase.co\nSUPABASE_DB_URL=postgresql://postgres.{ref}:synthetic@region.pooler.supabase.com:6543/postgres\nPOKER_SETTING=preserve\nACCOUNT_DELETION_ENABLED=0\n').encode()
