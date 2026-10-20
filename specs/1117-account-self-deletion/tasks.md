@@ -311,3 +311,7 @@ Independent Redis-only Draft [#1129](https://github.com/krzysztofcal/arcadePlatf
 
 - [x] T05d4 operator preparation: independent #1129 durable dry-run/apply/verify executor, root-owned configuration/credential procedure, restricted Netlify adapter;570-record real read-only dry-run PASS. Local fundamental regression coverage for ambiguity/lock/retry/config safety. No password reset or historical deletion.
 - [ ] T05d4 actual window: protected root prepare; exact supported Stage avatar-v3 artifact readiness; Upstash owner reset only after READY; hidden-token root commit; scoped Netlify distribution/drain; final snapshot/CAS reset; both V3 deployment/epoch/smoke. Follow independent operator document. #1124 remains Draft, deletion OFF.
+
+- [x] T05d4 real owner credential rotation/configuration, final protected570-key backup, dry-run, journaled CAS570DELETED, independentverify, retained2V3 values, namespaceepochsNX,0V2repopulation.
+- [x] T05d4 supported Stage13481825 Netlify+WS release and real login/XP0→30/anonconversion→60/rank/profile/browserrefresh/authenticatedWS ping smoke; no financial operation or deletion activation.
+- [ ] T05d4 Production completion BLOCKED by GitHub token ready/merge permissions: owner Ready+merge only #1129, then standard Production exact-SHA Netlify/WS deployment and actual nonfinancial V3 smoke. Production XPcurrentlyHTTP500/oldruntime; do not call migration complete. Both projects Auth/profile counts/balance sums stable,0unbalanced hot ledgertransactions; scope/limits in redis-cutover.md.
