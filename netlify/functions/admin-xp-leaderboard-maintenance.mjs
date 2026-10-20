@@ -1,3 +1,4 @@
+import { xpStoreUnavailableResponse } from "./_shared/store-upstash.mjs";
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
 import { baseHeaders, corsHeaders, klog } from "./_shared/supabase-admin.mjs";
 import { buildStageIdentity } from "./admin-stage-identity.mjs";
@@ -21,6 +22,8 @@ function createAdminXpLeaderboardMaintenanceHandler(deps = {}) {
     const cors = corsHeaders(origin);
     if (!cors) return { statusCode: 403, headers: baseHeaders(), body: JSON.stringify({ error: "forbidden_origin" }) };
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
+    const unavailable = xpStoreUnavailableResponse(cors);
+    if (unavailable) return unavailable;
     if (event.httpMethod !== "POST") return { statusCode: 405, headers: cors, body: JSON.stringify({ error: "method_not_allowed" }) };
 
     try {

@@ -1,3 +1,5 @@
+import { createXpLedgerKeys, resolveXpNamespace } from "./xp-ledger.mjs";
+import { guardedRedisEval } from "./store-upstash.mjs";
 import { store as defaultStore } from "./store-upstash.mjs";
 import { createXpLeaderboardKeys, getXpLeaderboardPeriods, getXpLeaderboardWeekDayKeys } from "./xp-leaderboard.mjs";
 
@@ -45,24 +47,20 @@ const SYNC_LEADERBOARD_VISIBILITY_SCRIPT = `
 async function syncUserLeaderboardVisibility(userId, visible, deps = {}) {
   if (typeof userId !== "string" || !userId.trim() || typeof visible !== "boolean") throw new TypeError("invalid_leaderboard_visibility_sync");
   const store = deps.store || defaultStore;
-  const namespace = deps.namespace || process.env.XP_KEY_NS || "kcswh:xp:v2";
+  const namespace = deps.namespace || resolveXpNamespace();
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const periods = getXpLeaderboardPeriods(now);
   const weekDayKeys = getXpLeaderboardWeekDayKeys(now);
   const keys = createXpLeaderboardKeys({ namespace });
-  const result = await store.eval(
-    SYNC_LEADERBOARD_VISIBILITY_SCRIPT,
-    [
+  const result = await guardedRedisEval({ store, userIds: [userId], script: SYNC_LEADERBOARD_VISIBILITY_SCRIPT, keys: [
       keys.hidden(userId),
       keys.allTime(),
       keys.day(periods.dayKey),
       keys.week(periods.weekKey),
-      `${namespace}:total:${userId}`,
-      `${namespace}:daily:${userId}:${periods.dayKey}`,
-      ...weekDayKeys.map((dayKey) => `${namespace}:daily:${userId}:${dayKey}`),
-    ],
-    [visible ? "1" : "0", userId, String(periods.dayExpiresAtSec), String(periods.weekExpiresAtSec)],
-  );
+      createXpLedgerKeys({namespace}).total(userId),
+      createXpLedgerKeys({namespace}).daily(userId, periods.dayKey),
+      ...weekDayKeys.map((dayKey) => createXpLedgerKeys({namespace}).daily(userId, dayKey)),
+    ], args: [visible ? "1" : "0", userId, String(periods.dayExpiresAtSec), String(periods.weekExpiresAtSec)] });
   return {
     visible,
     allTime: Math.max(0, Math.floor(Number(result?.[0]) || 0)),

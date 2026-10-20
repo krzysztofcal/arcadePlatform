@@ -121,10 +121,27 @@ export function defaultQuerySystemIdentifier(dbUrl) {
   return (result.stdout || "").trim();
 }
 
+// Secrets go only to a child stdin, never argv, stdout or diagnostics.
+export function defaultQueryRedisV3(values) {
+  const script = `import fs from 'node:fs';
+    const v=JSON.parse(fs.readFileSync(0,'utf8'));
+    try {
+      const r=await fetch(v.url,{method:'POST',signal:AbortSignal.timeout(5000),headers:{Authorization:'Bearer '+v.token,'content-type':'application/json'},body:JSON.stringify(['PING'])});
+      const b=await r.json(); if(!r.ok || b.error || b.result!=='PONG') process.exit(1);
+      process.stdout.write('PASS');
+    } catch {process.exit(1);}`;
+  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{
+    input:JSON.stringify({url:values.UPSTASH_REDIS_REST_URL,token:values.UPSTASH_REDIS_REST_TOKEN}),
+    encoding:'utf8',timeout:8000,env:{PATH:process.env.PATH}});
+  return !result.error && result.status===0 && result.stdout==='PASS';
+}
+
 export function runPreflight({
   envFile = DEFAULT_ENV_FILE,
   allowTestUid = false,
-  querySystemIdentifier = defaultQuerySystemIdentifier
+  querySystemIdentifier = defaultQuerySystemIdentifier,
+  requireRedisV3 = false,
+  queryRedisV3 = defaultQueryRedisV3
 } = {}) {
   let fd;
   try {
@@ -197,6 +214,14 @@ export function runPreflight({
       reject(`DB system identifier mismatch: expected ${CANONICAL_PROD_SYSTEM_IDENTIFIER}, got ${systemIdentifier}`);
     }
 
+    if (requireRedisV3) {
+      if (values.XP_REDIS_VERSION!=='3' || values.XP_REDIS_ENV!=='prod' || values.XP_KEY_NS!=='kcswh:prod:xp:v3' ||
+          values.ACCOUNT_DELETION_ENABLED!=='0' || !values.UPSTASH_REDIS_REST_TOKEN?.trim()) reject('production Redis V3 configuration mismatch');
+      let endpoint; try { endpoint=new URL(values.UPSTASH_REDIS_REST_URL); } catch { reject('production Redis endpoint missing'); }
+      if (endpoint.protocol!=='https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname!=='/' || !endpoint.hostname.endsWith('.upstash.io')) reject('production Redis endpoint invalid');
+      if (!queryRedisV3(values)) reject('production Redis V3 LIVE failed');
+      return 'PASS LIVE Redis V3 prod';
+    }
     return "PASS";
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
@@ -207,7 +232,7 @@ const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === fs.re
 if (isMainModule) {
   try {
     if (process.argv.length !== 2) reject("unexpected arguments");
-    const result = runPreflight();
+    const result = runPreflight({requireRedisV3:true});
     process.stdout.write(`${result}\n`);
   } catch (error) {
     const reason = error instanceof PreflightError

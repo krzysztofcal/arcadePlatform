@@ -1,3 +1,5 @@
+import { createXpLedgerKeys, resolveXpNamespace } from "./xp-ledger.mjs";
+import { guardedUserMutation } from "./store-upstash.mjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { executeSql, klog } from "./supabase-admin.mjs";
 import { store as defaultStore } from "./store-upstash.mjs";
@@ -221,9 +223,9 @@ async function listProfilesPage({ page, limit, runSql = executeSql }) {
 }
 
 async function readCanonicalProjection({ store, namespace, userId, periods, weekDayKeys }) {
-  const totalKey = `${namespace}:total:${userId}`;
-  const dayKey = `${namespace}:daily:${userId}:${periods.dayKey}`;
-  const weekKeys = weekDayKeys.map((key) => `${namespace}:daily:${userId}:${key}`);
+  const totalKey = createXpLedgerKeys({namespace}).total(userId);
+  const dayKey = createXpLedgerKeys({namespace}).daily(userId, periods.dayKey);
+  const weekKeys = weekDayKeys.map((key) => createXpLedgerKeys({namespace}).daily(userId, key));
   const values = await Promise.all([store.get(totalKey), store.get(dayKey), ...weekKeys.map((key) => store.get(key))]);
   return {
     allTime: normalizeCounter(values[0]),
@@ -232,19 +234,19 @@ async function readCanonicalProjection({ store, namespace, userId, periods, week
   };
 }
 
-async function setProjectionScore({ store, key, member, score, dryRun }) {
+async function setProjectionScore({ store, key, member, score, dryRun, expiresAt, beginSql }) {
   const current = normalizeCounter(await store.zscore(key, member));
-  if (current === score) return "unchanged";
+  if (current === score && (!expiresAt || score <= 0)) return "unchanged";
   if (!dryRun) {
-    if (score > 0) await store.zadd(key, score, member);
+    if (score > 0) await guardedUserMutation({ store, userId: member, operation: "zadd", key, score, value: member, expiresAt, beginSql });
     else await store.zrem(key, member);
   }
-  return score > 0 ? "updated" : "removed";
+  return current === score ? "unchanged" : score > 0 ? "updated" : "removed";
 }
 
 async function runBackfill(request, deps = {}) {
   const store = deps.store || defaultStore;
-  const namespace = deps.namespace || process.env.XP_KEY_NS || "kcswh:xp:v2";
+  const namespace = deps.namespace || resolveXpNamespace();
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const periods = getXpLeaderboardPeriods(now);
   const weekDayKeys = getXpLeaderboardWeekDayKeys(now);
@@ -255,9 +257,9 @@ async function runBackfill(request, deps = {}) {
     try {
       const canonical = await readCanonicalProjection({ store, namespace, userId, periods, weekDayKeys });
       const results = await Promise.all([
-        setProjectionScore({ store, key: leaderboardKeys.allTime(), member: userId, score: canonical.allTime, dryRun: request.dryRun }),
-        setProjectionScore({ store, key: leaderboardKeys.day(periods.dayKey), member: userId, score: canonical.today, dryRun: request.dryRun }),
-        setProjectionScore({ store, key: leaderboardKeys.week(periods.weekKey), member: userId, score: canonical.week, dryRun: request.dryRun }),
+        setProjectionScore({ store, key: leaderboardKeys.allTime(), member: userId, score: canonical.allTime, dryRun: request.dryRun, beginSql:deps.beginSql }),
+        setProjectionScore({ store, key: leaderboardKeys.day(periods.dayKey), member: userId, score: canonical.today, dryRun: request.dryRun, expiresAt:periods.dayExpiresAtSec, beginSql:deps.beginSql }),
+        setProjectionScore({ store, key: leaderboardKeys.week(periods.weekKey), member: userId, score: canonical.week, dryRun: request.dryRun, expiresAt:periods.weekExpiresAtSec, beginSql:deps.beginSql }),
       ]);
       counts.processed += 1;
       for (const result of results) counts[result] += 1;
@@ -265,12 +267,7 @@ async function runBackfill(request, deps = {}) {
       counts.failed += 1;
     }
   }
-  if (!request.dryRun && counts.processed > 0) {
-    await Promise.all([
-      store.expire(leaderboardKeys.day(periods.dayKey), Math.max(1, periods.dayExpiresAtSec - Math.floor(now / 1000))),
-      store.expire(leaderboardKeys.week(periods.weekKey), Math.max(1, periods.weekExpiresAtSec - Math.floor(now / 1000))),
-    ]);
-  }
+
   return {
     operation: request.operation,
     dryRun: request.dryRun,
@@ -293,7 +290,7 @@ function selectLeaderboardKey({ period, namespace, now }) {
 
 async function runPrune(request, deps = {}) {
   const store = deps.store || defaultStore;
-  const namespace = deps.namespace || process.env.XP_KEY_NS || "kcswh:xp:v2";
+  const namespace = deps.namespace || resolveXpNamespace();
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const key = selectLeaderboardKey({ period: request.period, namespace, now });
   const candidates = await store.zrevrangeWithScores(key, request.offset, request.offset + request.limit - 1);
