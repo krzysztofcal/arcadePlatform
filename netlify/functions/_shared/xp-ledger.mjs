@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { BUILD_DEPLOY_CONTEXT, BUILD_XP_REDIS_VERSION, BUILD_XP_REDIS_ENV } from "../_generated/deploy-context.mjs";
 
 const sanitizeXpCounter = (value) => Math.max(0, Math.floor(Number(value) || 0));
 const hashLedgerPart = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
@@ -75,6 +76,7 @@ const XP_ATOMIC_AWARD_SCRIPT = `
   end
 
   dailyTotal = tonumber(redis.call('INCRBY', dailyKey, grant))
+  if dayExpiresAt and dayExpiresAt > 0 then redis.call('EXPIREAT', dailyKey, dayExpiresAt) end
   sessionTotal = tonumber(redis.call('INCRBY', sessionKey, grant))
   lifetime = tonumber(redis.call('INCRBY', totalKey, grant))
   lastSync = ts
@@ -91,16 +93,66 @@ const XP_ATOMIC_AWARD_SCRIPT = `
   return finish(grant, dailyTotal, sessionTotal, lifetime, lastSync, status)
 `;
 
-function createXpLedgerKeys({ namespace = "kcswh:xp:v2", lockPrefix = `${namespace}:lock:` } = {}) {
+// V3 is opt-in at the separately authorized cutover. Legacy is never read by V3.
+export function resolveXpNamespace(env = process.env, buildContext = BUILD_DEPLOY_CONTEXT,
+  pin = {version:BUILD_XP_REDIS_VERSION,environment:BUILD_XP_REDIS_ENV}) {
+  const version = env.XP_REDIS_VERSION;
+  const namespace = env.XP_KEY_NS;
+  const environment = env.XP_REDIS_ENV;
+  const testing = env.XP_TEST_MODE === "1";
+  const v3Intent = pin.version === "3" || version === "3" || !!environment || /:v3(?:$|:)/.test(namespace || "");
+  if (!v3Intent) {
+    if (!testing) throw new Error("xp_redis_v3_required");
+    if (version && version !== "2") throw new Error("xp_redis_version_invalid");
+    if (pin.version || pin.environment) throw new Error("xp_redis_build_pin_invalid");
+    if (!namespace || namespace === "kcswh:xp:v2") return "kcswh:xp:v2";
+    if (testing && /^(test|e2e):[A-Za-z0-9:_-]+$/.test(namespace)) return namespace;
+    throw new Error("xp_redis_environment_mismatch");
+  }
+  if (version !== "3" || !["stage","prod"].includes(environment) || namespace !== `kcswh:${environment}:xp:v3`) {
+    throw new Error("xp_redis_environment_mismatch");
+  }
+  // An environment flag alone is removable. Activation requires an immutable
+  // pin in the Netlify/WS/background artifact; missing runtime vars then deny.
+  if (!testing && (pin.version !== "3" || pin.environment !== environment)) throw new Error("xp_redis_build_pin_invalid");
+  if (pin.version && (pin.version !== "3" || pin.environment !== environment)) throw new Error("xp_redis_build_pin_invalid");
+  const contexts = [buildContext,env.ARCADE_DEPLOY_TARGET,env.CONTEXT,env.NETLIFY_CONTEXT].filter(value=>value && value!=="unknown");
+  if (!contexts.length && !testing) throw new Error("xp_redis_environment_unpinned");
+  for (const context of contexts) {
+    if (!["production","deploy-preview","branch-deploy","development","dev"].includes(context)) throw new Error("xp_redis_environment_unpinned");
+    if ((context === "production" ? "prod" : "stage") !== environment) throw new Error("xp_redis_environment_mismatch");
+  }
+  return namespace;
+}
+
+export const isXpV3 = (namespace) => /^kcswh:(stage|prod):xp:v3$/.test(namespace);
+export function xpOwnerPrefix(namespace, userId, anonymous = false) {
+  if (!isXpV3(namespace)) throw new Error("xp_v3_namespace_required");
+  if (anonymous) {
+    if (typeof userId !== "string" || !userId.length) throw new Error("xp_identity_required");
+    return `${namespace}:anon:${hashLedgerPart(userId)}:`;
+  }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) throw new Error("xp_uuid_required");
+  return `${namespace}:user:${userId.toLowerCase()}:`;
+}
+function createXpLedgerKeys({ namespace = resolveXpNamespace(), lockPrefix = `${namespace}:lock:`, anonymous = false } = {}) {
+  const v3 = isXpV3(namespace);
+  const own = (id, suffix) => xpOwnerPrefix(namespace, id, anonymous) + suffix;
   const sessionHash = (userId, sessionId) => hashLedgerPart(`${userId}|${sessionId}`);
   return Object.freeze({
-    daily: (userId, dayKey) => `${namespace}:daily:${userId}:${dayKey}`,
-    total: (userId) => `${namespace}:total:${userId}`,
-    session: (userId, sessionId) => `${namespace}:session:${sessionHash(userId, sessionId)}`,
-    sessionSync: (userId, sessionId) => `${namespace}:session:last:${sessionHash(userId, sessionId)}`,
-    sessionState: (userId, sessionId) => `${namespace}:session:state:${sessionHash(userId, sessionId)}`,
-    lock: (userId, sessionId) => `${lockPrefix}${sessionHash(userId, sessionId)}`,
-    registry: (userId, sessionId) => `${namespace}:registry:${sessionHash(userId, sessionId)}`,
+    daily: (id, day) => v3 ? own(id, `daily:${day}`) : `${namespace}:daily:${id}:${day}`,
+    total: (id) => v3 ? own(id, "total") : `${namespace}:total:${id}`,
+    session: (id, sid) => v3 ? own(id, `session:${hashLedgerPart(sid)}`) : `${namespace}:session:${sessionHash(id, sid)}`,
+    sessionSync: (id, sid) => v3 ? own(id, `sync:${hashLedgerPart(sid)}`) : `${namespace}:session:last:${sessionHash(id, sid)}`,
+    sessionState: (id, sid) => v3 ? own(id, `state:${hashLedgerPart(sid)}`) : `${namespace}:session:state:${sessionHash(id, sid)}`,
+    lock: (id, sid) => v3 ? own(id, `lock:${hashLedgerPart(sid)}`) : `${lockPrefix}${sessionHash(id, sid)}`,
+    registry: (id, sid) => v3 ? own(id, `registry:${hashLedgerPart(sid)}`) : `${namespace}:registry:${sessionHash(id, sid)}`,
+    serverSession: (id, sid) => v3 ? own(id, `server-session:${hashLedgerPart(sid)}`) : `${namespace}:server-session:${sid}`,
+    profile: (id) => v3 ? own(id, "profile") : `kcswh:xp:user:${id}`,
+    hidden: (id) => v3 ? own(id, "hidden") : `${namespace}:leaderboard:v1:hidden:${id}`,
+    rateLimit: (id, minute) => v3 ? own(id, `ratelimit:${minute}`) : `${namespace}:ratelimit:user:${id}:${minute}`,
+    migration: (anon, id) => v3 ? own(id, `conversion:${hashLedgerPart(anon)}`) : `${namespace}:migration:${hashLedgerPart(`${anon}|${id}`)}`,
+    userMigration: (id) => v3 ? own(id, "conversion-once") : `${namespace}:migration:user:${hashLedgerPart(id)}`,
   });
 }
 
@@ -119,17 +171,22 @@ async function readXpTotals({ store, keys, userId, sessionId, dayKey, onError = 
       lastSync: hasSession ? sanitizeXpCounter(values[3]) : 0,
     };
   } catch (error) {
+    if (error?.code === "xp_store_unavailable") throw error;
     if (onError === "zero") return { current: 0, lifetime: 0, sessionTotal: 0, lastSync: 0 };
     throw error;
   }
 }
 
-async function executeAtomicXpAward({ store, script = XP_ATOMIC_AWARD_SCRIPT, keys, args, retryLocked = false, retryDelay, onEvalError }) {
+async function executeAtomicXpAward({ store, userId, anonymous = false, beginSql, script = XP_ATOMIC_AWARD_SCRIPT, keys, args, retryLocked = false, retryDelay, onEvalError }) {
   if (!store || typeof store.eval !== "function" || typeof script !== "string" || !Array.isArray(keys) || !Array.isArray(args)) {
     throw new TypeError("invalid_xp_award_dependencies");
   }
+  const { guardedRedisEval } = await import("./store-upstash.mjs");
   const run = async () => {
-    try { return await store.eval(script, keys, args.map(String)); }
+    try {
+      if (process.env.ACCOUNT_DELETION_ENABLED === '1' && !userId) throw new Error('xp_award_identity_required');
+      return await guardedRedisEval({ store, userIds: [userId], anonymousIds: anonymous ? [userId] : [], script, keys, args: args.map(String), beginSql });
+    }
     catch (error) { if (typeof onEvalError === "function") onEvalError(error); throw error; }
   };
   let result = await run();

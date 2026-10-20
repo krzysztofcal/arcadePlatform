@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import { createXpLedgerKeys, isXpV3 } from "./xp-ledger.mjs";
 
 const asNumber = (raw, fallback) => {
   const value = typeof raw === "string" ? raw.replace(/_/g, "") : raw;
@@ -6,10 +6,9 @@ const asNumber = (raw, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
 export function getXpPolicy(env = process.env) {
-  const sessionTtlSec = Math.max(0, asNumber(env.XP_SESSION_TTL_SEC, 604800));
+  const sessionTtlSec = Math.max(60, Math.min(604800, asNumber(env.XP_SESSION_TTL_SEC, 604800)));
   return {
     dailyCap: Math.max(0, asNumber(env.XP_DAILY_CAP, 3000)),
     sessionCap: Math.max(0, asNumber(env.XP_SESSION_CAP, 300)),
@@ -91,9 +90,6 @@ export function isSupportedXpGameId(value) {
   return SUPPORTED_XP_GAME_ID_SET.has(canonicalizeXpGameId(value));
 }
 
-const keyTotal = (namespace, userId) => `${namespace}:total:${userId}`;
-const keyMigration = (namespace, anonId, userId) => `${namespace}:migration:${hash(`${anonId}|${userId}`)}`;
-const keyUserMigration = (namespace, userId) => `${namespace}:migration:user:${hash(userId)}`;
 
 const ANON_CONVERSION_SCRIPT = `
   local anonTotalKey = KEYS[1]
@@ -119,6 +115,7 @@ const ANON_CONVERSION_SCRIPT = `
   currentUserTotal = tonumber(redis.call('INCRBY', userTotalKey, converted))
   redis.call('DEL', anonTotalKey)
   redis.call('SET', markerKey, tostring(converted))
+  if tonumber(ARGV[3]) and tonumber(ARGV[3]) > 0 then redis.call('EXPIRE', markerKey, ARGV[3]) end
   redis.call('SET', userMarkerKey, tostring(converted))
   local leaderboardVisible = not leaderboardHiddenKey or leaderboardHiddenKey == '' or redis.call('EXISTS', leaderboardHiddenKey) == 0
   if leaderboardAllTimeKey and leaderboardMember and leaderboardMember ~= '' and leaderboardVisible then
@@ -127,22 +124,19 @@ const ANON_CONVERSION_SCRIPT = `
   return {converted, currentUserTotal, anonTotal, 0}
 `;
 
-export async function migrateAnonXpToUser({ store, namespace, anonId, userId, conversionCap, leaderboardAllTimeKey = null, leaderboardHiddenKey = null }) {
+export async function migrateAnonXpToUser({ store, namespace, anonId, userId, conversionCap, leaderboardAllTimeKey = null, leaderboardHiddenKey = null, beginSql }) {
   if (!anonId || !userId || anonId === userId) {
     return { converted: 0, userTotal: null, anonTotal: 0, alreadyConverted: false };
   }
-  const result = await store.eval(
-    ANON_CONVERSION_SCRIPT,
-    [
-      keyTotal(namespace, anonId),
-      keyTotal(namespace, userId),
-      keyMigration(namespace, anonId, userId),
-      keyUserMigration(namespace, userId),
+  const { guardedRedisEval } = await import("./store-upstash.mjs");
+  const result = await guardedRedisEval({ store, userIds: [anonId, userId], anonymousIds: [anonId], beginSql, script: ANON_CONVERSION_SCRIPT, keys: [
+      createXpLedgerKeys({namespace, anonymous:true}).total(anonId),
+      createXpLedgerKeys({namespace}).total(userId),
+      createXpLedgerKeys({namespace}).migration(anonId, userId),
+      createXpLedgerKeys({namespace}).userMigration(userId),
       ...(leaderboardAllTimeKey ? [leaderboardAllTimeKey] : []),
       ...(leaderboardAllTimeKey && leaderboardHiddenKey ? [leaderboardHiddenKey] : []),
-    ],
-    [String(Math.max(0, Number(conversionCap) || 0)), ...(leaderboardAllTimeKey ? [userId] : [])],
-  );
+    ], args: [String(Math.max(0, Number(conversionCap) || 0)), leaderboardAllTimeKey ? userId : "", isXpV3(namespace) ? "604800" : "0"] });
   return {
     converted: Math.max(0, Math.floor(Number(result?.[0]) || 0)),
     userTotal: Math.max(0, Math.floor(Number(result?.[1]) || 0)),

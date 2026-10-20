@@ -212,7 +212,8 @@ test("ws preview env helper validates descriptor metadata before parsing content
   const descriptorMetadata = text.indexOf("const metadata = fs.fstatSync(fd)", descriptorOpen);
   const descriptorRead = text.indexOf('fs.readFileSync(fd, "utf8")', descriptorMetadata);
   const firstContentCheck = text.indexOf("PORT", descriptorRead);
-  const parser = text.indexOf("const values = parseEnv");
+  const parser = text.indexOf("const values = parseEnv(originalSource)");
+  const snapshot = text.indexOf('const originalSource = fs.readFileSync(fd, "utf8")', descriptorMetadata);
 
   assert.match(text, /const ENV_FILE = "\/opt\/arcade-ws-preview\/\.env\.preview"/);
   assert.match(text, /process\.argv\.length !== 2/);
@@ -225,7 +226,8 @@ test("ws preview env helper validates descriptor metadata before parsing content
   assert.ok(descriptorMetadata > descriptorOpen, "opened preview env metadata must be checked");
   assert.ok(descriptorRead > descriptorMetadata, "preview env contents must be read after metadata");
   assert.ok(firstContentCheck > descriptorRead, "content checks must follow the permission preflight");
-  assert.ok(parser >= 0 && parser < descriptorRead, "env parsing must consume the descriptor contents");
+  assert.ok(snapshot > descriptorMetadata && snapshot < parser, "env parsing must consume the saved descriptor contents");
+  assert.ok(parser > descriptorRead, "parsing must follow the verified descriptor snapshot read");
   assert.match(text, /typeof fs\.constants\.O_NOFOLLOW !== "number"/);
   assert.match(text, /typeof fs\.constants\.O_NONBLOCK !== "number"/);
   assert.match(text, /metadata\.isFile\(\)/);

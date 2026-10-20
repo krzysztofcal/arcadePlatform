@@ -1,6 +1,6 @@
 import { klog } from "./supabase-admin.mjs";
 import { saveUserProfile } from "./store-upstash.mjs";
-import { sanitizeXpCounter } from "./xp-ledger.mjs";
+import { sanitizeXpCounter, isXpV3, resolveXpNamespace } from "./xp-ledger.mjs";
 
 function buildXpStatusSnapshot({ totals, dailyCap, deltaCap, sessionId, dayKey, nextReset, status = "statusOnly" }) {
   const source = totals && typeof totals === "object" ? totals : {};
@@ -42,6 +42,7 @@ async function persistXpProfileSnapshot({ userId, totalXp, now = Date.now(), sav
     return true;
   } catch (error) {
     klog(logKind, { error: error?.message });
+    if (isXpV3(resolveXpNamespace())) throw error;
     return false;
   }
 }

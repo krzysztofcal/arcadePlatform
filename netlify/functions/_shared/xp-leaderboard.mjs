@@ -1,3 +1,4 @@
+import { createXpLedgerKeys, resolveXpNamespace } from "./xp-ledger.mjs";
 import { nextWarsawResetMs, warsawDayKey, warsawLocalEpochMs } from "./time-utils.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -61,12 +62,12 @@ export function getXpLeaderboardWeekDayKeys(nowMs = Date.now()) {
   return Object.freeze(keys);
 }
 
-export function createXpLeaderboardKeys({ namespace = "kcswh:xp:v2" } = {}) {
+export function createXpLeaderboardKeys({ namespace = resolveXpNamespace() } = {}) {
   const prefix = `${namespace}:leaderboard:v1`;
   return Object.freeze({
     allTime: () => `${prefix}:all_time`,
     day: (dayKey) => `${prefix}:day:${dayKey}`,
     week: (weekKey) => `${prefix}:week:${weekKey}`,
-    hidden: (userId) => `${prefix}:hidden:${userId}`,
+    hidden: (userId) => createXpLedgerKeys({namespace}).hidden(userId),
   });
 }

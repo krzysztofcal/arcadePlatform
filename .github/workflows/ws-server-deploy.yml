@@ -452,8 +452,12 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           DEPLOY_REF: ${{ github.ref_name }}
           RELEASE_ENVIRONMENT: production
+          XP_REDIS_VERSION: '3'
         run: |
           set -euo pipefail
+          export XP_REDIS_ENV=prod XP_KEY_NS=kcswh:prod:xp:v3
+          CONTEXT=production node scripts/generate-build-info.js --server-context-only
+
           ARTIFACT_DIR="$GITHUB_WORKSPACE/.artifacts/ws-server"
           STAGE_ROOT="$ARTIFACT_DIR/stage"
           STAGE_WS_DIR="$STAGE_ROOT/ws-server"
@@ -504,6 +508,7 @@ jobs:
             cp netlify/functions/_shared/poker-*.mjs "$STAGE_ROOT"/netlify/functions/_shared/
             cp netlify/functions/_shared/supabase-admin.mjs "$STAGE_ROOT"/netlify/functions/_shared/
             cp netlify/functions/_shared/api-cors.mjs "$STAGE_ROOT"/netlify/functions/_shared/
+            cp netlify/functions/_shared/store-upstash.mjs netlify/functions/_shared/xp-ledger.mjs "$STAGE_ROOT"/netlify/functions/_shared/
             mkdir -p "$STAGE_ROOT"/netlify/functions/_generated
             cp netlify/functions/_generated/deploy-context.mjs "$STAGE_ROOT"/netlify/functions/_generated/
           fi
@@ -655,6 +660,11 @@ jobs:
               if [ "$HAVE_SWITCHED" != "1" ] || [ -z "$PREVIOUS_TARGET" ]; then
                 return 0
               fi
+              # Never restore a V2 runtime after the coordinated V3 cutover.
+              if ! node --input-type=module -e 'const p=process.argv[1]; const c=await import("file://"+p+"/../netlify/functions/_generated/deploy-context.mjs"); if(c.BUILD_XP_REDIS_VERSION!=="3" || c.BUILD_XP_REDIS_ENV!=="prod") process.exit(1)' "$PREVIOUS_TARGET"; then
+                echo "Previous release is not V3 prod; roll-forward required"
+                return 0
+              fi
               ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
               mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
               sudo -n /usr/bin/systemctl restart ws-server.service || true
@@ -699,7 +709,11 @@ jobs:
               exit 1
             fi
 
-            sudo -n /usr/local/sbin/arcade-ws-production-env-preflight
+            node --input-type=module -e 'import fs from "node:fs"; const root=process.argv[1]; const c=await import("file://"+root+"/netlify/functions/_generated/deploy-context.mjs"); const m=JSON.parse(fs.readFileSync(root+"/ws-server/release-metadata.json")); if(c.BUILD_DEPLOY_CONTEXT!=="production" || c.BUILD_XP_REDIS_VERSION!=="3" || c.BUILD_XP_REDIS_ENV!=="prod" || m.releaseSha!==process.env.RELEASE_SHA) process.exit(1)' "$NEW_RELEASE_DIR"
+            # An old installed helper returning only PASS must not deploy V3.
+            PROD_PREFLIGHT="$(sudo -n /usr/local/sbin/arcade-ws-production-env-preflight)"
+            printf '%s\n' "$PROD_PREFLIGHT"
+            [[ "$PROD_PREFLIGHT" == 'PASS LIVE Redis V3 prod' ]]
 
             ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
             mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"

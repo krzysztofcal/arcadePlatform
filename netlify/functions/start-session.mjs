@@ -1,5 +1,7 @@
+import { getXpPolicy } from "./_shared/xp-identity.mjs";
+import { createXpLedgerKeys, resolveXpNamespace } from "./_shared/xp-ledger.mjs";
 import crypto from "node:crypto";
-import { store } from "./_shared/store-upstash.mjs";
+import { xpStoreUnavailableResponse, store, guardedUserMutation, atomicRateLimitIncr } from "./_shared/store-upstash.mjs";
 import { extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { buildApiCorsPolicy, buildCorsHeaders } from "./_shared/api-cors.mjs";
 import {
@@ -10,8 +12,8 @@ import {
 } from "./_shared/xp-server-session.mjs";
 
 // Configuration
-const SESSION_TTL_SEC = Math.max(0, Number(process.env.XP_SESSION_TTL_SEC) || 604800); // 7 days default
-const KEY_NS = process.env.XP_KEY_NS ?? "kcswh:xp:v2";
+const SESSION_TTL_SEC = getXpPolicy().sessionTtlSec; // 7 days default
+const KEY_NS = resolveXpNamespace();
 const DEBUG_ENABLED = process.env.XP_DEBUG === "1";
 const API_CORS_POLICY = buildApiCorsPolicy();
 if (API_CORS_POLICY.invalidConfiguredOriginCount > 0) {
@@ -26,7 +28,7 @@ const SESSION_RATE_LIMIT_ENABLED = process.env.XP_SESSION_RATE_LIMIT_ENABLED !==
 const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 
 // Key generators
-const keyServerSession = (sessionId) => `${KEY_NS}:server-session:${sessionId}`;
+const keyServerSession = (sessionId, userId, anonymous = false) => createXpLedgerKeys({namespace:KEY_NS, anonymous}).serverSession(userId, sessionId);
 const keySessionRateLimitIp = (ip) => `${KEY_NS}:session-ratelimit:ip:${hash(ip)}:${Math.floor(Date.now() / 60000)}`;
 
 // CORS headers
@@ -80,10 +82,7 @@ async function checkSessionRateLimit(ip) {
 
   const key = keySessionRateLimitIp(ip);
   try {
-    const count = await store.incrBy(key, 1);
-    if (count === 1) {
-      await store.expire(key, 60);
-    }
+    const { count } = await atomicRateLimitIncr(key, 60);
 
     if (count > SESSION_RATE_LIMIT_PER_IP_PER_MIN) {
       return {
@@ -99,10 +98,10 @@ async function checkSessionRateLimit(ip) {
 }
 
 // Store session metadata in Redis
-async function storeSession({ sessionId, userId, createdAt, fingerprint, ip }) {
-  const key = keyServerSession(sessionId);
+async function storeSession({ sessionId, userId, anonymous = false, createdAt, fingerprint, ip }) {
+  const key = keyServerSession(sessionId, userId, anonymous);
   const sessionData = JSON.stringify({
-    userId,
+    userId, identityMode: anonymous ? "anonymous" : "user",
     createdAt,
     fingerprint,
     ipHash: hash(ip || "unknown").substring(0, 16), // Store hashed IP for audit, not validation
@@ -110,7 +109,7 @@ async function storeSession({ sessionId, userId, createdAt, fingerprint, ip }) {
   });
 
   try {
-    await store.setex(key, SESSION_TTL_SEC, sessionData);
+    await guardedUserMutation({ userId, anonymous, operation: "setex", key, ttl: SESSION_TTL_SEC, value: sessionData });
     return { stored: true };
   } catch (err) {
     klog("xp_session_store_failed", { outcome: "unavailable" });
@@ -119,8 +118,8 @@ async function storeSession({ sessionId, userId, createdAt, fingerprint, ip }) {
 }
 
 // Validate session exists and matches (userId is the identityId stored in the token)
-export async function validateServerSession({ sessionId, userId, fingerprint }) {
-  const key = keyServerSession(sessionId);
+export async function validateServerSession({ sessionId, userId, fingerprint, anonymous = false }) {
+  const key = keyServerSession(sessionId, userId, anonymous);
 
   try {
     const raw = await store.get(key);
@@ -153,18 +152,18 @@ export async function validateServerSession({ sessionId, userId, fingerprint }) 
 }
 
 // Update session last activity
-export async function touchSession(sessionId) {
-  const key = keyServerSession(sessionId);
+export async function touchSession(sessionId, { userId = null, anonymous = false, beginSql } = {}) {
+  const key = keyServerSession(sessionId, userId, anonymous);
 
   try {
     const raw = await store.get(key);
     if (!raw) return { updated: false };
 
     const data = JSON.parse(raw);
-    data.lastActivity = Date.now();
-
-    await store.setex(key, SESSION_TTL_SEC, JSON.stringify(data));
-    return { updated: true };
+    if (userId && data.userId !== userId) return { updated: false };
+    const updated = await guardedUserMutation({ userId: data.userId, anonymous: anonymous || data.identityMode === "anonymous", operation: "touch", key,
+      ttl: SESSION_TTL_SEC, value: Date.now(), beginSql });
+    return { updated: Number(updated) === 1 };
   } catch {
     return { updated: false };
   }
@@ -199,6 +198,9 @@ export async function handler(event) {
   }
 
   // Only accept POST requests
+  const unavailable = xpStoreUnavailableResponse(corsHeaders(origin) || {});
+  if (unavailable) return unavailable;
+
   if (event.httpMethod !== "POST") {
     return json(405, { error: "method_not_allowed" }, origin);
   }
@@ -285,7 +287,7 @@ export async function handler(event) {
   // Store session in Redis
   const storeResult = await storeSession({
     sessionId,
-    userId: identityId,
+    userId: identityId, anonymous: !supabaseUserId,
     createdAt: now,
     fingerprint,
     ip: clientIp,
