@@ -20,7 +20,24 @@ class OperatorTests(unittest.TestCase):
             {'key': 'COMMON', 'values': [{'context':'all','value':'keep-common'}]},
             {'key': 'UPSTASH_REDIS_REST_TOKEN', 'values': [{'context':'deploy-preview','value':'old'}]},
         ]
-        self.assertEqual(adapter.stage_overrides(rows), [('SUPABASE_URL', {'context':'branch','context_parameter':adapter.BRANCH,'value':'stage'})])
+        updates = adapter.stage_overrides(rows)
+        self.assertEqual([r for r in updates if r[1]['context_parameter'] == adapter.BRANCH], [('SUPABASE_URL', {'context':'branch','context_parameter':adapter.BRANCH,'value':'stage'})])
+        alias = {key: value['value'] for key, value in updates if value['context_parameter'] == adapter.STAGE_ALIAS}
+        self.assertEqual(alias, {'SUPABASE_URL':'stage','EXISTING':'keep','UPSTASH_REDIS_REST_TOKEN':'old'})
+        self.assertNotIn('production', alias.values())
+        rows[0]['values'].append({'context':'branch','context_parameter':adapter.STAGE_ALIAS,'value':'production'})
+        with self.assertRaises(adapter.operator.Refused):
+            adapter.stage_overrides(rows)
+
+    def test_netlify_all_normalization_preserves_every_other_effective_scope(self):
+        spec = importlib.util.spec_from_file_location('netlify_normalization', 'scripts/ops/xp-redis-netlify-configure.py')
+        adapter = importlib.util.module_from_spec(spec); spec.loader.exec_module(adapter)
+        before = [{'key':'TOKEN','scopes':['functions','builds'],'values':[{'context':'all','value':'old'}]}]
+        after = [{'key':'TOKEN','scopes':['functions','builds'],'values':[{'context':c,'value':'old'} for c in ('dev','branch-deploy','deploy-preview','production')]+[{'context':'branch','context_parameter':adapter.STAGE_ALIAS,'value':'stage'}]}]
+        allowed = {('TOKEN','branch',adapter.STAGE_ALIAS)}
+        adapter.verify_unrelated(before, after, allowed)
+        after[0]['values'][3]['value'] = 'wrong-production'
+        with self.assertRaises(adapter.operator.Refused): adapter.verify_unrelated(before, after, allowed)
 
     def env(self, target):
         ref = m.REFS[target]

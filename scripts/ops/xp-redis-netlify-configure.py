@@ -16,6 +16,7 @@ operator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(operator)
 KEYS = (*operator.REDIS_KEYS, 'XP_REDIS_VERSION', 'XP_REDIS_ENV', 'XP_KEY_NS', 'ACCOUNT_DELETION_ENABLED')
 BRANCH = 'feat/1117-account-deletion-v2'
+STAGE_ALIAS = 'deploy-preview-1124'
 PRIVATE = Path.home() / 'arcade-xp-v3-cutover'
 
 
@@ -38,7 +39,48 @@ def stage_overrides(rows):
         operator.require(len(preview) <= 1 and len(branch) <= 1, 'ambiguous_stage_context')
         if preview and not branch:
             updates.append((row['key'], {'context': 'branch', 'context_parameter': BRANCH, 'value': preview[0]['value']}))
+    # CLI deploy metadata uses alias as branch; build --context alone does not
+    # provision hosted Function env. Mirror only approved Stage values there.
+    for row in rows:
+        by_context = lambda context, parameter=None: [v for v in row['values'] if v['context'] == context and (parameter is None or v.get('context_parameter') == parameter)]
+        source = by_context('branch', BRANCH) or by_context('deploy-preview')
+        if not source and row['key'] in KEYS:
+            source = by_context('all')
+        existing = by_context('branch', STAGE_ALIAS)
+        operator.require(len(source) <= 1 and len(existing) <= 1, 'ambiguous_alias_context')
+        if source:
+            operator.require(not existing or existing[0]['value'] == source[0]['value'], 'alias_context_drift')
+            if not existing:
+                updates.append((row['key'], {'context':'branch', 'context_parameter':STAGE_ALIAS, 'value':source[0]['value']}))
     return updates
+
+
+def verify_unrelated(before, after, allowed):
+    # Envelope expands `all` into four concrete contexts on a branch PATCH.
+    # Compare effective values, not that storage representation; never permit
+    # a change to another branch/Production merely because `all` disappeared.
+    resulting = {row['key']: row for row in after}
+    operator.require(set(resulting) == {row['key'] for row in before}, 'unexpected_variable_change')
+    def effective(row, context, parameter):
+        candidates = [('branch', parameter), ('branch-deploy', None), ('all', None)] if context == 'branch' else [(context, None), ('all', None)]
+        for identity in candidates:
+            found = [v['value'] for v in row['values'] if (v['context'], v.get('context_parameter')) == identity]
+            operator.require(len(found) <= 1, 'ambiguous_context')
+            if found:
+                return found[0]
+        return None
+    for previous in before:
+        current = resulting[previous['key']]
+        operator.require(current['scopes'] == previous['scopes'], 'unexpected_scope_change')
+        identities = {('dev',None),('branch-deploy',None),('deploy-preview',None),('production',None)}
+        for row in (previous, current):
+            for v in row['values']:
+                operator.require(v['context'] in ('dev','branch-deploy','deploy-preview','production','all','branch'), 'unknown_context')
+                if v['context'] != 'all':
+                    identities.add((v['context'], v.get('context_parameter')))
+        for identity in identities:
+            if (previous['key'], *identity) not in allowed:
+                operator.require(effective(previous, *identity) == effective(current, *identity), 'unrelated_value_changed')
 
 
 def main(mode):
@@ -79,6 +121,8 @@ def main(mode):
             or (db.hostname == 'db.' + ref + '.supabase.co' and db.username == 'postgres'), 'db_context_mismatch')
     urls = [value(operator.REDIS_KEYS[0], stage).rstrip('/') for stage in (True, False)]
     operator.require(urls[0] == urls[1] and operator.digest(urls[0].encode()) == operator.ENDPOINT_HASH, 'redis_endpoint_mismatch')
+    if mode == 'plan':
+        operator.require(not stage_overrides(before), 'stage_context_not_prepared')
     allowed = set()
     if mode == 'prepare-stage':
         updates = stage_overrides(before)
@@ -93,8 +137,9 @@ def main(mode):
         new = read_private(Path('/var/lib/arcade-xp-v3/redis-new.json'))
         operator.verify_new(old, new)
         updates = []
-        for stage in (False, True):
-            context = {'context': 'branch', 'context_parameter': BRANCH} if stage else {'context': 'production'}
+        for branch in (None, BRANCH, STAGE_ALIAS):
+            stage = branch is not None
+            context = {'context': 'branch', 'context_parameter': branch} if stage else {'context': 'production'}
             target = 'stage' if stage else 'prod'
             desired = {**new, 'XP_REDIS_VERSION': '3', 'XP_REDIS_ENV': target,
                        'XP_KEY_NS': f'kcswh:{target}:xp:v3', 'ACCOUNT_DELETION_ENABLED': '0'}
@@ -103,7 +148,9 @@ def main(mode):
         # A branch context falls back to branch-deploy/all, NOT deploy-preview.
         # Materialize existing explicit Stage preview overrides on this one branch;
         # otherwise a manual exact-source build could inherit Production defaults.
-        updates.extend(stage_overrides(before))
+        # Stage alias parity was prepared before credential rotation; verify it
+        # before changing any supported scope to the new credential.
+        stage_overrides([row for row in before if row['key'] not in KEYS])
         # Backup only Redis/settings, never the full env response or Supabase credentials.
         operator.SecureFiles(uid=os.getuid(), gid=os.getgid(), boundary=Path('/')).parents(PRIVATE / 'netlify-redis.before.json')
         operator.require(stat.S_IMODE(PRIVATE.stat().st_mode) == 0o700, 'unsafe_private_directory')
@@ -121,22 +168,11 @@ def main(mode):
     after = api(root + '?site_id=' + site_id) if updates else before
     after_map = {row['key']: row for row in after}
     operator.require(set(after_map) == {row['key'] for row in before}, 'unexpected_variable_change')
-    for row in before:
-        result = after_map[row['key']]
-        previous_ids = {(v['context'], v.get('context_parameter')) for v in row['values']}
-        operator.require(all((v['context'], v.get('context_parameter')) in previous_ids
-            or (row['key'], v['context'], v.get('context_parameter')) in allowed
-            for v in result['values']), 'unexpected_context_change')
-        operator.require(result['scopes'] == row['scopes'], 'unexpected_scope_change')
-        for previous in row['values']:
-            identity = (row['key'], previous['context'], previous.get('context_parameter'))
-            if identity not in allowed:
-                present = [v for v in result['values'] if (v['context'], v.get('context_parameter')) == identity[1:]]
-                operator.require(len(present) == 1 and present[0]['value'] == previous['value'], 'unrelated_value_changed')
+    verify_unrelated(before, after, allowed)
     for key, update in updates:
         found = [v for v in after_map[key]['values'] if v['context'] == update['context'] and v.get('context_parameter') == update.get('context_parameter')]
         operator.require(len(found) == 1 and found[0]['value'] == update['value'], 'write_not_confirmed')
-    return {'phase': mode, 'site': 'playkcswh', 'stageAndProductionTargetsVerified': True,
+    return {'phase': mode, 'site': 'playkcswh', 'stageAndProductionTargetsVerified': True, 'stageAlias': STAGE_ALIAS,
             'writes': len(updates), 'unrelatedValuesAndScopesPreserved': True, 'deployTriggered': False}
 
 
