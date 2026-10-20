@@ -301,3 +301,13 @@ test('MVP SQL purge still rejects known unfinished writes and live capabilities 
   await seedClock("signing_finished_at=clock_timestamp()-interval '3 hours',capability_until=clock_timestamp()-interval '1 minute',source_deleted_at=clock_timestamp(),output_path=$2,output_write_started_at=clock_timestamp(),output_deleted_at=clock_timestamp() where id=$1",[pending.uploadId,randomUUID()+'.webp']);
   await assert.rejects(purge(),/closure unconfirmed/,'a deletion receipt never erases an unfinished write');
 });
+
+test('Storage 1.80.2 legacy HTTP400 accepts only embedded404 NoSuchKey, never bucket/auth/infrastructure errors',async()=>{
+  const {userId,deps,cleanup,executeSql}=await fixture();
+  await updateUserAvatarKey(userId,randomUUID()+'.webp',deps);
+  for(const body of [{statusCode:'404',code:'NoSuchBucket'},{statusCode:'403',code:'AccessDenied'},{statusCode:'500',code:'InternalError'},{code:'NoSuchKey'},{statusCode:'500',code:'NoSuchKey'}]) {
+    await assert.rejects(cleanup({fetch:(url,opts)=>url.includes('/info/authenticated/')?new Response(JSON.stringify(body),{status:400}):deps.fetch(url,opts)}),/dependency_unavailable/);
+    assert.equal((await executeSql('select deleted_at from private.account_avatar_objects'))[0].deleted_at,null);
+  }
+  assert.deepEqual(await cleanup({fetch:(url,opts)=>url.includes('/info/authenticated/')?new Response(JSON.stringify({statusCode:'404',code:'NoSuchKey',error:'not_found',message:'Object not found'}),{status:400}):deps.fetch(url,opts)}),{done:true});
+});

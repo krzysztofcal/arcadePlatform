@@ -46,7 +46,10 @@ order by id limit 5;`, [userId]);
       headers: { apikey:key, Authorization:`Bearer ${key}`, 'cache-control':'no-cache' }, signal:AbortSignal.timeout(15000) });
     // A bucket/auth/network error is not proof that this exact object is absent.
     const body = await response.json().catch(() => null);
-    if (response.status !== 404 || body?.code !== 'NoSuchKey') throw unavailable();
+    // Storage1.80.2 legacy error handler maps non-500 errors to HTTP400
+    // while retaining the semantic status in the body. Require both signals.
+    if (body?.code !== 'NoSuchKey' || !(response.status === 404
+      || (response.status === 400 && body.statusCode === '404'))) throw unavailable();
   };
   const remove = async (bucket,path) => {
     if (!(bucket === UPLOAD ? SOURCE : AVATAR).test(path || '')) throw unavailable();
