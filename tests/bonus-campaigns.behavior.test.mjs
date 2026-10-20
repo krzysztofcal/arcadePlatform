@@ -102,6 +102,9 @@ function createDeps() {
         const createdAt = users.get(params[0]);
         return createdAt ? [{ created_at: createdAt, is_anonymous: false }] : [];
       }
+      if (text.includes("from private.bonus_campaign_paid_totals")) {
+        return [{ claim_count: [...txByKey.values()].filter(tx => tx.metadata.campaign_id === params[0]).length }];
+      }
       if (text.includes("from public.bonus_claims")) {
         if (text.includes("count(*)")) {
           const campaignId = params[0];

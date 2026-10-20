@@ -1186,11 +1186,11 @@
       "purpose": "#1117 local-only canonical reconciliation / release-gated legacy reward commit fence; no remote application, activation, seed evidence or approval authorized."
     },
     {
-      "file": "20261020094949_account_reward_legacy_writer_fence.sql",
-      "version": "20261020094949",
-      "sha256": "cc1c720345d2ff4c15a40284bb610e6eaa602b3b4730a71c7cf24b7dab7d5165",
+      "file": "20261020190000_account_bonus_uuid_policy.sql",
+      "version": "20261020190000",
+      "sha256": "d90ed9e48a07ce3e7126bc50de17756f87558a9fced9473845a6d31020138b52",
       "category": "needs-production-equivalent",
-      "purpose": "#1117 local-only canonical reconciliation / release-gated legacy reward commit fence; no remote application, activation, seed evidence or approval authorized."
+      "purpose": "#1117 per-UUID bonuses without HMAC; remove unused empty recognition schema and retain atomic campaign lifetime quotas. Local-only; no remote apply authorized."
     }
   ]
 }

@@ -4,7 +4,7 @@ Scope: current app paths on main 9a43f4cf plus Draft #1124. No live data queried
 
 | Current writer | Final guard / trusted exception |
 | --- | --- |
-| HTTP chips-tx, admin-ledger-adjust, Welcome/campaign grants | Main chips-ledger locks sorted actual USER recipients plus initiating actor inside transaction. Deleted recipient/actor denied; ledger/reward proof/bonus_claims atomic. Historical replay reads existing immutable receipt. |
+| HTTP chips-tx, admin-ledger-adjust, Welcome/campaign grants | Main chips-ledger locks sorted actual USER recipients plus initiating actor inside transaction. Deleted recipient/actor denied; ledger/bonus_claims/campaign lifetime quota atomic; Welcome uses UUID-only ledger idempotency (#1131 defers cross-account recognition). Historical replay reads existing immutable receipt. |
 | WS JOIN/rebuy, escrow buy-in | Separate WS chips-ledger guards actual USER entries before wallet creation; bot SYSTEM↔ESCROW remains allowed. Table/user-slot locks precede lifecycle. |
 | HTTP create-table/quick-seat | Shared createPokerTableWithState checks owner after slot/capacity locks immediately before new table insert. Quick-seat replay locks table then lifecycle before renewal; recommendations alone cannot JOIN. |
 | Human ACT, start_hand, rollover | Persisted-state writer checks durable actor after table lock, before reservation/CAS. New-hand participants and explicit start actor require ACTIVE; ongoing internal settlement/bot turns without new deal remain allowed. File test adapter cannot run deletion-enabled runtime. |

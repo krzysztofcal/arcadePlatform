@@ -1,23 +1,21 @@
-# Remaining work — Account Deletion V2 / #1117
+# Active tasks — #1117
 
-## Current release status — 20 October 2026 (supersedes historical checkpoints)
+## Binding owner decision — per-UUID bonuses / #1131 (20 October 2026)
 
-Redis V3 operational migration is **COMPLETED** on Stage and Production, independently of Account Deletion. Owner merged #1129 as `82aee39d5b0bd006e72a199cc89963beaf5665c1`; closure is recorded in #1130 and `docs/ops/redis-v3-cutover.md`. Actual journal:570 exact legacy XP keys deleted,0 uncertain,0 V2 repopulation; protected backup/journal retained. Production Netlify/WS exact82aee39d, Stage avatar-v3 source134818252375239acb8356163a0b454222d99ef8 preserved; real XP/profile/ranking/refresh/WS smoke PASS in both environments. Do not repeat reset, rotate credentials, recreate epochs or roll back to V2. Old audit statements below about pending reset/ProductionV2 are historical, not current instructions.
+Cross-account anti-farming is OUT OF SCOPE for #1117 and deferred to #1131. Welcome must work for every eligible new UUID under existing amount/start-date rules, including same-email/Google re-registration; one payout per UUID, no lifetime email cap. Daily UTC/streak and once/campaign remain per UUID. Owner accepts cross-account farming. No HMAC key, verified-email-at-payout, history_ready, protected-payout pause or anti-farming privacy/LIA decision blocks Account Deletion. Global campaign max_total_claims and financial/idempotency retention remain unchanged. Do not delete ledger evidence or reset a campaign quota with Auth/claims cascade.
 
-Account Deletion remains **OFF**, #1124 **DRAFT**, MVP **not merge-ready**. Existing runtime/Stage proofs do not cover newly integrated runtime or pending deletion migrations. The accepted theoretical post-expiry upload limitation is #1128, not an MVP blocker; real unknown operations/ownership remain blocking. No Stage mutation/deploy or Production change is authorized by this review.
+Redis V3 is COMPLETED on Stage+Production (#1129/#1130); no new reset or credential rotation. Account Deletion stays OFF and #1124 DRAFT. Invisible late upload is accepted MVP limitation#1128; real uncertain operations/ownership still fail closed. Current permission is local code/tests/documentation and read-only review, not activation/destructive E2E/Production deployment/merge.
 
-## Active checklist (historical entries below are not an execution queue)
-
-- [x] T04d Retired USER archive/receipt/idempotency compatibility implemented; retain existing local and real ESCROW retention evidence (#1126).
-- [x] T02f Final writer guards implemented; preserve SQL lifecycle, sticky Redis BLOCKED, WS admission fences and trusted internal Poker settlement.
-- [x] T05d4 Redis V3 operational cutover COMPLETED Stage+Production (#1129/#1130). No reset/redeployment needed for this review.
-- [x] SYNC Merge current main into #1124; keep independent Redis CI and Account Deletion CI; remove duplicate reset tests and obsolete live V2 expectations. Preserve pre-deletion-schema compatibility while deletion is OFF.
-- [ ] T05d4-release Record actual existing namespace/endpoint/epoch/manifest in Stage `account_deletion_release.redis_cutover` only under next explicit evidence/marker GO. This is deletion-specific readiness metadata, NOT another Redis migration/reset. Re-read current credentials/epoch; do not copy historical epoch values.
-- [ ] T05e Apply reviewed `20261020094224_account_avatar_reconciliation.sql` on Stage, deploy matched runtime with deletion OFF, resolve five no-SHA historical Netlify artifacts through provenance or explicitly approved narrow retirement; reconcile exact ownership/inventory and retained legacy/uncertain operations with genuine request/lease + actual DELETE/absence receipts. No global sweep, fabricated terminal receipt or guard disable.
-- [ ] T06b Apply reviewed `20261020094949_account_reward_legacy_writer_fence.sql`, reconcile campaign global totals from real receipts/registry/archive coverage while release OFF; select owner-approved history-gap policy. Do not set history_ready from current email or partial ledger.
-- [ ] T06b-policy Owner/legal accept purpose-bound HMAC retention/LIA/rights notice and protected-payout pause when trustworthy history/key unavailable. No annual reset, speculative multi-key framework or timer-based proof purge. A first real key/backup is separate scoped provisioning; positive protected payouts still require honest complete coverage.
-- [ ] T07a Validate integrated merge with existing local fundamentals, syntax/CSP/guards/migration manifest and required CI. CI is code evidence, not new hosted integration proof.
-- [ ] T07b After genuine Storage/Redis metadata and policy/schema/runtime prerequisites, separately authorize one disposable Stage UI→durable accept→all-in/showdown/side-pot→cash-out→one BURN→exact cleanup→Auth-last→new UUID E2E; verify control, retry/lost response and old-token denial. No existing fixture teardown automatically included. Google NOT TESTED without dedicated identity.
+- [x] T04d Retired USER archive/receipt/idempotency compatibility retained.
+- [x] T02f Final writer lifecycle guards retained; internal Poker settlement stays allowed.
+- [x] T05d4 Redis V3 COMPLETED Stage+Production; no further reset.
+- [x] T06b REMOVED from#1117: cross-account HMAC/history/privacy policy deferred to#1131, not a release prerequisite. No protected-payout pause.
+- [x] BONUS-UUID Restore ordinary per-UUID Welcome/Daily/once with deletion ON or OFF and no HMAC; remove unused runtime/manual proposal/pending fence. Preserve applied migration hashes; prepare20261020190000 forward cleanup + independent campaign lifetime quota. Fundamental rollback/replay/cascade/concurrency tests.
+- [ ] T05e Complete real legacy authority/inventory/cutoff and canonical uncertain-operation reconciliation; apply pending20261020094224 only under Stage GO. No unowned deletes, invented receipts or guard disable.
+- [ ] BONUS-ROLLOUT Apply reviewed20261020190000 and matched code Stage-only; verify counter backfill from actual ledger/registry/claim evidence and normal bonus availability. No cross-account history approval.
+- [ ] REDIS-RELEASE Bind existing actual endpoint/epoch/manifest/drain/reset evidence to deletion release record under explicit GO; NOT a Redis migration/reset.
+- [ ] T07a Final matched-release review/CI after remaining rollout; current local/CI evidence is recorded in PR/research, not hosted E2E proof.
+- [ ] T07b Separate explicit disposable Stage destructive E2E: positive wallet/all-in/showdown/side-pot→cash-out→one BURN→cleanup→Auth-last→same email new UUID→normal Welcome, control/global-quota/retry checks. Google needs dedicated identity. End feature OFF; no Production or merge.
 
 ## Historical audit trail — evidence only, superseded instructions must not be executed
 

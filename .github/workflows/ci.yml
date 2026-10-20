@@ -113,7 +113,7 @@ jobs:
           tests/xp-redis-v3.behavior.test.mjs
           tests/account-deletion-storage.behavior.test.mjs
           tests/chips-ledger.deletion-retirement.test.mjs
-          tests/reward-identities.behavior.test.mjs
+          tests/account-deletion-bonuses.behavior.test.mjs
           tests/xp-ledger.behavior.test.mjs
           shared/poker-domain/gift-purchase.behavior.test.mjs
           ws-server/poker/runtime/session-store.behavior.test.mjs

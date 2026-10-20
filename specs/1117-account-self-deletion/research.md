@@ -1,3 +1,27 @@
+## Binding owner decision — per-UUID bonuses / #1131 (20 October 2026)
+
+Cross-account anti-farming is OUT OF SCOPE for #1117 and deferred to #1131. Welcome must work for every eligible new UUID under existing amount/start-date rules, including same-email/Google re-registration; one payout per UUID, no lifetime email cap. Daily UTC/streak and once/campaign remain per UUID. Owner accepts cross-account farming. No HMAC key, verified-email-at-payout, history_ready, protected-payout pause or anti-farming privacy/LIA decision blocks Account Deletion. Global campaign max_total_claims and financial/idempotency retention remain unchanged. Do not delete ledger evidence or reset a campaign quota with Auth/claims cascade.
+
+Redis V3 is COMPLETED on Stage+Production (#1129/#1130); no new reset or credential rotation. Account Deletion stays OFF and #1124 DRAFT. Invisible late upload is accepted MVP limitation#1128; real uncertain operations/ownership still fail closed. Current permission is local code/tests/documentation and read-only review, not activation/destructive E2E/Production deployment/merge.
+
+### Executed local removal / read-only history evidence
+
+Verified live PR1124 HEAD56f8f1a6 and#1131 decision. Read-only Stage+Production histories:20261018184941 applied only on Stage;20261020094949 applied in neither project. Stage private payout proof count0, Production recognition schema absent. This authorizes no remote mutation. Applied migration remains unchanged; removed pending HMAC fence/manual copy/JS helper/test implementation. New20261020190000 forward migration drops unused recognition tables only if all empty and preserves campaign aggregate table; no HMAC key/version/history gates survive in runtime. Current Welcome is exactly main's established UUID implementation.
+
+Replacement fundamental SQL-backed tests cover five same-email registrations/one payout each, same-UUID retry denial, deletion-release OFF/ON without HMAC, Daily UTC/once/new UUID, global campaign quota after Auth/claims cascade, atomic rollback/final-slot race, legacy bypass denial and archival replay. Existing full ledger/deletion fixtures remain independent financial evidence. Fixture Auth deletes and faults are LOCAL PGlite only, not hosted Stage E2E.
+
+T05e remains operationally open; no new writes/cleanup/deploy/activation were executed. The five no-SHA Netlify artifacts are a narrow provenance gap, not a1626deployment retirement requirement. Existing exact inventory/reconciliation code needs matched schema/runtime and genuine owner/request/lease observations. T07b full real deletion+new-UUID Welcome awaits separate GO. T06b cross-account recognition/retention/history is REMOVED from#1117; the old no-bonus fallback is explicitly superseded by owner decision. No policy approval for cross-account protection is requested here.
+
+### Narrow T05e provenance follow-up (read-only, no endpoint mutation)
+
+Re-read exactly the five previously unresolved deploy metadata records, not a mass rescan. Netlify now exposes compressed available_functions metadata (`n` is function name): the two no-SHA Stage/branch artifacts each list55 functions and include profile-avatar-upload-url/finalize/remove; the three historical Production-context artifacts list45/41/41 functions and no named avatar endpoint (each has one schedule). All are READY/no commit_ref. required_functions0 is NOT proof of no functions. This narrows known standard issuer presence to the two Stage artifacts; absence of named avatar functions in three unknown-source artifacts is not proof that arbitrary custom privileged code cannot touch Storage. No function/bundle download is provided by the inspected official API paths (deploy/functions name is PUT-only); do not invent a GET provenance proof or retire Production artifacts silently. Obtain bundle provenance or separately approved exact retirement after aliases/current-published safety, then genuine inventory/cutoff. No signed URL, upload or cleanup invoked.
+
+### Current validation
+
+Local55/55 targeted UUID bonus/Welcome/campaign/Storage/full deletion+all-in/BURN/Auth-last/retirement regressions PASS; the complete-flow fixture now installs the new forward policy and makes a canonical balanced Welcome payment for the recreated UUID, with repeat denied and old BURN still exactly once. npm test PASS (existing environment-dependent skips). Syntax/CSP/guards/migration117+9 PASS; applied migration bytes remain unchanged. Replacement SQL guard is PROMO-only and release-independent; no duplicate JS quota mutation. No browser JS/CSS/inline script changed. Full real Stage E2E remains NOT TESTED; local Auth simulation is not provider signup proof.
+
+## Historical audit evidence — superseded anti-farming proposals are NOT current requirements
+
 ## Current release status — 20 October 2026 (supersedes historical checkpoints)
 
 ### Current integrated review / fresh read-only Stage evidence

@@ -21,7 +21,7 @@ async function fixture(balance=75) {
       create table user_profiles(user_id uuid,avatar_key text);
       create table favorites(user_id uuid);
       create table profile_avatar_uploads(id uuid primary key,user_id uuid,source_path text);
-      create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql as $$select null::uuid$$;
+      create schema auth; create table auth.users(id uuid primary key,created_at timestamptz default now(),email text default 'same@example.test'); create function auth.uid() returns uuid language sql as $$select null::uuid$$;
       create table chips_accounts(id uuid primary key default gen_random_uuid(), user_id uuid references auth.users(id),
         account_type text not null, system_key text, status text not null default 'active', balance bigint not null default 0,
         next_entry_seq bigint not null default 1, unique(user_id,account_type), unique(system_key),
@@ -49,6 +49,13 @@ async function fixture(balance=75) {
     await db.exec(await readFile(new URL('../supabase/migrations/20261019170000_account_avatar_manifest_guards.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261020082604_account_avatar_mvp_closure.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261020094224_account_avatar_reconciliation.sql',import.meta.url),'utf8'));
+    await db.exec(`alter table bonus_campaigns add column max_total_claims bigint;
+      alter table bonus_claims add column transaction_id uuid;
+      create table private.bonus_campaign_paid_totals(campaign_id uuid primary key,paid_count bigint);
+      create table private.account_reward_config(id boolean);
+      create table private.account_reward_identities(identity_key text);
+      create table private.account_reward_payouts(identity_key text);`);
+    await db.exec(await readFile(new URL('../supabase/migrations/20261020190000_account_bonus_uuid_policy.sql',import.meta.url),'utf8'));
     await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
   }
   await db.exec('truncate chips_entries,chips_transactions,chips_transaction_idempotency,chips_accounts,account_deletion_requests,poker_seats,poker_state,auth.users cascade');
@@ -163,6 +170,16 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
   assert.equal(await store.get(keys.profile(fresh)),null);
   assert.equal((await db.query('select count(*)::int n from chips_accounts where user_id=$1',[fresh])).rows[0].n,0);
   await assert.rejects(guardedUserMutation({store,userId:USER,key:keys.profile(USER),value:'resurrect',operation:'set',beginSql:begin}));
+  const {claimWelcomeBonus}=await import('../netlify/functions/_shared/welcome-bonus.mjs');
+  const {postTransaction}=await import('../netlify/functions/_shared/chips-ledger.mjs');
+  const bonusDeps={env:{ACCOUNT_DELETION_ENABLED:'1',WELCOME_BONUS_START_AT:'2020-01-01'},
+    executeSql:(query,params)=>begin(tx=>tx.unsafe(query,params)),
+    postTransaction:payload=>begin(tx=>postTransaction({...payload,tx}))};
+  assert.equal((await claimWelcomeBonus(fresh,bonusDeps)).claimed,true);
+  assert.equal((await claimWelcomeBonus(fresh,bonusDeps)).reason,'already_claimed');
+  assert.equal((await db.query('select balance::int n from chips_accounts where user_id=$1',[fresh])).rows[0].n,500);
+  assert.equal((await db.query("select count(*)::int n from chips_transactions where tx_type='BURN'")).rows[0].n,1);
+  assert.equal((await db.query('select sum(amount)::int n from chips_entries')).rows[0].n,0);
   await guardedUserMutation({store,userId:fresh,key:keys.profile(fresh),value:'new identity',operation:'set',beginSql:begin});
   assert.equal(await store.get(keys.profile(OTHER)),'private fixture');
 });
