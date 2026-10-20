@@ -1170,6 +1170,13 @@
       "sha256": "32b56f4a458f4104c1886e5093df153ecf5b74ebeb18e393cbea20058049bd9a",
       "category": "needs-production-equivalent",
       "purpose": "#1117 local-only avatar protocol v3; trigger installed disabled; no Stage/Production application, activation or provider evidence authorized"
+    },
+    {
+      "file": "20261020082604_account_avatar_mvp_closure.sql",
+      "version": "20261020082604",
+      "sha256": "d04a59b383eee60200cca69a7d3cbe63b6e6ffab1a6edc208f2ff25c42cc5158",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 MVP owner-accepted invisible late-upload risk; retain known-operation/ownership/capability/lease/receipt guards. Local-only; no remote apply or activation authorized."
     }
   ]
 }

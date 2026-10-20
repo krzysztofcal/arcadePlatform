@@ -60,6 +60,9 @@ test('Welcome allows three committed payouts across UUIDs with no cooldown, conc
   const out = await Promise.all(ids.map(id => claimWelcomeBonus(id,deps)));
   assert.equal(out.filter(x=>x.claimed).length,3);
   assert.equal(out.filter(x=>x.reason==='welcome_limit_reached').length,1);
+  const proofs=await executeSql("select period_key,transaction_id from private.account_reward_payouts where reward_scope='welcome'");
+  assert.ok(proofs.every(row=>row.period_key===row.transaction_id),'new private proofs use transaction reference, not old UUID');
+  await executeSql("update private.account_reward_payouts set period_key='welcome-bonus:'||$1 where transaction_id=$2",[ids[0],proofs[0].transaction_id]);
   await executeSql('delete from auth.users');
   assert.equal((await claimWelcomeBonus(await user(),deps)).reason,'welcome_limit_reached');
   const fresh = await user('different@example.test');

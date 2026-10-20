@@ -16,16 +16,15 @@ export async function cleanupDeletionAvatars({ userId, requestId, beginSql, asse
     const [guards] = await tx.unsafe('select private.account_avatar_guards_ready() as ready;');
     if (guards?.ready !== true) throw unavailable();
     const [cutover] = await tx.unsafe(`select *, clock_timestamp() as server_now,
-cutover_at + ((7200 + provider_max_completion_seconds) * interval '1 second') as safe_after
+cutover_at + interval '7200 seconds' as safe_after
 from private.avatar_tracking_cutover where marker=$1;`, [marker]);
-    if (!Number.isSafeInteger(cutover?.provider_max_token_seconds) || cutover.provider_max_token_seconds < 1 || cutover.provider_max_token_seconds > 7200
-      || !Number.isSafeInteger(cutover?.provider_max_completion_seconds) || cutover.provider_max_completion_seconds < 0 || !cutover.provider_evidence || !cutover?.legacy_inventory_verified || cutover.upload_bucket !== UPLOAD || cutover.public_bucket !== OUTPUT) throw unavailable();
+    if (!cutover?.legacy_inventory_verified || cutover.upload_bucket !== UPLOAD || cutover.public_bucket !== OUTPUT) throw unavailable();
     const [safety] = await tx.unsafe(`select count(*) filter (where tracking_version is distinct from 3
 or signing_finished_at is null or capability_until is null
 or (output_write_started_at is not null and output_write_finished_at is null))::int as uncertain,
 max(capability_until) as capability_until from public.profile_avatar_uploads where user_id=$1;`, [userId]);
     if (Number(safety?.uncertain || 0)) throw unavailable();
-    const wait = Math.max(Date.parse(cutover.safe_after), safety?.capability_until ? Date.parse(safety.capability_until) + cutover.provider_max_completion_seconds * 1000 : 0);
+    const wait = Math.max(Date.parse(cutover.safe_after), safety?.capability_until ? Date.parse(safety.capability_until) : 0);
     if (!Number.isFinite(wait)) throw unavailable();
     if (wait > Date.parse(cutover.server_now)) return { waitUntil: new Date(wait).toISOString() };
     // Preserve current selected key before a later profile/Auth cascade. Never list
@@ -41,12 +40,21 @@ order by id limit 5;`, [userId]);
   });
   const current = await snapshot();
   if (current.waitUntil) return current;
+  const verifyAbsent = async (bucket,path) => {
+    if (!(bucket === UPLOAD ? SOURCE : AVATAR).test(path || '')) throw unavailable();
+    const response = await fetchImpl(`${base}/storage/v1/object/info/authenticated/${bucket}/${path}`, {
+      headers: { apikey:key, Authorization:`Bearer ${key}`, 'cache-control':'no-cache' }, signal:AbortSignal.timeout(15000) });
+    // A bucket/auth/network error is not proof that this exact object is absent.
+    const body = await response.json().catch(() => null);
+    if (response.status !== 404 || body?.code !== 'NoSuchKey') throw unavailable();
+  };
   const remove = async (bucket,path) => {
     if (!(bucket === UPLOAD ? SOURCE : AVATAR).test(path || '')) throw unavailable();
     const response = await fetchImpl(`${base}/storage/v1/object/${bucket}`, { method: 'DELETE',
       headers: { apikey:key, Authorization:`Bearer ${key}`, 'content-type':'application/json' },
       body: JSON.stringify({ prefixes:[path] }), signal:AbortSignal.timeout(15000) });
     if (!response.ok) throw unavailable();
+    await verifyAbsent(bucket,path);
   };
   // Bounded batch: persisted deletion receipts let the next worker invocation resume.
   await Promise.all([
@@ -74,6 +82,9 @@ output_deleted_at=case when output_path is not null then coalesce(output_deleted
   const final = await snapshot();
   if (final.waitUntil) return final;
   if (final.rows.length || final.objects.length) return { waitUntil: new Date(Date.now()+1000).toISOString() };
+  // Exact Storage absence was checked before every persisted receipt; the final
+  // SQL snapshot confirms all paths have receipts. This is API-visible cleanup,
+  // not a guarantee against the owner-accepted invisible post-expiry write.
   // Retain manifests until owner's subsequent durable SQL cleanup/Auth cascade.
   // requestId stays in the caller's durable job; no client-controlled cleanup API.
   return { done:true };

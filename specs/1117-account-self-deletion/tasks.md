@@ -1,5 +1,14 @@
 Current Stage checkpoint: v3 guard ENABLED under explicit GO; deletion OFF. Latest campaign results at end supersede earlier disabled checkpoints.
 
+## Binding MVP decision — accepted invisible late-upload risk (20 October 2026)
+
+This owner decision supersedes earlier provider-terminal-bound/write-fence/support requirements below. Do not contact Supabase. MVP accepts the narrow possibility that an upload admitted before deletion completes invisibly after signed-URL expiry and after the final API-visible absence check. Neither COMPLETED nor this decision guarantees physical erasure of every provider copy. This exception does **not** waive observed incomplete signing/output writes, missing ownership, legacy/unknown manifests, or failed/unconfirmed Storage operations.
+
+Keep v3 admission/manifest guards and lifecycle fences, verified legacy inventory/cutover, the 7200-second cutover capability wait, every saved `capability_until` (including longer historical values), exact UUID-owned paths, checked DELETE plus authenticated exact-object re-read, durable receipts/retry/lease, financial reconciliation and Auth hard-delete last. No fabricated `provider_evidence`, receipts, timestamps or approval markers. Provider maximum-token/completion fields remain historical evidence, no longer prerequisites for MVP closure.
+
+Local-only forward migration `20261020082604_account_avatar_mvp_closure.sql` changes only `private.account_avatar_prepare_purge`; applied migrations remain immutable. No remote apply, deployment, activation, retirement, reconciliation, Redis reset or fixture cleanup is authorized in this continuation. Draft PR skips automatic Stage apply; keep Draft and `[skip netlify]` until separately authorized deployment. All current hosted runtime evidence predates this change: a new exact-SHA WS Preview deployment and Netlify Preview deployment are required before integration PASS.
+
+
 ## Current verified Stage checkpoint — 19 October 2026, financial GO completed
 
 Deployed WS Preview runtime remains **d0cca7f5595637a215b61a6104abcbd69fd22ae9**, workflow run39251488130, main-defined V3 LIVE/deploy-context/exact-SHA gates intact. Operator config remains Stage/deploy-preview/3/stage with kcswh:stage:xp:v3; actual LIVE PASS epochPresent0 is NOT cutover attestation. Deletion flag0 and database releasefalse were verified; no configuration, epoch or approval marker changed. Current task now stops for owner review: no further Stage/financial/destructive operations, restart, deployment, Production change or merge.
@@ -251,3 +260,12 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [ ] T05e NO-GO: provider terminal-write/physical-orphan bound or effective fence; exceptional legacy authority proof; approved local narrow reconciliation before any Stage destructive action.
 - [ ] T06b NO-GO: owner/legal acceptance, provenance completeness/gap handling, restricted key backup continuity; conditional Daily proof pruning and future rotation bridge not implemented/approved.
 - [ ] Redis cutover/real full deletion+Google/re-registration T07b remain gated. Next proposed GO bundles support contact/questions+local-only reconciliation/Daily-retention PoCs after policy acceptance; NOT Stage cleanup or feature activation.
+
+### Current MVP closure work (supersedes provider-support task)
+- [x] Local Storage closure no longer requires provider terminal guarantee. New forward-only purge SQL and adapter agree; no fake evidence and no remote apply.
+- [x] Exact DELETE response + authenticated `NoSuchKey` verification before receipts; final SQL snapshot confirms all paths have receipts. Ambiguous 404, live object, outage, missing manifest/guard, unknown legacy/write state remain fail-closed.
+- [x] New Welcome private proof uses opaque transaction UUID, not user-bearing ledger idempotency key. Existing immutable keys/proofs and paid counting remain valid; no historical quota reset.
+- [ ] T05e operational: separately apply reviewed migration, deploy supported Preview/WS exact SHA, verify ordinary closure, reconcile retained legacy/uncertain fixture ownership only with actual terminal receipts and scoped GO. Inventory/cutover remains unproved; theoretical post-expiry completion is accepted risk, not a release gate.
+- [ ] T06b: historical verified-email provenance and global counts, original key continuity, approved LIA/privacy/retention/rights. Missing trustworthy history/key continues to reject protected payouts; no history_ready marker generated. No automated pruner/rotation bridge without approved policy/need.
+- [ ] T05d4: live legacy-writer drain, protected backup and reviewed XP-only allowlist/reset, V3 epoch/cutover proof remain separate GO; reset is shared with Production and cannot be relabelled Stage-only.
+- [ ] T07b: new exact-SHA deployment and actual deletion/re-registration E2E await separate Stage activation/fixture/financial/Auth cleanup GO after real Redis/Storage/HMAC prerequisites. Local fixture completion is not Stage PASS.

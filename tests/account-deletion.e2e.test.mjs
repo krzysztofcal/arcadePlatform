@@ -47,6 +47,7 @@ async function fixture(balance=75) {
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-wallet-retirement-v2.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-avatar-tracking-v2.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261019170000_account_avatar_manifest_guards.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261020082604_account_avatar_mvp_closure.sql',import.meta.url),'utf8'));
     await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
   }
   await db.exec('truncate chips_entries,chips_transactions,chips_transaction_idempotency,chips_accounts,account_deletion_requests,poker_seats,poker_state,auth.users cascade');
@@ -95,7 +96,6 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
     UPSTASH_REDIS_REST_URL:'https://local-redis.invalid',ACCOUNT_DELETION_AVATAR_TRACKING_MARKER:'fixture'};
   await db.query('update account_deletion_release set redis_cutover=$1',[{namespace,epoch:'fixture-epoch',endpoint_hash:createHash('sha256').update(env.UPSTASH_REDIS_REST_URL).digest('hex'),writers_drained:true,legacy_xp_reset_verified:true,manifest_hash:'f'.repeat(64)}]);
   await db.exec("insert into private.avatar_tracking_cutover(marker,cutover_at,legacy_inventory_verified,upload_bucket,public_bucket) values('fixture',now()-interval '1 day',true,'profile-avatar-uploads','profile-avatars')");
-  await db.exec("update private.avatar_tracking_cutover set provider_max_token_seconds=7200,provider_max_completion_seconds=0,provider_evidence='LOCAL FIXTURE ONLY'");
   const request=await begin(tx=>requestDeletion(tx,USER));
   let leaveCalls=0,authCalls=0,disconnected=0,authPresent=true;
   const fetchImpl=async(url,options={})=>{
@@ -156,4 +156,12 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
   assert.equal((await db.query('select count(*)::int n from auth.users where id=$1',[OTHER])).rows[0].n,1);
   assert.equal((await advance()).advanced,false);
   assert.equal((await db.query('select count(*)::int n from chips_transactions')).rows[0].n,2);
+  // Auth recreation is modelled locally, not a hosted signup/OAuth proof.
+  const fresh='55555555-5555-4555-8555-555555555555';
+  await db.query('insert into auth.users(id) values($1)',[fresh]);
+  assert.equal(await store.get(keys.profile(fresh)),null);
+  assert.equal((await db.query('select count(*)::int n from chips_accounts where user_id=$1',[fresh])).rows[0].n,0);
+  await assert.rejects(guardedUserMutation({store,userId:USER,key:keys.profile(USER),value:'resurrect',operation:'set',beginSql:begin}));
+  await guardedUserMutation({store,userId:fresh,key:keys.profile(fresh),value:'new identity',operation:'set',beginSql:begin});
+  assert.equal(await store.get(keys.profile(OTHER)),'private fixture');
 });

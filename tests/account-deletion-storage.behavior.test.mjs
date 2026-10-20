@@ -24,6 +24,7 @@ create function public.ensure_user_profile(uid uuid) returns setof public.user_p
 create table public.profile_avatar_uploads(id uuid primary key,user_id uuid references auth.users on delete cascade,source_path text,declared_mime_type text,declared_size integer,expires_at timestamptz,consumed_at timestamptz,created_at timestamptz default now());`);
     for(const file of ['1117-account-deletion-requests-v2.sql','1117-account-deletion-avatar-tracking-v2.sql']) await db.exec(await readFile(new URL('../supabase/manual/'+file, import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261019170000_account_avatar_manifest_guards.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261020082604_account_avatar_mvp_closure.sql',import.meta.url),'utf8'));
     assert.equal((await db.query('select private.account_avatar_guards_ready() as ready')).rows[0].ready,false,'installation must not activate restrictive guards');
     await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
   }
@@ -31,11 +32,11 @@ create table public.profile_avatar_uploads(id uuid primary key,user_id uuid refe
   const userId = randomUUID();
   await db.query('insert into auth.users values($1)',[userId]);
   await db.query(`insert into private.avatar_tracking_cutover(marker,cutover_at,legacy_inventory_verified,upload_bucket,public_bucket) values($1,clock_timestamp()-interval '3 hours',true,'profile-avatar-uploads','profile-avatars')`,[env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER]);
-  await db.exec("update private.avatar_tracking_cutover set provider_max_token_seconds=7200,provider_max_completion_seconds=0,provider_evidence='LOCAL MODEL ONLY; not provider proof'");
   const executeSql = async(q,p=[]) => (await db.query(q,p)).rows;
   const beginSql = (fn) => db.transaction(tx=>fn({unsafe:async(q,p=[]) => (await tx.query(q,p)).rows}));
   const removed=[];
   const fetch = async(url,opts)=> {
+    if(url.includes('/info/authenticated/')) return new Response(JSON.stringify({code:'NoSuchKey'}),{status:404});
     if(opts.method==='DELETE') { removed.push(JSON.parse(opts.body).prefixes[0]); return new Response('[]'); }
     if(url.includes('/upload/sign/')) return new Response(JSON.stringify({url:'/object/upload/sign/profile-avatar-uploads/pending/test?token=redacted'}));
     throw new Error('unexpected local Storage call');
@@ -156,7 +157,7 @@ test('signing with active v3 guard records exactly 7200 seconds from one timesta
   assert.deepEqual(receipt,{finished:true,exact_horizon:true});
 });
 
-test('older longer capability horizon and provider completion bound remain blocking without grace',async()=>{
+test('older longer capability horizon remains blocking without provider evidence',async()=>{
   const {userId,deps,cleanup,executeSql,removed}=await fixture();
   await createPendingUpload(userId,{mimeType:'image/png',size:100},deps);
   await seedClock("signing_finished_at=clock_timestamp()-interval '3 hours',capability_until=clock_timestamp()+interval '1 hour',expires_at=clock_timestamp()-interval '1 hour'");
@@ -164,7 +165,7 @@ test('older longer capability horizon and provider completion bound remain block
   const [manifest]=await executeSql('select capability_until from public.profile_avatar_uploads');
   await cleanupExpiredUploads(deps);
   const result=await cleanup();
-  assert.equal(Date.parse(result.waitUntil),Date.parse(manifest.capability_until)+120000);
+  assert.equal(Date.parse(result.waitUntil),Date.parse(manifest.capability_until));
   assert.equal(result.done,undefined);assert.equal(removed.length,0);
   assert.equal(Date.parse((await executeSql('select capability_until from public.profile_avatar_uploads'))[0].capability_until),Date.parse(manifest.capability_until));
 });
@@ -229,7 +230,7 @@ test('legacy finalize is rejected before I/O; uncertain supported output retains
   assert.ok(removed.includes(output));
 });
 
-test('missing receipts/guard/provider evidence fail closed; canonical purge needs exact lease and authorized Auth cascade',async()=>{
+test('missing receipts and guard fail closed; provider evidence is optional and canonical purge needs exact lease',async()=>{
   const {userId,deps,deletion,executeSql,cleanup}=await fixture();
   await assert.rejects(createPendingUpload(userId,{mimeType:'image/png',size:100},{...deps,executeSql:(q,p)=>q.includes('set signing_finished_at')?Promise.resolve([]):deps.executeSql(q,p)}),/avatar_tracking_unavailable/);
   await assert.rejects(cleanup(),/dependency_unavailable/);
@@ -237,11 +238,7 @@ test('missing receipts/guard/provider evidence fail closed; canonical purge need
   await db.exec('alter table public.profile_avatar_uploads disable trigger account_avatar_manifest_guard_v3');
   await assert.rejects(cleanup(),/dependency_unavailable/);
   await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
-  for(const field of ['provider_max_token_seconds','provider_max_completion_seconds','provider_evidence']) {
-    await executeSql('update private.avatar_tracking_cutover set '+field+'=null');
-    await assert.rejects(cleanup(),/dependency_unavailable/);
-    await executeSql("update private.avatar_tracking_cutover set provider_max_token_seconds=7200,provider_max_completion_seconds=0,provider_evidence='LOCAL MODEL ONLY; not provider proof'");
-  }
+  assert.deepEqual(await cleanup(),{done:true},'ordinary cleanup needs no provider attestation');
   const req=await deletion();
   assert.deepEqual(await cleanup(),{done:true});
   await executeSql("update public.account_deletion_requests set status='PROCESSING',phase='cleanup',accepted_at=clock_timestamp(),lease_generation=4,lease_until=clock_timestamp()+interval '120 seconds' where request_id=$1",[req.request_id]);
@@ -263,6 +260,8 @@ test('missing receipts/guard/provider evidence fail closed; canonical purge need
 
 test('tracked upload/finalize publishes known output and exact cleanup is repeatable',async()=>{
   const {userId,deps,deletion,executeSql,cleanup,removed}=await fixture();
+  const control=randomUUID()+'.webp';
+  await executeSql('insert into private.account_avatar_objects(user_id,output_path) values($1,$2)',[randomUUID(),control]);
   const image=await sharp({create:{width:16,height:16,channels:3,background:'#123456'}}).png().toBuffer();
   const pending=await createPendingUpload(userId,{mimeType:'image/png',size:image.length},deps);
   const profile=await finalizeAvatar(userId,pending.uploadId,{...deps,fetch:async(url,opts)=>{
@@ -275,5 +274,30 @@ test('tracked upload/finalize publishes known output and exact cleanup is repeat
   await seedClock("signing_finished_at=clock_timestamp()-interval '3 hours',capability_until=clock_timestamp()-interval '1 minute'");
   await deletion();assert.deepEqual(await cleanup(),{done:true});
   assert.ok(removed.includes(row.source_path));assert.ok(removed.includes(row.output_path));
+  assert.equal(removed.includes(control),false);
+  assert.equal((await executeSql('select deleted_at from private.account_avatar_objects where output_path=$1',[control]))[0].deleted_at,null);
   assert.deepEqual(await cleanup(),{done:true});
+});
+
+
+test('Storage confirmation rejects live objects, ambiguous absence and outages before recording deletion receipts',async()=>{
+  const {userId,deps,cleanup,executeSql}=await fixture();
+  await updateUserAvatarKey(userId,randomUUID()+'.webp',deps);
+  for(const response of [()=>new Response('{}'),()=>new Response('{}',{status:404}),()=>new Response(JSON.stringify({code:'NoSuchBucket'}),{status:404}),()=>new Response('outage',{status:503})]) {
+    await assert.rejects(cleanup({fetch:(url,opts)=>url.includes('/info/authenticated/')?response():deps.fetch(url,opts)}),/dependency_unavailable/);
+    assert.equal((await executeSql('select deleted_at from private.account_avatar_objects'))[0].deleted_at,null);
+  }
+  assert.deepEqual(await cleanup(),{done:true});
+});
+
+
+test('MVP SQL purge still rejects known unfinished writes and live capabilities without provider fields',async()=>{
+  const {userId,deps,deletion,executeSql}=await fixture();
+  const pending=await createPendingUpload(userId,{mimeType:'image/png',size:100},deps);
+  const req=await deletion();
+  await executeSql("update public.account_deletion_requests set status='PROCESSING',phase='cleanup',lease_generation=1,lease_until=clock_timestamp()+interval '120 seconds' where request_id=$1",[req.request_id]);
+  const purge=()=>executeSql('select private.account_avatar_prepare_purge($1,$2,1,$3)',[userId,req.request_id,env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER]);
+  await assert.rejects(purge(),/closure unconfirmed/);
+  await seedClock("signing_finished_at=clock_timestamp()-interval '3 hours',capability_until=clock_timestamp()-interval '1 minute',source_deleted_at=clock_timestamp(),output_path=$2,output_write_started_at=clock_timestamp(),output_deleted_at=clock_timestamp() where id=$1",[pending.uploadId,randomUUID()+'.webp']);
+  await assert.rejects(purge(),/closure unconfirmed/,'a deletion receipt never erases an unfinished write');
 });

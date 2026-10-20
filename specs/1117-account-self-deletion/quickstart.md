@@ -1,5 +1,14 @@
 Latest Stage state: manifest guard v3 ENABLED; deletion OFF, T05e OPEN. Earlier B disabled steps are historical and must not be replayed.
 
+## Binding MVP decision — accepted invisible late-upload risk (20 October 2026)
+
+This owner decision supersedes earlier provider-terminal-bound/write-fence/support requirements below. Do not contact Supabase. MVP accepts the narrow possibility that an upload admitted before deletion completes invisibly after signed-URL expiry and after the final API-visible absence check. Neither COMPLETED nor this decision guarantees physical erasure of every provider copy. This exception does **not** waive observed incomplete signing/output writes, missing ownership, legacy/unknown manifests, or failed/unconfirmed Storage operations.
+
+Keep v3 admission/manifest guards and lifecycle fences, verified legacy inventory/cutover, the 7200-second cutover capability wait, every saved `capability_until` (including longer historical values), exact UUID-owned paths, checked DELETE plus authenticated exact-object re-read, durable receipts/retry/lease, financial reconciliation and Auth hard-delete last. No fabricated `provider_evidence`, receipts, timestamps or approval markers. Provider maximum-token/completion fields remain historical evidence, no longer prerequisites for MVP closure.
+
+Local-only forward migration `20261020082604_account_avatar_mvp_closure.sql` changes only `private.account_avatar_prepare_purge`; applied migrations remain immutable. No remote apply, deployment, activation, retirement, reconciliation, Redis reset or fixture cleanup is authorized in this continuation. Draft PR skips automatic Stage apply; keep Draft and `[skip netlify]` until separately authorized deployment. All current hosted runtime evidence predates this change: a new exact-SHA WS Preview deployment and Netlify Preview deployment are required before integration PASS.
+
+
 ## Current scope: procedure preparation ONLY
 
 The A–E runbook below supersedes historical operational-GO statements in this file. No Stage/Production operation is authorized by the current UX task. No deployment, migrations/configuration, signed URL, upload, deletion, restart, activation or attestation has been performed. PR stays Draft with [skip netlify].
@@ -167,4 +176,11 @@ Guard v3O/readytrue, v2O,114 matching migrations, releasefalse/deletion0/trackin
 
 Main-defined run39386163624 SUCCESS deployed7aac5d011f7aed3e8a255003a4c34e1141754b48 with xpRedisVersion3. Installed release/dual contexts, LIVE stage epoch0, local/public healthz and real browser Auth/ping/lobby PASS; no JOIN. Netlify remains56048623, later commits docs-only. DeletionOFF/guardON/no attestations. No more deploy needed for documentation-only updates.
 
-Before closure obtain provider response using UNSENT storage-support-request.md; follow research concrete variant/reconciliation contract, not elapsed7200 or a metadata-only fence. Owner must accept HMAC/history/privacy policy before local future policy work; no new policy/rotation/pruning/markers applied. Retained fixture backlog unchanged. Proposed next GO is support questions+metadata investigation+approved LOCAL ONLY reconciliation/reward PoCs, with Stage destructive work explicitly excluded.
+Superseded operational proposal: no support contact or provider terminal guarantee is required for MVP. Follow the binding decision at the top and the next bundled Stage GO below; known unresolved fixture operations and actual ownership/cutover/HMAC/Redis evidence still require closure.
+
+### Next bundled Stage GO proposal — not executed
+1. Read-only identity/schema/hash/config/guard/feature-OFF preflight; inspect all writers and shared-Preview conflicts. New migration is pending; old Stage114/114 is historical evidence, not a fresh115-row claim.
+2. Apply only the new reviewed MVP closure migration; keep guard v3 ENABLED, release/deletion OFF. Deploy Netlify Preview with branch-only Stage tracking and deploy WS from workflow main with exact reviewed runtime SHA / xpRedisVersion3; verify both contexts, LIVE Redis, health and nonfinancial browser smoke. No change to shared V2.
+3. Before activation obtain genuine legacy ownership/cutover inventory, reconcile actual unknown operations under separately reviewed canonical procedure and finalize HMAC/history/legal prerequisites. Do not set markers as a convenience; theoretical invisible late-upload bound is no longer required. Retained fixtures remain unchanged pending scoped teardown authorization.
+4. Stage-only E2E GO must explicitly authorize enabling deletion only after those real gates, disposable positive-wallet/all-in fixture funding via canonical ledger, BURN/Auth hard-delete, same-email password re-registration and isolated Google OAuth when dedicated identity exists. Compare control UUID and ledger conservation/receipts, retry/lost-response/restart where shared-service impact approved, then feature OFF and scoped canonical teardown. Full E2E is NO-GO until real Redis cutover is authorized/proved; shared V2 reset needs explicit scope acknowledging Production XP impact.
+5. Failure: preserve evidence, turn feature OFF if it was authorized/enabled, stop destructive phases; forward-fix code/schema under review. Do not undo ledger history, reset XP markers, disable guards, fabricate receipts or roll V3 back to V2.

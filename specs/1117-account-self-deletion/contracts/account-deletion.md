@@ -53,3 +53,5 @@ One existing Free database is the approved topology, with exact stage/prod names
 ## Tracking before acceptance
 
 ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1 can record/retain upload/output and previous-avatar manifests with ACCOUNT_DELETION_ENABLED=0; both flags default off, and no flag is deployed here. It is allowed only after legacy signers AND manifest-deleting cleanup handlers are retired. Storage done still requires real maximum capability horizon, in-flight reconciliation and confirmed exact-path removal. Netlify branch config permission failure keeps Preview unavailable; no fallback to shared V2 is authorized.
+
+MVP Storage exception (owner-approved20October): no provider terminal-write proof/support contact is required. Wait known capability_until and verified cutover horizon, require tracked ownership and confirmed exact DELETE+NoSuchKey before receipts. Known unfinished operations remain blocking. COMPLETED is not physical-erasure certification and accepts only the invisible post-expiry completion edge case. Canonical owner/request/lease purge and Auth-last remain mandatory.

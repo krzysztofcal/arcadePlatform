@@ -1,5 +1,14 @@
 Latest operational state: Stage guard v3 is ENABLED; older disabled-installation instructions are historical. Deletion remains OFF.
 
+## Binding MVP decision — accepted invisible late-upload risk (20 October 2026)
+
+This owner decision supersedes earlier provider-terminal-bound/write-fence/support requirements below. Do not contact Supabase. MVP accepts the narrow possibility that an upload admitted before deletion completes invisibly after signed-URL expiry and after the final API-visible absence check. Neither COMPLETED nor this decision guarantees physical erasure of every provider copy. This exception does **not** waive observed incomplete signing/output writes, missing ownership, legacy/unknown manifests, or failed/unconfirmed Storage operations.
+
+Keep v3 admission/manifest guards and lifecycle fences, verified legacy inventory/cutover, the 7200-second cutover capability wait, every saved `capability_until` (including longer historical values), exact UUID-owned paths, checked DELETE plus authenticated exact-object re-read, durable receipts/retry/lease, financial reconciliation and Auth hard-delete last. No fabricated `provider_evidence`, receipts, timestamps or approval markers. Provider maximum-token/completion fields remain historical evidence, no longer prerequisites for MVP closure.
+
+Local-only forward migration `20261020082604_account_avatar_mvp_closure.sql` changes only `private.account_avatar_prepare_purge`; applied migrations remain immutable. No remote apply, deployment, activation, retirement, reconciliation, Redis reset or fixture cleanup is authorized in this continuation. Draft PR skips automatic Stage apply; keep Draft and `[skip netlify]` until separately authorized deployment. All current hosted runtime evidence predates this change: a new exact-SHA WS Preview deployment and Netlify Preview deployment are required before integration PASS.
+
+
 ## Current verified Stage checkpoint — 19 October 2026, financial GO completed
 
 Deployed WS Preview runtime remains **d0cca7f5595637a215b61a6104abcbd69fd22ae9**, workflow run39251488130, main-defined V3 LIVE/deploy-context/exact-SHA gates intact. Operator config remains Stage/deploy-preview/3/stage with kcswh:stage:xp:v3; actual LIVE PASS epochPresent0 is NOT cutover attestation. Deletion flag0 and database releasefalse were verified; no configuration, epoch or approval marker changed. Current task now stops for owner review: no further Stage/financial/destructive operations, restart, deployment, Production change or merge.
@@ -172,6 +181,6 @@ Guard v3 nowO/readytrue, v2O;114/114 hashes unchanged, releasefalse/deletion0/tr
 
 ## 20 October D / closure decision
 
-D run39386163624 actually deployed7aac5d01 from main workflow with xpRedisVersion3; both installed contexts/LIVE/health and browser auth/ping/lobby PASS, no JOIN. Deletion remainsOFF. T05e preferred design is existing central SQL fence+provider-proved drain/terminal fence+exact canonical reconciliation, NOT arbitrary wait/RLS/metadata tombstones. Ready support draft asks for accepted-I/O/backend/orphan-byte guarantees; not sent. Reconciliation extends existing private purge/progress only in future forward-only reviewed work, without fabricating original receipts.
+D run39386163624 actually deployed7aac5d01 from main workflow with xpRedisVersion3; both installed contexts/LIVE/health and browser auth/ping/lobby PASS, no JOIN. Deletion remainsOFF. Historical T05e provider-proof proposal is superseded by the binding MVP risk decision above; support draft removed without sending. Existing central SQL guard, tracking, known capability expiry and exact cleanup remain. Reconciliation extends existing private purge/progress only in future forward-only reviewed work, without fabricating original receipts.
 
 T06b recommended Welcome3/program life, DailyUTC/current+previous-date proofs only after locked pruning proof, once/immutable campaign enforceable life; single V1 key with backup and no immediate rotation. Unknown payout/email history => unavailable protected claims, not quota reset. Owner/legal LIA/rights/privacy/history-gap decisions and real key continuity remain gates. Future multi-version bridge/drain is required before any key change. No policy implementation/configuration in this task. See research final tables for exact PASS/NO-GO and bundled next GO.

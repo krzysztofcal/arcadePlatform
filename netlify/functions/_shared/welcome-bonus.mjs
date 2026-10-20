@@ -201,7 +201,7 @@ async function claimWelcomeBonus(userId, deps = {}) {
     const transactionId = result?.transaction?.id || null;
     if (deps.rewardTx) {
       if (!transactionId) throw new Error('reward_proof_write_failed');
-      await recordRewardPayout(deps.rewardIdentity, 'welcome', status.idempotencyKey, transactionId, deps.executeSql);
+      await recordRewardPayout(deps.rewardIdentity, 'welcome', transactionId, transactionId, deps.executeSql);
     }
     klog("welcome_bonus_claimed", {
       ...baseLog,
