@@ -242,3 +242,12 @@ Follow-up local evidence: 150/150 CI-equivalent fundamentals passed, including t
 - [x] Preserve private fixture residue (same2 users,4 sessions,5 manifests/3 real synthetic outputs), deletionOFF/no attestations/financial effects. No full deletion/provider-gated cleanup claim.
 - [ ] T05e OPEN: provider accepted-I/O bound/fence, historical/global ownership and narrow authoritative reconciliation for legacy/uncertain rows; no fabricated receipts. Separate GO before reconciliation/destructive teardown.
 - [ ] Separate D WS deployment, HMAC/legal/history, Redis cutover and actual full deletion T07b still gated.
+
+### 20 October bundled D / Storage / HMAC outcome
+
+- [x] D actual main-defined exact-SHA WS Preview7aac5d01/run39386163624; preflight zero sockets/human seats, contexts/LIVE/health, browser password owner mint/WS auth/ping/lobby PASS. No JOIN/CH/deletion; guardreadytrue/releasefalse retained.
+- [x] T05e concrete variant/closure/reconciliation/fixture-teardown proposal and copy-ready UNSENT support questions. No retirement, storage-schema change, new capability or Stage reconciliation.
+- [x] T06b final technical/business/legal decision table; actual hot counts8 Welcome/18 Promo/18 claims, config/proofs/history_ready0; no reset/rotation/policy activation.
+- [ ] T05e NO-GO: provider terminal-write/physical-orphan bound or effective fence; exceptional legacy authority proof; approved local narrow reconciliation before any Stage destructive action.
+- [ ] T06b NO-GO: owner/legal acceptance, provenance completeness/gap handling, restricted key backup continuity; conditional Daily proof pruning and future rotation bridge not implemented/approved.
+- [ ] Redis cutover/real full deletion+Google/re-registration T07b remain gated. Next proposed GO bundles support contact/questions+local-only reconciliation/Daily-retention PoCs after policy acceptance; NOT Stage cleanup or feature activation.
