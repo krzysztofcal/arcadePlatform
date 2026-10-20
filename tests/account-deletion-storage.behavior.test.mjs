@@ -25,6 +25,7 @@ create table public.profile_avatar_uploads(id uuid primary key,user_id uuid refe
     for(const file of ['1117-account-deletion-requests-v2.sql','1117-account-deletion-avatar-tracking-v2.sql']) await db.exec(await readFile(new URL('../supabase/manual/'+file, import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261019170000_account_avatar_manifest_guards.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261020082604_account_avatar_mvp_closure.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261020094224_account_avatar_reconciliation.sql',import.meta.url),'utf8'));
     assert.equal((await db.query('select private.account_avatar_guards_ready() as ready')).rows[0].ready,false,'installation must not activate restrictive guards');
     await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
   }
@@ -310,4 +311,42 @@ test('Storage 1.80.2 legacy HTTP400 accepts only embedded404 NoSuchKey, never bu
     assert.equal((await executeSql('select deleted_at from private.account_avatar_objects'))[0].deleted_at,null);
   }
   assert.deepEqual(await cleanup({fetch:(url,opts)=>url.includes('/info/authenticated/')?new Response(JSON.stringify({statusCode:'404',code:'NoSuchKey',error:'not_found',message:'Object not found'}),{status:400}):deps.fetch(url,opts)}),{done:true});
+});
+
+test('canonical reconciliation retains original uncertain receipt and needs exact inventory, owner and live lease',async()=>{
+  for(const legacy of [false,true]) {
+  const {userId,deps,deletion,cleanup,executeSql,removed}=await fixture();
+  const pending=await createPendingUpload(userId,{mimeType:'image/png',size:100},deps);
+  await seedClock("signing_finished_at=clock_timestamp()-interval '3 hours',capability_until=clock_timestamp()-interval '1 minute',output_path=$2,output_write_started_at=clock_timestamp() where id=$1",[pending.uploadId,randomUUID()+'.webp']);
+  if(legacy) await seedClock('tracking_version=null,signing_finished_at=null,capability_until=null,output_path=null,output_write_started_at=null');
+  const req=await deletion();
+  await executeSql("update public.account_deletion_requests set status='PROCESSING',phase='cleanup',lease_generation=7,lease_until=clock_timestamp()+interval '120 seconds' where request_id=$1",[req.request_id]);
+  const context={requestId:req.request_id,generation:7};
+  await assert.rejects(cleanup(context),/dependency_unavailable/);
+  const [e]=await executeSql('select id,user_id,source_path,output_path,md5(to_jsonb(u)::text) as digest from public.profile_avatar_uploads u where id=$1',[pending.uploadId]);
+  const entry={owner:userId,sourcePath:e.source_path,outputPath:e.output_path,snapshotDigest:e.digest,ownershipEvidence:'LOCAL inventory created exact path before POST',terminalEvidence:'LOCAL injected response loss after completed POST; exact path observed'};
+  await executeSql('update private.avatar_tracking_cutover set reconciliation_inventory=$1',[{[e.id]:entry}]);
+  await assert.rejects(cleanup({...context,fetch:async()=>new Response('failure',{status:503})}),/dependency_unavailable/);
+  assert.equal((await executeSql('select progress from public.account_deletion_requests where request_id=$1',[req.request_id]))[0].progress.avatarReconciliations,undefined);
+  await assert.rejects(cleanup({...context,generation:6}),/dependency_unavailable/);
+  await executeSql('update private.avatar_tracking_cutover set reconciliation_inventory=$1',[{[e.id]:{...entry,owner:randomUUID()}}]);
+  await assert.rejects(cleanup(context),/dependency_unavailable/);
+  await executeSql('update private.avatar_tracking_cutover set reconciliation_inventory=$1',[{[e.id]:entry}]);
+  assert.equal(removed.length,0);
+  assert.ok((await cleanup(context)).waitUntil);
+  assert.deepEqual(await cleanup(context),{done:true});
+  const [original]=await executeSql('select tracking_version,output_write_finished_at from public.profile_avatar_uploads where id=$1',[e.id]);
+  assert.equal(original.output_write_finished_at,null,'never forge original successful write acknowledgement');
+  const [job]=await executeSql('select progress from public.account_deletion_requests where request_id=$1',[req.request_id]);
+  assert.equal(job.progress.avatarReconciliations[e.id].owner,userId);
+  assert.ok(job.progress.avatarReconciliations[e.id].deletedAt);
+  await executeSql('select private.account_avatar_prepare_purge($1,$2,7,$3)',[userId,req.request_id,env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER]);
+  // Changing the inventory invalidates the receipt, rather than broadening ownership.
+  await executeSql("update private.avatar_tracking_cutover set reconciliation_inventory='{}'");
+  await assert.rejects(cleanup(context),/dependency_unavailable/);
+  await executeSql('update private.avatar_tracking_cutover set reconciliation_inventory=$1',[{[e.id]:entry}]);
+  await executeSql(`update public.account_deletion_requests set phase='auth',progress=progress||'{"cleanup":{"done":true},"authIntent":true}'::jsonb where request_id=$1`,[req.request_id]);
+  await executeSql('delete from auth.users where id=$1',[userId]);
+  assert.equal((await executeSql('select count(*)::int n from public.profile_avatar_uploads where id=$1',[e.id]))[0].n,0,'real authorized cascade accepts separate reconciliation proof');
+  }
 });

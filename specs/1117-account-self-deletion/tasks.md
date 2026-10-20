@@ -287,3 +287,14 @@ Ambiguous response rejection is a local deterministic fault-response test, NOT a
 - [x] Local fundamentals166/166, Storage16/16, syntax/CSP/guards/migration inventory PASS.
 - [ ] T05e full canonical cleanup/lease + true legacy ownership/inventory/cutover still OPEN; no fake markers. Known pending/uncertain operations remain blocking, accepted invisible late-upload risk is tracked in#1128.
 - [ ] T06b actual history/key continuity/privacy approval, Redis live cutover and T07b destructive E2E/re-registration remain separate GO. No feature activation/Auth-delete/BURN performed in this campaign.
+
+## Dependency closure delivery — current local/read-only scope
+- [x] T05e inventory: Stage115/115, four objects uniquely attributed, five manifests; exact two exceptional fixture matches in private inventory. No remote changes; all-family authority/drain still unproved.
+- [x] T05e local canonical reconciliation: forward-only SQL + existing adapter/progress, actual lease/inventory/snapshot binding, exact DELETE+absence and separate new receipt, original evidence unchanged; legacy/v3/ownership/retry/failed-delete/localAuth-cascade tests.
+- [ ] T05e operational closure: review/apply new migration, real writer drain/cutover inventory approval and scoped canonical fixture cleanup under separately authorized genuine deletion jobs. No marker set.
+- [x] T06b hot/registry/archive-metadata/claims/proofs audit; no verified-email-at-payout coverage or configured HMAC key; no made-up backfill. Proposed one purpose-based policy documented in research.
+- [x] T06b local SQL commit fence for protected legacy rewards + durable global Promo quota, JS double-increment removed, flag-skew fail-closed, historical registry replay not a new payout. No new multi-key/pruner framework.
+- [ ] T06b owner LIA/privacy/rights/retention + missing-history protected-payout pause; genuine key/history/global-total readiness separately approved. No history_ready seed or real key change.
+- [x] T05d4 complete read-only572-key metadata scan; refined exact570legacy XP-cache scope, source-proven conversion/anon fields; unknown fields still preserved; pure atomic CAS command preparation + tamper tests, no live execution.
+- [ ] T05d4 isolated real CAS validation, old-writer credential/authority fence and coordinated ProductionXP reset/cutover/backup/recovery need explicit separate GO. Metadata inventory is not backup; missing write-fence means NO-GO.
+- [ ] T07b next full Stage E2E prerequisite matrix in quickstart; no previous smoke rerun and no destructive E2E performed. Remains PARTIAL, not merge-ready.

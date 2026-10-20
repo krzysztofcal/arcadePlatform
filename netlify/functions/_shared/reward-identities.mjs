@@ -27,7 +27,13 @@ function rewardIdentityFromUser(user, env = process.env) {
   return `${version}:${createHmac('sha256', key).update('arcade:reward-email:v1\0').update(email).digest('hex')}`;
 }
 
+async function assertRewardRelease(runSql) {
+  const [release] = await runSql('select enabled from public.account_deletion_release where id=true for share;', []);
+  if (release?.enabled !== true) throw Object.assign(new Error('reward_identity_unavailable'), {code:'reward_identity_unavailable',status:503});
+}
+
 async function resolveRewardIdentity(userId, runSql, env, lock = false) {
+  await assertRewardRelease(runSql);
   const { version } = rewardKeyConfig(env);
   const keyCheck = rewardKeyCheck(env);
   // Keep approval stable throughout the caller's payout transaction. A deployment
@@ -59,4 +65,4 @@ values ($1, $2, $3, $4) returning transaction_id;`, [identity, scope, period, tr
   if (rows?.[0]?.transaction_id !== transactionId) throw new Error('reward_proof_write_failed');
 }
 
-export { enabled as rewardProtectionEnabled, rewardIdentityFromUser, rewardKeyCheck, resolveRewardIdentity, lockRewardIdentity, rewardPaidCount, recordRewardPayout };
+export { assertRewardRelease, enabled as rewardProtectionEnabled, rewardIdentityFromUser, rewardKeyCheck, resolveRewardIdentity, lockRewardIdentity, rewardPaidCount, recordRewardPayout };

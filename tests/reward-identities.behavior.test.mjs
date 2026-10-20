@@ -18,8 +18,11 @@ create table public.chips_transactions(id uuid primary key, user_id uuid referen
 create table public.bonus_campaigns(id uuid primary key default gen_random_uuid(), code text unique, title text default 'Test', description text, campaign_type text, amount bigint default 25, status text default 'active', starts_at timestamptz default '2020-01-01', ends_at timestamptz, eligibility_type text default 'all_accounts', eligibility_config jsonb default '{}', claim_policy text, max_total_claims bigint);
 create table public.bonus_claims(id uuid primary key default gen_random_uuid(), campaign_id uuid, user_id uuid references auth.users on delete cascade, transaction_id uuid, idempotency_key text, claim_period_key text, metadata jsonb, claimed_at timestamptz, unique(campaign_id,user_id,claim_period_key));`);
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-reward-identities-v2.sql', import.meta.url), 'utf8'));
+    await db.exec("alter table public.chips_transactions add column payload_hash text default repeat('a',64); create table public.chips_transaction_idempotency(idempotency_key text primary key,transaction_id uuid,payload_hash text,tx_type text,user_id uuid,transaction_created_at timestamptz,replay_transaction jsonb,replay_completed_at timestamptz,created_at timestamptz)");
+    await db.exec('create table public.account_deletion_release(id boolean primary key,enabled boolean); insert into public.account_deletion_release values(true,true)');
+    await db.exec(await readFile(new URL('../supabase/migrations/20261020094949_account_reward_legacy_writer_fence.sql',import.meta.url),'utf8'));
   }
-  await db.exec('truncate private.account_reward_config, private.account_reward_payouts, private.account_reward_identities, private.bonus_campaign_paid_totals, public.bonus_claims, public.chips_transactions, public.bonus_campaigns, auth.users cascade');
+  await db.exec('truncate private.account_reward_config, private.account_reward_payouts, private.account_reward_identities, private.bonus_campaign_paid_totals, public.bonus_claims, public.chips_transaction_idempotency, public.chips_transactions, public.bonus_campaigns, auth.users cascade');
   const executeSql = async (q,p = []) => (await db.query(q,p)).rows;
   await executeSql('insert into private.account_reward_config(id,active_version,key_check,history_ready) values(true,$1,$2,true)',
     [env.ACCOUNT_DELETION_REWARD_HMAC_VERSION, createHmac('sha256',env.ACCOUNT_DELETION_REWARD_HMAC_KEY).update('arcade:reward-key-check:v1').digest('hex')]);
@@ -130,4 +133,48 @@ test('missing/unapproved history or changed key/version fails closed before any 
   await assert.rejects(claimBonusCampaign(id,once,deps),/reward_identity_unavailable/);
   assert.equal((await executeSql('select count(*)::int n from public.chips_transactions'))[0].n,0);
   assert.equal((await executeSql('select count(*)::int n from private.account_reward_identities'))[0].n,0);
+});
+
+test('release SQL fence rejects legacy protected ledger writers without atomic proof, canonical payout still commits',async()=>{
+  const {deps,user,executeSql,campaign}=await fixture();
+  const id=await user('legacy-writer@example.test');
+  await assert.rejects(executeSql("insert into public.chips_transactions(id,user_id,tx_type,idempotency_key,metadata) values($1,$2,'WELCOME_BONUS','legacy-probe','{}')",[randomUUID(),id]),/reward proof required/);
+  assert.equal((await executeSql('select count(*)::int n from public.chips_transactions'))[0].n,0);
+  assert.equal((await claimWelcomeBonus(id,deps)).claimed,true);
+  const code=await campaign('promo','once');
+  assert.equal((await claimBonusCampaign(id,code,deps)).claimed,true);
+  await executeSql('update public.account_deletion_release set enabled=false');
+  await executeSql("insert into public.chips_transactions(id,user_id,tx_type,idempotency_key,metadata) values($1,$2,'WELCOME_BONUS','legacy-release-off','{}')",[randomUUID(),id]);
+  await executeSql('update public.account_deletion_release set enabled=true');
+});
+
+test('legacy unrelated campaign writer advances durable SQL quota once; Auth cascade cannot reset its global cap',async()=>{
+  const {deps,user,campaign,executeSql}=await fixture();
+  const id=await user('legacy-recurring@example.test');const code=await campaign('other','daily',1);
+  const [{id:campaignId}]=await executeSql('select id from public.bonus_campaigns where code=$1',[code]);
+  const txId=randomUUID();
+  await deps.beginSql(async tx=>{
+    await tx.unsafe("insert into public.chips_transactions(id,user_id,tx_type,idempotency_key,metadata) values($1,$2,'PROMO_BONUS','legacy-recurring','{}')",[txId,id]);
+    await tx.unsafe("insert into public.bonus_claims(campaign_id,user_id,transaction_id,claim_period_key) values($1,$2,$3,'fixture-period')",[campaignId,id,txId]);
+  });
+  assert.equal((await executeSql('select paid_count from private.bonus_campaign_paid_totals where campaign_id=$1',[campaignId]))[0].paid_count,1);
+  await executeSql('delete from auth.users where id=$1',[id]);
+  assert.equal((await claimBonusCampaign(await user('different-new@example.test'),code,deps)).reason,'max_total_claims_reached');
+});
+
+test('runtime protection ON with database release OFF rejects payout before SQL quota guard can be bypassed',async()=>{
+  const {deps,user,campaign,executeSql}=await fixture();const id=await user();const code=await campaign('other','daily',1);
+  await executeSql('update public.account_deletion_release set enabled=false');
+  try {
+    await assert.rejects(claimBonusCampaign(id,code,deps),/reward_identity_unavailable/);
+    await assert.rejects(claimWelcomeBonus(id,deps),/reward_identity_unavailable/);
+    assert.equal((await executeSql('select count(*)::int n from public.chips_transactions'))[0].n,0);
+  } finally {await executeSql('update public.account_deletion_release set enabled=true');}
+});
+
+test('exact historical registry replay restores ledger without a new payout proof or quota increment',async()=>{
+  const {user,executeSql}=await fixture();const id=await user('archive-test@example.test');const txId=randomUUID();
+  await executeSql("insert into public.chips_transaction_idempotency(idempotency_key,transaction_id,payload_hash,tx_type,user_id,transaction_created_at,replay_transaction,replay_completed_at,created_at) values('historical-replay',$1,repeat('a',64),'WELCOME_BONUS',$2,'2020-01-01',$3,'2020-01-01','2020-01-01')",[txId,id,JSON.stringify({metadata:{source:'historical'},id:txId})]);
+  await executeSql("insert into public.chips_transactions(id,user_id,tx_type,idempotency_key,metadata,created_at) values($1,$2,'WELCOME_BONUS','historical-replay','{\"source\":\"historical\"}','2020-01-01')",[txId,id]);
+  assert.equal((await executeSql('select count(*)::int n from private.account_reward_payouts'))[0].n,0);
 });

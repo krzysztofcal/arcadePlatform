@@ -3,21 +3,26 @@
 import {createHash} from 'node:crypto';
 const NS='kcswh:xp:v2:';
 const XP_COUNTER_FIELDS=new Set(['totalXp','total','xp','level','dailyXp','sessionXp']);
-const XP_PROFILE_METADATA=new Set(['userId','createdAt','updatedAt']);
+const XP_PROFILE_METADATA=new Set(['userId','createdAt','updatedAt','hasConvertedAnonXp']);
+const ANON_COUNTER_FIELDS=new Set(['totalAnonXp','anonActiveDays']);
+const ANON_PROFILE_METADATA=new Set(['anonId','createdAt','lastActivityTs','lastActiveDayKey','convertedToUserId']);
 export function legacyXpResetAction(key, {type, value}={}) {
   if (typeof key!=='string') throw new TypeError('invalid_reset_key');
   // Exact families only. Never classify by loose substring or FLUSH the database.
-  if (key.startsWith('kcswh:xp:user:')) {
+  if (key.startsWith('kcswh:xp:user:') || key.startsWith('kcswh:xp:anon:')) {
+    const anonymous=key.startsWith('kcswh:xp:anon:');
+    const counters=anonymous ? ANON_COUNTER_FIELDS : XP_COUNTER_FIELDS;
+    const metadata=anonymous ? ANON_PROFILE_METADATA : XP_PROFILE_METADATA;
     if(type!=='string') throw new Error('xp_profile_type_unreviewed');
     let record;try{record=JSON.parse(value);}catch{throw new Error('xp_profile_format_unreviewed');}
     if(!record || Array.isArray(record) || typeof record!=='object') throw new Error('xp_profile_format_unreviewed');
     const fields=Object.keys(record);
-    if(!fields.some(field=>XP_COUNTER_FIELDS.has(field))) throw new Error('xp_profile_without_counter_unreviewed');
-    if(fields.every(field=>XP_COUNTER_FIELDS.has(field)||XP_PROFILE_METADATA.has(field))) return {key,operation:'DEL'};
+    if(!fields.some(field=>counters.has(field))) throw new Error('xp_profile_without_counter_unreviewed');
+    if(fields.every(field=>counters.has(field)||metadata.has(field))) return {key,operation:'DEL'};
     // Preserve unknown/non-XP fields exactly; never rewrite a mixed profile via
     // the XP-only normalizer (which would silently discard identity data).
     const replacement={...record};
-    for(const field of fields)if(XP_COUNTER_FIELDS.has(field))replacement[field]=field==='level'?1:0;
+    for(const field of fields)if(counters.has(field))replacement[field]=field==='level'?1:0;
     return {key,operation:'SET',value:JSON.stringify(replacement),preserveTtl:true};
   }
   if (!key.startsWith(NS)) return null;
@@ -70,4 +75,46 @@ export function validateLegacyXpResetObservation(action, observation, {nowMs, to
     if (observation.pttl<0 || Math.abs(nowMs+observation.pttl-expected.expiresAtMs)>toleranceMs) throw new Error('reset_expiry_changed');
   }
   return {action:action.operation,preserveCurrentTtl:action.operation==='SET'};
+}
+
+// No network/CLI. The separately authorized runner must journal each result and
+// stop on an uncertain response. Persistent-key absence is NOT replay success.
+const RESET_CAS_LUA = `
+local kind=redis.call('TYPE',KEYS[1]).ok
+local clock=redis.call('TIME'); local now=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
+local deadline=tonumber(ARGV[3]); local captured=tonumber(ARGV[4])
+if now<captured then return redis.error_reply('reset_clock_unproven') end
+if kind=='none' then
+ if deadline>=0 and now>=deadline then return 'SKIP_EXPIRED' end
+ return redis.error_reply('reset_absence_unproven')
+end
+if kind~=ARGV[1] then return redis.error_reply('reset_content_changed') end
+local expected=cjson.decode(ARGV[2])
+if kind=='string' then
+ if redis.call('GET',KEYS[1])~=expected then return redis.error_reply('reset_content_changed') end
+elseif kind=='zset' then
+ local actual=redis.call('ZRANGE',KEYS[1],0,-1,'WITHSCORES')
+ if #actual~=#expected then return redis.error_reply('reset_content_changed') end
+ for i=1,#actual do if actual[i]~=expected[i] then return redis.error_reply('reset_content_changed') end end
+else return redis.error_reply('reset_type_unreviewed') end
+local ttl=redis.call('PTTL',KEYS[1])
+if deadline<0 then
+ if ttl~=-1 then return redis.error_reply('reset_expiry_changed') end
+elseif ttl<=0 or math.abs(now+ttl-deadline)>1000 then return redis.error_reply('reset_expiry_changed') end
+if ARGV[5]=='DEL' then redis.call('DEL',KEYS[1]); return 'DELETED' end
+if ARGV[5]=='SET' and kind=='string' then
+ redis.call('SET',KEYS[1],ARGV[6],'KEEPTTL'); return 'XP_FIELDS_RESET'
+end
+return redis.error_reply('reset_action_unreviewed')`;
+
+export function prepareLegacyXpResetCommand(action, snapshot) {
+  // Recompute the plan from the original snapshot; never accept a caller's SET
+  // payload, namespace, key or hash as authority to erase data.
+  const plan=buildLegacyXpResetPlan([snapshot]);
+  const expected=plan.operations[0];
+  if (!expected || JSON.stringify(action)!==JSON.stringify(expected)) throw new Error('reset_action_changed');
+  if (snapshot.type==='string' ? typeof snapshot.value!=='string'
+    : snapshot.type!=='zset' || !Array.isArray(snapshot.value) || snapshot.value.some(x=>typeof x!=='string')) throw new Error('reset_snapshot_format');
+  return ['EVAL',RESET_CAS_LUA,1,action.key,snapshot.type,JSON.stringify(snapshot.value),
+    action.expected.expiresAtMs===null?'-1':String(action.expected.expiresAtMs),String(action.expected.capturedAtMs),action.operation,action.value||''];
 }

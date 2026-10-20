@@ -1,4 +1,4 @@
-import { rewardProtectionEnabled, resolveRewardIdentity, lockRewardIdentity, rewardPaidCount, recordRewardPayout } from "./reward-identities.mjs";
+import { assertRewardRelease, rewardProtectionEnabled, resolveRewardIdentity, lockRewardIdentity, rewardPaidCount, recordRewardPayout } from "./reward-identities.mjs";
 import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 import { postTransaction } from "./chips-ledger.mjs";
 
@@ -399,7 +399,10 @@ async function claimBonusCampaign(userId, campaignCode, deps = {}) {
     return await begin(async (sqlTx) => {
       const txSql = (query, params = []) => sqlTx.unsafe(query, params);
       // Auth row precedes campaign and identity locks; no network calls under locks.
-      if (protectedMode) await txSql('select id from auth.users where id = $1 for update;', [userId]);
+      if (protectedMode) {
+        await txSql('select id from auth.users where id = $1 for update;', [userId]);
+        await assertRewardRelease(txSql);
+      }
       const campaign = normalizeCampaign(await lockCampaign(preflight.campaign.id, txSql));
       const protectedClaim = protectedMode && campaign && (campaign.campaignType === 'poker_daily' || campaign.claimPolicy === 'once');
       const identity = protectedClaim ? await resolveRewardIdentity(userId, txSql, deps.env || process.env) : null;
@@ -433,13 +436,8 @@ async function claimBonusCampaign(userId, campaignCode, deps = {}) {
       if (!claim?.id || claim.transaction_id !== transactionId) throw new Error("bonus_claim_write_failed");
       if (identity) await recordRewardPayout(identity, campaign.campaignType === 'poker_daily' ? 'poker_daily' : `campaign:${campaign.id}`,
         campaign.campaignType === 'poker_daily' ? status.claimPeriodKey : 'once', transactionId, txSql);
-      if (protectedMode) {
-        // Campaign row lock serializes quota checks and increments, for every
-        // policy, including unrelated recurring campaigns whose behavior stays intact.
-        await txSql(`insert into private.bonus_campaign_paid_totals (campaign_id, paid_count)
-values ($1, (select count(*) from public.bonus_claims where campaign_id = $1))
-on conflict (campaign_id) do update set paid_count = private.bonus_campaign_paid_totals.paid_count + 1;`, [campaign.id]);
-      }
+      // Release-enabled SQL commit guard atomically advances the durable global
+      // quota for every writer; JS must not double-count the same transaction.
       klog("bonus_campaign_claimed", { userId, campaignCode, transactionId, amount: award.amount });
       return { ...status, eligible: false, alreadyClaimed: true, claimed: true, reason: "claimed",
         transactionId, claim, transaction: result.transaction, entries: result.entries || [], account: result.account || null };

@@ -263,3 +263,26 @@ test('V3 missing Redis credentials denies reads, writes, rate limits and XP HTTP
     }
   } finally { await rm(cwd,{recursive:true,force:true}); }
 });
+
+test('reset command binds original XP-only snapshot and refuses foreign/tampered actions before EVAL',async()=>{
+  const {buildLegacyXpResetPlan,prepareLegacyXpResetCommand}=await import('../scripts/ops/xp-redis-reset-plan.mjs');
+  const snapshot={key:'kcswh:xp:user:fixture',type:'string',value:JSON.stringify({totalXp:40,hasConvertedAnonXp:true,profileName:'preserve'}),pttl:-1,capturedAtMs:1000};
+  const [action]=buildLegacyXpResetPlan([snapshot]).operations;
+  const command=prepareLegacyXpResetCommand(action,snapshot);
+  assert.equal(command[0],'EVAL');assert.equal(command[2],1);assert.equal(command[3],snapshot.key);
+  assert.deepEqual(JSON.parse(command.at(-1)),{totalXp:0,hasConvertedAnonXp:true,profileName:'preserve'});
+  assert.throws(()=>prepareLegacyXpResetCommand({...action,key:'kcswh:stage:xp:v3:user:other:profile'},snapshot),/reset_action_changed/);
+  assert.throws(()=>prepareLegacyXpResetCommand({...action,value:'{}'},snapshot),/reset_action_changed/);
+  assert.throws(()=>prepareLegacyXpResetCommand(action,{...snapshot,value:'changed'}));
+});
+
+test('legacy anonymous XP cache is reset without dropping conversion/identity or unknown fields',async()=>{
+  const {legacyXpResetAction}=await import('../scripts/ops/xp-redis-reset-plan.mjs');
+  const value={anonId:'fixture-anon',totalAnonXp:80,anonActiveDays:3,convertedToUserId:OWNER,lastActivityTs:123,lastActiveDayKey:'2020-01-01',createdAt:'fixture',other:'preserve'};
+  const action=legacyXpResetAction('kcswh:xp:anon:fixture-anon',{type:'string',value:JSON.stringify(value)});
+  assert.equal(action.operation,'SET');assert.equal(action.preserveTtl,true);
+  assert.deepEqual(JSON.parse(action.value),{...value,totalAnonXp:0,anonActiveDays:0});
+  const {other,...known}=value;
+  assert.equal(legacyXpResetAction('kcswh:xp:anon:fixture-anon',{type:'string',value:JSON.stringify(known)}).operation,'DEL');
+  assert.equal(legacyXpResetAction('kcswh:xp:user:'+OWNER,{type:'string',value:JSON.stringify({userId:OWNER,totalXp:80,hasConvertedAnonXp:true})}).operation,'DEL');
+});

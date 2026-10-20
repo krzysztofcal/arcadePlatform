@@ -1177,6 +1177,20 @@
       "sha256": "d04a59b383eee60200cca69a7d3cbe63b6e6ffab1a6edc208f2ff25c42cc5158",
       "category": "needs-production-equivalent",
       "purpose": "#1117 MVP owner-accepted invisible late-upload risk; retain known-operation/ownership/capability/lease/receipt guards. Local-only; no remote apply or activation authorized."
+    },
+    {
+      "file": "20261020094224_account_avatar_reconciliation.sql",
+      "version": "20261020094224",
+      "sha256": "e83203c48fc8fc7a7698b4961a4bb5b5106dde17c25eb98e55a85a67ae9cdb46",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 local-only canonical reconciliation / release-gated legacy reward commit fence; no remote application, activation, seed evidence or approval authorized."
+    },
+    {
+      "file": "20261020094949_account_reward_legacy_writer_fence.sql",
+      "version": "20261020094949",
+      "sha256": "cc1c720345d2ff4c15a40284bb610e6eaa602b3b4730a71c7cf24b7dab7d5165",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 local-only canonical reconciliation / release-gated legacy reward commit fence; no remote application, activation, seed evidence or approval authorized."
     }
   ]
 }
