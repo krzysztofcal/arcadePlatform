@@ -29,6 +29,17 @@ def read_private(path):
         return json.load(stream)
 
 
+def private_parents(path):
+    current = path.parent
+    while True:
+        meta = current.lstat()
+        operator.require(stat.S_ISDIR(meta.st_mode) and meta.st_uid in (0, os.getuid())
+                         and not meta.st_mode & 0o022, 'untrusted_parent_directory')
+        if current == Path('/'):
+            return
+        current = current.parent
+
+
 def stage_overrides(rows):
     updates = []
     for row in rows:
@@ -152,7 +163,7 @@ def main(mode):
         # before changing any supported scope to the new credential.
         stage_overrides([row for row in before if row['key'] not in KEYS])
         # Backup only Redis/settings, never the full env response or Supabase credentials.
-        operator.SecureFiles(uid=os.getuid(), gid=os.getgid(), boundary=Path('/')).parents(PRIVATE / 'netlify-redis.before.json')
+        private_parents(PRIVATE / 'netlify-redis.before.json')
         operator.require(stat.S_IMODE(PRIVATE.stat().st_mode) == 0o700, 'unsafe_private_directory')
         snapshot = PRIVATE / 'netlify-redis.before.json'
         if not snapshot.exists():

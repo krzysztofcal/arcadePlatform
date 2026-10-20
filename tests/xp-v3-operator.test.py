@@ -39,6 +39,12 @@ class OperatorTests(unittest.TestCase):
         after[0]['values'][3]['value'] = 'wrong-production'
         with self.assertRaises(adapter.operator.Refused): adapter.verify_unrelated(before, after, allowed)
 
+    def test_agent_backup_allows_root_ancestors_but_rejects_shared_tmp(self):
+        spec = importlib.util.spec_from_file_location('netlify_paths', 'scripts/ops/xp-redis-netlify-configure.py')
+        adapter = importlib.util.module_from_spec(spec); spec.loader.exec_module(adapter)
+        adapter.private_parents(Path('/not-opened.json'))
+        with self.assertRaises(adapter.operator.Refused): adapter.private_parents(Path('/tmp/not-opened.json'))
+
     def env(self, target):
         ref = m.REFS[target]
         return (f'SUPABASE_URL=https://{ref}.supabase.co\nSUPABASE_DB_URL=postgresql://postgres.{ref}:synthetic@region.pooler.supabase.com:6543/postgres\nPOKER_SETTING=preserve\nACCOUNT_DELETION_ENABLED=0\n').encode()
