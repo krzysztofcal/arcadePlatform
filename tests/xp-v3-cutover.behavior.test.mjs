@@ -137,3 +137,16 @@ test('both actual build contexts require immutable V3 pins, never a V2 rebuild',
   }
  } finally {await rm(cwd,{recursive:true,force:true});}
 });
+
+test('static landing build has no Redis capability or dependency',async()=>{
+ const {mkdtemp,mkdir,copyFile,rm,stat}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os'); const {resolve,join}=await import('node:path'); const {spawnSync}=await import('node:child_process');
+ const root=await mkdtemp(join(tmpdir(),'xp-static-build-'));
+ try {
+  await mkdir(join(root,'scripts'));await mkdir(join(root,'landing'));
+  await copyFile(resolve('scripts/generate-build-info.js'),join(root,'scripts/generate-build-info.js'));
+  const result=spawnSync(process.execPath,[join(root,'scripts/generate-build-info.js')],{cwd:join(root,'landing'),env:{PATH:process.env.PATH,CONTEXT:'production'},encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr);
+  await assert.rejects(stat(join(root,'landing/netlify/functions/_generated/deploy-context.mjs')),{code:'ENOENT'});
+ }finally{await rm(root,{recursive:true,force:true});}
+});

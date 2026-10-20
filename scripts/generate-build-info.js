@@ -308,7 +308,10 @@ window.BUILD_INFO = ${JSON.stringify(buildInfo, null, 2)};
   if (!generateSupabaseConfig(process.env)) {
     console.log("Supabase public config not generated: SUPABASE_URL/SUPABASE_ANON_KEY missing");
   }
-  generateServerDeployContext(buildInfo.context, process.env.DEPLOY_PRIME_URL);
+  // The separate static landing site has no Functions or XP Redis runtime.
+  if (path.resolve(process.cwd()) !== path.resolve(__dirname, "../landing")) {
+    generateServerDeployContext(buildInfo.context, process.env.DEPLOY_PRIME_URL);
+  }
 }
 
 if (process.argv.includes('--server-context-only')) generateServerDeployContext(process.env.CONTEXT || process.env.ARCADE_DEPLOY_TARGET, process.env.DEPLOY_PRIME_URL);
