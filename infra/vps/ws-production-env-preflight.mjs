@@ -216,7 +216,7 @@ export function runPreflight({
 
     if (requireRedisV3) {
       if (values.XP_REDIS_VERSION!=='3' || values.XP_REDIS_ENV!=='prod' || values.XP_KEY_NS!=='kcswh:prod:xp:v3' ||
-          values.ACCOUNT_DELETION_ENABLED!=='0' || !values.UPSTASH_REDIS_REST_TOKEN?.trim()) reject('production Redis V3 configuration mismatch');
+          values.ACCOUNT_DELETION_ENABLED!=='0' || values.XP_TEST_MODE==='1' || !values.UPSTASH_REDIS_REST_TOKEN?.trim()) reject('production Redis V3 configuration mismatch');
       let endpoint; try { endpoint=new URL(values.UPSTASH_REDIS_REST_URL); } catch { reject('production Redis endpoint missing'); }
       if (endpoint.protocol!=='https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname!=='/' || !endpoint.hostname.endsWith('.upstash.io')) reject('production Redis endpoint invalid');
       if (!queryRedisV3(values)) reject('production Redis V3 LIVE failed');
