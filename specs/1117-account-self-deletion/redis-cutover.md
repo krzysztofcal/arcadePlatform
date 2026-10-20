@@ -1,5 +1,8 @@
 # Redis V3 / one-time XP reset — requires separate operational GO
 
+> **Owner GO — 20 October, shared XP reset and both environments:** the latest owner instruction authorizes the one-time historical XP hard reset, coordinated Stage + Production V3 configuration/deploy and necessary shared credential rotation. It supersedes earlier “Production/reset not authorized” statements below, which describe historical audit boundaries. Only the independent Redis-only PR #1129 may be merged after required checks and operational readiness; #1124 remains Draft and must not be merged. No Storage/HMAC/deletion activation or financial/Auth cleanup is included. Actual reset/cutover has **not** happened: old-token retirement and protected WS administration remain blocked.
+
+
 The owner's later 18 October decision replaces XP preservation/migration. Stage-only integration/schema/Preview operations are now authorized after isolation preflight. Shared V2 backup/reset and all Production changes still need separate GO. No live shared V2 reset or drain has run. No FLUSHDB/FLUSHALL, no guessing owners of 359 hashes, no Auth/session-JWT secret rotation.
 
 ## Isolation and cost
@@ -92,3 +95,13 @@ Rollback: before mutations, abort without changing state. After partial reset, s
 Therefore a Stage-only GO cannot complete this shared reset. Owner must approve Production XP loss570DEL and the common credential/configuration maintenance separately and explicitly. No billing check/new database/account/paid resource required or proposed. Existing supported XP failure isolation and finance invariants stay intact.
 
 Refined read-only reset scope fingerprint: f0e0c942516d3b45eb5027d23a18285bd0aff7cae974ff07d281964f6a72044d (570exact metadata-only DEL candidates, not a value backup/execution approval). Historical source c7878c46/44732dca classifies anonymous/conversion cache fields as XP bookkeeping; arbitrary additional fields remain counter-only/preserved or NO-GO. This removes the initial classification ambiguity without touching Redis.
+
+## Authorized execution preparation — independent Redis-only PR #1129
+
+Source main fb12d182; #1124 Draft7613a174; independent implementation ff5276c1. See [operator contract](https://github.com/krzysztofcal/arcadePlatform/blob/feat/1117-redis-v3-cutover/docs/ops/redis-v3-cutover.md). Both build floors3, no live V2 fallback/import; owner-indexed/epoch-fenced writes retain BLOCKED. No Account Deletion schema/runtime is copied to Production; isolated XP release explicitly refuses deletion activation. Its future merge into #1124 must retain the complete SQL lifecycle guards.
+
+Fresh shared inventory572 =570legacyXP +2StageV3, same endpoint/token, Production V2. Two DB identities verified in READ ONLY transactions; both have zero active human seats; WS0connections observed. Actual Stage release13481825, Productiona00ededc; public healthz both OK. Production Netlify deletion flag was absent (feature not shipped), not falsely reported as explicit0; explicit0 is required before new release. Stage release false/flag0, Production has no deletion schema and no release to activate. No non-XP DB mutation performed.
+
+Restricted value/type/PTTL/RedisTIME backup570outsideGit,0700/0600. Backup SHA256eb84d47a1418fb0aca8217ff7e71fac166cd7cc39fe3ba2d071566f87ee551a9; pre-drain manifest546c9fd0e7f7a491ae4c1775f5a28c5f525253197eb5dc869359f919d967c3a6. Not final execution authority: repeat capture after common old-writer fence/drain. Real existing Upstash scratch CAS DEL/SETKEEPTTL/content-change/expiry/lost-response denial and string+TTL/zset restoration PASS. Seven exclusively owned scratch keys cleaned and absence verified. No historical key deleted. Unknown response remains STOP, never fabricated receipt.
+
+Only new Redis PR branch-scoped Netlify variables changed: version3, envstage, exactstage namespace, deletion0. Supabase Preview target checked; all preexisting values/scopes—including Production—compared unchanged in memory, no secret dump. No main merge, WS deploy/restart, credential rotation, epoch/attestation or legacy reset. Installed Production root helper returns plain PASS and cannot satisfy new V3 deploy gate; secure root installation/configuration and Upstash control-plane access are real operator prerequisites. Do not reset password before all supported clients are prepared.

@@ -1,5 +1,8 @@
 Current Stage checkpoint: v3 guard ENABLED under explicit GO; deletion OFF. Latest campaign results at end supersede earlier disabled checkpoints.
 
+> **Owner GO — 20 October, shared XP reset and both environments:** the latest owner instruction authorizes the one-time historical XP hard reset, coordinated Stage + Production V3 configuration/deploy and necessary shared credential rotation. It supersedes earlier “Production/reset not authorized” statements below, which describe historical audit boundaries. Only the independent Redis-only PR #1129 may be merged after required checks and operational readiness; #1124 remains Draft and must not be merged. No Storage/HMAC/deletion activation or financial/Auth cleanup is included. Actual reset/cutover has **not** happened: old-token retirement and protected WS administration remain blocked.
+
+
 ## Binding MVP decision — accepted invisible late-upload risk (20 October 2026)
 
 This owner decision supersedes earlier provider-terminal-bound/write-fence/support requirements below. Do not contact Supabase. MVP accepts the narrow possibility that an upload admitted before deletion completes invisibly after signed-URL expiry and after the final API-visible absence check. Neither COMPLETED nor this decision guarantees physical erasure of every provider copy. This exception does **not** waive observed incomplete signing/output writes, missing ownership, legacy/unknown manifests, or failed/unconfirmed Storage operations.
@@ -301,3 +304,7 @@ Ambiguous response rejection is a local deterministic fault-response test, NOT a
 
 - [x] T05e additional source closure:27/27missing commits fetched locally, all known avatar family;264unique no-helper commits have no matching standard Storage source. No environment mutations or new mass endpoint inventory.
 - [ ] Five manual no-SHA deployments remain an exact authority gap; obtain per-deploy source proof or separately approve their scoped retirement after alias safety checks (three historical Production-context artifacts, none current published). No blanket1626retirement.
+
+### Redis hard-reset execution preparation (owner GO, 20 October)
+
+Independent Redis-only Draft [#1129](https://github.com/krzysztofcal/arcadePlatform/pull/1129), from current main, excludes Account Deletion and SQL migrations. V3-required builds/runtime, guarded owner indexes, non-importing conversion, fail-closed config and Production LIVE deployment gate are tested separately. Actual shared Upstash CAS/restore scratch passed; restricted570-key value backup/checksum verified,7scratchkeysremoved. Complete evidence and exact reset scope are in redis-cutover.md and the independent operator contract. T05d4 remains OPEN: no old credential revocation, final drain/reset, epoch initialization or Stage+Production V3 smoke has occurred. Installed Production preflight is legacy PASS, root-owned protected configurations cannot be edited by current command-specific sudo, and no Upstash control-plane credential is configured. Do not merge/deploy/reset until operator readiness. No new Storage/HMAC work, financial operation or Account Deletion activation was performed.
