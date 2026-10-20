@@ -8,13 +8,13 @@ Redis V3 is COMPLETED on Stage+Production (#1129/#1130); no new reset or credent
 
 ## 1. Read-only preflight
 
-Pin Stage krydukthwdvccggbyjfw/system7656985631720456337; compare all applied hashes. Baseline115 applied, two pending:20261020094224_account_avatar_reconciliation.sql and20261020190000_account_bonus_uuid_policy.sql. Removed20261020094949 was never applied; never restore it. Unexpected drift/data in unused recognition tables -> NO-GO. Do not run migrator as read-only check.
+Pin Stage krydukthwdvccggbyjfw/system7656985631720456337; compare all applied hashes. Current Stage117 applied/hashes verified, zero pending:20261020094224_account_avatar_reconciliation.sql and20261020190000_account_bonus_uuid_policy.sql are ALREADY APPLIED. Do not reapply. Removed20261020094949 was never applied; never restore it. Unexpected drift/data in unused recognition tables -> NO-GO. Do not run migrator as read-only check.
 
 Verify guards v2/v3 ready, tracking1, Netlify/WS deletion0 and DB releasefalse, Stage Redis V3 LIVE/current epoch and no shared Preview conflict. Redis migration is completed; retain protected backup/journal. Current hosted sourceStage13481825/Production82aee39d is historical component evidence, not this new runtime.
 
 ## 2. Matched schema/runtime (next scoped Stage GO)
 
-Apply only the two pending forward migrations while deletion OFF. UUID policy migration preserves already-applied hashes, fails if recognition tables unexpectedly contain data, initializes durable global campaign counts from actual claim/hot/registry receipts without decrementing retained totals, installs PROMO-only quota/replay guard and drops unused HMAC structures. No history_ready/key/version/privacy approval exists or is needed. Global max_total_claims is unchanged; retired claims cannot replenish it.
+The two approved forward migrations are installed with deletion OFF; verify hashes/catalog without reapplying. Netlify/WS rollout is currently HELD under the financial STOP condition because autonomous bot buy-ins/cash-outs continue (see current Stage record in research). Obtain the specific bot-activity/maintenance decision before deployment. UUID policy migration preserves already-applied hashes, fails if recognition tables unexpectedly contain data, initializes durable global campaign counts from actual claim/hot/registry receipts without decrementing retained totals, installs PROMO-only quota/replay guard and drops unused HMAC structures. No history_ready/key/version/privacy approval exists or is needed. Global max_total_claims is unchanged; retired claims cannot replenish it.
 
 Deploy supported Netlify Preview and main-defined WS Preview with ref=<reviewed exact runtime SHA>, xpRedisVersion3. Check actualSHA/dual deploy-preview/3/stage contexts, LIVE Redis/health/browser Auth/ping. Keep deletion OFF. Verify normal per-UUID Welcome/Daily/once independently of release/HMAC; tests must not silently spend real bonus budget on non-disposable identities.
 
