@@ -1,6 +1,6 @@
 import { createXpLedgerKeys, resolveXpNamespace, isXpV3, xpOwnerPrefix } from "./xp-ledger.mjs";
 // Minimal Upstash REST client (no extra deps).
-import { klog } from "./supabase-admin.mjs";
+import { klog, beginSql } from "./supabase-admin.mjs";
 
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -19,7 +19,7 @@ if current == 'BLOCKED' then return 0 end
 if not current then redis.call('SET',KEYS[2],'ACTIVE:'..ARGV[1],'NX') end
 return redis.call('GET',KEYS[2]) == 'ACTIVE:'..ARGV[1] and 1 or 0`;
 // Missing/old permits deny at execution. This XP-only release never overrides
-// BLOCKED. Full SQL lifecycle integration is deliberately left in #1124.
+// BLOCKED. The compatible SQL check also observes #1124 once its schema exists.
 export async function withRedisIdentityPermit(userIds, fn, deps = {}) {
   if (process.env.ACCOUNT_DELETION_ENABLED !== '1' && !isXpV3(XP_NAMESPACE)) return fn(null);
   // Account Deletion requires the separate SQL lifecycle integration from #1124.
@@ -34,12 +34,35 @@ export async function withRedisIdentityPermit(userIds, fn, deps = {}) {
   }
   const target = deps.store || store;
   if (isMemoryStore && target === store && !FORCE_MEMORY_STORE) throw fenceError();
-  const epoch = await target.get(EPOCH_KEY);
-  if (!epoch) throw fenceError();
-  for (const id of ids) {
-    if (Number(await target.eval(INIT_PERMIT, [EPOCH_KEY, permitKey(id)], [epoch])) !== 1) throw fenceError();
-  }
-  return fn({ epoch, ids });
+  return (deps.beginSql || beginSql)(async (tx) => {
+    // Same lock as #1124, without shipping its schema or deletion endpoints.
+    // Production has Auth but not that optional schema yet. Detect in the same
+    // transaction; never cache absence across a later feature rollout.
+    for (const id of ids) await tx.unsafe('select pg_advisory_xact_lock(hashtextextended($1, 0));', ['account-lifecycle:' + id]);
+    const [schema] = await tx.unsafe(`select to_regclass('public.account_deletion_requests') is not null as lifecycle,
+      exists(select 1 from pg_attribute where attrelid=to_regclass('public.chips_accounts')
+        and attname='retired_user_id' and not attisdropped) as retirement;`);
+    if (typeof schema?.lifecycle !== 'boolean' || typeof schema?.retirement !== 'boolean') throw fenceError();
+    const anonymous = new Set((deps.anonymousIds || []).map(id => id.toLowerCase()));
+    for (const id of ids) {
+      const [identity] = await tx.unsafe('select exists(select 1 from auth.users where id=$1) as present;', [id]);
+      if (identity?.present !== !anonymous.has(id)) throw fenceError();
+      if (schema.lifecycle) {
+        const [request] = await tx.unsafe('select exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting;', [id]);
+        if (request?.deleting !== false) throw fenceError();
+      }
+      if (anonymous.has(id) && schema.retirement) {
+        const [retired] = await tx.unsafe('select exists(select 1 from public.chips_accounts where retired_user_id=$1) as retired;', [id]);
+        if (retired?.retired !== false) throw fenceError();
+      }
+    }
+    const epoch = await target.get(EPOCH_KEY);
+    if (!epoch) throw fenceError();
+    for (const id of ids) {
+      if (Number(await target.eval(INIT_PERMIT, [EPOCH_KEY, permitKey(id)], [epoch])) !== 1) throw fenceError();
+    }
+    return fn({ epoch, ids });
+  });
 }
 
 // Index every private key and shared board touched by every guarded writer in

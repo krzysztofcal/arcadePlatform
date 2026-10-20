@@ -10,6 +10,16 @@ const redis=await import('../netlify/functions/_shared/store-upstash.mjs');
 const OTHER='22222222-2222-4222-8222-222222222222';
 const OWNER='11111111-1111-4111-8111-111111111111';
 const ns='kcswh:stage:xp:v3';
+function sqlIdentity({schema=false,anonymous=[],missing=false,deleting=false,retired=false,trace=[]}={}) {
+ return async fn=>fn({unsafe:async(query,params)=>{
+  trace.push(query);
+  if(query.includes('to_regclass'))return [{lifecycle:schema,retirement:schema}];
+  if(query.includes('as present'))return [{present:!missing && !anonymous.includes(params[0])}];
+  if(query.includes('as deleting'))return [{deleting}];
+  if(query.includes('as retired'))return [{retired}];
+  return [];
+ }});
+}
 test('V3 is mandatory outside isolated test mode and environment pinned',()=>{
  assert.throws(()=>xp.resolveXpNamespace({},'production',{version:null,environment:null}),/xp_redis/);
  for(const environment of ['stage','prod']) {
@@ -21,14 +31,14 @@ test('V3 is mandatory outside isolated test mode and environment pinned',()=>{
 test('V3 owner mutations require epoch, index atomically and preserve BLOCKED',async()=>{
  const store=redis.__createMemoryStoreForTests();
  const key=xp.createXpLedgerKeys({namespace:ns}).total(OWNER);
- const put=()=>redis.guardedUserMutation({store,userId:OWNER,operation:'set',key,value:'7'});
+ const put=()=>redis.guardedUserMutation({store,userId:OWNER,operation:'set',key,value:'7',beginSql:sqlIdentity()});
  await assert.rejects(put(),/account_redis_fenced/);
  await store.set(ns+':lifecycle:epoch','test-epoch');
  await put(); assert.equal(await store.get(key),'7');
  assert.equal(await store.zscore(xp.xpOwnerPrefix(ns,OWNER)+'keys',key),0);
  await store.set(ns+':lifecycle:permit:'+OWNER,'BLOCKED');
  await assert.rejects(put(),/account_redis_fenced/);
- await assert.rejects(redis.guardedUserMutation({store,userId:OWNER,operation:'set',key:key.replace(':stage:',':prod:'),value:'99'}),/account_redis_fenced/);
+ await assert.rejects(redis.guardedUserMutation({store,userId:OWNER,operation:'set',key:key.replace(':stage:',':prod:'),value:'99',beginSql:sqlIdentity()}),/account_redis_fenced/);
 });
 
 test('V3 missing Redis credentials denies reads, writes, rate limits and XP HTTP without memory fallback',async()=>{
@@ -103,10 +113,10 @@ test('new V3 anonymous conversion never imports V2 and is once-only',async()=>{
  const {migrateAnonXpToUser}=await import('../netlify/functions/_shared/xp-identity.mjs');
  await store.set(ns+':lifecycle:epoch','conversion-test');
  await store.set('kcswh:xp:v2:total:'+OTHER,'9999');
- const convert=()=>migrateAnonXpToUser({store,namespace:ns,anonId:OTHER,userId:OWNER,conversionCap:100});
+ const convert=()=>migrateAnonXpToUser({store,namespace:ns,anonId:OTHER,userId:OWNER,conversionCap:100,beginSql:sqlIdentity({anonymous:[OTHER]})});
  assert.equal((await convert()).converted,0);
  const anon=xp.createXpLedgerKeys({namespace:ns,anonymous:true});
- await redis.guardedUserMutation({store,userId:OTHER,anonymous:true,operation:'set',key:anon.total(OTHER),value:'9'});
+ await redis.guardedUserMutation({store,userId:OTHER,anonymous:true,operation:'set',key:anon.total(OTHER),value:'9',beginSql:sqlIdentity({anonymous:[OTHER]})});
  assert.equal((await convert()).converted,9);
  assert.equal((await convert()).converted,0);
  assert.equal(await store.get('kcswh:xp:v2:total:'+OTHER),'9999');
@@ -149,4 +159,18 @@ test('static landing build has no Redis capability or dependency',async()=>{
   assert.equal(result.status,0,result.stderr);
   await assert.rejects(stat(join(root,'landing/netlify/functions/_generated/deploy-context.mjs')),{code:'ENOENT'});
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('standalone V3 supports pre-deletion Production schema and observes future SQL lifecycle under the shared lock',async()=>{
+ const store=redis.__createMemoryStoreForTests();await store.set(ns+':lifecycle:epoch','sql-test');
+ const key=xp.createXpLedgerKeys({namespace:ns}).total(OWNER);
+ const put=(beginSql,anonymous=false)=>redis.guardedUserMutation({store,userId:OWNER,anonymous,operation:'set',key,value:'3',beginSql});
+ const trace=[];await put(sqlIdentity({trace}));
+ assert.ok(trace.some(query=>query.includes('pg_advisory_xact_lock')));
+ assert.equal(trace.some(query=>query.includes('from public.account_deletion_requests')),false);
+ for(const args of [{missing:true},{schema:true,deleting:true}])await assert.rejects(put(sqlIdentity(args)),/account_redis_fenced/);
+ // Even with no Redis BLOCKED yet, accepted SQL request already denies writes.
+ assert.equal(await store.get(ns+':lifecycle:permit:'+OWNER),'ACTIVE:sql-test');
+ await assert.rejects(put(sqlIdentity({schema:true,deleting:true})),/account_redis_fenced/);
+ await assert.rejects(put(sqlIdentity({schema:true}),true),/account_redis_fenced/);
 });
