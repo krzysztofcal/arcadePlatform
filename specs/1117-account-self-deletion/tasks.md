@@ -298,3 +298,6 @@ Ambiguous response rejection is a local deterministic fault-response test, NOT a
 - [x] T05d4 complete read-only572-key metadata scan; refined exact570legacy XP-cache scope, source-proven conversion/anon fields; unknown fields still preserved; pure atomic CAS command preparation + tamper tests, no live execution.
 - [ ] T05d4 isolated real CAS validation, old-writer credential/authority fence and coordinated ProductionXP reset/cutover/backup/recovery need explicit separate GO. Metadata inventory is not backup; missing write-fence means NO-GO.
 - [ ] T07b next full Stage E2E prerequisite matrix in quickstart; no previous smoke rerun and no destructive E2E performed. Remains PARTIAL, not merge-ready.
+
+- [x] T05e additional source closure:27/27missing commits fetched locally, all known avatar family;264unique no-helper commits have no matching standard Storage source. No environment mutations or new mass endpoint inventory.
+- [ ] Five manual no-SHA deployments remain an exact authority gap; obtain per-deploy source proof or separately approve their scoped retirement after alias safety checks (three historical Production-context artifacts, none current published). No blanket1626retirement.
