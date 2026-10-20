@@ -39,3 +39,68 @@ The source Stage helper is exactly the already installed/reviewed helper SHA2568
 READ ONLY DB baseline: exact Stage/Production project refs and system identifiers match. Both have0active human Poker seats. Stage deletion releasefalse/Netlify0; Production deletion schema absent/flagunset (new release requires explicit0). Runtime Stage13481825 / Productiona00ededc; both public healthzOK. Aggregate non-XP baseline is stored privately for post-cutover comparison; no financial/user data exported to this PR.
 
 Read-only Netlify site inventory confirms playkcswh base `/` and landing-kcswh base `/landing`, both main. Static landing has no XP/Functions runtime: its shared build-info generator does not emit server context or require Redis credentials. Root Functions and explicit WS context generation still require V3. This avoids introducing an unrelated Redis dependency into the landing site; a fundamental build test covers the distinction.
+
+## Final operator procedure (preparation; execution remains gated)
+
+### Responsibilities and immutable inputs
+
+Agent: CI/review, no-player preflight, exact artifact preparation, scoped Netlify settings, final inventory/backup, executor, V3 epoch initialization, supported workflows, smoke and evidence. Root: protected installation/prepare and one credential commit. Upstash administrator: **one Reset Password on the existing database**, only after the agent gives an explicit READY for the coordinated window. No manual env editing, new resources, sudoers changes or credentials in chat/arguments. This preparation does not authorize executing the reset now.
+
+Local protected execution directory is `/home/copilot/arcade-xp-v3-cutover` (0700, files0600). Do not use the old `.config` directory: its group-writable ancestor deliberately fails the executor's path guard. Approved scope570 SHA256 `8ba869d3bccb1bc1d72afe4fdc2d4870a82e60d1fe824bfb6080786799053700` binds exact keys/types/operations, endpoint fingerprint and the original token fingerprint. The pre-drain snapshot hash above remains a recovery reference, never an apply authorization. A real read-only executor dry-run validated all570 records; no journal, CAS or historical deletion occurred. The subsequent added old-token fingerprint changes no key operation.
+
+`xp-redis-reset-execute.mjs` is now the executable adapter for the existing planner/CAS. It pins the existing endpoint, requires approved scope checksum/count, final capture and snapshot/manifest hashes, authentic old-token revocation and new PING+Lua permission. Default `dry-run` cannot mutate. `capture` refuses unapproved legacy keys; `apply` fsyncs each intent before CAS and receipt afterwards, holds a kernel lock, verifies outcomes, and stops on error/ambiguous response. `verify` is read-only and requires a complete journal. A crash with an unresolved intent is NO-GO, even if a persistent key is absent: preserve evidence and reconcile separately, never edit the journal to force resume. Successfully recorded operations are verified rather than repeated. Natural expiry and TTL deadline checks use the planner's Redis TIME tolerance; exact PTTL equality is never required.
+
+### 1. Protected installation and prepare — root, before password reset
+
+Public bundle `/tmp/arcade-xp-v3-operator.tgz` contains ONLY the two reviewed public sources `xp-v3-operator.py` and `ws-production-env-preflight.mjs`, regular files0600. Bundle SHA256 **348655674cde6ef4d3ce8482cfa885c80922ad900e05aefbdefcbbc246c6391a**. Agent regenerates/compares this bundle from the reviewed commit before handing it over. Run this single line in an existing root shell (not yet executed by the agent):
+
+```sh
+( set -eu; test "$(id -u)" = 0; for p in /root /usr /usr/local /usr/local/libexec; do test ! -L "$p"; test "$(stat -c %u "$p")" = 0; test -z "$(find "$p" -maxdepth 0 -perm /022 -print)"; done; install -o root -g root -m 0600 /tmp/arcade-xp-v3-operator.tgz /root/arcade-xp-v3-34865567.tgz; echo '348655674cde6ef4d3ce8482cfa885c80922ad900e05aefbdefcbbc246c6391a  /root/arcade-xp-v3-34865567.tgz' | sha256sum -c -; mkdir -m 0700 /usr/local/libexec/arcade-xp-v3-34865567; tar --no-same-owner --no-same-permissions -xzf /root/arcade-xp-v3-34865567.tgz -C /usr/local/libexec/arcade-xp-v3-34865567; chown root:root /usr/local/libexec/arcade-xp-v3-34865567/*; chmod 0600 /usr/local/libexec/arcade-xp-v3-34865567/*; /usr/bin/python3 -I -B /usr/local/libexec/arcade-xp-v3-34865567/xp-v3-operator.py prepare )
+```
+
+A repeated install intentionally stops on an existing destination; repeat only the already protected `prepare` invocation. Hash validation occurs AFTER copying to protected storage, before extraction/execution. The script rejects unsafe ancestors, symlinks, hardlinks, wrong modes, changed descriptors/files, foreign project or active deletion. It reuses the existing Production deployment lock without changing its permissions. Prepare backs up root0600 files in root0700 `/var/backups/arcade-xp-v3-cutover`, stages candidate environments, performs live read-only DB/Redis checks, and installs only the Production V3 preflight helper. It does not change active env files or restart anything. The stricter helper intentionally blocks legacy Production deployments until commit; freeze competing deployments during the window.
+
+Exactly four existing paths are authorized across prepare/commit:
+
+* `/opt/arcade-ws-preview/.env.preview` (root0600)
+* `/etc/arcadeplatform/ws-server.env` (root0600)
+* `/var/backups/arcade-ws-preview-v3/manifest.json` (root0600; configuration receipt hash only, not cutover attestation)
+* `/usr/local/sbin/arcade-ws-production-env-preflight` (root0755)
+
+Stage helper, systemd, sudoers, directory ownership, CH/DB settings and other services are untouched. Additional files are restricted backups/state and two Redis-only exports `/var/lib/arcade-xp-v3/redis-{old,new}.json` (copilot0600, root-owned parent). Neither complete env backups nor Supabase secrets are exported to the agent.
+
+### 2. Agent readiness gate — do not reset credentials before PASS
+
+Recheck exact main/PR/runtime SHAs, required CI, zero active players/operations and an exclusive deployment window. Reconfirm both identities, deletion OFF, Redis endpoint and approved scope; preserve non-XP control fingerprints. Root prepare must PASS. All current clients must use the same known REST authority; any unaccounted TCP/admin client is NO-GO.
+
+`python3 -B scripts/ops/xp-redis-netlify-configure.py plan` is read-only. The preparation permission probe has succeeded: one Production-context `XP_KEY_NS` PATCH retaining the same effective V2 value, with every unrelated value/scope verified unchanged and no deploy. `apply` is for AFTER credential reset only; it verifies revocation and updates only Production and branch `feat/1117-account-deletion-v2`, never global/all/deploy-preview contexts. It stores only Redis/settings backups0600. No old immutable deployment is rebuilt or receives new credentials.
+
+Preserve canonical avatar-v3 Stage source **134818252375239acb8356163a0b454222d99ef8**. Do not replace it with this main-based Redis-only application's legacy avatar handlers. Prepare its isolated exact-source build using existing Netlify CLI, Stage branch-scoped configuration, `CONTEXT=deploy-preview`, alias `deploy-preview-1124`, and `--skip-functions-cache`, WITHOUT `--prod`. Validate both generated Stage/V3 contexts and public build SHA in the artifact before upload. Netlify Retry builds branch HEAD, not the old deploy SHA; therefore it is not the exact-source mechanism. A manual deploy may have no `commit_ref`: record source SHA plus artifact digest and verify exposed build metadata, never fabricate provider provenance. If branch-context resolution, alias replacement or artifact provenance cannot be confirmed, STOP before password reset; prepare a supported exact-source deployment instead. WS Preview continues to deploy this supported Stage SHA through the main-defined workflow. Production deploys only the independently reviewed Redis PR's main merge SHA; #1124 remains Draft.
+
+Confirm existing request/drain bounds for every old XP writer before the window; no arbitrary wait establishes quiescence. Revocation fences future commands, not commands already accepted. Await known in-flight requests/jobs, stop supported old XP ingress without interrupting CH settlement, then reobserve inventory. An unbounded or unknown active writer is NO-GO. Quiet observations supplement, never replace credential rejection and writer accounting.
+
+### 3. One Upstash console action and one root commit — coordinated window
+
+Only after READY: owner selects **Reset Password** for the single existing database. Do not create a database, change plan, rotate unrelated Supabase keys, or send the new token in chat. Copy its new **STANDARD REST token**, then run:
+
+```sh
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-xp-v3-34865567/xp-v3-operator.py commit
+```
+
+Paste the token into the hidden TTY prompt once. The existing approved URL is reused. Commit requires old-token authentication rejection and new PING/EVAL success before writing either environment. It seals new secret/candidate bytes and fsyncs state before exact-file CAS; partial commits resume only against the same sealed bytes. Retry reuses the protected token, without repeated console reset. No restart, deployment, Redis key mutation or epoch is performed by this command. It updates the protected Preview configuration hash legitimately while preserving original backup/evidence; this is not a Storage/Redis approval marker.
+
+### 4. Agent execution after commit — future approved window
+
+1. Reverify revoked original token/new permission and unchanged non-XP data; run Netlify scoped `apply`. Freeze unsupported old builds; do not assign new tokens to broad/global contexts. Prepare fresh supported artifacts with new captured function environments (Netlify requires a new deploy for Functions env changes).
+2. Complete writer drain, then use executor `capture` with `--credentials /var/lib/arcade-xp-v3/redis-new.json --old-credentials /var/lib/arcade-xp-v3/redis-old.json --scope /home/copilot/arcade-xp-v3-cutover/approved-scope.json --scope-sha 8ba869d3bccb1bc1d72afe4fdc2d4870a82e60d1fe824bfb6080786799053700 --output /home/copilot/arcade-xp-v3-cutover/xp-final.json`. Capture writes a protected final snapshot and checksum; compare its inventory to the exact approved scope. No automatic scope extension.
+3. Agent supplies printed nonsecret snapshot/manifest hashes to `dry-run`, then `apply`, then `verify` using `--snapshot`, `--snapshot-sha`, `--manifest-sha` and the same `--journal /home/copilot/arcade-xp-v3-cutover/reset.jsonl`. Apply/verify also require old credentials. Do not use pre-drain hashes as final hashes. All570 outcomes must be proven; unknown response or content/type/TTL mismatch STOP before the next key.
+4. Preserve the two existing V3 keys and all non-XP data. Initialize only absent Stage/Production V3 epochs with exact NX semantics through existing Redis controls, without resetting fences/permits or creating Account Deletion attestations. Merge/deploy only the independent Redis release after required CI and explicit execution GO; both immutable contexts must be V3 with correct env. Use main-defined WS workflows, LIVE helpers, exact release SHAs and supported Netlify artifacts. Never roll back to V2 credentials/runtime.
+5. Verify both services, deletion OFF, nonfinancial login/XP0/base-level/normal award/rank/persistence/anonymous conversion, Stage-vs-Production isolation, unchanged CH/Poker/Auth/bonus invariants, actual old-token denial and no V2 reappearance. No funded game/bonus claim is part of this smoke. Failure means roll-forward or stop with evidence, not restoring whole Redis.
+
+### Recovery / operator impact
+
+Before rotation, stop with XP data intact; root backups allow reviewed exact-file restoration, but the stricter deploy helper can remain as a safe gate. No automatic rollback is provided. After rotation, old credentials are invalid: retry idempotent commit and roll forward; restoring old env bytes cannot recover availability. After any uncertain CAS, retain the fsynced journal, final snapshot and checksum and stop; do not delete/rewrite the journal, infer success from absence, or restore the entire database. Any selective XP restoration needs a separately reviewed stopped-ingress procedure accounting for elapsed TTL and newer data. Keep recovery material restricted and delete under an agreed post-verification retention policy, not in GitHub.
+
+Breaking impact: intentional loss of historical XP/levels/rankings/XP sessions in BOTH environments, temporary XP-only outage, old immutable XP clients fail authentication, strict V3 settings required for every supported writer. Supabase sessions, CH, Poker settlement, profiles, avatars, bonuses and financial archives are preserved. The currently supported Stage avatar runtime must not regress.
+
+Provider references: [Functions env requires deployment](https://docs.netlify.com/build/functions/environment-variables/), [retry builds branch HEAD](https://docs.netlify.com/deploy/manage-deploys/manage-deploys-overview/). Root prepare/commit, password reset, final capture/reset, epochs and deployments have NOT been executed during this preparation.
