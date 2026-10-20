@@ -76,7 +76,7 @@ export async function executeReset({snapshot,scope,manifestHash,journal,boundary
   }else {need(!verifyOnly,'reset_journal_incomplete');protectedCreate(journal,JSON.stringify(header)+'\n',{boundary});}
   need(!verifyOnly||completed.size===plan.operations.length,'reset_journal_incomplete');
   fd=fs.openSync(journal,fs.constants.O_WRONLY|fs.constants.O_APPEND|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);check(fd);
-  const append=row=>{fs.writeSync(fd,JSON.stringify(row)+'\n');fs.fsyncSync(fd);};
+  const append=row=>{fs.writeFileSync(fd,JSON.stringify(row)+'\n');fs.fsyncSync(fd);};
   for(let index=0;index<plan.operations.length;index++){
    const action=plan.operations[index];
    if(completed.has(index)){await verifyEffect(action,completed.get(index),observe);continue;}
