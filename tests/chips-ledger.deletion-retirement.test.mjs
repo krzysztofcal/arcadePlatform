@@ -15,7 +15,7 @@ async function fixture(balance=75) {
     db=new PGlite();
     await db.exec(`create role anon; create role authenticated; create role service_role;
       create table bonus_campaigns(created_by uuid); create table bonus_campaign_eligible_users(created_by uuid);
-      create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql as $$select null::uuid$$;
+      create table poker_tables(id uuid primary key,status text); create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql as $$select null::uuid$$;
       create table chips_accounts(id uuid primary key default gen_random_uuid(), user_id uuid references auth.users(id),
         account_type text not null, system_key text, status text not null default 'active', balance bigint not null default 0,
         next_entry_seq bigint not null default 1, unique(user_id,account_type), unique(system_key),
@@ -32,7 +32,7 @@ async function fixture(balance=75) {
         values(new.idempotency_key,new.id,new.payload_hash,new.tx_type,new.user_id,new.created_at); return new; end$$;
       create trigger test_registry after insert on chips_transactions for each row execute function test_registry();
       create function raise_insufficient_funds() returns boolean language plpgsql as $$begin raise exception 'insufficient'; end$$;
-      create table poker_seats(table_id uuid,user_id uuid);
+      create table poker_seats(table_id uuid,user_id uuid,status text default 'ACTIVE',stack bigint default 0);
       create table poker_state(table_id uuid primary key,state jsonb);`);
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-requests-v2.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-wallet-retirement-v2.sql',import.meta.url),'utf8'));
@@ -91,7 +91,7 @@ test('late credit, forged internal option, unresolved Poker and stale lease cann
   const credit={userId:OTHER,txType:'ADMIN_ADJUST',idempotencyKey:'late',internalAuthorization:'deletion',
     entries:[{accountType:'SYSTEM',systemKey:'GENESIS',amount:-10},{accountType:'USER',userId:USER,amount:10}]};
   await assert.rejects(begin(tx=>postTransaction({...credit,tx})),{code:'account_not_active'});
-  await db.query('insert into poker_seats values($1,$2)',[TABLE,USER]);
+  await db.query('insert into poker_seats(table_id,user_id) values($1,$2)',[TABLE,USER]);
   await assert.rejects(begin(retire),{code:'financial_mismatch'});
   await db.exec('truncate poker_seats');
   await db.exec("update account_deletion_requests set lease_until=now()-interval '1 second'");

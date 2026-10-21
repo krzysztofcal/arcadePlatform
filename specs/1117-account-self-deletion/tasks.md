@@ -371,3 +371,14 @@ Local verification for window preparation:13 Python window/configuration tests,7
 - [x] Owner explicitly approved official Admin email confirmation ONLY for the actual new disposable UUID after old subject real hard-delete and successful ordinary public same-email signUp. No Admin createUser/SQL fallback; signup rejection is STOP. Email delivery/confirmation link NOT TESTED. Old subject/other existing users must not be administratively confirmed.
 - [x] Fresh117/117/guards/REDIS-RELEASE/original subject checks; following Netlify branch-only ON deploy6ad8913597cbf65ecb017f0a READY/served91c, real subject password login/read-only account-delete404; Production/unrelated contexts unchanged.
 - [ ] Next window WS activation requires owner root fixed operator; WS currentlyOFF and DB releasefalse. No destructive E2E/funding/new players/BURN/Auth delete yet. Retain exact new ON identity for safe terminal closure.
+
+## Current accepted Stage request — historical-seat recovery blocker (21 October)
+
+- [x] Reviewed protected activation, safe Preview restart and live exact91c/Stage/V3 smoke; three normal Welcome/replay checks, subject XP, funded JOIN and real unequal-stack all-in/showdown/cash-outs executed.
+- [x] Real UI Cancel no-request and confirmed durable POST202; fixture-scoped lost HTTP response retained private capability. DB releasefalse after STOP; recovery remainsON.
+- [x] Diagnose CLOSED/HAND_DONE/ESCROW0, INACTIVE0 historical seat without state stack key causing canonical Leave `stack_ambiguous`; no manual data/finance correction.
+- [x] Local shared predicate for runtime drain and independent retirement guard; reproduce before fix and fundamental fail-closed/replay regression. No migration or remote runtime change.
+- [ ] Separately authorized exact-SHA WS Preview deployment and automatic recovery of the SAME accepted request, with DBfalse and safety/drain checks. No new request, fake receipts or manual incident clearing.
+- [ ] Actual one BURN, canonical Storage/Redis/profile cleanup, Auth-last; then normal same-email signUp/new UUID, approved Admin confirmation of ONLY that new UUID, normal Welcome once. Currently BURN0/Storage DELETE0/Auth delete0; old Auth still present.
+- [ ] Active-all-in deletion timing remains unproven (acceptance snapshot SETTLED). Google/email delivery NOT TESTED.
+- [ ] All accepted requests terminal, verified Netlify/WS OFF and safe current ON retirement. WS/Netlify deliberatelyON during recovery; do not mark closure complete. T07b remainsOPEN/blocked, PRDraft.

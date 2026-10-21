@@ -14,7 +14,7 @@ async function fixture(t) {
   database = new PGlite();
   const db = database;
   await db.exec(`create role anon; create role authenticated; create role service_role;
-    create schema auth; create table auth.users(id uuid primary key); create table public.user_profiles(user_id uuid,display_name text); create table public.favorites(user_id uuid,game_id text); create table public.poker_state(table_id uuid,state jsonb); create table public.poker_seats(table_id uuid,user_id uuid); create table public.bonus_campaigns(created_by uuid); create table public.bonus_campaign_eligible_users(created_by uuid); create function auth.uid() returns uuid language sql as $$ select null::uuid $$;`);
+    create table poker_tables(id uuid primary key,status text); create table chips_accounts(account_type text,system_key text,balance bigint); create schema auth; create table auth.users(id uuid primary key); create table public.user_profiles(user_id uuid,display_name text); create table public.favorites(user_id uuid,game_id text); create table public.poker_state(table_id uuid,state jsonb); create table public.poker_seats(table_id uuid,user_id uuid,status text default 'ACTIVE',stack bigint default 0); create table public.bonus_campaigns(created_by uuid); create table public.bonus_campaign_eligible_users(created_by uuid); create function auth.uid() returns uuid language sql as $$ select null::uuid $$;`);
   await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-requests-v2.sql', import.meta.url), 'utf8'));
   }
   const db = database;

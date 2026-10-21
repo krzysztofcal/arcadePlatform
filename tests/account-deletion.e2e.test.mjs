@@ -183,3 +183,37 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
   await guardedUserMutation({store,userId:fresh,key:keys.profile(fresh),value:'new identity',operation:'set',beginSql:begin});
   assert.equal(await store.get(keys.profile(OTHER)),'private fixture');
 });
+
+test('closed inactive zero-stack history is not a Poker obligation; uncertain/live value still blocks BURN',async()=>{
+  const {begin}=await fixture(75);
+  await db.query("insert into poker_tables(id,status) values($1,'CLOSED') on conflict(id) do update set status='CLOSED'",[TABLE]);
+  await db.query("insert into chips_accounts(account_type,system_key,balance) values('ESCROW',$1,0)",['POKER_TABLE:'+TABLE]);
+  await db.query("insert into poker_seats values($1,$2,1,'INACTIVE',false,0)",[TABLE,USER]);
+  await db.query('insert into poker_state(table_id,state) values($1,$2)',[TABLE,{tableId:TABLE,phase:'HAND_DONE',seats:[{userId:USER,seatNo:1}],stacks:{}}]);
+  const {assertDeletionLease}=await import('../shared/account-deletion.mjs');
+  const runtime=createAccountDeletionRuntime({beginSql:begin,klog:()=>{},redisIsMemory:false,
+    leaveFromTable:async()=>{throw new Error('must not cash out unproven stack');}});
+  const context=phase=>({userId:USER,requestId:REQUEST,generation:1,progress:{},
+    assertLease:tx=>assertDeletionLease(tx,{requestId:REQUEST,generation:1,phase})});
+  const phase=async value=>db.query('update account_deletion_requests set phase=$1,progress=$2',[value,value==='burn'?{poker:{done:true}}:{}]);
+  await phase('poker');
+  assert.deepEqual(await runtime.steps.poker(context('poker')),{done:true});
+  // Do not generalize the exception to ACTIVE/value-bearing/open/unsettled cases.
+  for(const bad of ['active','positive_seat','open','unsettled','positive_escrow','stack_key','missing_stacks']){
+    await db.query("update poker_seats set status=$1,stack=$2",[bad==='active'?'ACTIVE':'INACTIVE',bad==='positive_seat'?1:0]);
+    await db.query('update poker_tables set status=$1',[bad==='open'?'OPEN':'CLOSED']);
+    await db.query('update poker_state set state=$1',[{tableId:TABLE,phase:bad==='unsettled'?'RIVER':'HAND_DONE',seats:[{userId:USER,seatNo:1}],...(bad==='missing_stacks'?{}:{stacks:bad==='stack_key'?{[USER]:0}:{}})}]);
+    await db.query("update chips_accounts set balance=$1 where account_type='ESCROW'",[bad==='positive_escrow'?1:0]);
+    await phase('poker');await assert.rejects(runtime.steps.poker(context('poker')),/must not cash out/);
+    await phase('burn');await assert.rejects(runtime.steps.burn(context('burn')),error=>error.code==='financial_mismatch');
+    assert.equal((await db.query('select count(*)::int n from chips_transactions')).rows[0].n,0);
+  }
+  await db.exec("update poker_seats set status='INACTIVE',stack=0;update poker_tables set status='CLOSED';update chips_accounts set balance=0 where account_type='ESCROW'");
+  await db.query('update poker_state set state=$1',[{tableId:TABLE,phase:'HAND_DONE',seats:[{userId:USER,seatNo:1}],stacks:{}}]);
+  await phase('burn');assert.equal((await runtime.steps.burn(context('burn'))).done,true);
+  assert.equal((await runtime.steps.burn(context('burn'))).done,true);
+  assert.equal((await db.query("select count(*)::int n from chips_transactions where tx_type='BURN'")).rows[0].n,1);
+  assert.equal((await db.query('select sum(amount)::int n from chips_entries')).rows[0].n,0);
+  assert.equal((await db.query("select balance::int n from chips_accounts where retired_user_id=$1",[USER])).rows[0].n,0);
+  assert.equal((await db.query('select count(*)::int n from poker_seats where user_id=$1',[USER])).rows[0].n,1,'historical seat is preserved for canonical Auth-last cascade');
+});

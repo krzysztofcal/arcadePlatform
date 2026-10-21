@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { lockAccountLifecycle, assertAccountActive } from "../../../shared/account-deletion.mjs";
+import { lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql } from "../../../shared/account-deletion.mjs";
 
 const deletionEnabled = () => process.env.ACCOUNT_DELETION_ENABLED === "1";
 const INTERNAL_DELETION = Symbol("trusted deletion ledger effect");
@@ -1320,7 +1320,7 @@ async function retireUserForDeletion({ tx, userId, requestId, assertLease }) {
   }
   if (saved || account.retired_user_id || account.user_id !== userId || account.status !== "active") throw financialMismatch();
   const [obligations] = await tx.unsafe(`select
-    exists(select 1 from public.poker_seats where user_id=$1) or
+    exists(select 1 from public.poker_seats p where p.user_id=$1 and ${deletionPokerSeatPendingSql}) or
     exists(select 1 from public.poker_state where state->'stacks' ? $1::text
       or (state->>'phase' in ('PREFLOP','FLOP','TURN','RIVER','SHOWDOWN')
         and exists(select 1 from jsonb_array_elements(coalesce(state->'handSeats',state->'seats','[]'::jsonb)) s where s->>'userId'=$1::text))) as pending;`, [userId]);

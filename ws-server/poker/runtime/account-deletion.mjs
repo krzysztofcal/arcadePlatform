@@ -1,4 +1,4 @@
-import { accountDeletionEnabled, advanceDeletion, scanDeletionRequests, lockAccountLifecycle, deleteAuthUser } from '../../../shared/account-deletion.mjs';
+import { accountDeletionEnabled, advanceDeletion, scanDeletionRequests, lockAccountLifecycle, deleteAuthUser, deletionPokerSeatPendingSql } from '../../../shared/account-deletion.mjs';
 import { retireUserForDeletion } from '../../../netlify/functions/_shared/chips-ledger.mjs';
 import { blockRedisIdentity, cleanupRedisIdentity, isMemoryStore } from '../../../netlify/functions/_shared/store-upstash.mjs';
 import { cleanupDeletionAvatars } from '../../../shared/account-deletion-storage.mjs';
@@ -29,9 +29,9 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
       return {done:true};
     },
     poker: async (context) => {
-      const rows = await transactionFor(context,(tx) => tx.unsafe(`select table_id from public.poker_seats where user_id=$1
+      const rows = await transactionFor(context,(tx) => tx.unsafe(`select p.table_id from public.poker_seats p where p.user_id=$1 and ${deletionPokerSeatPendingSql}
         union select distinct s.table_id from public.poker_state s
-        where exists(select 1 from public.poker_seats p where p.table_id=s.table_id and p.user_id=$1)
+        where exists(select 1 from public.poker_seats p where p.table_id=s.table_id and p.user_id=$1 and ${deletionPokerSeatPendingSql})
           or s.state->'stacks' ? $1::text
           or (s.state->>'phase' in ('PREFLOP','FLOP','TURN','RIVER','SHOWDOWN') and
             exists(select 1 from jsonb_array_elements(coalesce(s.state->'handSeats',s.state->'seats','[]'::jsonb)) h where h->>'userId'=$1::text));`,[context.userId]));
