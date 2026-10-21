@@ -303,6 +303,7 @@ test('completed repair is exact two-table, idempotent and never invents lease/BU
  const states=(await db.query('select table_id,version,state from poker_state order by table_id')).rows;
  const manifest={version:1,stage:'krydukthwdvccggbyjfw',userId:USER,requestId:REQUEST,tables:states.map(row=>({tableId:row.table_id,version:Number(row.version),stateSha256:pokerPrivacyStateSha256(row.state),cleanedStateSha256:pokerPrivacyStateSha256(projectDeletionPokerState(row.state,USER))}))};
  options.manifest=manifest;
+ await assert.rejects(repairCompletedDeletionPoker({...options,manifest:{...manifest,tables:manifest.tables.map(t=>({...t,cleanedStateSha256:'0'.repeat(64)}))}}),/manifest_drift/);
  const {createHash}=await import('node:crypto');const bytes=JSON.stringify(manifest),hash=createHash('sha256').update(bytes).digest('hex');
  assert.deepEqual(parsePokerRepairManifest(bytes,hash),manifest);
  assert.throws(()=>parsePokerRepairManifest(bytes,'0'.repeat(64)));

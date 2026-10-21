@@ -160,7 +160,8 @@ export async function repairCompletedDeletionPoker({beginSql,userId,requestId,ta
     if(states.length!==2)throw privacyError();
     for(const row of states) {
       const approved=manifest.tables.find(t=>t.tableId===row.table_id),hash=pokerPrivacyStateSha256(row.state);
-      const original=Number(row.version)===approved?.version&&hash===approved.stateSha256;
+      const original=Number(row.version)===approved?.version&&hash===approved.stateSha256
+        &&pokerPrivacyStateSha256(projectDeletionPokerState(row.state,userId))===approved.cleanedStateSha256;
       // Only the exact pre-approved projection/version is an idempotent retry.
       const cleaned=Number(row.version)===approved?.version+1&&hash===approved.cleanedStateSha256&&!containsOwner(row.state,userId);
       if(!original&&!cleaned)throw new Error('poker_privacy_manifest_drift');
