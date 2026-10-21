@@ -313,6 +313,7 @@ test("Stage deletion window derives ON from protected OFF and refuses missing, t
   assert.throws(check(on,null));
   assert.throws(check(on,"activating"));
   assert.throws(check(on,"restoring"));
+  assert.throws(check(off,"restoring"));
   assert.throws(check(on+"DRIFT=1\n","on"));
   assert.throws(check(on+"DRIFT=1\n","on",{on:sha(on+"DRIFT=1\n")}));
   assert.throws(check(on,"on",{baseline_record:"foreign"}));

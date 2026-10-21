@@ -349,3 +349,8 @@ Independent Redis-only Draft [#1129](https://github.com/krzysztofcal/arcadePlatf
 - [ ] T07b remains OPEN: no new E2E/activation evidence from local tests. PR remains Draft, no Production or merge.
 
 Local verification for window preparation:13 Python window/configuration tests,7 unchanged Redis operator tests,11 workflow/preflight tests and32 deletion/Storage/local-E2E regression tests passed (`XP_TEST_MODE=1`, local fixtures only). Syntax227/CSP55 passed; lifecycle, games-XP hook and authoritative transport guards passed. Full check:all reaches five existing missing-badge mockup HTML violations; unrelated paths unchanged. Local privileged rsync contract cannot finish without passwordless sudo; retain CI root-run result separately. No Stage E2E or activation performed.
+
+## Conditional final E2E GO — interrupted RESTORE gate (21 October)
+
+- [x] Added one fundamental interrupted-restore regression: interruption after OFF replace leaves phase restoring, verify/preflight refuses the transition, restore resumes and matches the exact original OFF SHA-256. Existing preflight test also rejects OFF bytes with restoring authority. Operator/helper code and all three reviewed installation hashes remain unchanged.
+- [ ] Protected installation is BLOCKED by actual VPS privileges: copilot sudo permits fixed preflight/restart commands, not root installation/Python operator. Root-owned environment metadata remains0600 and parent0755; no broad sudo or credential escalation. Prepare/activate/restore require the authorized root operator session; do not bypass through Redis operators. No activation, funding, BURN, Storage DELETE or Auth delete performed.

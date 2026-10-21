@@ -215,6 +215,24 @@ class DeletionWindow(unittest.TestCase):
         self.assertEqual(self.action('restore'), 'off')
         self.assertEqual(self.env.read_bytes(), self.before)
 
+    def test_window_interrupted_restore_refuses_verify_then_restores_exact_off(self):
+        self.action('prepare')
+        self.action('activate')
+        original_hash = config.digest(self.before)
+        outer = self
+        class Interrupted(config.SecureFiles):
+            def atomic(self, path, *args, **kwargs):
+                super().atomic(path, *args, **kwargs)
+                if path == outer.env: raise OSError('fixture interruption after OFF replace')
+        with self.assertRaises(OSError):
+            self.action('restore', Interrupted(os.getuid(), os.getgid(), self.root))
+        self.assertEqual(json.loads((self.window / 'manifest.json').read_bytes())['phase'], 'restoring')
+        self.assertEqual(config.digest(self.env.read_bytes()), original_hash)
+        with self.assertRaises(window.secure.Refused): self.action('verify')
+        self.assertEqual(self.action('restore'), 'off')
+        self.assertEqual(self.action('verify'), 'off')
+        self.assertEqual(config.digest(self.env.read_bytes()), original_hash)
+
     def test_window_foreign_environment_and_permissions(self):
         for source in (self.before.replace(b'kcswh:stage:xp:v3', b'kcswh:prod:xp:v3'),
                        self.before.replace(b'krydukthwdvccggbyjfw', b'foreign')):
