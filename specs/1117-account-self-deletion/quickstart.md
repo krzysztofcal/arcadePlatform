@@ -157,3 +157,7 @@ Actual recovery run39597072168 installed503be776; existing request completed2026
 After processOFF proof, verify no active alias/publish/fallback/split references to ONLY current ON6ad8913597cbf65ecb017f0a; retire it under the existing specific GO and verify metadata/immutable endpoints unavailable plus active aliases/Production unchanged. Do not retire the new OFF deployment or any other historical deploy.
 
 Same-email public signupHTTP400: no new UUID, no Admin confirmation/Welcome; do not rerun or create via Admin fallback. Full E2E remains partial pending fixture/re-registration review and historical Poker-row disposition. Status API actually reports completedtrue/retryablefalse/requiresInterventiontrue; preserve historical incident and review presentation before merge. Google/email delivery NOT TESTED.
+
+### Window CLOSED —21 October12:23:13UTC
+
+The root restore above has now been performed and verified; do NOT rerun activation/closure. Fresh actual WS processPID20592 started12:21:29UTC on503be776, protected OFF baseline/LIVE/health/browser Auth+WSPASS, DBfalse, ALL requests terminal. NetlifyOFF6ad8ac5e86ce1c2d1e5c96ee remains ready. ONLY ON6ad8913597cbf65ecb017f0a was retired204 after alias/fallback checks; metadata/immutable root/functions404, active aliases/Production unchanged. All layersOFF; no recovery is outstanding. Retain private proofs/backups. Next work is review of signup fixture and retained historical Poker rows/API presentation, not another migration/reset/deploy/activation.

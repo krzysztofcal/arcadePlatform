@@ -395,3 +395,10 @@ Local verification for window preparation:13 Python window/configuration tests,7
 - [x] All accepted requests terminal, DBfalse; branch-only NetlifyOFF6ad8ac5e86ce1c2d1e5c96ee ready/Functions503/marker absent/Production unchanged.
 - [ ] Owner protected root restore → agent safe Preview restart and actual processOFF → alias-safe retirement ONLY ON6ad8913597cbf65ecb017f0a. WS stillON pending this step; do not claim complete closure or full E2EPASS.
 - [ ] T07b/merge-readiness remainOPEN; PRDraft. No Production change/migration/reset/new financial policy.
+
+## Terminal window closure —21 October
+
+- [x] Owner protected root restore/verifyOFF; pinned LIVE preflight, actual safe Preview restart PID20592, health and browser Auth+WSPASS; all accepted requests terminal/DBfalse.
+- [x] USER fingerprint/peer balances/claims18/totalCH300/unbalanced0 unchanged. Resumed bot-only activity remains balanced, no human/pending settlement interrupted.
+- [x] ONLY ON6ad8913597cbf65ecb017f0a retired204 after publish/branches/split/alias/fallback checks; metadata/immutable root/functions404, active OFF alias/Production unchanged. Retain OFF6ad8ac5e86ce1c2d1e5c96ee and private backups/receipts.
+- [ ] T07b full E2E remainsOPEN for real same-email re-registration after signupHTTP400; historical seat data disposition and completed+incident status presentation remain review findings. No new activation/destructive action authorized by closure.

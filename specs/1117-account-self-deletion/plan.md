@@ -51,3 +51,7 @@ Exact503be776 WS deployment39597072168 and natural same-request recovery complet
 Same-email public signupHTTP400 stopped the re-registration stage; no new UUID/admin confirmation/Welcome. Do not substitute Admin creation. Review a new deliverable disposable identity procedure separately. Before merge review retained historical Poker rows (actual seats lack AuthFK) and completed+historicalincident API presentation; no remote repair authorized.
 
 DBfalse/requests terminal and Netlify branchOFF verified on6ad8ac5e86ce1c2d1e5c96ee. Next is owner protected root restore, then authorized safe Preview restart/processOFF verification. Only then verify alias/fallback detachment and retire exact ON6ad8913597cbf65ecb017f0a. No migration/reset/re-wait/Production deployment. This docs/test-message-only checkpoint does not require another runtime deploy; installed503be776 remains the verified runtime.
+
+## Closure verified —21 October
+
+Owner root restored the exact protected OFF baseline; fresh WS Preview process20592/LIVE/health/browser Auth+WS and unchanged USER/CH/claims verified. DBfalse, requests terminal, NetlifyOFF6ad8ac5e86ce1c2d1e5c96ee. Retired ONLY detached ON6ad8913597cbf65ecb017f0a (204, metadata/functions404), aliases and Production unchanged. No further operator action or worker recovery is pending. Remaining signup/retention/presentation findings still require review before merge; this closure documentation does not change verified runtime503be776.
