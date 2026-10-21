@@ -215,5 +215,5 @@ test('closed inactive zero-stack history is not a Poker obligation; uncertain/li
   assert.equal((await db.query("select count(*)::int n from chips_transactions where tx_type='BURN'")).rows[0].n,1);
   assert.equal((await db.query('select sum(amount)::int n from chips_entries')).rows[0].n,0);
   assert.equal((await db.query("select balance::int n from chips_accounts where retired_user_id=$1",[USER])).rows[0].n,0);
-  assert.equal((await db.query('select count(*)::int n from poker_seats where user_id=$1',[USER])).rows[0].n,1,'historical seat is preserved for canonical Auth-last cascade');
+  assert.equal((await db.query('select count(*)::int n from poker_seats where user_id=$1',[USER])).rows[0].n,1,'wallet retirement does not remove historical seats');
 });

@@ -145,3 +145,15 @@ The next window WAS activated and safely restarted on91c; branch-only ON deploy 
 Local fix recognizes only proven terminal CLOSED/INACTIVE0/ESCROW0 seat history without a state stack key. Requires a NEW exact-SHA WS Preview Deploy; green PR CI does not install it. Before deployment: recheck pending requests/incidents, exact Stage/Redis/guards/marker, no unsafe humans/actions/settlement and unchanged financial proof. This recovery deployment requires separate GO after the financial STOP; no manual seat/balance/request edits or new deletion request. Keep DBfalse and use automatic recovery of the existing request. Verify one BURN/registry, exact Storage cleanup with real lease, Auth-last and then the approved normal-signUp/new-UUID/Welcome checks. Do not claim deletion during active all-in from this campaign: the acceptance snapshot had already reached SETTLED.
 
 Only after all accepted requests actually finish may the existing DBfalse → terminal verification → NetlifyOFF → protected root restore → safe WS restart/processOFF → detached ON retirement sequence finish. Do not issue a root restore instruction while this request remains unfinished.
+
+### Current checkpoint — COMPLETED, waiting ONLY for protected WS restore to close window
+
+Actual recovery run39597072168 installed503be776; existing request completed2026-10-21T12:10:22.640Z with incidenttrue preserved, leaseNULL, one balanced400CH BURN and Auth-last. ALL requests terminal, DB releasefalse, Netlify aliasOFF verified on6ad8ac5e86ce1c2d1e5c96ee (served91c), Functions503, marker absent. Owner may NOW execute the reviewed protected restore below. Agent then checks protected OFF/LIVE, safe Preview restart and actual fresh processOFF. Do not call current WS OFF before those steps.
+
+```sh
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py restore && /usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py verify && /usr/bin/node /usr/local/sbin/arcade-ws-preview-env-preflight
+```
+
+After processOFF proof, verify no active alias/publish/fallback/split references to ONLY current ON6ad8913597cbf65ecb017f0a; retire it under the existing specific GO and verify metadata/immutable endpoints unavailable plus active aliases/Production unchanged. Do not retire the new OFF deployment or any other historical deploy.
+
+Same-email public signupHTTP400: no new UUID, no Admin confirmation/Welcome; do not rerun or create via Admin fallback. Full E2E remains partial pending fixture/re-registration review and historical Poker-row disposition. Status API actually reports completedtrue/retryablefalse/requiresInterventiontrue; preserve historical incident and review presentation before merge. Google/email delivery NOT TESTED.

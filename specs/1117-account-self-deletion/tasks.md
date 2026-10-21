@@ -382,3 +382,16 @@ Local verification for window preparation:13 Python window/configuration tests,7
 - [ ] Actual one BURN, canonical Storage/Redis/profile cleanup, Auth-last; then normal same-email signUp/new UUID, approved Admin confirmation of ONLY that new UUID, normal Welcome once. Currently BURN0/Storage DELETE0/Auth delete0; old Auth still present.
 - [ ] Active-all-in deletion timing remains unproven (acceptance snapshot SETTLED). Google/email delivery NOT TESTED.
 - [ ] All accepted requests terminal, verified Netlify/WS OFF and safe current ON retirement. WS/Netlify deliberatelyON during recovery; do not mark closure complete. T07b remainsOPEN/blocked, PRDraft.
+
+## Real same-request recovery result —21 October
+
+- [x] Accepted known age-only incident, fresh pinned read-only preflight, main-defined exact503be776 WS Preview Deploy39597072168, new actual process, both contexts/LIVE/healthPASS. No Netlify deployment for recovery.
+- [x] Natural SAME request poker→burn→cleanup→auth→COMPLETED; incidenttrue retained and no manual lease/status/progress edits. One balanced400CH BURN/one registry receipt; retiredUSER0, peers/escrow/conservationPASS.
+- [x] Canonical four-manifest cleanup/reconciliation, two existing outputs removed, seven exact authenticated NoSuchKey reads, control/July objects/profile/Auth unchanged. Redis per-UUID cleanup and sticky fencePASS; Auth-last/oldAuthabsentPASS.
+- [x] Ordinary same-email signup attempted AFTER completion:HTTP400, zero new accounts; STOP without Admin fallback/confirmation/payment.
+- [ ] Actual new-UUID registration/login/Welcome remains NOT TESTED after rejected signup; deliverable fixture procedure needs review. Email delivery/Google NOT TESTED.
+- [ ] Review actual retained two historical INACTIVE0/CLOSED/ESCROW0 seats (no AuthFK), their old-UUID retention/cleanup policy; correct prior cascade assumption. No manual remote seat/state delete authorized.
+- [ ] Review completedtrue+requiresInterventiontrue status presentation; keep historical incidenttrue. User UI has no status polling.
+- [x] All accepted requests terminal, DBfalse; branch-only NetlifyOFF6ad8ac5e86ce1c2d1e5c96ee ready/Functions503/marker absent/Production unchanged.
+- [ ] Owner protected root restore → agent safe Preview restart and actual processOFF → alias-safe retirement ONLY ON6ad8913597cbf65ecb017f0a. WS stillON pending this step; do not claim complete closure or full E2EPASS.
+- [ ] T07b/merge-readiness remainOPEN; PRDraft. No Production change/migration/reset/new financial policy.
