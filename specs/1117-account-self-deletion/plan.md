@@ -152,3 +152,8 @@ After both queues and row locks are held, verify ALL approved versions/hashes be
 6. Read-only post-check actual UUID absence, both expected state hashes/versions, synchronized current cache/no quarantine, unchanged peer balances/escrow/ledger/registry/immutable receipts/archives and completed+historical incident semantics. Retry the same packet only for the exact approved terminal projection. STOP on unknown state, uncertain external effects or financial mismatch. Keep evidence and all flags OFF.
 
 Breaking impact: quarantined tables temporarily withhold state as well as writes; stale resync/replay is unavailable until canonical restore. The repair operation now requires an operator-installed protected manifest and SHA pin; old payloads fail closed. Normal deletion does not require that one-off repair manifest. No environment operation has been executed.
+
+
+### Recovery from the first repair attempt
+
+The first repair HTTP500 was fully rolled back and diagnosed as postgres-js serialized JSON parameter binding. Correct only serialized JSON parameters to `($n::text)::jsonb`; retain all manifest hashes, atomic scope, locks and version+JSON CAS. Do not replace the approved original hashes with new guesses, clear the original request/lease/incident, bypass the manifest, or correct data manually. After corrected runtime review/GO: fresh read-only original5/45/hash/finance/OFF checks → main-defined exact-SHA WS Preview deploy and smoke → single bounded repair using the SAME already-installed approved manifest → actual SQL/cache/finance post-check. Root installation need not be repeated. Current Stage has the15b5666f runtime and original operational references; repair is NOT PASS.

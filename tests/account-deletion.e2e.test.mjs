@@ -350,3 +350,22 @@ test('failed privacy restore exposes no stale state or snapshot until successful
  assert.deepEqual(manager.tableState(tableId).members,[]);
  assert(!JSON.stringify(manager.tableSnapshot(tableId,null)).includes(context.userId));
 });
+
+test('privacy serialized JSON binding matches postgres-js and preserves object CAS/financial proof',async()=>{
+ const f=await privacyFixture();
+ const settlement={payouts:{[USER]:10,[OTHER]:20},receipt:'immutable synthetic proof'};
+ await db.query('update poker_state set state=$1',[{...f.state,handSettlement:settlement}]);
+ // Actual Stage SELECT reproduced postgres-js binding a serialized string as
+ // JSON string for a direct ::jsonb parameter. Text-first casts must bypass it.
+ const typedBegin=fn=>f.begin(tx=>fn({...tx,unsafe:(query,params=[])=>{
+   const encoded=[...params];for(const match of query.matchAll(/\$(\d+)::jsonb/g)){
+     const index=Number(match[1])-1;if(typeof encoded[index]==='string')encoded[index]=JSON.stringify(encoded[index]);
+   }
+   return tx.unsafe(query,encoded);
+ }}));
+ assert.equal((await cleanupDeletionPoker({...f,beginSql:typedBegin})).done,true);
+ const [state]=(await db.query('select state from poker_state')).rows;
+ assert.equal(typeof state.state,'object');assert.deepEqual(state.state.handSettlement.payouts,{[OTHER]:20});
+ const [request]=(await db.query('select progress from account_deletion_requests')).rows;
+ assert.deepEqual(request.progress.pokerPrivacyFinancialReceipts[TABLE],settlement);
+});

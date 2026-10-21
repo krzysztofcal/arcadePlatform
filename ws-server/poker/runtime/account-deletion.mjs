@@ -94,11 +94,11 @@ export async function cleanupDeletionPoker({context,beginSql,coordinate,resync =
       const saved=request.progress?.pokerPrivacyFinancialReceipts?.[candidate.id];
       if(saved && JSON.stringify(saved)!==JSON.stringify(state.handSettlement))throw privacyError();
       await tx.unsafe(`update public.account_deletion_requests set progress=jsonb_set(progress,'{pokerPrivacyFinancialReceipts}',
-        coalesce(progress->'pokerPrivacyFinancialReceipts','{}'::jsonb)||jsonb_build_object($2::text,$3::jsonb)) where request_id=$1;`,
+        coalesce(progress->'pokerPrivacyFinancialReceipts','{}'::jsonb)||jsonb_build_object($2::text,($3::text)::jsonb)) where request_id=$1;`,
         [context.requestId,candidate.id,JSON.stringify(state.handSettlement)]);
     }
     if (JSON.stringify(next)!==JSON.stringify(state)) {
-      const changed=await tx.unsafe('update public.poker_state set state=$4::jsonb,version=version+1,updated_at=clock_timestamp() where table_id=$1 and version=$2 and state=$3::jsonb returning version;',
+      const changed=await tx.unsafe('update public.poker_state set state=($4::text)::jsonb,version=version+1,updated_at=clock_timestamp() where table_id=$1 and version=$2 and state=($3::text)::jsonb returning version;',
         [candidate.id,row.version,JSON.stringify(state),JSON.stringify(next)]);
       if(changed.length!==1)throw new Error('poker_privacy_conflict');
     }

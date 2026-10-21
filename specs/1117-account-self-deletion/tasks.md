@@ -431,3 +431,11 @@ Earlier unchecked implementation-before-GO and status-presentation findings are 
 - [x] Read/state/snapshot/resync/publication fence during privacy quarantine; invalidate captured pre-await views and clear snapshot/replay caches. Fundamental failed-restore → unavailable read → canonical restore regression.
 - [x] Root-owned protected repair manifest, fixed path/O_NOFOLLOW/metadata checks, exact raw SHA pin and approved table/version/state hashes. Both tables repair atomically with CAS; approved exact clean-state retry only. Fundamental drift/hash rejection and unchanged finance regression.
 - [ ] Separate final GO: install reviewed manifest, exact-SHA WS Preview deploy and bounded two-table repair per plan.md. All Stage/Production writes and deployments remain unexecuted in this review.
+
+
+## Actual bounded repair attempt — STOP
+
+- [x] Owner installed approved root-owned manifest; fresh Stage117/117/no-drift/guards/LIVE/OFF preflight and exact15b5666f Preview deployment verified.
+- [x] One canonical repair attempt; HTTP500/poker_privacy_conflict. Read-only proof confirms complete SQL rollback, original versions5/45 and all financial/peer/immutable history invariants unchanged. No automatic retry.
+- [x] Diagnose serialized JSON double-encoding through actual Stage driver SELECT; minimal local text-first JSON casts and fundamental binding regression.
+- [ ] Review corrected runtime SHA, then controlled deployment and same-manifest repair. Existing operational references remain; no root reinstall, new deletion request/BURN/Auth action or migration.
