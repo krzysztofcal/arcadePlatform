@@ -363,3 +363,11 @@ Local verification for window preparation:13 Python window/configuration tests,7
 - [ ] Owner root restore exact protected WS baseline, agent safe Preview restart/processOFF proof, then retire only window-created ON deploy6ad889618f2adbfbd14859db after alias safety checks. No worker disable during an accepted unfinished operation (none accepted here).
 - [ ] Owner decision: allow official Admin confirmation ONLY for newly re-registered disposable UUID as declared test setup, or approve a deliverable identity procedure; no speculative email/OTP infrastructure or global configuration changes.
 - [ ] T07b destructive E2E remains NOT RUN/NO-GO until this fixture prerequisite is resolved. No code defect or successful deletion is claimed.
+
+## Previous window CLOSED; confirmation exception accepted (21 October)
+
+- [x] Owner root restore/verify OFF, protected LIVE proof, safe Preview restart at10:10:45UTC/newPID11501; health/browser Auth+WS PASS; ledger unchanged/escrow conserved. Original DB releasefalse/requests0; NetlifyOFF6ad88b82d4dc63d285f15c0f.
+- [x] Retired ONLY ON deploy6ad889618f2adbfbd14859db: DELETE204, metadata/immutable root/account-delete GET+POST/avatar POST404, active alias fingerprints and Production unchanged; verified10:13:41.280518UTC. Previous window fully closed before beginning next.
+- [x] Owner explicitly approved official Admin email confirmation ONLY for the actual new disposable UUID after old subject real hard-delete and successful ordinary public same-email signUp. No Admin createUser/SQL fallback; signup rejection is STOP. Email delivery/confirmation link NOT TESTED. Old subject/other existing users must not be administratively confirmed.
+- [x] Fresh117/117/guards/REDIS-RELEASE/original subject checks; following Netlify branch-only ON deploy6ad8913597cbf65ecb017f0a READY/served91c, real subject password login/read-only account-delete404; Production/unrelated contexts unchanged.
+- [ ] Next window WS activation requires owner root fixed operator; WS currentlyOFF and DB releasefalse. No destructive E2E/funding/new players/BURN/Auth delete yet. Retain exact new ON identity for safe terminal closure.
