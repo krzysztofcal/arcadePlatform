@@ -362,6 +362,7 @@ export function createTableManager({
   const tables = new Map();
   const pendingBootstrapByTableId = new Map();
   const retiringTableIds = new Set();
+  const mutationBlockedTableIds = new Set();
   const connStateBySocket = new Map();
   const pokerAccessFailClosedUserIds = new Set();
 
@@ -587,7 +588,8 @@ export function createTableManager({
     return { joinedTableId, subscribedTableId };
   }
 
-  function ensureTable(tableId) {
+  function ensureTable(tableId, forCanonicalRestore = false) {
+    if (mutationBlockedTableIds.has(tableId) && !forCanonicalRestore) throw Object.assign(new Error("table_resync_required"), {code:"table_resync_required"});
     if (!tables.has(tableId)) {
       if (retiringTableIds.has(tableId)) {
         // A retiring table (closed-table retention) must never be
@@ -899,6 +901,7 @@ export function createTableManager({
   }
 
   async function ensureTableLoaded(tableId, { allowCreate = false } = {}) {
+    if (mutationBlockedTableIds.has(tableId)) return {ok:false,code:"table_resync_required",message:"table_resync_required"};
     if (retiringTableIds.has(tableId)) {
       // Retiring tables are fail-closed: they may only be read from
       // persistence, never materialized back into the runtime while the
@@ -939,6 +942,7 @@ export function createTableManager({
         };
       }
 
+      if (mutationBlockedTableIds.has(tableId)) return {ok:false,code:"table_resync_required",message:"table_resync_required"};
       const loadedTable = loaded.table;
       ensurePublicProfileState(loadedTable);
       ensureAccessCacheState(loadedTable);
@@ -1045,6 +1049,7 @@ export function createTableManager({
   }
 
   function bootstrapHand(tableId, { nowMs, allowManagedBotsOnly = false } = {}) {
+    if (mutationBlockedTableIds.has(tableId)) return {ok:false,code:"table_resync_required",changed:false};
     const table = tables.get(tableId);
     if (!table) {
       return { ok: false, code: "table_missing", bootstrap: "table_missing" };
@@ -1095,6 +1100,7 @@ export function createTableManager({
   }
 
   function applyAction({ tableId, handId, userId, requestId, action, amount, nowIso, nowMs, useActionReplayCache = true }) {
+    if (mutationBlockedTableIds.has(tableId)) return rejectAction({reason:"table_resync_required",stateVersion:0});
     const table = tables.get(tableId);
     if (!table) {
       return rejectAction({ reason: "table_not_found", stateVersion: 0 });
@@ -2413,6 +2419,7 @@ export function createTableManager({
   function sweepExpiredPresence({ nowTs = Date.now() } = {}) {
     const updates = [];
     for (const [tableId, table] of tables.entries()) {
+      if (mutationBlockedTableIds.has(tableId)) continue;
       const expiredUserIds = [];
       for (const [userId, member] of table.presenceByUserId.entries()) {
         if (!member.connected && typeof member.expiresAt === "number" && member.expiresAt <= nowTs) {
@@ -2455,6 +2462,7 @@ export function createTableManager({
   }
 
   function setPersistedStateVersion(tableId, stateVersion) {
+    if (mutationBlockedTableIds.has(tableId) || stateVersion < Number(tables.get(tableId)?.persistedStateVersion || 0)) return {ok:false};
     const table = tables.get(tableId);
     if (!table || !Number.isInteger(stateVersion) || stateVersion < 0) {
       return { ok: false };
@@ -2478,7 +2486,11 @@ export function createTableManager({
       return { ok: false, reason: "invalid_restored_table" };
     }
 
-    const table = ensureTable(tableId);
+    const cached = tables.get(tableId);
+    if (cached && Number(restoredCoreState.version)<Number(cached.persistedStateVersion || 0)) {
+      return {ok:false,reason:'stale_persisted_restore'};
+    }
+    const table = ensureTable(tableId, true);
     const previousPresenceByUserId = table.presenceByUserId;
     const restoredPresenceByUserId = restoredTable?.presenceByUserId instanceof Map
       ? restoredTable.presenceByUserId
@@ -2738,6 +2750,7 @@ export function createTableManager({
   }
 
   function markTableRotationDue(tableId, dueAtMs = Date.now()) {
+    if (mutationBlockedTableIds.has(tableId)) return {ok:false,changed:false,reason:"table_resync_required"};
     const table = tables.get(tableId);
     if (!table || table.tableMeta?.lifecycleKind !== "CONTINUOUS_BOT") {
       return { ok: false, changed: false, reason: "managed_table_not_found" };
@@ -2759,6 +2772,7 @@ export function createTableManager({
   }
 
   function setTableRotationDueAt(tableId, dueAtMs) {
+    if (mutationBlockedTableIds.has(tableId)) return {ok:false,changed:false,reason:"table_resync_required"};
     const table = tables.get(tableId);
     if (!table || table.tableMeta?.lifecycleKind !== "CONTINUOUS_BOT") {
       return { ok: false, changed: false, reason: "managed_table_not_found" };
@@ -2824,6 +2838,9 @@ export function createTableManager({
     listTableIds,
     activeHumanUserIds,
     projectUserTables,
+    blockTableMutations: (id) => { if (pendingBootstrapByTableId.has(id)) throw new Error("table_bootstrap_pending"); mutationBlockedTableIds.add(id); },
+    unblockTableMutations: (id) => mutationBlockedTableIds.delete(id),
+    isTableMutationBlocked: (id) => mutationBlockedTableIds.has(id),
     beginTableRetirement,
     endTableRetirement,
     isTableRetiring,

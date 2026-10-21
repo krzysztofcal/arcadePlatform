@@ -1220,13 +1220,24 @@ const terminalJanitorSuppressionSummaryTimer = setInterval(() => {
 }, 60_000);
 terminalJanitorSuppressionSummaryTimer.unref();
 
+let deletionPokerCoordinatorPromise=null;
+function getDeletionPokerCoordinator() {
+  if(!deletionPokerCoordinatorPromise)deletionPokerCoordinatorPromise=import('./poker/runtime/account-deletion.mjs').then(({createDeletionPokerCoordinator})=>createDeletionPokerCoordinator({
+    enqueue:(tableId,run)=>enqueueTableCommand({tableId,commandName:'account_delete_privacy',run}),
+    restore:restoreTableFromPersisted,
+    block:id=>tableManager.blockTableMutations(id),unblock:id=>tableManager.unblockTableMutations(id)
+  })).catch(error=>{deletionPokerCoordinatorPromise=null;throw error;});
+  return deletionPokerCoordinatorPromise;
+}
 let accountDeletionRuntimePromise = null;
 async function runAccountDeletionTick() {
   if (!accountDeletionEnabled()) return;
   if (!accountDeletionRuntimePromise) accountDeletionRuntimePromise = (async () => {
     const {createAccountDeletionRuntime} = await import('./poker/runtime/account-deletion.mjs');
     const beginSql = await loadBeginSqlWs();
+    const privacy=await getDeletionPokerCoordinator();
     return createAccountDeletionRuntime({beginSql,klog:klogSafe,
+      coordinatePokerPrivacy:privacy.coordinate,resyncPokerPrivacy:privacy.resync,
       disconnectUser: async (userId) => {
         for (const socket of sessionStore.connectionsForUser(userId) || []) invalidateSocketSession(socket,{reason:'account_deletion_pending',send_stale:false});
         for (const sessionId of sessionStore.forgetUser(userId)) streamLog.forgetReceiver(sessionId);
@@ -1491,6 +1502,7 @@ function enqueueTableCommand({ tableId, commandName, dedupeKey = null, run }) {
     dedupeKey,
     run: async () => {
       try {
+        if (tableManager.isTableMutationBlocked(tableId) && commandName!=='account_delete_privacy') throw new Error('table_resync_required');
         return await run();
       } catch (error) {
         klogSafe("ws_table_command_failed", {
@@ -2154,6 +2166,7 @@ async function persistMutatedState({
     : nextState);
   const persistStartedAtMs = pokerLogRuntimeControl.mayBuildDebugPayload("ws_state_persist_start", { tableId }) ? Date.now() : 0;
   klogVerbose("ws_state_persist_start", () => ({ tableId, expectedVersion, mutationKind }), { tableId });
+  if (tableManager.isTableMutationBlocked(tableId)) return {ok:false,reason:"table_resync_required"};
   const persisted = await persistedStateWriter.writeMutation({
     tableId,
     expectedVersion,
@@ -3419,6 +3432,7 @@ async function forceTableToHandDoneFromPersisted({ tableId, nowMs }) {
     }, { env: process.env });
     if (!loaded?.ok) return loaded;
 
+    if (tableManager.isTableMutationBlocked(tableId)) return {ok:false,reason:"table_resync_required"};
     return persistedStateWriter.writeMutation({
       tableId,
       expectedVersion: loaded.expectedVersion,
@@ -4425,7 +4439,18 @@ async function handleInternalPokerMaintenance(req, res) {
       && hasExactKeySet(payload, SET_DESIRED_STATE_KEYS);
     const isExtendedSetDesiredState = operation === "set_desired_state"
       && hasExactKeySet(payload, EXTENDED_SET_DESIRED_STATE_KEYS);
-    if (
+    if (operation==='repair_deleted_user_privacy') {
+      if(environment!=='preview'||!hasExactKeySet(payload,['operation','actorUserId','requestId','userId','deletionRequestId','tableIds'])
+        ||!isUuid(payload.userId)||!isUuid(payload.deletionRequestId)||!Array.isArray(payload.tableIds)
+        ||payload.tableIds.length!==2||!payload.tableIds.every(isUuid)) {
+        sendInternalJson(res,400,{error:'invalid_request'});return;
+      }
+      const {repairCompletedDeletionPoker}=await import('./poker/runtime/account-deletion.mjs');
+      const coordination=await getDeletionPokerCoordinator();
+      const outcome=await repairCompletedDeletionPoker({beginSql:await loadBeginSqlWs(),env:process.env,
+        userId:payload.userId,requestId:payload.deletionRequestId,tableIds:payload.tableIds,...coordination});
+      result={ok:outcome.done===true,operation};
+    } else if (
       (isLegacySetDesiredState || isExtendedSetDesiredState)
       && typeof payload.enabled === "boolean"
       && Number.isInteger(payload.desiredTableCount)

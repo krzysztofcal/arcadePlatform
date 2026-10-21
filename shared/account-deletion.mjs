@@ -2,17 +2,27 @@ import { randomUUID, randomBytes, createHash } from 'node:crypto';
 
 export function accountDeletionEnabled(env = process.env) { return env.ACCOUNT_DELETION_ENABLED === '1'; }
 
-// Fixed SQL alias p. Only a persisted, terminal, zero-value closed-table seat
-// is history rather than a remaining financial obligation. Unknowns fail closed.
+// Fixed SQL alias p. Released zero-owner seats may be historical on CLOSED
+// or OPEN tables. Peer escrow must remain conserved; unknown rights fail closed.
 // Reused by the Poker drain and the independent wallet-retirement check.
 export const deletionPokerSeatPendingSql = `not coalesce((p.status='INACTIVE' and p.stack=0
-  and exists(select 1 from public.poker_tables t where t.id=p.table_id and t.status='CLOSED')
+  and exists(select 1 from public.poker_tables t where t.id=p.table_id and t.status in ('CLOSED','OPEN'))
   and exists(select 1 from public.poker_state terminal where terminal.table_id=p.table_id
-    and terminal.state->>'phase' in ('HAND_DONE','SETTLED')
+    and (terminal.state->>'phase' in ('HAND_DONE','SETTLED','INIT') or
+      (terminal.state->>'phase' in ('PREFLOP','FLOP','TURN','RIVER','SHOWDOWN')
+       and not exists(select 1 from jsonb_array_elements(coalesce(terminal.state->'handSeats',terminal.state->'seats','[]'::jsonb)) h where h->>'userId'=p.user_id::text)
+       and coalesce((terminal.state->'contributionsByUserId'->>p.user_id::text)::bigint,0)=0))
+    and (terminal.state->>'phase' in ('HAND_DONE','SETTLED') or exists(select 1 from public.poker_tables opened where opened.id=p.table_id and opened.status='OPEN'))
+    and coalesce(to_jsonb(p)->>'leave_after_hand','false')='false'
+    and coalesce(terminal.state->'pendingDetachByUserId'->>p.user_id::text,'false')='false'
     and jsonb_typeof(terminal.state->'stacks')='object'
     and not (terminal.state->'stacks' ? p.user_id::text))
   and exists(select 1 from public.chips_accounts escrow where escrow.account_type='ESCROW'
-    and escrow.system_key='POKER_TABLE:' || p.table_id::text and escrow.balance=0)),false)`;
+    and escrow.system_key='POKER_TABLE:' || p.table_id::text
+    and (escrow.balance=0 or exists(select 1 from public.poker_tables ot where ot.id=p.table_id and ot.status='OPEN')) and escrow.balance=(
+      select coalesce(sum(value::bigint),0) from public.poker_state ps,jsonb_each_text(ps.state->'stacks') where ps.table_id=p.table_id) + (
+      select case when ps.state->>'phase' in ('PREFLOP','FLOP','TURN','RIVER','SHOWDOWN') then
+        (select coalesce(sum(value::bigint),0) from jsonb_each_text(ps.state->'contributionsByUserId')) else 0 end from public.poker_state ps where ps.table_id=p.table_id))),false)`;
 
 const PHASES = ['preparing', 'poker', 'burn', 'cleanup', 'auth', 'completed'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

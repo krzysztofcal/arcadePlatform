@@ -38,7 +38,7 @@ async function fixture(balance=75) {
         values(new.idempotency_key,new.id,new.payload_hash,new.tx_type,new.user_id,new.created_at); return new; end$$;
       create trigger test_registry after insert on chips_transactions for each row execute function test_registry();
       create function raise_insufficient_funds() returns boolean language plpgsql as $$begin raise exception 'insufficient'; end$$;
-      create table poker_tables(id uuid primary key,status text,lifecycle_kind text,managed_profile_key text,last_activity_at timestamptz,updated_at timestamptz);
+      create table poker_tables(id uuid primary key,created_by uuid,status text,lifecycle_kind text,managed_profile_key text,last_activity_at timestamptz,updated_at timestamptz);
       create table poker_seats(table_id uuid,user_id uuid,seat_no int,status text,is_bot boolean,stack bigint);
       create table poker_actions(id uuid default gen_random_uuid(),table_id uuid,version bigint,user_id uuid,action_type text,amount bigint,hand_id text,request_id text,phase_from text,phase_to text,meta jsonb);
       create table poker_requests(table_id uuid,user_id uuid,request_id text,kind text,result_json jsonb,created_at timestamptz default now(),unique(table_id,user_id,request_id,kind));
@@ -58,7 +58,7 @@ async function fixture(balance=75) {
     await db.exec(await readFile(new URL('../supabase/migrations/20261020190000_account_bonus_uuid_policy.sql',import.meta.url),'utf8'));
     await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
   }
-  await db.exec('truncate chips_entries,chips_transactions,chips_transaction_idempotency,chips_accounts,account_deletion_requests,poker_seats,poker_state,auth.users cascade');
+  await db.exec('truncate chips_entries,chips_transactions,chips_transaction_idempotency,chips_accounts,account_deletion_requests,poker_seats,poker_state,poker_requests,auth.users cascade');
   await db.query('insert into auth.users values($1),($2)',[USER,OTHER]);
   await db.query("insert into chips_accounts(user_id,account_type,balance) values($1,'USER',$2)",[USER,balance]);
   await db.exec("insert into chips_accounts(account_type,system_key,balance) values('SYSTEM','GENESIS',0)");
@@ -109,7 +109,7 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
   const fetchImpl=async(url,options={})=>{
     assert.ok(url.endsWith('/admin/users/'+USER));
     assert.equal(await store.get(keys.profile(USER)),null,'Auth must follow proven cleanup');
-    assert.equal((await db.query("select balance::int n from chips_accounts where account_type='USER'")).rows[0].n,0);
+    assert.equal((await db.query("select balance::int n from chips_accounts where account_type='USER' and coalesce(user_id,retired_user_id)=$1",[USER])).rows[0].n,0);
     if(options.method==='DELETE'){
       authCalls++;await db.query('delete from auth.users where id=$1',[USER]);authPresent=false;
       throw new Error('lost successful provider response');
@@ -117,6 +117,7 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
     return authPresent?new Response(JSON.stringify({id:USER}),{status:200}):new Response('',{status:404});
   };
   const dependencies={beginSql:begin,env,klog:()=>{},redisIsMemory:false,
+    coordinatePokerPrivacy:async(context,tableId,run)=>run(),
     blockIdentity:id=>blockRedisIdentity(id,store),disconnectUser:async()=>{disconnected++;},
     leaveFromTable:async({tableId,userId,requestId})=>{
       leaveCalls++;
@@ -146,9 +147,13 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
   await db.query('update poker_state set state=$1,version=version+1',[settled]);
   const finalized=await finalizeDeferredLeavesAfterSettlement({beginSql:begin,tableId:TABLE});
   assert.equal(finalized.ok,true);
-  assert.equal((await db.query("select balance::int n from chips_accounts where account_type='USER'")).rows[0].n,275);
+  assert.equal((await db.query("select balance::int n from chips_accounts where account_type='USER' and coalesce(user_id,retired_user_id)=$1",[USER])).rows[0].n,275);
+  // The remaining player leaves through the canonical executor, reaching the
+  // terminal boundary before private historical projection is removed.
+  await executePokerLeave({beginSql:begin,tableId:TABLE,userId:OTHER,requestId:'peer-final-leave',klog:()=>{},runPostLeaveBotAutoplay:false});
+  const originalSettlement=(await db.query('select state from poker_state where table_id=$1',[TABLE])).rows[0].state.handSettlement;
   runtime=createAccountDeletionRuntime(dependencies); // VPS restart: durable request, same real adapters
-  for(let i=0;i<7;i++){
+  for(let i=0;i<12;i++){
     const outcome=await advance();
     const row=(await db.query('select * from account_deletion_requests')).rows[0];
     assert.notEqual(row.status,'ERROR',JSON.stringify(outcome));
@@ -156,14 +161,15 @@ test('local request → all-in showdown/side-pot → real cashout+BURN → index
   }
   const row=(await db.query('select * from account_deletion_requests')).rows[0];
   assert.equal(row.status,'COMPLETED',JSON.stringify({phase:row.phase,error:row.error_code}));
+  assert.deepEqual(row.progress.pokerPrivacyFinancialReceipts[TABLE],originalSettlement,'retain exact original financial proof');
   const txs=(await db.query('select tx_type from chips_transactions order by created_at')).rows;
-  assert.deepEqual(txs.map(t=>t.tx_type),['TABLE_CASH_OUT','BURN']);
+  assert.deepEqual(txs.map(t=>t.tx_type),['TABLE_CASH_OUT','TABLE_CASH_OUT','BURN']);
   assert.equal((await db.query("select amount::int n from chips_entries e join chips_transactions t on t.id=e.transaction_id where t.tx_type='BURN' and amount<0")).rows[0].n,-275);
   assert.equal(authCalls,1);assert.equal(leaveCalls,1);
   assert.equal(await store.get(keys.profile(USER)),null);assert.equal(await store.get(keys.profile(OTHER)),'private fixture');
   assert.equal((await db.query('select count(*)::int n from auth.users where id=$1',[OTHER])).rows[0].n,1);
   assert.equal((await advance()).advanced,false);
-  assert.equal((await db.query('select count(*)::int n from chips_transactions')).rows[0].n,2);
+  assert.equal((await db.query('select count(*)::int n from chips_transactions')).rows[0].n,3);
   // Auth recreation is modelled locally, not a hosted signup/OAuth proof.
   const fresh='55555555-5555-4555-8555-555555555555';
   await db.query('insert into auth.users(id) values($1)',[fresh]);
@@ -202,7 +208,7 @@ test('closed inactive zero-stack history is not a Poker obligation; uncertain/li
   for(const bad of ['active','positive_seat','open','unsettled','positive_escrow','stack_key','missing_stacks']){
     await db.query("update poker_seats set status=$1,stack=$2",[bad==='active'?'ACTIVE':'INACTIVE',bad==='positive_seat'?1:0]);
     await db.query('update poker_tables set status=$1',[bad==='open'?'OPEN':'CLOSED']);
-    await db.query('update poker_state set state=$1',[{tableId:TABLE,phase:bad==='unsettled'?'RIVER':'HAND_DONE',seats:[{userId:USER,seatNo:1}],...(bad==='missing_stacks'?{}:{stacks:bad==='stack_key'?{[USER]:0}:{}})}]);
+    await db.query('update poker_state set state=$1',[{tableId:TABLE,phase:(bad==='unsettled'||bad==='open')?'RIVER':'HAND_DONE',seats:[{userId:USER,seatNo:1}],handSeats:[{userId:USER,seatNo:1}],...(bad==='missing_stacks'?{}:{stacks:bad==='stack_key'?{[USER]:0}:{}})}]);
     await db.query("update chips_accounts set balance=$1 where account_type='ESCROW'",[bad==='positive_escrow'?1:0]);
     await phase('poker');await assert.rejects(runtime.steps.poker(context('poker')),/must not cash out/);
     await phase('burn');await assert.rejects(runtime.steps.burn(context('burn')),error=>error.code==='financial_mismatch');
@@ -216,4 +222,94 @@ test('closed inactive zero-stack history is not a Poker obligation; uncertain/li
   assert.equal((await db.query('select sum(amount)::int n from chips_entries')).rows[0].n,0);
   assert.equal((await db.query("select balance::int n from chips_accounts where retired_user_id=$1",[USER])).rows[0].n,0);
   assert.equal((await db.query('select count(*)::int n from poker_seats where user_id=$1',[USER])).rows[0].n,1,'wallet retirement does not remove historical seats');
+});
+
+const {cleanupDeletionPoker,projectDeletionPokerState,repairCompletedDeletionPoker,createDeletionPokerCoordinator,assertDeletionPokerAbsent}=await import('../ws-server/poker/runtime/account-deletion.mjs');
+async function privacyFixture(open=false) {
+ const {begin}=await fixture(75);
+ await db.query("insert into poker_tables(id,status,created_by) values($1,$2,$3) on conflict(id) do update set status=excluded.status,created_by=excluded.created_by",[TABLE,open?'OPEN':'CLOSED',USER]);
+ const state={phase:open?'FLOP':'HAND_DONE',handId:open?'peer-hand':'',seats:[{userId:USER,seatNo:1},{userId:OTHER,seatNo:2}],
+  handSeats:open?[{userId:OTHER,seatNo:2}]:[{userId:USER,seatNo:1},{userId:OTHER,seatNo:2}],stacks:open?{[OTHER]:90}:{},
+  foldedByUserId:{[USER]:true,[OTHER]:false},contributionsByUserId:open?{[OTHER]:10}:{[USER]:100,[OTHER]:77},missedTurnsByUserId:{[USER]:1,[OTHER]:2}};
+ await db.query("insert into chips_accounts(account_type,system_key,balance) values('ESCROW',$1,$2)",['POKER_TABLE:'+TABLE,open?100:0]);
+ await db.query("insert into poker_seats values($1,$2,1,'INACTIVE',false,0)",[TABLE,USER]);
+ await db.query('insert into poker_state(table_id,state) values($1,$2)',[TABLE,state]);
+ const runtime=createAccountDeletionRuntime({beginSql:begin,klog:()=>{}});
+ const context={userId:USER,requestId:REQUEST,generation:1,assertLease:tx=>assertLease(tx)};
+ const assertLease=async tx=>{const {assertDeletionLease}=await import('../shared/account-deletion.mjs');return assertDeletionLease(tx,{requestId:REQUEST,generation:1,phase:'burn'});};
+ await runtime.steps.burn(context);
+ await db.query("update account_deletion_requests set phase='cleanup'");
+ context.assertLease=async tx=>{const {assertDeletionLease}=await import('../shared/account-deletion.mjs');return assertDeletionLease(tx,{requestId:REQUEST,generation:1,phase:'cleanup'});};
+ const history={immutable:'archive receipt',owner:USER};
+ await db.query("insert into poker_requests(table_id,user_id,request_id,kind,result_json) values($1,$2,'original-receipt','ACT',$3)",[TABLE,USER,history]);
+ const finances=async()=>JSON.stringify({tx:(await db.query('select * from chips_transactions order by id')).rows,entries:(await db.query('select * from chips_entries order by id')).rows,
+  registry:(await db.query('select * from chips_transaction_idempotency order by idempotency_key')).rows,wallets:(await db.query('select * from chips_accounts order by id')).rows,
+  receipts:(await db.query('select * from poker_requests')).rows});
+ return{begin,context,state,finances,coordinate:async(c,t,run)=>run()};
+}
+
+test('owner privacy CLOSED/retry preserves other player projections and immutable finance; Auth gate rereads real rows',async()=>{
+ const f=await privacyFixture();const before=await f.finances();
+ assert.equal((await cleanupDeletionPoker({...f,beginSql:f.begin})).done,true);
+ const [row]=(await db.query('select version,state from poker_state')).rows;
+ assert.deepEqual(row.state,projectDeletionPokerState(f.state,USER));
+ assert.equal((await db.query('select created_by from poker_tables where id=$1',[TABLE])).rows[0].created_by,null);
+ assert.equal((await db.query('select count(*)::int n from poker_seats where user_id=$1',[USER])).rows[0].n,0);
+ await cleanupDeletionPoker({...f,beginSql:f.begin});assert.equal((await db.query('select version from poker_state')).rows[0].version,row.version);
+ assert.equal(await f.finances(),before);
+ await f.begin(tx=>assertDeletionPokerAbsent(tx,USER));
+ await db.query('update poker_state set state=$1',[{...row.state,unknownOwner:USER}]);
+ await assert.rejects(f.begin(tx=>assertDeletionPokerAbsent(tx,USER)),/privacy_unconfirmed/);
+});
+
+test('owner privacy OPEN preserves active peer hand and positive escrow; BURN obligations permit only released owner',async()=>{
+ const f=await privacyFixture(true);const before=await f.finances();
+ assert.equal((await cleanupDeletionPoker({...f,beginSql:f.begin})).done,true);
+ const [row]=(await db.query('select state from poker_state')).rows;
+ assert.equal(row.state.phase,'FLOP');assert.deepEqual(row.state.stacks,{[OTHER]:90});assert.deepEqual(row.state.contributionsByUserId,{[OTHER]:10});
+ assert.equal(await f.finances(),before);
+});
+
+test('privacy rejects current all-in, unknown owner field and changed CAS without deleting seat or finance',async()=>{
+ const f=await privacyFixture();const before=await f.finances();
+ for(const state of [{...f.state,phase:'RIVER',handSeats:[{userId:USER}],contributionsByUserId:{[USER]:100}}, {...f.state,unknown:{owner:USER}}]){
+  await db.query('update poker_state set state=$1',[state]);await assert.rejects(cleanupDeletionPoker({...f,beginSql:f.begin}));
+  assert.equal((await db.query('select count(*)::int n from poker_seats where user_id=$1',[USER])).rows[0].n,1);
+ }
+ await db.query('update poker_state set state=$1',[f.state]);
+ const conflict=fn=>f.begin(tx=>fn({...tx,unsafe:(sql,params)=>sql.startsWith('update public.poker_state set state=')?Promise.resolve([]):tx.unsafe(sql,params)}));
+ await assert.rejects(cleanupDeletionPoker({...f,beginSql:conflict}),/privacy_conflict/);
+ assert.equal(await f.finances(),before);
+ assert.equal((await db.query('select state from poker_state')).rows[0].state.seats[0].userId,USER);
+});
+
+test('committed SQL with failed cache restore stays fenced; retry resyncs even after SQL owner discovery is empty',async()=>{
+ const f=await privacyFixture();const blocked=new Set();let fail=true;
+ const coordination=createDeletionPokerCoordinator({enqueue:async(t,run)=>run(),block:t=>blocked.add(t),unblock:t=>blocked.delete(t),restore:async()=>({ok:!fail})});
+ await assert.rejects(cleanupDeletionPoker({...f,beginSql:f.begin,...coordination}),/resync_required/);assert(blocked.has(TABLE));
+ await f.begin(tx=>assertDeletionPokerAbsent(tx,USER));
+ fail=false;assert.equal((await cleanupDeletionPoker({...f,beginSql:f.begin,...coordination})).done,true);assert.equal(blocked.size,0);
+});
+
+test('completed repair is exact two-table, idempotent and never invents lease/BURN/Auth effects',async()=>{
+ const f=await privacyFixture();const second='66666666-6666-4666-8666-666666666666';
+ await db.query("insert into poker_tables(id,status,created_by) values($1,'CLOSED',$2)",[second,USER]);
+ await db.query('insert into poker_state(table_id,state) values($1,$2)',[second,{...f.state}]);
+ await db.query('delete from auth.users where id=$1',[USER]);
+ await db.query("update account_deletion_requests set status='COMPLETED',phase='completed',completed_at=now(),lease_until=null,incident=true");
+ const before=await f.finances();const [original]=(await db.query('select * from account_deletion_requests')).rows;
+ await db.exec("update account_deletion_release set redis_cutover='{\"namespace\":\"kcswh:stage:xp:v3\"}'");
+ const options={env:{SUPABASE_URL:'https://krydukthwdvccggbyjfw.supabase.co',ACCOUNT_DELETION_ENABLED:'0'},beginSql:f.begin,userId:USER,requestId:REQUEST,tableIds:[TABLE,second],coordinate:f.coordinate};
+ // Missing second-table escrow is an uncertainty, never fabricated as zero.
+ await assert.rejects(repairCompletedDeletionPoker(options));
+ await db.query("insert into chips_accounts(account_type,system_key,balance) values('ESCROW',$1,0)",['POKER_TABLE:'+second]);
+ const ready=await f.finances();assert.equal((await repairCompletedDeletionPoker(options)).done,true);await repairCompletedDeletionPoker(options);
+ assert.equal(await f.finances(),ready);
+ const [after]=(await db.query('select * from account_deletion_requests')).rows;
+ assert.equal(after.status,original.status);assert.equal(after.incident,true);assert.equal(after.lease_generation,original.lease_generation);assert.equal(after.lease_until,null);
+ assert.equal((await db.query('select count(*)::int n from auth.users where id=$1',[USER])).rows[0].n,0);
+ assert.equal((await db.query("select count(*)::int n from chips_transactions where tx_type='BURN'")).rows[0].n,1);
+ await assert.rejects(repairCompletedDeletionPoker({...options,tableIds:[TABLE]}));
+ await assert.rejects(repairCompletedDeletionPoker({...options,env:{...options.env,SUPABASE_URL:'https://production.supabase.co'}}));
+ await assert.rejects(repairCompletedDeletionPoker({...options,env:{...options.env,ACCOUNT_DELETION_ENABLED:'1'}}));
 });

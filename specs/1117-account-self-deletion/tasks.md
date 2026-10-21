@@ -411,3 +411,16 @@ Local verification for window preparation:13 Python window/configuration tests,7
 - [ ] Separate GO BEFORE implementing/executing Poker privacy cleanup. Preserve active all-in, other users, table history/finance/idempotency and RAM/SQL consistency; include OPEN-table/positive peer escrow case, not CLOSED-only blocking.
 - [ ] Separate bounded repair GO for original COMPLETED fixture request: exact TWO audited tables, no phase/lease reset, no new request/BURN/Auth action. All flags remainOFF.
 - [ ] Full E2E requires supported deliverable identity signup first, real post-delete new UUID/login/Welcome once, no inherited state, zero residual operational UUID in seats/state/created_by, control/financial invariants and correct COMPLETED status presentation. Financial/audit retention exceptions remain explicit. Google/email delivery cannot be silently markedPASS.
+
+
+## Accepted Poker privacy implementation — local scope
+
+- [x] Implement owner-scoped operational cleanup after actual retired wallet proof and before Auth-last; actual residual-reference query gates Auth. Preserve all other players and immutable finance/history.
+- [x] Coordinate table queue, row locks/version+JSON CAS and cache restore; quarantine failed resync and recover even after SQL owner references disappear.
+- [x] Support released owner on OPEN tables with other-player escrow; block unsettled all-in/pending settlement/unknown references.
+- [x] Add bounded, idempotent completed-request repair through existing Preview-only private maintenance operation, exact two-table scope, no invented request/lease or financial/Auth action. CODE ONLY.
+- [x] Fundamental local regressions for CLOSED/retry, OPEN/escrow peers, all-in, unknown fields, CAS failure, cache resync, completed repair and unchanged financial receipts.
+- [ ] Separate GO: exact-SHA WS Preview deployment and repair of original completed fixture's two audited tables; verify actual cache and operational UUID absence. No remote repair performed.
+- [ ] Full hosted E2E/new UUID/ordinary Welcome with supported test address; Google/email delivery NOT TESTED. PR remains Draft and merge-readiness OPEN.
+
+Earlier unchecked implementation-before-GO and status-presentation findings are superseded by this accepted local implementation and the COMPLETED API regression; historical hosted results above are preserved unchanged.
