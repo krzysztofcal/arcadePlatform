@@ -41,28 +41,50 @@ function parseEnv(source) {
   return values;
 }
 
-function assertApprovedSource(source) {
-  const directory = "/var/backups/arcade-ws-preview-v3";
+function protectedRecord(directory, name) {
   for (const path of ["/var", "/var/backups", directory]) {
     const metadata = fs.lstatSync(path);
     if (!metadata.isDirectory() || metadata.uid !== 0 || metadata.gid !== 0 || (metadata.mode & 0o022)
-      || (path === directory && (metadata.mode & 0o7777) !== 0o700)) {
-      reject("protected Preview preparation record is required");
-    }
+      || (path === directory && (metadata.mode & 0o7777) !== 0o700)) reject("protected Preview record is required");
   }
-  let manifestFd;
+  const fd = fs.openSync(directory + "/" + name, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   try {
-    manifestFd = fs.openSync(directory + "/manifest.json", fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
-    const metadata = fs.fstatSync(manifestFd);
+    const metadata = fs.fstatSync(fd);
     if (!metadata.isFile() || metadata.uid !== 0 || metadata.gid !== 0 || metadata.nlink !== 1
-      || (metadata.mode & 0o7777) !== 0o600) reject("protected Preview preparation record is required");
-    const record = JSON.parse(fs.readFileSync(manifestFd, "utf8"));
-    if (record.version !== 1 || record.phase !== "complete"
-      || record.desired?.env !== createHash("sha256").update(source).digest("hex")) {
+      || (metadata.mode & 0o7777) !== 0o600 || metadata.size > 1048576) reject("protected Preview record is required");
+    return fs.readFileSync(fd, "utf8");
+  } finally { fs.closeSync(fd); }
+}
+
+function assertApprovedSource(source) {
+  const sha = value => createHash("sha256").update(value).digest("hex");
+  const preparation = protectedRecord("/var/backups/arcade-ws-preview-v3", "manifest.json");
+  const record = JSON.parse(preparation);
+  if (record.version !== 1 || record.phase !== "complete") reject("Preview preparation incomplete");
+  const windowDirectory = "/var/backups/arcade-stage-deletion-window";
+  if (!fs.existsSync(windowDirectory)) {
+    if (record.desired?.env !== sha(source) || parseEnv(source).ACCOUNT_DELETION_ENABLED !== "0") {
       reject("Preview environment differs from approved preparation");
     }
-  } finally {
-    if (manifestFd !== undefined) fs.closeSync(manifestFd);
+    return;
+  }
+  const window = JSON.parse(protectedRecord(windowDirectory, "manifest.json"));
+  const baseline = protectedRecord(windowDirectory, "env.before");
+  const values = parseEnv(baseline);
+  if (window.version !== 1 || window.baseline_record !== sha(preparation)
+    || window.off !== sha(baseline) || record.desired?.env !== sha(baseline)
+    || values.ACCOUNT_DELETION_ENABLED !== "0"
+    || ![undefined, "", "stage-avatar-authority-20261021"].includes(values.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER)) {
+    reject("Preview window baseline is invalid");
+  }
+  // Derive the only allowed ON bytes independently; never trust an arbitrary supplied hash.
+  let on = baseline.split(/(?<=\n)/).filter(line => !["ACCOUNT_DELETION_ENABLED", "ACCOUNT_DELETION_AVATAR_TRACKING_MARKER"]
+    .includes(line.split("=", 1)[0].trim())).join("");
+  if (on && !on.endsWith("\n")) on += "\n";
+  on += "ACCOUNT_DELETION_ENABLED=1\nACCOUNT_DELETION_AVATAR_TRACKING_MARKER=stage-avatar-authority-20261021\n";
+  if (window.on !== sha(on) || !((window.phase === "on" && source === on)
+    || (["prepared", "off"].includes(window.phase) && source === baseline))) {
+    reject("Preview window is incomplete or environment drifted");
   }
 }
 
@@ -158,10 +180,11 @@ try {
       reject("preview Redis endpoint or credential format is invalid");
     }
   }
+  if (values.ACCOUNT_DELETION_ENABLED === "1" && !v3) reject("deletion window requires Stage V3");
+  if (v3) assertApprovedSource(originalSource);
   // The existing exact no-argument sudo contract must authenticate V3 on every deploy.
   if (explicitLive || (v3 && !configOnly)) {
     if (!v3) reject("Redis V3 is required for live verification");
-    assertApprovedSource(originalSource);
     // Explicit read-only mode: no redirects, key values, SCAN, V2 commands or writes.
     fetch(values.UPSTASH_REDIS_REST_URL.replace(/\/$/, "") + "/pipeline", {
       method: "POST", redirect: "error", signal: AbortSignal.timeout(10000),
@@ -177,6 +200,7 @@ try {
         assertProtectedParents();
         verificationFd = fs.openSync(ENV_FILE, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
         const current = fs.fstatSync(verificationFd);
+        assertApprovedSource(originalSource);
         if (!current.isFile() || current.uid !== 0 || current.gid !== 0 || current.nlink !== 1
           || (current.mode & 0o7777) !== 0o600 || fs.readFileSync(verificationFd, "utf8") !== originalSource) throw new Error();
       } finally {

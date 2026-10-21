@@ -184,16 +184,17 @@ test("protected Preview env preflight validates Stage V3 without disclosing cred
   const base = { SUPABASE_STAGE_PROJECT_REF:"krydukthwdvccggbyjfw",
     SUPABASE_URL:"https://krydukthwdvccggbyjfw.supabase.co",
     SUPABASE_DB_URL:"postgres://postgres.krydukthwdvccggbyjfw@aws-0-eu-west-3.pooler.supabase.com:6543/postgres",
-    POKER_WS_INTERNAL_TOKEN:"private-internal-token",PORT:"3001",WS_AUTHORITATIVE_JOIN_ENABLED:"1" };
+    ACCOUNT_DELETION_ENABLED:"0",POKER_WS_INTERNAL_TOKEN:"private-internal-token",PORT:"3001",WS_AUTHORITATIVE_JOIN_ENABLED:"1" };
   const v3 = { XP_REDIS_VERSION:"3",XP_REDIS_ENV:"stage",XP_KEY_NS:"kcswh:stage:xp:v3",
     UPSTASH_REDIS_REST_URL:"https://fixture.upstash.io",UPSTASH_REDIS_REST_TOKEN:"private-redis-token" };
   function run(overrides, parentUid=0, parentMode=0o755) {
     const values={...base,...overrides};let output="";const process={argv:["node","helper","--config-only"],
       stdout:{write:text=>{output+=text;}},stderr:{write:text=>{output+=text;}}};
-    const fs={constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:()=>3,
+    const envText=Object.entries(values).map(([k,v])=>k+"="+v).join("\n");
+    const fs={existsSync:()=>false,constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:path=>path.endsWith("manifest.json")?4:3,
       fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600,nlink:1}),
-      lstatSync:()=>({isDirectory:()=>true,uid:parentUid,gid:0,mode:parentMode}),
-      readFileSync:()=>Object.entries(values).map(([k,v])=>k+"="+v).join("\n"),closeSync:()=>{}};
+      lstatSync:path=>({isDirectory:()=>true,uid:parentUid,gid:0,mode:path==="/var/backups/arcade-ws-preview-v3"?0o700:parentMode}),
+      readFileSync:fd=>fd===4?JSON.stringify({version:1,phase:"complete",desired:{env:createHash("sha256").update(envText).digest("hex")}}):envText,closeSync:()=>{}};
     runInNewContext(source,{fs,process,URL,createHash});
     assert.doesNotMatch(output,/private-internal-token|private-redis-token/);
     return {code:process.exitCode||0,output};
@@ -220,7 +221,7 @@ test("explicit Redis live verification uses only PING and Stage EXISTS and redac
   const text = ["SUPABASE_STAGE_PROJECT_REF=krydukthwdvccggbyjfw",
     "SUPABASE_URL=https://krydukthwdvccggbyjfw.supabase.co",
     "SUPABASE_DB_URL=postgres://postgres.krydukthwdvccggbyjfw@aws-0-eu-west-3.pooler.supabase.com/postgres",
-    "POKER_WS_INTERNAL_TOKEN=private-internal-token", "PORT=3001", "WS_AUTHORITATIVE_JOIN_ENABLED=1",
+    "ACCOUNT_DELETION_ENABLED=0", "POKER_WS_INTERNAL_TOKEN=private-internal-token", "PORT=3001", "WS_AUTHORITATIVE_JOIN_ENABLED=1",
     "XP_REDIS_VERSION=3", "XP_REDIS_ENV=stage", "XP_KEY_NS=kcswh:stage:xp:v3",
     "UPSTASH_REDIS_REST_URL=https://fixture.upstash.io", "UPSTASH_REDIS_REST_TOKEN=private-redis-token"].join("\n");
   for (const scenario of ["ok", "default", "quota", "redirect", "config-changed", "unapproved-config"]) {
@@ -228,7 +229,7 @@ test("explicit Redis live verification uses only PING and Stage EXISTS and redac
     const completed=new Promise(resolve=>{finish=resolve;});
     const process={argv:scenario==="default"?["node","helper"]:["node","helper","--verify-redis"],stdout:{write:s=>{output+=s;finish();}},
       stderr:{write:s=>{output+=s;finish();}}};
-    const fs={constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:path=>path.endsWith("manifest.json")?4:3,
+    const fs={existsSync:()=>false,constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},openSync:path=>path.endsWith("manifest.json")?4:3,
       fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600,nlink:1}),
       lstatSync:path=>({isDirectory:()=>true,uid:0,gid:0,mode:path==="/var/backups/arcade-ws-preview-v3"?0o700:0o755}),closeSync:()=>{},
       readFileSync:fd=>{
@@ -285,4 +286,34 @@ test("V3 generated context gate rejects foreign Stage/version and checks both ar
     assert.equal((workflow.match(/verify_deploy_context "\$/g)||[]).length,4);
     assert.ok(workflow.indexOf('# END REDIS DEPLOY GATE')<workflow.indexOf('rsync -a --no-owner'));
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test("Stage deletion window derives ON from protected OFF and refuses missing, transitional or drifted authority", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const functions = helperText().slice(helperText().indexOf("class PreflightError"), helperText().indexOf("function assertProtectedParents"));
+  const sha = text => createHash("sha256").update(text).digest("hex");
+  const off = "ACCOUNT_DELETION_ENABLED=0\nACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1\nUNCHANGED=private-fixture\n";
+  const on = "ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1\nUNCHANGED=private-fixture\nACCOUNT_DELETION_ENABLED=1\nACCOUNT_DELETION_AVATAR_TRACKING_MARKER=stage-avatar-authority-20261021\n";
+  const preparation = JSON.stringify({version:1,phase:"complete",desired:{env:sha(off)}});
+  function check(source, phase, overrides={}) {
+    const window = JSON.stringify({version:1,phase,baseline_record:sha(preparation),off:sha(off),on:sha(on),...overrides});
+    const contents = {"/var/backups/arcade-ws-preview-v3/manifest.json":preparation,
+      "/var/backups/arcade-stage-deletion-window/manifest.json":window,
+      "/var/backups/arcade-stage-deletion-window/env.before":off};
+    const fs = {constants:{O_RDONLY:0,O_NOFOLLOW:1,O_NONBLOCK:2},existsSync:()=>phase!==null,
+      lstatSync:()=>({isDirectory:()=>true,uid:0,gid:0,mode:0o700}),openSync:path=>path,
+      fstatSync:()=>({isFile:()=>true,uid:0,gid:0,mode:0o600,nlink:1,size:100}),
+      readFileSync:fd=>contents[fd],closeSync:()=>{}};
+    return () => runInNewContext(functions + "\nassertApprovedSource(input);", {fs,createHash,input:source});
+  }
+  assert.doesNotThrow(check(off,null));
+  assert.doesNotThrow(check(off,"prepared"));
+  assert.doesNotThrow(check(on,"on"));
+  assert.doesNotThrow(check(off,"off"));
+  assert.throws(check(on,null));
+  assert.throws(check(on,"activating"));
+  assert.throws(check(on,"restoring"));
+  assert.throws(check(on+"DRIFT=1\n","on"));
+  assert.throws(check(on+"DRIFT=1\n","on",{on:sha(on+"DRIFT=1\n")}));
+  assert.throws(check(on,"on",{baseline_record:"foreign"}));
 });

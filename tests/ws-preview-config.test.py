@@ -151,5 +151,90 @@ class Preparation(unittest.TestCase):
                 config.render_env(BASE, credentials)
 
 
+window_spec = importlib.util.spec_from_file_location('window', Path(__file__).parents[1] / 'infra/vps/stage-deletion-window.py')
+window = importlib.util.module_from_spec(window_spec)
+window_spec.loader.exec_module(window)
+
+
+class DeletionWindow(unittest.TestCase):
+    run_operation = Preparation.run_operation
+    def setUp(self):
+        Preparation.setUp(self)
+        self.run_operation()
+        self.env.write_bytes(self.env.read_bytes() + b'ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1\n')
+        record = json.loads((self.backup / 'manifest.json').read_bytes())
+        record['desired']['env'] = config.digest(self.env.read_bytes())
+        (self.backup / 'manifest.json').write_text(json.dumps(record))
+        self.before = self.env.read_bytes()
+        self.window = self.root / 'window'
+        self.helper.write_bytes(b'new helper')
+        self.old = window.OLD_HELPER
+        window.OLD_HELPER = config.digest(b'new helper')
+        self.addCleanup(setattr, window, 'OLD_HELPER', self.old)
+
+    def action(self, operation, files=None):
+        return window.operate(operation, self.env, self.helper, self.backup / 'manifest.json',
+                              self.window, b'window helper', files or self.files)
+
+    def test_reviewed_helper_pins_match_bundle(self):
+        helper_bytes = (Path(__file__).parents[1] / 'infra/vps/ws-preview-env-preflight.mjs').read_bytes()
+        self.assertEqual(config.digest(helper_bytes), config.HELPER_SHA256)
+        self.assertEqual(config.digest(helper_bytes), window.HELPER_SHA256)
+
+    def test_window_baseline_on_restore_and_drift(self):
+        self.assertEqual(self.action('dry-run'), 'baseline')
+        self.assertFalse(self.window.exists())
+        with self.assertRaises(window.secure.Refused): self.action('activate')
+        self.assertEqual(self.action('prepare'), 'prepared')
+        self.assertEqual(self.env.read_bytes(), self.before)
+        self.assertEqual(self.action('activate'), 'on')
+        self.assertEqual(self.action('verify'), 'on')
+        values = config.parse_env(self.env.read_bytes())
+        self.assertEqual(values['ACCOUNT_DELETION_ENABLED'], '1')
+        self.assertEqual(values['ACCOUNT_DELETION_AVATAR_TRACKING_MARKER'], window.MARKER)
+        self.assertEqual(values['UPSTASH_REDIS_REST_TOKEN'], CREDS['UPSTASH_REDIS_REST_TOKEN'])
+        on = self.env.read_bytes()
+        self.env.write_bytes(on + b'DRIFT=1\n')
+        with self.assertRaises(window.secure.Refused): self.action('restore')
+        self.env.write_bytes(on)
+        self.assertEqual(self.action('restore'), 'off')
+        self.assertEqual(self.env.read_bytes(), self.before)
+        self.assertEqual(self.action('restore'), 'off')
+
+    def test_window_interrupted_activation_resumes_or_restores(self):
+        self.action('prepare')
+        outer = self
+        class Interrupted(config.SecureFiles):
+            def atomic(self, path, *args, **kwargs):
+                super().atomic(path, *args, **kwargs)
+                if path == outer.env: raise OSError('fixture interruption')
+        with self.assertRaises(OSError):
+            self.action('activate', Interrupted(os.getuid(), os.getgid(), self.root))
+        with self.assertRaises(window.secure.Refused): self.action('verify')
+        self.assertEqual(self.action('activate'), 'on')
+        self.assertEqual(self.action('restore'), 'off')
+        self.assertEqual(self.env.read_bytes(), self.before)
+
+    def test_window_foreign_environment_and_permissions(self):
+        for source in (self.before.replace(b'kcswh:stage:xp:v3', b'kcswh:prod:xp:v3'),
+                       self.before.replace(b'krydukthwdvccggbyjfw', b'foreign')):
+            with self.assertRaises(window.secure.Refused): window.render_on(source)
+        self.root.chmod(0o770)
+        with self.assertRaises(config.Refused): self.action('prepare')
+
+    def test_window_prepare_interruption_preserves_off_and_resumes(self):
+        outer = self
+        class Interrupted(config.SecureFiles):
+            def atomic(self, path, *args, **kwargs):
+                super().atomic(path, *args, **kwargs)
+                if path == outer.helper: raise OSError('fixture interruption')
+        with self.assertRaises(OSError):
+            self.action('prepare', Interrupted(os.getuid(), os.getgid(), self.root))
+        self.assertEqual(self.env.read_bytes(), self.before)
+        with self.assertRaises(window.secure.Refused): self.action('activate')
+        self.assertEqual(self.action('prepare'), 'prepared')
+        self.assertEqual(self.action('verify'), 'prepared')
+
+
 if __name__ == '__main__':
     unittest.main()

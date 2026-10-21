@@ -1,5 +1,7 @@
 # WS Preview V3 — reviewed administrative procedure
 
+Current helper upgrade for the separately approved Stage deletion test window is specified in `specs/1117-account-self-deletion/quickstart.md` (21 October). Historical literal hashes/install/apply commands below remain audit evidence; do not execute them with the new helper or rerun the Redis preparation transaction. The new window operator leaves the original approval record unchanged. No installation/activation has been performed by this change.
+
 ## Current execution status — 19 October, after #1127
 
 Operator preparation completed under the separate administrative GO. Independently observed root-owned Preview base0755, env0600, protected bundle0755, backup directory0700 and exact reviewed code hashes below. The installed no-argument helper actually returned PASS LIVE Redis V3 stage; epochPresent=0; cutover NOT attested. This is not cutover/feature readiness. Main now includes #1127 (fb12d182); WS runtime is still the old f771972b release. No deployment/restart has been performed in the current integration task.

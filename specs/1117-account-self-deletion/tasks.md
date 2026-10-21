@@ -339,3 +339,13 @@ Independent Redis-only Draft [#1129](https://github.com/krzysztofcal/arcadePlatf
 - Historical verified: T05d4 real owner credential rotation/configuration, final protected570-key backup, dry-run, journaled CAS570DELETED, independentverify, retained2V3 values, namespaceepochsNX,0V2repopulation.
 - Historical verified: T05d4 supported Stage13481825 Netlify+WS release and real login/XP0→30/anonconversion→60/rank/profile/browserrefresh/authenticatedWS ping smoke; no financial operation or deletion activation.
 - Historical unresolved: T05d4 Production completion BLOCKED by GitHub token ready/merge permissions: owner Ready+merge only #1129, then standard Production exact-SHA Netlify/WS deployment and actual nonfinancial V3 smoke. Production XPcurrentlyHTTP500/oldruntime; do not call migration complete. Both projects Auth/profile counts/balance sums stable,0unbalanced hot ledgertransactions; scope/limits in redis-cutover.md.
+
+## Protected Stage E2E window — 21 October local preparation
+
+- [x] T07b-window-code Separate fixed Stage operator reuses SecureFiles/lock/atomic backup; preflight/dry-run, prepare, activate, verify, deactivate/restore; whole-file baseline and restricted ON derivation; interruption/drift/foreign-environment fundamentals.
+- [x] T07b-window-plan Document exact protected installation/hash pins, actual Netlify branch scopes, required Functions deployment, ordered release/worker-safe closure and immutable ON authority handling (quickstart.md). No configuration changed.
+- [ ] T07b-window-install Separate GO: protected bundle install/prepare and actual OFF/LIVE baseline proof; never execute staging source as root.
+- [ ] T07b-window-run Separate GO: Stage alias-only ON/OFF deployment, fixed WS activation/restore and safe Preview restart, DB release last/first; preserve recovery until actual terminal completion. Revalidate fixture/financial scope before destructive E2E. Retire only the window-created ON deploy after OFF alias/fallback checks under explicit GO.
+- [ ] T07b remains OPEN: no new E2E/activation evidence from local tests. PR remains Draft, no Production or merge.
+
+Local verification for window preparation:13 Python window/configuration tests,7 unchanged Redis operator tests,11 workflow/preflight tests and32 deletion/Storage/local-E2E regression tests passed (`XP_TEST_MODE=1`, local fixtures only). Syntax227/CSP55 passed; lifecycle, games-XP hook and authoritative transport guards passed. Full check:all reaches five existing missing-badge mockup HTML violations; unrelated paths unchanged. Local privileged rsync contract cannot finish without passwordless sudo; retain CI root-run result separately. No Stage E2E or activation performed.

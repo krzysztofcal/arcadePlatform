@@ -51,3 +51,77 @@ Shared restart/fault needs explicit impact window. Financial mismatch -> inciden
 ## 5. Failure / forward fix
 
 Keep feature OFF on unmet prerequisites; preserve manifests and ledger/counter history. No HMAC fallback, bonus pause, arbitrary timeout, fake completion, guard disable, V2 rollback or global sweep. Correct through reviewed forward code/schema. History/real Stage evidence remains in research.md; old HMAC and pending-reset proposals there are superseded, not executable instructions.
+
+## Stage Account Deletion test window — LOCAL PREPARATION ONLY (21 October 2026)
+
+Supersedes the previous missing-procedure STOP, not the pending operational GO. Current hosted runtime remains91c329558f90cb8cc525777bc621f56242dfeca0; this change is administrative tooling only. No VPS installation, activation, Netlify/DB mutation, restart or E2E was performed. Redis V3 migration and real Storage authority cutoff remain completed; never repeat reset/wait solely for this procedure.
+
+### Protected contract and installation
+
+`infra/vps/stage-deletion-window.py` reuses `SecureFiles`, nonblocking flock, SHA-256, durable backup and atomic replace from `prepare-ws-preview-v3.py`. It has fixed CLI paths and no network/SQL/service commands. Only `.env.preview` may change configuration, and only `ACCOUNT_DELETION_ENABLED` plus `ACCOUNT_DELETION_AVATAR_TRACKING_MARKER=stage-avatar-authority-20261021`. All other bytes/credentials remain unchanged. Baseline must explicitly beOFF, Stage identity/port3001, Redis3/stage namespace. Tracking1 is required in the Netlify issuer configuration; WS cleanup uses the marker, not the issuer-only tracking flag. No extra WS flag is introduced. No CLI path/hash/marker overrides. Foreign settings, unsafe permissions, duplicate assignments, corrupt backup or changed preparation record are NO-GO.
+
+Separate window record: `/var/backups/arcade-stage-deletion-window/` root:root0700, `env.before`, `helper.before`, `manifest.json`, `operation.lock` root:root0600. Original V3 `/var/backups/arcade-ws-preview-v3/manifest.json` stays byte-identical. Window manifest binds its exact hash, full OFF/ON hashes and reviewed helper hash. Helper derives allowed ON bytes from OFF itself, checks against original approval, and rejects arbitrary replacement hashes. States `preparing/activating/restoring` block preflight; same operator resumes deterministic original-or-desired bytes, unknown state stops. Prepare installs only the new protected helper and records; it does NOT activate. Restore restores exact OFF bytes, retaining the new helper and audit records. Neither mode asserts DB terminal completion or automatically rolls back finance/Auth.
+
+New helper pin replaces the old pin in `prepare-ws-preview-v3.py`; do NOT rerun that operator's apply against an old completed transaction. Historical one-time `xp-v3-operator.py` keeps its original pins/evidence and is intentionally not a window installation path. No sudoers changes. Workflow from main invokes the installed fixed helper, so no workflow merge/bypass is required for this installation. Existing protected helper upgrade is necessary before ON can pass LIVE.
+
+After separate GO, stage these THREE public reviewed files at `/tmp/1117-window-reviewed/infra/vps/`. Quiesce configuration writers/deploys. Root validates protected bundle ancestry (no symlinks, root-owned, no group/other write), installed target metadata and existing approval before proceeding; never execute code directly from the staging directory. Install copies first, verify literal approved hashes in the protected directory, then invoke only protected code. A failed hash check means STOP, no prepare/activation. Original helper stays installed until prepare takes its protected backup.
+
+Root installation (public bundle files only; no secret copy, service restart or environment write):
+
+```sh
+test ! -L /usr/local/libexec/arcade-ws-preview-v3 && test "$(stat -c '%u:%g:%a' /usr/local/libexec/arcade-ws-preview-v3)" = '0:0:755' && install -o root -g root -m 0644 /tmp/1117-window-reviewed/infra/vps/prepare-ws-preview-v3.py /tmp/1117-window-reviewed/infra/vps/stage-deletion-window.py /tmp/1117-window-reviewed/infra/vps/ws-preview-env-preflight.mjs /usr/local/libexec/arcade-ws-preview-v3/ && printf '%s\n' '63787466ec6e4163f60e09510777df04c38cd2e8d20cb26d6257bcb550173740  /usr/local/libexec/arcade-ws-preview-v3/prepare-ws-preview-v3.py' 'e85a640354a2e4357f772c9104e71c98f6dbfc04faf581341e7380c607a534ec  /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py' '704dc9a8dd59fa96625f63199f3605b888b7eaecabd4a4dcb724a4862d22993e  /usr/local/libexec/arcade-ws-preview-v3/ws-preview-env-preflight.mjs' | sha256sum -c -
+```
+
+The command assumes `/usr/local/libexec/arcade-ws-preview-v3` already exists root:root0755 and its ancestors passed the read-only audit. `prepare` rechecks full ancestry/metadata before privileged effects. Do not replace a symlinked bundle/file, alter ACLs, recursively chown or extend sudoers. Existing baseline/helper drift means stop for review, not regenerate an approval hash.
+
+Read-only readiness and prepare (each line is a separate operator step after the relevant GO):
+
+```sh
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py dry-run
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py prepare
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py verify
+/usr/bin/node /usr/local/sbin/arcade-ws-preview-env-preflight
+```
+
+`dry-run/preflight/verify` never write configuration or create records; after a crash during prepare, rerun prepare rather than deleting evidence. Root source reads are descriptor/ownership/mode checked. Atomic operations are per-file, NOT an atomic transaction across files/providers. Root must not concurrently edit ignored locks. Failure between helper install and final prepared record remains fail-closed and resumable.
+
+### Netlify scope — read-only verified 21 October
+
+Site `playkcswh`/f7e19a84-28f7-41f7-978a-f3b4552a404d currently has deletion0 in Production and all five existing branch overrides. Tracking1 exists for `deploy-preview-1124`, source branch `feat/1117-account-deletion-v2`, and the older docs branch; marker key is absent. Existing keys have scopes builds/functions/post_processing/runtime. This is actual provider metadata, not an assumption about generic deploy-preview scope.
+
+For the window change ONLY the exact `context=branch, context_parameter=deploy-preview-1124` value of deletion to1 and add the same branch-only marker. Preserve scopes and every other context/value byte-for-byte; no all/deploy-preview-wide value, no source-branch/other Preview/Production update. New marker entry needs functions scope with only that branch value; absent elsewhere must remain absent. Back up exact scoped provider metadata privately; validate pre/post differences. Freeze automatic PR deploys (Draft/skip marker) and concurrent alias publishing for the whole window. If provider cannot scope this override unambiguously, NO-GO.
+
+Env edits alone are NOT runtime proof. Build/package the supported exact runtime SHA using the existing Stage build/Functions procedure, then publish ONLY the manual `deploy-preview-1124` alias. Record actual deploy ID, served build SHA, generated deploy-preview/3/stage context, pinned Supabase Stage, effective branch env and tracking marker. Do not claim provider `commit_ref` if null. With DB releasefalse, a no-token GET to account-delete should change from503 disabled to401 unauthorized; a disposable owner's read-only GET should return404 no request. No POST/acceptance in this gate. Verify marker through scoped deployment configuration plus package/env evidence, never by printing secrets. Failure to prove effective Functions env means NO-GO.
+
+Changing Functions environment requires a new supported deploy; restoring OFF also requires a new OFF deploy. Track the ON deploy's immutable URL: repointing alias alone does not retire it. After terminal completion, OFF alias verification and no active/rollback/split alias references, retire ONLY the newly created ON window deploy under explicit operational GO and verify provider absence/function unreachability. Never bulk-retire historical deployments. If retirement isn't permitted or safe, leave DB releasefalse and block a later window until immutable ON authority is accounted for. Other previews and Production must retain their deploy IDs/config/health throughout.
+
+### Activation sequence — next explicit operational GO required
+
+1. Recheck117/117 hashes, guards v2/v3/ready, Storage marker stage-avatar-authority-20261021, REDIS-RELEASE/epoch, exact91c runtime/both contexts and Stage identity. DB releasefalse and both runtime flags0. Subject/control/July ownership and approved financial/E2E scope must be independently revalidated. No reset, migration, fake marker or additional7200s wait.
+2. Install reviewed bundle, dry-run, prepare, verify OFF and LIVE; privately retain approved hashes/backups. Recheck Netlify issuer tracking1 separately; operator may not change any third WS setting.
+3. Publish branch-only Netlify ON/marker deployment with DBfalse; verify scope/Functions. Activate WS file through the fixed operator, then verify protected ON/preflight. No arbitrary shell env editor.
+
+```sh
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py activate
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py verify
+/usr/bin/node /usr/local/sbin/arcade-ws-preview-env-preflight
+```
+
+4. Before an explicitly authorized Preview restart: zero humans, no unsafe pending actions/settlement, persisted bot state and exact escrow conservation; balanced bot-only activity alone is not STOP. Restart only ws-server-preview.service with the approved fixed systemd command. The operator never does this. Verify actual process config through protected evidence, installed SHA/both contexts, LIVE, health, browser auth/ping and finance after restart.
+5. Only after matched ON runtime/marker and all gates, enable the single Stage DB release row using the existing pinned Stage transaction mechanism; never operate on Production. This is LAST. Execute only the separately scoped fixture E2E; no global cleanup.
+
+### Closure / incident handling
+
+First set only Stage DB releasefalse through the pinned transaction mechanism; this blocks NEW POST requests. Existing WS tick scans durable requests independently of the release row and continues while WS flag1. Check ALL accepted requests (including leased, RETRY and INCIDENT), not just due scan results. Require actual terminal completion and no outstanding settlement/effect before stopping recovery. An INCIDENT is NOT terminal cleanup success. Preserve enabled worker and receipts on partial failure; no BURN/Auth rollback, fake receipts or manual financial repair.
+
+After actual terminal completion, deploy branch-only Netlify OFF, restore its prior marker presence/value and verify effective OFF Functions/unchanged other contexts; retire the exact ON deploy as above. Restore WS baseline byte-for-byte, verify OFF and LIVE, and only then perform an authorized safe Preview restart so process config also becomesOFF. No restart while recovery remains outstanding.
+
+```sh
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py restore
+/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py verify
+/usr/bin/node /usr/local/sbin/arcade-ws-preview-env-preflight
+```
+
+`deactivate` aliases restore; it cannot prove application termination, so the operator must enforce that prerequisite from DB/ledger evidence. Interrupted activate/restore: stop new requests via DBfalse, inspect protected phase, rerun SAME operation or restore only when recovery is safe. Unknown bytes/permissions/hash = STOP. Do not remove the window directory or overwrite preparation manifest to get a PASS. Final evidence: DBfalse, OFF active Netlify and actual WS process, exact unchanged Redis/Stage config, accepted requests terminal, protected baseline restored, no remaining ON immutable authority. Backups remain private0600, no expiry/deletion invented.
+
+Breaking impact: helper config-only now authenticates full V3 approval too; transient window phases intentionally prevent deployment. Old Redis operators cannot reinstall over the new window helper using stale pins. No app/finance/bonus/Storage/Redis behavior changes, no browser script/CSS/CSP changes, no Production effect. New operational GO must cover protected installation/prepare, alias-only Functions ON/OFF deployments, fixed WS config activation/restoration and safe restarts, DB release last/first, specific fixture E2E and newly created ON deploy retirement after safe alias checks. None has been executed here.

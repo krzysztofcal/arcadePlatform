@@ -21,7 +21,7 @@ SETTINGS = {'XP_REDIS_VERSION': '3', 'XP_REDIS_ENV': 'stage',
             'XP_KEY_NS': 'kcswh:stage:xp:v3', 'ACCOUNT_DELETION_ENABLED': '0'}
 REDIS_KEYS = ('UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN')
 # Updated only together with the reviewed helper. Does not contain credentials.
-HELPER_SHA256 = '87f1fd25ca5db2ce0203b2dc438deb2bca43ab615514fdb478ca03589305cde8'
+HELPER_SHA256 = '704dc9a8dd59fa96625f63199f3605b888b7eaecabd4a4dcb724a4862d22993e'
 
 
 class Refused(Exception):
