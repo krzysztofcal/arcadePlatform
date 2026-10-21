@@ -182,3 +182,10 @@ After separate owner GO only: revalidate exact subject/balance, guards117/117, L
 Verify one balanced BURN of the actual remaining wallet (currently500 CH), zero avatar objects expected, Redis/profile cleanup and official Auth hard-delete LAST; assert no operational Poker references without re-running historical repair. Ordinary signup with the exact same deliverable address, real confirmation link, password login, distinct UUID, zero inherited CH/XP/profile before ordinary Welcome500 once; retry must not pay again. Preserve control accounts and global campaign counters.
 
 Closure: DB releasefalse first; all accepted requests terminal; Netlify OFF; operator exact WS restore; safe restart and actual processOFF verification; retire ONLY the newly created ON immutable deployment after alias/publish/fallback/split checks. Any uncertain financial/Storage/Auth effect is STOP with recovery preserved. No Production operation. Full T07b is not PASS before this separate campaign.
+
+
+### Owner-selected final alias supersedes earlier fixture selection
+
+The exact dedicated alias subsequently specified by the owner is now the ONLY intended final T07b deletion/re-registration subject. Its full address, UUID and credentials remain in the protected private owner-alias campaign record, never in public artifacts. Read-only Stage lookup first proved it unused. Ordinary browser public signUp returned200/new UUID; the actual Gmail confirmation message was delivered and its signup link followed (provider303). Normal password login PASS; ordinary Welcome500 CH paid exactly once, retry denied with the same receipt. No Admin API confirmation/createUser or validation bypass. The previously prepared alternate-alias account and the base-address account are outside deletion scope and remain untouched.
+
+The same exact owner-selected alias must be reused after the separately authorized deletion; do not substitute the base address or any other alias. No activation/deployment/deletion occurred in this prerequisite campaign; existing separate-GO Stage-window plan is unchanged.

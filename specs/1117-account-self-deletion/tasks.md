@@ -450,3 +450,10 @@ Earlier unchecked implementation-before-GO and status-presentation findings are 
 - [ ] Separate GO: existing root window dry-run/verify, branch-only exact-runtime Netlify ON, protected WS activation/safe restart and DB admission LAST. Existing admission is Stage-wide; only this subject may be submitted operationally.
 - [ ] Minimal real deletion → Auth-last → same-email ordinary signup/real confirmation/new UUID/zero inherited data/Welcome once; no repeat Poker tests. Close DB admission after durable acceptance and preserve worker until terminal completion.
 - [ ] Verify all layers/process OFF and alias-safe retirement of only the new ON immutable deployment. Full T07b/merge-readiness OPEN; PR remains Draft, Google NOT TESTED.
+
+
+### Owner-selected final alias supersedes earlier fixture selection
+
+The exact dedicated alias subsequently specified by the owner is now the ONLY intended final T07b deletion/re-registration subject. Its full address, UUID and credentials remain in the protected private owner-alias campaign record, never in public artifacts. Read-only Stage lookup first proved it unused. Ordinary browser public signUp returned200/new UUID; the actual Gmail confirmation message was delivered and its signup link followed (provider303). Normal password login PASS; ordinary Welcome500 CH paid exactly once, retry denied with the same receipt. No Admin API confirmation/createUser or validation bypass. The previously prepared alternate-alias account and the base-address account are outside deletion scope and remain untouched.
+
+The same exact owner-selected alias must be reused after the separately authorized deletion; do not substitute the base address or any other alias. No activation/deployment/deletion occurred in this prerequisite campaign; existing separate-GO Stage-window plan is unchanged.

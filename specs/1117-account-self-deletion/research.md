@@ -1013,3 +1013,10 @@ Supersedes the reserved-address fixture blocker; preserves the earlier email_add
 Fresh Stage evidence:117/117 matching migration hashes, guards ready, Redis V3 LIVE, DB releasefalse, Netlify/WS OFF, no unfinished deletion request, active humans0/pending Poker0, unbalanced transactions0. No deletion, activation, deployment, restart, Poker operation or Production mutation occurred in this preparation. Accepted Poker privacy repair is CLOSED and excluded from further testing. Full T07b deletion/same-email re-registration remains OPEN; Google NOT TESTED.
 
 The existing release gate is Stage-wide, not a UUID allowlist. A subsequent explicitly approved short window must submit only this controlled subject request and close DB admission immediately after durable acceptance, retaining workers until terminal completion. No claim of technical per-UUID admission isolation is made.
+
+
+### Owner-selected final alias supersedes earlier fixture selection
+
+The exact dedicated alias subsequently specified by the owner is now the ONLY intended final T07b deletion/re-registration subject. Its full address, UUID and credentials remain in the protected private owner-alias campaign record, never in public artifacts. Read-only Stage lookup first proved it unused. Ordinary browser public signUp returned200/new UUID; the actual Gmail confirmation message was delivered and its signup link followed (provider303). Normal password login PASS; ordinary Welcome500 CH paid exactly once, retry denied with the same receipt. No Admin API confirmation/createUser or validation bypass. The previously prepared alternate-alias account and the base-address account are outside deletion scope and remain untouched.
+
+The same exact owner-selected alias must be reused after the separately authorized deletion; do not substitute the base address or any other alias. No activation/deployment/deletion occurred in this prerequisite campaign; existing separate-GO Stage-window plan is unchanged.
