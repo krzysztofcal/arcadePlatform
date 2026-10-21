@@ -224,7 +224,7 @@ test('closed inactive zero-stack history is not a Poker obligation; uncertain/li
   assert.equal((await db.query('select count(*)::int n from poker_seats where user_id=$1',[USER])).rows[0].n,1,'wallet retirement does not remove historical seats');
 });
 
-const {cleanupDeletionPoker,projectDeletionPokerState,repairCompletedDeletionPoker,createDeletionPokerCoordinator,assertDeletionPokerAbsent}=await import('../ws-server/poker/runtime/account-deletion.mjs');
+const {cleanupDeletionPoker,projectDeletionPokerState,repairCompletedDeletionPoker,createDeletionPokerCoordinator,assertDeletionPokerAbsent,pokerPrivacyStateSha256,parsePokerRepairManifest}=await import('../ws-server/poker/runtime/account-deletion.mjs');
 async function privacyFixture(open=false) {
  const {begin}=await fixture(75);
  await db.query("insert into poker_tables(id,status,created_by) values($1,$2,$3) on conflict(id) do update set status=excluded.status,created_by=excluded.created_by",[TABLE,open?'OPEN':'CLOSED',USER]);
@@ -300,6 +300,21 @@ test('completed repair is exact two-table, idempotent and never invents lease/BU
  const before=await f.finances();const [original]=(await db.query('select * from account_deletion_requests')).rows;
  await db.exec("update account_deletion_release set redis_cutover='{\"namespace\":\"kcswh:stage:xp:v3\"}'");
  const options={env:{SUPABASE_URL:'https://krydukthwdvccggbyjfw.supabase.co',ACCOUNT_DELETION_ENABLED:'0'},beginSql:f.begin,userId:USER,requestId:REQUEST,tableIds:[TABLE,second],coordinate:f.coordinate};
+ const states=(await db.query('select table_id,version,state from poker_state order by table_id')).rows;
+ const manifest={version:1,stage:'krydukthwdvccggbyjfw',userId:USER,requestId:REQUEST,tables:states.map(row=>({tableId:row.table_id,version:Number(row.version),stateSha256:pokerPrivacyStateSha256(row.state),cleanedStateSha256:pokerPrivacyStateSha256(projectDeletionPokerState(row.state,USER))}))};
+ options.manifest=manifest;
+ const {createHash}=await import('node:crypto');const bytes=JSON.stringify(manifest),hash=createHash('sha256').update(bytes).digest('hex');
+ assert.deepEqual(parsePokerRepairManifest(bytes,hash),manifest);
+ assert.throws(()=>parsePokerRepairManifest(bytes,'0'.repeat(64)));
+ await db.query('update poker_state set version=version+1 where table_id=$1',[second]);
+ await assert.rejects(repairCompletedDeletionPoker(options),/manifest_drift/);
+ assert.equal(await f.finances(),before);assert.equal((await db.query('select count(*)::int n from poker_seats where user_id=$1',[USER])).rows[0].n,1);
+ await db.query('update poker_state set version=version-1 where table_id=$1',[second]);
+ const originalSecond=states.find(row=>row.table_id===second).state;
+ await db.query('update poker_state set state=$2 where table_id=$1',[second,{...originalSecond,unrelatedAuditChange:true}]);
+ await assert.rejects(repairCompletedDeletionPoker(options),/manifest_drift/);
+ assert.equal((await db.query('select state from poker_state where table_id=$1',[TABLE])).rows[0].state.seats[0].userId,USER);
+ await db.query('update poker_state set state=$2 where table_id=$1',[second,originalSecond]);
  // Missing second-table escrow is an uncertainty, never fabricated as zero.
  await assert.rejects(repairCompletedDeletionPoker(options));
  await db.query("insert into chips_accounts(account_type,system_key,balance) values('ESCROW',$1,0)",['POKER_TABLE:'+second]);
@@ -312,4 +327,25 @@ test('completed repair is exact two-table, idempotent and never invents lease/BU
  await assert.rejects(repairCompletedDeletionPoker({...options,tableIds:[TABLE]}));
  await assert.rejects(repairCompletedDeletionPoker({...options,env:{...options.env,SUPABASE_URL:'https://production.supabase.co'}}));
  await assert.rejects(repairCompletedDeletionPoker({...options,env:{...options.env,ACCOUNT_DELETION_ENABLED:'1'}}));
+});
+
+
+test('failed privacy restore exposes no stale state or snapshot until successful canonical resync',async()=>{
+ const {createTableManager}=await import('../ws-server/poker/table/table-manager.mjs');
+ const manager=createTableManager(),tableId='privacy-read-fence',context={userId:'deleted-owner',requestId:'repair'};
+ assert.equal(manager.restoreTableFromPersisted(tableId,{coreState:{version:5,members:[{userId:context.userId,seat:1}],seats:{[context.userId]:1},appliedRequestIds:[],maxSeats:4}}).ok,true);
+ const oldView=manager.tableSnapshot(tableId,null);assert(JSON.stringify(oldView).includes(context.userId));
+ let fail=true;
+ const coordinator=createDeletionPokerCoordinator({enqueue:async(_id,run)=>run(),block:id=>manager.blockTableMutations(id),unblock:id=>manager.unblockTableMutations(id),restore:async id=>fail?{ok:false}:manager.restoreTableFromPersisted(id,{coreState:{version:10,members:[],seats:{},appliedRequestIds:[],maxSeats:4}})});
+ await assert.rejects(coordinator.coordinate(context,tableId,async()=>{}),/resync_required/);
+ for(const view of [manager.tableSnapshot(tableId,null),manager.tableState(tableId)]){assert.equal(view.unavailable,true);assert(!JSON.stringify(view).includes(context.userId));}
+ assert.equal(manager.resync({ws:{},userId:'reader',tableId}).code,'table_resync_required');
+ assert.equal(manager.bootstrapHand(tableId).code,'table_resync_required');
+ fail=false;await coordinator.resync(context);
+ assert.equal(manager.isTableMutationBlocked(tableId),false);
+ assert.equal(manager.isTableViewCurrent(oldView),false,'captured pre-await view stays invalid after restore');
+ assert.equal(manager.isTableViewCurrent(manager.tableSnapshot(tableId,null)),true);
+ assert.notEqual(manager.tableSnapshot(tableId,null).unavailable,true);
+ assert.deepEqual(manager.tableState(tableId).members,[]);
+ assert(!JSON.stringify(manager.tableSnapshot(tableId,null)).includes(context.userId));
 });

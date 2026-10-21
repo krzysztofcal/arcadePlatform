@@ -211,12 +211,12 @@ export async function readDeletionStatusAccess(tx, requestId, token) {
 
 // Authorization and synchronous transport enqueue share the acceptance lock.
 // A frame already enqueued before acceptance cannot be recalled from the network.
-export function queueAccountPrivateFrame({ws,connection,ownerId,frame,beginSql,close}) {
+export function queueAccountPrivateFrame({ws,connection,ownerId,frame,beginSql,close,canDeliver=()=>true}) {
   ws.__deletionSendCount=(ws.__deletionSendCount || 0)+1;
   if (ws.__deletionSendCount>100) { ws.__deletionSendCount--; close('send_queue_full'); return Promise.resolve(); }
   ws.__deletionSendTail=(ws.__deletionSendTail || Promise.resolve()).then(() => beginSql(async(tx)=>{
     await assertAccountActive(tx,ownerId);
-    if (ws.readyState===1 && connection.session?.userId===ownerId && !connection.sessionInvalidated) ws.send(JSON.stringify(frame));
+    if (ws.readyState===1 && connection.session?.userId===ownerId && !connection.sessionInvalidated && canDeliver()) ws.send(JSON.stringify(frame));
   })).catch(()=>close('account_not_active')).finally(()=>{ws.__deletionSendCount--;});
   return ws.__deletionSendTail;
 }

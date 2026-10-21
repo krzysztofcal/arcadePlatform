@@ -424,3 +424,10 @@ Local verification for window preparation:13 Python window/configuration tests,7
 - [ ] Full hosted E2E/new UUID/ordinary Welcome with supported test address; Google/email delivery NOT TESTED. PR remains Draft and merge-readiness OPEN.
 
 Earlier unchecked implementation-before-GO and status-presentation findings are superseded by this accepted local implementation and the COMPLETED API regression; historical hosted results above are preserved unchanged.
+
+
+## Final review: two bounded fixes
+
+- [x] Read/state/snapshot/resync/publication fence during privacy quarantine; invalidate captured pre-await views and clear snapshot/replay caches. Fundamental failed-restore → unavailable read → canonical restore regression.
+- [x] Root-owned protected repair manifest, fixed path/O_NOFOLLOW/metadata checks, exact raw SHA pin and approved table/version/state hashes. Both tables repair atomically with CAS; approved exact clean-state retry only. Fundamental drift/hash rejection and unchanged finance regression.
+- [ ] Separate final GO: install reviewed manifest, exact-SHA WS Preview deploy and bounded two-table repair per plan.md. All Stage/Production writes and deployments remain unexecuted in this review.

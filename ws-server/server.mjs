@@ -1225,7 +1225,7 @@ function getDeletionPokerCoordinator() {
   if(!deletionPokerCoordinatorPromise)deletionPokerCoordinatorPromise=import('./poker/runtime/account-deletion.mjs').then(({createDeletionPokerCoordinator})=>createDeletionPokerCoordinator({
     enqueue:(tableId,run)=>enqueueTableCommand({tableId,commandName:'account_delete_privacy',run}),
     restore:restoreTableFromPersisted,
-    block:id=>tableManager.blockTableMutations(id),unblock:id=>tableManager.unblockTableMutations(id)
+    block:id=>{tableManager.blockTableMutations(id);clearSnapshotCacheForTable(id);streamLog.forgetTable(id);},unblock:id=>tableManager.unblockTableMutations(id)
   })).catch(error=>{deletionPokerCoordinatorPromise=null;throw error;});
   return deletionPokerCoordinatorPromise;
 }
@@ -1518,10 +1518,13 @@ function enqueueTableCommand({ tableId, commandName, dedupeKey = null, run }) {
 }
 
 function sendFrame(ws, frame) {
+  const readFence=frame.roomId?tableManager.tableState(frame.roomId):null;
+  const canDeliver=()=>!readFence||tableManager.isTableViewCurrent(readFence);
+  if(!canDeliver())return;
   const connection = ws.__connState;
   const owner = connection?.session?.userId;
   if (accountDeletionEnabled() && owner && !isGuestSession(connection)) {
-    void queueAccountPrivateFrame({ws,connection,ownerId:owner,frame,
+    void queueAccountPrivateFrame({ws,connection,ownerId:owner,frame,canDeliver,
       beginSql:async(fn)=>{const transact=await loadBeginSqlWs();return transact(fn);},
       close:(reason)=>invalidateSocketSession(ws,{reason,send_stale:false})});
     return;
@@ -1715,6 +1718,7 @@ function requiresRequestId(frameType) {
 }
 
 function recordStatefulFrame({ ws, connState, tableId, frame }) {
+  if (tableManager.isTableMutationBlocked(tableId)) return null;
   if (accountDeletionEnabled() && (connState.sessionInvalidated || ws.readyState!==WebSocket.OPEN)) return null;
   const replayFrame = streamLog.append({
     tableId,
@@ -1921,6 +1925,8 @@ function buildTableStatePayload({ tableState, tableSnapshot, userId }) {
 }
 
 function sendTableState(ws, connState, { requestId = null, tableState, tableSnapshot = null }) {
+  if (!tableManager.isTableViewCurrent(tableState) || (tableSnapshot && !tableManager.isTableViewCurrent(tableSnapshot))) return null;
+  if (tableManager.isTableMutationBlocked(tableState.tableId)) return null;
   const preparedReveal = preparePublishedSettlementReveal(tableState.tableId, tableSnapshot);
   const settlementRevealDueAt = preparedReveal?.dueAt ?? null;
   maybeScheduleSettledRollover(tableState.tableId, preparedReveal?.dueAt ?? null);
@@ -1944,6 +1950,8 @@ function sendTableState(ws, connState, { requestId = null, tableState, tableSnap
 }
 
 function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, reason = null }) {
+  if (!tableManager.isTableViewCurrent(tableSnapshot)) return null;
+  if (tableManager.isTableMutationBlocked(tableSnapshot.tableId)) return null;
   const preparedReveal = preparePublishedSettlementReveal(tableSnapshot.tableId, tableSnapshot);
   const settlementRevealDueAt = preparedReveal?.dueAt ?? null;
   maybeScheduleSettledRollover(tableSnapshot.tableId, preparedReveal?.dueAt ?? null);
@@ -1976,6 +1984,8 @@ function sendStateSnapshot(ws, connState, { requestId = null, tableSnapshot, rea
 }
 
 function sendStateDelta(ws, connState, { tableSnapshot }) {
+  if (!tableManager.isTableViewCurrent(tableSnapshot)) return null;
+  if (tableManager.isTableMutationBlocked(tableSnapshot.tableId)) return null;
   const preparedReveal = preparePublishedSettlementReveal(tableSnapshot.tableId, tableSnapshot);
   const settlementRevealDueAt = preparedReveal?.dueAt ?? null;
   maybeScheduleSettledRollover(tableSnapshot.tableId, preparedReveal?.dueAt ?? null);
@@ -2074,6 +2084,7 @@ function sendCommandResult(ws, connState, { requestId = null, tableId = null, st
 }
 
 function sendGameplaySnapshot(ws, connState, { requestId = null, tableId, snapshot }) {
+  if (tableManager.isTableMutationBlocked(tableId)) return;
   const frame = {
     version: "1.0",
     type: "table_snapshot",
@@ -2091,6 +2102,7 @@ function sendGameplaySnapshot(ws, connState, { requestId = null, tableId, snapsh
 }
 
 function broadcastTableState(tableId, { excludeWs = null } = {}) {
+  if (tableManager.isTableMutationBlocked(tableId)) return null;
   maybeBroadcastLobbySnapshot();
   const publicationSnapshot = tableManager.tableSnapshot(tableId, null);
   const preparedReveal = preparePublishedSettlementReveal(tableId, publicationSnapshot);
@@ -3152,6 +3164,7 @@ async function isSettledRevealPending(tableId, nowMs = Date.now()) {
 }
 
 function broadcastStateSnapshots(tableId) {
+  if (tableManager.isTableMutationBlocked(tableId)) return null;
   maybeBroadcastLobbySnapshot();
   const publicationSnapshot = tableManager.tableSnapshot(tableId, null);
   const preparedReveal = preparePublishedSettlementReveal(tableId, publicationSnapshot);
@@ -4440,15 +4453,16 @@ async function handleInternalPokerMaintenance(req, res) {
     const isExtendedSetDesiredState = operation === "set_desired_state"
       && hasExactKeySet(payload, EXTENDED_SET_DESIRED_STATE_KEYS);
     if (operation==='repair_deleted_user_privacy') {
-      if(environment!=='preview'||!hasExactKeySet(payload,['operation','actorUserId','requestId','userId','deletionRequestId','tableIds'])
+      if(environment!=='preview'||!hasExactKeySet(payload,['operation','actorUserId','requestId','userId','deletionRequestId','tableIds','manifestSha256'])
         ||!isUuid(payload.userId)||!isUuid(payload.deletionRequestId)||!Array.isArray(payload.tableIds)
         ||payload.tableIds.length!==2||!payload.tableIds.every(isUuid)) {
         sendInternalJson(res,400,{error:'invalid_request'});return;
       }
-      const {repairCompletedDeletionPoker}=await import('./poker/runtime/account-deletion.mjs');
+      const {repairCompletedDeletionPoker,loadPokerRepairManifest}=await import('./poker/runtime/account-deletion.mjs');
+      const manifest=await loadPokerRepairManifest(payload.manifestSha256);
       const coordination=await getDeletionPokerCoordinator();
       const outcome=await repairCompletedDeletionPoker({beginSql:await loadBeginSqlWs(),env:process.env,
-        userId:payload.userId,requestId:payload.deletionRequestId,tableIds:payload.tableIds,...coordination});
+        userId:payload.userId,requestId:payload.deletionRequestId,tableIds:payload.tableIds,manifest,...coordination});
       result={ok:outcome.done===true,operation};
     } else if (
       (isLegacySetDesiredState || isExtendedSetDesiredState)
@@ -5563,6 +5577,7 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      if (tableManager.isTableMutationBlocked(tableId)) { sendError(ws,connState,{code:"TABLE_BOOTSTRAP_UNAVAILABLE",message:"table_resync_required",requestId:frame.requestId ?? null});return; }
       const replay = streamLog.eventsAfter({ tableId, lastSeq: resumeLastSeq, receiverKey: resumeSessionId });
       if (rebound.priorSocket && rebound.priorSocket !== ws) {
         try {
@@ -5903,7 +5918,10 @@ wss.on("connection", (ws) => {
         return;
       }
       const tableId = resolvedRoomId.roomId;
+      const readFence=tableManager.tableState(tableId);
+      if(!tableManager.isTableViewCurrent(readFence))return;
       const loaded = await tableSnapshotLoader({ tableId, userId: connState.session.userId, nowMs: Date.now() });
+      if(!tableManager.isTableViewCurrent(readFence))return;
       if (!loaded?.ok || !loaded?.snapshot) {
         const snapshotFailureCode = TABLE_SNAPSHOT_KNOWN_FAILURE_CODES.has(loaded?.code) ? loaded.code : "snapshot_failed";
         sendError(ws, connState, {

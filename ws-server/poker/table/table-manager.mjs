@@ -363,6 +363,8 @@ export function createTableManager({
   const pendingBootstrapByTableId = new Map();
   const retiringTableIds = new Set();
   const mutationBlockedTableIds = new Set();
+  const privacyReadGeneration = new Map();
+  const viewGenerations = new WeakMap();
   const connStateBySocket = new Map();
   const pokerAccessFailClosedUserIds = new Set();
 
@@ -989,7 +991,17 @@ export function createTableManager({
     };
   }
 
-  function tableState(tableId) {
+  function trackTableView(tableId,view) {
+    viewGenerations.set(view,{tableId,generation:privacyReadGeneration.get(tableId)||0});return view;
+  }
+  function isTableViewCurrent(view) {
+    const saved=view&&viewGenerations.get(view);
+    return Boolean(saved&&!view.unavailable&&!mutationBlockedTableIds.has(saved.tableId)&&saved.generation===(privacyReadGeneration.get(saved.tableId)||0));
+  }
+  function tableState(tableId) {return trackTableView(tableId,buildTableState(tableId));}
+  function tableSnapshot(tableId,userId) {return trackTableView(tableId,buildTableSnapshot(tableId,userId));}
+  function buildTableState(tableId) {
+    if (mutationBlockedTableIds.has(tableId)) return {tableId,unavailable:true,code:"table_resync_required"};
     const table = tables.get(tableId);
     if (!table) {
       return { tableId, members: [] };
@@ -1001,7 +1013,8 @@ export function createTableManager({
     };
   }
 
-  function tableSnapshot(tableId, userId) {
+  function buildTableSnapshot(tableId, userId) {
+    if (mutationBlockedTableIds.has(tableId)) return {tableId,unavailable:true,code:"table_resync_required"};
     const table = tables.get(tableId);
     const members = table ? normalizeAuthoritativeMembers(table) : [];
     const roomId = table?.coreState?.roomId || tableId;
@@ -1918,6 +1931,7 @@ export function createTableManager({
   }
 
   function resync({ ws, userId, tableId, nowTs = Date.now() }) {
+    if (mutationBlockedTableIds.has(tableId)) return {ok:false,code:"table_resync_required",message:"table_resync_required"};
     const conn = ensureConn(ws);
     if (conn.subscribedTableId && conn.subscribedTableId !== tableId) {
       return { ok: false, code: "one_table_per_connection", message: "Connection is already subscribed to a different table" };
@@ -2838,8 +2852,9 @@ export function createTableManager({
     listTableIds,
     activeHumanUserIds,
     projectUserTables,
-    blockTableMutations: (id) => { if (pendingBootstrapByTableId.has(id)) throw new Error("table_bootstrap_pending"); mutationBlockedTableIds.add(id); },
+    blockTableMutations: (id) => { if (pendingBootstrapByTableId.has(id)) throw new Error("table_bootstrap_pending"); mutationBlockedTableIds.add(id); privacyReadGeneration.set(id,(privacyReadGeneration.get(id)||0)+1); },
     unblockTableMutations: (id) => mutationBlockedTableIds.delete(id),
+    isTableViewCurrent,
     isTableMutationBlocked: (id) => mutationBlockedTableIds.has(id),
     beginTableRetirement,
     endTableRetirement,

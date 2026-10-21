@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { open, lstat } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { accountDeletionEnabled, advanceDeletion, scanDeletionRequests, lockAccountLifecycle, deleteAuthUser, deletionPokerSeatPendingSql } from '../../../shared/account-deletion.mjs';
 import { retireUserForDeletion } from '../../../netlify/functions/_shared/chips-ledger.mjs';
 import { blockRedisIdentity, cleanupRedisIdentity, isMemoryStore } from '../../../netlify/functions/_shared/store-upstash.mjs';
@@ -107,10 +110,43 @@ export async function cleanupDeletionPoker({context,beginSql,coordinate,resync =
     return remaining.length?{waitUntil:new Date(Date.now()+1000).toISOString()}:{done:true};});
 }
 
+// A protected operator file, never an HTTP-supplied replacement manifest.
+const REPAIR_MANIFEST='/opt/arcade-ws-preview/.poker-privacy-repair.json';
+const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');
+export function pokerPrivacyStateSha256(state) {
+  const ordered=value=>Array.isArray(value)?value.map(ordered):value&&typeof value==='object'
+    ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,ordered(value[key])])):value;
+  return sha256(JSON.stringify(ordered(state)));
+}
+export function parsePokerRepairManifest(bytes,expectedSha256) {
+  if(!/^[a-f0-9]{64}$/.test(expectedSha256||'')||sha256(bytes)!==expectedSha256)throw privacyError();
+  const manifest=JSON.parse(bytes);
+  if(manifest.version!==1||manifest.stage!=='krydukthwdvccggbyjfw'||!Array.isArray(manifest.tables)||manifest.tables.length!==2
+    ||new Set(manifest.tables.map(t=>t.tableId)).size!==2||manifest.tables.some(t=>!Number.isSafeInteger(t.version)||t.version<0
+      ||!['stateSha256','cleanedStateSha256'].every(k=>/^[a-f0-9]{64}$/.test(t[k]||''))))throw privacyError();
+  return manifest;
+}
+export async function loadPokerRepairManifest(expectedSha256) {
+  for(const path of ['/','/opt','/opt/arcade-ws-preview']) {
+    const meta=await lstat(path);
+    if(!meta.isDirectory()||meta.uid!==0||(meta.mode&0o022))throw privacyError();
+  }
+  const handle=await open(REPAIR_MANIFEST,constants.O_RDONLY|constants.O_NOFOLLOW);
+  try {
+    const meta=await handle.stat();
+    if(!meta.isFile()||meta.uid!==0||meta.gid!==process.getgid()||meta.nlink!==1||(meta.mode&0o777)!==0o640||meta.size>16384)throw privacyError();
+    const bytes=await handle.readFile();const after=await handle.stat();
+    if(meta.size!==after.size||meta.mtimeMs!==after.mtimeMs||meta.ctimeMs!==after.ctimeMs)throw privacyError();
+    return parsePokerRepairManifest(bytes,expectedSha256);
+  } finally {await handle.close();}
+}
+
 // Existing token-protected internal maintenance API; no invented request/lease or
 // feature activation. Caller MUST supply the same real WS queue/cache adapter.
-export async function repairCompletedDeletionPoker({beginSql,userId,requestId,tableIds,coordinate,resync,env=process.env}) {
+export async function repairCompletedDeletionPoker({beginSql,userId,requestId,tableIds,manifest,coordinate,resync,env=process.env}) {
   if (env.SUPABASE_URL!=='https://krydukthwdvccggbyjfw.supabase.co'||env.ACCOUNT_DELETION_ENABLED!=='0') throw privacyError();
+  if(manifest?.version!==1||manifest.stage!=='krydukthwdvccggbyjfw'||manifest.userId!==userId||manifest.requestId!==requestId
+    ||!Array.isArray(manifest.tables)||manifest.tables.length!==2||manifest.tables.some(t=>!tableIds?.includes(t.tableId)))throw privacyError();
   if (!Array.isArray(tableIds)||tableIds.length!==2||new Set(tableIds).size!==2||typeof coordinate!=='function') throw privacyError();
   const rawBegin=beginSql;
   beginSql=fn=>rawBegin(async tx=>{await tx.unsafe("set local statement_timeout='5s';");await tx.unsafe("set local lock_timeout='5s';");return fn(tx);});
@@ -120,12 +156,31 @@ export async function repairCompletedDeletionPoker({beginSql,userId,requestId,ta
     if(release?.enabled!==false||release.namespace!=='kcswh:stage:xp:v3')throw privacyError();
     const tables=await tx.unsafe('select id,status from public.poker_tables where id=any($1::uuid[]) order by id;',[tableIds]);
     if(tables.length!==2||tables.some(t=>t.status!=='CLOSED'))throw privacyError();
+    const states=await tx.unsafe('select table_id,version,state from public.poker_state where table_id=any($1::uuid[]) order by table_id;',[tableIds]);
+    if(states.length!==2)throw privacyError();
+    for(const row of states) {
+      const approved=manifest.tables.find(t=>t.tableId===row.table_id),hash=pokerPrivacyStateSha256(row.state);
+      const original=Number(row.version)===approved?.version&&hash===approved.stateSha256;
+      // Only the exact pre-approved projection/version is an idempotent retry.
+      const cleaned=Number(row.version)===approved?.version+1&&hash===approved.cleanedStateSha256&&!containsOwner(row.state,userId);
+      if(!original&&!cleaned)throw new Error('poker_privacy_manifest_drift');
+    }
     const [request]=await tx.unsafe('select * from public.account_deletion_requests where request_id=$1 for update;',[requestId]);
     const [auth]=await tx.unsafe('select 1 from auth.users where id=$1;',[userId]);
     if (request?.old_user_id!==userId||request.status!=='COMPLETED'||request.phase!=='completed'||request.lease_until!=null||auth)throw privacyError();
     return request;
   };
-  return cleanupDeletionPoker({context,beginSql,authorize,tableIds,coordinate,resync});
+  await resync?.(context);
+  const ordered=[...tableIds].sort();
+  // Hold both queues and both table/state locks: audit drift in either table
+  // rolls back the entire repair, never a partially applied first table.
+  return coordinate(context,ordered[0],()=>coordinate(context,ordered[1],()=>beginSql(async tx=>{
+    await tx.unsafe('select id from public.poker_tables where id=any($1::uuid[]) order by id for update;',[ordered]);
+    await tx.unsafe('select table_id from public.poker_state where table_id=any($1::uuid[]) order by table_id for update;',[ordered]);
+    return cleanupDeletionPoker({context,beginSql:fn=>fn(tx),authorize,tableIds,
+      coordinate:async(_context,_tableId,run)=>run()});
+  })));
+
 }
 
 // The table-manager block fences queued commands and all persisted writer entry

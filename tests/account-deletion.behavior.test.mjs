@@ -188,6 +188,11 @@ test('private WS enqueue rejects an already active socket after durable deletion
  const connection={session:{userId:OWNER}};
  const send=()=>queueAccountPrivateFrame({ws,connection,ownerId:OWNER,frame:{private:'synthetic-cards'},beginSql,close:reason=>closed.push(reason)});
  await send();assert.equal(sent.length,1);
+ let current=true;
+ await queueAccountPrivateFrame({ws,connection,ownerId:OWNER,frame:{private:'stale-after-await'},canDeliver:()=>current,
+   beginSql:fn=>beginSql(async tx=>{current=false;return fn(tx);}),close:reason=>closed.push(reason)});
+ assert.equal(sent.length,1,'quarantine during asynchronous authorization suppresses the captured frame');
+ assert.deepEqual(closed,[]);
  await beginSql(tx=>requestDeletion(tx,OWNER));
  await send();assert.equal(sent.length,1);assert.deepEqual(closed,['account_not_active']);
  connection.session.userId=OTHER;
