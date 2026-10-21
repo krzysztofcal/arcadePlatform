@@ -354,3 +354,12 @@ Local verification for window preparation:13 Python window/configuration tests,7
 
 - [x] Added one fundamental interrupted-restore regression: interruption after OFF replace leaves phase restoring, verify/preflight refuses the transition, restore resumes and matches the exact original OFF SHA-256. Existing preflight test also rejects OFF bytes with restoring authority. Operator/helper code and all three reviewed installation hashes remain unchanged.
 - [ ] Protected installation is BLOCKED by actual VPS privileges: copilot sudo permits fixed preflight/restart commands, not root installation/Python operator. Root-owned environment metadata remains0600 and parent0755; no broad sudo or credential escalation. Prepare/activate/restore require the authorized root operator session; do not bypass through Redis operators. No activation, funding, BURN, Storage DELETE or Auth delete performed.
+
+## Final E2E attempt — fixture confirmation blocker
+
+- [x] Protected window prepare/activation owner-root proof, safe authorized WS restart and exact91c LIVE/health/browser Auth+WS smoke; branch-only Netlify ON runtime verified.
+- [x] STOP before first destructive operation: reserved subject email plus Stage confirmation requirement makes ordinary verified same-email re-registration unavailable. DB release never enabled, requests0, BURN/Storage DELETE/Auth delete0; subject/control/July data preserved.
+- [x] Netlify branch OFF/prior marker absence restored and OFF immutable6ad88b82d4dc63d285f15c0f verified; Production unchanged.
+- [ ] Owner root restore exact protected WS baseline, agent safe Preview restart/processOFF proof, then retire only window-created ON deploy6ad889618f2adbfbd14859db after alias safety checks. No worker disable during an accepted unfinished operation (none accepted here).
+- [ ] Owner decision: allow official Admin confirmation ONLY for newly re-registered disposable UUID as declared test setup, or approve a deliverable identity procedure; no speculative email/OTP infrastructure or global configuration changes.
+- [ ] T07b destructive E2E remains NOT RUN/NO-GO until this fixture prerequisite is resolved. No code defect or successful deletion is claimed.
