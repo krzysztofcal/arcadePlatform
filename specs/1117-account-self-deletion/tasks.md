@@ -439,3 +439,14 @@ Earlier unchecked implementation-before-GO and status-presentation findings are 
 - [x] One canonical repair attempt; HTTP500/poker_privacy_conflict. Read-only proof confirms complete SQL rollback, original versions5/45 and all financial/peer/immutable history invariants unchanged. No automatic retry.
 - [x] Diagnose serialized JSON double-encoding through actual Stage driver SELECT; minimal local text-first JSON casts and fundamental binding regression.
 - [ ] Review corrected runtime SHA, then controlled deployment and same-manifest repair. Existing operational references remain; no root reinstall, new deletion request/BURN/Auth action or migration.
+
+
+## Current final minimal T07b — supersedes stale follow-up gates above
+
+- [x] Accepted Stage Poker privacy repair CLOSED; no repeat historical-table/manifest/all-in work.
+- [x] Dedicated deliverable disposable identity: actual public signUp/new UUID, delivered confirmation link, normal password login; no Admin workaround.
+- [x] Ordinary Welcome500 exactly once and retry denied/same receipt; one balanced ledger transaction/two entries/one registry receipt; global campaign counts unchanged; XP0/no avatar.
+- [x] Read-only readiness:117/117 hashes/guards, Stage Redis V3 LIVE, DB/Netlify/WS OFF, no unfinished request or unsafe human/pending Poker operations. Protected installed sources match approved hashes.
+- [ ] Separate GO: existing root window dry-run/verify, branch-only exact-runtime Netlify ON, protected WS activation/safe restart and DB admission LAST. Existing admission is Stage-wide; only this subject may be submitted operationally.
+- [ ] Minimal real deletion → Auth-last → same-email ordinary signup/real confirmation/new UUID/zero inherited data/Welcome once; no repeat Poker tests. Close DB admission after durable acceptance and preserve worker until terminal completion.
+- [ ] Verify all layers/process OFF and alias-safe retirement of only the new ON immutable deployment. Full T07b/merge-readiness OPEN; PR remains Draft, Google NOT TESTED.

@@ -165,3 +165,20 @@ The root restore above has now been performed and verified; do NOT rerun activat
 ### Next review gates (no new activation authorized)
 
 Stage remainsOFF/closed. Signup400 is now attributed by actual provider log to email_address_invalid; do not retry the reserved fixture or create via Admin fallback. Before another real E2E, agree a deliverable dedicated fixture and prove normal public signup via existing client/redirect. Poker cleanup is NOT implemented: see exact per-owner projection/CAS, lock/cache rules and completed-request repair scope in plan.md; separate GO mandatory. Full E2E must assert no deleted UUID in operational seats/state/table.creator while retaining accounting/immutable audit evidence under existing policy. Local API fix preserves historical incident but reports no active intervention once COMPLETED; current deployed runtime still has the older presentation until separately deployed.
+
+
+### Current final minimal T07b plan — separate activation GO required
+
+Supersedes the old reserved-email and unimplemented-Poker follow-up instructions above: Poker repair is accepted CLOSED; do not revisit its tables/manifest/all-in. A new deliverable disposable identity already passed real public signup, delivered confirmation link, password login and ordinary Welcome500 exactly once (retry denied), with XP0/no avatar. No Admin confirmation was needed. Protected private fixture evidence identifies the exact subject; never publish credentials/email/UUID.
+
+Current WS runtime a6e8e4dda45e2908b385d3242691bf3f6cc0ba4b is OFF. Netlify OFF deployment6ad8ac5e86ce1c2d1e5c96ee serves91c329558f90cb8cc525777bc621f56242dfeca0; the next approved window must build supported Functions from exacta6e8e4dd, with branch-only deploy-preview-1124 flag/marker and no Production/global changes. Documentation-only commits do not require WS redeployment. Reviewed protected operator files already match their approved hashes; no reinstall or Redis operator is needed.
+
+Before activation, operator may perform this read-only root check (not yet executed for this preparation):
+
+`/usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py dry-run && /usr/bin/python3 -I -B /usr/local/libexec/arcade-ws-preview-v3/stage-deletion-window.py verify && /usr/bin/node /usr/local/sbin/arcade-ws-preview-env-preflight`
+
+After separate owner GO only: revalidate exact subject/balance, guards117/117, LIVE/OFF and no unsafe active operations; prepare branch-only Netlify ON immutable build, then protected root activate/verify and safe WS Preview restart. Verify exact runtime/configuration/LIVE/health before enabling DB release LAST. Existing flags are Stage-wide, not UUID-scoped; submit ONLY this subject's UI request and close DB admission immediately after durable acceptance. Do not create another request after lost response: recover through existing status/idempotent retry. Keep worker enabled through terminal completion. No Poker scenario, avatar upload, migration, Redis reset or old-fixture operation belongs to this test.
+
+Verify one balanced BURN of the actual remaining wallet (currently500 CH), zero avatar objects expected, Redis/profile cleanup and official Auth hard-delete LAST; assert no operational Poker references without re-running historical repair. Ordinary signup with the exact same deliverable address, real confirmation link, password login, distinct UUID, zero inherited CH/XP/profile before ordinary Welcome500 once; retry must not pay again. Preserve control accounts and global campaign counters.
+
+Closure: DB releasefalse first; all accepted requests terminal; Netlify OFF; operator exact WS restore; safe restart and actual processOFF verification; retire ONLY the newly created ON immutable deployment after alias/publish/fallback/split checks. Any uncertain financial/Storage/Auth effect is STOP with recovery preserved. No Production operation. Full T07b is not PASS before this separate campaign.
