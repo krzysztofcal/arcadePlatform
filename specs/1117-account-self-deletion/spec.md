@@ -28,3 +28,7 @@ Only after durable acceptance (or one-shot owner GET recovery of a lost response
 T04d/T02f and Redis V3 are implemented; real Poker/Storage API/XP component evidence is in research.md. T05e still needs truthful authority/inventory/cutover and scoped canonical reconciliation. T07b needs matched pending schema/runtime and separately authorized real Stage deletion/BURN/Auth-last/re-registration/control/retry E2E. Google NOT TESTED without dedicated authorized identity. Local fixtures/green CI do not prove hosted completion. Production activation and merge require separate GO.
 
 Only fundamental tests, existing packages, JSP-compatible frontend, klog, CSP hashes for new inline code and one-line CSS selectors. Current change adds no UI scripts/CSS/infrastructure. Historical superseded HMAC decisions/evidence remain in research.md, not active requirements.
+
+## Reviewed acceptance clarification
+
+Completed requests retain historical incident in durable storage but status API requiresIntervention=false and retryable=false. Operational Poker seats/state/table.creator must not retain the deleted UUID after the planned privacy cleanup; other players and immutable accounting/idempotency/archive evidence remain protected by existing retention rules. This cleanup is not yet implemented/authorized. Real full E2E must use a provider-accepted disposable identity and prove actual same-email new UUID/Welcome, not substitute Admin creation for rejected signUp.

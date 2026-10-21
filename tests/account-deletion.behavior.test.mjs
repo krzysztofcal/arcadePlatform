@@ -223,3 +223,15 @@ test('BURN diagnostic redacts provider details and preserves the original failur
  assert.equal(typeof logs[0].data.durationMs,'number');
  assert.doesNotMatch(JSON.stringify(logs),/private SQL|token|message|stack/);
 });
+
+
+test('completed status suppresses active intervention without clearing historical incident', async(t)=>{
+ const {db,beginSql}=await fixture(t);const row=await beginSql(tx=>requestDeletion(tx,OWNER));
+ await db.query("update account_deletion_requests set incident=true,status='RETRY',phase='poker',accepted_at=clock_timestamp() where request_id=$1",[row.request_id]);
+ assert.equal((await beginSql(tx=>getDeletionStatus(tx,OWNER))).requiresIntervention,true);
+ await db.query("update account_deletion_requests set status='COMPLETED',phase='completed',completed_at=clock_timestamp() where request_id=$1",[row.request_id]);
+ const state=await beginSql(tx=>getDeletionStatus(tx,OWNER));
+ assert.equal(state.completed,true);assert.equal(state.requiresIntervention,false);assert.equal(state.retryable,false);
+ const [saved]=(await db.query('select * from account_deletion_requests where request_id=$1',[row.request_id])).rows;
+ assert.equal(saved.incident,true);
+});

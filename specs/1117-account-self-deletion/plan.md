@@ -55,3 +55,50 @@ DBfalse/requests terminal and Netlify branchOFF verified on6ad8ac5e86ce1c2d1e5c9
 ## Closure verified —21 October
 
 Owner root restored the exact protected OFF baseline; fresh WS Preview process20592/LIVE/health/browser Auth+WS and unchanged USER/CH/claims verified. DBfalse, requests terminal, NetlifyOFF6ad8ac5e86ce1c2d1e5c96ee. Retired ONLY detached ON6ad8913597cbf65ecb017f0a (204, metadata/functions404), aliases and Production unchanged. No further operator action or worker recovery is pending. Remaining signup/retention/presentation findings still require review before merge; this closure documentation does not change verified runtime503be776.
+
+## Review plan: Poker privacy projection (NOT implemented; separate GO)
+
+Scope: remove the deleted UUID from operational `poker_seats`, `poker_state` and nullable `poker_tables.created_by`; keep table rows, other players, ledger/entries/escrow, registry, durable `poker_requests.result_json` and archive hashes unchanged. Prefer exact owner-field removal over inventing a reusable anonymous player identity. Current private read-only audit proves TWO fixture tables CLOSED/HAND_DONE/handId empty/ESCROW0/no ACTIVE seats/no pending requests; both created_by also equal old subject. One snapshot contains subject in seats+handSeats and five owner-keyed maps, the other only seats. No FK exists from seats/state to Auth; their only FK is table_id→poker_tables CASCADE. Deleting the WHOLE table is therefore prohibited: it would destroy other players' data and bypass established retention.
+
+Proposed files after approval: `ws-server/poker/runtime/account-deletion.mjs` (bounded cleanup after retirement and before Auth), `ws-server/server.mjs` (reuse enqueueTableCommand/restoreTableFromPersisted), existing table manager coordination, existing local deletion tests. No new service/table/worker/migration proposed unless implementation proves a missing necessary guard. This section defines queries, not permission to execute them.
+
+Runtime discipline: serialize each table through existing `enqueueTableCommand`, then DB table lock→lifecycle lock→assert actual cleanup lease. Use canonical persisted state/version; after successful commit use existing `restoreTableFromPersisted` for cached tables so members/presence/profile/action-result caches cannot write the old projection back. Never only patch SQL underneath live RAM. Unloaded closed repair candidates can instead use existing beginTableRetirement/endTableRetirement to prevent bootstrap while CAS runs; skip loaded/pending-bootstrap candidates, do not evict other players. Preserve existing financial/account lock ordering; no financial UPDATE is needed.
+
+Normal path requires real walletRetirement receipt and current owner/request/generation cleanup lease. Recheck canonical Leave/cashout completion, no owned stack/deferred rights, no unfinished ACT/settlement. For the proven CLOSED case require HAND_DONE, empty handId, exact active ESCROW0, no active seat and no unresolved table request. OPEN tables must NOT wait for global escrow0/table closure (other players legitimately hold CH): only scrub after this UUID is absent from the current hand/stack/contribution/pending-detach rights, with authoritative queue+version and other-player conservation verified. If current-hand ownership or settlement is uncertain, retry canonical Leave/rollover; never remove an all-in participant or synthesize a cashout. The OPEN branch needs its own fundamental regression before this cleanup is called complete.
+
+Discovery uses $1 deleted_uuid; per-table query contract is $1 table_id, $2 deleted_uuid, $3 old_version, $4 old_state, $5 generated_new_state:
+
+```sql
+-- Discover candidates for this UUID only. Actual fixture IDs stay private.
+select distinct t.id from public.poker_tables t
+left join public.poker_state s on s.table_id=t.id
+where t.created_by=$1 or exists(select 1 from public.poker_seats p where p.table_id=t.id and p.user_id=$1)
+   or strpos(s.state::text,$1::text)>0 order by t.id;
+-- Per candidate, lock table first; then call existing lifecycle/lease guards.
+select id,status,created_by from public.poker_tables where id=$1 for update;
+select version,state from public.poker_state where table_id=$1 for update;
+select status,stack,leave_after_hand from public.poker_seats where table_id=$1 and user_id=$2;
+select balance,status from public.chips_accounts where account_type='ESCROW' and system_key='POKER_TABLE:'||$1::text;
+select count(*) from public.poker_requests where table_id=$1 and result_json is null;
+```
+
+Projection is pure and field-aware: filter ONLY entries with userId=$2 from seats/handSeats, retaining order and every other element; remove ONLY key$2 from known owner maps (observed foldedByUserId, missedTurnsByUserId, contributionsByUserId, handStartStacksByUserId, lastBettingRoundActionByUserId; other current schema maps require explicit audited rules). Preserve absent fields/types rather than creating defaults. Do not recalculate pots, payouts, other-player stack/contributions, phase, handId or seat numbers. Require no remaining occurrence of the UUID anywhere in projected JSON; an unknown/embedded reference is NO-GO, not blanket text replacement. Shared terminal snapshot is no longer a full departed-player presentation; immutable financial/audit evidence remains authoritative for historical totals.
+
+```sql
+-- Same transaction, AFTER above safety checks. Exactly one row or rollback.
+update public.poker_state set state=$5::jsonb,version=version+1,updated_at=clock_timestamp()
+where table_id=$1 and version=$3 and state=$4::jsonb
+  and strpos(($5::jsonb)::text,$2::text)=0 returning version;
+-- Only this owner's settled seat; retry permits already absent with proven state.
+delete from public.poker_seats where table_id=$1 and user_id=$2
+  and status='INACTIVE' and stack=0 returning table_id;
+update public.poker_tables set created_by=null where id=$1 and created_by=$2 returning id;
+-- Postchecks: owner seat/creator/state references zero; all other seat rows and
+-- the non-owner JSON projection equal the locked originals; CH/registry unchanged.
+```
+
+Keep `poker_tables.updated_at`, has_human_participant and retention markers unchanged; no accelerated archive/prune/table deletion. Skip state UPDATE entirely on an already-clean identical projection and absent owner seat/creator; retries must not keep incrementing version. Record actual table/version/hash cleanup observations in existing request progress only after committed successful effects; normal Auth-last must require that real privacy-cleanup result. Before normal Auth-last, re-read candidate closure/no owner references; missing or unexpected state, CAS loss or cache-sync failure blocks progress. No receipt alone substitutes for SQL/cache proof.
+
+Completed fixture repair is a SEPARATE GO: exact old owner/request + exact TWO audited tables, DB/Netlify/WS remainOFF. Reuse the reviewed pure projection/CAS queries under real runtime retirement claims; lock and verify original COMPLETED request, old Auth absent, immutable BURN/registry receipt and retired USER0. No fake lease, no reopening/resetting completed request or BURN/Auth retry. Save protected before/after state/version and unrelated-player/finance digests; update only truthful supplemental privacy-cleanup observations if needed, leaving original completion/incident/financial receipts intact. Changed candidate set/state/version, loaded unsafe table or financial discrepancy means STOP. Do not execute ad-hoc hand-written JSON repairs. A lost response is reconciled by reread of exact rows/versions; never restore an old snapshot over newer state.
+
+Fundamental tests proposed BEFORE implementation: the two closed shapes and idempotent repeat; OPEN table with other users' positive escrow and no deleted-user rights; active all-in/pending settlement rejection; stale CAS/cache rehydration; identical other-player state and unchanged ledger/registry; completed-request repair without lease/status/finance edits. Broader retention/history rules remain unchanged.

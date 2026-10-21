@@ -402,3 +402,12 @@ Local verification for window preparation:13 Python window/configuration tests,7
 - [x] USER fingerprint/peer balances/claims18/totalCH300/unbalanced0 unchanged. Resumed bot-only activity remains balanced, no human/pending settlement interrupted.
 - [x] ONLY ON6ad8913597cbf65ecb017f0a retired204 after publish/branches/split/alias/fallback checks; metadata/immutable root/functions404, active OFF alias/Production unchanged. Retain OFF6ad8ac5e86ce1c2d1e5c96ee and private backups/receipts.
 - [ ] T07b full E2E remainsOPEN for real same-email re-registration after signupHTTP400; historical seat data disposition and completed+incident status presentation remain review findings. No new activation/destructive action authorized by closure.
+
+## Review follow-up (no environment writes)
+
+- [x] Read-only provider logs confirm signup400/email_address_invalid on pinned Stage; audit SDK redirect versus direct harness (no redirect). No retries/Admin workaround.
+- [x] Audit exact two states/seats, dependencies and caches; discover both table.created_by references. Save private evidence; define field-aware per-UUID projection/CAS and repair safety in plan.md.
+- [x] Local deletionStatus hides active-intervention flag for COMPLETED while preserving DBincident; one fundamental red/green PGlite test.
+- [ ] Separate GO BEFORE implementing/executing Poker privacy cleanup. Preserve active all-in, other users, table history/finance/idempotency and RAM/SQL consistency; include OPEN-table/positive peer escrow case, not CLOSED-only blocking.
+- [ ] Separate bounded repair GO for original COMPLETED fixture request: exact TWO audited tables, no phase/lease reset, no new request/BURN/Auth action. All flags remainOFF.
+- [ ] Full E2E requires supported deliverable identity signup first, real post-delete new UUID/login/Welcome once, no inherited state, zero residual operational UUID in seats/state/created_by, control/financial invariants and correct COMPLETED status presentation. Financial/audit retention exceptions remain explicit. Google/email delivery cannot be silently markedPASS.

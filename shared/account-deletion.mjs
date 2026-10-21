@@ -52,7 +52,7 @@ export async function requestDeletion(tx, userId) {
 export function deletionStatus(row) {
   if (!row) return null;
   return { requestId: row.request_id, status: row.status, phase: row.phase,
-    accepted: row.accepted_at != null, completed: row.status === 'COMPLETED', requiresIntervention: row.incident === true,
+    accepted: row.accepted_at != null, completed: row.status === 'COMPLETED', requiresIntervention: row.incident === true && row.status !== 'COMPLETED',
     retryable: !['ERROR', 'COMPLETED'].includes(row.status) };
 }
 
