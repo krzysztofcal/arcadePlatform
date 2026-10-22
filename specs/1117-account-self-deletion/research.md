@@ -1072,3 +1072,8 @@ Production is NOT activated by this change. Before any Production apply: prepare
 
 
 Read-only observation supporting the risk decision: 2026-10-22 09:06 UTC, Production had zero upload manifests and pending objects, with one existing public avatar linked to a current profile. Available provider storage/edge logs for 06:55–09:05 UTC contained zero avatar/signing requests. These observations do not prove historical capability completeness. No fake historical cutoff is inferred from them. Local validation: 19 Storage behavior tests PASS with `XP_TEST_MODE=1`; syntax, CSP, migration manifest and lifecycle/badge/XP guards PASS. Remote rollout and CI remain separate evidence.
+
+
+### P4 prepared Production release (review #1132)
+
+See [production-activation.md](production-activation.md) for actual Production66 authority evidence, exact Production-equivalent SQL/hash, isolated PostgreSQL verification, minimal protected ON/OFF proposal, ordered release and forward-fix. Production migration is now prepared locally, not applied. The protected Production operator is a proposal requiring implementation/review and root installation, not an existing tested activation path. No remote changes or readiness metadata are made. Historical P2/P3 before-merge instructions are superseded by their accepted PASS and merged #1124; T07b remains closed PASS.

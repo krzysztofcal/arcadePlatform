@@ -1,3 +1,5 @@
+> Current status: P2 schema66 and P3 disabled Production deployment are accepted PASS; #1124 merged as 5c80f968. This file preserves historical evidence. For the current #1132 optional-wait waiver and P4 activation prerequisites use [production-activation.md](production-activation.md). No activation is implied.
+
 # Production compatibility before merge — #1117 / #1124
 
 **Status:** P2 Production schema readiness PASS on21October2026 under owner exact-file GO; merge/deploy/feature activation remain NOT authorized. The earlier P0/P1/P2 handoff below is historical; actual P2 result follows at the end. Read-only audit21October2026; feature/runtime baseline `6b464afd0244391dfe8d3c01585fd3869f655ab6`, main `8e7d4ef934cb188564aeb81c1b812cec54e7e240`. T07b PASS is closed; no repeat Poker/E2E requested. Only local disposable PostgreSQL fixture mutations were authorized and executed. No shared-environment mutation is authorized by this document. No skip-CI/skip-deploy merge workaround.

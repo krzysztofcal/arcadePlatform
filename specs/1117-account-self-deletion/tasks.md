@@ -1,3 +1,15 @@
+## Current gate — P4 Production activation preparation (#1132)
+
+P2/P3 and T07b remain PASS; #1124 is merged. Earlier before-merge checkpoints below are historical, not pending reset or repeat-E2E instructions. [Current ordered release and protected ON/OFF proposal](production-activation.md).
+
+- [x] PA1 Read-only Production66 ACL/RLS/role/RPC audit: only privileged operator can write cutover acceptance; runtime service_role cannot.
+- [x] PA2 Prepare forward-only Production equivalent, manifest provenance and bounded identity/catalog/lock guards; no remote application.
+- [x] PA3 Test isolated Production66→67, rollback/drift, unchanged finance/routines/ACL/triggers/RLS and runtime denial; update full-process fixture schema.
+- [x] PA4 Specify minimal protected Production operator/preflight change, ordered tracking→v3→readiness→runtime flags→DB admission and recovery-safe OFF.
+- [ ] PA5 Separate GO: implement/review/install protected Production-only ON/OFF helper/operator and fundamental interruption tests; current helper still refuses ON.
+- [ ] PA6 Separate exact-file Production67 apply/backup/preflight, authorized Stage source application, owner merge and exact-SHA deployment OFF; no automatic apply implied.
+- [ ] PA7 Separate activation GO: real Production Storage/Redis readiness and risk acceptance, tracking before guards, protected runtime flags, DB release LAST; bounded owner-authorized monitoring.
+
 ## Current gate — Production compatibility before standard merge
 
 T07b PASS is CLOSED. No additional functional/Poker tests. P1 local Production-equivalent/harness PASS; no remote application. [Reviewed read-only plan](production-compatibility.md); P1 local implementation is authorized/completed; no shared-environment apply authorized.

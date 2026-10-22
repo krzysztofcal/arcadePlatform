@@ -1160,6 +1160,17 @@
         "20261020094224",
         "20261020190000"
       ]
+    },
+    {
+      "file": "20261022091126_account_avatar_known_capability_policy.sql",
+      "sha256": "f75258ec5e5c378df62ec1bc0fb1ff08b74dfc93158c48ac211e8e879c5bfd3d",
+      "purpose": "#1132 optional owner-accepted fixed global avatar wait waiver; schema-only after Production 66, no acceptance or activation",
+      "prerequisites": [
+        "20261021191104_account_deletion_production_compatibility.sql"
+      ],
+      "source_versions": [
+        "20261022091126"
+      ]
     }
   ],
   "provenance_rules": [
