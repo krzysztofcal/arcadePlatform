@@ -227,3 +227,22 @@ Ready for owner review after final CI; this is not authorization to merge, deplo
 ### Production P2 result —21October2026
 
 Exact approved equivalent20261021191104 applied once at19:50:36UTC, reviewedSHA5036a5977b8c9572556830fa08dc8cc87589ff232270a6cb6d58064a7b429b3e; actual history65→66. Schema/ACL/retention/campaign counters and read-only old-runtime smoke PASS. Protected backup/evidence retained; normal bot-only financial deltas fully reconciled, USER/history unchanged. Deletion/tracking remainOFF,avatar-v3DISABLED; Netlify/WS remain82aee39d without restart/deploy. See [P2 evidence](production-compatibility.md). Do NOT repeat apply or run a migration directory. P3 standard merge/deploy and P4 activation require separate owner GO; no push/merge/deploy/Stage change authorized in P2. T07b remainsPASS.
+
+
+### Production activation policy update (2026-10-22)
+
+Owner accepts unobserved previously issued avatar capabilities. A truthful, privileged cutover acceptance may waive only the fixed global 7200-second delay; every known `capability_until`, uncertain operation, ownership, receipt and lease guard remains mandatory. Existing markers without acceptance retain the original wait. See `research.md`, section “Production activation: owner-accepted unobserved capability risk”.
+
+Local implementation: `20261022091126_account_avatar_known_capability_policy.sql` and `private.account_avatar_safe_after(marker)`. No remote apply, acceptance marker or activation has occurred. Production-equivalent SQL after history 66 and a reviewed protected Production ON/OFF procedure are still prerequisites. Current protected Production preflight refuses ON; do not bypass it. New changes must be reviewed separately because #1124 is already merged. Default behavior remains OFF.
+
+
+### P4 prepared Production release (review #1132)
+
+See [production-activation.md](production-activation.md) for actual Production66 authority evidence, exact Production-equivalent SQL/hash, isolated PostgreSQL verification, minimal protected ON/OFF proposal, ordered release and forward-fix. Production migration is now prepared locally, not applied. The protected Production operator is a proposal requiring implementation/review and root installation, not an existing tested activation path. No remote changes or readiness metadata are made. Historical P2/P3 before-merge instructions are superseded by their accepted PASS and merged #1124; T07b remains closed PASS.
+
+
+### P4 protected Production window — implemented locally, not installed
+
+Owner accepted the existing postgres backend trust boundary; acceptance remains an operational action with no new HTTP/RPC setter. `infra/vps/production-deletion-window.py` now reuses SecureFiles and anchors OFF to the committed root Redis-cutover receipt, deriving only deletion flag + Production marker ON. Updated Production preflight accepts ON only with the protected manifest/whole-file derivation and existing exact DB/LIVE Redis checks. Existing Stage/Redis operators and sudoers are unchanged. Python20/Node20 local tests cover interruption/restore/drift; no protected VPS or environment mutation occurred. Exact reviewed hashes, one-line FUTURE-GO installation/activation/restore and release order are in [production-activation.md](production-activation.md).
+
+Production SQL67 (unchanged hash) must be applied and verified before deploying runtime using `private.account_avatar_safe_after`. OFF-only protected helper preparation may occur earlier; migration67, merge/deploy, tracking/guard/readiness and activation each retain their explicit GO gates. Do not infer activation from successful installation or CI.

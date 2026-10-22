@@ -1058,3 +1058,32 @@ Ready for owner review after final CI; this is not authorization to merge, deplo
 ### Production P2 result —21October2026
 
 Exact approved equivalent20261021191104 applied once at19:50:36UTC, reviewedSHA5036a5977b8c9572556830fa08dc8cc87589ff232270a6cb6d58064a7b429b3e; actual history65→66. Schema/ACL/retention/campaign counters and read-only old-runtime smoke PASS. Protected backup/evidence retained; normal bot-only financial deltas fully reconciled, USER/history unchanged. Deletion/tracking remainOFF,avatar-v3DISABLED; Netlify/WS remain82aee39d without restart/deploy. See [P2 evidence](production-compatibility.md). Do NOT repeat apply or run a migration directory. P3 standard merge/deploy and P4 activation require separate owner GO; no push/merge/deploy/Stage change authorized in P2. T07b remainsPASS.
+
+
+### Production activation: owner-accepted unobserved capability risk (2026-10-22)
+
+The owner explicitly accepts the risk of unobserved previously issued avatar upload links. This supersedes the unconditional global 7200-second waiting requirement only when the existing cutover inventory is verified and a trusted operator records the actual acceptance timestamp in `private.avatar_tracking_cutover.unobserved_capability_risk_accepted_at`. No acceptance is inserted by the migration. Existing rows without acceptance retain the original wait. Never backdate a cutoff or treat absence of manifest rows as proof that no historical capability existed.
+
+`20261022091126_account_avatar_known_capability_policy.sql` adds the optional timestamp and central `private.account_avatar_safe_after(marker)` calculation. Both cleanup and the three SQL reconciliation/purge predicates use it. Every known `capability_until`, uncertain signing/output, ownership, real DELETE/absence verification and owner/request/lease check remains mandatory. No provider evidence or receipts are synthesized. This accepted residual risk is distinct from #1128's previously accepted invisible post-expiry completion limitation.
+
+Local regression evidence: verified empty inventory may proceed without the fixed wait after recorded acceptance; a known future capability still waits; a genuinely unfinished output still blocks; missing verified inventory and invalid leases still refuse purge.
+
+Production is NOT activated by this change. Before any Production apply: prepare/review an exact-file Production-equivalent migration after history 66, preserve migration 66 unchanged, verify function definitions/ACL and flags OFF, and obtain authorization for that exact SQL. Before ON: install/review a protected Production-only activation procedure and preflight supporting an auditable ON state. The current Production preflight intentionally accepts deletion OFF only; do not bypass it or reuse the Stage/Redis operator. Then establish real Redis/Storage release metadata, deploy matching code with deletion OFF, enable supported tracking/guards in the documented order, and enable DB release LAST. DB release=false blocks new requests without stopping recovery of accepted ones. No local test proves remote deployment or activation.
+
+
+Read-only observation supporting the risk decision: 2026-10-22 09:06 UTC, Production had zero upload manifests and pending objects, with one existing public avatar linked to a current profile. Available provider storage/edge logs for 06:55–09:05 UTC contained zero avatar/signing requests. These observations do not prove historical capability completeness. No fake historical cutoff is inferred from them. Local validation: 19 Storage behavior tests PASS with `XP_TEST_MODE=1`; syntax, CSP, migration manifest and lifecycle/badge/XP guards PASS. Remote rollout and CI remain separate evidence.
+
+
+### P4 prepared Production release (review #1132)
+
+See [production-activation.md](production-activation.md) for actual Production66 authority evidence, exact Production-equivalent SQL/hash, isolated PostgreSQL verification, minimal protected ON/OFF proposal, ordered release and forward-fix. Production migration is now prepared locally, not applied. The protected Production operator is a proposal requiring implementation/review and root installation, not an existing tested activation path. No remote changes or readiness metadata are made. Historical P2/P3 before-merge instructions are superseded by their accepted PASS and merged #1124; T07b remains closed PASS.
+
+
+Final authority audit correction (22 October 2026): service_role API credentials cannot mutate cutover, but the actual Production application DB connection uses postgres and can UPDATE it. No existing HTTP/RPC setter was found. Strict operator-only database identity is therefore NOT established; see the explicit owner decision and alternatives in production-activation.md. Do not interpret the API-role ACL tests as protection against privileged backend SQL.
+
+
+### P4 protected Production window — implemented locally, not installed
+
+Owner accepted the existing postgres backend trust boundary; acceptance remains an operational action with no new HTTP/RPC setter. `infra/vps/production-deletion-window.py` now reuses SecureFiles and anchors OFF to the committed root Redis-cutover receipt, deriving only deletion flag + Production marker ON. Updated Production preflight accepts ON only with the protected manifest/whole-file derivation and existing exact DB/LIVE Redis checks. Existing Stage/Redis operators and sudoers are unchanged. Python20/Node20 local tests cover interruption/restore/drift; no protected VPS or environment mutation occurred. Exact reviewed hashes, one-line FUTURE-GO installation/activation/restore and release order are in [production-activation.md](production-activation.md).
+
+Production SQL67 (unchanged hash) must be applied and verified before deploying runtime using `private.account_avatar_safe_after`. OFF-only protected helper preparation may occur earlier; migration67, merge/deploy, tracking/guard/readiness and activation each retain their explicit GO gates. Do not infer activation from successful installation or CI.

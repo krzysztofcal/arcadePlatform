@@ -1,3 +1,17 @@
+## Current gate — P4 Production activation preparation (#1132)
+
+P2/P3 and T07b remain PASS; #1124 is merged. Earlier before-merge checkpoints below are historical, not pending reset or repeat-E2E instructions. [Current ordered release and protected ON/OFF proposal](production-activation.md).
+
+- [x] PA1 Read-only Production66 ACL/RLS/role/RPC audit: API roles cannot write acceptance, but actual backend shares postgres owner identity; strict operator-only isolation is NOT proven.
+- [x] PA2 Prepare forward-only Production equivalent, manifest provenance and bounded identity/catalog/lock guards; no remote application.
+- [x] PA3 Test isolated Production66→67, rollback/drift, unchanged finance/routines/ACL/triggers/RLS and API-role denial; update full-process fixture schema.
+- [x] PA4 Specify minimal protected Production operator/preflight change, ordered tracking→v3→readiness→runtime flags→DB admission and recovery-safe OFF.
+- [x] PA4b Owner accepts existing trusted-backend postgres boundary; no new DB role/HTTP/RPC setter or claim of strict backend isolation.
+- [x] PA5a Local Production-only ON/OFF operator and protected preflight implemented; existing SecureFiles, anchored OFF, exact derived ON, atomic backup/journal/lock and interruption tests. No installation.
+- [ ] PA5b Separate root GO: install reviewed bundle, dry-run/prepare/verify OFF and LIVE; no activation or restart implied.
+- [ ] PA6 Separate exact-file Production67 apply/backup/preflight, authorized Stage source application, owner merge and exact-SHA deployment OFF; no automatic apply implied.
+- [ ] PA7 Separate activation GO: real Production Storage/Redis readiness and risk acceptance, tracking before guards, protected runtime flags, DB release LAST; bounded owner-authorized monitoring.
+
 ## Current gate — Production compatibility before standard merge
 
 T07b PASS is CLOSED. No additional functional/Poker tests. P1 local Production-equivalent/harness PASS; no remote application. [Reviewed read-only plan](production-compatibility.md); P1 local implementation is authorized/completed; no shared-environment apply authorized.
@@ -522,3 +536,10 @@ Ready for owner review after final CI; this is not authorization to merge, deplo
 - [ ] Owner supplies current CHIPS_INTEGRATION_ENABLED absent/0 evidence, or separately authorizes reviewed target/fixture; API403/current condition unknown.
 - [ ] Owner selects standard merge+automatic OFF deployment(recommended) or temporary strict merge-only pause; no skip-token/protection bypass.
 - [ ] After separate GO: exact mergeSHA deployments,nonfinancial smoke,recovery verification; Production activation remains independentP4.
+
+
+### Production activation policy update (2026-10-22)
+
+Owner accepts unobserved previously issued avatar capabilities. A truthful, privileged cutover acceptance may waive only the fixed global 7200-second delay; every known `capability_until`, uncertain operation, ownership, receipt and lease guard remains mandatory. Existing markers without acceptance retain the original wait. See `research.md`, section “Production activation: owner-accepted unobserved capability risk”.
+
+Local implementation: `20261022091126_account_avatar_known_capability_policy.sql` and `private.account_avatar_safe_after(marker)`. No remote apply, acceptance marker or activation has occurred. Production-equivalent SQL after history 66 and a reviewed protected Production ON/OFF procedure are still prerequisites. Current protected Production preflight refuses ON; do not bypass it. New changes must be reviewed separately because #1124 is already merged. Default behavior remains OFF.

@@ -32,3 +32,20 @@ Only fundamental tests, existing packages, JSP-compatible frontend, klog, CSP ha
 ## Reviewed acceptance clarification
 
 Completed requests retain historical incident in durable storage but status API requiresIntervention=false and retryable=false. Operational Poker seats/state/table.creator must not retain the deleted UUID after the planned privacy cleanup; other players and immutable accounting/idempotency/archive evidence remain protected by existing retention rules. This cleanup is not yet implemented/authorized. Real full E2E must use a provider-accepted disposable identity and prove actual same-email new UUID/Welcome, not substitute Admin creation for rejected signUp.
+
+
+### Production activation policy update (2026-10-22)
+
+Owner accepts unobserved previously issued avatar capabilities. A truthful, privileged cutover acceptance may waive only the fixed global 7200-second delay; every known `capability_until`, uncertain operation, ownership, receipt and lease guard remains mandatory. Existing markers without acceptance retain the original wait. See `research.md`, section “Production activation: owner-accepted unobserved capability risk”.
+
+Local implementation: `20261022091126_account_avatar_known_capability_policy.sql` and `private.account_avatar_safe_after(marker)`. No remote apply, acceptance marker or activation has occurred. Production-equivalent SQL after history 66 and a reviewed protected Production ON/OFF procedure are still prerequisites. Current protected Production preflight refuses ON; do not bypass it. New changes must be reviewed separately because #1124 is already merged. Default behavior remains OFF.
+
+
+### P4 prepared Production release (review #1132)
+
+See [production-activation.md](production-activation.md) for actual Production66 authority evidence, exact Production-equivalent SQL/hash, isolated PostgreSQL verification, minimal protected ON/OFF proposal, ordered release and forward-fix. Production migration is now prepared locally, not applied. The protected Production operator is a proposal requiring implementation/review and root installation, not an existing tested activation path. No remote changes or readiness metadata are made. Historical P2/P3 before-merge instructions are superseded by their accepted PASS and merged #1124; T07b remains closed PASS.
+
+
+### P4 protected window implementation update
+
+The owner explicitly accepts the existing privileged postgres backend trust boundary. The Production-only file operator and manifest-aware preflight are implemented/tested locally; they are not installed. No new DB role or HTTP/RPC acceptance setter is added. See production-activation.md for exact bundle hashes, permissions, interruption recovery and future-GO commands. Known-upload checks and the SQL67-before-runtime dependency remain mandatory. Installation/activation/deployment require separate authorization.

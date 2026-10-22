@@ -49,6 +49,7 @@ async function fixture(balance=75) {
     await db.exec(await readFile(new URL('../supabase/migrations/20261019170000_account_avatar_manifest_guards.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261020082604_account_avatar_mvp_closure.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261020094224_account_avatar_reconciliation.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261022091126_account_avatar_known_capability_policy.sql',import.meta.url),'utf8'));
     await db.exec(`alter table bonus_campaigns add column max_total_claims bigint;
       alter table bonus_claims add column transaction_id uuid;
       create table private.bonus_campaign_paid_totals(campaign_id uuid primary key,paid_count bigint);

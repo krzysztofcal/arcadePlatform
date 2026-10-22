@@ -470,3 +470,11 @@ test('V3 production gate denies legacy, foreign namespace, missing credentials a
     assert.equal(runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>true,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}),'PASS LIVE Redis V3 prod');
   });
 });
+
+
+test('ON cannot skip the LIVE V3 gate and duplicate flags are refused', () => {
+  assert.throws(() => parseEnv('ACCOUNT_DELETION_ENABLED=0\nACCOUNT_DELETION_ENABLED=1\n'),/duplicate/);
+  withTempEnvFile(validEnvContent({ACCOUNT_DELETION_ENABLED:'1'}),envFile => {
+    assert.throws(() => runPreflight({envFile,allowTestUid:true,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}),/LIVE V3 gate/);
+  });
+});

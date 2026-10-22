@@ -29,7 +29,7 @@ export async function assertProductionDeletionCompatibility({runMigration,migrat
  await sql.unsafe('drop function public.poker_bot_pool_refill_hourly()');
  for(const v of ['20261011200000','20261012095657'])await runMigration(sql,migrationFiles.find(f=>f.startsWith(v+'_')));
  const manifest=JSON.parse(fs.readFileSync('supabase/production-migrations/manifest.json'));
- const versions=[...manifest.baseline_applied.map(x=>x.version),...manifest.replacement_migrations.filter(x=>x.file!==files[0]).map(x=>x.file.split('_')[0]),'20261011200000','20261012095657'];
+ const versions=[...manifest.baseline_applied.map(x=>x.version),...manifest.replacement_migrations.filter(x=>x.file.split('_')[0]<'20261021191104').map(x=>x.file.split('_')[0]),'20261011200000','20261012095657'];
  await sql`insert into supabase_migrations.schema_migrations(version) select unnest(${versions}::text[]) on conflict do nothing`;
  assert.equal(Number((await sql`select count(*) n from supabase_migrations.schema_migrations`)[0].n),65);
  const current={claimBonusCampaign,claimWelcomeBonus,createPendingUpload,finalizeAvatar};
@@ -126,6 +126,60 @@ export async function assertProductionDeletionCompatibility({runMigration,migrat
  await sql.begin(async tx=>{await tx.unsafe("create function public.compat_unknown_delete() returns trigger language plpgsql as $$begin return old;end$$;create trigger compat_unknown before delete on chips_accounts for each row execute function public.compat_unknown_delete()");assert.equal((await tx.unsafe('select '+predicate+' bad'))[0].bad,true);throw Object.assign(new Error('fixture rollback'),{fixtureRollback:true});}).catch(e=>{if(!e.fixtureRollback)throw e;});
  assert.equal(Number((await sql`select count(*) n from (select transaction_id from chips_entries group by transaction_id having sum(amount)<>0)x`)[0].n),0);
  await assert.rejects(()=>sql.unsafe(migration),/migration history drift/);await sql.unsafe('rollback');
+ // #1132: one forward-only schema-only equivalent against the reconstructed Production 66.
+ const policyFile='20261022091126_account_avatar_known_capability_policy.sql';
+ const policy=fixtureSQL(policyFile);
+ const catalog=async()=>normalize({
+  routines:await sql`select p.oid::regprocedure::text signature,pg_get_functiondef(p.oid) definition,pg_get_userbyid(p.proowner) owner,p.proacl::text acl from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname in ('public','private') and p.prokind in ('f','p') order by 1`,
+  triggers:await sql`select tgrelid::regclass::text relation,tgname,tgenabled,pg_get_triggerdef(oid) definition from pg_trigger where not tgisinternal order by 1,2`,
+  policies:await sql`select * from pg_policies where schemaname in ('public','private') order by schemaname,tablename,policyname`,
+  relations:await sql`select c.oid::regclass::text relation,pg_get_userbyid(c.relowner) owner,c.relacl::text acl,c.relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','private') order by 1`
+ });
+ const policyBefore=await catalog(),financeBefore=await snapshot();
+ await assert.rejects(()=>sql.unsafe(policy),/identity\/confirmation mismatch/);await sql.unsafe('rollback');
+ await sql.unsafe("set chips.production_avatar_risk_confirmation='INSTALL AVATAR KNOWN CAPABILITY POLICY otbqfijerkieoxwpxjnm'");
+ const signature='private.account_avatar_prepare_purge(uuid,uuid,bigint,text)';
+ const original=policyBefore.routines.find(r=>r.signature===signature).definition;
+ await sql.begin(async tx=>{
+  await tx.unsafe(original.replace('declare','declare /* fixture drift */'));
+  await assert.rejects(()=>tx.savepoint(sp=>sp.unsafe(policy.replace(/^begin;$/m,'').replace(/^commit;$/m,''))),/function drift/);
+  await tx.unsafe(original);
+ });
+ await assert.rejects(()=>sql.unsafe(policy.replace(/^commit;$/m,'select 1/0;commit;')),error=>error.code==='22012');await sql.unsafe('rollback');
+ assert.deepEqual(await catalog(),policyBefore);assert.deepEqual(await snapshot(),financeBefore);
+ await sql.unsafe(policy);
+ const policyAfter=await catalog();
+ assert.deepEqual(policyAfter.triggers,policyBefore.triggers);assert.deepEqual(policyAfter.policies,policyBefore.policies);assert.deepEqual(policyAfter.relations,policyBefore.relations);
+ assert.deepEqual(await snapshot(),financeBefore);
+ const substitutions=new Map([
+  ['private.account_avatar_manifest_reconciled(uuid,uuid,uuid)',["c.cutover_at+interval '7200 seconds'<=clock_timestamp()","private.account_avatar_safe_after(c.marker)<=clock_timestamp()"]],
+  ['private.account_avatar_reconciliation_plan(uuid,uuid,bigint,text)',["cut.cutover_at+interval '7200 seconds'>clock_timestamp()","coalesce(private.account_avatar_safe_after(marker_key)>clock_timestamp(),true)"]],
+  [signature,["cut.cutover_at+interval '7200 seconds'>clock_timestamp()","coalesce(private.account_avatar_safe_after(marker_key)>clock_timestamp(),true)"]]
+ ]);
+ for(const routine of policyBefore.routines){
+  const expected={...routine};const patch=substitutions.get(routine.signature);if(patch)expected.definition=expected.definition.replace(...patch);
+  assert.deepEqual(policyAfter.routines.find(r=>r.signature===routine.signature),expected,'only the three exact time predicates may change; ownership/ACL remain identical');
+ }
+ assert.equal(policyAfter.routines.length,policyBefore.routines.length+1);
+ for(const role of ['anon','authenticated','service_role']){
+  const [rights]=await sql`select has_column_privilege(${role},'private.avatar_tracking_cutover','unobserved_capability_risk_accepted_at','UPDATE') can_update,has_table_privilege(${role},'private.avatar_tracking_cutover','INSERT,UPDATE,DELETE,TRUNCATE') can_write`;
+  assert.deepEqual(rights,{can_update:false,can_write:false});
+  await sql.begin(async tx=>{
+   await tx.unsafe('set local role '+role);
+   await assert.rejects(()=>tx.savepoint(sp=>sp.unsafe("update private.avatar_tracking_cutover set unobserved_capability_risk_accepted_at=statement_timestamp()")),error=>error.code==='42501');
+   if(role!=='service_role')await assert.rejects(()=>tx.savepoint(sp=>sp.unsafe("select private.account_avatar_safe_after('fixture')")),error=>error.code==='42501');
+  });
+ }
+ await sql`insert into private.avatar_tracking_cutover(marker,cutover_at,legacy_inventory_verified,upload_bucket,public_bucket) values('policy-fixture',statement_timestamp(),true,'profile-avatar-uploads','profile-avatars')`;
+ assert.equal((await sql`select private.account_avatar_safe_after(marker)-cutover_at=interval '7200 seconds' delayed from private.avatar_tracking_cutover where marker='policy-fixture'`)[0].delayed,true);
+ await sql`update private.avatar_tracking_cutover set unobserved_capability_risk_accepted_at=statement_timestamp() where marker='policy-fixture'`;
+ assert.equal((await sql`select private.account_avatar_safe_after(marker)=cutover_at waived from private.avatar_tracking_cutover where marker='policy-fixture'`)[0].waived,true);
+ await sql`delete from private.avatar_tracking_cutover where marker='policy-fixture'`;
+ assert.equal(Number((await sql`select count(*) n from supabase_migrations.schema_migrations`)[0].n),67);
+ assert.equal((await sql`select enabled from public.account_deletion_release`)[0].enabled,false);
+ assert.equal((await sql`select tgenabled from pg_trigger where tgname='account_avatar_manifest_guard_v3'`)[0].tgenabled,'D');
+ await assert.rejects(()=>sql.unsafe(policy),/history drift/);await sql.unsafe('rollback');
+ process.stdout.write('[klog] production_avatar_policy '+JSON.stringify({history:67,changedTimePredicates:3,newReadOnlyFunction:1,financialHistoryUnchanged:true,existingAclTriggersRlsUnchanged:true,apiRolesCannotAcceptRisk:true,backendSharesOwnerPrincipal:true,deletion:false,avatarV3:'DISABLED'})+'\n');
  process.stdout.write('[klog] production_deletion_compatibility '+JSON.stringify({migration:true,history:66,oldRuntime:oldDir?'executed':'SQL writer contract',newRuntime:'executed',deletion:false,avatarV3:'DISABLED',historicalPromo:5,historyRepaid:0,financialHistoryUnchanged:true,wrapperUnchanged:true,rls:true,legacyAvatar:true,unknownTriggerRejected:true})+'\n');
  } finally {await sql.end({timeout:1});const oldDir=process.env.CHIPS_PRODUCTION_COMPAT_OLD_RUNTIME_DIR;if(oldDir){const admin=await import(pathToFileURL(path.join(oldDir,'netlify/functions/_shared/supabase-admin.mjs')));await admin.closeSql?.();}}
 }

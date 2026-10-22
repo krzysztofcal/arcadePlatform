@@ -35,7 +35,7 @@ export async function cleanupDeletionAvatars({ userId, requestId, generation, be
     const [guards] = await tx.unsafe('select private.account_avatar_guards_ready() as ready;');
     if (guards?.ready !== true) throw unavailable();
     const [cutover] = await tx.unsafe(`select *, clock_timestamp() as server_now,
-cutover_at + interval '7200 seconds' as safe_after
+private.account_avatar_safe_after(marker) as safe_after
 from private.avatar_tracking_cutover where marker=$1;`, [marker]);
     if (!cutover?.legacy_inventory_verified || cutover.upload_bucket !== UPLOAD || cutover.public_bucket !== OUTPUT) throw unavailable();
     const [safety] = await tx.unsafe(`select count(*) filter (where tracking_version is distinct from 3
