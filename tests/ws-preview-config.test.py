@@ -254,5 +254,110 @@ class DeletionWindow(unittest.TestCase):
         self.assertEqual(self.action('verify'), 'prepared')
 
 
+# Production has its own fixed operator; only filesystem primitives are shared.
+prod_spec = importlib.util.spec_from_file_location('prod_window', Path(__file__).parents[1] / 'infra/vps/production-deletion-window.py')
+prod = importlib.util.module_from_spec(prod_spec)
+prod_spec.loader.exec_module(prod)
+
+
+class ProductionDeletionWindow(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.env, self.helper = self.root / 'env', self.root / 'helper'
+        self.approval, self.directory = self.root / 'approval', self.root / 'window'
+        self.before = BASE.replace(b'krydukthwdvccggbyjfw', b'otbqfijerkieoxwpxjnm').replace(b'SUPABASE_STAGE_PROJECT_REF=', b'FIXTURE_PROJECT_REF=').replace(b'PORT=3001', b'PORT=3000') + b'ACCOUNT_DELETION_ENABLED=0\nXP_REDIS_VERSION=3\nXP_REDIS_ENV=prod\nXP_KEY_NS=kcswh:prod:xp:v3\nUPSTASH_REDIS_REST_URL=https://fixture.upstash.io\nUPSTASH_REDIS_REST_TOKEN=fixture-token\n'
+        self.env.write_bytes(self.before); self.env.chmod(0o600)
+        self.old = b'fixture old protected production helper'
+        self.helper.write_bytes(self.old); self.helper.chmod(0o755)
+        self.previous_pin = prod.OLD_HELPER
+        prod.OLD_HELPER = config.digest(self.old)
+        self.addCleanup(setattr, prod, 'OLD_HELPER', self.previous_pin)
+        # Actual preflight's old-helper pin is fixed; anchor pins the real reviewed hash.
+        self.record = {'version':1,'phase':'committed','after':{'prod':config.digest(self.before),'helper':prod.OLD_HELPER}}
+        self.approval.write_text(json.dumps(self.record)); self.approval.chmod(0o600)
+        self.files = prod.secure.SecureFiles(os.getuid(), os.getgid(), self.root)
+        self.new = (Path(__file__).parents[1] / 'infra/vps/ws-production-env-preflight.mjs').read_bytes()
+
+    def action(self, mode, files=None):
+        return prod.operate(mode,self.env,self.helper,self.approval,self.directory,self.new,files or self.files)
+
+    def preflight(self, good=True, live=True):
+        import subprocess
+        # The old helper bytes are synthetic; the approved baseline record is protected,
+        # while the new helper/module hash and all configuration derivation are real.
+        script = """import {runPreflight} from './infra/vps/ws-production-env-preflight.mjs';
+const [envFile,directory,anchor,helper,boundary]=process.argv.slice(1);
+try {runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>process.argv[6]==='1',querySystemIdentifier:()=> '7575202818581710058',protection:{directory,anchor,helper,boundary}});process.exit(0);}catch {process.exit(1);}"""
+        result = subprocess.run(['node','--input-type=module','-e',script,str(self.env),str(self.directory),str(self.approval),str(self.helper),str(self.root),'1' if live else '0'],cwd=Path(__file__).parents[1],capture_output=True)
+        self.assertEqual(result.returncode,0 if good else 1)
+
+    def test_off_on_exact_restore_and_only_two_keys_change(self):
+        self.assertEqual(self.action('dry-run'),'baseline'); self.assertFalse(self.directory.exists())
+        self.assertEqual(self.action('prepare'),'prepared'); self.assertEqual(self.env.read_bytes(),self.before)
+        self.preflight()
+        self.assertEqual(self.action('activate'),'on'); self.preflight(); self.preflight(False,live=False)
+        before, after = config.parse_env(self.before),config.parse_env(self.env.read_bytes())
+        changed={key for key in before.keys()|after.keys() if before.get(key)!=after.get(key)}
+        self.assertEqual(changed,{'ACCOUNT_DELETION_ENABLED','ACCOUNT_DELETION_AVATAR_TRACKING_MARKER'})
+        self.assertEqual(self.action('activate'),'on'); self.assertEqual(self.action('restore'),'off')
+        self.assertEqual(self.env.read_bytes(),self.before); self.preflight()
+        self.assertEqual(self.action('restore'),'off')
+
+    def test_missing_manifest_drift_and_forged_on_hash_are_denied(self):
+        self.env.write_bytes(prod.render_on(self.before)); self.preflight(False)
+        with self.assertRaises(prod.secure.Refused): self.action('activate')
+        self.env.write_bytes(self.before); self.action('prepare'); self.action('activate')
+        legitimate=self.env.read_bytes(); self.env.write_bytes(legitimate+b'OTHER=changed\n'); self.preflight(False)
+        with self.assertRaises(prod.secure.Refused): self.action('restore')
+        record=json.loads((self.directory/'manifest.json').read_text()); record['on']=config.digest(self.env.read_bytes())
+        (self.directory/'manifest.json').write_text(json.dumps(record)); self.preflight(False)
+        with self.assertRaises(prod.secure.Refused): self.action('verify')
+
+    def test_interrupted_activation_and_restore_fail_closed_then_resume(self):
+        self.action('prepare')
+        outer=self
+        class Interrupted(prod.secure.SecureFiles):
+            def atomic(self,path,*args,**kwargs):
+                super().atomic(path,*args,**kwargs)
+                if path==outer.env: raise OSError('fixture response loss after replace')
+        files=Interrupted(os.getuid(),os.getgid(),self.root)
+        for mode,terminal in [('activate','on'),('restore','off')]:
+            with self.assertRaises(OSError): self.action(mode,files)
+            with self.assertRaises(prod.secure.Refused): self.action('verify')
+            self.preflight(False)
+            self.assertEqual(self.action(mode),terminal); self.preflight()
+        self.assertEqual(config.digest(self.env.read_bytes()),config.digest(self.before))
+
+    def test_foreign_environment_unsafe_paths_and_lock_are_denied(self):
+        self.env.write_bytes(self.before.replace(b'kcswh:prod:xp:v3',b'kcswh:stage:xp:v3'))
+        with self.assertRaises(prod.secure.Refused): self.action('prepare')
+        self.env.write_bytes(self.before); self.env.chmod(0o644)
+        with self.assertRaises(prod.secure.Refused): self.action('prepare')
+        self.env.chmod(0o600); self.action('prepare')
+        with (self.directory/'operation.lock').open('r+b') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            with self.assertRaises(BlockingIOError): self.action('activate')
+        saved=self.directory/'env.before'; saved.unlink(); saved.symlink_to(self.env)
+        self.preflight(False)
+        with self.assertRaises((OSError,prod.secure.Refused)): self.action('activate')
+
+    def test_interrupted_helper_install_stays_off_and_resumes(self):
+        outer=self
+        class Interrupted(prod.secure.SecureFiles):
+            def atomic(self,path,*args,**kwargs):
+                super().atomic(path,*args,**kwargs)
+                if path==outer.helper: raise OSError('fixture helper install interrupted')
+        with self.assertRaises(OSError): self.action('prepare',Interrupted(os.getuid(),os.getgid(),self.root))
+        self.assertEqual(self.env.read_bytes(),self.before); self.preflight(False)
+        with self.assertRaises(prod.secure.Refused): self.action('activate')
+        self.assertEqual(self.action('prepare'),'prepared'); self.preflight()
+
+    def test_reviewed_bundle_pins(self):
+        self.assertEqual(config.digest(self.new),prod.HELPER_SHA256)
+        self.assertEqual(config.digest((Path(__file__).parents[1]/'infra/vps/prepare-ws-preview-v3.py').read_bytes()),prod.SECURE_SHA256)
+
+
 if __name__ == '__main__':
     unittest.main()

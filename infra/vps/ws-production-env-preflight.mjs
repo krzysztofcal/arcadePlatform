@@ -1,6 +1,8 @@
 #!/usr/bin/node
 
 import fs from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -51,6 +53,7 @@ export function parseEnv(source) {
     ) {
       value = value.slice(1, -1);
     }
+    if (Object.hasOwn(values, match[1])) reject("duplicate production environment key");
     values[match[1]] = value;
   }
 
@@ -136,12 +139,65 @@ export function defaultQueryRedisV3(values) {
   return !result.error && result.status===0 && result.stdout==='PASS';
 }
 
+const WINDOW_DIRECTORY = "/var/backups/arcade-production-deletion-window";
+const WINDOW_ANCHOR = "/var/backups/arcade-xp-v3-cutover/state.json";
+const INSTALLED_HELPER = "/usr/local/sbin/arcade-ws-production-env-preflight";
+const PRODUCTION_MARKER = "prod-avatar-authority-20261022";
+const sha = source => createHash("sha256").update(source).digest("hex");
+
+function protectedRead(filename, mode, {allowTestUid, boundary = "/"}) {
+  const uid = allowTestUid ? process.getuid() : 0;
+  const gid = allowTestUid ? process.getgid() : 0;
+  let parent = path.dirname(filename);
+  while (true) {
+    if (parent !== boundary && !parent.startsWith(boundary === "/" ? "/" : boundary + "/")) reject("untrusted protection path");
+    const m = fs.lstatSync(parent);
+    if (!m.isDirectory() || m.uid !== uid || m.gid !== gid || (m.mode & 0o022)) reject("untrusted protection directory");
+    if (parent === boundary) break;
+    parent = path.dirname(parent);
+  }
+  const fd = fs.openSync(filename,fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  try {
+    const m = fs.fstatSync(fd);
+    if (!m.isFile() || m.nlink !== 1 || m.uid !== uid || m.gid !== gid || (m.mode & 0o7777) !== mode || m.size > 1048576) reject("untrusted protection file");
+    return fs.readFileSync(fd,"utf8");
+  } finally {fs.closeSync(fd);}
+}
+
+function approvedSource(source, allowTestUid, protection) {
+  if (protection && !allowTestUid) reject("test protection paths forbidden");
+  const directory = protection?.directory || WINDOW_DIRECTORY;
+  const anchor = protection?.anchor || WINDOW_ANCHOR;
+  const helper = protection?.helper || INSTALLED_HELPER;
+  const options = {allowTestUid,boundary:protection?.boundary || "/"};
+  if (!fs.existsSync(directory)) {
+    if (parseEnv(source).ACCOUNT_DELETION_ENABLED !== "0") reject("Production ON requires protected manifest");
+    return;
+  }
+  const m = fs.lstatSync(directory);
+  if (!m.isDirectory() || (m.mode & 0o7777) !== 0o700) reject("untrusted window directory");
+  const read = (file,mode=0o600) => protectedRead(file,mode,options);
+  const record = read(anchor), baseline = read(path.join(directory,"env.before"));
+  const approval = JSON.parse(record), state = JSON.parse(read(path.join(directory,"manifest.json")));
+  const v = parseEnv(baseline);
+  if (approval.version !== 1 || approval.phase !== "committed" || state.version !== 1
+    || state.anchor !== sha(record) || state.off !== sha(baseline) || approval.after?.prod !== sha(baseline)
+    || v.ACCOUNT_DELETION_ENABLED !== "0" || ![undefined,"",PRODUCTION_MARKER].includes(v.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER)) reject("Production window baseline invalid");
+  let on = baseline.split(/(?<=\n)/).filter(line => !["ACCOUNT_DELETION_ENABLED","ACCOUNT_DELETION_AVATAR_TRACKING_MARKER"].includes(line.split("=",1)[0].trim())).join("");
+  if (on && !on.endsWith("\n")) on += "\n";
+  on += "ACCOUNT_DELETION_ENABLED=1\nACCOUNT_DELETION_AVATAR_TRACKING_MARKER=" + PRODUCTION_MARKER + "\n";
+  const moduleSource = fs.readFileSync(fileURLToPath(import.meta.url),"utf8");
+  if (state.helper !== sha(moduleSource) || read(helper,0o755) !== moduleSource || state.on !== sha(on)
+    || !((state.phase === "on" && source === on) || (["prepared","off"].includes(state.phase) && source === baseline))) reject("Production window incomplete or drifted");
+}
+
 export function runPreflight({
   envFile = DEFAULT_ENV_FILE,
   allowTestUid = false,
   querySystemIdentifier = defaultQuerySystemIdentifier,
   requireRedisV3 = false,
-  queryRedisV3 = defaultQueryRedisV3
+  queryRedisV3 = defaultQueryRedisV3,
+  protection
 } = {}) {
   let fd;
   try {
@@ -164,11 +220,12 @@ export function runPreflight({
       : metadata.uid === 0 && metadata.gid === 0;
     const isMode0600 = (metadata.mode & 0o7777) === 0o600;
 
-    if (!isFile || !isRootOwned || !isMode0600) {
+    if (!isFile || metadata.nlink !== 1 || metadata.size > 1048576 || !isRootOwned || !isMode0600) {
       reject("production env file must be a regular file owned by root:root with mode 0600 and must not be a symlink");
     }
 
-    const values = parseEnv(fs.readFileSync(fd, "utf8"));
+    const source = fs.readFileSync(fd, "utf8");
+    const values = parseEnv(source);
     for (const key of REQUIRED_NON_EMPTY) {
       if (!values[key]) reject(`production env file must define ${key}`);
     }
@@ -214,12 +271,27 @@ export function runPreflight({
       reject(`DB system identifier mismatch: expected ${CANONICAL_PROD_SYSTEM_IDENTIFIER}, got ${systemIdentifier}`);
     }
 
+    if (values.ACCOUNT_DELETION_ENABLED === '1' && !requireRedisV3) reject('Production ON requires LIVE V3 gate');
     if (requireRedisV3) {
       if (values.XP_REDIS_VERSION!=='3' || values.XP_REDIS_ENV!=='prod' || values.XP_KEY_NS!=='kcswh:prod:xp:v3' ||
-          values.ACCOUNT_DELETION_ENABLED!=='0' || values.XP_TEST_MODE==='1' || !values.UPSTASH_REDIS_REST_TOKEN?.trim()) reject('production Redis V3 configuration mismatch');
+          !['0','1'].includes(values.ACCOUNT_DELETION_ENABLED) || values.XP_TEST_MODE==='1' || !values.UPSTASH_REDIS_REST_TOKEN?.trim()) reject('production Redis V3 configuration mismatch');
       let endpoint; try { endpoint=new URL(values.UPSTASH_REDIS_REST_URL); } catch { reject('production Redis endpoint missing'); }
       if (endpoint.protocol!=='https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname!=='/' || !endpoint.hostname.endsWith('.upstash.io')) reject('production Redis endpoint invalid');
+      approvedSource(source,allowTestUid,protection);
+      if (values.ACCOUNT_DELETION_ENABLED === '1') {
+        const db = parseDbUrl(dbUrl);
+        if (!((db.host === `db.${CANONICAL_PROD_PROJECT_REF}.supabase.co` && db.user === 'postgres')
+          || (db.host.endsWith('.pooler.supabase.com') && db.user === `postgres.${CANONICAL_PROD_PROJECT_REF}`))
+          || !['postgres:','postgresql:'].includes(new URL(dbUrl).protocol)
+          || values.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER !== PRODUCTION_MARKER
+          || (values.PORT && values.PORT !== '3000') || values.SUPABASE_STAGE_PROJECT_REF
+          || ['CONTEXT','NETLIFY_CONTEXT','ARCADE_DEPLOY_TARGET'].some(key => values[key] && values[key] !== 'production')) reject('Production ON identity mismatch');
+      }
       if (!queryRedisV3(values)) reject('production Redis V3 LIVE failed');
+      // Re-read after the external checks; deployment/operator also share flock.
+      const fresh = protectedRead(envFile,0o600,{allowTestUid,boundary:allowTestUid ? path.dirname(envFile) : '/'});
+      if (fresh !== source) reject('production env changed during preflight');
+      approvedSource(fresh,allowTestUid,protection);
       return 'PASS LIVE Redis V3 prod';
     }
     return "PASS";
@@ -237,7 +309,7 @@ if (isMainModule) {
   } catch (error) {
     const reason = error instanceof PreflightError
       ? error.message
-      : `production env preflight failed: ${error?.message || error}`;
+      : "production env preflight failed (" + (["EACCES","ENOENT","ELOOP"].includes(error?.code) ? error.code : "NO-GO") + "); inspect protected state";
     process.stderr.write(`${reason}\n`);
     process.exitCode = 1;
   }

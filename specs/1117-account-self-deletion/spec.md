@@ -44,3 +44,8 @@ Local implementation: `20261022091126_account_avatar_known_capability_policy.sql
 ### P4 prepared Production release (review #1132)
 
 See [production-activation.md](production-activation.md) for actual Production66 authority evidence, exact Production-equivalent SQL/hash, isolated PostgreSQL verification, minimal protected ON/OFF proposal, ordered release and forward-fix. Production migration is now prepared locally, not applied. The protected Production operator is a proposal requiring implementation/review and root installation, not an existing tested activation path. No remote changes or readiness metadata are made. Historical P2/P3 before-merge instructions are superseded by their accepted PASS and merged #1124; T07b remains closed PASS.
+
+
+### P4 protected window implementation update
+
+The owner explicitly accepts the existing privileged postgres backend trust boundary. The Production-only file operator and manifest-aware preflight are implemented/tested locally; they are not installed. No new DB role or HTTP/RPC acceptance setter is added. See production-activation.md for exact bundle hashes, permissions, interruption recovery and future-GO commands. Known-upload checks and the SQL67-before-runtime dependency remain mandatory. Installation/activation/deployment require separate authorization.

@@ -176,3 +176,10 @@ Local implementation: `20261022091126_account_avatar_known_capability_policy.sql
 ### P4 prepared Production release (review #1132)
 
 See [production-activation.md](production-activation.md) for actual Production66 authority evidence, exact Production-equivalent SQL/hash, isolated PostgreSQL verification, minimal protected ON/OFF proposal, ordered release and forward-fix. Production migration is now prepared locally, not applied. The protected Production operator is a proposal requiring implementation/review and root installation, not an existing tested activation path. No remote changes or readiness metadata are made. Historical P2/P3 before-merge instructions are superseded by their accepted PASS and merged #1124; T07b remains closed PASS.
+
+
+### P4 protected Production window — implemented locally, not installed
+
+Owner accepted the existing postgres backend trust boundary; acceptance remains an operational action with no new HTTP/RPC setter. `infra/vps/production-deletion-window.py` now reuses SecureFiles and anchors OFF to the committed root Redis-cutover receipt, deriving only deletion flag + Production marker ON. Updated Production preflight accepts ON only with the protected manifest/whole-file derivation and existing exact DB/LIVE Redis checks. Existing Stage/Redis operators and sudoers are unchanged. Python20/Node20 local tests cover interruption/restore/drift; no protected VPS or environment mutation occurred. Exact reviewed hashes, one-line FUTURE-GO installation/activation/restore and release order are in [production-activation.md](production-activation.md).
+
+Production SQL67 (unchanged hash) must be applied and verified before deploying runtime using `private.account_avatar_safe_after`. OFF-only protected helper preparation may occur earlier; migration67, merge/deploy, tracking/guard/readiness and activation each retain their explicit GO gates. Do not infer activation from successful installation or CI.
