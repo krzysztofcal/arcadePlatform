@@ -1,3 +1,5 @@
+> **Current pre-merge gate (21 October 2026):** T07b PASS; #1124 Ready for Review, **merge STOP** pending [Production compatibility plan](production-compatibility.md). Production65 migrations differs from Stage117; P1 local equivalent/tests PASS, PC2 schema apply/PC3 release/PC4 activation still require separate GO. Historical execution instructions below do not authorize another Stage campaign or bypass this gate.
+
 # Implementation / remaining rollout plan — #1117
 
 ## Binding owner decision — per-UUID bonuses / #1131 (20 October 2026)
@@ -157,3 +159,8 @@ Breaking impact: quarantined tables temporarily withhold state as well as writes
 ### Recovery from the first repair attempt
 
 The first repair HTTP500 was fully rolled back and diagnosed as postgres-js serialized JSON parameter binding. Correct only serialized JSON parameters to `($n::text)::jsonb`; retain all manifest hashes, atomic scope, locks and version+JSON CAS. Do not replace the approved original hashes with new guesses, clear the original request/lease/incident, bypass the manifest, or correct data manually. After corrected runtime review/GO: fresh read-only original5/45/hash/finance/OFF checks → main-defined exact-SHA WS Preview deploy and smoke → single bounded repair using the SAME already-installed approved manifest → actual SQL/cache/finance post-check. Root installation need not be repeated. Current Stage has the15b5666f runtime and original operational references; repair is NOT PASS.
+
+
+### Production P2 result —21October2026
+
+Exact approved equivalent20261021191104 applied once at19:50:36UTC, reviewedSHA5036a5977b8c9572556830fa08dc8cc87589ff232270a6cb6d58064a7b429b3e; actual history65→66. Schema/ACL/retention/campaign counters and read-only old-runtime smoke PASS. Protected backup/evidence retained; normal bot-only financial deltas fully reconciled, USER/history unchanged. Deletion/tracking remainOFF,avatar-v3DISABLED; Netlify/WS remain82aee39d without restart/deploy. See [P2 evidence](production-compatibility.md). Do NOT repeat apply or run a migration directory. P3 standard merge/deploy and P4 activation require separate owner GO; no push/merge/deploy/Stage change authorized in P2. T07b remainsPASS.

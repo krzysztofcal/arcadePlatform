@@ -4922,6 +4922,11 @@ async function main() {
   await assertEscrowDryRunReadOnlyConcurrency(sql);
   await assertDeletionDriverReceipts(sql);
   await runProductionEquivalentFixture(sql);
+  // This already-authorized disposable DB fixture also isolates XP from Redis.
+  process.env.XP_TEST_MODE = "1";
+  process.env.ACCOUNT_DELETION_ENABLED = "0";
+  const { assertProductionDeletionCompatibility } = await import("./account-deletion-production.fixture.mjs");
+  await assertProductionDeletionCompatibility({ runMigration, migrationFiles });
 
   // The integration workflow reuses this disposable database for the
   // following Stage contract jobs. Leave it in the normal main-migration

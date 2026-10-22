@@ -1142,6 +1142,24 @@
       "prerequisites": [
         "20260914092000_chips_ledger_production_retention_activation.sql"
       ]
+    },
+    {
+      "file": "20261021191104_account_deletion_production_compatibility.sql",
+      "sha256": "5036a5977b8c9572556830fa08dc8cc87589ff232270a6cb6d58064a7b429b3e",
+      "purpose": "#1117 final disabled Account Deletion Production compatibility; separate exact-file GO required, not applied",
+      "prerequisites": [
+        "20261016120000_chips_ledger_production_human_lifecycle_receipts.sql",
+        "20261011200000_poker_single_player_table_flag.sql",
+        "20261012095657_poker_single_player_request_lookup.sql"
+      ],
+      "source_versions": [
+        "20261018184941",
+        "20261018190323",
+        "20261019170000",
+        "20261020082604",
+        "20261020094224",
+        "20261020190000"
+      ]
     }
   ],
   "provenance_rules": [

@@ -1,3 +1,5 @@
+> **Current pre-merge gate (21 October 2026):** T07b PASS; #1124 Ready for Review, **merge STOP** pending [Production compatibility plan](production-compatibility.md). Production65 migrations differs from Stage117; P1 local equivalent/tests PASS, PC2 schema apply/PC3 release/PC4 activation still require separate GO. Historical execution instructions below do not authorize another Stage campaign or bypass this gate.
+
 ## Binding owner decision — per-UUID bonuses / #1131 (20 October 2026)
 
 Cross-account anti-farming is OUT OF SCOPE for #1117 and deferred to #1131. Welcome must work for every eligible new UUID under existing amount/start-date rules, including same-email/Google re-registration; one payout per UUID, no lifetime email cap. Daily UTC/streak and once/campaign remain per UUID. Owner accepts cross-account farming. No HMAC key, verified-email-at-payout, history_ready, protected-payout pause or anti-farming privacy/LIA decision blocks Account Deletion. Global campaign max_total_claims and financial/idempotency retention remain unchanged. Do not delete ledger evidence or reset a campaign quota with Auth/claims cascade.
@@ -1051,3 +1053,8 @@ Final read-only checks:117/117 hashes/guards, Redis V3 LIVE, DB releasefalse, no
 - [ ] Google OAuth remains NOT TESTED without a separately authorized dedicated identity; do not infer Google PASS from password evidence.
 
 Ready for owner review after final CI; this is not authorization to merge, deploy Production or activate Account Deletion. Prior Draft/OPEN/429 checkpoints above are historical and superseded only for the completed minimal email/password T07b. Accepted MVP late-upload risk remains separately tracked in#1128; cross-account anti-farming remains#1131, Welcome remains per UUID.
+
+
+### Production P2 result —21October2026
+
+Exact approved equivalent20261021191104 applied once at19:50:36UTC, reviewedSHA5036a5977b8c9572556830fa08dc8cc87589ff232270a6cb6d58064a7b429b3e; actual history65→66. Schema/ACL/retention/campaign counters and read-only old-runtime smoke PASS. Protected backup/evidence retained; normal bot-only financial deltas fully reconciled, USER/history unchanged. Deletion/tracking remainOFF,avatar-v3DISABLED; Netlify/WS remain82aee39d without restart/deploy. See [P2 evidence](production-compatibility.md). Do NOT repeat apply or run a migration directory. P3 standard merge/deploy and P4 activation require separate owner GO; no push/merge/deploy/Stage change authorized in P2. T07b remainsPASS.

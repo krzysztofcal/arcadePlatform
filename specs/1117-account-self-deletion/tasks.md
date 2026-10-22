@@ -1,3 +1,16 @@
+## Current gate — Production compatibility before standard merge
+
+T07b PASS is CLOSED. No additional functional/Poker tests. P1 local Production-equivalent/harness PASS; no remote application. [Reviewed read-only plan](production-compatibility.md); P1 local implementation is authorized/completed; no shared-environment apply authorized.
+
+- [x] PC0 Audit actual pinned Stage117/Production65 histories/schema/functions/ACL/policies, financial aggregates and current runtimes. Stage hashes117/117 match; Production has no per-file hash catalog, so applied-byte equivalence not asserted.
+- [x] PC0 Identify six source dependencies and prove Stage archive4-argument patch/ESCROW function cannot be blindly applied to Production5-argument implementation/Production ESCROW contract. Existing manifest keeps needs-production-equivalent.
+- [x] PC1 Local GO completed: ONE final-state Production equivalent, existing manifest entry, identity/definition guards; no HMAC/intermediate Stage history; preserve wrapper/retention and legacy avatars with v3DISABLED. Fundamental old/new-runtime-OFF/retention/quota/RLS tests on isolated fixtures.
+- [ ] PC2 Separate exact-file Production schema GO: backup/fresh drift+finance preflight, apply transactionally, compatibility verify with old runtime and deletionOFF; no merge/deploy.
+- [ ] PC3 Separate owner standard merge/automatic WS+Netlify release GO only after PC2PASS and CI; bounded nonfinancial smoke/deletionOFF. No skip-CI/skip-Netlify workaround.
+- [ ] PC4 Separate later Production activation/preparation GO; genuine Production tracking/authority/inventory/Redis readiness, protected flags, DB releaseLAST. Not a merge prerequisite for disabled deployment, never implied by merge.
+
+Google NOT TESTED; accepted#1128 late-upload limitation and deferred#1131 anti-farming unchanged. Earlier Draft/OPEN T07b/Stage pending checkpoints below are historical.
+
 # Active tasks — #1117
 
 ## Binding owner decision — per-UUID bonuses / #1131 (20 October 2026)
@@ -488,3 +501,24 @@ Final read-only checks:117/117 hashes/guards, Redis V3 LIVE, DB releasefalse, no
 - [ ] Google OAuth remains NOT TESTED without a separately authorized dedicated identity; do not infer Google PASS from password evidence.
 
 Ready for owner review after final CI; this is not authorization to merge, deploy Production or activate Account Deletion. Prior Draft/OPEN/429 checkpoints above are historical and superseded only for the completed minimal email/password T07b. Accepted MVP late-upload risk remains separately tracked in#1128; cross-account anti-farming remains#1131, Welcome remains per UUID.
+
+
+### PC1 local result (no push)
+
+- [x] One Production-equivalent20261021191104, final disabled schema/manifest provenance, no historical migration edits.
+- [x] Existing disposable PostgreSQL17 harness: equivalent apply/late rollback/drift/replay, old82aee39d+current modules, five historical synthetic PROMO without repay, unchanged accounting/archives, legacy avatars/RLS/Production pruner-wrapper/ESCROW contracts.
+- [x] Separate managed-role NOSUPERUSER local apply PASS; grant/CREATE restoration and OFF/v3D validated.
+- [x] Local syntax/CSP/guards/manifest PASS; standard harness path without old checkout PASS.
+- [x] PC2/P2 Production exact-file apply under subsequent owner GO:65→66, schema/ACL/retention/quota/read-only smoke PASS; see production-compatibility.md P2 result.
+- [ ] PC3/P3 merge/automatic deployment and PC4/P4 feature activation remain separate owner approvals. No push, new CI run, merge or deployment performed.
+
+
+### P3 release readiness review —22October2026
+
+- [x] Fresh Production66/P2 catalog compatibility,OFF/v3D,RedisV3 LIVE and current82aee39d runtimes verified read-only.
+- [x] Main push workflow/deployment/restart/rollback surfaces and strict branch rules reviewed; see production-compatibility.md P3.
+- [ ] Owner approves publication of local applied-equivalent/provenance/tests/docs plus final Stage Preview/CI and explicit treatment of Ready-PR Stage apply.
+- [ ] Real Netlify required Preview status for finalHEAD (currently absent); final CI after publication.
+- [ ] Owner supplies current CHIPS_INTEGRATION_ENABLED absent/0 evidence, or separately authorizes reviewed target/fixture; API403/current condition unknown.
+- [ ] Owner selects standard merge+automatic OFF deployment(recommended) or temporary strict merge-only pause; no skip-token/protection bypass.
+- [ ] After separate GO: exact mergeSHA deployments,nonfinancial smoke,recovery verification; Production activation remains independentP4.
