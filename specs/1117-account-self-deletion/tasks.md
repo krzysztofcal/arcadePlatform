@@ -2,10 +2,11 @@
 
 P2/P3 and T07b remain PASS; #1124 is merged. Earlier before-merge checkpoints below are historical, not pending reset or repeat-E2E instructions. [Current ordered release and protected ON/OFF proposal](production-activation.md).
 
-- [x] PA1 Read-only Production66 ACL/RLS/role/RPC audit: only privileged operator can write cutover acceptance; runtime service_role cannot.
+- [x] PA1 Read-only Production66 ACL/RLS/role/RPC audit: API roles cannot write acceptance, but actual backend shares postgres owner identity; strict operator-only isolation is NOT proven.
 - [x] PA2 Prepare forward-only Production equivalent, manifest provenance and bounded identity/catalog/lock guards; no remote application.
 - [x] PA3 Test isolated Production66→67, rollback/drift, unchanged finance/routines/ACL/triggers/RLS and runtime denial; update full-process fixture schema.
 - [x] PA4 Specify minimal protected Production operator/preflight change, ordered tracking→v3→readiness→runtime flags→DB admission and recovery-safe OFF.
+- [ ] PA4b Owner decision: accept existing trusted-backend DB boundary or separately scope restricted-principal isolation; strict operator-only enforcement remains NO-GO.
 - [ ] PA5 Separate GO: implement/review/install protected Production-only ON/OFF helper/operator and fundamental interruption tests; current helper still refuses ON.
 - [ ] PA6 Separate exact-file Production67 apply/backup/preflight, authorized Stage source application, owner merge and exact-SHA deployment OFF; no automatic apply implied.
 - [ ] PA7 Separate activation GO: real Production Storage/Redis readiness and risk acceptance, tracking before guards, protected runtime flags, DB release LAST; bounded owner-authorized monitoring.

@@ -1077,3 +1077,6 @@ Read-only observation supporting the risk decision: 2026-10-22 09:06 UTC, Produc
 ### P4 prepared Production release (review #1132)
 
 See [production-activation.md](production-activation.md) for actual Production66 authority evidence, exact Production-equivalent SQL/hash, isolated PostgreSQL verification, minimal protected ON/OFF proposal, ordered release and forward-fix. Production migration is now prepared locally, not applied. The protected Production operator is a proposal requiring implementation/review and root installation, not an existing tested activation path. No remote changes or readiness metadata are made. Historical P2/P3 before-merge instructions are superseded by their accepted PASS and merged #1124; T07b remains closed PASS.
+
+
+Final authority audit correction (22 October 2026): service_role API credentials cannot mutate cutover, but the actual Production application DB connection uses postgres and can UPDATE it. No existing HTTP/RPC setter was found. Strict operator-only database identity is therefore NOT established; see the explicit owner decision and alternatives in production-activation.md. Do not interpret the API-role ACL tests as protection against privileged backend SQL.

@@ -179,7 +179,7 @@ export async function assertProductionDeletionCompatibility({runMigration,migrat
  assert.equal((await sql`select enabled from public.account_deletion_release`)[0].enabled,false);
  assert.equal((await sql`select tgenabled from pg_trigger where tgname='account_avatar_manifest_guard_v3'`)[0].tgenabled,'D');
  await assert.rejects(()=>sql.unsafe(policy),/history drift/);await sql.unsafe('rollback');
- process.stdout.write('[klog] production_avatar_policy '+JSON.stringify({history:67,changedTimePredicates:3,newReadOnlyFunction:1,financialHistoryUnchanged:true,existingAclTriggersRlsUnchanged:true,runtimeCannotAcceptRisk:true,deletion:false,avatarV3:'DISABLED'})+'\n');
+ process.stdout.write('[klog] production_avatar_policy '+JSON.stringify({history:67,changedTimePredicates:3,newReadOnlyFunction:1,financialHistoryUnchanged:true,existingAclTriggersRlsUnchanged:true,apiRolesCannotAcceptRisk:true,backendSharesOwnerPrincipal:true,deletion:false,avatarV3:'DISABLED'})+'\n');
  process.stdout.write('[klog] production_deletion_compatibility '+JSON.stringify({migration:true,history:66,oldRuntime:oldDir?'executed':'SQL writer contract',newRuntime:'executed',deletion:false,avatarV3:'DISABLED',historicalPromo:5,historyRepaid:0,financialHistoryUnchanged:true,wrapperUnchanged:true,rls:true,legacyAvatar:true,unknownTriggerRejected:true})+'\n');
  } finally {await sql.end({timeout:1});const oldDir=process.env.CHIPS_PRODUCTION_COMPAT_OLD_RUNTIME_DIR;if(oldDir){const admin=await import(pathToFileURL(path.join(oldDir,'netlify/functions/_shared/supabase-admin.mjs')));await admin.closeSql?.();}}
 }
