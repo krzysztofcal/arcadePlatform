@@ -1209,6 +1209,13 @@
       "sha256": "d90ed9e48a07ce3e7126bc50de17756f87558a9fced9473845a6d31020138b52",
       "category": "needs-production-equivalent",
       "purpose": "#1117 per-UUID bonuses without HMAC; remove unused empty recognition schema and retain atomic campaign lifetime quotas. Local-only; no remote apply authorized."
+    },
+    {
+      "file": "20261022091126_account_avatar_known_capability_policy.sql",
+      "version": "20261022091126",
+      "sha256": "f2d4c1b9a1c461581af922e17d5d0f920cfb52ffce48b5207d36a938ce6f1f8c",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 owner-approved unobserved capability risk: optional truthful waiver of fixed global wait only; known capabilities and unresolved operations remain fail-closed. No remote application or activation."
     }
   ]
 }

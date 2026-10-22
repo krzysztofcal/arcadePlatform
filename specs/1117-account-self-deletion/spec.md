@@ -32,3 +32,10 @@ Only fundamental tests, existing packages, JSP-compatible frontend, klog, CSP ha
 ## Reviewed acceptance clarification
 
 Completed requests retain historical incident in durable storage but status API requiresIntervention=false and retryable=false. Operational Poker seats/state/table.creator must not retain the deleted UUID after the planned privacy cleanup; other players and immutable accounting/idempotency/archive evidence remain protected by existing retention rules. This cleanup is not yet implemented/authorized. Real full E2E must use a provider-accepted disposable identity and prove actual same-email new UUID/Welcome, not substitute Admin creation for rejected signUp.
+
+
+### Production activation policy update (2026-10-22)
+
+Owner accepts unobserved previously issued avatar capabilities. A truthful, privileged cutover acceptance may waive only the fixed global 7200-second delay; every known `capability_until`, uncertain operation, ownership, receipt and lease guard remains mandatory. Existing markers without acceptance retain the original wait. See `research.md`, section “Production activation: owner-accepted unobserved capability risk”.
+
+Local implementation: `20261022091126_account_avatar_known_capability_policy.sql` and `private.account_avatar_safe_after(marker)`. No remote apply, acceptance marker or activation has occurred. Production-equivalent SQL after history 66 and a reviewed protected Production ON/OFF procedure are still prerequisites. Current protected Production preflight refuses ON; do not bypass it. New changes must be reviewed separately because #1124 is already merged. Default behavior remains OFF.

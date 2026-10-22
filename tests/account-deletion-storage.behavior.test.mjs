@@ -26,6 +26,7 @@ create table public.profile_avatar_uploads(id uuid primary key,user_id uuid refe
     await db.exec(await readFile(new URL('../supabase/migrations/20261019170000_account_avatar_manifest_guards.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261020082604_account_avatar_mvp_closure.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261020094224_account_avatar_reconciliation.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261022091126_account_avatar_known_capability_policy.sql',import.meta.url),'utf8'));
     assert.equal((await db.query('select private.account_avatar_guards_ready() as ready')).rows[0].ready,false,'installation must not activate restrictive guards');
     await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
   }
@@ -349,4 +350,36 @@ test('canonical reconciliation retains original uncertain receipt and needs exac
   await executeSql('delete from auth.users where id=$1',[userId]);
   assert.equal((await executeSql('select count(*)::int n from public.profile_avatar_uploads where id=$1',[e.id]))[0].n,0,'real authorized cascade accepts separate reconciliation proof');
   }
+});
+
+
+test('owner-accepted unobserved-link risk waives only the fixed cutover wait, never inventory/lease/known capabilities',async()=>{
+  const {userId,deletion,executeSql,cleanup}=await fixture();
+  await executeSql('update private.avatar_tracking_cutover set cutover_at=clock_timestamp()');
+  assert.ok((await cleanup()).waitUntil,'default still waits two hours');
+  await executeSql('update private.avatar_tracking_cutover set unobserved_capability_risk_accepted_at=clock_timestamp()');
+  assert.deepEqual(await cleanup(),{done:true},'empty verified inventory requires no artificial delay');
+  const req=await deletion();
+  const purge=(generation=1)=>executeSql('select private.account_avatar_prepare_purge($1,$2,$3,$4)',[userId,req.request_id,generation,env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER]);
+  await assert.rejects(purge(),/lease invalid/);
+  await executeSql("update account_deletion_requests set status='PROCESSING',phase='cleanup',lease_generation=1,lease_until=clock_timestamp()+interval '120 seconds' where request_id=$1",[req.request_id]);
+  await purge();
+  await executeSql('update private.avatar_tracking_cutover set legacy_inventory_verified=false');
+  await assert.rejects(cleanup(),/dependency_unavailable/);
+  await assert.rejects(purge(),/closure unconfirmed/);
+});
+
+test('waived global wait preserves future capability and blocks real unfinished output in JS and SQL',async()=>{
+  const {userId,deps,deletion,executeSql,cleanup}=await fixture();
+  await executeSql('update private.avatar_tracking_cutover set cutover_at=statement_timestamp(),unobserved_capability_risk_accepted_at=statement_timestamp()');
+  const pending=await createPendingUpload(userId,{mimeType:'image/png',size:100},deps);
+  const [manifest]=await executeSql('select capability_until from profile_avatar_uploads where id=$1',[pending.uploadId]);
+  const req=await deletion();
+  await executeSql("update account_deletion_requests set status='PROCESSING',phase='cleanup',lease_generation=1,lease_until=clock_timestamp()+interval '120 seconds' where request_id=$1",[req.request_id]);
+  const purge=()=>executeSql('select private.account_avatar_prepare_purge($1,$2,1,$3)',[userId,req.request_id,env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER]);
+  assert.equal(Date.parse((await cleanup()).waitUntil),Date.parse(manifest.capability_until));
+  await assert.rejects(purge(),/closure unconfirmed/);
+  await seedClock("signing_finished_at=clock_timestamp()-interval '3 hours',capability_until=clock_timestamp()-interval '1 minute',source_deleted_at=clock_timestamp(),output_path=$1,output_write_started_at=clock_timestamp(),output_deleted_at=clock_timestamp()",[randomUUID()+'.webp']);
+  await assert.rejects(cleanup(),/dependency_unavailable/,'real uncertain operation still needs canonical reconciliation');
+  await assert.rejects(purge(),/closure unconfirmed/);
 });

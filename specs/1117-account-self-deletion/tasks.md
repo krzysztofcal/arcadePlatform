@@ -522,3 +522,10 @@ Ready for owner review after final CI; this is not authorization to merge, deplo
 - [ ] Owner supplies current CHIPS_INTEGRATION_ENABLED absent/0 evidence, or separately authorizes reviewed target/fixture; API403/current condition unknown.
 - [ ] Owner selects standard merge+automatic OFF deployment(recommended) or temporary strict merge-only pause; no skip-token/protection bypass.
 - [ ] After separate GO: exact mergeSHA deployments,nonfinancial smoke,recovery verification; Production activation remains independentP4.
+
+
+### Production activation policy update (2026-10-22)
+
+Owner accepts unobserved previously issued avatar capabilities. A truthful, privileged cutover acceptance may waive only the fixed global 7200-second delay; every known `capability_until`, uncertain operation, ownership, receipt and lease guard remains mandatory. Existing markers without acceptance retain the original wait. See `research.md`, section “Production activation: owner-accepted unobserved capability risk”.
+
+Local implementation: `20261022091126_account_avatar_known_capability_policy.sql` and `private.account_avatar_safe_after(marker)`. No remote apply, acceptance marker or activation has occurred. Production-equivalent SQL after history 66 and a reviewed protected Production ON/OFF procedure are still prerequisites. Current protected Production preflight refuses ON; do not bypass it. New changes must be reviewed separately because #1124 is already merged. Default behavior remains OFF.
