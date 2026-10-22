@@ -543,3 +543,25 @@ Ready for owner review after final CI; this is not authorization to merge, deplo
 Owner accepts unobserved previously issued avatar capabilities. A truthful, privileged cutover acceptance may waive only the fixed global 7200-second delay; every known `capability_until`, uncertain operation, ownership, receipt and lease guard remains mandatory. Existing markers without acceptance retain the original wait. See `research.md`, section “Production activation: owner-accepted unobserved capability risk”.
 
 Local implementation: `20261022091126_account_avatar_known_capability_policy.sql` and `private.account_avatar_safe_after(marker)`. No remote apply, acceptance marker or activation has occurred. Production-equivalent SQL after history 66 and a reviewed protected Production ON/OFF procedure are still prerequisites. Current protected Production preflight refuses ON; do not bypass it. New changes must be reviewed separately because #1124 is already merged. Default behavior remains OFF.
+
+### Production recovery — missing WS service-role key (2026-10-22)
+
+- [x] Confirm owner root proof of missing key, guarded DB admission OFF, real RETRY/cleanup/one balanced BURN500; retain worker and evidence.
+- [x] Verify existing Netlify Production key identity by role/ref and read-only pinned provider API; never publish the value.
+- [x] Prepare local fixed credential-extension modes in existing Production operator and matching preflight, preserving original anchor/backups/manifest; fundamental interruption/drift/OFF/ON tests.
+- [x] Separate owner GO A: install reviewed bundle, pipe-only dry-run/prepare/verify; no restart or admission.
+- [x] Separate owner GO B: restart exact runtime with key, natural recovery of SAME durable request through cleanup/Auth-last; prove one BURN only and other users unaffected. No manual state/financial repair.
+- [x] Separate owner GO C: reopen admission only after real terminal recovery and final checks. Do not close #1117 based on the accepted earlier Stage T07b or local tests.
+
+Earlier preparation-only status notes are historical. Production currently has schema67 and deployed59cb0998, tracking/guards/readiness PASS, runtime flags ON but DB admission OFF for this recovery. #1128 remains accepted scope limitation, #1131 deferred, Google OAuth NOT TESTED. No remote changes are part of this local preparation task.
+
+### Production final acceptance and repository publication (2026-10-22)
+
+Owner accepted Production Account Deletion LIVE as PASS. A installed the reviewed credential extension without changing historical anchor/backups; B restarted the exact59cb0998 runtime and naturally completed the same durable request; C enabled DB admission at 2026-10-22 22:25:18 UTC after fresh readiness/finance checks. Previous preparation-only OFF/RETRY statements above are historical, not current operating instructions.
+
+- [x] Production request COMPLETED; exactly one balanced BURN500; retired USER closed0; Auth-last verified; no incomplete requests or unbalanced transactions.
+- [x] Netlify/WS flags ON, DB admission ON, schema67, tracking/guards ready, Redis V3 LIVE; limited login/profile/CH/XP/ranking/browser-WS smoke PASS with no new deletion.
+- [x] Reviewed operator/helper/primitive bytes match installed VPS SHA-256; no secrets, protected manifests or backup files included in publication.
+- [ ] Publish this existing service-role correction through a separate reviewed PR and green CI; owner merges separately. Keep #1117 open until publication.
+
+Explicit limitations: **Storage DELETE with a real avatar NOT TESTED** in the final Production deletion E2E (subject had no avatar); **Google OAuth NOT TESTED**; late upload #1128 and cross-account antifarming #1131 remain outside accepted MVP scope. Do not represent these as PASS. No new Production operation is authorized by this documentation PR.

@@ -1,6 +1,8 @@
 # P4 — Production activation after #1124 / #1132
 
-Status: **preparation only**. #1124 is merged as `5c80f968ee5444ec64ce02797d20df48b57b003a`; P2/P3 and T07b remain PASS. No migration, deployment, root installation or activation is authorized by this document. Production activation remains NO-GO until the explicit gates below pass. Google OAuth is NOT TESTED. Accepted #1128 and deferred #1131 are unchanged.
+Historical release preparation follows below. **Latest status (2026-10-22):** Production schema67 and runtime `59cb099823e3985a55bee0137d3004ca4f765c99` are deployed; tracking/guards/readiness passed. Production E2E has one durable request in `RETRY/cleanup`, one balanced BURN500 and a closed USER wallet. DB admission is OFF; workers remain ON. Owner root inspection confirmed missing `SUPABASE_SERVICE_ROLE_KEY` in the protected env and running process. The service-role recovery addendum below supersedes earlier installation/activation instructions for this recovery. This revision is local preparation only; no installation/restart/configuration change is authorized by it.
+
+Historical status: **preparation only**. #1124 is merged as `5c80f968ee5444ec64ce02797d20df48b57b003a`; P2/P3 and T07b remain PASS. No migration, deployment, root installation or activation is authorized by this document. Production activation remains NO-GO until the explicit gates below pass. Google OAuth is NOT TESTED. Accepted #1128 and deferred #1131 are unchanged.
 
 ## Verified authority and risk scope
 
@@ -80,3 +82,74 @@ Breaking impacts: new cleanup code requires the new SQL helper; v3 guard activat
 
 
 Local validation recorded for this review: all 178 account-deletion CI fundamentals PASS, including the previously failing full-process fixture. The exact Production SQL passes the existing isolated PostgreSQL17 migration harness (synthetic Production66, history67); syntax/CSP/guards and manifest PASS. This is not hosted deletion evidence or approval for remote migration. GitHub final-SHA CI is recorded separately in the PR.
+
+## Service-role recovery addendum — LOCAL PREPARATION, separate GO required
+
+### Confirmed cause and authority
+
+The ordinary new Production disposable subject has exactly one canonical Welcome500 followed by exactly one balanced BURN500; its USER wallet is closed0. The same durable request is RETRY/cleanup, incident=false; Auth/profile remain. Admission is false and workers remain ON. No new request, financial correction, BURN replay or early Auth delete is permitted. Root's read-only output confirmed `fileHasServiceRole=false`, `processHasServiceRole=false`, `processDeletionOn=true`. The Storage adapter rejects a missing service key before cleanup, and Auth-last also needs it. The existing Production preflight did not require that key: prior LIVE PASS was not proof of this dependency.
+
+Read-only source verification passed: Netlify **explicit Production** service-role JWT has ref `otbqfijerkieoxwpxjnm`, role `service_role`; the exact Production Storage API returned200 and the expected avatar buckets. This matches WS DB system7575202818581710058. No key value is in this document, tests, diffs or reports. JWT payload checks alone are not signature proof; the operator independently repeats the provider-authenticated GET before any configuration write.
+
+### Minimal implementation and integrity
+
+`infra/vps/production-deletion-window.py` retains SecureFiles and fixed paths. It adds only `export-service-role` (unprivileged pipe, never terminal), `dry-run-service-role` and `prepare-service-role`. Export resolves only explicit Production values from the existing `playkcswh` Netlify site, requires Functions scope, pins Supabase project and verifies the key against read-only `/storage/v1/bucket`. Root independently checks the same identity/provider. No credential appears in arguments or logs; bounded JSON crosses only the pipe. Do not use shell tracing, tee or command substitution for the secret.
+
+Historical `/var/backups/arcade-xp-v3-cutover/state.json`, and deletion-window `env.before`, `helper.before`, `manifest.json` remain byte-identical. The currently installed legacy-window helper must match SHA `af861b5eb2d63429114fd064c88ff575179df6d955293e24a458f3c65cc00562`. No arbitrary baseline/hash replacement is accepted.
+
+New root:root0600 files, inside the existing root:root0700 `/var/backups/arcade-production-deletion-window`:
+
+- `service-role.env`: exactly one canonical `SUPABASE_SERVICE_ROLE_KEY` assignment; this is secret, never cat/export to reports.
+- `service-role.helper.before`: immutable copy of the previously reviewed installed helper.
+- `service-role.json`: separate transition manifest binding original anchor and original window manifest, credential-file hash, derived OFF/ON hashes, reviewed new helper and transition phase. It contains no raw key.
+
+Only active `/etc/arcadeplatform/ws-server.env` and `/usr/local/sbin/arcade-ws-production-env-preflight` change during prepare. The former adds the service key and preserves the existing ON/OFF state and every other assignment; the latter is upgraded atomically. The existing deployment lock and window lock serialize the operation; unsafe owners/modes/symlinks/hardlinks/drift are denied. The helper is replaced before the transition can change env bytes: a crash after helper replacement or during env/manifest write fails preflight closed. `prepare-service-role` resumes only recognized exact states with the same credential and immutable evidence. Do not delete manifests or generate replacement hashes after failure.
+
+The new preflight derives allowed OFF/ON from historical OFF plus the protected one-key extension, validates both manifests and all hashes, and refuses Production ON without a current Production service-role claim. OFF after this upgrade **retains the key**, so later activation/recovery does not silently lose it. This is a new verified OFF derived from the old immutable OFF, not a claim that the historical baseline changed. Credential rotation is not implemented or authorized. Reusing an older operator/helper after upgrade is not a supported rollback.
+
+### Files/hashes for review
+
+- `prepare-ws-preview-v3.py` unchanged: `63787466ec6e4163f60e09510777df04c38cd2e8d20cb26d6257bcb550173740`.
+- `production-deletion-window.py`: `16d32217c90419bb85e7b2c85e62ea301067e3f7d67fc634e19b733c06f7f721`.
+- `ws-production-env-preflight.mjs`: `e73fc3f7bdb52465be3a02d9fbee2cfa119dd0bdf2ac93c346002da468069f18`.
+
+### GO A — install/prepare only, NOT executed
+
+First recheck Production schema67/exact runtime59cb0998, DB release=false, the same RETRY request/one BURN/closed wallet, finance, current root ON manifest and no deployment conflict. Stage and Netlify values are not changed. Public staging files may be under the existing isolated worktree; root must copy and hash the protected copies **before execution**. No sudoers/systemd/unit/Redis/anchor changes.
+
+Root installation (public files only; no active env/helper change yet):
+
+`set -euo pipefail; test "$(id -u)" = 0; bundle_dir=/usr/local/libexec/arcade-production-deletion-window; for p in /usr /usr/local /usr/local/libexec "$bundle_dir"; do test ! -L "$p"; test "$(stat -c '%u:%g:%a' "$p")" = '0:0:755'; done; for f in prepare-ws-preview-v3.py production-deletion-window.py ws-production-env-preflight.mjs; do test ! -L "$bundle_dir/$f"; test "$(stat -c '%u:%g:%a:%h' "$bundle_dir/$f")" = '0:0:644:1'; done; install -o root -g root -m 0644 /tmp/arcade1117-v2/infra/vps/prepare-ws-preview-v3.py /tmp/arcade1117-v2/infra/vps/production-deletion-window.py /tmp/arcade1117-v2/infra/vps/ws-production-env-preflight.mjs "$bundle_dir/"; cd "$bundle_dir"; printf '%s\n' '63787466ec6e4163f60e09510777df04c38cd2e8d20cb26d6257bcb550173740  prepare-ws-preview-v3.py' '16d32217c90419bb85e7b2c85e62ea301067e3f7d67fc634e19b733c06f7f721  production-deletion-window.py' 'e73fc3f7bdb52465be3a02d9fbee2cfa119dd0bdf2ac93c346002da468069f18  ws-production-env-preflight.mjs' | sha256sum -c -`
+
+Root pipe-only dry-run, prepare and verify (read-only provider calls, no restart/DB write; leaves existing ON state unchanged):
+
+`set -euo pipefail; bundle_dir=/usr/local/libexec/arcade-production-deletion-window; for mode in dry-run-service-role prepare-service-role; do sudo -H -u copilot /usr/bin/python3 -I -B "$bundle_dir/production-deletion-window.py" export-service-role | /usr/bin/python3 -I -B "$bundle_dir/production-deletion-window.py" "$mode"; done; /usr/bin/python3 -I -B "$bundle_dir/production-deletion-window.py" verify; /usr/bin/node /usr/local/sbin/arcade-ws-production-env-preflight`
+
+If interrupted, STOP and inspect only safe hashes/phases. A preparing manifest or new helper without a complete extension must refuse preflight. Once the recognized interruption is reviewed, resume the **prepare-service-role pipeline only**, then verify; do not blindly repeat dry-run when it reports an interrupted install and do not overwrite backup/anchor files. The process is still the old process until separately restarted. A failed provider read does not authorize a key substitute, a new baseline or deletion of evidence.
+
+### GO B — restart plus accepted-request recovery, NOT executed
+
+After A passes: owner must explicitly authorize the existing WS Production restart and the natural continuation of the **same** request, including canonical cleanup and Auth hard-delete LAST. Keep DB release=false. Recheck human/pending financial safety; any accepted bot-only interruption risk must be explicit. Restart with the existing service command and deployment lock, verify process service-role presence without exposing values, exact59cb0998/LIVE/health/Auth/WS and finance. Observe existing retry/lease without changing them; no new request/lease/BURN. Require one retained BURN500, no duplicate receipts, canonical Storage/Redis/Poker/profile cleanup and actual Auth absence before COMPLETED. The subject has no avatars: do not claim this recovery executed real object DELETEs. Other users/avatars/XP/claims must remain unchanged.
+
+### GO C — new admissions, NOT authorized by this addendum
+
+Only after B's real COMPLETED, finance/identity/cleanup proof and no remaining incomplete requests may a separate GO reopen DB release. Keep worker ON throughout partial deletion. Do not run restore or remove the key while recovery is pending. Once all accepted effects are terminal, the updated restore can derive OFF while retaining the credential; that flag/restart action also needs explicit approval. No automatic financial/Auth rollback or schema rollback is proposed.
+
+### Security and breaking impact
+
+This adds the existing broad Production service-role capability to the already privileged postgres-backed WS process. Supabase Auth hard-delete needs that existing server credential; no narrower key is introduced. No HTTP/RPC endpoint or new service is added. Current other WS usage passes the value into persisted-state writer's config-presence check; writes still go through `writeViaDb`, so the key does not select a new REST accounting path. Future use sites need review. The exporter retains the existing unprivileged Netlify credential trust boundary; root does not execute staging code or trust a claimed project without provider validation. Root/WS host compromise remains outside this isolation guarantee.
+
+New preflight deliberately blocks ON without the key, invalid identity/expiry and incomplete/drifted extension. The approved original anchor/backups remain unchanged, but the supported future OFF hash is the derived credential-preserving one. A future credential rotation needs its own reviewed procedure. Installation is an operator dependency and is not performed by CI/merge. No application runtime, DB schema, Stage behavior, bonus policy or accounting semantics change in this patch.
+
+Local verification for this recovery patch: Python configuration suite24/24, Production preflight21/21, existing deployment/infra guards17/17 and deletion fundamentals15/15 with the CI-defined `XP_TEST_MODE=1` passed. Initial ad-hoc deletion invocation without that CI test setting correctly hit `xp_redis_v3_required`; no application fix was made. Syntax227 files, CSP55 documents and existing lifecycle/badge/XP guards passed. The real exporter was exercised read-only with stdout captured only in memory; provider/project validation passed without persisting/printing the credential. No GitHub CI/push, root install, protected file change, restart or recovery execution is claimed.
+
+
+## Final Production acceptance — 2026-10-22
+
+The owner accepted stages A/B/C as PASS. This supersedes preparation-only and RETRY/admission-OFF status notes above; preserve them as historical evidence. Production is LIVE: runtime Netlify/WS `59cb099823e3985a55bee0137d3004ca4f765c99`, published Netlify deployment `6ada4e9ad2e45d70dde0e19a`, schema67, tracking ON, v3 guard ready, Redis V3 LIVE, runtime flags ON and DB admission ON (verified at 22:25:18 UTC). No restart/deployment or new request was performed in C.
+
+The previous request completed at 22:16:42.839442 UTC through natural worker recovery. Exactly one balanced BURN500 and its immutable idempotency receipt remain; retired wallet closed0; profile/private XP/operational Poker references removed and official Auth absence verified last. Historical incident remains in DB; completed API requires no intervention. Final admission review found zero incomplete requests and zero unbalanced transactions. USER wallets, avatar objects and manifests were unchanged by opening admission. Limited normal Auth/profile/CH/ledger/XP/ranking/refresh/browser-WS auth/ping and local/public health passed without financial actions or XP awards.
+
+**Limitations:** Storage DELETE with a real avatar **NOT TESTED** in the final Production deletion E2E: that subject had no avatar and deleted zero Storage objects. Do not conflate prior Storage API tests with populated-avatar end-to-end cleanup. Google OAuth **NOT TESTED**; #1128 late-upload risk and #1131 cross-account antifarming are explicitly deferred.
+
+Private request/receipt/configuration and before/after evidence, with hashes, are retained outside Git. Public report contains no email, password, token, protected manifest or backup. The accepted service-role correction is published separately to align repository source with the already-installed protected bundle; merging it does not install or activate the operator. No production data/configuration mutation is part of publication. Emergency response remains DB admission OFF first, preserving worker/recovery for accepted requests; no automatic financial/Auth rollback. Do not close #1117 until the source correction is published.
