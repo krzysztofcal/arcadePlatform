@@ -3895,3 +3895,18 @@ test("Single Player tableManager.join requires authoritative seat and rejects no
   assert.equal(secondHuman.ok, false);
   assert.equal(secondHuman.code, "single_player_human_conflict");
 });
+
+test('privacy quarantine blocks materialization and mutations until canonical restore is explicitly released',async()=>{
+ const manager=createTableManager();
+ const tableId='privacy-quarantine';
+ manager.join({tableId,userId:'peer',buyIn:100});
+ manager.blockTableMutations(tableId);
+ assert.equal(manager.isTableMutationBlocked(tableId),true);
+ assert.equal((await manager.ensureTableLoaded(tableId)).code,'table_resync_required');
+ assert.equal(manager.bootstrapHand(tableId).code,"table_resync_required");
+ const core={members:[],seats:{},appliedRequestIds:[],maxSeats:4};
+ assert.equal(manager.restoreTableFromPersisted(tableId,{coreState:{...core,version:10}}).ok,true);
+ assert.equal(manager.restoreTableFromPersisted(tableId,{coreState:{...core,version:9}}).reason,'stale_persisted_restore');
+ manager.unblockTableMutations(tableId);
+ assert.equal(manager.isTableMutationBlocked(tableId),false);
+});

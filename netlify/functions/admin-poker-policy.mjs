@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive } from '../../shared/account-deletion.mjs';
 import { supportsPokerHourlyRefillCaps } from "./_shared/admin-poker-policy-schema.mjs";
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
 import { badRequest, conflict, parseJsonBody } from "./_shared/admin-ops.mjs";
@@ -163,6 +164,7 @@ async function updatePokerPolicy({ body, actorId, runTransaction = beginSql } = 
       const rows = await tx.unsafe("select revision from public.poker_access_policy where id = 1 for update;");
       if (!rows?.[0]) throw badRequest("policy_missing", "policy_missing");
       if (Number(rows[0].revision) !== expectedRevision) throw conflict("stale_revision", "stale_revision");
+      if (accountDeletionEnabled()) await assertAccountActive(tx, actorId);
       const updated = await tx.unsafe(`
 update public.poker_access_policy
 set slow_threshold_ch = $1, slow_hysteresis_bps = $2, slow_recovery_threshold_ch = $3, revision = revision + 1,
@@ -195,6 +197,7 @@ where account_type = 'SYSTEM' and status = 'active' and system_key = any($1::tex
       const keys = new Set((accounts || []).map((row) => row.system_key));
       if (!normalKey || !slowKey || !keys.has(normalKey) || !keys.has(slowKey)) throw badRequest("tier_pools_unprovisioned", "tier_pools_unprovisioned");
     }
+    if (accountDeletionEnabled()) await assertAccountActive(tx, actorId);
     const updated = await tx.unsafe(`
 update public.poker_bot_tier_policy
 set enabled = $2,

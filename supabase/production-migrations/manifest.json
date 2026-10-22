@@ -1142,11 +1142,73 @@
       "prerequisites": [
         "20260914092000_chips_ledger_production_retention_activation.sql"
       ]
+    },
+    {
+      "file": "20261021191104_account_deletion_production_compatibility.sql",
+      "sha256": "5036a5977b8c9572556830fa08dc8cc87589ff232270a6cb6d58064a7b429b3e",
+      "purpose": "#1117 final disabled Account Deletion Production compatibility; separate exact-file GO required, not applied",
+      "prerequisites": [
+        "20261016120000_chips_ledger_production_human_lifecycle_receipts.sql",
+        "20261011200000_poker_single_player_table_flag.sql",
+        "20261012095657_poker_single_player_request_lookup.sql"
+      ],
+      "source_versions": [
+        "20261018184941",
+        "20261018190323",
+        "20261019170000",
+        "20261020082604",
+        "20261020094224",
+        "20261020190000"
+      ]
     }
   ],
   "provenance_rules": [
     "Source hashes are immutable inventory evidence.",
     "Only E1/E2/P1 are applied Production versions; omitted source versions are never marked applied.",
     "Manifest entries classify every current main migration; new unclassified files fail the repository guard."
+  ],
+  "forward_only": [
+    {
+      "file": "20261018184941_account_self_deletion_v2.sql",
+      "version": "20261018184941",
+      "sha256": "6552d447ea64e9b4c20d2cc2fd135f688528c5049b3c50674df8b94e21992c88",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 disabled account-deletion schema; Stage application authorized; Production not authorized; no reset/approval/activation"
+    },
+    {
+      "file": "20261018190323_account_retirement_escrow_compatibility.sql",
+      "version": "20261018190323",
+      "sha256": "3d7375771822df62ec8972abb5748f950847eba0ff2ed84d77937f370d543323",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 known USER trigger compatibility with exact Stage escrow dependency inventory; unknown dependencies still fail closed; separate Production GO"
+    },
+    {
+      "file": "20261019170000_account_avatar_manifest_guards.sql",
+      "version": "20261019170000",
+      "sha256": "32b56f4a458f4104c1886e5093df153ecf5b74ebeb18e393cbea20058049bd9a",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 local-only avatar protocol v3; trigger installed disabled; no Stage/Production application, activation or provider evidence authorized"
+    },
+    {
+      "file": "20261020082604_account_avatar_mvp_closure.sql",
+      "version": "20261020082604",
+      "sha256": "d04a59b383eee60200cca69a7d3cbe63b6e6ffab1a6edc208f2ff25c42cc5158",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 MVP owner-accepted invisible late-upload risk; retain known-operation/ownership/capability/lease/receipt guards. Local-only; no remote apply or activation authorized."
+    },
+    {
+      "file": "20261020094224_account_avatar_reconciliation.sql",
+      "version": "20261020094224",
+      "sha256": "e83203c48fc8fc7a7698b4961a4bb5b5106dde17c25eb98e55a85a67ae9cdb46",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 local-only canonical reconciliation / release-gated legacy reward commit fence; no remote application, activation, seed evidence or approval authorized."
+    },
+    {
+      "file": "20261020190000_account_bonus_uuid_policy.sql",
+      "version": "20261020190000",
+      "sha256": "d90ed9e48a07ce3e7126bc50de17756f87558a9fced9473845a6d31020138b52",
+      "category": "needs-production-equivalent",
+      "purpose": "#1117 per-UUID bonuses without HMAC; remove unused empty recognition schema and retain atomic campaign lifetime quotas. Local-only; no remote apply authorized."
+    }
   ]
 }

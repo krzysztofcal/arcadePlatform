@@ -1,3 +1,4 @@
+import {accountDeletionEnabled,assertAccountActive,lockAccountLifecycle} from '../../../shared/account-deletion.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createTableManager } from "../table/table-manager.mjs";
@@ -111,6 +112,7 @@ async function accessRuntimeFixture(options = {}) {
   let activeUsers = [];
   const isUuid = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
   const deps = {
+    accountDeletionEnabled,assertAccountActive,lockAccountLifecycle,
     activePokerAccessMutations: activeMutations,
     pokerAccessMutationGenerationByUser: generations,
     tableManager: manager,
@@ -628,6 +630,7 @@ async function settledRolloverRuntimeFixture(options = {}) {
   const stats = { persistedCount: 0 };
 
   const deps = {
+    accountDeletionEnabled,assertAccountActive,lockAccountLifecycle,
     tableManager: manager,
     initialFundingSnapshot,
     retries,
@@ -1029,6 +1032,7 @@ test('timeout sweep queues only unresolved Leave work and keeps completed/deferr
   };
   const queued = [];
   const deps = {
+    accountDeletionEnabled,assertAccountActive,lockAccountLifecycle,
     tableManager: { listTableIds: () => Object.keys(states), persistedPokerState: id => states[id],
       isTableClosed: id => id === 'closed', listDueTurnTimeouts: () => [] },
     pruneBotTimeoutSafetySuppressions: () => {},

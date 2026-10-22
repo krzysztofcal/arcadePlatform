@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive } from '../../shared/account-deletion.mjs';
 import fs from "node:fs";
 import path from "node:path";
 import { areCardsUnique, cardIdentity, isValidTwoCards } from "../../netlify/functions/_shared/poker-cards-utils.mjs";
@@ -97,6 +98,7 @@ export const loadPokerHandler = (filePath, mocks) => {
   }
   const declared = getDeclaredIdentifiers(rewritten);
   const injectable = [
+    "accountDeletionEnabled", "assertAccountActive",
     "baseHeaders",
     "beginSql",
     "awardPotsAtShowdown",
@@ -213,6 +215,7 @@ return handler;`
   );
   try {
     const resolvedMocks = {
+      accountDeletionEnabled, assertAccountActive,
       parseStakes,
       formatStakes,
       ensurePokerRequest,

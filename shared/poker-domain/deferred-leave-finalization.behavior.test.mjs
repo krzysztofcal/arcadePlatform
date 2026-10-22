@@ -6,11 +6,11 @@ const tableId = "11111111-1111-4111-8111-111111111111";
 const leaverId = "22222222-2222-4222-8222-222222222222";
 const activeId = "33333333-3333-4333-8333-333333333333";
 
-function createFixture({ withActiveHuman, initialVersion = 7, managedContinuous = false, inactivity = false }) {
+function createFixture({ withActiveHuman, initialVersion = 7, managedContinuous = false, inactivity = false, pendingAllIn = false, phase = "HAND_DONE" }) {
   let version = initialVersion;
   let state = {
     tableId,
-    phase: "HAND_DONE",
+    phase,
     handId: "",
     seats: [
       { userId: leaverId, seatNo: 1 },
@@ -20,7 +20,8 @@ function createFixture({ withActiveHuman, initialVersion = 7, managedContinuous 
       [leaverId]: 25,
       ...(withActiveHuman ? { [activeId]: 75 } : {}),
     },
-    leftTableByUserId: { [leaverId]: true },
+    leftTableByUserId: { [leaverId]: !pendingAllIn },
+    ...(pendingAllIn ? { pendingDetachByUserId: { [leaverId]: true } } : {}),
     ...(inactivity ? { inactivityEjectionByUserId: { [leaverId]: { handId: "hand", isSinglePlayer: false } } } : {}),
   };
   let seats = [
@@ -169,4 +170,20 @@ test("Online completed inactivity finalizer feeds real removed snapshot and retr
     assert.equal((await finalizeDeferredLeavesAfterSettlement(args)).ok, true);
     assert.equal(fixture.cashouts.length, 1);
   }
+});
+
+
+test("all-in pending detach waits for settlement and cashes out winnings exactly once", async () => {
+  const live = createFixture({ withActiveHuman: true, pendingAllIn: true, phase: "RIVER" });
+  const waiting = await finalizeDeferredLeavesAfterSettlement({ beginSql: live.beginSql, tableId, postTransactionFn: live.postTransactionFn });
+  assert.equal(waiting.status, "not_settled");
+  assert.equal(live.cashouts.length, 0);
+  assert.equal(live.getSeats().length, 2);
+  const settled = createFixture({ withActiveHuman: true, pendingAllIn: true });
+  const args = { beginSql: settled.beginSql, tableId, postTransactionFn: settled.postTransactionFn };
+  assert.equal((await finalizeDeferredLeavesAfterSettlement(args)).changed, true);
+  assert.equal(settled.cashouts[0].entries[1].amount, 25);
+  assert.equal(settled.getState().pendingDetachByUserId?.[leaverId], undefined);
+  assert.equal((await finalizeDeferredLeavesAfterSettlement(args)).changed, false);
+  assert.equal(settled.cashouts.length, 1);
 });

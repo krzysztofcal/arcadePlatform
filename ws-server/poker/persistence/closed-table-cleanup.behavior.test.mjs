@@ -22,7 +22,7 @@ test("short retention preserves Single Player start intents through the retry/sk
       await db.query("insert into poker_tables values ($1,'CLOSED',now()-interval '3 days',true,null)", [ids[i]]);
       await db.query("insert into poker_state values ($1,'{\"phase\":\"HAND_DONE\",\"handId\":\"\"}')", [ids[i]]);
       await db.query("insert into chips_accounts values ($1,'ESCROW','active',0)", ['POKER_TABLE:' + ids[i]]);
-      await db.query("insert into poker_requests values ($1,'QUICK_SEAT',$2::jsonb,now()-$3::interval)", [ids[i], JSON.stringify({ isSinglePlayer: i < 2 }), i === 0 ? '24 hours 4 minutes' : i === 1 ? '24 hours 6 minutes' : '1 hour']);
+      await db.query("insert into poker_requests values ($1,'QUICK_SEAT',$2::jsonb,now()-$3::interval)", [ids[i], JSON.stringify({ isSinglePlayer: i < 2 }), i === 0 ? '24 hours 4 minutes' : i === 1 ? '24 hours 6 minutes' : '2 hours']);
     }
     const cleanup = createClosedTableCleanup({
       env: envWithRetention(HOUR),

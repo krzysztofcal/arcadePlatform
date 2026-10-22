@@ -144,6 +144,7 @@
 
   function setStatus(message, tone){
     if (!nodes.status) return;
+    if (deletionReceivedOwnerId){ message = deletionReceivedMessage(); tone = 'success'; }
     nodes.status.textContent = message || '';
     nodes.status.dataset.tone = tone || '';
     nodes.status.hidden = !message;
@@ -226,6 +227,9 @@
   }
 
   function renderUser(user){
+    var incomingUserKey = getUserKey(user);
+    if (incomingUserKey && deletionReceivedOwnerId === incomingUserKey) user = null;
+    else if (incomingUserKey && deletionReceivedOwnerId) resetDeletionAttempt();
     var hasUser = !!user;
     var previousUserKey = getUserKey(currentUser);
     var nextUserKey = getUserKey(user);
@@ -235,6 +239,7 @@
       setBlockVisibility(nodes.signupConfirmation, false);
     }
     if (previousUserKey !== nextUserKey){
+      if (nextUserKey && deletionAttempt && nextUserKey !== deletionAttempt.ownerId) resetDeletionAttempt();
       publicProfileGeneration += 1;
       publicProfileInFlight = null;
       if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
@@ -1086,6 +1091,7 @@
   }
 
   function handleGoogleSignIn(){
+    if (deletionReceivedOwnerId) resetDeletionAttempt();
     if (!nodes.googleSignIn || nodes.googleSignIn.disabled) return;
     if (!auth || !auth.signInWithGoogle){
       setStatus(googleErrorMessage('google_unavailable'), 'error');
@@ -1106,6 +1112,7 @@
 
   function handleSignIn(e){
     e.preventDefault();
+    if (deletionReceivedOwnerId) resetDeletionAttempt();
     var email = nodes.signInEmail && nodes.signInEmail.value ? nodes.signInEmail.value.trim() : '';
     var password = nodes.signInPass && nodes.signInPass.value ? nodes.signInPass.value : '';
     if (!validEmail(email)){
@@ -1140,6 +1147,7 @@
 
   function handleSignUp(e){
     e.preventDefault();
+    if (deletionReceivedOwnerId) resetDeletionAttempt();
     var email = nodes.signUpEmail && nodes.signUpEmail.value ? nodes.signUpEmail.value.trim() : '';
     var password = nodes.signUpPass && nodes.signUpPass.value ? nodes.signUpPass.value : '';
     var passwordConfirm = nodes.signUpPassConfirm && nodes.signUpPassConfirm.value ? nodes.signUpPassConfirm.value : '';
@@ -1232,6 +1240,7 @@
   }
 
   function handleSignOut(){
+    resetDeletionAttempt();
     setStatus(t('signingOut', 'Signing out...'), 'info');
     if (!auth || !auth.signOut){
       setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
@@ -1244,6 +1253,94 @@
     }).catch(function(err){
       var msg = err && err.message ? String(err.message) : t('signOutError', 'Could not sign out right now.');
       setStatus(msg, 'error');
+    });
+  }
+
+  // Request recovery only. No cleanup polling or persisted tracking state.
+  var deletionAttempt = null;
+  var deletionReceivedOwnerId = '';
+  function deletionReceivedMessage(){
+    return t('accountDeletionReceived', 'We have received your account deletion request. You do not need to take any further action.');
+  }
+  function resetDeletionAttempt(){
+    deletionAttempt = null;
+    deletionReceivedOwnerId = '';
+    if (nodes.deleteBtn) nodes.deleteBtn.disabled = false;
+    if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deleting your account permanently forfeits CH, XP, achievements and profile data.');
+  }
+  function deletionRequest(token, method){
+    return window.fetch('/.netlify/functions/account-delete', {
+      method: method, cache: 'no-store',
+      headers: method === 'POST' ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { Authorization: 'Bearer ' + token },
+      body: method === 'POST' ? JSON.stringify({confirmation:'DELETE_ACCOUNT',acknowledgeForfeiture:true}) : undefined
+    }).then(function(response){
+      if (method === 'GET' && response.status === 404) return null;
+      if (response.status !== (method === 'POST' ? 202 : 200)) throw new Error('deletion_unavailable');
+      return response.json().then(function(state){
+        if (!state || typeof state.requestId !== 'string' || !state.requestId) throw new Error('deletion_unconfirmed');
+        return state;
+      });
+    });
+  }
+  function acknowledgeDeletion(attempt, client){
+    if (deletionAttempt !== attempt || getUserKey(currentUser) !== attempt.ownerId) return;
+    deletionReceivedOwnerId = attempt.ownerId;
+    if (nodes.deleteBtn) nodes.deleteBtn.disabled = true;
+    renderUser(null);
+    setStatus(deletionReceivedMessage(), 'success');
+    // SDK sign-out may fail during an Auth outage. It never cancels the durable
+    // request; SQL/WS guards still deny the old UUID and the acknowledgement stays.
+    return client.auth.signOut({scope:'local'}).then(function(result){
+      if (result && result.error) throw result.error;
+    }).catch(function(){ klog('account:deletion_signout_failed', {code:'auth_unavailable'}); });
+  }
+  function handleDeleteAccount(event){
+    event.preventDefault();
+    if (!currentUser || !auth || !auth.getClient) return;
+    var ownerId = getUserKey(currentUser);
+    if (deletionAttempt && deletionAttempt.ownerId === ownerId && deletionAttempt.busy) return;
+    var attempt = deletionAttempt && deletionAttempt.ownerId === ownerId ? deletionAttempt : {ownerId:ownerId,confirmed:false};
+    deletionAttempt = attempt;
+    attempt.busy = true;
+    nodes.deleteBtn.disabled = true;
+    var client = auth.getClient();
+    var token;
+    if (!client || !client.auth || !client.auth.getSession || !client.auth.signOut){
+      attempt.busy = false; nodes.deleteBtn.disabled = false;
+      setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
+      return;
+    }
+    function isCurrent(){ return deletionAttempt === attempt && getUserKey(currentUser) === ownerId; }
+    client.auth.getSession().then(function(result){
+      var session = result && result.data && result.data.session;
+      if (!session || !session.access_token || !session.user || session.user.id !== ownerId) throw new Error('unauthorized');
+      token = session.access_token;
+      return deletionRequest(token, 'GET');
+    }).then(function(existing){
+      if (!isCurrent()) return;
+      // A persisted preparing request is enough: accepted/completed are backend
+      // lifecycle details, not prerequisites for leaving this page.
+      if (existing) return acknowledgeDeletion(attempt, client);
+      if (!attempt.confirmed){
+        attempt.confirmed = window.confirm(t('accountDeletionConfirm', 'Your account will be permanently deleted. You will lose all CH (including Poker winnings), XP, achievements and profile data. This cannot be undone.'));
+      }
+      if (!attempt.confirmed || !isCurrent()) return;
+      return deletionRequest(token, 'POST').catch(function(){
+        // A lost response is UNKNOWN. Reconcile once; do not start a timer or
+        // ask for consent again. A later click may safely replay the same POST.
+        return deletionRequest(token, 'GET').then(function(saved){
+          if (!saved) throw new Error('deletion_unconfirmed');
+          return saved;
+        });
+      }).then(function(){ return acknowledgeDeletion(attempt, client); });
+    }).catch(function(){
+      if (!isCurrent()) return;
+      var message = t('accountDeletionUnavailable', 'We could not confirm receipt of your request. Try again; any saved request continues automatically.');
+      if (nodes.deleteNote) nodes.deleteNote.textContent = message;
+      setStatus(message, 'error');
+    }).then(function(){
+      attempt.busy = false;
+      if (isCurrent() && !deletionReceivedOwnerId) nodes.deleteBtn.disabled = false;
     });
   }
 
@@ -1267,11 +1364,7 @@
     if (nodes.publicAvatarInput){ nodes.publicAvatarInput.addEventListener('change', handleAvatarSelected); }
     if (nodes.publicAvatarRemove){ nodes.publicAvatarRemove.addEventListener('click', handleAvatarRemove); }
     if (nodes.deleteBtn && nodes.deleteNote){
-      nodes.deleteBtn.addEventListener('click', function(e){
-        e.preventDefault();
-        setStatus(t('deleteAccountSupport', 'Contact support to request account deletion for this profile.'), 'info');
-        nodes.deleteNote.focus();
-      });
+      nodes.deleteBtn.addEventListener('click', handleDeleteAccount);
     }
 
     doc.addEventListener('auth:signin-request', function(){
@@ -1346,6 +1439,7 @@
   function init(){
     auth = (typeof window !== 'undefined' && window.SupabaseAuth) ? window.SupabaseAuth : null;
     selectNodes();
+    try { window.sessionStorage.removeItem('arcade:account-deletion-status'); } catch (_err){}
     setWelcomeBonusVisibility(false);
     wireEvents();
     hydrateUser();
@@ -1357,6 +1451,7 @@
       if (currentUser){ refreshWelcomeBonus(currentUser); }
       if (accountPokerProjection !== undefined) renderPokerState(accountPokerProjection);
       queueLedgerRender();
+      if (deletionReceivedOwnerId) setStatus(deletionReceivedMessage(), 'success');
     });
   }
 

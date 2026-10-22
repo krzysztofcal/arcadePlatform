@@ -1,4 +1,9 @@
 import crypto from "node:crypto";
+import { lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql } from "../../../shared/account-deletion.mjs";
+
+const deletionEnabled = () => process.env.ACCOUNT_DELETION_ENABLED === "1";
+const INTERNAL_DELETION = Symbol("trusted deletion ledger effect");
+const financialMismatch = () => Object.assign(new Error("financial_mismatch"), { code: "financial_mismatch" });
 import { beginSql, executeSql, klog } from "./supabase-admin.mjs";
 
 const VALID_TX_TYPES = new Set([
@@ -127,6 +132,9 @@ const FULL_REPLAY_TX_TYPES = new Set([
   "ADMIN_ADJUST",
 ]);
 
+const requiresFullReplay = (record) => FULL_REPLAY_TX_TYPES.has(String(record?.tx_type || ""))
+  || (record?.tx_type === "BURN" && /^account-delete:[0-9a-f-]{36}:burn:v1$/i.test(record.idempotency_key || ""));
+
 const idempotencyError = (code, message, status = 503) => {
   const error = new Error(message || code);
   error.code = code;
@@ -192,7 +200,7 @@ async function fetchCurrentUserAccountSnapshot(userId, tx = null) {
   const query = `
 select id, balance, next_entry_seq
 from public.chips_accounts
-where user_id = $1 and account_type = 'USER'
+where ${deletionEnabled() ? 'coalesce(user_id, retired_user_id)' : 'user_id'} = $1 and account_type = 'USER'
 limit 1;
 `;
   const runner = tx ? (q, params) => tx.unsafe(q, params) : executeSql;
@@ -215,12 +223,12 @@ async function resolveIdempotentReplay(record, input, tx = null) {
     normalizeIdempotencyUserId(input.payloadUserId),
     tx,
   );
-  const requiresFullReplay = FULL_REPLAY_TX_TYPES.has(String(record.tx_type || ""));
-  if (hotSnapshot?.transaction && (!requiresFullReplay || (Array.isArray(hotSnapshot.entries) && hotSnapshot.entries.length > 0))) {
+  const fullReplay = requiresFullReplay(record);
+  if (hotSnapshot?.transaction && (!fullReplay || (Array.isArray(hotSnapshot.entries) && hotSnapshot.entries.length > 0))) {
     return hotSnapshot;
   }
 
-  if (!requiresFullReplay) {
+  if (!fullReplay) {
     return {
       transaction: {
         id: String(record.transaction_id),
@@ -268,7 +276,7 @@ async function resolveIdempotentReplay(record, input, tx = null) {
 }
 
 async function storeIdempotencyReplay(record, result, tx) {
-  if (!FULL_REPLAY_TX_TYPES.has(String(record?.tx_type || ""))) return record;
+  if (!requiresFullReplay(record)) return record;
   if (!result?.transaction || !Array.isArray(result.entries)) {
     throw idempotencyError("chips_idempotency_replay_unavailable", "Cannot store incomplete idempotency replay snapshot");
   }
@@ -324,7 +332,16 @@ function isIdempotencyUniqueError(error) {
   return (is23505 && mentionsIdempotency) || (looksUnique && mentionsIdempotency);
 }
 
-async function getOrCreateUserAccount(userId, tx = null) {
+async function getOrCreateUserAccount(userId, tx = null, internalAuthorization = null) {
+  if (deletionEnabled()) {
+    if (!tx) return beginSql((activeTx) => getOrCreateUserAccount(userId, activeTx, internalAuthorization));
+    await lockAccountLifecycle(tx, [userId]);
+    if (internalAuthorization?.capability !== INTERNAL_DELETION || internalAuthorization.userId !== userId) {
+      await assertAccountActive(tx, userId);
+    }
+    const retired = await tx.unsafe("select id from public.chips_accounts where retired_user_id=$1 and account_type='USER' limit 1;", [userId]);
+    if (retired.length) throw Object.assign(new Error("account_retired"), { code: "account_retired" });
+  }
   const query = `
 with existing as (
   select * from public.chips_accounts where user_id = $1 and account_type = 'USER' for update
@@ -349,6 +366,7 @@ select row_to_json(account) as account from account;
   if (!account) {
     throw new Error("Failed to prepare chips account");
   }
+  if (account.status !== "active") throw Object.assign(new Error("account_not_active"), { code: "account_not_active" });
   return account;
 }
 
@@ -779,7 +797,7 @@ entries as (
 account as (
   select id, balance, next_entry_seq
   from public.chips_accounts
-  where user_id = coalesce($2::uuid, (select user_id from txn))
+  where ${deletionEnabled() ? 'coalesce(user_id, retired_user_id)' : 'user_id'} = coalesce($2::uuid, (select user_id from txn))
     and account_type = 'USER'
   limit 1
 )
@@ -914,6 +932,7 @@ async function postTransaction({
   entries = [],
   createdBy = null,
   tx = null,
+  internalAuthorization = null,
 }) {
   if (!VALID_TX_TYPES.has(txType)) {
     throw badRequest("invalid_tx_type", "Invalid transaction type");
@@ -1012,9 +1031,15 @@ async function postTransaction({
     const runNewTransaction = async (activeTx = sqlTx) => {
       // IMPORTANT: inside this block use ONLY `activeTx` for all SQL to keep it atomic.
       const userEntryIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId).filter(Boolean))];
+      userEntryIds.sort();
+      if (deletionEnabled()) {
+        const actor = createdBy && userEntryIds.length && internalAuthorization?.capability !== INTERNAL_DELETION ? createdBy : null;
+        await lockAccountLifecycle(activeTx,[...userEntryIds,...(actor ? [actor] : [])]);
+        if (actor) await assertAccountActive(activeTx,actor);
+      }
       const userAccountById = new Map();
       for (const userEntryId of userEntryIds) {
-        userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, activeTx));
+        userAccountById.set(userEntryId, await getOrCreateUserAccount(userEntryId, activeTx, internalAuthorization));
       }
 
       userAccount = payloadUserId ? (userAccountById.get(payloadUserId) || null) : null;
@@ -1241,8 +1266,100 @@ from inserted i;
   return result;
 }
 
+// Trusted Poker completion only. No caller-controlled boolean can bypass lifecycle.
+async function postPokerLeaveCashout({ tx, tableId, userId, amount, idempotencyKey, createdBy = userId,
+  description = null, metadata = { tableId } }) {
+  if (!tx || !isUuidLike(userId) || !isUuidLike(tableId) || !Number.isSafeInteger(amount) || amount <= 0) throw financialMismatch();
+  const input = { userId, txType: "TABLE_CASH_OUT", idempotencyKey, reference: `table:${tableId}`,
+    description, metadata, createdBy, tx,
+    entries: [{ accountType: "ESCROW", systemKey: `POKER_TABLE:${tableId}`, amount: -amount }, { accountType: "USER", amount }] };
+  if (!deletionEnabled()) return postTransaction(input);
+  // Table/state locks precede lifecycle/request/account locks throughout Poker.
+  const [row] = await tx.unsafe("select state from public.poker_state where table_id=$1 for update;", [tableId]);
+  await lockAccountLifecycle(tx, [userId]);
+  const [request] = await tx.unsafe("select * from public.account_deletion_requests where old_user_id=$1 for update;", [userId]);
+  if (!request) return postTransaction(input);
+  const state = typeof row?.state === "string" ? JSON.parse(row.state) : row?.state;
+  if (!["preparing", "poker"].includes(request.phase) || ["ERROR", "COMPLETED"].includes(request.status)
+    || !["INIT", "SETTLED", "HAND_DONE"].includes(state?.phase)
+    || Number(state?.stacks?.[userId]) !== amount) throw financialMismatch();
+  return postTransaction({ ...input, internalAuthorization: { capability: INTERNAL_DELETION, userId } });
+}
+
+async function retireUserForDeletion({ tx, userId, requestId, assertLease }) {
+  if (!deletionEnabled() || !tx || !isUuidLike(userId) || !isUuidLike(requestId) || typeof assertLease !== "function") {
+    throw new Error("deletion_retirement_unavailable");
+  }
+  await lockAccountLifecycle(tx, [userId]);
+  const request = await assertLease(tx);
+  if (request?.request_id !== requestId || request.old_user_id !== userId || request.phase !== "burn"
+    || request.status !== "PROCESSING" || request.progress?.poker?.done !== true) throw financialMismatch();
+  let accounts = await tx.unsafe("select * from public.chips_accounts where account_type='USER' and coalesce(user_id,retired_user_id)=$1 for update;", [userId]);
+  if (accounts.length === 0 && !request.progress.walletRetirement) {
+    // An owner who never held CH still gets a permanent retired financial
+    // identity; creating its empty live shell and retiring it is one transaction.
+    await getOrCreateUserAccount(userId, tx, { capability: INTERNAL_DELETION, userId });
+    accounts = await tx.unsafe("select * from public.chips_accounts where account_type='USER' and coalesce(user_id,retired_user_id)=$1 for update;", [userId]);
+  }
+  if (accounts.length !== 1) throw financialMismatch();
+  const account = accounts[0];
+  const saved = request.progress.walletRetirement;
+  if (saved?.retiredAt) {
+    if (saved.accountId !== account.id || account.retired_user_id !== userId || account.user_id != null
+      || account.status !== "closed" || Number(account.balance) !== 0) throw financialMismatch();
+    if (saved.noBurn === true) {
+      if (saved.amount !== 0 || saved.burnPayload !== null || saved.burnTransactionId != null) throw financialMismatch();
+    } else {
+      if (!Number.isSafeInteger(saved.amount) || saved.amount <= 0 || typeof saved.burnPayload !== "string") throw financialMismatch();
+      const registry = await findIdempotencyRecord(`account-delete:${requestId}:burn:v1`, tx);
+      if (!registry || registry.transaction_id !== saved.burnTransactionId) throw financialMismatch();
+      const replayed = await postTransaction({ ...JSON.parse(saved.burnPayload), tx });
+      if (replayed.transaction.id !== saved.burnTransactionId) throw financialMismatch();
+    }
+    return { done: true, receipt: saved };
+  }
+  if (saved || account.retired_user_id || account.user_id !== userId || account.status !== "active") throw financialMismatch();
+  const [obligations] = await tx.unsafe(`select
+    exists(select 1 from public.poker_seats p where p.user_id=$1 and ${deletionPokerSeatPendingSql}) or
+    exists(select 1 from public.poker_state where state->'stacks' ? $1::text
+      or (state->>'phase' in ('PREFLOP','FLOP','TURN','RIVER','SHOWDOWN')
+        and exists(select 1 from jsonb_array_elements(coalesce(state->'handSeats',state->'seats','[]'::jsonb)) s where s->>'userId'=$1::text))) as pending;`, [userId]);
+  if (obligations?.pending !== false) throw financialMismatch();
+  const amount = Number(account.balance);
+  if (!Number.isSafeInteger(amount) || amount < 0) throw financialMismatch();
+  const burnPayload = amount === 0 ? null : {
+    userId, txType: "BURN", idempotencyKey: `account-delete:${requestId}:burn:v1`,
+    reference: `account-delete:${requestId}`, description: "Account deletion final wallet burn",
+    metadata: { requestId, reason: "ACCOUNT_DELETION" }, createdBy: userId,
+    entries: [{ accountType: "USER", amount: -amount }, { accountType: "SYSTEM", systemKey: "GENESIS", amount }],
+  };
+  const receipt = { version: 1, accountId: account.id, amount, burnPayload: burnPayload ? JSON.stringify(burnPayload) : null, noBurn: amount === 0 };
+  const store = async () => {
+    const rows = await tx.unsafe(`update public.account_deletion_requests
+      set progress=jsonb_set(progress,'{walletRetirement}',($2::text)::jsonb),progress_at=clock_timestamp()
+      where request_id=$1 returning request_id;`, [requestId, JSON.stringify(receipt)]);
+    if (rows.length !== 1) throw financialMismatch();
+  };
+  await store();
+  if (burnPayload) {
+    const burned = await postTransaction({ ...burnPayload, tx, internalAuthorization: { capability: INTERNAL_DELETION, userId } });
+    if (!burned?.transaction?.id || Number(burned.account?.balance) !== 0) throw financialMismatch();
+    receipt.burnTransactionId = burned.transaction.id;
+    await store();
+  }
+  await assertLease(tx);
+  const retired = await tx.unsafe(`update public.chips_accounts set user_id=null,retired_user_id=$2,
+    retired_at=clock_timestamp(),status='closed' where id=$1 and user_id=$2 and balance=0 and status='active' returning retired_at;`, [account.id, userId]);
+  if (retired.length !== 1) throw financialMismatch();
+  receipt.retiredAt = asIso(retired[0].retired_at);
+  await store();
+  return { done: true, receipt };
+}
+
 export {
   VALID_TX_TYPES,
+  retireUserForDeletion,
+  postPokerLeaveCashout,
   getUserBalance,
   listUserLedgerAfterSeq,
   listUserLedger,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { applyLeaveTable } from "../netlify/functions/_shared/poker-reducer.mjs";
+import { applyLeaveTable as applySnapshotLeave, advanceIfNeeded as advanceSnapshot } from "../ws-server/poker/snapshot-runtime/poker-reducer.mjs";
+import { applyLeaveTable, advanceIfNeeded } from "../netlify/functions/_shared/poker-reducer.mjs";
 
 const leaverUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const otherUserId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -42,6 +43,28 @@ const run = () => {
 
 try {
   run();
+  for (const [leave, advance] of [[applyLeaveTable, advanceIfNeeded], [applySnapshotLeave, advanceSnapshot]]) {
+    const allIn = { ...state, stacks: { ...state.stacks, [leaverUserId]: 0 },
+      allInByUserId: { ...state.allInByUserId, [leaverUserId]: true },
+      contributionsByUserId: { [leaverUserId]: 100, [otherUserId]: 200 },
+      holeCardsByUserId: { [leaverUserId]: ["AS", "AH"] },
+      sidePots: [{ amount: 200, eligibleUserIds: [leaverUserId, otherUserId] }] };
+    const pending = leave(allIn, { userId: leaverUserId }).state;
+    assert.equal(pending.pendingDetachByUserId?.[leaverUserId], true);
+    assert.equal(pending.leftTableByUserId[leaverUserId], false);
+    assert.equal(pending.foldedByUserId[leaverUserId], false);
+    assert.equal(pending.stacks[leaverUserId], 0);
+    assert.deepEqual(pending.seats, allIn.seats);
+    assert.deepEqual(pending.contributionsByUserId, allIn.contributionsByUserId);
+    assert.deepEqual(pending.holeCardsByUserId, allIn.holeCardsByUserId);
+    assert.deepEqual(pending.sidePots, allIn.sidePots);
+    assert.deepEqual(leave(pending, { userId: leaverUserId }).state, pending);
+    assert.equal(allIn.pendingDetachByUserId, undefined);
+    const showdown = advance({ ...pending, stacks: { [leaverUserId]: 0, [otherUserId]: 0 },
+      allInByUserId: { [leaverUserId]: true, [otherUserId]: true } });
+    assert.equal(showdown.state.phase, "SHOWDOWN", "both all-in participants reach showdown rather than awarding a fold win");
+    assert.deepEqual(showdown.state.contributionsByUserId, allIn.contributionsByUserId);
+  }
   console.log("poker-reducer applyLeaveTable marks acted for participating leaver unit test passed");
 } catch (error) {
   console.error(error);

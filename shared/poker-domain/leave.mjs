@@ -1,4 +1,4 @@
-import { postTransaction } from "../../netlify/functions/_shared/chips-ledger.mjs";
+import { postTransaction, postPokerLeaveCashout } from "../../netlify/functions/_shared/chips-ledger.mjs";
 import { deletePokerRequest, ensurePokerRequest, storePokerRequestResult } from "../../netlify/functions/_shared/poker-idempotency.mjs";
 import { updatePokerStateOptimistic } from "../../netlify/functions/_shared/poker-state-write.mjs";
 import { requireAuthoritativeHumanStack } from "./human-stack-accounting.mjs";
@@ -169,7 +169,9 @@ const postHumanLeaveCashoutInTx = async ({
 }) => {
   if (!Number.isInteger(amount) || amount < 0) throw makeError(409, "stack_ambiguous");
   if (amount === 0) return null;
-  const result = await postTransactionFn({
+  const result = process.env.ACCOUNT_DELETION_ENABLED === "1" && postTransactionFn === postTransaction
+    ? await postPokerLeaveCashout({ tx, tableId, userId, amount, idempotencyKey, createdBy })
+    : await postTransactionFn({
     userId,
     txType: "TABLE_CASH_OUT",
     idempotencyKey,
@@ -708,18 +710,24 @@ export async function executePokerLeave({
           ? parseStacks(currentState.stacks)
           : (isPlainObject(leaveState.stacks) ? leaveState.stacks : parseStacks(currentState.stacks));
         const seats = parseSeats(baseSeats);
-        const updatedStacks = parseStacks(baseStacks);
+        const updatedStacks = { ...parseStacks(baseStacks) };
         if (deferDetachUntilHandComplete) {
           const restoredStack = stateStack;
           if (normalizeNonNegativeInt(restoredStack) != null && normalizeNonNegativeInt(updatedStacks[userId]) == null) {
             updatedStacks[userId] = restoredStack;
           }
         } else {
-          delete updatedStacks[userId];
+          // Keep the locked authoritative amount until cashout; detach below in
+          // the same transaction after the scoped ledger operation validates it.
+          updatedStacks[userId] = stateStack;
         }
 
         const nextLeftTableByUserId = isPlainObject(leaveState.leftTableByUserId) ? { ...leaveState.leftTableByUserId } : {};
-        nextLeftTableByUserId[userId] = true;
+        const nextPendingDetach = isPlainObject(leaveState.pendingDetachByUserId) ? { ...leaveState.pendingDetachByUserId } : {};
+        if (!deferDetachUntilHandComplete) delete nextPendingDetach[userId];
+        if (!deferDetachUntilHandComplete || leaveState.pendingDetachByUserId?.[userId] !== true) {
+          nextLeftTableByUserId[userId] = true;
+        }
 
         const updatedStateRaw = {
           ...leaveState,
@@ -727,6 +735,7 @@ export async function executePokerLeave({
           seats,
           stacks: updatedStacks,
           leftTableByUserId: nextLeftTableByUserId,
+          pendingDetachByUserId: nextPendingDetach,
           pot: Number.isFinite(leaveState.pot) ? leaveState.pot : 0,
           phase: leaveState.phase || "INIT",
         };
@@ -896,12 +905,15 @@ export async function executePokerLeave({
             mutated = true;
           }
           const detachedSeats = parseSeats(latestState.seats).filter((seatItem) => seatItem?.userId !== userId);
-          const detachedStacks = parseStacks(latestState.stacks);
+          const detachedStacks = { ...parseStacks(latestState.stacks) };
           delete detachedStacks[userId];
           if (detachedSeats.length !== parseSeats(latestState.seats).length
             || Object.prototype.hasOwnProperty.call(parseStacks(latestState.stacks), userId)) {
+            const detachedPending = { ...latestState.pendingDetachByUserId };
+            delete detachedPending[userId];
             const detachedState = sanitizePersistedState({
               ...latestState,
+              pendingDetachByUserId: detachedPending,
               seats: detachedSeats,
               stacks: detachedStacks,
               leftTableByUserId: {
@@ -1065,11 +1077,13 @@ export async function finalizeDeferredLeavesAfterSettlement({
     const activeHumans = (Array.isArray(seatRows) ? seatRows : []).filter(
       (seat) => seat?.status === "ACTIVE" && seat?.is_bot !== true && typeof seat?.user_id === "string" && seat.user_id.trim()
     );
-    const deferredSeats = activeHumans.filter((seat) => leftMap[seat.user_id] === true);
+    const pendingDetach = isPlainObject(state.pendingDetachByUserId) ? state.pendingDetachByUserId : {};
+    const isDeferred = (seat) => leftMap[seat.user_id] === true || pendingDetach[seat.user_id] === true;
+    const deferredSeats = activeHumans.filter(isDeferred);
     if (deferredSeats.length === 0) {
       return { ok: true, changed: false, closed: false, status: "no_deferred_leaves", retryable: false };
     }
-    const remainingActiveHumans = activeHumans.filter((seat) => leftMap[seat.user_id] !== true);
+    const remainingActiveHumans = activeHumans.filter((seat) => !isDeferred(seat));
     if (remainingActiveHumans.length === 0 && !isManagedContinuousTable(table)) {
       return executeTerminalClose({
         tx,
@@ -1099,11 +1113,18 @@ export async function finalizeDeferredLeavesAfterSettlement({
       delete nextStacks[userId];
     }
     const deferredSet = new Set(deferredUserIds);
+    const nextPendingDetach = { ...pendingDetach };
+    const nextLeftMap = { ...leftMap };
+    for (const userId of deferredUserIds) {
+      delete nextPendingDetach[userId];
+      nextLeftMap[userId] = true;
+    }
     const nextState = sanitizePersistedState({
       ...state,
+      pendingDetachByUserId: nextPendingDetach,
       seats: parseSeats(state.seats).filter((seat) => !deferredSet.has(seat?.userId)),
       stacks: nextStacks,
-      leftTableByUserId: { ...leftMap },
+      leftTableByUserId: nextLeftMap,
     });
     validatePersistedStateOrThrow(nextState, makeError);
     const stateUpdate = await updatePokerStateOptimistic(tx, {

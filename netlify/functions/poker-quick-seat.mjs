@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive } from '../../shared/account-deletion.mjs';
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
 import { checkWsBuyInCapability, notifyWsLobbyMaterialize } from "./_shared/poker-ws-runtime-notify.mjs";
@@ -465,6 +466,10 @@ export async function handler(event) {
           }
           if (Date.now() - singlePlayerRequestIssuedAt > SINGLE_PLAYER_REQUEST_WINDOW_MS) {
             return { kind: "single_player_request_expired" };
+          }
+          if (accountDeletionEnabled()) {
+            await tx.unsafe('select id from public.poker_tables where id=$1 for update;',[replayed.id]);
+            await assertAccountActive(tx, auth.userId);
           }
           await tx.unsafe("update public.poker_tables set last_activity_at = now(), updated_at = now() where id = $1;", [replayed.id]);
           return {

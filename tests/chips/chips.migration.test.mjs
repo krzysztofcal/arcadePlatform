@@ -121,6 +121,7 @@ const expectNegativeBalanceGuard = async (sql) => {
 
 const dropAndRecreateSchema = async (sql) => {
   await assertTestDatabase(sql);
+  await sql.unsafe("drop schema if exists private cascade;");
   await sql.unsafe("drop schema if exists public cascade;");
   await sql.unsafe("create schema public;");
 };
@@ -4810,6 +4811,31 @@ async function assertEscrowDryRunReadOnlyConcurrency(sql) {
   }
 }
 
+// Fundamental real-driver regression: JSON strings must not be serialized twice.
+async function assertDeletionDriverReceipts(sql) {
+  const previous=process.env.ACCOUNT_DELETION_ENABLED;
+  process.env.ACCOUNT_DELETION_ENABLED="1";
+  try {
+    const {postTransaction,retireUserForDeletion}=await withLedger();
+    const {requestDeletion,advanceDeletion}=await import("../../shared/account-deletion.mjs");
+    const userId=crypto.randomUUID();
+    await sql.unsafe("insert into auth.users(id) values($1)",[userId]);
+    const beginSql=fn=>sql.begin(fn);
+    await beginSql(tx=>postTransaction({userId,txType:"MINT",idempotencyKey:"deletion-driver:"+userId,
+      entries:[{accountType:"SYSTEM",systemKey:"GENESIS",amount:-75},{accountType:"USER",amount:75}],tx}));
+    const request=await beginSql(tx=>requestDeletion(tx,userId));
+    const steps={preparing:async()=>({done:true}),poker:async()=>({done:true}),
+      burn:context=>beginSql(tx=>retireUserForDeletion({tx,userId,requestId:request.request_id,assertLease:context.assertLease})),
+      cleanup:async()=>{throw Error("not part of this receipt regression");},auth:async()=>{throw Error("not part of this receipt regression");}};
+    for(let i=0;i<3;i++)assert.equal((await advanceDeletion({beginSql,requestId:request.request_id,steps})).advanced,true);
+    const [row]=await sql.unsafe("select progress,phase from public.account_deletion_requests where request_id=$1",[request.request_id]);
+    assert.equal(row.phase,"cleanup");assert.equal(row.progress.preparing.done,true);assert.equal(row.progress.poker.done,true);
+    assert.equal(row.progress.walletRetirement.amount,75);assert.ok(row.progress.walletRetirement.retiredAt);
+    const [burn]=await sql.unsafe("select count(*)::int n from public.chips_transactions where idempotency_key=$1",["account-delete:"+request.request_id+":burn:v1"]);assert.equal(burn.n,1);
+    await sql.unsafe("delete from auth.users where id=$1",[userId]);
+  } finally { if(previous===undefined)delete process.env.ACCOUNT_DELETION_ENABLED;else process.env.ACCOUNT_DELETION_ENABLED=previous; }
+}
+
 async function main() {
   // Fundamental consent regressions run before any connection or fixture DDL.
   let reads = 0;
@@ -4894,7 +4920,13 @@ async function main() {
   await assertIdempotencyRegistryParity(sql);
   await assertEscrowAccountRetirementContracts(sql);
   await assertEscrowDryRunReadOnlyConcurrency(sql);
+  await assertDeletionDriverReceipts(sql);
   await runProductionEquivalentFixture(sql);
+  // This already-authorized disposable DB fixture also isolates XP from Redis.
+  process.env.XP_TEST_MODE = "1";
+  process.env.ACCOUNT_DELETION_ENABLED = "0";
+  const { assertProductionDeletionCompatibility } = await import("./account-deletion-production.fixture.mjs");
+  await assertProductionDeletionCompatibility({ runMigration, migrationFiles });
 
   // The integration workflow reuses this disposable database for the
   // following Stage contract jobs. Leave it in the normal main-migration

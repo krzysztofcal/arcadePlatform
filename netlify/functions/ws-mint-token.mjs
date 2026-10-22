@@ -295,6 +295,18 @@ export async function handler(event) {
   }
 
   const userId = auth.userId;
+  if (process.env.ACCOUNT_DELETION_ENABLED === '1') {
+    try {
+      const apiUrl = String(process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || '').replace(/\/$/, '');
+      const key = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY_V2 || process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const activeResponse = await fetch(apiUrl + '/rest/v1/rpc/account_is_active', {
+        method:'POST', headers:{apikey:key,authorization:'Bearer ' + token,'content-type':'application/json'},
+        body:'{}', signal:AbortSignal.timeout(10000)
+      });
+      if (!activeResponse.ok || await activeResponse.json() !== true) throw new Error('inactive');
+    } catch { return { statusCode:403,headers:originCors,body:JSON.stringify({error:'account_not_active'}) }; }
+  }
+
   const wsToken = signWsToken({ sub: userId, secret: mintSecret, ttlSec: expiresInSec });
   return {
     statusCode: 200,

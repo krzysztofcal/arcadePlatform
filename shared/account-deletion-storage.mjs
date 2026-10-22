@@ -1,0 +1,113 @@
+// Storage deletion adapter shared by Netlify and WS. No image or DB-driver imports.
+function unavailable() { return Object.assign(new Error('dependency_unavailable'), { code: 'dependency_unavailable' }); }
+const UPLOAD = 'profile-avatar-uploads';
+const OUTPUT = 'profile-avatars';
+const SOURCE = /^pending\/[0-9a-f-]{36}$/i;
+const AVATAR = /^[0-9a-f-]{36}\.webp$/i;
+
+export async function cleanupDeletionAvatars({ userId, requestId, generation, beginSql, assertLease, env = process.env, fetch: fetchImpl = globalThis.fetch }) {
+  const marker = env.ACCOUNT_DELETION_AVATAR_TRACKING_MARKER;
+  const base = String(env.SUPABASE_URL || env.SUPABASE_URL_V2 || '').replace(/\/$/,'');
+  const key = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (env.ACCOUNT_DELETION_ENABLED !== '1' || !marker
+    || !/^https:\/\/[^/]+\.supabase\.co$/i.test(base) || !key || !assertLease || !beginSql) throw unavailable();
+  const verifyAbsent = async (bucket,path) => {
+    if (!(bucket === UPLOAD ? SOURCE : AVATAR).test(path || '')) throw unavailable();
+    const response = await fetchImpl(`${base}/storage/v1/object/info/authenticated/${bucket}/${path}`, {
+      headers: { apikey:key, Authorization:`Bearer ${key}`, 'cache-control':'no-cache' }, signal:AbortSignal.timeout(15000) });
+    // A bucket/auth/network error is not proof that this exact object is absent.
+    const body = await response.json().catch(() => null);
+    // Storage1.80.2 legacy error handler maps non-500 errors to HTTP400
+    // while retaining the semantic status in the body. Require both signals.
+    if (body?.code !== 'NoSuchKey' || !(response.status === 404
+      || (response.status === 400 && body.statusCode === '404'))) throw unavailable();
+  };
+  const remove = async (bucket,path) => {
+    if (!(bucket === UPLOAD ? SOURCE : AVATAR).test(path || '')) throw unavailable();
+    const response = await fetchImpl(`${base}/storage/v1/object/${bucket}`, { method: 'DELETE',
+      headers: { apikey:key, Authorization:`Bearer ${key}`, 'content-type':'application/json' },
+      body: JSON.stringify({ prefixes:[path] }), signal:AbortSignal.timeout(15000) });
+    if (!response.ok) throw unavailable();
+    await verifyAbsent(bucket,path);
+  };
+  const snapshot = () => beginSql(async (tx) => {
+    await assertLease(tx);
+    const [guards] = await tx.unsafe('select private.account_avatar_guards_ready() as ready;');
+    if (guards?.ready !== true) throw unavailable();
+    const [cutover] = await tx.unsafe(`select *, clock_timestamp() as server_now,
+cutover_at + interval '7200 seconds' as safe_after
+from private.avatar_tracking_cutover where marker=$1;`, [marker]);
+    if (!cutover?.legacy_inventory_verified || cutover.upload_bucket !== UPLOAD || cutover.public_bucket !== OUTPUT) throw unavailable();
+    const [safety] = await tx.unsafe(`select count(*) filter (where tracking_version is distinct from 3
+or signing_finished_at is null or capability_until is null
+or (output_write_started_at is not null and output_write_finished_at is null))::int as uncertain,
+max(capability_until) as capability_until from public.profile_avatar_uploads where user_id=$1 and not private.account_avatar_manifest_reconciled($1,$2,id);`, [userId,requestId]);
+    if (Number(safety?.uncertain || 0)) return { reconcile:true };
+    const wait = Math.max(Date.parse(cutover.safe_after), safety?.capability_until ? Date.parse(safety.capability_until) : 0);
+    if (!Number.isFinite(wait)) throw unavailable();
+    if (wait > Date.parse(cutover.server_now)) return { waitUntil: new Date(wait).toISOString() };
+    // Preserve current selected key before a later profile/Auth cascade. Never list
+    // or sweep either bucket; historical orphan ownership needs operator evidence.
+    await tx.unsafe(`insert into private.account_avatar_objects(user_id,output_path)
+select user_id,avatar_key from public.user_profiles where user_id=$1 and avatar_key is not null
+on conflict(user_id,output_path) do nothing;`, [userId]);
+    const rows = await tx.unsafe(`select id,source_path,output_path,source_deleted_at,output_deleted_at
+from public.profile_avatar_uploads where user_id=$1 and not private.account_avatar_manifest_reconciled($1,$2,id) and (source_deleted_at is null or (output_path is not null and output_deleted_at is null))
+order by id limit 5;`, [userId,requestId]);
+    const objects = await tx.unsafe(`select output_path from private.account_avatar_objects where user_id=$1 and deleted_at is null order by output_path limit 5;`, [userId]);
+    return { rows, objects };
+  });
+  const current = await snapshot();
+  if (current.waitUntil) return current;
+  if (current.reconcile) {
+    let rows;
+    try {
+      // RPC acquires lifecycle before request and validates the complete lease.
+      rows = await beginSql(async (tx) => {
+        return tx.unsafe('select * from private.account_avatar_reconciliation_plan($1,$2,$3,$4);',[userId,requestId,generation,marker]);
+      });
+    } catch { throw unavailable(); }
+    for (const row of rows) {
+      await remove(UPLOAD,row.source_path);
+      if (row.output_path) await remove(OUTPUT,row.output_path);
+      await beginSql(async (tx) => {
+        await tx.unsafe('select private.account_avatar_record_reconciliation($1,$2,$3,$4,$5,$6,$7);',
+          [userId,requestId,generation,marker,row.id,row.snapshot_digest,row.inventory_digest]);
+      });
+    }
+    return { waitUntil:new Date(Date.now()+1000).toISOString() };
+  }
+  // Bounded batch: persisted deletion receipts let the next worker invocation resume.
+  await Promise.all([
+    ...current.rows.map(async (row) => {
+      await Promise.all([
+        !row.source_deleted_at ? remove(UPLOAD,row.source_path) : undefined,
+        row.output_path && !row.output_deleted_at ? remove(OUTPUT,row.output_path) : undefined,
+      ]);
+      await beginSql(async (tx) => {
+        await assertLease(tx);
+        const receipts = await tx.unsafe(`update public.profile_avatar_uploads set source_deleted_at=coalesce(source_deleted_at,clock_timestamp()),
+output_deleted_at=case when output_path is not null then coalesce(output_deleted_at,clock_timestamp()) else null end where id=$1 and user_id=$2 returning id;`, [row.id,userId]);
+        if (receipts.length !== 1) throw unavailable();
+      });
+    }),
+    ...current.objects.map(async (row) => {
+      await remove(OUTPUT,row.output_path);
+      await beginSql(async (tx) => {
+        await assertLease(tx);
+        const receipts = await tx.unsafe('update private.account_avatar_objects set deleted_at=coalesce(deleted_at,clock_timestamp()) where user_id=$1 and output_path=$2 returning output_path;', [userId,row.output_path]);
+        if (receipts.length !== 1) throw unavailable();
+      });
+    }),
+  ]);
+  const final = await snapshot();
+  if (final.waitUntil) return final;
+  if (final.reconcile) return { waitUntil:new Date(Date.now()+1000).toISOString() };
+  if (final.rows.length || final.objects.length) return { waitUntil: new Date(Date.now()+1000).toISOString() };
+  // Exact Storage absence was checked before every persisted receipt; the final
+  // SQL snapshot confirms all paths have receipts. This is API-visible cleanup,
+  // not a guarantee against the owner-accepted invisible post-expiry write.
+  // Retain manifests until owner's subsequent durable SQL cleanup/Auth cascade.
+  // requestId stays in the caller's durable job; no client-controlled cleanup API.
+  return { done:true };
+}

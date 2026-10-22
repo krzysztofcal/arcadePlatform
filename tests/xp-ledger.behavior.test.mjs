@@ -95,3 +95,18 @@ test("atomic award executor normalizes results and preserves legacy lock retry",
   assert.deepEqual({ granted: result.granted, dailyTotal: result.dailyTotal, sessionTotal: result.sessionTotal, lifetime: result.lifetime, lastSync: result.lastSync, status: result.status },
     { granted: 5, dailyTotal: 15, sessionTotal: 7, lifetime: 25, lastSync: 110, status: 0 });
 });
+
+test("enabled lifecycle protection propagates snapshot failure instead of returning successful XP status", async () => {
+  const previous = process.env.ACCOUNT_DELETION_ENABLED;
+  process.env.ACCOUNT_DELETION_ENABLED = "1";
+  const error = Object.assign(new Error("account_redis_fenced"), { code: "account_redis_fenced" });
+  try {
+    await assert.rejects(readCanonicalXpStatus({
+      readTotals: async () => ({ lifetime: 500, current: 10 }), supabaseUserId: "user-1",
+      persistProfile: ({ userId, totalXp }) => persistXpProfileSnapshot({ userId, totalXp, save: async () => { throw error; } })
+    }), { code: "account_redis_fenced" });
+  } finally {
+    if (previous === undefined) delete process.env.ACCOUNT_DELETION_ENABLED;
+    else process.env.ACCOUNT_DELETION_ENABLED = previous;
+  }
+});

@@ -768,6 +768,20 @@ const applyLeaveTable = (state, { userId, requestId } = {}) => {
   if (alreadyLeft && !userInHandSeats && !userInTableSeats && !hasStackEntry) {
     return { state, events: [] };
   }
+  // Leaving cannot forfeit chips already committed by an all-in participant.
+  // Keep the hand universe and eligibility intact until authoritative settlement.
+  const liveHand = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(state.phase);
+  if (liveHand && userInHandSeats && state.allInByUserId?.[userId] === true
+    && stackMap[userId] === 0 && !state.foldedByUserId?.[userId]
+    && !alreadyLeft && !state.sitOutByUserId?.[userId]) {
+    return {
+      state: { ...state, pendingDetachByUserId: { ...state.pendingDetachByUserId, [userId]: true } },
+      events: state.pendingDetachByUserId?.[userId] ? [] : [{
+        type: "PLAYER_LEAVE_DEFERRED", userId,
+        requestId: typeof requestId === "string" ? requestId : undefined,
+      }],
+    };
+  }
   const sitOutByUserId = sanitizeSitOutByUserId(state.sitOutByUserId, sanitizeSeats);
   const leftTableByUserId = sanitizeLeftTableByUserId(state.leftTableByUserId, sanitizeSeats);
   const pendingAutoSitOutByUserId = sanitizePendingAutoSitOutByUserId(state.pendingAutoSitOutByUserId, sanitizeSeats);

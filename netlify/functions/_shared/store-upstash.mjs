@@ -1,6 +1,8 @@
 import { createXpLedgerKeys, resolveXpNamespace, isXpV3, xpOwnerPrefix } from "./xp-ledger.mjs";
 // Minimal Upstash REST client (no extra deps).
+import { createHash } from "node:crypto";
 import { klog, beginSql } from "./supabase-admin.mjs";
+import { assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -18,12 +20,10 @@ local current=redis.call('GET',KEYS[2])
 if current == 'BLOCKED' then return 0 end
 if not current then redis.call('SET',KEYS[2],'ACTIVE:'..ARGV[1],'NX') end
 return redis.call('GET',KEYS[2]) == 'ACTIVE:'..ARGV[1] and 1 or 0`;
-// Missing/old permits deny at execution. This XP-only release never overrides
-// BLOCKED. The compatible SQL check also observes #1124 once its schema exists.
+// Missing/old permits deny at execution. Only an authoritative SQL check under
+// the lifecycle lock may initialize one. BLOCKED is never overwritten.
 export async function withRedisIdentityPermit(userIds, fn, deps = {}) {
   if (process.env.ACCOUNT_DELETION_ENABLED !== '1' && !isXpV3(XP_NAMESPACE)) return fn(null);
-  // Account Deletion requires the separate SQL lifecycle integration from #1124.
-  if (process.env.ACCOUNT_DELETION_ENABLED === '1') throw fenceError();
   if (!Array.isArray(userIds) || !userIds.length || userIds.some((id) => typeof id !== 'string' || !id.trim())) throw fenceError();
   const ids = [...new Set(userIds.filter((id) => ACCOUNT_UUID.test(String(id))).map((id) => id.toLowerCase()))].sort();
   if (!ids.length) {
@@ -34,28 +34,45 @@ export async function withRedisIdentityPermit(userIds, fn, deps = {}) {
   }
   const target = deps.store || store;
   if (isMemoryStore && target === store && !FORCE_MEMORY_STORE) throw fenceError();
-  return (deps.beginSql || beginSql)(async (tx) => {
-    // Same lock as #1124, without shipping its schema or deletion endpoints.
-    // Production has Auth but not that optional schema yet. Detect in the same
-    // transaction; never cache absence across a later feature rollout.
-    for (const id of ids) await tx.unsafe('select pg_advisory_xact_lock(hashtextextended($1, 0));', ['account-lifecycle:' + id]);
-    const [schema] = await tx.unsafe(`select to_regclass('public.account_deletion_requests') is not null as lifecycle,
-      exists(select 1 from pg_attribute where attrelid=to_regclass('public.chips_accounts')
-        and attname='retired_user_id' and not attisdropped) as retirement;`);
-    if (typeof schema?.lifecycle !== 'boolean' || typeof schema?.retirement !== 'boolean') throw fenceError();
-    const anonymous = new Set((deps.anonymousIds || []).map(id => id.toLowerCase()));
-    for (const id of ids) {
-      const [identity] = await tx.unsafe('select exists(select 1 from auth.users where id=$1) as present;', [id]);
-      if (identity?.present !== !anonymous.has(id)) throw fenceError();
-      if (schema.lifecycle) {
-        const [request] = await tx.unsafe('select exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting;', [id]);
-        if (request?.deleting !== false) throw fenceError();
-      }
-      if (anonymous.has(id) && schema.retirement) {
-        const [retired] = await tx.unsafe('select exists(select 1 from public.chips_accounts where retired_user_id=$1) as retired;', [id]);
-        if (retired?.retired !== false) throw fenceError();
-      }
+  const transaction = deps.beginSql || beginSql;
+  return transaction(async (tx) => {
+    if (process.env.ACCOUNT_DELETION_ENABLED !== '1') {
+      // Preserve the deployed V3 pre-deletion-schema contract while acceptance
+      // is OFF. Observe installed lifecycle tables in this same transaction;
+      // never cache their absence across a later feature rollout.
+      for (const id of ids) await tx.unsafe('select pg_advisory_xact_lock(hashtextextended($1, 0));', ['account-lifecycle:' + id]);
+      const [schema] = await tx.unsafe(`select to_regclass('public.account_deletion_requests') is not null as lifecycle,
+        exists(select 1 from pg_attribute where attrelid=to_regclass('public.chips_accounts')
+          and attname='retired_user_id' and not attisdropped) as retirement;`);
+      if (typeof schema?.lifecycle !== 'boolean' || typeof schema?.retirement !== 'boolean') throw fenceError();
+      const anonymous = new Set((deps.anonymousIds || []).map(id => id.toLowerCase()));
+      for (const id of ids) {
+        const [identity] = await tx.unsafe('select exists(select 1 from auth.users where id=$1) as present;', [id]);
+        if (identity?.present !== !anonymous.has(id)) throw fenceError();
+        if (schema.lifecycle) {
+          const [request] = await tx.unsafe('select exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting;', [id]);
+          if (request?.deleting !== false) throw fenceError();
+        }
+        if (anonymous.has(id) && schema.retirement) {
+          const [retired] = await tx.unsafe('select exists(select 1 from public.chips_accounts where retired_user_id=$1) as retired;', [id]);
+          if (retired?.retired !== false) throw fenceError();
+        }
     }
+    } else {
+      const anonymous = new Set((deps.anonymousIds || []).map((id) => String(id).toLowerCase()));
+      for (const id of ids) {
+        if (!anonymous.has(id)) { await assertAccountActive(tx, id); continue; }
+        // Browser anonymous IDs are UUIDs too. They must never alias a current
+        // Auth identity or an old deletion identity, even as a conversion source.
+        await lockAccountLifecycle(tx, [id]);
+        const [identity] = await tx.unsafe(`select exists(select 1 from auth.users where id=$1) as present,
+          exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting,
+          exists(select 1 from public.chips_accounts where retired_user_id=$1) as retired;`, [id]);
+        if (identity?.present !== false || identity?.deleting !== false || identity?.retired !== false) throw fenceError();
+    }
+    }
+    // Recovery must install a fresh epoch after quiescing old issuers. Requests
+    // never initialize it: a delayed NX epoch initializer could replay after flush.
     const epoch = await target.get(EPOCH_KEY);
     if (!epoch) throw fenceError();
     for (const id of ids) {
@@ -63,6 +80,13 @@ export async function withRedisIdentityPermit(userIds, fn, deps = {}) {
     }
     return fn({ epoch, ids });
   });
+}
+
+// Blocking is sticky even across an epoch change. Flush removes it, but missing
+// permits still deny and SQL prevents a suspended UUID from initializing again.
+export async function blockRedisIdentity(userId, target = store) {
+  if (!ACCOUNT_UUID.test(String(userId))) throw fenceError();
+  if (await target.set(permitKey(userId.toLowerCase()), 'BLOCKED') !== 'OK') throw fenceError();
 }
 
 // Index every private key and shared board touched by every guarded writer in
@@ -137,6 +161,48 @@ export async function guardedUserMutation({ store: target = store, userId, anony
   }
   return guardedRedisEval({ store: target, userIds: [userId], anonymousIds: anonymous ? [userId] : [], script: MUTATE, keys: [key],
     args: [operation, String(value), String(ttl ?? score ?? ''), String(userId),String(expiresAt || '')], beginSql: transaction });
+}
+
+const CLEAN_OWNER = `-- xp-clean-owner
+if redis.call('GET',KEYS[1]) ~= ARGV[1] or redis.call('GET',KEYS[2]) ~= 'BLOCKED' then return redis.error_reply('account_redis_fenced') end
+local prefix=ARGV[2]
+local board=ARGV[3]
+local batch=redis.call('ZRANGE',KEYS[3],0,tonumber(ARGV[5])-1)
+-- Validate the WHOLE batch before any mutation. Corrupt index is an incident,
+-- never authority to remove another owner/environment's data.
+for _,key in ipairs(batch) do
+ if key==KEYS[3] then return redis.error_reply('xp_owner_index_corrupt') end
+ if string.sub(key,1,string.len(prefix)) ~= prefix and
+  not (key==board..'all_time' or string.match(key,'^'..board..'day:%d%d%d%d%-%d%d%-%d%d$') or string.match(key,'^'..board..'week:%d%d%d%d%-W%d%d$')) then return redis.error_reply('xp_owner_index_corrupt') end
+end
+for _,key in ipairs(batch) do
+ if key==KEYS[3] then return redis.error_reply('xp_owner_index_corrupt') end
+ if string.sub(key,1,string.len(prefix)) == prefix then redis.call('DEL',key)
+ else redis.call('ZREM',key,ARGV[4]) end
+ redis.call('ZREM',KEYS[3],key)
+end
+if redis.call('ZCARD',KEYS[3]) == 0 then redis.call('DEL',KEYS[3]); return 0 end
+return redis.call('ZCARD',KEYS[3])`;
+
+export async function cleanupRedisIdentity({ userId, limit = 50, namespace = XP_NAMESPACE, store: target = store, beginSql: transaction = beginSql, env = process.env }) {
+  if (!ACCOUNT_UUID.test(String(userId)) || namespace !== XP_NAMESPACE) throw fenceError();
+  // Legacy ownership cannot be proved. No permanent SCAN workaround.
+  if (!isXpV3(namespace)) return {done:false,reason:'legacy_redis_ownership_unproven',cursor:null};
+  userId = userId.toLowerCase();
+  const epoch = await target.get(EPOCH_KEY);
+  if (!epoch || await target.get(permitKey(userId)) !== 'BLOCKED') throw fenceError();
+  const [row] = await transaction((tx) => tx.unsafe('select redis_cutover from public.account_deletion_release where id=true;'));
+  const proof = row?.redis_cutover;
+  const endpointHash = createHash('sha256').update(String(env.UPSTASH_REDIS_REST_URL || '')).digest('hex');
+  if (!proof || proof.namespace !== namespace || proof.epoch !== epoch || proof.endpoint_hash !== endpointHash ||
+      proof.writers_drained !== true || proof.legacy_xp_reset_verified !== true || !/^[0-9a-f]{64}$/.test(proof.manifest_hash || '')) {
+    return {done:false,reason:'redis_cutover_unconfirmed',cursor:null};
+  }
+  const prefix = xpOwnerPrefix(namespace, userId);
+  const remaining = Number(await target.eval(CLEAN_OWNER,[EPOCH_KEY,permitKey(userId),prefix+'keys'],
+    [epoch,prefix,namespace+':leaderboard:v1:',userId,String(Math.max(1,Math.min(100,Math.floor(Number(limit)||50))))]));
+  if (!Number.isInteger(remaining) || remaining < 0) throw fenceError();
+  return {done:remaining===0,reason:remaining===0 ? null : 'redis_cleanup_scanning',cursor:remaining===0 ? null : {remaining}};
 }
 
 // Track whether we're using memory store (for fallback logic)
@@ -329,6 +395,18 @@ function createMemoryStore() {
         const entries=JSON.parse(Buffer.from(_script.split('\n')[0].slice('-- xp-owner-index:'.length),'base64').toString());
         for (const [index,key] of entries) zaddValue(index,0,key);
         return this.eval(_script.split('-- xp-owner-index-end\n')[1],keys,argv);
+      }
+      if (_script.startsWith('-- xp-clean-owner')) {
+        if (getValue(keys[0]) !== argv[0] || getValue(keys[1]) !== 'BLOCKED') throw fenceError();
+        const [ ,prefix,board,userId,budget]=argv;
+        const batch=sortedEntries(keys[2]).slice(0,Number(budget)).map(([key])=>key);
+        const valid=(key)=> key.startsWith(prefix) || key===board+'all_time' || key.startsWith(board+'day:') && /^\d{4}-\d{2}-\d{2}$/.test(key.slice((board+'day:').length)) || key.startsWith(board+'week:') && /^\d{4}-W\d{2}$/.test(key.slice((board+'week:').length));
+        if (batch.some(key=>key===keys[2] || !valid(key))) throw new Error('xp_owner_index_corrupt');
+        for (const key of batch) {
+          if (key.startsWith(prefix)) memory.delete(key); else getSortedSet(key)?.delete(userId);
+          getSortedSet(keys[2])?.delete(key);
+        }
+        if (!getSortedSet(keys[2])?.size) {memory.delete(keys[2]);return 0;} return getSortedSet(keys[2]).size;
       }
       if (_script.startsWith('-- account-permit-init')) {
         if (getValue(keys[0]) !== argv[0] || getValue(keys[1]) === 'BLOCKED') return 0;
@@ -723,7 +801,7 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
     await guardedUserMutation({ userId, operation: "set", key: profileKey(userId), value: JSON.stringify(profile) });
     return profile;
   } catch (err) {
-    if (isXpV3(XP_NAMESPACE)) throw err;
+    if (isXpV3(XP_NAMESPACE) || process.env.ACCOUNT_DELETION_ENABLED === "1") throw err;
     klog("upstash_save_user_profile_failed", { userId, error: err?.message });
     return existing || profile;
   }

@@ -835,7 +835,9 @@ test("authoritative join adapter resolves in ws artifact layout without netlify 
 
   const stageDir = await mkdtemp(join(tmpdir(), "ws-join-artifact-"));
   try {
+    const wsDir = join(stageDir, "ws-server");
     const files = [
+      ["shared/account-deletion.mjs", "shared/account-deletion.mjs"],
       ["ws-server/poker/persistence/authoritative-join-adapter.mjs", "poker/persistence/authoritative-join-adapter.mjs"],
       ["ws-server/poker/persistence/chips-ledger.mjs", "poker/persistence/chips-ledger.mjs"],
       ["ws-server/poker/persistence/sql-admin.mjs", "poker/persistence/sql-admin.mjs"],
@@ -849,7 +851,7 @@ test("authoritative join adapter resolves in ws artifact layout without netlify 
     ];
 
     for (const [src, dest] of files) {
-      const target = join(stageDir, dest);
+      const target = join(src.startsWith("shared/") ? stageDir : wsDir, dest);
       await mkdir(dirname(target), { recursive: true });
       await copyFile(src, target);
     }
@@ -859,7 +861,7 @@ test("authoritative join adapter resolves in ws artifact layout without netlify 
     await writeFile(join(stageDir, "node_modules/postgres/package.json"), '{"name":"postgres","type":"module","exports":"./index.js"}\n', "utf8");
     await writeFile(join(stageDir, "node_modules/postgres/index.js"), 'export default function postgres() { return { begin: async (fn) => fn({ unsafe: async () => [] }) }; }\n', "utf8");
 
-    const adapterModule = await import(pathToFileURL(join(stageDir, "poker/persistence/authoritative-join-adapter.mjs")).href);
+    const adapterModule = await import(pathToFileURL(join(wsDir, "poker/persistence/authoritative-join-adapter.mjs")).href);
     const execute = adapterModule.createAuthoritativeJoinExecutor({
       env: { SUPABASE_DB_URL: "postgres://db.example.local/app" },
       beginSql: async (fn) => fn({}),

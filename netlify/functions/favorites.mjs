@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive } from '../../shared/account-deletion.mjs';
 /**
  * Favorites API - Manages user favorite games
  *
@@ -13,6 +14,7 @@ import {
   baseHeaders,
   corsHeaders,
   executeSql,
+  beginSql,
   extractBearerToken,
   klog,
   verifySupabaseJwt,
@@ -56,6 +58,13 @@ async function getFavorites(userId, origin) {
   }
 }
 
+async function writeFavorite(userId, query, params) {
+  return beginSql(async (tx) => {
+    if (accountDeletionEnabled()) await assertAccountActive(tx, userId);
+    return tx.unsafe(query, params);
+  });
+}
+
 async function addFavorite(userId, gameId, origin) {
   if (!gameId || typeof gameId !== "string") {
     return json(400, { error: "invalid_game_id", message: "gameId is required" }, origin);
@@ -68,7 +77,7 @@ async function addFavorite(userId, gameId, origin) {
 
   try {
     // Use INSERT ... ON CONFLICT to handle duplicates gracefully
-    await executeSql(
+    await writeFavorite(userId,
       `INSERT INTO public.favorites (user_id, game_id)
        VALUES ($1, $2)
        ON CONFLICT (user_id, game_id) DO NOTHING`,
@@ -93,7 +102,7 @@ async function removeFavorite(userId, gameId, origin) {
   }
 
   try {
-    await executeSql(
+    await writeFavorite(userId,
       `DELETE FROM public.favorites
        WHERE user_id = $1 AND game_id = $2`,
       [userId, sanitizedGameId]

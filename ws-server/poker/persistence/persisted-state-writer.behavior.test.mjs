@@ -1485,3 +1485,74 @@ test("durable ACT keeps accepted action audit best-effort", async () => {
   assert.equal(harness.durable.requests.get(harness.requestKey(request.userId, request.requestId)).result_json.status, "accepted");
   assert.equal(logs.includes("ws_accepted_action_audit_failed"), true);
 });
+
+test("enabled durable human ACT rechecks deletion after table lock before any request or state effect", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000377";
+  const harness = createDurableActionDbHarness({ tableId });
+  let deleting = false;
+  const queries = [];
+  const writer = createPersistedStateWriter({
+    env: { SUPABASE_DB_URL: "postgres://example.invalid/db", ACCOUNT_DELETION_ENABLED: "1" },
+    beginSql: (fn) => harness.beginSql((tx) => fn({ unsafe: async (sql, params) => {
+      queries.push(sql);
+      if (sql.startsWith("select id from public.poker_tables")) {
+        // Acceptance committed while ACT was delayed obtaining its table lock.
+        deleting = true;
+        return [{ id: tableId }];
+      }
+      if (sql.includes("as present")) return [{ present: true, deleting }];
+      return tx.unsafe(sql, params);
+    } })),
+    klog: () => {}
+  });
+  const result = await writer.writeMutation({ tableId, expectedVersion: 1,
+    nextState: { tableId, handId: "h1", phase: "TURN" }, durableActionRequest: durableActionRequestFixture(),
+    acceptedActionAudit: { userId: "client-spoofed-actor", source: "bot" } });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "account_not_active");
+  assert.equal(harness.durable.version, 1);
+  assert.equal(harness.durable.requests.size, 0);
+  assert.equal(harness.durable.casCount, 0);
+  assert.ok(queries[0].includes("poker_tables"));
+  assert.ok(queries[1].includes("pg_advisory_xact_lock"));
+  assert.equal(queries.some((sql) => sql.startsWith("insert into public.poker_requests")), false);
+});
+
+test("enabled writer allows active durable actor and internal settlement without actor eligibility", async () => {
+  const tableId = "00000000-0000-4000-8000-000000000377";
+  for (const internal of [false, true]) {
+    const harness = createDurableActionDbHarness({ tableId });
+    let activeChecks = 0;
+    const writer = createPersistedStateWriter({
+      env: { SUPABASE_DB_URL: "postgres://example.invalid/db", ACCOUNT_DELETION_ENABLED: "1" },
+      beginSql: (fn) => harness.beginSql((tx) => fn({ unsafe: async (sql, params) => {
+        if (sql.startsWith("select id from public.poker_tables")) return [{ id: tableId }];
+        if (sql.includes("as present")) { activeChecks++; return [{ present: true, deleting: false }]; }
+        return tx.unsafe(sql, params);
+      } })), klog: () => {}
+    });
+    const result = await writer.writeMutation({ tableId, expectedVersion: 1,
+      nextState: { tableId, handId: "h1", phase: "TURN" },
+      ...(internal ? {} : { durableActionRequest: durableActionRequestFixture() }) });
+    assert.equal(result.ok, true);
+    assert.equal(harness.durable.version, 2);
+    assert.equal(activeChecks, internal ? 0 : 1);
+  }
+});
+
+
+test('new hand commit denies a suspended actor after table lock; ongoing internal settlement stays separate',async()=>{
+ const tableId='00000000-0000-4000-8000-000000000377';
+ const actor='00000000-0000-4000-8000-000000000378';
+ const h=createDurableActionDbHarness({tableId});
+ const writer=createPersistedStateWriter({env:{SUPABASE_DB_URL:'postgres://example.invalid/db',ACCOUNT_DELETION_ENABLED:'1'},
+  beginSql:fn=>h.beginSql(tx=>fn({unsafe:async(q,p)=>{
+   if(q.startsWith('select id from public.poker_tables')) return [{id:tableId}];
+   if(q.startsWith('select user_id from public.poker_seats')) return [{user_id:actor}];
+   if(q.includes('as present')) return [{present:true,deleting:true}];
+   return tx.unsafe(q,p);
+  }})),klog:()=>{}});
+ const out=await writer.writeMutation({tableId,expectedVersion:1,
+  nextState:{tableId,phase:'PREFLOP',handId:'new-hand'},meta:{mutationKind:'start_hand',actorUserId:actor}});
+ assert.equal(out.ok,false);assert.equal(out.reason,'account_not_active');assert.equal(h.durable.casCount,0);
+});

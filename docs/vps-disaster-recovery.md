@@ -63,6 +63,16 @@ The Phase A portion is limited to:
 4. Install the fixed Preview env helper and exact Preview-only sudoers contract,
    validating syntax before and after installation.
 
+For the #1117 protected-environment correction, separately authorize making ONLY
+`/opt/arcade-ws-preview` itself `root:root 0755`; preserve the Phase A subtrees
+and all descendant ownership/modes. The five sync roots include the two
+`netlify/functions/_shared` and `_generated` descendants; these may remain
+`copilot:arcade-deploy 2775` under Phase A. See
+[the audited Preview procedure](../infra/vps/ws-preview-v3-procedure.md) for
+exact read-only evidence, guarded execution/rollback and the required main
+workflow LIVE V3 gate. No recursive remigration, systemd/sudoers change or
+Production change is part of that correction.
+
 Phase A does not change ownership or modes under `/opt/ws-server` or
 `/opt/ws-server/releases`, does not migrate legacy Production release
 directories, and does not change `/etc/caddy/Caddyfile`. Those Production and

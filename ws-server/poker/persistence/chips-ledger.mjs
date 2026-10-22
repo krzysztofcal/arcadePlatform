@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { accountDeletionEnabled, lockAccountLifecycle, assertAccountActive } from "../../../shared/account-deletion.mjs";
 import { beginSql, klog } from "./sql-admin.mjs";
 
 const VALID_TX_TYPE = "TABLE_BUY_IN";
@@ -83,7 +84,7 @@ with txn as (
 ), account as (
   select id, balance, next_entry_seq
   from public.chips_accounts
-  where user_id = coalesce($2::uuid, (select user_id from txn))
+  where ${accountDeletionEnabled() ? 'coalesce(user_id, retired_user_id)' : 'user_id'} = coalesce($2::uuid, (select user_id from txn))
     and account_type = 'USER'
   limit 1
 )
@@ -186,6 +187,11 @@ function validateEntries(entries, payloadUserId) {
 }
 
 async function getOrCreateUserAccount(sqlTx, userId) {
+  if (accountDeletionEnabled()) {
+    await assertAccountActive(sqlTx, userId);
+    const retired = await sqlTx.unsafe("select id from public.chips_accounts where retired_user_id=$1 and account_type='USER' limit 1;", [userId]);
+    if (retired.length) throw badRequest("account_retired");
+  }
   const result = await sqlTx.unsafe(
     `
 with existing as (
@@ -211,6 +217,7 @@ select row_to_json(account) as account from account;
   if (!account?.id) {
     throw new Error("Failed to prepare chips account");
   }
+  if (account.status !== "active") throw badRequest("account_not_active");
   return account;
 }
 
@@ -281,6 +288,10 @@ async function runTableBuyIn(sqlTx, {
 
   const runNewTransaction = async (activeTx = sqlTx) => {
     const userIds = [...new Set(normalizedEntries.filter((entry) => entry.kind === "USER").map((entry) => entry.userId))];
+    userIds.sort();
+    // Acquire every actual USER identity before any wallet lock/effect. The
+    // outer command/JWT check cannot serialize a delayed JOIN with acceptance.
+    if (accountDeletionEnabled()) await lockAccountLifecycle(activeTx, userIds);
     const userAccountById = new Map();
     for (const accountUserId of userIds) {
       userAccountById.set(accountUserId, await getOrCreateUserAccount(activeTx, accountUserId));

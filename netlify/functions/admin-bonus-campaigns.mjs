@@ -1,3 +1,4 @@
+import { accountDeletionEnabled, assertAccountActive } from '../../shared/account-deletion.mjs';
 import { validatePokerDaily } from "./_shared/bonus-campaigns.mjs";
 import { adminAuthErrorResponse, requireAdminUser } from "./_shared/admin-auth.mjs";
 import {
@@ -373,20 +374,21 @@ returning *, $3::bigint as claim_count;
   return normalizeCampaignRow(rows?.[0] || null);
 }
 
-async function withLockedCampaign(id, operation, begin = beginSql) {
+async function withLockedCampaign(id, operation, begin = beginSql, actorId = null) {
   return begin(async (tx) => {
     const runSql = (query, params = []) => tx.unsafe(query, params);
     await runSql("select id from public.bonus_campaigns where id = $1 for update;", [id]);
+    if (accountDeletionEnabled() && actorId) await assertAccountActive(tx, actorId);
     return operation(runSql);
   });
 }
 
-async function updateBonusCampaign(id, payload = {}, runSql = executeSql, begin = beginSql) {
-  return withLockedCampaign(id, (txSql) => updateLockedCampaign(id, payload, txSql), begin);
+async function updateBonusCampaign(id, payload = {}, runSql = executeSql, begin = beginSql, actorId = null) {
+  return withLockedCampaign(id, (txSql) => updateLockedCampaign(id, payload, txSql), begin, actorId);
 }
 
-async function setBonusCampaignStatus(id, status, runSql = executeSql, begin = beginSql) {
-  return withLockedCampaign(id, (txSql) => setLockedCampaignStatus(id, status, txSql), begin);
+async function setBonusCampaignStatus(id, status, runSql = executeSql, begin = beginSql, actorId = null) {
+  return withLockedCampaign(id, (txSql) => setLockedCampaignStatus(id, status, txSql), begin, actorId);
 }
 
 function mapAdminCampaignError(error) {
@@ -432,13 +434,16 @@ function createAdminBonusCampaignsHandler(deps = {}) {
       const action = typeof body.action === "string" ? body.action.trim() : "";
       let campaign = null;
       if (action === "create") {
-        campaign = await createBonusCampaign(body.campaign || body, adminUserId, runSql);
+        campaign = await begin(async (tx) => {
+          if (accountDeletionEnabled(env)) await assertAccountActive(tx, adminUserId);
+          return createBonusCampaign(body.campaign || body, adminUserId, (q,p=[])=>tx.unsafe(q,p));
+        });
       } else if (action === "update") {
         const id = parseUuid(body.campaignId || body.id, "invalid_campaign_id");
-        campaign = await updateBonusCampaign(id, body.campaign || body, runSql, begin);
+        campaign = await updateBonusCampaign(id, body.campaign || body, runSql, begin, adminUserId);
       } else if (action === "set_status") {
         const id = parseUuid(body.campaignId || body.id, "invalid_campaign_id");
-        campaign = await setBonusCampaignStatus(id, body.status, runSql, begin);
+        campaign = await setBonusCampaignStatus(id, body.status, runSql, begin, adminUserId);
       } else {
         throw badRequest("invalid_action", "invalid_action");
       }

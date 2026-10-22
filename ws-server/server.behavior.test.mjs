@@ -9145,3 +9145,14 @@ export async function load(url, context, nextLoad) {
     observer.close(); ws.close();
   } finally { child.kill('SIGTERM'); await waitForExit(child); await fs.rm(loader.dir, { recursive: true, force: true }); await fs.rm(register.dir, { recursive: true, force: true }); }
 });
+
+
+test("internal poker maintenance privacy repair rejects Production before repository access", async () => {
+  const token="privacy-repair-token";
+  const {port,child}=await createServer({env:{POKER_WS_INTERNAL_TOKEN:token,WS_DEPLOY_ENVIRONMENT:"production",SUPABASE_DB_URL:""}});
+  try {
+    await waitForListening(child,5000);
+    const response=await fetch(`http://127.0.0.1:${port}/internal/admin/poker-maintenance`,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({operation:"repair_deleted_user_privacy",manifestSha256:"a".repeat(64),actorUserId:"11111111-1111-4111-8111-111111111111",requestId:"privacy-repair-test",userId:"22222222-2222-4222-8222-222222222222",deletionRequestId:"33333333-3333-4333-8333-333333333333",tableIds:["44444444-4444-4444-8444-444444444444","55555555-5555-4555-8555-555555555555"]})});
+    assert.equal(response.status,400);assert.deepEqual(await response.json(),{error:"invalid_request"});
+  } finally {child.kill("SIGTERM");await waitForExit(child);}
+});

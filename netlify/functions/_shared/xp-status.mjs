@@ -42,7 +42,7 @@ async function persistXpProfileSnapshot({ userId, totalXp, now = Date.now(), sav
     return true;
   } catch (error) {
     klog(logKind, { error: error?.message });
-    if (isXpV3(resolveXpNamespace())) throw error;
+    if (isXpV3(resolveXpNamespace()) || process.env.ACCOUNT_DELETION_ENABLED === "1") throw error;
     return false;
   }
 }

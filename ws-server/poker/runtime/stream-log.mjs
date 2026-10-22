@@ -93,7 +93,14 @@ export function createStreamLog({ cap = DEFAULT_STREAM_CAP } = {}) {
     return streamByTableId.delete(tableId.trim());
   }
 
+  function forgetReceiver(receiverKey) {
+    if (!receiverKey || receiverKey===GLOBAL_RECEIVER_KEY) return;
+    for (const stream of streamByTableId.values()) {
+      stream.entriesByReceiverKey.delete(receiverKey);stream.latestSeqByReceiverKey.delete(receiverKey);
+    }
+  }
   return {
+    forgetReceiver,
     append,
     latestSeq,
     eventsAfter,

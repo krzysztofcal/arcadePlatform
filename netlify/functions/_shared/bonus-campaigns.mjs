@@ -135,6 +135,10 @@ limit 1;
 }
 
 async function fetchCampaignClaimCount(campaignId, runSql = executeSql) {
+  // Campaign lifetime quota survives account/claim cascade. Independent of
+  // Account Deletion flags and all cross-account identity mechanisms.
+  const totals = await runSql('select paid_count as claim_count from private.bonus_campaign_paid_totals where campaign_id = $1;', [campaignId]);
+  if (totals?.[0]) return Number(totals[0].claim_count);
   const rows = await runSql(
     `
 select count(*)::bigint as claim_count
