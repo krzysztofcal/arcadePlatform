@@ -30,3 +30,7 @@ Netlify Preview automatic PR build failed with build-script exit 2. Connected de
 - Final VPS free disk 5.9 GB (initial 6.2 GB), above warning/stop thresholds; no SDK/JDK/Gradle/Node install, extra checkout or manual data cleanup. Remaining task is owner-gated Stage integration and physical phone smoke.
 
 The final documentation-only commit does not change the APK runtime. Compare its diff to the source SHA above before reusing artifact evidence.
+
+## User review follow-up
+
+See [review-followup.md](review-followup.md) for the new exact-SHA APK, public-profile/offline-resume fixes, 69 passing selected checks, Netlify Redis context root cause, API1095 incompatibilities, live WS receipt/protocol evidence and Stage-only CORS proposal. No environment/origin/deploy change was applied. This supersedes the earlier unavailable-log diagnosis and old APK link; physical/authenticated integration remains pending.

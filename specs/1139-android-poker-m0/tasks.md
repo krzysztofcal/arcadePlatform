@@ -20,4 +20,6 @@ Final APK: source `0407e886fb3c4f056cd7af529b373fd31ba8bad3`, successful run [39
 - [x] R001 Route shared account publicProfileUrl through validated Stage external-browser adapter; preserve web relative link. Guard resume online event using navigator.onLine; extend only fundamental security/lifecycle tests.
 - [x] R002 Diagnose Netlify exit 2 using build logs and read-only comparison; no configuration bypass or deployment.
 - [x] R003 Inventory actual packaged API consumers, compare Preview 1095 and current Stage WS revisions/contracts, inspect read-only OPTIONS; propose Stage-only XP_CORS_ALLOW additive change without application.
-- [ ] R004 Run fundamental tests and existing syntax/CSP controls; hosted-only new APK, exact source receipt, update Draft PR/evidence.
+- [x] R004 Run fundamental tests and existing syntax/CSP controls; hosted-only new APK, exact source receipt, update Draft PR/evidence.
+
+Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workflow](https://github.com/krzysztofcal/arcadePlatform/actions/runs/39996051429), [artifact](https://github.com/krzysztofcal/arcadePlatform/actions/runs/39996051429/artifacts/12520250698). [Review findings and required GO](review-followup.md).

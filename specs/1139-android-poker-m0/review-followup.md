@@ -30,7 +30,7 @@ The approved v3 floor was already present in base `f9137918`; this PR does not c
 
 - APK baseline: `0407e886fb3c4f056cd7af529b373fd31ba8bad3`.
 - API remains `https://deploy-preview-1095--playkcswh.netlify.app`; public BUILD_INFO pins source `18f9f0fab9dc34bbb1cac4165c1370f2606a20f7`, deploy `6acd5f7a8897eeb7d7b78e55`, 2026-10-12. Original PR branch: `feat/1077-single-player-poker` (merged). Stage Supabase remains `krydukthwdvccggbyjfw`.
-- Running WS release receipt: `6c662d524d158e439d3888cfc667a923806100d1`, environment preview. The deployment checkout's git HEAD is stale; release metadata plus hashes of running `server.mjs` and `poker/auth/verify-token.mjs` match that release. Do not use checkout HEAD as deployed SHA.
+- Running WS release receipt: `6c662d524d158e439d3888cfc667a923806100d1`, environment preview. The deployment checkout's git HEAD is stale; release metadata plus hashes of all 48 inspected server/auth/handler/read-model/runtime protocol files match that release. Do not use checkout HEAD as deployed SHA.
 - `/healthz`: HTTP 200, buy-in materialization capability 2. Read-only WS upgrade with Origin `https://localhost`: HTTP 101, then closed without sending hello/auth/JOIN/actions. No origin rejection at transport layer.
 - APK client vs released WS client differs only in explicit mint URL resolution. Server, auth, handlers, read models and runtime protocol source are unchanged between released WS and APK baseline. Existing version 1.0 frames, token response and HS256 sub/exp contract are structurally compatible. Mint signing-secret alignment and authenticated snapshots/actions are NOT TESTED; no credential/session/funded requests performed.
 - **Full API compatibility FAIL:** Preview 1095 lacks account-delete (404), inactivity-aware progression updates and current account-deletion safeguards in mint/quick-seat/shared helpers. XP namespace/runtime settings also predate the current v3 floor. CORS alone cannot bring this old deployment to current feature/safety parity. No origin changed and no old API rebuilt.
@@ -40,7 +40,7 @@ An owner decision is needed before treating any backend as the complete mobile i
 
 ## OPTIONS inventory: actual loaded mobile consumers
 
-Only OPTIONS was sent; no POST/PATCH/DELETE business request, JOIN, bonus claim, deletion, login or DB mutation. Probe headers were `Access-Control-Request-Headers: authorization,content-type`; the actual avatar-remove method is DELETE. The first diagnostic POST preflight on avatar-remove advertised DELETE and was followed by the correct DELETE preflight below.
+For Netlify Function probes only OPTIONS was sent; no POST/PATCH/DELETE business request, JOIN, bonus claim, deletion, login or DB mutation. Probe headers were `Access-Control-Request-Headers: authorization,content-type`; the actual avatar-remove method is DELETE. The first diagnostic POST preflight on avatar-remove advertised DELETE and was followed by the correct DELETE preflight below.
 
 | Function | Actual method(s) | Mobile origin | Preview 1095 origin |
 | --- | --- | --- | --- |
@@ -84,3 +84,14 @@ Append exactly `https://localhost`, preserve all existing origins, no wildcard/p
 PASS: 69 selected fundamental/security and existing Auth/WS/sidebar/token-mint/CORS tests, run sequentially with `NODE_ENV=test XP_TEST_MODE=1`. This is the existing scripts/test-all.mjs memory-store test setup, not an environment or guard bypass. An initial standalone CORS invocation without that required test flag failed with xp_redis_v3_required; it was rerun correctly without changing code or shared configuration. PASS: existing syntax control (228 tracked files), CSP control (55 documents), explicit mobile JS/CJS syntax, diff whitespace check. Independent read-only reviewer found no important issues in the changes or scope proposal.
 
 No SDK/JDK/Gradle/Node installation or extra checkout; disk 6.0 GB before, 5.9 GB after local work. No service interrupted, secret value logged, environment changed, authenticated call, business-method request, JOIN, financial operation, deletion or merge. New APK must be built by the existing hosted-only workflow; device/Google/session integration remains NOT TESTED.
+
+## New APK and latest checks
+
+- Source SHA: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`.
+- Hosted-only successful workflow: https://github.com/krzysztofcal/arcadePlatform/actions/runs/39996051429
+- APK artifact: https://github.com/krzysztofcal/arcadePlatform/actions/runs/39996051429/artifacts/12520250698 (expires 2026-10-30).
+- APK SHA256: `e45a044abe7c23345151c730791f32dc2fce10aa5cb2dc4ec99aa6936f62d8e0`.
+- Streamed artifact into memory without writing APK to VPS: receipt/SHA256SUMS match; both source corrections are in the APK; API origin still Preview 1095; exactly the four shared HTML pages and no server.url.
+- Latest Preview failure `6adb9a68b02c7896f8a688fa` confirms the same xp_redis_build_configuration_invalid exception in its actual build log. Check remains failed, not bypassed.
+- Hosted CodeQL/all language analyses, core, actionlint, existing automatic Playwright and debug-apk pass. Device/native integration is not inferred from these checks. No manual broad suite was launched.
+- PR #1141 stays Draft. Later evidence/tasks-only commit changes no APK runtime; preserve the source SHA above when reproducing or installing.
