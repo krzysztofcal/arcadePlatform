@@ -50,4 +50,4 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] T001 Read-only OAuth diagnosis: missing exact Stage callback allowlist, verified browser fallback; JS PKCE/callback/intent source audit. STOP configuration pending separate GO.
 - [x] T002 Read-only avatar diagnosis: request/function/DB logs, enabled manifest trigger vs disabled Preview tracking flags; schema/buckets/cutover verified. STOP configuration/upload pending separate GO.
 - [x] T003 Native WebView inset ownership correction; no web/CSS/gesture policy change, physical landscape/IME retest pending.
-- [ ] T004 Existing fundamental tests/syntax/CSP, hosted exact-SHA APK/receipt/manifest and Draft report.
+- [x] T004 Existing fundamental tests/syntax/CSP, hosted exact-SHA APK/receipt/manifest and Draft report. Physical retest and Auth/avatar configuration remain pending separate owner GO.
