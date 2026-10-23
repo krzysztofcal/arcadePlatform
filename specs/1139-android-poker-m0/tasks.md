@@ -37,4 +37,4 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] S001 Validate Personal secrets capability, review policy, approved Stage PING/epoch and branch override impact.
 - [x] S002 Implement/test Stage Deploy Preview selector, fail-closed cases, unchanged Production/WS legacy behavior.
 - [x] S003 Create protected ARCADE_STAGE_REDIS_TOKEN and shared Preview XP tuple; verify unrelated configuration and overrides unchanged.
-- [ ] S004 Push passing SHA and verify exact-SHA Preview1141 build/configuration/read-only endpoints; report remaining blockers. No APK/backend business operation.
+- [x] S004 Push passing SHA and verify exact-SHA Preview1141 build/configuration/read-only endpoints; report remaining blockers. No APK/backend business operation.
