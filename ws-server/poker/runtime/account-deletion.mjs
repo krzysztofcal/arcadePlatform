@@ -68,7 +68,7 @@ export async function cleanupDeletionPoker({context,beginSql,coordinate,resync =
   if (tableIds && candidates.some(row=>!tableIds.includes(row.id))) throw privacyError();
   if (candidates.length && typeof coordinate !== 'function') throw privacyError();
   for (const candidate of candidates.slice(0,5)) await coordinate(context,candidate.id,()=>beginSql(async tx=>{
-    const [table] = await tx.unsafe('select id,status,created_by from public.poker_tables where id=$1 for update;',[candidate.id]);
+    const [table] = await tx.unsafe('select id,status,created_by,is_single_player from public.poker_tables where id=$1 for update;',[candidate.id]);
     const [row] = await tx.unsafe('select version,state from public.poker_state where table_id=$1 for update;',[candidate.id]);
     await lockAccountLifecycle(tx,[context.userId]);
     const request=await authorize(tx);await assertPrivacyWallet(tx,context,request);
@@ -82,6 +82,9 @@ export async function cleanupDeletionPoker({context,beginSql,coordinate,resync =
       || Object.hasOwn(state.stacks || {},context.userId) || state.pendingDetachByUserId?.[context.userId]===true
       || (LIVE_PHASES.includes(state.phase) && (containsOwner(state.handSeats || state.seats,context.userId)
         || Number(state.contributionsByUserId?.[context.userId] || 0)!==0))) throw privacyError();
+    // A dedicated owner-only table must be canonically closed before losing its owner.
+    // Keep the settled CLOSED row/history, rather than exposing it as multiplayer.
+    if (table.created_by===context.userId && table.is_single_player===true && table.status!=='CLOSED') throw privacyError();
     if (table.status==='CLOSED' && (state.phase!=='HAND_DONE' || state.handId!=='' || Number(escrow.balance)!==0)) throw privacyError();
     const amounts=map=>{if(!map||typeof map!=='object'||Array.isArray(map))throw privacyError();return Object.values(map).reduce((sum,v)=>{const n=Number(v);if(!Number.isSafeInteger(n)||n<0)throw privacyError();return sum+n;},0);};
     const expected=amounts(state.stacks)+(LIVE_PHASES.includes(state.phase)?amounts(state.contributionsByUserId):0);
@@ -103,7 +106,7 @@ export async function cleanupDeletionPoker({context,beginSql,coordinate,resync =
       if(changed.length!==1)throw new Error('poker_privacy_conflict');
     }
     await tx.unsafe("delete from public.poker_seats where table_id=$1 and user_id=$2 and status='INACTIVE' and stack=0 returning table_id;",[candidate.id,context.userId]);
-    await tx.unsafe('update public.poker_tables set created_by=null where id=$1 and created_by=$2;',[candidate.id,context.userId]);
+    await tx.unsafe('update public.poker_tables set created_by=null,is_single_player=false where id=$1 and created_by=$2;',[candidate.id,context.userId]);
   }));
   return beginSql(async tx=>{await lockAccountLifecycle(tx,[context.userId]);await authorize(tx);
     const remaining=await tx.unsafe(pokerReferencesSql,[context.userId]);
