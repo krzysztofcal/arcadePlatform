@@ -63,4 +63,4 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] F001 Diagnose full-WebView margin budget and visible SystemBars; record new owner OAuth/avatar/Poker PASS.
 - [x] F002 Implement table-only immersive lifecycle and fullwindow/safe-content inset ownership; preserve non-table bounds/shared web.
 - [x] F003 Short M1 Verified App Links proposal only; retain working OAuth/Supabase.
-- [ ] F004 Fundamental regressions/syntax/CSP, hosted exact-SHA APK/receipt/checksum, breaking-impact review and owner retest handoff.
+- [x] F004 Fundamental regressions/syntax/CSP, hosted exact-SHA APK/receipt/checksum, breaking-impact review and owner retest handoff.
