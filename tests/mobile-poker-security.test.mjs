@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const security = require('../mobile/poker/security.cjs');
-const config = { apiOrigin: 'https://deploy-preview-1095--playkcswh.netlify.app', supabaseUrl: 'https://krydukthwdvccggbyjfw.supabase.co', wsUrl: 'wss://ws-preview.kcswh.pl/ws' };
+const config = { apiOrigin: 'https://deploy-preview-1141--playkcswh.netlify.app', supabaseUrl: 'https://krydukthwdvccggbyjfw.supabase.co', wsUrl: 'wss://ws-preview.kcswh.pl/ws' };
 test('mobile cannot target Production, foreign Preview or credential-bearing origins', () => {
   assert.equal(security.validate(config).apiOrigin, config.apiOrigin);
   assert.equal(security.publicProfileUrl(config, 'alice'), config.apiOrigin + '/u/alice');
   assert.equal(security.publicProfileUrl(config, '../?x'), config.apiOrigin + '/u/..%2F%3Fx');
   assert.throws(() => security.publicProfileUrl({ ...config, apiOrigin: 'https://play.kcswh.pl' }, 'alice'));
-  for (const apiOrigin of ['https://play.kcswh.pl', 'https://evil.netlify.app', 'https://user@deploy-preview-1095--playkcswh.netlify.app', config.apiOrigin + '/path']) {
+  for (const apiOrigin of ['https://play.kcswh.pl', 'https://evil.netlify.app', 'https://user@deploy-preview-1141--playkcswh.netlify.app', config.apiOrigin + '/path']) {
     assert.throws(() => security.validate({ ...config, apiOrigin }));
   }
   assert.throws(() => security.validate({ ...config, wsUrl: 'wss://ws.kcswh.pl/ws' }));

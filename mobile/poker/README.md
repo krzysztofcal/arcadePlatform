@@ -76,3 +76,7 @@ Public-profile links use the unchanged Stage origin through the external Browser
 ## Galaxy S24+ visual retest
 
 The owner confirmed installation/Lobby/Account/basic navigation on bebbdc6a, but found system-bar overlap and unwanted Search. [Device evidence and focused no-gameplay retest](../../specs/1139-android-poker-m0/device-smoke-s24.md) separate these presentation defects from blocked API1095/CORS. The next APK uses built-in native insets with generated viewport-fit=auto, explicit AndroidX EdgeToEdge, Poker/Profile-only bottom navigation and a status footer/table-menu message rather than a fixed banner. Physical visual PASS remains pending. Redis repair is still stopped at the earlier credential mismatch; this changes no backend setting.
+
+## Approved API integration (2026-10-23)
+
+The current APK pins API Preview1141, superseding the historical1095 diagnostics above; Supabase Stage and WS Preview are unchanged. Exact-branch XP_CORS_ALLOW adds only https://localhost. Actual19 OPTIONS combinations passed on deploy6adbc543278f8840161bc416/source2c6f23daf5f47f4e0b59f6c4489f36dc6fc1532d. Stage password login, progression GET and token mint200; WS helloAck/authOk without JOIN PASS. OAuth provider/redirect configuration untouched and phone callback NOT TESTED. Redis shared Preview repair PASS is recorded in SpecKit; the old stopped-Redis notes are historical. See android-api-integration.md in SpecKit for current evidence and safe phone checklist.
