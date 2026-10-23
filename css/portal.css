@@ -514,3 +514,38 @@ body::before{ content:""; position:fixed; inset:0; pointer-events:none; backgrou
 html.netlify-drawer-active .site-footer{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
 html.netlify-drawer-active .mobile-bottom-nav{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
 html.netlify-drawer-active #klaro .cookie-notice{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
+
+/* Account deletion: scoped destructive action and native modal. */
+.account-danger-zone{margin-top:28px;padding:22px;border:1px solid rgba(248,113,113,.28);border-radius:16px;background:linear-gradient(135deg,rgba(127,29,29,.16),rgba(15,23,42,.35));}
+.account-danger-zone .xp-card__title{color:#fca5a5;}
+.account-danger-zone .account-note{margin-bottom:0;max-width:62ch;}
+.account-panel__btn.account-panel__btn--danger{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:44px;padding:11px 18px;border:1px solid rgba(248,113,113,.55);background:rgba(127,29,29,.18);color:#fecaca;font:600 .9rem Poppins,sans-serif;transition:background .15s,border-color .15s;}
+.account-panel__btn--danger:hover:not(:disabled){background:rgba(185,28,28,.35);border-color:#f87171;}
+.account-panel__btn--danger:focus-visible,.account-delete-dialog button:focus-visible{outline:3px solid #c4b5fd;outline-offset:4px;}
+.account-panel__btn--danger:disabled{opacity:.55;cursor:not-allowed;}
+.account-panel__btn--danger[aria-busy="true"]::before{content:"";width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:account-delete-spin .8s linear infinite;}
+.account-delete-dialog{width:min(480px,calc(100% - 32px));max-height:calc(100dvh - 32px);overflow:auto;box-sizing:border-box;padding:0;border:1px solid rgba(248,113,113,.35);border-radius:22px;background:#111827;color:#e2e8f0;box-shadow:0 28px 100px rgba(0,0,0,.55);font-family:Poppins,sans-serif;}
+.account-delete-dialog::backdrop{background:rgba(3,7,18,.8);backdrop-filter:blur(5px);}
+.account-delete-dialog__content{position:relative;padding:32px;}
+.account-delete-dialog__close{position:absolute;top:12px;right:12px;width:44px;height:44px;border:0;border-radius:12px;background:transparent;color:#94a3b8;font-size:26px;cursor:pointer;}
+.account-delete-dialog__close:hover{background:rgba(255,255,255,.07);color:#fff;}
+.account-delete-dialog__icon{display:grid;place-items:center;width:48px;height:48px;border:1px solid rgba(248,113,113,.35);border-radius:15px;background:rgba(127,29,29,.2);color:#fca5a5;font-size:26px;font-weight:600;}
+.account-delete-dialog__eyebrow{margin:22px 0 6px;color:#fca5a5;font-size:.75rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;}
+.account-delete-dialog h2{margin:0 0 14px;font-size:1.5rem;line-height:1.3;color:#f8fafc;}
+.account-delete-dialog p#accountDeletionDialogWarning{margin:0;color:#cbd5e1;font-size:.9rem;line-height:1.8;}
+.account-delete-dialog__actions{display:flex;justify-content:flex-end;gap:12px;margin-top:28px;}
+.account-delete-dialog__actions .account-panel__btn{min-height:46px;flex:1;}
+.account-panel__btn.account-panel__btn--danger-solid{background:#b91c1c;color:#fff;border-color:#ef4444;}
+.account-panel__btn--danger-solid:hover:not(:disabled){background:#991b1b;}
+@keyframes account-delete-spin{to{transform:rotate(360deg);}}
+@media(max-width:480px){
+.account-danger-zone{padding:18px;}
+.account-danger-zone .account-panel__btn--danger{width:100%;}
+.account-delete-dialog__content{padding:26px 22px;}
+.account-delete-dialog__actions{flex-direction:column-reverse;}
+.account-delete-dialog__actions .account-panel__btn{width:100%;}
+}
+@media(prefers-reduced-motion:reduce){
+.account-panel__btn--danger{transition:none;}
+.account-panel__btn--danger[aria-busy="true"]::before{animation:none;}
+}

@@ -319,9 +319,9 @@
             <button type="button" class="account-bonus__btn" id="welcomeBonusClaimButton" data-i18n="claimBonus" hidden>Claim bonus</button>
             <p class="account-note" id="welcomeBonusStatus" aria-live="polite"></p>
           </div>
-          <section aria-labelledby="accountDangerZoneTitle">
+          <section class="account-danger-zone" aria-labelledby="accountDangerZoneTitle">
             <h3 class="xp-card__title" id="accountDangerZoneTitle" data-i18n="accountDangerZone">Danger Zone</h3>
-            <button type="button" class="account-panel__btn account-panel__btn--ghost" id="deleteAccountButton" data-i18n="deleteAccount">Delete account</button>
+            <button type="button" class="account-panel__btn account-panel__btn--danger" id="deleteAccountButton" aria-haspopup="dialog" aria-controls="accountDeletionDialog" aria-busy="false" data-i18n="deleteAccount">Delete account</button>
             <p class="account-note" id="deleteAccountNote" data-i18n="deleteAccountNote" tabindex="-1">Deleting your account permanently forfeits CH, XP, achievements and profile data.</p>
           </section>
         </section>
@@ -360,6 +360,20 @@
       </article>
     </main>
   </div>
+
+  <dialog class="account-delete-dialog" id="accountDeletionDialog" aria-labelledby="accountDeletionDialogTitle" aria-describedby="accountDeletionDialogWarning">
+    <div class="account-delete-dialog__content">
+      <button type="button" class="account-delete-dialog__close" id="accountDeletionClose" data-i18n-aria="accountDeletionClose" aria-label="Cancel and close">×</button>
+      <span class="account-delete-dialog__icon" aria-hidden="true">!</span>
+      <p class="account-delete-dialog__eyebrow" data-i18n="accountDangerZone">Danger Zone</p>
+      <h2 id="accountDeletionDialogTitle" data-i18n="accountDeletionDialogTitle">Delete your account?</h2>
+      <p id="accountDeletionDialogWarning" data-i18n="accountDeletionConfirm">Your account will be permanently deleted. You will lose all CH (including Poker winnings), XP, achievements and profile data. This cannot be undone.</p>
+      <div class="account-delete-dialog__actions">
+        <button type="button" class="account-panel__btn account-panel__btn--ghost" id="accountDeletionCancel" data-i18n="accountDeletionCancel" autofocus>Cancel</button>
+        <button type="button" class="account-panel__btn account-panel__btn--danger account-panel__btn--danger-solid" id="accountDeletionConfirmButton" data-i18n="deleteAccount">Delete account</button>
+      </div>
+    </div>
+  </dialog>
 
   <footer class="site-footer" role="contentinfo">
     <nav class="footer-nav" aria-label="Footer">

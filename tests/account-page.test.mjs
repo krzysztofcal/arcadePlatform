@@ -46,6 +46,9 @@ function createElement(tagName, id, isFragment = false) {
       list.push(handler);
       listeners.set(type, list);
     },
+    removeEventListener(type, handler) {
+      listeners.set(type, (listeners.get(type) || []).filter(item => item !== handler));
+    },
     setAttribute(name, value) {
       this.attributes = this.attributes || {};
       this.attributes[name] = String(value);
@@ -97,6 +100,10 @@ function seedNodes(document, includePagination = false) {
     "signOutButton",
     "deleteAccountButton",
     "deleteAccountNote",
+    "accountDeletionDialog",
+    "accountDeletionCancel",
+    "accountDeletionConfirmButton",
+    "accountDeletionClose",
     "signinForm",
     "signupForm",
     "signinEmail",
@@ -128,7 +135,9 @@ function seedNodes(document, includePagination = false) {
     "welcomeBonusStatus",
   ];
   ids.forEach(id => {
-    document.__nodes.set(id, createElement("div", id));
+    const element = createElement("div", id);
+    element.focus = () => { document.activeElement = element; };
+    document.__nodes.set(id, element);
   });
   if (includePagination) {
     ["chipLedgerPagination", "chipLedgerFirst", "chipLedgerPrev", "chipLedgerNext", "chipLedgerLast", "chipLedgerPages", "chipLedgerPage", "chipLedgerPageSize"].forEach(id => {
@@ -1154,4 +1163,62 @@ test("chip history pagination shows total pages and jumps to the last page", asy
   assert.equal(calls.at(-1).page, 10);
   assert.equal(calls.at(-1).limit, 10);
   assert.equal(document.getElementById("chipLedgerPage").textContent, "Page 10 of 10");
+});
+
+
+async function deletionHarness(replies) {
+ const user={id:'00000000-0000-4000-8000-000000000111',user_metadata:{},email:'fixture@example.test'};
+ const calls=[];let signedOut=0;
+ const client={auth:{getSession:async()=>({data:{session:{access_token:'fixture-token',user}}}),signOut:async()=>{signedOut++;}}};
+ const auth={getCurrentUser:async()=>user,onAuthChange(){},getClient:()=>client};
+ const chips={fetchBalance:async()=>({balance:0}),fetchLedger:async()=>({items:[]}),fetchBonusCampaigns:async()=>({items:[]})};
+ const h=buildContext(chips,{auth});const dialog=h.document.getElementById('accountDeletionDialog');
+ dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;};
+ h.windowObj.confirm=()=>{throw Error('native confirm must not be called');};
+ h.windowObj.fetch=async(url,options)=>{
+  if(url!=='/.netlify/functions/account-delete')return {ok:true,status:200,json:async()=>({})};
+  calls.push({method:options.method,body:options.body});const reply=replies.shift();
+  if(reply instanceof Error)throw reply;
+  return {status:reply.status,json:async()=>reply.body};
+ };
+ vm.runInContext(source,vm.createContext({window:h.windowObj,document:h.document,CustomEvent:function(){}}));
+ await flush();await flush();
+ const click=id=>h.document.getElementById(id).dispatchEvent({type:'click',preventDefault(){}});
+ return {...h,dialog,calls,click,signedOut:()=>signedOut};
+}
+
+test('deletion modal cancels without POST, traps keyboard and restores safe focus',async()=>{
+ const h=await deletionHarness([{status:404}]);h.click('deleteAccountButton');await flush();await flush();
+ assert.equal(h.dialog.open,true);assert.equal(h.document.activeElement.id,'accountDeletionCancel');
+ h.document.getElementById('accountDeletionClose').focus();
+ h.dialog.dispatchEvent({type:'keydown',key:'Tab',shiftKey:true,preventDefault(){}});
+ assert.equal(h.document.activeElement.id,'accountDeletionConfirmButton');
+ h.dialog.dispatchEvent({type:'keydown',key:'Tab',shiftKey:false,preventDefault(){}});
+ assert.equal(h.document.activeElement.id,'accountDeletionClose');
+ h.dialog.dispatchEvent({type:'keydown',key:'Escape',preventDefault(){}});await flush();
+ assert.equal(h.dialog.open,false);assert.deepEqual(h.calls.map(x=>x.method),['GET']);
+ assert.equal(h.document.activeElement.id,'deleteAccountButton');assert.equal(h.signedOut(),0);
+ for(const id of ['accountDeletionCancel','accountDeletionClose']){
+  const c=await deletionHarness([{status:404}]);c.click('deleteAccountButton');await flush();await flush();c.click(id);await flush();assert.deepEqual(c.calls.map(x=>x.method),['GET']);
+ }
+});
+
+test('modal confirmation sends exactly one POST and reconciles a lost response',async()=>{
+ const h=await deletionHarness([{status:404},new Error('lost response'),{status:200,body:{requestId:'durable'}}]);
+ h.click('deleteAccountButton');h.click('deleteAccountButton');await flush();await flush();
+ h.click('accountDeletionConfirmButton');h.click('accountDeletionConfirmButton');await flush();await flush();
+ assert.deepEqual(h.calls.map(x=>x.method),['GET','POST','GET']);
+ assert.deepEqual(JSON.parse(h.calls[1].body),{confirmation:'DELETE_ACCOUNT',acknowledgeForfeiture:true});assert.equal(h.signedOut(),1);
+});
+
+test('existing durable deletion skips confirmation and POST',async()=>{
+ const h=await deletionHarness([{status:200,body:{requestId:'already-saved'}}]);h.click('deleteAccountButton');await flush();await flush();
+ assert.equal(h.dialog.open,undefined);assert.deepEqual(h.calls.map(x=>x.method),['GET']);assert.equal(h.signedOut(),1);
+});
+
+test('uncertain deletion retry retains consent without reopening modal',async()=>{
+ const h=await deletionHarness([{status:404},new Error('lost'),{status:404},{status:404},{status:202,body:{requestId:'saved'}}]);
+ h.click('deleteAccountButton');await flush();await flush();h.click('accountDeletionConfirmButton');await flush();await flush();
+ assert.equal(h.signedOut(),0);h.dialog.showModal=()=>{throw Error('must not ask again');};h.click('deleteAccountButton');await flush();await flush();
+ assert.deepEqual(h.calls.map(x=>x.method),['GET','POST','GET','GET','POST']);assert.equal(h.signedOut(),1);
 });
