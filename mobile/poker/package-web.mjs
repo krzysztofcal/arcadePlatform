@@ -46,7 +46,7 @@ const pages = ['poker/index.html', 'poker/table-v2.html', 'account.html'];
 for (const name of pages) {
   let html = await readFile(path.join(root, name), 'utf8');
   // Presentation composition only; account forms and Poker DOM remain shared.
-  html = html.replace(/<script\b[^>]*src=["'][^"']*(?:analytics|klaro-config|consent-services|consent-manager|vendor\/klaro\/klaro)\.js["'][^>]*><\/script>/g, '');
+  html = html.split("\n").filter(line => !/^\s*<script\b[^>]*src=["'][^"']*(?:analytics|klaro-config|consent-services|consent-manager|vendor\/klaro\/klaro)\.js["'][^>]*><\/script>\s*$/.test(line)).join("\n");
   html = html.replace(/<link\b[^>]*href=["']https:\/\/fonts\.[^>]+>/g, '');
   html = html.replace(/<ul class="sb-list">[\s\S]*?<\/ul>/g, '<ul class="sb-list"></ul>');
   html = html.replace(/Arcade Hub/g, 'Arcade Poker');
