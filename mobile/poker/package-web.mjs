@@ -31,7 +31,7 @@ async function copy(name){
   if (name.endsWith('.css')) {
     for (const match of value.toString().matchAll(/url\(["']?([^\s)"']+)/g)) {
       if (/^(data:|https?:|#)/.test(match[1])) continue;
-      await copy(path.posix.normalize(path.posix.join(path.posix.dirname(name), match[1].split(/[?#]/)[0])));
+      await copy(new URL(match[1], 'https://localhost/' + name).pathname.slice(1));
     }
   }
 }

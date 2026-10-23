@@ -46,7 +46,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21.0.10+7'
+          java-version: '21.0.10+7.0.LTS'
       - name: Fundamental security checks
         run: node --test tests/mobile-poker-security.test.mjs
       - name: Locked mobile dependencies
