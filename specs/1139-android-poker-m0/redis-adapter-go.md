@@ -9,3 +9,9 @@ Minimal store-upstash.mjs adapter uses immutable build context/origin, accepts c
 Verification: 73 fundamental tests PASS; syntax228 PASS; CSP55 PASS. No browser UI/APK change. Runtime deploy verification pending exact source SHA. API1095/CORS, OAuth/authenticated gameplay and physical retest remain separate blockers; no CORS/OAuth/API origin/WS/financial/JOIN/bonus/deletion/merge action.
 
 References: https://docs.netlify.com/build/environment-variables/secrets-controller/ and https://docs.netlify.com/build/environment-variables/get-started/#sensitive-variable-policy . VPS6.5GB free; no install/cleanup.
+
+## First deployment and CI follow-up
+
+Source 0cf891e3312e57b8838d54d13947c57b60506a01, Netlify deploy6adbc14e93a222dd69c857f2 ready PASS. Public build receipt matches SHA/context/PR1141. GET calculate-xp405 (after xpStoreUnavailable guard), profile-me401, poker-progression401, no business writes. Direct Redis PING/epoch PASS; no deployed command-level Redis PING endpoint was added, authenticated Redis-consuming flow NOT TESTED.
+
+Hosted xp-v3-fundamentals exposed an old fixture with deploy-preview origin=null. New origin validation correctly rejects it before the missing-credentials test. Fixture now uses canonical Stage Preview1124 and explicitly clears the new alias while keeping legacy-token variants, so no-fallback denial remains asserted. Re-run required on final SHA. No guard weakened. Existing test copies/cleans its own temporary fixture; run this control on GitHub rather than doing extra VPS fixture writes.

@@ -49,7 +49,7 @@ test('V3 missing Redis credentials denies reads, writes, rate limits and XP HTTP
     await cp(resolve('netlify'),join(cwd,'netlify'),{recursive:true});
     await cp(resolve('shared'),join(cwd,'shared'),{recursive:true});
     await symlink(resolve('node_modules'),join(cwd,'node_modules'),'dir');
-    await writeFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'export const BUILD_DEPLOY_CONTEXT="deploy-preview"; export const BUILD_DEPLOY_ORIGIN=null; export const BUILD_XP_REDIS_VERSION="3"; export const BUILD_XP_REDIS_ENV="stage";');
+    await writeFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'export const BUILD_DEPLOY_CONTEXT="deploy-preview"; export const BUILD_DEPLOY_ORIGIN="https://deploy-preview-1124--playkcswh.netlify.app"; export const BUILD_XP_REDIS_VERSION="3"; export const BUILD_XP_REDIS_ENV="stage";');
     const script=`import assert from 'node:assert/strict';
       globalThis.fetch=()=>{throw new Error('unexpected network');};
       const m=await import('./netlify/functions/_shared/store-upstash.mjs');
@@ -61,7 +61,7 @@ test('V3 missing Redis credentials denies reads, writes, rate limits and XP HTTP
         assert.equal(result.statusCode,503,name); assert.equal(JSON.parse(result.body).error,'xp_store_unavailable',name);
       }`;
     for(const [url,token] of [['',''],['https://fixture.invalid',''],['','fixture'],[' ','fixture']]){
-      const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd,encoding:'utf8',env:{...process.env,XP_CORS_ALLOW:'https://deploy-preview-1124--playkcswh.netlify.app',XP_TEST_MODE:'0',ACCOUNT_DELETION_ENABLED:'0',CONTEXT:'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:'stage',XP_KEY_NS:ns,UPSTASH_REDIS_REST_URL:url,UPSTASH_REDIS_REST_TOKEN:token}});
+      const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd,encoding:'utf8',env:{...process.env,XP_CORS_ALLOW:'https://deploy-preview-1124--playkcswh.netlify.app',XP_TEST_MODE:'0',ACCOUNT_DELETION_ENABLED:'0',CONTEXT:'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:'stage',XP_KEY_NS:ns,ARCADE_STAGE_REDIS_TOKEN:'',UPSTASH_REDIS_REST_URL:url,UPSTASH_REDIS_REST_TOKEN:token}});
       assert.equal(result.status,0,result.stderr+result.stdout);
     }
     const memoryScript="import assert from 'node:assert/strict'; const m=await import('./netlify/functions/_shared/store-upstash.mjs'); assert.equal(m.isMemoryStore,true); await m.store.set('fixture','ok'); assert.equal(await m.store.get('fixture'),'ok');";
