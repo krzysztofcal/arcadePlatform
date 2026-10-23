@@ -45,6 +45,9 @@ await put('js/vendor/supabase.js', await readFile(path.join(here, 'node_modules/
 const pages = ['poker/index.html', 'poker/table-v2.html', 'account.html'];
 for (const name of pages) {
   let html = await readFile(path.join(root, name), 'utf8');
+  // Let Capacitor's native insets keep the whole WebView inside system bars.
+  // Only generated mobile pages change; shared web keeps viewport-fit=cover.
+  html = html.replace('viewport-fit=cover', 'viewport-fit=auto');
   // Presentation composition only; account forms and Poker DOM remain shared.
   html = html.split("\n").filter(line => !/^\s*<script\b[^>]*src=["'][^"']*(?:analytics|klaro-config|consent-services|consent-manager|vendor\/klaro\/klaro)\.js["'][^>]*><\/script>\s*$/.test(line)).join("\n");
   html = html.replace(/<link\b[^>]*href=["']https:\/\/fonts\.[^>]+>/g, '');

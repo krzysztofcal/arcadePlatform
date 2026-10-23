@@ -23,3 +23,9 @@ Final APK: source `0407e886fb3c4f056cd7af529b373fd31ba8bad3`, successful run [39
 - [x] R004 Run fundamental tests and existing syntax/CSP controls; hosted-only new APK, exact source receipt, update Draft PR/evidence.
 
 Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workflow](https://github.com/krzysztofcal/arcadePlatform/actions/runs/39996051429), [artifact](https://github.com/krzysztofcal/arcadePlatform/actions/runs/39996051429/artifacts/12520250698). [Review findings and required GO](review-followup.md).
+
+## First physical Galaxy S24+ review
+
+- [x] D001 Record owner evidence for APK bebbdc6a, separate UI defects from API1095/CORS symptoms.
+- [x] D002 Mobile presentation only: built-in SystemBars native insets plus generated viewport-fit=auto; filter bottom navigation to Poker/Profile; diagnostics in normal flow/table menu. Existing web viewport/styles/menus unchanged.
+- [ ] D003 Existing fundamental/syntax/CSP checks, hosted-only APK artifact and review; physical retest remains pending. No backend/environment action.

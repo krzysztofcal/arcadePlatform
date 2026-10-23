@@ -234,6 +234,7 @@
 
 
   function bottomNavItems(items){
+    if (window.MOBILE_POKER_CONFIG) return items.filter(function(item){ return item.id === 'poker' || item.id === 'profile'; });
     const wanted = ['home', 'search', 'favorites', 'poker', 'profile'];
     const byId = {};
     items.forEach(function(item){ byId[item.id] = item; });

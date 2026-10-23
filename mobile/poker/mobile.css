@@ -1,3 +1,4 @@
-body{padding-top:env(safe-area-inset-top);padding-bottom:calc(28px + env(safe-area-inset-bottom))}
 .search-box{display:none!important}
-#mobileStatus{position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:4px 10px calc(4px + env(safe-area-inset-bottom));background:#101827;color:#e7edf8;font:12px system-ui;text-align:center;pointer-events:none}
+body .mobile-bottom-nav{grid-template-columns:repeat(2,minmax(0,1fr))}
+#mobileStatus{position:static;max-width:100%;margin:8px 12px;padding:6px 10px;border-radius:8px;background:#101827;color:#e7edf8;font:12px/1.4 system-ui;text-align:center;overflow-wrap:anywhere;pointer-events:none}
+#pokerMenuPanel #mobileStatus{margin:8px 0}

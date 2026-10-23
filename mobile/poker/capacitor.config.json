@@ -4,5 +4,5 @@
   "webDir": "www",
   "server": { "hostname": "localhost", "androidScheme": "https", "cleartext": false },
   "android": { "allowMixedContent": false, "webContentsDebuggingEnabled": false },
-  "plugins": { "CapacitorHttp": { "enabled": false }, "CapacitorCookies": { "enabled": false } }
+  "plugins": { "CapacitorHttp": { "enabled": false }, "CapacitorCookies": { "enabled": false }, "SystemBars": { "insetsHandling": "native", "initialViewportFitValueHint": "auto", "style": "DARK" } }
 }

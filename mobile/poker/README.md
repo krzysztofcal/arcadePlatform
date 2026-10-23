@@ -72,3 +72,7 @@ References: [Capacitor config](https://capacitorjs.com/docs/config), [App events
 ## PR review follow-up
 
 Public-profile links use the unchanged Stage origin through the external Browser; offline resume no longer emits an online event. [Detailed environment/API/CORS audit](../../specs/1139-android-poker-m0/review-followup.md) identifies the Netlify XP Redis v3 context mismatch and stale Preview 1095 contract. No environment/origin change applied; native and authenticated integration remain pending.
+
+## Galaxy S24+ visual retest
+
+The owner confirmed installation/Lobby/Account/basic navigation on bebbdc6a, but found system-bar overlap and unwanted Search. [Device evidence and focused no-gameplay retest](../../specs/1139-android-poker-m0/device-smoke-s24.md) separate these presentation defects from blocked API1095/CORS. The next APK uses built-in native insets with generated viewport-fit=auto, explicit AndroidX EdgeToEdge, Poker/Profile-only bottom navigation and a status footer/table-menu message rather than a fixed banner. Physical visual PASS remains pending. Redis repair is still stopped at the earlier credential mismatch; this changes no backend setting.

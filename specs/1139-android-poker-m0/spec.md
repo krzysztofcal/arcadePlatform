@@ -16,3 +16,9 @@ Classic IIFE/global browser JS, one CSS line per selector, klog, strict script C
 
 ## Success criteria
 Hosted build produces debug APK and exact-SHA receipt; source packager excludes game routes. Auth/WS/gameplay are not claimed until real Stage/device evidence exists. Missing configuration or integration GO is reported as a blocker, not bypassed. Draft PR only, no merge.
+
+## Physical-device presentation correction
+
+Owner's first S24+ smoke of APK bebbdc6a confirms installation, launch, Lobby/Account and navigation, but finds system-bar overlap and unwanted Search. Only mobile generated viewport/SystemBars settings and mobile.css may change layout; js/sidebar.js may conditionally filter native bottom navigation. Place diagnostic status in document flow (table status inside its menu) so no persistent overlay covers controls. No new dependencies, native toolchain on VPS or UI/CSS test suite. API failures remain separate integration blockers; Redis GO remains stopped at credential mismatch.
+
+`mobile/poker/configure-android.mjs` enables AndroidX EdgeToEdge in the generated MainActivity.onCreate, using the existing Capacitor AndroidX dependency, so native SystemBars padding has consistent window ownership on older Android as well. No checked-in parallel Android UI or new dependency.

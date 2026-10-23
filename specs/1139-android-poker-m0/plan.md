@@ -27,3 +27,9 @@ Reuse existing T001 audit at main f9137918f54fd285d00dad5c7d91c1120bab6e33 and a
 ## Review corrections
 
 Use security.cjs::publicProfileUrl(config, handle) through runtime.js and renderPublicProfile() for Stage-only external navigation; preserve the web relative link. Guard the existing resume hint with navigator.onLine. Extend only origin/lifecycle security assertions. Inspect build logs/config/release metadata and OPTIONS without applying changes; record compatibility and scoped XP_CORS_ALLOW proposal in review-followup.md. Rebuild APK only on hosted runner.
+
+## S24+ presentation follow-up
+
+Use built-in Capacitor 8.5.3 SystemBars `insetsHandling=native` with `initialViewportFitValueHint=auto`; package-web.mjs changes only staged pages to viewport-fit=auto, leaving native system-bar/cutout padding outside the WebView and avoiding double safe-area padding. No plugin/dependency upgrade or Android edge-to-edge opt-out. js/sidebar.js::bottomNavItems() returns only Poker/Profile in mobile context; mobile.css uses two equal columns. runtime.js::notice() appends status inside pokerMenuPanel when present, otherwise normal body flow; remove fixed overlay and generic body padding. Verify existing fundamentals/syntax/CSP and inspect hosted artifact; all physical visual fixes remain awaiting owner retest.
+
+`mobile/poker/configure-android.mjs` enables AndroidX EdgeToEdge in the generated MainActivity.onCreate, using the existing Capacitor AndroidX dependency, so native SystemBars padding has consistent window ownership on older Android as well. No checked-in parallel Android UI or new dependency.

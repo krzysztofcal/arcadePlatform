@@ -11,7 +11,8 @@
       node = document.createElement('div');
       node.id = 'mobileStatus';
       node.setAttribute('role', 'status');
-      document.body.appendChild(node);
+      // Diagnostics belong in normal flow, or inside the table's explicit menu.
+      (document.getElementById('pokerMenuPanel') || document.body).appendChild(node);
     }
     node.textContent = message;
   }
