@@ -22,6 +22,13 @@
   }
   var browser;
   var app;
+  var systemBars;
+  function syncSystemBars(active){
+    if (!systemBars) return;
+    var table = window.location.pathname === '/poker/table-v2.html';
+    var operation = active && table ? systemBars.hide() : systemBars.show();
+    Promise.resolve(operation).catch(function(){ klog('mobile:system_bars_failed'); });
+  }
   window.MobilePoker = {
     authOptions: { auth: { flowType: 'pkce', detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } },
     redirectTo: window.MobilePokerSecurity.redirectTo,
@@ -66,6 +73,8 @@
     try {
       browser = plugin('Browser');
       app = plugin('App');
+      systemBars = plugin('SystemBars');
+      syncSystemBars(true);
       app.addListener('appUrlOpen', function(event){ callback(event.url); });
       var pendingCode = sessionStorage.getItem('mobilePokerAuthCode');
       sessionStorage.removeItem('mobilePokerAuthCode');
@@ -81,6 +90,7 @@
         } else app.minimizeApp();
       });
       app.addListener('appStateChange', function(event){
+        syncSystemBars(event.isActive);
         var client = window.supabaseClient;
         if (!client || !client.auth) return;
         if (event.isActive) {

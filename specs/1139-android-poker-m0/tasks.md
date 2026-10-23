@@ -57,3 +57,10 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] G001 Stage exact callback allowlist update/readback; existing URLs/Site URL/provider/all other Auth configuration unchanged; controlled redirect/native referrer PASS after propagation.
 - [x] G002 Exact branch tracking flag1; deletion acceptance OFF; all unrelated env/context/secret metadata unchanged. Fundamental tracking-before-deletion and Auth/avatar tests PASS.
 - [x] G003 Exact-SHA Preview1141 rebuild, effective branch configuration and endpoint availability checks, owner handoff. Full Google/real avatar tests remain owner-only.
+
+## Immersive fullscreen follow-up
+
+- [x] F001 Diagnose full-WebView margin budget and visible SystemBars; record new owner OAuth/avatar/Poker PASS.
+- [x] F002 Implement table-only immersive lifecycle and fullwindow/safe-content inset ownership; preserve non-table bounds/shared web.
+- [x] F003 Short M1 Verified App Links proposal only; retain working OAuth/Supabase.
+- [ ] F004 Fundamental regressions/syntax/CSP, hosted exact-SHA APK/receipt/checksum, breaking-impact review and owner retest handoff.

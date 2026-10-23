@@ -2,3 +2,4 @@
 body .mobile-bottom-nav{grid-template-columns:repeat(2,minmax(0,1fr))}
 #mobileStatus{position:static;max-width:100%;margin:8px 12px;padding:6px 10px;border-radius:8px;background:#101827;color:#e7edf8;font:12px/1.4 system-ui;text-align:center;overflow-wrap:anywhere;pointer-events:none}
 #pokerMenuPanel #mobileStatus{margin:8px 0}
+#pokerTableScreen .poker-action-bar{min-width:0;max-width:calc(100% - var(--mobile-safe-left,0px) - var(--mobile-safe-right,0px) - 16px)}

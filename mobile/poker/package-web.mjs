@@ -26,7 +26,9 @@ async function put(name, value){
 async function copy(name){
   if (copied.has(name)) return;
   if (name.startsWith('../') || path.isAbsolute(name)) throw new Error('Asset outside repository');
-  const value = await readFile(path.join(root, name));
+  let value = await readFile(path.join(root, name));
+  // Reuse table styles (including JS panel styles) with the native single-owner values.
+  if (name === 'poker/poker-v2.css' || name === 'poker/poker-v2.js') value = Buffer.from(value.toString().replace(/env\(safe-area-inset-(top|right|bottom|left)(?:,\s*0px)?\)/g, 'var(--mobile-safe-$1,0px)'));
   await put(name, value);
   if (name.endsWith('.css')) {
     for (const match of value.toString().matchAll(/url\(["']?([^\s)"']+)/g)) {
@@ -45,9 +47,8 @@ await put('js/vendor/supabase.js', await readFile(path.join(here, 'node_modules/
 const pages = ['poker/index.html', 'poker/table-v2.html', 'account.html'];
 for (const name of pages) {
   let html = await readFile(path.join(root, name), 'utf8');
-  // Let Capacitor's native insets keep the whole WebView inside system bars.
-  // Only generated mobile pages change; shared web keeps viewport-fit=cover.
-  html = html.replace('viewport-fit=cover', 'viewport-fit=auto');
+  // Only the table draws behind cutouts; other pages retain native viewport margins.
+  if (name !== 'poker/table-v2.html') html = html.replace('viewport-fit=cover', 'viewport-fit=auto');
   // Presentation composition only; account forms and Poker DOM remain shared.
   html = html.split("\n").filter(line => !/^\s*<script\b[^>]*src=["'][^"']*(?:analytics|klaro-config|consent-services|consent-manager|vendor\/klaro\/klaro)\.js["'][^>]*><\/script>\s*$/.test(line)).join("\n");
   html = html.replace(/<link\b[^>]*href=["']https:\/\/fonts\.[^>]+>/g, '');

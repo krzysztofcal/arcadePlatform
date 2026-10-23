@@ -32,6 +32,7 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   let exchangeCount = 0;
   const connectivity = { onLine: false };
   const events = [];
+  const barCalls = [];
   let refreshStarts = 0;
   const storage = new Map();
   let navigated = false;
@@ -41,6 +42,7 @@ test('native PKCE callback uses injected plugins and preserves recovery document
     MobilePokerSecurity: security, MOBILE_POKER_CONFIG: { ...config, sha: '12345678' },
     Capacitor: { Plugins: {
       Browser: { close: async () => {} },
+      SystemBars: { hide: async () => { barCalls.push('hide'); }, show: async () => { barCalls.push('show'); } },
       App: { addListener(name, fn) { listeners[name] = fn; }, getLaunchUrl: async () => null }
     } },
     supabaseClient: { auth: { startAutoRefresh() { refreshStarts++; }, stopAutoRefresh() {}, exchangeCodeForSession: async code => { exchanged = code; exchangeCount++; return { data: { session: {} } }; } } },
@@ -48,6 +50,7 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   };
   vm.runInNewContext(source, { window, document, URL, Event, navigator: connectivity, sessionStorage: { getItem(key) { return storage.get(key) || null; }, setItem(key, value) { storage.set(key, value); }, removeItem(key) { storage.delete(key); } } });
   ready();
+  assert.deepEqual(barCalls, ['show'], 'Account is never immersive');
   listeners.appStateChange({ isActive: true });
   assert.deepEqual(events, [], 'offline resume must not emit online');
   assert.equal(refreshStarts, 1);
@@ -62,4 +65,18 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   await listeners.appUrlOpen({ url: 'arcadepoker-stage://auth/callback?code=recovery-code' });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(exchangeCount, 1, 'ignore a repeated launch callback after successful consumption');
+  // Table-only lifecycle routing, independent of Auth availability; no layout assertions.
+  barCalls.length = 0;
+  window.location.pathname = '/poker/table-v2.html';
+  window.supabaseClient = null;
+  ready();
+  listeners.appStateChange({ isActive: false });
+  listeners.appStateChange({ isActive: true });
+  window.location.pathname = '/poker/index.html';
+  ready();
+  window.location.pathname = '/poker/table-v2.html';
+  ready();
+  window.location.pathname = '/account.html';
+  ready();
+  assert.deepEqual(barCalls, ['hide','show','hide','show','hide','show']);
 });

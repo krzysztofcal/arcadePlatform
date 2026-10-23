@@ -38,3 +38,7 @@ Owner confirms email/password login, Poker/table use, rotation, portrait header 
 ## Approved Stage Auth + Avatar configuration GO
 
 Owner authorizes exact native callback addition only to pinned Stage Auth uri_allow_list, preserving Site URL/all existing entries/Google provider configuration. Exact branch feat/1139-android-poker-m0 may set ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1 while deletion acceptance stays OFF. Rebuild only Preview1141; no shared Preview/Production/secret/schema/trigger/Storage change. Controlled Google redirect without provider login/code/session exchange and endpoint availability checks only. Owner performs full Google→APK session and real avatar upload/finalize tests.
+
+## Table-only immersive Android GO
+
+Owner physical PASS: avatar upload/finalization, Google OAuth→APK active session, Poker, portrait/landscape. Current landscape failure is unused edges/system bars: prior all-WebView margins reserve bars/cutout/gestures and runtime never hides bars. New goal is full-window table background with safe interactive content; Lobby/Profile retain bars/native safe bounds. Only Android/mobile packaging/runtime changes, no shared web/WS/Auth/avatar/Redis/DB/financial logic or configuration changes. Use existing SystemBars hide/show + official transient swipe immersive behavior; one inset owner handles native route, orientation, IME and document changes without device offsets/dependencies. Physical fullscreen acceptance remains owner-only.
