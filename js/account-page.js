@@ -321,7 +321,7 @@
     if (nodes.publicBio) nodes.publicBio.value = profile.bio || '';
     if (nodes.hideFromLeaderboard) nodes.hideFromLeaderboard.checked = profile.leaderboardVisible === false;
     if (nodes.publicHandleHint) nodes.publicHandleHint.textContent = profile.handleCanBeCustomized ? t('publicHandleHint', 'You can change your generated handle once. It then becomes permanent.') : t('publicHandleLockedHint', 'This handle is permanent.');
-    if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
+    if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = window.MobilePoker ? window.MobilePoker.publicProfileUrl(profile.handle) : '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
     setPublicProfileErrors(null);
   }
 

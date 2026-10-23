@@ -24,6 +24,7 @@
   window.MobilePoker = {
     authOptions: { auth: { flowType: 'pkce', detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } },
     redirectTo: window.MobilePokerSecurity.redirectTo,
+    publicProfileUrl: function(handle){ return window.MobilePokerSecurity.publicProfileUrl(config, handle); },
     openOAuth: function(value){
       var url = new URL(value);
       if (url.origin !== config.supabaseUrl || url.pathname !== '/auth/v1/authorize' || url.searchParams.get('provider') !== 'google' || url.searchParams.get('redirect_to') !== window.MobilePokerSecurity.redirectTo) {
@@ -84,7 +85,7 @@
         if (event.isActive) {
           client.auth.startAutoRefresh();
           // Preserve the existing Poker WS reconnect/resync owner; no duplicate socket.
-          window.dispatchEvent(new Event('online'));
+          if (navigator.onLine) window.dispatchEvent(new Event('online'));
         } else client.auth.stopAutoRefresh();
       });
     } catch (_err){ notice('Native bridge unavailable. Install the APK to test mobile sign-in.'); }

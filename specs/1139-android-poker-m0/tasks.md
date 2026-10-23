@@ -14,3 +14,10 @@
 T008 remains pending: no physical phone attached; mobile-origin Stage preflight is HTTP 403. Separate Stage CORS/OAuth GO and funded gameplay GO required. No environment change was applied. Netlify Preview build currently fails (exit 2); root-cause logs unavailable via connected read API/CLI (404), so web Preview runtime remains unverified.
 
 Final APK: source `0407e886fb3c4f056cd7af529b373fd31ba8bad3`, successful run [39979500333](https://github.com/krzysztofcal/arcadePlatform/actions/runs/39979500333), artifact [12512069127](https://github.com/krzysztofcal/arcadePlatform/actions/runs/39979500333/artifacts/12512069127). Device/Stage integration remains uncompleted T008.
+
+## PR review follow-up
+
+- [x] R001 Route shared account publicProfileUrl through validated Stage external-browser adapter; preserve web relative link. Guard resume online event using navigator.onLine; extend only fundamental security/lifecycle tests.
+- [x] R002 Diagnose Netlify exit 2 using build logs and read-only comparison; no configuration bypass or deployment.
+- [x] R003 Inventory actual packaged API consumers, compare Preview 1095 and current Stage WS revisions/contracts, inspect read-only OPTIONS; propose Stage-only XP_CORS_ALLOW additive change without application.
+- [ ] R004 Run fundamental tests and existing syntax/CSP controls; hosted-only new APK, exact source receipt, update Draft PR/evidence.

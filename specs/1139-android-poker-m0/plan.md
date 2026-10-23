@@ -23,3 +23,7 @@ Invalid Stage host/key, malformed callback, foreign OAuth URL, absent PKCE code,
 
 ## Execution decisions
 Reuse existing T001 audit at main f9137918f54fd285d00dad5c7d91c1120bab6e33 and all seven #1139 comments. Owner explicitly requested immediate implementation and constrained checkout use; implement inline in existing checkout, no extra approval/worktree/install cycle. Capacitor-generated Android template is reproducible from locked package, rather than committing generated SDK artifacts. No WS protocol changes, so no WS deploy performed.
+
+## Review corrections
+
+Use security.cjs::publicProfileUrl(config, handle) through runtime.js and renderPublicProfile() for Stage-only external navigation; preserve the web relative link. Guard the existing resume hint with navigator.onLine. Extend only origin/lifecycle security assertions. Inspect build logs/config/release metadata and OPTIONS without applying changes; record compatibility and scoped XP_CORS_ALLOW proposal in review-followup.md. Rebuild APK only on hosted runner.

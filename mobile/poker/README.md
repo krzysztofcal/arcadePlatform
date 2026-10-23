@@ -68,3 +68,7 @@ A web deploy never updates installed UI. UI changes need a new APK; backend chan
 Future iOS can share packaged assets/adapters but needs separate GO, macOS/Xcode, signing and Apple policy work. No iOS implementation.
 
 References: [Capacitor config](https://capacitorjs.com/docs/config), [App events](https://capacitorjs.com/docs/apis/app), [Supabase native deep links](https://supabase.com/docs/guides/auth/native-mobile-deep-linking). Current Supabase changelog inspected; TLS cipher retirement does not require changing modern Android WebView configuration.
+
+## PR review follow-up
+
+Public-profile links use the unchanged Stage origin through the external Browser; offline resume no longer emits an online event. [Detailed environment/API/CORS audit](../../specs/1139-android-poker-m0/review-followup.md) identifies the Netlify XP Redis v3 context mismatch and stale Preview 1095 contract. No environment/origin change applied; native and authenticated integration remain pending.
