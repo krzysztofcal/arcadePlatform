@@ -16,8 +16,8 @@
     node.textContent = message;
   }
   function plugin(name){
-    if (!cap || !cap.registerPlugin) throw new Error('Native plugin bridge unavailable');
-    return cap.registerPlugin(name);
+    if (!cap || !cap.Plugins || !cap.Plugins[name]) throw new Error('Native plugin bridge unavailable');
+    return cap.Plugins[name];
   }
   var browser;
   var app;
@@ -38,13 +38,18 @@
     try {
       var code = window.MobilePokerSecurity.callbackCode(value);
       exchanging = true;
+      if (window.location.pathname !== '/account.html') {
+        sessionStorage.setItem('mobilePokerAuthCode', code);
+        window.location.replace('/account.html');
+        return;
+      }
       // The verifier is stored by the shared Supabase client in app-local storage.
       var client = window.supabaseClient;
       if (!client || !client.auth) throw new Error('Auth client unavailable');
       var result = await client.auth.exchangeCodeForSession(code);
       if (result.error || !result.data || !result.data.session) throw new Error('Auth callback failed');
       await browser.close().catch(function(){});
-      window.location.replace('/account.html');
+      notice('Signed in to Stage. Account is ready.');
     } catch (_err){
       notice('Sign-in return failed or expired. Please retry from Account.');
       klog('mobile:auth_callback_failed');
@@ -58,6 +63,9 @@
       browser = plugin('Browser');
       app = plugin('App');
       app.addListener('appUrlOpen', function(event){ callback(event.url); });
+      var pendingCode = sessionStorage.getItem('mobilePokerAuthCode');
+      sessionStorage.removeItem('mobilePokerAuthCode');
+      if (pendingCode) setTimeout(function(){ callback(window.MobilePokerSecurity.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
       app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
         // Avoid a blind history back into a stale table or out of the local package.
