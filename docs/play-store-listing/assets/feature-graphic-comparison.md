@@ -1,45 +1,51 @@
 # Google Play Feature Graphic (1024 × 500 px) — Design Proposals & Analysis
 
 **Linked Issue:** [#1140](https://github.com/krzysztofcal/arcadePlatform/issues/1140) / P05  
-**Strategic Roadmap:** [#1138](https://github.com/krzysztofcal/arcadePlatform/issues/1138)  
+**Strategic Roadmap:** [#1138](https://github.com/krzysztofcal/arcadePlatform/issues/1138) (Milestone M1)  
 **Deliverables Directory:** `docs/play-store-listing/assets/`  
+**Status:** Working Draft — Proposals Ready for Owner Review  
 
 ---
 
-## 1. Technical Compliance Overview
+## 1. Weryfikacja techniczna plików PNG
 
-Both proposals have been generated and validated strictly against Google Play Store technical requirements:
-- **Dimensions:** 1024 × 500 pixels (exact horizontal banner ratio 2.048:1).
-- **Format:** 24-bit PNG (`image/png`, 8 bits per channel RGB).
-- **Alpha Channel:** **None (100% opaque)** — transparency has been stripped to avoid Google Play Console upload rejections.
-- **Color Space:** sRGB.
-- **Safe Zone:** Kept within the central 70% bounds (≥15% horizontal and vertical margins), leaving the center clear of microscopic details that could clash with YouTube video play button overlays in the Play Store app carousel.
-- **Copy Compliance:** No prohibited marketing text (*"#1"*, *"Best Poker"*, *"Free"*, *"Download Now"*).
+Oba pliki zostały zweryfikowane na poziomie nagłówków IHDR pod kątem wymogów Google Play Store:
+- **Rozdzielczość:** dokładnie **1024 × 500 pikseli** (stosunek boków 2.048:1).
+- **Format:** rzeczywisty **24-bit Truecolor RGB PNG** (`bitDepth: 8`, `colorType: 2`, 3 kanały barwne: R, G, B).
+- **Kanał alfa / Przezroczystość:** **Brak** (`hasAlpha: false`, brak przezroczystości, brak palety indeksowanej PLTE).
+- **Przestrzeń barw:** sRGB.
+- **Strefa bezpieczeństwa (Safe Zone):** elementy skupione w centralnych 70% kadru, bezpieczne marginesy od krawędzi (≥ 15%), optymalne pod kątem nakładek systemowych Google Play (np. przycisk play wideo).
+
+```text
+Weryfikacja nagłówka IHDR (Node.js buffer inspection):
+feature-graphic-proposal-1.png: width=1024, height=500, colorType=2 (Truecolor RGB), bitDepth=8, is24BitRgb=true
+feature-graphic-proposal-2.png: width=1024, height=500, colorType=2 (Truecolor RGB), bitDepth=8, is24BitRgb=true
+```
 
 ---
 
-## 2. Design Proposals for Owner Aesthetic Evaluation
+## 2. Opis propozycji wizualnych
 
 ### Propozycja 1 (Proposal 1): "Sapphire VIP Velvet"
 - **Plik:** `docs/play-store-listing/assets/feature-graphic-proposal-1.png`
-- **Koncepcja wizualna:** Luksusowy stół VIP w odcieniach głębokiego szafiru i granatu velvet (`#06080f` / `#0a1c3d`), dramatyczne oświetlenie żyrandolowe ze złotymi akcentami rim-light, trójwymiarowa złota typografia `ARCADE POKER` z subtelnym reliefem, rozłożone karty Royal Flush (A♠ K♠) oraz wielobarwne, błyszczące stosy żetonów (purpurowe, szmaragdowe, złote).
-- **Nastrój (Vibe):** Nowoczesne, ekskluzywne kasyno, wysoka jakość renderu 3D, stonowana elegancja.
-- **Kompozycja:** Wyraźny punkt centralny z logo i kartami, dynamiczne światła po bokach.
+- **Format:** 24-bit RGB PNG (1024 × 500 px, ~270 KB, Color Type 2).
+- **Koncepcja wizualna:** Luksusowy stół VIP w odcieniach głębokiego szafiru i aksamitu, oświetlenie ze złotymi refleksami, trójwymiarowa złota typografia `ARCADE POKER`, rozłożone karty **Ace-King suited (A♠ K♠)** w kolorze pik oraz stosy żetonów pokerowych.
+- **Korekta opisu układu kart:** Poprawiono pierwotny błędny opis – widoczne karty to para kart broadway w kolorze pik (**A♠ K♠ / Big Slick suited**), a nie pełny 5-kartowy poker królewski (Royal Flush).
+- **Nastrój:** Styl ekskluzywnego pokoju VIP, malarski rendering atmosfery kasyna.
 
-### Propozycja 2 (Proposal 2): "Emerald Palace & Canonical Arcade Chips"
+### Propozycja 2 (Proposal 2): "Emerald Palace & Canonical Chips" (Kierunek preferowany przez właściciela)
 - **Plik:** `docs/play-store-listing/assets/feature-graphic-proposal-2.png`
-- **Koncepcja wizualna:** Bezpośrednio zakorzeniona w kanonicznych zasobach gry Arcade Poker:
-  - Tło oparte na motywie stołu `emerald-palace` (`#040c08` – `#114b31`) ze złotą lamówką i łukiem filcu.
-  - Oficjalne żetony z repozytorium (`poker/assets/chips/chip-*.png` – purpurowe, zielone, złote, niebieskie) ułożone w perspektywie stołu.
-  - Para asów (Pocket Aces: A♠ A♥) z ostrym, wektorowym wykończeniem.
-  - Precyzyjne, typograficzne logo `ARCADE POKER` z odznakami `NO-LIMIT HOLD'EM`, `ONLINE & SINGLE PLAYER` oraz kanonicznym dopiskiem `VIRTUAL CHIPS · NO CASH-OUT`.
-- **Nastrój (Vibe):** Czysta, czytelna estetyka klasycznego pokera arcade, 100% spójna z UI stołu i lobby w aplikacji webowej.
-- **Zalety:** Bardzo wysoka czytelność nawet przy małym skalowaniu na ekranach smartfonów w sklepie Google Play.
+- **Format:** 24-bit RGB PNG (1024 × 500 px, ~617 KB, Color Type 2).
+- **Wprowadzone uproszczenia (po review):**
+  - **Pozostawiono wyłącznie kluczowe elementy:**
+    1. Duży, wyrazisty napis **ARCADE POKER** w złotym gradiencie z głębokim obrysem kontrastującym.
+    2. Dwa asy (**Pocket Aces: A♠ i A♥**) w centralnej kompozycji.
+    3. Prawdziwe żetony pokerowe z repozytorium gry (`poker/assets/chips/`) rozmieszczone po bokach stołu.
+  - **Usunięto małe slogany i elementy zaśmiecające kadr:** usunięto plakietkę `NO-LIMIT HOLD'EM`, podtytuł `ONLINE & SINGLE PLAYER` oraz mały slogan `VIRTUAL CHIPS · NO CASH-OUT`.
+  - **Efekt:** Maksymalna czytelność i wyrazistość logotypu, brak drobnego, nieczytelnego tekstu przy skalowaniu do miniatur w aplikacji Google Play Store na ekranach telefonów.
 
 ---
 
-## 3. Podsumowanie do decyzji właściciela
+## 3. Podsumowanie do ostatecznej akceptacji
 
-Obie propozycje są w pełni zgodne ze specyfikacją techniczną Google Play. Przed ostatecznym wdrożeniem do konsoli Play Store prosimy o wybór preferowanego kierunku estetycznego:
-1. **Kierunek A (Sapphire VIP Velvet):** Bardziej malarski, nastrojowy, głęboki luksus.
-2. **Kierunek B (Emerald Palace & Canonical Arcade Chips):** Bardziej graficzny, kontrastowy, bezpośrednio odwzorowujący elementy UI stołu.
+Zgodnie z decyzją review, **Propozycja 2 (Emerald Palace)** została uproszczona, pozbawiona sloganów i wyeksportowana jako prawdziwy 24-bitowy plik RGB PNG (Color Type 2). Przedstawiona do ostatecznej oceny estetycznej przed zakończeniem prac nad banerem promocyjnym.

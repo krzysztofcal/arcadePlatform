@@ -2,8 +2,9 @@
 
 **Pakiet wydawniczy Google Play dla Arcade Poker**  
 **Dokumentacja powiązana z:** [#1140](https://github.com/krzysztofcal/arcadePlatform/issues/1140) / P05  
+**Nadrzędna roadmapa:** [#1138](https://github.com/krzysztofcal/arcadePlatform/issues/1138) (Milestone M1)  
 **Data przygotowania:** 2026-10-23  
-**Status:** Gotowe do review właściciela produktu  
+**Status dokumentu:** Status roboczy — wersja do weryfikacji właściciela (Draft)  
 
 ---
 
@@ -11,7 +12,7 @@
 
 ### Nazwa aplikacji (App Title)
 > **Maksymalny limit Google Play:** 30 znaków  
-> **Długość:** 27 znaków  
+> **Dokładna długość:** **27 znaków**  
 > **Status:** ZGODNE (PASS)
 
 ```text
@@ -27,7 +28,7 @@ Arcade Poker - Texas Hold'em
 
 ### Krótki opis (Short Description)
 > **Maksymalny limit Google Play:** 80 znaków  
-> **Długość:** 77 znaków  
+> **Dokładna długość:** **77 znaków**  
 > **Status:** ZGODNE (PASS)
 
 ```text
@@ -38,42 +39,42 @@ Elegancki poker Texas Hold'em online i z botami. Graj za wirtualne żetony CH.
 
 ### Pełny opis (Full Description)
 > **Maksymalny limit Google Play:** 4000 znaków  
-> **Długość tekstu:** 3234 znaki (ze spacjami)  
+> **Dokładna długość tekstu:** **3419 znaków** (ze spacjami)  
 > **Status:** ZGODNE (PASS)
 
 ```text
 Witamy w Arcade Poker – eleganckim wirtualnym pokoju karcianym stworzonym z myślą o pasjonatach klasycznego No-Limit Texas Hold'em. Usiądź przy stole, sprawdź swoje umiejętności taktyczne i ciesz się czystą dynamiką pokera bez ryzyka finansowego!
 
-Arcade Poker to gra społecznościowa (social casino) oparta w 100% na wirtualnych żetonach Arcade Chips (CH). Poczuj atmosferę luksusowego kasyna, blefuj, podbijaj i buduj swój wirtualny bankroll w grze z graczami z całego świata lub trenuj w trybie solo.
+Arcade Poker to gra społecznościowa (social casino) oparta w 100% na wirtualnych żetonach Arcade Chips (CH). Poczuj atmosferę luksusowego kasyna, blefuj, podbijaj i buduj swój wirtualny bankroll w grze z graczami z całego świata lub trenuj w trybie solo z botami. Gra wymaga aktywnego połączenia z Internetem.
 
 KLUCZOWE CECHY GRY:
 
 • KLASYCZNY NO-LIMIT TEXAS HOLD'EM
-Prawdziwe zasady najpopularniejszej odmiany pokera. Pre-flop, flop, turn, river, licytacja bez limitu oraz czytelny interfejs podejmowania decyzji (Fold, Check, Call, Bet, Raise, All-in) z możliwością kolejkowania akcji.
+Prawdziwe zasady najpopularniejszej odmiany pokera. Pre-flop, flop, turn, river, licytacja bez limitu oraz czytelny interfejs podejmowania decyzji (Fold, Check, Call, Bet, Raise, All-in) z obsługą przydatnego kolejkowania akcji.
 
 • POKER ONLINE W CZASIE RZECZYWISTYM
-Zasiądź przy stołach wieloosobowych (od 2 do 6 miejsc). Autorytatywny silnik czasu rzeczywistego (WebSocket) zapewnia natychmiastową synchronizację stanu stołu, płynne rozdania i stabilne wznawianie sesji.
+Zasiądź przy stołach wieloosobowych (od 2 do 6 miejsc). Autorytatywny silnik czasu rzeczywistego (WebSocket) zapewnia natychmiastową synchronizację stanu stołu, płynne rozdania i stabilne wznawianie sesji po chwilowej utracie łączności.
 
-• TRYB SINGLE PLAYER – TRENING Z BOTAMI
-Chcesz poćwiczyć strategię bez presji czasu? Wybierz Single Player i zmierz się z autonomicznymi botami pokerowymi. Doskonały sposób na naukę czytania pozycji i kalkulacji pot odds.
+• TRYB SINGLE PLAYER – TRENING Z BOTAMI POKEROWYMI
+Chcesz zagrać od razu bez oczekiwania na wolne miejsce przy stole? Wybierz Single Player i zmierz się z autonomicznymi botami pokerowymi na serwerze. Gra zachowuje dynamiczny timer rundy, oferując doskonały trening kalkulacji pozycji i pot odds.
 
 • ZRÓŻNICOWANE POZIOMY STAWEK (TIERS)
 Dobierz stół do wielkości swojego wirtualnego bankrolla. Od niskich stawek rekreacyjnych po wysokie progi dla wirtualnych high-rollerów.
 
 • INTERAKCJA PRZY STOLE I GIFT SHOP
-Gra przy stole to nie tylko karty – to emocje! Korzystaj z dymków reakcji i emotikonów, a także wysyłaj wirtualne upominki i drinki innym graczom za pośrednictwem wbudowanego Gift Shopu.
+Poker to gra relacji! Korzystaj z dymków reakcji i emotikonów przy stole, a także wysyłaj wirtualne upominki i napoje innym graczom za pośrednictwem wbudowanego Gift Shopu.
 
 • WBUDOWANY PRZEWODNIK UKŁADÓW KART
-Nie jesteś pewien, czy strit bije kolor? W każdej chwili możesz otworzyć podręczny, czytelny przewodnik starszeństwa układów pokerowych – idealny dla graczy na każdym poziomie zaawansowania.
+Nie jesteś pewien, czy strit bije kolor? W każdej chwili możesz otworzyć podręczny, czytelny przewodnik starszeństwa układów pokerowych – idealny dla graczy chcących odświeżyć zasady.
 
 • BONUS POWITALNY I CODZIENNE NAGRODY UTC
-Zarejestruj bezpłatne konto, aby odebrać powitalny pakiet żetonów CH. Loguj się codziennie i utrzymuj passę (daily streak), by odbierać odnawialne bonusy wirtualnych żetonów.
+Zarejestrowani gracze mogą odebrać jednorazowy bonus powitalny wirtualnych żetonów CH bezpośrednio w lobby gry. Loguj się codziennie, aby utrzymywać passę (daily streak) i odbierać odnawialne pakiety żetonów.
 
 • GRAJ JAKO GOŚĆ LUB ZAPISZ POSTĘPY
-Możesz rozpocząć grę od razu w trybie gościa z pulą tymczasowych żetonów lub zalogować się kontem Arcade, aby zachować stały stan konta CH i osiągnięcia.
+Możesz rozpocząć grę od razu w trybie gościa z pulą tymczasowych żetonów lub zalogować się kontem Arcade, aby zachować stały stan konta CH i osiągnięcia XP.
 
 • PEŁNA KONTROLA NAD KONTEM I PRYWATNOŚĆ
-Szanujemy Twoją prywatność. Masz pełną możliwość trwałego usunięcia swojego konta i danych bezpośrednio w menu profilu aplikacji lub poprzez zewnętrzny formularz WWW.
+Szanujemy Twoją prywatność. Masz pełną możliwość trwałego usunięcia swojego konta i danych bezpośrednio w menu profilu aplikacji lub poprzez formularz na stronie WWW.
 
 ────────────────────────────────────────
 WAŻNA INFORMACJA DLA GRACZY (INFORMACJA PRAWNA):
@@ -90,13 +91,14 @@ WAŻNA INFORMACJA DLA GRACZY (INFORMACJA PRAWNA):
 
 - **Typ aplikacji:** Gra (Game)
 - **Kategoria podstawowa:** Gry karciane (Card) / Kasyno społecznościowe (Casino)
-- **Tagi:** Poker, Texas Hold'em, Karciane, Gra wieloosobowa, Symulator kasyna, Boty
-- **Klasyfikacja wiekowa IARC:** Wypełnienie kwestionariusza IARC z zaznaczeniem symulowanego hazardu (Simulated Gambling) – kategoria 18+ (Dorośli).
+- **Tagi:** Poker, Texas Hold'em, Karciane, Gra wieloosobowa, Symulator kasyna, Boty pokerowe
+- **Uwaga dotycząca tagów:** Usunięto tagi sugerujące grę offline – boty są hostowane na serwerze i wymagają połączenia sieciowego.
+- **Klasyfikacja wiekowa IARC:** Wypełnienie oficjalnego kwestionariusza IARC z zaznaczeniem symulowanego hazardu (Simulated Gambling) – kategoria 18+ (Dorośli) do formalnego zatwierdzenia.
 
 ---
 
 ## 3. Bezpieczeństwo danych (Google Play Data Safety)
 
 - **Szyfrowanie w transporcie:** Tak (HTTPS / Secure WebSockets TLS).
-- **Konto użytkownika:** Opcjonalne (możliwa gra w trybie gościa bez rejestracji).
-- **Usuwanie danych:** Użytkownik może w każdej chwili zażądać usunięcia konta w aplikacji lub pod adresem: `https://arcade.kcswh.pl/account.html`.
+- **Konto użytkownika:** Opcjonalne (możliwa gra w trybie gościa z tymczasowymi żetonami bez rejestracji).
+- **Zewnętrzny adres usuwania konta (Production):** `https://play.kcswh.pl/account.html` (funkcja wdrożona w aplikacji webowej; adres przewidziany do zgłoszenia w konsoli Google Play podczas submission, status zgłoszenia w Play Console: Oczekuje na wdrożenie konta wydawcy).

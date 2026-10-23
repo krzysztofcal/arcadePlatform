@@ -4,7 +4,7 @@
 **Linked Issue:** [#1140](https://github.com/krzysztofcal/arcadePlatform/issues/1140) / P05  
 **Strategic Roadmap:** [#1138](https://github.com/krzysztofcal/arcadePlatform/issues/1138) (Milestone M1)  
 **Creation Date:** 2026-10-23  
-**Status:** Ready for Owner Review  
+**Document Status:** Working Draft — Pending Owner & Legal Review (Draft)  
 
 ---
 
@@ -12,7 +12,7 @@
 
 ### App Title
 > **Google Play Maximum Limit:** 30 characters  
-> **Character Count:** 27 characters  
+> **Exact Character Count:** **27 characters**  
 > **Status:** COMPLIANT (PASS)
 
 ```text
@@ -28,7 +28,7 @@ Arcade Poker - Texas Hold'em
 
 ### Short Description
 > **Google Play Maximum Limit:** 80 characters  
-> **Character Count:** 74 characters  
+> **Exact Character Count:** **74 characters**  
 > **Status:** COMPLIANT (PASS)
 
 ```text
@@ -44,13 +44,13 @@ Texas Hold'em poker online and vs bots. Play purely for virtual CH chips.
 
 ### Full Description
 > **Google Play Maximum Limit:** 4,000 characters  
-> **Character Count:** 3,180 characters (with spaces)  
+> **Exact Character Count:** **3277 characters** (with spaces)  
 > **Status:** COMPLIANT (PASS)
 
 ```text
 Welcome to Arcade Poker – an elegant, modern card room designed for poker fans and tactical thinkers who love classic No-Limit Texas Hold'em. Take your seat at the virtual table, read your opponents, and experience the pure thrill of poker with zero financial risk!
 
-Arcade Poker is a free-to-play social card game powered 100% by virtual Arcade Chips (CH). Immerse yourself in a luxury casino ambiance, bluff, bet, and build your virtual bankroll competing against real players online or honing your strategy in solo bot play.
+Arcade Poker is a free-to-play social card game powered 100% by virtual Arcade Chips (CH). Immerse yourself in a luxury casino ambiance, bluff, bet, and build your virtual bankroll competing against real players online or honing your strategy in solo bot play. An active internet connection is required.
 
 CORE GAME FEATURES:
 
@@ -61,7 +61,7 @@ Standard Texas Hold'em rules played right: pre-flop, flop, turn, river, and no-l
 Join active 2 to 6-seat tables powered by an authoritative real-time WebSocket game engine. Enjoy seamless card distribution, crisp animations, and robust session recovery if your connection drops.
 
 • SINGLE PLAYER MODE — TRAIN VS AI BOTS
-Want to practice without turn timer pressure? Jump into Single Player mode and face intelligent poker bots. The perfect training ground to master position, bluff timing, and pot odds.
+Want to jump straight into a hand without waiting for open seats? Jump into Single Player mode and face server-hosted poker bots. Matches feature live decision timers, making it an excellent training ground to master position and pot odds.
 
 • PROGRESSIVE BUY-IN TIERS
 Choose a table that matches your bankroll and playing style. Progress from friendly low-stakes tables to high-roller action as your virtual CH stack grows.
@@ -73,10 +73,10 @@ Poker is social! Express yourself with animated table reaction bubbles and emoji
 Never second-guess whether a flush beats a straight. Access an instant, beautifully organized Texas Hold'em hand ranking guide directly from the table menu anytime.
 
 • WELCOME BONUS & DAILY UTC STREAKS
-Get started with an instant Welcome Bonus of virtual CH upon account registration. Return every day to claim streak rewards and keep your virtual bankroll topped up.
+Registered players can claim a one-time welcome bonus of virtual CH directly in the poker lobby. Return every day to claim streak rewards and keep your virtual bankroll topped up.
 
 • GUEST PLAY OR PERSISTENT ACCOUNT
-Jump in right away as a Guest with temporary chips, or sign in to sync your CH balance, XP, and table history across sessions.
+Jump in right away as a Guest with temporary chips, or sign in to sync your CH balance and XP across sessions.
 
 • PRIVACY & ACCOUNT CONTROL
 We respect your privacy and account autonomy. You have complete control to permanently delete your account and associated data directly within the in-app profile menu or via our dedicated web account deletion portal.
@@ -95,9 +95,10 @@ IMPORTANT DISCLAIMER (SIMULATED GAMBLING / SOCIAL CASINO):
 ## 2. Store Categorization & Tags
 
 - **Application Type:** Game
-- **Primary Category:** Card (Gry karciane) / Casino (Kasyno)
-- **Store Tags:** Poker, Texas Hold'em, Card, Multiplayer, Casino Simulator, Offline Bots
-- **IARC Content Rating:** Classified under Simulated Gambling for adult audience (18+).
+- **Primary Category:** Card / Casino (Kasyno społecznościowe)
+- **Store Tags:** Poker, Texas Hold'em, Card, Multiplayer, Casino Simulator, Poker Bots
+- **Tag Notice:** Excluded misleading "Offline Bots" tag; game is online and communicates with the authoritative server.
+- **IARC Content Rating:** Subject to official IARC questionnaire submission indicating Simulated Gambling for an adult audience (18+).
 
 ---
 
@@ -106,4 +107,4 @@ IMPORTANT DISCLAIMER (SIMULATED GAMBLING / SOCIAL CASINO):
 - **Data Encryption:** TLS/HTTPS and authenticated WSS in transit.
 - **Data Collection:** Minimal authentication credentials (Supabase Auth email/ID for registered accounts), game progression (XP, CH virtual balance).
 - **Third-Party Data Sharing:** None.
-- **Account Deletion:** Fully supported in-app via profile dialog and publicly accessible at `https://arcade.kcswh.pl/account.html`.
+- **Production Account Deletion URL:** `https://play.kcswh.pl/account.html` (verified production endpoint; designated for Google Play Console submission upon developer registration).
