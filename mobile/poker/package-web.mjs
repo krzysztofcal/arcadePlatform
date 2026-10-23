@@ -55,7 +55,7 @@ for (const name of pages) {
     if (/^(#|data:|mailto:|https?:)/.test(value)) return match;
     const url = new URL(value, 'https://localhost/' + name);
     let target = url.pathname;
-    if (target === '/index.html') target = '/poker/';
+    if (target === '/index.html' || target === '/poker/') target = '/poker/index.html';
     if (target === '/xp.html') target = '/account.html';
     if (!['/poker/', '/poker/index.html', '/poker/table-v2.html', '/account.html'].includes(target) && !target.endsWith('.css')) {
       if (/^\/(legal\/|about[./])/.test(target)) target = config.apiOrigin + target;
@@ -75,7 +75,7 @@ for (const name of pages) {
   await put(name, html);
 }
 await cp(path.join(root, 'poker/assets'), path.join(out, 'poker/assets'), { recursive: true });
-await put('mobile/entry.js', "window.location.replace('/poker/');\n");
-await put('index.html', '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &#39;self&#39;; script-src &#39;self&#39;; object-src &#39;none&#39;; base-uri &#39;none&#39;"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arcade Poker Stage</title><script src="/mobile/entry.js" defer></script></head><body><a href="/poker/">Open Poker Lobby</a></body></html>');
+await put('mobile/entry.js', "window.location.replace('/poker/index.html');\n");
+await put('index.html', '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &#39;self&#39;; script-src &#39;self&#39;; object-src &#39;none&#39;; base-uri &#39;none&#39;"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arcade Poker Stage</title><script src="/mobile/entry.js" defer></script></head><body><a href="/poker/index.html">Open Poker Lobby</a></body></html>');
 await put('build-receipt.json', JSON.stringify({ sha: config.sha, appId: 'pl.kcswh.arcadepoker.stage', version: '0.0.1', apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, wsUrl: config.wsUrl, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
 process.stdout.write('Packaged shared Poker/account assets at SHA ' + config.sha + '\n');

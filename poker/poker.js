@@ -577,7 +577,7 @@
 
   function navigateToPokerLobby(){
     if (!window || !window.location) return;
-    window.location.href = '/poker/';
+    window.location.href = window.MOBILE_POKER_CONFIG ? '/poker/index.html' : '/poker/';
   }
 
   function shouldShowTurnActions(params){
@@ -1837,7 +1837,7 @@
     function isLobbyPageActive(){
       var pathname = window && window.location && typeof window.location.pathname === 'string' ? window.location.pathname : '';
       if (!pathname) return true;
-      return pathname === '/poker/' || pathname === '/poker';
+      return pathname === '/poker/' || pathname === '/poker' || pathname === '/poker/index.html';
     }
 
     function canMaintainLobbyConnection(){

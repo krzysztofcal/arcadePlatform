@@ -31,7 +31,7 @@
 
   function mobileItems(){
     return [
-      { id: 'poker', labelKey: 'navPoker', fallbackLabel: 'Poker', href: '/poker/', iconSvg: icons.poker },
+      { id: 'poker', labelKey: 'navPoker', fallbackLabel: 'Poker', href: '/poker/index.html', iconSvg: icons.poker },
       { id: 'profile', labelKey: 'profile', fallbackLabel: 'Profile', href: '/account.html', iconSvg: icons.profile }
     ];
   }

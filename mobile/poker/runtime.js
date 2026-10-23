@@ -75,7 +75,7 @@
           var lobby = document.getElementById('pokerLobbyLink');
           if (lobby) lobby.click();
         } else if (window.location.pathname !== '/poker/' && window.location.pathname !== '/poker/index.html') {
-          window.location.assign('/poker/');
+          window.location.assign('/poker/index.html');
         } else app.minimizeApp();
       });
       app.addListener('appStateChange', function(event){

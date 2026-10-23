@@ -6663,7 +6663,7 @@
   }
 
   function normalizeLeaveDestination(destination){
-    return '/poker/';
+    return window.MOBILE_POKER_CONFIG ? '/poker/index.html' : '/poker/';
   }
 
   function navigateToDestination(destination){
