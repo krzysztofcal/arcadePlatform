@@ -26,6 +26,8 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   const listeners = {};
   let ready;
   let exchanged;
+  let exchangeCount = 0;
+  const storage = new Map();
   let navigated = false;
   const node = { textContent: '' };
   const document = { addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready = fn; }, getElementById() { return node; } };
@@ -35,14 +37,17 @@ test('native PKCE callback uses injected plugins and preserves recovery document
       Browser: { close: async () => {} },
       App: { addListener(name, fn) { listeners[name] = fn; }, getLaunchUrl: async () => null }
     } },
-    supabaseClient: { auth: { exchangeCodeForSession: async code => { exchanged = code; return { data: { session: {} } }; } } },
+    supabaseClient: { auth: { exchangeCodeForSession: async code => { exchanged = code; exchangeCount++; return { data: { session: {} } }; } } },
     location: { pathname: '/account.html', replace() { navigated = true; } }, addEventListener() {}
   };
-  vm.runInNewContext(source, { window, document, URL, navigator: { onLine: true }, sessionStorage: { getItem() { return null; }, removeItem() {} } });
+  vm.runInNewContext(source, { window, document, URL, navigator: { onLine: true }, sessionStorage: { getItem(key) { return storage.get(key) || null; }, setItem(key, value) { storage.set(key, value); }, removeItem(key) { storage.delete(key); } } });
   ready();
   await listeners.appUrlOpen({ url: 'arcadepoker-stage://auth/callback?code=recovery-code' });
   // Listener deliberately schedules asynchronous completion; drain promise chain.
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(exchanged, 'recovery-code');
   assert.equal(navigated, false, 'do not discard shared PASSWORD_RECOVERY state');
+  await listeners.appUrlOpen({ url: 'arcadepoker-stage://auth/callback?code=recovery-code' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(exchangeCount, 1, 'ignore a repeated launch callback after successful consumption');
 });

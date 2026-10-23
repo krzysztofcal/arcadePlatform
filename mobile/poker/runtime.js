@@ -37,6 +37,7 @@
     if (exchanging) return;
     try {
       var code = window.MobilePokerSecurity.callbackCode(value);
+      if (sessionStorage.getItem('mobilePokerConsumedAuthCode') === code) return;
       exchanging = true;
       if (window.location.pathname !== '/account.html') {
         sessionStorage.setItem('mobilePokerAuthCode', code);
@@ -48,6 +49,7 @@
       if (!client || !client.auth) throw new Error('Auth client unavailable');
       var result = await client.auth.exchangeCodeForSession(code);
       if (result.error || !result.data || !result.data.session) throw new Error('Auth callback failed');
+      sessionStorage.setItem('mobilePokerConsumedAuthCode', code);
       await browser.close().catch(function(){});
       notice('Signed in to Stage. Account is ready.');
     } catch (_err){

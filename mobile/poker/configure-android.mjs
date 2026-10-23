@@ -10,3 +10,8 @@ xml = xml.replace('</activity>', `<intent-filter>
 </intent-filter>\n</activity>`);
 if (!xml.includes('arcadepoker-stage')) throw new Error('Android template activity missing');
 await writeFile(file, xml);
+const gradleFile = new URL('./android/app/build.gradle', import.meta.url);
+let gradle = await readFile(gradleFile, 'utf8');
+if (!gradle.includes('versionName "1.0"') || !gradle.includes('versionCode 1')) throw new Error('Unexpected Android template version');
+gradle = gradle.replace('versionName "1.0"', 'versionName "0.0.1"');
+await writeFile(gradleFile, gradle);
