@@ -30,3 +30,7 @@ Owner GO replaces the stopped branch-specific proposal with ARCADE_STAGE_REDIS_T
 ## GO — Android Stage API integration
 
 Only PR1141 branch may append https://localhost to XP_CORS_ALLOW, preserving existing origins, scopes, methods and headers. Rebuild Preview1141 and require actual mobile OPTIONS PASS before switching stage-public.json apiOrigin to Preview1141. Supabase Stage and WS Preview remain pinned. Fundamental checks and hosted-only exact-SHA debug APK required. No OAuth provider/redirect changes, WS runtime, Redis credentials, JOIN/bonus/deletion/financial action or merge. Any additional infrastructure need is a separate STOP/GO.
+
+## Second S24+ review scope
+
+Owner confirms email/password login, Poker/table use, rotation, portrait header and Poker/Profile navigation PASS. Google returns to browser, avatar upload fails500, landscape cutout/nav clipping FAIL. Read-only Stage Auth/DB/Storage diagnosis only; no new upload. Configuration changes need separate GO. Native-only correction must reserve actual WebView bounds from Android cutout/system/gesture/IME insets without fixed offsets, web changes, disabled gestures or layout tests. Existing callback remains arcadepoker-stage://auth/callback. New hosted APK with exact source receipt required; physical correction remains unverified until owner retest.

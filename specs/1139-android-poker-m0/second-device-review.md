@@ -1,0 +1,33 @@
+# Second S24+ review: read-only diagnosis and native candidate
+
+## T001 OAuth: confirmed allowlist mismatch, configuration STOP
+
+Read only Management API GET /v1/projects/krydukthwdvccggbyjfw/config/auth. Google is enabled. uri_allow_list currently contains https://deploy-preview-*--playkcswh.netlify.app/**, https://play.kcswh.pl/**, https://playkcswh.netlify.app/** and https://deploy-preview-1101--playkcswh.netlify.app/account.html; no arcadepoker-stage://auth/callback. site_url is https://deploy-preview-1101--playkcswh.netlify.app/account.html. No credential/provider fields logged.
+
+Shared signInWithGoogle selects MobilePoker.redirectTo, calls signInWithOAuth with skipBrowserRedirect:true and PKCE client options; openOAuth checks exact pinned authorize endpoint/provider/redirect_to before Browser.open. Runtime uses App appUrlOpen/getLaunchUrl, exact callback parser, handoff to Account and exchangeCodeForSession with app-local verifier; replay guard prevents duplicate exchange. Android generator declares VIEW/DEFAULT/BROWSABLE + exact scheme/host/path; Capacitor App consumes new intent. No code defect demonstrated in this path; do not replace existing callback.
+
+Public authorize probe used redirect_to=arcadepoker-stage://auth/callback and synthetic s256 challenge, followed no Google login:302 to accounts.google.com, Google redirect_uri remains pinned Stage Supabase /auth/v1/callback. Read only auth.flow_state for this uniquely identified probe selected only referrer/provider/method (not auth_code/token): referrer is web1101/account.html. This confirms actual Supabase fallback despite requested native redirect. Authorize probe initiates ordinary transient Auth flow metadata; no provider sign-in/session exchange, DB configuration or cleanup was performed. Owner click URL was not captured directly; source/packaged contract and controlled probe are the evidence.
+
+Minimal GO AUTH proposal: append only exact arcadepoker-stage://auth/callback to pinned Stage uri_allow_list, preserving all existing entries, site_url, Google provider/client/redirect_uri, Production and all other Auth settings. Then owner manual Google→APK session test on physical device. No config write applied. Custom scheme/PKCE remains PoC-only; no wildcard/custom provider change.
+
+## T002 Avatar: confirmed tracking mismatch, configuration/upload STOP
+
+Owner request01M5NA9Q2PYGWAJ371XHGDJRFT,2026-10-23T21:22:31.638Z: Netlify request detail POST profile-avatar-upload-url500, function invocation present. Effective deploy at incident6adbcc2d33cb8742a0dc03cd/source45a511932bb1d2de0d46d35bd74c8f729e16b65c. Historical function logs via installed official CLI API show profile_avatar_upload_url_failed/server_error/status500; IDs redacted. Stage Postgres logs in the exact window:21:22:33.147 Avatar manifest purge not authorized,21:22:33.319 Avatar tracking protocol required.
+
+Effective Preview1141 ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED and ACCOUNT_DELETION_ENABLED absent. Therefore createPendingUpload follows legacy cleanup and inserts without tracking_version. Enabled account_avatar_manifest_guard_v3 rejects that INSERT with42501 unless tracking_version=3, and rejects legacy cleanup deletes. cleanup error is intentionally swallowed, then INSERT error reaches handler and maps to generic server_error500. This matches the request; not CORS/file picker/Storage PUT failure. No real upload was repeated.
+
+Read-only DB schema has tracking_version/signing_finished_at/capability_until/output/source evidence columns; manifest and owned-write triggers enabled. Existing private.avatar_tracking_cutover row present, legacy_inventory_verified=true. Storage metadata: profile-avatar-uploads private1MiB JPEG/PNG/WebP; profile-avatars public256KiB WebP. No missing bucket/schema proved, no row/object/key/secret exposed.
+
+Minimal GO AVATAR proposal: exact branch feat/1139-android-poker-m0 only ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1 plus Preview1141 rebuild, preserving ACCOUNT_DELETION_ENABLED off and all credentials/DB/Storage/other Preview settings. No migration or trigger weakening. This uses existing active-account/tracking/signing/finalize path and disables legacy expiry cleanup. Real upload/finalize/delete/provider closure must receive explicit separate acceptance scope; this diagnosis does not guarantee full lifecycle success after flag change. No setting applied and no upload signed/PUT/finalize performed.
+
+## T003 Landscape: native-only correction, physical result pending
+
+Pinned Capacitor8.5.3 SystemBars native mode pads decor and includes system bars/cutout, but not system gesture regions. Existing auto viewport avoids passthrough/double CSS inset, and table uses100dvh/fixed controls. Without physical traces/images the exact cutout clipping path is not proven; report candidate correction, not device PASS. Move inset ownership to actual WebView bounds: its CoordinatorLayout MarginLayoutParams reserve dynamic systemBars|displayCutout|systemGestures and max bottom IME. Reapply on ordinary inset redispatch/rotation; zero handled insets to avoid CSS double application. Disable SystemBars inset listener only, retain style/edge-to-edge. No new plugin/dependency, hard-coded pixel/device offset, gesture exclusion, bars hiding, CSS/layout/web/poker logic change. WebView viewport/scene client size now follows safe bounds.
+
+Files: mobile/poker/configure-android.mjs and capacitor.config.json. Existing mobile.css, package-web.mjs (generated auto viewport) and shared poker/poker-v2.css inspected and unchanged. Scope includes possible narrower usable width due reserved Back gesture region; physical IME/rotation test required. Read-only review found no confirmed blocker for S24+/Android16.
+
+## T004 Verification
+
+Existing selected fundamentals mobile/security/Auth/avatar mocks/WS/sidebar/token-mint/CORS76/76 PASS, syntax228/CSP55 PASS, whitespace PASS. No layout tests. Hosted compilation/receipt/manifest/artifact result to be recorded in Draft PR; no local SDK/JDK/Gradle/dependency install. VPS6.5GB free before/after. Shared web breaking impact none (no shared source edits); native geometry regression risk limited to inset/IME/rotation behavior and remains a physical retest item. Auth/avatar environment scope explicitly stopped; no Production, WS runtime, Redis, CORS, migration, bonus, financial operation or merge.
+
+Sources: https://github.com/ionic-team/capacitor/blob/8.5.3/android/capacitor/src/main/java/com/getcapacitor/plugin/SystemBars.java ; https://developer.android.com/develop/ui/views/layout/edge-to-edge ; https://supabase.com/docs/guides/auth/redirect-urls . Supabase changelog read; no relevant SDK/redirect breaking change explains these confirmed config mismatches.

@@ -41,3 +41,7 @@ Import immutable BUILD_DEPLOY_CONTEXT/BUILD_DEPLOY_ORIGIN in store-upstash.mjs. 
 ## Android API integration
 
 PATCH XP_CORS_ALLOW exact branch value, compare unrelated settings, push documentation to rebuild Preview1141. Audit real OPTIONS for actual native API consumers and preserve existing method/header policy. Only after all PASS change mobile/poker/stage-public.json apiOrigin. Run existing fundamentals/syntax/CSP; normal Draft PR push builds hosted APK. Verify embedded receipt/config/CSP and checksum in memory, document phone checklist and Auth/WS limits. No local Android tooling or dependency install.
+
+## Second S24+ diagnosis and correction
+
+Read Stage Auth config and follow public Google authorize redirect only to302 (no provider sign-in); inspect stored probe referrer without reading auth codes/tokens. Correlate owner Netlify request with function logs and Stage Postgres errors; inspect avatar schema/triggers/buckets/flags read-only. Stop Auth/avatar configuration scope at concrete proposed GO. For landscape replace SystemBars decor-padding owner with one AndroidX WebView margin listener in configure-android.mjs, disable only SystemBars inset listener, retain style/edge-to-edge/viewport-fit=auto. Reserve systemBars/displayCutout/systemGestures and maximum IME bottom; return zero already-handled insets. Keep mobile.css/package-web/shared poker-v2.css unchanged. Run existing fundamentals/syntax/CSP and hosted APK; inspect receipt/config/native callback in APK, report candidate fix and physical keyboard/rotation retest.

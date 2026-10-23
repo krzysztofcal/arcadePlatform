@@ -53,3 +53,11 @@ These corrections are implementation/inspection evidence, not a physical-device 
 - Streamed artifact into memory: checksum/receipt match; all three shared staged pages use viewport-fit=auto; SystemBars native/auto config, native nav filter and non-overlay status styles/host are present; API origin remains Preview 1095. No APK saved to VPS.
 - Hosted core, CodeQL/language analyses, existing automatic Playwright and debug-apk PASS. Netlify Preview remains FAILED at the unresolved environment gate; no settings/bypass applied. VPS remains 6.1 GB free.
 - Physical visual retest of this new SHA is NOT TESTED. Owner PASS evidence remains attached only to the earlier bebbdc6a scenarios. A later documentation-only commit changes no APK runtime.
+
+## Second owner physical test (2026-10-23)
+
+Owner PASS: email/password, Poker and table use, rotation; portrait header and Poker/Profile navigation. Owner FAIL: Google remains logged in in external browser; avatar upload; slight landscape clipping near cutout/navigation bar. Supplied request UA confirms Android16 SM-S926B WebViewChrome156.0.8078.47. Images were referenced but not available as actual attachments to this agent, so no screenshot measurements are claimed. Exact installed SHA was not explicitly repeated by owner; latest delivered integration APK was2df3b896976dcabfbbbec5a2e7938eed70fa48d1, not proof of device receipt.
+
+These owner results supersede earlier API1095/CORS symptom blocking for tested gameplay. OAuth and avatar are independently diagnosed configuration mismatches, not Poker engine defects. [Read-only diagnoses and required GO](second-device-review.md). Landscape candidate reserves real WebView bounds using native reported cutout/system/gesture/IME insets. Prior portrait fixes, Poker-only nav and normal-flow banner retained. Physical PASS for this new correction NOT TESTED.
+
+Retest the new exact-SHA APK over existing Stage app: portrait and both landscape rotations, cutout on either side, every edge button/slider/menu reachable, system Back/home gestures, three-button navigation if used, keyboard open/close and rotate with keyboard open, Lobby/Account/Poker/table navigation and banner. Do not repeat avatar upload or Google provider flow until separate configuration GO; no new financial/funded smoke is authorized by this review.
