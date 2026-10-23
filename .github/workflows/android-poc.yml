@@ -54,8 +54,6 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Package shared frontend and generate Android template
         working-directory: mobile/poker
-        env:
-          GITHUB_SHA: ${{ env.SOURCE_SHA }}
         run: |
           set -euo pipefail
           node package-web.mjs

@@ -18,3 +18,31 @@ test('callback accepts only exact mobile redirect and one PKCE code; never beare
     assert.throws(() => security.callbackCode(url));
   }
 });
+
+test('native PKCE callback uses injected plugins and preserves recovery document', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const source = await readFile(new URL('../mobile/poker/runtime.js', import.meta.url), 'utf8');
+  const listeners = {};
+  let ready;
+  let exchanged;
+  let navigated = false;
+  const node = { textContent: '' };
+  const document = { addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready = fn; }, getElementById() { return node; } };
+  const window = {
+    MobilePokerSecurity: security, MOBILE_POKER_CONFIG: { ...config, sha: '12345678' },
+    Capacitor: { Plugins: {
+      Browser: { close: async () => {} },
+      App: { addListener(name, fn) { listeners[name] = fn; }, getLaunchUrl: async () => null }
+    } },
+    supabaseClient: { auth: { exchangeCodeForSession: async code => { exchanged = code; return { data: { session: {} } }; } } },
+    location: { pathname: '/account.html', replace() { navigated = true; } }, addEventListener() {}
+  };
+  vm.runInNewContext(source, { window, document, URL, navigator: { onLine: true }, sessionStorage: { getItem() { return null; }, removeItem() {} } });
+  ready();
+  await listeners.appUrlOpen({ url: 'arcadepoker-stage://auth/callback?code=recovery-code' });
+  // Listener deliberately schedules asynchronous completion; drain promise chain.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(exchanged, 'recovery-code');
+  assert.equal(navigated, false, 'do not discard shared PASSWORD_RECOVERY state');
+});

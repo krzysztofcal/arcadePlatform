@@ -14,7 +14,7 @@ const config = security.validate(JSON.parse(await readFile(path.join(here, 'stag
 const key = JSON.parse(Buffer.from(config.supabaseAnonKey.split('.')[1], 'base64url').toString());
 if (key.ref !== 'krydukthwdvccggbyjfw' || key.role !== 'anon') throw new Error('Only pinned public Stage anon key permitted');
 config.sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
-if (process.env.GITHUB_SHA && config.sha !== process.env.GITHUB_SHA) throw new Error('Build SHA mismatch');
+if (process.env.SOURCE_SHA && config.sha !== process.env.SOURCE_SHA) throw new Error('Build SHA mismatch');
 await mkdir(out, { recursive: true });
 const copied = new Set();
 async function put(name, value){
