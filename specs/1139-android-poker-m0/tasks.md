@@ -38,3 +38,9 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] S002 Implement/test Stage Deploy Preview selector, fail-closed cases, unchanged Production/WS legacy behavior.
 - [x] S003 Create protected ARCADE_STAGE_REDIS_TOKEN and shared Preview XP tuple; verify unrelated configuration and overrides unchanged.
 - [x] S004 Push passing SHA and verify exact-SHA Preview1141 build/configuration/read-only endpoints; report remaining blockers. No APK/backend business operation.
+
+## Android Stage API GO
+
+- [ ] A001 Add localhost CORS exact branch, rebuild and require real OPTIONS PASS.
+- [ ] A002 Switch native apiOrigin only; fundamental Auth/WS/API/CSP verification.
+- [ ] A003 Hosted exact-SHA APK, receipt/checksum and S24+ checklist; Draft PR report.

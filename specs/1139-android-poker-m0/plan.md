@@ -37,3 +37,7 @@ Use built-in Capacitor 8.5.3 SystemBars `insetsHandling=native` with `initialVie
 ## Isolated Stage Redis implementation
 
 Import immutable BUILD_DEPLOY_CONTEXT/BUILD_DEPLOY_ORIGIN in store-upstash.mjs. resolveRedisRestToken selects ARCADE_STAGE_REDIS_TOKEN for deploy-preview and canonical playkcswh Preview origin with Stage V3 tuple; reject mismatches and fail closed on missing alias. Other contexts retain UPSTASH_REDIS_REST_TOKEN. Preserve existing client/namespace/epoch/fence logic. Validate Personal capabilities, sensitive-variable review policy and existing branch overrides before mutation. Create protected deploy-preview secret using CLI standard secret scopes; PATCH three XP deploy-preview values only and compare all unrelated settings. Run fundamental tests and syntax/CSP controls, then push exact passing SHA to trigger Preview1141; verify build commit/context and read-only endpoints. No WS or APK deployment.
+
+## Android API integration
+
+PATCH XP_CORS_ALLOW exact branch value, compare unrelated settings, push documentation to rebuild Preview1141. Audit real OPTIONS for actual native API consumers and preserve existing method/header policy. Only after all PASS change mobile/poker/stage-public.json apiOrigin. Run existing fundamentals/syntax/CSP; normal Draft PR push builds hosted APK. Verify embedded receipt/config/CSP and checksum in memory, document phone checklist and Auth/WS limits. No local Android tooling or dependency install.
