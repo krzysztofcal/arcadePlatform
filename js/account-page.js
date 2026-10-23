@@ -41,6 +41,10 @@
     nodes.signOut = doc.getElementById('signOutButton');
     nodes.deleteBtn = doc.getElementById('deleteAccountButton');
     nodes.deleteNote = doc.getElementById('deleteAccountNote');
+    nodes.deletionDialog = doc.getElementById('accountDeletionDialog');
+    nodes.deletionCancel = doc.getElementById('accountDeletionCancel');
+    nodes.deletionConfirm = doc.getElementById('accountDeletionConfirmButton');
+    nodes.deletionClose = doc.getElementById('accountDeletionClose');
     nodes.googleSignIn = doc.getElementById('googleSignInButton');
     nodes.googleDivider = doc.getElementById('googleSignInDivider');
     nodes.signInForm = doc.getElementById('signinForm');
@@ -1262,10 +1266,56 @@
   function deletionReceivedMessage(){
     return t('accountDeletionReceived', 'We have received your account deletion request. You do not need to take any further action.');
   }
+  var closeDeletionConfirmation = null;
+  function setDeletionBusy(busy, sending){
+    if (!nodes.deleteBtn) return;
+    nodes.deleteBtn.disabled = busy;
+    nodes.deleteBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
+    nodes.deleteBtn.textContent = busy ? (sending ? t('accountDeletionSending', 'Sending request…') : t('accountDeletionChecking', 'Checking request…')) : t('deleteAccount', 'Delete account');
+  }
+  function confirmAccountDeletion(){
+    return new Promise(function(resolve, reject){
+      var dialog = nodes.deletionDialog;
+      if (!dialog || !dialog.showModal || !nodes.deletionCancel || !nodes.deletionConfirm || !nodes.deletionClose){ reject(new Error('dialog_unavailable')); return; }
+      function finish(confirmed){
+        dialog.removeEventListener('cancel', cancel);
+        dialog.removeEventListener('close', cancel);
+        dialog.removeEventListener('click', backdrop);
+        dialog.removeEventListener('keydown', keyboard);
+        nodes.deletionCancel.removeEventListener('click', cancel);
+        nodes.deletionClose.removeEventListener('click', cancel);
+        nodes.deletionConfirm.removeEventListener('click', accept);
+        closeDeletionConfirmation = null;
+        if (dialog.open) dialog.close();
+        resolve(confirmed);
+      }
+      function cancel(event){ if (event && event.preventDefault) event.preventDefault(); finish(false); }
+      function accept(){ finish(true); }
+      function backdrop(event){ if (event.target === dialog) finish(false); }
+      function keyboard(event){
+        if (event.key === 'Escape'){ cancel(event); return; }
+        if (event.key !== 'Tab') return;
+        var first = nodes.deletionClose, last = nodes.deletionConfirm;
+        if (event.shiftKey && doc.activeElement === first){ event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && doc.activeElement === last){ event.preventDefault(); first.focus(); }
+      }
+      closeDeletionConfirmation = cancel;
+      dialog.addEventListener('cancel', cancel);
+      dialog.addEventListener('close', cancel);
+      dialog.addEventListener('click', backdrop);
+      dialog.addEventListener('keydown', keyboard);
+      nodes.deletionCancel.addEventListener('click', cancel);
+      nodes.deletionClose.addEventListener('click', cancel);
+      nodes.deletionConfirm.addEventListener('click', accept);
+      try { dialog.showModal(); nodes.deletionCancel.focus(); }
+      catch (error){ finish(false); }
+    });
+  }
   function resetDeletionAttempt(){
+    if (closeDeletionConfirmation) closeDeletionConfirmation();
     deletionAttempt = null;
     deletionReceivedOwnerId = '';
-    if (nodes.deleteBtn) nodes.deleteBtn.disabled = false;
+    setDeletionBusy(false);
     if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deleting your account permanently forfeits CH, XP, achievements and profile data.');
   }
   function deletionRequest(token, method){
@@ -1302,11 +1352,11 @@
     var attempt = deletionAttempt && deletionAttempt.ownerId === ownerId ? deletionAttempt : {ownerId:ownerId,confirmed:false};
     deletionAttempt = attempt;
     attempt.busy = true;
-    nodes.deleteBtn.disabled = true;
+    setDeletionBusy(true);
     var client = auth.getClient();
     var token;
     if (!client || !client.auth || !client.auth.getSession || !client.auth.signOut){
-      attempt.busy = false; nodes.deleteBtn.disabled = false;
+      attempt.busy = false; setDeletionBusy(false);
       setStatus(t('authenticationNotReady', 'Authentication is not ready. Refresh and try again.'), 'error');
       return;
     }
@@ -1321,18 +1371,22 @@
       // A persisted preparing request is enough: accepted/completed are backend
       // lifecycle details, not prerequisites for leaving this page.
       if (existing) return acknowledgeDeletion(attempt, client);
-      if (!attempt.confirmed){
-        attempt.confirmed = window.confirm(t('accountDeletionConfirm', 'Your account will be permanently deleted. You will lose all CH (including Poker winnings), XP, achievements and profile data. This cannot be undone.'));
-      }
-      if (!attempt.confirmed || !isCurrent()) return;
-      return deletionRequest(token, 'POST').catch(function(){
-        // A lost response is UNKNOWN. Reconcile once; do not start a timer or
-        // ask for consent again. A later click may safely replay the same POST.
-        return deletionRequest(token, 'GET').then(function(saved){
-          if (!saved) throw new Error('deletion_unconfirmed');
-          return saved;
-        });
-      }).then(function(){ return acknowledgeDeletion(attempt, client); });
+      var consent = attempt.confirmed ? Promise.resolve(true) : confirmAccountDeletion();
+      attempt.modalShown = !attempt.confirmed;
+      return consent.then(function(confirmed){
+        if (!isCurrent()) return;
+        attempt.confirmed = confirmed;
+        if (!confirmed) return;
+        setDeletionBusy(true, true);
+        return deletionRequest(token, 'POST').catch(function(){
+          // A lost response is UNKNOWN. Reconcile once; do not start a timer or
+          // ask for consent again. A later click may safely replay the same POST.
+          return deletionRequest(token, 'GET').then(function(saved){
+            if (!saved) throw new Error('deletion_unconfirmed');
+            return saved;
+          });
+        }).then(function(){ return acknowledgeDeletion(attempt, client); });
+      });
     }).catch(function(){
       if (!isCurrent()) return;
       var message = t('accountDeletionUnavailable', 'We could not confirm receipt of your request. Try again; any saved request continues automatically.');
@@ -1340,7 +1394,10 @@
       setStatus(message, 'error');
     }).then(function(){
       attempt.busy = false;
-      if (isCurrent() && !deletionReceivedOwnerId) nodes.deleteBtn.disabled = false;
+      if (isCurrent() && !deletionReceivedOwnerId){
+        setDeletionBusy(false);
+        if (attempt.modalShown) nodes.deleteBtn.focus();
+      }
     });
   }
 
