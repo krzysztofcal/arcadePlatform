@@ -34,3 +34,7 @@ Only PR1141 branch may append https://localhost to XP_CORS_ALLOW, preserving exi
 ## Second S24+ review scope
 
 Owner confirms email/password login, Poker/table use, rotation, portrait header and Poker/Profile navigation PASS. Google returns to browser, avatar upload fails500, landscape cutout/nav clipping FAIL. Read-only Stage Auth/DB/Storage diagnosis only; no new upload. Configuration changes need separate GO. Native-only correction must reserve actual WebView bounds from Android cutout/system/gesture/IME insets without fixed offsets, web changes, disabled gestures or layout tests. Existing callback remains arcadepoker-stage://auth/callback. New hosted APK with exact source receipt required; physical correction remains unverified until owner retest.
+
+## Approved Stage Auth + Avatar configuration GO
+
+Owner authorizes exact native callback addition only to pinned Stage Auth uri_allow_list, preserving Site URL/all existing entries/Google provider configuration. Exact branch feat/1139-android-poker-m0 may set ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1 while deletion acceptance stays OFF. Rebuild only Preview1141; no shared Preview/Production/secret/schema/trigger/Storage change. Controlled Google redirect without provider login/code/session exchange and endpoint availability checks only. Owner performs full Google→APK session and real avatar upload/finalize tests.

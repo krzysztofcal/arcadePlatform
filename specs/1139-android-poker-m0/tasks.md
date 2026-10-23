@@ -51,3 +51,9 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] T002 Read-only avatar diagnosis: request/function/DB logs, enabled manifest trigger vs disabled Preview tracking flags; schema/buckets/cutover verified. STOP configuration/upload pending separate GO.
 - [x] T003 Native WebView inset ownership correction; no web/CSS/gesture policy change, physical landscape/IME retest pending.
 - [x] T004 Existing fundamental tests/syntax/CSP, hosted exact-SHA APK/receipt/manifest and Draft report. Physical retest and Auth/avatar configuration remain pending separate owner GO.
+
+## GO AUTH + GO AVATAR
+
+- [x] G001 Stage exact callback allowlist update/readback; existing URLs/Site URL/provider/all other Auth configuration unchanged; controlled redirect/native referrer PASS after propagation.
+- [x] G002 Exact branch tracking flag1; deletion acceptance OFF; all unrelated env/context/secret metadata unchanged. Fundamental tracking-before-deletion and Auth/avatar tests PASS.
+- [ ] G003 Exact-SHA Preview1141 rebuild, effective branch configuration and endpoint availability checks, owner handoff. Full Google/real avatar tests remain owner-only.
