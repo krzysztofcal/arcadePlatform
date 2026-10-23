@@ -43,3 +43,13 @@ These corrections are implementation/inspection evidence, not a physical-device 
 ## Local verification and review
 
 69 existing selected fundamental/security/Auth/WS/sidebar/mint/CORS tests PASS with prescribed memory-store XP_TEST_MODE=1; existing syntax control 228 files PASS, CSP 55 documents PASS. Mobile runtime/packager/configure script syntax and diff whitespace checked. No UI/CSS/layout tests or SDK/emulator installed. Independent read-only review confirmed native menu whitelist, CSS specificity and non-overlay banner; recommended the explicit EdgeToEdge call now included. Android compilation and artifact inspection run only on hosted Actions. None of this marks the physical layout corrections PASS before owner retest.
+
+## Prepared visual-retest APK
+
+- Source SHA: `006cef6e0b0399d81cc128b5fd1b869f0cd6786e`.
+- Successful GitHub-hosted Android compilation: https://github.com/krzysztofcal/arcadePlatform/actions/runs/40005621668
+- Artifact: https://github.com/krzysztofcal/arcadePlatform/actions/runs/40005621668/artifacts/12524536115 (expires 2026-10-30).
+- APK SHA256: `9b9b9e2043fde5840353afb2d0dba13f8873e521f27fb9abf5a22cfb1bb7a698`.
+- Streamed artifact into memory: checksum/receipt match; all three shared staged pages use viewport-fit=auto; SystemBars native/auto config, native nav filter and non-overlay status styles/host are present; API origin remains Preview 1095. No APK saved to VPS.
+- Hosted core, CodeQL/language analyses, existing automatic Playwright and debug-apk PASS. Netlify Preview remains FAILED at the unresolved environment gate; no settings/bypass applied. VPS remains 6.1 GB free.
+- Physical visual retest of this new SHA is NOT TESTED. Owner PASS evidence remains attached only to the earlier bebbdc6a scenarios. A later documentation-only commit changes no APK runtime.

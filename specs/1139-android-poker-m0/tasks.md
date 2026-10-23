@@ -28,4 +28,6 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 
 - [x] D001 Record owner evidence for APK bebbdc6a, separate UI defects from API1095/CORS symptoms.
 - [x] D002 Mobile presentation only: built-in SystemBars native insets plus generated viewport-fit=auto; filter bottom navigation to Poker/Profile; diagnostics in normal flow/table menu. Existing web viewport/styles/menus unchanged.
-- [ ] D003 Existing fundamental/syntax/CSP checks, hosted-only APK artifact and review; physical retest remains pending. No backend/environment action.
+- [x] D003 Existing fundamental/syntax/CSP checks, hosted-only APK artifact and review; physical retest remains pending. No backend/environment action.
+
+- [ ] D004 Owner visual retest of `006cef6e0b0399d81cc128b5fd1b869f0cd6786e` on S24+; record OS/WebView versions. No funded/backend smoke. [Device evidence and APK](device-smoke-s24.md).

@@ -34,3 +34,7 @@ The final documentation-only commit does not change the APK runtime. Compare its
 ## User review follow-up
 
 See [review-followup.md](review-followup.md) for the new exact-SHA APK, public-profile/offline-resume fixes, 69 passing selected checks, Netlify Redis context root cause, API1095 incompatibilities, live WS receipt/protocol evidence and Stage-only CORS proposal. No environment/origin/deploy change was applied. This supersedes the earlier unavailable-log diagnosis and old APK link; physical/authenticated integration remains pending.
+
+## Physical S24+ UI follow-up
+
+[Owner device evidence and retest APK](device-smoke-s24.md) supersede NOT TESTED only for installation/launch/Lobby/Account/basic navigation on bebbdc6a. Known API1095/CORS failures are not Poker engine defects. UI source 006cef6e uses mobile-only native insets/viewport, Poker/Profile menu and non-overlay diagnostics; 69 local checks plus syntax/CSP and hosted APK/CodeQL pass. New physical visual behavior remains unverified. Existing web keeps original HTML/CSS and menu path. No Redis/Stage/Production/OAuth/origin/WS/migration/financial/deletion/merge action; Redis GO remains stopped at credential mismatch.
