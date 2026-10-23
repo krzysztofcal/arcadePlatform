@@ -31,3 +31,10 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] D003 Existing fundamental/syntax/CSP checks, hosted-only APK artifact and review; physical retest remains pending. No backend/environment action.
 
 - [ ] D004 Owner visual retest of `006cef6e0b0399d81cc128b5fd1b869f0cd6786e` on S24+; record OS/WebView versions. No funded/backend smoke. [Device evidence and APK](device-smoke-s24.md).
+
+## Owner GO — shared Stage Deploy Preview secret adapter
+
+- [x] S001 Validate Personal secrets capability, review policy, approved Stage PING/epoch and branch override impact.
+- [x] S002 Implement/test Stage Deploy Preview selector, fail-closed cases, unchanged Production/WS legacy behavior.
+- [x] S003 Create protected ARCADE_STAGE_REDIS_TOKEN and shared Preview XP tuple; verify unrelated configuration and overrides unchanged.
+- [ ] S004 Push passing SHA and verify exact-SHA Preview1141 build/configuration/read-only endpoints; report remaining blockers. No APK/backend business operation.

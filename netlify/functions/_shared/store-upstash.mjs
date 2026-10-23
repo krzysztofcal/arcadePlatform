@@ -1,11 +1,23 @@
 import { createXpLedgerKeys, resolveXpNamespace, isXpV3, xpOwnerPrefix } from "./xp-ledger.mjs";
+import { BUILD_DEPLOY_CONTEXT, BUILD_DEPLOY_ORIGIN } from "../_generated/deploy-context.mjs";
 // Minimal Upstash REST client (no extra deps).
 import { createHash } from "node:crypto";
 import { klog, beginSql } from "./supabase-admin.mjs";
 import { assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
-const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+// Build metadata is immutable: runtime URL/CONTEXT flags cannot enable the alias.
+export function resolveRedisRestToken(env = process.env, buildContext = BUILD_DEPLOY_CONTEXT, buildOrigin = BUILD_DEPLOY_ORIGIN) {
+  if (buildContext !== "deploy-preview") {
+    return env.UPSTASH_REDIS_REST_TOKEN;
+  }
+  if (typeof buildOrigin !== "string" || !/^https:\/\/deploy-preview-[1-9][0-9]*--playkcswh\.netlify\.app$/.test(buildOrigin) || env.XP_REDIS_VERSION !== "3" || env.XP_REDIS_ENV !== "stage" || env.XP_KEY_NS !== "kcswh:stage:xp:v3") {
+    throw new Error("stage_preview_redis_environment_mismatch");
+  }
+  const token = env.ARCADE_STAGE_REDIS_TOKEN;
+  return typeof token === "string" && token.trim() ? token : undefined;
+}
+const TOKEN = resolveRedisRestToken();
 const XP_NAMESPACE = resolveXpNamespace();
 const FORCE_MEMORY_STORE = process.env.XP_TEST_MODE === "1";
 
