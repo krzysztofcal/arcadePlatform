@@ -34,17 +34,17 @@ docs/play-store-listing/
    - Usunięto wzmianki o historii rozdań (funkcja #1115 nie jest częścią wydania v1, zaplanowana na M2).
    - Usunięto nieprawdziwe twierdzenia o botach offline – boty są hostowane na serwerze i wymagają połączenia z Internetem.
    - Doprecyzowano zasady odbioru Welcome Bonusu (jednorazowy bonus w lobby dla zarejestrowanych graczy).
-4. **Status roboczy:**  
-   Zmieniono status audytu na roboczy (Draft), wskazując, że deklaracja IARC, formalny audyt prawny, Google Play Data Safety oraz retencja danych podlegają ostatecznemu audytowi przed publikacją.
+4. **Status roboczy (Draft) i Data Safety:**  
+   Zmieniono status audytu na roboczy (Draft). Deklaracja Google Play Data Safety oraz udostępnianie danych podmiotom trzecim oznaczono jako **Pending Audit** (bez deklarowania braku sharingu przed formalnym audytem prawnym).
 5. **Uproszczenie Propozycji 2 (Emerald Palace):**  
-   Pozostawiono wyłącznie duży, kontrastowy napis `ARCADE POKER`, dwa asy (Pocket Aces: A♠ A♥) oraz oficjalne żetony. Usunięto drobne slogany i plakietki, zwiększając czytelność na ekranach telefonów.
+   Pozostawiono wyłącznie duży, kontrastowy napis `ARCADE POKER`, dwa asy (Pocket Aces: A♠ A♥) oraz oficjalne żetony. Usunięto drobne slogany i plakietki, zwiększając czytelność na ekranach telefonów. Estetyka zaakceptowana w review.
 6. **Zadania otwarte zależne od builda #1139:**  
-   Zdefiniowano zależność od stabilnego builda Capacitor Android z zadania #1139 dla screenshotów rzeczywistej aplikacji, ikony sklepu (512 × 512 px) oraz materiałów recenzenckich.
+   Zdefiniowano zależność od stabilnego builda Capacitor Android z zadania #1139 dla autentycznych screenshotów z fizycznego telefonu (gdzie 1080 px to cel jakościowy, a nie bezwzględny wymóg Google Play), ikony sklepu (512 × 512 px) oraz materiałów recenzenckich.
 7. **Weryfikacja liczby znaków i układu kart:**  
    - Zweryfikowano programowo dokładną długość znaków w metadanych PL i EN (wszystkie mieszczą się w limitach Google Play).
    - Skorygowano opis kart w Propozycji 1 z "Royal Flush" na "Ace-King suited (A♠ K♠)".
-8. **Analiza środowiska CI i Netlify Deploy Preview:**  
-   Udokumentowano, że niepowodzenie podglądu Netlify dla witryny `playkcswh` wynika z braku konfiguracji zmiennych środowiskowych migracji Redis V3 (`XP_REDIS_VERSION=3`) w automatycznym hooku podglądu gałęzi (błąd `xp_redis_build_context_required` w `scripts/generate-build-info.js`), a nie ze zmian w kodzie (który w tym PR nie był modyfikowany).
+8. **Analiza środowiska CI i błędu Netlify Preview:**  
+   W Netlify API deploy previews dla `playkcswh` zwróciło błąd wyjścia `exit code: 2`. Z analizy kodu wynika, że przy `context: "deploy-preview"` brak zmiennych Redis V3 prowadzi do `xp_redis_build_configuration_invalid` (podczas gdy `xp_redis_build_context_required` dotyczy nierozpoznanego kontekstu). Ze względu na brak dostępu do surowego terminala kontenera w publicznym API, dokładny błąd oznaczono jako **NOT VERIFIED directly from deploy logs**. Nie modyfikowano żadnych zmiennych ani sekretów Netlify.
 
 ---
 

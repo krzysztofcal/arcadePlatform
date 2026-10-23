@@ -97,8 +97,12 @@ WAŻNA INFORMACJA DLA GRACZY (INFORMACJA PRAWNA):
 
 ---
 
-## 3. Bezpieczeństwo danych (Google Play Data Safety)
+## 3. Bezpieczeństwo danych (Google Play Data Safety — Status: Do audytu)
+
+> [!NOTE]
+> Deklaracja Google Play Data Safety oraz zasady udostępniania danych podmiotom trzecim mają status **Do audytu (Pending Audit)** przed procesem submission w Play Console. Nie deklaruje się ostatecznych przepływów danych ani braku udostępniania (zero third-party sharing) przed sformalizowanym audytem prywatności i bezpieczeństwa.
 
 - **Szyfrowanie w transporcie:** Tak (HTTPS / Secure WebSockets TLS).
 - **Konto użytkownika:** Opcjonalne (możliwa gra w trybie gościa z tymczasowymi żetonami bez rejestracji).
-- **Zewnętrzny adres usuwania konta (Production):** `https://play.kcswh.pl/account.html` (funkcja wdrożona w aplikacji webowej; adres przewidziany do zgłoszenia w konsoli Google Play podczas submission, status zgłoszenia w Play Console: Oczekuje na wdrożenie konta wydawcy).
+- **Status formularza Data Safety i udostępniania:** Do audytu (ostateczne deklaracje podlegają formalnemu przeglądowi prawnemu).
+- **Zewnętrzny adres usuwania konta (Production):** `https://play.kcswh.pl/account.html` (funkcja wdrożona w aplikacji webowej; adres przewidziany do zgłoszenia w konsoli Google Play podczas submission, status zgłoszenia w Play Console: Oczekuje na rejestrację konta wydawcy).

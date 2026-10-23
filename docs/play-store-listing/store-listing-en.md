@@ -102,9 +102,11 @@ IMPORTANT DISCLAIMER (SIMULATED GAMBLING / SOCIAL CASINO):
 
 ---
 
-## 3. Data Safety & Privacy Disclosures
+## 3. Data Safety & Privacy Disclosures (Status: Pending Audit)
 
-- **Data Encryption:** TLS/HTTPS and authenticated WSS in transit.
-- **Data Collection:** Minimal authentication credentials (Supabase Auth email/ID for registered accounts), game progression (XP, CH virtual balance).
-- **Third-Party Data Sharing:** None.
-- **Production Account Deletion URL:** `https://play.kcswh.pl/account.html` (verified production endpoint; designated for Google Play Console submission upon developer registration).
+> [!NOTE]
+> Formal Google Play Data Safety declarations and data sharing disclosures are **Pending Audit** prior to Play Console submission. Do not declare final data flows, collection categories, or third-party sharing status until the privacy and security audit is formally completed.
+
+- **Data Encryption in transit:** TLS/HTTPS and authenticated WSS in transit.
+- **Data Safety Form & Sharing Status:** Pending Audit (final disclosures subject to formal compliance review).
+- **Verified Production Account Deletion URL:** `https://play.kcswh.pl/account.html` (verified production endpoint hosting the in-app account deletion modal; designated for entry into Google Play Console during submission).

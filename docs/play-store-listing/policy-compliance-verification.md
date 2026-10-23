@@ -78,7 +78,8 @@ Zgodnie z zasadami projektu, repozytorium **nie może zawierać syntetycznych an
 
 1. **Zrzuty ekranu prawdziwej aplikacji (Screenshots):**
    - Wykonanie 4–8 autentycznych screenshotów z działającego builda Android na fizycznym urządzeniu (lub przez zweryfikowany BrowserStack).
-   - Wymagane formaty: zrzuty ekranu telefonu (portrait oraz landscape, min. 1080 px krótszy bok).
+   - Wymagania techniczne platformy Google Play: format JPEG lub 24-bit PNG bez kanału alfa, min. 320 px, max. 3840 px, proporcje boków od 1:2 do 2:1 (typowo 16:9 lub 9:16).
+   - Wewnętrzny cel jakościowy dla Arcade Poker: min. 1080 px krótszy bok (np. 1080 × 1920 / 1080 × 2400 FHD) — uwaga: 1080 px to zalecany cel jakościowy (quality target) dla zachowania ostrości detali stołu, a **nie** bezwzględny wymóg techniczny Google Play.
 2. **Ikona aplikacji w Google Play (App Icon):**
    - Dokładny wymiar: **512 × 512 px**, 32-bit PNG z kanałem alfa, max 1024 KB.
    - Do wygenerowania po ostatecznym zatwierdzeniu stylistyki marki Arcade Poker.
@@ -94,9 +95,13 @@ Zgodnie z zasadami projektu, repozytorium **nie może zawierać syntetycznych an
 - `CodeQL` (Python, JavaScript/TypeScript, Actions): **PASS**.
 - `Impact checks` (`CI/impact`, `Tests/impact`, `WS PR Checks/impact`, `WS Server Deploy/impact`, `Validate games catalog`): **PASS** / **SKIPPED** (potwierdzony brak wpływu na runtime).
 
-### 5.2. Wynik i przyczyna błędu Netlify Preview (`playkcswh`)
-- Wynik w Netlify: **FAILURE** (`Deploy Preview failed`).
-- **Udokumentowana przyczyna niepowodzenia:**
-  - Jak zweryfikowano bezpośrednio poleceniem `node scripts/generate-build-info.js`, skrypt generujący kontekst wdrożenia Netlify (`generateServerDeployContext`) wymaga zmiennych środowiskowych migracji Redis V3 (`XP_REDIS_VERSION=3`, `XP_REDIS_ENV=stage`, `XP_KEY_NS=kcswh:stage:xp:v3`) dla kontekstów `deploy-preview`.
-  - W automatycznych wywołaniach podglądu Netlify dla gałęzi roboczych zmienne te nie są przekazywane przez Netlify, co powoduje zatrzymanie z błędem `Error: xp_redis_build_context_required` (jest to zachowanie identyczne jak na innych gałęziach PR w repozytorium, udokumentowane w `docs/ops/redis-v3-cutover.md`).
+### 5.2. Wynik i analiza błędu Netlify Preview (`playkcswh`)
+- **Status w Netlify API:** **FAILURE** (`Deploy Preview failed`, deploy ID: `6adb7ea40e8d9bf726f15d91`, stan: `error`).
+- **Komunikat z Netlify API:** `Failed during stage 'building site': Build script returned non-zero exit code: 2`.
+- **Analiza techniczna i diagnoza:**
+  - Polecenie budowania w `netlify.toml` uruchamia: `node scripts/generate-build-info.js`.
+  - W kodzie `scripts/generate-build-info.js` funkcja `generateServerDeployContext`:
+    - Przy nierozpoznanym lub pustym `CONTEXT` rzuca `Error: xp_redis_build_context_required` (np. przy braku zdefiniowanego celu w środowisku lokalnym).
+    - Przy poprawnym kontekście Netlify `CONTEXT="deploy-preview"`, brak wymaganych zmiennych migracji Redis V3 (`XP_REDIS_VERSION=3`, `XP_REDIS_ENV=stage`, `XP_KEY_NS=kcswh:stage:xp:v3`) prowadzi do zgłoszenia wyjątku `Error: xp_redis_build_configuration_invalid`.
+  - **Status weryfikacji logów builda:** **NOT VERIFIED directly from deploy logs** — surowe logi strumienia stdout/stderr z kontenera budowania Netlify nie są dostępne przez publiczny interfejs API/CLI bez uwierzytelnienia webowego. Zgodnie z zasadami projektu nie modyfikowano żadnych zmiennych środowiskowych ani sekretów Netlify.
   - Zmiany w PR #1142 dotyczą wyłącznie plików dokumentacyjnych i graficznych w `docs/play-store-listing/`, co wyklucza wpływ na kod źródłowy aplikacji.
