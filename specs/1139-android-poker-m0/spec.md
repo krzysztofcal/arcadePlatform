@@ -11,7 +11,7 @@
 ## Constraints and authorization
 Capacitor only; no parallel PoCs. No engine/backend/schema/protocol change. No Production, DB migrations, WS/environment deployments, payments, Play or OTA. Stage CORS/OAuth changes prepared only; separate GO before application. No funded JOIN/action/deletion smoke without separate GO.
 VPS: source edits/light checks only; no SDK/JDK/Gradle/emulator/Node upgrade, extra checkout/dependency tree or cleanup. Check disk before/after significant writes; warn below 5 GB, stop such writes below 4 GB. Existing untracked files remain untouched.
-Explicit setup scope: mobile/poker/package.json and lockfile, capacitor.config.json, package-web.mjs, configure-android.mjs, runtime.js, mobile.css, .gitignore; .github/workflows/android-poc.yml; shared js/api-url.js, API call sites, auth adapter hooks and SidebarModel. No generic setup changes.
+Explicit setup scope: mobile/poker/package.json and lockfile, capacitor.config.json, package-web.mjs, configure-android.mjs, security.cjs, stage-public.json, runtime.js, README.md, mobile.css, .gitignore; .github/workflows/android-poc.yml; shared js/api-url.js, API call sites, auth adapter hooks and SidebarModel. No generic setup changes.
 Classic IIFE/global browser JS, one CSS line per selector, klog, strict script CSP with hashes for existing inline scripts; local pinned Supabase UMD. Fundamental deterministic security tests only; existing syntax/CSP checks, manual device smoke.
 
 ## Success criteria
