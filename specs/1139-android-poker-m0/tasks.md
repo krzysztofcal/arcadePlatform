@@ -43,4 +43,4 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 
 - [x] A001 Add localhost CORS exact branch, rebuild and require real OPTIONS PASS.
 - [x] A002 Switch native apiOrigin only; fundamental Auth/WS/API/CSP verification.
-- [ ] A003 Hosted exact-SHA APK, receipt/checksum and S24+ checklist; Draft PR report.
+- [x] A003 Hosted exact-SHA APK, receipt/checksum and S24+ checklist; Draft PR report.
