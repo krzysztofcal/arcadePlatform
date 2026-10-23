@@ -189,7 +189,7 @@
     if (opts.body && !headers['Content-Type']){
       headers['Content-Type'] = 'application/json';
     }
-    return fetch(url, Object.assign({}, opts, { headers: headers }));
+    return fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, Object.assign({}, opts, { headers: headers }));
   }
 
   async function parseResponse(res){
@@ -2592,7 +2592,7 @@
       setError(errorEl, null);
       if (guestPlayBtn) setLoading(guestPlayBtn, true);
       try {
-        var res = await fetch(GUEST_SESSION_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        var res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(GUEST_SESSION_URL) : GUEST_SESSION_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
         var data = {};
         try { data = await res.json(); } catch (_err){}
         if (!res.ok || !data || data.ok !== true || !data.token || !data.tableId){

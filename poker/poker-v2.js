@@ -1190,7 +1190,7 @@
   function fetchTableAccess(token){
     if (!token || !tableId) return Promise.reject(new Error('table_access_unauthorized'));
     var url = PROGRESSION_URL + '?tableId=' + encodeURIComponent(tableId);
-    return fetch(url, {
+    return fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, {
       method: 'GET',
       headers: { Authorization: 'Bearer ' + token }
     }).then(function(response){

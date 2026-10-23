@@ -54,6 +54,7 @@
   }
 
   async function refreshAdminVisibility(){
+    if (window.MOBILE_POKER_CONFIG) return;
     const requestId = ++state.adminRequestId;
     const token = await getAccessToken();
     if (requestId !== state.adminRequestId) return;
@@ -66,7 +67,7 @@
     }
     let nextIsAdmin = false;
     try {
-      const res = await fetch('/.netlify/functions/admin-me', {
+      const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/admin-me') : '/.netlify/functions/admin-me', {
         method: 'GET',
         headers: { Authorization: 'Bearer ' + token },
       });
@@ -332,7 +333,7 @@
     if (state.randomInFlight) return;
     state.randomInFlight = true;
     try {
-      const res = await fetch('/js/games.json', { cache: 'no-cache' });
+      const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url('/js/games.json') : '/js/games.json', { cache: 'no-cache' });
       const data = res && typeof res.json === 'function' ? await res.json() : null;
       let games = data && Array.isArray(data.games) ? data.games : (Array.isArray(data) ? data : []);
       if (window.ArcadeCatalog && typeof window.ArcadeCatalog.normalizeGameList === 'function'){

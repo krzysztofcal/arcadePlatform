@@ -29,7 +29,15 @@
     { id: 'profile', labelKey: 'profile', fallbackLabel: 'Profile', href: '/account.html', iconSvg: icons.profile }
   ];
 
+  function mobileItems(){
+    return [
+      { id: 'poker', labelKey: 'navPoker', fallbackLabel: 'Poker', href: '/poker/', iconSvg: icons.poker },
+      { id: 'profile', labelKey: 'profile', fallbackLabel: 'Profile', href: '/account.html', iconSvg: icons.profile }
+    ];
+  }
+
   function getItems(options){
+    if (window.MOBILE_POKER_CONFIG) return mobileItems();
     var opts = options || {};
     return menuItems.filter(function(item){
       return !(item && item.requiresAdmin && !opts.isAdmin);
@@ -37,6 +45,7 @@
   }
 
   function getBottomNavItems(){
+    if (window.MOBILE_POKER_CONFIG) return mobileItems();
     return bottomItems.slice();
   }
 

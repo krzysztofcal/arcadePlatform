@@ -1319,7 +1319,7 @@
     if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deleting your account permanently forfeits CH, XP, achievements and profile data.');
   }
   function deletionRequest(token, method){
-    return window.fetch('/.netlify/functions/account-delete', {
+    return window.fetch(window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/account-delete') : '/.netlify/functions/account-delete', {
       method: method, cache: 'no-store',
       headers: method === 'POST' ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { Authorization: 'Bearer ' + token },
       body: method === 'POST' ? JSON.stringify({confirmation:'DELETE_ACCOUNT',acknowledgeForfeiture:true}) : undefined

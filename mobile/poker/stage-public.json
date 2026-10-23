@@ -1,0 +1,6 @@
+{
+  "apiOrigin": "https://deploy-preview-1095--playkcswh.netlify.app",
+  "supabaseUrl": "https://krydukthwdvccggbyjfw.supabase.co",
+  "wsUrl": "wss://ws-preview.kcswh.pl/ws",
+  "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtyeWR1a3Rod2R2Y2NnZ2J5amZ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzMzQ0MDcsImV4cCI6MjA5ODkxMDQwN30.Ujdw5AW5T_D7FsT47ZFyYpZxToAWNUXcNlSqy1m97K0"
+}

@@ -72,7 +72,7 @@
     var opts = options || {};
     var headers = Object.assign({ Authorization: 'Bearer ' + accessToken }, opts.headers || {});
     if (opts.body) headers['Content-Type'] = 'application/json';
-    return fetch(url, Object.assign({}, opts, { headers: headers }));
+    return fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, Object.assign({}, opts, { headers: headers }));
   }
 
   function notify(profile){
@@ -130,7 +130,7 @@
     if (signed.token && uploadUrl.indexOf('token=') === -1){
       uploadUrl += (uploadUrl.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(signed.token);
     }
-    var uploadResponse = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: file });
+    var uploadResponse = await fetch(window.ArcadeApi ? window.ArcadeApi.url(uploadUrl) : uploadUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: file });
     if (!uploadResponse.ok){
       var uploadError = new Error('avatar_upload_failed');
       uploadError.code = 'avatar_upload_failed';
@@ -182,7 +182,7 @@
   }
 
   async function getPublic(handle){
-    var response = await fetch(PUBLIC_URL + encodeURIComponent(String(handle || '')), { headers: { Accept: 'application/json' } });
+    var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(PUBLIC_URL + encodeURIComponent(String(handle || ''))) : PUBLIC_URL + encodeURIComponent(String(handle || '')), { headers: { Accept: 'application/json' } });
     return parse(response);
   }
 

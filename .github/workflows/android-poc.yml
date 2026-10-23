@@ -1,0 +1,88 @@
+name: Android Poker M0 APK
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'mobile/poker/**'
+      - '.github/workflows/android-poc.yml'
+      - 'poker/**'
+      - 'account.html'
+      - 'js/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-poc-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug-apk:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == true)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Xmx2g'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - name: Resource and source preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          df -h .
+          free -h
+          test "$(df -Pk . | awk 'NR==2 {print $4}')" -ge 6291456
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.1'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21.0.10+7'
+      - name: Fundamental security checks
+        run: node --test tests/mobile-poker-security.test.mjs
+      - name: Locked mobile dependencies
+        working-directory: mobile/poker
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Package shared frontend and generate Android template
+        working-directory: mobile/poker
+        env:
+          GITHUB_SHA: ${{ env.SOURCE_SHA }}
+        run: |
+          set -euo pipefail
+          node package-web.mjs
+          ./node_modules/.bin/cap add android
+          node configure-android.mjs
+          ./node_modules/.bin/cap sync android
+      - name: Build debug APK on hosted runner only
+        working-directory: mobile/poker/android
+        run: |
+          set -euo pipefail
+          df -h .
+          test "$(df -Pk . | awk 'NR==2 {print $4}')" -ge 4194304
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 assembleDebug
+      - name: APK and exact-source receipt
+        working-directory: mobile/poker
+        run: |
+          set -euo pipefail
+          mkdir artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk "artifacts/arcade-poker-stage-${SOURCE_SHA}.apk"
+          cp www/build-receipt.json artifacts/
+          (node --version; java -version 2>&1; cat android/variables.gradle; cat android/gradle/wrapper/gradle-wrapper.properties; ./android/gradlew -p android --version; df -h .) > artifacts/toolchain.txt
+          (cd artifacts && sha256sum *.apk > SHA256SUMS)
+          cat artifacts/build-receipt.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcade-poker-stage-${{ env.SOURCE_SHA }}
+          path: mobile/poker/artifacts/
+          if-no-files-found: error
+          retention-days: 7
