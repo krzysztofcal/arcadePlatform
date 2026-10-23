@@ -22,6 +22,7 @@ function run(cmd, args, name){
 const has = s => !!(process.env[s] && process.env[s] !== "0");
 
 run("node", ["scripts/syntax-check.mjs"], "syntax");
+run("node", ["--test", "tests/account-page.test.mjs"], "account-page");
 
 run("node", ["tests/xp-client.test.mjs"], "xp-client");
 run("node", ["tests/xp-client-contract.test.mjs"], "xp-client-contract");
