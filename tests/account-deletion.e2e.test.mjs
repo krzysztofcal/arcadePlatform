@@ -43,6 +43,7 @@ async function fixture(balance=75) {
       create table poker_actions(id uuid default gen_random_uuid(),table_id uuid,version bigint,user_id uuid,action_type text,amount bigint,hand_id text,request_id text,phase_from text,phase_to text,meta jsonb);
       create table poker_requests(table_id uuid,user_id uuid,request_id text,kind text,result_json jsonb,created_at timestamptz default now(),unique(table_id,user_id,request_id,kind));
       create table poker_state(table_id uuid primary key,state jsonb,version bigint default 1,updated_at timestamptz default now());`);
+    await db.exec(await readFile(new URL('../supabase/migrations/20261011200000_poker_single_player_table_flag.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-requests-v2.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-wallet-retirement-v2.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/manual/1117-account-deletion-avatar-tracking-v2.sql',import.meta.url),'utf8'));
@@ -228,7 +229,7 @@ test('closed inactive zero-stack history is not a Poker obligation; uncertain/li
 const {cleanupDeletionPoker,projectDeletionPokerState,repairCompletedDeletionPoker,createDeletionPokerCoordinator,assertDeletionPokerAbsent,pokerPrivacyStateSha256,parsePokerRepairManifest}=await import('../ws-server/poker/runtime/account-deletion.mjs');
 async function privacyFixture(open=false) {
  const {begin}=await fixture(75);
- await db.query("insert into poker_tables(id,status,created_by) values($1,$2,$3) on conflict(id) do update set status=excluded.status,created_by=excluded.created_by",[TABLE,open?'OPEN':'CLOSED',USER]);
+ await db.query("insert into poker_tables(id,status,created_by,lifecycle_kind,is_single_player) values($1,$2,$3,'STANDARD',false) on conflict(id) do update set status=excluded.status,created_by=excluded.created_by,lifecycle_kind='STANDARD',is_single_player=false",[TABLE,open?'OPEN':'CLOSED',USER]);
  const state={phase:open?'FLOP':'HAND_DONE',handId:open?'peer-hand':'',seats:[{userId:USER,seatNo:1},{userId:OTHER,seatNo:2}],
   handSeats:open?[{userId:OTHER,seatNo:2}]:[{userId:USER,seatNo:1},{userId:OTHER,seatNo:2}],stacks:open?{[OTHER]:90}:{},
   foldedByUserId:{[USER]:true,[OTHER]:false},contributionsByUserId:open?{[OTHER]:10}:{[USER]:100,[OTHER]:77},missedTurnsByUserId:{[USER]:1,[OTHER]:2}};
@@ -261,6 +262,27 @@ test('owner privacy CLOSED/retry preserves other player projections and immutabl
  await f.begin(tx=>assertDeletionPokerAbsent(tx,USER));
  await db.query('update poker_state set state=$1',[{...row.state,unknownOwner:USER}]);
  await assert.rejects(f.begin(tx=>assertDeletionPokerAbsent(tx,USER)),/privacy_unconfirmed/);
+});
+
+test('Single Player retired owner cleanup keeps CLOSED history, real constraint and finance on retry',async()=>{
+ const f=await privacyFixture();await db.exec("update poker_tables set is_single_player=true");const before=await f.finances();
+ assert.equal((await cleanupDeletionPoker({...f,beginSql:f.begin})).done,true);
+ const row=(await db.query('select status,lifecycle_kind,is_single_player,created_by from poker_tables where id=$1',[TABLE])).rows[0];
+ assert.deepEqual(row,{status:'CLOSED',lifecycle_kind:'STANDARD',is_single_player:false,created_by:null});
+ const version=(await db.query('select version from poker_state where table_id=$1',[TABLE])).rows[0].version;
+ assert.equal((await cleanupDeletionPoker({...f,beginSql:f.begin})).done,true);
+ assert.equal((await db.query('select version from poker_state where table_id=$1',[TABLE])).rows[0].version,version);
+ assert.equal(await f.finances(),before);await f.begin(tx=>assertDeletionPokerAbsent(tx,USER));
+ await assert.rejects(db.query('update poker_tables set is_single_player=true where id=$1',[TABLE]),/poker_tables_single_player_chk/);
+});
+
+test('OPEN Single Player is not converted or scrubbed before canonical closure',async()=>{
+ const f=await privacyFixture(true);await db.exec("update poker_tables set is_single_player=true");const before=await f.finances();
+ await assert.rejects(cleanupDeletionPoker({...f,beginSql:f.begin}),/poker_privacy_unconfirmed/);
+ assert.equal(await f.finances(),before);
+ const row=(await db.query('select status,is_single_player,created_by from poker_tables where id=$1',[TABLE])).rows[0];
+ assert.deepEqual(row,{status:'OPEN',is_single_player:true,created_by:USER});
+ assert.deepEqual((await db.query('select state from poker_state where table_id=$1',[TABLE])).rows[0].state,f.state);
 });
 
 test('owner privacy OPEN preserves active peer hand and positive escrow; BURN obligations permit only released owner',async()=>{

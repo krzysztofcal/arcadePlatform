@@ -565,3 +565,12 @@ Owner accepted Production Account Deletion LIVE as PASS. A installed the reviewe
 - [ ] Publish this existing service-role correction through a separate reviewed PR and green CI; owner merges separately. Keep #1117 open until publication.
 
 Explicit limitations: **Storage DELETE with a real avatar NOT TESTED** in the final Production deletion E2E (subject had no avatar); **Google OAuth NOT TESTED**; late upload #1128 and cross-account antifarming #1131 remain outside accepted MVP scope. Do not represent these as PASS. No new Production operation is authorized by this documentation PR.
+
+### Single Player privacy-cleanup incident (2026-10-23)
+
+- [x] Explicit emergency GO: Production DB admission OFF only, verified at07:27:44UTC; runtime/workers retained ON, no restart/request edits.
+- [x] Reproduce real `poker_tables_single_player_chk` conflict with existing immutable migration in PGlite (red tests), then implement atomic CLOSED-table owner/flag retirement with OPEN fail-closed.
+- [x] Preserve ordinary-table behavior and retry/CAS/cache/ledger/escrow/idempotency protections; no migration or direct Production repair.
+- [ ] Separate GO: Stage exact-SHA WS Preview plus scoped Netlify Preview/checks and nonfinancial smoke. This PR changes WS runtime; CI/Netlify alone is not runtime verification.
+- [ ] Owner review/merge and explicitly authorized Production rollout; natural recovery of SAME existing request, no additional BURN501, lease/status/incident edits or manual Auth/Storage cleanup.
+- [ ] Verify terminal cleanup/Auth-last and unchanged other-user finance, then separate owner GO before reopening Production admission. Keep #1117 OPEN.
