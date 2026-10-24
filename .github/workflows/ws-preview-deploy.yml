@@ -98,7 +98,7 @@ jobs:
           if [[ "$XP_REDIS_VERSION" == "3" ]]; then
             export XP_REDIS_ENV=stage XP_KEY_NS=kcswh:stage:xp:v3
           fi
-          CONTEXT=deploy-preview node scripts/generate-build-info.js --server-context-only
+          CONTEXT=deploy-preview node scripts/generate-build-info.js --server-context-only --ws-preview-artifact
 
           rm -rf "$PREVIEW_ARTIFACT_DIR"
           mkdir -p "$PREVIEW_STAGE_WS_DIR"
