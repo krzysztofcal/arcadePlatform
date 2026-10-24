@@ -132,6 +132,24 @@ Agents MUST use this to locate logic quickly.
 
 ---
 
+## ✉️ Supabase Auth / Email Testing (MANDATORY)
+
+### Files
+- `/js/auth/supabaseClient.js`
+- `/js/account-page.js`
+- `/tests/account-auth.contract.test.mjs`
+
+### Rules
+- CI/unit/fundamental tests must mock email delivery or use isolated local fixtures; never send real transactional emails by default.
+- Real Stage Auth email E2E requires an explicit, narrowly scoped test approval and a verified, operator-controlled receiving inbox (or an approved mail-testing sink); do not run it automatically on every PR.
+- Never invent recipients under `kcswh.pl` or other real domains without confirming the exact mailbox/alias or a functioning catch-all. Reserved domains (e.g. `example.invalid`) are only for tests that cannot trigger real delivery.
+- Test signup, recovery, magic link and reauthentication without delivery whenever delivery itself is not the behavior under test. Bound real sends and retries to the provider quota and cooldown.
+- Treat `mail.send` as an attempt, not proof of delivery; distinguish provider rate limits (HTTP 429) and invalid-address rejection (HTTP 400) from confirmed delivery bounces.
+- On bounce warnings, inspect project identity, Auth logs, sending recipients and provider delivery metrics before changing SMTP/production settings; if bounce details are unavailable, mark the root cause unconfirmed.
+- Keep credentials, OTPs, confirmation URLs and private recipient details out of source control and logs.
+
+---
+
 ## 🔐 Security / CSP
 
 ### Files
