@@ -50,7 +50,11 @@ await writeFile('poker/offline/renderer.generated.js', '// GENERATED from poker/
 await build({ entryPoints: ['poker/offline/offline-game.mjs'], outfile: 'poker/offline/game.generated.js', bundle: true, format: 'iife', platform: 'browser', target: 'es2020', define: { 'process.env.WS_POKER_TURN_MS': 'undefined' }, alias: { 'node:crypto': './poker/offline/browser-crypto.mjs' }, banner: { js: '// GENERATED from shared accepted WS rules and strategy. Do not edit.' } });
 
 let html = await readFile('poker/table-v2.html','utf8');
-html = html.replace(/\s*<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/\s*<link\b[^>]*https:\/\/[^>]*>/g,'');
+// This is a transformation of a checked-in source format, not an HTML sanitizer.
+// Only single-line script elements are supported; reject any source-format drift.
+html = html.split('\n').filter(line => !line.trimStart().startsWith('<script ')).join('\n');
+if (/<script/i.test(html)) throw new Error('Unsupported script markup in V2 source');
+html = html.split('\n').filter(line => !(line.trimStart().startsWith('<link ') && line.includes('https://'))).join('\n');
 const scriptPaths = ['game.generated.js', 'renderer.generated.js'];
 const scriptHashes = await Promise.all(scriptPaths.map(async name => 'sha256-' + createHash('sha256').update(await readFile('poker/offline/' + name)).digest('base64')));
 // Scoped to this isolated page: also excludes Netlify's injected Preview toolbar.
