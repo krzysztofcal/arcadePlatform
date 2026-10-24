@@ -415,7 +415,10 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
   const { dir, filePath } = await writePersistedFile(store);
   const botSeat2 = makeBotUserId(tableId, 2);
   const botSeat3 = makeBotUserId(tableId, 3);
-  const { port, child } = await createServer({ env: runtimeJoinEnv({ secret, filePath }) });
+  // Join/resync must inspect the same hand before an unrelated turn timeout.
+  const { port, child } = await createServer({
+    env: { ...runtimeJoinEnv({ secret, filePath }), WS_POKER_TURN_MS: "60000" }
+  });
 
   try {
     await waitForListening(child, 5000);

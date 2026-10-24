@@ -1,0 +1,55 @@
+# Android M0 — Arcade Poker, Capacitor-first
+
+**Issue:** #1139; parent #1138; release work deferred to #1140. Approved scope: owner request 2026-10-23.
+
+
+## Current owner acceptance and final review — 2026-10-24
+
+Owner-confirmed physical APK857159ca8157166e46929726eda45309842973cb on Samsung Galaxy S24+: immersive fullscreen landscape without system bars/black margins PASS; portrait fullscreen PASS. Visual table/background/dealer/cards/player seats fit both orientations PASS; Fold/Call/Raise/All-in/slider visible and fit PASS (visual, not full financial-operation regression). Previous owner-confirmed password login, Google→APK active session, avatar upload/finalization and working Poker retained as physical PASS. Appearance accepted and frozen; no further aesthetic/fullscreen changes absent a concrete defect.
+
+Still NOT TESTED physically: transient bars swipe/auto-hide, background/resume, IME open/close/rotate. Full financial regression remains unverified and is not added as new M0 scope. Stable signing and Verified App Links are M1 only. Final independent review found a real WS Preview artifact-context regression; owner-approved correction edf9fb3a now passes actual-context/import fundamentals and required CI/WS PR Checks. See p1-artifact-identity-fix.md. No live WS deployment or merge performed; prior NO-GO finding is retained in final-review.md as resolved audit history. Earlier pending/failed integration notes below are historical and superseded by later GO/owner evidence.
+
+## User stories and acceptance
+1. As an Android tester I install a debug APK built from an exact SHA on GitHub-hosted ubuntu-24.04, launch locally bundled Poker Lobby, open the existing table and existing account page. Other Arcade games and navigation are absent.
+2. As an existing web user I retain existing UI, relative APIs and OAuth behavior. Mobile reuses poker/index.html, poker/table-v2.html, account.html and their controllers; generated output is disposable, never a second editable UI.
+3. As a Stage tester I use public configuration for pinned Supabase project krydukthwdvccggbyjfw and wss://ws-preview.kcswh.pl/ws. API resolution is explicit; no fetch monkeypatch/native HTTP bypass. Google login uses external Browser + App callback with PKCE, exact callback validation and no token logging. Back/resume use native events and existing WS reconnect.
+4. As an operator I download an APK, receipt with source SHA/tool versions and SHA256, and install on Samsung Galaxy S24+. Device evidence must distinguish tested from NOT TESTED.
+
+## Constraints and authorization
+Capacitor only; no parallel PoCs. No engine/backend/schema/protocol change. No Production, DB migrations, WS/environment deployments, payments, Play or OTA. Stage CORS/OAuth changes prepared only; separate GO before application. No funded JOIN/action/deletion smoke without separate GO.
+VPS: source edits/light checks only; no SDK/JDK/Gradle/emulator/Node upgrade, extra checkout/dependency tree or cleanup. Check disk before/after significant writes; warn below 5 GB, stop such writes below 4 GB. Existing untracked files remain untouched.
+Explicit setup scope: mobile/poker/package.json and lockfile, capacitor.config.json, package-web.mjs, configure-android.mjs, security.cjs, stage-public.json, runtime.js, README.md, mobile.css, .gitignore; .github/workflows/android-poc.yml; shared js/api-url.js, API call sites, auth adapter hooks and SidebarModel. No generic setup changes.
+Classic IIFE/global browser JS, one CSS line per selector, klog, strict script CSP with hashes for existing inline scripts; local pinned Supabase UMD. Fundamental deterministic security tests only; existing syntax/CSP checks, manual device smoke.
+
+## Success criteria
+Hosted build produces debug APK and exact-SHA receipt; source packager excludes game routes. Auth/WS/gameplay are not claimed until real Stage/device evidence exists. Missing configuration or integration GO is reported as a blocker, not bypassed. Draft PR only, no merge.
+
+## Physical-device presentation correction
+
+Owner's first S24+ smoke of APK bebbdc6a confirms installation, launch, Lobby/Account and navigation, but finds system-bar overlap and unwanted Search. Only mobile generated viewport/SystemBars settings and mobile.css may change layout; js/sidebar.js may conditionally filter native bottom navigation. Place diagnostic status in document flow (table status inside its menu) so no persistent overlay covers controls. No new dependencies, native toolchain on VPS or UI/CSS test suite. API failures remain separate integration blockers; Redis GO remains stopped at credential mismatch.
+
+`mobile/poker/configure-android.mjs` enables AndroidX EdgeToEdge in the generated MainActivity.onCreate, using the existing Capacitor AndroidX dependency, so native SystemBars padding has consistent window ownership on older Android as well. No checked-in parallel Android UI or new dependency.
+
+## Authorized shared Stage Deploy Preview Redis adapter
+
+Owner GO replaces the stopped branch-specific proposal with ARCADE_STAGE_REDIS_TOKEN, is_secret=true, deploy-preview context only, standard secret scopes Builds/Functions/Runtime (no Post processing). Personal supports secrets, not individual scope selection. Existing sensitive-variable policy must remain review: untrusted authors/forks require member approval; connected site members remain trusted even from forks. Reuse validated Stage V3 credentials with PING/epoch reads only. All immutable playkcswh Deploy Preview origins select the alias and require 3/stage/kcswh:stage:xp:v3; wrong origin/configuration rejects and missing alias fails closed. Production and WS retain legacy token behavior. Existing client, namespace, epoch and fences remain. Shared deploy-preview XP tuple changes future rebuilds; matching branch overrides remain unchanged. No global credentials, CORS/OAuth/API origin/WS/Redis data/Production changes. Only Preview1141 is rebuilt by this task; no APK change.
+
+## GO — Android Stage API integration
+
+Only PR1141 branch may append https://localhost to XP_CORS_ALLOW, preserving existing origins, scopes, methods and headers. Rebuild Preview1141 and require actual mobile OPTIONS PASS before switching stage-public.json apiOrigin to Preview1141. Supabase Stage and WS Preview remain pinned. Fundamental checks and hosted-only exact-SHA debug APK required. No OAuth provider/redirect changes, WS runtime, Redis credentials, JOIN/bonus/deletion/financial action or merge. Any additional infrastructure need is a separate STOP/GO.
+
+## Second S24+ review scope
+
+Owner confirms email/password login, Poker/table use, rotation, portrait header and Poker/Profile navigation PASS. Google returns to browser, avatar upload fails500, landscape cutout/nav clipping FAIL. Read-only Stage Auth/DB/Storage diagnosis only; no new upload. Configuration changes need separate GO. Native-only correction must reserve actual WebView bounds from Android cutout/system/gesture/IME insets without fixed offsets, web changes, disabled gestures or layout tests. Existing callback remains arcadepoker-stage://auth/callback. New hosted APK with exact source receipt required; physical correction remains unverified until owner retest.
+
+## Approved Stage Auth + Avatar configuration GO
+
+Owner authorizes exact native callback addition only to pinned Stage Auth uri_allow_list, preserving Site URL/all existing entries/Google provider configuration. Exact branch feat/1139-android-poker-m0 may set ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1 while deletion acceptance stays OFF. Rebuild only Preview1141; no shared Preview/Production/secret/schema/trigger/Storage change. Controlled Google redirect without provider login/code/session exchange and endpoint availability checks only. Owner performs full Google→APK session and real avatar upload/finalize tests.
+
+## Table-only immersive Android GO
+
+Owner physical PASS: avatar upload/finalization, Google OAuth→APK active session, Poker, portrait/landscape. Current landscape failure is unused edges/system bars: prior all-WebView margins reserve bars/cutout/gestures and runtime never hides bars. New goal is full-window table background with safe interactive content; Lobby/Profile retain bars/native safe bounds. Only Android/mobile packaging/runtime changes, no shared web/WS/Auth/avatar/Redis/DB/financial logic or configuration changes. Use existing SystemBars hide/show + official transient swipe immersive behavior; one inset owner handles native route, orientation, IME and document changes without device offsets/dependencies. Physical fullscreen acceptance remains owner-only.
+
+## Approved P1 preservation correction
+
+Owner GO permits immutable artifact identity in generated server metadata and explicit WS Preview workflow marking. Netlify Stage Preview must remain canonical-origin/protected-alias fail-closed; WS Preview may use legacy credentials only with explicit generated ws-preview identity, deploy-preview context, null Netlify origin and Stage V3 tuple. Production keeps legacy token behavior. Existing namespace/epoch/lifecycle/Redis/SHA/deployment guards remain; no environment, appearance, engine, Auth/avatar or deployed WS changes. Test real workflow-generated context and real WS dependency import offline.

@@ -288,7 +288,7 @@
       var accessToken = await getAccessToken();
       if (!accessToken) throw new Error('missing_access_token');
       emitStatus('minting_token', {});
-      var mintRes = await fetch(mintUrl, { method: 'POST', headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' }, body: '{}' });
+      var mintRes = await fetch(window.ArcadeApi ? window.ArcadeApi.url(mintUrl) : mintUrl, { method: 'POST', headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' }, body: '{}' });
       var mintBody = {};
       try { mintBody = await mintRes.json(); } catch (_err){}
       if (!mintRes.ok || !mintBody || mintBody.ok !== true || typeof mintBody.token !== 'string' || !mintBody.token){

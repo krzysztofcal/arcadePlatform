@@ -321,7 +321,7 @@
     if (nodes.publicBio) nodes.publicBio.value = profile.bio || '';
     if (nodes.hideFromLeaderboard) nodes.hideFromLeaderboard.checked = profile.leaderboardVisible === false;
     if (nodes.publicHandleHint) nodes.publicHandleHint.textContent = profile.handleCanBeCustomized ? t('publicHandleHint', 'You can change your generated handle once. It then becomes permanent.') : t('publicHandleLockedHint', 'This handle is permanent.');
-    if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
+    if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = window.MobilePoker ? window.MobilePoker.publicProfileUrl(profile.handle) : '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
     setPublicProfileErrors(null);
   }
 
@@ -1319,7 +1319,7 @@
     if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deleting your account permanently forfeits CH, XP, achievements and profile data.');
   }
   function deletionRequest(token, method){
-    return window.fetch('/.netlify/functions/account-delete', {
+    return window.fetch(window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/account-delete') : '/.netlify/functions/account-delete', {
       method: method, cache: 'no-store',
       headers: method === 'POST' ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { Authorization: 'Bearer ' + token },
       body: method === 'POST' ? JSON.stringify({confirmation:'DELETE_ACCOUNT',acknowledgeForfeiture:true}) : undefined

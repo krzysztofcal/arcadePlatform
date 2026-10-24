@@ -325,7 +325,9 @@ jobs:
                 node --input-type=module -e '
                   import { pathToFileURL } from "node:url";
                   const context = await import(pathToFileURL(process.argv[1]).href);
-                  if (context.BUILD_DEPLOY_CONTEXT !== "deploy-preview"
+                  if (context.BUILD_ARTIFACT_IDENTITY !== "ws-preview"
+                    || context.BUILD_DEPLOY_ORIGIN !== null
+                    || context.BUILD_DEPLOY_CONTEXT !== "deploy-preview"
                     || context.BUILD_XP_REDIS_VERSION !== "3"
                     || context.BUILD_XP_REDIS_ENV !== "stage") {
                     process.stderr.write("Preview generated V3 context mismatch\n");
