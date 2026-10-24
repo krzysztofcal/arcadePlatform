@@ -1,15 +1,15 @@
 {
-  "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/offline/poc.html",
+  "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/offline/poc.html",
   "result": {
-    "tableId": "offline-13d4be77-345d-447f-9d98-54ac2c66196c",
+    "tableId": "offline-6c4049bf-a1df-41ca-a5ed-cc094662462e",
     "state": {
       "inactivityEjectionByUserId": {},
       "missedTurnsByUserId": {},
       "pendingAutoSitOutByUserId": {},
       "sitOutByUserId": {},
-      "roomId": "offline-13d4be77-345d-447f-9d98-54ac2c66196c",
-      "handId": "ws_hand_offline-13d4be77-345d-447f-9d98-54ac2c66196c_1_3",
-      "handSeed": "ws_seed_offline-13d4be77-345d-447f-9d98-54ac2c66196c_1_3",
+      "roomId": "offline-6c4049bf-a1df-41ca-a5ed-cc094662462e",
+      "handId": "ws_hand_offline-6c4049bf-a1df-41ca-a5ed-cc094662462e_1_3",
+      "handSeed": "ws_seed_offline-6c4049bf-a1df-41ca-a5ed-cc094662462e_1_3",
       "phase": "SETTLED",
       "dealerSeatNo": 1,
       "turnUserId": null,
@@ -42,11 +42,11 @@
         }
       ],
       "community": [
-        "3S",
-        "KH",
-        "2D",
-        "KC",
-        "6D"
+        "8C",
+        "2C",
+        "JC",
+        "6S",
+        "9D"
       ],
       "communityDealt": 5,
       "potTotal": 0,
@@ -55,9 +55,9 @@
       "bigBlind": 2,
       "lastRaiseSize": 2,
       "stacks": {
-        "offline-human": 116,
-        "bot-offline-1": 92,
-        "bot-offline-2": 92
+        "offline-human": 108,
+        "bot-offline-1": 96,
+        "bot-offline-2": 96
       },
       "handStartStacksByUserId": {
         "offline-human": 100,
@@ -90,66 +90,66 @@
         "bot-offline-2": false
       },
       "contributionsByUserId": {
-        "offline-human": 8,
-        "bot-offline-1": 8,
-        "bot-offline-2": 8
+        "offline-human": 4,
+        "bot-offline-1": 4,
+        "bot-offline-2": 4
       },
       "holeCardsByUserId": {
         "offline-human": [
-          "KS",
-          "AC"
+          "2D",
+          "9H"
         ],
         "bot-offline-1": [
-          "6C",
-          "QS"
+          "4S",
+          "4D"
         ],
         "bot-offline-2": [
-          "2S",
-          "8S"
+          "6C",
+          "5H"
         ]
       },
       "deck": [
-        "8D",
-        "JS",
-        "3C",
-        "5S",
-        "3D",
-        "QH",
-        "5D",
-        "6H",
-        "2C",
         "TD",
-        "2H",
-        "JD",
-        "9D",
-        "4H",
-        "AS",
-        "QC",
-        "KD",
-        "9C",
-        "7S",
-        "AH",
-        "6S",
-        "8H",
-        "7D",
-        "TS",
-        "7H",
-        "QD",
-        "JH",
-        "4D",
-        "5H",
-        "7C",
-        "4S",
         "5C",
         "AD",
-        "TH",
-        "8C",
-        "JC",
-        "TC",
-        "9S",
+        "KH",
+        "7D",
+        "KC",
+        "4H",
         "4C",
+        "5D",
+        "7S",
+        "TC",
+        "8H",
+        "3D",
+        "5S",
+        "9S",
+        "2S",
+        "6D",
+        "JS",
+        "TS",
+        "QS",
+        "AH",
+        "8S",
+        "6H",
+        "3C",
+        "AS",
+        "AC",
+        "JD",
+        "QC",
+        "8D",
+        "QH",
         "3H",
-        "9H"
+        "3S",
+        "2H",
+        "TH",
+        "JH",
+        "9C",
+        "KD",
+        "QD",
+        "7H",
+        "7C",
+        "KS"
       ],
       "turnStartedAt": null,
       "turnDeadlineAt": null,
@@ -160,7 +160,7 @@
         ],
         "potsAwarded": [
           {
-            "amount": 24,
+            "amount": 12,
             "winners": [
               "offline-human"
             ],
@@ -171,112 +171,114 @@
             ]
           }
         ],
-        "potAwardedTotal": 24,
-        "potAwarded": 24,
+        "potAwardedTotal": 12,
+        "potAwarded": 12,
         "reason": "computed",
-        "awardedAt": "2026-10-24T21:36:49.763Z",
+        "awardedAt": "2026-10-24T21:40:06.987Z",
         "handsByUserId": {
           "offline-human": {
-            "category": 4,
-            "name": "TRIPS",
+            "category": 3,
+            "name": "TWO_PAIR",
             "ranks": [
-              13,
-              14,
-              6
+              9,
+              2,
+              11
             ],
             "best5": [
               {
-                "r": 13,
-                "s": "C"
+                "r": 9,
+                "s": "D"
               },
               {
-                "r": 13,
+                "r": 9,
                 "s": "H"
               },
               {
-                "r": 13,
-                "s": "S"
-              },
-              {
-                "r": 14,
+                "r": 2,
                 "s": "C"
               },
               {
-                "r": 6,
+                "r": 2,
                 "s": "D"
+              },
+              {
+                "r": 11,
+                "s": "C"
               }
             ]
           },
           "bot-offline-1": {
-            "category": 3,
-            "name": "TWO_PAIR",
+            "category": 2,
+            "name": "PAIR",
             "ranks": [
-              13,
-              6,
-              12
-            ],
-            "best5": [
-              {
-                "r": 13,
-                "s": "C"
-              },
-              {
-                "r": 13,
-                "s": "H"
-              },
-              {
-                "r": 6,
-                "s": "C"
-              },
-              {
-                "r": 6,
-                "s": "D"
-              },
-              {
-                "r": 12,
-                "s": "S"
-              }
-            ]
-          },
-          "bot-offline-2": {
-            "category": 3,
-            "name": "TWO_PAIR",
-            "ranks": [
-              13,
-              2,
+              4,
+              11,
+              9,
               8
             ],
             "best5": [
               {
-                "r": 13,
-                "s": "C"
-              },
-              {
-                "r": 13,
-                "s": "H"
-              },
-              {
-                "r": 2,
+                "r": 4,
                 "s": "D"
               },
               {
-                "r": 2,
+                "r": 4,
                 "s": "S"
               },
               {
+                "r": 11,
+                "s": "C"
+              },
+              {
+                "r": 9,
+                "s": "D"
+              },
+              {
                 "r": 8,
+                "s": "C"
+              }
+            ]
+          },
+          "bot-offline-2": {
+            "category": 2,
+            "name": "PAIR",
+            "ranks": [
+              6,
+              11,
+              9,
+              8
+            ],
+            "best5": [
+              {
+                "r": 6,
+                "s": "C"
+              },
+              {
+                "r": 6,
                 "s": "S"
+              },
+              {
+                "r": 11,
+                "s": "C"
+              },
+              {
+                "r": 9,
+                "s": "D"
+              },
+              {
+                "r": 8,
+                "s": "C"
               }
             ]
           }
         },
-        "handId": "ws_hand_offline-13d4be77-345d-447f-9d98-54ac2c66196c_1_3"
+        "handId": "ws_hand_offline-6c4049bf-a1df-41ca-a5ed-cc094662462e_1_3"
       },
       "handSettlement": {
-        "handId": "ws_hand_offline-13d4be77-345d-447f-9d98-54ac2c66196c_1_3",
-        "settledAt": "2026-10-24T21:36:49.763Z",
+        "handId": "ws_hand_offline-6c4049bf-a1df-41ca-a5ed-cc094662462e_1_3",
+        "settledAt": "2026-10-24T21:40:06.987Z",
         "payouts": {
-          "offline-human": 24
+          "offline-human": 12
         }
       }
     },
@@ -298,18 +300,12 @@
       },
       {
         "userId": "bot-offline-2",
-        "type": "BET",
-        "amount": 2,
+        "type": "CHECK",
         "phase": "FLOP"
       },
       {
         "userId": "offline-human",
-        "type": "CALL",
-        "phase": "FLOP"
-      },
-      {
-        "userId": "bot-offline-1",
-        "type": "CALL",
+        "type": "CHECK",
         "phase": "FLOP"
       },
       {
@@ -319,18 +315,12 @@
       },
       {
         "userId": "bot-offline-2",
-        "type": "BET",
-        "amount": 2,
+        "type": "CHECK",
         "phase": "TURN"
       },
       {
         "userId": "offline-human",
-        "type": "CALL",
-        "phase": "TURN"
-      },
-      {
-        "userId": "bot-offline-1",
-        "type": "CALL",
+        "type": "CHECK",
         "phase": "TURN"
       },
       {
@@ -360,232 +350,267 @@
   "requests": [
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/offline/poc.html",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/offline/poc.html",
       "type": "document"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/poker-v2.css",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/poker-v2.css",
       "type": "stylesheet"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-atlas.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-atlas.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-black-1.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-black-1.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-black-2.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-black-2.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-black-3.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-black-3.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-black-4.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-black-4.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-black-5.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-black-5.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-blue-1.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-blue-1.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-blue-2.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-blue-2.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-blue-3.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-blue-3.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-blue-4.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-blue-4.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-blue-5.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-blue-5.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-green-1.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-green-1.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-green-2.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-green-2.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-green-3.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-green-3.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-green-4.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-green-4.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-green-5.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-green-5.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-purple-1.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-purple-1.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-purple-2.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-purple-2.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-purple-3.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-purple-3.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-purple-4.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-purple-4.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-purple-5.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-purple-5.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-red-1.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-red-1.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-red-2.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-red-2.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-red-3.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-red-3.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-red-4.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-red-4.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-red-5.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-red-5.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-white-1.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-white-1.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-white-2.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-white-2.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-white-3.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-white-3.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-white-4.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-white-4.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-white-5.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-white-5.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-yellow-1.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-yellow-1.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-yellow-2.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-yellow-2.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-yellow-3.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-yellow-3.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-yellow-4.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-yellow-4.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/chips/chip-yellow-5.png",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/chips/chip-yellow-5.png",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/offline/game.generated.js",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/offline/game.generated.js",
       "type": "script"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/offline/renderer.generated.js",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/offline/renderer.generated.js",
       "type": "script"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/scene/casino-room-v2.webp",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/scene/casino-room-v2.webp",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/scene/dealer-v2.webp",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/scene/dealer-v2.webp",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/scene/felt-house-mark.svg",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/scene/felt-weave.webp",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/avatars/bots/bot-male-05-v1.webp",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/themes/emerald-palace/room.webp",
       "type": "image"
     },
     {
       "phase": "load",
-      "url": "https://6add24ba621945a5e4d143aa--playkcswh.netlify.app/poker/assets/avatars/bots/bot-female-05-v1.webp",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/themes/emerald-palace/dealer.webp",
+      "type": "image"
+    },
+    {
+      "phase": "load",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/themes/emerald-palace/rail.svg",
+      "type": "image"
+    },
+    {
+      "phase": "load",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/themes/emerald-palace/felt.svg",
+      "type": "image"
+    },
+    {
+      "phase": "load",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/themes/emerald-palace/card-face.svg",
+      "type": "image"
+    },
+    {
+      "phase": "load",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/themes/emerald-palace/card-back.svg",
+      "type": "image"
+    },
+    {
+      "phase": "load",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/themes/emerald-palace/avatar-frame.svg",
+      "type": "image"
+    },
+    {
+      "phase": "load",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/avatars/bots/bot-female-07-v1.webp",
+      "type": "image"
+    },
+    {
+      "phase": "load",
+      "url": "https://6add25770b2d070b30946a10--playkcswh.netlify.app/poker/assets/avatars/bots/bot-male-08-v1.webp",
       "type": "image"
     }
   ],
