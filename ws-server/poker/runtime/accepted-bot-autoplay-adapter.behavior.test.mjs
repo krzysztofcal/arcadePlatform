@@ -1899,3 +1899,13 @@ test("accepted bot autoplay settles showdown and allows next hand to continue", 
   assert.equal(calls.resync, 0);
   assert.equal(nextHandRun.reason === "turn_not_bot" || nextHandRun.actionCount > 0 || nextHandRun.reason === "not_action_phase", true);
 });
+
+// One fundamental case: canonical strategy used by both accepted WS and Offline.
+test("shared NORMAL bot with aces raises at the legal minimum with injected RNG", async () => {
+  const { chooseBotActionProfiled, enrichBotLegalActions } = await import("../shared/poker-bot-strategy.mjs");
+  const actions = enrichBotLegalActions({ actions: ["FOLD", "CALL", "RAISE"], minRaiseTo: 8, maxRaiseTo: 100 });
+  assert.deepEqual(chooseBotActionProfiled(actions, {
+    userId: "bot-1", profile: "NORMAL", random: () => 0.2,
+    state: { phase: "PREFLOP", holeCardsByUserId: { "bot-1": ["AS", "AH"] }, toCallByUserId: { "bot-1": 4 } }
+  }), { type: "RAISE", amount: 8 });
+});

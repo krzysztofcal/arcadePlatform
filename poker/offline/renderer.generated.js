@@ -1,0 +1,7633 @@
+// GENERATED from poker/poker-v2.js by scripts/build-poker-offline-poc.mjs; do not edit.
+(function(){
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  var SUIT_SYMBOLS = { S: '♠', H: '♥', D: '♦', C: '♣' };
+
+  // Stable table assignment contract: keep this order and the hash unchanged.
+  // Classic reuses the shipped default artwork.
+  var TABLE_THEME_CATALOG = [
+    { id: 'classic-casino', label: 'Classic Casino', assets: [] },
+    { id: 'royal-gold', label: 'Royal Gold', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'neon-vegas', label: 'Neon Vegas', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'midnight-sapphire', label: 'Midnight Sapphire', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'crimson-velvet', label: 'Crimson Velvet', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] },
+    { id: 'emerald-palace', label: 'Emerald Palace', assets: ['room.webp', 'dealer.webp', 'rail.svg', 'felt.svg', 'card-face.svg', 'card-back.svg', 'avatar-frame.svg'] }
+  ];
+  var tableThemeRequest = 0;
+
+  function resolveTableThemeId(tableId){
+    if (typeof tableId !== 'string' || !tableId.trim()) return 'classic-casino';
+    tableId = tableId.trim(); // Match PokerWsClient's table identity normalization.
+    var hash = 2166136261;
+    for (var i = 0; i < tableId.length; i++){
+      hash = Math.imul(hash ^ tableId.charCodeAt(i), 16777619) >>> 0;
+    }
+    return TABLE_THEME_CATALOG[hash % TABLE_THEME_CATALOG.length].id;
+  }
+
+  function isThemePreviewBuild(){
+    var build = window.BUILD_INFO;
+    return !!build && build.context === 'deploy-preview' && build.isPreview === true;
+  }
+
+  function applyTableTheme(themeId){
+    if (!els.screen) return;
+    var theme = TABLE_THEME_CATALOG.find(function(entry){ return entry.id === themeId; });
+    var request = ++tableThemeRequest;
+    els.screen.removeAttribute('data-table-theme');
+    if (!theme || !theme.assets || theme.id === 'classic-casino') return;
+    Promise.all(theme.assets.map(function(file){
+      return new Promise(function(resolve, reject){
+        var image = new Image();
+        var timeout = window.setTimeout(function(){ finish(false); }, 15000);
+        function finish(loaded){
+          window.clearTimeout(timeout);
+          image.onload = null;
+          image.onerror = null;
+          if (loaded) resolve();
+          else reject(new Error('Theme artwork unavailable'));
+        }
+        image.onload = function(){ finish(image.naturalWidth > 0); };
+        image.onerror = function(){ finish(false); };
+        image.src = '/poker/assets/themes/' + theme.id + '/' + file;
+      });
+    })).then(function(){
+      if (request !== tableThemeRequest) return;
+      els.screen.setAttribute('data-table-theme', theme.id);
+    }).catch(function(){
+      if (request !== tableThemeRequest) return;
+      els.screen.removeAttribute('data-table-theme');
+      klog('poker_table_theme_load_failed', { themeId: theme.id });
+    });
+  }
+
+  var HAND_CATEGORY = {
+    HIGH_CARD: 1,
+    PAIR: 2,
+    TWO_PAIR: 3,
+    TRIPS: 4,
+    STRAIGHT: 5,
+    FLUSH: 6,
+    FULL_HOUSE: 7,
+    QUADS: 8,
+    STRAIGHT_FLUSH: 9
+  };
+  var POKER_AVATAR_VARIANTS = {
+    'default': true,
+    'comet-blue': true,
+    'falcon-orange': true,
+    'fox-blue': true,
+    'nova-purple': true,
+    'orbit-green': true,
+    'panda-pink': true
+  };
+  var BOT_AVATAR_BASE_PATH = '/poker/assets/avatars/bots/';
+  var BOT_PRESENTATION_ENTRIES = [
+    { key: 'viktor', displayName: 'Viktor', gender: 'male', file: 'bot-male-01-v1.webp' },
+    { key: 'sofia', displayName: 'Sofia', gender: 'female', file: 'bot-female-01-v1.webp' },
+    { key: 'marco', displayName: 'Marco', gender: 'male', file: 'bot-male-02-v1.webp' },
+    { key: 'carmen', displayName: 'Carmen', gender: 'female', file: 'bot-female-02-v1.webp' },
+    { key: 'luca', displayName: 'Luca', gender: 'male', file: 'bot-male-03-v1.webp' },
+    { key: 'elena', displayName: 'Elena', gender: 'female', file: 'bot-female-03-v1.webp' },
+    { key: 'dante', displayName: 'Dante', gender: 'male', file: 'bot-male-04-v1.webp' },
+    { key: 'freya', displayName: 'Freya', gender: 'female', file: 'bot-female-04-v1.webp' },
+    { key: 'ragnar', displayName: 'Ragnar', gender: 'male', file: 'bot-male-05-v1.webp' },
+    { key: 'astrid', displayName: 'Astrid', gender: 'female', file: 'bot-female-05-v1.webp' },
+    { key: 'leon', displayName: 'Leon', gender: 'male', file: 'bot-male-06-v1.webp' },
+    { key: 'maya', displayName: 'Maya', gender: 'female', file: 'bot-female-06-v1.webp' },
+    { key: 'malik', displayName: 'Malik', gender: 'male', file: 'bot-male-07-v1.webp' },
+    { key: 'helena', displayName: 'Helena', gender: 'female', file: 'bot-female-07-v1.webp' },
+    { key: 'nico', displayName: 'Nico', gender: 'male', file: 'bot-male-08-v1.webp' },
+    { key: 'nadia', displayName: 'Nadia', gender: 'female', file: 'bot-female-08-v1.webp' },
+    { key: 'adrian', displayName: 'Adrian', gender: 'male', file: 'bot-male-09-v1.webp' },
+    { key: 'zara', displayName: 'Zara', gender: 'female', file: 'bot-female-09-v1.webp' }
+  ];
+  var BOT_PRESENTATIONS = normalizeBotPresentationCatalog(BOT_PRESENTATION_ENTRIES);
+  var LIVE_STATUS_COPY = {
+    demo: 'Demo mode',
+    connecting: 'Connecting…',
+    auth: 'Sign in to join this table',
+    live: 'Live table connected',
+    disconnected: 'Live connection closed',
+    error: 'Live table unavailable'
+  };
+  var CLOSED_TABLE_REDIRECT_SECONDS = 5;
+  var WINNER_REVEAL_MS = 3_500;
+  var REGULAR_REACTION_TTL_MS = 3_500;
+  var TARGETED_REACTION_EFFECT_TTL_MS = 1_200;
+  var AUTO_REBUY_FEEDBACK_MS = 3_000;
+  var CHIP_FLY_MS = 420;
+  var SETTLEMENT_CHIP_FLY_MS = 780;
+  var AUTO_JOIN_RETRY_DELAYS_MS = [250, 750, 1500, 3000];
+  var CHIP_DENOMINATIONS = [
+    { value: 1000, color: 'yellow' },
+    { value: 500, color: 'purple' },
+    { value: 100, color: 'black' },
+    { value: 25, color: 'green' },
+    { value: 10, color: 'blue' },
+    { value: 5, color: 'red' },
+    { value: 1, color: 'white' }
+  ];
+  var CHIP_ASSET_COLORS = {
+    white: true,
+    red: true,
+    blue: true,
+    green: true,
+    black: true,
+    purple: true,
+    yellow: true
+  };
+  var CHIP_STACK_MAX_HEIGHT = 5;
+  var LAST_ACTION_LABEL = {
+    fold: 'Fold',
+    check: 'Check',
+    call: 'Call',
+    raise: 'Raise',
+    all_in: 'All in'
+  };
+  var REACTION_CATALOG = [
+    { key: 'hello', emoji: '👋', label: 'Hello' },
+    { key: 'nice_hand', emoji: '👍', label: 'Nice hand!' },
+    { key: 'well_played', emoji: '👏', label: 'Well played!' },
+    { key: 'thinking', emoji: '🤔', label: 'Thinking...' },
+    { key: 'haha', emoji: '😄', label: 'Haha' },
+    { key: 'wow', emoji: '😮', label: 'Wow!' },
+    { key: 'bad_beat', emoji: '😢', label: 'Bad beat' },
+    { key: 'nice_bluff', emoji: '😎', label: 'Nice bluff!' },
+    { key: 'good_luck', emoji: '🤝', label: 'Good luck' },
+    { key: 'thanks', emoji: '❤️', label: 'Thanks' },
+    { key: 'cheers', emoji: '🥂', label: 'Cheers!' },
+    { key: 'gg', emoji: '🏆', label: 'GG!' },
+    { key: 'hurry_up', emoji: '⏳', label: 'Please, hurry up!' },
+    { key: 'you_are_bluffing', emoji: '🧐', label: 'You are bluffing!', humanSelectable: false },
+    { key: 'i_was_bluffing', emoji: '😏', label: 'I was bluffing!', humanSelectable: false },
+    { key: 'lucky', emoji: '🍀', label: 'Lucky!', humanSelectable: false },
+    { key: 'congrats', emoji: '🎉', label: 'Congrats!', humanSelectable: false },
+    { key: 'not_this_time', emoji: '😌', label: 'Not this time.', humanSelectable: false },
+    { key: 'all_in_oh_no', emoji: '😞', label: 'Oh no...', humanSelectable: false },
+    { key: 'all_in_that_hurts', emoji: '😣', label: 'That hurts.', humanSelectable: false },
+    { key: 'all_in_no_way', emoji: '😠', label: 'No way...', humanSelectable: false },
+    { key: 'all_in_come_on', emoji: '😤', label: 'Come on!', humanSelectable: false },
+    { key: 'all_in_censored', emoji: '🤬', label: '******!', humanSelectable: false },
+    { key: 'ambient_hmm', emoji: '💭', label: 'Hmm...', humanSelectable: false },
+    { key: 'ambient_interesting', emoji: '💭', label: 'Interesting...', humanSelectable: false },
+    { key: 'ambient_lets_see', emoji: '💭', label: "Let's see...", humanSelectable: false },
+    { key: 'ambient_well_see', emoji: '💭', label: "We'll see.", humanSelectable: false },
+    { key: 'ambient_watching', emoji: '👀', label: "I'm watching.", humanSelectable: false },
+    { key: 'ambient_good_move', emoji: '💬', label: 'Good move.', humanSelectable: false },
+    { key: 'ambient_bold', emoji: '💬', label: 'Bold.', humanSelectable: false },
+    { key: 'ambient_nice', emoji: '💬', label: 'Nice.', humanSelectable: false },
+    { key: 'ambient_tough_one', emoji: '💬', label: 'Tough one.', humanSelectable: false },
+    { key: 'ambient_here_we_go', emoji: '💬', label: 'Here we go!', humanSelectable: false },
+    { key: 'ambient_your_move', emoji: '💬', label: 'Your move.', humanSelectable: false },
+    { key: 'ambient_lets_play', emoji: '💬', label: "Let's play.", humanSelectable: false },
+    { key: 'ambient_thinking', emoji: '🤔', label: 'Thinking...', humanSelectable: false }
+  ];
+  var demoState = {
+    mode: 'demo',
+    tableId: null,
+    tableStatus: 'OPEN',
+    maxSeats: 6,
+    seats: [
+      { seatNo: 0, userId: 'victor', displayName: 'Victor', status: 'WAITING' },
+      { seatNo: 1, userId: 'marcus', displayName: 'Marcus', status: 'THINKING' },
+      { seatNo: 2, userId: 'elena', displayName: 'Elena', status: 'READY' },
+      { seatNo: 3, userId: 'hero', displayName: 'You', status: 'ACTIVE' },
+      { seatNo: 4, userId: 'nico', displayName: 'Nico', status: 'FOLDED' },
+      { seatNo: 5, userId: 'mila', displayName: 'Mila', status: 'READY' }
+    ],
+    stacks: { victor: 875, marcus: 950, elena: 1100, hero: 1560, nico: 780, mila: 1250 },
+    potTotal: 1350,
+    dealerSeat: 1,
+    communityCards: [
+      { r: '10', s: 'D' },
+      { r: 'J', s: 'C' },
+      { r: 'Q', s: 'H' },
+      { r: '7', s: 'S' },
+      { r: '2', s: 'H' }
+    ],
+    heroCards: [
+      { r: 'A', s: 'S' },
+      { r: 'K', s: 'H' }
+    ],
+    turnUserId: 'hero',
+    phase: 'TURN',
+    handId: 'demo-hand',
+    lastBettingRoundActionByUserId: { victor: 'call', marcus: 'raise', nico: 'fold' },
+    legalActions: ['FOLD', 'CHECK', 'BET'],
+    actionConstraints: { toCall: 0, maxBetAmount: 240, minRaiseTo: null, maxRaiseTo: null },
+    bigBlind: null,
+    currentUserId: 'hero',
+    youSeat: 3,
+    statusText: LIVE_STATUS_COPY.demo,
+    errorText: ''
+  };
+
+  var state = cloneState(demoState);
+  var searchParams = null;
+  var tableId = readTableId();
+  var PROGRESSION_URL = '/.netlify/functions/poker-progression';
+  var wsClient = null;
+  var currentAccessToken = null;
+  var currentGuestSession = null;
+  var isGuestMode = false;
+  var authWatchTimer = null;
+  var turnClockTimer = null;
+  var revealDismissTimer = null;
+  var closedTableRedirectTimer = null;
+  var closedTableRedirectRemaining = 0;
+  var closedTableRedirectReason = null;
+  var authUnsubscribe = null;
+  var pendingLeaveRetryAfterReconnect = false;
+  var pendingLeaveNavigation = false;
+  var pendingLeaveDestination = '/poker/';
+  var leaveConfirmDestination = '/poker/';
+  var leaveConfirmOpen = false;
+  var autoRebuyConfirmOpen = false;
+  var pendingAutoRebuyConfirmationBuyIn = null;
+  var renderedSeatAnchors = {};
+  var renderedSeatAvatars = {};
+  var renderedSeatHud = {};
+  var accountHudIdentity = null;
+  var accountHudGeneration = 0;
+  var lastRenderedWallet = null;
+  var renderedSeatBetAnchors = {};
+  var renderedSeatStackAnchors = {};
+  var seatCommittedByUserId = {};
+  var suggestedSeatNoParam = null;
+  var shouldAutoJoin = false;
+  var inactivityExit = null;
+  var autoJoinAttempted = false;
+  var autoJoinRetryTimer = null;
+  var autoJoinRetryCount = 0;
+  var autoJoinErrorActive = false;
+  var reconnectSeatNo = null;
+  var lastKnownCurrentSeatNo = null;
+  var spectatorJoinIntroShown = false;
+  var spectatorJoinIntroActive = false;
+  var spectatorJoinIntroTimer = null;
+  var spectatorJoinIntroSettleTimer = null;
+  var heroPresentationState = null;
+  var heroFrameKind = null;
+  var heroLifecycleTransition = 'boot';
+  var liveModeGeneration = 0;
+  var authenticatedPreflightGeneration = 0;
+  var authLifecycleGeneration = 0;
+  var snapshotRecoveryTimer = null;
+  var snapshotRecoveryAttempts = 0;
+  var snapshotRecoveryTimedOut = false;
+  var SNAPSHOT_RECOVERY_TIMEOUT_MS = 5000;
+  var SNAPSHOT_RECOVERY_MAX_ATTEMPTS = 3;
+  var SNAPSHOT_RECOVERY_TIMEOUT_COPY = 'Snapshot recovery timed out';
+  // Legacy declaration for an older WS deployment. The server remains the
+  // source of truth; this value is only sent when that WS cannot yet expose
+  // the table buy-in in snapshots.
+  var LEGACY_WS_BUY_IN = 100;
+  var joinOperation = {
+    phase: 'idle',
+    requestId: null,
+    payload: null,
+    source: null
+  };
+  var bootReady = false;
+  var queuedPreaction = null;
+  var queuedPreactionInFlight = false;
+  var rebuyOperation = null;
+  var rebuyPanelDismissed = false;
+  var autoRebuyAttemptedForCurrentBust = false;
+  var rebuyBalanceLoading = false;
+  var autoRebuyFeedbackTimer = null;
+  var autoRebuyFeedbackState = { visible: false, buyIn: null };
+  var stickyWinnerReveal = {
+    handId: null,
+    visibleUntilMs: 0,
+    authoritativeTargetedWindow: false,
+    authoritativeRevealDueAtMs: null,
+    presentationReceivedAtMs: null,
+    settlementPresentation: null,
+    showdownWinnerUserIds: [],
+    revealedShowdownCardsByUserId: {},
+    communityCards: []
+  };
+  var pendingPostRevealSnapshots = [];
+  var lastPresentedSettlementHandId = null;
+  var lastAnimatedSettlementHandId = null;
+  var lastSettlementFailureKey = null;
+  var settlementAnimationGeneration = 0;
+  var settlementAnimationTimers = [];
+  var settlementAnimationNodes = [];
+  var cardFxClaims = { key: null, deal: false, board: {}, fold: {}, reveal: {} };
+  var cardFxNodes = [];
+  var cardFxTimers = [];
+  var suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
+  var reactionBubblesBySeatNo = {};
+  var reactionBubbleNodesBySeatNo = {};
+  var botAvatarReactionTimersBySeatNo = {};
+  var targetedReactionEffectsById = {};
+  var targetedReactionEffectNodesById = {};
+  var reactionRenderNodes = [];
+  var nextTargetedReactionEffectId = 1;
+  var dismissedTargetedReactionOffersByKey = {};
+  var pendingTargetedReactionOfferKeys = new Set();
+  var targetedReactionOfferHandId = null;
+  var targetedReactionDismissTimer = null;
+  var reactionControlTimer = null;
+  var reactionControlUntilMs = 0;
+  var reactionHistoryTableId = null;
+  var reactionHistoryUserId = null;
+  var reactionHistoryEntries = [];
+  var reactionHistoryExpiryTimer = null;
+  var layoutRefreshTimer = null;
+  var socialSettingsOpener = null;
+  var reactionHistoryPanelOpen = false;
+  var socialPreferencesIdentity;
+  var socialPreferences = defaultSocialPreferences();
+  var celebration = null;
+  var celebrationTimer = null;
+  var celebrationCursor = { tableId: null, handId: null, version: -1, consumed: false };
+  var winStreakCursor = newWinStreakCursor();
+  var winStreakPendingHandId = null;
+  var winStreakSequenceIntact = true;
+  var els = {};
+
+  var REACTION_HISTORY_LIMIT = 25;
+  var REACTION_HISTORY_TTL_MS = 10 * 60 * 1000;
+  var CELEBRATION_ANCHOR_LOST_FADE_MS = 140;
+  var SOCIAL_PREFERENCES_STORAGE_PREFIX = 'kcswh:poker-social-preferences:v1:';
+  var GUEST_CELEBRATIONS_STORAGE_KEY = 'kcswh:poker-celebrations:guest:v1';
+  var AUTO_REBUY_STORAGE_PREFIX = 'kcswh:poker-auto-rebuy:v1:';
+
+  function defaultSocialPreferences(){
+    return { reactionBubblesEnabled: true, reactionHistoryEnabled: true, botReactionsEnabled: true, celebrationsEnabled: true };
+  }
+
+  function normalizeSocialPreferences(raw){
+    return {
+      reactionBubblesEnabled: raw && raw.reactionBubblesEnabled === false ? false : true,
+      reactionHistoryEnabled: raw && raw.reactionHistoryEnabled === false ? false : true,
+      botReactionsEnabled: raw && raw.botReactionsEnabled === false ? false : true,
+      celebrationsEnabled: raw && raw.celebrationsEnabled === false ? false : true
+    };
+  }
+
+  function cloneState(source){
+    return JSON.parse(JSON.stringify(source));
+  }
+
+  function normalizeSignalCode(value){
+    if (typeof value !== 'string') return '';
+    return value.trim().toLowerCase();
+  }
+
+  // Cosmetic passenger only: none of these functions owns gameplay or reveal time.
+  function clearCelebration(){
+    if (celebrationTimer != null) window.clearTimeout(celebrationTimer);
+    celebrationTimer = null;
+    celebration = null;
+    if (els.celebration){
+      els.celebration.hidden = true;
+      els.celebration.textContent = '';
+      els.celebration.className = 'poker-celebration';
+      els.celebration.removeAttribute('style');
+    }
+    if (els.celebrationPreviewPanel) els.celebrationPreviewPanel.hidden = true;
+    if (els.celebrationPreviewButton) els.celebrationPreviewButton.setAttribute('aria-expanded', 'false');
+  }
+
+  function startCelebrationExit(){
+    if (!celebration || celebration.exiting) return;
+    if (celebrationTimer != null) window.clearTimeout(celebrationTimer);
+    celebration.exiting = true;
+    // Keep every verified claim and card through its full entrance, then fade the art.
+    els.celebration.textContent = '';
+    els.celebration.classList.add('poker-celebration--exit');
+    celebrationTimer = window.setTimeout(clearCelebration, celebrationExitDuration());
+  }
+
+  function deemphasizeCelebration(){
+    if (!celebration || celebration.exiting || celebration.deemphasized || !els.celebration) return;
+    celebration.deemphasized = true;
+    els.celebration.classList.add('poker-celebration--deemphasized');
+  }
+
+  function fadeLostCelebrationAnchor(){
+    if (!celebration || !celebration.started || celebration.anchorLost) return false;
+    var remaining = celebration.endsAtMs - Date.now();
+    if (remaining <= 0){ clearCelebration(); return false; }
+    celebration.anchorLost = true;
+    if (celebrationTimer != null) window.clearTimeout(celebrationTimer);
+    els.celebration.classList.add('poker-celebration--anchor-lost');
+    celebrationTimer = window.setTimeout(clearCelebration, Math.min(CELEBRATION_ANCHOR_LOST_FADE_MS, remaining));
+    return false;
+  }
+
+  function celebrationSeatRect(userId){
+    if (!userId) return null;
+    var seats = state.seats.filter(function(seat){ return seat && seat.userId === userId; });
+    if (seats.length !== 1) return null;
+    var avatar = renderedSeatAvatars[seats[0].seatNo];
+    if (!avatar || avatar.dataset.userId !== userId || !avatar.isConnected || typeof avatar.getBoundingClientRect !== 'function'
+      || !avatar.closest || !avatar.closest('.poker-seat')) return null;
+    var rect = avatar.getBoundingClientRect();
+    var seat = avatar.closest('.poker-seat').getBoundingClientRect();
+    if (!rect || !seat || !Number.isFinite(rect.left) || !Number.isFinite(rect.top) || !Number.isFinite(rect.right) || !Number.isFinite(rect.bottom)
+      || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)
+      || !Number.isFinite(seat.left) || !Number.isFinite(seat.right) || !Number.isFinite(seat.width) || !Number.isFinite(seat.height)
+      || rect.width <= 0 || rect.height <= 0 || seat.width <= 0 || seat.height <= 0 || rect.left < 0 || rect.top < 0
+      || rect.right > window.innerWidth || rect.bottom > window.innerHeight) return null;
+    return { avatar: rect, seat: seat, seatNo: seats[0].seatNo };
+  }
+
+  function positionCelebration(){
+    if (!celebration || celebration.anchorLost) return false;
+    if (celebration.own) return true;
+    var targetSeats = state.seats.filter(function(seat){ return seat && seat.userId === celebration.userId; });
+    if (targetSeats.length !== 1){ clearCelebration(); return false; }
+    if (targetSeats[0].seatNo !== celebration.targetSeatNo){ clearCelebration(); return false; }
+    var currentAvatar = renderedSeatAvatars[celebration.targetSeatNo];
+    if (currentAvatar && currentAvatar.isConnected && currentAvatar.dataset.userId !== celebration.userId){ clearCelebration(); return false; }
+    var anchor = celebrationSeatRect(celebration.userId);
+    if (!anchor) return celebration.started ? fadeLostCelebrationAnchor() : false;
+    if (anchor.seatNo !== celebration.targetSeatNo){ clearCelebration(); return false; }
+    // Player notifications stay directly above their owner, never beside another seat.
+    var width = 120;
+    var center = anchor.avatar.left + anchor.avatar.width / 2;
+    els.celebration.style.left = center + 'px';
+    var stackOffset = (getSeatSettlementAwards(celebration.userId).length ? 32 : 0)
+      + (reactionBubblesBySeatNo[anchor.seatNo] ? 18 : 0);
+    var sceneScale = els.screen ? Number(els.screen.style.getPropertyValue('--poker-scene-scale')) || 1 : 1;
+    els.celebration.style.top = (anchor.avatar.top - (6 + stackOffset) * sceneScale) + 'px';
+    els.celebration.style.width = width + 'px';
+    els.celebration.style.setProperty('--compact-font', width / 12 + 'px');
+    return true;
+  }
+
+  function celebrationPreviewOpponents(){
+    return state.seats.filter(function(seat){
+      return seat && seat.userId && seat.userId !== state.currentUserId && celebrationSeatRect(seat.userId);
+    });
+  }
+
+  function celebrationPreviewOpponent(targetValue){
+    if (!targetValue) return null;
+    var identity;
+    try { identity = JSON.parse(targetValue); } catch (_error) { return null; }
+    if (!Array.isArray(identity) || identity.length !== 2 || typeof identity[0] !== 'string' || !identity[0] || !Number.isInteger(identity[1])) return null;
+    var matches = state.seats.filter(function(seat){
+      return seat && seat.userId === identity[0] && seat.seatNo === identity[1] && seat.userId !== state.currentUserId;
+    });
+    if (matches.length !== 1) return null;
+    var anchor = celebrationSeatRect(identity[0]);
+    return anchor && anchor.seatNo === identity[1] ? matches[0] : null;
+  }
+
+  function refreshCelebrationPreview(){
+    if (!els.celebrationPreviewMode || !els.celebrationPreviewTarget) return;
+    var targetSelect = els.celebrationPreviewTarget;
+    var selectedTargetValue = targetSelect.value;
+    var canPreviewEffects = isSeatedAtLiveTable() && isWsReady() && !state.reconnectGate && !getActiveWinnerReveal();
+    if (els.celebrationPreviewPanel) els.celebrationPreviewPanel.querySelectorAll('[data-preview-effect]').forEach(function(button){ button.disabled = !canPreviewEffects; });
+    var opponents = celebrationPreviewOpponents();
+    var optionKey = JSON.stringify(opponents.map(function(seat){
+      return [seat.userId, getPublicDisplayName(seat), !!seat.isBot, seat.seatNo];
+    }));
+    if (targetSelect.dataset.optionKey !== optionKey){
+      targetSelect.textContent = '';
+      var placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select a visible player/bot';
+      placeholder.disabled = true;
+      targetSelect.appendChild(placeholder);
+      opponents.forEach(function(seat){
+        var option = document.createElement('option');
+        option.value = JSON.stringify([seat.userId, seat.seatNo]);
+        option.textContent = getPublicDisplayName(seat) + (seat.isBot ? ' · Bot' : ' · Player') + ' · seat ' + Number(seat.seatNo);
+        targetSelect.appendChild(option);
+      });
+      targetSelect.dataset.optionKey = optionKey;
+    }
+    var selectedOpponent = celebrationPreviewOpponent(selectedTargetValue);
+    targetSelect.value = selectedOpponent ? JSON.stringify([selectedOpponent.userId, selectedOpponent.seatNo]) : '';
+    els.celebrationPreviewMode.options[1].disabled = !opponents.length;
+    targetSelect.disabled = els.celebrationPreviewMode.value !== 'other' || !opponents.length;
+    if (els.celebrationPreviewMode.value !== 'other'){
+      els.celebrationPreviewHint.textContent = 'Visual demo only. Table settings and reduced motion apply. Live play takes priority.';
+    } else if (!opponents.length){
+      els.celebrationPreviewHint.textContent = 'Small preview unavailable: no visible opponent/bot. Join a table with another player.';
+    } else if (!selectedOpponent){
+      els.celebrationPreviewHint.textContent = 'Choose a currently visible opponent/bot for the small preview.';
+    } else {
+      els.celebrationPreviewHint.textContent = 'Visual demo only · ' + getPublicDisplayName(selectedOpponent) + '. Table settings and reduced motion apply.';
+    }
+  }
+
+  function showCelebration(selection, options){
+    clearCelebration();
+    if (!selection || !els.celebration || !socialPreferences.celebrationsEnabled || prefersReducedMotion() || document.hidden) return;
+    var demo = options && options.demo === true;
+    var duration = celebrationDuration(Date.now(), options && options.duration);
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    if (selection.kind === 'hand'){
+      if (['STRAIGHT', 'FLUSH', 'FULL HOUSE', 'FOUR OF A KIND', 'STRAIGHT FLUSH', 'ROYAL FLUSH'].indexOf(selection.title) === -1
+        || !Array.isArray(selection.cards) || selection.cards.length !== 5) return;
+      selection.cards = selection.cards.map(normalizeCard);
+      if (!normalizeEvalCards(selection.cards)) return;
+    } else if (selection.kind === 'royal'){
+      selection.cards = resolveCelebrationRoyalCards(selection.cards, demo);
+      if (!selection.cards) return;
+    }
+    var own = demo ? options.mode !== 'other' : !!state.currentUserId && selection.userId === state.currentUserId;
+    var heroSpecialHand = own && (selection.kind === 'hand' || selection.kind === 'royal');
+    var targetAnchor = heroSpecialHand ? null : celebrationSeatRect(selection.userId);
+    if (!heroSpecialHand && !targetAnchor) return;
+    celebration = { demo: demo, own: heroSpecialHand, userId: selection.userId, targetSeatNo: targetAnchor && targetAnchor.seatNo, handId: state.handId, tableId: state.tableId,
+      exiting: false, started: false, anchorLost: false, endsAtMs: Date.now() + duration + celebrationExitDuration() };
+    var overlay = els.celebration;
+    var visualKind = selection.kind === 'hand' ? 'royal' : selection.kind;
+    overlay.className = 'poker-celebration poker-celebration--' + visualKind + (heroSpecialHand ? ' poker-celebration--own' : ' poker-celebration--other');
+    if (!positionCelebration()){ clearCelebration(); return; }
+    overlay.style.setProperty('--celebration-duration', duration + 'ms');
+    overlay.hidden = false;
+    celebration.started = true;
+    var art = document.createElement('div');
+    art.className = 'poker-celebration__art';
+    var hero = document.createElement('div');
+    hero.className = 'poker-celebration__hero';
+    if (selection.kind === 'hand' || selection.kind === 'royal'){
+      selection.cards.forEach(function(card, index){
+        var node = document.createElement('span');
+        node.className = 'poker-celebration__card';
+        node.style.setProperty('--fan', (index - 2) * 12 + 'deg');
+        node.style.setProperty('--rise', Math.abs(index - 2) * 4 + 'px');
+        node.textContent = card.r + '\n' + SUIT_SYMBOLS[card.s];
+        hero.appendChild(node);
+      });
+    } else if (selection.kind === 'pot'){
+      for (var c = 0; c < 5; c++){
+        var chip = document.createElement('img');
+        chip.className = 'poker-celebration__chip';
+        chip.src = '/poker/assets/chips/chip-' + (c % 2 ? 'green' : 'yellow') + '-3.png';
+        chip.alt = '';
+        chip.style.setProperty('--fan', (c - 2) * 18 + 'deg');
+        hero.appendChild(chip);
+      }
+    } else {
+      var avatar = document.createElement('span');
+      avatar.className = 'poker-celebration__avatar';
+      avatar.textContent = '×' + (Number.isSafeInteger(selection.count) ? selection.count : 5);
+      hero.appendChild(avatar);
+    }
+    var title = document.createElement('strong');
+    title.className = 'poker-celebration__title';
+    title.textContent = selection.kind === 'hand' ? selection.title : selection.kind === 'royal' ? 'ROYAL FLUSH' : selection.kind === 'pot' ? 'MONSTER POT' : 'WIN STREAK ×' + (Number.isSafeInteger(selection.count) ? selection.count : 5);
+    var caption = document.createElement('span');
+    caption.className = 'poker-celebration__caption';
+    caption.textContent = demo
+      ? selection.kind === 'pot' ? 'DEMO · ' + formatNumber(Number.isSafeInteger(selection.amount) ? selection.amount : 1250) + ' CH' : 'PREVIEW · VISUAL DEMO'
+      : selection.kind === 'pot' ? tf('pokerCelebrationWinAmount', { amount: formatNumber(selection.amount) }, 'WIN {amount} CH') : 'EXCEPTIONAL HAND';
+    art.appendChild(hero);
+    art.appendChild(title);
+    art.appendChild(caption);
+    overlay.appendChild(art);
+    for (var i = 0; i < 14; i++){
+      var spark = document.createElement('i');
+      spark.className = 'poker-celebration__spark';
+      var angle = Math.PI * 2 * i / 14;
+      spark.style.setProperty('--x', Math.round(Math.cos(angle) * 135) + 'px');
+      spark.style.setProperty('--y', Math.round(Math.sin(angle) * 62) + 'px');
+      spark.style.setProperty('--delay', (i % 4) * 45 + 'ms');
+      overlay.appendChild(spark);
+    }
+    celebrationTimer = window.setTimeout(startCelebrationExit, duration);
+  }
+
+  function bindCelebrationPreview(){
+    var build = window.BUILD_INFO;
+    if (!build || build.context !== 'deploy-preview' || build.isPreview !== true) return;
+    var controls = document.createElement('div');
+    controls.className = 'poker-celebration-preview';
+    controls.hidden = false;
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Preview FX';
+    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-controls', 'pokerCelebrationPreviewPanel');
+    var panel = document.createElement('section');
+    panel.id = 'pokerCelebrationPreviewPanel';
+    panel.className = 'poker-celebration-preview__panel';
+    panel.setAttribute('aria-label', 'Celebration preview');
+    panel.hidden = true;
+    var mode = document.createElement('select');
+    mode.setAttribute('aria-label', 'Preview presentation');
+    [['own', 'My win (large)'], ['other', 'Other player/bot (small near avatar)']].forEach(function(entry){
+      var option = document.createElement('option');
+      option.value = entry[0];
+      option.textContent = entry[1];
+      mode.appendChild(option);
+    });
+    panel.appendChild(mode);
+    var target = document.createElement('select');
+    target.setAttribute('aria-label', 'Small preview player or bot');
+    var targetPlaceholder = document.createElement('option');
+    targetPlaceholder.value = '';
+    targetPlaceholder.textContent = 'Select a visible player/bot';
+    targetPlaceholder.disabled = true;
+    target.appendChild(targetPlaceholder);
+    panel.appendChild(target);
+    var streakCount = document.createElement('select');
+    streakCount.setAttribute('aria-label', 'Win Streak demo count');
+    [5, 6, 7, 8, 12].forEach(function(count){
+      var option = document.createElement('option');
+      option.value = String(count);
+      option.textContent = 'Win Streak ×' + count;
+      streakCount.appendChild(option);
+    });
+    var potAmount = document.createElement('strong');
+    potAmount.className = 'poker-celebration-preview__amount';
+    potAmount.textContent = 'DEMO Monster Pot · ' + formatNumber(1250) + ' CH';
+    panel.appendChild(streakCount);
+    panel.appendChild(potAmount);
+    var giftDemoLabel = document.createElement('label');
+    var giftDemoToggle = document.createElement('input');
+    giftDemoToggle.type = 'checkbox';
+    giftDemoLabel.appendChild(giftDemoToggle);
+    giftDemoLabel.appendChild(document.createTextNode(' Show demo gifts on hero — DEMO / Visual only'));
+    panel.appendChild(giftDemoLabel);
+    els.heroGiftDemoToggle = giftDemoToggle;
+    giftDemoToggle.addEventListener('change', function(){
+      var hero = giftDemoHeroSeat();
+      heroGiftDemo = giftDemoToggle.checked && hero
+        ? { tableId: state.tableId, seatNo: hero.seatNo, userId: hero.userId } : null;
+      renderGiftBadges();
+    });
+    [
+      { kind: 'hand', title: 'STRAIGHT', label: 'Straight', cards: ['2S', '3H', '4D', '5C', '6S'] },
+      { kind: 'hand', title: 'FLUSH', label: 'Flush', cards: ['2S', '5S', '8S', '10S', 'QS'] },
+      { kind: 'hand', title: 'FULL HOUSE', label: 'Full House', cards: ['9S', '9H', '9D', 'KC', 'KH'] },
+      { kind: 'hand', title: 'FOUR OF A KIND', label: 'Four of a Kind', cards: ['7S', '7H', '7D', '7C', 'AH'] },
+      { kind: 'hand', title: 'STRAIGHT FLUSH', label: 'Straight Flush', cards: ['6S', '7S', '8S', '9S', '10S'] },
+      { kind: 'hand', title: 'ROYAL FLUSH', label: 'Royal Flush', cards: ['10S', 'JS', 'QS', 'KS', 'AS'] },
+      { kind: 'pot', label: 'Monster Pot · ' + formatNumber(1250) + ' CH (demo)' },
+      { kind: 'streak', label: 'Win Streak' },
+      { kind: 'close', label: 'Close' }
+    ].forEach(function(entry){
+      var choice = document.createElement('button');
+      choice.type = 'button';
+      choice.textContent = entry.label;
+      choice.addEventListener('click', function(){
+        panel.hidden = true;
+        button.setAttribute('aria-expanded', 'false');
+        button.focus();
+        if (entry.kind === 'close' || !isSeatedAtLiveTable() || !isWsReady() || state.reconnectGate || getActiveWinnerReveal()) return;
+        var opponent = mode.value === 'other' ? celebrationPreviewOpponent(target.value) : null;
+        if (mode.value === 'other' && !opponent) { refreshCelebrationPreview(); return; }
+        showCelebration({ kind: entry.kind, title: entry.title, cards: entry.cards, userId: opponent ? opponent.userId : state.currentUserId,
+          amount: entry.kind === 'pot' ? 1250 : undefined, count: entry.kind === 'streak' ? Number(streakCount.value) : undefined },
+        { demo: true, mode: mode.value });
+      });
+      if (entry.kind !== 'close') choice.setAttribute('data-preview-effect', '');
+      panel.appendChild(choice);
+    });
+    var hint = document.createElement('small');
+    hint.textContent = 'Visual demo only. Respects Table settings and reduced motion. Live results take priority.';
+    panel.appendChild(hint);
+    button.addEventListener('click', function(){
+      refreshCelebrationPreview();
+      panel.hidden = !panel.hidden;
+      button.setAttribute('aria-expanded', String(!panel.hidden));
+    });
+    mode.addEventListener('change', refreshCelebrationPreview);
+    target.addEventListener('change', refreshCelebrationPreview);
+    controls.addEventListener('keydown', function(event){
+      if (event.key === 'Escape') { panel.hidden = true; button.setAttribute('aria-expanded', 'false'); button.focus(); }
+    });
+    controls.appendChild(button);
+    controls.appendChild(panel);
+    if (!els.diagnostics) return;
+    els.diagnostics.appendChild(controls);
+    els.celebrationPreviewMode = mode;
+    els.celebrationPreviewTarget = target;
+    els.celebrationPreviewHint = hint;
+    els.celebrationPreview = controls;
+    els.celebrationPreviewPanel = panel;
+    els.celebrationPreviewButton = button;
+  }
+
+  function isClosedTableStatus(value){
+    return typeof value === 'string' && value.trim().toUpperCase() === 'CLOSED';
+  }
+
+  function isClosedTableSignal(value){
+    var normalized = normalizeSignalCode(value);
+    if (!normalized) return false;
+    return normalized === 'table_closed'
+      || normalized === 'table_not_open'
+      || normalized === 'table_not_found'
+      || normalized === 'temporarily_unavailable';
+  }
+
+  function clearClosedTableRedirectTimer(){
+    if (!closedTableRedirectTimer) return;
+    window.clearTimeout(closedTableRedirectTimer);
+    closedTableRedirectTimer = null;
+  }
+
+  function renderClosedTableNotice(){
+    if (!els.closedTableModal || !els.closedTableCountdown || !els.closedTableTitle) return;
+    var active = closedTableRedirectRemaining > 0;
+    els.closedTableModal.hidden = !active;
+    if (!active) return;
+    els.closedTableTitle.textContent = inactivityExit && inactivityExit.status === 'removed'
+      ? (inactivityExit.isSinglePlayer ? 'Game ended due to inactivity' : 'Removed for inactivity')
+      : 'This table has ended. Returning to lobby in 5 seconds…';
+    els.closedTableCountdown.textContent = closedTableRedirectRemaining === CLOSED_TABLE_REDIRECT_SECONDS
+      ? 'Returning to lobby in 5 seconds…'
+      : ('Returning to lobby in ' + closedTableRedirectRemaining + '…');
+  }
+
+  function cancelClosedTableRedirect(){
+    if (inactivityExit && inactivityExit.status === 'removed') return;
+    clearClosedTableRedirectTimer();
+    closedTableRedirectRemaining = 0;
+    closedTableRedirectReason = null;
+    renderClosedTableNotice();
+  }
+
+  function tickClosedTableRedirect(){
+    clearClosedTableRedirectTimer();
+    if (closedTableRedirectRemaining <= 1) {
+      closedTableRedirectRemaining = 0;
+      renderClosedTableNotice();
+      navigateToLobby();
+      return;
+    }
+    closedTableRedirectRemaining -= 1;
+    renderClosedTableNotice();
+    closedTableRedirectTimer = window.setTimeout(tickClosedTableRedirect, 1000);
+  }
+
+  function startClosedTableRedirect(reason){
+    if (inactivityExit && inactivityExit.status === 'removed' && closedTableRedirectReason === 'removed_for_inactivity') return;
+    clearCardFx(true);
+    if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
+    if (closedTableRedirectRemaining === CLOSED_TABLE_REDIRECT_SECONDS && closedTableRedirectReason === reason && closedTableRedirectTimer) {
+      renderClosedTableNotice();
+      syncJoinVisibility();
+      return;
+    }
+    closedTableRedirectReason = reason || null;
+    closedTableRedirectRemaining = CLOSED_TABLE_REDIRECT_SECONDS;
+    clearClosedTableRedirectTimer();
+    renderClosedTableNotice();
+    syncJoinVisibility();
+    klog('poker_closed_table_redirect_started', {
+      tableId: state.tableId || null,
+      reason: closedTableRedirectReason
+    });
+    closedTableRedirectTimer = window.setTimeout(tickClosedTableRedirect, 1000);
+  }
+
+  function syncClosedTableRedirectFromSnapshot(payload){
+    if (!isObject(payload)) return;
+    var exit = payload.private && payload.private.inactivity;
+    if (exit && (exit.status === 'pending' || exit.status === 'removed')) {
+      if (!inactivityExit || inactivityExit.status !== 'removed') inactivityExit = exit;
+      shouldAutoJoin = false;
+      reconnectSeatNo = null;
+      lastKnownCurrentSeatNo = null;
+      clearAutoJoinRetry();
+      clearPendingJoin();
+      clearQueuedPreaction();
+      if (inactivityExit.status === 'removed') startClosedTableRedirect('removed_for_inactivity');
+      return;
+    }
+    if (inactivityExit) return;
+    var tableObj = isObject(payload.table) ? payload.table : {};
+    var nextStatus = null;
+    if (typeof payload.status === 'string' && payload.status) nextStatus = payload.status;
+    else if (typeof tableObj.status === 'string' && tableObj.status) nextStatus = tableObj.status;
+    if (isClosedTableStatus(nextStatus)) {
+      startClosedTableRedirect('table_closed');
+      return;
+    }
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    var handObj = isObject(publicObj.hand) ? publicObj.hand : (isObject(payload.hand) ? payload.hand : {});
+    var handStatus = typeof handObj.status === 'string' ? handObj.status.trim().toUpperCase() : '';
+    var hasMembers = Array.isArray(tableObj.members) && tableObj.members.some(function(member){
+      return member && typeof member.userId === 'string' && member.userId;
+    });
+    var hasSeats = Array.isArray(publicObj.seats) && publicObj.seats.some(function(seat){
+      return seat && typeof seat.userId === 'string' && seat.userId;
+    });
+    var hasUsableState = handStatus === 'LOBBY'
+      || handStatus === 'PREFLOP'
+      || handStatus === 'FLOP'
+      || handStatus === 'TURN'
+      || handStatus === 'RIVER'
+      || handStatus === 'SETTLED'
+      || hasMembers
+      || hasSeats;
+    if (hasUsableState) cancelClosedTableRedirect();
+  }
+
+  function syncClosedTableRedirectFromSignal(reason){
+    if (!isClosedTableSignal(reason)) return false;
+    startClosedTableRedirect(normalizeSignalCode(reason));
+    return true;
+  }
+
+  function createEmptyLiveState(nextTableId, nextUserId){
+    return {
+      mode: 'live',
+      tableId: nextTableId || null,
+      tableStatus: 'OPEN',
+      maxSeats: 6,
+      buyIn: null,
+      stateVersion: null,
+      hasAppliedAuthoritativeSnapshot: false,
+      reconnectGate: false,
+      seats: [],
+      stacks: {},
+      potTotal: 0,
+      dealerSeat: null,
+      communityCards: [],
+      heroCards: [],
+      turnUserId: null,
+      turnStartedAt: null,
+      turnDeadlineAt: null,
+      phase: 'LOBBY',
+      handId: null,
+      lastBettingRoundActionByUserId: {},
+      foldedByUserId: {},
+      betThisRoundByUserId: {},
+      legalActions: [],
+      actionConstraints: {},
+      currentUserId: nextUserId || null,
+      pokerAccess: null,
+      youSeat: null,
+      statusText: LIVE_STATUS_COPY.connecting,
+      errorText: '',
+      wsReady: false,
+      showdown: null,
+      handSettlement: null,
+      settlementRevealDueAtMs: null,
+      settlementPresentation: null,
+      revealedShowdownCardsByUserId: {},
+      playerState: null
+    };
+  }
+
+  function readTableId(){
+    try {
+      searchParams = new URLSearchParams(window.location.search || '');
+      return searchParams.get('tableId');
+    } catch (_err){
+      searchParams = null;
+      return null;
+    }
+  }
+
+
+  function readGuestMode(){
+    try {
+      if (!searchParams) searchParams = new URLSearchParams(window.location.search || "");
+      return searchParams.get("guest") === "1";
+    } catch (_err){
+      return false;
+    }
+  }
+
+  function clearGuestSession(){
+    try {
+      if (window.sessionStorage) window.sessionStorage.removeItem("poker:guestSession");
+    } catch (_err){}
+  }
+
+  function readGuestSession(){
+    try {
+      var raw = window.sessionStorage ? window.sessionStorage.getItem("poker:guestSession") : null;
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || !parsed.token || !parsed.tableId){
+        clearGuestSession();
+        return null;
+      }
+      if (tableId && parsed.tableId !== tableId){
+        clearGuestSession();
+        return null;
+      }
+      if (Number(parsed.expiresAt) && Number(parsed.expiresAt) <= Date.now()){
+        clearGuestSession();
+        return null;
+      }
+      return parsed;
+    } catch (_err){
+      clearGuestSession();
+      return null;
+    }
+  }
+
+  function consumeGuestJoinIntent(){
+    if (!isGuestMode || !currentGuestSession) return null;
+    var intent = currentGuestSession.createPending === true ? 'create' : 'resume';
+    if (intent === 'create'){
+      currentGuestSession.createPending = false;
+      try {
+        if (window.sessionStorage) {
+          window.sessionStorage.setItem('poker:guestSession', JSON.stringify(currentGuestSession));
+        }
+      } catch (_err){}
+    }
+    return intent;
+  }
+
+  function klog(kind, data){return;}
+
+  function renderSocialPreferences(){
+    if (els.celebrationsPreference) els.celebrationsPreference.checked = socialPreferences.celebrationsEnabled;
+    if (els.celebrationsPreferenceLabel) els.celebrationsPreferenceLabel.textContent = document.documentElement && document.documentElement.lang === 'pl' ? 'Animacje celebracyjne' : 'Celebration animations';
+    if (els.reactionBubblesPreference) els.reactionBubblesPreference.checked = socialPreferences.reactionBubblesEnabled;
+    if (els.reactionHistoryPreference) els.reactionHistoryPreference.checked = socialPreferences.reactionHistoryEnabled;
+    if (els.botReactionsPreference) els.botReactionsPreference.checked = socialPreferences.botReactionsEnabled;
+    if (els.reactionHistory) els.reactionHistory.hidden = !(state && state.mode === 'live' && state.tableId && socialPreferences.reactionHistoryEnabled);
+    if (els.autoRebuyPreference) els.autoRebuyPreference.checked = isAutoRebuyEnabled();
+    if (els.autoRebuyPreferenceWrap) els.autoRebuyPreferenceWrap.hidden = !socialPreferencesIdentity;
+    renderAutoRebuyCopy();
+  }
+
+  function currentTableBuyIn(){
+    var buyIn = Number(state && state.buyIn);
+    return Number.isSafeInteger(buyIn) && buyIn > 0 ? buyIn : null;
+  }
+
+  function normalizeRebuySource(source){
+    return source === 'auto' ? 'auto' : 'manual';
+  }
+
+  function normalizeAuthoritativeBuyIn(value){
+    var buyIn = Number(value);
+    return Number.isSafeInteger(buyIn) && buyIn > 0 ? buyIn : null;
+  }
+
+  function clientBuyInDeclaration(){
+    return currentTableBuyIn() || LEGACY_WS_BUY_IN;
+  }
+
+  function renderAutoRebuyCopy(){
+    var buyIn = currentTableBuyIn();
+    if (els.autoRebuyPreferenceLabel){
+      els.autoRebuyPreferenceLabel.textContent = buyIn == null
+        ? 'Auto rebuy at the table buy-in when out of chips'
+        : 'Auto rebuy ' + formatNumber(buyIn) + ' CH when out of chips';
+    }
+    if (els.autoRebuyPreferenceHint){
+      els.autoRebuyPreferenceHint.textContent = buyIn == null
+        ? 'Auto rebuy becomes available once this table reports its authoritative buy-in.'
+        : 'Automatically uses ' + formatNumber(buyIn) + ' CH from your account each time you run out of chips.';
+    }
+  }
+
+  function renderAutoRebuyFeedback(){
+    if (!els.autoRebuyBalanceToast) return;
+    var visible = autoRebuyFeedbackState.visible === true && normalizeAuthoritativeBuyIn(autoRebuyFeedbackState.buyIn) != null;
+    els.autoRebuyBalanceToast.hidden = !visible;
+    els.autoRebuyBalanceToast.textContent = visible
+      ? ('-' + formatNumber(autoRebuyFeedbackState.buyIn) + ' CH')
+      : '';
+  }
+
+  function clearAutoRebuyFeedbackTimer(){
+    if (!autoRebuyFeedbackTimer) return;
+    window.clearTimeout(autoRebuyFeedbackTimer);
+    autoRebuyFeedbackTimer = null;
+  }
+
+  function hideAutoRebuyFeedback(){
+    clearAutoRebuyFeedbackTimer();
+    autoRebuyFeedbackState.visible = false;
+    autoRebuyFeedbackState.buyIn = null;
+    renderAutoRebuyFeedback();
+    renderSeats();
+  }
+
+  function showAutoRebuyFeedback(buyIn){
+    var authoritativeBuyIn = normalizeAuthoritativeBuyIn(buyIn);
+    if (authoritativeBuyIn == null) return false;
+    clearAutoRebuyFeedbackTimer();
+    autoRebuyFeedbackState.visible = true;
+    autoRebuyFeedbackState.buyIn = authoritativeBuyIn;
+    renderAutoRebuyFeedback();
+    renderSeats();
+    autoRebuyFeedbackTimer = window.setTimeout(function(){
+      autoRebuyFeedbackTimer = null;
+      autoRebuyFeedbackState.visible = false;
+      autoRebuyFeedbackState.buyIn = null;
+      renderAutoRebuyFeedback();
+      renderSeats();
+    }, AUTO_REBUY_FEEDBACK_MS);
+    return true;
+  }
+
+  function renderAutoRebuyConfirmationCopy(buyIn){
+    if (!els.autoRebuyConfirmCopy) return;
+    els.autoRebuyConfirmCopy.textContent = 'Auto rebuy will use ' + formatNumber(buyIn)
+      + ' CH from your account each time you run out of chips. You can disable it later.';
+  }
+
+  function closeAutoRebuyConfirm(restoreFocus){
+    var wasOpen = autoRebuyConfirmOpen;
+    autoRebuyConfirmOpen = false;
+    pendingAutoRebuyConfirmationBuyIn = null;
+    if (els.autoRebuyConfirmModal) els.autoRebuyConfirmModal.hidden = true;
+    if (els.autoRebuyPreference) els.autoRebuyPreference.checked = false;
+    if (restoreFocus && wasOpen && els.autoRebuyPreference && typeof els.autoRebuyPreference.focus === 'function') {
+      els.autoRebuyPreference.focus();
+    }
+  }
+
+  function openAutoRebuyConfirm(buyIn){
+    var authoritativeBuyIn = normalizeAuthoritativeBuyIn(buyIn);
+    if (authoritativeBuyIn == null || !els.autoRebuyConfirmModal) return false;
+    autoRebuyConfirmOpen = true;
+    pendingAutoRebuyConfirmationBuyIn = authoritativeBuyIn;
+    renderAutoRebuyConfirmationCopy(authoritativeBuyIn);
+    els.autoRebuyConfirmModal.hidden = false;
+    if (els.autoRebuyConfirmYes && typeof els.autoRebuyConfirmYes.focus === 'function') els.autoRebuyConfirmYes.focus();
+    return true;
+  }
+
+  function confirmAutoRebuy(){
+    if (!autoRebuyConfirmOpen) return;
+    var authoritativeBuyIn = currentTableBuyIn();
+    if (authoritativeBuyIn == null){
+      closeAutoRebuyConfirm(true);
+      renderSocialPreferences();
+      return;
+    }
+    if (authoritativeBuyIn !== pendingAutoRebuyConfirmationBuyIn){
+      pendingAutoRebuyConfirmationBuyIn = authoritativeBuyIn;
+      renderAutoRebuyConfirmationCopy(authoritativeBuyIn);
+      return;
+    }
+    writeAutoRebuyPref(true);
+    closeAutoRebuyConfirm(false);
+    klog('poker_auto_rebuy_pref_changed', { enabled: true });
+    renderSocialPreferences();
+    render();
+    maybeTriggerAutoRebuy();
+  }
+
+  function syncSocialPreferencesIdentity(userId){
+    var normalizedUserId = typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+    if (socialPreferencesIdentity === normalizedUserId) return;
+    clearCelebration();
+    resetWinStreakSession();
+    socialPreferencesIdentity = normalizedUserId;
+    socialPreferences = defaultSocialPreferences();
+    if (normalizedUserId){
+      try {
+        var raw = window.localStorage ? window.localStorage.getItem(SOCIAL_PREFERENCES_STORAGE_PREFIX + normalizedUserId) : null;
+        if (raw) socialPreferences = normalizeSocialPreferences(JSON.parse(raw));
+      } catch (err){
+        klog('poker_social_preferences_read_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
+      }
+    } else {
+      try {
+        socialPreferences.celebrationsEnabled = !window.localStorage || window.localStorage.getItem(GUEST_CELEBRATIONS_STORAGE_KEY) !== 'false';
+      } catch (_err){}
+    }
+    renderSocialPreferences();
+  }
+
+  function persistSocialPreferences(){
+    try {
+      if (!window.localStorage) return;
+      if (socialPreferencesIdentity) window.localStorage.setItem(SOCIAL_PREFERENCES_STORAGE_PREFIX + socialPreferencesIdentity, JSON.stringify(socialPreferences));
+      else window.localStorage.setItem(GUEST_CELEBRATIONS_STORAGE_KEY, String(socialPreferences.celebrationsEnabled));
+    } catch (err){
+      klog('poker_social_preferences_write_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
+    }
+  }
+
+  function autoRebuyStorageKey(){
+    // Use the authenticated identity synced by syncSocialPreferencesIdentity()
+    // (set before renderSocialPreferences()), not the transient table state
+    // currentUserId which may still be stale during the auth hand-off.
+    var userId = typeof socialPreferencesIdentity === 'string' && socialPreferencesIdentity.trim()
+      ? socialPreferencesIdentity.trim()
+      : '';
+    return userId ? AUTO_REBUY_STORAGE_PREFIX + userId : null;
+  }
+
+  function normalizeAutoRebuyPref(raw){
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { enabled: false };
+    return { enabled: raw.enabled === true };
+  }
+
+  function readAutoRebuyPref(){
+    var key = autoRebuyStorageKey();
+    if (!key) return { enabled: false };
+    try {
+      var raw = window.localStorage ? window.localStorage.getItem(key) : null;
+      if (raw) return normalizeAutoRebuyPref(JSON.parse(raw));
+    } catch (err){
+      klog('poker_auto_rebuy_pref_read_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
+    }
+    return { enabled: false };
+  }
+
+  function writeAutoRebuyPref(enabled){
+    var key = autoRebuyStorageKey();
+    if (!key) return;
+    try {
+      if (window.localStorage) window.localStorage.setItem(key, JSON.stringify({ enabled: enabled === true, updatedAt: new Date().toISOString() }));
+    } catch (err){
+      klog('poker_auto_rebuy_pref_write_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
+    }
+  }
+
+  function isAutoRebuyEnabled(){
+    // Authority is the synced authenticated identity (socialPreferencesIdentity),
+    // not the transient table state currentUserId (which may be stale during auth).
+    var key = autoRebuyStorageKey();
+    return !!key && readAutoRebuyPref().enabled === true;
+  }
+
+  function t(key, fallback){
+    try {
+      if (window.I18N && typeof window.I18N.t === 'function'){
+        var translated = window.I18N.t(key);
+        if (translated) return translated;
+      }
+    } catch (_err){}
+    return fallback || key;
+  }
+
+  function tf(key, values, fallback){
+    try {
+      if (window.I18N && typeof window.I18N.format === 'function'){
+        var translated = window.I18N.format(key, values || {});
+        if (translated) return translated;
+      }
+    } catch (_err){}
+    var output = t(key, fallback || key);
+    Object.keys(values || {}).forEach(function(name){
+      output = output.replace(new RegExp('\\{' + name + '\\}', 'g'), String(values[name]));
+    });
+    return output;
+  }
+
+  function getAccessToken(){
+    var bridge = window.SupabaseAuthBridge;
+    if (!bridge || typeof bridge.getAccessToken !== 'function') return Promise.resolve(null);
+    return Promise.resolve().then(function(){ return bridge.getAccessToken(); }).catch(function(){ return null; });
+  }
+
+  function fetchTableAccess(token){
+    if (!token || !tableId) return Promise.reject(new Error('table_access_unauthorized'));
+    var url = PROGRESSION_URL + '?tableId=' + encodeURIComponent(tableId);
+    return fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + token }
+    }).then(function(response){
+      return response.json().catch(function(){ return {}; }).then(function(body){
+        if (!response.ok){
+          var responseError = new Error(body && (body.error || body.reason) || 'table_access_failed');
+          responseError.status = response.status;
+          throw responseError;
+        }
+        return body;
+      });
+    }).then(function(body){
+      var access = body && body.tableAccess;
+      if (!access || access.tableId !== tableId){
+        throw new Error('table_access_unavailable');
+      }
+      return access;
+    });
+  }
+
+  function tableAccessDeniedMessage(access){
+    if (access && access.reason === 'single_player_participation_ended') return joinErrorMessage({ code: access.reason });
+    if (access && access.reason === 'table_not_found') return 'This table is no longer available. Return to the lobby.';
+    if (access && access.reason === 'table_closed') return 'This table is closed. Return to the lobby.';
+    if (access && access.reason === 'table_not_open') return 'This table is not available. Return to the lobby.';
+    if (access && access.reason === 'invalid_table_economy') return 'This table has an invalid buy-in and blinds configuration.';
+    return 'This table tier is not available for your current bankroll.';
+  }
+
+  function preflightAuthenticatedLiveMode(token, preflightGeneration){
+    function isCurrentPreflight(){
+      return preflightGeneration === authenticatedPreflightGeneration;
+    }
+    return fetchTableAccess(token).then(function(access){
+      if (!isCurrentPreflight()) return false;
+      if (access.inactivity) syncClosedTableRedirectFromSnapshot({ private: { inactivity: access.inactivity } });
+      if (access.allowed !== true && access.viewAllowed !== true) {
+        currentAccessToken = null;
+        stopLiveMode();
+        state.statusText = LIVE_STATUS_COPY.error;
+        setError(tableAccessDeniedMessage(access));
+        markBootReady();
+        syncClosedTableRedirectFromSignal(access.reason);
+        render();
+        return false;
+      }
+      currentAccessToken = token;
+      if (Number.isSafeInteger(Number(access.buyIn)) && Number(access.buyIn) > 0) state.buyIn = Number(access.buyIn);
+      startLiveMode(token);
+      return true;
+    }).catch(function(error){
+      if (!isCurrentPreflight()) return false;
+      klog('poker_table_access_preflight_failed', { code: error && (error.message || error.code) ? (error.message || error.code) : 'unknown' });
+      state.statusText = LIVE_STATUS_COPY.error;
+      setError('This table is not available. Return to the lobby.');
+      markBootReady();
+      render();
+      return false;
+    });
+  }
+
+  function getAuthApi(){
+    if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
+      return window.SupabaseAuth;
+    }
+    return null;
+  }
+
+  function getCurrentUser(){
+    var authApi = getAuthApi();
+    if (!authApi || typeof authApi.getCurrentUser !== 'function') return Promise.resolve(null);
+    return Promise.resolve().then(function(){ return authApi.getCurrentUser(); }).catch(function(){ return null; });
+  }
+
+  function resolveInitialIdentity(attempt){
+    var retry = Number.isInteger(attempt) ? attempt : 0;
+    return Promise.all([getAccessToken(), getCurrentUser()]).then(function(values){
+      var identity = { token: values[0] || null, user: values[1] || null };
+      if (identity.token || identity.user || !getAuthApi() || retry >= 4) return identity;
+      return new Promise(function(resolve){
+        window.setTimeout(function(){ resolve(resolveInitialIdentity(retry + 1)); }, 150);
+      });
+    });
+  }
+
+  function getAuthSessionToken(session){
+    if (!session || typeof session !== 'object') return null;
+    var token = session.access_token || session.accessToken || session.token;
+    return typeof token === 'string' && token ? token : null;
+  }
+
+  function decodeBase64Url(str){
+    var base64 = String(str || '').replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) base64 += '=';
+    return atob(base64);
+  }
+
+  function getUserIdFromToken(token){
+    if (!token || typeof token !== 'string') return null;
+    var parts = token.split('.');
+    if (parts.length < 2) return null;
+    try {
+      var payload = JSON.parse(decodeBase64Url(parts[1]));
+      return payload && payload.sub ? payload.sub : null;
+    } catch (_err){
+      return null;
+    }
+  }
+
+  function openSignIn(){
+    var bridge = window.SupabaseAuthBridge;
+    var methods = ['signIn', 'openSignIn', 'showAuth', 'startLogin'];
+    if (bridge){
+      for (var i = 0; i < methods.length; i++){
+        if (typeof bridge[methods[i]] === 'function'){
+          try {
+            bridge[methods[i]]();
+            return;
+          } catch (_err){}
+        }
+      }
+    }
+    window.location.href = '/account.html';
+  }
+
+  function isObject(value){
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function normalizeCard(card){
+    if (!card) return null;
+    var rank = '';
+    var suit = '';
+    if (typeof card === 'string'){
+      var trimmed = card.trim();
+      if (trimmed.length < 2) return null;
+      rank = trimmed.slice(0, -1).toUpperCase();
+      suit = trimmed.slice(-1).toUpperCase();
+    } else if (isObject(card)){
+      rank = String(card.r != null ? card.r : card.rank != null ? card.rank : '').trim().toUpperCase();
+      suit = String(card.s != null ? card.s : card.suit != null ? card.suit : '').trim().toUpperCase();
+    }
+    if (rank === 'T') rank = '10';
+    if (!SUIT_SYMBOLS[suit]) return null;
+    if (!/^(A|K|Q|J|10|9|8|7|6|5|4|3|2)$/.test(rank)) return null;
+    return { r: rank, s: suit };
+  }
+
+  function normalizeCards(cards){
+    if (!Array.isArray(cards)) return [];
+    var out = [];
+    for (var i = 0; i < cards.length; i++){
+      var normalized = normalizeCard(cards[i]);
+      if (normalized) out.push(normalized);
+    }
+    return out;
+  }
+
+  function normalizeEvalRank(rank){
+    if (typeof rank === 'number' && Number.isInteger(rank) && rank >= 2 && rank <= 14) return rank;
+    if (typeof rank !== 'string') return null;
+    var value = rank.trim().toUpperCase();
+    if (value === 'A') return 14;
+    if (value === 'K') return 13;
+    if (value === 'Q') return 12;
+    if (value === 'J') return 11;
+    if (value === 'T') return 10;
+    if (/^\d+$/.test(value)) {
+      var numeric = Number(value);
+      if (Number.isInteger(numeric) && numeric >= 2 && numeric <= 10) return numeric;
+    }
+    return null;
+  }
+
+  function normalizeEvalSuit(suit){
+    if (typeof suit !== 'string') return null;
+    var value = suit.trim().toUpperCase();
+    if (!SUIT_SYMBOLS[value]) return null;
+    return value;
+  }
+
+  function normalizeEvalCards(cards){
+    if (!Array.isArray(cards) || cards.length < 5) return null;
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < cards.length; i++){
+      var card = cards[i];
+      if (!card || typeof card !== 'object') return null;
+      var rank = normalizeEvalRank(card.r);
+      var suit = normalizeEvalSuit(card.s);
+      if (!rank || !suit) return null;
+      var key = String(rank) + '-' + suit;
+      if (seen[key]) return null;
+      seen[key] = true;
+      out.push({ rank: rank, suit: suit, raw: { r: card.r, s: suit } });
+    }
+    return out;
+  }
+
+  function compareRankVectors(left, right){
+    var a = Array.isArray(left) ? left : [];
+    var b = Array.isArray(right) ? right : [];
+    var maxLen = Math.max(a.length, b.length);
+    for (var i = 0; i < maxLen; i++){
+      var diff = (a[i] || 0) - (b[i] || 0);
+      if (diff !== 0) return diff > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  function sortByRankDescThenSuit(left, right){
+    if (left.rank !== right.rank) return right.rank - left.rank;
+    return left.suit.localeCompare(right.suit);
+  }
+
+  function findStraightRanks(ranksDesc){
+    var rankMap = {};
+    (Array.isArray(ranksDesc) ? ranksDesc : []).forEach(function(rank){ rankMap[rank] = true; });
+    if (rankMap[14]) rankMap[1] = true;
+    for (var high = 14; high >= 5; high--){
+      var ok = true;
+      for (var i = 0; i < 5; i++){
+        if (!rankMap[high - i]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok){
+        var ranks = [];
+        for (var j = 0; j < 5; j++) ranks.push(high - j);
+        return { high: high, ranks: ranks };
+      }
+    }
+    return null;
+  }
+
+  function pickStraightCards(ranks, cardsByRank){
+    var result = [];
+    for (var i = 0; i < ranks.length; i++){
+      var actual = ranks[i] === 1 ? 14 : ranks[i];
+      var list = cardsByRank[actual] || [];
+      result.push(list[0]);
+    }
+    return result;
+  }
+
+  function evaluateViewerBestHand(cards){
+    var normalized = normalizeEvalCards(cards);
+    if (!normalized) return null;
+    var allSorted = normalized.slice().sort(sortByRankDescThenSuit);
+    var cardsByRank = {};
+    var cardsBySuit = {};
+    normalized.forEach(function(card){
+      if (!cardsByRank[card.rank]) cardsByRank[card.rank] = [];
+      cardsByRank[card.rank].push(card);
+      if (!cardsBySuit[card.suit]) cardsBySuit[card.suit] = [];
+      cardsBySuit[card.suit].push(card);
+    });
+    Object.keys(cardsByRank).forEach(function(rank){
+      cardsByRank[rank].sort(function(a, b){ return a.suit.localeCompare(b.suit); });
+    });
+    Object.keys(cardsBySuit).forEach(function(suit){
+      cardsBySuit[suit].sort(sortByRankDescThenSuit);
+    });
+
+    var uniqueRanksDesc = Object.keys(cardsByRank).map(Number).sort(function(a, b){ return b - a; });
+    var ranksByCount = { 1: [], 2: [], 3: [], 4: [] };
+    uniqueRanksDesc.forEach(function(rank){
+      ranksByCount[cardsByRank[rank].length].push(rank);
+    });
+
+    var bestStraightFlush = null;
+    Object.keys(cardsBySuit).sort().forEach(function(suit){
+      var suitedCards = cardsBySuit[suit];
+      if (suitedCards.length < 5) return;
+      var suitRanks = suitedCards.map(function(entry){ return entry.rank; }).filter(function(rank, index, list){
+        return list.indexOf(rank) === index;
+      }).sort(function(a, b){ return b - a; });
+      var straightInSuit = findStraightRanks(suitRanks);
+      if (!straightInSuit) return;
+      var cardsByRankSuit = {};
+      suitedCards.forEach(function(entry){
+        if (!cardsByRankSuit[entry.rank]) cardsByRankSuit[entry.rank] = [];
+        cardsByRankSuit[entry.rank].push(entry);
+      });
+      var candidate = {
+        high: straightInSuit.high === 1 ? 5 : straightInSuit.high,
+        cards: pickStraightCards(straightInSuit.ranks, cardsByRankSuit)
+      };
+      if (!bestStraightFlush || candidate.high > bestStraightFlush.high) bestStraightFlush = candidate;
+    });
+    if (bestStraightFlush) return { category: HAND_CATEGORY.STRAIGHT_FLUSH, cards: bestStraightFlush.cards.map(function(entry){ return entry.raw; }) };
+
+    if (ranksByCount[4].length){
+      var quadRank = ranksByCount[4][0];
+      var quadCards = cardsByRank[quadRank].slice(0, 4);
+      var quadKicker = allSorted.find(function(entry){ return entry.rank !== quadRank; });
+      return { category: HAND_CATEGORY.QUADS, cards: quadCards.concat([quadKicker]).map(function(entry){ return entry.raw; }) };
+    }
+
+    if (ranksByCount[3].length){
+      var tripRank = ranksByCount[3][0];
+      var pairRank = ranksByCount[2].find(function(rank){ return rank !== tripRank; }) || ranksByCount[3][1];
+      if (pairRank){
+        return { category: HAND_CATEGORY.FULL_HOUSE, cards: cardsByRank[tripRank].slice(0, 3).concat(cardsByRank[pairRank].slice(0, 2)).map(function(entry){ return entry.raw; }) };
+      }
+    }
+
+    var bestFlush = null;
+    Object.keys(cardsBySuit).sort().forEach(function(suit){
+      var flushCards = cardsBySuit[suit];
+      if (flushCards.length < 5) return;
+      var topFlush = flushCards.slice(0, 5);
+      var ranks = topFlush.map(function(entry){ return entry.rank; });
+      if (!bestFlush || compareRankVectors(ranks, bestFlush.ranks) > 0) bestFlush = { ranks: ranks, cards: topFlush };
+    });
+    if (bestFlush) return { category: HAND_CATEGORY.FLUSH, cards: bestFlush.cards.map(function(entry){ return entry.raw; }) };
+
+    var straight = findStraightRanks(uniqueRanksDesc);
+    if (straight) return { category: HAND_CATEGORY.STRAIGHT, cards: pickStraightCards(straight.ranks, cardsByRank).map(function(entry){ return entry.raw; }) };
+
+    if (ranksByCount[3].length){
+      var tripsRank = ranksByCount[3][0];
+      return {
+        category: HAND_CATEGORY.TRIPS,
+        cards: cardsByRank[tripsRank].slice(0, 3).concat(allSorted.filter(function(entry){ return entry.rank !== tripsRank; }).slice(0, 2)).map(function(entry){ return entry.raw; })
+      };
+    }
+
+    if (ranksByCount[2].length >= 2){
+      var highPair = ranksByCount[2][0];
+      var lowPair = ranksByCount[2][1];
+      var twoPairKicker = allSorted.find(function(entry){ return entry.rank !== highPair && entry.rank !== lowPair; });
+      return {
+        category: HAND_CATEGORY.TWO_PAIR,
+        cards: cardsByRank[highPair].slice(0, 2).concat(cardsByRank[lowPair].slice(0, 2)).concat([twoPairKicker]).map(function(entry){ return entry.raw; })
+      };
+    }
+
+    if (ranksByCount[2].length){
+      var pairRankOnly = ranksByCount[2][0];
+      return {
+        category: HAND_CATEGORY.PAIR,
+        cards: cardsByRank[pairRankOnly].slice(0, 2).concat(allSorted.filter(function(entry){ return entry.rank !== pairRankOnly; }).slice(0, 3)).map(function(entry){ return entry.raw; })
+      };
+    }
+
+    return { category: HAND_CATEGORY.HIGH_CARD, cards: allSorted.slice(0, 5).map(function(entry){ return entry.raw; }) };
+  }
+
+  function formatViewerHandCategory(category){
+    if (category === HAND_CATEGORY.STRAIGHT_FLUSH) return 'Straight Flush';
+    if (category === HAND_CATEGORY.QUADS) return 'Four of a Kind';
+    if (category === HAND_CATEGORY.FULL_HOUSE) return 'Full House';
+    if (category === HAND_CATEGORY.FLUSH) return 'Flush';
+    if (category === HAND_CATEGORY.STRAIGHT) return 'Straight';
+    if (category === HAND_CATEGORY.TRIPS) return 'Three of a Kind';
+    if (category === HAND_CATEGORY.TWO_PAIR) return 'Two Pair';
+    if (category === HAND_CATEGORY.PAIR) return 'Pair';
+    return 'High Card';
+  }
+
+  function normalizeSeatNumber(rawSeatNo){
+    var seatNo = Number(rawSeatNo);
+    if (!Number.isInteger(seatNo) || seatNo < 0) return null;
+    return seatNo;
+  }
+
+  function getTrustedAvatarOrigin(){
+    var config = isObject(window.SUPABASE_CONFIG) ? window.SUPABASE_CONFIG : {};
+    var rawUrl = config.SUPABASE_URL || config.supabaseUrl || config.url || '';
+    try {
+      var parsed = new URL(rawUrl);
+      if (parsed.protocol !== 'https:' || !/^[a-z0-9-]+\.supabase\.co$/i.test(parsed.hostname)) return '';
+      if (parsed.href !== parsed.origin + '/') return '';
+      return parsed.origin;
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  function normalizePokerAvatar(rawAvatar){
+    if (!isObject(rawAvatar)) return null;
+    if (rawAvatar.type === 'default' && POKER_AVATAR_VARIANTS[rawAvatar.variant] === true){
+      return { type: 'default', variant: rawAvatar.variant };
+    }
+    if (rawAvatar.type !== 'uploaded' || typeof rawAvatar.url !== 'string') return null;
+    try {
+      var parsed = new URL(rawAvatar.url);
+      var trustedOrigin = getTrustedAvatarOrigin();
+      if (!trustedOrigin || parsed.origin !== trustedOrigin) return null;
+      if (!/^\/storage\/v1\/object\/public\/profile-avatars\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$/i.test(parsed.pathname)) return null;
+      if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.port) return null;
+      return { type: 'uploaded', url: parsed.href };
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function normalizePokerProfile(rawProfile){
+    if (!isObject(rawProfile)) return null;
+    var handle = typeof rawProfile.handle === 'string' ? rawProfile.handle.trim().toLowerCase() : '';
+    var displayName = typeof rawProfile.displayName === 'string' ? rawProfile.displayName.trim().replace(/\s+/g, ' ') : '';
+    var avatar = normalizePokerAvatar(rawProfile.avatar);
+    if (!/^[a-z0-9][a-z0-9_-]{2,23}$/.test(handle)) return null;
+    if (displayName.length < 2 || displayName.length > 40 || /[\u0000-\u001f\u007f]/.test(displayName)) return null;
+    if (!avatar) return null;
+    return { handle: handle, displayName: displayName, avatar: avatar };
+  }
+
+  function hashBotPresentationKey(value){
+    var hash = 2166136261;
+    for (var i = 0; i < value.length; i++){
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  function normalizeBotPresentation(entry){
+    if (!isObject(entry)) return null;
+    var key = typeof entry.key === 'string' ? entry.key.trim().toLowerCase() : '';
+    var displayName = typeof entry.displayName === 'string' ? entry.displayName.trim() : '';
+    var gender = entry.gender === 'male' || entry.gender === 'female' ? entry.gender : '';
+    var file = typeof entry.file === 'string' ? entry.file.trim().toLowerCase() : '';
+    if (!/^[a-z][a-z0-9-]{1,23}$/.test(key)) return null;
+    if (displayName.length < 2 || displayName.length > 24 || /[\u0000-\u001f\u007f]/.test(displayName)) return null;
+    if (!gender || !/^bot-(male|female)-\d{2}-v\d+\.webp$/.test(file)) return null;
+    if (file.indexOf('bot-' + gender + '-') !== 0) return null;
+    return {
+      key: key,
+      displayName: displayName,
+      gender: gender,
+      avatarPath: BOT_AVATAR_BASE_PATH + file
+    };
+  }
+
+  function normalizeBotPresentationCatalog(entries){
+    var seenKeys = {};
+    var seenNames = {};
+    return (Array.isArray(entries) ? entries : []).map(normalizeBotPresentation).filter(function(entry){
+      if (!entry) return false;
+      var nameKey = entry.displayName.toLowerCase();
+      if (seenKeys[entry.key] || seenNames[nameKey]) return false;
+      seenKeys[entry.key] = true;
+      seenNames[nameKey] = true;
+      return true;
+    });
+  }
+
+  function resolveBotPresentation(tableId, seatNo, usedKeys){
+    if (!BOT_PRESENTATIONS.length || !Number.isInteger(seatNo) || seatNo < 0) return null;
+    var normalizedTableId = typeof tableId === 'string' && tableId.trim() ? tableId.trim() : 'poker-table';
+    var baseIndex = (hashBotPresentationKey(normalizedTableId) + seatNo) % BOT_PRESENTATIONS.length;
+    for (var offset = 0; offset < BOT_PRESENTATIONS.length; offset++){
+      var entry = BOT_PRESENTATIONS[(baseIndex + offset) % BOT_PRESENTATIONS.length];
+      if (entry && (!usedKeys || usedKeys[entry.key] !== true)) return entry;
+    }
+    return null;
+  }
+
+  function assignBotPresentations(seats, tableId){
+    var usedKeys = {};
+    (Array.isArray(seats) ? seats : []).filter(function(seat){
+      return seat && seat.isBot === true && typeof seat.userId === 'string' && seat.userId;
+    }).sort(function(left, right){
+      return left.seatNo - right.seatNo || left.userId.localeCompare(right.userId);
+    }).forEach(function(seat){
+      var presentation = resolveBotPresentation(tableId, seat.seatNo, usedKeys);
+      seat.botPresentation = presentation;
+      seat.displayName = presentation ? presentation.displayName : 'Bot';
+      if (presentation) usedKeys[presentation.key] = true;
+    });
+    return seats;
+  }
+
+  function normalizeSeatRows(payload, previousSeats, currentTableId){
+    var seatMap = {};
+    var previousMap = {};
+    var sourceSeats = [];
+    if (Array.isArray(previousSeats)){
+      previousSeats.forEach(function(seat){
+        if (!seat || !Number.isInteger(seat.seatNo)) return;
+        previousMap[seat.seatNo] = seat;
+      });
+    }
+
+    var tableObj = isObject(payload.table) ? payload.table : {};
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    var snapshotTableId = typeof payload.tableId === 'string' && payload.tableId
+      ? payload.tableId
+      : (typeof payload.roomId === 'string' && payload.roomId
+        ? payload.roomId
+        : (typeof tableObj.tableId === 'string' && tableObj.tableId
+          ? tableObj.tableId
+          : (typeof publicObj.roomId === 'string' && publicObj.roomId
+            ? publicObj.roomId
+            : (typeof currentTableId === 'string' ? currentTableId : ''))));
+    if (Array.isArray(tableObj.members)) sourceSeats = sourceSeats.concat(tableObj.members);
+    if (Array.isArray(payload.authoritativeMembers)) sourceSeats = sourceSeats.concat(payload.authoritativeMembers);
+    if (Array.isArray(payload.seats)) sourceSeats = sourceSeats.concat(payload.seats);
+    if (Array.isArray(publicObj.seats)) sourceSeats = sourceSeats.concat(publicObj.seats);
+
+    sourceSeats.forEach(function(rawSeat){
+      if (!rawSeat) return;
+      var seatNo = normalizeSeatNumber(
+        rawSeat.seatNo != null ? rawSeat.seatNo : rawSeat.seat != null ? rawSeat.seat : rawSeat.position
+      );
+      if (seatNo == null) return;
+      var previous = previousMap[seatNo] || {};
+      var userId = typeof rawSeat.userId === 'string' && rawSeat.userId ? rawSeat.userId : (typeof previous.userId === 'string' ? previous.userId : null);
+      var samePreviousUser = !!(userId && previous.userId === userId);
+      var isBot = rawSeat.isBot === true || (samePreviousUser && previous.isBot === true) || /^bot[-_:]/i.test(userId || '');
+      var profile = isBot ? null : (normalizePokerProfile(rawSeat.profile) || (samePreviousUser ? normalizePokerProfile(previous.profile) : null));
+      var displayName = isBot
+        ? 'Bot'
+        : ((profile && profile.displayName) || rawSeat.displayName || rawSeat.name || rawSeat.username || rawSeat.userName || rawSeat.handle || (samePreviousUser ? previous.displayName : null) || null);
+      var status = typeof rawSeat.status === 'string' && rawSeat.status ? rawSeat.status.toUpperCase() : (previous.status || 'ACTIVE');
+      seatMap[seatNo] = {
+        seatNo: seatNo,
+        userId: userId,
+        displayName: displayName,
+        status: status,
+        isBot: isBot,
+        profile: profile,
+        botPresentation: null
+      };
+    });
+
+    var normalizedSeats = Object.keys(seatMap)
+      .map(function(key){ return seatMap[key]; })
+      .sort(function(left, right){ return left.seatNo - right.seatNo; });
+    return assignBotPresentations(normalizedSeats, snapshotTableId);
+  }
+
+  function normalizeStacks(payload){
+    if (isObject(payload.stacks)) return Object.assign({}, payload.stacks);
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    if (isObject(publicObj.stacks)) return Object.assign({}, publicObj.stacks);
+    return null;
+  }
+
+  function normalizeNumericUserMap(source){
+    if (!isObject(source)) return null;
+    var next = {};
+    Object.keys(source).forEach(function(userId){
+      if (!userId) return;
+      var value = Number(source[userId]);
+      if (!Number.isFinite(value) || value < 0) return;
+      next[userId] = value;
+    });
+    return Object.keys(next).length ? next : null;
+  }
+
+  function extractSeatCommittedByUserId(payload){
+    var publicObj = isObject(payload && payload.public) ? payload.public : {};
+    var committed = readSnapshotField(payload, publicObj, 'committedByUserId');
+    var field = committed.present ? committed : readSnapshotField(payload, publicObj, 'betThisRoundByUserId');
+    return field.present ? (normalizeNumericUserMap(field.value) || {}) : null;
+  }
+
+  function captureVisualSnapshot(){
+    return {
+      potTotal: Number(state.potTotal) || 0,
+      phase: state.phase || null,
+      handId: state.handId || null,
+      tableId: state.tableId,
+      viewerId: state.currentUserId,
+      viewerSeat: (deriveCurrentSeat() || {}).seatNo || null,
+      cardSeats: captureCardSeats(),
+      communityCards: state.communityCards.map(normalizeCard),
+      committedByUserId: Object.assign({}, seatCommittedByUserId),
+      lastActionByUserId: Object.assign({}, state.lastBettingRoundActionByUserId || {}),
+      settlementPresentation: cloneSettlementPresentation(getCurrentSettlementPresentation())
+    };
+  }
+
+  function normalizeLegalActions(source){
+    var list = [];
+    var raw = source;
+    if (Array.isArray(raw)) list = raw;
+    else if (isObject(raw) && Array.isArray(raw.actions)) list = raw.actions;
+    return list
+      .map(function(entry){
+        if (typeof entry === 'string') return entry.trim().toUpperCase();
+        if (isObject(entry) && typeof entry.type === 'string') return entry.type.trim().toUpperCase();
+        return '';
+      })
+      .filter(Boolean);
+  }
+
+  function normalizeConstraints(primary, secondary){
+    var raw = isObject(primary) ? primary : isObject(secondary) ? secondary : {};
+    return {
+      toCall: raw.toCall != null ? Number(raw.toCall) : null,
+      minRaiseTo: raw.minRaiseTo != null ? Number(raw.minRaiseTo) : null,
+      maxRaiseTo: raw.maxRaiseTo != null ? Number(raw.maxRaiseTo) : null,
+      maxBetAmount: raw.maxBetAmount != null ? Number(raw.maxBetAmount) : null,
+      minBetAmount: raw.minBetAmount != null ? Number(raw.minBetAmount) : null
+    };
+  }
+
+  function normalizeLastBettingRoundActionByUserId(source){
+    var raw = isObject(source) ? source : {};
+    var allowed = { fold: true, check: true, call: true, raise: true, all_in: true };
+    var next = {};
+    Object.keys(raw).forEach(function(userId){
+      var action = typeof raw[userId] === 'string' ? raw[userId].trim().toLowerCase() : '';
+      if (userId && allowed[action]) next[userId] = action;
+    });
+    return next;
+  }
+
+  function normalizeFoldedByUserId(source){
+    var next = Object.create(null);
+    if (!isObject(source)) return next;
+    Object.keys(source).forEach(function(userId){
+      if (userId && source[userId] === true) next[userId] = true;
+    });
+    return next;
+  }
+
+  function normalizeShowdown(source){
+    if (!isObject(source)) return null;
+    var showdown = {
+      winners: Array.isArray(source.winners) ? source.winners.slice() : [],
+      reason: typeof source.reason === 'string' ? source.reason : null,
+      handId: typeof source.handId === 'string' ? source.handId : null,
+      potAwardedTotal: source.potAwardedTotal,
+      potsAwarded: Array.isArray(source.potsAwarded) ? source.potsAwarded.map(function(pot){
+        return isObject(pot) ? {
+          amount: pot.amount,
+          winners: Array.isArray(pot.winners) ? pot.winners.slice() : pot.winners,
+          eligibleUserIds: Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds.slice() : pot.eligibleUserIds
+        } : pot;
+      }) : source.potsAwarded
+    };
+    if (Array.isArray(source.revealedShowdownParticipants)){
+      showdown.revealedShowdownParticipants = source.revealedShowdownParticipants
+        .filter(function(entry){
+          return entry && typeof entry.userId === 'string';
+        })
+        .map(function(entry){
+          return {
+            userId: entry.userId,
+            holeCards: normalizeCards(entry.holeCards)
+          };
+        })
+        .filter(function(entry){
+          return entry.holeCards.length === 2;
+        });
+    }
+    return showdown;
+  }
+
+  function normalizeHandSettlement(source){
+    if (!isObject(source)) return null;
+    return {
+      handId: typeof source.handId === 'string' ? source.handId : null,
+      settledAt: typeof source.settledAt === 'string' ? source.settledAt : null,
+      payouts: isObject(source.payouts) ? Object.assign({}, source.payouts) : source.payouts
+    };
+  }
+
+  function invalidSettlementPresentation(reason, handId, settledAt){
+    return {
+      valid: false,
+      failureReason: reason || 'invalid_settlement',
+      handId: handId || null,
+      settledAt: settledAt || null,
+      totalAmount: 0,
+      pots: [],
+      byUserId: {}
+    };
+  }
+
+  function normalizeSettlementUserId(value){
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
+  function normalizeSettlementChipAmount(value){
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+
+  function normalizeSettlementUserIds(source){
+    if (!Array.isArray(source) || !source.length) return null;
+    var result = [];
+    var seen = Object.create(null);
+    for (var i = 0; i < source.length; i++){
+      var userId = normalizeSettlementUserId(source[i]);
+      if (!userId || seen[userId]) return null;
+      seen[userId] = true;
+      result.push(userId);
+    }
+    return result;
+  }
+
+  function normalizeSettlementPayouts(source){
+    if (!isObject(source)) return null;
+    var result = Object.create(null);
+    var keys = Object.keys(source);
+    for (var i = 0; i < keys.length; i++){
+      var userId = normalizeSettlementUserId(keys[i]);
+      var amount = normalizeSettlementChipAmount(source[keys[i]]);
+      if (!userId || amount == null || hasOwn(result, userId)) return null;
+      if (amount > 0) result[userId] = amount;
+    }
+    return result;
+  }
+
+  function allocatePotRecipients(amount, orderedWinnerIds){
+    var safeAmount = normalizeSettlementChipAmount(amount);
+    var winners = normalizeSettlementUserIds(orderedWinnerIds);
+    if (safeAmount == null || !winners || (safeAmount > 0 && !winners.length)) return null;
+    var baseShare = Math.floor(safeAmount / winners.length);
+    var remainder = safeAmount - (baseShare * winners.length);
+    return winners.map(function(userId, index){
+      return { userId: userId, amount: baseShare + (index < remainder ? 1 : 0) };
+    });
+  }
+
+  function classifySettlementPot(reason, potIndex, eligibleUserIds, winners, sidePotNumber){
+    if (reason === 'all_folded'){
+      if (potIndex !== 0 || eligibleUserIds.length !== 1 || winners.length !== 1 || eligibleUserIds[0] !== winners[0]) return null;
+      return { kind: 'main', sidePotNumber: null };
+    }
+    if (reason !== 'computed') return null;
+    if (potIndex === 0){
+      if (eligibleUserIds.length < 2) return null;
+      return { kind: 'main', sidePotNumber: null };
+    }
+    if (eligibleUserIds.length >= 2) return { kind: 'side', sidePotNumber: sidePotNumber };
+    if (eligibleUserIds.length === 1 && winners.length === 1 && eligibleUserIds[0] === winners[0]) return { kind: 'return', sidePotNumber: null };
+    return null;
+  }
+
+  function buildSettlementPresentation(input){
+    var showdown = input && input.showdown;
+    var settlement = input && input.handSettlement;
+    var handId = showdown && normalizeSettlementUserId(showdown.handId);
+    var settlementHandId = settlement && normalizeSettlementUserId(settlement.handId);
+    var settledAt = settlement && typeof settlement.settledAt === 'string' ? settlement.settledAt : null;
+    if (!isObject(showdown) || !isObject(settlement)) return invalidSettlementPresentation('missing_settlement_pair', handId || settlementHandId, settledAt);
+    if (!handId || !settlementHandId || handId !== settlementHandId) return invalidSettlementPresentation('hand_id_mismatch', handId || settlementHandId, settledAt);
+    var reason = typeof showdown.reason === 'string' ? showdown.reason.trim().toLowerCase() : '';
+    var totalAmount = normalizeSettlementChipAmount(showdown.potAwardedTotal);
+    var payouts = normalizeSettlementPayouts(settlement.payouts);
+    var sourcePots = showdown.potsAwarded;
+    if (totalAmount == null || !payouts || !Array.isArray(sourcePots) || !sourcePots.length) return invalidSettlementPresentation('malformed_totals', handId, settledAt);
+    if (reason === 'all_folded' && sourcePots.length !== 1) return invalidSettlementPresentation('malformed_all_folded', handId, settledAt);
+
+    var pots = [];
+    var byUserId = Object.create(null);
+    var calculatedPayouts = Object.create(null);
+    var calculatedTotal = 0;
+    var sidePotNumber = 0;
+    for (var potIndex = 0; potIndex < sourcePots.length; potIndex++){
+      var sourcePot = sourcePots[potIndex];
+      if (!isObject(sourcePot)) return invalidSettlementPresentation('malformed_pot', handId, settledAt);
+      var amount = normalizeSettlementChipAmount(sourcePot.amount);
+      var winners = normalizeSettlementUserIds(sourcePot.winners);
+      var eligibleUserIds = normalizeSettlementUserIds(sourcePot.eligibleUserIds);
+      if (amount == null || !winners || !eligibleUserIds) return invalidSettlementPresentation('malformed_pot', handId, settledAt);
+      for (var winnerIndex = 0; winnerIndex < winners.length; winnerIndex++){
+        if (eligibleUserIds.indexOf(winners[winnerIndex]) === -1) return invalidSettlementPresentation('ineligible_winner', handId, settledAt);
+      }
+      var nextSidePotNumber = sidePotNumber + 1;
+      var classification = classifySettlementPot(reason, potIndex, eligibleUserIds, winners, nextSidePotNumber);
+      if (!classification) return invalidSettlementPresentation('invalid_pot_classification', handId, settledAt);
+      if (classification.kind === 'side') sidePotNumber = nextSidePotNumber;
+      var recipients = allocatePotRecipients(amount, winners);
+      if (!recipients) return invalidSettlementPresentation('invalid_split', handId, settledAt);
+      var recipientTotal = 0;
+      var awardId = handId + ':pot:' + potIndex;
+      recipients.forEach(function(recipient){
+        recipientTotal += recipient.amount;
+        calculatedPayouts[recipient.userId] = (calculatedPayouts[recipient.userId] || 0) + recipient.amount;
+        if (!byUserId[recipient.userId]) byUserId[recipient.userId] = [];
+        byUserId[recipient.userId].push({
+          awardId: awardId,
+          potIndex: potIndex,
+          kind: classification.kind,
+          sidePotNumber: classification.sidePotNumber,
+          amount: recipient.amount
+        });
+      });
+      if (recipientTotal !== amount) return invalidSettlementPresentation('split_total_mismatch', handId, settledAt);
+      pots.push({
+        awardId: awardId,
+        potIndex: potIndex,
+        kind: classification.kind,
+        sidePotNumber: classification.sidePotNumber,
+        amount: amount,
+        recipients: recipients,
+        eligibleUserIds: eligibleUserIds
+      });
+      calculatedTotal += amount;
+    }
+    if (calculatedTotal !== totalAmount) return invalidSettlementPresentation('pot_total_mismatch', handId, settledAt);
+    var payoutKeys = Object.keys(payouts).sort();
+    var calculatedKeys = Object.keys(calculatedPayouts).filter(function(userId){ return calculatedPayouts[userId] > 0; }).sort();
+    if (payoutKeys.join('|') !== calculatedKeys.join('|')) return invalidSettlementPresentation('payout_users_mismatch', handId, settledAt);
+    for (var payoutIndex = 0; payoutIndex < payoutKeys.length; payoutIndex++){
+      if (payouts[payoutKeys[payoutIndex]] !== calculatedPayouts[payoutKeys[payoutIndex]]) return invalidSettlementPresentation('payout_amount_mismatch', handId, settledAt);
+    }
+    return {
+      valid: true,
+      failureReason: null,
+      handId: handId,
+      settledAt: settledAt,
+      totalAmount: totalAmount,
+      pots: pots,
+      byUserId: byUserId
+    };
+  }
+
+  function mapRevealedShowdownCards(showdown){
+    var revealed = {};
+    if (!showdown || !Array.isArray(showdown.revealedShowdownParticipants)) return revealed;
+    showdown.revealedShowdownParticipants.forEach(function(entry){
+      if (!entry || typeof entry.userId !== 'string') return;
+      if (!Array.isArray(entry.holeCards) || entry.holeCards.length !== 2) return;
+      revealed[entry.userId] = entry.holeCards.slice(0, 2);
+    });
+    return revealed;
+  }
+
+  function resolveCelebrationRoyalCards(cards, demo){
+    if (!Array.isArray(cards) || cards.length !== 5){
+      if (demo === true) return ['10', 'J', 'Q', 'K', 'A'].map(function(rank){ return { r: rank, s: 'S' }; });
+      return null;
+    }
+    var normalized = cards.map(normalizeCard);
+    if (normalized.some(function(card){ return !card; })) return null;
+    var ranks = normalized.map(function(card){ return normalizeEvalRank(card.r); }).sort(function(a, b){ return a - b; });
+    if (ranks.join(',') !== '10,11,12,13,14' || normalized.some(function(card){ return card.s !== normalized[0].s; })) return null;
+    return normalized.slice().sort(function(a, b){ return normalizeEvalRank(a.r) - normalizeEvalRank(b.r); });
+  }
+
+  function resolveCelebrationHand(best){
+    if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
+    var cards = best.cards.map(normalizeCard);
+    var evaluated = normalizeEvalCards(cards);
+    if (!evaluated || evaluated.length !== 5) return null;
+    var title = best.category === HAND_CATEGORY.STRAIGHT ? 'STRAIGHT'
+      : best.category === HAND_CATEGORY.FLUSH ? 'FLUSH'
+      : best.category === HAND_CATEGORY.FULL_HOUSE ? 'FULL HOUSE'
+      : best.category === HAND_CATEGORY.QUADS ? 'FOUR OF A KIND'
+      : best.category === HAND_CATEGORY.STRAIGHT_FLUSH ? 'STRAIGHT FLUSH' : null;
+    if (!title) return null;
+    if (best.category === HAND_CATEGORY.STRAIGHT_FLUSH){
+      var royalCards = resolveCelebrationRoyalCards(cards, false);
+      if (royalCards) return { title: 'ROYAL FLUSH', cards: royalCards };
+    }
+    return { title: title, cards: cards };
+  }
+
+  function newWinStreakCursor(){
+    return { identityKey: null, lastHandId: null, lastVersion: -1, counts: Object.create(null), processedHandIds: Object.create(null) };
+  }
+
+  function resetWinStreakCursor(cursor){
+    if (!cursor) return newWinStreakCursor();
+    cursor.identityKey = null;
+    cursor.lastHandId = null;
+    cursor.lastVersion = -1;
+    cursor.counts = Object.create(null);
+    cursor.processedHandIds = Object.create(null);
+    return cursor;
+  }
+
+  function clearWinStreakCounts(cursor){
+    cursor.lastHandId = null;
+    cursor.lastVersion = -1;
+    cursor.counts = Object.create(null);
+    cursor.processedHandIds = Object.create(null);
+  }
+
+  function resetWinStreakSession(){
+    resetWinStreakCursor(winStreakCursor);
+    winStreakPendingHandId = null;
+    winStreakSequenceIntact = false;
+  }
+
+  function resetWinStreakCountsForSession(){
+    resetWinStreakCursor(winStreakCursor);
+    winStreakSequenceIntact = false;
+  }
+
+  function recordWinStreakSettlement(cursor, input){
+    if (!cursor || !input) return [];
+    var tableId = typeof input.tableId === 'string' && input.tableId ? input.tableId : null;
+    var userId = typeof input.currentUserId === 'string' && input.currentUserId ? input.currentUserId : 'guest';
+    var seatNo = Number.isInteger(input.currentSeatNo) ? input.currentSeatNo : null;
+    var identityKey = tableId ? JSON.stringify([tableId, userId, seatNo]) : null;
+    if (!identityKey){ resetWinStreakCursor(cursor); return []; }
+    if (cursor.identityKey && cursor.identityKey !== identityKey){
+      resetWinStreakCursor(cursor);
+      cursor.identityKey = identityKey;
+      return [];
+    }
+    if (!cursor.identityKey) cursor.identityKey = identityKey;
+    var presentation = input.settlementPresentation;
+    var handId = typeof input.handId === 'string' && input.handId ? input.handId : null;
+    var version = Number(input.version);
+    if (input.transition !== true) return [];
+    if (!handId || input.phase !== 'SETTLED' || !presentation || !presentation.valid
+      || presentation.handId !== handId || !Array.isArray(presentation.pots)
+      || !Number.isSafeInteger(version) || version < 0){
+      clearWinStreakCounts(cursor);
+      return [];
+    }
+    if (cursor.processedHandIds[handId]) return [];
+    if (input.sequenceIntact === false) clearWinStreakCounts(cursor);
+    if (cursor.lastVersion >= 0 && version <= cursor.lastVersion){
+      clearWinStreakCounts(cursor);
+      return [];
+    }
+
+    var outcomes = Object.create(null);
+    var unavailable = Object.create(null);
+    var participants = Object.create(null);
+    (Array.isArray(input.seats) ? input.seats : []).forEach(function(seat){
+      if (!seat || !seat.userId) return;
+      var status = String(seat.status || '').toUpperCase();
+      if (status === 'WAITING_NEXT_HAND' || status === 'OUT_OF_CHIPS') unavailable[seat.userId] = true;
+      else if (status === 'FOLDED') { participants[seat.userId] = true; outcomes[seat.userId] = false; }
+    });
+    if (isObject(input.foldedByUserId)){
+      Object.keys(input.foldedByUserId).forEach(function(id){
+        if (id && input.foldedByUserId[id] === true){ participants[id] = true; outcomes[id] = false; }
+      });
+    }
+    presentation.pots.forEach(function(pot){
+      if (!pot || !Array.isArray(pot.recipients)) return;
+      if (pot.kind === 'main' || pot.kind === 'side'){
+        (Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds : []).forEach(function(id){
+          if (!id) return;
+          participants[id] = true;
+          if (!hasOwn(outcomes, id)) outcomes[id] = false;
+        });
+        pot.recipients.forEach(function(recipient){
+          if (recipient && recipient.userId && Number.isSafeInteger(recipient.amount) && recipient.amount > 0){
+            participants[recipient.userId] = true;
+            outcomes[recipient.userId] = true;
+          }
+        });
+      } else if (pot.kind === 'return'){
+        pot.recipients.forEach(function(recipient){
+          if (recipient && recipient.userId){
+            participants[recipient.userId] = true;
+            if (!hasOwn(outcomes, recipient.userId)) outcomes[recipient.userId] = false;
+          }
+        });
+      }
+    });
+    Object.keys(unavailable).forEach(function(id){ if (!participants[id]) delete outcomes[id]; });
+    if (!Object.keys(outcomes).length){ clearWinStreakCounts(cursor); return []; }
+
+    var candidates = [];
+    Object.keys(outcomes).sort().forEach(function(id){
+      if (outcomes[id]){
+        cursor.counts[id] = (Number(cursor.counts[id]) || 0) + 1;
+        if (cursor.counts[id] >= 5) candidates.push({ userId: id, count: cursor.counts[id] });
+      } else {
+        delete cursor.counts[id];
+      }
+    });
+    cursor.lastHandId = handId;
+    cursor.lastVersion = Number.isSafeInteger(version) && version >= 0 ? version : cursor.lastVersion;
+    cursor.processedHandIds[handId] = true;
+    return candidates;
+  }
+
+  function selectCelebrationForSettlement(input){
+    var presentation = input && input.settlementPresentation;
+    if (!input || input.phase !== 'SETTLED' || !input.handId || !input.showdown || !input.handSettlement
+      || input.showdown.handId !== input.handId || input.handSettlement.handId !== input.handId
+      || !presentation || !presentation.valid || presentation.handId !== input.handId) return null;
+    var awards = Object.create(null);
+    var confirmedWinners = Object.create(null);
+    presentation.pots.forEach(function(pot){
+      if (pot.kind !== 'main' && pot.kind !== 'side') return;
+      pot.recipients.forEach(function(recipient){
+        if (recipient.amount <= 0) return;
+        confirmedWinners[recipient.userId] = true;
+        var currentAmount = awards[recipient.userId] || 0;
+        if (!Number.isSafeInteger(currentAmount + recipient.amount)) return;
+        awards[recipient.userId] = currentAmount + recipient.amount;
+      });
+    });
+    var winners = Object.keys(confirmedWinners).sort();
+    var viewerIndex = winners.indexOf(input.currentUserId);
+    if (viewerIndex > 0) winners.unshift(winners.splice(viewerIndex, 1)[0]);
+    for (var i = 0; i < winners.length; i++){
+      var userId = winners[i];
+      var revealed = input.revealedShowdownCardsByUserId && input.revealedShowdownCardsByUserId[userId];
+      var holeCards = Array.isArray(revealed) && revealed.length === 2 ? revealed : [];
+      if (userId === input.currentUserId && Array.isArray(input.heroCards) && input.heroCards.length === 2) holeCards = input.heroCards;
+      var hasVerifiedHoleCards = holeCards.length === 2;
+      var cards = (input.communityCards || []).concat(holeCards);
+      var best = cards.length <= 7 ? evaluateViewerBestHand(cards) : null;
+      var hand = resolveCelebrationHand(best);
+      // Without both hole cards, only a public-board royal proves the exact best five.
+      if (hand && (hasVerifiedHoleCards || hand.title === 'ROYAL FLUSH')){
+        return { kind: 'hand', userId: userId, title: hand.title, cards: hand.cards };
+      }
+    }
+    var buyIn = input.buyIn;
+    if (!Number.isSafeInteger(buyIn) || buyIn <= 0 || !Number.isSafeInteger(5 * buyIn)) return null;
+    for (var j = 0; j < winners.length; j++){
+      if (Number.isSafeInteger(awards[winners[j]]) && awards[winners[j]] >= 5 * buyIn) return { kind: 'pot', userId: winners[j], amount: awards[winners[j]] };
+    }
+    return null;
+  }
+
+  function celebrationDuration(){
+    return 1600;
+  }
+
+  function celebrationExitDuration(){
+    return 400;
+  }
+
+  function claimCelebrationTransition(cursor, input, frame, version, transition){
+    if (!input.tableId || !input.handId || !Number.isSafeInteger(version) || version < 0) return false;
+    if (cursor.tableId !== input.tableId){
+      cursor.tableId = input.tableId; cursor.handId = null; cursor.version = -1; cursor.consumed = false;
+    }
+    if (version <= cursor.version) return false;
+    cursor.version = version;
+    if (cursor.handId !== input.handId){ cursor.handId = input.handId; cursor.consumed = false; }
+    if (input.phase !== 'SETTLED') return false;
+    var claimed = !cursor.consumed && transition && !frame.initial && !frame.suppressSettlementAnimation;
+    cursor.consumed = true;
+    return claimed;
+  }
+
+  function celebrateSettlement(frame, incomingVersion, transition, streakCandidates){
+    if (!claimCelebrationTransition(celebrationCursor, state, frame || {}, incomingVersion, transition)) return;
+    if (!state.wsReady || state.reconnectGate || state.mode !== 'live') return;
+    var selection = selectCelebrationForSettlement(state);
+    if (!selection && Array.isArray(streakCandidates) && streakCandidates.length){
+      var orderedStreakCandidates = streakCandidates.slice();
+      var viewerIndex = orderedStreakCandidates.findIndex(function(entry){ return entry.userId === state.currentUserId; });
+      if (viewerIndex > 0) orderedStreakCandidates.unshift(orderedStreakCandidates.splice(viewerIndex, 1)[0]);
+      selection = Object.assign({ kind: 'streak' }, orderedStreakCandidates[0]);
+    }
+    if (selection) showCelebration(selection, { demo: false, duration: celebrationDuration() });
+  }
+
+  function observeCelebrationSnapshot(payload, frame){
+    if (!celebration || celebration.exiting || !payload) return;
+    if (frame.initial || frame.suppressSettlementAnimation){ clearCelebration(); return; }
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    var hand = payload.hand || publicObj.hand || {};
+    var turn = payload.turn || publicObj.turn || {};
+    if (hand.status != null && typeof hand.status !== 'string'){ deemphasizeCelebration(); return; }
+    var nextHand = extractSnapshotHandId(payload);
+    var lastActionField = readSnapshotField(payload, publicObj, 'lastBettingRoundActionByUserId');
+    var actionChanged = lastActionField.present && JSON.stringify(lastActionField.value || {}) !== JSON.stringify(state.lastBettingRoundActionByUserId || {});
+    if ((nextHand && nextHand !== celebration.handId) || turn.userId
+      || (!celebration.demo && hand.status && hand.status.toUpperCase() !== 'SETTLED')
+      || (celebration.demo && Number(payload.stateVersion) > Number(state.stateVersion)) || actionChanged) deemphasizeCelebration();
+  }
+
+  function cloneRevealedShowdownCards(source){
+    var next = {};
+    if (!isObject(source)) return next;
+    Object.keys(source).forEach(function(userId){
+      if (!Array.isArray(source[userId])) return;
+      next[userId] = source[userId].slice(0, 2);
+    });
+    return next;
+  }
+
+  function cloneSettlementPresentation(source){
+    return source ? cloneState(source) : null;
+  }
+
+  function normalizeSettlementRevealDueAt(value){
+    if (value == null || value === '') return null;
+    var dueAtMs = Number(value);
+    return Number.isFinite(dueAtMs) && dueAtMs >= 0 ? dueAtMs : null;
+  }
+
+  function resolveSettlementRevealDueAt(presentation, authoritativeDueAtMs){
+    var normalizedAuthoritativeDueAtMs = normalizeSettlementRevealDueAt(authoritativeDueAtMs);
+    if (Number.isFinite(normalizedAuthoritativeDueAtMs)) return normalizedAuthoritativeDueAtMs;
+    var settledAtMs = presentation && presentation.settledAt ? Date.parse(presentation.settledAt) : NaN;
+    return Number.isFinite(settledAtMs) && settledAtMs <= Date.now() + 1000 ? settledAtMs + WINNER_REVEAL_MS : Date.now() + WINNER_REVEAL_MS;
+  }
+
+  function syncStickyWinnerReveal(minimumVisibleUntilMs, settlementPairComplete){
+    var handId = state.handId || (state.handSettlement && state.handSettlement.handId) || (state.showdown && state.showdown.handId) || null;
+    if (!handId || state.phase !== 'SETTLED' || (!state.showdown && !state.settlementPresentation)) return;
+    if (stickyWinnerReveal.handId !== handId && lastPresentedSettlementHandId !== handId && settlementPairComplete !== true) return;
+    var authoritativeRevealDueAtMs = normalizeSettlementRevealDueAt(state.settlementRevealDueAtMs);
+    var settlementPresentation = state.settlementPresentation;
+    var authoritativeTargetedWindow = Number.isFinite(authoritativeRevealDueAtMs)
+      && settlementPresentation
+      && settlementPresentation.valid === true
+      && settlementPresentation.handId === handId;
+    if (Number.isFinite(authoritativeRevealDueAtMs) && authoritativeTargetedWindow !== true) return;
+    if (stickyWinnerReveal.handId !== handId && lastPresentedSettlementHandId !== handId){
+      var visibleUntilMs = authoritativeTargetedWindow
+        ? Math.min(Date.now() + WINNER_REVEAL_MS, authoritativeRevealDueAtMs)
+        : resolveSettlementRevealDueAt(settlementPresentation || state.handSettlement, null);
+      if (!authoritativeTargetedWindow && Number.isFinite(minimumVisibleUntilMs)) visibleUntilMs = Math.max(visibleUntilMs, minimumVisibleUntilMs);
+      stickyWinnerReveal = {
+        handId: handId,
+        visibleUntilMs: visibleUntilMs,
+        authoritativeTargetedWindow: authoritativeTargetedWindow,
+        authoritativeRevealDueAtMs: authoritativeRevealDueAtMs,
+        presentationReceivedAtMs: Date.now(),
+        settlementPresentation: cloneSettlementPresentation(settlementPresentation),
+        showdownWinnerUserIds: state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(function(userId){ return typeof userId === 'string' && !!userId; }) : [],
+        revealedShowdownCardsByUserId: cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId),
+        communityCards: Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []
+      };
+      lastPresentedSettlementHandId = handId;
+    } else if (stickyWinnerReveal.handId === handId){
+      stickyWinnerReveal.authoritativeRevealDueAtMs = normalizeSettlementRevealDueAt(state.settlementRevealDueAtMs);
+      stickyWinnerReveal.settlementPresentation = cloneSettlementPresentation(settlementPresentation);
+      stickyWinnerReveal.showdownWinnerUserIds = state.showdown && Array.isArray(state.showdown.winners) ? state.showdown.winners.filter(function(userId){ return typeof userId === 'string' && !!userId; }) : [];
+      stickyWinnerReveal.revealedShowdownCardsByUserId = cloneRevealedShowdownCards(state.revealedShowdownCardsByUserId);
+      stickyWinnerReveal.communityCards = Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : [];
+    }
+  }
+
+  function getActiveWinnerReveal(){
+    if (!stickyWinnerReveal.handId) return null;
+    if (stickyWinnerReveal.visibleUntilMs <= Date.now()) return null;
+    return stickyWinnerReveal;
+  }
+
+  function clearWinnerRevealTimer(){
+    if (!revealDismissTimer) return;
+    try { window.clearTimeout(revealDismissTimer); } catch (_err){}
+    revealDismissTimer = null;
+  }
+
+  function extractSnapshotHandId(payload){
+    if (!isObject(payload)) return null;
+    if (typeof payload.handId === 'string' && payload.handId) return payload.handId;
+    if (isObject(payload.hand) && typeof payload.hand.handId === 'string' && payload.hand.handId) return payload.hand.handId;
+    if (isObject(payload.public) && isObject(payload.public.hand) && typeof payload.public.hand.handId === 'string' && payload.public.hand.handId) return payload.public.hand.handId;
+    return null;
+  }
+
+  function scheduleRevealDismiss(processSnapshot){
+    var sticky = getActiveWinnerReveal();
+    if (!sticky) return;
+    clearWinnerRevealTimer();
+    var remainingMs = Math.max(0, sticky.visibleUntilMs - Date.now());
+    revealDismissTimer = window.setTimeout(function(){
+      revealDismissTimer = null;
+      stickyWinnerReveal.visibleUntilMs = 0;
+      var nextFrames = pendingPostRevealSnapshots;
+      pendingPostRevealSnapshots = [];
+      nextFrames.forEach(function(nextFrame){ processSnapshot(nextFrame, nextFrame); });
+    }, remainingMs);
+  }
+
+  function shouldDeferSnapshotUntilRevealEnds(payload){
+    if (pendingPostRevealSnapshots.length) return true;
+    var sticky = getActiveWinnerReveal();
+    if (!sticky) return false;
+    var nextHandId = extractSnapshotHandId(payload);
+    return !!(nextHandId && sticky.handId && nextHandId !== sticky.handId);
+  }
+
+  function getCurrentSettlementPresentation(){
+    if (state.phase === 'SETTLED' && state.settlementPresentation) return state.settlementPresentation;
+    var sticky = getActiveWinnerReveal();
+    return sticky ? sticky.settlementPresentation : null;
+  }
+
+  function getDisplaySettlementPresentation(){
+    var sticky = getActiveWinnerReveal();
+    return sticky ? sticky.settlementPresentation : null;
+  }
+
+  function getSeatSettlementAwards(userId){
+    var presentation = getDisplaySettlementPresentation();
+    if (!presentation || !presentation.valid || !presentation.byUserId || !Array.isArray(presentation.byUserId[userId])) return [];
+    return presentation.byUserId[userId].slice();
+  }
+
+  function hasOwn(source, key){
+    return !!source && Object.prototype.hasOwnProperty.call(source, key);
+  }
+
+  function readSnapshotField(payload, publicObj, key){
+    if (hasOwn(payload, key)) return { present: true, value: payload[key] };
+    if (hasOwn(publicObj, key)) return { present: true, value: publicObj[key] };
+    return { present: false, value: undefined };
+  }
+
+  function normalizePlayerState(value){
+    if (!isObject(value)) return null;
+    var status = typeof value.status === 'string' ? value.status.trim().toUpperCase() : '';
+    if (status !== 'ACTIVE' && status !== 'OUT_OF_CHIPS' && status !== 'WAITING_NEXT_HAND' && status !== 'EJECTION_PENDING' && status !== 'REMOVED') return null;
+    var stack = Number(value.stack);
+    if (!Number.isInteger(stack) || stack < 0) return null;
+    return { status: status, stack: stack, canRebuy: value.canRebuy === true };
+  }
+
+  function mergeSnapshot(payload, frame){
+    if (inactivityExit && inactivityExit.status === 'removed') return;
+    if (!isObject(payload)) return;
+    var previousTableId = state.tableId;
+    var previousHandId = state.handId;
+    var previousPhase = state.phase;
+    var previousSeatNo = state.youSeat;
+    var previousCardSeat = deriveCurrentSeat();
+    var previousPresentation = state.settlementPresentation;
+    var previousStateVersion = Number(state.stateVersion) || 0;
+    var frameKind = frame && typeof frame.kind === 'string' ? frame.kind : 'stateSnapshot';
+    var frameInitial = !!(frame && frame.initial);
+    heroFrameKind = frameKind;
+    var authoritativeFull = frameKind === 'stateSnapshot' || (frameKind === 'table_state' && frameInitial);
+    // Single source of truth for version tracking: never regress an applied version.
+    var incomingVersion = Number(payload.stateVersion);
+    var settlementVersionAdvanced = Number.isSafeInteger(incomingVersion) && incomingVersion > previousStateVersion;
+    if (Number.isInteger(incomingVersion) && incomingVersion >= 0){
+      state.stateVersion = Math.max(Number(state.stateVersion) || 0, incomingVersion);
+    }
+    var snapshotTableId = typeof payload.tableId === 'string' && payload.tableId ? payload.tableId : null;
+    var publicObj = isObject(payload.public) ? payload.public : {};
+    var privateObj = isObject(payload.private) ? payload.private : {};
+    var youObj = isObject(payload.you) ? payload.you : {};
+    var tableObj = isObject(payload.table) ? payload.table : {};
+    var handObj = isObject(payload.hand) ? payload.hand : isObject(publicObj.hand) ? publicObj.hand : {};
+    var turnObj = isObject(payload.turn) ? payload.turn : isObject(publicObj.turn) ? publicObj.turn : {};
+    var potObj = isObject(payload.pot) ? payload.pot : isObject(publicObj.pot) ? publicObj.pot : {};
+    var showdownField = readSnapshotField(payload, publicObj, 'showdown');
+    var handSettlementField = readSnapshotField(payload, publicObj, 'handSettlement');
+    var foldedUsersField = readSnapshotField(payload, publicObj, 'foldedByUserId');
+    var handBetsField = readSnapshotField(payload, publicObj, 'betThisRoundByUserId');
+    var settlementRevealDueAtField = readSnapshotField(payload, publicObj, 'settlementRevealDueAt');
+    var playerStateField = hasOwn(payload, 'private') && isObject(payload.private) && hasOwn(payload.private, 'playerState')
+      ? { present: true, value: payload.private.playerState }
+      : { present: false, value: undefined };
+    var legalSource = payload.legalActions != null ? payload.legalActions : publicObj.legalActions;
+    var constraintsPrimary = payload.actionConstraints != null ? payload.actionConstraints : publicObj.actionConstraints;
+    var lastActionMapSource = payload.lastBettingRoundActionByUserId != null ? payload.lastBettingRoundActionByUserId : publicObj.lastBettingRoundActionByUserId;
+
+    if (snapshotTableId && state.tableId && snapshotTableId !== state.tableId){
+      resetWinStreakSession();
+      clearCelebration();
+      return;
+    }
+    if (snapshotTableId) state.tableId = snapshotTableId;
+    else if (tableObj.tableId) state.tableId = tableObj.tableId;
+    if (previousTableId && state.tableId && previousTableId !== state.tableId){
+      resetWinStreakSession();
+      clearCelebration();
+    }
+
+    if (typeof tableObj.status === 'string' && tableObj.status) state.tableStatus = tableObj.status.toUpperCase();
+    if (typeof payload.status === 'string' && payload.status) state.tableStatus = payload.status.toUpperCase();
+    var snapshotBuyIn = hasOwn(tableObj, 'buyIn') ? tableObj.buyIn : payload.buyIn;
+    if (Number.isSafeInteger(Number(snapshotBuyIn)) && Number(snapshotBuyIn) > 0) state.buyIn = Number(snapshotBuyIn);
+    syncClosedTableRedirectFromSnapshot(payload);
+
+    var resolvedMaxSeats = null;
+    if (Number.isInteger(tableObj.maxSeats) && tableObj.maxSeats > 1) resolvedMaxSeats = tableObj.maxSeats;
+    else if (Number.isInteger(tableObj.maxPlayers) && tableObj.maxPlayers > 1) resolvedMaxSeats = tableObj.maxPlayers;
+    else if (Number.isInteger(payload.maxSeats) && payload.maxSeats > 1) resolvedMaxSeats = payload.maxSeats;
+    if (resolvedMaxSeats) state.maxSeats = resolvedMaxSeats;
+
+    var suppliedOwnSeat = hasOwn(payload, 'youSeat') ? payload.youSeat : hasOwn(youObj, 'seat') ? youObj.seat : undefined;
+    var nextSeats = normalizeSeatRows(payload, state.seats, state.tableId);
+    if (inactivityExit && inactivityExit.status === 'removed') {
+      suppliedOwnSeat = null;
+      nextSeats = nextSeats.filter(function(seat){ return seat.userId !== state.currentUserId; });
+    }
+    var seatProjectionPresent = Array.isArray(payload.seats) || Array.isArray(tableObj.members)
+      || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats);
+    var currentParticipation = handBetsField.present ? handBetsField.value : state.betThisRoundByUserId;
+    // Ownership plus same-hand participation outrank an incomplete public projection.
+    if (seatProjectionPresent && !pendingLeaveNavigation && previousCardSeat
+      && (handObj.handId == null || handObj.handId === previousHandId)
+      && ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'].indexOf(handObj.status || state.phase) !== -1
+      && isObject(currentParticipation) && hasOwn(currentParticipation, state.currentUserId)
+      && suppliedOwnSeat === previousCardSeat.seatNo
+      && !nextSeats.some(function(seat){ return seat.seatNo === suppliedOwnSeat; })){
+      nextSeats.push(previousCardSeat);
+    }
+    if (nextSeats.length || Array.isArray(payload.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers) || Array.isArray(publicObj.seats)) {
+      state.seats = nextSeats;
+      var currentSeatAfterMerge = deriveCurrentSeat();
+      if (!inactivityExit && currentSeatAfterMerge && Number.isInteger(currentSeatAfterMerge.seatNo)) {
+        lastKnownCurrentSeatNo = currentSeatAfterMerge.seatNo;
+      }
+    }
+    var nextCommitted = extractSeatCommittedByUserId(payload);
+
+    var nextStacks = normalizeStacks(payload);
+    if (nextStacks) state.stacks = nextStacks;
+
+    // Authoritative big blind for the current hand; used to derive legal BET
+    // minimums off-turn (min(bigBlind, stack)) when minBetAmount is absent.
+    var bigBlindRaw = hasOwn(payload, 'bigBlind') ? payload.bigBlind : (hasOwn(publicObj, 'bigBlind') ? publicObj.bigBlind : undefined);
+    if (Number.isFinite(Number(bigBlindRaw)) && Number(bigBlindRaw) > 0) state.bigBlind = Math.trunc(Number(bigBlindRaw));
+
+    // Authoritative projected pre-action list for a seated off-turn viewer; the
+    // server honors reopening rights, so the browser must not re-derive RAISE
+    // availability from numeric constraints. Field presence (not list length)
+    // is authoritative: an intentionally empty projected list must not fall
+    // back to browser reconstruction.
+    var projectedLegalPresent = hasOwn(payload, 'projectedLegalActions') || hasOwn(publicObj, 'projectedLegalActions');
+    if (projectedLegalPresent){
+      var projectedLegalSource = payload.projectedLegalActions != null ? payload.projectedLegalActions : publicObj.projectedLegalActions;
+      state.projectedLegalActions = (projectedLegalSource && typeof projectedLegalSource === 'object')
+        ? {
+            seat: Number.isInteger(projectedLegalSource.seat) ? projectedLegalSource.seat : null,
+            actions: Array.isArray(projectedLegalSource.actions)
+              ? projectedLegalSource.actions.filter((action) => typeof action === 'string')
+              : []
+          }
+        : { seat: null, actions: [] };
+    } else {
+      state.projectedLegalActions = undefined;
+    }
+
+    if (typeof handObj.status === 'string' && handObj.status) state.phase = handObj.status.toUpperCase();
+    if (typeof handObj.handId === 'string' && handObj.handId) state.handId = handObj.handId;
+    else if (hasOwn(handObj, 'handId') && handObj.handId == null) state.handId = null;
+    var handIdChanged = state.handId !== previousHandId;
+    var dealerField = readSnapshotField(payload, handObj, 'dealerSeat');
+    if (!dealerField.present) dealerField = readSnapshotField(payload, handObj, 'dealerSeatNo');
+    if (dealerField.present && (Number.isInteger(dealerField.value) || dealerField.value === null)) state.dealerSeat = dealerField.value;
+    else if (handIdChanged) state.dealerSeat = null;
+
+    if (typeof turnObj.userId === 'string' && turnObj.userId) state.turnUserId = turnObj.userId;
+    else if (turnObj.userId == null) state.turnUserId = null;
+    if (turnObj.startedAt != null) state.turnStartedAt = Number(turnObj.startedAt);
+    else if (turnObj.startedAt == null) state.turnStartedAt = null;
+    if (turnObj.deadlineAt != null) state.turnDeadlineAt = Number(turnObj.deadlineAt);
+    else if (turnObj.deadlineAt == null) state.turnDeadlineAt = null;
+
+    if (nextCommitted !== null) seatCommittedByUserId = nextCommitted;
+    else if (handIdChanged) seatCommittedByUserId = {};
+    if (Number.isFinite(Number(potObj.total))) state.potTotal = Number(potObj.total);
+    else if (handIdChanged) state.potTotal = 0;
+
+    var boardSource = null;
+    if (Array.isArray(payload.board)) boardSource = payload.board;
+    else if (isObject(payload.board) && Array.isArray(payload.board.cards)) boardSource = payload.board.cards;
+    else if (Array.isArray(publicObj.board)) boardSource = publicObj.board;
+    else if (isObject(publicObj.board) && Array.isArray(publicObj.board.cards)) boardSource = publicObj.board.cards;
+    if (boardSource) state.communityCards = normalizeCards(boardSource);
+    else if (state.handId && previousHandId && state.handId !== previousHandId) state.communityCards = [];
+
+    var nextHeroCards = null;
+    if (Array.isArray(payload.myHoleCards)) nextHeroCards = normalizeCards(payload.myHoleCards);
+    else if (Array.isArray(privateObj.holeCards)) nextHeroCards = normalizeCards(privateObj.holeCards);
+    if (handIdChanged || handBetsField.present) state.betThisRoundByUserId = normalizeNumericUserMap(handBetsField.value) || {};
+    if (handIdChanged && !foldedUsersField.present) state.foldedByUserId = Object.create(null);
+    if (authoritativeFull || foldedUsersField.present) state.foldedByUserId = normalizeFoldedByUserId(foldedUsersField.value);
+
+    var seatFieldPresent = hasOwn(payload, 'youSeat') || hasOwn(youObj, 'seat');
+    if (Number.isInteger(payload.youSeat)) state.youSeat = payload.youSeat;
+    else if (Number.isInteger(youObj.seat)) state.youSeat = youObj.seat;
+    else if (seatFieldPresent) state.youSeat = null;
+    if ((Array.isArray(payload.seats) || Array.isArray(publicObj.seats) || Array.isArray(tableObj.members) || Array.isArray(payload.authoritativeMembers))
+      && !state.seats.some(isCurrentUserSeat)) state.youSeat = null;
+    if (seatFieldPresent && state.youSeat == null){
+      // A visible pending financial owner is not an active participant.
+      var pendingOwner = inactivityExit && inactivityExit.status === 'pending'
+        && Array.isArray(publicObj.seats) && publicObj.seats.some(function(seat){
+          return seat.userId === state.currentUserId && seat.status === 'EJECTION_PENDING';
+        });
+      state.seats = state.seats.filter(function(seat){ return seat.userId !== state.currentUserId || pendingOwner; });
+      lastKnownCurrentSeatNo = null;
+    }
+    if (seatFieldPresent && previousSeatNo !== state.youSeat){
+      resetWinStreakSession();
+      clearCelebration();
+    }
+
+    if (playerStateField.present) state.playerState = normalizePlayerState(playerStateField.value);
+    else if (authoritativeFull) state.playerState = null;
+    var cardSeat = deriveCurrentSeat();
+    var cardsOutOfHand = !state.handId || !cardSeat || cardSeat.status === 'WAITING_NEXT_HAND' || cardSeat.status === 'OUT_OF_CHIPS'
+      || (handBetsField.present && !hasOwn(state.betThisRoundByUserId, cardSeat.userId))
+      || (state.playerState && (state.playerState.status === 'WAITING_NEXT_HAND' || state.playerState.status === 'OUT_OF_CHIPS'));
+    var cardSeatChanged = !previousCardSeat || !cardSeat || previousCardSeat.seatNo !== cardSeat.seatNo
+      || previousCardSeat.userId !== cardSeat.userId;
+    // An empty private projection cannot revoke an already received active deal.
+    // Retain only for the same hand/occupant with authoritative participation.
+    var keepActiveDeal = nextHeroCards && nextHeroCards.length === 0 && state.heroCards.length === 2
+      && !handIdChanged && !cardSeatChanged
+      && ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'].indexOf(state.phase) !== -1
+      && getOpponentHeldCardCount(cardSeat, state.handId, state.betThisRoundByUserId) === 2;
+    if (cardsOutOfHand) state.heroCards = [];
+    else if (nextHeroCards && !keepActiveDeal) state.heroCards = nextHeroCards.length >= 2 ? nextHeroCards.slice(0, 2) : [];
+    else if (handIdChanged || cardSeatChanged) state.heroCards = [];
+    if (!state.playerState || (state.playerState.status !== 'OUT_OF_CHIPS' && state.playerState.status !== 'WAITING_NEXT_HAND')) {
+      rebuyPanelDismissed = false;
+      autoRebuyAttemptedForCurrentBust = false;
+    }
+    if (state.playerState && (state.playerState.status === 'OUT_OF_CHIPS' || state.playerState.status === 'WAITING_NEXT_HAND')) clearQueuedPreaction();
+    maybeTriggerAutoRebuy();
+
+    var legalActions = normalizeLegalActions(legalSource);
+    if (legalActions.length || Array.isArray(legalSource) || (isObject(legalSource) && Array.isArray(legalSource.actions))){
+      state.legalActions = legalActions;
+    }
+    if (authoritativeFull || showdownField.present){
+      state.showdown = normalizeShowdown(showdownField.value);
+      state.revealedShowdownCardsByUserId = mapRevealedShowdownCards(state.showdown);
+    }
+    if (authoritativeFull || handSettlementField.present) state.handSettlement = normalizeHandSettlement(handSettlementField.value);
+    if (authoritativeFull || settlementRevealDueAtField.present) state.settlementRevealDueAtMs = settlementRevealDueAtField.present
+      ? normalizeSettlementRevealDueAt(settlementRevealDueAtField.value)
+      : null;
+    var handChanged = !!(state.handId && previousHandId && state.handId !== previousHandId);
+    var explicitSettlementClear = (showdownField.present && showdownField.value == null) || (handSettlementField.present && handSettlementField.value == null);
+    var settlementPairComplete = !!(state.showdown && state.handSettlement
+      && (authoritativeFull || showdownField.present || handSettlementField.present));
+    if (handChanged){
+      var priorResultConfirmed = previousPhase === 'SETTLED' && state.phase !== 'SETTLED' && previousPresentation && previousPresentation.valid
+        && winStreakCursor.lastHandId === previousHandId;
+      if (!priorResultConfirmed) resetWinStreakSession();
+      winStreakSequenceIntact = !!priorResultConfirmed;
+      winStreakPendingHandId = null;
+      deemphasizeCelebration();
+    }
+    if (state.phase !== 'SETTLED' || handChanged || explicitSettlementClear){
+      if (celebration && (!celebration.demo || handChanged || explicitSettlementClear)) deemphasizeCelebration();
+      state.settlementRevealDueAtMs = null;
+      state.settlementPresentation = null;
+      if (explicitSettlementClear && stickyWinnerReveal.handId === (state.handId || previousHandId)){
+        clearWinnerRevealTimer();
+        stickyWinnerReveal.visibleUntilMs = 0;
+      }
+      cancelSettlementAnimations();
+    } else if (settlementPairComplete){
+      state.settlementPresentation = buildSettlementPresentation({ showdown: state.showdown, handSettlement: state.handSettlement });
+      if (!state.settlementPresentation.valid){
+        var failureKey = String(state.settlementPresentation.handId || state.handId || 'unknown') + ':' + state.settlementPresentation.failureReason;
+        if (failureKey !== lastSettlementFailureKey){
+          lastSettlementFailureKey = failureKey;
+          klog('poker_settlement_presentation_invalid', { reason: state.settlementPresentation.failureReason });
+        }
+      }
+    } else if (authoritativeFull && (showdownField.present || handSettlementField.present)){
+      state.settlementPresentation = invalidSettlementPresentation('missing_settlement_pair', state.handId, state.handSettlement && state.handSettlement.settledAt);
+    } else if (authoritativeFull){
+      state.settlementPresentation = null;
+    }
+    state.lastBettingRoundActionByUserId = normalizeLastBettingRoundActionByUserId(lastActionMapSource);
+    if (handChanged && (previousPhase === 'SETTLED' || stickyWinnerReveal.handId === previousHandId)){
+      clearWinnerRevealTimer();
+      stickyWinnerReveal.visibleUntilMs = 0;
+    }
+    var liveSettlementTransition = !frameInitial
+      && !(frame && frame.suppressSettlementAnimation)
+      && !!previousHandId
+      && previousHandId === state.handId
+      && previousPhase !== 'SETTLED'
+      && state.phase === 'SETTLED';
+    if (liveSettlementTransition) winStreakPendingHandId = state.handId;
+    var streakCandidates = [];
+    var settlementConfirmedForEffects = false;
+    if (winStreakPendingHandId && winStreakPendingHandId === state.handId && state.phase === 'SETTLED'){
+      if (state.settlementPresentation && state.settlementPresentation.valid){
+        if (settlementVersionAdvanced){
+          var currentSeat = deriveCurrentSeat();
+          streakCandidates = recordWinStreakSettlement(winStreakCursor, {
+            tableId: state.tableId,
+            currentUserId: state.currentUserId,
+            currentSeatNo: Number.isInteger(state.youSeat) ? state.youSeat : currentSeat && currentSeat.seatNo,
+            handId: state.handId,
+            version: incomingVersion,
+            phase: state.phase,
+            transition: true,
+            sequenceIntact: winStreakSequenceIntact,
+            settlementPresentation: state.settlementPresentation,
+            seats: state.seats,
+            foldedByUserId: state.foldedByUserId
+          });
+          winStreakPendingHandId = null;
+          settlementConfirmedForEffects = true;
+        } else {
+          resetWinStreakCountsForSession();
+        }
+      } else {
+        resetWinStreakCountsForSession();
+      }
+    }
+    syncStickyWinnerReveal(liveSettlementTransition ? Date.now() + WINNER_REVEAL_MS : null, settlementPairComplete);
+    if (celebration && !celebration.demo && (!state.settlementPresentation || !state.settlementPresentation.valid)) deemphasizeCelebration();
+    if (settlementConfirmedForEffects) celebrateSettlement(frame, incomingVersion, true, streakCandidates);
+    state.actionConstraints = normalizeConstraints(constraintsPrimary, legalSource && legalSource.actionConstraints);
+    // While a snapshot recovery timeout is pending, snapshots must not overwrite a
+    // newer status/error raised after the timeout; the recovery gate-open handles it.
+    if (!snapshotRecoveryTimedOut){
+      state.statusText = LIVE_STATUS_COPY.live;
+      if (!autoJoinErrorActive) state.errorText = '';
+    }
+    if (pendingLeaveNavigation && !hasRenderableCurrentSeat()){
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      navigateAfterLeave();
+      return;
+    }
+    if (pendingLeaveNavigation && pendingLeaveRetryAfterReconnect && hasRenderableCurrentSeat() && isWsReady()){
+      pendingLeaveRetryAfterReconnect = false;
+      leaveAndReturnToLobby();
+    }
+  }
+
+  function isSignedIn(){
+    return !!state.currentUserId;
+  }
+
+  function isSeatedAtLiveTable(){
+    return !!(!inactivityExit && state && state.mode === 'live' && state.tableId && deriveCurrentSeat());
+  }
+
+  function isCurrentUserSeat(seat){
+    if (!seat) return false;
+    if (seat.userId && state.currentUserId && seat.userId === state.currentUserId) return true;
+    return !!(Number.isInteger(state.youSeat) && Number.isInteger(seat.seatNo) && seat.seatNo === state.youSeat);
+  }
+
+  function deriveCurrentSeat(){
+    var currentUserId = state.currentUserId;
+    if (!currentUserId) return null;
+    for (var i = 0; i < state.seats.length; i++){
+      if (isCurrentUserSeat(state.seats[i])) return state.seats[i];
+    }
+    if (Number.isInteger(state.youSeat)){
+      return { seatNo: state.youSeat, userId: currentUserId, status: 'ACTIVE', displayName: 'You' };
+    }
+    return null;
+  }
+
+  function isJoinOperationPending(){
+    return joinOperation.phase === 'reserving' || joinOperation.phase === 'checking';
+  }
+
+  function pendingJoinStorageKey(){
+    if (!state.currentUserId || !state.tableId) return null;
+    return 'poker:pendingJoin:' + String(state.currentUserId) + ':' + String(state.tableId);
+  }
+
+  function buildRebuyRequestId(){
+    return 'rebuy_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function pendingRebuyStorageKey(){
+    if (!state.currentUserId || !state.tableId) return null;
+    return 'poker:pendingRebuy:' + String(state.currentUserId) + ':' + String(state.tableId);
+  }
+
+  function persistPendingRebuy(){
+    var key = pendingRebuyStorageKey();
+    if (!key || !rebuyOperation || !rebuyOperation.requestId || !rebuyOperation.payload) return;
+    try {
+      if (window.sessionStorage){
+        window.sessionStorage.setItem(key, JSON.stringify({
+          requestId: rebuyOperation.requestId,
+          tableId: rebuyOperation.tableId,
+          userId: rebuyOperation.userId,
+          payload: rebuyOperation.payload,
+          phase: rebuyOperation.phase,
+          source: normalizeRebuySource(rebuyOperation.source)
+        }));
+      }
+    } catch (_err){}
+  }
+
+  function clearPendingRebuyStorage(){
+    var key = pendingRebuyStorageKey();
+    if (!key) return;
+    try { if (window.sessionStorage) window.sessionStorage.removeItem(key); } catch (_err){}
+  }
+
+  function clearRebuyOperation(){
+    rebuyOperation = null;
+    clearPendingRebuyStorage();
+  }
+
+  function loadPendingRebuy(){
+    var key = pendingRebuyStorageKey();
+    if (!key) return null;
+    try {
+      var raw = window.sessionStorage ? window.sessionStorage.getItem(key) : null;
+      var parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || parsed.tableId !== state.tableId || parsed.userId !== state.currentUserId
+        || typeof parsed.requestId !== 'string' || !parsed.requestId || !isObject(parsed.payload)){
+        if (raw && window.sessionStorage) window.sessionStorage.removeItem(key);
+        return null;
+      }
+      return {
+        phase: parsed.phase === 'error' ? 'error' : 'pending',
+        resumeAttempted: false,
+        requestId: parsed.requestId,
+        tableId: parsed.tableId,
+        userId: parsed.userId,
+        payload: parsed.payload,
+        source: normalizeRebuySource(parsed.source)
+      };
+    } catch (_err){
+      return null;
+    }
+  }
+
+  function rebuyErrorCode(error){
+    return error && (error.code || error.message) ? String(error.code || error.message) : 'rebuy_failed';
+  }
+
+  function isDefinitiveRebuyRejection(code){
+    return ['insufficient_chips', 'invalid_rebuy_amount', 'table_not_found', 'table_not_open',
+      'seat_not_active', 'rebuy_not_allowed', 'rebuy_not_available'].indexOf(code) >= 0;
+  }
+
+  function sendRebuyOperation(){
+    if (!rebuyOperation || rebuyOperation.phase !== 'pending') return Promise.resolve({ ok: true, pending: true });
+    var operation = rebuyOperation;
+    return sendCommand('sendRebuy', operation.payload, operation.requestId).then(function(result){
+      if (rebuyOperation !== operation) return result;
+      clearRebuyOperation();
+      rebuyPanelDismissed = true;
+      state.statusText = 'Buy-in accepted';
+      if (operation.source === 'auto') showAutoRebuyFeedback(result && result.buyIn);
+      render();
+      return result;
+    }).catch(function(error){
+      if (rebuyOperation !== operation) return null;
+      var code = rebuyErrorCode(error);
+      if (code === 'ws_closed' && operation.preserveOnTechnicalRestart === true){
+        operation.preserveOnTechnicalRestart = false;
+        operation.phase = 'pending';
+        persistPendingRebuy();
+        renderRebuyPanel();
+        return null;
+      }
+      if (isDefinitiveRebuyRejection(code)){
+        clearRebuyOperation();
+        rebuyPanelDismissed = false;
+      } else {
+        operation.phase = 'error';
+        persistPendingRebuy();
+      }
+      if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = code !== 'insufficient_chips';
+      setError(code === 'insufficient_chips'
+        ? (currentTableBuyIn() == null
+          ? 'Not enough CH for this table buy-in'
+          : 'Not enough CH for a ' + formatNumber(currentTableBuyIn()) + ' CH buy-in')
+        : code);
+      render();
+      return null;
+    });
+  }
+
+  function reconcileRebuyOperationFromSnapshot(authoritativeSnapshot){
+    if (!authoritativeSnapshot || !state.currentUserId || !state.tableId || !Number.isInteger(state.youSeat) || !state.playerState) return false;
+    if (!rebuyOperation) rebuyOperation = loadPendingRebuy();
+    if (!rebuyOperation) return false;
+    if (rebuyOperation.tableId !== state.tableId || rebuyOperation.userId !== state.currentUserId){
+      clearRebuyOperation();
+      return false;
+    }
+    var stack = Number(state.playerState.stack);
+    var status = state.playerState.status;
+    var funded = Number.isFinite(stack) && stack > 0 && state.playerState.canRebuy !== true
+      && (status === 'WAITING_NEXT_HAND' || status === 'ACTIVE');
+    if (funded){
+      var recoveredSource = normalizeRebuySource(rebuyOperation.source);
+      clearRebuyOperation();
+      rebuyPanelDismissed = true;
+      if (recoveredSource === 'auto') showAutoRebuyFeedback(currentTableBuyIn());
+      return true;
+    }
+    if (rebuyOperation.phase === 'pending' && rebuyOperation.resumeAttempted !== true
+      && status === 'OUT_OF_CHIPS' && stack === 0 && state.playerState.canRebuy === true){
+      rebuyOperation.resumeAttempted = true;
+      persistPendingRebuy();
+      void sendRebuyOperation();
+    }
+    return true;
+  }
+
+  function persistPendingJoin(){
+    var key = pendingJoinStorageKey();
+    if (!key || !joinOperation.requestId || !joinOperation.payload) return;
+    try {
+      if (window.sessionStorage) {
+        window.sessionStorage.setItem(key, JSON.stringify({
+          requestId: joinOperation.requestId,
+          tableId: state.tableId,
+          payload: joinOperation.payload,
+          phase: 'unresolved'
+        }));
+      }
+    } catch (_err){}
+  }
+
+  function clearPendingJoin(){
+    var key = pendingJoinStorageKey();
+    if (!key) return;
+    try { if (window.sessionStorage) window.sessionStorage.removeItem(key); } catch (_err){}
+  }
+
+  function loadPendingJoin(){
+    var key = pendingJoinStorageKey();
+    if (!key) return null;
+    try {
+      var raw = window.sessionStorage ? window.sessionStorage.getItem(key) : null;
+      var parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || parsed.tableId !== state.tableId || typeof parsed.requestId !== 'string' || !parsed.requestId || !isObject(parsed.payload)) return null;
+      return {
+        requestId: parsed.requestId,
+        payload: parsed.payload
+      };
+    } catch (_err){
+      return null;
+    }
+  }
+
+  function setJoinOperationPhase(phase){
+    joinOperation.phase = phase;
+    if (isWsReady() && !state.reconnectGate){
+      if (phase === 'reserving') state.statusText = 'Reserving seat…';
+      else if (phase === 'checking') state.statusText = 'Checking seat reservation…';
+      else if (phase === 'waiting_next_hand') state.statusText = 'Seat reserved · Joining next hand';
+      else if (phase === 'active') state.statusText = LIVE_STATUS_COPY.live;
+    }
+    renderInfoPanel();
+    renderControls();
+  }
+
+  function buildJoinRequestId(){
+    return 'join_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function reconcileJoinOperationFromSnapshot(authoritativeSnapshot){
+    if (inactivityExit) return false;
+    // Guest seats can be projected before the required join is acknowledged.
+    if (isGuestMode) return false;
+    var seat = deriveCurrentSeat();
+    if (!seat){
+      var completedJoinWithoutSeat = authoritativeSnapshot === true
+        && (joinOperation.phase === 'active' || joinOperation.phase === 'waiting_next_hand')
+        && !state.reconnectGate
+        && !Number.isInteger(reconnectSeatNo)
+        && joinOperation.source !== 'reconnect';
+      if (completedJoinWithoutSeat){
+        joinOperation.phase = 'idle';
+        joinOperation.source = null;
+        reconnectSeatNo = null;
+        lastKnownCurrentSeatNo = null;
+        state.statusText = LIVE_STATUS_COPY.live;
+      }
+      return false;
+    }
+    var waiting = currentPlayerStatus() === 'WAITING_NEXT_HAND';
+    joinOperation.phase = waiting ? 'waiting_next_hand' : 'active';
+    joinOperation.source = null;
+    state.statusText = waiting ? 'Seat reserved · Joining next hand' : LIVE_STATUS_COPY.live;
+    joinOperation.requestId = null;
+    joinOperation.payload = null;
+    clearPendingJoin();
+    return true;
+  }
+
+  function hasRenderableCurrentSeat(){
+    var currentUserId = state.currentUserId;
+    if (!currentUserId) return false;
+    for (var i = 0; i < state.seats.length; i++){
+      if (isCurrentUserSeat(state.seats[i])) return true;
+    }
+    return false;
+  }
+
+  function getHeroVisualIndex(){
+    var offset = getSeatNumberingOffset();
+    var currentSeat = deriveCurrentSeat();
+    if (!currentSeat || !Number.isInteger(currentSeat.seatNo)) return null;
+    return Math.max(0, currentSeat.seatNo - offset);
+  }
+
+  function isCurrentUserFolded(){
+    var currentSeat = deriveCurrentSeat();
+    return !!(currentSeat && /FOLD/i.test(currentSeat.status || ''));
+  }
+
+  function rotateSeatIndex(index, total){
+    var heroIndex = getHeroVisualIndex();
+    var safeTotal = Math.max(1, total || 1);
+    if (heroIndex == null) return index % safeTotal;
+    var heroAnchorIndex = safeTotal >= 4 ? Math.floor(safeTotal / 2) : safeTotal - 1;
+    return (index - heroIndex + heroAnchorIndex + safeTotal) % safeTotal;
+  }
+
+  function getHeroBestHand(){
+    var mergedCards = (Array.isArray(state.heroCards) ? state.heroCards.slice(0, 2) : []).concat(Array.isArray(state.communityCards) ? state.communityCards.slice(0, 5) : []);
+    var best = evaluateViewerBestHand(mergedCards);
+    if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
+    return best;
+  }
+
+  function heroMadeHandIdentities(){
+    if (!Array.isArray(state.heroCards) || state.heroCards.length !== 2) return [];
+    var best = getHeroBestHand();
+    if (!best || best.category === HAND_CATEGORY.HIGH_CARD) return [];
+    // The existing evaluator orders paired/trip/quad groups before their kickers.
+    var count = 5;
+    if (best.category === HAND_CATEGORY.PAIR) count = 2;
+    else if (best.category === HAND_CATEGORY.TWO_PAIR || best.category === HAND_CATEGORY.QUADS) count = 4;
+    else if (best.category === HAND_CATEGORY.TRIPS) count = 3;
+    return best.cards.slice(0, count).map(function(card){ var value = normalizeCard(card); return value.r + value.s; });
+  }
+
+  function syncMadeHandHighlights(){
+    var madeHand = heroMadeHandIdentities();
+    [els.communityCards, els.heroCards].forEach(function(container){
+      if (!container) return;
+      Array.from(container.children).forEach(function(card){
+        if (madeHand.indexOf(card.dataset.cardIdentity) !== -1) card.classList.add('poker-card--made-hand');
+        else card.classList.remove('poker-card--made-hand');
+      });
+    });
+  }
+
+  function getDisplayCommunityCards(){
+    if (Array.isArray(state.communityCards) && state.communityCards.length) return state.communityCards.slice(0, 5);
+    var sticky = getActiveWinnerReveal();
+    return sticky && Array.isArray(sticky.communityCards) ? sticky.communityCards.slice(0, 5) : [];
+  }
+
+  function resolveStack(userId){
+    if (!userId || !isObject(state.stacks)) return null;
+    var value = state.stacks[userId];
+    if (!Number.isFinite(Number(value))) return null;
+    return Math.max(0, Math.trunc(Number(value)));
+  }
+
+  function getAllowedActions(){
+    return Array.isArray(state.legalActions) ? state.legalActions.slice() : [];
+  }
+
+  function isUsersTurn(){
+    return !!(state.currentUserId && state.turnUserId && state.currentUserId === state.turnUserId);
+  }
+
+  function hasActiveHand(){
+    return !!(state.handId && state.phase !== 'LOBBY' && state.phase !== 'SETTLED');
+  }
+
+  function isFoldAvailable(){
+    return !!(isWsReady() && deriveCurrentSeat() && hasActiveHand() && !isCurrentUserFolded());
+  }
+
+  function resolveProjectedAllowedActions(){
+    if (!isFoldAvailable()) return [];
+    // Authoritative projected action list from the server (honors reopening
+    // rights). Field presence decides authority: an intentionally empty list
+    // means no pre-actions and must NOT fall back to browser reconstruction.
+    var projected = state.projectedLegalActions;
+    if (projected !== undefined && projected !== null){
+      return Array.isArray(projected.actions) ? projected.actions.slice() : [];
+    }
+    // Legacy fallback: reconstruct from constraints. Only a finite minRaiseTo
+    // signals raising rights; maxRaiseTo or stack never imply a raise.
+    var allowed = ['FOLD'];
+    var constraints = state.actionConstraints || {};
+    var stackAmount = resolveStack(state.currentUserId);
+    var toCall = Number.isFinite(constraints.toCall) ? Math.max(0, Math.trunc(constraints.toCall)) : 0;
+    if (toCall > 0) allowed.push('CALL');
+    else allowed.push('CHECK');
+    if (toCall > 0){
+      if (Number.isFinite(constraints.minRaiseTo)) allowed.push('RAISE');
+    } else if ((Number.isFinite(constraints.maxBetAmount) && Math.max(0, Math.trunc(constraints.maxBetAmount)) > 0) || (Number.isFinite(stackAmount) && stackAmount > 0)){
+      allowed.push('BET');
+    }
+    return allowed;
+  }
+
+  function createCard(cardData, opts){
+    var card = document.createElement('div');
+    var normalized = normalizeCard(cardData);
+    if (!normalized){
+      card.className = 'poker-card poker-card--back';
+      return card;
+    }
+    card.dataset.cardIdentity = normalized.r + normalized.s;
+    var suit = SUIT_SYMBOLS[normalized.s];
+    var isRed = normalized.s === 'H' || normalized.s === 'D';
+    card.className = isRed ? 'poker-card poker-card--red' : 'poker-card';
+    var rank = document.createElement('span');
+    rank.textContent = normalized.r;
+    var suitEl = document.createElement('small');
+    suitEl.textContent = suit;
+    card.appendChild(rank);
+    card.appendChild(suitEl);
+    if (opts && opts.faceDown){
+      card.className = 'poker-card poker-card--back';
+      card.innerHTML = '';
+    }
+    return card;
+  }
+
+  function initials(name){
+    var text = typeof name === 'string' ? name.trim() : '';
+    if (!text) return 'P';
+    var parts = text.split(/\s+/).filter(Boolean);
+    if (parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return text.slice(0, 2).toUpperCase();
+  }
+
+  function formatNumber(value){
+    var num = Number(value || 0);
+    if (!Number.isFinite(num)) return '0';
+    return Math.round(num).toLocaleString();
+  }
+
+  function findReactionEntry(reactionKey){
+    for (var i = 0; i < REACTION_CATALOG.length; i++){
+      if (REACTION_CATALOG[i].key === reactionKey) return REACTION_CATALOG[i];
+    }
+    return null;
+  }
+
+  function reactionLabel(entry){
+    return entry ? t('pokerReaction_' + entry.key, entry.label) : '';
+  }
+
+  function clearReactionHistoryExpiryTimer(){
+    if (!reactionHistoryExpiryTimer) return;
+    window.clearTimeout(reactionHistoryExpiryTimer);
+    reactionHistoryExpiryTimer = null;
+  }
+
+  function renderReactionHistory(){
+    var live = state && state.mode === 'live' && !!state.tableId;
+    var visible = live && socialPreferences.reactionHistoryEnabled;
+    if (els.reactionHistory) els.reactionHistory.hidden = !visible;
+    if (els.reactionHistoryToggle){
+      els.reactionHistoryToggle.setAttribute('aria-label', 'Reaction history, ' + reactionHistoryEntries.length + ' messages');
+      els.reactionHistoryToggle.setAttribute('aria-expanded', live && reactionHistoryPanelOpen ? 'true' : 'false');
+    }
+    if (els.reactionHistoryCount) els.reactionHistoryCount.textContent = String(reactionHistoryEntries.length);
+    if (els.reactionHistoryPanel) els.reactionHistoryPanel.hidden = !visible || !reactionHistoryPanelOpen;
+    if (!els.reactionHistoryList) return;
+    els.reactionHistoryList.innerHTML = '';
+    if (!reactionHistoryEntries.length){
+      var empty = document.createElement('div');
+      empty.className = 'poker-reaction-history__empty';
+      empty.textContent = 'No reactions yet';
+      els.reactionHistoryList.appendChild(empty);
+      return;
+    }
+    reactionHistoryEntries.forEach(function(item){
+      var entry = findReactionEntry(item.reactionKey);
+      if (!entry) return;
+      var row = document.createElement('div');
+      row.className = 'poker-reaction-history__entry';
+      var author = document.createElement('span');
+      author.className = 'poker-reaction-history__author';
+      var nickname = document.createElement('span');
+      nickname.className = 'poker-reaction-history__nickname';
+      nickname.textContent = item.senderDisplayName;
+      nickname.title = item.senderDisplayName;
+      nickname.setAttribute('aria-label', 'Player nickname: ' + item.senderDisplayName);
+      var seat = document.createElement('span');
+      seat.className = 'poker-reaction-history__seat';
+      seat.textContent = 'S' + item.senderSeatNo;
+      seat.setAttribute('aria-label', 'Seat ' + item.senderSeatNo);
+      var separator = document.createElement('span');
+      separator.className = 'poker-reaction-history__separator';
+      separator.textContent = '·';
+      separator.setAttribute('aria-hidden', 'true');
+      var reaction = document.createElement('span');
+      reaction.className = 'poker-reaction-history__reaction';
+      reaction.textContent = entry.emoji + ' ' + reactionLabel(entry);
+      author.appendChild(nickname);
+      author.appendChild(seat);
+      row.appendChild(author);
+      row.appendChild(separator);
+      row.appendChild(reaction);
+      els.reactionHistoryList.appendChild(row);
+    });
+  }
+
+  function scheduleReactionHistoryExpiry(){
+    clearReactionHistoryExpiryTimer();
+    if (!reactionHistoryEntries.length) return;
+    var delayMs = Math.max(0, reactionHistoryEntries[0].createdAt + REACTION_HISTORY_TTL_MS - Date.now());
+    reactionHistoryExpiryTimer = window.setTimeout(function(){
+      reactionHistoryExpiryTimer = null;
+      pruneReactionHistory();
+      renderReactionHistory();
+      scheduleReactionHistoryExpiry();
+    }, delayMs);
+  }
+
+  function pruneReactionHistory(){
+    var oldestAllowedAt = Date.now() - REACTION_HISTORY_TTL_MS;
+    reactionHistoryEntries = reactionHistoryEntries.filter(function(item){ return item.createdAt > oldestAllowedAt; });
+    if (reactionHistoryEntries.length > REACTION_HISTORY_LIMIT){
+      reactionHistoryEntries = reactionHistoryEntries.slice(-REACTION_HISTORY_LIMIT);
+    }
+  }
+
+  function appendReactionHistory(seatNo, senderDisplayName, reactionKey, senderUserId, senderIsBot){
+    reactionHistoryEntries.push({
+      senderSeatNo: seatNo,
+      senderDisplayName: senderDisplayName,
+      reactionKey: reactionKey,
+      senderUserId: senderUserId,
+      senderIsBot: senderIsBot === true,
+      createdAt: Date.now()
+    });
+    pruneReactionHistory();
+    renderReactionHistory();
+    scheduleReactionHistoryExpiry();
+  }
+
+  function removeBotReactionHistory(){
+    reactionHistoryEntries = reactionHistoryEntries.filter(function(item){ return item.senderIsBot !== true; });
+    pruneReactionHistory();
+    renderReactionHistory();
+    scheduleReactionHistoryExpiry();
+  }
+
+  function clearReactionHistory(){
+    clearReactionHistoryExpiryTimer();
+    reactionHistoryTableId = null;
+    reactionHistoryUserId = null;
+    reactionHistoryEntries = [];
+    reactionHistoryPanelOpen = false;
+    renderReactionHistory();
+  }
+
+  function syncReactionHistoryContext(nextTableId, nextUserId){
+    var normalizedTableId = nextTableId ? String(nextTableId) : null;
+    var normalizedUserId = nextUserId ? String(nextUserId) : null;
+    if (reactionHistoryTableId === normalizedTableId && reactionHistoryUserId === normalizedUserId) return;
+    clearReactionHistoryExpiryTimer();
+    reactionHistoryTableId = normalizedTableId;
+    reactionHistoryUserId = normalizedUserId;
+    reactionHistoryEntries = [];
+    reactionHistoryPanelOpen = false;
+    renderReactionHistory();
+  }
+
+  function clearReactionControlTimer(){
+    if (reactionControlTimer){
+      window.clearTimeout(reactionControlTimer);
+      reactionControlTimer = null;
+    }
+  }
+
+  function clearTargetedReactionDismissTimer(){
+    if (!targetedReactionDismissTimer) return;
+    window.clearTimeout(targetedReactionDismissTimer);
+    targetedReactionDismissTimer = null;
+  }
+
+  function targetedReactionOfferKey(handId, targetSeatNo){
+    return String(handId || '') + ':' + String(targetSeatNo);
+  }
+
+  function syncTargetedReactionOfferHand(handId){
+    var normalizedHandId = handId ? String(handId) : null;
+    if (targetedReactionOfferHandId === normalizedHandId) return;
+    targetedReactionOfferHandId = normalizedHandId;
+    pendingTargetedReactionOfferKeys.clear();
+    dismissedTargetedReactionOffersByKey = {};
+  }
+
+  function dismissTargetedReactionOffer(handId, targetSeatNo){
+    if (!handId || !Number.isInteger(targetSeatNo)) return;
+    if (targetedReactionOfferHandId !== String(handId)) return;
+    dismissedTargetedReactionOffersByKey[targetedReactionOfferKey(handId, targetSeatNo)] = true;
+  }
+
+  function dismissTargetedReactionOffersForHand(handId){
+    if (!handId) return;
+    var prefix = String(handId) + ':';
+    Object.keys(dismissedTargetedReactionOffersByKey).forEach(function(key){
+      if (key.indexOf(prefix) === 0) delete dismissedTargetedReactionOffersByKey[key];
+    });
+    state.seats.forEach(function(seat){
+      if (seat && Number.isInteger(seat.seatNo)) dismissTargetedReactionOffer(handId, seat.seatNo);
+    });
+  }
+
+  function getTargetedReactionDeadlineMs(sticky){
+    if (!sticky || sticky.authoritativeTargetedWindow !== true) return null;
+    var visibleUntilMs = Number(sticky.visibleUntilMs);
+    return Number.isFinite(visibleUntilMs) ? visibleUntilMs : null;
+  }
+
+  function getTargetedReactionOffers(){
+    if (inactivityExit || state.reconnectGate || !deriveCurrentSeat()) return [];
+    var sticky = getActiveWinnerReveal();
+    var presentation = sticky && sticky.settlementPresentation;
+    if (!sticky || !presentation || presentation.valid !== true || !presentation.handId){
+      syncTargetedReactionOfferHand(null);
+      return [];
+    }
+    var deadlineMs = getTargetedReactionDeadlineMs(sticky);
+    if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()){
+      syncTargetedReactionOfferHand(null);
+      return [];
+    }
+    syncTargetedReactionOfferHand(presentation.handId);
+    var currentSeat = deriveCurrentSeat();
+    var offers = [];
+    state.seats.forEach(function(seat){
+      if (!seat || !seat.userId || !Number.isInteger(seat.seatNo)) return;
+      if (seat.seatNo === currentSeat.seatNo || !hasWonContestedPot(seat)) return;
+      if (dismissedTargetedReactionOffersByKey[targetedReactionOfferKey(presentation.handId, seat.seatNo)]) return;
+      offers.push({
+        handId: presentation.handId,
+        targetSeatNo: seat.seatNo,
+        targetUserId: seat.userId
+      });
+    });
+    return offers;
+  }
+
+  function scheduleTargetedReactionDismiss(){
+    clearTargetedReactionDismissTimer();
+    var sticky = getActiveWinnerReveal();
+    var deadlineMs = getTargetedReactionDeadlineMs(sticky);
+    if (!sticky || !Number.isFinite(deadlineMs)) return;
+    var delayMs = deadlineMs - Date.now();
+    if (delayMs <= 0) return;
+    targetedReactionDismissTimer = window.setTimeout(function(){
+      targetedReactionDismissTimer = null;
+      renderSeats();
+    }, delayMs);
+  }
+
+  function clearReactionBubbles(){
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
+      clearReactionBubble(seatNo);
+    });
+    Object.keys(reactionBubbleNodesBySeatNo).forEach(function(seatNo){
+      removeReactionBubbleNode(seatNo);
+    });
+    clearBotAvatarReactions();
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (effect && effect.timer) window.clearTimeout(effect.timer);
+    });
+    targetedReactionEffectsById = {};
+    Object.keys(targetedReactionEffectNodesById).forEach(function(effectId){
+      var node = targetedReactionEffectNodesById[effectId];
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    targetedReactionEffectNodesById = {};
+    reactionRenderNodes = [];
+    clearTargetedReactionDismissTimer();
+    pendingTargetedReactionOfferKeys.clear();
+    targetedReactionOfferHandId = null;
+    dismissedTargetedReactionOffersByKey = {};
+    if (els.reactionLayer) els.reactionLayer.innerHTML = '';
+  }
+
+  function currentSeatOwnerUserId(seatNo){
+    for (var i = 0; i < state.seats.length; i++){
+      var seat = state.seats[i];
+      if (!seat || seat.seatNo !== seatNo) continue;
+      return typeof seat.userId === 'string' && seat.userId.trim() ? seat.userId.trim() : null;
+    }
+    return null;
+  }
+
+  function clearReactionBubble(seatNo){
+    var bubble = reactionBubblesBySeatNo[seatNo];
+    if (bubble && bubble.timer) window.clearTimeout(bubble.timer);
+    removeReactionBubbleNode(seatNo);
+    delete reactionBubblesBySeatNo[seatNo];
+  }
+
+  function removeReactionBubbleNode(seatNo){
+    var node = reactionBubbleNodesBySeatNo[seatNo];
+    if (node && node.parentNode) node.parentNode.removeChild(node);
+    delete reactionBubbleNodesBySeatNo[seatNo];
+  }
+
+  function clearBotAvatarReaction(seatNo){
+    if (botAvatarReactionTimersBySeatNo[seatNo]){
+      window.clearTimeout(botAvatarReactionTimersBySeatNo[seatNo]);
+      delete botAvatarReactionTimersBySeatNo[seatNo];
+    }
+    var avatarEl = renderedSeatAvatars[seatNo];
+    if (avatarEl && avatarEl.classList){
+      avatarEl.classList.remove(
+        'poker-seat-avatar--react-bounce',
+        'poker-seat-avatar--react-tilt',
+        'poker-seat-avatar--react-shake'
+      );
+    }
+  }
+
+  function clearBotAvatarReactions(){
+    Object.keys(botAvatarReactionTimersBySeatNo).forEach(function(seatNo){
+      clearBotAvatarReaction(seatNo);
+    });
+    botAvatarReactionTimersBySeatNo = {};
+  }
+
+  function clearReactionArtifacts(filter){
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
+      var bubble = reactionBubblesBySeatNo[seatNo];
+      if (!filter || filter(bubble)) clearReactionBubble(seatNo);
+    });
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (!filter || filter(effect)) clearTargetedReactionEffect(effectId);
+    });
+    renderSeats();
+  }
+
+  function clearTargetedReactionEffect(effectId){
+    var effect = targetedReactionEffectsById[effectId];
+    if (effect && effect.timer) window.clearTimeout(effect.timer);
+    var node = targetedReactionEffectNodesById[effectId];
+    if (node && node.parentNode) node.parentNode.removeChild(node);
+    delete targetedReactionEffectNodesById[effectId];
+    delete targetedReactionEffectsById[effectId];
+  }
+
+  function clearTargetedReactionEffectsWithChangedOwners(){
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      if (!effect
+        || currentSeatOwnerUserId(effect.senderSeatNo) !== effect.senderOwnerUserId
+        || currentSeatOwnerUserId(effect.targetSeatNo) !== effect.targetOwnerUserId){
+        clearTargetedReactionEffect(effectId);
+      }
+    });
+  }
+
+  function clearReactionBubblesWithChangedOwners(){
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
+      var bubble = reactionBubblesBySeatNo[seatNo];
+      var ownerUserId = currentSeatOwnerUserId(Number(seatNo));
+      if (!bubble || !ownerUserId || bubble.ownerUserId !== ownerUserId) clearReactionBubble(seatNo);
+    });
+  }
+
+  function closeReactionMenu(){
+    if (!els.reactionMenu || !els.reactionBtn) return;
+    els.reactionMenu.hidden = true;
+    els.reactionBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function renderReactionControl(){
+    if (!els.reactionBtn) return;
+    var signedIn = isSignedIn();
+    var seated = !!deriveCurrentSeat();
+    var cooldownActive = reactionControlUntilMs > Date.now();
+    var canUse = signedIn && seated && !inactivityExit && isWsReady() && !state.reconnectGate;
+    if (els.reactionControl) els.reactionControl.hidden = !signedIn || !seated;
+    els.reactionBtn.hidden = !signedIn || !seated;
+    els.reactionBtn.disabled = !canUse || cooldownActive;
+    if (!canUse) closeReactionMenu();
+  }
+
+  function startReactionCooldown(){
+    clearReactionControlTimer();
+    reactionControlUntilMs = Date.now() + 4_000;
+    renderReactionControl();
+    renderSeats();
+    reactionControlTimer = window.setTimeout(function(){
+      reactionControlTimer = null;
+      reactionControlUntilMs = 0;
+      renderReactionControl();
+      renderSeats();
+    }, 4_000);
+  }
+
+  function sendTargetedReaction(targetSeatNo, handId){
+    if (inactivityExit || !wsClient || typeof wsClient.sendTargetedReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
+      return Promise.resolve(null);
+    }
+    var offerKey = targetedReactionOfferKey(handId, targetSeatNo);
+    if (pendingTargetedReactionOfferKeys.has(offerKey) || dismissedTargetedReactionOffersByKey[offerKey]) return Promise.resolve(null);
+    pendingTargetedReactionOfferKeys.add(offerKey);
+    renderSeats();
+    return wsClient.sendTargetedReaction(targetSeatNo, handId).then(function(result){
+      pendingTargetedReactionOfferKeys.delete(offerKey);
+      dismissTargetedReactionOffer(handId, targetSeatNo);
+      renderSeats();
+      return result;
+    }).catch(function(error){
+      pendingTargetedReactionOfferKeys.delete(offerKey);
+      var code = normalizeSignalCode(error && (error.code || error.message));
+      if (code === 'reaction_already_sent'){
+        dismissTargetedReactionOffer(handId, targetSeatNo);
+        renderSeats();
+        return null;
+      }
+      if (code === 'reaction_rate_limited'){
+        renderSeats();
+        return null;
+      }
+      if (code === 'settlement_reaction_window_closed' || code === 'settlement_mismatch'){
+        dismissTargetedReactionOffersForHand(handId);
+        renderSeats();
+        return null;
+      }
+      if (code === 'target_not_available' || code === 'invalid_reaction'){
+        dismissTargetedReactionOffer(handId, targetSeatNo);
+        renderSeats();
+        if (code === 'invalid_reaction') klog('poker_targeted_reaction_invalid', { targetSeatNo: targetSeatNo });
+        return null;
+      }
+      if (code === 'not_seated' || code === 'table_closed'){
+        renderSeats();
+        renderControls();
+        if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
+        return null;
+      }
+      klog('poker_targeted_reaction_error', { code: code || 'targeted_reaction_failed' });
+      renderSeats();
+      return null;
+    });
+  }
+
+  function resolveBotAvatarReactionMotion(reactionKey){
+    switch (reactionKey){
+      case 'hello':
+      case 'nice_hand':
+      case 'well_played':
+      case 'haha':
+      case 'wow':
+      case 'good_luck':
+      case 'thanks':
+      case 'cheers':
+      case 'gg':
+      case 'congrats':
+      case 'i_was_bluffing':
+        return 'bounce';
+      case 'nice_bluff':
+      case 'you_are_bluffing':
+      case 'lucky':
+      case 'thinking':
+        return 'tilt';
+      case 'bad_beat':
+      case 'hurry_up':
+      case 'not_this_time':
+      case 'all_in_oh_no':
+      case 'all_in_that_hurts':
+      case 'all_in_no_way':
+      case 'all_in_come_on':
+      case 'all_in_censored':
+        return 'shake';
+      default:
+        if (typeof reactionKey === 'string' && reactionKey.indexOf('ambient_') === 0) return 'tilt';
+        return null;
+    }
+  }
+
+  function triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot){
+    if (senderIsBot !== true) return;
+    if (!socialPreferences.botReactionsEnabled) return;
+    if (!Number.isInteger(seatNo) || seatNo < 1) return;
+    var motion = resolveBotAvatarReactionMotion(reactionKey);
+    if (!motion) return;
+    var avatarEl = renderedSeatAvatars[seatNo];
+    if (!avatarEl || !avatarEl.classList || avatarEl.isConnected === false) return;
+    clearBotAvatarReaction(seatNo);
+    var motionClass = 'poker-seat-avatar--react-' + motion;
+    avatarEl.classList.add(motionClass);
+    botAvatarReactionTimersBySeatNo[seatNo] = window.setTimeout(function(){
+      delete botAvatarReactionTimersBySeatNo[seatNo];
+      if (avatarEl && avatarEl.classList){
+        avatarEl.classList.remove(motionClass);
+      }
+    }, 450);
+  }
+
+  function handleTableReaction(event){
+    var payload = event && event.payload && typeof event.payload === 'object' ? event.payload : {};
+    var seatNo = Number(payload.seatNo);
+    var reactionKey = typeof payload.reactionKey === 'string' ? payload.reactionKey : '';
+    var entry = findReactionEntry(reactionKey);
+    var ownerUserId = currentSeatOwnerUserId(seatNo);
+    if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
+    var hasTargetSeatNo = Object.prototype.hasOwnProperty.call(payload, 'targetSeatNo');
+    var targetSeatNo = null;
+    var targetOwnerUserId = null;
+    if (hasTargetSeatNo && reactionKey === 'nice_hand'){
+      targetSeatNo = Number(payload.targetSeatNo);
+      targetOwnerUserId = currentSeatOwnerUserId(targetSeatNo);
+      if (!Number.isInteger(targetSeatNo) || targetSeatNo < 1 || targetSeatNo === seatNo || !targetOwnerUserId) return;
+    }
+    var senderSeat = state.seats.find(function(seat){ return seat && seat.seatNo === seatNo && seat.userId === ownerUserId; });
+    var senderIsBot = !!(senderSeat && senderSeat.isBot === true);
+    if (senderIsBot && !socialPreferences.botReactionsEnabled) return;
+    appendReactionHistory(seatNo, getPublicDisplayName(senderSeat || { userId: ownerUserId }), reactionKey, ownerUserId, senderIsBot);
+    if (!socialPreferences.reactionBubblesEnabled){
+      triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot);
+      return;
+    }
+    if (hasTargetSeatNo && reactionKey === 'nice_hand'){
+      var effectId = String(nextTargetedReactionEffectId++);
+      var effect = {
+        senderSeatNo: seatNo,
+        targetSeatNo: targetSeatNo,
+        senderOwnerUserId: ownerUserId,
+        senderUserId: ownerUserId,
+        senderIsBot: senderIsBot,
+        targetOwnerUserId: targetOwnerUserId,
+        reactionKey: reactionKey,
+        animate: true,
+        timer: null
+      };
+      effect.timer = window.setTimeout(function(){
+        if (targetedReactionEffectsById[effectId] !== effect) return;
+        clearTargetedReactionEffect(effectId);
+        renderSeats();
+      }, TARGETED_REACTION_EFFECT_TTL_MS);
+      targetedReactionEffectsById[effectId] = effect;
+      renderSeats();
+      triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot);
+      return;
+    }
+    var previous = reactionBubblesBySeatNo[seatNo];
+    if (previous) clearReactionBubble(seatNo);
+    var bubble = { reactionKey: reactionKey, ownerUserId: ownerUserId, senderUserId: ownerUserId, senderIsBot: senderIsBot, animate: true, timer: null };
+    bubble.timer = window.setTimeout(function(){
+      if (reactionBubblesBySeatNo[seatNo] !== bubble) return;
+      clearReactionBubble(seatNo);
+      renderSeats();
+    }, REGULAR_REACTION_TTL_MS);
+    reactionBubblesBySeatNo[seatNo] = bubble;
+    renderSeats();
+    triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot);
+  }
+
+  function sendReaction(reactionKey){
+    if (inactivityExit || !wsClient || typeof wsClient.sendReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
+      return Promise.resolve(null);
+    }
+    closeReactionMenu();
+    return wsClient.sendReaction(reactionKey).then(function(result){
+      startReactionCooldown();
+      return result;
+    }).catch(function(error){
+      var code = normalizeSignalCode(error && (error.code || error.message));
+      if (code === 'reaction_rate_limited'){
+        startReactionCooldown();
+        return null;
+      }
+      if (code === 'not_seated' || code === 'table_closed'){
+        renderControls();
+        if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
+        return null;
+      }
+      klog('poker_reaction_error', { code: code || 'reaction_failed' });
+      return null;
+    });
+  }
+
+  function buildReactionMenu(){
+    if (!els.reactionMenu) return;
+    els.reactionMenu.innerHTML = '';
+    REACTION_CATALOG.forEach(function(entry){
+      if (entry.humanSelectable === false) return;
+      var option = document.createElement('button');
+      var label = reactionLabel(entry);
+      option.type = 'button';
+      option.className = 'poker-reaction-option';
+      option.setAttribute('role', 'menuitem');
+      option.setAttribute('aria-label', label);
+      option.dataset.reactionKey = entry.key;
+      option.textContent = entry.emoji + ' ' + label;
+      option.addEventListener('click', function(){ sendReaction(entry.key); });
+      els.reactionMenu.appendChild(option);
+    });
+  }
+
+  function formatCompactAmount(value){
+    var num = Number(value || 0);
+    if (!Number.isFinite(num) || num <= 0) return '0';
+    if (num < 1000) return String(Math.round(num));
+    if (num < 1000000) return String(Math.round(num / 1000)) + 'k';
+    return String(Math.round(num / 1000000)) + 'M';
+  }
+
+  function readSeatParam(){
+    var raw = searchParams && typeof searchParams.get === 'function' ? parseInt(searchParams.get('seatNo'), 10) : NaN;
+    return Number.isInteger(raw) && raw > 0 ? raw : null;
+  }
+
+  function readAutoJoinParam(){
+    return !!(searchParams && typeof searchParams.get === 'function' && searchParams.get('autoJoin') === '1');
+  }
+
+  function getSeatNumberingOffset(){
+    for (var i = 0; i < state.seats.length; i++){
+      if (state.seats[i] && state.seats[i].seatNo === 0) return 0;
+    }
+    return 1;
+  }
+
+
+  function getDisplayName(seat){
+    if (!seat) return 'Open seat';
+    if (isCurrentUserSeat(seat)) return 'You';
+    return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
+  }
+
+  function getPublicDisplayName(seat){
+    if (!seat) return 'Player';
+    return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
+  }
+
+  function seatAvatarSource(seat){
+    if (!seat) return '';
+    if (seat.isBot && seat.botPresentation) return seat.botPresentation.avatarPath || '';
+    var avatar = seat.profile && seat.profile.avatar;
+    return avatar ? (avatar.type === 'uploaded' ? avatar.url : 'default:' + avatar.variant) : '';
+  }
+
+  function renderSeatAvatar(avatar, seat){
+    avatar.textContent = '';
+    if (!seat){
+      avatar.textContent = '+';
+      return;
+    }
+
+    var fallback = document.createElement('span');
+    fallback.className = 'poker-seat-avatar__initials';
+    fallback.textContent = initials(getDisplayName(seat));
+    avatar.appendChild(fallback);
+
+    var imageUrl = seat.isBot && seat.botPresentation ? seat.botPresentation.avatarPath : '';
+    var profileAvatar = !seat.isBot && seat.profile && seat.profile.avatar;
+    if (!imageUrl && !profileAvatar) return;
+    if (!imageUrl && profileAvatar.type === 'default'){
+      avatar.dataset.avatarVariant = profileAvatar.variant;
+      return;
+    }
+    if (!imageUrl && profileAvatar.type === 'uploaded') imageUrl = profileAvatar.url;
+    if (!imageUrl) return;
+
+    var image = document.createElement('img');
+    image.className = 'poker-seat-avatar__image';
+    image.alt = '';
+    image.decoding = 'async';
+    image.addEventListener('load', function(){
+      fallback.hidden = true;
+      avatar.classList.add('poker-seat-avatar--image');
+    }, { once: true });
+    image.addEventListener('error', function(){
+      if (image.parentNode === avatar) avatar.removeChild(image);
+      fallback.hidden = false;
+      avatar.classList.remove('poker-seat-avatar--image');
+    }, { once: true });
+    image.src = imageUrl;
+    avatar.appendChild(image);
+  }
+
+  function findSeatTurnClock(avatar){
+    if (!avatar || !avatar.children) return null;
+    for (var i = 0; i < avatar.children.length; i++){
+      var child = avatar.children[i];
+      if (child && child.classList && child.classList.contains('poker-seat-turn-clock')) return child;
+    }
+    return null;
+  }
+
+  function updateSeatTurnClock(avatar, turnClock){
+    if (!avatar) return;
+    var clock = findSeatTurnClock(avatar);
+    if (!turnClock){
+      if (clock && clock.parentNode === avatar) avatar.removeChild(clock);
+      return;
+    }
+    if (!clock){
+      clock = document.createElement('div');
+      clock.setAttribute('aria-hidden', 'true');
+      avatar.appendChild(clock);
+    }
+    clock.className = 'poker-seat-turn-clock' + (turnClock.remainingSeconds <= 5 ? ' poker-seat-turn-clock--warning' : '');
+    clock.style.setProperty('--turn-progress', String(turnClock.ratio));
+    clock.style.setProperty('--turn-hue', String(Math.max(0, Math.min(120, Math.round(turnClock.ratio * 120)))));
+  }
+
+  function refreshSeatTurnClock(){
+    var activeSeatNo = null;
+    for (var i = 0; i < state.seats.length; i++){
+      var seat = state.seats[i];
+      if (seat && seat.userId && seat.userId === state.turnUserId){
+        activeSeatNo = seat.seatNo;
+        break;
+      }
+    }
+    var turnClock = activeSeatNo == null ? null : getTurnClockState();
+    Object.keys(renderedSeatAvatars).forEach(function(seatNo){
+      updateSeatTurnClock(renderedSeatAvatars[seatNo], Number(seatNo) === activeSeatNo ? turnClock : null);
+    });
+  }
+
+  function getSeatLastBettingRoundAction(seat){
+    if (!seat || !state.lastBettingRoundActionByUserId) return null;
+    if (typeof seat.userId === 'string' && state.lastBettingRoundActionByUserId[seat.userId]){
+      return state.lastBettingRoundActionByUserId[seat.userId];
+    }
+    if (isCurrentUserSeat(seat) && state.currentUserId && state.lastBettingRoundActionByUserId[state.currentUserId]){
+      return state.lastBettingRoundActionByUserId[state.currentUserId];
+    }
+    return null;
+  }
+
+
+
+  function shortId(value){
+    var text = typeof value === 'string' ? value.trim() : '';
+    if (!text) return '';
+    return text.length <= 8 ? text : text.slice(0, 8);
+  }
+
+  function normalizeTimerMs(value){
+    var numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? Math.trunc(numeric) : null;
+  }
+
+  function getTurnClockState(){
+    var deadlineAt = normalizeTimerMs(state.turnDeadlineAt);
+    if (!deadlineAt || !state.turnUserId) return null;
+    var startedAt = normalizeTimerMs(state.turnStartedAt);
+    var totalMs = startedAt && deadlineAt > startedAt ? (deadlineAt - startedAt) : 20_000;
+    var remainingMs = Math.max(0, deadlineAt - Date.now());
+    return {
+      remainingMs: remainingMs,
+      remainingSeconds: Math.ceil(remainingMs / 1000),
+      ratio: totalMs > 0 ? Math.max(0, Math.min(1, remainingMs / totalMs)) : 0
+    };
+  }
+
+  function getSettlementAwardLabel(award){
+    if (!award) return '';
+    if (award.kind === 'main') return t('pokerSettlementMainPot', 'Main pot');
+    if (award.kind === 'side') return tf('pokerSettlementSidePot', { number: award.sidePotNumber }, 'Side pot {number}');
+    if (award.kind === 'return') return t('pokerSettlementReturned', 'Returned');
+    return '';
+  }
+
+  function hasWonContestedPot(seat){
+    if (!seat || typeof seat.userId !== 'string') return false;
+    return getSeatSettlementAwards(seat.userId).some(function(award){ return award.kind === 'main' || award.kind === 'side'; });
+  }
+
+  function hasReturnedChips(seat){
+    if (!seat || typeof seat.userId !== 'string') return false;
+    return getSeatSettlementAwards(seat.userId).some(function(award){ return award.kind === 'return'; });
+  }
+
+  function shouldShowShowdownHandSummary(seat){
+    if (!seat || typeof seat.userId !== 'string') return false;
+    if (getSeatSettlementAwards(seat.userId).length) return true;
+    if (state.showdown && Array.isArray(state.showdown.winners) && state.showdown.winners.indexOf(seat.userId) !== -1) return true;
+    var sticky = getActiveWinnerReveal();
+    return !!(sticky && Array.isArray(sticky.showdownWinnerUserIds) && sticky.showdownWinnerUserIds.indexOf(seat.userId) !== -1);
+  }
+
+  function getOpponentHeldCardCount(seat, handId, handBets){
+    if (!seat || !handId || seat.status === 'WAITING_NEXT_HAND' || seat.status === 'OUT_OF_CHIPS') return 0;
+    // The public per-round map is initialized for every dealt-in user (including
+    // zero bets), and keeps folded participants. It is not a hole-card count.
+    return isObject(handBets) && hasOwn(handBets, seat.userId) ? 2 : 0;
+  }
+
+  function getSeatRevealCards(seat){
+    if (!seat || typeof seat.userId !== 'string') return null;
+    var revealed = state.revealedShowdownCardsByUserId && state.revealedShowdownCardsByUserId[seat.userId];
+    if ((!Array.isArray(revealed) || revealed.length !== 2) && getActiveWinnerReveal()){
+      revealed = stickyWinnerReveal.revealedShowdownCardsByUserId[seat.userId];
+    }
+    return Array.isArray(revealed) && revealed.length === 2 ? revealed : null;
+  }
+
+  function getWinnerHandSummary(seat){
+    if (!seat || typeof seat.userId !== 'string') return null;
+    var revealCards = getSeatRevealCards(seat);
+    if (!Array.isArray(revealCards) || revealCards.length !== 2) return null;
+    var boardCards = getDisplayCommunityCards();
+    if (!Array.isArray(boardCards) || boardCards.length < 3) return null;
+    var best = evaluateViewerBestHand(revealCards.concat(boardCards));
+    if (!best || !Array.isArray(best.cards) || best.cards.length !== 5) return null;
+    return {
+      label: formatViewerHandCategory(best.category),
+      cards: best.cards.slice(0, 5)
+    };
+  }
+
+  function buildChipBreakdown(amount){
+    var safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+    var out = [];
+    for (var i = 0; i < CHIP_DENOMINATIONS.length; i++){
+      var denom = CHIP_DENOMINATIONS[i];
+      var count = Math.floor(safeAmount / denom.value);
+      safeAmount = safeAmount % denom.value;
+      if (count > 0) out.push({ value: denom.value, color: denom.color, count: count });
+    }
+    return out;
+  }
+
+  function compressChipBreakdown(breakdown, maxVisible){
+    var max = Math.max(1, Math.floor(Number(maxVisible) || 1));
+    var total = 0;
+    (breakdown || []).forEach(function(entry){ total += entry.count; });
+    if (!total || total <= max) return breakdown || [];
+    var visible = [];
+    var allocated = 0;
+    (breakdown || []).forEach(function(entry){
+      var exact = (entry.count / total) * max;
+      var scaled = Math.floor(exact);
+      if (scaled < 1) scaled = 1;
+      visible.push({ value: entry.value, color: entry.color, count: scaled, remainder: exact - scaled });
+      allocated += scaled;
+    });
+    while (allocated > max){
+      var reduced = false;
+      for (var i = 0; i < visible.length && allocated > max; i++){
+        if (visible[i].count > 1){
+          visible[i].count -= 1;
+          allocated -= 1;
+          reduced = true;
+        }
+      }
+      if (!reduced) break;
+    }
+    while (allocated < max && visible.length){
+      visible.sort(function(left, right){ return right.remainder - left.remainder; });
+      visible[0].count += 1;
+      allocated += 1;
+    }
+    visible.sort(function(left, right){ return right.value - left.value; });
+    visible.forEach(function(entry){ delete entry.remainder; });
+    return visible;
+  }
+
+  function resolveFlyChipColorFromAmount(amount){
+    var breakdown = buildChipBreakdown(amount);
+    if (breakdown.length) return breakdown[0].color;
+    return 'white';
+  }
+
+  function splitChipBreakdownIntoStacks(breakdown){
+    var stacks = [];
+    (breakdown || []).slice().reverse().forEach(function(entry){
+      var remaining = Math.max(0, Math.floor(entry.count || 0));
+      while (remaining > 0){
+        var chipCount = Math.min(CHIP_STACK_MAX_HEIGHT, remaining);
+        stacks.push({ value: entry.value, color: entry.color, count: chipCount });
+        remaining -= chipCount;
+      }
+    });
+    return stacks;
+  }
+
+  function buildVisibleChipModels(amount, maxVisibleStacks){
+    var maxVisibleChips = Math.max(1, Math.floor(Number(maxVisibleStacks) || 1)) * CHIP_STACK_MAX_HEIGHT;
+    return splitChipBreakdownIntoStacks(compressChipBreakdown(buildChipBreakdown(amount), maxVisibleChips));
+  }
+
+  function resolveStackMaxVisible(variant){
+    if (variant === 'pot') return 9;
+    if (variant === 'seat-stack' || variant === 'hero-seat-stack') return 7;
+    return 5;
+  }
+
+  function resolveTotalVisibleChipCount(stacks){
+    var total = 0;
+    (stacks || []).forEach(function(stack){ total += stack.count; });
+    return total;
+  }
+
+  function resolveStackSizeClass(stacks){
+    var stackCount = (stacks || []).length;
+    var chipCount = resolveTotalVisibleChipCount(stacks);
+    if (chipCount <= 1) return 'tiny';
+    if (chipCount <= 5 && stackCount <= 1) return 'small';
+    if (chipCount <= 15 && stackCount <= 4) return 'medium';
+    if (chipCount <= 30) return 'large';
+    return 'huge';
+  }
+
+  function resolveStackColumnCount(stackCount){
+    if (stackCount > 6) return 3;
+    if (stackCount > 2) return 2;
+    return 1;
+  }
+
+  function resolveChipStackAsset(color, chipCount){
+    var safeColor = CHIP_ASSET_COLORS[color] ? color : 'white';
+    var safeCount = Math.max(1, Math.min(CHIP_STACK_MAX_HEIGHT, Math.floor(Number(chipCount) || 1)));
+    return 'assets/chips/chip-' + safeColor + '-' + safeCount + '.png';
+  }
+
+  function createChipFlyAsset(color){
+    var wrap = document.createElement('span');
+    wrap.className = 'poker-chip-fly';
+    var img = document.createElement('img');
+    img.className = 'poker-chip-fly-img';
+    img.alt = '';
+    img.setAttribute('aria-hidden', 'true');
+    img.decoding = 'async';
+    img.src = resolveChipStackAsset(color, 1);
+    wrap.appendChild(img);
+    return wrap;
+  }
+
+  function createChipStackVisual(amount, variant){
+    var wrap = document.createElement('div');
+    var chips = buildVisibleChipModels(amount, resolveStackMaxVisible(variant));
+    var sizeClass = resolveStackSizeClass(chips);
+    wrap.className = 'poker-chip-visual-stack poker-chip-visual-stack--' + sizeClass + (variant ? (' poker-chip-visual-stack--' + variant) : '');
+    wrap.setAttribute('data-chip-count', String(resolveTotalVisibleChipCount(chips)));
+    wrap.setAttribute('data-stack-count', String(chips.length));
+    wrap.setAttribute('data-amount', String(Math.max(0, Math.floor(Number(amount) || 0))));
+    if (!chips.length) return wrap;
+    var columns = resolveStackColumnCount(chips.length);
+    for (var i = 0; i < chips.length; i++){
+      var chip = chips[i];
+      var column = columns === 1 ? 0 : i % columns;
+      var row = columns === 1 ? i : Math.floor(i / columns);
+      var columnOffset = (column - ((columns - 1) / 2)) * (columns === 3 ? 33 : 39);
+      var stagger = columns > 1 && row % 2 ? 3 : 0;
+      var verticalOffset = row * 12 + (columns > 1 ? column * 3 : 0);
+      var img = document.createElement('img');
+      img.className = 'poker-chip-stack-chip poker-chip-stack-chip--' + chip.color;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      img.setAttribute('data-value', String(chip.value));
+      img.setAttribute('data-chip-count', String(chip.count));
+      img.decoding = 'async';
+      img.src = resolveChipStackAsset(chip.color, chip.count);
+      img.style.setProperty('--chip-x', Math.round(columnOffset + stagger) + 'px');
+      img.style.setProperty('--chip-y', '-' + Math.round(verticalOffset) + 'px');
+      img.style.setProperty('--chip-z', String(10 + i));
+      wrap.appendChild(img);
+    }
+    return wrap;
+  }
+
+  function appendSeatStackAmountLabel(stackEl, amount){
+    if (!stackEl) return;
+    var label = document.createElement('span');
+    label.className = 'poker-chip-stack-label';
+    label.textContent = formatNumber(amount);
+    stackEl.appendChild(label);
+  }
+
+  function clampNumber(value, min, max){
+    return Math.max(min, Math.min(max, value));
+  }
+
+
+  // Design coordinates belong to the table, never to measured seat content.
+  // Physical variants: top, upper right, lower right, hero, lower left, upper left.
+  var seatSceneGeometry = {
+    portrait: { width:360, height:650, seats:[
+      {gifts:[88,162,-1],avatar:[90,55],stack:[130,130],bet:[160,164],dealer:[90,130]},
+      {gifts:[238,234],avatar:[324,175],stack:[236,190],bet:[205,140],dealer:[272,135]},
+      {gifts:[290,440],avatar:[324,360],stack:[236,365],bet:[258,370],dealer:[272,320]},
+      {gifts:[198,520],avatar:[150,500],cards:[154,615],stack:[208,437],bet:[172,420],dealer:[204,492],bestHand:[49,580,98,40]},
+      {gifts:[117,440],avatar:[38,410],stack:[82,488],bet:[102,389],dealer:[90,370]},
+      {gifts:[118,260],avatar:[38,247],stack:[130,210],bet:[175,180],dealer:[90,207]}
+    ]},
+    landscape: { width:1040, height:390, seats:[
+      {gifts:[387,132],avatar:[472,12],compactTransient:[642,110],stack:[445,104],bet:[430,148],dealer:[402,92]},
+      {gifts:[782,192],avatar:[906,65],stack:[820,154],bet:[772,169],dealer:[906,155]},
+      {gifts:[838,258],avatar:[970,205],stack:[850,220],bet:[780,250],dealer:[1030,205]},
+      {gifts:[276,278],avatar:[430,298],cards:[558,334],stack:[354,259],bet:[440,242],dealer:[490,288],bestHand:[280,327,200,44]},
+      {gifts:[193,266],avatar:[95,185],stack:[205,228],bet:[285,224],dealer:[28,195]},
+      {gifts:[283,178],avatar:[230,65],stack:[295,140],bet:[328,169],dealer:[168,85]}
+    ]}
+  };
+  var seatSceneOrientation = 'portrait';
+
+  function fitTableScene(){
+    if (!els.scene || !els.sceneViewport) return;
+    seatSceneOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+    var geometry = seatSceneGeometry[seatSceneOrientation];
+    if (els.accountHud && els.topRightRail && els.liveTopbar){
+      var accountParent = seatSceneOrientation === 'landscape' ? els.topRightRail : els.liveTopbar;
+      if (els.accountHud.parentNode !== accountParent) accountParent.insertBefore(els.accountHud, accountParent.firstChild);
+    }
+    // Portrait status belongs to the visible viewport, not the transformed scene.
+    if (els.roomStatus){
+      var statusParent = seatSceneOrientation === 'portrait' ? els.sceneViewport : els.scene;
+      if (els.roomStatus.parentNode !== statusParent) statusParent.appendChild(els.roomStatus);
+    }
+    // Compact northern transients use their local side anchor, not a larger scene reserve.
+    var topSafeArea = seatSceneOrientation === 'landscape' ? 24 : 84;
+    var scale = Math.min(els.sceneViewport.clientWidth / geometry.width, els.sceneViewport.clientHeight / (geometry.height + topSafeArea));
+    if (!Number.isFinite(scale) || scale <= 0) return;
+    if (els.screen){
+      els.screen.style.setProperty('--poker-scene-scale', String(scale));
+      els.screen.style.setProperty('--poker-quick-gift-hit-size', Math.max(24,30/scale) + 'px');
+    }
+    els.scene.dataset.orientation = seatSceneOrientation;
+    els.scene.style.width = geometry.width + 'px';
+    els.scene.style.height = geometry.height + 'px';
+    var sceneTop = (els.sceneViewport.clientHeight + topSafeArea * scale) / 2;
+    if (seatSceneOrientation === 'landscape' && window.innerHeight <= 500) sceneTop = (geometry.height / 2 + topSafeArea) * scale;
+    els.scene.style.top = sceneTop + 'px';
+    els.scene.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
+    positionQuickGiftPicker();
+  }
+
+  function seatPhysicalSlot(index, total){
+    var variants = {2:[0,3],3:[5,1,3],4:[0,1,3,5],5:[0,1,3,4,5]};
+    return variants[total] ? variants[total][index] : index;
+  }
+
+  function placeSeatNode(node, hud, point, width, height){
+    if (!node || !point) return;
+    node.setAttribute('data-seat-anchor','');
+    node.style.left = (point[0] - hud.origin[0]) + 'px';
+    node.style.top = (point[1] - hud.origin[1]) + 'px';
+    if (width) node.style.width = width + 'px';
+    if (height) node.style.height = height + 'px';
+  }
+
+  function configureSeatHud(article, hud, slot, hero){
+    var portrait = seatSceneOrientation === 'portrait';
+    var config = seatSceneGeometry[seatSceneOrientation].seats[slot];
+    hud.config = config;
+    hud.origin = [config.avatar[0] - 46, config.avatar[1] - 50];
+    article.style.left = hud.origin[0] + 'px';
+    article.style.top = hud.origin[1] + 'px';
+    article.dataset.seatVariant = ['top','upper-right','lower-right','hero','lower-left','upper-left'][slot];
+    hud.avatarSize = portrait ? 72 : 96;
+    hud.name = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2 + 15];
+    hud.action = [config.avatar[0],config.avatar[1] + hud.avatarSize / 2];
+    var corner = portrait ? 46 : 60;
+    var leftSide = slot === 4 || slot === 5;
+    var rightSide = slot === 1 || slot === 2;
+    var edge = leftSide ? corner : -corner;
+    var quick = [config.avatar[0] + (rightSide ? -1 : 1) * (hud.avatarSize / 2 + 10),config.avatar[1] - 16];
+    var marker = [config.avatar[0] + edge,config.avatar[1] + (hero ? 20 : leftSide || rightSide ? 48 : 28)];
+    hud.marker = marker;
+    // Preserve the shared reaction anchor; only Gift owns the avatar-edge position.
+    var actionPoint = [config.avatar[0] + (rightSide ? -corner : corner),config.avatar[1] + (hero ? 12 : 8)];
+    placeSeatNode(hud.quickAction,{origin:[0,0]},actionPoint,16,16);
+    hud.quickGiftPoint = [quick[0]-actionPoint[0]+8,quick[1]-actionPoint[1]+8];
+    hud.quickAction.style.setProperty('--poker-quick-gift-pad-left', rightSide ? 'calc(var(--poker-quick-gift-hit-size,24px) - 24px)' : '0px');
+    // Northern landscape controls share the existing 24px scene top reserve.
+    hud.quickAction.style.setProperty('--poker-quick-gift-height-limit', !portrait && slot === 0 ? '32px' : '999px');
+    hud.cardPoint = hero ? config.cards : [config.avatar[0] + edge,config.avatar[1] + (leftSide || rightSide ? 28 : 8)];
+    placeSeatNode(hud.cards,hud,hud.cardPoint,hero ? 110 : 36,hero ? 80 : 30);
+    placeSeatNode(hud.stack,hud,config.stack,portrait ? 60 : 80,60);
+    placeSeatNode(hud.bet,hud,config.bet,22,20);
+    ['bestHand'].forEach(function(role){
+      var point=config[role];
+      if (point) placeSeatNode(hud[role],{origin:[0,0]},point,point[2],point[3]);
+    });
+    // Compact landscape keeps the northern column beside its avatar, above the board.
+    var presentationPoint = !portrait && window.innerHeight <= 500 && config.compactTransient
+      ? config.compactTransient : [config.avatar[0],config.avatar[1] - hud.avatarSize / 2 - 6];
+    placeSeatNode(hud.presentation,{origin:[0,0]},presentationPoint,100);
+    hud.presentation.classList.add('poker-seat-hud-transient');
+    hud.presentation.appendChild(hud.social);
+    var geometry = seatSceneGeometry[seatSceneOrientation];
+    var reactionWidth = portrait
+      ? Math.min(220, 2 * (Math.min(config.avatar[0], geometry.width - config.avatar[0]) - 8))
+      : Math.min(220, geometry.width - 16);
+    var reactionCenter = Math.max(reactionWidth / 2 + 8, Math.min(config.avatar[0], geometry.width - reactionWidth / 2 - 8));
+    hud.social.style.setProperty('--poker-reaction-width', reactionWidth + 'px');
+    hud.social.style.setProperty('--poker-reaction-offset', (reactionCenter - config.avatar[0]) + 'px');
+    // Three receipt objects stand on a fixed tabletop patch, independent of avatar actions.
+    [0,1,2].forEach(function(index){
+      placeSeatNode(hud.gifts.children[index],hud,[config.gifts[0]+index*12*(config.gifts[2] || 1),config.gifts[1]+index*5],22,22);
+      hud.gifts.children[index].style.zIndex = String(3-index);
+    });
+  }
+
+  function getSeatAvatarAnchor(seatNo){
+    var hud = renderedSeatHud[seatNo];
+    if (!hud) return null;
+    var geometry=seatSceneGeometry[seatSceneOrientation];
+    return {x:hud.config.avatar[0]/geometry.width*100,y:hud.config.avatar[1]/geometry.height*100};
+  }
+
+  function syncRenderedSeatAnchors(){
+    Object.keys(renderedSeatAvatars).forEach(function(seatNo){
+      var anchor = getSeatAvatarAnchor(Number(seatNo));
+      if (anchor) renderedSeatAnchors[seatNo] = {x:anchor.x,y:anchor.y};
+    });
+  }
+
+  function refreshLayoutPresentation(){
+    layoutRefreshTimer = null;
+    render();
+    if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
+  }
+
+  function scheduleLayoutPresentationRefresh(){
+    if (layoutRefreshTimer != null) return;
+    layoutRefreshTimer = window.setTimeout(refreshLayoutPresentation, 0);
+  }
+
+  function startSpectatorJoinIntro(){
+    if (prefersReducedMotion()) return;
+    if (!els.spectatorJoinIntro || !els.spectatorJoinIntroBtn || !els.joinBtn) return;
+    spectatorJoinIntroActive = true;
+    els.joinBtn.hidden = false;
+    els.joinBtn.classList.add('poker-join-btn--intro-target');
+    els.spectatorJoinIntro.hidden = false;
+    els.spectatorJoinIntro.classList.remove('poker-spectator-join-intro--flying');
+    els.spectatorJoinIntroBtn.style.transform = '';
+    els.spectatorJoinIntroBtn.style.opacity = '';
+
+    if (spectatorJoinIntroTimer) window.clearTimeout(spectatorJoinIntroTimer);
+    spectatorJoinIntroTimer = window.setTimeout(function(){
+      flySpectatorJoinIntro();
+    }, 1800);
+  }
+
+  function flySpectatorJoinIntro(){
+    if (!spectatorJoinIntroActive || !els.spectatorJoinIntroBtn || !els.joinBtn) return;
+    if (els.spectatorJoinIntro) {
+      els.spectatorJoinIntro.classList.add('poker-spectator-join-intro--flying');
+    }
+
+    var fromRect = typeof els.spectatorJoinIntroBtn.getBoundingClientRect === 'function'
+      ? els.spectatorJoinIntroBtn.getBoundingClientRect()
+      : null;
+    var toRect = typeof els.joinBtn.getBoundingClientRect === 'function'
+      ? els.joinBtn.getBoundingClientRect()
+      : null;
+
+    if (toRect && toRect.width > 0 && toRect.height > 0 && fromRect && fromRect.width > 0 && fromRect.height > 0) {
+      var deltaX = (toRect.left + toRect.width / 2) - (fromRect.left + fromRect.width / 2);
+      var deltaY = (toRect.top + toRect.height / 2) - (fromRect.top + fromRect.height / 2);
+      var scale = toRect.height / fromRect.height;
+      els.spectatorJoinIntroBtn.style.transform = 'translate(' + Math.round(deltaX) + 'px, ' + Math.round(deltaY) + 'px) scale(' + scale.toFixed(3) + ')';
+    } else {
+      els.spectatorJoinIntroBtn.style.opacity = '0';
+    }
+
+    if (spectatorJoinIntroTimer) window.clearTimeout(spectatorJoinIntroTimer);
+    spectatorJoinIntroTimer = window.setTimeout(function(){
+      finishSpectatorJoinIntro();
+    }, 550);
+  }
+
+  function finishSpectatorJoinIntro(){
+    spectatorJoinIntroActive = false;
+    if (spectatorJoinIntroTimer) {
+      window.clearTimeout(spectatorJoinIntroTimer);
+      spectatorJoinIntroTimer = null;
+    }
+    if (els.spectatorJoinIntro) {
+      els.spectatorJoinIntro.hidden = true;
+      els.spectatorJoinIntro.classList.remove('poker-spectator-join-intro--flying');
+    }
+    if (els.spectatorJoinIntroBtn) {
+      els.spectatorJoinIntroBtn.style.transform = '';
+      els.spectatorJoinIntroBtn.style.opacity = '';
+    }
+    if (els.joinBtn) {
+      els.joinBtn.classList.remove('poker-join-btn--intro-target');
+      els.joinBtn.classList.add('poker-join-btn--settled');
+      if (spectatorJoinIntroSettleTimer) window.clearTimeout(spectatorJoinIntroSettleTimer);
+      spectatorJoinIntroSettleTimer = window.setTimeout(function(){
+        spectatorJoinIntroSettleTimer = null;
+        if (els.joinBtn) els.joinBtn.classList.remove('poker-join-btn--settled');
+      }, 700);
+    }
+    syncJoinVisibility();
+  }
+
+  function cancelSpectatorJoinIntro(preserveJoinBtn){
+    spectatorJoinIntroActive = false;
+    if (spectatorJoinIntroTimer) {
+      window.clearTimeout(spectatorJoinIntroTimer);
+      spectatorJoinIntroTimer = null;
+    }
+    if (spectatorJoinIntroSettleTimer) {
+      window.clearTimeout(spectatorJoinIntroSettleTimer);
+      spectatorJoinIntroSettleTimer = null;
+    }
+    if (els.spectatorJoinIntro) {
+      els.spectatorJoinIntro.hidden = true;
+      els.spectatorJoinIntro.classList.remove('poker-spectator-join-intro--flying');
+    }
+    if (els.spectatorJoinIntroBtn) {
+      els.spectatorJoinIntroBtn.style.transform = '';
+      els.spectatorJoinIntroBtn.style.opacity = '';
+    }
+    if (els.joinBtn) {
+      els.joinBtn.classList.remove('poker-join-btn--intro-target', 'poker-join-btn--settled');
+    }
+    if (!preserveJoinBtn) {
+      syncJoinVisibility();
+    }
+  }
+
+  function syncJoinVisibility(){
+    if (!els.joinBtn) return;
+    var signedIn = isSignedIn() && !isGuestMode;
+    var seated = !!deriveCurrentSeat();
+    var joinPending = isJoinOperationPending();
+    var waitingForAuthoritativeSeat = joinOperation.phase === 'active' && !seated;
+    var isClosed = isClosedTableStatus(state.tableStatus) || closedTableRedirectRemaining > 0;
+    var canJoin = state.mode === 'live' && signedIn && !inactivityExit && !seated && !isClosed && !!state.tableId
+      && !state.reconnectGate && isWsReady() && state.hasAppliedAuthoritativeSnapshot === true
+      && !joinPending && !waitingForAuthoritativeSeat;
+    var occupiedSeatsCount = Array.isArray(state.seats)
+      ? state.seats.filter(function(seat){ return seat && Number.isInteger(seat.seatNo); }).length
+      : 0;
+    var maxSeatsCount = Number.isInteger(state.maxSeats) && state.maxSeats > 0 ? state.maxSeats : 6;
+    var isTableFull = occupiedSeatsCount >= maxSeatsCount;
+
+    if (seated) {
+      spectatorJoinIntroShown = true;
+    }
+
+    if ((!canJoin || isTableFull) && spectatorJoinIntroActive) {
+      cancelSpectatorJoinIntro(false);
+    }
+
+    if (spectatorJoinIntroActive) {
+      els.joinBtn.hidden = false;
+      els.joinBtn.classList.add('poker-join-btn--intro-target');
+    } else {
+      els.joinBtn.classList.remove('poker-join-btn--intro-target');
+      els.joinBtn.hidden = !canJoin;
+    }
+
+    if (canJoin && !isTableFull && !spectatorJoinIntroShown && !shouldAutoJoin
+        && !Number.isInteger(reconnectSeatNo) && !autoJoinAttempted && !joinPending) {
+      spectatorJoinIntroShown = true;
+      if (prefersReducedMotion()) {
+        els.joinBtn.hidden = false;
+        els.joinBtn.classList.remove('poker-join-btn--intro-target');
+      } else {
+        startSpectatorJoinIntro();
+      }
+    }
+  }
+
+  function seatHudAnchor(node){
+    if (!node) return null;
+    var hud=renderedSeatHud[node.dataset.seatNo];
+    var point=hud && hud.config[node.dataset.seatHud];
+    var geometry=seatSceneGeometry[seatSceneOrientation];
+    return point ? {x:point[0]/geometry.width*100,y:point[1]/geometry.height*100} : null;
+  }
+
+  function syncChipVisual(container, amount, variant, showLabel){
+    var current = container.children[0];
+    var visible = amount != null && (showLabel || amount > 0);
+    if (visible && current && current.getAttribute('data-amount') === String(Math.floor(amount))
+        && current.classList.contains('poker-chip-visual-stack--' + variant)) return;
+    if (!visible && !current) return;
+    container.innerHTML = '';
+    if (!visible) return;
+    var visual = createChipStackVisual(amount, variant);
+    if (showLabel) appendSeatStackAmountLabel(visual, amount);
+    container.appendChild(visual);
+  }
+
+  function renderSeatChips(){
+    renderedSeatBetAnchors = {};
+    renderedSeatStackAnchors = {};
+    if (!els.seatChipLayer) return;
+    // Static chips belong to the persistent scene layer, never the rebuilt HUD.
+    Array.from(els.seatChipLayer.children).forEach(function(node){
+      var occupied = state.seats.some(function(seat){
+        return seat.userId === node.dataset.userId && String(seat.seatNo) === node.dataset.seatNo;
+      });
+      if (!occupied) els.seatChipLayer.removeChild(node);
+    });
+    state.seats.forEach(function(seat){
+      var hud = seat && renderedSeatHud[seat.seatNo];
+      if (!hud || !seat.userId) return;
+      ['stack','bet'].forEach(function(role){
+        var container = Array.from(els.seatChipLayer.children).find(function(node){
+          return node.dataset.seatNo === String(seat.seatNo) && node.dataset.userId === seat.userId && node.dataset.seatHud === role;
+        });
+        if (!container){
+          container = hud[role];
+          container.dataset.userId = seat.userId;
+          els.seatChipLayer.appendChild(container);
+        }
+        hud[role] = container;
+        placeSeatNode(container,{origin:[0,0]},hud.config[role],role === 'stack' ? (seatSceneOrientation === 'portrait' ? 60 : 80) : 22,role === 'stack' ? 60 : 20);
+      });
+      syncChipVisual(hud.stack,resolveStack(seat.userId),isCurrentUserSeat(seat) ? 'hero-seat-stack' : 'seat-stack',true);
+      syncChipVisual(hud.bet,Math.max(0,Number(seatCommittedByUserId[seat.userId]) || 0),'seat-bet',false);
+      renderedSeatStackAnchors[seat.seatNo] = seatHudAnchor(hud.stack);
+      renderedSeatBetAnchors[seat.seatNo] = seatHudAnchor(hud.bet);
+    });
+  }
+
+  function renderPotChips(){
+    if (!els.potChipStack) return;
+    syncChipVisual(els.potChipStack,Math.max(0,Number(state.potTotal) || 0),'pot',false);
+  }
+
+  function resolvePointFromPercent(anchor, rect){
+    if (!anchor || !rect || rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: rect.width * (anchor.x / 100),
+      y: rect.height * (anchor.y / 100)
+    };
+  }
+
+  function spawnChipFly(fromPoint, toPoint, color, delayMs, durationMs){
+    if (!els.chipFxLayer || !fromPoint || !toPoint) return null;
+    var tone = color || 'white';
+    var fly = createChipFlyAsset(tone);
+    fly.style.left = Math.round(fromPoint.x) + 'px';
+    fly.style.top = Math.round(fromPoint.y) + 'px';
+    var resolvedDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : CHIP_FLY_MS;
+    fly.style.animationDuration = resolvedDurationMs + 'ms';
+    fly.style.animationDelay = Math.max(0, delayMs || 0) + 'ms';
+    fly.style.setProperty('--chip-dx', Math.round(toPoint.x - fromPoint.x) + 'px');
+    fly.style.setProperty('--chip-dy', Math.round(toPoint.y - fromPoint.y) + 'px');
+    els.chipFxLayer.appendChild(fly);
+    window.setTimeout(function(){ if (fly && fly.parentNode) fly.parentNode.removeChild(fly); }, resolvedDurationMs + Math.max(0, delayMs || 0) + 40);
+    return fly;
+  }
+
+  function resolveBetAnimationUserIds(previousVisual, nextVisual){
+    var ids = [];
+    var seen = {};
+    state.seats.forEach(function(seat){
+      if (!seat || !seat.userId) return;
+      var beforeCommit = Number(previousVisual.committedByUserId[seat.userId]) || 0;
+      var afterCommit = Number(nextVisual.committedByUserId[seat.userId]) || 0;
+      var delta = Math.max(0, Math.round(afterCommit - beforeCommit));
+      if (!delta) return;
+      seen[seat.userId] = true;
+      ids.push(seat.userId);
+    });
+    if (ids.length) return ids;
+    state.seats.forEach(function(seat){
+      if (!seat || !seat.userId || seen[seat.userId]) return;
+      var beforeAction = previousVisual.lastActionByUserId[seat.userId] || null;
+      var afterAction = nextVisual.lastActionByUserId[seat.userId] || null;
+      if (beforeAction === afterAction) return;
+      if (afterAction === 'call' || afterAction === 'raise' || afterAction === 'all_in'){
+        seen[seat.userId] = true;
+        ids.push(seat.userId);
+      }
+    });
+    return ids;
+  }
+
+  function prefersReducedMotion(){
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (_err){ return false; }
+  }
+
+  function cancelSettlementAnimations(){
+    settlementAnimationGeneration += 1;
+    settlementAnimationTimers.forEach(function(timerId){
+      try { window.clearTimeout(timerId); } catch (_err){}
+    });
+    settlementAnimationTimers = [];
+    settlementAnimationNodes.forEach(function(node){
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    settlementAnimationNodes = [];
+  }
+
+  function animateSettlementAwards(previousVisual, nextVisual, sceneRect, potFrom, frame){
+    var presentation = nextVisual && nextVisual.settlementPresentation;
+    if (!presentation || !presentation.valid || !Array.isArray(presentation.pots) || !presentation.pots.length) return;
+    if (!frame || frame.initial || frame.suppressSettlementAnimation) return;
+    if (frame.kind !== 'statePatch' && frame.kind !== 'stateSnapshot') return;
+    if (!previousVisual || previousVisual.phase === 'SETTLED' || nextVisual.phase !== 'SETTLED') return;
+    if (!nextVisual.handId || previousVisual.handId !== nextVisual.handId || presentation.handId !== nextVisual.handId) return;
+    if (lastAnimatedSettlementHandId === presentation.handId || prefersReducedMotion()) return;
+    lastAnimatedSettlementHandId = presentation.handId;
+    cancelSettlementAnimations();
+    var generation = settlementAnimationGeneration;
+    var seatByUserId = {};
+    state.seats.forEach(function(seat){ if (seat && seat.userId) seatByUserId[seat.userId] = seat; });
+    var availableMs = Math.max(200, WINNER_REVEAL_MS - SETTLEMENT_CHIP_FLY_MS - 240);
+    var stepGapMs = Math.min(480, Math.max(150, Math.floor(availableMs / Math.max(1, presentation.pots.length))));
+    presentation.pots.forEach(function(pot, potIndex){
+      var timerId = window.setTimeout(function(){
+        if (generation !== settlementAnimationGeneration || state.handId !== presentation.handId) return;
+        pot.recipients.forEach(function(recipient, recipientIndex){
+          var seat = seatByUserId[recipient.userId];
+          if (!seat || !Number.isInteger(seat.seatNo)) return;
+          var target = resolvePointFromPercent(renderedSeatStackAnchors[seat.seatNo] || renderedSeatBetAnchors[seat.seatNo], sceneRect);
+          if (!target) return;
+          var color = resolveFlyChipColorFromAmount(recipient.amount);
+          for (var chipIndex = 0; chipIndex < 3; chipIndex++){
+            var fly = spawnChipFly(potFrom, target, color, recipientIndex * 34 + chipIndex * 42, SETTLEMENT_CHIP_FLY_MS);
+            if (!fly) continue;
+            fly.classList.add('poker-chip-fly--settlement');
+            fly.dataset.settlementAnimation = presentation.handId;
+            settlementAnimationNodes.push(fly);
+          }
+        });
+      }, potIndex * stepGapMs);
+      settlementAnimationTimers.push(timerId);
+    });
+  }
+
+  function captureCardSeats(){
+    var result = {};
+    state.seats.forEach(function(seat){
+      if (!seat || !seat.userId) return;
+      var revealed = getSeatRevealCards(seat);
+      result[seat.userId] = {
+        seatNo: seat.seatNo,
+        held: getOpponentHeldCardCount(seat, state.handId, state.betThisRoundByUserId) === 2,
+        folded: (state.foldedByUserId || {})[seat.userId] === true || /FOLD/i.test(seat.status || ''),
+        revealed: revealed ? revealed.slice() : null,
+        hero: seat.userId === state.currentUserId
+      };
+    });
+    return result;
+  }
+
+  function removeCardFxNode(node){
+    if (node.dataset.communityCard && els.communityCards){
+      var target = els.communityCards.children[Number(node.dataset.boardIndex)];
+      if (target && target.dataset.cardIdentity === node.dataset.communityCard) target.classList.remove('poker-card--dealing');
+    }
+    if (node.parentNode) node.parentNode.removeChild(node);
+  }
+
+  function clearCardFx(resetClaims){
+    cardFxTimers.forEach(function(timer){ window.clearTimeout(timer); });
+    cardFxTimers = [];
+    cardFxNodes.forEach(removeCardFxNode);
+    cardFxNodes = [];
+    if (resetClaims) cardFxClaims = { key: null, deal: false, board: {}, fold: {}, reveal: {} };
+  }
+
+  function claimCardTransitions(previous, next, eligible){
+    var key = JSON.stringify([next.tableId, next.viewerId, next.viewerSeat, next.handId]);
+    if (key !== cardFxClaims.key){
+      clearCardFx(true);
+      cardFxClaims.key = key;
+    }
+    var transitions = [];
+    if (!next.handId) return transitions;
+    var sameHand = previous.handId === next.handId;
+    var sameContext = key === JSON.stringify([previous.tableId, previous.viewerId, previous.viewerSeat, previous.handId]);
+    var beforeBoard = previous.communityCards;
+    var board = next.communityCards;
+    var boardCount = board.length;
+    var newStreet = !cardFxClaims.board[boardCount];
+    // Consume all populated streets, including recovery/reduced-motion baselines.
+    [3, 4, 5].forEach(function(count){ if (count <= boardCount) cardFxClaims.board[count] = true; });
+    var forwardStreet = (beforeBoard.length === 0 && boardCount === 3)
+      || (beforeBoard.length === 3 && boardCount === 4) || (beforeBoard.length === 4 && boardCount === 5);
+    var samePrefix = beforeBoard.every(function(card, index){ return JSON.stringify(card) === JSON.stringify(board[index]); });
+    if (eligible && sameHand && sameContext && newStreet && forwardStreet && samePrefix){
+      transitions.push({ kind: 'community', start: beforeBoard.length, cards: board.slice(beforeBoard.length) });
+    }
+    var users = Object.keys(next.cardSeats);
+    var participants = users.filter(function(userId){ return next.cardSeats[userId].held; });
+    if (!cardFxClaims.deal){
+      cardFxClaims.deal = true;
+      if (eligible && !sameHand && participants.length) transitions.push({ kind: 'deal', users: participants });
+    }
+    users.forEach(function(userId){
+      var current = next.cardSeats[userId];
+      var prior = sameHand && previous.cardSeats[userId];
+      var sameSeat = prior && prior.seatNo === current.seatNo;
+      if (current.folded && !cardFxClaims.fold[userId]){
+        cardFxClaims.fold[userId] = true;
+        if (eligible && sameSeat && prior.held && !prior.folded) transitions.push({ kind: 'muck', userId: userId });
+      }
+      if (current.revealed && !cardFxClaims.reveal[userId]){
+        cardFxClaims.reveal[userId] = true;
+        if (eligible && !current.hero && sameSeat && prior.held && !prior.revealed) transitions.push({ kind: 'flip', userId: userId });
+      }
+    });
+    return transitions;
+  }
+
+  function getSeatCardAnchor(seatNo){
+    var hud = renderedSeatHud[seatNo];
+    if (!hud) return null;
+    // Hero CSS includes its fixed short-portrait lift; use that rendered anchor.
+    if (isCurrentUserSeat(state.seats.find(function(seat){ return seat.seatNo === seatNo; })) && els.heroCards){
+      var box = els.heroCards.getBoundingClientRect();
+      return cardScenePoint(box.left + box.width / 2, box.top + box.height / 2);
+    }
+    return { x: hud.cardPoint[0], y: hud.cardPoint[1] };
+  }
+
+  function cardScenePoint(clientX, clientY){
+    var box = els.scene.getBoundingClientRect();
+    var geometry = seatSceneGeometry[seatSceneOrientation];
+    if (!(box.width > 0 && box.height > 0)) return null;
+    return { x: (clientX - box.left) * geometry.width / box.width, y: (clientY - box.top) * geometry.height / box.height };
+  }
+
+  function spawnCardFx(kind, from, to, cards, hero, delay){
+    if (!els.cardFxLayer || !from || !to) return;
+    var node = document.createElement('div');
+    node.className = 'poker-card-fx poker-card-fx--' + kind + (hero ? ' poker-card-fx--hero' : '');
+    node.dataset.cardFx = kind;
+    node.style.left = from.x + 'px';
+    node.style.top = from.y + 'px';
+    node.style.setProperty('--card-dx', (to.x - from.x) + 'px');
+    node.style.setProperty('--card-dy', (to.y - from.y) + 'px');
+    node.style.animationDelay = (delay || 0) + 'ms';
+    cards.forEach(function(card){
+      if (kind === 'flip'){
+        var turn = document.createElement('div');
+        turn.className = 'poker-card-flip';
+        turn.appendChild(createCard(null));
+        turn.appendChild(createCard(card));
+        node.appendChild(turn);
+      } else node.appendChild(createCard(card));
+    });
+    els.cardFxLayer.appendChild(node);
+    cardFxNodes.push(node);
+    var timer = window.setTimeout(function(){
+      removeCardFxNode(node);
+      cardFxNodes = cardFxNodes.filter(function(entry){ return entry !== node; });
+      cardFxTimers = cardFxTimers.filter(function(entry){ return entry !== timer; });
+    }, (delay || 0) + (kind === 'muck' ? 800 : kind === 'flip' ? 420 : 280));
+    cardFxTimers.push(timer);
+    return node;
+  }
+
+  function animateCardDiff(previous, next, frame){
+    if (isClosedTableStatus(state.tableStatus) || closedTableRedirectRemaining > 0){ clearCardFx(true); return; }
+    var transitions = claimCardTransitions(previous, next, !!frame.cardFxEligible && !prefersReducedMotion());
+    if (!els.scene || !els.cardFxLayer) return;
+    transitions.forEach(function(transition){
+      if (transition.kind === 'deal' || transition.kind === 'community'){
+        if (!els.roomDealer) return;
+        var dealerBox = els.roomDealer.getBoundingClientRect();
+        // The rendered woman's hands, separate from the gameplay Dealer D.
+        var origin = cardScenePoint(dealerBox.left + dealerBox.width * .5, dealerBox.top + dealerBox.height * .84);
+        if (transition.kind === 'community'){
+          transition.cards.forEach(function(card, index){
+            var target = els.communityCards && els.communityCards.children[transition.start + index];
+            var identity = card.r + card.s;
+            if (!target || target.dataset.cardIdentity !== identity) return;
+            var box = target.getBoundingClientRect();
+            var destination = cardScenePoint(box.left + box.width / 2, box.top + box.height / 2);
+            var node = spawnCardFx('community', origin, destination, [card], false, index * 70);
+            if (!node) return;
+            node.dataset.communityCard = identity;
+            node.dataset.boardIndex = String(transition.start + index);
+            var style = window.getComputedStyle(target);
+            var copy = node.children[0];
+            copy.style.flexBasis = copy.style.width = style.width;
+            copy.style.height = style.height;
+            copy.style.fontSize = style.fontSize;
+            copy.style.borderRadius = style.borderRadius;
+            copy.children[1].style.fontSize = window.getComputedStyle(target.children[1]).fontSize;
+            if (target.classList.contains('poker-card--made-hand')) copy.classList.add('poker-card--made-hand');
+            target.classList.add('poker-card--dealing');
+          });
+          return;
+        }
+        for (var round = 0; round < 2; round++){
+          transition.users.forEach(function(userId, index){
+            var seat = next.cardSeats[userId];
+            spawnCardFx('deal', origin, getSeatCardAnchor(seat.seatNo), [null], false, (round * transition.users.length + index) * 35);
+          });
+        }
+      } else {
+        var seat = next.cardSeats[transition.userId];
+        var anchor = getSeatCardAnchor(seat.seatNo);
+        var geometry = seatSceneGeometry[seatSceneOrientation];
+        var muck = { x: geometry.width * .32, y: geometry.height * .46 };
+        var cards = transition.kind === 'flip' ? seat.revealed
+          : seat.hero && state.heroCards.length === 2 ? state.heroCards : seat.revealed || [null, null];
+        spawnCardFx(transition.kind, anchor, transition.kind === 'flip' ? anchor : muck, cards, seat.hero, 0);
+      }
+    });
+  }
+
+  function animateChipDiff(previousVisual, nextVisual, frame){
+    if (!previousVisual || !nextVisual || !els.scene || !els.chipFxLayer) return;
+    if (prefersReducedMotion()) return;
+    if (typeof els.scene.getBoundingClientRect !== 'function') return;
+    var sceneRect = els.scene.getBoundingClientRect();
+    if (sceneRect.width <= 0 || sceneRect.height <= 0) return;
+    var potFrom = resolvePointFromPercent({ x: 50, y: 44 }, sceneRect);
+    var potTo = resolvePointFromPercent({ x: 50, y: 44 }, sceneRect);
+    if (!potFrom || !potTo) return;
+    var potIncrease = Math.max(0, Math.round((nextVisual.potTotal || 0) - (previousVisual.potTotal || 0)));
+    if (potIncrease > 0){
+      var candidateUsers = resolveBetAnimationUserIds(previousVisual, nextVisual);
+      var sent = 0;
+      state.seats.forEach(function(seat){
+        if (!seat || !seat.userId || !Number.isInteger(seat.seatNo)) return;
+        if (candidateUsers.indexOf(seat.userId) === -1) return;
+        var from = resolvePointFromPercent(renderedSeatBetAnchors[seat.seatNo] || renderedSeatStackAnchors[seat.seatNo], sceneRect);
+        if (!from) return;
+        var chips = 2;
+        var committedDelta = Math.max(0, (Number(nextVisual.committedByUserId[seat.userId]) || 0) - (Number(previousVisual.committedByUserId[seat.userId]) || 0));
+        var chipColor = resolveFlyChipColorFromAmount(committedDelta || Math.max(1, Math.round(potIncrease / Math.max(1, candidateUsers.length))));
+        for (var i = 0; i < chips; i++){
+          spawnChipFly(from, potTo, chipColor, sent * 28 + i * 44);
+        }
+        sent += chips;
+      });
+    }
+    animateSettlementAwards(previousVisual, nextVisual, sceneRect, potFrom, frame);
+  }
+
+  function appendShowdownHandSummary(container, seat){
+    if (!container || !shouldShowShowdownHandSummary(seat)) return;
+    var summary = getWinnerHandSummary(seat);
+    if (!summary) return;
+    var label = document.createElement('div');
+    label.className = 'poker-seat-settlement-hand-label';
+    label.textContent = summary.label;
+    container.appendChild(label);
+    var cards = document.createElement('div');
+    cards.className = 'poker-seat-settlement-hand-cards';
+    summary.cards.forEach(function(card){
+      var normalizedCard = normalizeCard(card);
+      var chip = document.createElement('span');
+      chip.className = 'poker-seat-settlement-hand-card' + (normalizedCard && (normalizedCard.s === 'H' || normalizedCard.s === 'D') ? ' poker-seat-settlement-hand-card--red' : '');
+      chip.textContent = normalizedCard ? (normalizedCard.r + SUIT_SYMBOLS[normalizedCard.s]) : '?';
+      cards.appendChild(chip);
+    });
+    container.appendChild(cards);
+  }
+
+  var giftCatalog = [
+    { key: 'coffee', emoji: '☕', price: 10 }, { key: 'beer', emoji: '🍺', price: 25 },
+    { key: 'whisky', emoji: '🥃', price: 50 }, { key: 'pizza', emoji: '🍕', price: 100 },
+    { key: 'cake', emoji: '🎂', price: 250 }, { key: 'diamond', emoji: '💎', price: 1000 }
+  ];
+  var giftsBySeat = {};
+  var giftOwners = {};
+  var giftEventIds = new Set();
+  var giftAnimationQueue = [];
+  var giftAnimationTimer = null;
+  var giftTableId = null;
+  var giftNoticeTimer = null;
+  var giftPending = false;
+  var giftRetry = null;
+  var quickGiftTarget = null;
+  var heroGiftDemo = null;
+  function giftByKey(key){ return giftCatalog.filter(function(gift){ return gift.key === key; })[0] || null; }
+  function giftName(gift){ return t('pokerGift_' + gift.key, gift.key); }
+  function giftEligibleSeats(){ return state.seats.filter(function(seat){ return seat && seat.userId && !isCurrentUserSeat(seat) && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''); }); }
+  function giftShopBlockReason(){
+    if (inactivityExit) return 'seat_not_active';
+    if (isGuestMode || !isSignedIn()) return 'sign_in_required';
+    if (isClosedTableStatus(state.tableStatus)) return 'table_closed';
+    if (state.reconnectGate) return 'reconnecting';
+    if (!isWsReady()) return 'ws_not_ready';
+    var seat = state.seats.filter(function(entry){ return entry && entry.userId && entry.userId === state.currentUserId; })[0];
+    return !seat || seat.isBot || /LEFT|INACTIVE|EMPTY/.test(seat.status || '') ? 'seat_not_active' : null;
+  }
+  function giftShopAvailable(){ return !giftShopBlockReason(); }
+  function giftDemoHeroSeat(){
+    if (inactivityExit) return null;
+    var build = window.BUILD_INFO;
+    if (!build || build.context !== 'deploy-preview' || build.isPreview !== true
+      || !state.tableId || isClosedTableStatus(state.tableStatus) || state.reconnectGate || !state.wsReady) return null;
+    return state.seats.filter(function(seat){
+      return seat && seat.userId && seat.userId === state.currentUserId && !/LEFT|INACTIVE|EMPTY/.test(seat.status || '');
+    })[0] || null;
+  }
+  function clearHeroGiftDemo(){ heroGiftDemo = null; renderGiftBadges(); }
+  function renderGiftBadges(){
+    var hero = giftDemoHeroSeat();
+    if (heroGiftDemo && (!hero || heroGiftDemo.tableId !== state.tableId
+      || heroGiftDemo.seatNo !== hero.seatNo || heroGiftDemo.userId !== hero.userId)) heroGiftDemo = null;
+    if (els.heroGiftDemoToggle){
+      els.heroGiftDemoToggle.checked = !!heroGiftDemo;
+      els.heroGiftDemoToggle.disabled = !hero;
+    }
+    state.seats.forEach(function(seat){
+      var hud = renderedSeatHud[seat.seatNo];
+      if (!hud || !seat.userId) return;
+      var demo = !!heroGiftDemo && seat.seatNo === heroGiftDemo.seatNo && seat.userId === heroGiftDemo.userId;
+      var gifts = demo ? [{giftKey:'beer'},{giftKey:'pizza'},{giftKey:'whisky'}] : giftsBySeat[seat.seatNo] || [];
+      if (hud.nameNode){
+        if (demo) hud.nameNode.dataset.giftDemo = 'true';
+        else delete hud.nameNode.dataset.giftDemo;
+      }
+      Array.prototype.forEach.call(hud.gifts.children, function(slot, index){
+        var gift = gifts[index] && giftByKey(gifts[index].giftKey);
+        slot.textContent = gift ? gift.emoji : '';
+        slot.title = gift ? (demo ? 'DEMO / Visual only · ' : '') + giftName(gift) : '';
+      });
+    });
+  }
+  function syncGiftOwners(){
+    if (giftTableId !== state.tableId) { giftsBySeat = {}; giftOwners = {}; giftEventIds.clear(); giftAnimationQueue = []; giftRetry = null; giftTableId = state.tableId; quickGiftTarget = null; }
+    var owners = {};
+    state.seats.forEach(function(seat){ if (seat && seat.userId && !/LEFT|INACTIVE|EMPTY/.test(seat.status || '')) owners[seat.seatNo] = seat.userId; });
+    Object.keys(giftOwners).forEach(function(seatNo){ if (giftOwners[seatNo] !== owners[seatNo]) delete giftsBySeat[seatNo]; });
+    giftOwners = owners;
+    if (giftRetry && owners[giftRetry.seatNo] !== giftRetry.userId) {
+      if (els.giftRecipient && els.giftRecipient.dataset.value === String(giftRetry.seatNo)) els.giftRecipient.dataset.value = '';
+      giftRetry = null;
+    }
+    if (quickGiftTarget && owners[quickGiftTarget.seatNo] !== quickGiftTarget.userId) {
+      quickGiftTarget = null;
+    }
+  }
+  function applyTableGiftState(payload){
+    if (!payload || !Array.isArray(payload.seats)) return;
+    syncGiftOwners();
+    giftsBySeat = {};
+    payload.seats.forEach(function(seat){
+      if (!Number.isInteger(seat.seatNo) || !giftOwners[seat.seatNo]
+          || (seat.userId && seat.userId !== giftOwners[seat.seatNo])) return;
+      var recent = Array.isArray(seat.recentGifts) ? seat.recentGifts : (Array.isArray(seat.gifts) ? seat.gifts : []);
+      giftsBySeat[seat.seatNo] = recent.filter(function(gift){ return gift && giftByKey(gift.giftKey); }).slice(0, 3);
+      giftsBySeat[seat.seatNo].forEach(function(gift){ if (gift.eventId) giftEventIds.add(gift.eventId); });
+    });
+    while (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
+    renderGiftBadges();
+  }
+  function playNextGift(){
+    if (giftAnimationTimer || !giftAnimationQueue.length) return;
+    var event = giftAnimationQueue.shift();
+    var gift = giftByKey(event.giftKey);
+    var sender = renderedSeatAvatars[event.senderSeatNo];
+    var recipient = renderedSeatAvatars[event.recipientSeatNo];
+    if (!sender || !recipient || !gift) { playNextGift(); return; }
+    var node = document.createElement('span');
+    node.className = 'poker-gift-fly';
+    node.textContent = gift.emoji;
+    node.setAttribute('aria-hidden', 'true');
+    var from = sender.getBoundingClientRect();
+    var to = recipient.getBoundingClientRect();
+    node.style.left = (from.left + from.width / 2) + 'px';
+    node.style.top = (from.top + from.height / 2) + 'px';
+    node.style.setProperty('--gift-x', (to.left + to.width / 2 - from.left - from.width / 2) + 'px');
+    node.style.setProperty('--gift-y', (to.top + to.height / 2 - from.top - from.height / 2) + 'px');
+    document.body.appendChild(node);
+    giftAnimationTimer = setTimeout(function(){ node.remove(); giftAnimationTimer = null; playNextGift(); }, 800);
+  }
+  function handleTableGift(event){
+    var gift = event && giftByKey(event.giftKey);
+    if (!gift || typeof event.eventId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(event.eventId)
+        || !Number.isInteger(event.senderSeatNo) || !Number.isInteger(event.recipientSeatNo) || giftEventIds.has(event.eventId)) return;
+    giftEventIds.add(event.eventId);
+    if (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
+    syncGiftOwners();
+    if (!giftOwners[event.recipientSeatNo]) return;
+    var recent = giftsBySeat[event.recipientSeatNo] || [];
+    giftsBySeat[event.recipientSeatNo] = [{ eventId: event.eventId, giftKey: event.giftKey }].concat(recent).slice(0, 3);
+    renderGiftBadges();
+    if (els.giftNotice) {
+      els.giftNotice.textContent = gift.emoji + ' ' + t('pokerGiftSent', 'Gift sent') + ' · S' + event.recipientSeatNo;
+      els.giftNotice.hidden = false;
+      clearTimeout(giftNoticeTimer);
+      giftNoticeTimer = setTimeout(function(){ els.giftNotice.hidden = true; }, 2200);
+    }
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (giftAnimationQueue.length < 8) giftAnimationQueue.push(event);
+    playNextGift();
+  }
+  function syncGiftShop(){
+    if (!els.giftShopButton) return;
+    syncGiftOwners();
+    var available = giftShopAvailable();
+    var locked = isGuestMode || !isSignedIn();
+    var copy = locked ? t('pokerGiftSignInRequired', 'Gift Shop is available only to signed-in players') : t('pokerGiftShop', 'Gift Shop');
+    els.giftShopButton.hidden = !locked && !available;
+    els.giftShopButton.classList.toggle('poker-gift-shop-button--locked', locked);
+    els.giftShopButton.setAttribute('aria-disabled', String(!available));
+    els.giftShopButton.title = copy;
+    els.giftShopButton.setAttribute('aria-label', copy);
+    els.giftShop.setAttribute('aria-busy', String(giftPending));
+    syncQuickGifts();
+    if (!available) { els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); }
+    giftCatalog.forEach(function(gift){
+      var button = els.giftSelect.querySelector('[data-gift-key="' + gift.key + '"]');
+      button.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH';
+      button.setAttribute('aria-pressed', String(els.giftSelect.dataset.value === gift.key));
+      button.disabled = !available || giftPending;
+    });
+    var seats = giftEligibleSeats();
+    Array.prototype.slice.call(els.giftRecipient.children).forEach(function(button){
+      if (!seats.some(function(seat){ return String(seat.seatNo) === button.dataset.seatNo && String(seat.userId) === button.dataset.userId; })) {
+        if (els.giftRecipient.dataset.value === button.dataset.seatNo) els.giftRecipient.dataset.value = '';
+        if (giftRetry && String(giftRetry.seatNo) === button.dataset.seatNo) giftRetry = null;
+        button.remove();
+      }
+    });
+    if (els.giftRecipient.dataset.value && !seats.some(function(seat){ return String(seat.seatNo) === els.giftRecipient.dataset.value; })) els.giftRecipient.dataset.value = '';
+    if (giftRetry && !seats.some(function(seat){ return seat.seatNo === giftRetry.seatNo && seat.userId === giftRetry.userId; })) giftRetry = null;
+    seats.forEach(function(seat){
+      var seatNo = String(seat.seatNo);
+      var button = els.giftRecipient.querySelector('[data-seat-no="' + seatNo + '"]');
+      var avatar = document.createElement('span'); avatar.className = 'poker-gift-recipient__avatar'; avatar.setAttribute('aria-hidden', 'true');
+      renderSeatAvatar(avatar, seat);
+      if (!button) {
+        button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice poker-gift-recipient'; button.dataset.seatNo = seatNo; button.dataset.userId = String(seat.userId);
+        button.appendChild(avatar);
+        var label = document.createElement('span'); label.className = 'poker-gift-recipient__label'; button.appendChild(label);
+        els.giftRecipient.appendChild(button);
+      } else button.replaceChild(avatar, button.firstChild);
+      button.lastChild.textContent = getDisplayName(seat) + ' · S' + seatNo;
+      button.setAttribute('aria-pressed', String(els.giftRecipient.dataset.value === seatNo));
+      button.disabled = !available || giftPending;
+    });
+    els.giftSend.disabled = !available || giftPending || !giftByKey(els.giftSelect.dataset.value) || !els.giftRecipient.dataset.value;
+  }
+  function bindGiftShop(){
+    ['giftShopButton', 'giftShop', 'giftSelect', 'giftRecipient', 'giftSend', 'giftMessage', 'giftClose'].forEach(function(key){
+      var ids = { giftShopButton: 'pokerGiftShopButton', giftShop: 'pokerGiftShop', giftSelect: 'pokerGiftSelect', giftRecipient: 'pokerGiftRecipient', giftSend: 'pokerGiftSend', giftMessage: 'pokerGiftMessage', giftClose: 'pokerGiftClose' };
+      els[key] = document.getElementById(ids[key]);
+    });
+    if (!els.giftShopButton) return;
+    document.addEventListener('pointerdown', function(event){
+      if (quickGiftTarget === null) return;
+      if (event.target.closest('.poker-quick-gift-picker:not([hidden]),.poker-quick-gift-button')) return;
+      quickGiftTarget = null;
+      syncQuickGifts();
+    });
+    els.giftNotice = document.getElementById('pokerGiftNotice');
+    giftCatalog.forEach(function(gift){ var button = document.createElement('button'); button.type = 'button'; button.className = 'poker-gift-choice'; button.dataset.giftKey = gift.key; els.giftSelect.appendChild(button); });
+    els.giftShopButton.addEventListener('click', function(){
+      syncGiftShop();
+      if (!giftShopAvailable()) return;
+      quickGiftTarget = null; syncQuickGifts();
+      els.giftShop.hidden = !els.giftShop.hidden;
+      els.giftShopButton.setAttribute('aria-expanded', String(!els.giftShop.hidden));
+      if (!els.giftShop.hidden) els.giftSelect.querySelector('button').focus();
+    });
+    function close(){ els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); els.giftShopButton.focus(); }
+    els.giftClose.addEventListener('click', close);
+    els.giftShop.addEventListener('keydown', function(event){ if (event.key === 'Escape') close(); });
+    els.giftSelect.addEventListener('click', function(event){
+      var button = event.target.closest('[data-gift-key]');
+      if (!button || button.disabled || !giftShopAvailable()) return;
+      if (els.giftSelect.dataset.value !== button.dataset.giftKey) giftRetry = null;
+      els.giftSelect.dataset.value = button.dataset.giftKey; syncGiftShop();
+    });
+    els.giftRecipient.addEventListener('click', function(event){
+      var button = event.target.closest('[data-seat-no]');
+      if (!button || button.disabled || !giftShopAvailable()) return;
+      if (els.giftRecipient.dataset.value !== button.dataset.seatNo) giftRetry = null;
+      els.giftRecipient.dataset.value = button.dataset.seatNo; syncGiftShop();
+    });
+    els.giftSend.addEventListener('click', function(){
+      if (els.giftSend.disabled) return;
+      sendSelectedGift(els.giftSelect.dataset.value, Number(els.giftRecipient.dataset.value));
+    });
+  }
+
+  function sendSelectedGift(key, seatNo){
+    var blocked = giftShopBlockReason();
+    if (giftPending || !wsClient || blocked || !giftByKey(key)) {
+      klog('poker_gift_send_blocked', { tableId: state.tableId, targetSeatNo: seatNo, reason: giftPending ? 'pending' : blocked || 'gift_invalid', wsReady: isWsReady(), reconnectGate: !!state.reconnectGate });
+      return;
+    }
+    var recipient = giftEligibleSeats().filter(function(seat){ return seat.seatNo === seatNo; })[0];
+    if (!recipient || (giftRetry && giftRetry.seatNo === seatNo && giftRetry.userId !== recipient.userId)) {
+      klog('poker_gift_send_blocked', { tableId: state.tableId, targetSeatNo: seatNo, reason: 'target_unavailable' });
+      syncGiftShop();
+      return;
+    }
+    var retry = giftRetry && giftRetry.key === key && giftRetry.seatNo === seatNo && giftRetry.userId === recipient.userId
+      ? giftRetry : { key: key, seatNo: seatNo, userId: recipient.userId, requestId: 'gift_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10) };
+    giftRetry = retry;
+    giftPending = true; syncGiftShop();
+    wsClient.sendGift(key, seatNo, retry.requestId).then(function(){
+      giftRetry = null; quickGiftTarget = null;
+      els.giftMessage.textContent = t('pokerGiftSent', 'Gift sent');
+      document.dispatchEvent(new CustomEvent('chips:tx-complete'));
+    }).catch(function(error){
+      var messages = { gift_insufficient_chips: 'pokerGiftInsufficient', gift_rate_limited: 'pokerGiftRateLimited', gift_target_unavailable: 'pokerGiftTargetUnavailable', gift_shop_unavailable: 'pokerGiftUnavailable' };
+      var seat = state.seats.filter(function(entry){ return entry && entry.userId && entry.userId === state.currentUserId; })[0];
+      klog('poker_gift_purchase_failed', { tableId: state.tableId, targetSeatNo: seatNo, code: error.code || 'unknown', wsReady: isWsReady(), reconnectGate: !!state.reconnectGate, seatStatus: seat && seat.status || 'absent', availability: giftShopBlockReason() });
+      if (error.code === 'ws_unavailable' || error.code === 'ws_closed') messages[error.code] = 'pokerLobbyReconnecting';
+      els.giftMessage.textContent = t(messages[error.code] || 'pokerGiftFailed', 'Gift purchase failed');
+      if (els.giftShop.hidden && els.giftNotice) {
+        els.giftNotice.textContent = els.giftMessage.textContent; els.giftNotice.hidden = false;
+        clearTimeout(giftNoticeTimer);
+        giftNoticeTimer = setTimeout(function(){ els.giftNotice.hidden = true; }, 4000);
+      }
+      // Preserve the request identity after uncertain transport failure; a retry cannot charge twice.
+      if ((String(error.code || '').indexOf('gift_') === 0 && error.code !== 'gift_purchase_failed') || error.code === 'not_seated' || error.code === 'invalid_sender') giftRetry = null;
+    }).then(function(){ giftPending = false; syncGiftShop(); });
+  }
+
+  function syncQuickGifts(){
+    var available = giftShopAvailable();
+    var eligible = giftEligibleSeats();
+    state.seats.forEach(function(seat){
+      var hud = renderedSeatHud[seat.seatNo];
+      if (!hud) return;
+      var allowed = available && eligible.indexOf(seat) !== -1;
+      var button = hud.quickAction.querySelector('.poker-quick-gift-button');
+      var picker = hud.quickPicker;
+      if (!allowed) { if (button) button.hidden = true; if (picker) picker.hidden = true; return; }
+      if (!button){
+        button = document.createElement('button');
+        button.type = 'button'; button.className = 'poker-quick-gift-button'; button.textContent = '🎁';
+        button.setAttribute('aria-label', t('pokerGiftShop', 'Gift Shop') + ' · ' + getDisplayName(seat));
+        button.setAttribute('aria-haspopup', 'true');
+        picker = document.createElement('div');
+        picker.className = 'poker-gift-picker poker-quick-gift-picker';
+        picker.tabIndex = -1;
+        var heading = document.createElement('strong');
+        heading.className = 'poker-quick-gift-picker__heading';
+        picker.appendChild(heading);
+        giftCatalog.forEach(function(gift){
+          var choice = document.createElement('button');
+          choice.type = 'button'; choice.className = 'poker-gift-choice';
+          ['emoji', 'name', 'price'].forEach(function(part){
+            var value = document.createElement('span');
+            value.className = 'poker-quick-gift-choice__' + part;
+            value.textContent = part === 'emoji' ? gift.emoji : part === 'name' ? giftName(gift) : formatNumber(gift.price) + ' CH';
+            choice.appendChild(value);
+          });
+          choice.addEventListener('click', function(){ sendSelectedGift(gift.key, seat.seatNo); });
+          picker.appendChild(choice);
+        });
+        button.addEventListener('click', function(){
+          if (!giftShopAvailable() || giftPending) return;
+          var same = quickGiftTarget && quickGiftTarget.seatNo === seat.seatNo && quickGiftTarget.userId === seat.userId;
+          quickGiftTarget = same ? null : { seatNo: seat.seatNo, userId: seat.userId };
+          if (!same) {
+            if (giftRetry && giftRetry.seatNo !== seat.seatNo) giftRetry = null;
+            els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false');
+          }
+          syncQuickGifts();
+          if (!picker.hidden) picker.querySelector('button').focus();
+        });
+        picker.addEventListener('keydown', function(event){
+          if (event.key === 'Escape') { quickGiftTarget = null; syncQuickGifts(); button.focus(); }
+        });
+        hud.quickAction.appendChild(button);
+        hud.quickPicker = picker;
+        document.body.appendChild(picker);
+      }
+      placeSeatNode(button,{origin:[0,0]},hud.quickGiftPoint);
+      var open = quickGiftTarget && quickGiftTarget.seatNo === seat.seatNo && quickGiftTarget.userId === seat.userId;
+      button.hidden = false; button.disabled = giftPending;
+      button.setAttribute('aria-expanded', String(!!open));
+      picker.hidden = !open;
+      picker.firstChild.textContent = (document.documentElement.lang === 'pl' ? 'Prezent dla: ' : 'Gift for: ') + getDisplayName(seat) + ' · S' + seat.seatNo;
+      Array.prototype.forEach.call(picker.querySelectorAll('button'), function(choice){ choice.disabled = giftPending; });
+    });
+    if (!available) quickGiftTarget = null;
+    positionQuickGiftPicker();
+  }
+
+  function positionQuickGiftPicker(){
+    if (!quickGiftTarget) return;
+    var hud = renderedSeatHud[quickGiftTarget.seatNo];
+    var picker = hud && hud.quickPicker;
+    if (!picker || picker.hidden) return;
+    var button = hud.quickAction.querySelector('.poker-quick-gift-button');
+    var trigger = button.getBoundingClientRect();
+    var action = els.actionBar && els.actionBar.getBoundingClientRect();
+    var bottom = action && action.width && action.height ? Math.min(window.innerHeight - 8, action.top - 8) : window.innerHeight - 8;
+    picker.style.maxHeight = Math.max(44, bottom - 8) + 'px';
+    var box = picker.getBoundingClientRect();
+    var left = trigger.right + 8 + box.width <= window.innerWidth - 8 ? trigger.right + 8
+      : trigger.left - box.width - 8 >= 8 ? trigger.left - box.width - 8 : trigger.left;
+    var top = trigger.bottom + 8 + box.height <= bottom ? trigger.bottom + 8
+      : trigger.top - box.height - 8 >= 8 ? trigger.top - box.height - 8 : bottom - box.height;
+    picker.style.left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8)) + 'px';
+    picker.style.top = Math.max(8, Math.min(top, bottom - box.height)) + 'px';
+  }
+
+  function renderSeats(){
+    if (!els.seatLayer) return;
+    var quickFocus = null;
+    Object.keys(renderedSeatHud).forEach(function(key){
+      var picker = renderedSeatHud[key].quickPicker;
+      if (picker && document.activeElement && picker.contains(document.activeElement)) {
+        quickFocus = { seatNo: key, userId: giftOwners[key], index: Array.prototype.indexOf.call(picker.querySelectorAll('button'), document.activeElement) };
+      }
+      if (picker) picker.remove();
+    });
+    if (els.scene && els.scene.dataset) els.scene.dataset.pokerMaxSeats = String(state.maxSeats);
+    syncGiftOwners();
+    clearReactionBubblesWithChangedOwners();
+    clearTargetedReactionEffectsWithChangedOwners();
+    clearBotAvatarReactions();
+    var previousAvatars = renderedSeatAvatars;
+    els.seatLayer.innerHTML = '';
+    if (els.seatNameLayer) els.seatNameLayer.innerHTML = '';
+    if (els.seatTransientLayer) els.seatTransientLayer.innerHTML = '';
+    renderedSeatAnchors = {};
+    renderedSeatAvatars = {};
+    renderedSeatHud = {};
+    renderedSeatBetAnchors = {};
+    renderedSeatStackAnchors = {};
+    var offset = getSeatNumberingOffset();
+    var seatsByIndex = {};
+    state.seats.forEach(function(seat){
+      if (!seat || !Number.isInteger(seat.seatNo)) return;
+      var index = Math.max(0, seat.seatNo - offset);
+      seatsByIndex[index] = seat;
+    });
+    var heroBestHand = getHeroBestHand();
+    for (var i = 0; i < state.maxSeats; i++){
+      var seat = seatsByIndex[i] || null;
+      var article = document.createElement('article');
+      var active = !!(seat && seat.userId && state.turnUserId && seat.userId === state.turnUserId);
+      var hero = isCurrentUserSeat(seat);
+      var showAutoRebuyIndicator = hero && !isGuestMode && isSignedIn() && isAutoRebuyEnabled();
+      var lastAction = getSeatLastBettingRoundAction(seat);
+      var folded = !!(seat && /FOLD/i.test(seat.status || ''));
+      var waitingNextHand = !!(seat && String(seat.status || '').toUpperCase() === 'WAITING_NEXT_HAND');
+      var rotatedIndex = rotateSeatIndex(i, state.maxSeats);
+      article.className = 'poker-seat'
+        + (active ? ' poker-seat--active' : '')
+        + (folded ? ' poker-seat--folded' : '')
+        + (seat && hasWonContestedPot(seat) ? ' poker-seat--pot-winner' : '')
+        + (seat && hasReturnedChips(seat) ? ' poker-seat--returned' : '')
+        + (hero ? ' poker-seat--hero' : '')
+        + (waitingNextHand ? ' poker-seat--waiting-next-hand' : '')
+        + (!seat ? ' poker-seat--empty' : '');
+      article.dataset.pokerSlot = String(rotatedIndex);
+      article.dataset.seatNo = String(seat ? seat.seatNo : i + offset);
+      article.dataset.userId = seat && seat.userId || '';
+      var hud = {};
+      ['identity', 'portrait', 'cards', 'stack', 'bet', 'presentation', 'social', 'gifts', 'bestHand'].forEach(function(area){
+        var node = document.createElement('div');
+        node.className = 'poker-seat-hud-' + area;
+        node.dataset.seatHud = area;
+        node.dataset.seatNo = article.dataset.seatNo;
+        hud[area] = node;
+        if (['stack','bet','presentation','social','bestHand'].indexOf(area) === -1) article.appendChild(node);
+      });
+      hud.quickAction = document.createElement('div');
+      hud.quickAction.className = 'poker-seat-hud-quick-action';
+      hud.quickAction.setAttribute('data-poker-quick-action-slot', '');
+      hud.gifts.setAttribute('data-poker-gift-slots', '');
+      for (var giftIndex = 0; giftIndex < 3; giftIndex++){
+        var giftSlot = document.createElement('span');
+        giftSlot.className = 'poker-seat-gift-slot';
+        giftSlot.setAttribute('data-poker-gift-slot', String(giftIndex));
+        hud.gifts.appendChild(giftSlot);
+      }
+      configureSeatHud(article,hud,seatPhysicalSlot(rotatedIndex,state.maxSeats),hero);
+      if (seat) renderedSeatHud[seat.seatNo] = hud;
+      if (seat && Number.isInteger(seat.seatNo)) {
+        renderedSeatAnchors[seat.seatNo] = getSeatAvatarAnchor(seat.seatNo);
+      }
+
+      var avatarSource = seatAvatarSource(seat);
+      var previousAvatar = seat && previousAvatars[seat.seatNo];
+      var reuseAvatar = previousAvatar && previousAvatar.dataset.userId === seat.userId && previousAvatar.dataset.avatarSource === avatarSource;
+      var avatar = reuseAvatar ? previousAvatar : document.createElement('div');
+      if (!reuseAvatar) avatar.className = 'poker-seat-avatar';
+      avatar.dataset.avatarSource = avatarSource;
+      avatar.setAttribute('data-poker-avatar-center', '');
+      avatar.dataset.userId = seat && seat.userId || '';
+      if (seat && !reuseAvatar) renderSeatAvatar(avatar, seat);
+      else if (!seat) { avatar.classList.add('poker-seat-avatar--open'); avatar.textContent = 'OPEN'; }
+      if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
+      if (reuseAvatar){
+        var initialsNode = Array.from(avatar.children).find(function(node){ return node.classList.contains('poker-seat-avatar__initials'); });
+        if (initialsNode) initialsNode.textContent = initials(getDisplayName(seat));
+      }
+      updateSeatTurnClock(avatar, active ? getTurnClockState() : null);
+
+      var autoRebuyIndicator = null;
+      if (showAutoRebuyIndicator){
+        autoRebuyIndicator = document.createElement('span');
+        autoRebuyIndicator.className = 'poker-auto-rebuy-indicator';
+        autoRebuyIndicator.textContent = '↻';
+        autoRebuyIndicator.setAttribute('aria-label', 'Auto rebuy enabled');
+        autoRebuyIndicator.setAttribute('title', 'Auto rebuy enabled');
+      }
+
+      var autoRebuyAvatarToast = null;
+      if (hero && !isGuestMode && isSignedIn() && autoRebuyFeedbackState.visible === true){
+        autoRebuyAvatarToast = document.createElement('div');
+        autoRebuyAvatarToast.className = 'poker-auto-rebuy-toast poker-auto-rebuy-toast--avatar';
+        autoRebuyAvatarToast.setAttribute('role', 'status');
+        autoRebuyAvatarToast.setAttribute('aria-live', 'polite');
+        autoRebuyAvatarToast.textContent = 'Auto rebuy: +' + formatNumber(autoRebuyFeedbackState.buyIn) + ' CH';
+      }
+
+      var seatNumber = null;
+      if (seat && Number.isInteger(seat.seatNo)){
+        seatNumber = document.createElement('span');
+        seatNumber.className = 'poker-seat-number';
+        seatNumber.textContent = 'S' + seat.seatNo;
+        seatNumber.setAttribute('aria-label', 'Seat ' + seat.seatNo);
+      }
+
+      var cards = document.createElement('div');
+      cards.className = 'poker-seat-cards';
+      if (!hero && seat && seat.userId){
+        var heldCards = getOpponentHeldCardCount(seat, state.handId, state.betThisRoundByUserId);
+        var revealCards = getSeatRevealCards(seat);
+        var visibleCount = revealCards ? 2 : heldCards;
+        cards.setAttribute('aria-label', revealCards ? 'Revealed cards' : visibleCount + ' cards held');
+        for (var cardIndex = 0; cardIndex < visibleCount; cardIndex++){
+          cards.appendChild(createCard(revealCards ? revealCards[cardIndex] : null));
+        }
+      }
+
+      var name = document.createElement('div');
+      name.className = 'poker-seat-name';
+      name.textContent = seat ? getDisplayName(seat) : 'Seat ' + String(i + offset);
+
+      placeSeatNode(avatar,hud,hud.config.avatar,hud.avatarSize,hud.avatarSize);
+      hud.portrait.appendChild(avatar);
+      var transientSeat = document.createElement('div');
+      transientSeat.className = 'poker-seat-transient';
+      transientSeat.dataset.seatNo = article.dataset.seatNo;
+      transientSeat.dataset.userId = article.dataset.userId;
+      if (seat && els.seatTransientLayer){
+        transientSeat.appendChild(hud.presentation);
+        transientSeat.appendChild(hud.quickAction);
+        if (hero) transientSeat.appendChild(hud.bestHand);
+        els.seatTransientLayer.appendChild(transientSeat);
+      }
+      if (autoRebuyIndicator){placeSeatNode(autoRebuyIndicator,hud,[hud.marker[0],hud.marker[1]+16],14,14);hud.identity.appendChild(autoRebuyIndicator);}
+      if (autoRebuyAvatarToast) hud.presentation.appendChild(autoRebuyAvatarToast);
+      if (seatNumber){placeSeatNode(seatNumber,hud,hud.marker,16,14);hud.identity.appendChild(seatNumber);}
+      var visibleAction = lastAction || (folded ? 'fold' : null);
+      if (seat && visibleAction){
+        var actionBadge = document.createElement('div');
+        actionBadge.className = 'poker-seat-action-badge poker-seat-action-badge--' + visibleAction.replace(/_/g, '-');
+        actionBadge.textContent = LAST_ACTION_LABEL[visibleAction] || visibleAction;
+        placeSeatNode(actionBadge,{origin:[0,0]},hud.action,64,12);
+        transientSeat.appendChild(actionBadge);
+      }
+      var seatSettlementAwards = seat ? getSeatSettlementAwards(seat.userId) : [];
+      var seatHasShowdownSummary = !!(seat && shouldShowShowdownHandSummary(seat) && getWinnerHandSummary(seat));
+      if (seat && (seatSettlementAwards.length || seatHasShowdownSummary)){
+        var settlementBadge = document.createElement('div');
+        settlementBadge.className = 'poker-seat-settlement-badge';
+        seatSettlementAwards.forEach(function(award){
+          var awardRow = document.createElement('div');
+          awardRow.className = 'poker-seat-settlement-award poker-seat-settlement-award--' + award.kind;
+          awardRow.dataset.awardId = award.awardId;
+          awardRow.textContent = '+' + formatNumber(award.amount) + ' ' + getSettlementAwardLabel(award);
+          settlementBadge.appendChild(awardRow);
+        });
+        appendShowdownHandSummary(settlementBadge, seat);
+        hud.presentation.appendChild(settlementBadge);
+      }
+      if (cards.children.length) hud.cards.appendChild(cards);
+      var nameOwner = document.createElement('div');
+      nameOwner.className = folded ? 'poker-seat--folded' : '';
+      nameOwner.dataset.seatNo = article.dataset.seatNo;
+      nameOwner.dataset.userId = article.dataset.userId;
+      placeSeatNode(name,{origin:[0,0]},hud.name,seatSceneOrientation === 'landscape' ? 104 : hero ? 88 : 76,seatSceneOrientation === 'landscape' ? 20 : 14);
+      hud.nameNode = name;
+      nameOwner.appendChild(name);
+      els.seatNameLayer.appendChild(nameOwner);
+      if (seat && !visibleAction && (waitingNextHand || seat.status === 'OUT_OF_CHIPS')){
+        var status = document.createElement('div');
+        status.className = 'poker-seat-status';
+        status.textContent = waitingNextHand ? 'NEXT HAND' : 'OUT OF CHIPS';
+        placeSeatNode(status,{origin:[0,0]},hud.action,64,12);
+        transientSeat.appendChild(status);
+      }
+      if (hero && heroBestHand){
+        var bestHand = document.createElement('div');
+        bestHand.className = 'poker-seat-best-hand';
+        var bestHandName = document.createElement('span');
+        bestHandName.className = 'poker-seat-best-hand-label';
+        bestHandName.textContent = formatViewerHandCategory(heroBestHand.category);
+        bestHand.appendChild(bestHandName);
+        var bestHandCards = document.createElement('div');
+        bestHandCards.className = 'poker-seat-best-hand-cards';
+        heroBestHand.cards.forEach(function(card){
+          var chip = document.createElement('span');
+          var normalized = normalizeCard(card);
+          chip.className = 'poker-seat-best-hand-card' + (normalized && (normalized.s === 'H' || normalized.s === 'D') ? ' poker-seat-best-hand-card--red' : '');
+          chip.textContent = normalized ? (normalized.r + SUIT_SYMBOLS[normalized.s]) : '?';
+          bestHandCards.appendChild(chip);
+        });
+        bestHand.appendChild(bestHandCards);
+        hud.bestHand.appendChild(bestHand);
+      }
+      els.seatLayer.appendChild(article);
+    }
+    syncRenderedSeatAnchors();
+    scheduleTargetedReactionDismiss();
+    renderReactionBubbles();
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNo){
+      var reactionBubble = reactionBubblesBySeatNo[seatNo];
+      if (reactionBubble) reactionBubble.animate = false;
+    });
+    renderGiftBadges();
+    syncGiftShop();
+    if (quickFocus && giftOwners[quickFocus.seatNo] === quickFocus.userId){
+      var hud = renderedSeatHud[quickFocus.seatNo];
+      var picker = hud && hud.quickPicker;
+      if (picker && !picker.hidden){
+        var choice = picker.querySelectorAll('button')[quickFocus.index];
+        (choice && !choice.disabled ? choice : picker).focus();
+      }
+    }
+  }
+
+  function clearReactionRenderNodes(){
+    reactionRenderNodes.forEach(function(node){
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    reactionRenderNodes = [];
+  }
+
+  function appendReactionRenderNode(node){
+    if (!node || !els.reactionLayer) return;
+    els.reactionLayer.appendChild(node);
+    reactionRenderNodes.push(node);
+  }
+
+
+  function renderRegularReactionBubble(seatNo, reactionBubble, reactionEntry, anchor){
+    var reducedMotion = prefersReducedMotion();
+    var anchorNode = reactionBubbleNodesBySeatNo[seatNo];
+    if (!anchorNode){
+      anchorNode = document.createElement('div');
+      reactionBubbleNodesBySeatNo[seatNo] = anchorNode;
+      var bubble = document.createElement('div');
+      bubble.setAttribute('role', 'status');
+      anchorNode.appendChild(bubble);
+    }
+    var hud = renderedSeatHud[seatNo];
+    if (!hud) return;
+    var topAvatarReaction = seatSceneOrientation === 'landscape' && hud.config === seatSceneGeometry.landscape.seats[0];
+    (topAvatarReaction ? els.seatTransientLayer : hud.social).appendChild(anchorNode);
+    anchorNode.className = 'poker-seat-social-reaction' + (topAvatarReaction ? ' poker-seat-social-reaction--top-avatar' : '');
+    if (!topAvatarReaction){
+      anchorNode.removeAttribute('data-seat-anchor');
+      anchorNode.style.cssText = '';
+    }
+    var bubbleNode = anchorNode.children && anchorNode.children[0];
+    if (!bubbleNode){
+      clearReactionBubble(seatNo);
+      return;
+    }
+    bubbleNode.className = 'poker-seat-reaction-bubble' + (reactionBubble.animate && !reducedMotion ? ' poker-seat-reaction-bubble--enter' : '');
+    bubbleNode.setAttribute('role', 'status');
+    bubbleNode.textContent = reactionEntry.emoji + ' ' + reactionLabel(reactionEntry);
+    var floatingEmoji = anchorNode.children && anchorNode.children[1];
+    if (reducedMotion){
+      if (floatingEmoji && floatingEmoji.parentNode) floatingEmoji.parentNode.removeChild(floatingEmoji);
+    } else {
+      if (!floatingEmoji){
+        floatingEmoji = document.createElement('span');
+        anchorNode.appendChild(floatingEmoji);
+      }
+      floatingEmoji.className = 'poker-seat-reaction-float';
+      floatingEmoji.setAttribute('aria-hidden', 'true');
+      floatingEmoji.textContent = reactionEntry.emoji;
+    }
+    if (topAvatarReaction){
+      placeSeatNode(anchorNode,{origin:[0,0]},hud.config.avatar,84);
+      var sceneRect = els.scene.getBoundingClientRect();
+      var scale = sceneRect.width / seatSceneGeometry.landscape.width;
+      var topbarBottom = els.liveTopbar ? els.liveTopbar.getBoundingClientRect().bottom : 0;
+      var visibleTop = Math.max(topbarBottom,els.sceneViewport.getBoundingClientRect().top,0) + 4;
+      var height = anchorNode.offsetHeight;
+      var top = Math.max(hud.config.avatar[1] - hud.avatarSize / 2 - 6 - height,(visibleTop - sceneRect.top) / scale);
+      anchorNode.style.top = (top + height / 2) + 'px';
+    }
+  }
+
+  function getReactionLayerDimensions(){
+    var width = Number(els.reactionLayer && els.reactionLayer.clientWidth);
+    var height = Number(els.reactionLayer && els.reactionLayer.clientHeight);
+    if ((!width || !height) && els.reactionLayer && typeof els.reactionLayer.getBoundingClientRect === 'function'){
+      var rect = els.reactionLayer.getBoundingClientRect();
+      if (!width) width = Number(rect && rect.width);
+      if (!height) height = Number(rect && rect.height);
+    }
+    return {
+      width: Number.isFinite(width) && width > 0 ? width : 0,
+      height: Number.isFinite(height) && height > 0 ? height : 0
+    };
+  }
+
+  function renderTargetedReactionEffects(){
+    var dimensions = getReactionLayerDimensions();
+    Object.keys(targetedReactionEffectsById).forEach(function(effectId){
+      var effect = targetedReactionEffectsById[effectId];
+      var entry = effect ? findReactionEntry(effect.reactionKey) : null;
+      var senderAnchor = effect && getSeatAvatarAnchor(effect.senderSeatNo);
+      var targetAnchor = effect && getSeatAvatarAnchor(effect.targetSeatNo);
+      if (!effect || !entry || !senderAnchor || !targetAnchor){
+        clearTargetedReactionEffect(effectId);
+        return;
+      }
+      var reducedMotion = prefersReducedMotion();
+      var anchorNode = targetedReactionEffectNodesById[effectId];
+      if (!anchorNode){
+        anchorNode = document.createElement('div');
+        anchorNode.className = 'poker-reaction-anchor poker-seat-target-reaction-effect';
+        var newFlyout = document.createElement('div');
+        newFlyout.setAttribute('role', 'status');
+        anchorNode.appendChild(newFlyout);
+        targetedReactionEffectNodesById[effectId] = anchorNode;
+        els.reactionLayer.appendChild(anchorNode);
+      }
+      var flyout = anchorNode.children && anchorNode.children[0];
+      if (!flyout){
+        clearTargetedReactionEffect(effectId);
+        return;
+      }
+      var fromX = reducedMotion ? targetAnchor.x : senderAnchor.x;
+      var fromY = reducedMotion ? targetAnchor.y : senderAnchor.y;
+      var deltaX = reducedMotion ? 0 : ((targetAnchor.x - senderAnchor.x) / 100) * dimensions.width;
+      var deltaY = reducedMotion ? 0 : ((targetAnchor.y - senderAnchor.y) / 100) * dimensions.height;
+      anchorNode.style.left = fromX + '%';
+      anchorNode.style.top = fromY + '%';
+      flyout.className = 'poker-seat-target-reaction-flyout' + (effect.animate && !reducedMotion ? ' poker-seat-target-reaction-flyout--enter' : '');
+      flyout.setAttribute('role', 'status');
+      flyout.setAttribute('aria-label', reactionLabel(entry));
+      flyout.textContent = entry.emoji;
+      flyout.style.setProperty('--reaction-delta-x', deltaX + 'px');
+      flyout.style.setProperty('--reaction-delta-y', deltaY + 'px');
+    });
+  }
+
+  function renderReactionBubbles(){
+    if (!els.reactionLayer) return;
+    clearReactionRenderNodes();
+    renderTargetedReactionEffects();
+    var targetedOffers = getTargetedReactionOffers();
+    targetedOffers.forEach(function(offer){
+      var anchor = renderedSeatAnchors[offer.targetSeatNo];
+      if (!anchor) return;
+      var anchorNode = document.createElement('div');
+      anchorNode.className = 'poker-seat-social-reaction';
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'poker-seat-target-reaction';
+      button.textContent = '👍';
+      button.setAttribute('aria-label', 'Send Nice hand');
+      button.title = 'Send Nice hand';
+      button.disabled = pendingTargetedReactionOfferKeys.has(targetedReactionOfferKey(offer.handId, offer.targetSeatNo));
+      button.addEventListener('click', function(event){
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        sendTargetedReaction(offer.targetSeatNo, offer.handId);
+      });
+      anchorNode.appendChild(button);
+      var hud = renderedSeatHud[offer.targetSeatNo];
+      if (hud) hud.quickAction.appendChild(anchorNode);
+      reactionRenderNodes.push(anchorNode);
+    });
+    Object.keys(reactionBubblesBySeatNo).forEach(function(seatNoKey){
+      var seatNo = Number(seatNoKey);
+      var reactionBubble = reactionBubblesBySeatNo[seatNoKey];
+      var ownerUserId = currentSeatOwnerUserId(seatNo);
+      var anchor = renderedSeatAnchors[seatNo];
+      var reactionEntry = reactionBubble ? findReactionEntry(reactionBubble.reactionKey) : null;
+      if (!reactionBubble || !ownerUserId || reactionBubble.ownerUserId !== ownerUserId || !anchor || !reactionEntry){
+        clearReactionBubble(seatNo);
+        return;
+      }
+      renderRegularReactionBubble(seatNo, reactionBubble, reactionEntry, anchor);
+    });
+  }
+
+  function renderCommunityCards(){
+    if (!els.communityCards) return;
+    els.communityCards.innerHTML = '';
+    var cards = getDisplayCommunityCards();
+    cards.forEach(function(card){
+      var element = createCard(card);
+      if (cardFxNodes.some(function(node){ return node.dataset.communityCard === element.dataset.cardIdentity; })) element.classList.add('poker-card--dealing');
+      els.communityCards.appendChild(element);
+    });
+  }
+
+  function logHeroCardPresentation(reason){
+    if (!els.heroCards) return;
+    var seat = deriveCurrentSeat();
+    var hud = seat && renderedSeatHud[seat.seatNo];
+    var presentation = els.heroCards.hidden ? 'hidden' : state.heroCards.length === 2 ? 'visible' : 'placeholder';
+    var previous = heroPresentationState;
+    heroPresentationState = presentation;
+    if (previous == null || previous === presentation) return;
+    klog('poker_hero_card_presentation_changed', {
+      from: previous, to: presentation, reason: reason,
+      frameKind: heroFrameKind, stateVersion: state.stateVersion, handId: state.handId, phase: state.phase,
+      playerStatus: currentPlayerStatus(), heroCardsLength: state.heroCards.length,
+      youSeatPresent: Number.isInteger(state.youSeat), currentSeatPresent: !!seat, renderedHeroHudPresent: !!hud,
+      reconnectGate: !!state.reconnectGate, wsReady: isWsReady(), lifecycleTransition: heroLifecycleTransition
+    });
+  }
+
+  function renderHeroCards(){
+    if (!els.heroCards) return;
+    var seat = deriveCurrentSeat();
+    if (currentPlayerStatus() === 'WAITING_NEXT_HAND' || !seat){
+      els.heroCards.hidden = true;
+      els.heroCards.innerHTML = '';
+      return;
+    }
+    els.heroCards.hidden = false;
+    els.heroCards.className = 'poker-hero-cards' + (isCurrentUserFolded() ? ' poker-hero-cards--folded' : '');
+    var cards = Array.isArray(state.heroCards) ? state.heroCards : [];
+    var children = els.heroCards.children;
+    var sameDeal = children.length === 2;
+    for (var i = 0; sameDeal && i < 2; i++){
+      var child = children[i];
+      sameDeal = cards.length === 2
+        ? child.children.length === 2 && child.children[0].textContent === cards[i].r && child.children[1].textContent === SUIT_SYMBOLS[cards[i].s]
+        : child.classList.contains('poker-card--back');
+    }
+    if (sameDeal) return;
+    els.heroCards.innerHTML = '';
+    for (var cardIndex = 0; cardIndex < 2; cardIndex++) els.heroCards.appendChild(createCard(cards[cardIndex] || null));
+  }
+
+  function positionHeroCards(){
+    if (!els.heroCards || !els.scene) return;
+    // The persistent deal belongs to the scene, never a disposable seat HUD.
+    if (els.heroCards.parentNode !== els.scene) els.scene.appendChild(els.heroCards);
+    var config = seatSceneGeometry[seatSceneOrientation].seats[3];
+    placeSeatNode(els.heroCards, { origin: [0, 0] }, config.cards, 110, 80);
+  }
+
+  function renderDealerChip(){
+    if (!els.dealerChip) return;
+    // Dealer ownership is independent of disposable/missing seat HUD projection.
+    if (els.dealerChip.parentNode !== els.scene) els.scene.appendChild(els.dealerChip);
+    var seatIndex = Number.isInteger(state.dealerSeat) ? state.dealerSeat - getSeatNumberingOffset() : -1;
+    var valid = seatIndex >= 0 && seatIndex < state.maxSeats;
+    els.dealerChip.hidden = !valid;
+    if (!valid) return;
+    var slot = seatPhysicalSlot(rotateSeatIndex(seatIndex,state.maxSeats),state.maxSeats);
+    var point = seatSceneGeometry[seatSceneOrientation].seats[slot].dealer;
+    placeSeatNode(els.dealerChip,{origin:[0,0]},point,20,20);
+  }
+
+  function isWsReady(){return true;}
+
+  function currentPlayerStatus(){
+    return state.playerState && typeof state.playerState.status === 'string' ? state.playerState.status : 'ACTIVE';
+  }
+
+  function isPlayerSittingOut(){
+    var status = currentPlayerStatus();
+    return !!inactivityExit || status === 'OUT_OF_CHIPS' || status === 'EJECTION_PENDING' || status === 'REMOVED';
+  }
+
+  function refreshRebuyBalance(){
+    if (rebuyBalanceLoading || !els.rebuyBalance || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return;
+    rebuyBalanceLoading = true;
+    var buyInLabel = currentTableBuyIn() == null ? 'table buy-in unavailable' : 'Buy-in: ' + formatNumber(currentTableBuyIn()) + ' CH';
+    Promise.resolve(window.ChipsClient.fetchBalance()).then(function(balance){
+      var amount = balance && Number.isFinite(Number(balance.balance)) ? Number(balance.balance) : Number(balance);
+      if (Number.isFinite(amount)) els.rebuyBalance.textContent = 'Balance: ' + formatNumber(amount) + ' CH · ' + buyInLabel;
+    }).catch(function(){
+      els.rebuyBalance.textContent = buyInLabel;
+    }).then(function(){
+      rebuyBalanceLoading = false;
+    });
+  }
+
+  function renderRebuyPanel(){
+    if (!els.rebuyPanel) return;
+    renderAutoRebuyCopy();
+    var playerState = state.playerState || null;
+    var outOfChips = !!playerState && playerState.status === 'OUT_OF_CHIPS';
+    var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
+    var show = ((outOfChips && playerState.canRebuy === true) || (waiting && !!rebuyOperation)) && !rebuyPanelDismissed;
+    if (els.rebuyBtn) els.rebuyBtn.hidden = waiting;
+    if (inactivityExit) {
+      if (els.rebuyBtn) els.rebuyBtn.disabled = true;
+      if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = true;
+    }
+    els.rebuyPanel.hidden = !show;
+    if (!show) return;
+    if (els.rebuyTitle) els.rebuyTitle.textContent = waiting ? 'Buy-in confirmed' : 'Out of chips';
+    if (els.rebuyCopy) els.rebuyCopy.textContent = waiting ? 'Funded · Joining next hand' : 'The table will keep playing. Buy in to join the next hand.';
+    if (els.rebuyBtn) {
+      var rebuyPending = !!rebuyOperation && rebuyOperation.phase === 'pending';
+      els.rebuyBtn.disabled = !!inactivityExit || rebuyPending || !isWsReady() || playerState.canRebuy !== true;
+      var buyIn = currentTableBuyIn();
+      els.rebuyBtn.textContent = rebuyPending ? 'Buying in…' : (rebuyOperation && rebuyOperation.phase === 'error'
+        ? 'Retry buy-in'
+        : (buyIn == null ? 'Buy in' : 'Buy in ' + formatNumber(buyIn) + ' CH'));
+    }
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = !!inactivityExit || (!!rebuyOperation && rebuyOperation.phase === 'pending') || !isWsReady();
+    if (outOfChips) refreshRebuyBalance();
+  }
+
+  function resolveLiveBannerStatus(){
+    var statusText = state.statusText || '';
+    if (!isWsReady() || state.reconnectGate) return statusText;
+    if (statusText !== LIVE_STATUS_COPY.live
+      && statusText !== 'Reserving seat…'
+      && statusText !== 'Checking seat reservation…'
+      && statusText !== 'Seat reserved · Joining next hand') return statusText;
+    if (joinOperation.phase === 'active' && !deriveCurrentSeat()) return 'Checking seat reservation…';
+    if (joinOperation.phase === 'reserving') return 'Reserving seat…';
+    if (joinOperation.phase === 'checking') return 'Checking seat reservation…';
+    if (joinOperation.phase === 'waiting_next_hand' || currentPlayerStatus() === 'WAITING_NEXT_HAND'){
+      return 'Seat reserved · Joining next hand';
+    }
+    if (state.hasAppliedAuthoritativeSnapshot === true
+      && deriveCurrentSeat()
+      && state.statusText === LIVE_STATUS_COPY.live){
+      return 'Joined';
+    }
+    return statusText;
+  }
+
+  function sumPokerTableStacks(tables){
+    if (!Array.isArray(tables)) return null;
+    var total = 0;
+    for (var i = 0; i < tables.length; i++){
+      var table = tables[i];
+      if (!table || !table.tableId) return null;
+      if (!Number.isSafeInteger(table.stack) || table.stack < 0) return null;
+      total += table.stack;
+      if (!Number.isSafeInteger(total)) return null;
+    }
+    return total;
+  }
+
+  function accountHudContext(){
+    return !isGuestMode && state.mode === 'live' && isSignedIn() ? state.currentUserId + ':' + state.tableId : null;
+  }
+
+  function syncAccountHud(){
+    if (!els.accountHud) return;
+    var identity = accountHudContext();
+    els.accountHud.hidden = !identity;
+    if (identity !== accountHudIdentity){
+      accountHudIdentity = identity;
+      accountHudGeneration++;
+      lastRenderedWallet = null;
+      els.accountHud.classList.remove('poker-account-hud--wallet-change');
+      els.accountHud.textContent = '';
+      if (identity) refreshAccountHud();
+    }
+  }
+
+  async function refreshAccountHud(){return;}
+
+  function renderInfoPanel(){
+    if (els.liveStatus) els.liveStatus.textContent = resolveLiveBannerStatus();
+    if (els.liveNotice){
+      els.liveNotice.hidden = !!state.errorText || !(state.mode === 'live' && (!isWsReady() || state.reconnectGate));
+      els.liveNotice.textContent = isGuestMode ? 'Connecting…' : isSignedIn() ? state.hasAppliedAuthoritativeSnapshot ? 'Reconnecting…' : 'Connecting…' : 'Sign in to join';
+    }
+    if (els.tableMeta) {
+      var parts = [];
+      if (state.tableId) parts.push('Table ' + state.tableId);
+      parts.push(state.phase || state.tableStatus || 'LOBBY');
+      parts.push('Pot ' + formatNumber(state.potTotal || 0));
+      els.tableMeta.textContent = parts.join(' • ');
+    }
+    if (els.errorText){
+      var pendingExit = inactivityExit && inactivityExit.status === 'pending';
+      els.errorText.textContent = pendingExit ? 'Removal for inactivity pending — finishing and settling the current hand.' : (state.errorText || '');
+      els.errorText.hidden = !pendingExit && !state.errorText;
+    }
+    if (els.turnText){
+      if (currentPlayerStatus() === 'OUT_OF_CHIPS'){
+        els.turnText.textContent = 'Out of chips · Sitting out';
+      } else if (currentPlayerStatus() === 'WAITING_NEXT_HAND'){
+        els.turnText.textContent = 'Joining next hand';
+      } else if (isUsersTurn()){
+        els.turnText.textContent = 'Your turn.';
+      } else if (state.turnUserId){
+        els.turnText.textContent = 'Acting: ' + state.turnUserId;
+      } else {
+        els.turnText.textContent = 'Waiting for action';
+      }
+    }
+    syncAccountHud();
+    renderRebuyPanel();
+  }
+
+  function resolvePrimaryAction(allowed){
+    if (allowed.indexOf('CHECK') !== -1) return 'CHECK';
+    if (allowed.indexOf('CALL') !== -1) return 'CALL';
+    return null;
+  }
+
+  function resolveAmountAction(allowed){
+    if (allowed.indexOf('RAISE') !== -1) return 'RAISE';
+    if (allowed.indexOf('BET') !== -1) return 'BET';
+    return null;
+  }
+
+  function resolveAllInPlan(allowed){
+    var stackAmount = resolveStack(state.currentUserId);
+    if (!stackAmount || stackAmount < 1) return null;
+    var constraints = state.actionConstraints || {};
+    var toCall = Number.isFinite(constraints.toCall) ? Math.max(0, Math.trunc(constraints.toCall)) : null;
+    if (allowed.indexOf('CALL') !== -1 && toCall != null && toCall > 0 && stackAmount <= toCall){
+      return { type: 'CALL', amount: null };
+    }
+    if (allowed.indexOf('RAISE') !== -1 && Number.isFinite(constraints.maxRaiseTo)){
+      var maxRaiseTo = Math.max(1, Math.trunc(constraints.maxRaiseTo));
+      return { type: 'RAISE', amount: maxRaiseTo };
+    }
+    if (allowed.indexOf('BET') !== -1){
+      var maxBet = Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount;
+      return { type: 'BET', amount: maxBet };
+    }
+    return null;
+  }
+
+  function resolveAmountBounds(amountAction, stackAmount){
+    if (!amountAction) return null;
+    var constraints = state.actionConstraints || {};
+    var bigBlindAmount = Number.isFinite(state.bigBlind) ? Math.max(1, Math.trunc(state.bigBlind)) : null;
+    var min = amountAction === 'RAISE'
+      ? (Number.isFinite(constraints.minRaiseTo) ? Math.max(1, Math.trunc(constraints.minRaiseTo)) : 1)
+      : (Number.isFinite(constraints.minBetAmount) ? Math.max(1, Math.trunc(constraints.minBetAmount))
+        : (bigBlindAmount != null && Number.isFinite(stackAmount) ? Math.min(bigBlindAmount, Math.max(0, Math.trunc(stackAmount))) : 1));
+    var max = amountAction === 'RAISE'
+      ? (Number.isFinite(constraints.maxRaiseTo) ? Math.max(min, Math.trunc(constraints.maxRaiseTo)) : null)
+      : (Number.isFinite(constraints.maxBetAmount) ? Math.max(1, Math.trunc(constraints.maxBetAmount)) : stackAmount);
+    var defaultAmount = Math.min(max != null ? max : 20, Math.max(min, 20));
+    return {
+      min: min,
+      max: max != null ? max : null,
+      defaultAmount: defaultAmount
+    };
+  }
+
+  function syncAmountInput(bounds){
+    if (!els.amountInput) return null;
+    if (!bounds) return parseInt(els.amountInput.value, 10) || 20;
+    els.amountInput.min = String(bounds.min);
+    if (bounds.max != null) els.amountInput.max = String(bounds.max);
+    else els.amountInput.removeAttribute('max');
+    var value = parseInt(els.amountInput.value, 10);
+    if (!Number.isFinite(value) || value < bounds.min || (bounds.max != null && value > bounds.max)){
+      value = bounds.defaultAmount;
+      els.amountInput.value = String(value);
+    }
+    return value;
+  }
+
+  // Show the current slider amount on the dynamic Bet/Raise button (and the
+  // queued pre-action label). The amount is the raise-to value for RAISE and
+  // the opening-bet value for BET; the caller supplies it (renderControls
+  // passes the value returned by syncAmountInput, the slider input listener
+  // passes the live slider value).
+  function syncAmountActionLabels(amount){
+    if (!Number.isFinite(amount)) return;
+    var compact = formatCompactAmount(amount);
+    if (els.amountBtn){
+      var liveAction = els.amountBtn.dataset.action || '';
+      if (liveAction === 'BET' || liveAction === 'RAISE'){
+        els.amountBtn.textContent = (liveAction === 'RAISE' ? 'Raise' : 'Bet') + ' (' + compact + ')';
+      }
+    }
+    if (els.amountPreactionText){
+      var preAction = els.amountPreaction ? (els.amountPreaction.dataset.action || '') : '';
+      if (preAction === 'BET' || preAction === 'RAISE'){
+        els.amountPreactionText.textContent = (preAction === 'RAISE' ? 'Raise' : 'Bet') + ' (' + compact + ')';
+      }
+    }
+  }
+
+  function clearQueuedPreaction(){
+    queuedPreaction = null;
+  }
+
+  function notifyPreactionCancelled(amountAction, bounds){
+    if (amountAction !== 'RAISE' && amountAction !== 'BET') return;
+    if (!bounds || !Number.isFinite(bounds.min)) return;
+    var noun = amountAction === 'RAISE' ? 'raise' : 'bet';
+    setError('Pre-action cancelled: minimum ' + noun + ' is now ' + Math.trunc(bounds.min) + '.');
+  }
+
+  function resetQueuedPreactionState(){
+    queuedPreaction = null;
+    queuedPreactionInFlight = false;
+  }
+
+  function getPreactionInput(slot){
+    if (slot === 'fold') return els.foldPreaction;
+    if (slot === 'primary') return els.primaryPreaction;
+    if (slot === 'amount') return els.amountPreaction;
+    if (slot === 'allIn') return els.allInPreaction;
+    return null;
+  }
+
+  function readQueuedAmount(){
+    var value = els.amountInput ? parseInt(els.amountInput.value, 10) : NaN;
+    return Number.isFinite(value) ? Math.trunc(value) : null;
+  }
+
+  function buildQueuedPreaction(slot){
+    if (slot === 'fold') return { slot: 'fold', action: 'FOLD', amount: null };
+    if (slot === 'primary'){
+      var primaryAction = els.primaryPreaction ? (els.primaryPreaction.dataset.action || '') : '';
+      return primaryAction ? { slot: 'primary', action: primaryAction, amount: null } : null;
+    }
+    if (slot === 'amount'){
+      var amountAction = els.amountPreaction ? (els.amountPreaction.dataset.action || '') : '';
+      var amount = readQueuedAmount();
+      return amountAction && Number.isFinite(amount) ? { slot: 'amount', action: amountAction, amount: amount } : null;
+    }
+    if (slot === 'allIn') return { slot: 'allIn', action: null, amount: null };
+    return null;
+  }
+
+  function syncQueuedPreactionWithPreactionState(preactionState){
+    if (!queuedPreaction || !preactionState) return;
+    if (queuedPreaction.slot === 'fold'){
+      if (!preactionState.foldVisible) clearQueuedPreaction();
+      return;
+    }
+    if (queuedPreaction.slot === 'primary'){
+      if (!preactionState.primaryAction || queuedPreaction.action !== preactionState.primaryAction) clearQueuedPreaction();
+      return;
+    }
+    if (queuedPreaction.slot === 'amount'){
+      if (!preactionState.amountAction || queuedPreaction.action !== preactionState.amountAction || !preactionState.amountBounds){
+        clearQueuedPreaction();
+        return;
+      }
+      var queuedAmount = readQueuedAmount();
+      if (!Number.isFinite(queuedAmount) || queuedAmount < preactionState.amountBounds.min || (preactionState.amountBounds.max != null && queuedAmount > preactionState.amountBounds.max)){
+        notifyPreactionCancelled(queuedPreaction.action, preactionState.amountBounds);
+        clearQueuedPreaction();
+        return;
+      }
+      queuedPreaction.amount = queuedAmount;
+      return;
+    }
+    if (queuedPreaction.slot === 'allIn' && !preactionState.allInAvailable) clearQueuedPreaction();
+  }
+
+  function resolveQueuedPreactionExecution(liveState){
+    if (!queuedPreaction || !liveState) return null;
+    if (queuedPreaction.slot === 'fold') return liveState.foldVisible ? { action: 'FOLD', amount: null } : null;
+    if (queuedPreaction.slot === 'primary'){
+      return queuedPreaction.action && queuedPreaction.action === liveState.primaryAction
+        ? { action: queuedPreaction.action, amount: null }
+        : null;
+    }
+    if (queuedPreaction.slot === 'amount'){
+      if (!queuedPreaction.action || queuedPreaction.action !== liveState.amountAction || !liveState.amountBounds) return null;
+      if (!Number.isFinite(queuedPreaction.amount) || queuedPreaction.amount < liveState.amountBounds.min || (liveState.amountBounds.max != null && queuedPreaction.amount > liveState.amountBounds.max)) return null;
+      return { action: queuedPreaction.action, amount: queuedPreaction.amount };
+    }
+    if (queuedPreaction.slot === 'allIn'){
+      return liveState.allInPlan
+        ? { action: liveState.allInPlan.type, amount: liveState.allInPlan.amount == null ? null : liveState.allInPlan.amount }
+        : null;
+    }
+    return null;
+  }
+
+  function renderControls(){
+    var signedIn = isSignedIn();
+    var seated = !!deriveCurrentSeat();
+    var liveReady = isWsReady();
+    var activeHand = hasActiveHand();
+    var usersTurn = isUsersTurn();
+    var controlsLocked = queuedPreactionInFlight || !!inactivityExit;
+    var allowed = liveReady && usersTurn && !inactivityExit ? getAllowedActions() : [];
+    var primary = resolvePrimaryAction(allowed);
+    var amountAction = resolveAmountAction(allowed);
+    var allInPlan = resolveAllInPlan(allowed);
+    var stackAmount = resolveStack(state.currentUserId);
+    var amountBounds = resolveAmountBounds(amountAction, stackAmount);
+    var playerSittingOut = isPlayerSittingOut();
+    var preactionMode = !!(signedIn && seated && liveReady && activeHand && !usersTurn && !isCurrentUserFolded() && !playerSittingOut && currentPlayerStatus() !== 'WAITING_NEXT_HAND');
+    var projectedAllowed = preactionMode ? resolveProjectedAllowedActions() : [];
+    var preactionPrimary = resolvePrimaryAction(projectedAllowed);
+    var preactionAmountAction = resolveAmountAction(projectedAllowed);
+    // Off-turn ALL IN availability follows the authoritative projected actions
+    // (CALL all-in when stack <= toCall, RAISE/BET all-in when those are legal);
+    // a positive stack alone never implies an all-in.
+    var preactionAllInPlan = preactionMode ? resolveAllInPlan(projectedAllowed) : null;
+    var preactionAllInAvailable = !!preactionAllInPlan;
+    // A short stack below the big blind cannot make an ordinary opening bet; the
+    // only legal opening bet is the all-in, which the ALL IN pre-action already
+    // represents. Do not offer a selectable BET amount for it.
+    if (preactionMode && preactionAmountAction === 'BET' && Number.isFinite(stackAmount) && Number.isFinite(state.bigBlind) && stackAmount < Math.trunc(state.bigBlind) && preactionAllInAvailable){
+      preactionAmountAction = null;
+    }
+    var preactionAmountBounds = resolveAmountBounds(preactionAmountAction, stackAmount);
+    var displayPrimary = primary || preactionPrimary || 'CHECK';
+    var displayAmountAction = amountAction || preactionAmountAction || 'BET';
+    var showActionButtons = signedIn && seated && currentPlayerStatus() !== 'WAITING_NEXT_HAND';
+    var showLiveActionButtons = showActionButtons && !preactionMode;
+    var actionControlsLocked = !liveReady || !usersTurn || controlsLocked || playerSittingOut;
+    var joinPending = isJoinOperationPending();
+    var joinDisabled = !!inactivityExit || !signedIn || isGuestMode || seated || !state.tableId || !liveReady
+      || state.reconnectGate || !state.hasAppliedAuthoritativeSnapshot || joinPending
+      || (joinOperation.phase === 'active' && !seated);
+    if (!seated || !activeHand || isCurrentUserFolded() || playerSittingOut) clearQueuedPreaction();
+    if (preactionMode) {
+      syncQueuedPreactionWithPreactionState({
+        foldVisible: isFoldAvailable(),
+        primaryAction: preactionPrimary,
+        amountAction: preactionAmountAction,
+        allInAvailable: preactionAllInAvailable,
+        amountBounds: preactionAmountBounds
+      });
+    }
+
+    var accountActionText = isGuestMode ? 'Create account and get 500 CH Welcome Bonus' : 'Sign in to join this table';
+    if (els.menuSignIn) {
+      els.menuSignIn.hidden = signedIn && !isGuestMode;
+      els.menuSignIn.textContent = accountActionText;
+    }
+    if (els.menuGuestInfo) els.menuGuestInfo.hidden = !isGuestMode;
+    if (els.joinBtn) els.joinBtn.disabled = joinDisabled;
+    if (els.joinBtn) {
+      els.joinBtn.textContent = 'Join';
+      if (joinPending) els.joinBtn.setAttribute('aria-busy', 'true');
+      else els.joinBtn.removeAttribute('aria-busy');
+    }
+    syncJoinVisibility();
+    if (els.joinSeat) els.joinSeat.disabled = !!inactivityExit || !signedIn || seated || !liveReady;
+    if (els.joinBuyIn) els.joinBuyIn.disabled = !!inactivityExit || !signedIn || seated || !liveReady;
+    if (els.joinSeat && suggestedSeatNoParam && !seated && !els.joinSeat.dataset.userEdited) {
+      els.joinSeat.value = String(suggestedSeatNoParam);
+    }
+    if (els.startBtn) els.startBtn.hidden = !!inactivityExit || !signedIn || !seated;
+    if (els.startBtn) els.startBtn.disabled = !!inactivityExit || !liveReady;
+    if (els.menuLeave) {
+      els.menuLeave.hidden = !!inactivityExit || !signedIn || !seated;
+      els.menuLeave.disabled = !!inactivityExit || !liveReady;
+    }
+    if ((inactivityExit || !signedIn || !seated) && leaveConfirmOpen) closeLeaveConfirm();
+    if ((!signedIn || isGuestMode) && autoRebuyConfirmOpen){
+      closeAutoRebuyConfirm(false);
+      renderSocialPreferences();
+    }
+    if (els.stackText) els.stackText.textContent = stackAmount == null ? '—' : formatNumber(stackAmount);
+
+    if (els.foldBtn){
+      els.foldBtn.hidden = !showLiveActionButtons;
+      els.foldBtn.dataset.action = 'FOLD';
+      els.foldBtn.disabled = actionControlsLocked || !isFoldAvailable();
+    }
+    if (els.primaryBtn){
+      els.primaryBtn.hidden = !showLiveActionButtons;
+      var toCall = Number.isFinite(state.actionConstraints && state.actionConstraints.toCall)
+        ? Math.max(0, Math.trunc(state.actionConstraints.toCall))
+        : null;
+      els.primaryBtn.textContent = displayPrimary === 'CHECK'
+        ? 'Check'
+        : ('Call (' + formatCompactAmount(toCall) + ')');
+      els.primaryBtn.dataset.action = primary || '';
+      els.primaryBtn.disabled = actionControlsLocked || !primary;
+    }
+    if (els.amountBtn){
+      els.amountBtn.hidden = !showLiveActionButtons;
+      els.amountBtn.textContent = displayAmountAction === 'RAISE' ? 'Raise' : 'Bet';
+      els.amountBtn.dataset.action = amountAction || '';
+      els.amountBtn.disabled = actionControlsLocked || !amountAction;
+    }
+    if (els.allInBtn){
+      els.allInBtn.hidden = !showLiveActionButtons;
+      els.allInBtn.dataset.action = allInPlan ? allInPlan.type : '';
+      els.allInBtn.disabled = actionControlsLocked || !allInPlan;
+    }
+    if (els.foldPreactionWrap) els.foldPreactionWrap.hidden = !preactionMode;
+    if (els.foldPreaction) {
+      els.foldPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'fold');
+      els.foldPreaction.disabled = !preactionMode || !liveReady || controlsLocked || !isFoldAvailable();
+      els.foldPreaction.dataset.slot = 'fold';
+    }
+    if (els.primaryPreactionWrap) els.primaryPreactionWrap.hidden = !preactionMode;
+    if (els.primaryPreaction) {
+      els.primaryPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'primary');
+      els.primaryPreaction.disabled = !preactionMode || !liveReady || controlsLocked || !preactionPrimary;
+      els.primaryPreaction.dataset.slot = 'primary';
+      els.primaryPreaction.dataset.action = preactionPrimary || '';
+    }
+    if (els.primaryPreactionText) {
+      var projectedToCall = Number.isFinite(state.actionConstraints && state.actionConstraints.toCall)
+        ? Math.max(0, Math.trunc(state.actionConstraints.toCall))
+        : null;
+      els.primaryPreactionText.textContent = preactionPrimary === 'CALL'
+        ? ('Call (' + formatCompactAmount(projectedToCall) + ')')
+        : 'Check';
+    }
+    if (els.amountPreactionWrap) els.amountPreactionWrap.hidden = !preactionMode;
+    if (els.amountPreaction) {
+      els.amountPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'amount');
+      els.amountPreaction.disabled = !preactionMode || !liveReady || controlsLocked || !preactionAmountAction;
+      els.amountPreaction.dataset.slot = 'amount';
+      els.amountPreaction.dataset.action = preactionAmountAction || '';
+    }
+    if (els.amountPreactionText) els.amountPreactionText.textContent = preactionAmountAction === 'RAISE' ? 'Raise' : 'Bet';
+    if (els.allInPreactionWrap) els.allInPreactionWrap.hidden = !preactionMode;
+    if (els.allInPreaction) {
+      els.allInPreaction.checked = !!(queuedPreaction && queuedPreaction.slot === 'allIn');
+      els.allInPreaction.disabled = !preactionMode || !liveReady || controlsLocked || !preactionAllInAvailable;
+      els.allInPreaction.dataset.slot = 'allIn';
+    }
+    if (els.amountInputWrap){
+      els.amountInputWrap.hidden = false;
+      var activeAmountBounds = usersTurn ? amountBounds : preactionMode ? preactionAmountBounds : null;
+      if (activeAmountBounds){
+        var syncedAmount = syncAmountInput(activeAmountBounds);
+        if (els.amountValue) els.amountValue.textContent = formatCompactAmount(Number.isFinite(syncedAmount) ? syncedAmount : activeAmountBounds.min);
+        if (els.amountInputWrap.classList && typeof els.amountInputWrap.classList.remove === 'function') els.amountInputWrap.classList.remove('is-disabled');
+      } else if (els.amountInputWrap.classList && typeof els.amountInputWrap.classList.add === 'function') {
+        els.amountInputWrap.classList.add('is-disabled');
+      }
+    }
+    if (els.amountInput) els.amountInput.disabled = !liveReady || controlsLocked || !(usersTurn ? amountAction : preactionMode ? preactionAmountAction : null);
+    if (els.amountValue && !(usersTurn ? amountAction : preactionMode ? preactionAmountAction : null)) {
+      els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput && els.amountInput.value ? els.amountInput.value : '20', 10) || 20);
+    }
+    // Keep Bet/Raise labels in sync with the authoritative (clamped) slider
+    // value; syncAmountInput returns undefined when no amount action is active,
+    // in which case the base Bet/Raise label set above is preserved.
+    syncAmountActionLabels(syncedAmount);
+    renderReactionControl();
+  }
+
+  function resolveSettlementRecipientName(userId){
+    for (var i = 0; i < state.seats.length; i++){
+      if (state.seats[i] && state.seats[i].userId === userId) return getDisplayName(state.seats[i]);
+    }
+    return shortId(userId) || t('pokerSettlementPlayer', 'Player');
+  }
+
+  function renderSettlementSummary(){
+    if (!els.centerLayer) return;
+    if (!els.settlementSummary){
+      els.settlementSummary = document.createElement('div');
+      els.settlementSummary.className = 'poker-settlement-summary';
+      els.settlementSummary.setAttribute('role', 'status');
+      els.settlementSummary.setAttribute('aria-live', 'polite');
+      els.settlementSummary.setAttribute('aria-atomic', 'true');
+      els.settlementSummary.setAttribute('aria-label', t('pokerSettlementSummaryAria', 'Hand settlement'));
+      els.centerLayer.appendChild(els.settlementSummary);
+    }
+    els.settlementSummary.setAttribute('aria-label', t('pokerSettlementSummaryAria', 'Hand settlement'));
+    els.settlementSummary.innerHTML = '';
+    var presentation = getDisplaySettlementPresentation();
+    if (!presentation){
+      els.settlementSummary.hidden = true;
+      return;
+    }
+    els.settlementSummary.hidden = false;
+    if (!presentation.valid){
+      var fallback = document.createElement('div');
+      fallback.className = 'poker-settlement-summary__fallback';
+      fallback.textContent = t('pokerSettlementComplete', 'Settlement complete');
+      els.settlementSummary.appendChild(fallback);
+      return;
+    }
+    presentation.pots.forEach(function(pot){
+      var row = document.createElement('div');
+      row.className = 'poker-settlement-summary__row poker-settlement-summary__row--' + pot.kind;
+      row.dataset.awardId = pot.awardId;
+      var label = document.createElement('span');
+      label.className = 'poker-settlement-summary__label';
+      label.textContent = getSettlementAwardLabel(pot) + ' ' + formatNumber(pot.amount);
+      var recipients = document.createElement('span');
+      recipients.className = 'poker-settlement-summary__recipients';
+      recipients.textContent = pot.recipients.map(function(recipient){
+        var name = resolveSettlementRecipientName(recipient.userId);
+        return pot.recipients.length > 1 ? name + ' +' + formatNumber(recipient.amount) : name;
+      }).join(', ');
+      row.appendChild(label);
+      row.appendChild(recipients);
+      els.settlementSummary.appendChild(row);
+    });
+  }
+
+  // Ephemeral public room copy, never gameplay state or an engineering log.
+  var roomMessageHandId = null;
+  var roomMessageTableId = null;
+  var roomMessageUsers = [];
+  var roomMessageTimer = null;
+
+  function renderRoomMessages(){
+    if (!els.roomEvent || !els.roomStatus) return;
+    var seats = state.seats.filter(function(seat){ return !!seat.userId; });
+    var users = seats.map(function(seat){ return seat.userId; });
+    var sameTable = roomMessageTableId === state.tableId;
+    var joined = sameTable && roomMessageUsers.length ? seats.find(function(seat){ return roomMessageUsers.indexOf(seat.userId) < 0; }) : null;
+    var newHand = state.handId && state.handId !== roomMessageHandId;
+    var message = joined ? tf('pokerRoomPlayerJoined', { name: joined.displayName || t('pokerRoomPlayer', 'A player') }, '{name} joined the table')
+      : newHand ? t('pokerRoomNewHand', 'New hand · Good luck') : null;
+    if (!sameTable){
+      if (roomMessageTimer) window.clearTimeout(roomMessageTimer);
+      els.roomEvent.hidden = true;
+    }
+    roomMessageTableId = state.tableId;
+    roomMessageUsers = users;
+    roomMessageHandId = state.handId;
+    if (message){
+      if (roomMessageTimer) window.clearTimeout(roomMessageTimer);
+      els.roomEvent.textContent = message;
+      els.roomEvent.hidden = false;
+      roomMessageTimer = window.setTimeout(function(){ els.roomEvent.hidden = true; roomMessageTimer = null; }, 5000);
+    }
+    var playerStatus = String(state.playerState && state.playerState.status || '').toUpperCase();
+    els.roomStatus.textContent = seats.length < 2 ? t('pokerRoomWaiting', 'Waiting for more players')
+      : playerStatus === 'WAITING_NEXT_HAND' ? t('pokerRoomReserved', 'Seat reserved · Joining next hand')
+      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Next hand shortly')
+      : isUsersTurn() ? t('pokerRoomYourTurn', 'Your turn') : t('pokerRoomHandInProgress', 'Hand in progress');
+  }
+
+  function render(){
+    fitTableScene();
+    if (els.celebrationPreview) els.celebrationPreview.hidden = !isThemePreviewBuild();
+    if (els.potPill) els.potPill.textContent = 'Pot ' + formatNumber(state.potTotal || 0);
+    renderCommunityCards();
+    renderSeats();
+    renderAutoRebuyFeedback();
+    renderHeroCards();
+    positionHeroCards();
+    syncMadeHandHighlights();
+    logHeroCardPresentation(!deriveCurrentSeat() ? 'seat_absent' : !renderedSeatHud[deriveCurrentSeat().seatNo] ? 'hud_absent' : state.heroCards.length !== 2 ? 'deal_absent' : 'active_deal');
+    renderSeatChips();
+    renderPotChips();
+    renderSettlementSummary();
+    renderDealerChip();
+    renderInfoPanel();
+    renderControls();
+    renderReactionHistory();
+    renderClosedTableNotice();
+    renderRoomMessages();
+    positionCelebration();
+    refreshCelebrationPreview();
+    fitTableScene();
+    if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
+  }
+
+  function setError(message){
+    state.errorText = message || '';
+    renderInfoPanel();
+  }
+
+  function markBootReady(){
+    if (bootReady) return;
+    bootReady = true;
+    if (els.screen) els.screen.setAttribute('data-boot-ready', '1');
+    if (els.bootSplash) els.bootSplash.hidden = true;
+  }
+
+  function buildJoinPayload(){
+    return buildJoinPayloadWithOptions();
+  }
+
+  function resolvePreferredSeatNo(){
+    var rawSeatNo = els.joinSeat ? parseInt(els.joinSeat.value, 10) : NaN;
+    var maxSeats = Number.isInteger(state.maxSeats) && state.maxSeats >= 1 ? state.maxSeats : 1;
+    var preferredSeatNo = Number.isFinite(rawSeatNo) ? Math.trunc(rawSeatNo) : 1;
+    if (preferredSeatNo < 1) preferredSeatNo = 1;
+    if (preferredSeatNo > maxSeats) preferredSeatNo = maxSeats;
+    if (els.joinSeat) els.joinSeat.value = String(preferredSeatNo);
+    return preferredSeatNo;
+  }
+
+  function buildJoinPayloadWithOptions(options){
+    var opts = options || {};
+    var payload = { tableId: state.tableId };
+    payload.buyIn = clientBuyInDeclaration();
+    var preferredSeatNo = resolvePreferredSeatNo();
+    if (opts.autoSeat === true) {
+      payload.autoSeat = true;
+      payload.preferredSeatNo = preferredSeatNo;
+    } else {
+      payload.seatNo = preferredSeatNo;
+    }
+    var guestJoinIntent = consumeGuestJoinIntent();
+    if (guestJoinIntent) payload.guestJoinIntent = guestJoinIntent;
+    return payload;
+  }
+
+  function sendCommand(methodName, payload, requestId){if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable in one-hand Offline PoC')); return window.PokerOfflinePoc.act({type:payload.action, amount:payload.amount});}
+
+  function beginJoinOperation(payload, options){
+    if (inactivityExit) return Promise.reject(new Error('removed_for_inactivity'));
+    var opts = options || {};
+    if (isJoinOperationPending() && opts.resume !== true) return joinOperation.promise || Promise.resolve({ ok: true, pending: true });
+    var requestId = typeof opts.requestId === 'string' && opts.requestId ? opts.requestId : buildJoinRequestId();
+    joinOperation = {
+      phase: opts.resume === true ? 'checking' : 'reserving',
+      requestId: requestId,
+      payload: payload,
+      source: opts.source || 'manual',
+      promise: null
+    };
+    persistPendingJoin();
+    setError('');
+    setJoinOperationPhase(joinOperation.phase);
+    var promise = sendCommand('sendJoin', payload, requestId).then(function(result){
+      if (joinOperation.requestId !== requestId) return result;
+      clearPendingJoin();
+      joinOperation.requestId = null;
+      joinOperation.payload = null;
+      setJoinOperationPhase(result && result.joinStatus === 'WAITING_NEXT_HAND' ? 'waiting_next_hand' : 'active');
+      return result;
+    }).catch(function(error){
+      if (joinOperation.requestId !== requestId) return;
+      clearPendingJoin();
+      joinOperation.requestId = null;
+      joinOperation.payload = null;
+      joinOperation.phase = 'rejected';
+      if (autoJoinErrorCode(error) === 'single_player_participation_ended') {
+        shouldAutoJoin = false;
+        clearAutoJoinRetry();
+        reconnectSeatNo = null;
+        if (currentAccessToken) preflightAuthenticatedLiveMode(currentAccessToken, ++authenticatedPreflightGeneration);
+      }
+      if (isWsReady() && !state.reconnectGate) state.statusText = LIVE_STATUS_COPY.live;
+      renderInfoPanel();
+      renderControls();
+      throw error;
+    });
+    joinOperation.promise = promise;
+    return promise;
+  }
+
+  function resumePendingJoinOperation(){
+    if (inactivityExit) return false;
+    if (!isGuestMode && state.reconnectGate) return false;
+    if (!isGuestMode && !state.hasAppliedAuthoritativeSnapshot) return false;
+    if (isGuestMode && isJoinOperationPending()) return true;
+    if (!isGuestMode && deriveCurrentSeat()){
+      reconcileJoinOperationFromSnapshot();
+      return false;
+    }
+    var pendingJoin = loadPendingJoin();
+    if (!pendingJoin) return false;
+    void beginJoinOperation(pendingJoin.payload, {
+      requestId: pendingJoin.requestId,
+      source: 'resume_pending',
+      resume: true
+    }).catch(function(error){
+      setError(joinErrorMessage(error));
+    });
+    return true;
+  }
+
+  function queueLeaveAndNavigateImmediately(){
+    if (inactivityExit) return false;
+    if (!wsClient || typeof wsClient.sendLeaveQueued !== 'function' || !isWsReady()) return false;
+    clearRebuyOperation();
+    wsClient.sendLeaveQueued({ tableId: state.tableId });
+    pendingLeaveRetryAfterReconnect = false;
+    pendingLeaveNavigation = false;
+    state.statusText = 'Leaving...';
+    renderInfoPanel();
+    navigateAfterLeave();
+    return true;
+  }
+
+  function closeLeaveConfirm(){
+    leaveConfirmOpen = false;
+    if (els.leaveConfirmModal) els.leaveConfirmModal.hidden = true;
+  }
+
+  function openLeaveConfirm(destination){
+    if (inactivityExit) return;
+    if (!els.leaveConfirmModal) return;
+    leaveConfirmDestination = normalizeLeaveDestination(destination);
+    leaveConfirmOpen = true;
+    els.leaveConfirmModal.hidden = false;
+  }
+
+  function handleAction(actionType, amount){
+    if (!actionType) return Promise.resolve();
+    if (state.reconnectGate) return Promise.resolve();
+    var payload = { handId: state.handId || null, action: actionType };
+    if (Number.isFinite(amount)) payload.amount = Math.trunc(amount);
+    setError('');
+    return sendCommand('sendAct', payload).then(function(){
+      state.statusText = 'Action sent';
+      renderInfoPanel();
+    }).catch(function(err){
+      setError(err && err.message ? err.message : 'Failed to send action');
+    });
+  }
+
+  function maybeExecuteQueuedPreaction(){
+    if (state.reconnectGate) return;
+    if (!queuedPreaction || queuedPreactionInFlight || !isUsersTurn()) return;
+    var allowed = getAllowedActions();
+    var liveState = {
+      foldVisible: isFoldAvailable(),
+      primaryAction: resolvePrimaryAction(allowed),
+      amountAction: resolveAmountAction(allowed),
+      allInPlan: resolveAllInPlan(allowed),
+      amountBounds: resolveAmountBounds(resolveAmountAction(allowed), resolveStack(state.currentUserId))
+    };
+    var nextAction = resolveQueuedPreactionExecution(liveState);
+    if (!nextAction && queuedPreaction && queuedPreaction.slot === 'amount' && queuedPreaction.action === liveState.amountAction && liveState.amountBounds){
+      var queuedAmountValue = queuedPreaction.amount;
+      if (!Number.isFinite(queuedAmountValue) || queuedAmountValue < liveState.amountBounds.min || (liveState.amountBounds.max != null && queuedAmountValue > liveState.amountBounds.max)){
+        notifyPreactionCancelled(queuedPreaction.action, liveState.amountBounds);
+      }
+    }
+    clearQueuedPreaction();
+    if (!nextAction || !nextAction.action) return;
+    queuedPreactionInFlight = true;
+    handleAction(nextAction.action, nextAction.amount == null ? undefined : nextAction.amount).then(function(){
+      queuedPreactionInFlight = false;
+      renderControls();
+    });
+  }
+
+  function autoJoinErrorCode(error){
+    var value = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return value.trim().toLowerCase();
+  }
+
+  function joinErrorMessage(error){
+    var code = autoJoinErrorCode(error);
+    if (code === 'single_player_participation_ended') {
+      return 'Your participation ended when you left. Return to the lobby and choose New Game explicitly to play again.';
+    }
+    if (code === 'single_player_bot_funding_unavailable') {
+      return 'Bot funding pool temporarily unavailable. Please try again later.';
+    }
+    if (code === 'single_player_owner_only') {
+      return 'This single player table belongs to another player.';
+    }
+    if (code === 'single_player_human_conflict') {
+      return 'Single Player tables permit only one human player.';
+    }
+    if (code === 'single_player_restricted_unavailable') {
+      return 'Single Player vs bots is unavailable for restricted accounts.';
+    }
+    if (code === 'single_player_authoritative_required') {
+      return 'Single Player tables require authoritative game access.';
+    }
+    if (code === 'buy_in_tier_locked') {
+      var requiredBankroll = Number(error && error.requiredBankroll);
+      var balance = Number(error && error.balance);
+      var tableBuyIn = Number(error && error.buyIn);
+      var alreadyUnlocked = Number.isSafeInteger(balance) && balance >= 0
+        && Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0
+        && balance >= requiredBankroll;
+      if (alreadyUnlocked){
+        return Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0
+          ? formatNumber(tableBuyIn) + ' CH tables are unlocked but not currently available at your progression level.'
+          : 'This table tier is unlocked but not currently available at your progression level.';
+      }
+      if (Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0){
+        var tierLabel = Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0 ? (' to unlock ' + formatNumber(tableBuyIn) + ' CH tables') : '';
+        return 'You need at least ' + formatNumber(requiredBankroll) + ' CH' + tierLabel + '.';
+      }
+      return 'This table tier is locked for your current bankroll.';
+    }
+    if (code !== 'insufficient_funds' && code !== 'insufficient_chips') {
+      return error && error.message ? error.message : 'Failed to join';
+    }
+    var buyIn = currentTableBuyIn();
+    if (buyIn == null) return 'Not enough CH to join this table.';
+    return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', String(buyIn));
+  }
+
+  function isRetryableAutoJoinError(error){
+    var code = autoJoinErrorCode(error);
+    if (!code) return false;
+    return /^(timeout|ws_unavailable|temporarily_unavailable|authoritative_join_failed|authoritative_state_invalid|state_missing|poker_state_missing|state_conflict|conflict|persist_failed|seat_taken|table_load_failed|table_bootstrap_failed)$/.test(code);
+  }
+
+  function clearAutoJoinRetry(){
+    if (autoJoinRetryTimer){
+      window.clearTimeout(autoJoinRetryTimer);
+      autoJoinRetryTimer = null;
+    }
+  }
+
+  function resetAutoJoinRetryState(){
+    clearAutoJoinRetry();
+    autoJoinRetryCount = 0;
+    autoJoinErrorActive = false;
+  }
+
+  function scheduleAutoJoinRetry(error){
+    if (!shouldAutoJoin || !isRetryableAutoJoinError(error) || autoJoinRetryTimer) return false;
+    if (autoJoinRetryCount >= AUTO_JOIN_RETRY_DELAYS_MS.length) return false;
+    var delayMs = AUTO_JOIN_RETRY_DELAYS_MS[autoJoinRetryCount];
+    autoJoinRetryCount += 1;
+    autoJoinRetryTimer = window.setTimeout(function(){
+      autoJoinRetryTimer = null;
+      autoJoinAttempted = false;
+      if (!isGuestMode && deriveCurrentSeat()){
+        resetAutoJoinRetryState();
+        return;
+      }
+      autoJoinSeat();
+    }, delayMs);
+    return true;
+  }
+
+  function autoJoinSeat(){
+    if (inactivityExit) return;
+    if (!isGuestMode && !state.hasAppliedAuthoritativeSnapshot) return;
+    if (!isGuestMode && state.reconnectGate) return;
+    if (!shouldAutoJoin) return;
+    if (isGuestMode ? joinOperation.phase === 'active' : deriveCurrentSeat()){
+      autoJoinAttempted = false;
+      resetAutoJoinRetryState();
+      return;
+    }
+    if (autoJoinAttempted || autoJoinRetryTimer) return;
+    if (!isSignedIn() || !isWsReady()) return;
+    autoJoinAttempted = true;
+    if (suggestedSeatNoParam && els.joinSeat) els.joinSeat.value = String(suggestedSeatNoParam);
+    autoJoinErrorActive = false;
+    setError('');
+    beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'auto' }).then(function(){
+      resetAutoJoinRetryState();
+    }).catch(function(err){
+      autoJoinAttempted = false;
+      autoJoinErrorActive = true;
+      var retryScheduled = scheduleAutoJoinRetry(err);
+      klog('poker_auto_join_failed', {
+        reason: autoJoinErrorCode(err) || 'unknown',
+        retryScheduled: retryScheduled,
+        retryCount: autoJoinRetryCount
+      });
+      setError(joinErrorMessage(err));
+    });
+  }
+
+  function rememberSeatForReconnect(){
+    if (inactivityExit) { reconnectSeatNo = null; return; }
+    var currentSeat = deriveCurrentSeat();
+    var seatNo = currentSeat && Number.isInteger(currentSeat.seatNo)
+      ? currentSeat.seatNo
+      : lastKnownCurrentSeatNo;
+    reconnectSeatNo = Number.isInteger(seatNo) && seatNo > 0 ? seatNo : null;
+    autoJoinAttempted = false;
+    if (isGuestMode && !isJoinOperationPending()) joinOperation.phase = 'idle';
+  }
+
+  function rejoinSeatAfterReconnect(){
+    if (inactivityExit) return false;
+    if (isGuestMode) return false;
+    if (state.reconnectGate) return false;
+    if (!Number.isInteger(reconnectSeatNo) || reconnectSeatNo < 1) return false;
+    if (autoJoinAttempted) return true;
+    var preferredSeatNo = reconnectSeatNo;
+    autoJoinAttempted = true;
+    setError('');
+    var reconnectPayload = {
+      tableId: state.tableId,
+      buyIn: clientBuyInDeclaration(),
+      autoSeat: true,
+      preferredSeatNo: preferredSeatNo
+    };
+    if (isGuestMode) reconnectPayload.guestJoinIntent = 'resume';
+    beginJoinOperation(reconnectPayload, { source: 'reconnect' }).then(function(result){
+      var resolvedSeatNo = result && Number.isInteger(Number(result.seatNo))
+        ? Number(result.seatNo)
+        : preferredSeatNo;
+      reconnectSeatNo = null;
+      lastKnownCurrentSeatNo = resolvedSeatNo;
+    }).catch(function(err){
+      autoJoinAttempted = false;
+      if (autoJoinErrorCode(err) !== 'single_player_participation_ended') reconnectSeatNo = preferredSeatNo;
+      setError(err && err.message ? err.message : 'Failed to reconnect seat');
+    });
+    return true;
+  }
+
+  function closeMenu(){
+    if (!els.menuToggle || !els.menuPanel) return;
+    els.menuPanel.setAttribute('hidden', 'hidden');
+    els.menuToggle.setAttribute('aria-expanded', 'false');
+  }
+
+  function closeSocialSettings(restoreFocus){
+    var wasOpen = !!(els.socialSettingsPanel && !els.socialSettingsPanel.hidden);
+    if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = true;
+    if (els.menuSettings) els.menuSettings.setAttribute('aria-expanded', 'false');
+    var opener = socialSettingsOpener;
+    socialSettingsOpener = null;
+    if (restoreFocus && wasOpen && opener && typeof opener.focus === 'function') opener.focus();
+  }
+
+  function closeHandInfoPanel(restoreFocus){
+    var wasOpen = !!(els.handInfoPanel && !els.handInfoPanel.hidden);
+    if (els.handInfoPanel){
+      els.handInfoPanel.hidden = true;
+      els.handInfoPanel.style.maxHeight = '';
+    }
+    if (els.handInfoToggle) els.handInfoToggle.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && wasOpen && els.handInfoToggle && typeof els.handInfoToggle.focus === 'function'){
+      els.handInfoToggle.focus();
+    }
+  }
+
+  function updateHandInfoPanelBounds(){
+    if (!els.handInfoPanel) return;
+    var isLandscape = (els.scene && els.scene.dataset.orientation === 'landscape') || (window.innerWidth > window.innerHeight);
+    if (isLandscape){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var heroAvatar = document.querySelector('.poker-seat--hero .poker-seat-avatar');
+    if (!heroAvatar){
+      var currentSeat = typeof deriveCurrentSeat === 'function' ? deriveCurrentSeat() : null;
+      if (currentSeat && Number.isInteger(currentSeat.seatNo) && renderedSeatAvatars && renderedSeatAvatars[currentSeat.seatNo]){
+        heroAvatar = renderedSeatAvatars[currentSeat.seatNo];
+      }
+    }
+    if (!heroAvatar || typeof heroAvatar.getBoundingClientRect !== 'function'){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var avRect = heroAvatar.getBoundingClientRect();
+    if (!(avRect.width > 0 && avRect.height > 0)){
+      els.handInfoPanel.style.maxHeight = '';
+      return;
+    }
+    var clock = typeof findSeatTurnClock === 'function' ? findSeatTurnClock(heroAvatar) : heroAvatar.querySelector('.poker-seat-turn-clock');
+    var indicatorTop = avRect.top;
+    if (clock && typeof clock.getBoundingClientRect === 'function'){
+      var clockRect = clock.getBoundingClientRect();
+      if (clockRect.height > 0 && clockRect.top < indicatorTop){
+        indicatorTop = clockRect.top;
+      }
+    } else {
+      indicatorTop = avRect.top - 2;
+    }
+    var clearance = 11;
+    var targetBottom = indicatorTop - clearance;
+    var panelTop = els.handInfoPanel.getBoundingClientRect().top;
+    if (!(panelTop > 0)){
+      panelTop = 50;
+    }
+    var availableHeight = Math.floor(targetBottom - panelTop);
+    if (availableHeight > 100){
+      els.handInfoPanel.style.maxHeight = availableHeight + 'px';
+    } else {
+      els.handInfoPanel.style.maxHeight = '';
+    }
+  }
+
+  function openHandInfoPanel(){
+    if (!els.handInfoPanel) return;
+    closeMenu();
+    closeSocialSettings(false);
+    closeReactionMenu();
+    if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
+    els.handInfoPanel.hidden = false;
+    if (els.handInfoToggle) els.handInfoToggle.setAttribute('aria-expanded', 'true');
+    updateHandInfoPanelBounds();
+    if (els.handInfoClose && typeof els.handInfoClose.focus === 'function'){
+      els.handInfoClose.focus();
+    }
+  }
+
+  function toggleHandInfoPanel(){
+    if (!els.handInfoPanel) return;
+    if (els.handInfoPanel.hidden) openHandInfoPanel();
+    else closeHandInfoPanel(true);
+  }
+
+  function getSocialSettingsViewport(){
+    var width = Number(window.innerWidth);
+    var height = Number(window.innerHeight);
+    if (!(width > 0) && document.documentElement) width = Number(document.documentElement.clientWidth);
+    if (!(height > 0) && document.documentElement) height = Number(document.documentElement.clientHeight);
+    if (!(width > 0) && els.screen && typeof els.screen.getBoundingClientRect === 'function') width = Number(els.screen.getBoundingClientRect().width);
+    if (!(height > 0) && els.screen && typeof els.screen.getBoundingClientRect === 'function') height = Number(els.screen.getBoundingClientRect().height);
+    return { width: width > 0 ? width : 0, height: height > 0 ? height : 0 };
+  }
+
+  function positionSocialSettingsPanel(trigger){
+    var settingsTrigger = trigger || socialSettingsOpener;
+    if (!els.socialSettingsPanel || els.socialSettingsPanel.hidden || !settingsTrigger
+      || typeof settingsTrigger.getBoundingClientRect !== 'function'
+      || typeof els.socialSettingsPanel.getBoundingClientRect !== 'function') return;
+    var viewport = getSocialSettingsViewport();
+    if (!(viewport.width > 0) || !(viewport.height > 0)) return;
+    var toggleRect = settingsTrigger.getBoundingClientRect();
+    var panelRect = els.socialSettingsPanel.getBoundingClientRect();
+    var edge = 8;
+    var gap = 8;
+    var panelWidth = Number(panelRect.width) > 0 ? Number(panelRect.width) : 260;
+    var panelHeight = Number(panelRect.height) > 0 ? Number(panelRect.height) : 0;
+    var availableAbove = Math.max(0, Number(toggleRect.top) - edge - gap);
+    var availableBelow = Math.max(0, viewport.height - Number(toggleRect.bottom) - edge - gap);
+    var placeAbove = availableAbove >= availableBelow;
+    var availablePreferred = placeAbove ? availableAbove : availableBelow;
+    if (panelHeight > availablePreferred && availablePreferred > 0){
+      els.socialSettingsPanel.style.maxHeight = 'min(' + Math.floor(availablePreferred) + 'px, calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px))';
+      panelRect = els.socialSettingsPanel.getBoundingClientRect();
+      panelHeight = Number(panelRect.height) > 0 ? Number(panelRect.height) : 0;
+    } else {
+      els.socialSettingsPanel.style.removeProperty('max-height');
+    }
+    var top = placeAbove ? Number(toggleRect.top) - panelHeight - gap : Number(toggleRect.bottom) + gap;
+    if (top < edge) top = edge;
+    var maxTop = viewport.height - panelHeight - edge;
+    if (maxTop < edge) maxTop = edge;
+    top = Math.max(edge, Math.min(top, maxTop));
+
+    var right = viewport.width - Number(toggleRect.right);
+    var maxRight = viewport.width - panelWidth - edge;
+    if (maxRight < edge) maxRight = edge;
+    right = Math.max(edge, Math.min(right, maxRight));
+    els.socialSettingsPanel.style.top = 'max(' + Math.round(top) + 'px, calc(env(safe-area-inset-top) + ' + edge + 'px))';
+    els.socialSettingsPanel.style.right = 'max(' + Math.round(right) + 'px, calc(env(safe-area-inset-right) + ' + edge + 'px))';
+    els.socialSettingsPanel.style.left = 'auto';
+  }
+
+  function updateSocialPreference(key, enabled){
+    if (key === 'celebrationsEnabled') clearCelebration();
+    socialPreferences[key] = enabled === true;
+    if (key === 'reactionBubblesEnabled' && !socialPreferences.reactionBubblesEnabled) clearReactionArtifacts();
+    if (key === 'reactionHistoryEnabled' && !socialPreferences.reactionHistoryEnabled) reactionHistoryPanelOpen = false;
+    if (key === 'botReactionsEnabled' && !socialPreferences.botReactionsEnabled){
+      clearReactionArtifacts(function(item){ return item && item.senderIsBot === true; });
+      removeBotReactionHistory();
+      clearBotAvatarReactions();
+    }
+    if (socialPreferencesIdentity || key === 'celebrationsEnabled') persistSocialPreferences();
+    renderSocialPreferences();
+    renderReactionHistory();
+  }
+
+  function normalizeLeaveDestination(destination){
+    return window.MOBILE_POKER_CONFIG ? '/poker/index.html' : '/poker/';
+  }
+
+  function navigateToDestination(destination){
+    clearCelebration();
+    cancelClosedTableRedirect();
+    clearReactionHistory();
+    if (!window || !window.location) return;
+    window.location.href = normalizeLeaveDestination(destination);
+  }
+
+  function navigateToLobby(){
+    navigateToDestination('/poker/');
+  }
+
+  function navigateAfterLeave(){
+    var destination = pendingLeaveDestination || '/poker/';
+    pendingLeaveDestination = '/poker/';
+    navigateToDestination(destination);
+  }
+
+  function isStaleSessionError(error){
+    var code = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound';
+  }
+
+  function isRetryableLeaveError(error){
+    var code = error && (error.code || error.message) ? String(error.code || error.message) : '';
+    return code === 'STALE_SESSION' || code === 'session_rebound' || code === 'ws_closed' || code === 'timeout' || code === 'ws_unavailable';
+  }
+
+  function leaveAndReturnToLobby(destination){
+    if (inactivityExit) return Promise.resolve(null);
+    if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
+    clearHeroGiftDemo();
+    var leaveDestination = destination == null
+      ? (pendingLeaveNavigation ? pendingLeaveDestination : '/poker/')
+      : normalizeLeaveDestination(destination);
+    pendingLeaveDestination = leaveDestination;
+    clearRebuyOperation();
+    pendingLeaveNavigation = true;
+    try {
+      if (queueLeaveAndNavigateImmediately()) return Promise.resolve({ ok: true, queued: true });
+    } catch (_err){}
+    return sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      state.statusText = 'Leave accepted';
+      renderInfoPanel();
+      navigateAfterLeave();
+    }).catch(function(err){
+      if (isRetryableLeaveError(err) && currentAccessToken && !pendingLeaveRetryAfterReconnect){
+        pendingLeaveRetryAfterReconnect = true;
+        state.statusText = LIVE_STATUS_COPY.connecting;
+        renderInfoPanel();
+        restartLiveMode(currentAccessToken);
+        return;
+      }
+      pendingLeaveRetryAfterReconnect = false;
+      pendingLeaveNavigation = false;
+      pendingLeaveDestination = '/poker/';
+      setError(err && err.message ? err.message : 'Failed to leave');
+    });
+  }
+
+  function requestManualRebuy(source){
+    if (inactivityExit) return false;
+    var requestedSource = normalizeRebuySource(source);
+    if (!state.playerState || state.playerState.canRebuy !== true) return Promise.resolve();
+    if (requestedSource === 'auto' && currentTableBuyIn() == null) return Promise.resolve();
+    if (rebuyOperation && rebuyOperation.phase === 'pending') return Promise.resolve({ ok: true, pending: true });
+    if (rebuyOperation && rebuyOperation.phase === 'error'){
+      rebuyOperation.source = requestedSource;
+      rebuyOperation.phase = 'pending';
+      rebuyOperation.resumeAttempted = true;
+      persistPendingRebuy();
+      setError('');
+      renderRebuyPanel();
+      return sendRebuyOperation();
+    }
+    var requestId = buildRebuyRequestId();
+    rebuyOperation = {
+      phase: 'pending',
+      resumeAttempted: true,
+      requestId: requestId,
+      tableId: state.tableId,
+      userId: state.currentUserId,
+      source: requestedSource,
+      payload: { tableId: state.tableId }
+    };
+    rebuyOperation.payload.amount = requestedSource === 'auto'
+      ? currentTableBuyIn()
+      : clientBuyInDeclaration();
+    persistPendingRebuy();
+    setError('');
+    renderRebuyPanel();
+    return sendRebuyOperation();
+  }
+
+  function maybeTriggerAutoRebuy(){
+    var playerState = state.playerState || null;
+    if (!rebuyOperation) rebuyOperation = loadPendingRebuy();
+    if (!isAutoRebuyEnabled()) return;
+    if (!playerState || playerState.status !== 'OUT_OF_CHIPS' || playerState.canRebuy !== true) return;
+    if (currentTableBuyIn() == null) return;
+    if (autoRebuyAttemptedForCurrentBust) return;
+    if (rebuyOperation && (rebuyOperation.phase === 'pending' || rebuyOperation.phase === 'error')) return;
+    autoRebuyAttemptedForCurrentBust = true;
+    // Suppress the manual rebuy prompt before requestManualRebuy() renders it
+    // synchronously. A definitive failure (e.g. insufficient_chips) later
+    // re-opens the panel for manual recovery.
+    rebuyPanelDismissed = true;
+    requestManualRebuy('auto');
+  }
+
+  function bindMenu(){
+    if (!els.menuToggle || !els.menuPanel) return;
+    els.menuToggle.addEventListener('click', function(){
+      var hidden = els.menuPanel.hasAttribute('hidden');
+      if (hidden) {
+        closeSocialSettings(false);
+        closeHandInfoPanel(false);
+        if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
+      }
+      if (hidden) els.menuPanel.removeAttribute('hidden');
+      else els.menuPanel.setAttribute('hidden', 'hidden');
+      els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+    });
+    function bindDestinationLink(link, destination){
+      if (!link) return;
+      link.addEventListener('click', function(event){
+        if (!isSeatedAtLiveTable()){
+          closeMenu();
+          return;
+        }
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        closeMenu();
+        setError('');
+        openLeaveConfirm(destination);
+      });
+    }
+    bindDestinationLink(els.lobbyLink, '/poker/');
+    function toggleSocialSettings(trigger){
+      var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
+      closeMenu();
+      closeHandInfoPanel(false);
+      if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
+      if (els.socialSettingsPanel) els.socialSettingsPanel.hidden = !opening;
+      if (els.menuSettings) els.menuSettings.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      socialSettingsOpener = opening ? (trigger || els.menuSettings) : null;
+      if (opening) positionSocialSettingsPanel(socialSettingsOpener);
+    }
+    if (els.menuSettings) els.menuSettings.addEventListener('click', function(){
+      toggleSocialSettings(els.menuSettings);
+    });
+    if (els.socialSettingsClose) els.socialSettingsClose.addEventListener('click', closeSocialSettings);
+    if (window && typeof window.addEventListener === 'function') {
+      var refreshResponsivePresentation = function(){
+        scheduleLayoutPresentationRefresh();
+        syncJoinVisibility();
+        if (els.socialSettingsPanel && !els.socialSettingsPanel.hidden) positionSocialSettingsPanel();
+        if (els.handInfoPanel && !els.handInfoPanel.hidden) updateHandInfoPanelBounds();
+      };
+      window.addEventListener('resize', refreshResponsivePresentation);
+      window.addEventListener('orientationchange', refreshResponsivePresentation);
+    }
+    document.addEventListener('click', function(event){
+      var target = event && event.target;
+      if (!target) return;
+      if (target === els.menuToggle || target === els.menuPanel) return;
+      if (typeof els.menuToggle.contains === 'function' && els.menuToggle.contains(target)) return;
+      if (typeof els.menuPanel.contains === 'function' && els.menuPanel.contains(target)) return;
+      closeMenu();
+    });
+    document.addEventListener('keydown', function(event){
+      if (event && event.key === 'Escape') {
+        closeMenu();
+        closeSocialSettings(true);
+        if (els.handInfoPanel && !els.handInfoPanel.hidden) closeHandInfoPanel(true);
+        if (autoRebuyConfirmOpen){
+          closeAutoRebuyConfirm(true);
+          renderSocialPreferences();
+        }
+      }
+    });
+  }
+
+  function bindControls(){
+    function bindPreaction(slot){
+      var input = getPreactionInput(slot);
+      if (!input) return;
+      input.addEventListener('change', function(){
+        if (!input.checked){
+          if (queuedPreaction && queuedPreaction.slot === slot) clearQueuedPreaction();
+          renderControls();
+          return;
+        }
+        queuedPreaction = buildQueuedPreaction(slot);
+        if (!queuedPreaction) {
+          input.checked = false;
+          renderControls();
+          return;
+        }
+        ['fold', 'primary', 'amount', 'allIn'].forEach(function(otherSlot){
+          if (otherSlot === slot) return;
+          var otherInput = getPreactionInput(otherSlot);
+          if (otherInput) otherInput.checked = false;
+        });
+        renderControls();
+      });
+    }
+    if (els.menuSignIn) els.menuSignIn.addEventListener('click', function(){
+      closeMenu();
+      openSignIn();
+    });
+    if (els.foldBtn) els.foldBtn.addEventListener('click', function(){
+      handleAction('FOLD');
+    });
+    function handleManualJoinClick(){
+      if (isJoinOperationPending() || joinOperation.phase === 'active') return;
+      if (spectatorJoinIntroActive) {
+        cancelSpectatorJoinIntro(true);
+      }
+      beginJoinOperation(buildJoinPayloadWithOptions({ autoSeat: true }), { source: 'manual' }).catch(function(err){
+        setError(joinErrorMessage(err));
+      });
+    }
+    if (els.joinBtn) els.joinBtn.addEventListener('click', handleManualJoinClick);
+    if (els.spectatorJoinIntroBtn) els.spectatorJoinIntroBtn.addEventListener('click', handleManualJoinClick);
+    if (els.menuLeave) els.menuLeave.addEventListener('click', function(){
+      closeMenu();
+      setError('');
+      openLeaveConfirm('/poker/');
+    });
+    if (els.leaveConfirmYes) els.leaveConfirmYes.addEventListener('click', function(){
+      var destination = leaveConfirmDestination;
+      closeLeaveConfirm();
+      setError('');
+      leaveAndReturnToLobby(destination);
+    });
+    if (els.leaveConfirmCancel) els.leaveConfirmCancel.addEventListener('click', function(){
+      closeLeaveConfirm();
+    });
+    if (els.autoRebuyConfirmYes) els.autoRebuyConfirmYes.addEventListener('click', confirmAutoRebuy);
+    if (els.autoRebuyConfirmCancel) els.autoRebuyConfirmCancel.addEventListener('click', function(){
+      closeAutoRebuyConfirm(true);
+      renderSocialPreferences();
+    });
+    if (els.rebuyBtn) els.rebuyBtn.addEventListener('click', requestManualRebuy);
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', leaveAndReturnToLobby);
+    if (els.rebuyWatchBtn) els.rebuyWatchBtn.addEventListener('click', function(){
+      rebuyPanelDismissed = true;
+      renderRebuyPanel();
+    });
+    if (els.startBtn) els.startBtn.addEventListener('click', function(){
+      setError('');
+      sendCommand('sendStartHand', { tableId: state.tableId }).then(function(){
+        state.statusText = 'Start hand accepted';
+        renderInfoPanel();
+      }).catch(function(err){
+        setError(err && err.message ? err.message : 'Failed to start hand');
+      });
+    });
+    if (els.primaryBtn) els.primaryBtn.addEventListener('click', function(){
+      handleAction(els.primaryBtn.dataset.action || '');
+    });
+    if (els.amountBtn) els.amountBtn.addEventListener('click', function(){
+      var value = els.amountInput ? parseInt(els.amountInput.value, 10) : NaN;
+      handleAction(els.amountBtn.dataset.action || '', Number.isFinite(value) ? value : undefined);
+    });
+    if (els.amountInput) els.amountInput.addEventListener('input', function(){
+      if (els.amountValue) els.amountValue.textContent = formatCompactAmount(parseInt(els.amountInput.value, 10) || 0);
+      syncAmountActionLabels(readQueuedAmount());
+      if (queuedPreaction && queuedPreaction.slot === 'amount'){
+        var queuedAmount = readQueuedAmount();
+        if (Number.isFinite(queuedAmount)) queuedPreaction.amount = queuedAmount;
+      }
+    });
+    if (els.joinSeat) els.joinSeat.addEventListener('input', function(){
+      els.joinSeat.dataset.userEdited = '1';
+    });
+    if (els.allInBtn) els.allInBtn.addEventListener('click', function(){
+      var plan = resolveAllInPlan(getAllowedActions());
+      if (!plan) return;
+      handleAction(plan.type, plan.amount == null ? undefined : plan.amount);
+    });
+    buildReactionMenu();
+    if (els.reactionBtn) els.reactionBtn.addEventListener('click', function(){
+      if (els.reactionBtn.disabled || !els.reactionMenu) return;
+      var hidden = els.reactionMenu.hidden;
+      els.reactionMenu.hidden = !hidden;
+      els.reactionBtn.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+    });
+    if (els.reactionHistoryToggle) els.reactionHistoryToggle.addEventListener('click', function(){
+      reactionHistoryPanelOpen = !reactionHistoryPanelOpen;
+      renderReactionHistory();
+      if (reactionHistoryPanelOpen && els.reactionHistoryList){
+        els.reactionHistoryList.scrollTop = els.reactionHistoryList.scrollHeight;
+      }
+    });
+    if (els.handInfoToggle) els.handInfoToggle.addEventListener('click', toggleHandInfoPanel);
+    if (els.handInfoClose) els.handInfoClose.addEventListener('click', function(){ closeHandInfoPanel(true); });
+    if (els.reactionBubblesPreference) els.reactionBubblesPreference.addEventListener('change', function(){ updateSocialPreference('reactionBubblesEnabled', els.reactionBubblesPreference.checked); });
+    if (els.reactionHistoryPreference) els.reactionHistoryPreference.addEventListener('change', function(){ updateSocialPreference('reactionHistoryEnabled', els.reactionHistoryPreference.checked); });
+    if (els.botReactionsPreference) els.botReactionsPreference.addEventListener('change', function(){ updateSocialPreference('botReactionsEnabled', els.botReactionsPreference.checked); });
+    if (els.autoRebuyPreference) els.autoRebuyPreference.addEventListener('change', function(){
+      if (els.autoRebuyPreference.checked){
+        els.autoRebuyPreference.checked = false;
+        var buyIn = currentTableBuyIn();
+        if (buyIn == null){
+          renderSocialPreferences();
+          return;
+        }
+        openAutoRebuyConfirm(buyIn);
+        renderSocialPreferences();
+        return;
+      }
+      closeAutoRebuyConfirm(false);
+      writeAutoRebuyPref(false);
+      klog('poker_auto_rebuy_pref_changed', { enabled: false });
+      renderSocialPreferences();
+      render();
+    });
+    document.addEventListener('click', function(event){
+      var target = event && event.target;
+      if (!target) return;
+      if (els.handInfoPanel && !els.handInfoPanel.hidden){
+        var inToggle = els.handInfoToggle && typeof els.handInfoToggle.contains === 'function' && els.handInfoToggle.contains(target);
+        var inPanel = els.handInfoPanel && typeof els.handInfoPanel.contains === 'function' && els.handInfoPanel.contains(target);
+        if (target !== els.handInfoToggle && target !== els.handInfoPanel && !inToggle && !inPanel){
+          closeHandInfoPanel(false);
+        }
+      }
+      if (target === els.reactionBtn || target === els.reactionMenu) return;
+      if (els.reactionBtn && typeof els.reactionBtn.contains === 'function' && els.reactionBtn.contains(target)) return;
+      if (els.reactionMenu && typeof els.reactionMenu.contains === 'function' && els.reactionMenu.contains(target)) return;
+      closeReactionMenu();
+    });
+    document.addEventListener('keydown', function(event){
+      if (event && event.key === 'Escape'){
+        if (els.handInfoPanel && !els.handInfoPanel.hidden) closeHandInfoPanel(true);
+        closeReactionMenu();
+      }
+    });
+    bindPreaction('fold');
+    bindPreaction('primary');
+    bindPreaction('amount');
+    bindPreaction('allIn');
+  }
+
+  function selectElements(){
+    els.screen = document.getElementById('pokerTableScreen');
+    if (typeof document.querySelector === 'function') els.scene = document.querySelector('.poker-scene');
+    els.sceneViewport = document.getElementById('pokerSceneViewport');
+    els.diagnostics = document.getElementById('pokerDiagnostics');
+    els.liveTopbar = document.querySelector('.poker-live-topbar');
+    els.topRightRail = document.querySelector('.poker-top-right-rail');
+    els.roomEvent = document.getElementById('pokerRoomEvent');
+    els.roomStatus = document.getElementById('pokerRoomStatus');
+    els.liveNotice = document.getElementById('pokerLiveNotice');
+    if (typeof document.querySelector === 'function') els.centerLayer = document.querySelector('.poker-center-layer');
+    if (!els.scene) els.scene = els.screen;
+    els.accountHud = document.getElementById('pokerAccountHud');
+    els.autoRebuyBalanceToast = document.getElementById('pokerV2AutoRebuyBalanceToast');
+    els.bootSplash = document.getElementById('pokerBootSplash');
+    els.menuToggle = document.getElementById('pokerMenuToggle');
+    els.menuPanel = document.getElementById('pokerMenuPanel');
+    els.lobbyLink = document.getElementById('pokerLobbyLink');
+    els.menuLeave = document.getElementById('pokerMenuLeave');
+    els.menuSettings = document.getElementById('pokerMenuSettings');
+    els.menuSignIn = document.getElementById('pokerMenuSignIn');
+    els.menuGuestInfo = document.getElementById('pokerMenuGuestInfo');
+    bindGiftShop();
+    els.socialSettingsPanel = document.getElementById('pokerSocialSettingsPanel');
+    els.socialSettingsClose = document.getElementById('pokerSocialSettingsClose');
+    els.reactionBubblesPreference = document.getElementById('pokerReactionBubblesPreference');
+    els.reactionHistoryPreference = document.getElementById('pokerReactionHistoryPreference');
+    els.botReactionsPreference = document.getElementById('pokerBotReactionsPreference');
+    els.celebrationsPreference = document.getElementById('pokerCelebrationsPreference');
+    els.celebrationsPreferenceLabel = document.getElementById('pokerCelebrationsPreferenceLabel');
+    els.celebration = document.getElementById('pokerCelebration');
+    els.actionBar = document.getElementById('pokerActionBar');
+    els.autoRebuyPreference = document.getElementById('pokerAutoRebuyPreference');
+    els.autoRebuyPreferenceWrap = document.getElementById('pokerAutoRebuyPreferenceWrap');
+    els.autoRebuyPreferenceLabel = document.querySelector ? document.querySelector('#pokerAutoRebuyPreferenceWrap label span') : null;
+    els.autoRebuyPreferenceHint = document.getElementById('pokerAutoRebuyPreferenceHint');
+    els.seatLayer = document.getElementById('pokerSeatLayer');
+    els.seatNameLayer = document.getElementById('pokerSeatNameLayer');
+    els.seatChipLayer = document.getElementById('pokerSeatChipLayer');
+    els.seatTransientLayer = document.getElementById('pokerSeatTransientLayer');
+    els.chipFxLayer = document.getElementById('pokerChipFxLayer');
+    els.cardFxLayer = document.getElementById('pokerCardFxLayer');
+    els.roomDealer = document.getElementById('pokerRoomDealer');
+    els.reactionLayer = document.getElementById('pokerReactionLayer');
+    els.potPill = document.getElementById('pokerPotPill');
+    els.potChipStack = document.getElementById('pokerPotChipStack');
+    els.communityCards = document.getElementById('pokerCommunityCards');
+    els.dealerChip = document.getElementById('pokerDealerChip');
+    els.heroCards = document.getElementById('pokerHeroCards');
+    els.liveStatus = document.getElementById('pokerV2LiveStatus');
+    els.tableMeta = document.getElementById('pokerV2TableMeta');
+    els.turnText = document.getElementById('pokerV2TurnText');
+    els.stackText = document.getElementById('pokerV2StackText');
+    els.errorText = document.getElementById('pokerV2ErrorText');
+    els.joinBtn = document.getElementById('pokerV2JoinBtn');
+    els.spectatorJoinIntro = document.getElementById('pokerSpectatorJoinIntro');
+    els.spectatorJoinIntroBtn = document.getElementById('pokerSpectatorJoinIntroBtn');
+    els.joinSeat = document.getElementById('pokerV2SeatNo');
+    els.joinBuyIn = document.getElementById('pokerV2BuyIn');
+    els.reactionBtn = document.getElementById('pokerV2ReactionBtn');
+    els.reactionControl = document.getElementById('pokerV2ReactionControl');
+    els.reactionMenu = document.getElementById('pokerV2ReactionMenu');
+    els.reactionHistory = document.getElementById('pokerReactionHistory');
+    els.reactionHistoryToggle = document.getElementById('pokerReactionHistoryToggle');
+    els.reactionHistoryCount = document.getElementById('pokerReactionHistoryCount');
+    els.reactionHistoryPanel = document.getElementById('pokerReactionHistoryPanel');
+    els.reactionHistoryList = document.getElementById('pokerReactionHistoryList');
+    els.handInfoToggle = document.getElementById('pokerHandInfoToggle');
+    els.handInfoPanel = document.getElementById('pokerHandInfoPanel');
+    els.handInfoClose = document.getElementById('pokerHandInfoClose');
+    els.leaveConfirmModal = document.getElementById('pokerV2LeaveConfirmModal');
+    els.leaveConfirmYes = document.getElementById('pokerV2LeaveConfirmYes');
+    els.leaveConfirmCancel = document.getElementById('pokerV2LeaveConfirmCancel');
+    els.autoRebuyConfirmModal = document.getElementById('pokerV2AutoRebuyConfirmModal');
+    els.autoRebuyConfirmCopy = document.getElementById('pokerV2AutoRebuyConfirmCopy');
+    els.autoRebuyConfirmYes = document.getElementById('pokerV2AutoRebuyConfirmYes');
+    els.autoRebuyConfirmCancel = document.getElementById('pokerV2AutoRebuyConfirmCancel');
+    els.rebuyPanel = document.getElementById('pokerV2RebuyPanel');
+    els.rebuyTitle = document.getElementById('pokerV2RebuyTitle');
+    els.rebuyCopy = document.getElementById('pokerV2RebuyCopy');
+    els.rebuyBalance = document.getElementById('pokerV2RebuyBalance');
+    els.rebuyBtn = document.getElementById('pokerV2RebuyBtn');
+    els.rebuyLobbyBtn = document.getElementById('pokerV2RebuyLobbyBtn');
+    els.rebuyWatchBtn = document.getElementById('pokerV2RebuyWatchBtn');
+    els.rebuyAccountLink = document.getElementById('pokerV2RebuyAccountLink');
+    els.closedTableModal = document.getElementById('pokerV2ClosedTableModal');
+    els.closedTableTitle = document.getElementById('pokerV2ClosedTableTitle');
+    els.closedTableCountdown = document.getElementById('pokerV2ClosedTableCountdown');
+    els.startBtn = document.getElementById('pokerV2StartBtn');
+    els.foldBtn = document.getElementById('pokerV2FoldBtn');
+    els.foldPreactionWrap = document.getElementById('pokerV2FoldPreactionWrap');
+    els.foldPreaction = document.getElementById('pokerV2FoldPreaction');
+    els.foldPreactionText = document.getElementById('pokerV2FoldPreactionText');
+    els.primaryBtn = document.getElementById('pokerV2PrimaryBtn');
+    els.primaryPreactionWrap = document.getElementById('pokerV2PrimaryPreactionWrap');
+    els.primaryPreaction = document.getElementById('pokerV2PrimaryPreaction');
+    els.primaryPreactionText = document.getElementById('pokerV2PrimaryPreactionText');
+    els.amountBtn = document.getElementById('pokerV2AmountBtn');
+    els.amountPreactionWrap = document.getElementById('pokerV2AmountPreactionWrap');
+    els.amountPreaction = document.getElementById('pokerV2AmountPreaction');
+    els.amountPreactionText = document.getElementById('pokerV2AmountPreactionText');
+    els.allInBtn = document.getElementById('pokerV2AllInBtn');
+    els.allInPreactionWrap = document.getElementById('pokerV2AllInPreactionWrap');
+    els.allInPreaction = document.getElementById('pokerV2AllInPreaction');
+    els.allInPreactionText = document.getElementById('pokerV2AllInPreactionText');
+    els.amountInput = document.getElementById('pokerV2AmountInput');
+    els.amountValue = document.getElementById('pokerV2AmountValue');
+    els.amountInputWrap = document.getElementById('pokerV2AmountInputWrap');
+  }
+
+  function startDemoMode(){
+    startTurnClock();
+    resetQueuedPreactionState();
+    state = cloneState(demoState);
+    state.wsReady = false;
+    render();
+    markBootReady();
+  }
+
+  function stopSnapshotRecoveryTimer(){
+    if (!snapshotRecoveryTimer) return;
+    window.clearTimeout(snapshotRecoveryTimer);
+    snapshotRecoveryTimer = null;
+  }
+
+  function issueSnapshotRecoveryRequest(gen){
+    if (gen !== liveModeGeneration) return;
+    if (!state.reconnectGate) return;
+    if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function'){
+      wsClient.requestGameplaySnapshot();
+    }
+  }
+
+  function scheduleSnapshotRecovery(gen){
+    stopSnapshotRecoveryTimer();
+    snapshotRecoveryTimer = window.setTimeout(function(){
+      snapshotRecoveryTimer = null;
+      if (gen !== liveModeGeneration) return;
+      if (!state.reconnectGate) return;
+      if (snapshotRecoveryAttempts >= SNAPSHOT_RECOVERY_MAX_ATTEMPTS){
+        snapshotRecoveryTimedOut = true;
+        state.statusText = LIVE_STATUS_COPY.error;
+        setError(SNAPSHOT_RECOVERY_TIMEOUT_COPY);
+        renderInfoPanel();
+        renderControls();
+        return;
+      }
+      snapshotRecoveryAttempts += 1;
+      issueSnapshotRecoveryRequest(gen);
+      scheduleSnapshotRecovery(gen);
+    }, SNAPSHOT_RECOVERY_TIMEOUT_MS);
+  }
+
+  // Shared bounded snapshot recovery for both reconnect (after auth_ok) and
+  // server-initiated resync: the first full snapshot request is sent immediately,
+  // the timer only schedules up to SNAPSHOT_RECOVERY_MAX_ATTEMPTS retries.
+  function startSnapshotRecovery(gen){
+    if (gen !== liveModeGeneration) return;
+    if (!state.reconnectGate) return;
+    snapshotRecoveryAttempts = 0;
+    snapshotRecoveryTimedOut = false;
+    issueSnapshotRecoveryRequest(gen);
+    scheduleSnapshotRecovery(gen);
+  }
+
+  function stopLiveMode(){
+    clearCelebration();
+    resetWinStreakSession();
+    liveModeGeneration += 1;
+    authenticatedPreflightGeneration += 1;
+    stopSnapshotRecoveryTimer();
+    stopTurnClock();
+    clearReactionControlTimer();
+    reactionControlUntilMs = 0;
+    clearReactionBubbles();
+    clearWinnerRevealTimer();
+    cancelSettlementAnimations();
+    clearCardFx(true);
+    cancelClosedTableRedirect();
+    resetAutoJoinRetryState();
+    autoJoinAttempted = false;
+    pendingPostRevealSnapshots = [];
+    state.wsReady = false;
+    if (wsClient && typeof wsClient.destroy === 'function'){
+      try { wsClient.destroy(); } catch (_err){}
+    }
+    wsClient = null;
+  }
+
+  function resetInactivityExitForIdentity(){
+    if (!inactivityExit) return;
+    inactivityExit = null;
+    // Clear the old identity's sticky countdown before technical teardown.
+    cancelClosedTableRedirect();
+    shouldAutoJoin = readAutoJoinParam();
+    reconnectSeatNo = null;
+    lastKnownCurrentSeatNo = null;
+  }
+
+  function applySignedOutState(){
+    resetInactivityExitForIdentity();
+    lastKnownCurrentSeatNo = null;
+    heroLifecycleTransition = 'signed_out';
+    syncSocialPreferencesIdentity(null);
+    clearRebuyOperation();
+    hideAutoRebuyFeedback();
+    clearReactionHistory();
+    stopLiveMode();
+    resetQueuedPreactionState();
+    state = createEmptyLiveState(tableId, null);
+    state.statusText = LIVE_STATUS_COPY.auth;
+    markBootReady();
+    render();
+  }
+
+  function applyAuthenticatedPendingState(user, options){
+    if (!user || String(user.id || '') !== String(state.currentUserId || '')) resetInactivityExitForIdentity();
+    heroLifecycleTransition = user && String(user.id || '') === state.currentUserId ? 'auth_pending_same_user' : 'auth_pending_identity';
+    var preservingState = !!(user && state.mode === 'live' && state.hasAppliedAuthoritativeSnapshot
+      && String(user.id || '') === state.currentUserId && state.tableId === tableId);
+    if (!user || !state.currentUserId || String(user.id || '') !== String(state.currentUserId)) clearRebuyOperation();
+    syncReactionHistoryContext(tableId, user && user.id ? String(user.id) : null);
+    syncSocialPreferencesIdentity(user && user.id ? String(user.id) : null);
+    stopLiveMode();
+    resetQueuedPreactionState();
+    isGuestMode = false;
+    currentGuestSession = null;
+    if (!preservingState){
+      lastKnownCurrentSeatNo = null;
+      state = createEmptyLiveState(tableId, user && user.id ? String(user.id) : null);
+    } else state.reconnectGate = true;
+    state.statusText = LIVE_STATUS_COPY.connecting;
+    render();
+    if (!(options && options.keepBootSplash === true)) markBootReady();
+  }
+
+  function restartLiveMode(token){
+    if (!tableId || !token) return;
+    currentAccessToken = token;
+    startLiveMode(token);
+  }
+
+  function restartAuthenticatedLiveMode(token){
+    if (!tableId || !token){
+      currentAccessToken = null;
+      stopLiveMode();
+      return;
+    }
+    var nextUserId = getUserIdFromToken(token);
+    var previousUserId = state && state.currentUserId ? String(state.currentUserId) : getUserIdFromToken(currentAccessToken);
+    var userChanged = !!(nextUserId && previousUserId && nextUserId !== previousUserId);
+    syncSocialPreferencesIdentity(nextUserId);
+    if (userChanged) { resetInactivityExitForIdentity(); clearRebuyOperation(); }
+    isGuestMode = false;
+    currentGuestSession = null;
+    clearGuestSession();
+    var preservingState = !userChanged && !!(state && state.mode === 'live'
+      && state.hasAppliedAuthoritativeSnapshot
+      && state.tableId && state.tableId === tableId);
+    if (preservingState && rebuyOperation && rebuyOperation.phase === 'pending'){
+      rebuyOperation.preserveOnTechnicalRestart = true;
+      rebuyOperation.resumeAttempted = false;
+      persistPendingRebuy();
+    }
+    currentAccessToken = null;
+    stopLiveMode();
+    if (userChanged){
+      state = createEmptyLiveState(tableId, nextUserId);
+      state.statusText = LIVE_STATUS_COPY.connecting;
+      render();
+    }
+    var preflightGeneration = authenticatedPreflightGeneration;
+    preflightAuthenticatedLiveMode(token, preflightGeneration);
+  }
+
+  function startLiveMode(token){
+    if (!window.PokerWsClient || typeof window.PokerWsClient.create !== 'function'){
+      state.statusText = LIVE_STATUS_COPY.error;
+      setError('Poker WS client is unavailable');
+      render();
+      return;
+    }
+    syncReactionHistoryContext(tableId, getUserIdFromToken(token) || state.currentUserId || null);
+    // 1. Stop/invalidate the old client first (stopLiveMode increments the
+    //    generation, so any late callback from the previous instance is stale).
+    var preservingState = !!(state && state.mode === 'live'
+      && state.hasAppliedAuthoritativeSnapshot
+      && state.tableId && state.tableId === tableId);
+    if (preservingState && rebuyOperation && rebuyOperation.phase === 'pending'){
+      rebuyOperation.preserveOnTechnicalRestart = true;
+      rebuyOperation.resumeAttempted = false;
+      persistPendingRebuy();
+    }
+    stopLiveMode();
+    startTurnClock();
+    // 2. THEN capture the new generation (old = N, stop => N+1 stale, this => N+2 active).
+    var gen = ++liveModeGeneration;
+    if (preservingState){
+      // Reconnect: keep the last applied authoritative state and raise a recovery gate.
+      state.wsReady = false;
+      state.statusText = LIVE_STATUS_COPY.connecting;
+      state.errorText = '';
+      state.reconnectGate = true;
+      renderInfoPanel();
+      renderControls();
+    } else {
+      // Cold start: a fresh empty model is fine.
+      state = createEmptyLiveState(tableId, getUserIdFromToken(token));
+      state.reconnectGate = false;
+      render();
+    }
+    markBootReady();
+    var processSnapshotFrame = function(snapshot, deferredFrame){
+      if (gen !== liveModeGeneration) return;
+      var payload = snapshot && snapshot.payload ? snapshot.payload : null;
+      var frame = {
+        kind: snapshot && typeof snapshot.kind === 'string' ? snapshot.kind : 'stateSnapshot',
+        initial: !!(snapshot && snapshot.initial),
+        suppressSettlementAnimation: deferredFrame
+          ? deferredFrame.suppressSettlementAnimation === true
+          : suppressSettlementAnimationUntilAuthoritativeSnapshot,
+        payload: payload
+      };
+      // Capture eligibility before this frame opens recovery/initial gates.
+      frame.cardFxEligible = !frame.initial && !frame.suppressSettlementAnimation
+        && state.hasAppliedAuthoritativeSnapshot && !state.reconnectGate && state.wsReady;
+      var authoritativeSnapshot = frame.kind === 'stateSnapshot' || (frame.kind === 'table_state' && frame.initial);
+      // Snapshot acceptance contract: current tableId, no version regression.
+      if (payload && payload.tableId && state.tableId && payload.tableId !== state.tableId){
+        clearCelebration();
+        resetWinStreakSession();
+        return;
+      }
+      var incomingVersion = Number(payload && payload.stateVersion) || 0;
+      var appliedVersion = Number(state.stateVersion) || 0;
+      if (incomingVersion > 0 && appliedVersion > 0 && incomingVersion < appliedVersion){
+        resetWinStreakSession();
+        return;
+      }
+      if (snapshot && (snapshot.initial || (deferredFrame
+        ? deferredFrame.suppressSettlementAnimation === true
+        : suppressSettlementAnimationUntilAuthoritativeSnapshot))) resetWinStreakSession();
+      observeCelebrationSnapshot(payload, frame);
+      if (shouldDeferSnapshotUntilRevealEnds(payload)){
+        pendingPostRevealSnapshots.push(frame);
+        scheduleRevealDismiss(processSnapshotFrame);
+        return;
+      }
+      var previousVisual = captureVisualSnapshot();
+      var previousAccountSeat = deriveCurrentSeat();
+      var previousAccountStack = previousAccountSeat ? resolveStack(state.currentUserId) : null;
+      mergeSnapshot(payload, frame);
+      if (authoritativeSnapshot) suppressSettlementAnimationUntilAuthoritativeSnapshot = false;
+      reconcileRebuyOperationFromSnapshot(authoritativeSnapshot);
+      if (authoritativeSnapshot) state.hasAppliedAuthoritativeSnapshot = true;
+      // Open the reconnect gate only after a full authoritative snapshot is merged.
+      var openedRecoveryGate = false;
+      if (authoritativeSnapshot && state.reconnectGate){
+        state.reconnectGate = false;
+        stopSnapshotRecoveryTimer();
+        openedRecoveryGate = true;
+        if (snapshotRecoveryTimedOut){
+          // A late snapshot arrived after the bounded retries exhausted. Clear the
+          // recovery status/error ONLY if the current error is still the recovery
+          // timeout — a newer unrelated error (failed/error status, rejected async
+          // op) must not be wiped by a stale timeout flag.
+          var clearingRecoveryTimeout = state.errorText === SNAPSHOT_RECOVERY_TIMEOUT_COPY;
+          snapshotRecoveryTimedOut = false;
+          if (clearingRecoveryTimeout){
+            state.statusText = LIVE_STATUS_COPY.live;
+            state.errorText = '';
+          }
+        }
+        if (pendingLeaveRetryAfterReconnect){
+          leaveAndReturnToLobby();
+          return;
+        }
+        if (!resumePendingJoinOperation() && !rejoinSeatAfterReconnect()) autoJoinSeat();
+      }
+      // reconcileJoinOperationFromSnapshot() resets joinOperation.requestId; do not
+      // run it right after the recovery gate already started a deferred join/rejoin.
+      if (!openedRecoveryGate) reconcileJoinOperationFromSnapshot(authoritativeSnapshot);
+      maybeExecuteQueuedPreaction();
+      render();
+      var currentAccountSeat = deriveCurrentSeat();
+      var currentAccountStack = currentAccountSeat ? resolveStack(state.currentUserId) : null;
+      if ((previousAccountSeat && previousAccountSeat.seatNo) !== (currentAccountSeat && currentAccountSeat.seatNo)
+        || previousAccountStack !== currentAccountStack) refreshAccountHud();
+      var nextVisual = captureVisualSnapshot();
+      animateChipDiff(previousVisual, nextVisual, frame);
+      animateCardDiff(previousVisual, nextVisual, frame);
+      autoJoinSeat();
+    };
+    wsClient = window.PokerWsClient.create({
+      tableId: tableId,
+      guestToken: isGuestMode && currentGuestSession ? currentGuestSession.token : null,
+      getAccessToken: function(){ return Promise.resolve(currentAccessToken); },
+      klog: klog,
+      onGift: function(event){ if (gen === liveModeGeneration) handleTableGift(event); },
+      onGiftState: function(payload){ if (gen === liveModeGeneration) applyTableGiftState(payload); },
+      onReaction: function(event){
+        if (gen !== liveModeGeneration) return;
+        handleTableReaction(event);
+      },
+      onAccess: function(access){
+        if (gen !== liveModeGeneration || !access || !access.payload) return;
+        state.pokerAccess = access.payload;
+      },
+      onStatus: function(status, info){
+        if (gen !== liveModeGeneration) return;
+        if (['hello_ack', 'minting_token', 'authenticating', 'reconnecting', 'resync', 'failed', 'error', 'closed'].indexOf(status) !== -1){
+          clearCelebration();
+          clearHeroGiftDemo();
+          resetWinStreakSession();
+          if (els.celebrationPreview) els.celebrationPreview.hidden = !isThemePreviewBuild();
+        }
+        heroLifecycleTransition = status;
+        if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
+          state.wsReady = false;
+          state.statusText = LIVE_STATUS_COPY.connecting;
+          renderInfoPanel();
+          renderControls();
+        } else if (status === 'auth_ok'){
+          // Socket is authenticated, but the table is NOT ready until a full
+          // authoritative snapshot is applied. Do not open the recovery gate here.
+          state.wsReady = true;
+          state.statusText = LIVE_STATUS_COPY.live;
+          state.errorText = '';
+          render();
+          if (pendingLeaveRetryAfterReconnect){
+            if (!state.reconnectGate) leaveAndReturnToLobby();
+            return;
+          }
+          if (isGuestMode){
+            // Missing guest runtimes have no subscription snapshot. Join must
+            // resolve create/resume before the snapshot recovery gate can open.
+            if (!resumePendingJoinOperation()) autoJoinSeat();
+            if (state.reconnectGate) startSnapshotRecovery(gen);
+            return;
+          }
+          if (state.reconnectGate){
+            startSnapshotRecovery(gen);
+            return;
+          }
+          if (!resumePendingJoinOperation() && !rejoinSeatAfterReconnect()) autoJoinSeat();
+        } else if (status === 'join_pending'){
+          if (joinOperation.requestId && info && info.requestId === joinOperation.requestId) {
+            setJoinOperationPhase('checking');
+          }
+        } else if (status === 'reconnecting'){
+          cancelSettlementAnimations();
+          clearCardFx();
+          suppressSettlementAnimationUntilAuthoritativeSnapshot = true;
+          clearReactionBubbles();
+          rememberSeatForReconnect();
+          state.wsReady = false;
+          state.statusText = LIVE_STATUS_COPY.connecting;
+          state.reconnectGate = true;
+          renderInfoPanel();
+          renderControls();
+        } else if (status === 'command_result') {
+          syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
+        } else if (status === 'resync'){
+          cancelSettlementAnimations();
+          clearCardFx();
+          suppressSettlementAnimationUntilAuthoritativeSnapshot = true;
+          state.reconnectGate = true;
+          renderInfoPanel();
+          renderControls();
+          startSnapshotRecovery(gen);
+        } else if (status === 'failed'){
+          stopSnapshotRecoveryTimer();
+          cancelSettlementAnimations();
+          clearCardFx();
+          state.wsReady = false;
+          state.statusText = LIVE_STATUS_COPY.error;
+          setError(info && info.code ? info.code : 'Live connection failed');
+        } else if (status === 'error'){
+          stopSnapshotRecoveryTimer();
+          cancelSettlementAnimations();
+          clearCardFx();
+          state.wsReady = false;
+          state.statusText = LIVE_STATUS_COPY.error;
+          syncClosedTableRedirectFromSignal(info && info.code ? info.code : null);
+          setError(info && info.code ? info.code : 'Live table unavailable');
+        } else if (status === 'closed'){
+          stopSnapshotRecoveryTimer();
+          cancelSettlementAnimations();
+          clearCardFx();
+          state.wsReady = false;
+          state.statusText = LIVE_STATUS_COPY.disconnected;
+          renderInfoPanel();
+          renderControls();
+        }
+      },
+      onSnapshot: processSnapshotFrame,
+      onProtocolError: function(info){
+        if (gen !== liveModeGeneration) return;
+        clearCardFx();
+        clearCelebration();
+        resetWinStreakSession();
+        state.wsReady = false;
+        state.statusText = LIVE_STATUS_COPY.error;
+        if (info && info.code === 'missing_access_token'){
+          applySignedOutState();
+          return;
+        }
+        if (info && info.code === 'STALE_SESSION' && currentAccessToken && pendingLeaveRetryAfterReconnect){
+          restartLiveMode(currentAccessToken);
+          return;
+        }
+        syncClosedTableRedirectFromSignal(info && info.code ? info.code : null);
+        setError(info && info.code ? info.code : 'Protocol error');
+      }
+    });
+    wsClient.start();
+  }
+
+  function startAuthWatch(){
+    if (authWatchTimer || !tableId) return;
+    authWatchTimer = window.setInterval(function(){
+      getAccessToken().then(function(token){
+        if (!token || token === currentAccessToken) return;
+        restartAuthenticatedLiveMode(token);
+      }).catch(function(){});
+    }, 3000);
+  }
+
+  function stopAuthWatch(){
+    if (!authWatchTimer) return;
+    window.clearInterval(authWatchTimer);
+    authWatchTimer = null;
+  }
+
+  function startTurnClock(){
+    if (turnClockTimer) return;
+    turnClockTimer = window.setInterval(function(){
+      if (!state.turnUserId || !state.turnDeadlineAt) return;
+      refreshSeatTurnClock();
+    }, 200);
+  }
+
+  function stopTurnClock(){
+    if (!turnClockTimer) return;
+    window.clearInterval(turnClockTimer);
+    turnClockTimer = null;
+  }
+
+  function bindAuthLifecycle(){
+    var authApi = getAuthApi();
+    if (!authApi || typeof authApi.onAuthChange !== 'function') return;
+    authUnsubscribe = authApi.onAuthChange(function(_event, user, session){
+      heroLifecycleTransition = _event || 'auth_change';
+      var lifecycleGeneration = ++authLifecycleGeneration;
+      var tokenPromise = typeof session === 'undefined'
+        ? getAccessToken()
+        : Promise.resolve(getAuthSessionToken(session));
+      tokenPromise.then(function(token){
+        if (lifecycleGeneration !== authLifecycleGeneration) return;
+        if (user && !token){
+          currentAccessToken = null;
+          applyAuthenticatedPendingState(user);
+          startAuthWatch();
+          return;
+        }
+        if (!user || !token){
+          currentAccessToken = null;
+          applySignedOutState();
+          startAuthWatch();
+          return;
+        }
+        stopAuthWatch();
+        if (isGuestMode || token !== currentAccessToken || !isWsReady()) restartAuthenticatedLiveMode(token);
+      }).catch(function(){
+        if (lifecycleGeneration !== authLifecycleGeneration) return;
+        currentAccessToken = null;
+        applySignedOutState();
+        startAuthWatch();
+      });
+    });
+  }
+
+  function applyInitialIdentity(identity, guestSessionCandidate){
+    if (identity.token){
+      stopAuthWatch();
+      applyAuthenticatedPendingState(identity.user || { id: getUserIdFromToken(identity.token) }, { keepBootSplash: true });
+      restartAuthenticatedLiveMode(identity.token);
+      return;
+    }
+    if (identity.user){
+      currentAccessToken = null;
+      applyAuthenticatedPendingState(identity.user);
+      startAuthWatch();
+      return;
+    }
+    currentGuestSession = guestSessionCandidate;
+    isGuestMode = !!(currentGuestSession && currentGuestSession.token);
+    if (isGuestMode){
+      currentAccessToken = null;
+      syncSocialPreferencesIdentity(null);
+      startLiveMode(currentGuestSession.token);
+      startAuthWatch();
+      return;
+    }
+    if (readGuestMode()){
+      applySignedOutState();
+      setError('Guest session expired. Start again from the lobby.');
+      return;
+    }
+    currentAccessToken = null;
+    applySignedOutState();
+    startAuthWatch();
+  }
+
+  function init(){
+    selectElements();
+    tableId = window.PokerOfflinePoc.tableId;
+    state = createEmptyLiveState(tableId, window.PokerOfflinePoc.human);
+    state.wsReady = true; state.reconnectGate = false;
+    applyTableTheme(resolveTableThemeId(tableId));
+    bindControls();
+    if (els.sceneViewport && window.ResizeObserver) new ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
+    window.addEventListener('resize', scheduleLayoutPresentationRefresh);
+    markBootReady();
+    window.PokerOfflinePoc.start(function(payload){
+      mergeSnapshot(payload, {kind:'stateSnapshot', initial:false});
+      state.hasAppliedAuthoritativeSnapshot = true;
+      state.statusText = 'OFFLINE PoC · Practice Chips · one hand';
+      render();
+      [els.menuToggle, els.reactionBtn, els.accountHud, els.rebuyPanel, els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
+    }).catch(function(error){ setError(error.message); render(); });
+  }
+
+  window.__PokerV2 = {
+    _mergeSnapshot: mergeSnapshot,
+    _resolveAllInPlan: resolveAllInPlan
+  };
+
+  if (window.__RUNNING_POKER_UI_TESTS__ === true){
+    window.__POKER_V2_TEST_HOOKS__ = {
+      allocatePotRecipients: allocatePotRecipients,
+      classifySettlementPot: classifySettlementPot,
+      buildSettlementPresentation: buildSettlementPresentation,
+      selectCelebrationForSettlement: selectCelebrationForSettlement,
+      resolveCelebrationRoyalCards: resolveCelebrationRoyalCards,
+      resolveCelebrationHand: resolveCelebrationHand,
+      celebrationDuration: celebrationDuration,
+      celebrationExitDuration: celebrationExitDuration,
+      newWinStreakCursor: newWinStreakCursor,
+      recordWinStreakSettlement: recordWinStreakSettlement,
+      resetWinStreakCursor: resetWinStreakCursor,
+      claimCelebrationTransition: claimCelebrationTransition
+    };
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+})();
