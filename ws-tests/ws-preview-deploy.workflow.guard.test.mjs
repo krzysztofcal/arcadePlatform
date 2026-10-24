@@ -278,10 +278,10 @@ test("V3 generated context gate rejects foreign Stage/version and checks both ar
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),"preview-context-"));
   try {
     const file=path.join(dir,"context.mjs");
-    for(const values of [ ["deploy-preview","3","stage"], ["production","3","stage"], ["deploy-preview","2","stage"], ["deploy-preview","3","prod"], ["unknown",null,null] ]) {
-      fs.writeFileSync(file,["BUILD_DEPLOY_CONTEXT","BUILD_XP_REDIS_VERSION","BUILD_XP_REDIS_ENV"].map((key,i)=>`export const ${key}=${JSON.stringify(values[i])};`).join("\n"));
+    for(const values of [ ["deploy-preview","3","stage","ws-preview",null], ["production","3","stage","ws-preview",null], ["deploy-preview","2","stage","ws-preview",null], ["deploy-preview","3","prod","ws-preview",null], ["unknown",null,null,null,null], ["deploy-preview","3","stage","netlify-functions",null], ["deploy-preview","3","stage","ws-preview","https://preview.invalid"] ]) {
+      fs.writeFileSync(file,["BUILD_DEPLOY_CONTEXT","BUILD_XP_REDIS_VERSION","BUILD_XP_REDIS_ENV","BUILD_ARTIFACT_IDENTITY","BUILD_DEPLOY_ORIGIN"].map((key,i)=>`export const ${key}=${JSON.stringify(values[i])};`).join("\n"));
       const result=spawnSync(process.execPath,["--input-type=module","-e",match[1],file]);
-      assert.equal(result.status,values.join()==="deploy-preview,3,stage"?0:1);
+      assert.equal(result.status,values.join()==="deploy-preview,3,stage,ws-preview,"?0:1);
     }
     assert.equal((workflow.match(/verify_deploy_context "\$/g)||[]).length,4);
     assert.ok(workflow.indexOf('# END REDIS DEPLOY GATE')<workflow.indexOf('rsync -a --no-owner'));
