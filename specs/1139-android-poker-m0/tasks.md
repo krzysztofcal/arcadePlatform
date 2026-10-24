@@ -7,13 +7,13 @@
 - [x] T005 Add hosted-only android-poc.yml resource/SHA checks, pinned toolchain, debug build and short-lived artifact receipt.
 - [x] T006 Run sequential lightweight security/auth/WS/CSP/syntax checks, package inspection and self-review; check VPS disk.
 - [x] T007 Push feature branch, create Draft PR, obtain exact-SHA hosted APK or record evidenced blocker. No merge/deployment.
-- [ ] T008 Phone installation and authorized Stage smoke; report NOT TESTED and pending Stage CORS/OAuth GO. No funded smoke without GO.
+- [x] T008 Owner phone installation/Stage smoke accepted on final857159ca APK, including prior Auth/avatar/Poker evidence. Physical gesture/resume/IME and full financial regression remain explicitly NOT TESTED; no new funded agent smoke.
 
 ## Runtime gates
 
-T008 remains pending: no physical phone attached; mobile-origin Stage preflight is HTTP 403. Separate Stage CORS/OAuth GO and funded gameplay GO required. No environment change was applied. Netlify Preview build currently fails (exit 2); root-cause logs unavailable via connected read API/CLI (404), so web Preview runtime remains unverified.
+Current gate: owner accepted857159ca physical fullscreen/visual fit and earlier integration/gameplay. No current API1095/CORS/Auth blocker. One actual final-review P1 remains: WS Preview build context rejected by Redis token selector (final-review.md). Other manual lifecycle scenarios remain unverified, not falsely marked PASS.
 
-Final APK: source `0407e886fb3c4f056cd7af529b373fd31ba8bad3`, successful run [39979500333](https://github.com/krzysztofcal/arcadePlatform/actions/runs/39979500333), artifact [12512069127](https://github.com/krzysztofcal/arcadePlatform/actions/runs/39979500333/artifacts/12512069127). Device/Stage integration remains uncompleted T008.
+Historical initial artifact0407e886 and initial Stage/phone blockers were superseded by later approved GO/deploys and owner tests recorded below; they are not current gates.
 
 ## PR review follow-up
 
@@ -30,7 +30,7 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] D002 Mobile presentation only: built-in SystemBars native insets plus generated viewport-fit=auto; filter bottom navigation to Poker/Profile; diagnostics in normal flow/table menu. Existing web viewport/styles/menus unchanged.
 - [x] D003 Existing fundamental/syntax/CSP checks, hosted-only APK artifact and review; physical retest remains pending. No backend/environment action.
 
-- [ ] D004 Owner visual retest of `006cef6e0b0399d81cc128b5fd1b869f0cd6786e` on S24+; record OS/WebView versions. No funded/backend smoke. [Device evidence and APK](device-smoke-s24.md).
+- [x] D004 Superseded by owner acceptance of newer exact857159ca APK. No physical PASS is claimed retroactively for006cef6e; previous device logs identify Android16/WebView156, current owner did not repeat version metadata. [Device evidence and APK](device-smoke-s24.md).
 
 ## Owner GO — shared Stage Deploy Preview secret adapter
 
@@ -64,3 +64,12 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] F002 Implement table-only immersive lifecycle and fullwindow/safe-content inset ownership; preserve non-table bounds/shared web.
 - [x] F003 Short M1 Verified App Links proposal only; retain working OAuth/Supabase.
 - [x] F004 Fundamental regressions/syntax/CSP, hosted exact-SHA APK/receipt/checksum, breaking-impact review and owner retest handoff.
+
+## Final owner acceptance and independent review
+
+- [x] V001 Record exact857159ca physical fullscreen PASS and visual controls/scaling PASS; freeze accepted appearance, preserve untested distinctions.
+- [x] V002 Independent full diff review against current main; read-only CI/Stage/API/WS boundary and APK provenance checks.
+- [x] V003 Report one real M0 P1/NO-GO: next WS Preview startup rejects deploy-preview/null-origin metadata in store selector; do not silently expand scope/deploy or claim all compatibility PASS.
+- [ ] V004 Follow-up actual-context Redis selector correction + fundamental preservation test; not implemented in review-only task. Preserve Netlify fail-closed behavior, Production/WS contract and namespace/epoch guards.
+
+Manual handoff remains limited to approved transient bars, background/resume and IME scenarios; stable signer/App Links remain M1. No new financial smoke requirement.

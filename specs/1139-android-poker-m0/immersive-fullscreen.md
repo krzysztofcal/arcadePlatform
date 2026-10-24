@@ -38,3 +38,19 @@ Existing fundamental regressions76/76 PASS, focused final lifecycle/PKCE3/3 PASS
 Physical fullscreen/rotation/IME/gesture result NOT TESTED; owner checklist above applies. APK v2 signer differs from prior deliveredfe4220ed (new certd2d855ed7040a88463d33e7eb1254ccabec230967f38a7cf875e47030b7cb11a): existing ephemeral-debug signing limitation persists. adb install -r cannot upgrade across different signers; owner may choose manual Stage-app reinstall, losing local session/cache, then re-login (server account unaffected). No signing infrastructure change. New owner PASS for Google/native session and avatar upload/finalize recorded; no Auth/DB/Storage/WS/Redis/Production setting or financial operation changed by this task. VPS6.5GB before/after, no SDK/install/checkout/cleanup. A following evidence-only commit does not change APK payload source.
 
 M1 official references: https://developer.android.com/training/app-links/configure-assetlinks and https://developer.android.com/training/app-links/verify-applinks . No M1 domain/signature/redirect configuration applied.
+
+## Owner-confirmed final physical acceptance — 2026-10-24
+
+Exact installed APK/source857159ca8157166e46929726eda45309842973cb, Samsung Galaxy S24+.
+
+| Scenario | Evidence/result |
+| --- | --- |
+| Landscape immersive, no visible system bars or black margins | Owner-confirmed physical PASS |
+| Portrait fullscreen | Owner-confirmed physical PASS |
+| Table/background/dealer/cards/player seats in both orientations | Owner-confirmed visual PASS |
+| Fold/Call/Raise/All-in and slider within visible screen | Owner-confirmed visual PASS, not a complete financial-action test |
+| Password login, Google OAuth return with active APK session, avatar upload/finalization, Poker gameplay | Previous owner-confirmed physical PASS retained |
+| Swipe transient bars/auto-hide; background/resume; keyboard open/close/rotation | Physically NOT TESTED / not confirmed by this report |
+| Full financial-operation regression | NOT TESTED; not added to approved M0 scope |
+
+Owner accepts appearance. Do not alter styling/fullscreen without concrete defect. Latest owner did not re-supply OS/WebView versions; earlier request logs identify Android16/WebView156. No extra agent gameplay, upload or financial operation. Existing certificate/App Links limitations deferred to M1. Final independent source review finds a separate future WS Preview startup regression; device PASS remains valid, but does not verify future server deployment compatibility. [Final review/NO-GO](final-review.md).

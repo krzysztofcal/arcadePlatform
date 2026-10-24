@@ -2,6 +2,13 @@
 
 **Issue:** #1139; parent #1138; release work deferred to #1140. Approved scope: owner request 2026-10-23.
 
+
+## Current owner acceptance and final review — 2026-10-24
+
+Owner-confirmed physical APK857159ca8157166e46929726eda45309842973cb on Samsung Galaxy S24+: immersive fullscreen landscape without system bars/black margins PASS; portrait fullscreen PASS. Visual table/background/dealer/cards/player seats fit both orientations PASS; Fold/Call/Raise/All-in/slider visible and fit PASS (visual, not full financial-operation regression). Previous owner-confirmed password login, Google→APK active session, avatar upload/finalization and working Poker retained as physical PASS. Appearance accepted and frozen; no further aesthetic/fullscreen changes absent a concrete defect.
+
+Still NOT TESTED physically: transient bars swipe/auto-hide, background/resume, IME open/close/rotate. Full financial regression remains unverified and is not added as new M0 scope. Stable signing and Verified App Links are M1 only. Final independent review identifies one real M0 compatibility blocker: Redis selector rejects actual WS Preview generated context deploy-preview/null origin; see final-review.md. Recommendation NO-GO until that regression is corrected, irrespective of green CI. Earlier pending/failed integration notes below are historical and superseded by later GO/owner evidence.
+
 ## User stories and acceptance
 1. As an Android tester I install a debug APK built from an exact SHA on GitHub-hosted ubuntu-24.04, launch locally bundled Poker Lobby, open the existing table and existing account page. Other Arcade games and navigation are absent.
 2. As an existing web user I retain existing UI, relative APIs and OAuth behavior. Mobile reuses poker/index.html, poker/table-v2.html, account.html and their controllers; generated output is disposable, never a second editable UI.
