@@ -2,7 +2,9 @@
 
 ## Correction status
 
-Owner-approved correction edf9fb3a86b73da2e5b921dce4053280c50f0902 resolves the original P1 with immutable artifact identity. Actual WS workflow-generated context imports real WS dependencies offline; Netlify fail-closed/Production preservation cases and required CI/WS PR Checks PASS. See [correction evidence](p1-artifact-identity-fix.md). No live WS deployment, appearance change or merge performed. Remaining previously recorded physical lifecycle coverage stays NOT TESTED.
+Owner-approved correction edf9fb3a86b73da2e5b921dce4053280c50f0902 resolves the original P1 with immutable artifact identity. WS Preview Deploy [40103841583](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40103841583) succeeded using main dcca1232951c20780a4fd18269ed0fae6da6fe3a and exact application EDF SHA. Installed release and both metadata copies match ws-preview/deploy-preview/null origin/Redis3 stage. Real module import without network, live Redis preflight, local/public healthz and Stage user mint → helloAck → authOk PASS; socket closed and Auth logout204. No JOIN/financial actions. Owner accepts closure of P1.
+
+Owner confirms physical Galaxy S24+ APK857159ca8157166e46929726eda45309842973cb: system gestures/bars, background/resume (Poker continues), keyboard opening including Profile PASS. Previous fullscreen, visual controls/scene, password/Google native return, avatar and gameplay PASS retained. No inferred full financial regression or broader IME-rotation matrix. Appearance frozen; signing/App Links M1.
 
 ## Original review recommendation: NO-GO, one real M0 blocker
 
@@ -41,3 +43,13 @@ Docs-only final evidence commits do not change app/source payload; their automat
 ## Owner-approved correction follow-up
 
 The P1 is addressed in the subsequent [artifact identity correction](p1-artifact-identity-fix.md): explicit immutable identity distinguishes WS Preview from Netlify instead of missing-origin inference; local offline import and fundamental preservation tests pass. Original finding above is retained as audit evidence. Required post-push CI status determines correction handoff; no live WS deployment or merge is authorized.
+
+## Final merge preparation and operational gate
+
+Integrate main dcca1232951c20780a4fd18269ed0fae6da6fe3a under strict up-to-date. Its prospective merged tree equals prior PR HEAD260f3c54432549d070e2b5c42e6f38b97f3a57ec; only this evidence update changes files. Mobile/shared UI source equals accepted APK857159ca; runtime/deployable source equals deployed WS EDF, with only documentation changed afterward. Historical NOT TESTED/NO-GO entries above describe earlier stages and are superseded by current explicit evidence, not retroactive device claims.
+
+Actual diff classification against main: all validation domains true, deploy_ws=true, triggered by netlify/functions/_generated/deploy-context.mjs. An ordinary main push would allow WS Production deploy/restart. Future squash must use [skip netlify] [skip actions] only in the resulting commit message, never the PR title/head used for required checks. GitHub documents skip-actions suppression for push/pull_request; repository has no workflow_run/pull_request_target bypass. Netlify documents commit-message skip for Production. Required actionlint/Netlify Preview and all CI/WS checks must first pass for the updated SHA; normal protection/review remains binding, no bypass. Stop if main moves, checks fail, or exact commit message cannot be guaranteed. Separate final owner GO required before Ready/merge; keep Draft now.
+
+Markers suppress only that merge push. A later ordinary Netlify deploy includes shared web/Functions changes; a later qualifying WS deploy includes shared Redis helper/generated identity. Web retains existing routes/Auth/API behavior without mobile configuration, Production retains legacy Redis token and V3 guards; no schema/protocol/engine changes. Stage Netlify Previews intentionally fail closed without approved Stage tuple/origin/alias. Full Production runtime/financial regression not performed or introduced as a new M0 requirement.
+
+Production baseline: WS PID147840/start2026-10-23T10:13:58Z/release41bb6185d38201e727cb9953a98b22e9a2711edc; Netlify play published6adb42a0bd227672bf3534c7 and landing6acfd5effa83daccd5de95d4. No Production deployment/restart/configuration change authorized by preparation. Post-push exact-SHA check results are to be recorded in the final handoff, avoiding an endless evidence-only commit loop.

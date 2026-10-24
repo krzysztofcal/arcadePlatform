@@ -99,7 +99,13 @@ Exact installed APK/source857159ca8157166e46929726eda45309842973cb, Samsung Gala
 | Table/background/dealer/cards/player seats in both orientations | Owner-confirmed visual PASS |
 | Fold/Call/Raise/All-in and slider within visible screen | Owner-confirmed visual PASS, not a complete financial-action test |
 | Password login, Google OAuth return with active APK session, avatar upload/finalization, Poker gameplay | Previous owner-confirmed physical PASS retained |
-| Swipe transient bars/auto-hide; background/resume; keyboard open/close/rotation | Physically NOT TESTED / not confirmed by this report |
+| System gestures and Android bars | Owner-confirmed physical PASS (final owner report) |
+| Background/resume after switching applications | Owner-confirmed physical PASS; Poker continues after return |
+| Keyboard opening, including Profile | Owner-confirmed physical PASS; no broader rotation-with-IME assertion inferred |
 | Full financial-operation regression | NOT TESTED; not added to approved M0 scope |
 
-Owner accepts appearance. Do not alter styling/fullscreen without concrete defect. Latest owner did not re-supply OS/WebView versions; earlier request logs identify Android16/WebView156. No extra agent gameplay, upload or financial operation. Existing certificate/App Links limitations deferred to M1. Final independent source review finds a separate future WS Preview startup regression; device PASS remains valid, but does not verify future server deployment compatibility. [Final review/NO-GO](final-review.md).
+Owner accepts appearance. Do not alter styling/fullscreen without concrete defect. Latest owner did not re-supply OS/WebView versions; earlier request logs identify Android16/WebView156. No extra agent gameplay, upload or financial operation. Existing certificate/App Links limitations deferred to M1. The separate WS Preview P1 is closed by exact-SHA deployment and nonfinancial authorization smoke; see [final review](final-review.md).
+
+## Final owner lifecycle confirmation — 2026-10-24
+
+Owner confirms the above gesture/bar, background/resume and keyboard PASS on physical Samsung Galaxy S24+ with exact APK857159ca8157166e46929726eda45309842973cb. Previous fullscreen portrait/landscape, visual scene/controls, password/Google native-session return, avatar upload/finalization and gameplay PASS remain valid. These are owner observations, not agent-operated device tests. Accepted appearance and app code remain frozen. Full financial regression is not added to M0.

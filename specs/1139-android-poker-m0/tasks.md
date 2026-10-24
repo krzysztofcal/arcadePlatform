@@ -72,10 +72,16 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] V003 Report one real M0 P1/NO-GO: next WS Preview startup rejects deploy-preview/null-origin metadata in store selector; do not silently expand scope/deploy or claim all compatibility PASS.
 - [x] V004 Owner-approved P1 correction implemented with immutable build identity, actual workflow regression and offline real WS dependency imports; existing Netlify/Production/V3 guards retained. No WS deploy.
 
-Manual handoff remains limited to approved transient bars, background/resume and IME scenarios; stable signer/App Links remain M1. No new financial smoke requirement.
+Owner has confirmed physical system gestures/bars, background/resume and keyboard opening PASS on exact857159ca APK. Stable signer/App Links remain M1. No new financial smoke requirement.
 
 ## Approved P1 correction validation
 
 - [x] P001 Immutable artifact identity + explicit WS workflow marker/validation; no runtime inference from missing origin.
 - [x] P002 Fundamental red→green regression, actual generated WS context, offline real WS imports, preservation/failure cases, independent minimal-diff review.
 - [x] P003 Exact-SHA edf9fb3a CI/WS PR Checks all green; Netlify ready/availability guard PASS; no live WS deploy/service restart/merge.
+
+## Final preparation after owner lifecycle PASS
+
+- [x] M001 Record owner-confirmed physical system gestures/bars, background/resume and keyboard PASS; retain prior device PASS and freeze appearance.
+- [x] M002 Integrate main dcca1232951c20780a4fd18269ed0fae6da6fe3a without app/runtime changes; preserve deployed WS edf9fb3a86b73da2e5b921dce4053280c50f0902 evidence.
+- [ ] M003 Verify required checks for the resulting preparation SHA, then hand off final merge GO; PR remains Draft, no merge or Production deployment.
