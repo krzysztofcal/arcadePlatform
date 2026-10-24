@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createTableCommandQueue } from "./table-command-queue.mjs";
+import { createBotAutoplayCascadeScheduler } from "../handlers/bot-autoplay.mjs";
 import { createAcceptedBotAutoplayExecutor as createAcceptedBotAutoplayExecutorBase } from "./accepted-bot-autoplay-adapter.mjs";
 import { createBotReactionOverrideStore } from "./bot-reaction-override.mjs";
 import { initHandState, applyAction as applyRuntimeAction, advanceIfNeeded } from "../snapshot-runtime/poker-reducer.mjs";
-import { buildBootstrappedPokerState, applyCoreStateAction } from "../engine/poker-engine.mjs";
+import { buildBootstrappedPokerState, bootstrapCoreStateHand, applyCoreStateAction } from "../engine/poker-engine.mjs";
 import { computeSharedLegalActions } from "../shared/poker-primitives.mjs";
 import { runAdvanceLoop, runBotAutoplayLoop } from "../../shared/poker-domain/poker-autoplay.mjs";
 import { materializeShowdownAndPayout } from "../snapshot-runtime/poker-materialize-showdown.mjs";
@@ -23,6 +25,25 @@ function createAcceptedBotAutoplayExecutor(options = {}) {
     ...options,
     env: mergedEnv
   });
+}
+
+// Whole-hand assertions drive the same cascade used by the server; an adapter
+// invocation itself is only one action, including when every actor is a bot.
+async function runBotCascade(run, args) {
+  const results = [];
+  const scheduler = createBotAutoplayCascadeScheduler({ runStep: async context => {
+    const result = await run(context);
+    results.push(result);
+    return result;
+  } });
+  const last = await scheduler.schedule(args);
+  return {
+    ...last,
+    changed: results.some(result => result.changed),
+    lastBroadcastStateVersion: results.map(result => result.lastBroadcastStateVersion).findLast(Number.isFinite) ?? null,
+    actionCount: results.reduce((sum, result) => sum + result.actionCount, 0),
+    broadcastedStepCount: results.reduce((sum, result) => sum + (result.broadcastedStepCount || 0), 0)
+  };
 }
 
 function previewRuntimeEnv() {
@@ -608,9 +629,9 @@ test("accepted bot autoplay waits before each bot action in bots-only hands", as
     klog: () => {}
   });
 
-  const result = await run({ tableId: "t-delay-bots-only", trigger: "act", requestId: "r-delay-bots-only" });
+  const result = await runBotCascade(run, { tableId: "t-delay-bots-only", trigger: "act", requestId: "r-delay-bots-only" });
   assert.equal(result.ok, true);
-  assert.equal(result.reason, "non_action_phase");
+  assert.equal(result.phase, "SETTLED");
   assert.equal(persistedState.phase, "SETTLED");
   assert.ok(result.actionCount > 1);
   assert.equal(result.broadcastedStepCount, result.actionCount);
@@ -659,7 +680,7 @@ test("accepted bot autoplay aborts during a later delayed bot step when turn sto
     klog: () => {}
   });
 
-  const result = await run({ tableId: "t-delay-bots-race", trigger: "act", requestId: "r-delay-bots-race" });
+  const result = await runBotCascade(run, { tableId: "t-delay-bots-race", trigger: "act", requestId: "r-delay-bots-race" });
   assert.equal(result.ok, true);
   assert.equal(result.changed, true);
   assert.equal(result.actionCount, 1);
@@ -717,7 +738,7 @@ test("accepted bot autoplay exposes final state version when a later step broadc
     klog: () => {}
   });
 
-  const result = await run({ tableId: "t-delay-broadcast-fail", trigger: "act", requestId: "r-delay-broadcast-fail" });
+  const result = await runBotCascade(run, { tableId: "t-delay-broadcast-fail", trigger: "act", requestId: "r-delay-broadcast-fail" });
   assert.equal(result.ok, true);
   assert.ok(result.actionCount > 1);
   assert.ok(result.broadcastedStepCount >= 1);
@@ -1801,7 +1822,7 @@ test("accepted bot autoplay handles engine poker state through river showdown wi
     klog: () => {}
   });
 
-  const result = await run({ tableId, trigger: "act", requestId: "engine-runtime-river", frameTs: new Date().toISOString() });
+  const result = await runBotCascade(run, { tableId, trigger: "act", requestId: "engine-runtime-river", frameTs: new Date().toISOString() });
   assert.equal(result.ok, true);
   assert.equal(calls.restore, 0);
   assert.equal(calls.resync, 0);
@@ -1879,7 +1900,7 @@ test("accepted bot autoplay settles showdown and allows next hand to continue", 
     klog: () => {}
   });
 
-  const showdownRun = await run({ tableId: "t-next-hand", trigger: "act", requestId: "r-next-hand-1" });
+  const showdownRun = await runBotCascade(run, { tableId: "t-next-hand", trigger: "act", requestId: "r-next-hand-1" });
   assert.equal(showdownRun.ok, true);
   assert.equal(calls.restore, 0);
   assert.equal(calls.resync, 0);
@@ -1899,3 +1920,92 @@ test("accepted bot autoplay settles showdown and allows next hand to continue", 
   assert.equal(calls.resync, 0);
   assert.equal(nextHandRun.reason === "turn_not_bot" || nextHandRun.actionCount > 0 || nextHandRun.reason === "not_action_phase", true);
 });
+
+for (const foldedHuman of [false, true]) {
+  test(`WS releases the bot-only queue before the next bot action (${foldedHuman ? "Single Player after fold" : "Online JOIN"})`, async () => {
+    const tableId = `queue-fairness-${foldedHuman}`;
+    const ids = foldedHuman ? ["human", "bot_a", "bot_b"] : ["bot_a", "bot_b"];
+    const members = ids.map((userId, i) => ({ userId, seat: i + 1 }));
+    let coreState = {
+      version: 1, roomId: tableId, members,
+      seats: Object.fromEntries(members.map(m => [m.userId, m.seat])),
+      seatDetailsByUserId: Object.fromEntries(ids.map(id => [id, { isBot: id !== "human" }])),
+      publicStacks: Object.fromEntries(ids.map(id => [id, 100]))
+    };
+    let clock = 1_000;
+    coreState = bootstrapCoreStateHand({ tableId, coreState, nowMs: clock }).coreState;
+    if (foldedHuman) {
+      const fold = applyCoreStateAction({ tableId, coreState, handId: coreState.pokerState.handId, userId: "human", action: "FOLD", nowMs: clock });
+      assert.equal(fold.accepted, true);
+      coreState = fold.coreState;
+    }
+    const order = [], actionIds = [], steps = [];
+    let writes = 0;
+    const queue = createTableCommandQueue();
+    let releaseFirstReaction, firstReactionStarted;
+    const reactionGate = new Promise(resolve => { releaseFirstReaction = resolve; });
+    const reactionStarted = new Promise(resolve => { firstReactionStarted = resolve; });
+    let reactionCount = 0;
+    const run = createAcceptedBotAutoplayExecutor({
+      tableManager: {
+        persistedPokerState: () => coreState.pokerState,
+        persistedStateVersion: () => coreState.version,
+        tableSnapshot: () => ({ seats: coreState.pokerState.seats.map(s => ({ ...s, isBot: s.userId !== "human" })) }),
+        applyAction: args => {
+          const beforeVersion = coreState.version;
+          const applied = applyCoreStateAction({ ...args, tableId, coreState, nowMs: clock });
+          assert.equal(applied.accepted, true, applied.reason);
+          assert.equal(applied.stateVersion, beforeVersion + 1);
+          coreState = applied.coreState;
+          actionIds.push(args.requestId);
+          order.push("bot");
+          assert.equal(Object.values(coreState.pokerState.stacks).reduce((a,b) => a+b, 0) + coreState.pokerState.potTotal, ids.length * 100);
+          return { ...applied, replayed: false };
+        }
+      },
+      persistMutatedState: async () => { writes++; return { ok: true }; },
+      restoreTableFromPersisted: async () => { throw new Error("unexpected restore"); },
+      broadcastResyncRequired: () => assert.fail("unexpected resync"),
+      env: { WS_BOT_REACTION_MIN_MS: "2000", WS_BOT_REACTION_MAX_MS: "4000", POKER_BOTS_BOTS_ONLY_HAND_HARD_CAP: "80" },
+      now: () => clock, random: () => 0.1,
+      sleep: async ms => {
+        if (++reactionCount === 1) { firstReactionStarted(); await reactionGate; }
+        clock += ms;
+      }
+    });
+    const scheduler = createBotAutoplayCascadeScheduler({
+      runStep: args => queue.enqueue({ tableId, run: async () => {
+        const result = await run(args);
+        assert.equal(result.ok, true, result.reason);
+        steps.push(result.actionCount);
+        return result;
+      } })
+    });
+    const cascade = scheduler.schedule({ tableId, trigger: "queue-regression" });
+    await reactionStarted;
+    let admission;
+    // Real queued admission boundary; domain JOIN/funding/WAITING_NEXT_HAND has
+    // separate authoritative-join tests. No DB/ledger implementation is mocked here.
+    const pending = queue.enqueue({ tableId, run: async () => {
+      admission = { actions: actionIds.length, phase: coreState.pokerState.phase };
+      order.push("admission");
+    } });
+    releaseFirstReaction();
+    await Promise.all([cascade, pending]);
+    assert.equal(admission.actions, 1, "admission must not wait behind the whole bots-only hand");
+    assert.notEqual(admission.phase, "SETTLED");
+    assert.deepEqual(order.slice(0, 3), ["bot", "admission", "bot"]);
+    assert.ok(steps.length > 1);
+    assert.ok(steps.every(count => count === 1));
+    assert.equal(steps.length, actionIds.length);
+    assert.equal(writes, actionIds.length);
+    assert.equal(reactionCount, actionIds.length);
+    assert.equal(new Set(actionIds).size, actionIds.length);
+    const settled = coreState.pokerState;
+    assert.equal(settled.phase, "SETTLED");
+    assert.equal(settled.potTotal, 0);
+    assert.equal(settled.handSettlement.handId, settled.handId);
+    assert.equal(Object.values(settled.stacks).reduce((a,b) => a+b, 0), ids.length * 100);
+    assert.equal(Object.values(settled.handSettlement.payouts).reduce((a,b) => a+b, 0), Object.values(settled.contributionsByUserId).reduce((a,b) => a+b, 0));
+  });
+}
