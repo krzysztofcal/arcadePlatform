@@ -1,5 +1,9 @@
 # Final independent PR1141 review — 2026-10-24
 
+## Correction status
+
+Owner-approved correction edf9fb3a86b73da2e5b921dce4053280c50f0902 resolves the original P1 with immutable artifact identity. Actual WS workflow-generated context imports real WS dependencies offline; Netlify fail-closed/Production preservation cases and required CI/WS PR Checks PASS. See [correction evidence](p1-artifact-identity-fix.md). No live WS deployment, appearance change or merge performed. Remaining previously recorded physical lifecycle coverage stays NOT TESTED.
+
 ## Original review recommendation: NO-GO, one real M0 blocker
 
 Base mainf9137918f54fd285d00dad5c7d91c1120bab6e33, independently confirmed live GitHub main. Reviewed HEAD3d775b7cfc00b6c077c1546735a0c289da012e93. A fresh independent reviewer inspected complete runtime/workflow diff read-only; root independently reproduced finding. No visual/native implementation edits are part of this review.

@@ -78,4 +78,4 @@ Manual handoff remains limited to approved transient bars, background/resume and
 
 - [x] P001 Immutable artifact identity + explicit WS workflow marker/validation; no runtime inference from missing origin.
 - [x] P002 Fundamental red→green regression, actual generated WS context, offline real WS imports, preservation/failure cases, independent minimal-diff review.
-- [ ] P003 Exact-SHA CI/WS PR Checks and report; no live WS deploy/service restart/merge.
+- [x] P003 Exact-SHA edf9fb3a CI/WS PR Checks all green; Netlify ready/availability guard PASS; no live WS deploy/service restart/merge.
