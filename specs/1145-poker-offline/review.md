@@ -1,5 +1,7 @@
 # T001–T002 review handoff — STOP
 
+Subsequent authorized WS verification: [deployment/smoke/CodeQL report](ws-verification.md). CodeQL neutral has since resolved to success; human Online smoke stopped at joined-snapshot timeout, so runtime regression risk remains open.
+
 Draft PR: https://github.com/krzysztofcal/arcadePlatform/pull/1147
 
 Verified runtime SHA: **ddb21224d99e07dead0164bf14dcbfb52356dec4**.
