@@ -2,6 +2,7 @@ import { buildBootstrappedPokerState } from '../../ws-server/poker/engine/poker-
 import { applyAction } from '../../ws-server/poker/shared/poker-action-reducer.mjs';
 import { computeSharedLegalActions } from '../../ws-server/poker/shared/poker-primitives.mjs';
 import { chooseBotActionProfiled, enrichBotLegalActions } from '../../ws-server/poker/shared/poker-bot-strategy.mjs';
+import { projectRoomCoreSnapshot } from '../../ws-server/poker/read-model/room-core-snapshot.mjs';
 import { prepareSeed } from './browser-crypto.mjs';
 
 // T002 spike: one hand, no persistence, wallet, admission, ledger or protocol emulator.
@@ -14,17 +15,15 @@ let random = Math.random;
 const history = [];
 function legal(userId) { return computeSharedLegalActions({ statePublic: state, userId }); }
 function snapshot() {
-  const info = legal(human);
+  const coreState = {
+    pokerState: state,
+    seats: Object.fromEntries(members.map(m => [m.userId, m.seat])),
+    seatDetailsByUserId: Object.fromEntries(members.map(m => [m.userId, { isBot: m.userId !== human, botProfile: 'NORMAL' }]))
+  };
   return {
-    tableId, stateVersion: version, table: { status: 'PLAYING', maxSeats: 3, buyIn: 100 },
-    seats: members.map(m => ({ userId: m.userId, seatNo: m.seat, isBot: m.userId !== human, displayName: 'You', status: 'ACTIVE' })),
-    stacks: state.stacks, youSeat: 1,
-    hand: { handId: state.handId, status: state.phase, dealerSeatNo: state.dealerSeatNo },
-    turn: { userId: state.turnUserId }, pot: { total: state.potTotal }, board: state.community,
-    myHoleCards: state.holeCardsByUserId[human], bigBlind: state.bigBlind,
-    legalActions: info.actions, actionConstraints: info,
-    foldedByUserId: state.foldedByUserId, betThisRoundByUserId: state.betThisRoundByUserId,
-    showdown: state.showdown || null, handSettlement: state.handSettlement || null
+    ...projectRoomCoreSnapshot({ tableId, roomId: tableId, coreState, members, userId: human, youSeat: 1 }),
+    tableId, stateVersion: version, youSeat: 1,
+    table: { status: 'OPEN', maxSeats: 3, buyIn: 100 }
   };
 }
 function publish() { version++; if (listener) listener(snapshot()); }

@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 // Generated artifacts are checked in so normal Netlify builds need no extra setup.
 // Replace only explicit function bodies; fail closed if renderer seams drift.
 let renderer = await readFile('poker/poker-v2.js', 'utf8');
+renderer = renderer.replace('Hand complete · Next hand shortly', 'Hand complete · Reload for another PoC hand');
 const replacements = {
   init: `
     selectElements();

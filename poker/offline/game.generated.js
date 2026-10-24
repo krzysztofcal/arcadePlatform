@@ -230,6 +230,23 @@
     }
     return computeLegalActionsForSeatedPlayer(state2, userId);
   }
+  function computeProjectedLegalActions({ statePublic, userId } = {}) {
+    const state2 = statePublic || {};
+    if (!state2 || typeof state2 !== "object" || Array.isArray(state2)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    const phase = typeof state2.phase === "string" ? state2.phase : "";
+    if (!ACTION_PHASES.has(phase)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    if (!userId || typeof userId !== "string") {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    if (!isSeatedPlayer(state2, userId) || !isActivePlayer(state2, userId)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    return computeLegalActionsForSeatedPlayer(state2, userId);
+  }
 
   // ws-server/poker/shared/settlement/poker-materialize-showdown.mjs
   var getHandId = (state2) => typeof state2?.handId === "string" && state2.handId.trim() ? state2.handId.trim() : "";
@@ -1924,6 +1941,489 @@
     return pickLegalAction(legalActions, ["CHECK", "FOLD", "CALL"]);
   }
 
+  // shared/profile-avatar-projection.mjs
+  var PUBLIC_AVATAR_VARIANTS = Object.freeze([
+    "comet-blue",
+    "falcon-orange",
+    "fox-blue",
+    "nova-purple",
+    "orbit-green",
+    "panda-pink"
+  ]);
+  var PUBLIC_AVATAR_VARIANT_SET = new Set(PUBLIC_AVATAR_VARIANTS);
+
+  // ws-server/poker/read-model/public-poker-identity.mjs
+  var HANDLE_RE = /^[a-z0-9][a-z0-9_-]{2,23}$/;
+  var DISPLAY_NAME_CONTROL_RE = /[\u0000-\u001f\u007f]/;
+  var SUPABASE_ORIGIN_RE = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i;
+  var UPLOADED_AVATAR_PATH_RE = /^\/storage\/v1\/object\/public\/profile-avatars\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$/i;
+  var PUBLIC_AVATAR_VARIANT_SET2 = /* @__PURE__ */ new Set([...PUBLIC_AVATAR_VARIANTS, "default"]);
+  function normalizeHandle(value) {
+    const handle = typeof value === "string" ? value.trim().toLowerCase() : "";
+    return HANDLE_RE.test(handle) ? handle : "";
+  }
+  function normalizeDisplayName(value) {
+    const displayName = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+    if (displayName.length < 2 || displayName.length > 40 || DISPLAY_NAME_CONTROL_RE.test(displayName)) {
+      return "";
+    }
+    return displayName;
+  }
+  function normalizeTrustedStorageOrigin(storageBaseUrl) {
+    const rawValue = typeof storageBaseUrl === "string" ? storageBaseUrl.trim() : "";
+    try {
+      const parsed = new URL(rawValue);
+      if (!SUPABASE_ORIGIN_RE.test(parsed.origin) || parsed.href !== `${parsed.origin}/`) {
+        return "";
+      }
+      return parsed.origin;
+    } catch {
+      return "";
+    }
+  }
+  function normalizePublicAvatar(value, { storageBaseUrl = "" } = {}) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    if (value.type === "uploaded" && typeof value.url === "string") {
+      const trustedOrigin = normalizeTrustedStorageOrigin(storageBaseUrl);
+      try {
+        const parsed = new URL(value.url);
+        if (trustedOrigin && parsed.origin === trustedOrigin && UPLOADED_AVATAR_PATH_RE.test(parsed.pathname) && !parsed.username && !parsed.password && !parsed.search && !parsed.hash && !parsed.port) {
+          return { type: "uploaded", url: parsed.href };
+        }
+      } catch {
+        return null;
+      }
+    }
+    if (value.type === "default" && PUBLIC_AVATAR_VARIANT_SET2.has(value.variant)) {
+      return { type: "default", variant: value.variant };
+    }
+    return null;
+  }
+  function normalizePublicPokerIdentity(value, { storageBaseUrl = "" } = {}) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    const handle = normalizeHandle(value.handle);
+    const displayName = normalizeDisplayName(value.displayName);
+    const avatar = normalizePublicAvatar(value.avatar, { storageBaseUrl });
+    if (!handle || !displayName || !avatar) {
+      return null;
+    }
+    return { handle, displayName, avatar };
+  }
+
+  // ws-server/poker/read-model/room-core-snapshot.mjs
+  function asObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  }
+  function withoutPrivateState(state2) {
+    if (!state2 || typeof state2 !== "object" || Array.isArray(state2)) {
+      return state2;
+    }
+    const { holeCardsByUserId, deck, handSeed, handStartStacksByUserId, ...rest } = state2;
+    return rest;
+  }
+  function normalizeCards(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((card) => typeof card === "string");
+  }
+  function normalizeActions(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((action) => typeof action === "string");
+  }
+  function normalizeSeatRows(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((seat) => seat && typeof seat.userId === "string" && Number.isInteger(seat.seatNo)).map((seat) => {
+      const normalized = {
+        userId: seat.userId,
+        seatNo: seat.seatNo,
+        status: typeof seat.status === "string" ? seat.status : "ACTIVE"
+      };
+      if (seat.isBot === true) normalized.isBot = true;
+      if (typeof seat.botProfile === "string" && seat.botProfile) normalized.botProfile = seat.botProfile;
+      if (seat.leaveAfterHand === true) normalized.leaveAfterHand = true;
+      return normalized;
+    });
+  }
+  function normalizeSeatDetails(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    const entries = Object.entries(value).filter(([userId]) => typeof userId === "string" && userId).map(([userId, details]) => [userId, {
+      isBot: details?.isBot === true,
+      botProfile: typeof details?.botProfile === "string" ? details.botProfile : null,
+      leaveAfterHand: details?.leaveAfterHand === true
+    }]);
+    return Object.fromEntries(entries);
+  }
+  function normalizeStacks(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    const entries = Object.entries(value).filter(([userId, amount]) => typeof userId === "string" && userId && Number.isFinite(Number(amount)));
+    return Object.fromEntries(entries.map(([userId, amount]) => [userId, Number(amount)]));
+  }
+  function normalizeNumericUserMap(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    const entries = Object.entries(value).filter(([userId, amount]) => typeof userId === "string" && userId && Number.isFinite(Number(amount)));
+    return Object.fromEntries(entries.map(([userId, amount]) => [userId, Number(amount)]));
+  }
+  function normalizeLastBettingRoundActionByUserId(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    const allowed = /* @__PURE__ */ new Set(["fold", "check", "call", "raise", "all_in"]);
+    return Object.fromEntries(
+      Object.entries(value).filter(([userId, action]) => typeof userId === "string" && userId && typeof action === "string" && allowed.has(action))
+    );
+  }
+  function normalizeMemberSeatRows(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((member) => member && typeof member.userId === "string" && Number.isInteger(member.seat)).map((member) => ({ userId: member.userId, seatNo: member.seat, status: "ACTIVE" }));
+  }
+  function resolvePublicSeats({ statePublic, members: members2, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus }) {
+    const stateSeats = normalizeSeatRows(statePublic?.seats);
+    const memberSeats = normalizeMemberSeatRows(members2);
+    const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
+    const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
+    const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
+    const byUserId = new Map(memberSeats.map((seat) => [seat.userId, seat]));
+    for (const seat of stateSeats) byUserId.set(seat.userId, { ...byUserId.get(seat.userId) || {}, ...seat });
+    const baseSeats = [...byUserId.values()].sort((left, right) => left.seatNo - right.seatNo || left.userId.localeCompare(right.userId));
+    return baseSeats.filter((seat) => leftTableByUserId[seat.userId] !== true || tableStatus !== "CLOSED" && statePublic?.inactivityEjectionByUserId?.[seat.userId] && stateSeats.some((owned) => owned.userId === seat.userId)).map((seat) => {
+      const details = seatDetailsByUserId[seat.userId] || null;
+      const merged = { ...seat };
+      if (foldedByUserId[seat.userId] === true) {
+        merged.status = "FOLDED";
+      }
+      if (details?.isBot) merged.isBot = true;
+      if (details?.botProfile) merged.botProfile = details.botProfile;
+      if (details?.leaveAfterHand) merged.leaveAfterHand = true;
+      if (!merged.isBot) {
+        const profile = normalizePublicPokerIdentity(publicProfilesByUserId?.[seat.userId], { storageBaseUrl: publicProfileStorageBaseUrl });
+        if (profile) merged.profile = profile;
+      }
+      return merged;
+    });
+  }
+  function resolvePublicStacks({ statePublic, coreState, seats }) {
+    const stateStacks = normalizeStacks(statePublic?.stacks);
+    const fallbackStacks = { ...normalizeStacks(coreState?.publicStacks), ...stateStacks };
+    if (Object.keys(fallbackStacks).length <= 0) {
+      return {};
+    }
+    if (!Array.isArray(seats) || seats.length <= 0) {
+      return fallbackStacks;
+    }
+    const allowedUserIds = new Set(seats.map((seat) => seat.userId));
+    return Object.fromEntries(Object.entries(fallbackStacks).filter(([userId]) => allowedUserIds.has(userId)));
+  }
+  function resolvePotTotal(statePublic) {
+    if (Number.isFinite(statePublic?.potTotal)) {
+      return statePublic.potTotal;
+    }
+    if (Number.isFinite(statePublic?.pot)) {
+      return statePublic.pot;
+    }
+    return 0;
+  }
+  function resolveSidePots(statePublic) {
+    return Array.isArray(statePublic?.sidePots) ? statePublic.sidePots : [];
+  }
+  function resolveRoundFromPhase(phase) {
+    if (typeof phase !== "string") {
+      return null;
+    }
+    if (phase === "PREFLOP" || phase === "FLOP" || phase === "TURN" || phase === "RIVER") {
+      return phase;
+    }
+    return null;
+  }
+  function resolveTurnTimerField(value) {
+    return Number.isFinite(value) ? value : null;
+  }
+  function resolveTurnTimer({ statePublic, turnUserId }) {
+    const liveRound = resolveRoundFromPhase(statePublic?.phase);
+    const hasTurnUser = typeof turnUserId === "string" && turnUserId.trim().length > 0;
+    if (!liveRound || !hasTurnUser) {
+      return { startedAt: null, deadlineAt: null };
+    }
+    return {
+      startedAt: resolveTurnTimerField(statePublic?.turnStartedAt),
+      deadlineAt: resolveTurnTimerField(statePublic?.turnDeadlineAt)
+    };
+  }
+  function resolveTurnIdentity({ statePublic, turnUserId, turnSeat }) {
+    const liveRound = resolveRoundFromPhase(statePublic?.phase);
+    const hasTurnUser = typeof turnUserId === "string" && turnUserId.trim().length > 0;
+    if (!liveRound || !hasTurnUser) {
+      return { userId: null, seat: null };
+    }
+    return { userId: turnUserId, seat: turnSeat };
+  }
+  function normalizeAwardedPots(value) {
+    if (!Array.isArray(value)) return [];
+    return value.filter((pot) => pot && typeof pot === "object" && !Array.isArray(pot)).map((pot) => ({
+      amount: Number.isFinite(Number(pot.amount)) ? Number(pot.amount) : 0,
+      winners: Array.isArray(pot.winners) ? pot.winners.filter((userId) => typeof userId === "string") : [],
+      eligibleUserIds: Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds.filter((userId) => typeof userId === "string") : []
+    }));
+  }
+  function normalizeShowdown(showdown) {
+    if (!showdown || typeof showdown !== "object" || Array.isArray(showdown)) {
+      return null;
+    }
+    const normalized = {
+      winners: Array.isArray(showdown.winners) ? showdown.winners.filter((userId) => typeof userId === "string") : [],
+      potsAwarded: normalizeAwardedPots(showdown.potsAwarded),
+      potAwardedTotal: Number.isFinite(showdown.potAwardedTotal) ? showdown.potAwardedTotal : Number.isFinite(showdown.potAwarded) ? showdown.potAwarded : 0,
+      reason: typeof showdown.reason === "string" ? showdown.reason : null,
+      handId: typeof showdown.handId === "string" ? showdown.handId : null
+    };
+    if (Array.isArray(showdown.revealedShowdownParticipants)) {
+      normalized.revealedShowdownParticipants = showdown.revealedShowdownParticipants.filter((entry) => entry && typeof entry.userId === "string").map((entry) => ({
+        userId: entry.userId,
+        holeCards: normalizeCards(entry.holeCards)
+      })).filter((entry) => entry.holeCards.length === 2);
+    }
+    return normalized;
+  }
+  function normalizeHandSettlement(handSettlement) {
+    if (!handSettlement || typeof handSettlement !== "object" || Array.isArray(handSettlement)) {
+      return null;
+    }
+    return {
+      handId: typeof handSettlement.handId === "string" ? handSettlement.handId : null,
+      settledAt: typeof handSettlement.settledAt === "string" ? handSettlement.settledAt : null,
+      payouts: handSettlement.payouts && typeof handSettlement.payouts === "object" && !Array.isArray(handSettlement.payouts) ? handSettlement.payouts : {}
+    };
+  }
+  function resolvePrivateBranch({ state: state2, statePublic, userId, youSeat, stack, isBot, tableStatus }) {
+    const intent = state2?.inactivityEjectionByUserId?.[userId];
+    if (intent) {
+      const retained = state2?.seats?.some((seat) => seat?.userId === userId) || Object.prototype.hasOwnProperty.call(state2?.stacks || {}, userId);
+      const pending = tableStatus !== "CLOSED" && retained;
+      return {
+        userId,
+        seat: youSeat,
+        holeCards: [],
+        inactivity: { status: pending ? "pending" : "removed", isSinglePlayer: intent.isSinglePlayer === true },
+        playerState: { status: pending ? "EJECTION_PENDING" : "REMOVED", stack: Number.isInteger(stack) ? stack : 0, canRebuy: false }
+      };
+    }
+    if (!Number.isInteger(youSeat)) {
+      return null;
+    }
+    const holeCards = normalizeCards(state2?.holeCardsByUserId?.[userId]);
+    const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
+    const phase = typeof state2?.phase === "string" ? state2.phase.trim().toUpperCase() : "";
+    const inCurrentHand = phase !== "SETTLED" && handSeats.some((seat) => seat?.userId === userId);
+    const waiting = statePublic?.waitingForNextHandByUserId?.[userId] === true;
+    const status = waiting ? "WAITING_NEXT_HAND" : stack === 0 && !inCurrentHand ? "OUT_OF_CHIPS" : "ACTIVE";
+    const branch = {
+      userId,
+      seat: youSeat,
+      holeCards
+    };
+    if (Number.isInteger(stack) && stack >= 0) {
+      branch.playerState = {
+        status,
+        stack,
+        canRebuy: isBot !== true && tableStatus === "OPEN" && stack === 0 && !inCurrentHand && !waiting
+      };
+    }
+    return branch;
+  }
+  function hasLeftTable(statePublic, userId) {
+    if (typeof userId !== "string" || !userId) {
+      return false;
+    }
+    const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
+    return leftTableByUserId[userId] === true;
+  }
+  function resolveRevealedShowdownParticipants({ statePublic, state: state2 }) {
+    if (statePublic?.phase !== "SETTLED") {
+      return [];
+    }
+    if (statePublic?.showdown?.reason !== "computed") {
+      return [];
+    }
+    const potsAwarded = Array.isArray(statePublic?.showdown?.potsAwarded) ? statePublic.showdown.potsAwarded : [];
+    const comparedUserIds = [];
+    const comparedUserIdSet = /* @__PURE__ */ new Set();
+    potsAwarded.forEach((pot) => {
+      if (!pot || typeof pot !== "object" || !Array.isArray(pot.eligibleUserIds) || pot.eligibleUserIds.length < 2) return;
+      pot.eligibleUserIds.forEach((userId) => {
+        if (typeof userId !== "string" || !userId || comparedUserIdSet.has(userId)) return;
+        comparedUserIdSet.add(userId);
+        comparedUserIds.push(userId);
+      });
+    });
+    if (comparedUserIds.length === 0) {
+      const winners = Array.isArray(statePublic?.showdown?.winners) ? statePublic.showdown.winners.filter((value) => typeof value === "string" && value) : [];
+      winners.forEach((userId) => {
+        if (comparedUserIdSet.has(userId)) return;
+        comparedUserIdSet.add(userId);
+        comparedUserIds.push(userId);
+      });
+    }
+    if (comparedUserIds.length === 0) {
+      return [];
+    }
+    const holeCardsByUserId = asObject(state2?.holeCardsByUserId) || {};
+    return comparedUserIds.map((userId) => ({
+      userId,
+      holeCards: normalizeCards(holeCardsByUserId[userId])
+    })).filter((entry) => entry.holeCards.length === 2);
+  }
+  function projectRoomCoreSnapshot({ tableId: tableId2, roomId, coreState, members: members2, userId, youSeat, tableStatus = "OPEN", publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
+    const state2 = asObject(coreState?.pokerState) || asObject(coreState?.state);
+    const statePublic = state2 ? withoutPrivateState(state2) : null;
+    let publicSeats = resolvePublicSeats({ statePublic, members: members2, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus });
+    const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
+    const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
+    const publicPhase = typeof state2?.phase === "string" ? state2.phase.trim().toUpperCase() : "";
+    const currentHandUserIds = new Set(handSeats.map((seat) => seat?.userId).filter((seatUserId) => typeof seatUserId === "string" && seatUserId));
+    publicSeats = publicSeats.map((seat) => {
+      if (statePublic?.inactivityEjectionByUserId?.[seat.userId]) return { ...seat, status: "EJECTION_PENDING" };
+      if (seat.isBot === true) return seat;
+      const stack = Number(publicStacks[seat.userId]);
+      if (statePublic?.waitingForNextHandByUserId?.[seat.userId] === true) return { ...seat, status: "WAITING_NEXT_HAND" };
+      const inCurrentHand = publicPhase !== "SETTLED" && currentHandUserIds.has(seat.userId);
+      if (Number.isInteger(stack) && stack === 0 && !inCurrentHand) return { ...seat, status: "OUT_OF_CHIPS" };
+      return seat;
+    });
+    const effectiveYouSeat = hasLeftTable(statePublic, userId) || state2?.inactivityEjectionByUserId?.[userId] ? null : youSeat;
+    if (!statePublic) {
+      return {
+        roomId,
+        seats: publicSeats,
+        stacks: publicStacks,
+        bigBlind: null,
+        hand: {
+          handId: null,
+          status: members2.length > 0 ? "LOBBY" : "EMPTY",
+          round: null,
+          dealerSeatNo: null
+        },
+        board: {
+          cards: []
+        },
+        pot: {
+          total: 0,
+          sidePots: []
+        },
+        turn: {
+          userId: members2[0]?.userId ?? null,
+          seat: Number.isInteger(members2[0]?.seat) ? members2[0].seat : null,
+          startedAt: null,
+          deadlineAt: null
+        },
+        legalActions: {
+          seat: null,
+          actions: []
+        },
+        projectedLegalActions: {
+          seat: null,
+          actions: []
+        },
+        betThisRoundByUserId: {},
+        committedByUserId: {},
+        private: Number.isInteger(effectiveYouSeat) ? {
+          userId,
+          seat: effectiveYouSeat,
+          holeCards: []
+        } : null
+      };
+    }
+    const turnUserId = typeof statePublic.turnUserId === "string" ? statePublic.turnUserId : null;
+    const seatByUserId = asObject(coreState?.seats) || {};
+    const turnSeat = Number.isInteger(seatByUserId[turnUserId]) ? seatByUserId[turnUserId] : null;
+    const turnIdentity = resolveTurnIdentity({ statePublic, turnUserId, turnSeat });
+    const turnTimer = resolveTurnTimer({ statePublic, turnUserId: turnIdentity.userId });
+    const isTurnPlayer = Number.isInteger(effectiveYouSeat) && turnUserId === userId;
+    const legalInfo = Number.isInteger(effectiveYouSeat) ? computeSharedLegalActions({ statePublic, userId }) : { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    const constraintsInfo = Number.isInteger(effectiveYouSeat) && !isTurnPlayer ? computeProjectedLegalActions({ statePublic, userId }) : legalInfo;
+    const snapshot2 = {
+      roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId2,
+      seats: publicSeats,
+      stacks: publicStacks,
+      bigBlind: Number.isInteger(statePublic?.bigBlind) && statePublic.bigBlind > 0 ? statePublic.bigBlind : null,
+      hand: {
+        handId: typeof statePublic.handId === "string" && statePublic.handId.trim() ? statePublic.handId : null,
+        status: typeof statePublic.phase === "string" ? statePublic.phase : null,
+        round: resolveRoundFromPhase(statePublic.phase),
+        dealerSeatNo: Number.isInteger(statePublic.dealerSeatNo) ? statePublic.dealerSeatNo : null
+      },
+      board: {
+        cards: normalizeCards(statePublic.community)
+      },
+      pot: {
+        total: resolvePotTotal(statePublic),
+        sidePots: resolveSidePots(statePublic)
+      },
+      turn: {
+        userId: turnIdentity.userId,
+        seat: turnIdentity.seat,
+        startedAt: turnTimer.startedAt,
+        deadlineAt: turnTimer.deadlineAt
+      },
+      legalActions: {
+        seat: Number.isInteger(effectiveYouSeat) ? effectiveYouSeat : null,
+        actions: Number.isInteger(effectiveYouSeat) ? normalizeActions(legalInfo.actions) : []
+      },
+      // Authoritative pre-action action list for a seated viewer who is not
+      // acting (e.g. RAISE presence honors reopening rights); empty for the
+      // current actor and observers. The browser uses this instead of inferring
+      // raising rights from numeric constraints.
+      projectedLegalActions: Number.isInteger(effectiveYouSeat) && !isTurnPlayer ? { seat: effectiveYouSeat, actions: normalizeActions(constraintsInfo.actions) } : { seat: null, actions: [] },
+      actionConstraints: {
+        toCall: Number.isFinite(constraintsInfo.toCall) ? constraintsInfo.toCall : null,
+        minRaiseTo: Number.isFinite(constraintsInfo.minRaiseTo) ? constraintsInfo.minRaiseTo : null,
+        maxRaiseTo: Number.isFinite(constraintsInfo.maxRaiseTo) ? constraintsInfo.maxRaiseTo : null,
+        maxBetAmount: Number.isFinite(constraintsInfo.maxBetAmount) ? constraintsInfo.maxBetAmount : null,
+        minBetAmount: Number.isFinite(constraintsInfo.minBetAmount) ? constraintsInfo.minBetAmount : null
+      },
+      betThisRoundByUserId: normalizeNumericUserMap(statePublic.betThisRoundByUserId),
+      committedByUserId: normalizeNumericUserMap(statePublic.committedByUserId),
+      lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
+      private: resolvePrivateBranch({
+        state: state2,
+        statePublic,
+        userId,
+        youSeat: effectiveYouSeat,
+        stack: Number.isInteger(Number(publicStacks[userId])) ? Number(publicStacks[userId]) : null,
+        isBot: coreState?.seatDetailsByUserId?.[userId]?.isBot === true,
+        tableStatus
+      })
+    };
+    const showdown = normalizeShowdown(statePublic.showdown);
+    if (showdown) {
+      const revealedShowdownParticipants = resolveRevealedShowdownParticipants({ statePublic, state: state2 });
+      if (revealedShowdownParticipants.length > 0) {
+        showdown.revealedShowdownParticipants = revealedShowdownParticipants;
+      }
+      snapshot2.showdown = showdown;
+    }
+    const handSettlement = normalizeHandSettlement(statePublic.handSettlement);
+    if (handSettlement) {
+      snapshot2.handSettlement = handSettlement;
+    }
+    return snapshot2;
+  }
+
   // poker/offline/offline-game.mjs
   var human = "offline-human";
   var botIds = ["bot-offline-1", "bot-offline-2"];
@@ -1939,26 +2439,17 @@
     return computeSharedLegalActions({ statePublic: state, userId });
   }
   function snapshot() {
-    const info = legal(human);
+    const coreState = {
+      pokerState: state,
+      seats: Object.fromEntries(members.map((m) => [m.userId, m.seat])),
+      seatDetailsByUserId: Object.fromEntries(members.map((m) => [m.userId, { isBot: m.userId !== human, botProfile: "NORMAL" }]))
+    };
     return {
+      ...projectRoomCoreSnapshot({ tableId, roomId: tableId, coreState, members, userId: human, youSeat: 1 }),
       tableId,
       stateVersion: version,
-      table: { status: "PLAYING", maxSeats: 3, buyIn: 100 },
-      seats: members.map((m) => ({ userId: m.userId, seatNo: m.seat, isBot: m.userId !== human, displayName: "You", status: "ACTIVE" })),
-      stacks: state.stacks,
       youSeat: 1,
-      hand: { handId: state.handId, status: state.phase, dealerSeatNo: state.dealerSeatNo },
-      turn: { userId: state.turnUserId },
-      pot: { total: state.potTotal },
-      board: state.community,
-      myHoleCards: state.holeCardsByUserId[human],
-      bigBlind: state.bigBlind,
-      legalActions: info.actions,
-      actionConstraints: info,
-      foldedByUserId: state.foldedByUserId,
-      betThisRoundByUserId: state.betThisRoundByUserId,
-      showdown: state.showdown || null,
-      handSettlement: state.handSettlement || null
+      table: { status: "OPEN", maxSeats: 3, buyIn: 100 }
     };
   }
   function publish() {

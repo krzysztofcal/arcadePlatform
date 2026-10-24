@@ -6100,7 +6100,7 @@
     var playerStatus = String(state.playerState && state.playerState.status || '').toUpperCase();
     els.roomStatus.textContent = seats.length < 2 ? t('pokerRoomWaiting', 'Waiting for more players')
       : playerStatus === 'WAITING_NEXT_HAND' ? t('pokerRoomReserved', 'Seat reserved · Joining next hand')
-      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Next hand shortly')
+      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Reload for another PoC hand')
       : isUsersTurn() ? t('pokerRoomYourTurn', 'Your turn') : t('pokerRoomHandInProgress', 'Hand in progress');
   }
 
