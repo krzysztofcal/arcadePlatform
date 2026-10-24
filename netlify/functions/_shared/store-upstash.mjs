@@ -1,5 +1,5 @@
 import { createXpLedgerKeys, resolveXpNamespace, isXpV3, xpOwnerPrefix } from "./xp-ledger.mjs";
-import { BUILD_DEPLOY_CONTEXT, BUILD_DEPLOY_ORIGIN } from "../_generated/deploy-context.mjs";
+import { BUILD_DEPLOY_CONTEXT, BUILD_DEPLOY_ORIGIN, BUILD_ARTIFACT_IDENTITY } from "../_generated/deploy-context.mjs";
 // Minimal Upstash REST client (no extra deps).
 import { createHash } from "node:crypto";
 import { klog, beginSql } from "./supabase-admin.mjs";
@@ -7,11 +7,15 @@ import { assertAccountActive, lockAccountLifecycle } from "../../../shared/accou
 
 const BASE = process.env.UPSTASH_REDIS_REST_URL;
 // Build metadata is immutable: runtime URL/CONTEXT flags cannot enable the alias.
-export function resolveRedisRestToken(env = process.env, buildContext = BUILD_DEPLOY_CONTEXT, buildOrigin = BUILD_DEPLOY_ORIGIN) {
+export function resolveRedisRestToken(env = process.env, buildContext = BUILD_DEPLOY_CONTEXT, buildOrigin = BUILD_DEPLOY_ORIGIN, artifactIdentity = BUILD_ARTIFACT_IDENTITY) {
   if (buildContext !== "deploy-preview") {
     return env.UPSTASH_REDIS_REST_TOKEN;
   }
-  if (typeof buildOrigin !== "string" || !/^https:\/\/deploy-preview-[1-9][0-9]*--playkcswh\.netlify\.app$/.test(buildOrigin) || env.XP_REDIS_VERSION !== "3" || env.XP_REDIS_ENV !== "stage" || env.XP_KEY_NS !== "kcswh:stage:xp:v3") {
+  if (env.XP_REDIS_VERSION !== "3" || env.XP_REDIS_ENV !== "stage" || env.XP_KEY_NS !== "kcswh:stage:xp:v3") {
+    throw new Error("stage_preview_redis_environment_mismatch");
+  }
+  if (artifactIdentity === "ws-preview" && buildOrigin === null) return env.UPSTASH_REDIS_REST_TOKEN;
+  if (artifactIdentity !== "netlify-functions" || typeof buildOrigin !== "string" || !/^https:\/\/deploy-preview-[1-9][0-9]*--playkcswh\.netlify\.app$/.test(buildOrigin)) {
     throw new Error("stage_preview_redis_environment_mismatch");
   }
   const token = env.ARCADE_STAGE_REDIS_TOKEN;

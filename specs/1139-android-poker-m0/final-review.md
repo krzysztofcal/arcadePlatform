@@ -1,6 +1,6 @@
 # Final independent PR1141 review — 2026-10-24
 
-## Recommendation: NO-GO, one real M0 blocker
+## Original review recommendation: NO-GO, one real M0 blocker
 
 Base mainf9137918f54fd285d00dad5c7d91c1120bab6e33, independently confirmed live GitHub main. Reviewed HEAD3d775b7cfc00b6c077c1546735a0c289da012e93. A fresh independent reviewer inspected complete runtime/workflow diff read-only; root independently reproduced finding. No visual/native implementation edits are part of this review.
 
@@ -33,3 +33,7 @@ Focused existing security/Auth/avatar/Redis/client WS/sidebar/mint/CORS fundamen
 3. Keep exact APK/source/CI/deploy provenance. No automatic merge: only explicit human authorization. Stable signing and Verified App Links remain M1.
 
 Docs-only final evidence commits do not change app/source payload; their automatically triggered check/deploy status is recorded in the final PR comment. VPS6.5GB free; no SDK/JDK/Gradle/install/checkout/cleanup, service restart, Production/Stage writes or financial actions.
+
+## Owner-approved correction follow-up
+
+The P1 is addressed in the subsequent [artifact identity correction](p1-artifact-identity-fix.md): explicit immutable identity distinguishes WS Preview from Netlify instead of missing-origin inference; local offline import and fundamental preservation tests pass. Original finding above is retained as audit evidence. Required post-push CI status determines correction handoff; no live WS deployment or merge is authorized.

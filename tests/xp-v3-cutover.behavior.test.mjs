@@ -49,7 +49,7 @@ test('V3 missing Redis credentials denies reads, writes, rate limits and XP HTTP
     await cp(resolve('netlify'),join(cwd,'netlify'),{recursive:true});
     await cp(resolve('shared'),join(cwd,'shared'),{recursive:true});
     await symlink(resolve('node_modules'),join(cwd,'node_modules'),'dir');
-    await writeFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'export const BUILD_DEPLOY_CONTEXT="deploy-preview"; export const BUILD_DEPLOY_ORIGIN="https://deploy-preview-1124--playkcswh.netlify.app"; export const BUILD_XP_REDIS_VERSION="3"; export const BUILD_XP_REDIS_ENV="stage";');
+    await writeFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'export const BUILD_DEPLOY_CONTEXT="deploy-preview"; export const BUILD_DEPLOY_ORIGIN="https://deploy-preview-1124--playkcswh.netlify.app"; export const BUILD_ARTIFACT_IDENTITY="netlify-functions"; export const BUILD_XP_REDIS_VERSION="3"; export const BUILD_XP_REDIS_ENV="stage";');
     const script=`import assert from 'node:assert/strict';
       globalThis.fetch=()=>{throw new Error('unexpected network');};
       const m=await import('./netlify/functions/_shared/store-upstash.mjs');

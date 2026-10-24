@@ -49,3 +49,7 @@ Owner authorizes exact native callback addition only to pinned Stage Auth uri_al
 ## Table-only immersive Android GO
 
 Owner physical PASS: avatar upload/finalization, Google OAuth→APK active session, Poker, portrait/landscape. Current landscape failure is unused edges/system bars: prior all-WebView margins reserve bars/cutout/gestures and runtime never hides bars. New goal is full-window table background with safe interactive content; Lobby/Profile retain bars/native safe bounds. Only Android/mobile packaging/runtime changes, no shared web/WS/Auth/avatar/Redis/DB/financial logic or configuration changes. Use existing SystemBars hide/show + official transient swipe immersive behavior; one inset owner handles native route, orientation, IME and document changes without device offsets/dependencies. Physical fullscreen acceptance remains owner-only.
+
+## Approved P1 preservation correction
+
+Owner GO permits immutable artifact identity in generated server metadata and explicit WS Preview workflow marking. Netlify Stage Preview must remain canonical-origin/protected-alias fail-closed; WS Preview may use legacy credentials only with explicit generated ws-preview identity, deploy-preview context, null Netlify origin and Stage V3 tuple. Production keeps legacy token behavior. Existing namespace/epoch/lifecycle/Redis/SHA/deployment guards remain; no environment, appearance, engine, Auth/avatar or deployed WS changes. Test real workflow-generated context and real WS dependency import offline.

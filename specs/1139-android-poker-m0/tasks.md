@@ -70,6 +70,12 @@ Review APK: `bebbdc6a2ac5c6d556d6028bd33fc0bbbc5d4b8c`, [successful hosted workf
 - [x] V001 Record exact857159ca physical fullscreen PASS and visual controls/scaling PASS; freeze accepted appearance, preserve untested distinctions.
 - [x] V002 Independent full diff review against current main; read-only CI/Stage/API/WS boundary and APK provenance checks.
 - [x] V003 Report one real M0 P1/NO-GO: next WS Preview startup rejects deploy-preview/null-origin metadata in store selector; do not silently expand scope/deploy or claim all compatibility PASS.
-- [ ] V004 Follow-up actual-context Redis selector correction + fundamental preservation test; not implemented in review-only task. Preserve Netlify fail-closed behavior, Production/WS contract and namespace/epoch guards.
+- [x] V004 Owner-approved P1 correction implemented with immutable build identity, actual workflow regression and offline real WS dependency imports; existing Netlify/Production/V3 guards retained. No WS deploy.
 
 Manual handoff remains limited to approved transient bars, background/resume and IME scenarios; stable signer/App Links remain M1. No new financial smoke requirement.
+
+## Approved P1 correction validation
+
+- [x] P001 Immutable artifact identity + explicit WS workflow marker/validation; no runtime inference from missing origin.
+- [x] P002 Fundamental red→green regression, actual generated WS context, offline real WS imports, preservation/failure cases, independent minimal-diff review.
+- [ ] P003 Exact-SHA CI/WS PR Checks and report; no live WS deploy/service restart/merge.
