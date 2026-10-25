@@ -1,0 +1,675 @@
+{
+  "runtimeSha": "1226167c8fd77d77307f5cb097a4cc9d57e477f9",
+  "workflow": "https://github.com/krzysztofcal/arcadePlatform/actions/runs/40175101317",
+  "tableId": "2d200475-11f7-4069-8377-0ab8b9e9590f",
+  "originalStartingStacks": {
+    "42c161d8-3034-533e-8599-60d347648b6a": 61,
+    "6536e1b7-13fd-59ec-8e42-30d4b57399fb": 139,
+    "72306a63-69fe-5f16-89a7-d03770e1c5fe": 76,
+    "93449cf9-86fd-4f49-9d9b-2bd42f40dc8d": 96,
+    "111b1f2d-c822-542c-94df-e11d12d86f03": 90,
+    "e72c96a0-3cea-52d8-8c2f-25397fd86cfb": 138
+  },
+  "afterLeave": {
+    "at": "2026-10-25T08:11:43.52032+00:00",
+    "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6",
+    "version": 154,
+    "phase": "RIVER",
+    "startingStacks": {
+      "111b1f2d-c822-542c-94df-e11d12d86f03": 90,
+      "42c161d8-3034-533e-8599-60d347648b6a": 61,
+      "6536e1b7-13fd-59ec-8e42-30d4b57399fb": 139,
+      "72306a63-69fe-5f16-89a7-d03770e1c5fe": 76,
+      "93449cf9-86fd-4f49-9d9b-2bd42f40dc8d": 96,
+      "e72c96a0-3cea-52d8-8c2f-25397fd86cfb": 138
+    },
+    "leave": {
+      "at": "2026-10-25T08:11:15.720292+00:00",
+      "ok": true,
+      "version": 146,
+      "cashedOut": 0,
+      "publicHasPrivateMap": false
+    }
+  },
+  "target": {
+    "audit": {
+      "at": "2026-10-25T08:11:50.235893+00:00",
+      "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6",
+      "version": 156,
+      "integrity": {
+        "flags": [],
+        "status": "OK",
+        "payoutTotal": 14,
+        "returnedTotal": 0,
+        "awardedPotTotal": 14,
+        "endingStackTotal": 600,
+        "contributionTotal": 14,
+        "startingStackTotal": 600,
+        "contestablePotTotal": 14,
+        "potConservationDelta": 0,
+        "stackConservationDelta": 0,
+        "payoutConservationDelta": 0
+      },
+      "participants": [
+        {
+          "folded": false,
+          "payout": 14,
+          "seatNo": 1,
+          "userId": "42c161d8-3034-533e-8599-60d347648b6a",
+          "endingStack": 71,
+          "contribution": 4,
+          "startingStack": 61
+        },
+        {
+          "folded": true,
+          "payout": 0,
+          "seatNo": 2,
+          "userId": "6536e1b7-13fd-59ec-8e42-30d4b57399fb",
+          "endingStack": 139,
+          "contribution": 0,
+          "startingStack": 139
+        },
+        {
+          "folded": false,
+          "payout": 0,
+          "seatNo": 3,
+          "userId": "72306a63-69fe-5f16-89a7-d03770e1c5fe",
+          "endingStack": 72,
+          "contribution": 4,
+          "startingStack": 76
+        },
+        {
+          "folded": true,
+          "payout": 0,
+          "seatNo": 4,
+          "userId": "93449cf9-86fd-4f49-9d9b-2bd42f40dc8d",
+          "endingStack": 94,
+          "contribution": 2,
+          "startingStack": 96
+        },
+        {
+          "folded": true,
+          "payout": 0,
+          "seatNo": 5,
+          "userId": "111b1f2d-c822-542c-94df-e11d12d86f03",
+          "endingStack": 90,
+          "contribution": 0,
+          "startingStack": 90
+        },
+        {
+          "folded": false,
+          "payout": 0,
+          "seatNo": 6,
+          "userId": "e72c96a0-3cea-52d8-8c2f-25397fd86cfb",
+          "endingStack": 134,
+          "contribution": 4,
+          "startingStack": 138
+        }
+      ]
+    },
+    "actions": [
+      {
+        "at": "2026-10-25T08:10:51.986866+00:00",
+        "to": "PREFLOP",
+        "from": "PREFLOP",
+        "action": "FOLD",
+        "amount": 0,
+        "userId": "6536e1b7-13fd-59ec-8e42-30d4b57399fb",
+        "version": 142,
+        "requestId": "bot:settled_rollover:no-request-id:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:PREFLOP:6536e1b7-13fd-59ec-8e42-30d4b57399fb:v141:1"
+      },
+      {
+        "at": "2026-10-25T08:10:54.640896+00:00",
+        "to": "PREFLOP",
+        "from": "PREFLOP",
+        "action": "CALL",
+        "amount": 2,
+        "userId": "72306a63-69fe-5f16-89a7-d03770e1c5fe",
+        "version": 143,
+        "requestId": "bot:settled_rollover:no-request-id:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:PREFLOP:72306a63-69fe-5f16-89a7-d03770e1c5fe:v142:1"
+      },
+      {
+        "at": "2026-10-25T08:11:12.353027+00:00",
+        "to": "PREFLOP",
+        "from": "PREFLOP",
+        "action": "CALL",
+        "amount": 2,
+        "userId": "93449cf9-86fd-4f49-9d9b-2bd42f40dc8d",
+        "version": 144,
+        "requestId": "ws_1a1721d1a1b_8004184a"
+      },
+      {
+        "at": "2026-10-25T08:11:15.582635+00:00",
+        "to": "PREFLOP",
+        "from": "PREFLOP",
+        "action": "FOLD",
+        "amount": 0,
+        "userId": "111b1f2d-c822-542c-94df-e11d12d86f03",
+        "version": 145,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:PREFLOP:111b1f2d-c822-542c-94df-e11d12d86f03:v144:1"
+      },
+      {
+        "at": "2026-10-25T08:11:15.720292+00:00",
+        "to": "PREFLOP",
+        "from": "PREFLOP",
+        "action": "LEAVE_TABLE",
+        "amount": null,
+        "userId": "93449cf9-86fd-4f49-9d9b-2bd42f40dc8d",
+        "version": 146,
+        "requestId": "leave_1151_mvnjth7c"
+      },
+      {
+        "at": "2026-10-25T08:11:19.864396+00:00",
+        "to": "FLOP",
+        "from": "PREFLOP",
+        "action": "CALL",
+        "amount": 1,
+        "userId": "e72c96a0-3cea-52d8-8c2f-25397fd86cfb",
+        "version": 147,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:PREFLOP:e72c96a0-3cea-52d8-8c2f-25397fd86cfb:v146:1"
+      },
+      {
+        "at": "2026-10-25T08:11:23.178139+00:00",
+        "to": "FLOP",
+        "from": "FLOP",
+        "action": "CHECK",
+        "amount": 0,
+        "userId": "e72c96a0-3cea-52d8-8c2f-25397fd86cfb",
+        "version": 148,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:FLOP:e72c96a0-3cea-52d8-8c2f-25397fd86cfb:v147:2"
+      },
+      {
+        "at": "2026-10-25T08:11:26.251713+00:00",
+        "to": "FLOP",
+        "from": "FLOP",
+        "action": "CHECK",
+        "amount": 0,
+        "userId": "42c161d8-3034-533e-8599-60d347648b6a",
+        "version": 149,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:FLOP:42c161d8-3034-533e-8599-60d347648b6a:v148:3"
+      },
+      {
+        "at": "2026-10-25T08:11:28.954438+00:00",
+        "to": "TURN",
+        "from": "FLOP",
+        "action": "CHECK",
+        "amount": 0,
+        "userId": "72306a63-69fe-5f16-89a7-d03770e1c5fe",
+        "version": 150,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:FLOP:72306a63-69fe-5f16-89a7-d03770e1c5fe:v149:4"
+      },
+      {
+        "at": "2026-10-25T08:11:32.223692+00:00",
+        "to": "TURN",
+        "from": "TURN",
+        "action": "CHECK",
+        "amount": 0,
+        "userId": "e72c96a0-3cea-52d8-8c2f-25397fd86cfb",
+        "version": 151,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:TURN:e72c96a0-3cea-52d8-8c2f-25397fd86cfb:v150:5"
+      },
+      {
+        "at": "2026-10-25T08:11:36.284749+00:00",
+        "to": "TURN",
+        "from": "TURN",
+        "action": "CHECK",
+        "amount": 0,
+        "userId": "42c161d8-3034-533e-8599-60d347648b6a",
+        "version": 152,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:TURN:42c161d8-3034-533e-8599-60d347648b6a:v151:6"
+      },
+      {
+        "at": "2026-10-25T08:11:39.29671+00:00",
+        "to": "RIVER",
+        "from": "TURN",
+        "action": "CHECK",
+        "amount": 0,
+        "userId": "72306a63-69fe-5f16-89a7-d03770e1c5fe",
+        "version": 153,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:TURN:72306a63-69fe-5f16-89a7-d03770e1c5fe:v152:7"
+      },
+      {
+        "at": "2026-10-25T08:11:42.919132+00:00",
+        "to": "RIVER",
+        "from": "RIVER",
+        "action": "BET",
+        "amount": 2,
+        "userId": "e72c96a0-3cea-52d8-8c2f-25397fd86cfb",
+        "version": 154,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:RIVER:e72c96a0-3cea-52d8-8c2f-25397fd86cfb:v153:8"
+      },
+      {
+        "at": "2026-10-25T08:11:46.803704+00:00",
+        "to": "RIVER",
+        "from": "RIVER",
+        "action": "CALL",
+        "amount": 2,
+        "userId": "42c161d8-3034-533e-8599-60d347648b6a",
+        "version": 155,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:RIVER:42c161d8-3034-533e-8599-60d347648b6a:v154:9"
+      },
+      {
+        "at": "2026-10-25T08:11:50.235893+00:00",
+        "to": "SETTLED",
+        "from": "RIVER",
+        "action": "CALL",
+        "amount": 2,
+        "userId": "72306a63-69fe-5f16-89a7-d03770e1c5fe",
+        "version": 156,
+        "requestId": "bot:act:ws_1a1721d1a1b_8004184a:ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6:RIVER:72306a63-69fe-5f16-89a7-d03770e1c5fe:v155:10"
+      }
+    ]
+  },
+  "final": {
+    "at": "2026-10-25T08:16:54.616107+00:00",
+    "table": {
+      "phase": "RIVER",
+      "escrow": 506,
+      "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_224_5",
+      "status": "OPEN",
+      "version": 251,
+      "humanStack": null,
+      "stateTotal": 506,
+      "pendingDetach": null
+    },
+    "wallet": 454,
+    "humanSeats": [],
+    "transactions": [
+      {
+        "at": "2026-10-25T08:09:02.423332+00:00",
+        "id": "eac1ee7b-a10e-470a-a31e-8c7476f3757e",
+        "type": "TABLE_BUY_IN",
+        "userDelta": -100,
+        "entriesSum": 0,
+        "escrowDelta": 100
+      },
+      {
+        "at": "2026-10-25T08:11:55.38502+00:00",
+        "id": "8545239c-1d43-46d4-aac2-08ca8b742027",
+        "type": "TABLE_CASH_OUT",
+        "userDelta": 94,
+        "entriesSum": 0,
+        "escrowDelta": -94
+      }
+    ],
+    "blockingBotHand": {
+      "at": "2026-10-25T08:14:29.13939+00:00",
+      "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_182_5",
+      "integrity": {
+        "flags": [],
+        "status": "OK",
+        "payoutTotal": 50,
+        "returnedTotal": 0,
+        "awardedPotTotal": 50,
+        "endingStackTotal": 506,
+        "contributionTotal": 50,
+        "startingStackTotal": 506,
+        "contestablePotTotal": 50,
+        "potConservationDelta": 0,
+        "stackConservationDelta": 0,
+        "payoutConservationDelta": 0
+      }
+    },
+    "pendingPokerRequests": 0
+  },
+  "escrow": {
+    "entries": [
+      {
+        "at": "2026-10-25T08:02:54.496906+00:00",
+        "txId": "1a555661-31f3-426d-a738-9355a41d30c2",
+        "type": "TABLE_BUY_IN",
+        "reference": "BOT_SEED_BUY_IN:2d200475-11f7-4069-8377-0ab8b9e9590f:2",
+        "escrowDelta": 100,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:02:54.496906+00:00",
+        "txId": "307a9a0a-a697-48d0-b4ac-354ed19db87c",
+        "type": "TABLE_BUY_IN",
+        "reference": "BOT_SEED_BUY_IN:2d200475-11f7-4069-8377-0ab8b9e9590f:3",
+        "escrowDelta": 100,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:02:54.496906+00:00",
+        "txId": "9c635e99-0b8c-40e6-8dbc-15e51360f304",
+        "type": "TABLE_BUY_IN",
+        "reference": "BOT_SEED_BUY_IN:2d200475-11f7-4069-8377-0ab8b9e9590f:1",
+        "escrowDelta": 100,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:09:02.423332+00:00",
+        "txId": "c8ee4a7d-60b2-4a47-97a1-02246ddc19d1",
+        "type": "TABLE_BUY_IN",
+        "reference": "BOT_SEED_BUY_IN:2d200475-11f7-4069-8377-0ab8b9e9590f:6",
+        "escrowDelta": 100,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:09:02.423332+00:00",
+        "txId": "eac1ee7b-a10e-470a-a31e-8c7476f3757e",
+        "type": "TABLE_BUY_IN",
+        "reference": "table:2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "escrowDelta": 100,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:09:02.423332+00:00",
+        "txId": "1c762eab-8b3e-4fad-84c6-e30d3eaccdc5",
+        "type": "TABLE_BUY_IN",
+        "reference": "BOT_SEED_BUY_IN:2d200475-11f7-4069-8377-0ab8b9e9590f:5",
+        "escrowDelta": 100,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:11:55.38502+00:00",
+        "txId": "8545239c-1d43-46d4-aac2-08ca8b742027",
+        "type": "TABLE_CASH_OUT",
+        "reference": "table:2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "escrowDelta": -94,
+        "transactionSum": 0
+      }
+    ],
+    "escrowBalance": 506,
+    "allEscrowEntriesSum": 506
+  },
+  "verdict": "NOT READY",
+  "singlePlayer": "BLOCKED after client retry timeout",
+  "reloadTiming": "BLOCKED: DEBUG span not emitted; no approved readable environment for independent read-only probe",
+  "deployment": {
+    "definitionRef": "main",
+    "definitionSha": "6ecbc8a36a19952b7e86255436e8be903ea5d646",
+    "restartUtc": "2026-10-25T08:03:54Z",
+    "pid": 285476,
+    "healthz": "ok",
+    "modules": {
+      "server.mjs": "71565bd98fd72e24d8deb52c9e33c4129b214392e7c3557cd0fae17b20163464",
+      "poker/handlers/leave.mjs": "bbe2fcc605dc25415b00f2c7a53e55ac0bca8a2fa12a2702946ee7df1fdbb3cc",
+      "poker/runtime/account-deletion.mjs": "aff06b5d14637ec74303d7ac2c05f30f99641c35b9f8d54cdaf61bfeb427c2d2",
+      "poker/table/table-manager.mjs": "0a28067a903bdc782b62bc37ebe04a96656f0b8870efb4ac9ca6483f6042c648"
+    }
+  },
+  "browser": {
+    "origin": "https://deploy-preview-1151--playkcswh.netlify.app",
+    "startedAt": "2026-10-25T08:08:21.234Z",
+    "finishedAt": "2026-10-25T08:14:08.228Z",
+    "wsOrigins": [
+      "wss://ws-preview.kcswh.pl/ws"
+    ],
+    "publicSnapshotCount": 51,
+    "privateMapViolations": 0,
+    "events": [
+      {
+        "at": "2026-10-25T08:09:03.996Z",
+        "kind": "command_result",
+        "mode": "online",
+        "requestId": "join_mvnjqemb_7mxqbd8k",
+        "serverTs": "2026-10-25T08:09:03.977Z",
+        "status": "accepted",
+        "reason": "already_joined",
+        "seatNo": 4,
+        "joinStatus": "WAITING_NEXT_HAND",
+        "elapsedMs": 14702
+      },
+      {
+        "at": "2026-10-25T08:09:04.065Z",
+        "kind": "online_join_pass",
+        "mode": "online",
+        "result": {
+          "requestId": "join_mvnjqemb_7mxqbd8k",
+          "serverTs": "2026-10-25T08:09:03.977Z",
+          "status": "accepted",
+          "reason": "already_joined",
+          "seatNo": 4,
+          "joinStatus": "WAITING_NEXT_HAND",
+          "elapsedMs": 14702
+        }
+      },
+      {
+        "at": "2026-10-25T08:09:16.599Z",
+        "kind": "command_result",
+        "mode": "online",
+        "requestId": "ws_1a1721b5530_d7e2baac",
+        "serverTs": "2026-10-25T08:09:16.589Z",
+        "status": "accepted",
+        "reason": null,
+        "elapsedMs": 260
+      },
+      {
+        "at": "2026-10-25T08:09:16.651Z",
+        "kind": "player_action_pass",
+        "mode": "online",
+        "label": "Call (4)",
+        "requestId": "ws_1a1721b5530_d7e2baac",
+        "result": {
+          "requestId": "ws_1a1721b5530_d7e2baac",
+          "serverTs": "2026-10-25T08:09:16.589Z",
+          "status": "accepted",
+          "reason": null,
+          "elapsedMs": 260
+        }
+      },
+      {
+        "at": "2026-10-25T08:11:12.533Z",
+        "kind": "command_result",
+        "mode": "online",
+        "requestId": "ws_1a1721d1a1b_8004184a",
+        "serverTs": "2026-10-25T08:11:12.525Z",
+        "status": "accepted",
+        "reason": null,
+        "elapsedMs": 243
+      },
+      {
+        "at": "2026-10-25T08:11:12.599Z",
+        "kind": "player_action_pass",
+        "mode": "online",
+        "label": "Call (2)",
+        "requestId": "ws_1a1721d1a1b_8004184a",
+        "result": {
+          "requestId": "ws_1a1721d1a1b_8004184a",
+          "serverTs": "2026-10-25T08:11:12.525Z",
+          "status": "accepted",
+          "reason": null,
+          "elapsedMs": 243
+        }
+      },
+      {
+        "at": "2026-10-25T08:11:12.600Z",
+        "kind": "leave_before",
+        "mode": "online",
+        "requestId": "leave_1151_mvnjth7c",
+        "tableId": "2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6"
+      },
+      {
+        "at": "2026-10-25T08:11:12.618Z",
+        "kind": "sent",
+        "mode": "online",
+        "type": "leave",
+        "requestId": "leave_1151_mvnjth7c",
+        "tableId": "2d200475-11f7-4069-8377-0ab8b9e9590f"
+      },
+      {
+        "at": "2026-10-25T08:11:16.224Z",
+        "kind": "command_result",
+        "mode": "online",
+        "requestId": "leave_1151_mvnjth7c",
+        "serverTs": "2026-10-25T08:11:16.220Z",
+        "status": "accepted",
+        "reason": null,
+        "elapsedMs": 3606
+      },
+      {
+        "at": "2026-10-25T08:11:16.227Z",
+        "kind": "leave_accepted",
+        "mode": "online",
+        "requestId": "leave_1151_mvnjth7c",
+        "tableId": "2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_141_6",
+        "result": {
+          "requestId": "leave_1151_mvnjth7c",
+          "serverTs": "2026-10-25T08:11:16.220Z",
+          "status": "accepted",
+          "reason": null,
+          "elapsedMs": 3606
+        }
+      },
+      {
+        "at": "2026-10-25T08:13:55.899Z",
+        "kind": "observer_reconnect_pass",
+        "mode": "online",
+        "snapshot": {
+          "tableId": "2d200475-11f7-4069-8377-0ab8b9e9590f",
+          "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_182_5",
+          "phase": "TURN",
+          "seat": null,
+          "version": 195
+        }
+      },
+      {
+        "at": "2026-10-25T08:13:55.909Z",
+        "kind": "sent",
+        "mode": "online",
+        "type": "leave",
+        "requestId": "leave_1151_mvnjth7c",
+        "tableId": "2d200475-11f7-4069-8377-0ab8b9e9590f"
+      },
+      {
+        "at": "2026-10-25T08:14:07.915Z",
+        "kind": "FAIL",
+        "mode": "online",
+        "reason": "page.evaluate: Error: timeout\n    at createError (https://deploy-preview-1151--playkcswh.netlify.app/poker/poker-ws-client.js:45:13)\n    at https://deploy-preview-1151--playkcswh.n",
+        "snapshot": {
+          "tableId": "2d200475-11f7-4069-8377-0ab8b9e9590f",
+          "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_182_5",
+          "phase": "TURN",
+          "seat": null,
+          "version": 199
+        }
+      }
+    ]
+  },
+  "previousAudit": {
+    "at": "2026-10-25T08:10:44.538508+00:00",
+    "handId": "ws_hand_2d200475-11f7-4069-8377-0ab8b9e9590f_112_6",
+    "integrity": {
+      "flags": [],
+      "status": "OK",
+      "payoutTotal": 48,
+      "returnedTotal": 0,
+      "awardedPotTotal": 48,
+      "endingStackTotal": 600,
+      "contributionTotal": 48,
+      "startingStackTotal": 600,
+      "contestablePotTotal": 48,
+      "potConservationDelta": 0,
+      "stackConservationDelta": 0,
+      "payoutConservationDelta": 0
+    },
+    "participants": [
+      {
+        "folded": false,
+        "payout": 0,
+        "seatNo": 1,
+        "userId": "42c161d8-3034-533e-8599-60d347648b6a",
+        "endingStack": 61,
+        "contribution": 10,
+        "startingStack": 71
+      },
+      {
+        "folded": false,
+        "payout": 0,
+        "seatNo": 2,
+        "userId": "6536e1b7-13fd-59ec-8e42-30d4b57399fb",
+        "endingStack": 139,
+        "contribution": 10,
+        "startingStack": 149
+      },
+      {
+        "folded": true,
+        "payout": 0,
+        "seatNo": 3,
+        "userId": "72306a63-69fe-5f16-89a7-d03770e1c5fe",
+        "endingStack": 76,
+        "contribution": 4,
+        "startingStack": 80
+      },
+      {
+        "folded": true,
+        "payout": 0,
+        "seatNo": 4,
+        "userId": "93449cf9-86fd-4f49-9d9b-2bd42f40dc8d",
+        "endingStack": 96,
+        "contribution": 4,
+        "startingStack": 100
+      },
+      {
+        "folded": false,
+        "payout": 0,
+        "seatNo": 5,
+        "userId": "111b1f2d-c822-542c-94df-e11d12d86f03",
+        "endingStack": 90,
+        "contribution": 10,
+        "startingStack": 100
+      },
+      {
+        "folded": false,
+        "payout": 48,
+        "seatNo": 6,
+        "userId": "e72c96a0-3cea-52d8-8c2f-25397fd86cfb",
+        "endingStack": 138,
+        "contribution": 10,
+        "startingStack": 100
+      }
+    ]
+  },
+  "lifecycleClose": {
+    "at": "2026-10-25T08:22:27.500563+00:00",
+    "escrow": 0,
+    "wallet": 454,
+    "tableStatus": "CLOSED",
+    "lateEscrowEntries": [
+      {
+        "at": "2026-10-25T08:19:54.865407+00:00",
+        "id": "5f1217fa-3f9c-4aab-9a57-4c779812de16",
+        "type": "TABLE_CASH_OUT",
+        "reference": "table:2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "escrowDelta": -87,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:19:54.865407+00:00",
+        "id": "fcb4aee7-cac4-43e6-9234-16e17e1d8298",
+        "type": "TABLE_CASH_OUT",
+        "reference": "table:2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "escrowDelta": -73,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:19:54.865407+00:00",
+        "id": "c92e0360-f716-4903-806c-c894be6756f9",
+        "type": "TABLE_CASH_OUT",
+        "reference": "table:2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "escrowDelta": -107,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:19:54.865407+00:00",
+        "id": "1b016445-d7aa-4f87-a33b-17079328b14f",
+        "type": "TABLE_CASH_OUT",
+        "reference": "table:2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "escrowDelta": -115,
+        "transactionSum": 0
+      },
+      {
+        "at": "2026-10-25T08:19:54.865407+00:00",
+        "id": "e15e12ae-3710-4b99-b9ea-cf41c9af8fbe",
+        "type": "TABLE_CASH_OUT",
+        "reference": "table:2d200475-11f7-4069-8377-0ab8b9e9590f",
+        "escrowDelta": -124,
+        "transactionSum": 0
+      }
+    ]
+  }
+}

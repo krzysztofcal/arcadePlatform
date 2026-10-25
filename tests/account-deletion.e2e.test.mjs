@@ -85,6 +85,114 @@ const {__createMemoryStoreForTests,guardedUserMutation,blockRedisIdentity,cleanu
 const {createXpLedgerKeys}=await import('../netlify/functions/_shared/xp-ledger.mjs');
 const {createHash}=await import('node:crypto');
 
+test('deletion Leave retains audit metadata and recovers committed cashout reload before one BURN', async(t)=>{
+  const {createDeletionPokerLeave,createDeletionPokerCoordinator}=await import('../ws-server/poker/runtime/account-deletion.mjs');
+  const {createTableManager}=await import('../ws-server/poker/table/table-manager.mjs');
+  const {buildBootstrappedPokerState}=await import('../ws-server/poker/engine/poker-engine.mjs');
+  const {deriveDeterministicRuntimeHandState}=await import('../ws-server/poker/shared/runtime-hand-state.mjs');
+  const {createPersistedStateWriter}=await import('../ws-server/poker/persistence/persisted-state-writer.mjs');
+  const {buildStateSnapshotPayload}=await import('../ws-server/poker/read-model/state-snapshot.mjs');
+  const {begin}=await fixture(75);
+  const TABLE='88888888-8888-4888-8888-888888888888';
+  t.after(async()=>{
+    for(const table of ['poker_hole_cards','poker_actions','poker_state','poker_seats'])
+      await db.query(`delete from ${table} where table_id=$1`,[TABLE]);
+    await db.query('delete from poker_tables where id=$1',[TABLE]);
+  });
+  const BOT='77777777-7777-4777-8777-777777777777';
+  await db.exec(`create table if not exists poker_hole_cards(table_id uuid,hand_id text,user_id uuid,cards jsonb,primary key(table_id,hand_id,user_id));
+    create unique index if not exists deletion_test_settlement on poker_actions(table_id,hand_id)
+    where hand_id is not null and btrim(hand_id)<>'' and action_type='HAND_SETTLED'`);
+  await db.query("insert into poker_tables(id,status,lifecycle_kind,is_single_player) values($1,'OPEN','STANDARD',false) on conflict(id) do update set status='OPEN'",[TABLE]);
+  await db.query("insert into chips_accounts(account_type,system_key,balance) values('ESCROW',$1,300),('SYSTEM','POKER_BOT_BANKROLL_100',0)",['POKER_TABLE:'+TABLE]);
+  const ids=[USER,OTHER,BOT],starts=Object.fromEntries(ids.map(id=>[id,100]));
+  const core={version:1,roomId:TABLE,maxSeats:3,members:ids.map((userId,i)=>({userId,seat:i+1})),
+    seats:Object.fromEntries(ids.map((id,i)=>[id,i+1])),publicStacks:starts,
+    seatDetailsByUserId:Object.fromEntries(ids.map(id=>[id,{isBot:id!==USER}]))};
+  const initial={...buildBootstrappedPokerState({tableId:TABLE,coreState:core,dealerSeatNo:1,startingStacks:starts,handVersion:1}),tableId:TABLE};
+  const {deck,holeCardsByUserId,...stored}=initial;
+  await db.query('insert into poker_state(table_id,version,state) values($1,1,$2)',[TABLE,stored]);
+  for(const [i,id] of ids.entries())await db.query("insert into poker_seats values($1,$2,$3,'ACTIVE',$4,$5)",[TABLE,id,i+1,id!==USER,initial.stacks[id]]);
+  await db.exec("update account_deletion_requests set phase='poker',status='PENDING',lease_until=null,progress='{}'");
+  const manager=createTableManager({defaultBuyIn:100,maxSeats:3});
+  const install=row=>manager.restoreTableFromPersisted(TABLE,{tableMeta:{buyIn:100},tableStatus:'OPEN',presenceByUserId:new Map(),
+    coreState:{...core,version:Number(row.version),pokerState:{...row.state,...deriveDeterministicRuntimeHandState(row.state)},
+      members:core.members.filter(m=>row.state.stacks?.[m.userId]!=null&&!row.state.leftTableByUserId?.[m.userId]),
+      seats:Object.fromEntries(core.members.filter(m=>row.state.stacks?.[m.userId]!=null&&!row.state.leftTableByUserId?.[m.userId]).map(m=>[m.userId,m.seat]))}});
+  assert.equal(install({version:1,state:stored}).ok,true);
+  let failReload=false,reloads=0,leaveCalls=0;
+  const coordination=createDeletionPokerCoordinator({enqueue:async(_id,run)=>run(),
+    block:id=>manager.blockTableMutations(id),unblock:id=>manager.unblockTableMutations(id),
+    restore:async()=>{reloads++;if(failReload)return {ok:false};return install((await db.query('select version,state from poker_state where table_id=$1',[TABLE])).rows[0]);}});
+  const leave=createDeletionPokerLeave({coordinate:coordination.coordinate,
+    executeLeave:async input=>{
+      leaveCalls++;
+      const result=await executePokerLeave({...input,beginSql:begin,includeState:true,klog:()=>{},runPostLeaveBotAutoplay:false,hasConnectedHumanPresence:()=>true});
+      assert.equal(JSON.stringify(result).includes('handStartStacksByUserId'),false);
+      return result;
+    }});
+  let loseBurnResult=true;
+  const sqlErrors=[];
+  const runtime=createAccountDeletionRuntime({beginSql:async fn=>{
+    const result=await begin(fn).catch(error=>{sqlErrors.push(error.message);throw error;});
+    if(result?.receipt&&loseBurnResult){loseBurnResult=false;throw new Error('lost committed BURN response');}
+    return result;
+  },env:{ACCOUNT_DELETION_ENABLED:'1'},klog:()=>{},
+    leaveFromTable:leave,coordinatePokerPrivacy:coordination.coordinate,resyncPokerPrivacy:coordination.resync});
+  const advance=async()=>{
+    await db.query("update account_deletion_requests set next_attempt_at=now()-interval '1 second' where request_id=$1",[REQUEST]);
+    return advanceDeletion({beginSql:begin,requestId:REQUEST,steps:runtime.steps});
+  };
+  assert.equal((await advance()).waiting,true);
+  let state=manager.persistedPokerState(TABLE);
+  assert.deepEqual(state.handStartStacksByUserId,starts);
+  assert.equal(state.leftTableByUserId[USER],true);
+  const writeLogs=[];
+  const writer=createPersistedStateWriter({beginSql:begin,env:{SUPABASE_DB_URL:'postgres://fixture.invalid/db',ACCOUNT_DELETION_ENABLED:'1'},klog:(kind,data)=>writeLogs.push({kind,...data})});
+  for(let step=0;state.phase!=='SETTLED'&&step<20;step++){
+    const version=manager.tableSnapshot(TABLE,OTHER).stateVersion;
+    const acted=manager.applyAction({tableId:TABLE,handId:state.handId,userId:state.turnUserId,
+      action:Number(state.toCallByUserId[state.turnUserId]||0)>0?'CALL':'CHECK',requestId:'deletion-bot-'+step});
+    assert.equal(acted.accepted,true);
+    state=manager.persistedPokerState(TABLE);
+    assert.equal(Number((await db.query('select version from poker_state where table_id=$1',[TABLE])).rows[0].version),version,JSON.stringify({step,version,persistedVersion:manager.persistedStateVersion(TABLE)}));
+    const persisted=await writer.writeMutation({tableId:TABLE,expectedVersion:version,nextState:state});
+    assert.equal(persisted.ok,true,JSON.stringify(persisted));
+    assert.equal(writeLogs.some(log=>log.kind.endsWith('_failed')),false,JSON.stringify(writeLogs));
+    assert.equal(persisted.newVersion,version+1,JSON.stringify(persisted));
+    manager.setPersistedStateVersion(TABLE,persisted.newVersion);
+    for(const userId of [OTHER,'observer'])assert.equal(JSON.stringify(buildStateSnapshotPayload({tableSnapshot:manager.tableSnapshot(TABLE,userId),userId})).includes('handStartStacksByUserId'),false);
+  }
+  assert.equal(state.phase,'SETTLED');
+  const audit=(await db.query("select meta from poker_actions where table_id=$1 and hand_id=$2 and action_type='HAND_SETTLED'",[TABLE,state.handId])).rows[0].meta;
+  assert.equal(audit.integrity.status,'OK');assert.deepEqual(audit.integrity.flags,[]);
+  assert.equal(audit.integrity.startingStackTotal,300);assert.equal(audit.integrity.endingStackTotal,300);
+  // Commit real cashout, then lose the reload. The table must remain fenced.
+  failReload=true;
+  assert.equal((await advance()).retryable,true);
+  assert.equal(manager.isTableMutationBlocked(TABLE),true);
+  assert.equal((await db.query("select count(*)::int n from poker_seats where user_id=$1 and status in ('ACTIVE','WAITING_NEXT_HAND')",[USER])).rows[0].n,0);
+  const cashoutsBefore=(await db.query("select count(*)::int n from chips_transactions where tx_type='TABLE_CASH_OUT'")).rows[0].n;
+  assert.equal((await db.query("select balance::int n from chips_accounts where user_id=$1",[USER])).rows[0].n,175);
+  assert.equal((await db.query('select status,phase from account_deletion_requests')).rows[0].status,'RETRY');
+  assert.equal((await advance()).retryable,true);
+  assert.equal((await db.query("select count(*)::int n from chips_transactions where tx_type='BURN'")).rows[0].n,0);
+  failReload=false;
+  assert.equal((await advance()).advanced,true,'resync must run even after the owner disappears from SQL poker scan');
+  assert.equal(manager.isTableMutationBlocked(TABLE),false);
+  assert.equal(leaveCalls,2,'recovery reload must not run financial Leave again');
+  assert.equal(reloads,4);
+  assert.equal((await db.query("select count(*)::int n from chips_transactions where tx_type='TABLE_CASH_OUT'")).rows[0].n,cashoutsBefore);
+  assert.equal((await advance()).retryable,true); // lose the real BURN response after commit
+  const burnRetry=await advance();
+  assert.equal(burnRetry.advanced,true,JSON.stringify({burnRetry,sqlErrors,request:(await db.query('select status,phase,error_code,progress from account_deletion_requests')).rows[0]})); // durable retirement receipt replays
+  assert.equal((await db.query("select count(*)::int n from chips_transactions where tx_type='BURN'")).rows[0].n,1);
+  assert.equal((await db.query("select amount::int n from chips_entries e join chips_transactions t on t.id=e.transaction_id where t.tx_type='BURN' and amount<0")).rows[0].n,-175);
+  assert.equal((await db.query("select balance::int n from chips_accounts where system_key=$1",['POKER_TABLE:'+TABLE])).rows[0].n,200);
+  assert.equal((await db.query('select sum(amount)::int n from chips_entries')).rows[0].n,0);
+  assert.equal((await db.query('select count(*)::int n from auth.users where id=$1',[USER])).rows[0].n,1,'Auth remains last, not called by this regression');
+});
+
 test('local request → all-in showdown/side-pot → real cashout+BURN → indexed cleanup → official Auth delete, restart/retry',async()=>{
   const {begin}=await fixture(75);
   await db.exec('delete from account_deletion_requests');
