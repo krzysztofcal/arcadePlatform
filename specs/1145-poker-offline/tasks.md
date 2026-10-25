@@ -25,4 +25,4 @@ Owner PASS on Galaxy S24+: Offline play, multiple hands, human actions, Resume, 
 
 - [x] T013 Separate20s actor deadline from1–2s bot decision; canonical late fallback, independent pause budgets, no double callback.
 - [x] T014 Pure shared2–5 selection at New Game, persistent3–6 roster, dynamic snapshot/reactions and legacy two-bot v1 upgrade; only human wallet debit.
-- [ ] Focused Netlify evidence, current-SHA debug APK and owner re-test. No shared-runtime WS repeat/merge/Production.
+- [x] Focused Netlify5bot/6player evidence, full20s clocks/short decisions/showdown/Resume/Leave/isolation PASS; new Stage APK workflow PASS. Final artifact linked in PR. **Owner re-test PENDING**; no shared-runtime WS repeat/merge/Production.

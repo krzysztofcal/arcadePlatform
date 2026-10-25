@@ -12,6 +12,17 @@ No shared runtime/strategy/Online CSS/protocol/finance change, so no WS Preview 
 
 Deferred replacement assessment: `replaceBrokeBotsForNextHand()` already returns a pure state/replacement plan, but is not a drop-in Offline call: its generated IDs conflict with current local roster validation, its UUID helper uses Node crypto/Buffer beyond the prepared-seed adapter, and replacementFunding descriptors must never invoke CH bankroll/ledger paths. A later small reviewed browser-safe identity/local-issuance adaptation could reuse the planning semantics. It is **not implemented here**; current roster remains stable and broke bots retain existing local top-up behavior between hands.
 
+## Focused Preview PASS / new APK gate
+
+Tested runtime `f41b82e1c576a7a54260a47c5c16c58766bf4112`; [immutable Preview](https://6ade67d9f2cddc8fd73253f2--playkcswh.netlify.app/poker/), ready/exact commit_ref; later commits are evidence-only. [Measured session](evidence/preview-t013-t014-2026-10-25.json), [six-seat clock](evidence/preview-t013-six-seats.png).
+
+- Random New Game selected5bots+Hero: seats1–6, all100PC, wallet4900 (only human buy-in). Existing V2 shows active bot20,000ms clock; sampled remaining19,870ms/progress0.99975. All25observed bot decisions had20,000ms turn limit, scheduled1010–1909ms, observed1011–1911ms. Example1535ms decision leaves18,465ms. Deadline CHECK/FOLD for delayed bot is deterministically tested, not a live fault injection.
+- Board9S AH4S JC8H; stacks92/92/92/96/92/136,total600,pot0, canonical showdown/settlement. Auto-next3004ms. Back/Resume kept roster/seat assignments/tableId/theme and parked stacks. Ordinary Leave wallet4900+92cashout=4992,sessionnull. No second debit for bot stacks.
+- Network disabled after initial assets:0requests/0fetch/XHR/WS/beacon attempts,0JS errors. No forced clicks/direct action handlers/mocked game state. One focused Preview smoke, no WS/funded remote campaign.
+- Fundamental21/21PASS:15Offline+3mobile+3canonical timeout; syntax/CSP/rebuild/whitespace PASS; runtime CI/CodeQL/required checks and initial APK workflow40231415322 SUCCESS. Final documentation-head APK receipt/SHA256 linked in PR once build completes. No further runtime change after this evidence.
+
+Current recommendation: **ready for owner physical re-test; retain Draft, no merge/Production**. No public Online breaking impact; new Offline behavior is20s bot avatar clock with separate short decision and random persistent2–5 bot roster. v1 legacy two-bot and short-clock compatibility tested. Debug signing may require uninstalling only Stage, which erases local data; no Android signing/release/configuration change in this task. All prior S24+ PASS remains recorded; owner should specifically confirm countdown pacing and3–6player seating/Resume in the new APK.
+
 ---
 ## Previous physical review and evidence
 
