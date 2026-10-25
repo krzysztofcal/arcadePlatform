@@ -1,8 +1,9 @@
 import { buildBootstrappedPokerState, buildNextHandStateFromSettled } from '../../ws-server/poker/engine/poker-engine.mjs';
 import { applyAction } from '../../ws-server/poker/shared/poker-action-reducer.mjs';
 import { computeSharedLegalActions } from '../../ws-server/poker/shared/poker-primitives.mjs';
-import { chooseBotActionProfiled, enrichBotLegalActions } from '../../ws-server/poker/shared/poker-bot-strategy.mjs';
+import { chooseBotActionProfiled, enrichBotLegalActions, clampRandom } from '../../ws-server/poker/shared/poker-bot-strategy.mjs';
 import { projectRoomCoreSnapshot } from '../../ws-server/poker/read-model/room-core-snapshot.mjs';
+import { stampTurnDeadline, decideTurnTimeout } from '../../ws-server/poker/shared/poker-turn-timeout.mjs';
 import { prepareSeed } from './browser-crypto.mjs';
 
 export const STORAGE_KEY = 'arcade.poker.offline.v1';
@@ -19,7 +20,7 @@ function core(session) {
 // A single localStorage record is the transaction: wallet and session never split.
 // Each mutation rereads it synchronously; async deals use revision compare-and-set.
 // Failed writes leave the previously committed snapshot intact. No online imports.
-export function createOfflineGame({storage, prepare=prepareSeed, random=Math.random, uuid=()=>crypto.randomUUID()}={}) {
+export function createOfflineGame({storage, prepare=prepareSeed, random=Math.random, uuid=()=>crypto.randomUUID(), now=Date.now}={}) {
   function read() {
     const raw=storage.getItem(STORAGE_KEY);
     if(raw===null) return {schema:1,revision:0,wallet:5000,session:null};
@@ -29,6 +30,7 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
     if(data.session) {
       const s=data.session;
       if(typeof s.tableId!=='string'||!s.tableId.startsWith('offline-')||!integer(s.hand)||s.hand<1||![100,500,1000].includes(s.buyIn)||!s.state||s.state.roomId!==s.tableId||typeof s.state.handId!=='string'||!integer(s.state.potTotal)||!ids.every(id=>integer(s.state.stacks?.[id]))) throw new Error('Invalid offline storage session');
+      if(s.clock && (typeof s.clock.paused!=='boolean'||!integer(s.clock.durationMs)||s.clock.durationMs<1||s.clock.durationMs>20000||!integer(s.clock.remainingMs)||s.clock.remainingMs>s.clock.durationMs||!integer(s.clock.dueAt)))throw new Error('Invalid offline storage clock');
     }
     return data;
   }
@@ -40,10 +42,18 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
   function mutate(fn) { const data=read(), revision=data.revision; const result=fn(data); save(data,revision); return result; }
   function session(data) {if(!data.session) throw new Error('No offline session');return data.session;}
   function legalFor(s,id) {return computeSharedLegalActions({statePublic:s.state,userId:id});}
-  function apply(s,id,action) {
+  function token(data) {const s=data.session;return s ? {tableId:s.tableId,handId:s.state.handId,userId:s.state.turnUserId,revision:data.revision} : null;}
+  function matches(expected,data) {const current=token(data);return !expected || !!current && ['tableId','handId','userId','revision'].every(key=>expected[key]===current[key]);}
+  function stampClock(s) {
+    const durationMs=s.state.phase==='SETTLED'?3000:s.state.turnUserId===HUMAN?20000:1000+Math.floor(clampRandom(random)*1001);
+    s.state=stampTurnDeadline(s.state,now(),durationMs);
+    s.clock={paused:false,durationMs,remainingMs:durationMs,dueAt:now()+durationMs};
+  }
+  function apply(s,id,action,source=id===HUMAN?'human':'bot') {
     if(s.state.turnUserId!==id) throw new Error('Not your turn');
-    const result=applyAction({pokerState:s.state,userId:id,action:action.type,amount:action.amount,nowIso:new Date().toISOString()});
+    const result=applyAction({pokerState:s.state,userId:id,action:action.type,amount:action.amount,nowIso:new Date(now()).toISOString()});
     if(!result.ok) throw new Error(result.reason); s.state=result.state;
+    s.lastAction={userId:id,type:action.type,source,at:now()};stampClock(s);
   }
   function bot(s) {
     const id=s.state.turnUserId;
@@ -51,8 +61,39 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
     const action=chooseBotActionProfiled(enrichBotLegalActions(legalFor(s,id)),{userId:id,profile:'NORMAL',state:s.state,random});
     if(!action) throw new Error('No legal bot decision'); apply(s,id,action); return true;
   }
-  return {
+  const api = {
     read,
+    timerToken() {return token(read());},
+    pendingTimer() {
+      const data=read(),s=data.session;
+      if(!s || !s.clock || s.clock.paused || (s.state.phase==='SETTLED' && s.state.stacks[HUMAN]<2)) return null;
+      return {token:token(data),delayMs:Math.max(0,s.clock.dueAt-now())};
+    },
+    pause() {
+      const data=read(),s=data.session;if(!s||s.clock?.paused) return false;
+      const revision=data.revision;
+      if(!s.clock) stampClock(s);
+      s.clock.remainingMs=Math.max(1000,Math.min(s.clock.durationMs,s.clock.dueAt-now()));s.clock.paused=true;
+      s.state={...s.state,turnStartedAt:null,turnDeadlineAt:null};save(data,revision);return true;
+    },
+    resume(restart=false) {
+      const data=read(),s=data.session;if(!s || (s.clock && !s.clock.paused && !restart)) return false;
+      const revision=data.revision;
+      if(!s.clock) stampClock(s);
+      const duration=s.clock.durationMs,remaining=Math.max(1000,Math.min(duration,s.clock.remainingMs));
+      s.state=stampTurnDeadline(s.state,now()-(duration-remaining),duration);
+      s.clock={paused:false,durationMs:duration,remainingMs:remaining,dueAt:now()+remaining};save(data,revision);return true;
+    },
+    async tick(expected) {
+      const data=read(),s=data.session;
+      if(!s || !expected || !matches(expected,data) || !s.clock || s.clock.paused || now()<s.clock.dueAt) return false;
+      if(s.state.phase==='SETTLED') {if(s.state.stacks[HUMAN]<2)return false;return api.nextHand(expected);}
+      if(s.state.turnUserId===HUMAN) {
+        const decision=decideTurnTimeout({pokerState:s.state,nowMs:now(),turnMs:20000});
+        if(!decision.due)return false;apply(s,HUMAN,decision.action,'timeout');
+      } else if(!bot(s)) return false;
+      save(data,data.revision);return true;
+    },
     async newGame(buyIn) {
       if(![100,500,1000].includes(buyIn)) throw new Error('Invalid Practice Chips buy-in');
       const data=read(),revision=data.revision;
@@ -61,21 +102,26 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
       const s={tableId:'offline-'+uuid(),buyIn,hand:1,state:null};
       await prepare(`ws_seed_${s.tableId}_1_3`);
       s.state=buildBootstrappedPokerState({tableId:s.tableId,coreState:core(s),startingStacks:Object.fromEntries(ids.map(id=>[id,buyIn]))});
-      if(!s.state) throw new Error('Offline deal failed'); data.wallet-=buyIn;data.session=s;save(data,revision);
+      if(!s.state) throw new Error('Offline deal failed'); stampClock(s); data.wallet-=buyIn;data.session=s;save(data,revision);
     },
-    async nextHand() {
-      const data=read(),revision=data.revision,s=session(data);
+    async nextHand(expected) {
+      const data=read(),revision=data.revision; if(!matches(expected,data))return false;const s=session(data);
       if(s.state.phase!=='SETTLED') throw new Error('Hand is not settled');
       if(s.state.stacks[HUMAN]<2) throw new Error('Rebuy or Leave to continue');
       // Local bots get a fresh practice stack only when broke, never from the wallet.
       for(const id of ids.slice(1)) if(s.state.stacks[id]<2) s.state.stacks[id]=s.buyIn;
       s.hand++;
       await prepare(`ws_seed_${s.tableId}_${s.hand}_3`);
+      if(expected && !matches(expected,read())) return false;
       const next=buildNextHandStateFromSettled({tableId:s.tableId,coreState:core(s),settledState:s.state,nextVersion:s.hand});
-      if(!next) throw new Error('Offline rollover failed');s.state=next;save(data,revision);
+      if(!next) throw new Error('Offline rollover failed');s.state=next;stampClock(s);save(data,revision);return true;
     },
     legal() {return legalFor(session(read()),HUMAN);},
-    act(action) {return mutate(data=>apply(session(data),HUMAN,action));},
+    act(action,expected) {
+      const data=read();if(!matches(expected,data))return false;const s=session(data);
+      if(action.handId && action.handId!==s.state.handId)return false;
+      apply(s,HUMAN,action);save(data,data.revision);return true;
+    },
     botStep() {return mutate(data=>bot(session(data)));},
     leave() {
       const data=read(); if(!data.session) return {wallet:data.wallet,cashout:0};
@@ -92,7 +138,7 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
       const s=session(data);if(s.state.phase!=='SETTLED') throw new Error('Rebuy requires settled hand');
       const amount=Math.max(0,s.buyIn-s.state.stacks[HUMAN]);
       if(data.wallet<amount) throw new Error('Not enough Practice Chips; use free refill');
-      data.wallet-=amount;s.state.stacks[HUMAN]+=amount;
+      data.wallet-=amount;s.state.stacks[HUMAN]+=amount;stampClock(s);
     });},
     refill() {return mutate(data=>{data.wallet=Math.max(5000,data.wallet);});},
     snapshot() {
@@ -101,4 +147,5 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
         tableId:s.tableId,stateVersion:data.revision,youSeat:1,table:{status:'OPEN',maxSeats:3,buyIn:s.buyIn}};
     }
   };
+  return api;
 }

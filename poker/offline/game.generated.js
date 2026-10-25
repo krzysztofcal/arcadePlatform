@@ -1647,21 +1647,21 @@
   }
   function isBettingClosed(state) {
     const seats = orderedSeats(state);
-    const active = seats.filter((seat) => isSelectableActor(state, seat.userId));
-    if (active.length === 0) {
+    const active2 = seats.filter((seat) => isSelectableActor(state, seat.userId));
+    if (active2.length === 0) {
       return true;
     }
-    if (active.length === 1) {
-      return Number(state.toCallByUserId?.[active[0].userId] ?? 0) === 0;
+    if (active2.length === 1) {
+      return Number(state.toCallByUserId?.[active2[0].userId] ?? 0) === 0;
     }
-    const allMatched = active.every((seat) => Number(state.toCallByUserId?.[seat.userId] ?? 0) === 0);
+    const allMatched = active2.every((seat) => Number(state.toCallByUserId?.[seat.userId] ?? 0) === 0);
     if (!allMatched) {
       return false;
     }
     if (Number(state.currentBet ?? 0) > 0) {
       return true;
     }
-    return active.every((seat) => state.actedThisRoundByUserId?.[seat.userId] === true);
+    return active2.every((seat) => state.actedThisRoundByUserId?.[seat.userId] === true);
   }
   function nextPhase(phase) {
     return typeof phase === "string" ? NEXT_PHASE[phase] ?? null : null;
@@ -1889,6 +1889,7 @@
 
   // ws-server/poker/shared/poker-turn-timeout.mjs
   var DEFAULT_TURN_MS = 2e4;
+  var ACTION_PHASES3 = /* @__PURE__ */ new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
   function resolveTurnMs(rawValue) {
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -1897,6 +1898,76 @@
     return Math.trunc(parsed);
   }
   var TURN_MS = resolveTurnMs(void 0);
+  function isLiveHand(state) {
+    if (!state || typeof state !== "object" || Array.isArray(state)) {
+      return false;
+    }
+    if (typeof state.turnUserId !== "string" || !state.turnUserId.trim()) {
+      return false;
+    }
+    return ACTION_PHASES3.has(state.phase);
+  }
+  function defaultTimeoutActionFor(state, userId) {
+    const leftTableByUserId = state?.leftTableByUserId && typeof state.leftTableByUserId === "object" && !Array.isArray(state.leftTableByUserId) ? state.leftTableByUserId : null;
+    const statePublic = leftTableByUserId?.[userId] === true ? {
+      ...state,
+      leftTableByUserId: {
+        ...leftTableByUserId,
+        [userId]: false
+      }
+    } : state;
+    const legalInfo = computeSharedLegalActions({ statePublic, userId });
+    const actions = Array.isArray(legalInfo.actions) ? legalInfo.actions : [];
+    if (actions.includes("CHECK")) {
+      return { type: "CHECK", userId };
+    }
+    if (actions.includes("FOLD")) {
+      return { type: "FOLD", userId };
+    }
+    return null;
+  }
+  function decideTurnTimeout({ pokerState, nowMs, turnMs = TURN_MS }) {
+    if (!isLiveHand(pokerState)) {
+      return { due: false, reason: "hand_not_live" };
+    }
+    const deadline = Number(pokerState.turnDeadlineAt);
+    const now = Number.isFinite(nowMs) ? Math.trunc(nowMs) : Date.now();
+    if (typeof pokerState.turnDeadlineAt !== "number" || !Number.isFinite(deadline)) {
+      return { due: false, reason: "deadline_missing" };
+    }
+    if (now < deadline) {
+      return { due: false, reason: "deadline_unexpired" };
+    }
+    const userId = pokerState.turnUserId.trim();
+    const action = defaultTimeoutActionFor(pokerState, userId);
+    if (!action) {
+      return { due: false, reason: "no_default_action" };
+    }
+    return {
+      due: true,
+      actorUserId: userId,
+      action,
+      nowMs: now,
+      deadline,
+      turnMs
+    };
+  }
+  function stampTurnDeadline(state, nowMs, turnMs = TURN_MS) {
+    if (!isLiveHand(state)) {
+      return {
+        ...state,
+        turnStartedAt: null,
+        turnDeadlineAt: null
+      };
+    }
+    const startedAt = Number.isFinite(nowMs) ? Math.trunc(nowMs) : Date.now();
+    const ttl = Number.isFinite(turnMs) && turnMs > 0 ? Math.trunc(turnMs) : TURN_MS;
+    return {
+      ...state,
+      turnStartedAt: startedAt,
+      turnDeadlineAt: startedAt + ttl
+    };
+  }
 
   // shared/poker-domain/table-economy.mjs
   var DEFAULT_CASH_TABLE_BUY_IN_CHIPS = 100;
@@ -2785,7 +2856,7 @@
       pokerState: session.state
     };
   }
-  function createOfflineGame({ storage, prepare = prepareSeed, random = Math.random, uuid = () => crypto.randomUUID() } = {}) {
+  function createOfflineGame({ storage, prepare = prepareSeed, random = Math.random, uuid = () => crypto.randomUUID(), now = Date.now } = {}) {
     function read() {
       const raw = storage.getItem(STORAGE_KEY);
       if (raw === null) return { schema: 1, revision: 0, wallet: 5e3, session: null };
@@ -2799,6 +2870,7 @@
       if (data.session) {
         const s = data.session;
         if (typeof s.tableId !== "string" || !s.tableId.startsWith("offline-") || !integer(s.hand) || s.hand < 1 || ![100, 500, 1e3].includes(s.buyIn) || !s.state || s.state.roomId !== s.tableId || typeof s.state.handId !== "string" || !integer(s.state.potTotal) || !ids.every((id) => integer(s.state.stacks?.[id]))) throw new Error("Invalid offline storage session");
+        if (s.clock && (typeof s.clock.paused !== "boolean" || !integer(s.clock.durationMs) || s.clock.durationMs < 1 || s.clock.durationMs > 2e4 || !integer(s.clock.remainingMs) || s.clock.remainingMs > s.clock.durationMs || !integer(s.clock.dueAt))) throw new Error("Invalid offline storage clock");
       }
       return data;
     }
@@ -2821,11 +2893,26 @@
     function legalFor(s, id) {
       return computeSharedLegalActions({ statePublic: s.state, userId: id });
     }
-    function apply(s, id, action) {
+    function token(data) {
+      const s = data.session;
+      return s ? { tableId: s.tableId, handId: s.state.handId, userId: s.state.turnUserId, revision: data.revision } : null;
+    }
+    function matches(expected, data) {
+      const current = token(data);
+      return !expected || !!current && ["tableId", "handId", "userId", "revision"].every((key) => expected[key] === current[key]);
+    }
+    function stampClock(s) {
+      const durationMs = s.state.phase === "SETTLED" ? 3e3 : s.state.turnUserId === HUMAN ? 2e4 : 1e3 + Math.floor(clampRandom(random) * 1001);
+      s.state = stampTurnDeadline(s.state, now(), durationMs);
+      s.clock = { paused: false, durationMs, remainingMs: durationMs, dueAt: now() + durationMs };
+    }
+    function apply(s, id, action, source = id === HUMAN ? "human" : "bot") {
       if (s.state.turnUserId !== id) throw new Error("Not your turn");
-      const result = applyAction({ pokerState: s.state, userId: id, action: action.type, amount: action.amount, nowIso: (/* @__PURE__ */ new Date()).toISOString() });
+      const result = applyAction({ pokerState: s.state, userId: id, action: action.type, amount: action.amount, nowIso: new Date(now()).toISOString() });
       if (!result.ok) throw new Error(result.reason);
       s.state = result.state;
+      s.lastAction = { userId: id, type: action.type, source, at: now() };
+      stampClock(s);
     }
     function bot(s) {
       const id = s.state.turnUserId;
@@ -2835,8 +2922,53 @@
       apply(s, id, action);
       return true;
     }
-    return {
+    const api = {
       read,
+      timerToken() {
+        return token(read());
+      },
+      pendingTimer() {
+        const data = read(), s = data.session;
+        if (!s || !s.clock || s.clock.paused || s.state.phase === "SETTLED" && s.state.stacks[HUMAN] < 2) return null;
+        return { token: token(data), delayMs: Math.max(0, s.clock.dueAt - now()) };
+      },
+      pause() {
+        const data = read(), s = data.session;
+        if (!s || s.clock?.paused) return false;
+        const revision = data.revision;
+        if (!s.clock) stampClock(s);
+        s.clock.remainingMs = Math.max(1e3, Math.min(s.clock.durationMs, s.clock.dueAt - now()));
+        s.clock.paused = true;
+        s.state = { ...s.state, turnStartedAt: null, turnDeadlineAt: null };
+        save(data, revision);
+        return true;
+      },
+      resume(restart = false) {
+        const data = read(), s = data.session;
+        if (!s || s.clock && !s.clock.paused && !restart) return false;
+        const revision = data.revision;
+        if (!s.clock) stampClock(s);
+        const duration = s.clock.durationMs, remaining = Math.max(1e3, Math.min(duration, s.clock.remainingMs));
+        s.state = stampTurnDeadline(s.state, now() - (duration - remaining), duration);
+        s.clock = { paused: false, durationMs: duration, remainingMs: remaining, dueAt: now() + remaining };
+        save(data, revision);
+        return true;
+      },
+      async tick(expected) {
+        const data = read(), s = data.session;
+        if (!s || !expected || !matches(expected, data) || !s.clock || s.clock.paused || now() < s.clock.dueAt) return false;
+        if (s.state.phase === "SETTLED") {
+          if (s.state.stacks[HUMAN] < 2) return false;
+          return api.nextHand(expected);
+        }
+        if (s.state.turnUserId === HUMAN) {
+          const decision = decideTurnTimeout({ pokerState: s.state, nowMs: now(), turnMs: 2e4 });
+          if (!decision.due) return false;
+          apply(s, HUMAN, decision.action, "timeout");
+        } else if (!bot(s)) return false;
+        save(data, data.revision);
+        return true;
+      },
       async newGame(buyIn) {
         if (![100, 500, 1e3].includes(buyIn)) throw new Error("Invalid Practice Chips buy-in");
         const data = read(), revision = data.revision;
@@ -2846,27 +2978,39 @@
         await prepare(`ws_seed_${s.tableId}_1_3`);
         s.state = buildBootstrappedPokerState({ tableId: s.tableId, coreState: core(s), startingStacks: Object.fromEntries(ids.map((id) => [id, buyIn])) });
         if (!s.state) throw new Error("Offline deal failed");
+        stampClock(s);
         data.wallet -= buyIn;
         data.session = s;
         save(data, revision);
       },
-      async nextHand() {
-        const data = read(), revision = data.revision, s = session(data);
+      async nextHand(expected) {
+        const data = read(), revision = data.revision;
+        if (!matches(expected, data)) return false;
+        const s = session(data);
         if (s.state.phase !== "SETTLED") throw new Error("Hand is not settled");
         if (s.state.stacks[HUMAN] < 2) throw new Error("Rebuy or Leave to continue");
         for (const id of ids.slice(1)) if (s.state.stacks[id] < 2) s.state.stacks[id] = s.buyIn;
         s.hand++;
         await prepare(`ws_seed_${s.tableId}_${s.hand}_3`);
+        if (expected && !matches(expected, read())) return false;
         const next = buildNextHandStateFromSettled({ tableId: s.tableId, coreState: core(s), settledState: s.state, nextVersion: s.hand });
         if (!next) throw new Error("Offline rollover failed");
         s.state = next;
+        stampClock(s);
         save(data, revision);
+        return true;
       },
       legal() {
         return legalFor(session(read()), HUMAN);
       },
-      act(action) {
-        return mutate((data) => apply(session(data), HUMAN, action));
+      act(action, expected) {
+        const data = read();
+        if (!matches(expected, data)) return false;
+        const s = session(data);
+        if (action.handId && action.handId !== s.state.handId) return false;
+        apply(s, HUMAN, action);
+        save(data, data.revision);
+        return true;
       },
       botStep() {
         return mutate((data) => bot(session(data)));
@@ -2894,6 +3038,7 @@
           if (data.wallet < amount) throw new Error("Not enough Practice Chips; use free refill");
           data.wallet -= amount;
           s.state.stacks[HUMAN] += amount;
+          stampClock(s);
         });
       },
       refill() {
@@ -2912,15 +3057,18 @@
         };
       }
     };
+    return api;
   }
 
   // poker/offline/browser-entry.mjs
   var game = createOfflineGame({ storage: window.localStorage });
   var listener;
   var timer;
-  var busy = false;
+  var active = false;
+  var epoch = 0;
   var reactionListener;
   var lastBotReaction = 0;
+  var renderedToken;
   var botSeats = [{ userId: "bot-offline-1", seatNo: 2 }, { userId: "bot-offline-2", seatNo: 3 }];
   function botReaction(before) {
     if (!reactionListener || Date.now() - lastBotReaction < 4e3) return;
@@ -2933,79 +3081,128 @@
     }
   }
   function publish() {
-    if (listener && game.read().session) listener(game.snapshot());
+    if (listener && game.read().session) {
+      const token = game.timerToken(), snapshot = game.snapshot();
+      renderedToken = token.revision === snapshot.stateVersion ? token : null;
+      listener(snapshot);
+    }
     updateWallet();
   }
   function fail(error) {
-    const node = document.getElementById("offlineError");
-    if (node) node.textContent = error.message;
+    const node = document.getElementById("offlineError") || document.getElementById("pokerV2ErrorText");
+    if (node) {
+      node.textContent = error.message;
+      node.hidden = false;
+    }
   }
   function updateWallet() {
-    const data = game.read();
+    const data = game.read(), settled = data.session?.state.phase === "SETTLED";
     document.querySelectorAll("[data-practice-balance]").forEach((el) => {
       el.textContent = data.wallet.toLocaleString() + " Practice Chips";
     });
     const resume = document.getElementById("offlineResume");
     if (resume) resume.hidden = !data.session;
-    const controls = document.getElementById("offlineSessionControls");
-    if (controls) {
-      const settled = data.session?.state.phase === "SETTLED";
-      document.getElementById("offlineNext").disabled = !settled || data.session.state.stacks[HUMAN] < 2;
-      document.getElementById("offlineRebuy").disabled = !settled;
-    }
+    const rebuy = document.getElementById("offlineRebuy");
+    if (rebuy) rebuy.disabled = !settled;
   }
-  function scheduleBots() {
+  function schedule() {
     clearTimeout(timer);
-    const s = game.read().session;
-    if (!listener || document.hidden || !s || !s.state.turnUserId || s.state.turnUserId === HUMAN) return;
-    timer = setTimeout(() => {
-      run(() => {
-        const before = game.read().session.state;
-        game.botStep();
-        publish();
-        botReaction(before);
-      }).catch(fail);
-    }, 350);
+    if (!active || document.hidden || !listener) return;
+    const pending = game.pendingTimer();
+    if (!pending) return;
+    timer = setTimeout(() => run(() => active && !document.hidden ? game.tick(pending.token) : false).catch(fail), pending.delayMs);
   }
   async function run(fn) {
-    if (busy) throw new Error("Offline operation already in progress");
-    busy = true;
-    try {
-      if (!navigator.locks) throw new Error("This browser cannot safely save Offline play");
-      await navigator.locks.request(STORAGE_KEY, async () => {
-        await fn();
-        publish();
-        scheduleBots();
-      });
-    } finally {
-      busy = false;
+    if (!navigator.locks) throw new Error("This browser cannot safely save Offline play");
+    return navigator.locks.request(STORAGE_KEY, async () => {
+      const before = game.read().session?.state, lastAction = game.read().session?.lastAction;
+      const result = await fn();
+      publish();
+      if (before && JSON.stringify(lastAction) !== JSON.stringify(game.read().session?.lastAction)) botReaction(before);
+      schedule();
+      return result;
+    });
+  }
+  async function activate() {
+    if (active || !listener || document.hidden) return;
+    const generation = ++epoch;
+    await run(() => {
+      if (generation !== epoch || document.hidden) return;
+      game.resume(true);
+      active = true;
+    });
+  }
+  async function park() {
+    epoch++;
+    active = false;
+    clearTimeout(timer);
+    if (listener) {
+      try {
+        await run(() => game.pause());
+      } catch (error) {
+        if (!document.hidden) {
+          active = true;
+          schedule();
+        }
+        throw error;
+      }
     }
   }
-  function backToLobby() {
-    clearTimeout(timer);
+  var resolveConfirmation;
+  function cancelDialog() {
+    const dialog = document.getElementById("offlineConfirm");
+    if (dialog?.open) {
+      dialog.close("cancel");
+      return true;
+    }
+    const leave = document.getElementById("pokerV2LeaveConfirmModal");
+    if (leave && !leave.hidden) {
+      document.getElementById("pokerV2LeaveConfirmCancel").click();
+      return true;
+    }
+    return false;
+  }
+  function ask(title, message) {
+    const dialog = document.getElementById("offlineConfirm");
+    if (!dialog) return Promise.reject(new Error("Practice confirmation unavailable"));
+    document.getElementById("offlineConfirmTitle").textContent = title;
+    document.getElementById("offlineConfirmCopy").textContent = message;
+    return new Promise((resolve) => {
+      resolveConfirmation = resolve;
+      dialog.showModal();
+      document.getElementById("offlineConfirmCancel").focus();
+    });
+  }
+  async function backToLobby() {
+    if (cancelDialog()) return;
+    await park();
     window.location.assign("/poker/");
   }
   window.PokerOffline = {
     human: HUMAN,
     read: game.read,
     backToLobby,
+    cancelDialog,
     start(fn, reactions) {
       listener = fn;
       reactionListener = reactions;
-      publish();
-      scheduleBots();
+      activate().catch(fail);
     },
     act(action) {
-      return run(() => {
-        const before = game.read().session.state;
-        game.act(action);
-        publish();
-        botReaction(before);
-      });
+      const expected = renderedToken;
+      return run(() => active && expected ? game.act(action, expected) : false);
     },
     leave() {
       clearTimeout(timer);
-      return run(() => game.leave());
+      return run(() => {
+        const result = game.leave();
+        active = false;
+        epoch++;
+        return result;
+      }).catch((error) => {
+        schedule();
+        throw error;
+      });
     },
     rebuy() {
       return run(() => game.rebuy());
@@ -3018,9 +3215,29 @@
     }
   };
   function init() {
+    const dialog = document.getElementById("offlineConfirm");
+    if (dialog) {
+      dialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        dialog.close("cancel");
+      });
+      dialog.addEventListener("close", () => {
+        const resolve = resolveConfirmation;
+        resolveConfirmation = null;
+        if (resolve) resolve(dialog.returnValue === "confirm");
+      });
+      document.getElementById("offlineConfirmYes").addEventListener("click", () => dialog.close("confirm"));
+      document.getElementById("offlineConfirmCancel").addEventListener("click", () => dialog.close("cancel"));
+    }
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && cancelDialog()) event.preventDefault();
+    });
+    const plugins = window.Capacitor?.Plugins;
     if (window.location.pathname === "/poker/offline/play.html") {
-      const plugins = window.Capacitor?.Plugins;
-      if (plugins?.App) plugins.App.addListener("backButton", backToLobby);
+      if (plugins?.App) {
+        plugins.App.addListener("backButton", () => backToLobby().catch(fail));
+        plugins.App.addListener("appStateChange", (event) => (event.isActive ? activate() : park()).catch(fail));
+      }
       if (plugins?.SystemBars) Promise.resolve(plugins.SystemBars.hide()).catch(() => {
       });
     }
@@ -3036,7 +3253,7 @@
     action("offlinePlay", async () => {
       const buyIn = Number(document.querySelector('[name="offlineBuyIn"]:checked')?.value || 100);
       if (game.read().session) {
-        if (!window.confirm("Settle and leave the current Offline session before starting a new game?")) return;
+        if (!await ask("New Offline game", "Settle and leave the current practice session before starting a new game?")) return;
         game.leave();
       }
       await game.newGame(buyIn);
@@ -3044,30 +3261,29 @@
     });
     const resume = document.getElementById("offlineResume");
     if (resume) resume.addEventListener("click", () => window.location.assign("/poker/offline/play.html"));
+    document.querySelectorAll("[data-offline-refill]").forEach((el) => el.addEventListener("click", () => run(() => game.refill()).catch(fail)));
     action("offlineRefill", () => game.refill());
-    action("offlineNext", () => game.nextHand());
     action("offlineRebuy", () => game.rebuy());
-    action("offlineLeave", () => {
-      game.leave();
-      window.location.assign("/poker/");
-    });
-    action("offlineReset", () => {
-      if (window.confirm("Reset only local Practice Chips and offline session? Online CH is unaffected.")) {
+    action("offlineReset", async () => {
+      if (await ask("Reset Practice Chips", "Discard only this device\u2019s Practice Chips and Offline session? Online CH is unaffected.")) {
         clearTimeout(timer);
         window.localStorage.removeItem(STORAGE_KEY);
         window.location.assign("/poker/");
       }
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) clearTimeout(timer);
-      else scheduleBots();
+      if (document.hidden) cancelDialog();
+      (document.hidden ? park() : activate()).catch(fail);
+    });
+    window.addEventListener("pagehide", () => {
+      park().catch(fail);
     });
     window.addEventListener("storage", (event) => {
       if (event.key === STORAGE_KEY) {
         clearTimeout(timer);
         try {
           publish();
-          scheduleBots();
+          schedule();
         } catch (error) {
           fail(error);
         }

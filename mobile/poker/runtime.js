@@ -81,6 +81,7 @@
       if (pendingCode) setTimeout(function(){ callback(window.MobilePokerSecurity.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
       app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
+        if (window.PokerOffline && window.PokerOffline.cancelDialog && window.PokerOffline.cancelDialog()) return;
         // Avoid a blind history back into a stale table or out of the local package.
         if (window.location.pathname.indexOf('/poker/table-v2.html') === 0) {
           var lobby = document.getElementById('pokerLobbyLink');

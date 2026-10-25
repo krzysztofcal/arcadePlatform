@@ -35,3 +35,15 @@ Acceptance: deterministic fundamental sessions, legality/conservation, atomic fa
 ## Review clarification — Back versus Leave
 
 Normal Back to lobby, including native Android Back, parks the committed local session unchanged for Resume; it does not invoke Leave or cashout. Only explicit Leave settles/refunds/closes it. Reuse V2 bindMenu/settings through the generator; no Online menu/transport changes.
+
+## Physical owner review — T009–T012 (2026-10-25)
+
+Galaxy S24+ owner PASS: airplane-mode play, several complete hands, human actions, Resume and Leave. Rebuy/Refill were NOT VERIFIED on the physical device. Geometry cropped Hero cards in portrait/landscape; this owner finding supersedes browser-only presentation acceptance.
+
+T009: remove the extra row before the full-height V2 scene. Local balance uses existing account HUD; local rebuy/refill live in existing menu and existing bust panel. Original V2 source/layout/theme catalog remains single-source and Online CSS untouched. Android Offline uses the existing native table-mode inset owner, same safe-area substitutions and mobile stylesheet; packaging rehashes transformed renderer SRI/CSP.
+
+T010: persist a three-second result budget; canonical next-hand rollover automatically starts once, stops if human stack<2. Explicit local rebuy/refill/Leave offered; no automatic PC purchase. No Next Hand button.
+
+T011: stamp canonical turn deadlines, Hero20s and canonical timeout CHECK/FOLD; each bot action delayed randomly1000–2000ms. Reuse V2 avatar clock rendering and clock interval. All callbacks/action mutations use Web Locks and matching table/hand/actor/revision tokens; manual actions use last published snapshot token. Back/background park clocks and persist remaining budget (minimum1s); Resume excludes elapsed closed-app time, including unclean process death (last committed remaining budget restored). Repeated lifecycle events do not repeatedly restart active clocks. v1 key/schema unchanged: absent clock lazily initialized on Resume, IDs/stacks/PC preserved.
+
+T012: replace system confirm with local dialog using existing Poker modal patterns. New Game/Reset require explicit confirmation; Cancel/Escape/Android Back cancel without mutation. Explicit Leave keeps existing confirmation and same cancellation behavior. Dialog/clock operations remain local; no Auth/WS/CH/telemetry.

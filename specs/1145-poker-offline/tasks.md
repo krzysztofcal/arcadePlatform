@@ -10,3 +10,13 @@
 - [x] T008 Independent review and exact-SHA WS Preview deployment/natural-bot settlement evidence; retain Draft, no Production/merge. Ready for implementation review; **not merge-ready pending physical Android**.
 
 - [x] Owner review: bind shared menu/settings, separate Back/Resume from explicit Leave, update native Back callback; temporary focused probe and fundamental checks. New exact-HEAD Stage APK for physical acceptance; no WS replay.
+
+## Owner physical follow-up
+
+Owner PASS on Galaxy S24+: Offline play, multiple hands, human actions, Resume, Leave. Rebuy/Refill not yet physically verified; geometry issue confirmed.
+
+- [x] T009 Restore single-viewport V2 layout; PC HUD/menu, shared bust panel; native Offline table-mode insets/packaged SRI.
+- [x] T010 Persisted3s automatic rollover, bust stop, guarded idempotent callbacks.
+- [x] T011 Canonical Hero20s CHECK/FOLD timeout, random1000–2000ms bot delay, V2 clocks; pause/Resume without closed-time penalty; v1 compatibility.
+- [x] T012 Existing-style local dialogs for New Game/Reset; safe Cancel/Escape/native Back and explicit Leave.
+- [ ] Focused exact-SHA Netlify smoke and APK evidence, then owner physical re-test. No maintained UI suite, WS Preview replay, merge or Production.

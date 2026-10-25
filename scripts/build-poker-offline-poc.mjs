@@ -20,6 +20,7 @@ const replacements = {
     applyTableTheme(resolveTableThemeId(tableId));
     bindControls();
     bindMenu();
+    startTurnClock();
     if (els.sceneViewport && window.ResizeObserver) new ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
     markBootReady();
@@ -34,23 +35,40 @@ const replacements = {
       var nextVisual = captureVisualSnapshot();
       animateChipDiff(previousVisual, nextVisual, frame);
       animateCardDiff(previousVisual, nextVisual, frame);
-      [els.accountHud, els.rebuyPanel, els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
+      [els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
     }, handleTableReaction);
     } catch(error) { document.getElementById('offlineError').textContent = error.message; }
   `,
   bindDestinationLink: `if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby(); });`,
   isWsReady: 'return true;',
-  sendCommand: `if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable offline')); return window.PokerOffline.act({type:payload.action, amount:payload.amount});`,
+  sendCommand: `if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable offline')); return window.PokerOffline.act({type:payload.action, amount:payload.amount, handId:payload.handId});`,
   leaveAndReturnToLobby: `return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/'); }).catch(function(error){setError(error.message);});`,
   requestManualRebuy: `return window.PokerOffline.rebuy().catch(function(error){setError(error.message);});`,
   sendReaction: `if (Date.now() < reactionControlUntilMs || !deriveCurrentSeat()) return Promise.resolve(); closeReactionMenu(); window.PokerOffline.reaction(reactionKey); startReactionCooldown(); return Promise.resolve({ok:true});`,
   sendTargetedReaction: `if (Date.now() < reactionControlUntilMs || !deriveCurrentSeat() || targetSeatNo === 1) return Promise.resolve(); window.PokerOffline.reaction('nice_hand', targetSeatNo); startReactionCooldown(); return Promise.resolve({ok:true});`,
-  refreshAccountHud: 'return;',
+  syncAccountHud: `if (els.accountHud) { var data = window.PokerOffline.read(); els.accountHud.hidden = false; els.accountHud.textContent = 'OFFLINE · ' + formatNumber(data.wallet) + ' PC'; els.accountHud.title = 'Device-local Practice Chips'; }`,
+  refreshAccountHud: 'syncAccountHud();',
+  renderRebuyPanel: `
+    if (!els.rebuyPanel) return;
+    var data = window.PokerOffline.read(), session = data.session;
+    var show = !!session && session.state.phase === 'SETTLED' && session.state.stacks['offline-human'] < 2;
+    els.rebuyPanel.hidden = !show;
+    if (!show) return;
+    if (els.rebuyTitle) els.rebuyTitle.textContent = 'Out of Practice Chips';
+    if (els.rebuyCopy) els.rebuyCopy.textContent = 'Rebuy locally or use a free refill. No automatic purchase.';
+    if (els.rebuyBalance) els.rebuyBalance.textContent = data.wallet + ' PC · Buy-in ' + session.buyIn + ' PC';
+    if (els.rebuyBtn) { els.rebuyBtn.disabled = data.wallet < session.buyIn - session.state.stacks['offline-human']; els.rebuyBtn.textContent = 'Rebuy'; }
+    if (els.rebuyWatchBtn) els.rebuyWatchBtn.hidden = true;
+    if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = true;
+  `,
   refreshRebuyBalance: 'return;',
   persistSocialPreferences: 'return;',
   klog: 'return;'
 };
-renderer = renderer.replace(/ CH\b/g, ' PC').replace('Hand complete · Next hand shortly', 'Hand complete · Next hand when ready');
+renderer = renderer.replace(/ CH\b/g, ' PC');
+const rebuyBack = "if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', leaveAndReturnToLobby);";
+if (!renderer.includes(rebuyBack)) throw new Error('Offline rebuy Back seam changed');
+renderer = renderer.replace(rebuyBack, "if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ window.PokerOffline.backToLobby(); });");
 const ast = parse(renderer, { ecmaVersion: 'latest' });
 const edits = [];
 function visit(node) {
@@ -85,7 +103,13 @@ html = html.replace(/<label\b[^>]*id="pokerV2(?:Fold|Primary|Amount|AllIn)Preact
 const chips = await readdir('poker/assets/chips');
 html = html.replace('</head>', chips.filter(name => /\.(png|webp|svg)$/.test(name)).map(name => '<link rel="preload" as="image" href="/poker/assets/chips/' + name + '">').join('') + '</head>');
 html = html.replace('</head>', '<link rel="stylesheet" href="/poker/offline/offline.css"></head>');
-html = html.replace('<body>', '<body><section id="offlineSessionControls" class="offline-session" aria-label="Local practice session"><strong>OFFLINE · <span data-practice-balance></span></strong><button id="offlineNext" type="button">Next hand</button><button id="offlineRebuy" type="button">Rebuy</button><button id="offlineRefill" type="button">Free refill</button><button id="offlineLeave" type="button">Leave</button><p id="offlineError" role="alert"></p></section>');
+// Local controls live inside the shared menu, never before the 100dvh table.
+html = html.replace('<nav class="poker-menu-panel" id="pokerMenuPanel" hidden>', '<nav class="poker-menu-panel" id="pokerMenuPanel" hidden><section id="offlineSessionControls" class="offline-session" aria-label="Local practice"><strong data-practice-balance></strong><button id="offlineRebuy" type="button">Rebuy</button><button id="offlineRefill" type="button">Free refill</button><p id="offlineError" role="alert"></p></section>');
+html = html.replace('<button type="button" class="poker-live-btn" id="pokerV2RebuyLobbyBtn">', '<button type="button" class="poker-live-btn" data-offline-refill>Free refill</button><button type="button" class="poker-live-btn" id="pokerV2RebuyLobbyBtn">');
+const lobbyHtml = await readFile('poker/index.html','utf8');
+const confirmation = lobbyHtml.split('<!-- offline-confirm:start -->')[1]?.split('<!-- offline-confirm:end -->')[0];
+if (!confirmation) throw new Error('Offline confirmation source missing');
+html = html.replace('</body>', confirmation + '</body>');
 html = html.replace('</head>', scriptPaths.map((name, i) => '<script src="/poker/offline/' + name + '" integrity="' + scriptHashes[i] + '" defer></script>').join('\n') + '</head>');
 html = html.replace(/ CH\b/g, ' PC');
 html = html.replace('Poker Table v2 - Arcade Hub', 'Poker Offline — Practice Chips');

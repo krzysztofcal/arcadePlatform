@@ -56,7 +56,7 @@ activity = activity.replace('public class MainActivity extends BridgeActivity {}
             public void onPageCommitVisible(WebView view, String url) {
                 Uri page = Uri.parse(url);
                 tableMode = "https".equals(page.getScheme()) && "localhost".equals(page.getHost())
-                    && "/poker/table-v2.html".equals(page.getPath());
+                    && ("/poker/table-v2.html".equals(page.getPath()) || "/poker/offline/play.html".equals(page.getPath()));
                 safeAreaScript = ""; // The next document needs its own CSS values.
                 ViewCompat.requestApplyInsets(view);
             }

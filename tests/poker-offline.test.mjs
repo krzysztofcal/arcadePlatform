@@ -55,3 +55,26 @@ test('all-in payouts conserve the original local stake and public projection kee
  assert.equal(Object.values(s.handSettlement.payouts).reduce((a,b)=>a+b,0),Object.values(s.contributionsByUserId).reduce((a,b)=>a+b,0));
  const before=g.read().wallet;const stack=s.stacks['offline-human'];g.leave();assert.equal(g.read().wallet,before+stack);
 });
+function timedGame(storage=store()) {let time=100000;const g=createOfflineGame({storage,prepare:async()=>{},random:()=>0.2,now:()=>time});return {g,storage,advance:ms=>time+=ms};}
+test('automatic settled rollover runs after three seconds once; stale callbacks cannot start another hand',async()=>{
+ const {g,advance}=timedGame();await g.newGame(100);finish(g);const token=g.timerToken(),wallet=g.read().wallet;
+ advance(2999);assert.equal(await g.tick(token),false);advance(1);assert.deepEqual(await Promise.all([g.tick(token),g.tick(token)]),[true,false]);
+ assert.equal(g.read().session.hand,2);assert.equal(await g.tick(token),false);assert.equal(g.read().wallet,wallet);
+});
+test('hero timeout uses canonical FOLD or CHECK and a callback cannot act twice',async()=>{
+ const {g,advance}=timedGame();await g.newGame(100);const token=g.timerToken();advance(19999);assert.equal(await g.tick(token),false);advance(1);assert.equal(await g.tick(token),true);
+ assert.equal(g.read().session.state.foldedByUserId['offline-human'],true);const revision=g.read().revision;assert.equal(await g.tick(token),false);assert.equal(g.read().revision,revision);
+ const t=timedGame();await t.g.newGame(100);t.g.act({type:'CALL'});
+ for(let n=0;n<80;n++){const s=t.g.read().session.state;if(s.turnUserId==='offline-human'&&t.g.legal().actions.includes('CHECK'))break;if(s.turnUserId==='offline-human')t.g.act({type:'CALL'});else t.g.botStep();}
+ assert.equal(t.g.legal().actions.includes('CHECK'),true);const check=t.g.timerToken();t.advance(20000);assert.equal(await t.g.tick(check),true);assert.notEqual(t.g.read().session.state.foldedByUserId['offline-human'],true);
+});
+test('paused clocks and v1 Resume never charge closed-app time; bots have durable 1000–2000ms delay',async()=>{
+ const {g,advance,storage}=timedGame();await g.newGame(100);advance(5000);g.pause();const wallet=g.read().wallet;advance(600000);assert.equal(await g.tick(g.timerToken()),false);g.resume();assert.equal(g.pendingTimer().delayMs,15000);
+ g.act({type:'CALL'});const bot=g.pendingTimer();assert.ok(bot.delayMs>=1000&&bot.delayMs<=2000);advance(bot.delayMs);assert.equal(await g.tick(bot.token),true);assert.equal(await g.tick(bot.token),false);
+ const old=g.read();delete old.session.clock;old.session.state.turnDeadlineAt=null;old.session.state.turnStartedAt=null;storage.setItem(STORAGE_KEY,JSON.stringify(old));advance(600000);g.resume();assert.ok(g.pendingTimer().delayMs>0);assert.equal(g.read().wallet,wallet);
+});
+test('bust stops auto-deal until explicit rebuy; failed timer write preserves PC and turn',async()=>{
+ const {g,storage,advance}=timedGame();await g.newGame(100);finish(g);const d=g.read();d.session.state.stacks['offline-human']=0;d.session.state.stacks['bot-offline-1']+=100;storage.setItem(STORAGE_KEY,JSON.stringify(d));assert.equal(g.pendingTimer(),null);
+ g.rebuy();assert.ok(g.pendingTimer());assert.equal(g.read().wallet,4800);
+ const token=g.timerToken(),before=storage.getItem(STORAGE_KEY),write=storage.setItem;storage.setItem=()=>{throw new Error('quota');};advance(3000);await assert.rejects(g.tick(token),/quota/);assert.equal(storage.getItem(STORAGE_KEY),before);assert.throws(()=>g.leave(),/quota/);assert.equal(storage.getItem(STORAGE_KEY),before);storage.setItem=write;
+});

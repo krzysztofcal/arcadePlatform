@@ -5471,30 +5471,16 @@
 
   function renderRebuyPanel(){
     if (!els.rebuyPanel) return;
-    renderAutoRebuyCopy();
-    var playerState = state.playerState || null;
-    var outOfChips = !!playerState && playerState.status === 'OUT_OF_CHIPS';
-    var waiting = !!playerState && playerState.status === 'WAITING_NEXT_HAND';
-    var show = ((outOfChips && playerState.canRebuy === true) || (waiting && !!rebuyOperation)) && !rebuyPanelDismissed;
-    if (els.rebuyBtn) els.rebuyBtn.hidden = waiting;
-    if (inactivityExit) {
-      if (els.rebuyBtn) els.rebuyBtn.disabled = true;
-      if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = true;
-    }
+    var data = window.PokerOffline.read(), session = data.session;
+    var show = !!session && session.state.phase === 'SETTLED' && session.state.stacks['offline-human'] < 2;
     els.rebuyPanel.hidden = !show;
     if (!show) return;
-    if (els.rebuyTitle) els.rebuyTitle.textContent = waiting ? 'Buy-in confirmed' : 'Out of chips';
-    if (els.rebuyCopy) els.rebuyCopy.textContent = waiting ? 'Funded · Joining next hand' : 'The table will keep playing. Buy in to join the next hand.';
-    if (els.rebuyBtn) {
-      var rebuyPending = !!rebuyOperation && rebuyOperation.phase === 'pending';
-      els.rebuyBtn.disabled = !!inactivityExit || rebuyPending || !isWsReady() || playerState.canRebuy !== true;
-      var buyIn = currentTableBuyIn();
-      els.rebuyBtn.textContent = rebuyPending ? 'Buying in…' : (rebuyOperation && rebuyOperation.phase === 'error'
-        ? 'Retry buy-in'
-        : (buyIn == null ? 'Buy in' : 'Buy in ' + formatNumber(buyIn) + ' PC'));
-    }
-    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = !!inactivityExit || (!!rebuyOperation && rebuyOperation.phase === 'pending') || !isWsReady();
-    if (outOfChips) refreshRebuyBalance();
+    if (els.rebuyTitle) els.rebuyTitle.textContent = 'Out of Practice Chips';
+    if (els.rebuyCopy) els.rebuyCopy.textContent = 'Rebuy locally or use a free refill. No automatic purchase.';
+    if (els.rebuyBalance) els.rebuyBalance.textContent = data.wallet + ' PC · Buy-in ' + session.buyIn + ' PC';
+    if (els.rebuyBtn) { els.rebuyBtn.disabled = data.wallet < session.buyIn - session.state.stacks['offline-human']; els.rebuyBtn.textContent = 'Rebuy'; }
+    if (els.rebuyWatchBtn) els.rebuyWatchBtn.hidden = true;
+    if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = true;
   }
 
   function resolveLiveBannerStatus(){
@@ -5535,21 +5521,9 @@
     return !isGuestMode && state.mode === 'live' && isSignedIn() ? state.currentUserId + ':' + state.tableId : null;
   }
 
-  function syncAccountHud(){
-    if (!els.accountHud) return;
-    var identity = accountHudContext();
-    els.accountHud.hidden = !identity;
-    if (identity !== accountHudIdentity){
-      accountHudIdentity = identity;
-      accountHudGeneration++;
-      lastRenderedWallet = null;
-      els.accountHud.classList.remove('poker-account-hud--wallet-change');
-      els.accountHud.textContent = '';
-      if (identity) refreshAccountHud();
-    }
-  }
+  function syncAccountHud(){if (els.accountHud) { var data = window.PokerOffline.read(); els.accountHud.hidden = false; els.accountHud.textContent = 'OFFLINE · ' + formatNumber(data.wallet) + ' PC'; els.accountHud.title = 'Device-local Practice Chips'; }}
 
-  async function refreshAccountHud(){return;}
+  async function refreshAccountHud(){syncAccountHud();}
 
   function renderInfoPanel(){
     if (els.liveStatus) els.liveStatus.textContent = resolveLiveBannerStatus();
@@ -6012,7 +5986,7 @@
     var playerStatus = String(state.playerState && state.playerState.status || '').toUpperCase();
     els.roomStatus.textContent = seats.length < 2 ? t('pokerRoomWaiting', 'Waiting for more players')
       : playerStatus === 'WAITING_NEXT_HAND' ? t('pokerRoomReserved', 'Seat reserved · Joining next hand')
-      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Next hand when ready')
+      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Next hand shortly')
       : isUsersTurn() ? t('pokerRoomYourTurn', 'Your turn') : t('pokerRoomHandInProgress', 'Hand in progress');
   }
 
@@ -6084,7 +6058,7 @@
     return payload;
   }
 
-  function sendCommand(methodName, payload, requestId){if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable offline')); return window.PokerOffline.act({type:payload.action, amount:payload.amount});}
+  function sendCommand(methodName, payload, requestId){if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable offline')); return window.PokerOffline.act({type:payload.action, amount:payload.amount, handId:payload.handId});}
 
   function beginJoinOperation(payload, options){
     if (inactivityExit) return Promise.reject(new Error('removed_for_inactivity'));
@@ -6708,7 +6682,7 @@
       renderSocialPreferences();
     });
     if (els.rebuyBtn) els.rebuyBtn.addEventListener('click', requestManualRebuy);
-    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', leaveAndReturnToLobby);
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ window.PokerOffline.backToLobby(); });
     if (els.rebuyWatchBtn) els.rebuyWatchBtn.addEventListener('click', function(){
       rebuyPanelDismissed = true;
       renderRebuyPanel();
@@ -7436,6 +7410,7 @@
     applyTableTheme(resolveTableThemeId(tableId));
     bindControls();
     bindMenu();
+    startTurnClock();
     if (els.sceneViewport && window.ResizeObserver) new ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
     markBootReady();
@@ -7450,7 +7425,7 @@
       var nextVisual = captureVisualSnapshot();
       animateChipDiff(previousVisual, nextVisual, frame);
       animateCardDiff(previousVisual, nextVisual, frame);
-      [els.accountHud, els.rebuyPanel, els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
+      [els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
     }, handleTableReaction);
     } catch(error) { document.getElementById('offlineError').textContent = error.message; }
   }

@@ -28,7 +28,7 @@ async function copy(name){
   if (name.startsWith('../') || path.isAbsolute(name)) throw new Error('Asset outside repository');
   let value = await readFile(path.join(root, name));
   // Reuse table styles (including JS panel styles) with the native single-owner values.
-  if (name === 'poker/poker-v2.css' || name === 'poker/poker-v2.js') value = Buffer.from(value.toString().replace(/env\(safe-area-inset-(top|right|bottom|left)(?:,\s*0px)?\)/g, 'var(--mobile-safe-$1,0px)'));
+  if (name === 'poker/poker-v2.css' || name === 'poker/poker-v2.js' || name === 'poker/offline/renderer.generated.js') value = Buffer.from(value.toString().replace(/env\(safe-area-inset-(top|right|bottom|left)(?:,\s*0px)?\)/g, 'var(--mobile-safe-$1,0px)'));
   await put(name, value);
   if (name.endsWith('.css')) {
     for (const match of value.toString().matchAll(/url\(["']?([^\s)"']+)/g)) {
@@ -52,6 +52,13 @@ for (const name of pages) {
     await copy('poker/offline/game.generated.js');
     await copy('poker/offline/renderer.generated.js');
     await copy('poker/offline/offline.css');
+    // Apply the same native-inset substitutions as Online, then rehash the isolated renderer.
+    const hash = value => 'sha256-' + createHash('sha256').update(value).digest('base64');
+    const rendererPath = 'poker/offline/renderer.generated.js';
+    const sourceHash = hash(await readFile(path.join(root, rendererPath)));
+    const packagedHash = hash(await readFile(path.join(out, rendererPath)));
+    html = html.replaceAll(sourceHash, packagedHash);
+    html = html.replace('</head>', '<link rel="stylesheet" href="/mobile/mobile.css"></head>');
     await put(name, html);
     continue;
   }
