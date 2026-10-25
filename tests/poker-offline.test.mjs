@@ -130,3 +130,34 @@ test('V2 invalidates changed action/bet intent; pause/Resume and new-hand reset 
  r.queuedPreaction=r.buildQueuedPreaction('fold');r.resetQueuedPreactionState();t.g.pause();t.advance(600000);t.g.resume();const rev=t.g.read().revision;r.maybeExecuteQueuedPreaction();assert.equal(t.g.read().revision,rev);
  const oldHand=t.g.read().session.state.handId;finish(t.g);if(t.g.read().session.state.stacks['offline-human']>=2){await t.g.nextHand();assert.equal(t.g.act({type:'FOLD',handId:oldHand},t.g.timerToken()),false);}
 });
+async function backHarness(){
+ const t=timedGame();await t.g.newGame(100);t.advance(5000);
+ const{readFileSync}=await import('node:fs'),{parse}=await import('acorn'),vm=await import('node:vm');
+ const source=readFileSync('poker/offline/browser-entry.mjs','utf8'),names=new Set(['backToLobby','ask','cancelDialog','restorePage']);
+ const bodies=parse(source,{ecmaVersion:'latest',sourceType:'module'}).body.filter(n=>n.type==='FunctionDeclaration'&&names.has(n.id.name)).map(n=>source.slice(n.start,n.end));
+ const counts={park:0,resume:0,show:0,navigate:0};let context;
+ const nodes={offlineConfirmTitle:{},offlineConfirmCopy:{},offlineConfirmYes:{},offlineConfirmCancel:{focus(){}}};
+ const dialog={open:false,showModal(){this.open=true;counts.show++;},close(value){this.open=false;queueMicrotask(()=>{const resolve=context.resolveConfirmation;context.resolveConfirmation=null;if(resolve)resolve(value==='confirm');});}};nodes.offlineConfirm=dialog;
+ context=vm.createContext({document:{getElementById:id=>nodes[id]||null},window:{location:{assign(){counts.navigate++;}}},park:async()=>{counts.park++;t.g.pause();},activate:async()=>{counts.resume++;t.g.resume(true);}});
+ vm.runInContext('var backNavigation=null,resolveConfirmation;'+bodies.join('\n'),context);
+ return{...t,counts,nodes,dialog,back:()=>context.backToLobby(),restore:()=>context.restorePage({persisted:true}),flush:()=>new Promise(setImmediate)};
+}
+test('Back confirmation Cancel preserves budget; Confirm parks exact session for Resume with no cashout',async()=>{
+ const h=await backHarness(),original=h.g.read(),first=h.back();await h.flush();assert.equal(h.dialog.open,true);assert.equal(h.g.read().session.clock.paused,true);assert.equal(h.g.read().session.clock.remainingMs,15000);
+ assert.equal(h.nodes.offlineConfirmTitle.textContent,'Return to lobby?');assert.equal(h.nodes.offlineConfirmCancel.textContent,'Keep playing');assert.equal(h.nodes.offlineConfirmYes.textContent,'Return to lobby');
+ h.advance(60000);h.dialog.close('cancel');await first;assert.equal(h.counts.navigate,0);assert.equal(h.counts.resume,1);assert.equal(h.g.pendingTimer().delayMs,15000);
+ const second=h.back();await h.flush();const parked=h.g.read();h.advance(60000);h.dialog.close('confirm');await second;assert.equal(h.counts.navigate,1);await h.back();assert.equal(h.counts.navigate,1);assert.equal(h.counts.park,2);assert.equal(h.g.read().session.clock.paused,true);assert.equal(h.g.read().wallet,original.wallet);
+ h.g.resume(true);const resumed=h.g.read();assert.equal(resumed.session.tableId,original.session.tableId);assert.equal(resumed.session.state.handId,original.session.state.handId);assert.deepEqual(resumed.session.state.stacks,original.session.state.stacks);assert.deepEqual(resumed.session.state.holeCardsByUserId,original.session.state.holeCardsByUserId);assert.deepEqual(resumed.session.members,original.session.members);assert.equal(h.g.pendingTimer().delayMs,parked.session.clock.remainingMs);
+});
+test('rapid Back while pausing or while modal open creates one pause/modal/resume and no financial operation',async()=>{
+ for(const openFirst of[false,true]){
+  const h=await backHarness(),wallet=h.g.read().wallet,first=h.back();if(openFirst)await h.flush();
+  const second=h.back(),third=h.back();await Promise.all([first,second,third]);
+  assert.equal(h.counts.park,1);assert.equal(h.counts.show,openFirst?1:0);assert.equal(h.counts.resume,1);assert.equal(h.counts.navigate,0);assert.equal(h.g.read().wallet,wallet);assert.ok(h.g.read().session);assert.equal(h.g.pendingTimer().delayMs,15000);
+ }
+});
+
+test('confirmed Back BFCache return clears navigation latch and permits a fresh confirmation',async()=>{
+ const h=await backHarness(),first=h.back();await h.flush();h.dialog.close('confirm');await first;assert.equal(h.counts.navigate,1);h.advance(60000);await h.restore();assert.equal(h.g.pendingTimer().delayMs,15000);
+ const again=h.back();await h.flush();assert.equal(h.dialog.open,true);h.dialog.close('cancel');await again;assert.equal(h.counts.show,2);assert.equal(h.counts.navigate,1);assert.equal(h.g.read().wallet,4900);
+});

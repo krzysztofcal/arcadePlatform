@@ -1,3 +1,14 @@
+# T017 — Back confirmation (awaiting focused Preview and APK)
+
+Owner S24+ physical PASS for T015–T016 retained. New immediate-navigation report confirmed: former backToLobby parked then navigated directly. Updated only local controller/generator and generated artifacts: existing offlineConfirm now asks `Return to lobby?` with saved/Resume message and Keep playing/Return to lobby labels. Same styles; ask defaults reset for New Game/Reset.
+
+First Back claims single request and parks once before showing dialog. Cancel/Escape/repeat Back resume saved budgets once; rapid Back during pending park suppresses modal and resumes once. Confirm navigates with session parked and no cashout; duplicate navigation latched until unload. Generic wake events cannot resume timers behind pending modal. Existing park/epoch invalidation clears preactions. Explicit Leave unchanged; handler errors shown locally. No Auth/WS/CH/online data/config/dependency/CSS changes.
+
+Three fundamental tests reproduce the old behavior/BFCache edge and now pass, reusing actual Back/ask/cancel functions with minimal dialog interface and real local game/fake clock. Cover Cancel60000ms modal wait restoring15000ms budget, Confirm preserving hand/cards/stacks/bots/table/wallet for Resume, duplicate Confirm-then-Back navigation fence and rapid Back before/after modal with one park/show/resume and no refund. Review found the confirmed-navigation latch surviving BFCache; restorePage clears it only on a persisted return and resumes through existing lifecycle. A regression test covers confirmed departure/restoration/fresh confirmation. No maintained DOM/layout suite. Focused Preview and APK results linked after build. Intended behavior change only: Offline Back now requires confirmation; no public API/schema/protocol break, no WS replay.
+
+---
+## Previously accepted physical/UI evidence
+
 # T015–T016 — focused Preview PASS; new Stage APK for owner review
 
 Owner T013–T014 Galaxy S24+ PASS retained. New reported empty action panel traced to historical generator removal of V2 checkbox wrappers. Those wrappers are now unchanged source markup; existing buildQueuedPreaction/resolveQueuedPreactionExecution/maybeExecuteQueuedPreaction and canonical projectedLegalActions reused. Snapshot callback merges first, clears changed-hand intent and invokes queued execution as Online does. No second action engine or renderer.

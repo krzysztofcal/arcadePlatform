@@ -42,7 +42,7 @@ const replacements = {
     }, handleTableReaction, function(){ resetQueuedPreactionState(); renderControls(); });
     } catch(error) { document.getElementById('offlineError').textContent = error.message; }
   `,
-  bindDestinationLink: `if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby(); });`,
+  bindDestinationLink: `if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby().catch(function(error){ setError(error.message); }); });`,
   isWsReady: 'return window.PokerOffline.isActive();',
   sendCommand: `if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable offline')); return window.PokerOffline.act({type:payload.action, amount:payload.amount, handId:payload.handId});`,
   leaveAndReturnToLobby: `return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/'); }).catch(function(error){setError(error.message);});`,

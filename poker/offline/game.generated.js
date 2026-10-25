@@ -3163,8 +3163,8 @@
       return result;
     });
   }
-  async function activate() {
-    if (active || !listener || document.hidden) return;
+  async function activate(afterBack = false) {
+    if (active || !listener || document.hidden || backNavigation && !afterBack) return;
     const generation = ++epoch;
     await run(() => {
       if (generation !== epoch || document.hidden) return;
@@ -3190,12 +3190,15 @@
     }
   }
   var resolveConfirmation;
+  var backNavigation;
   function cancelDialog() {
+    if (backNavigation && !backNavigation.navigating) backNavigation.cancelled = true;
     const dialog = document.getElementById("offlineConfirm");
     if (dialog?.open) {
       dialog.close("cancel");
       return true;
     }
+    if (backNavigation && !backNavigation.navigating) return true;
     const leave = document.getElementById("pokerV2LeaveConfirmModal");
     if (leave && !leave.hidden) {
       document.getElementById("pokerV2LeaveConfirmCancel").click();
@@ -3203,11 +3206,13 @@
     }
     return false;
   }
-  function ask(title, message) {
+  function ask(title, message, labels = {}) {
     const dialog = document.getElementById("offlineConfirm");
     if (!dialog) return Promise.reject(new Error("Offline confirmation unavailable"));
     document.getElementById("offlineConfirmTitle").textContent = title;
     document.getElementById("offlineConfirmCopy").textContent = message;
+    document.getElementById("offlineConfirmCancel").textContent = labels.cancel || "Cancel";
+    document.getElementById("offlineConfirmYes").textContent = labels.confirm || "Confirm";
     return new Promise((resolve) => {
       resolveConfirmation = resolve;
       dialog.showModal();
@@ -3215,9 +3220,42 @@
     });
   }
   async function backToLobby() {
+    if (backNavigation) {
+      if (!backNavigation.navigating) {
+        backNavigation.cancelled = true;
+        cancelDialog();
+      }
+      return backNavigation.promise;
+    }
     if (cancelDialog()) return;
-    await park();
-    window.location.assign("/poker/");
+    const request = { cancelled: false, navigating: false, promise: null };
+    backNavigation = request;
+    request.promise = (async () => {
+      await park();
+      const confirmed = !request.cancelled && await ask(
+        "Return to lobby?",
+        "Your Offline game will be saved. You can continue later using Resume.",
+        { cancel: "Keep playing", confirm: "Return to lobby" }
+      );
+      if (confirmed && !request.cancelled) {
+        request.navigating = true;
+        try {
+          window.location.assign("/poker/");
+        } catch (error) {
+          request.navigating = false;
+          await activate(true);
+          throw error;
+        }
+      } else await activate(true);
+    })().finally(() => {
+      if (!request.navigating) backNavigation = null;
+    });
+    return request.promise;
+  }
+  async function restorePage(event) {
+    if (!event.persisted) return;
+    if (backNavigation?.navigating) backNavigation = null;
+    await activate();
   }
   window.PokerOffline = {
     human: HUMAN,
@@ -3324,6 +3362,9 @@
     });
     window.addEventListener("pagehide", () => {
       park().catch(fail);
+    });
+    window.addEventListener("pageshow", (event) => {
+      restorePage(event).catch(fail);
     });
     window.addEventListener("storage", (event) => {
       if (event.key === STORAGE_KEY) {

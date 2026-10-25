@@ -34,3 +34,11 @@ Owner S24+ PASS retained for T013–T014 clocks, bot delay/roster and Resume.
 - [x] T015 Restore common preaction markup/rules/snapshot execution; projected legality, exactly-once guard, hand/lifecycle invalidation; fundamental tests.
 - [x] T016 Common lobby/table components and Offline Chips wording; PC/v1 unchanged, existing issue decision updated; no paid/network functions restored.
 - [x] Focused Preview portrait/landscape/preaction+visual comparison PASS; Stage APK workflow PASS, final artifact linked in PR. **Owner final review PENDING**. No merge/Production/WS replay/migrations/manual data changes.
+
+## T017
+
+Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
+
+- [x] Add existing-styled Back confirmation, clock pause, Cancel/Confirm labels and single-flight lifecycle handling; keep explicit Leave separate.
+- [x] Fundamental Cancel/Confirm/Resume and rapid repeated-Back tests; preserve wallet and preaction reset.
+- [ ] Short Netlify Preview/Stage APK evidence, then owner final acceptance. Retain Draft; no Online/WS/CH/Production/migration changes.

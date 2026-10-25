@@ -6573,7 +6573,7 @@
       else els.menuPanel.setAttribute('hidden', 'hidden');
       els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
     });
-    function bindDestinationLink(link, destination){if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby(); });}
+    function bindDestinationLink(link, destination){if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby().catch(function(error){ setError(error.message); }); });}
     bindDestinationLink(els.lobbyLink, '/poker/');
     function toggleSocialSettings(trigger){
       var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);

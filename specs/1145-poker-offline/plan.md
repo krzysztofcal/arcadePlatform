@@ -42,3 +42,11 @@ Generated PoC has no auth bootstrap, chips client, remote telemetry, APIs or onl
 2. `browser-entry.mjs::start` accepts local pause callback; park/Leave clear renderer queue, act captures lifecycle epoch plus rendered token. Renderer readiness reads coordinator active state, not an Auth token or fabricated login. Existing local participant identity and canonical legality stay authoritative.
 3. Existing lobby quick-tier buttons with aria-pressed and shared tile-action/quick-resume-shell replace radios. Rename visible text/errors to Offline Chips, retain PC/v1 technical storage. Remove redundant Offline-only button/balance CSS; secondary tools inherit existing Poker button typography. Keep isolated hashed CSP/SRI and absence of remote bootstraps.
 4. Two fundamental intent tests load existing V2 queue rules without DOM framework: wait/legal exactly-once, changed legality invalidation, stale manual/timer token, pause/Resume/reset. Existing targeted preaction tests reused. One Preview portrait/landscape smoke and visual comparison to original Online renderer/lobby; current-SHA Stage APK, retain Draft for owner. No WS Preview rerun with shared runtime unchanged.
+
+## T017 minimal navigation confirmation
+
+- `browser-entry.mjs::backToLobby` claims one request before awaiting park, then existing ask with custom button labels. Repeat Back cancels pending request/modal; confirmed navigation stays latched until unload. No extra event handlers or local financial action.
+- `activate(afterBack)` ignores generic wake events during pending Back; only the cancelled Back continuation resumes. Existing park/resume preserve remaining clock budgets and reset preactions. cancelDialog handles preparing/visible confirmation; ask resets default labels for unrelated dialogs.
+- Generator destination link calls same local Back method with local error presentation. Three fundamental actual-function tests cover Cancel/Confirm/session budget, quick repeated Back and BFCache restoration; one short Preview probe plus exact-HEAD Stage APK. No Online/WS/CH/migration/dependency or CSS changes.
+
+- Existing pageshow lifecycle clears confirmed-navigation latch on BFCache restore; a pending unconfirmed modal remains paused, and repeated Back still cancels it.
