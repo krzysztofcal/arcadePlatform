@@ -29,3 +29,9 @@ Generated PoC has no auth bootstrap, chips client, remote telemetry, APIs or onl
 3. `browser-entry.mjs::run/schedule/activate/park` serializes lifecycle, timers, actions and wallet changes with one timer. Use rendered revision for human actions; fail-safe Leave preserves activation on failed commit. Explicit Back parks before navigation. No WS protocol emulation.
 4. Existing lobby provides one confirmation fragment copied into generated table; dialog Cancel/Escape/native Back resolve false. Existing native lobby Back checks this local cancellation hook before minimizing. Remove window.confirm, preserve source CSP and packaged transformed-script SRI.
 5. Fundamental timer/conservation/storage tests only. One focused Netlify smoke checks portrait/landscape Hero cards,20s timeout, bot delay,3s auto-next, menu/dialogs/Back. New Stage APK; physical layout/Rebuy/Refill/lifecycle re-test pending owner. No shared WS/runtime change, so no WS Preview repeat or Production effect.
+
+## T013–T014 minimal continuation
+
+- `offline-game.mjs::stampClock` always stamps20s live turn and separately stores botDueAt/botRemainingMs. `pendingTimer` selects the earlier decision/deadline; `tick` first consults canonical decideTurnTimeout, then permits strategy only for a due bot decision before timeout. `pause/resume` persist/rebase both budgets; legacy short clocks upgrade in place.
+- New Game imports only existing pure computeTargetBotCount; persist member roster. `core/read/newGame/nextHand/snapshot` use that roster for deal seed count, stacks, seats and maxSeats. Browser reaction actor/bot seats derive from persisted members. No shared module edits/WS Preview replay.
+- Fundamental20s+delay/late-timeout/pause/idempotence tests plus3–6 player showdown/conservation/Resume/Leave. One focused Netlify smoke validates actual20s bot indicator, early strategy timing, roster/Resume/auto-next/PC and network isolation; build current Stage APK and retain Draft for owner.

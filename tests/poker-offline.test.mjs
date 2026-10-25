@@ -55,7 +55,7 @@ test('all-in payouts conserve the original local stake and public projection kee
  assert.equal(Object.values(s.handSettlement.payouts).reduce((a,b)=>a+b,0),Object.values(s.contributionsByUserId).reduce((a,b)=>a+b,0));
  const before=g.read().wallet;const stack=s.stacks['offline-human'];g.leave();assert.equal(g.read().wallet,before+stack);
 });
-function timedGame(storage=store()) {let time=100000;const g=createOfflineGame({storage,prepare:async()=>{},random:()=>0.2,now:()=>time});return {g,storage,advance:ms=>time+=ms};}
+function timedGame(storage=store()) {let time=100000;const g=createOfflineGame({storage,prepare:async()=>{},random:()=>0.2,uuid:()=>'timing-fixture-0',now:()=>time});return {g,storage,advance:ms=>time+=ms};}
 test('automatic settled rollover runs after three seconds once; stale callbacks cannot start another hand',async()=>{
  const {g,advance}=timedGame();await g.newGame(100);finish(g);const token=g.timerToken(),wallet=g.read().wallet;
  advance(2999);assert.equal(await g.tick(token),false);advance(1);assert.deepEqual(await Promise.all([g.tick(token),g.tick(token)]),[true,false]);
@@ -77,4 +77,31 @@ test('bust stops auto-deal until explicit rebuy; failed timer write preserves PC
  const {g,storage,advance}=timedGame();await g.newGame(100);finish(g);const d=g.read();d.session.state.stacks['offline-human']=0;d.session.state.stacks['bot-offline-1']+=100;storage.setItem(STORAGE_KEY,JSON.stringify(d));assert.equal(g.pendingTimer(),null);
  g.rebuy();assert.ok(g.pendingTimer());assert.equal(g.read().wallet,4800);
  const token=g.timerToken(),before=storage.getItem(STORAGE_KEY),write=storage.setItem;storage.setItem=()=>{throw new Error('quota');};advance(3000);await assert.rejects(g.tick(token),/quota/);assert.equal(storage.getItem(STORAGE_KEY),before);assert.throws(()=>g.leave(),/quota/);assert.equal(storage.getItem(STORAGE_KEY),before);storage.setItem=write;
+});
+test('bot decision has a short independent delay but a full 20-second deadline; late bot uses canonical timeout once',async()=>{
+ const t=timedGame();await t.g.newGame(100);t.g.act({type:'CALL'});
+ const before=t.g.read().session.state,id=before.turnUserId;assert.notEqual(id,'offline-human');assert.equal(before.turnDeadlineAt-before.turnStartedAt,20000);
+ const pending=t.g.pendingTimer();assert.ok(pending.delayMs>=1000&&pending.delayMs<=2000);
+ t.advance(pending.delayMs);assert.ok(t.g.read().session.state.turnDeadlineAt-(100000+pending.delayMs)>=18000);assert.equal(await t.g.tick(pending.token),true);assert.equal(await t.g.tick(pending.token),false);
+ const late=timedGame();await late.g.newGame(100);late.g.act({type:'CALL'});const token=late.g.timerToken();late.advance(20000);assert.equal(await late.g.tick(token),true);
+ assert.equal(late.g.read().session.lastAction.source,'timeout');assert.ok(['CHECK','FOLD'].includes(late.g.read().session.lastAction.type));assert.equal(await late.g.tick(token),false);
+});
+for(const [roll,count] of [[0,2],[.3,3],[.6,4],[.9999,5]])test(`persistent ${count} bots: showdown, conservation, Resume, rollover and idempotent Leave`,async()=>{
+ const storage=store();let first=true;const g=createOfflineGame({storage,prepare:async()=>{},random:()=>{if(first){first=false;return roll;}return .01;}});await g.newGame(100);
+ const start=g.read(),roster=start.session.members;assert.equal(roster.length,count+1);assert.equal(start.wallet,4900);assert.equal(g.snapshot().table.maxSeats,count+1);
+ assert.deepEqual(start.session.state.handStartStacksByUserId,Object.fromEntries(roster.map(m=>[m.userId,100])));
+ finish(g);const settled=g.read().session.state;assert.equal(settled.community.length,5);assert.equal(Object.values(settled.stacks).reduce((a,b)=>a+b,0),100*(count+1));
+ const resumed=createOfflineGame({storage,prepare:async()=>{},random:()=>.99});resumed.resume(true);assert.deepEqual(resumed.read().session.members,roster);assert.equal(resumed.read().session.tableId,start.session.tableId);assert.deepEqual(resumed.read().session.state.stacks,settled.stacks);
+ if(settled.stacks['offline-human']>=2){await resumed.nextHand();assert.deepEqual(resumed.read().session.members,roster);}
+ const wallet=resumed.read().wallet,cash=resumed.leave();assert.equal(cash.wallet,wallet+cash.cashout);assert.equal(resumed.leave().cashout,0);
+});
+test('legacy two-bot v1 roster and short bot clock upgrade without changing wallet, stacks, IDs or hand',async()=>{
+ const t=timedGame();await t.g.newGame(100);t.g.act({type:'CALL'});const old=t.g.read();delete old.session.members;old.session.clock={durationMs:1500,remainingMs:700,dueAt:101500,paused:true};t.storage.setItem(STORAGE_KEY,JSON.stringify(old));
+ t.advance(600000);t.g.resume(true);const restored=t.g.read();assert.equal(restored.wallet,old.wallet);assert.deepEqual(restored.session.state.stacks,old.session.state.stacks);assert.equal(restored.session.tableId,old.session.tableId);assert.equal(restored.session.state.handId,old.session.state.handId);assert.equal(restored.session.members.length,3);
+ assert.equal(restored.session.state.turnDeadlineAt-restored.session.state.turnStartedAt,20000);assert.ok(t.g.pendingTimer().delayMs<=2000);
+});
+test('pause preserves independent bot-decision and 20-second turn budgets without duplicate action',async()=>{
+ const t=timedGame();await t.g.newGame(100);t.g.act({type:'CALL'});const start=t.g.pendingTimer();t.advance(500);t.g.pause();const saved=t.g.read();assert.equal(saved.session.clock.remainingMs,19500);assert.equal(saved.session.clock.botRemainingMs,start.delayMs-500);
+ t.advance(600000);t.g.resume();const state=t.g.read().session.state;assert.equal(state.turnDeadlineAt-state.turnStartedAt,20000);const pending=t.g.pendingTimer();assert.equal(pending.delayMs,start.delayMs-500);
+ t.advance(pending.delayMs-1);assert.equal(await t.g.tick(pending.token),false);t.advance(1);assert.equal(await t.g.tick(pending.token),true);assert.equal(t.g.read().session.lastAction.source,'bot');assert.equal(await t.g.tick(pending.token),false);
 });

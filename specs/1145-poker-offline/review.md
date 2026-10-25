@@ -1,3 +1,20 @@
+# T013–T014 — physical PASS retained, bot clock/roster corrections
+
+Owner S24+ PASS: airplane mode, both orientations/cards, auto-next, dialogs, Back/Resume and other exercised cases. Retain Draft; these two corrections require new Stage APK/owner confirmation.
+
+T013: all live actors have exactly20s stamped via existing shared timeout module; bot strategy independently scheduled1000–2000ms. Deadline expiry chooses canonical CHECK/FOLD before strategy, including delayed bot callback. Both remaining budgets persisted on pause/Resume;3s rollover and existing Web Locks/token guards retained. Existing V2 renderer/clock functions unchanged.
+
+T014: audited `shared/poker-domain/bots.mjs::computeTargetBotCount` and join.mjs first-human selection/default2–5. Reuse pure helper with6seats/1human/min2/max5; do not call funding/admission. Persist roster and use it for core, seeds, stack maps, snapshot maxSeats and reactions. Each member receives buy-in stack; only human debits wallet once. Legacy v1 infers original two bots; old short bot clock upgrades to20s without changing tableId/handId/cards/stacks/wallet/theme. Bad roster/timer metadata fails closed.
+
+Fundamental coverage includes15Offline cases plus existing mobile/security/shared timeout checks:20s versus early strategy, canonical late bot fallback, independent paused budgets, stale callbacks,2/3/4/5 bots with five-card showdown and totals300/400/500/600, Resume/rollover/Leave and old v1. A formerly random CHECK-timeout fixture could legally end by folds before reaching CHECK; its seed is now deterministic rather than changing production rules. Independent review found no critical/important issue in this delta.
+
+No shared runtime/strategy/Online CSS/protocol/finance change, so no WS Preview replay. No migration/dependency/config change. One focused Netlify proof and current-SHA APK are linked in PR after verification. Existing accepted physical evidence is not replayed as a WS campaign.
+
+Deferred replacement assessment: `replaceBrokeBotsForNextHand()` already returns a pure state/replacement plan, but is not a drop-in Offline call: its generated IDs conflict with current local roster validation, its UUID helper uses Node crypto/Buffer beyond the prepared-seed adapter, and replacementFunding descriptors must never invoke CH bankroll/ledger paths. A later small reviewed browser-safe identity/local-issuance adaptation could reuse the planning semantics. It is **not implemented here**; current roster remains stable and broke bots retain existing local top-up behavior between hands.
+
+---
+## Previous physical review and evidence
+
 # T009–T012 — focused Preview PASS; awaiting owner Android re-test
 
 Owner Galaxy S24+ PASS: cold Offline gameplay, several full hands, human actions, Resume, Leave. Rebuy/Refill physically NOT VERIFIED. Prior browser layout acceptance did not establish correct physical framing; clipping reported by owner is addressed by removing the extra banner and sharing Online viewport/inset ownership. Physical layout acceptance remains pending re-test.

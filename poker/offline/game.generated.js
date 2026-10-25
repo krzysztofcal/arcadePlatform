@@ -451,11 +451,11 @@
     const handId = normalizeString(state.handId);
     return !!handId && handId === normalizeString(state?.handSettlement?.handId) && handId === normalizeString(state?.showdown?.handId) && Array.isArray(state.handSeats) && Array.isArray(state.showdown?.winners) && !!state.handSettlement?.payouts && typeof state.handSettlement.payouts === "object" && !Array.isArray(state.handSettlement.payouts);
   }
-  function classifyRaiseReaction({ actorUserId, actorSeatNo, street, botSeats: botSeats2, reactionSettings, random = Math.random } = {}) {
+  function classifyRaiseReaction({ actorUserId, actorSeatNo, street, botSeats, reactionSettings, random = Math.random } = {}) {
     const normalizedActorUserId = normalizeString(actorUserId);
     const normalizedStreet = normalizeString(street).toUpperCase();
     if (!POST_FLOP_STREETS.has(normalizedStreet) || !normalizedActorUserId || !isPositiveSeatNo(actorSeatNo) || !samplePasses(random, 0.6, reactionSettings)) return null;
-    const reactor = normalizeBotSeats(botSeats2).find((bot) => bot.userId !== normalizedActorUserId);
+    const reactor = normalizeBotSeats(botSeats).find((bot) => bot.userId !== normalizedActorUserId);
     return reactor ? {
       botUserId: reactor.userId,
       botSeatNo: reactor.seatNo,
@@ -463,8 +463,8 @@
       reactionKey: "you_are_bluffing"
     } : null;
   }
-  function classifyAmbientReaction({ botSeats: botSeats2, reactionSettings, random = Math.random } = {}) {
-    const bots = normalizeBotSeats(botSeats2);
+  function classifyAmbientReaction({ botSeats, reactionSettings, random = Math.random } = {}) {
+    const bots = normalizeBotSeats(botSeats);
     if (bots.length === 0 || !samplePasses(random, 0.5, reactionSettings)) return null;
     const botSample = Number(random());
     const botIndex = Number.isFinite(botSample) && botSample >= 0 && botSample < 1 ? Math.floor(botSample * bots.length) : 0;
@@ -513,11 +513,11 @@
     const index = Math.floor(clamped * ALL_IN_LOSS_REACTION_KEYS.length);
     return ALL_IN_LOSS_REACTION_KEYS[index] || ALL_IN_LOSS_REACTION_KEYS[0];
   }
-  function classifySettlementReaction({ state, botSeats: botSeats2, reactionSettings, random = Math.random } = {}) {
+  function classifySettlementReaction({ state, botSeats, reactionSettings, random = Math.random } = {}) {
     if (reactionSettings?.enabled === false || !isCompleteReactionSettlement(state)) return null;
     const handId = normalizeString(state.handId);
     const handSeats = normalizeHandSeats(state.handSeats);
-    const bots = normalizeBotSeats(botSeats2);
+    const bots = normalizeBotSeats(botSeats);
     const botByUserId = new Map(bots.map((bot) => [bot.userId, bot]));
     const winners = winnerSeats(state, handSeats);
     if (normalFoldWin(state, handSeats, winners)) {
@@ -2029,8 +2029,8 @@
     return `ws_seed_${tableId}_${version}_${seatCount}`;
   }
   function orderedSeatMembers(coreState) {
-    const members2 = Array.isArray(coreState?.members) ? coreState.members : [];
-    return members2.filter((member) => typeof member?.userId === "string" && Number.isInteger(member?.seat)).slice().sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
+    const members = Array.isArray(coreState?.members) ? coreState.members : [];
+    return members.filter((member) => typeof member?.userId === "string" && Number.isInteger(member?.seat)).slice().sort((a, b) => a.seat - b.seat || a.userId.localeCompare(b.userId));
   }
   function isContinuationEligibleByStack(userId, stacksByUserId, { isBot = false } = {}) {
     const stack = Number(stacksByUserId?.[userId] ?? 0);
@@ -2038,11 +2038,11 @@
     return Number.isFinite(stack) && stack >= minimumStack;
   }
   function orderedEligibleSeatMembers(coreState, stacksByUserId = null) {
-    const members2 = orderedSeatMembers(coreState).filter((member) => !coreState?.pokerState?.inactivityEjectionByUserId?.[member.userId] && !coreState?.pokerState?.sitOutByUserId?.[member.userId] && !coreState?.pokerState?.leftTableByUserId?.[member.userId]);
+    const members = orderedSeatMembers(coreState).filter((member) => !coreState?.pokerState?.inactivityEjectionByUserId?.[member.userId] && !coreState?.pokerState?.sitOutByUserId?.[member.userId] && !coreState?.pokerState?.leftTableByUserId?.[member.userId]);
     if (!stacksByUserId || typeof stacksByUserId !== "object" || Array.isArray(stacksByUserId)) {
-      return members2;
+      return members;
     }
-    return members2.filter((member) => isContinuationEligibleByStack(member.userId, stacksByUserId, {
+    return members.filter((member) => isContinuationEligibleByStack(member.userId, stacksByUserId, {
       isBot: coreState?.seatDetailsByUserId?.[member.userId]?.isBot === true
     }));
   }
@@ -2062,8 +2062,8 @@
     handVersion = null,
     stakes = null
   }) {
-    const members2 = orderedEligibleSeatMembers(coreState, startingStacks);
-    if (members2.length < MIN_PLAYERS_TO_BOOTSTRAP) {
+    const members = orderedEligibleSeatMembers(coreState, startingStacks);
+    if (members.length < MIN_PLAYERS_TO_BOOTSTRAP) {
       return null;
     }
     const inactivity = { inactivityEjectionByUserId: { ...coreState.pokerState?.inactivityEjectionByUserId || {} }, missedTurnsByUserId: {}, pendingAutoSitOutByUserId: {}, sitOutByUserId: {} };
@@ -2075,17 +2075,17 @@
         if (coreState.pokerState?.[key]?.[userId] === true) inactivity[key][userId] = true;
       }
     }
-    const userIds = members2.map((member) => member.userId);
-    const dealerIndex = Number.isInteger(dealerSeatNo) ? Math.max(0, members2.findIndex((member) => member.seat === dealerSeatNo)) : 0;
-    const isHeadsUp = members2.length === 2;
-    const sbIndex = isHeadsUp ? dealerIndex : (dealerIndex + 1) % members2.length;
-    const bbIndex = (sbIndex + 1) % members2.length;
-    const utgIndex = isHeadsUp ? dealerIndex : (bbIndex + 1) % members2.length;
-    const sbUserId = members2[sbIndex]?.userId ?? null;
-    const bbUserId = members2[bbIndex]?.userId ?? null;
-    const turnUserId = members2[utgIndex]?.userId ?? members2[dealerIndex]?.userId ?? null;
+    const userIds = members.map((member) => member.userId);
+    const dealerIndex = Number.isInteger(dealerSeatNo) ? Math.max(0, members.findIndex((member) => member.seat === dealerSeatNo)) : 0;
+    const isHeadsUp = members.length === 2;
+    const sbIndex = isHeadsUp ? dealerIndex : (dealerIndex + 1) % members.length;
+    const bbIndex = (sbIndex + 1) % members.length;
+    const utgIndex = isHeadsUp ? dealerIndex : (bbIndex + 1) % members.length;
+    const sbUserId = members[sbIndex]?.userId ?? null;
+    const bbUserId = members[bbIndex]?.userId ?? null;
+    const turnUserId = members[utgIndex]?.userId ?? members[dealerIndex]?.userId ?? null;
     const versionForHand = Number.isInteger(handVersion) ? handVersion : coreState.version;
-    const handSeed = nextHandSeed(tableId, versionForHand, members2.length);
+    const handSeed = nextHandSeed(tableId, versionForHand, members.length);
     const initialDeck = deriveDeck(handSeed);
     const dealt = dealHoleCards(initialDeck, userIds);
     const stacks = Object.fromEntries(userIds.map((userId) => {
@@ -2118,14 +2118,14 @@
     for (const userId of userIds) {
       toCallByUserId[userId] = Math.max(0, currentBet - Number(betThisRoundByUserId[userId] ?? 0));
     }
-    const handSeats = members2.map((member) => ({ userId: member.userId, seatNo: member.seat }));
+    const handSeats = members.map((member) => ({ userId: member.userId, seatNo: member.seat }));
     return {
       ...inactivity,
       roomId: coreState.roomId || tableId,
-      handId: nextHandId(tableId, versionForHand, members2.length),
+      handId: nextHandId(tableId, versionForHand, members.length),
       handSeed,
       phase: "PREFLOP",
-      dealerSeatNo: members2[dealerIndex]?.seat ?? null,
+      dealerSeatNo: members[dealerIndex]?.seat ?? null,
       turnUserId,
       seats: handSeats.map((seat) => ({ ...seat })),
       handSeats,
@@ -2150,11 +2150,11 @@
       turnDeadlineAt: null
     };
   }
-  function resolveNextDealerSeatNo({ members: members2, settledState, coreState = null }) {
-    if (!Array.isArray(members2) || members2.length === 0) {
+  function resolveNextDealerSeatNo({ members, settledState, coreState = null }) {
+    if (!Array.isArray(members) || members.length === 0) {
       return null;
     }
-    const eligibleMembers = members2.filter((member) => isContinuationEligibleByStack(member.userId, settledState?.stacks, {
+    const eligibleMembers = members.filter((member) => isContinuationEligibleByStack(member.userId, settledState?.stacks, {
       isBot: coreState?.seatDetailsByUserId?.[member.userId]?.isBot === true
     }));
     if (eligibleMembers.length === 0) {
@@ -2174,8 +2174,8 @@
       if (pending === true) sitOutByUserId[userId] = true;
     }
     coreState = { ...coreState, pokerState: { ...settledState, sitOutByUserId, pendingAutoSitOutByUserId: {} } };
-    const members2 = orderedEligibleSeatMembers(coreState, settledState?.stacks);
-    const nextDealerSeatNo = resolveNextDealerSeatNo({ members: members2, settledState, coreState });
+    const members = orderedEligibleSeatMembers(coreState, settledState?.stacks);
+    const nextDealerSeatNo = resolveNextDealerSeatNo({ members, settledState, coreState });
     const nextHandState = buildBootstrappedPokerState({
       tableId,
       coreState,
@@ -2508,9 +2508,9 @@
     }
     return value.filter((member) => member && typeof member.userId === "string" && Number.isInteger(member.seat)).map((member) => ({ userId: member.userId, seatNo: member.seat, status: "ACTIVE" }));
   }
-  function resolvePublicSeats({ statePublic, members: members2, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus }) {
+  function resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus }) {
     const stateSeats = normalizeSeatRows(statePublic?.seats);
-    const memberSeats = normalizeMemberSeatRows(members2);
+    const memberSeats = normalizeMemberSeatRows(members);
     const seatDetailsByUserId = normalizeSeatDetails(coreState?.seatDetailsByUserId);
     const foldedByUserId = asObject(statePublic?.foldedByUserId) || {};
     const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
@@ -2703,10 +2703,10 @@
       holeCards: normalizeCards(holeCardsByUserId[userId])
     })).filter((entry) => entry.holeCards.length === 2);
   }
-  function projectRoomCoreSnapshot({ tableId, roomId, coreState, members: members2, userId, youSeat, tableStatus = "OPEN", publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
+  function projectRoomCoreSnapshot({ tableId, roomId, coreState, members, userId, youSeat, tableStatus = "OPEN", publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
     const state = asObject(coreState?.pokerState) || asObject(coreState?.state);
     const statePublic = state ? withoutPrivateState(state) : null;
-    let publicSeats = resolvePublicSeats({ statePublic, members: members2, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus });
+    let publicSeats = resolvePublicSeats({ statePublic, members, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus });
     const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
     const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
     const publicPhase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
@@ -2729,7 +2729,7 @@
         bigBlind: null,
         hand: {
           handId: null,
-          status: members2.length > 0 ? "LOBBY" : "EMPTY",
+          status: members.length > 0 ? "LOBBY" : "EMPTY",
           round: null,
           dealerSeatNo: null
         },
@@ -2741,8 +2741,8 @@
           sidePots: []
         },
         turn: {
-          userId: members2[0]?.userId ?? null,
-          seat: Number.isInteger(members2[0]?.seat) ? members2[0].seat : null,
+          userId: members[0]?.userId ?? null,
+          seat: Number.isInteger(members[0]?.seat) ? members[0].seat : null,
           startedAt: null,
           deadlineAt: null
         },
@@ -2839,14 +2839,38 @@
     return snapshot;
   }
 
+  // shared/poker-domain/bots.mjs
+  function clampRandom2(random = Math.random) {
+    const sampled = typeof random === "function" ? Number(random()) : Number(random);
+    if (!Number.isFinite(sampled)) return 0;
+    return Math.max(0, Math.min(0.999999, sampled));
+  }
+  function randomIntInclusive(min, max, random = Math.random) {
+    const low = Math.ceil(Number(min));
+    const high = Math.floor(Number(max));
+    if (!Number.isInteger(low) || !Number.isInteger(high) || high < low) return low;
+    return low + Math.floor((high - low + 1) * clampRandom2(random));
+  }
+  function computeTargetBotCount({ maxPlayers, humanCount, maxBots, minBots = 2, random = Math.random } = {}) {
+    const totalSeats = Number.isFinite(Number(maxPlayers)) ? Math.trunc(Number(maxPlayers)) : 0;
+    const humans = Number.isFinite(Number(humanCount)) ? Math.trunc(Number(humanCount)) : 0;
+    const limit = Number.isFinite(Number(maxBots)) ? Math.trunc(Number(maxBots)) : 0;
+    const minimum = Number.isFinite(Number(minBots)) ? Math.trunc(Number(minBots)) : 0;
+    if (humans <= 0 || humans >= totalSeats) return 0;
+    const upper = Math.max(0, Math.min(Math.max(0, limit), Math.max(0, totalSeats - humans)));
+    if (upper <= 0) return 0;
+    const lower = Math.min(upper, Math.max(1, Math.max(0, minimum)));
+    return randomIntInclusive(lower, upper, random);
+  }
+
   // poker/offline/offline-game.mjs
   var STORAGE_KEY = "arcade.poker.offline.v1";
   var HUMAN = "offline-human";
-  var ids = [HUMAN, "bot-offline-1", "bot-offline-2"];
-  var members = ids.map((userId, i) => ({ userId, seat: i + 1 }));
+  var legacyMembers = [HUMAN, "bot-offline-1", "bot-offline-2"].map((userId, i) => ({ userId, seat: i + 1 }));
   var clone = (value) => JSON.parse(JSON.stringify(value));
   var integer = (value) => Number.isSafeInteger(value) && value >= 0;
   function core(session) {
+    const members = session.members, ids = members.map((m) => m.userId);
     return {
       version: session.hand,
       roomId: session.tableId,
@@ -2869,8 +2893,12 @@
       if (data?.schema !== 1 || !integer(data.wallet) || !integer(data.revision)) throw new Error("Unsupported offline storage");
       if (data.session) {
         const s = data.session;
-        if (typeof s.tableId !== "string" || !s.tableId.startsWith("offline-") || !integer(s.hand) || s.hand < 1 || ![100, 500, 1e3].includes(s.buyIn) || !s.state || s.state.roomId !== s.tableId || typeof s.state.handId !== "string" || !integer(s.state.potTotal) || !ids.every((id) => integer(s.state.stacks?.[id]))) throw new Error("Invalid offline storage session");
+        if (!s.members) s.members = legacyMembers.map((m) => ({ ...m }));
+        if (!Array.isArray(s.members) || s.members.length < 3 || s.members.length > 6 || !s.members.every((m, i) => m?.seat === i + 1 && m.userId === (i === 0 ? HUMAN : "bot-offline-" + i))) throw new Error("Invalid offline storage roster");
+        const ids = s.members.map((m) => m.userId);
+        if (typeof s.tableId !== "string" || !s.tableId.startsWith("offline-") || !integer(s.hand) || s.hand < 1 || ![100, 500, 1e3].includes(s.buyIn) || !s.state || s.state.roomId !== s.tableId || typeof s.state.handId !== "string" || !integer(s.state.potTotal) || !ids.every((id) => integer(s.state.stacks?.[id])) || Object.keys(s.state.stacks).length !== ids.length) throw new Error("Invalid offline storage session");
         if (s.clock && (typeof s.clock.paused !== "boolean" || !integer(s.clock.durationMs) || s.clock.durationMs < 1 || s.clock.durationMs > 2e4 || !integer(s.clock.remainingMs) || s.clock.remainingMs > s.clock.durationMs || !integer(s.clock.dueAt))) throw new Error("Invalid offline storage clock");
+        if (s.clock && (s.clock.botDueAt != null && !integer(s.clock.botDueAt) || s.clock.botRemainingMs != null && (!integer(s.clock.botRemainingMs) || s.clock.botRemainingMs > 2e3))) throw new Error("Invalid offline storage bot timer");
       }
       return data;
     }
@@ -2902,9 +2930,10 @@
       return !expected || !!current && ["tableId", "handId", "userId", "revision"].every((key) => expected[key] === current[key]);
     }
     function stampClock(s) {
-      const durationMs = s.state.phase === "SETTLED" ? 3e3 : s.state.turnUserId === HUMAN ? 2e4 : 1e3 + Math.floor(clampRandom(random) * 1001);
+      const durationMs = s.state.phase === "SETTLED" ? 3e3 : 2e4;
+      const botDelay = s.state.phase !== "SETTLED" && s.state.turnUserId !== HUMAN ? 1e3 + Math.floor(clampRandom(random) * 1001) : null;
       s.state = stampTurnDeadline(s.state, now(), durationMs);
-      s.clock = { paused: false, durationMs, remainingMs: durationMs, dueAt: now() + durationMs };
+      s.clock = { paused: false, durationMs, remainingMs: durationMs, dueAt: now() + durationMs, botDueAt: botDelay === null ? null : now() + botDelay, botRemainingMs: botDelay };
     }
     function apply(s, id, action, source = id === HUMAN ? "human" : "bot") {
       if (s.state.turnUserId !== id) throw new Error("Not your turn");
@@ -2930,7 +2959,8 @@
       pendingTimer() {
         const data = read(), s = data.session;
         if (!s || !s.clock || s.clock.paused || s.state.phase === "SETTLED" && s.state.stacks[HUMAN] < 2) return null;
-        return { token: token(data), delayMs: Math.max(0, s.clock.dueAt - now()) };
+        const dueAt = s.clock.botDueAt == null ? s.clock.dueAt : Math.min(s.clock.dueAt, s.clock.botDueAt);
+        return { token: token(data), delayMs: Math.max(0, dueAt - now()) };
       },
       pause() {
         const data = read(), s = data.session;
@@ -2938,6 +2968,7 @@
         const revision = data.revision;
         if (!s.clock) stampClock(s);
         s.clock.remainingMs = Math.max(1e3, Math.min(s.clock.durationMs, s.clock.dueAt - now()));
+        if (s.clock.botDueAt != null) s.clock.botRemainingMs = Math.max(0, s.clock.botDueAt - now());
         s.clock.paused = true;
         s.state = { ...s.state, turnStartedAt: null, turnDeadlineAt: null };
         save(data, revision);
@@ -2947,25 +2978,26 @@
         const data = read(), s = data.session;
         if (!s || s.clock && !s.clock.paused && !restart) return false;
         const revision = data.revision;
-        if (!s.clock) stampClock(s);
+        if (!s.clock || s.state.phase !== "SETTLED" && s.clock.durationMs !== 2e4) stampClock(s);
         const duration = s.clock.durationMs, remaining = Math.max(1e3, Math.min(duration, s.clock.remainingMs));
         s.state = stampTurnDeadline(s.state, now() - (duration - remaining), duration);
-        s.clock = { paused: false, durationMs: duration, remainingMs: remaining, dueAt: now() + remaining };
+        const botRemaining = s.clock.botRemainingMs ?? null;
+        s.clock = { paused: false, durationMs: duration, remainingMs: remaining, dueAt: now() + remaining, botDueAt: botRemaining === null ? null : now() + botRemaining, botRemainingMs: botRemaining };
         save(data, revision);
         return true;
       },
       async tick(expected) {
         const data = read(), s = data.session;
-        if (!s || !expected || !matches(expected, data) || !s.clock || s.clock.paused || now() < s.clock.dueAt) return false;
+        if (!s || !expected || !matches(expected, data) || !s.clock || s.clock.paused) return false;
         if (s.state.phase === "SETTLED") {
-          if (s.state.stacks[HUMAN] < 2) return false;
+          if (now() < s.clock.dueAt || s.state.stacks[HUMAN] < 2) return false;
           return api.nextHand(expected);
         }
-        if (s.state.turnUserId === HUMAN) {
-          const decision = decideTurnTimeout({ pokerState: s.state, nowMs: now(), turnMs: 2e4 });
-          if (!decision.due) return false;
-          apply(s, HUMAN, decision.action, "timeout");
-        } else if (!bot(s)) return false;
+        const decision = decideTurnTimeout({ pokerState: s.state, nowMs: now(), turnMs: 2e4 });
+        if (decision.due) apply(s, decision.actorUserId, decision.action, "timeout");
+        else if (s.state.turnUserId !== HUMAN && s.clock.botDueAt != null && now() >= s.clock.botDueAt) {
+          if (!bot(s)) return false;
+        } else return false;
         save(data, data.revision);
         return true;
       },
@@ -2974,8 +3006,11 @@
         const data = read(), revision = data.revision;
         if (data.session) throw new Error("Leave the current session before New Game");
         if (data.wallet < buyIn) throw new Error("Not enough Practice Chips; use free refill");
-        const s = { tableId: "offline-" + uuid(), buyIn, hand: 1, state: null };
-        await prepare(`ws_seed_${s.tableId}_1_3`);
+        const count = computeTargetBotCount({ maxPlayers: 6, humanCount: 1, minBots: 2, maxBots: 5, random });
+        const members = Array.from({ length: count + 1 }, (_, i) => ({ userId: i === 0 ? HUMAN : "bot-offline-" + i, seat: i + 1 }));
+        const ids = members.map((m) => m.userId);
+        const s = { tableId: "offline-" + uuid(), buyIn, hand: 1, members, state: null };
+        await prepare(`ws_seed_${s.tableId}_1_${members.length}`);
         s.state = buildBootstrappedPokerState({ tableId: s.tableId, coreState: core(s), startingStacks: Object.fromEntries(ids.map((id) => [id, buyIn])) });
         if (!s.state) throw new Error("Offline deal failed");
         stampClock(s);
@@ -2989,9 +3024,9 @@
         const s = session(data);
         if (s.state.phase !== "SETTLED") throw new Error("Hand is not settled");
         if (s.state.stacks[HUMAN] < 2) throw new Error("Rebuy or Leave to continue");
-        for (const id of ids.slice(1)) if (s.state.stacks[id] < 2) s.state.stacks[id] = s.buyIn;
+        for (const { userId: id } of s.members.slice(1)) if (s.state.stacks[id] < 2) s.state.stacks[id] = s.buyIn;
         s.hand++;
-        await prepare(`ws_seed_${s.tableId}_${s.hand}_3`);
+        await prepare(`ws_seed_${s.tableId}_${s.hand}_${s.members.length}`);
         if (expected && !matches(expected, read())) return false;
         const next = buildNextHandStateFromSettled({ tableId: s.tableId, coreState: core(s), settledState: s.state, nextVersion: s.hand });
         if (!next) throw new Error("Offline rollover failed");
@@ -3047,13 +3082,13 @@
         });
       },
       snapshot() {
-        const data = read(), s = session(data);
+        const data = read(), s = session(data), members = s.members;
         return {
           ...projectRoomCoreSnapshot({ tableId: s.tableId, roomId: s.tableId, coreState: core(s), members, userId: HUMAN, youSeat: 1 }),
           tableId: s.tableId,
           stateVersion: data.revision,
           youSeat: 1,
-          table: { status: "OPEN", maxSeats: 3, buyIn: s.buyIn }
+          table: { status: "OPEN", maxSeats: members.length, buyIn: s.buyIn }
         };
       }
     };
@@ -3069,12 +3104,12 @@
   var reactionListener;
   var lastBotReaction = 0;
   var renderedToken;
-  var botSeats = [{ userId: "bot-offline-1", seatNo: 2 }, { userId: "bot-offline-2", seatNo: 3 }];
   function botReaction(before) {
     if (!reactionListener || Date.now() - lastBotReaction < 4e3) return;
-    const s = game.read().session?.state;
+    const session = game.read().session, s = session?.state;
     if (!s) return;
-    const candidate = s.phase === "SETTLED" && before.phase !== "SETTLED" ? classifySettlementReaction({ state: s, botSeats }) : s.currentBet > before.currentBet ? classifyRaiseReaction({ actorUserId: before.turnUserId, actorSeatNo: before.turnUserId === HUMAN ? 1 : before.turnUserId === "bot-offline-1" ? 2 : 3, street: s.phase, botSeats }) : classifyAmbientReaction({ botSeats });
+    const botSeats = session.members.filter((m) => m.userId !== HUMAN).map((m) => ({ userId: m.userId, seatNo: m.seat }));
+    const candidate = s.phase === "SETTLED" && before.phase !== "SETTLED" ? classifySettlementReaction({ state: s, botSeats }) : s.currentBet > before.currentBet ? classifyRaiseReaction({ actorUserId: before.turnUserId, actorSeatNo: session.members.find((m) => m.userId === before.turnUserId)?.seat, street: s.phase, botSeats }) : classifyAmbientReaction({ botSeats });
     if (candidate) {
       lastBotReaction = Date.now();
       reactionListener({ payload: { ...candidate, seatNo: candidate.botSeatNo } });

@@ -2,13 +2,13 @@ import {classifyRaiseReaction, classifySettlementReaction, classifyAmbientReacti
 import {createOfflineGame, HUMAN, STORAGE_KEY} from './offline-game.mjs';
 const game=createOfflineGame({storage:window.localStorage});
 let listener, timer, active=false, epoch=0, reactionListener, lastBotReaction=0, renderedToken;
-const botSeats=[{userId:'bot-offline-1',seatNo:2},{userId:'bot-offline-2',seatNo:3}];
 function botReaction(before){
   if(!reactionListener || Date.now()-lastBotReaction<4000) return;
-  const s=game.read().session?.state;if(!s)return;
+  const session=game.read().session,s=session?.state;if(!s)return;
+  const botSeats=session.members.filter(m=>m.userId!==HUMAN).map(m=>({userId:m.userId,seatNo:m.seat}));
   const candidate=s.phase==='SETTLED' && before.phase!=='SETTLED'
     ? classifySettlementReaction({state:s,botSeats})
-    : s.currentBet>before.currentBet ? classifyRaiseReaction({actorUserId:before.turnUserId,actorSeatNo:before.turnUserId===HUMAN?1:before.turnUserId==='bot-offline-1'?2:3,street:s.phase,botSeats})
+    : s.currentBet>before.currentBet ? classifyRaiseReaction({actorUserId:before.turnUserId,actorSeatNo:session.members.find(m=>m.userId===before.turnUserId)?.seat,street:s.phase,botSeats})
     : classifyAmbientReaction({botSeats});
   if(candidate){lastBotReaction=Date.now();reactionListener({payload:{...candidate,seatNo:candidate.botSeatNo}});}
 }
