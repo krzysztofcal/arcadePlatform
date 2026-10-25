@@ -1,53 +1,57 @@
-# #1150 — review: normal WS Leave must retain private audit state
+# #1150 / Draft #1151 — private audit metadata after WS Leave
 
-Priority Medium/P2; before public 1.0. Issue: https://github.com/krzysztofcal/arcadePlatform/issues/1150
+Medium/P2, before public 1.0. Issue: https://github.com/krzysztofcal/arcadePlatform/issues/1150
 
-## Final change
+**Account Deletion V2 is active on Production since 2026-10-23 (owner-confirmed); #1117 is CLOSED/completed. The prior assumption that this path was disabled was wrong.** This change treats deletion Leave as an active production path; no live deletion or Production inspection/mutation was performed.
 
-`ws-server/poker/handlers/leave.mjs::handleLeaveCommand` now calls the existing server `restoreTableFromPersisted(tableId)` after a successful authoritative Leave, including already-left/idempotent results. `ws-server/server.mjs` supplies that existing callback. It reads current table/seats/state through `createPersistedBootstrapRepository`, validates/rehydrates via `adaptPersistedBootstrap`, then applies the existing stale-version fence in the manager. Public response state is no longer installed into private runtime. No manual metadata copying, cross-hand merging or fallback to the public response.
+## Final behavior and files
 
-The current callback is already used by inactivity Leave. A replay of an old successful Leave reloads **current persistence**, not the old public response. A failed/thrown reload rejects without publishing success or scheduling a new bot step. Because the financial transaction may already have committed, clients must retry the existing same requestId; the unchanged durable Leave idempotency prevents repeated cashout. Existing restore diagnostics remain classified.
+- `ws-server/poker/handlers/leave.mjs::handleLeaveCommand`: after successful ordinary/already-left Leave, use existing `restoreTableFromPersisted(tableId)` rather than the public Leave result. `server.mjs` supplies that callback. Public responses remain sanitized.
+- `ws-server/poker/runtime/account-deletion.mjs::createDeletionPokerLeave`: the existing deletion callback is extracted for fundamental testing and uses the existing `createDeletionPokerCoordinator.coordinate` queue/fence/full-reload mechanism. It calls the same authoritative Leave executor and retains its fresh-attempt suffix for deferred seats/all-in winnings. No public state is installed into runtime.
+- `server.mjs::runAccountDeletionTick`: uses this callback, then existing broadcast/rollover/bot scheduling after successful restore. No new service, queue, persistence structure or SQL is introduced.
+- `createAccountDeletionRuntime.steps.poker`: first calls existing `resyncPokerPrivacy(context)`, **before** scanning SQL seats. A committed cashout can remove the owner from that scan; resync must not depend on finding the seat again.
+- Full reload reads current persisted table/seats/state, validates/rehydrates through `adaptPersistedBootstrap` and applies the existing manager version fence. It never copies private metadata across handIds. Existing Auth-last, lifecycle/lease guards, deletion phase order, ledger/BURN and canonical cashout code are unchanged.
 
-## Fundamental evidence
+## Consumer audit / removal
 
-One new regression in the existing handler test uses the real engine bootstrap, Leave reducer, manager/handler, legal bot action reducer, snapshot builder and settlement audit writer. The SQL/commit boundary is an in-memory fixture, not a real DB or a claimed live cashout. It models the actual split: full committed state versus sanitized public Leave result.
+Repository-wide search of executable code, scripts, tests and workflows confirmed deletion Leave was the last production caller of `buildAuthoritativeLeaveRestore`. `syncAuthoritativeLeave` had only direct unit-test consumers and delegated to the same obsolete public-projection restore. After migrating deletion, neither API had a production consumer.
 
-- RED on main: full starting-stack map expected, actual undefined after normal Leave restore.
-- GREEN: original u1/b1/b2 starting stacks survive; real bot actions reach SETTLED, pot zero, total 300 CH, audit OK/no flags. Public Leave projection and player/bot/observer snapshots omit handStartStacksByUserId.
-- A second small critical guard exercises a failed reload followed by already-left retry with an older public result: current hand/version and its distinct 125 CH map win; no old-hand metadata is copied.
-- Existing socket-test overrides now supply their corresponding persisted fixtures for successful external Leave, because success requires a full reload. No test runtime bypass or CI configuration change.
+Removed both internal methods/exports and their exclusive private-state/seat-shape helpers from `table-manager.mjs`. Removed tests of the discarded mechanism, retained the meaningful deferred-Leave projection test using full canonical restore, and changed the existing `table-manager.leave-restore.behavior.test.mjs` to verify full persisted bootstrap reload (normal/deferred all-in, original starting stacks, private cards, public snapshot privacy). Its existing CI registration stays unchanged. Remaining `restoreTableFromPersisted`, `deriveDeterministicRuntimeHandState` and the separate authoritative adapter shape validators still have needed callers and remain.
 
-## Cost and privacy
+The large deletion in the diff removes the orphaned mechanism and its tests; it is not an engine rewrite. No WS/HTTP/schema breaking change. Internal Node-only APIs with no remaining runtime consumers are removed; repository search must stay empty for their names.
 
-One additional full repository load per successful Leave/replay: one DB transaction with table, seat and state reads, plus the existing schema-capability read (cached within the transaction), i.e. ordinarily four SELECTs. It adds no ledger write or bot decision/action write. Queries are bounded to one table; there is no new SQL or dependency. Normal Leave acknowledgment holds the existing table command ownership for the extra read latency. No measured Preview/Production latency claim; verify on the separately authorized exact-SHA smoke.
+## Recovery after commit and latency
 
-The bootstrap reload also resets the existing private-hole-card acknowledgment cache, as any current restore does; the next existing writer may perform its usual idempotent hole-card check. No new public field, private-map logging, client exposure or fabricated audit OK. Existing partial historical records stay untouched. Current bootstrap's consistency/identity validation and version fences remain the recovery boundary; read failure after financial commit remains an operational retry case.
+The existing coordinator serializes under the existing table FIFO, fences table mutations and invalidates old views before Leave, then reloads full persistence. A failed reload keeps the table fenced and its existing pending-resync entry. `advanceDeletion` treats this as a dependency failure: RETRY, lease released, next attempt after 30 s; the existing 25 s tick scans due work. Nonfinancial long delays raise the existing operator incident after the deadline; they do not silently advance to BURN/Auth or become permanently completed/error. Recovery requires the underlying dependency to return.
 
-## Validation
+On the next poker attempt, resync runs even if SQL no longer has the owner's seat/stack. Success unblocks runtime before the poker phase can finish; another failure stays RETRY and cannot BURN. No second financial Leave is needed when the owner no longer has an obligation. A process restart drops the stale in-memory runtime/pending map; canonical bootstrap reloads SQL, not an old public reply. Existing restart/Auth-last tests remain in the verification set.
 
-- Fundamental handler suite: 9/9 PASS, including RED→GREEN and current-hand retry guard.
-- Existing adapter/writer/manager/bootstrap targeted run: 172/172 PASS.
-- Existing reconnect/adapter run: 70/70 PASS.
-- Existing shared Leave/deferred cashout/manager Leave restore/live Leave race run: 15/15 PASS.
-- Existing socket Leave subset: 10/10 PASS. Table socket suite: 11/11 PASS.
-- Root `npm test`: exit 0, 148 groups passed. Five optional PostgreSQL groups skipped without CHIPS_MIGRATIONS_TEST_DB_URL / POKER_RLS_TEST_DB_URL; also the existing daily-campaign PostgreSQL subtest and three PostgreSQL 16 CLI subtests skipped. No external DB configured/used.
-- Syntax and whitespace checks PASS.
-- First full WS server run: 140/141, one failure from removing classified `ws_leave_restore_rejected` diagnostic while replacing restore code. Restored the existing diagnostic on full-reload rejection; focused log-policy test PASS. Final full rerun: **141/141 PASS**, exit 0.
-- Initial regression invocation needed existing dependencies linked into the isolated worktree; after resolving that setup error, RED was the expected undefined-map assertion (not an import failure).
-- The first socket fixture adaptation also made invalid Leave fixtures into bootstrap fixtures and broke their preliminary JOINs. Restricted adaptation to successful coherent results with stacks; all 10 Leave cases then PASS. No runtime bypass.
+Normal deletion Leave adds one existing full repository read: ordinarily four SELECTs (table, seats, state and schema-capability check) in one read transaction. It holds that table's command ownership/fence for the read latency; unrelated tables keep their queues. Pending-resync retries add the same read; with no pending entries the pre-scan resync does no SQL. Existing restore may schedule settled rollover and invalidate the private-card acknowledgment cache. No extra ledger or bot-action write is introduced; a later writer may make its existing idempotent hole-card check. No live latency/SLA measurement is claimed, and no timeout/configuration was changed.
 
-The first PR WS harness also found the implicit-tableId Leave socket fixture lacked persisted state. Added its committed-state fixture and updated the initial observer expectation to an available empty table; all 11 table socket cases PASS locally. This follow-up changes tests/docs only; runtime remains commit `8ca505906f586878ce2e7ea9b1519510a3db8901`.
+## Fundamental tests
 
-No Stage/Production database access, financial mutation, migration, deploy or merge was performed for this implementation.
+- Ordinary Leave RED→GREEN remains: original map survives real manager/bot actions and settlement audit writer; public response/player/observer snapshots omit it. Already-left retry loads a current hand/version instead of an old public result.
+- New regression in existing `tests/account-deletion.e2e.test.mjs`, using existing local PGlite fixture: extracted original callback gives RED (map undefined); corrected callback/coordinator yields GREEN. Real authoritative Leave, legal engine bot actions, real persisted writer and HAND_SETTLED audit: OK, no flags, original total 300 CH.
+- Real subsequent cashout of 100 CH commits, reload fails twice, runtime stays fenced/RETRY and BURN count remains zero. Resync succeeds with no active owner place/stack to scan; Leave call count stays unchanged, so no second cashout. Wallet 75+100=175 CH; real BURN of 175 CH commits once, a lost post-commit response retries its durable receipt without another BURN. Observer keeps bot table open: remaining bot escrow 200 CH, all ledger entry sums zero. Auth still exists; the regression does not invoke Auth deletion.
+- Existing all-in/main-pot/side-pot/real cashout+BURN/restart/lost-Auth-response test validates Auth-last and full completion separately. Existing lifecycle, lease, privacy, Redis/avatar and wallet-retirement tests remain unchanged.
+- The local regression adds only missing fixture table/index shapes needed by the real writer, isolates its table and cleans it before legacy fixtures. It is registered before the file's later asynchronous imports so targeted runs do not execute the file cleanup hook before it. Initial incomplete-fixture failures were not treated as runtime passes.
 
-## Exact-SHA Preview gate — separate GO required
+## Verification
 
-Implementation is ready for review, **awaiting runtime verification**, not merge-ready. Green PR CI and Netlify only validate/build; they do not deploy WS.
+- Full Account Deletion E2E file: **12/12 PASS**.
+- WS server + reconnect/resync + live Leave race: **162/162 PASS**.
+- Handler + full reload + bootstrap: **37/37 PASS**; manager + reload suite: **94/94 PASS** (obsolete-method cases removed).
+- Root `npm test`: exit 0, **148 groups passed**, with existing optional PostgreSQL groups/subtests skipped without disposable DB configuration.
+- Combined deletion/lifecycle/Redis/avatar/bonus/retirement run: **74/74 PASS**, exit 0. CI is reported in the PR. Standalone deletion runs use the existing CI `XP_TEST_MODE=1` and concurrency=1; an initial invocation without that environment failed V3 setup, not a verified runtime result.
+- Syntax/whitespace checks PASS; no Stage/Production database or provider calls, migration, deploy or real deletion.
 
-1. Check shared Preview connections, human seats, prior cashouts/escrows and other work.
-2. Manual WS Preview Deploy: workflow definition main; application exact latest runtime-affecting SHA. Confirm workflow success, runtime metadata, service restart, changed-module hashes and /healthz.
-3. From this PR's Netlify Preview, admit a test human normally, then ordinary Leave during a live Online hand; verify original private starting-stack map in server-only read evidence, continued legal bots, HAND_SETTLED integrity OK and normal deferred cashout. Public Leave responses/snapshots must omit the map. Do not treat the separate #1149 JOIN fairness patch as part of this branch.
-4. Reconnect/retry the same Leave requestId as appropriate; verify current state/hand is loaded, no second cashout and no leftover human stack. Single Player: manual FOLD, bot settlement, ordinary Leave/cashout.
-5. Stop on mismatch, missing metadata or ambiguous accounting. No manual ledger/history repair.
+## Exact-SHA Preview plan — separate GO, no execution here
 
-No #1149/#1147 edits; no Offline T003–T008. Draft only; stop for owner review.
+Implementation is ready for review, **awaiting exact-SHA WS Preview runtime verification**, not merge-ready. PR/Netlify checks do not deploy WS.
+
+1. Check shared Preview occupancy, other work, prior human places/stacks/cashouts/escrow. After explicit deploy GO, use workflow definition main and exact latest runtime-affecting SHA; prove metadata/restart/module hashes/health.
+2. Ordinary Online in-hand Leave: original starting-stack metadata retained, bots continue, audit OK, canonical cashout. Repeat/reconnect with existing requestId where appropriate; no second cashout, no leftover human stack and no map in public output. This branch does not include #1149's JOIN fairness patch.
+3. **Actual Account Deletion requires a separate explicit destructive-test authorization**, pinned disposable Stage identity and approved CH/escrow expectations. Do not reuse the ordinary shared smoke account automatically. In-hand deletion Leave should finish/reconcile bots, retain audit OK until authorized privacy cleanup, BURN once, finish privacy before Auth-last, and reach completed state. Check retry/recovery through local failure tests unless fault injection is separately authorized; no live fault injection implied.
+4. Stop on unclear balances, missing metadata, prolonged fenced recovery or privacy leak. No manual ledger/history correction. No Production test or deployment.
+
+No #1149/#1147 edits or Offline T003–T008. Draft only; stop for owner review.

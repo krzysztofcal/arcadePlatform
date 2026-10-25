@@ -1233,27 +1233,24 @@ let accountDeletionRuntimePromise = null;
 async function runAccountDeletionTick() {
   if (!accountDeletionEnabled()) return;
   if (!accountDeletionRuntimePromise) accountDeletionRuntimePromise = (async () => {
-    const {createAccountDeletionRuntime} = await import('./poker/runtime/account-deletion.mjs');
+    const {createAccountDeletionRuntime,createDeletionPokerLeave} = await import('./poker/runtime/account-deletion.mjs');
     const beginSql = await loadBeginSqlWs();
     const privacy=await getDeletionPokerCoordinator();
+    const leavePoker=createDeletionPokerLeave({coordinate:privacy.coordinate,
+      executeLeave:async input=>(await loadAuthoritativeLeaveExecutor())(input)});
     return createAccountDeletionRuntime({beginSql,klog:klogSafe,
       coordinatePokerPrivacy:privacy.coordinate,resyncPokerPrivacy:privacy.resync,
       disconnectUser: async (userId) => {
         for (const socket of sessionStore.connectionsForUser(userId) || []) invalidateSocketSession(socket,{reason:'account_deletion_pending',send_stale:false});
         for (const sessionId of sessionStore.forgetUser(userId)) streamLog.forgetReceiver(sessionId);
       },
-      leaveFromTable: async ({tableId,userId,requestId}) => enqueueTableCommand({tableId,commandName:'account_delete_leave',run:async () => {
-        const executeLeave = await loadAuthoritativeLeaveExecutor();
-        // Use fresh idempotency attempt per authoritative version; existing Leave
-        // reconciles settled deferred seats, including all-in winnings.
-        const left = await executeLeave({tableId,userId,requestId:requestId + ':' + Date.now()});
-        if (!left?.ok) throw new Error('deletion_leave_unconfirmed');
-        const restored = tableManager.buildAuthoritativeLeaveRestore({tableId,userId,stateVersion:left.state?.version,pokerState:left.state?.state,tableStatus:left.tableStatus});
-        if (!restored?.ok || !tableManager.restoreTableFromPersisted(tableId,restored.restoredTable)?.ok) throw new Error('deletion_leave_restore_failed');
+      leaveFromTable: async input => {
+        await leavePoker(input);
+        const {tableId}=input;
         broadcastStateSnapshots(tableId); broadcastTableState(tableId);
         maybeScheduleSettledRollover(tableId);
         scheduleObservedBotTurn({tableId,trigger:'account_deletion_leave'});
-      }})
+      }
     });
   })().catch((error) => { accountDeletionRuntimePromise=null; throw error; });
   await (await accountDeletionRuntimePromise).tick();
