@@ -584,8 +584,8 @@
     var caption = document.createElement('span');
     caption.className = 'poker-celebration__caption';
     caption.textContent = demo
-      ? selection.kind === 'pot' ? 'DEMO · ' + formatNumber(Number.isSafeInteger(selection.amount) ? selection.amount : 1250) + ' CH' : 'PREVIEW · VISUAL DEMO'
-      : selection.kind === 'pot' ? tf('pokerCelebrationWinAmount', { amount: formatNumber(selection.amount) }, 'WIN {amount} CH') : 'EXCEPTIONAL HAND';
+      ? selection.kind === 'pot' ? 'DEMO · ' + formatNumber(Number.isSafeInteger(selection.amount) ? selection.amount : 1250) + ' PC' : 'PREVIEW · VISUAL DEMO'
+      : selection.kind === 'pot' ? tf('pokerCelebrationWinAmount', { amount: formatNumber(selection.amount) }, 'WIN {amount} PC') : 'EXCEPTIONAL HAND';
     art.appendChild(hero);
     art.appendChild(title);
     art.appendChild(caption);
@@ -645,7 +645,7 @@
     });
     var potAmount = document.createElement('strong');
     potAmount.className = 'poker-celebration-preview__amount';
-    potAmount.textContent = 'DEMO Monster Pot · ' + formatNumber(1250) + ' CH';
+    potAmount.textContent = 'DEMO Monster Pot · ' + formatNumber(1250) + ' PC';
     panel.appendChild(streakCount);
     panel.appendChild(potAmount);
     var giftDemoLabel = document.createElement('label');
@@ -668,7 +668,7 @@
       { kind: 'hand', title: 'FOUR OF A KIND', label: 'Four of a Kind', cards: ['7S', '7H', '7D', '7C', 'AH'] },
       { kind: 'hand', title: 'STRAIGHT FLUSH', label: 'Straight Flush', cards: ['6S', '7S', '8S', '9S', '10S'] },
       { kind: 'hand', title: 'ROYAL FLUSH', label: 'Royal Flush', cards: ['10S', 'JS', 'QS', 'KS', 'AS'] },
-      { kind: 'pot', label: 'Monster Pot · ' + formatNumber(1250) + ' CH (demo)' },
+      { kind: 'pot', label: 'Monster Pot · ' + formatNumber(1250) + ' PC (demo)' },
       { kind: 'streak', label: 'Win Streak' },
       { kind: 'close', label: 'Close' }
     ].forEach(function(entry){
@@ -979,12 +979,12 @@
     if (els.autoRebuyPreferenceLabel){
       els.autoRebuyPreferenceLabel.textContent = buyIn == null
         ? 'Auto rebuy at the table buy-in when out of chips'
-        : 'Auto rebuy ' + formatNumber(buyIn) + ' CH when out of chips';
+        : 'Auto rebuy ' + formatNumber(buyIn) + ' PC when out of chips';
     }
     if (els.autoRebuyPreferenceHint){
       els.autoRebuyPreferenceHint.textContent = buyIn == null
         ? 'Auto rebuy becomes available once this table reports its authoritative buy-in.'
-        : 'Automatically uses ' + formatNumber(buyIn) + ' CH from your account each time you run out of chips.';
+        : 'Automatically uses ' + formatNumber(buyIn) + ' PC from your account each time you run out of chips.';
     }
   }
 
@@ -993,7 +993,7 @@
     var visible = autoRebuyFeedbackState.visible === true && normalizeAuthoritativeBuyIn(autoRebuyFeedbackState.buyIn) != null;
     els.autoRebuyBalanceToast.hidden = !visible;
     els.autoRebuyBalanceToast.textContent = visible
-      ? ('-' + formatNumber(autoRebuyFeedbackState.buyIn) + ' CH')
+      ? ('-' + formatNumber(autoRebuyFeedbackState.buyIn) + ' PC')
       : '';
   }
 
@@ -1032,7 +1032,7 @@
   function renderAutoRebuyConfirmationCopy(buyIn){
     if (!els.autoRebuyConfirmCopy) return;
     els.autoRebuyConfirmCopy.textContent = 'Auto rebuy will use ' + formatNumber(buyIn)
-      + ' CH from your account each time you run out of chips. You can disable it later.';
+      + ' PC from your account each time you run out of chips. You can disable it later.';
   }
 
   function closeAutoRebuyConfirm(restoreFocus){
@@ -1100,15 +1100,7 @@
     renderSocialPreferences();
   }
 
-  function persistSocialPreferences(){
-    try {
-      if (!window.localStorage) return;
-      if (socialPreferencesIdentity) window.localStorage.setItem(SOCIAL_PREFERENCES_STORAGE_PREFIX + socialPreferencesIdentity, JSON.stringify(socialPreferences));
-      else window.localStorage.setItem(GUEST_CELEBRATIONS_STORAGE_KEY, String(socialPreferences.celebrationsEnabled));
-    } catch (err){
-      klog('poker_social_preferences_write_failed', { message: err && err.message ? err.message : String(err || 'unknown') });
-    }
-  }
+  function persistSocialPreferences(){return;}
 
   function autoRebuyStorageKey(){
     // Use the authenticated identity synced by syncSocialPreferencesIdentity()
@@ -2841,8 +2833,8 @@
       if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = code !== 'insufficient_chips';
       setError(code === 'insufficient_chips'
         ? (currentTableBuyIn() == null
-          ? 'Not enough CH for this table buy-in'
-          : 'Not enough CH for a ' + formatNumber(currentTableBuyIn()) + ' CH buy-in')
+          ? 'Not enough PC for this table buy-in'
+          : 'Not enough PC for a ' + formatNumber(currentTableBuyIn()) + ' PC buy-in')
         : code);
       render();
       return null;
@@ -3632,29 +3624,7 @@
     triggerBotAvatarReaction(seatNo, reactionKey, senderIsBot);
   }
 
-  function sendReaction(reactionKey){
-    if (inactivityExit || !wsClient || typeof wsClient.sendReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
-      return Promise.resolve(null);
-    }
-    closeReactionMenu();
-    return wsClient.sendReaction(reactionKey).then(function(result){
-      startReactionCooldown();
-      return result;
-    }).catch(function(error){
-      var code = normalizeSignalCode(error && (error.code || error.message));
-      if (code === 'reaction_rate_limited'){
-        startReactionCooldown();
-        return null;
-      }
-      if (code === 'not_seated' || code === 'table_closed'){
-        renderControls();
-        if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
-        return null;
-      }
-      klog('poker_reaction_error', { code: code || 'reaction_failed' });
-      return null;
-    });
-  }
+  function sendReaction(reactionKey){if (Date.now() < reactionControlUntilMs || !deriveCurrentSeat()) return Promise.resolve(); closeReactionMenu(); window.PokerOffline.reaction(reactionKey); startReactionCooldown(); return Promise.resolve({ok:true});}
 
   function buildReactionMenu(){
     if (!els.reactionMenu) return;
@@ -4875,7 +4845,7 @@
     if (!available) { els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); }
     giftCatalog.forEach(function(gift){
       var button = els.giftSelect.querySelector('[data-gift-key="' + gift.key + '"]');
-      button.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' CH';
+      button.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' PC';
       button.setAttribute('aria-pressed', String(els.giftSelect.dataset.value === gift.key));
       button.disabled = !available || giftPending;
     });
@@ -5012,7 +4982,7 @@
           ['emoji', 'name', 'price'].forEach(function(part){
             var value = document.createElement('span');
             value.className = 'poker-quick-gift-choice__' + part;
-            value.textContent = part === 'emoji' ? gift.emoji : part === 'name' ? giftName(gift) : formatNumber(gift.price) + ' CH';
+            value.textContent = part === 'emoji' ? gift.emoji : part === 'name' ? giftName(gift) : formatNumber(gift.price) + ' PC';
             choice.appendChild(value);
           });
           choice.addEventListener('click', function(){ sendSelectedGift(gift.key, seat.seatNo); });
@@ -5177,7 +5147,7 @@
         autoRebuyAvatarToast.className = 'poker-auto-rebuy-toast poker-auto-rebuy-toast--avatar';
         autoRebuyAvatarToast.setAttribute('role', 'status');
         autoRebuyAvatarToast.setAttribute('aria-live', 'polite');
-        autoRebuyAvatarToast.textContent = 'Auto rebuy: +' + formatNumber(autoRebuyFeedbackState.buyIn) + ' CH';
+        autoRebuyAvatarToast.textContent = 'Auto rebuy: +' + formatNumber(autoRebuyFeedbackState.buyIn) + ' PC';
       }
 
       var seatNumber = null;
@@ -5543,19 +5513,7 @@
     return !!inactivityExit || status === 'OUT_OF_CHIPS' || status === 'EJECTION_PENDING' || status === 'REMOVED';
   }
 
-  function refreshRebuyBalance(){
-    if (rebuyBalanceLoading || !els.rebuyBalance || !window.ChipsClient || typeof window.ChipsClient.fetchBalance !== 'function') return;
-    rebuyBalanceLoading = true;
-    var buyInLabel = currentTableBuyIn() == null ? 'table buy-in unavailable' : 'Buy-in: ' + formatNumber(currentTableBuyIn()) + ' CH';
-    Promise.resolve(window.ChipsClient.fetchBalance()).then(function(balance){
-      var amount = balance && Number.isFinite(Number(balance.balance)) ? Number(balance.balance) : Number(balance);
-      if (Number.isFinite(amount)) els.rebuyBalance.textContent = 'Balance: ' + formatNumber(amount) + ' CH · ' + buyInLabel;
-    }).catch(function(){
-      els.rebuyBalance.textContent = buyInLabel;
-    }).then(function(){
-      rebuyBalanceLoading = false;
-    });
-  }
+  function refreshRebuyBalance(){return;}
 
   function renderRebuyPanel(){
     if (!els.rebuyPanel) return;
@@ -5579,7 +5537,7 @@
       var buyIn = currentTableBuyIn();
       els.rebuyBtn.textContent = rebuyPending ? 'Buying in…' : (rebuyOperation && rebuyOperation.phase === 'error'
         ? 'Retry buy-in'
-        : (buyIn == null ? 'Buy in' : 'Buy in ' + formatNumber(buyIn) + ' CH'));
+        : (buyIn == null ? 'Buy in' : 'Buy in ' + formatNumber(buyIn) + ' PC'));
     }
     if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.disabled = !!inactivityExit || (!!rebuyOperation && rebuyOperation.phase === 'pending') || !isWsReady();
     if (outOfChips) refreshRebuyBalance();
@@ -5902,7 +5860,7 @@
       });
     }
 
-    var accountActionText = isGuestMode ? 'Create account and get 500 CH Welcome Bonus' : 'Sign in to join this table';
+    var accountActionText = isGuestMode ? 'Create account and get 500 PC Welcome Bonus' : 'Sign in to join this table';
     if (els.menuSignIn) {
       els.menuSignIn.hidden = signedIn && !isGuestMode;
       els.menuSignIn.textContent = accountActionText;
@@ -6100,7 +6058,7 @@
     var playerStatus = String(state.playerState && state.playerState.status || '').toUpperCase();
     els.roomStatus.textContent = seats.length < 2 ? t('pokerRoomWaiting', 'Waiting for more players')
       : playerStatus === 'WAITING_NEXT_HAND' ? t('pokerRoomReserved', 'Seat reserved · Joining next hand')
-      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Reload for another PoC hand')
+      : state.phase === 'SETTLED' ? t('pokerRoomHandComplete', 'Hand complete · Next hand when ready')
       : isUsersTurn() ? t('pokerRoomYourTurn', 'Your turn') : t('pokerRoomHandInProgress', 'Hand in progress');
   }
 
@@ -6172,7 +6130,7 @@
     return payload;
   }
 
-  function sendCommand(methodName, payload, requestId){if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable in one-hand Offline PoC')); return window.PokerOfflinePoc.act({type:payload.action, amount:payload.amount});}
+  function sendCommand(methodName, payload, requestId){if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable offline')); return window.PokerOffline.act({type:payload.action, amount:payload.amount});}
 
   function beginJoinOperation(payload, options){
     if (inactivityExit) return Promise.reject(new Error('removed_for_inactivity'));
@@ -6339,12 +6297,12 @@
         && balance >= requiredBankroll;
       if (alreadyUnlocked){
         return Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0
-          ? formatNumber(tableBuyIn) + ' CH tables are unlocked but not currently available at your progression level.'
+          ? formatNumber(tableBuyIn) + ' PC tables are unlocked but not currently available at your progression level.'
           : 'This table tier is unlocked but not currently available at your progression level.';
       }
       if (Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0){
-        var tierLabel = Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0 ? (' to unlock ' + formatNumber(tableBuyIn) + ' CH tables') : '';
-        return 'You need at least ' + formatNumber(requiredBankroll) + ' CH' + tierLabel + '.';
+        var tierLabel = Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0 ? (' to unlock ' + formatNumber(tableBuyIn) + ' PC tables') : '';
+        return 'You need at least ' + formatNumber(requiredBankroll) + ' PC' + tierLabel + '.';
       }
       return 'This table tier is locked for your current bankroll.';
     }
@@ -6352,8 +6310,8 @@
       return error && error.message ? error.message : 'Failed to join';
     }
     var buyIn = currentTableBuyIn();
-    if (buyIn == null) return 'Not enough CH to join this table.';
-    return t('pokerErrInsufficientChips', 'You need at least {amount} CH to join a table.').replace('{amount}', String(buyIn));
+    if (buyIn == null) return 'Not enough PC to join this table.';
+    return t('pokerErrInsufficientChips', 'You need at least {amount} PC to join a table.').replace('{amount}', String(buyIn));
   }
 
   function isRetryableAutoJoinError(error){
@@ -6654,73 +6612,9 @@
     return code === 'STALE_SESSION' || code === 'session_rebound' || code === 'ws_closed' || code === 'timeout' || code === 'ws_unavailable';
   }
 
-  function leaveAndReturnToLobby(destination){
-    if (inactivityExit) return Promise.resolve(null);
-    if (spectatorJoinIntroActive) cancelSpectatorJoinIntro(false);
-    clearHeroGiftDemo();
-    var leaveDestination = destination == null
-      ? (pendingLeaveNavigation ? pendingLeaveDestination : '/poker/')
-      : normalizeLeaveDestination(destination);
-    pendingLeaveDestination = leaveDestination;
-    clearRebuyOperation();
-    pendingLeaveNavigation = true;
-    try {
-      if (queueLeaveAndNavigateImmediately()) return Promise.resolve({ ok: true, queued: true });
-    } catch (_err){}
-    return sendCommand('sendLeave', { tableId: state.tableId }).then(function(){
-      pendingLeaveRetryAfterReconnect = false;
-      pendingLeaveNavigation = false;
-      state.statusText = 'Leave accepted';
-      renderInfoPanel();
-      navigateAfterLeave();
-    }).catch(function(err){
-      if (isRetryableLeaveError(err) && currentAccessToken && !pendingLeaveRetryAfterReconnect){
-        pendingLeaveRetryAfterReconnect = true;
-        state.statusText = LIVE_STATUS_COPY.connecting;
-        renderInfoPanel();
-        restartLiveMode(currentAccessToken);
-        return;
-      }
-      pendingLeaveRetryAfterReconnect = false;
-      pendingLeaveNavigation = false;
-      pendingLeaveDestination = '/poker/';
-      setError(err && err.message ? err.message : 'Failed to leave');
-    });
-  }
+  function leaveAndReturnToLobby(destination){return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/'); }).catch(function(error){setError(error.message);});}
 
-  function requestManualRebuy(source){
-    if (inactivityExit) return false;
-    var requestedSource = normalizeRebuySource(source);
-    if (!state.playerState || state.playerState.canRebuy !== true) return Promise.resolve();
-    if (requestedSource === 'auto' && currentTableBuyIn() == null) return Promise.resolve();
-    if (rebuyOperation && rebuyOperation.phase === 'pending') return Promise.resolve({ ok: true, pending: true });
-    if (rebuyOperation && rebuyOperation.phase === 'error'){
-      rebuyOperation.source = requestedSource;
-      rebuyOperation.phase = 'pending';
-      rebuyOperation.resumeAttempted = true;
-      persistPendingRebuy();
-      setError('');
-      renderRebuyPanel();
-      return sendRebuyOperation();
-    }
-    var requestId = buildRebuyRequestId();
-    rebuyOperation = {
-      phase: 'pending',
-      resumeAttempted: true,
-      requestId: requestId,
-      tableId: state.tableId,
-      userId: state.currentUserId,
-      source: requestedSource,
-      payload: { tableId: state.tableId }
-    };
-    rebuyOperation.payload.amount = requestedSource === 'auto'
-      ? currentTableBuyIn()
-      : clientBuyInDeclaration();
-    persistPendingRebuy();
-    setError('');
-    renderRebuyPanel();
-    return sendRebuyOperation();
-  }
+  function requestManualRebuy(source){return window.PokerOffline.rebuy().catch(function(error){setError(error.message);});}
 
   function maybeTriggerAutoRebuy(){
     var playerState = state.playerState || null;
@@ -7589,21 +7483,27 @@
 
   function init(){
     selectElements();
-    tableId = window.PokerOfflinePoc.tableId;
-    state = createEmptyLiveState(tableId, window.PokerOfflinePoc.human);
+    try {
+    var offline = window.PokerOffline;
+    var session = offline.read().session;
+    if (!session) { window.location.replace('/poker/'); return; }
+    tableId = session.tableId;
+    state = createEmptyLiveState(tableId, offline.human);
     state.wsReady = true; state.reconnectGate = false;
+    socialPreferencesIdentity = 'offline-human';
     applyTableTheme(resolveTableThemeId(tableId));
     bindControls();
     if (els.sceneViewport && window.ResizeObserver) new ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
     markBootReady();
-    window.PokerOfflinePoc.start(function(payload){
+    offline.start(function(payload){
       mergeSnapshot(payload, {kind:'stateSnapshot', initial:false});
       state.hasAppliedAuthoritativeSnapshot = true;
-      state.statusText = 'OFFLINE PoC · Practice Chips · one hand';
+      state.statusText = 'OFFLINE · Practice Chips';
       render();
-      [els.menuToggle, els.reactionBtn, els.accountHud, els.rebuyPanel, els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
-    }).catch(function(error){ setError(error.message); render(); });
+      [els.accountHud, els.rebuyPanel, els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
+    }, handleTableReaction);
+    } catch(error) { document.getElementById('offlineError').textContent = error.message; }
   }
 
   window.__PokerV2 = {

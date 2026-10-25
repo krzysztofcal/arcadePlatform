@@ -69,7 +69,7 @@
     }
   }
   document.addEventListener('DOMContentLoaded', function(){
-    notice(navigator.onLine ? 'Stage PoC · ' + config.sha.slice(0, 8) : 'Offline · reconnect to use Poker');
+    notice(navigator.onLine ? 'Stage PoC · ' + config.sha.slice(0, 8) : 'Offline · Poker Offline is available without login');
     try {
       browser = plugin('Browser');
       app = plugin('App');
@@ -109,6 +109,6 @@
       if (url.protocol === 'https:' && browser) browser.open({ url: url.href }).catch(function(){ klog('mobile:external_link_failed'); });
     }, true);
   });
-  window.addEventListener('offline', function(){ notice('Offline · reconnect to use Poker'); });
+  window.addEventListener('offline', function(){ notice('Offline · Poker Offline is available without login'); });
   window.addEventListener('online', function(){ notice('Stage PoC · ' + config.sha.slice(0, 8)); });
 })();

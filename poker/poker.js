@@ -1693,6 +1693,7 @@
     if (createBtn) createBtn.disabled = true;
 
     var carousel = document.querySelector('.carousel');
+    // Offline card initializes independently of Auth/WS in its local bundle.
     var tiles = Array.prototype.slice.call(document.querySelectorAll('.tile'));
     var dots = Array.prototype.slice.call(document.querySelectorAll('.dot'));
     var current = 0;

@@ -44,9 +44,17 @@ await put('mobile/mobile.css', await readFile(path.join(here, 'mobile.css')));
 await put('js/auth/supabase-config.js', 'window.SUPABASE_CONFIG = ' + JSON.stringify({ SUPABASE_URL: config.supabaseUrl, SUPABASE_ANON_KEY: config.supabaseAnonKey, AUTH_GOOGLE_ENABLED: true }) + ';\n');
 await put('js/build-info.js', 'window.BUILD_INFO = ' + JSON.stringify({ commit: config.sha, pokerWsUrl: config.wsUrl, mobileVersion: '0.0.1' }) + '; window.__POKER_WS_URL = ' + JSON.stringify(config.wsUrl) + ';\n');
 await put('js/vendor/supabase.js', await readFile(path.join(here, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')));
-const pages = ['poker/index.html', 'poker/table-v2.html', 'account.html'];
+const pages = ['poker/index.html', 'poker/table-v2.html', 'poker/offline/play.html', 'account.html'];
 for (const name of pages) {
   let html = await readFile(path.join(root, name), 'utf8');
+  if (name === 'poker/offline/play.html') {
+    // Preserve isolated CSP/SRI: no auth, online mobile bootstrap or remote config.
+    await copy('poker/offline/game.generated.js');
+    await copy('poker/offline/renderer.generated.js');
+    await copy('poker/offline/offline.css');
+    await put(name, html);
+    continue;
+  }
   // Only the table draws behind cutouts; other pages retain native viewport margins.
   if (name !== 'poker/table-v2.html') html = html.replace('viewport-fit=cover', 'viewport-fit=auto');
   // Presentation composition only; account forms and Poker DOM remain shared.
@@ -61,7 +69,7 @@ for (const name of pages) {
     let target = url.pathname;
     if (target === '/index.html' || target === '/poker/') target = '/poker/index.html';
     if (target === '/xp.html') target = '/account.html';
-    if (!['/poker/', '/poker/index.html', '/poker/table-v2.html', '/account.html'].includes(target) && !target.endsWith('.css')) {
+    if (!['/poker/', '/poker/index.html', '/poker/table-v2.html', '/poker/offline/play.html', '/account.html'].includes(target) && !target.endsWith('.css')) {
       if (/^\/(legal\/|about[./])/.test(target)) target = config.apiOrigin + target;
       else return match.replace(value, '/account.html');
     }

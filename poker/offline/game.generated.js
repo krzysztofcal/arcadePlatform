@@ -1,770 +1,5 @@
 // GENERATED from shared accepted WS rules and strategy. Do not edit.
 (() => {
-  // poker/offline/browser-crypto.mjs
-  var digests = /* @__PURE__ */ new Map();
-  async function prepareSeed(seed) {
-    const bytes = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed));
-    digests.set(seed, new DataView(bytes));
-  }
-  function createHash(algorithm) {
-    if (algorithm !== "sha256") throw new Error("Unsupported offline digest");
-    let seed;
-    return {
-      update(value) {
-        seed = value;
-        return this;
-      },
-      digest() {
-        const view = digests.get(seed);
-        if (!view) throw new Error("Offline seed must be prepared before dealing");
-        return { readUInt32BE(offset) {
-          return view.getUint32(offset, false);
-        } };
-      }
-    };
-  }
-  var browser_crypto_default = { createHash };
-
-  // ws-server/poker/shared/poker-primitives.mjs
-  var SUITS = ["S", "H", "D", "C"];
-  var RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
-  var ACTION_PHASES = /* @__PURE__ */ new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
-  var RANK_TO_CODE = {
-    14: "A",
-    13: "K",
-    12: "Q",
-    11: "J",
-    10: "T",
-    9: "9",
-    8: "8",
-    7: "7",
-    6: "6",
-    5: "5",
-    4: "4",
-    3: "3",
-    2: "2"
-  };
-  function createDeck() {
-    const deck = [];
-    for (const s of SUITS) {
-      for (const r of RANKS) {
-        deck.push({ r, s });
-      }
-    }
-    return deck;
-  }
-  function asSeed(seed) {
-    return typeof seed === "string" && seed.trim() ? seed.trim() : "ws-default-seed";
-  }
-  function deriveDeck(seed) {
-    const deck = createDeck();
-    const digest = browser_crypto_default.createHash("sha256").update(asSeed(seed)).digest();
-    let state2 = digest.readUInt32BE(0) ^ digest.readUInt32BE(4) ^ digest.readUInt32BE(8) ^ digest.readUInt32BE(12);
-    if (state2 === 0) {
-      state2 = 2654435769;
-    }
-    const next = () => {
-      state2 ^= state2 << 13;
-      state2 ^= state2 >>> 17;
-      state2 ^= state2 << 5;
-      return (state2 >>> 0) / 4294967296;
-    };
-    for (let i = deck.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(next() * (i + 1));
-      const tmp = deck[i];
-      deck[i] = deck[j];
-      deck[j] = tmp;
-    }
-    return deck;
-  }
-  function dealHoleCards(deck, playerIds) {
-    const totalNeeded = playerIds.length * 2;
-    if (deck.length < totalNeeded) {
-      throw new Error("not_enough_cards");
-    }
-    const holeCardsByUserId = {};
-    let idx = 0;
-    for (const id of playerIds) {
-      holeCardsByUserId[id] = [];
-    }
-    for (let round = 0; round < 2; round += 1) {
-      for (const id of playerIds) {
-        holeCardsByUserId[id].push(deck[idx]);
-        idx += 1;
-      }
-    }
-    return {
-      deck: deck.slice(idx),
-      holeCardsByUserId
-    };
-  }
-  function asCardCode(card) {
-    if (typeof card === "string") {
-      return card;
-    }
-    if (!card || typeof card !== "object" || Array.isArray(card)) {
-      return null;
-    }
-    const rank = RANK_TO_CODE[card.r];
-    const suit = typeof card.s === "string" ? card.s.trim().toUpperCase() : "";
-    if (!rank || !suit) {
-      return null;
-    }
-    return `${rank}${suit}`;
-  }
-  function toCardCodes(cards) {
-    if (!Array.isArray(cards)) {
-      return [];
-    }
-    return cards.map(asCardCode).filter((card) => typeof card === "string" && card.length > 0);
-  }
-  function toHoleCardCodeMap(holeCardsByUserId) {
-    if (!holeCardsByUserId || typeof holeCardsByUserId !== "object" || Array.isArray(holeCardsByUserId)) {
-      return {};
-    }
-    const normalized = {};
-    for (const [userId, cards] of Object.entries(holeCardsByUserId)) {
-      normalized[userId] = toCardCodes(cards);
-    }
-    return normalized;
-  }
-  function toSafeInt(value, fallback = 0) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return fallback;
-    return Math.trunc(num);
-  }
-  function maxFromMap(value) {
-    if (!value || typeof value !== "object") return 0;
-    const nums = Object.values(value).map((entry) => toSafeInt(entry, 0)).filter((entry) => entry > 0);
-    if (nums.length === 0) return 0;
-    return Math.max(...nums);
-  }
-  function deriveCurrentBet(state2) {
-    const currentBet = toSafeInt(state2.currentBet, null);
-    if (currentBet == null || currentBet < 0) return maxFromMap(state2.betThisRoundByUserId);
-    return currentBet;
-  }
-  function deriveLastRaiseSize(state2, currentBet) {
-    const lastRaiseSize = toSafeInt(state2.lastRaiseSize, null);
-    if (lastRaiseSize == null || lastRaiseSize <= 0) return currentBet > 0 ? currentBet : 0;
-    return lastRaiseSize;
-  }
-  function deriveBigBlind(state2) {
-    const bigBlind = toSafeInt(state2?.bigBlind, 0);
-    return bigBlind > 0 ? bigBlind : 1;
-  }
-  function canRaise(state2, userId, toCall, lastRaiseSize) {
-    return !state2?.actedThisRoundByUserId?.[userId] || toCall >= lastRaiseSize;
-  }
-  function isActivePlayer(state2, userId) {
-    if (!state2 || !userId) return false;
-    if (state2.leftTableByUserId && state2.leftTableByUserId[userId]) return false;
-    if (state2.sitOutByUserId && state2.sitOutByUserId[userId]) return false;
-    const folded = !!(state2.foldedByUserId && state2.foldedByUserId[userId]);
-    const allIn = !!(state2.allInByUserId && state2.allInByUserId[userId]);
-    return !folded && !allIn;
-  }
-  function isSeatedPlayer(state2, userId) {
-    if (!state2 || !userId) {
-      return false;
-    }
-    const phase = typeof state2?.phase === "string" ? state2.phase : "";
-    const seats = ACTION_PHASES.has(phase) && Array.isArray(state2?.handSeats) && state2.handSeats.length > 0 ? state2.handSeats : state2?.seats;
-    if (Array.isArray(seats)) {
-      return seats.some((seat) => seat && seat.userId === userId);
-    }
-    return !!(state2.stacks && typeof state2.stacks === "object" && Object.prototype.hasOwnProperty.call(state2.stacks, userId));
-  }
-  function computeLegalActionsForSeatedPlayer(state2, userId) {
-    const stack = toSafeInt(state2.stacks?.[userId], 0);
-    const currentUserBet = toSafeInt(state2.betThisRoundByUserId?.[userId], 0);
-    const currentBet = deriveCurrentBet(state2);
-    const lastRaiseSize = deriveLastRaiseSize(state2, currentBet);
-    const toCall = Math.max(0, currentBet - currentUserBet);
-    if (stack <= 0) {
-      return { actions: [], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    if (toCall > 0) {
-      const actions2 = ["FOLD", "CALL"];
-      const maxRaiseTo = stack + currentUserBet;
-      const rawMinRaiseTo = currentBet + lastRaiseSize;
-      const minRaiseTo = maxRaiseTo > 0 ? Math.min(rawMinRaiseTo, maxRaiseTo) : rawMinRaiseTo;
-      const mayRaise = canRaise(state2, userId, toCall, lastRaiseSize) && maxRaiseTo > currentBet;
-      if (mayRaise) actions2.push("RAISE");
-      return {
-        actions: actions2,
-        toCall,
-        minRaiseTo: mayRaise ? minRaiseTo : null,
-        maxRaiseTo,
-        maxBetAmount: null,
-        minBetAmount: null
-      };
-    }
-    const actions = ["FOLD", "CHECK"];
-    if (stack > 0) actions.push("BET");
-    const minBetAmount = Math.min(deriveBigBlind(state2), stack);
-    return { actions, toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: stack, minBetAmount };
-  }
-  function computeSharedLegalActions({ statePublic, userId } = {}) {
-    const state2 = statePublic || {};
-    if (!state2 || typeof state2 !== "object" || Array.isArray(state2)) {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    const phase = typeof state2.phase === "string" ? state2.phase : "";
-    if (!ACTION_PHASES.has(phase)) {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    if (!userId || typeof userId !== "string") {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    if (!isSeatedPlayer(state2, userId) || !isActivePlayer(state2, userId)) {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    const turnUserId = typeof state2.turnUserId === "string" ? state2.turnUserId : "";
-    if (!turnUserId) {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    if (turnUserId !== userId) {
-      const toCall = Math.max(0, deriveCurrentBet(state2) - toSafeInt(state2.betThisRoundByUserId?.[userId], 0));
-      return { actions: ["FOLD"], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    return computeLegalActionsForSeatedPlayer(state2, userId);
-  }
-  function computeProjectedLegalActions({ statePublic, userId } = {}) {
-    const state2 = statePublic || {};
-    if (!state2 || typeof state2 !== "object" || Array.isArray(state2)) {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    const phase = typeof state2.phase === "string" ? state2.phase : "";
-    if (!ACTION_PHASES.has(phase)) {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    if (!userId || typeof userId !== "string") {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    if (!isSeatedPlayer(state2, userId) || !isActivePlayer(state2, userId)) {
-      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
-    }
-    return computeLegalActionsForSeatedPlayer(state2, userId);
-  }
-
-  // ws-server/poker/shared/settlement/poker-materialize-showdown.mjs
-  var getHandId = (state2) => typeof state2?.handId === "string" && state2.handId.trim() ? state2.handId.trim() : "";
-  var normalizeChipAmount = (name, value) => {
-    const amount = Number(value ?? 0);
-    if (!Number.isFinite(amount) || amount < 0 || Math.floor(amount) !== amount) {
-      throw new Error(`showdown_invalid_${name}`);
-    }
-    return amount;
-  };
-  var normalizeSeatOrder = (seatUserIdsInOrder2, state2) => {
-    if (Array.isArray(seatUserIdsInOrder2) && seatUserIdsInOrder2.length > 0) {
-      const seen2 = /* @__PURE__ */ new Set();
-      const out2 = [];
-      for (const raw of seatUserIdsInOrder2) {
-        if (typeof raw !== "string") throw new Error("showdown_invalid_seats");
-        const userId = raw.trim();
-        if (!userId || seen2.has(userId)) throw new Error("showdown_invalid_seats");
-        seen2.add(userId);
-        out2.push(userId);
-      }
-      return out2;
-    }
-    if (!Array.isArray(state2?.seats)) return [];
-    const ordered = state2.seats.slice().sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0));
-    const out = [];
-    const seen = /* @__PURE__ */ new Set();
-    for (const seat of ordered) {
-      if (typeof seat?.userId !== "string") continue;
-      const userId = seat.userId.trim();
-      if (!userId) continue;
-      if (seen.has(userId)) throw new Error("showdown_invalid_seats");
-      seen.add(userId);
-      out.push(userId);
-    }
-    return out;
-  };
-  var listEligibleUserIds = ({ state: state2, seatUserIdsInOrder: seatUserIdsInOrder2 }) => {
-    const seatOrder = normalizeSeatOrder(seatUserIdsInOrder2, state2);
-    if (seatOrder.length === 0) throw new Error("showdown_invalid_seats");
-    const stacks = state2.stacks || {};
-    const eligible = [];
-    for (const userId of seatOrder) {
-      if (state2.foldedByUserId?.[userId]) continue;
-      if (state2.leftTableByUserId?.[userId]) continue;
-      if (state2.sitOutByUserId?.[userId]) continue;
-      if (!Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
-      normalizeChipAmount("stack", stacks[userId]);
-      eligible.push(userId);
-    }
-    return { eligibleUserIds: eligible, seatOrder };
-  };
-  var ensureCommunityComplete = (state2) => {
-    if (!Array.isArray(state2.community)) throw new Error("showdown_incomplete_community");
-    if (state2.community.length > 5) throw new Error("showdown_invalid_community");
-    if (state2.community.length !== 5) throw new Error("showdown_incomplete_community");
-    return state2.community.slice();
-  };
-  var copyStacks = (stacks) => {
-    const source = stacks && typeof stacks === "object" && !Array.isArray(stacks) ? stacks : {};
-    const out = {};
-    for (const [userId, amount] of Object.entries(source)) {
-      if (typeof userId !== "string" || !userId.trim()) continue;
-      out[userId] = normalizeChipAmount("stack", amount);
-    }
-    return out;
-  };
-  var diffPayouts = (prevStacks, nextStacks) => {
-    const payouts = {};
-    const allUserIds = /* @__PURE__ */ new Set([...Object.keys(prevStacks || {}), ...Object.keys(nextStacks || {})]);
-    for (const userId of allUserIds) {
-      const before = normalizeChipAmount("stack", prevStacks?.[userId] ?? 0);
-      const after = normalizeChipAmount("stack", nextStacks?.[userId] ?? 0);
-      const delta = after - before;
-      if (delta < 0) throw new Error("showdown_invalid_stack_delta");
-      if (delta > 0) payouts[userId] = delta;
-    }
-    return payouts;
-  };
-  var normalizeWinnerIds = (raw) => {
-    if (!Array.isArray(raw)) return [];
-    const out = [];
-    const seen = /* @__PURE__ */ new Set();
-    for (const value of raw) {
-      if (typeof value !== "string") continue;
-      const userId = value.trim();
-      if (!userId || seen.has(userId)) continue;
-      seen.add(userId);
-      out.push(userId);
-    }
-    return out;
-  };
-  var buildPayoutsFromPotsAwarded = (potsAwarded) => {
-    const payouts = {};
-    if (!Array.isArray(potsAwarded)) return payouts;
-    for (const pot of potsAwarded) {
-      const amount = normalizeChipAmount("pot", pot?.amount ?? 0);
-      const winners = normalizeWinnerIds(pot?.winners);
-      if (winners.length === 0 || amount === 0) continue;
-      const share = Math.floor(amount / winners.length);
-      let remainder = amount - share * winners.length;
-      let distributed = 0;
-      for (const userId of winners) {
-        const bonus = remainder > 0 ? 1 : 0;
-        if (remainder > 0) remainder -= 1;
-        const add = share + bonus;
-        payouts[userId] = (payouts[userId] || 0) + add;
-        distributed += add;
-      }
-      if (distributed !== amount) throw new Error("showdown_invalid_pot_distribution");
-    }
-    return payouts;
-  };
-  var ensureExistingSettlementMatches = ({ state: state2, handId }) => {
-    const settlementHandId = typeof state2?.handSettlement?.handId === "string" && state2.handSettlement.handId.trim() ? state2.handSettlement.handId.trim() : "";
-    if (!settlementHandId || settlementHandId !== handId) {
-      throw new Error("showdown_settlement_hand_mismatch");
-    }
-  };
-  var finalizeSettlement = ({ state: state2, handId, payouts, nowIso, klog }) => {
-    if (state2?.handSettlement) {
-      ensureExistingSettlementMatches({ state: state2, handId });
-      return state2;
-    }
-    const settledAt = typeof nowIso === "string" ? nowIso : (/* @__PURE__ */ new Date()).toISOString();
-    const nextState = {
-      ...state2,
-      phase: "SETTLED",
-      turnUserId: null,
-      turnStartedAt: null,
-      turnDeadlineAt: null,
-      handSettlement: {
-        handId,
-        settledAt,
-        payouts
-      }
-    };
-    if (typeof klog === "function") {
-      klog("poker_hand_settled", {
-        tableId: state2?.tableId ?? null,
-        handId,
-        payouts
-      });
-    }
-    return nextState;
-  };
-  var materializeShowdownAndPayout = ({
-    state: state2,
-    seatUserIdsInOrder: seatUserIdsInOrder2,
-    holeCardsByUserId,
-    computeShowdown: computeShowdown2,
-    awardPotsAtShowdown: awardPotsAtShowdown2,
-    klog,
-    nowIso
-  }) => {
-    if (!state2 || typeof state2 !== "object" || Array.isArray(state2)) return { nextState: state2 };
-    const handId = getHandId(state2);
-    const showdownHandId = typeof state2.showdown?.handId === "string" && state2.showdown.handId.trim() ? state2.showdown.handId.trim() : "";
-    if (state2.showdown) {
-      if (!handId) return { nextState: state2 };
-      if (!showdownHandId || showdownHandId !== handId) throw new Error("showdown_hand_mismatch");
-      if (normalizeChipAmount("pot", state2.pot) > 0) throw new Error("showdown_pot_not_zero");
-      if (state2.handSettlement) {
-        ensureExistingSettlementMatches({ state: state2, handId });
-        return { nextState: state2 };
-      }
-      const payouts2 = buildPayoutsFromPotsAwarded(state2.showdown?.potsAwarded);
-      const payoutTotal = Object.values(payouts2).reduce((sum, value) => sum + normalizeChipAmount("pot", value), 0);
-      const expectedTotal = normalizeChipAmount(
-        "pot",
-        state2.showdown?.potAwardedTotal ?? state2.showdown?.potAwarded ?? 0
-      );
-      if (payoutTotal !== expectedTotal) throw new Error("showdown_invalid_settlement_total");
-      if (typeof klog === "function") {
-        klog("poker_settlement_backfilled", {
-          tableId: state2?.tableId ?? null,
-          handId,
-          reason: "missing_handSettlement"
-        });
-      }
-      return {
-        nextState: finalizeSettlement({
-          state: state2,
-          handId,
-          payouts: payouts2,
-          nowIso,
-          klog
-        })
-      };
-    }
-    if (!handId) throw new Error("showdown_missing_hand_id");
-    const { eligibleUserIds, seatOrder } = listEligibleUserIds({ state: state2, seatUserIdsInOrder: seatUserIdsInOrder2 });
-    if (eligibleUserIds.length === 0) {
-      if (typeof klog === "function") klog("poker_showdown_no_eligible", { handId: state2.handId ?? null });
-      return { nextState: state2 };
-    }
-    if (eligibleUserIds.length === 1) {
-      const winnerUserId = eligibleUserIds[0];
-      const potAmount = normalizeChipAmount("pot", state2.pot);
-      const nextStacks2 = { ...copyStacks(state2.stacks) };
-      nextStacks2[winnerUserId] = normalizeChipAmount("stack", nextStacks2[winnerUserId] ?? 0) + potAmount;
-      const awardedAt = typeof nowIso === "string" ? nowIso : (/* @__PURE__ */ new Date()).toISOString();
-      const withShowdown = {
-        ...state2,
-        stacks: nextStacks2,
-        pot: 0,
-        showdown: {
-          winners: [winnerUserId],
-          potsAwarded: [{ amount: potAmount, winners: [winnerUserId], eligibleUserIds: [winnerUserId] }],
-          potAwardedTotal: potAmount,
-          potAwarded: potAmount,
-          reason: "all_folded",
-          awardedAt,
-          handId
-        }
-      };
-      return {
-        nextState: finalizeSettlement({
-          state: withShowdown,
-          handId,
-          payouts: { [winnerUserId]: potAmount },
-          nowIso,
-          klog
-        })
-      };
-    }
-    if (typeof awardPotsAtShowdown2 !== "function") throw new Error("showdown_invalid_compute");
-    if (typeof computeShowdown2 !== "function") throw new Error("showdown_invalid_compute");
-    const community = ensureCommunityComplete(state2);
-    const prevStacks = copyStacks(state2.stacks);
-    const awardResult = awardPotsAtShowdown2({
-      state: {
-        ...state2,
-        community,
-        communityDealt: community.length,
-        holeCardsByUserId
-      },
-      seatUserIdsInOrder: seatOrder,
-      computeShowdown: computeShowdown2,
-      nowIso
-    });
-    if (!awardResult?.nextState?.showdown || !Array.isArray(awardResult.nextState.showdown.winners)) {
-      throw new Error("showdown_missing_result");
-    }
-    const nextStacks = copyStacks(awardResult.nextState.stacks);
-    const payouts = diffPayouts(prevStacks, nextStacks);
-    return {
-      nextState: finalizeSettlement({
-        state: {
-          ...awardResult.nextState,
-          stacks: nextStacks,
-          pot: 0,
-          showdown: { ...awardResult.nextState.showdown, handId }
-        },
-        handId,
-        payouts,
-        nowIso,
-        klog
-      })
-    };
-  };
-
-  // ws-server/poker/shared/settlement/poker-side-pots.mjs
-  var normalizeContribution = (value) => {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return 0;
-    if (num <= 0) return 0;
-    return Math.floor(num);
-  };
-  var normalizeContributions = ({ contributionsByUserId, participantUserIds, eligibleUserIds }) => {
-    const userIds = Array.isArray(participantUserIds) ? participantUserIds : eligibleUserIds;
-    if (!Array.isArray(userIds) || userIds.length === 0) return [];
-    const source = contributionsByUserId && typeof contributionsByUserId === "object" ? contributionsByUserId : {};
-    return userIds.map((userId) => ({
-      userId,
-      contribution: normalizeContribution(source[userId])
-    }));
-  };
-  var resolveUncalledReturn = (normalized) => {
-    if (!Array.isArray(normalized) || normalized.length < 2) return null;
-    const ranked = normalized.slice().sort((a, b) => b.contribution - a.contribution);
-    const highest = ranked[0];
-    const secondHighestContribution = ranked[1].contribution;
-    if (highest.contribution <= secondHighestContribution) return null;
-    return {
-      userId: highest.userId,
-      amount: highest.contribution - secondHighestContribution,
-      minContribution: secondHighestContribution,
-      maxContribution: highest.contribution
-    };
-  };
-  var buildSidePots = ({ contributionsByUserId, participantUserIds, eligibleUserIds }) => {
-    if (!Array.isArray(eligibleUserIds) || eligibleUserIds.length === 0) return [];
-    const normalized = normalizeContributions({ contributionsByUserId, participantUserIds, eligibleUserIds });
-    const eligibleUserIdSet = new Set(eligibleUserIds);
-    const uncalledReturn = resolveUncalledReturn(normalized);
-    const contestable = normalized.map(({ userId, contribution }) => ({
-      userId,
-      contribution: uncalledReturn?.userId === userId ? uncalledReturn.minContribution : contribution
-    }));
-    const levels = [...new Set(contestable.map(({ contribution }) => contribution).filter((value) => value > 0))].sort((a, b) => a - b);
-    const pots = [];
-    let prev = 0;
-    levels.forEach((level) => {
-      const participants = contestable.filter(({ contribution }) => contribution >= level).map(({ userId }) => userId);
-      const delta = level - prev;
-      const amount = delta * participants.length;
-      if (amount > 0) {
-        const eligibleForBand = participants.filter((userId) => eligibleUserIdSet.has(userId));
-        if (eligibleForBand.length > 0) {
-          pots.push({
-            amount,
-            eligibleUserIds: eligibleForBand,
-            minContribution: prev,
-            maxContribution: level
-          });
-        } else if (pots.length > 0) {
-          const target = pots[pots.length - 1];
-          target.amount += amount;
-          target.maxContribution = level;
-        } else {
-          pots.push({
-            amount,
-            eligibleUserIds: eligibleUserIds.slice(),
-            minContribution: prev,
-            maxContribution: level
-          });
-        }
-      }
-      prev = level;
-    });
-    if (uncalledReturn) {
-      pots.push({
-        amount: uncalledReturn.amount,
-        eligibleUserIds: [uncalledReturn.userId],
-        minContribution: uncalledReturn.minContribution,
-        maxContribution: uncalledReturn.maxContribution,
-        returnUserId: uncalledReturn.userId
-      });
-    }
-    return pots;
-  };
-
-  // ws-server/poker/shared/settlement/poker-state-utils.mjs
-  var isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-  var RANKS2 = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
-  var SUITS2 = ["S", "H", "D", "C"];
-  var RANK_SET = new Set(RANKS2);
-  var SUIT_SET = new Set(SUITS2);
-
-  // ws-server/poker/shared/settlement/poker-payout.mjs
-  var normalizePotAmount = (value) => {
-    const amount = Number(value ?? 0);
-    if (!Number.isFinite(amount) || amount < 0) {
-      throw new Error("showdown_invalid_pot");
-    }
-    return Math.floor(amount);
-  };
-  var normalizeSidePots = (sidePots) => {
-    if (!Array.isArray(sidePots) || sidePots.length === 0) return null;
-    return sidePots.map((pot) => {
-      if (!isPlainObject(pot) || !Array.isArray(pot.eligibleUserIds)) {
-        throw new Error("showdown_invalid_side_pots");
-      }
-      return {
-        amount: normalizePotAmount(pot.amount),
-        eligibleUserIds: pot.eligibleUserIds.slice(),
-        ...typeof pot.returnUserId === "string" && pot.returnUserId ? { returnUserId: pot.returnUserId } : {}
-      };
-    });
-  };
-  var listShowdownUserIds = (state2, seatUserIdsInOrder2) => {
-    return seatUserIdsInOrder2.filter((userId) => typeof userId === "string" && !state2.foldedByUserId?.[userId] && !state2.leftTableByUserId?.[userId] && !state2.sitOutByUserId?.[userId] && !state2.pendingAutoSitOutByUserId?.[userId]);
-  };
-  var ensureHoleCardsPresent = ({ holeCardsByUserId, userId }) => {
-    const holeCards = holeCardsByUserId?.[userId];
-    if (!Array.isArray(holeCards) || holeCards.length !== 2) {
-      throw new Error("showdown_missing_hole_cards");
-    }
-    return holeCards;
-  };
-  var awardPotsAtShowdown = ({ state: state2, seatUserIdsInOrder: seatUserIdsInOrder2, computeShowdown: computeShowdown2, nowIso }) => {
-    if (!state2 || typeof state2 !== "object" || Array.isArray(state2)) {
-      throw new Error("showdown_invalid_state");
-    }
-    if (!Array.isArray(seatUserIdsInOrder2) || seatUserIdsInOrder2.length === 0) {
-      throw new Error("showdown_no_players");
-    }
-    if (typeof computeShowdown2 !== "function") {
-      throw new Error("showdown_invalid_compute");
-    }
-    const showdownUserIds = listShowdownUserIds(state2, seatUserIdsInOrder2);
-    if (showdownUserIds.length === 0) {
-      throw new Error("showdown_no_players");
-    }
-    const community = Array.isArray(state2.community) ? state2.community.slice() : [];
-    if (community.length !== 5) {
-      throw new Error("showdown_invalid_community");
-    }
-    const holeCardsByUserId = state2.holeCardsByUserId || {};
-    const showdownUserIdSet = new Set(showdownUserIds);
-    for (const userId of showdownUserIds) {
-      ensureHoleCardsPresent({ holeCardsByUserId, userId });
-    }
-    let pots = normalizeSidePots(state2.sidePots);
-    if (!pots && isPlainObject(state2.contributionsByUserId)) {
-      pots = buildSidePots({
-        contributionsByUserId: state2.contributionsByUserId,
-        participantUserIds: seatUserIdsInOrder2,
-        eligibleUserIds: showdownUserIds
-      }).map((pot) => ({
-        amount: normalizePotAmount(pot.amount),
-        eligibleUserIds: pot.eligibleUserIds.slice(),
-        ...pot.returnUserId ? { returnUserId: pot.returnUserId } : {}
-      }));
-      if (pots.length === 0) {
-        pots = null;
-      }
-    }
-    if (!pots) {
-      pots = [{ amount: normalizePotAmount(state2.pot ?? 0), eligibleUserIds: showdownUserIds.slice() }];
-    }
-    const nextStacks = { ...state2.stacks };
-    const potsAwarded = [];
-    const handsByUserId = {};
-    const winnersUnion = /* @__PURE__ */ new Set();
-    const seatUserIdSet = new Set(seatUserIdsInOrder2);
-    let potAwardedTotal = 0;
-    for (const pot of pots) {
-      const amount = normalizePotAmount(pot.amount);
-      const returnUserId = typeof pot.returnUserId === "string" ? pot.returnUserId : "";
-      if (returnUserId) {
-        if (!seatUserIdSet.has(returnUserId) || pot.eligibleUserIds.length !== 1 || pot.eligibleUserIds[0] !== returnUserId) {
-          throw new Error("showdown_invalid_return");
-        }
-        const baseStack = Number(nextStacks[returnUserId] ?? 0);
-        if (!Number.isFinite(baseStack)) {
-          throw new Error("showdown_invalid_stack");
-        }
-        nextStacks[returnUserId] = baseStack + amount;
-        potAwardedTotal += amount;
-        potsAwarded.push({ amount, winners: [returnUserId], eligibleUserIds: [returnUserId], returnUserId });
-        continue;
-      }
-      const eligibleSet = new Set(Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds : []);
-      const eligible = seatUserIdsInOrder2.filter((userId) => showdownUserIdSet.has(userId) && eligibleSet.has(userId));
-      if (eligible.length === 0) {
-        throw new Error("showdown_pot_without_eligible_player");
-      }
-      const players = eligible.map((userId) => ({ userId, holeCards: ensureHoleCardsPresent({ holeCardsByUserId, userId }) }));
-      const result = computeShowdown2({ community, players });
-      const winners = Array.isArray(result?.winners) ? result.winners : [];
-      if (result?.handsByUserId && typeof result.handsByUserId === "object" && !Array.isArray(result.handsByUserId)) {
-        for (const [userId, hand] of Object.entries(result.handsByUserId)) {
-          if (typeof userId !== "string" || !userId) continue;
-          if (!hand || typeof hand !== "object" || Array.isArray(hand)) continue;
-          handsByUserId[userId] = {
-            category: hand.category ?? null,
-            name: hand.name ?? null,
-            ranks: Array.isArray(hand.ranks) ? hand.ranks.slice() : [],
-            best5: Array.isArray(hand.best5) ? hand.best5.slice() : []
-          };
-        }
-      }
-      if (winners.length === 0) {
-        throw new Error("showdown_no_winners");
-      }
-      const winnersValid = winners.every((userId) => eligibleSet.has(userId));
-      if (!winnersValid) {
-        throw new Error("showdown_winners_invalid");
-      }
-      const winnersInSeatOrder = seatUserIdsInOrder2.filter((userId) => winners.includes(userId));
-      if (winnersInSeatOrder.length === 0) {
-        throw new Error("showdown_winners_invalid");
-      }
-      const share = Math.floor(amount / winnersInSeatOrder.length);
-      let remainder = amount - share * winnersInSeatOrder.length;
-      for (const userId of winnersInSeatOrder) {
-        const baseStack = Number(nextStacks[userId] ?? 0);
-        if (!Number.isFinite(baseStack)) {
-          throw new Error("showdown_invalid_stack");
-        }
-        const bonus = remainder > 0 ? 1 : 0;
-        if (remainder > 0) remainder -= 1;
-        nextStacks[userId] = baseStack + share + bonus;
-        winnersUnion.add(userId);
-      }
-      potAwardedTotal += amount;
-      potsAwarded.push({ amount, winners: winnersInSeatOrder, eligibleUserIds: eligible });
-    }
-    const showdownWinners = seatUserIdsInOrder2.filter((userId) => winnersUnion.has(userId));
-    const awardedAt = typeof nowIso === "string" ? nowIso : (/* @__PURE__ */ new Date()).toISOString();
-    const showdown = {
-      winners: showdownWinners,
-      potsAwarded,
-      potAwardedTotal,
-      potAwarded: potAwardedTotal,
-      reason: "computed",
-      awardedAt
-    };
-    if (Object.keys(handsByUserId).length > 0) {
-      showdown.handsByUserId = handsByUserId;
-    }
-    return {
-      nextState: {
-        ...state2,
-        stacks: nextStacks,
-        pot: 0,
-        showdown
-      },
-      payout: {
-        winners: showdownWinners,
-        potsAwarded,
-        potAwardedTotal
-      }
-    };
-  };
-
   // ws-server/poker/shared/settlement/poker-eval.mjs
   var HAND_CATEGORY = {
     HIGH_CARD: 1,
@@ -1055,6 +290,1069 @@
     return compareRankVectors(a.ranks, b.ranks);
   };
 
+  // ws-server/poker/handlers/reaction.mjs
+  var POST_FLOP_STREETS = /* @__PURE__ */ new Set(["FLOP", "TURN", "RIVER"]);
+  var REACTION_KEYS = Object.freeze([
+    "hello",
+    "nice_hand",
+    "well_played",
+    "thinking",
+    "haha",
+    "wow",
+    "bad_beat",
+    "nice_bluff",
+    "good_luck",
+    "thanks",
+    "cheers",
+    "gg",
+    "hurry_up",
+    "you_are_bluffing",
+    "i_was_bluffing",
+    "lucky",
+    "congrats",
+    "not_this_time",
+    "all_in_oh_no",
+    "all_in_that_hurts",
+    "all_in_no_way",
+    "all_in_come_on",
+    "all_in_censored",
+    "ambient_hmm",
+    "ambient_interesting",
+    "ambient_lets_see",
+    "ambient_well_see",
+    "ambient_watching",
+    "ambient_good_move",
+    "ambient_bold",
+    "ambient_nice",
+    "ambient_tough_one",
+    "ambient_here_we_go",
+    "ambient_your_move",
+    "ambient_lets_play",
+    "ambient_thinking"
+  ]);
+  var HUMAN_REACTION_KEYS = Object.freeze([
+    "hello",
+    "nice_hand",
+    "well_played",
+    "thinking",
+    "haha",
+    "wow",
+    "bad_beat",
+    "nice_bluff",
+    "good_luck",
+    "thanks",
+    "cheers",
+    "gg",
+    "hurry_up"
+  ]);
+  var REACTION_KEY_SET = new Set(REACTION_KEYS);
+  var HUMAN_REACTION_KEY_SET = new Set(HUMAN_REACTION_KEYS);
+  var BOT_REACTION_KEYS_BY_ACTION = Object.freeze({
+    BET: Object.freeze(["wow", "haha"]),
+    ALL_IN: Object.freeze(["wow", "haha"]),
+    FOLD: Object.freeze(["not_this_time"])
+  });
+  var BOT_REACTION_PROBABILITY_BY_ACTION = Object.freeze({ BET: 0.6, ALL_IN: 0.6, FOLD: 0.7 });
+  var ALL_IN_LOSS_REACTION_KEYS = Object.freeze([
+    "all_in_oh_no",
+    "all_in_that_hurts",
+    "all_in_no_way",
+    "all_in_come_on",
+    "all_in_censored"
+  ]);
+  var AMBIENT_REACTION_KEYS = Object.freeze([
+    "ambient_hmm",
+    "ambient_interesting",
+    "ambient_lets_see",
+    "ambient_well_see",
+    "ambient_watching",
+    "ambient_good_move",
+    "ambient_bold",
+    "ambient_nice",
+    "ambient_tough_one",
+    "ambient_here_we_go",
+    "ambient_your_move",
+    "ambient_lets_play",
+    "ambient_thinking"
+  ]);
+  function normalizeString(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+  function isPositiveSeatNo(value) {
+    return Number.isInteger(value) && value > 0;
+  }
+  function samplePasses(random, probability, reactionSettings) {
+    if (reactionSettings?.enabled === false) return false;
+    const frequencyPercent = Number.isInteger(Number(reactionSettings?.frequencyPercent)) ? Math.min(100, Math.max(1, Number(reactionSettings.frequencyPercent))) : 100;
+    const sample = Number(random());
+    return Number.isFinite(sample) && sample >= 0 && sample < probability * frequencyPercent / 100;
+  }
+  function normalizeBotSeats(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = /* @__PURE__ */ new Set();
+    return value.map((entry) => ({
+      userId: normalizeString(entry?.userId),
+      seatNo: Number(entry?.seatNo)
+    })).filter((entry) => entry.userId && isPositiveSeatNo(entry.seatNo) && !seen.has(entry.userId) && seen.add(entry.userId)).sort((left, right) => left.seatNo - right.seatNo);
+  }
+  function normalizeHandSeats(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = /* @__PURE__ */ new Set();
+    return value.map((entry) => ({ userId: normalizeString(entry?.userId), seatNo: Number(entry?.seatNo) })).filter((entry) => entry.userId && isPositiveSeatNo(entry.seatNo) && !seen.has(entry.userId) && seen.add(entry.userId)).sort((left, right) => left.seatNo - right.seatNo);
+  }
+  function winnerSeats(state, handSeats) {
+    const winners = new Set(Array.isArray(state?.showdown?.winners) ? state.showdown.winners.map(normalizeString).filter(Boolean) : []);
+    return handSeats.filter((seat) => winners.has(seat.userId));
+  }
+  function normalFoldWin(state, handSeats, winners) {
+    if (winners.length !== 1 || handSeats.length < 2) return false;
+    const winnerUserId = winners[0].userId;
+    return handSeats.every((seat) => seat.userId === winnerUserId || state?.foldedByUserId?.[seat.userId] === true && state?.leftTableByUserId?.[seat.userId] !== true && state?.sitOutByUserId?.[seat.userId] !== true);
+  }
+  function canBotSpeakAfterSettlement(state, handSeats, bot) {
+    return !!bot && handSeats.some((seat) => seat.userId === bot.userId) && state?.leftTableByUserId?.[bot.userId] !== true && state?.sitOutByUserId?.[bot.userId] !== true;
+  }
+  function canBotReactToSettlement(state, handSeats, bot, winners) {
+    return canBotSpeakAfterSettlement(state, handSeats, bot) && !winners.some((winner) => winner.userId === bot.userId);
+  }
+  var PRIMARY_RANK_COUNT_BY_CATEGORY = Object.freeze({ 2: 1, 3: 2, 4: 1, 8: 1 });
+  function validRankVector(hand) {
+    return Number.isInteger(Number(hand?.category)) && Array.isArray(hand?.ranks) && hand.ranks.length > 0 && hand.ranks.every((rank) => Number.isInteger(Number(rank))) ? hand.ranks.map(Number) : null;
+  }
+  function looksLuckyComparedWith(winningHand, losingHand) {
+    const winningRanks = validRankVector(winningHand);
+    const losingRanks = validRankVector(losingHand);
+    const category = Number(winningHand?.category);
+    if (!winningRanks || !losingRanks || category !== Number(losingHand?.category)) return false;
+    const differingIndexes = [];
+    for (let index = 0; index < Math.max(winningRanks.length, losingRanks.length); index += 1) {
+      if ((winningRanks[index] ?? 0) !== (losingRanks[index] ?? 0)) differingIndexes.push(index);
+    }
+    if (differingIndexes.length === 0) return false;
+    const firstDifference = differingIndexes[0];
+    const primaryRankCount = PRIMARY_RANK_COUNT_BY_CATEGORY[category];
+    const kickerDecided = Number.isInteger(primaryRankCount) && firstDifference >= primaryRankCount;
+    const narrowRankDifference = Math.abs((winningRanks[firstDifference] ?? 0) - (losingRanks[firstDifference] ?? 0)) === 1;
+    const almostIdentical = differingIndexes.length === 1 && Math.abs((winningRanks[firstDifference] ?? 0) - (losingRanks[firstDifference] ?? 0)) <= 1;
+    return kickerDecided || narrowRankDifference || almostIdentical;
+  }
+  function luckyWinner(state, handSeats, winners) {
+    const comparedHands = state?.showdown?.handsByUserId;
+    const riverChangedWinnerUserIds = new Set(Array.isArray(state?.riverChangedWinnerUserIds) ? state.riverChangedWinnerUserIds.map(normalizeString).filter(Boolean) : []);
+    if (!comparedHands || typeof comparedHands !== "object") {
+      return winners.find((winner) => riverChangedWinnerUserIds.has(winner.userId)) || null;
+    }
+    const winnerUserIds = new Set(winners.map((winner) => winner.userId));
+    const losers = handSeats.filter((seat) => !winnerUserIds.has(seat.userId));
+    return winners.find((winner) => riverChangedWinnerUserIds.has(winner.userId) || losers.some((loser) => looksLuckyComparedWith(comparedHands[winner.userId], comparedHands[loser.userId]))) || null;
+  }
+  function isCompleteReactionSettlement(state) {
+    if (!state || state.phase !== "SETTLED") return false;
+    const handId = normalizeString(state.handId);
+    return !!handId && handId === normalizeString(state?.handSettlement?.handId) && handId === normalizeString(state?.showdown?.handId) && Array.isArray(state.handSeats) && Array.isArray(state.showdown?.winners) && !!state.handSettlement?.payouts && typeof state.handSettlement.payouts === "object" && !Array.isArray(state.handSettlement.payouts);
+  }
+  function classifyRaiseReaction({ actorUserId, actorSeatNo, street, botSeats: botSeats2, reactionSettings, random = Math.random } = {}) {
+    const normalizedActorUserId = normalizeString(actorUserId);
+    const normalizedStreet = normalizeString(street).toUpperCase();
+    if (!POST_FLOP_STREETS.has(normalizedStreet) || !normalizedActorUserId || !isPositiveSeatNo(actorSeatNo) || !samplePasses(random, 0.6, reactionSettings)) return null;
+    const reactor = normalizeBotSeats(botSeats2).find((bot) => bot.userId !== normalizedActorUserId);
+    return reactor ? {
+      botUserId: reactor.userId,
+      botSeatNo: reactor.seatNo,
+      targetSeatNo: actorSeatNo,
+      reactionKey: "you_are_bluffing"
+    } : null;
+  }
+  function classifyAmbientReaction({ botSeats: botSeats2, reactionSettings, random = Math.random } = {}) {
+    const bots = normalizeBotSeats(botSeats2);
+    if (bots.length === 0 || !samplePasses(random, 0.5, reactionSettings)) return null;
+    const botSample = Number(random());
+    const botIndex = Number.isFinite(botSample) && botSample >= 0 && botSample < 1 ? Math.floor(botSample * bots.length) : 0;
+    const keySample = Number(random());
+    const keyIndex = Number.isFinite(keySample) && keySample >= 0 && keySample < 1 ? Math.floor(keySample * AMBIENT_REACTION_KEYS.length) : 0;
+    const bot = bots[botIndex] || bots[0];
+    return { botUserId: bot.userId, botSeatNo: bot.seatNo, reactionKey: AMBIENT_REACTION_KEYS[keyIndex] || AMBIENT_REACTION_KEYS[0] };
+  }
+  function isPlayerAllIn(userId, handStartStacks, contributions) {
+    const start = handStartStacks?.[userId];
+    const contrib = contributions?.[userId];
+    if (typeof start !== "number" || !Number.isInteger(start) || start <= 0) return false;
+    if (typeof contrib !== "number" || !Number.isInteger(contrib) || contrib < 0) return false;
+    return contrib === start;
+  }
+  function isLostAllInCandidate(botUserId, state) {
+    if (!state?.showdown?.handsByUserId || typeof state.showdown.handsByUserId !== "object" || !state.showdown.handsByUserId[botUserId]) {
+      return false;
+    }
+    if (state?.foldedByUserId?.[botUserId] === true || state?.leftTableByUserId?.[botUserId] === true || state?.sitOutByUserId?.[botUserId] === true) {
+      return false;
+    }
+    if (Array.isArray(state?.showdown?.winners) && state.showdown.winners.includes(botUserId)) {
+      return false;
+    }
+    const payouts = state?.handSettlement?.payouts;
+    if (!payouts || typeof payouts !== "object") {
+      return false;
+    }
+    let payout = 0;
+    if (Object.hasOwn(payouts, botUserId)) {
+      const rawPayout = payouts[botUserId];
+      if (typeof rawPayout !== "number" || !Number.isInteger(rawPayout) || rawPayout < 0) {
+        return false;
+      }
+      payout = rawPayout;
+    }
+    if (payout > 0) {
+      return false;
+    }
+    return isPlayerAllIn(botUserId, state?.handStartStacksByUserId, state?.contributionsByUserId);
+  }
+  function sampleAllInLossReactionKey(random = Math.random) {
+    const r = typeof random === "function" ? random() : Math.random();
+    const clamped = Math.min(Math.max(Number(r) || 0, 0), 0.999999);
+    const index = Math.floor(clamped * ALL_IN_LOSS_REACTION_KEYS.length);
+    return ALL_IN_LOSS_REACTION_KEYS[index] || ALL_IN_LOSS_REACTION_KEYS[0];
+  }
+  function classifySettlementReaction({ state, botSeats: botSeats2, reactionSettings, random = Math.random } = {}) {
+    if (reactionSettings?.enabled === false || !isCompleteReactionSettlement(state)) return null;
+    const handId = normalizeString(state.handId);
+    const handSeats = normalizeHandSeats(state.handSeats);
+    const bots = normalizeBotSeats(botSeats2);
+    const botByUserId = new Map(bots.map((bot) => [bot.userId, bot]));
+    const winners = winnerSeats(state, handSeats);
+    if (normalFoldWin(state, handSeats, winners)) {
+      const winner = winners[0];
+      const winningBot = botByUserId.get(winner.userId);
+      if (canBotSpeakAfterSettlement(state, handSeats, winningBot) && samplePasses(random, 0.75, reactionSettings)) {
+        return { botUserId: winningBot.userId, botSeatNo: winningBot.seatNo, reactionKey: "i_was_bluffing", handId };
+      }
+      const reactor2 = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
+      if (reactor2 && samplePasses(random, 0.75, reactionSettings)) {
+        return { botUserId: reactor2.userId, botSeatNo: reactor2.seatNo, targetSeatNo: winner.seatNo, reactionKey: "nice_bluff", handId };
+      }
+    }
+    const lostAllInBot = bots.find((bot) => canBotSpeakAfterSettlement(state, handSeats, bot) && isLostAllInCandidate(bot.userId, state));
+    if (lostAllInBot && samplePasses(random, 1, reactionSettings)) {
+      const hands = state?.showdown?.handsByUserId;
+      const isHeadsUp = Boolean(hands && typeof hands === "object" && Object.keys(hands).length === 2);
+      const winnersList = state?.showdown?.winners;
+      const singleWinner = Array.isArray(winnersList) && winnersList.length === 1 ? winnersList[0] : null;
+      const isRiverReversal = Boolean(singleWinner && Array.isArray(state?.riverChangedWinnerUserIds) && state.riverChangedWinnerUserIds.includes(singleWinner));
+      if (isHeadsUp && singleWinner && isRiverReversal) {
+        return {
+          botUserId: lostAllInBot.userId,
+          botSeatNo: lostAllInBot.seatNo,
+          reactionKey: "bad_beat",
+          handId
+        };
+      }
+      return {
+        botUserId: lostAllInBot.userId,
+        botSeatNo: lostAllInBot.seatNo,
+        reactionKey: sampleAllInLossReactionKey(random),
+        handId
+      };
+    }
+    const comparedHands = state?.showdown?.handsByUserId;
+    const luckyTarget = luckyWinner(state, handSeats, winners);
+    const luckyReactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
+    if (luckyTarget && luckyReactor && samplePasses(random, 0.7, reactionSettings)) {
+      return { botUserId: luckyReactor.userId, botSeatNo: luckyReactor.seatNo, targetSeatNo: luckyTarget.seatNo, reactionKey: "lucky", handId };
+    }
+    if (comparedHands && typeof comparedHands === "object" && Object.keys(comparedHands).length >= 2) {
+      const strongWinner = winners.find((winner) => Number(comparedHands?.[winner.userId]?.category) >= 4);
+      const reactor2 = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
+      if (strongWinner && reactor2 && samplePasses(random, 0.9, reactionSettings)) {
+        return { botUserId: reactor2.userId, botSeatNo: reactor2.seatNo, targetSeatNo: strongWinner.seatNo, reactionKey: "nice_hand", handId };
+      }
+    }
+    const bigBlind = Number(state.bigBlind);
+    if (Number.isInteger(bigBlind) && bigBlind > 0) {
+      const largeWinner = winners.find((winner) => {
+        const payout = Number(state?.handSettlement?.payouts?.[winner.userId]);
+        return botByUserId.has(winner.userId) && Number.isFinite(payout) && payout >= 20 * bigBlind;
+      });
+      if (largeWinner && samplePasses(random, 1, reactionSettings)) {
+        const bot = botByUserId.get(largeWinner.userId);
+        return { botUserId: bot.userId, botSeatNo: bot.seatNo, reactionKey: "wow", handId };
+      }
+    }
+    const firstWinner = winners[0];
+    const reactor = bots.find((bot) => canBotReactToSettlement(state, handSeats, bot, winners));
+    if (firstWinner && reactor && samplePasses(random, 0.8, reactionSettings)) {
+      const selection = Number(random());
+      const reactionKey = Number.isFinite(selection) && selection >= 0.5 && selection < 1 ? "congrats" : "well_played";
+      return { botUserId: reactor.userId, botSeatNo: reactor.seatNo, targetSeatNo: firstWinner.seatNo, reactionKey, handId };
+    }
+    return null;
+  }
+
+  // poker/offline/browser-crypto.mjs
+  var digests = /* @__PURE__ */ new Map();
+  async function prepareSeed(seed) {
+    const bytes = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed));
+    digests.clear();
+    digests.set(seed, new DataView(bytes));
+  }
+  function createHash(algorithm) {
+    if (algorithm !== "sha256") throw new Error("Unsupported offline digest");
+    let seed;
+    return {
+      update(value) {
+        seed = value;
+        return this;
+      },
+      digest() {
+        const view = digests.get(seed);
+        if (!view) throw new Error("Offline seed must be prepared before dealing");
+        return { readUInt32BE(offset) {
+          return view.getUint32(offset, false);
+        } };
+      }
+    };
+  }
+  var browser_crypto_default = { createHash };
+
+  // ws-server/poker/shared/poker-primitives.mjs
+  var SUITS = ["S", "H", "D", "C"];
+  var RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+  var ACTION_PHASES = /* @__PURE__ */ new Set(["PREFLOP", "FLOP", "TURN", "RIVER"]);
+  var RANK_TO_CODE = {
+    14: "A",
+    13: "K",
+    12: "Q",
+    11: "J",
+    10: "T",
+    9: "9",
+    8: "8",
+    7: "7",
+    6: "6",
+    5: "5",
+    4: "4",
+    3: "3",
+    2: "2"
+  };
+  function createDeck() {
+    const deck = [];
+    for (const s of SUITS) {
+      for (const r of RANKS) {
+        deck.push({ r, s });
+      }
+    }
+    return deck;
+  }
+  function asSeed(seed) {
+    return typeof seed === "string" && seed.trim() ? seed.trim() : "ws-default-seed";
+  }
+  function deriveDeck(seed) {
+    const deck = createDeck();
+    const digest = browser_crypto_default.createHash("sha256").update(asSeed(seed)).digest();
+    let state = digest.readUInt32BE(0) ^ digest.readUInt32BE(4) ^ digest.readUInt32BE(8) ^ digest.readUInt32BE(12);
+    if (state === 0) {
+      state = 2654435769;
+    }
+    const next = () => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return (state >>> 0) / 4294967296;
+    };
+    for (let i = deck.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(next() * (i + 1));
+      const tmp = deck[i];
+      deck[i] = deck[j];
+      deck[j] = tmp;
+    }
+    return deck;
+  }
+  function dealHoleCards(deck, playerIds) {
+    const totalNeeded = playerIds.length * 2;
+    if (deck.length < totalNeeded) {
+      throw new Error("not_enough_cards");
+    }
+    const holeCardsByUserId = {};
+    let idx = 0;
+    for (const id of playerIds) {
+      holeCardsByUserId[id] = [];
+    }
+    for (let round = 0; round < 2; round += 1) {
+      for (const id of playerIds) {
+        holeCardsByUserId[id].push(deck[idx]);
+        idx += 1;
+      }
+    }
+    return {
+      deck: deck.slice(idx),
+      holeCardsByUserId
+    };
+  }
+  function asCardCode(card) {
+    if (typeof card === "string") {
+      return card;
+    }
+    if (!card || typeof card !== "object" || Array.isArray(card)) {
+      return null;
+    }
+    const rank = RANK_TO_CODE[card.r];
+    const suit = typeof card.s === "string" ? card.s.trim().toUpperCase() : "";
+    if (!rank || !suit) {
+      return null;
+    }
+    return `${rank}${suit}`;
+  }
+  function toCardCodes(cards) {
+    if (!Array.isArray(cards)) {
+      return [];
+    }
+    return cards.map(asCardCode).filter((card) => typeof card === "string" && card.length > 0);
+  }
+  function toHoleCardCodeMap(holeCardsByUserId) {
+    if (!holeCardsByUserId || typeof holeCardsByUserId !== "object" || Array.isArray(holeCardsByUserId)) {
+      return {};
+    }
+    const normalized = {};
+    for (const [userId, cards] of Object.entries(holeCardsByUserId)) {
+      normalized[userId] = toCardCodes(cards);
+    }
+    return normalized;
+  }
+  function toSafeInt(value, fallback = 0) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.trunc(num);
+  }
+  function maxFromMap(value) {
+    if (!value || typeof value !== "object") return 0;
+    const nums = Object.values(value).map((entry) => toSafeInt(entry, 0)).filter((entry) => entry > 0);
+    if (nums.length === 0) return 0;
+    return Math.max(...nums);
+  }
+  function deriveCurrentBet(state) {
+    const currentBet = toSafeInt(state.currentBet, null);
+    if (currentBet == null || currentBet < 0) return maxFromMap(state.betThisRoundByUserId);
+    return currentBet;
+  }
+  function deriveLastRaiseSize(state, currentBet) {
+    const lastRaiseSize = toSafeInt(state.lastRaiseSize, null);
+    if (lastRaiseSize == null || lastRaiseSize <= 0) return currentBet > 0 ? currentBet : 0;
+    return lastRaiseSize;
+  }
+  function deriveBigBlind(state) {
+    const bigBlind = toSafeInt(state?.bigBlind, 0);
+    return bigBlind > 0 ? bigBlind : 1;
+  }
+  function canRaise(state, userId, toCall, lastRaiseSize) {
+    return !state?.actedThisRoundByUserId?.[userId] || toCall >= lastRaiseSize;
+  }
+  function isActivePlayer(state, userId) {
+    if (!state || !userId) return false;
+    if (state.leftTableByUserId && state.leftTableByUserId[userId]) return false;
+    if (state.sitOutByUserId && state.sitOutByUserId[userId]) return false;
+    const folded = !!(state.foldedByUserId && state.foldedByUserId[userId]);
+    const allIn = !!(state.allInByUserId && state.allInByUserId[userId]);
+    return !folded && !allIn;
+  }
+  function isSeatedPlayer(state, userId) {
+    if (!state || !userId) {
+      return false;
+    }
+    const phase = typeof state?.phase === "string" ? state.phase : "";
+    const seats = ACTION_PHASES.has(phase) && Array.isArray(state?.handSeats) && state.handSeats.length > 0 ? state.handSeats : state?.seats;
+    if (Array.isArray(seats)) {
+      return seats.some((seat) => seat && seat.userId === userId);
+    }
+    return !!(state.stacks && typeof state.stacks === "object" && Object.prototype.hasOwnProperty.call(state.stacks, userId));
+  }
+  function computeLegalActionsForSeatedPlayer(state, userId) {
+    const stack = toSafeInt(state.stacks?.[userId], 0);
+    const currentUserBet = toSafeInt(state.betThisRoundByUserId?.[userId], 0);
+    const currentBet = deriveCurrentBet(state);
+    const lastRaiseSize = deriveLastRaiseSize(state, currentBet);
+    const toCall = Math.max(0, currentBet - currentUserBet);
+    if (stack <= 0) {
+      return { actions: [], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    if (toCall > 0) {
+      const actions2 = ["FOLD", "CALL"];
+      const maxRaiseTo = stack + currentUserBet;
+      const rawMinRaiseTo = currentBet + lastRaiseSize;
+      const minRaiseTo = maxRaiseTo > 0 ? Math.min(rawMinRaiseTo, maxRaiseTo) : rawMinRaiseTo;
+      const mayRaise = canRaise(state, userId, toCall, lastRaiseSize) && maxRaiseTo > currentBet;
+      if (mayRaise) actions2.push("RAISE");
+      return {
+        actions: actions2,
+        toCall,
+        minRaiseTo: mayRaise ? minRaiseTo : null,
+        maxRaiseTo,
+        maxBetAmount: null,
+        minBetAmount: null
+      };
+    }
+    const actions = ["FOLD", "CHECK"];
+    if (stack > 0) actions.push("BET");
+    const minBetAmount = Math.min(deriveBigBlind(state), stack);
+    return { actions, toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: stack, minBetAmount };
+  }
+  function computeSharedLegalActions({ statePublic, userId } = {}) {
+    const state = statePublic || {};
+    if (!state || typeof state !== "object" || Array.isArray(state)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    const phase = typeof state.phase === "string" ? state.phase : "";
+    if (!ACTION_PHASES.has(phase)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    if (!userId || typeof userId !== "string") {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    const turnUserId = typeof state.turnUserId === "string" ? state.turnUserId : "";
+    if (!turnUserId) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    if (turnUserId !== userId) {
+      const toCall = Math.max(0, deriveCurrentBet(state) - toSafeInt(state.betThisRoundByUserId?.[userId], 0));
+      return { actions: ["FOLD"], toCall, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    return computeLegalActionsForSeatedPlayer(state, userId);
+  }
+  function computeProjectedLegalActions({ statePublic, userId } = {}) {
+    const state = statePublic || {};
+    if (!state || typeof state !== "object" || Array.isArray(state)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    const phase = typeof state.phase === "string" ? state.phase : "";
+    if (!ACTION_PHASES.has(phase)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    if (!userId || typeof userId !== "string") {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    if (!isSeatedPlayer(state, userId) || !isActivePlayer(state, userId)) {
+      return { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
+    }
+    return computeLegalActionsForSeatedPlayer(state, userId);
+  }
+
+  // ws-server/poker/shared/settlement/poker-materialize-showdown.mjs
+  var getHandId = (state) => typeof state?.handId === "string" && state.handId.trim() ? state.handId.trim() : "";
+  var normalizeChipAmount = (name, value) => {
+    const amount = Number(value ?? 0);
+    if (!Number.isFinite(amount) || amount < 0 || Math.floor(amount) !== amount) {
+      throw new Error(`showdown_invalid_${name}`);
+    }
+    return amount;
+  };
+  var normalizeSeatOrder = (seatUserIdsInOrder2, state) => {
+    if (Array.isArray(seatUserIdsInOrder2) && seatUserIdsInOrder2.length > 0) {
+      const seen2 = /* @__PURE__ */ new Set();
+      const out2 = [];
+      for (const raw of seatUserIdsInOrder2) {
+        if (typeof raw !== "string") throw new Error("showdown_invalid_seats");
+        const userId = raw.trim();
+        if (!userId || seen2.has(userId)) throw new Error("showdown_invalid_seats");
+        seen2.add(userId);
+        out2.push(userId);
+      }
+      return out2;
+    }
+    if (!Array.isArray(state?.seats)) return [];
+    const ordered = state.seats.slice().sort((a, b) => Number(a?.seatNo ?? 0) - Number(b?.seatNo ?? 0));
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const seat of ordered) {
+      if (typeof seat?.userId !== "string") continue;
+      const userId = seat.userId.trim();
+      if (!userId) continue;
+      if (seen.has(userId)) throw new Error("showdown_invalid_seats");
+      seen.add(userId);
+      out.push(userId);
+    }
+    return out;
+  };
+  var listEligibleUserIds = ({ state, seatUserIdsInOrder: seatUserIdsInOrder2 }) => {
+    const seatOrder = normalizeSeatOrder(seatUserIdsInOrder2, state);
+    if (seatOrder.length === 0) throw new Error("showdown_invalid_seats");
+    const stacks = state.stacks || {};
+    const eligible = [];
+    for (const userId of seatOrder) {
+      if (state.foldedByUserId?.[userId]) continue;
+      if (state.leftTableByUserId?.[userId]) continue;
+      if (state.sitOutByUserId?.[userId]) continue;
+      if (!Object.prototype.hasOwnProperty.call(stacks, userId)) continue;
+      normalizeChipAmount("stack", stacks[userId]);
+      eligible.push(userId);
+    }
+    return { eligibleUserIds: eligible, seatOrder };
+  };
+  var ensureCommunityComplete = (state) => {
+    if (!Array.isArray(state.community)) throw new Error("showdown_incomplete_community");
+    if (state.community.length > 5) throw new Error("showdown_invalid_community");
+    if (state.community.length !== 5) throw new Error("showdown_incomplete_community");
+    return state.community.slice();
+  };
+  var copyStacks = (stacks) => {
+    const source = stacks && typeof stacks === "object" && !Array.isArray(stacks) ? stacks : {};
+    const out = {};
+    for (const [userId, amount] of Object.entries(source)) {
+      if (typeof userId !== "string" || !userId.trim()) continue;
+      out[userId] = normalizeChipAmount("stack", amount);
+    }
+    return out;
+  };
+  var diffPayouts = (prevStacks, nextStacks) => {
+    const payouts = {};
+    const allUserIds = /* @__PURE__ */ new Set([...Object.keys(prevStacks || {}), ...Object.keys(nextStacks || {})]);
+    for (const userId of allUserIds) {
+      const before = normalizeChipAmount("stack", prevStacks?.[userId] ?? 0);
+      const after = normalizeChipAmount("stack", nextStacks?.[userId] ?? 0);
+      const delta = after - before;
+      if (delta < 0) throw new Error("showdown_invalid_stack_delta");
+      if (delta > 0) payouts[userId] = delta;
+    }
+    return payouts;
+  };
+  var normalizeWinnerIds = (raw) => {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const value of raw) {
+      if (typeof value !== "string") continue;
+      const userId = value.trim();
+      if (!userId || seen.has(userId)) continue;
+      seen.add(userId);
+      out.push(userId);
+    }
+    return out;
+  };
+  var buildPayoutsFromPotsAwarded = (potsAwarded) => {
+    const payouts = {};
+    if (!Array.isArray(potsAwarded)) return payouts;
+    for (const pot of potsAwarded) {
+      const amount = normalizeChipAmount("pot", pot?.amount ?? 0);
+      const winners = normalizeWinnerIds(pot?.winners);
+      if (winners.length === 0 || amount === 0) continue;
+      const share = Math.floor(amount / winners.length);
+      let remainder = amount - share * winners.length;
+      let distributed = 0;
+      for (const userId of winners) {
+        const bonus = remainder > 0 ? 1 : 0;
+        if (remainder > 0) remainder -= 1;
+        const add = share + bonus;
+        payouts[userId] = (payouts[userId] || 0) + add;
+        distributed += add;
+      }
+      if (distributed !== amount) throw new Error("showdown_invalid_pot_distribution");
+    }
+    return payouts;
+  };
+  var ensureExistingSettlementMatches = ({ state, handId }) => {
+    const settlementHandId = typeof state?.handSettlement?.handId === "string" && state.handSettlement.handId.trim() ? state.handSettlement.handId.trim() : "";
+    if (!settlementHandId || settlementHandId !== handId) {
+      throw new Error("showdown_settlement_hand_mismatch");
+    }
+  };
+  var finalizeSettlement = ({ state, handId, payouts, nowIso, klog }) => {
+    if (state?.handSettlement) {
+      ensureExistingSettlementMatches({ state, handId });
+      return state;
+    }
+    const settledAt = typeof nowIso === "string" ? nowIso : (/* @__PURE__ */ new Date()).toISOString();
+    const nextState = {
+      ...state,
+      phase: "SETTLED",
+      turnUserId: null,
+      turnStartedAt: null,
+      turnDeadlineAt: null,
+      handSettlement: {
+        handId,
+        settledAt,
+        payouts
+      }
+    };
+    if (typeof klog === "function") {
+      klog("poker_hand_settled", {
+        tableId: state?.tableId ?? null,
+        handId,
+        payouts
+      });
+    }
+    return nextState;
+  };
+  var materializeShowdownAndPayout = ({
+    state,
+    seatUserIdsInOrder: seatUserIdsInOrder2,
+    holeCardsByUserId,
+    computeShowdown: computeShowdown2,
+    awardPotsAtShowdown: awardPotsAtShowdown2,
+    klog,
+    nowIso
+  }) => {
+    if (!state || typeof state !== "object" || Array.isArray(state)) return { nextState: state };
+    const handId = getHandId(state);
+    const showdownHandId = typeof state.showdown?.handId === "string" && state.showdown.handId.trim() ? state.showdown.handId.trim() : "";
+    if (state.showdown) {
+      if (!handId) return { nextState: state };
+      if (!showdownHandId || showdownHandId !== handId) throw new Error("showdown_hand_mismatch");
+      if (normalizeChipAmount("pot", state.pot) > 0) throw new Error("showdown_pot_not_zero");
+      if (state.handSettlement) {
+        ensureExistingSettlementMatches({ state, handId });
+        return { nextState: state };
+      }
+      const payouts2 = buildPayoutsFromPotsAwarded(state.showdown?.potsAwarded);
+      const payoutTotal = Object.values(payouts2).reduce((sum, value) => sum + normalizeChipAmount("pot", value), 0);
+      const expectedTotal = normalizeChipAmount(
+        "pot",
+        state.showdown?.potAwardedTotal ?? state.showdown?.potAwarded ?? 0
+      );
+      if (payoutTotal !== expectedTotal) throw new Error("showdown_invalid_settlement_total");
+      if (typeof klog === "function") {
+        klog("poker_settlement_backfilled", {
+          tableId: state?.tableId ?? null,
+          handId,
+          reason: "missing_handSettlement"
+        });
+      }
+      return {
+        nextState: finalizeSettlement({
+          state,
+          handId,
+          payouts: payouts2,
+          nowIso,
+          klog
+        })
+      };
+    }
+    if (!handId) throw new Error("showdown_missing_hand_id");
+    const { eligibleUserIds, seatOrder } = listEligibleUserIds({ state, seatUserIdsInOrder: seatUserIdsInOrder2 });
+    if (eligibleUserIds.length === 0) {
+      if (typeof klog === "function") klog("poker_showdown_no_eligible", { handId: state.handId ?? null });
+      return { nextState: state };
+    }
+    if (eligibleUserIds.length === 1) {
+      const winnerUserId = eligibleUserIds[0];
+      const potAmount = normalizeChipAmount("pot", state.pot);
+      const nextStacks2 = { ...copyStacks(state.stacks) };
+      nextStacks2[winnerUserId] = normalizeChipAmount("stack", nextStacks2[winnerUserId] ?? 0) + potAmount;
+      const awardedAt = typeof nowIso === "string" ? nowIso : (/* @__PURE__ */ new Date()).toISOString();
+      const withShowdown = {
+        ...state,
+        stacks: nextStacks2,
+        pot: 0,
+        showdown: {
+          winners: [winnerUserId],
+          potsAwarded: [{ amount: potAmount, winners: [winnerUserId], eligibleUserIds: [winnerUserId] }],
+          potAwardedTotal: potAmount,
+          potAwarded: potAmount,
+          reason: "all_folded",
+          awardedAt,
+          handId
+        }
+      };
+      return {
+        nextState: finalizeSettlement({
+          state: withShowdown,
+          handId,
+          payouts: { [winnerUserId]: potAmount },
+          nowIso,
+          klog
+        })
+      };
+    }
+    if (typeof awardPotsAtShowdown2 !== "function") throw new Error("showdown_invalid_compute");
+    if (typeof computeShowdown2 !== "function") throw new Error("showdown_invalid_compute");
+    const community = ensureCommunityComplete(state);
+    const prevStacks = copyStacks(state.stacks);
+    const awardResult = awardPotsAtShowdown2({
+      state: {
+        ...state,
+        community,
+        communityDealt: community.length,
+        holeCardsByUserId
+      },
+      seatUserIdsInOrder: seatOrder,
+      computeShowdown: computeShowdown2,
+      nowIso
+    });
+    if (!awardResult?.nextState?.showdown || !Array.isArray(awardResult.nextState.showdown.winners)) {
+      throw new Error("showdown_missing_result");
+    }
+    const nextStacks = copyStacks(awardResult.nextState.stacks);
+    const payouts = diffPayouts(prevStacks, nextStacks);
+    return {
+      nextState: finalizeSettlement({
+        state: {
+          ...awardResult.nextState,
+          stacks: nextStacks,
+          pot: 0,
+          showdown: { ...awardResult.nextState.showdown, handId }
+        },
+        handId,
+        payouts,
+        nowIso,
+        klog
+      })
+    };
+  };
+
+  // ws-server/poker/shared/settlement/poker-side-pots.mjs
+  var normalizeContribution = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 0;
+    if (num <= 0) return 0;
+    return Math.floor(num);
+  };
+  var normalizeContributions = ({ contributionsByUserId, participantUserIds, eligibleUserIds }) => {
+    const userIds = Array.isArray(participantUserIds) ? participantUserIds : eligibleUserIds;
+    if (!Array.isArray(userIds) || userIds.length === 0) return [];
+    const source = contributionsByUserId && typeof contributionsByUserId === "object" ? contributionsByUserId : {};
+    return userIds.map((userId) => ({
+      userId,
+      contribution: normalizeContribution(source[userId])
+    }));
+  };
+  var resolveUncalledReturn = (normalized) => {
+    if (!Array.isArray(normalized) || normalized.length < 2) return null;
+    const ranked = normalized.slice().sort((a, b) => b.contribution - a.contribution);
+    const highest = ranked[0];
+    const secondHighestContribution = ranked[1].contribution;
+    if (highest.contribution <= secondHighestContribution) return null;
+    return {
+      userId: highest.userId,
+      amount: highest.contribution - secondHighestContribution,
+      minContribution: secondHighestContribution,
+      maxContribution: highest.contribution
+    };
+  };
+  var buildSidePots = ({ contributionsByUserId, participantUserIds, eligibleUserIds }) => {
+    if (!Array.isArray(eligibleUserIds) || eligibleUserIds.length === 0) return [];
+    const normalized = normalizeContributions({ contributionsByUserId, participantUserIds, eligibleUserIds });
+    const eligibleUserIdSet = new Set(eligibleUserIds);
+    const uncalledReturn = resolveUncalledReturn(normalized);
+    const contestable = normalized.map(({ userId, contribution }) => ({
+      userId,
+      contribution: uncalledReturn?.userId === userId ? uncalledReturn.minContribution : contribution
+    }));
+    const levels = [...new Set(contestable.map(({ contribution }) => contribution).filter((value) => value > 0))].sort((a, b) => a - b);
+    const pots = [];
+    let prev = 0;
+    levels.forEach((level) => {
+      const participants = contestable.filter(({ contribution }) => contribution >= level).map(({ userId }) => userId);
+      const delta = level - prev;
+      const amount = delta * participants.length;
+      if (amount > 0) {
+        const eligibleForBand = participants.filter((userId) => eligibleUserIdSet.has(userId));
+        if (eligibleForBand.length > 0) {
+          pots.push({
+            amount,
+            eligibleUserIds: eligibleForBand,
+            minContribution: prev,
+            maxContribution: level
+          });
+        } else if (pots.length > 0) {
+          const target = pots[pots.length - 1];
+          target.amount += amount;
+          target.maxContribution = level;
+        } else {
+          pots.push({
+            amount,
+            eligibleUserIds: eligibleUserIds.slice(),
+            minContribution: prev,
+            maxContribution: level
+          });
+        }
+      }
+      prev = level;
+    });
+    if (uncalledReturn) {
+      pots.push({
+        amount: uncalledReturn.amount,
+        eligibleUserIds: [uncalledReturn.userId],
+        minContribution: uncalledReturn.minContribution,
+        maxContribution: uncalledReturn.maxContribution,
+        returnUserId: uncalledReturn.userId
+      });
+    }
+    return pots;
+  };
+
+  // ws-server/poker/shared/settlement/poker-state-utils.mjs
+  var isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+  var RANKS2 = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
+  var SUITS2 = ["S", "H", "D", "C"];
+  var RANK_SET = new Set(RANKS2);
+  var SUIT_SET = new Set(SUITS2);
+
+  // ws-server/poker/shared/settlement/poker-payout.mjs
+  var normalizePotAmount = (value) => {
+    const amount = Number(value ?? 0);
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error("showdown_invalid_pot");
+    }
+    return Math.floor(amount);
+  };
+  var normalizeSidePots = (sidePots) => {
+    if (!Array.isArray(sidePots) || sidePots.length === 0) return null;
+    return sidePots.map((pot) => {
+      if (!isPlainObject(pot) || !Array.isArray(pot.eligibleUserIds)) {
+        throw new Error("showdown_invalid_side_pots");
+      }
+      return {
+        amount: normalizePotAmount(pot.amount),
+        eligibleUserIds: pot.eligibleUserIds.slice(),
+        ...typeof pot.returnUserId === "string" && pot.returnUserId ? { returnUserId: pot.returnUserId } : {}
+      };
+    });
+  };
+  var listShowdownUserIds = (state, seatUserIdsInOrder2) => {
+    return seatUserIdsInOrder2.filter((userId) => typeof userId === "string" && !state.foldedByUserId?.[userId] && !state.leftTableByUserId?.[userId] && !state.sitOutByUserId?.[userId] && !state.pendingAutoSitOutByUserId?.[userId]);
+  };
+  var ensureHoleCardsPresent = ({ holeCardsByUserId, userId }) => {
+    const holeCards = holeCardsByUserId?.[userId];
+    if (!Array.isArray(holeCards) || holeCards.length !== 2) {
+      throw new Error("showdown_missing_hole_cards");
+    }
+    return holeCards;
+  };
+  var awardPotsAtShowdown = ({ state, seatUserIdsInOrder: seatUserIdsInOrder2, computeShowdown: computeShowdown2, nowIso }) => {
+    if (!state || typeof state !== "object" || Array.isArray(state)) {
+      throw new Error("showdown_invalid_state");
+    }
+    if (!Array.isArray(seatUserIdsInOrder2) || seatUserIdsInOrder2.length === 0) {
+      throw new Error("showdown_no_players");
+    }
+    if (typeof computeShowdown2 !== "function") {
+      throw new Error("showdown_invalid_compute");
+    }
+    const showdownUserIds = listShowdownUserIds(state, seatUserIdsInOrder2);
+    if (showdownUserIds.length === 0) {
+      throw new Error("showdown_no_players");
+    }
+    const community = Array.isArray(state.community) ? state.community.slice() : [];
+    if (community.length !== 5) {
+      throw new Error("showdown_invalid_community");
+    }
+    const holeCardsByUserId = state.holeCardsByUserId || {};
+    const showdownUserIdSet = new Set(showdownUserIds);
+    for (const userId of showdownUserIds) {
+      ensureHoleCardsPresent({ holeCardsByUserId, userId });
+    }
+    let pots = normalizeSidePots(state.sidePots);
+    if (!pots && isPlainObject(state.contributionsByUserId)) {
+      pots = buildSidePots({
+        contributionsByUserId: state.contributionsByUserId,
+        participantUserIds: seatUserIdsInOrder2,
+        eligibleUserIds: showdownUserIds
+      }).map((pot) => ({
+        amount: normalizePotAmount(pot.amount),
+        eligibleUserIds: pot.eligibleUserIds.slice(),
+        ...pot.returnUserId ? { returnUserId: pot.returnUserId } : {}
+      }));
+      if (pots.length === 0) {
+        pots = null;
+      }
+    }
+    if (!pots) {
+      pots = [{ amount: normalizePotAmount(state.pot ?? 0), eligibleUserIds: showdownUserIds.slice() }];
+    }
+    const nextStacks = { ...state.stacks };
+    const potsAwarded = [];
+    const handsByUserId = {};
+    const winnersUnion = /* @__PURE__ */ new Set();
+    const seatUserIdSet = new Set(seatUserIdsInOrder2);
+    let potAwardedTotal = 0;
+    for (const pot of pots) {
+      const amount = normalizePotAmount(pot.amount);
+      const returnUserId = typeof pot.returnUserId === "string" ? pot.returnUserId : "";
+      if (returnUserId) {
+        if (!seatUserIdSet.has(returnUserId) || pot.eligibleUserIds.length !== 1 || pot.eligibleUserIds[0] !== returnUserId) {
+          throw new Error("showdown_invalid_return");
+        }
+        const baseStack = Number(nextStacks[returnUserId] ?? 0);
+        if (!Number.isFinite(baseStack)) {
+          throw new Error("showdown_invalid_stack");
+        }
+        nextStacks[returnUserId] = baseStack + amount;
+        potAwardedTotal += amount;
+        potsAwarded.push({ amount, winners: [returnUserId], eligibleUserIds: [returnUserId], returnUserId });
+        continue;
+      }
+      const eligibleSet = new Set(Array.isArray(pot.eligibleUserIds) ? pot.eligibleUserIds : []);
+      const eligible = seatUserIdsInOrder2.filter((userId) => showdownUserIdSet.has(userId) && eligibleSet.has(userId));
+      if (eligible.length === 0) {
+        throw new Error("showdown_pot_without_eligible_player");
+      }
+      const players = eligible.map((userId) => ({ userId, holeCards: ensureHoleCardsPresent({ holeCardsByUserId, userId }) }));
+      const result = computeShowdown2({ community, players });
+      const winners = Array.isArray(result?.winners) ? result.winners : [];
+      if (result?.handsByUserId && typeof result.handsByUserId === "object" && !Array.isArray(result.handsByUserId)) {
+        for (const [userId, hand] of Object.entries(result.handsByUserId)) {
+          if (typeof userId !== "string" || !userId) continue;
+          if (!hand || typeof hand !== "object" || Array.isArray(hand)) continue;
+          handsByUserId[userId] = {
+            category: hand.category ?? null,
+            name: hand.name ?? null,
+            ranks: Array.isArray(hand.ranks) ? hand.ranks.slice() : [],
+            best5: Array.isArray(hand.best5) ? hand.best5.slice() : []
+          };
+        }
+      }
+      if (winners.length === 0) {
+        throw new Error("showdown_no_winners");
+      }
+      const winnersValid = winners.every((userId) => eligibleSet.has(userId));
+      if (!winnersValid) {
+        throw new Error("showdown_winners_invalid");
+      }
+      const winnersInSeatOrder = seatUserIdsInOrder2.filter((userId) => winners.includes(userId));
+      if (winnersInSeatOrder.length === 0) {
+        throw new Error("showdown_winners_invalid");
+      }
+      const share = Math.floor(amount / winnersInSeatOrder.length);
+      let remainder = amount - share * winnersInSeatOrder.length;
+      for (const userId of winnersInSeatOrder) {
+        const baseStack = Number(nextStacks[userId] ?? 0);
+        if (!Number.isFinite(baseStack)) {
+          throw new Error("showdown_invalid_stack");
+        }
+        const bonus = remainder > 0 ? 1 : 0;
+        if (remainder > 0) remainder -= 1;
+        nextStacks[userId] = baseStack + share + bonus;
+        winnersUnion.add(userId);
+      }
+      potAwardedTotal += amount;
+      potsAwarded.push({ amount, winners: winnersInSeatOrder, eligibleUserIds: eligible });
+    }
+    const showdownWinners = seatUserIdsInOrder2.filter((userId) => winnersUnion.has(userId));
+    const awardedAt = typeof nowIso === "string" ? nowIso : (/* @__PURE__ */ new Date()).toISOString();
+    const showdown = {
+      winners: showdownWinners,
+      potsAwarded,
+      potAwardedTotal,
+      potAwarded: potAwardedTotal,
+      reason: "computed",
+      awardedAt
+    };
+    if (Object.keys(handsByUserId).length > 0) {
+      showdown.handsByUserId = handsByUserId;
+    }
+    return {
+      nextState: {
+        ...state,
+        stacks: nextStacks,
+        pot: 0,
+        showdown
+      },
+      payout: {
+        winners: showdownWinners,
+        potsAwarded,
+        potAwardedTotal
+      }
+    };
+  };
+
   // ws-server/poker/shared/settlement/poker-showdown.mjs
   var isPlainObject2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
   var normalizeRank2 = (value) => {
@@ -1181,19 +1479,19 @@
     }
     return normalized;
   }
-  function asStateCopy(state2) {
+  function asStateCopy(state) {
     return {
-      ...state2,
-      stacks: { ...state2.stacks || {} },
-      toCallByUserId: { ...state2.toCallByUserId || {} },
-      betThisRoundByUserId: { ...state2.betThisRoundByUserId || {} },
-      actedThisRoundByUserId: { ...state2.actedThisRoundByUserId || {} },
-      lastBettingRoundActionByUserId: { ...state2.lastBettingRoundActionByUserId || {} },
-      foldedByUserId: { ...state2.foldedByUserId || {} },
-      contributionsByUserId: { ...state2.contributionsByUserId || {} },
-      sidePots: Array.isArray(state2.sidePots) ? state2.sidePots.slice() : [],
-      community: Array.isArray(state2.community) ? state2.community.slice() : [],
-      deck: Array.isArray(state2.deck) ? state2.deck.slice() : []
+      ...state,
+      stacks: { ...state.stacks || {} },
+      toCallByUserId: { ...state.toCallByUserId || {} },
+      betThisRoundByUserId: { ...state.betThisRoundByUserId || {} },
+      actedThisRoundByUserId: { ...state.actedThisRoundByUserId || {} },
+      lastBettingRoundActionByUserId: { ...state.lastBettingRoundActionByUserId || {} },
+      foldedByUserId: { ...state.foldedByUserId || {} },
+      contributionsByUserId: { ...state.contributionsByUserId || {} },
+      sidePots: Array.isArray(state.sidePots) ? state.sidePots.slice() : [],
+      community: Array.isArray(state.community) ? state.community.slice() : [],
+      deck: Array.isArray(state.deck) ? state.deck.slice() : []
     };
   }
   function cardCodeToCard(cardCode) {
@@ -1229,12 +1527,12 @@
     }
     return normalized;
   }
-  function seatUserIdsInOrder(state2) {
-    return orderedSeats(state2).map((seat) => seat.userId);
+  function seatUserIdsInOrder(state) {
+    return orderedSeats(state).map((seat) => seat.userId);
   }
-  function deriveBoardStateFromHandSeed(state2, communityCount) {
-    const handSeed = typeof state2?.handSeed === "string" ? state2.handSeed.trim() : "";
-    const seatOrder = seatUserIdsInOrder(state2);
+  function deriveBoardStateFromHandSeed(state, communityCount) {
+    const handSeed = typeof state?.handSeed === "string" ? state.handSeed.trim() : "";
+    const seatOrder = seatUserIdsInOrder(state);
     if (!handSeed || seatOrder.length === 0 || !Number.isInteger(communityCount) || communityCount < 0 || communityCount > 5) {
       return null;
     }
@@ -1249,40 +1547,40 @@
       return null;
     }
   }
-  function resolveSettlementCommunity(state2) {
-    const community = Array.isArray(state2?.community) ? state2.community.slice() : [];
+  function resolveSettlementCommunity(state) {
+    const community = Array.isArray(state?.community) ? state.community.slice() : [];
     if (community.length === 5) {
       return community;
     }
-    const derivedBoardState = deriveBoardStateFromHandSeed(state2, 5);
+    const derivedBoardState = deriveBoardStateFromHandSeed(state, 5);
     return Array.isArray(derivedBoardState?.community) && derivedBoardState.community.length === 5 ? derivedBoardState.community : community;
   }
-  function eligibleUserIdsForSettlement(state2) {
-    return seatUserIdsInOrder(state2).filter((userId) => !state2.foldedByUserId?.[userId] && !state2.leftTableByUserId?.[userId] && !state2.sitOutByUserId?.[userId]);
+  function eligibleUserIdsForSettlement(state) {
+    return seatUserIdsInOrder(state).filter((userId) => !state.foldedByUserId?.[userId] && !state.leftTableByUserId?.[userId] && !state.sitOutByUserId?.[userId]);
   }
-  function settleHandState(state2, nowIso) {
-    const handId = typeof state2.handId === "string" ? state2.handId : "";
+  function settleHandState(state, nowIso) {
+    const handId = typeof state.handId === "string" ? state.handId : "";
     if (!handId) {
-      return state2;
+      return state;
     }
-    const settlementCommunity = resolveSettlementCommunity(state2);
+    const settlementCommunity = resolveSettlementCommunity(state);
     const materialized = materializeShowdownAndPayout({
       state: {
-        ...state2,
-        pot: Number(state2.potTotal ?? state2.pot ?? 0),
+        ...state,
+        pot: Number(state.potTotal ?? state.pot ?? 0),
         community: settlementCommunity.map(cardCodeToCard).filter(Boolean)
       },
-      seatUserIdsInOrder: seatUserIdsInOrder(state2),
-      holeCardsByUserId: toShowdownHoleCardsByUserId(state2.holeCardsByUserId),
+      seatUserIdsInOrder: seatUserIdsInOrder(state),
+      holeCardsByUserId: toShowdownHoleCardsByUserId(state.holeCardsByUserId),
       computeShowdown,
       awardPotsAtShowdown,
       nowIso
     });
-    if (!materialized?.nextState || materialized.nextState === state2) {
-      return state2;
+    if (!materialized?.nextState || materialized.nextState === state) {
+      return state;
     }
     return {
-      ...state2,
+      ...state,
       ...materialized.nextState,
       phase: "SETTLED",
       turnUserId: null,
@@ -1290,42 +1588,42 @@
       turnDeadlineAt: null,
       community: settlementCommunity,
       communityDealt: settlementCommunity.length,
-      holeCardsByUserId: { ...state2.holeCardsByUserId || {} },
-      deck: Array.isArray(state2.deck) ? state2.deck.slice() : [],
-      potTotal: Number(materialized.nextState.pot ?? state2.potTotal ?? 0),
+      holeCardsByUserId: { ...state.holeCardsByUserId || {} },
+      deck: Array.isArray(state.deck) ? state.deck.slice() : [],
+      potTotal: Number(materialized.nextState.pot ?? state.potTotal ?? 0),
       sidePots: []
     };
   }
-  function shouldSettleByFold(state2) {
-    return eligibleUserIdsForSettlement(state2).length <= 1;
+  function shouldSettleByFold(state) {
+    return eligibleUserIdsForSettlement(state).length <= 1;
   }
-  function shouldSettleAtShowdown(state2) {
-    return state2.phase === "RIVER" && isBettingClosed(state2);
+  function shouldSettleAtShowdown(state) {
+    return state.phase === "RIVER" && isBettingClosed(state);
   }
-  function orderedSeats(state2) {
-    const phase = typeof state2?.phase === "string" ? state2.phase : "";
-    const seats = ACTION_PHASES2.has(phase) && Array.isArray(state2?.handSeats) && state2.handSeats.length > 0 ? state2.handSeats : state2?.seats;
+  function orderedSeats(state) {
+    const phase = typeof state?.phase === "string" ? state.phase : "";
+    const seats = ACTION_PHASES2.has(phase) && Array.isArray(state?.handSeats) && state.handSeats.length > 0 ? state.handSeats : state?.seats;
     return (Array.isArray(seats) ? seats : []).filter((seat) => typeof seat?.userId === "string" && Number.isInteger(seat?.seatNo)).slice().sort((a, b) => a.seatNo - b.seatNo || a.userId.localeCompare(b.userId));
   }
-  function isSelectableActor(state2, userId) {
-    if (state2.foldedByUserId?.[userId] || state2.leftTableByUserId?.[userId] || state2.sitOutByUserId?.[userId]) {
+  function isSelectableActor(state, userId) {
+    if (state.foldedByUserId?.[userId] || state.leftTableByUserId?.[userId] || state.sitOutByUserId?.[userId]) {
       return false;
     }
-    const stack = Number(state2.stacks?.[userId] ?? 0);
+    const stack = Number(state.stacks?.[userId] ?? 0);
     return stack > 0;
   }
-  function resolveNextTurnUserId(state2, currentUserId) {
-    const seats = orderedSeats(state2);
+  function resolveNextTurnUserId(state, currentUserId) {
+    const seats = orderedSeats(state);
     if (seats.length === 0) {
       return null;
     }
-    const activeUserIds = seats.map((seat) => seat.userId).filter((userId) => isSelectableActor(state2, userId));
+    const activeUserIds = seats.map((seat) => seat.userId).filter((userId) => isSelectableActor(state, userId));
     if (activeUserIds.length === 0) {
       return null;
     }
     if (activeUserIds.length === 1) {
       const onlyUserId = activeUserIds[0];
-      return Number(state2.toCallByUserId?.[onlyUserId] ?? 0) > 0 ? onlyUserId : null;
+      return Number(state.toCallByUserId?.[onlyUserId] ?? 0) > 0 ? onlyUserId : null;
     }
     const currentIndex = seats.findIndex((seat) => seat.userId === currentUserId);
     if (currentIndex === -1) {
@@ -1333,77 +1631,77 @@
     }
     for (let offset = 1; offset <= seats.length; offset += 1) {
       const nextSeat = seats[(currentIndex + offset) % seats.length];
-      if (isSelectableActor(state2, nextSeat.userId)) {
+      if (isSelectableActor(state, nextSeat.userId)) {
         return nextSeat.userId;
       }
     }
     return null;
   }
-  function recomputeToCall(state2) {
-    const currentBet = Number(state2.currentBet ?? 0);
-    for (const seat of orderedSeats(state2)) {
+  function recomputeToCall(state) {
+    const currentBet = Number(state.currentBet ?? 0);
+    for (const seat of orderedSeats(state)) {
       const userId = seat.userId;
-      const userBet = Number(state2.betThisRoundByUserId?.[userId] ?? 0);
-      state2.toCallByUserId[userId] = Math.max(0, currentBet - userBet);
+      const userBet = Number(state.betThisRoundByUserId?.[userId] ?? 0);
+      state.toCallByUserId[userId] = Math.max(0, currentBet - userBet);
     }
   }
-  function isBettingClosed(state2) {
-    const seats = orderedSeats(state2);
-    const active = seats.filter((seat) => isSelectableActor(state2, seat.userId));
+  function isBettingClosed(state) {
+    const seats = orderedSeats(state);
+    const active = seats.filter((seat) => isSelectableActor(state, seat.userId));
     if (active.length === 0) {
       return true;
     }
     if (active.length === 1) {
-      return Number(state2.toCallByUserId?.[active[0].userId] ?? 0) === 0;
+      return Number(state.toCallByUserId?.[active[0].userId] ?? 0) === 0;
     }
-    const allMatched = active.every((seat) => Number(state2.toCallByUserId?.[seat.userId] ?? 0) === 0);
+    const allMatched = active.every((seat) => Number(state.toCallByUserId?.[seat.userId] ?? 0) === 0);
     if (!allMatched) {
       return false;
     }
-    if (Number(state2.currentBet ?? 0) > 0) {
+    if (Number(state.currentBet ?? 0) > 0) {
       return true;
     }
-    return active.every((seat) => state2.actedThisRoundByUserId?.[seat.userId] === true);
+    return active.every((seat) => state.actedThisRoundByUserId?.[seat.userId] === true);
   }
   function nextPhase(phase) {
     return typeof phase === "string" ? NEXT_PHASE[phase] ?? null : null;
   }
-  function revealCommunityCards(state2, count) {
+  function revealCommunityCards(state, count) {
     const normalized = Number.isInteger(count) && count > 0 ? count : 0;
     if (normalized === 0) {
       return;
     }
-    const deck = Array.isArray(state2.deck) ? state2.deck : [];
-    const community = Array.isArray(state2.community) ? state2.community : [];
-    const revealedCount = Number.isInteger(state2.communityDealt) ? Math.max(community.length, Math.min(5, state2.communityDealt)) : community.length;
+    const deck = Array.isArray(state.deck) ? state.deck : [];
+    const community = Array.isArray(state.community) ? state.community : [];
+    const revealedCount = Number.isInteger(state.communityDealt) ? Math.max(community.length, Math.min(5, state.communityDealt)) : community.length;
     const targetCommunityCount = Math.min(5, revealedCount + normalized);
     const missingCount = Math.max(0, targetCommunityCount - community.length);
     const dealt = deck.slice(0, missingCount);
     if (dealt.length === missingCount) {
-      state2.community = community.concat(dealt);
-      state2.deck = deck.slice(dealt.length);
-      state2.communityDealt = targetCommunityCount;
+      state.community = community.concat(dealt);
+      state.deck = deck.slice(dealt.length);
+      state.communityDealt = targetCommunityCount;
       return;
     }
-    const derivedBoardState = deriveBoardStateFromHandSeed(state2, targetCommunityCount);
+    const derivedBoardState = deriveBoardStateFromHandSeed(state, targetCommunityCount);
     if (Array.isArray(derivedBoardState?.community) && derivedBoardState.community.length === targetCommunityCount) {
-      state2.community = derivedBoardState.community;
-      state2.deck = Array.isArray(derivedBoardState.deck) ? derivedBoardState.deck : [];
-      state2.communityDealt = targetCommunityCount;
+      state.community = derivedBoardState.community;
+      state.deck = Array.isArray(derivedBoardState.deck) ? derivedBoardState.deck : [];
+      state.communityDealt = targetCommunityCount;
       return;
     }
-    state2.community = community.concat(dealt);
-    state2.deck = deck.slice(dealt.length);
-    state2.communityDealt = Math.max(revealedCount, state2.community.length);
+    state.community = community.concat(dealt);
+    state.deck = deck.slice(dealt.length);
+    state.communityDealt = Math.max(revealedCount, state.community.length);
   }
-  function resetRoundState(state2) {
-    state2.currentBet = 0;
-    for (const seat of orderedSeats(state2)) {
+  function resetRoundState(state) {
+    state.currentBet = 0;
+    for (const seat of orderedSeats(state)) {
       const userId = seat.userId;
-      state2.betThisRoundByUserId[userId] = 0;
-      state2.toCallByUserId[userId] = 0;
-      state2.actedThisRoundByUserId[userId] = false;
-      state2.lastBettingRoundActionByUserId[userId] = null;
+      state.betThisRoundByUserId[userId] = 0;
+      state.toCallByUserId[userId] = 0;
+      state.actedThisRoundByUserId[userId] = false;
+      state.lastBettingRoundActionByUserId[userId] = null;
     }
   }
   function resolveLastBettingRoundAction({ action, stackAfterAction }) {
@@ -1424,53 +1722,53 @@
     }
     return null;
   }
-  function resolveStreetTurnUserId(state2) {
-    const seats = orderedSeats(state2);
+  function resolveStreetTurnUserId(state) {
+    const seats = orderedSeats(state);
     if (seats.length === 0) {
       return null;
     }
-    const dealerSeatNo = Number(state2.dealerSeatNo ?? 0);
+    const dealerSeatNo = Number(state.dealerSeatNo ?? 0);
     const dealerIndex = seats.findIndex((seat) => seat.seatNo === dealerSeatNo);
     const startIndex = dealerIndex === -1 ? 0 : (dealerIndex + 1) % seats.length;
     for (let offset = 0; offset < seats.length; offset += 1) {
       const seat = seats[(startIndex + offset) % seats.length];
-      if (isSelectableActor(state2, seat.userId)) {
+      if (isSelectableActor(state, seat.userId)) {
         return seat.userId;
       }
     }
     return null;
   }
-  function advanceStreetIfClosed(state2) {
-    if (!isBettingClosed(state2)) {
+  function advanceStreetIfClosed(state) {
+    if (!isBettingClosed(state)) {
       return false;
     }
-    const phase = nextPhase(state2.phase);
+    const phase = nextPhase(state.phase);
     if (!phase) {
-      state2.turnUserId = null;
+      state.turnUserId = null;
       return true;
     }
-    state2.phase = phase;
+    state.phase = phase;
     if (phase === "FLOP") {
-      revealCommunityCards(state2, 3);
+      revealCommunityCards(state, 3);
     } else {
-      revealCommunityCards(state2, 1);
+      revealCommunityCards(state, 1);
     }
-    resetRoundState(state2);
-    state2.turnUserId = resolveStreetTurnUserId(state2);
+    resetRoundState(state);
+    state.turnUserId = resolveStreetTurnUserId(state);
     return true;
   }
-  function advanceClosedStreets(state2, nowIso) {
+  function advanceClosedStreets(state, nowIso) {
     let advanced = false;
-    while (isBettingClosed(state2)) {
-      if (state2.phase === "RIVER") {
-        return { advanced: true, settled: true, state: settleHandState(state2, nowIso) };
+    while (isBettingClosed(state)) {
+      if (state.phase === "RIVER") {
+        return { advanced: true, settled: true, state: settleHandState(state, nowIso) };
       }
-      if (!advanceStreetIfClosed(state2)) {
+      if (!advanceStreetIfClosed(state)) {
         break;
       }
       advanced = true;
     }
-    return { advanced, settled: false, state: state2 };
+    return { advanced, settled: false, state };
   }
   function applyAction({ pokerState, userId, action, amount, nowIso = "1970-01-01T00:00:00.000Z" }) {
     if (!pokerState || typeof pokerState !== "object" || Array.isArray(pokerState)) {
@@ -1653,11 +1951,11 @@
   // ws-server/poker/engine/poker-engine.mjs
   var MIN_PLAYERS_TO_BOOTSTRAP = 2;
   var MIN_STACK_TO_JOIN_HAND = 2;
-  function nextHandId(tableId2, version2, seatCount) {
-    return `ws_hand_${tableId2}_${version2}_${seatCount}`;
+  function nextHandId(tableId, version, seatCount) {
+    return `ws_hand_${tableId}_${version}_${seatCount}`;
   }
-  function nextHandSeed(tableId2, version2, seatCount) {
-    return `ws_seed_${tableId2}_${version2}_${seatCount}`;
+  function nextHandSeed(tableId, version, seatCount) {
+    return `ws_seed_${tableId}_${version}_${seatCount}`;
   }
   function orderedSeatMembers(coreState) {
     const members2 = Array.isArray(coreState?.members) ? coreState.members : [];
@@ -1686,7 +1984,7 @@
     return { smallBlind: 1, bigBlind: 2 };
   }
   function buildBootstrappedPokerState({
-    tableId: tableId2,
+    tableId,
     coreState,
     dealerSeatNo = null,
     startingStacks = null,
@@ -1716,7 +2014,7 @@
     const bbUserId = members2[bbIndex]?.userId ?? null;
     const turnUserId = members2[utgIndex]?.userId ?? members2[dealerIndex]?.userId ?? null;
     const versionForHand = Number.isInteger(handVersion) ? handVersion : coreState.version;
-    const handSeed = nextHandSeed(tableId2, versionForHand, members2.length);
+    const handSeed = nextHandSeed(tableId, versionForHand, members2.length);
     const initialDeck = deriveDeck(handSeed);
     const dealt = dealHoleCards(initialDeck, userIds);
     const stacks = Object.fromEntries(userIds.map((userId) => {
@@ -1752,8 +2050,8 @@
     const handSeats = members2.map((member) => ({ userId: member.userId, seatNo: member.seat }));
     return {
       ...inactivity,
-      roomId: coreState.roomId || tableId2,
-      handId: nextHandId(tableId2, versionForHand, members2.length),
+      roomId: coreState.roomId || tableId,
+      handId: nextHandId(tableId, versionForHand, members2.length),
       handSeed,
       phase: "PREFLOP",
       dealerSeatNo: members2[dealerIndex]?.seat ?? null,
@@ -1781,13 +2079,59 @@
       turnDeadlineAt: null
     };
   }
+  function resolveNextDealerSeatNo({ members: members2, settledState, coreState = null }) {
+    if (!Array.isArray(members2) || members2.length === 0) {
+      return null;
+    }
+    const eligibleMembers = members2.filter((member) => isContinuationEligibleByStack(member.userId, settledState?.stacks, {
+      isBot: coreState?.seatDetailsByUserId?.[member.userId]?.isBot === true
+    }));
+    if (eligibleMembers.length === 0) {
+      return null;
+    }
+    const currentDealerSeatNo = Number(settledState?.dealerSeatNo);
+    const currentDealerIndex = eligibleMembers.findIndex((member) => member.seat === currentDealerSeatNo);
+    if (currentDealerIndex === -1) {
+      return eligibleMembers[0].seat;
+    }
+    const nextIndex = (currentDealerIndex + 1) % eligibleMembers.length;
+    return eligibleMembers[nextIndex]?.seat ?? eligibleMembers[0].seat;
+  }
+  function buildNextHandStateFromSettled({ tableId, coreState, settledState, nextVersion, stakes = null }) {
+    const sitOutByUserId = { ...settledState?.sitOutByUserId || {} };
+    for (const [userId, pending] of Object.entries(settledState?.pendingAutoSitOutByUserId || {})) {
+      if (pending === true) sitOutByUserId[userId] = true;
+    }
+    coreState = { ...coreState, pokerState: { ...settledState, sitOutByUserId, pendingAutoSitOutByUserId: {} } };
+    const members2 = orderedEligibleSeatMembers(coreState, settledState?.stacks);
+    const nextDealerSeatNo = resolveNextDealerSeatNo({ members: members2, settledState, coreState });
+    const nextHandState = buildBootstrappedPokerState({
+      tableId,
+      coreState,
+      dealerSeatNo: nextDealerSeatNo,
+      startingStacks: settledState?.stacks,
+      handVersion: nextVersion,
+      stakes
+    });
+    if (!nextHandState) return null;
+    const durableStacks = { ...nextHandState.stacks };
+    const settledStacks = settledState?.stacks && typeof settledState.stacks === "object" && !Array.isArray(settledState.stacks) ? settledState.stacks : {};
+    for (const [userId, rawStack] of Object.entries(settledStacks)) {
+      if (Object.prototype.hasOwnProperty.call(durableStacks, userId)) continue;
+      const stack = Number(rawStack);
+      if (Number.isInteger(stack) && stack >= 0) durableStacks[userId] = stack;
+    }
+    const waitingForNextHandByUserId = settledState?.waitingForNextHandByUserId && typeof settledState.waitingForNextHandByUserId === "object" && !Array.isArray(settledState.waitingForNextHandByUserId) ? { ...settledState.waitingForNextHandByUserId } : {};
+    for (const seat of nextHandState.handSeats) delete waitingForNextHandByUserId[seat.userId];
+    return { ...nextHandState, stacks: durableStacks, waitingForNextHandByUserId };
+  }
 
   // ws-server/poker/shared/poker-bot-strategy.mjs
-  function normalizeString(value) {
+  function normalizeString2(value) {
     return String(value == null ? "" : value).trim();
   }
-  function clampRandom(random2 = Math.random) {
-    const sampled = typeof random2 === "function" ? Number(random2()) : Number(random2);
+  function clampRandom(random = Math.random) {
+    const sampled = typeof random === "function" ? Number(random()) : Number(random);
     if (!Number.isFinite(sampled)) return 0;
     return Math.max(0, Math.min(0.999999, sampled));
   }
@@ -1800,10 +2144,10 @@
     return null;
   }
   function findAction(legalActions, actionType) {
-    const target = normalizeString(actionType).toUpperCase();
+    const target = normalizeString2(actionType).toUpperCase();
     for (const entry of Array.isArray(legalActions) ? legalActions : []) {
       if (typeof entry === "string" && entry.toUpperCase() === target) return { type: target };
-      const entryType = normalizeString(entry?.type || entry?.action).toUpperCase();
+      const entryType = normalizeString2(entry?.type || entry?.action).toUpperCase();
       if (entryType === target) return entry;
     }
     return null;
@@ -1826,7 +2170,7 @@
     return Number.isInteger(parsed) && parsed >= 2 && parsed <= 14 ? parsed : 0;
   }
   function cardSuit(card) {
-    return typeof card === "string" ? card.trim().slice(-1).toUpperCase() : normalizeString(card?.s).toUpperCase();
+    return typeof card === "string" ? card.trim().slice(-1).toUpperCase() : normalizeString2(card?.s).toUpperCase();
   }
   function scorePreflop(cards) {
     if (!Array.isArray(cards) || cards.length < 2) return 0.45;
@@ -1881,7 +2225,7 @@
     const normalizedMinBetAmount = Number.isFinite(minBetAmount) ? Math.trunc(minBetAmount) : null;
     const botMinBet = normalizedMinBetAmount > 0 ? normalizedMinBetAmount : 1;
     return actions.map((action) => {
-      const type = typeof action === "string" ? action.toUpperCase() : normalizeString(action?.type || action?.action).toUpperCase();
+      const type = typeof action === "string" ? action.toUpperCase() : normalizeString2(action?.type || action?.action).toUpperCase();
       if (type === "BET" && normalizedMaxBetAmount > 0) {
         return {
           type: "BET",
@@ -1922,14 +2266,14 @@
   }
   function hasAggressedThisRound(context = {}) {
     const userId = typeof context?.userId === "string" ? context.userId : "";
-    const lastAction = normalizeString(context?.state?.lastBettingRoundActionByUserId?.[userId]).toUpperCase();
+    const lastAction = normalizeString2(context?.state?.lastBettingRoundActionByUserId?.[userId]).toUpperCase();
     return lastAction === "BET" || lastAction === "RAISE";
   }
   function chooseBotActionProfiled(legalActions, context = {}) {
     const seatProfile = Array.isArray(context?.state?.seats) ? context.state.seats.find((seat) => seat?.userId === context?.userId)?.botProfile : null;
-    const profile = normalizeString(context?.profile ?? context?.botProfile ?? seatProfile).toUpperCase() || "NORMAL";
+    const profile = normalizeString2(context?.profile ?? context?.botProfile ?? seatProfile).toUpperCase() || "NORMAL";
     const cards = botCardsFromContext(context);
-    const phase = normalizeString(context?.state?.phase).toUpperCase();
+    const phase = normalizeString2(context?.state?.phase).toUpperCase();
     const strength = phase === "PREFLOP" ? scorePreflop(cards) : scorePostflop(cards, context?.state?.community);
     const thresholds = strengthThresholds(profile);
     const roll = clampRandom(context?.random);
@@ -2018,11 +2362,11 @@
   function asObject(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : null;
   }
-  function withoutPrivateState(state2) {
-    if (!state2 || typeof state2 !== "object" || Array.isArray(state2)) {
-      return state2;
+  function withoutPrivateState(state) {
+    if (!state || typeof state !== "object" || Array.isArray(state)) {
+      return state;
     }
-    const { holeCardsByUserId, deck, handSeed, handStartStacksByUserId, ...rest } = state2;
+    const { holeCardsByUserId, deck, handSeed, handStartStacksByUserId, ...rest } = state;
     return rest;
   }
   function normalizeCards(value) {
@@ -2210,10 +2554,10 @@
       payouts: handSettlement.payouts && typeof handSettlement.payouts === "object" && !Array.isArray(handSettlement.payouts) ? handSettlement.payouts : {}
     };
   }
-  function resolvePrivateBranch({ state: state2, statePublic, userId, youSeat, stack, isBot, tableStatus }) {
-    const intent = state2?.inactivityEjectionByUserId?.[userId];
+  function resolvePrivateBranch({ state, statePublic, userId, youSeat, stack, isBot, tableStatus }) {
+    const intent = state?.inactivityEjectionByUserId?.[userId];
     if (intent) {
-      const retained = state2?.seats?.some((seat) => seat?.userId === userId) || Object.prototype.hasOwnProperty.call(state2?.stacks || {}, userId);
+      const retained = state?.seats?.some((seat) => seat?.userId === userId) || Object.prototype.hasOwnProperty.call(state?.stacks || {}, userId);
       const pending = tableStatus !== "CLOSED" && retained;
       return {
         userId,
@@ -2226,9 +2570,9 @@
     if (!Number.isInteger(youSeat)) {
       return null;
     }
-    const holeCards = normalizeCards(state2?.holeCardsByUserId?.[userId]);
+    const holeCards = normalizeCards(state?.holeCardsByUserId?.[userId]);
     const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
-    const phase = typeof state2?.phase === "string" ? state2.phase.trim().toUpperCase() : "";
+    const phase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
     const inCurrentHand = phase !== "SETTLED" && handSeats.some((seat) => seat?.userId === userId);
     const waiting = statePublic?.waitingForNextHandByUserId?.[userId] === true;
     const status = waiting ? "WAITING_NEXT_HAND" : stack === 0 && !inCurrentHand ? "OUT_OF_CHIPS" : "ACTIVE";
@@ -2253,7 +2597,7 @@
     const leftTableByUserId = asObject(statePublic?.leftTableByUserId) || {};
     return leftTableByUserId[userId] === true;
   }
-  function resolveRevealedShowdownParticipants({ statePublic, state: state2 }) {
+  function resolveRevealedShowdownParticipants({ statePublic, state }) {
     if (statePublic?.phase !== "SETTLED") {
       return [];
     }
@@ -2282,19 +2626,19 @@
     if (comparedUserIds.length === 0) {
       return [];
     }
-    const holeCardsByUserId = asObject(state2?.holeCardsByUserId) || {};
+    const holeCardsByUserId = asObject(state?.holeCardsByUserId) || {};
     return comparedUserIds.map((userId) => ({
       userId,
       holeCards: normalizeCards(holeCardsByUserId[userId])
     })).filter((entry) => entry.holeCards.length === 2);
   }
-  function projectRoomCoreSnapshot({ tableId: tableId2, roomId, coreState, members: members2, userId, youSeat, tableStatus = "OPEN", publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
-    const state2 = asObject(coreState?.pokerState) || asObject(coreState?.state);
-    const statePublic = state2 ? withoutPrivateState(state2) : null;
+  function projectRoomCoreSnapshot({ tableId, roomId, coreState, members: members2, userId, youSeat, tableStatus = "OPEN", publicProfilesByUserId = {}, publicProfileStorageBaseUrl = "" }) {
+    const state = asObject(coreState?.pokerState) || asObject(coreState?.state);
+    const statePublic = state ? withoutPrivateState(state) : null;
     let publicSeats = resolvePublicSeats({ statePublic, members: members2, coreState, publicProfilesByUserId, publicProfileStorageBaseUrl, tableStatus });
     const publicStacks = resolvePublicStacks({ statePublic, coreState, seats: publicSeats });
     const handSeats = Array.isArray(statePublic?.handSeats) ? statePublic.handSeats : Array.isArray(statePublic?.seats) ? statePublic.seats : [];
-    const publicPhase = typeof state2?.phase === "string" ? state2.phase.trim().toUpperCase() : "";
+    const publicPhase = typeof state?.phase === "string" ? state.phase.trim().toUpperCase() : "";
     const currentHandUserIds = new Set(handSeats.map((seat) => seat?.userId).filter((seatUserId) => typeof seatUserId === "string" && seatUserId));
     publicSeats = publicSeats.map((seat) => {
       if (statePublic?.inactivityEjectionByUserId?.[seat.userId]) return { ...seat, status: "EJECTION_PENDING" };
@@ -2305,7 +2649,7 @@
       if (Number.isInteger(stack) && stack === 0 && !inCurrentHand) return { ...seat, status: "OUT_OF_CHIPS" };
       return seat;
     });
-    const effectiveYouSeat = hasLeftTable(statePublic, userId) || state2?.inactivityEjectionByUserId?.[userId] ? null : youSeat;
+    const effectiveYouSeat = hasLeftTable(statePublic, userId) || state?.inactivityEjectionByUserId?.[userId] ? null : youSeat;
     if (!statePublic) {
       return {
         roomId,
@@ -2356,8 +2700,8 @@
     const isTurnPlayer = Number.isInteger(effectiveYouSeat) && turnUserId === userId;
     const legalInfo = Number.isInteger(effectiveYouSeat) ? computeSharedLegalActions({ statePublic, userId }) : { actions: [], toCall: null, minRaiseTo: null, maxRaiseTo: null, maxBetAmount: null, minBetAmount: null };
     const constraintsInfo = Number.isInteger(effectiveYouSeat) && !isTurnPlayer ? computeProjectedLegalActions({ statePublic, userId }) : legalInfo;
-    const snapshot2 = {
-      roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId2,
+    const snapshot = {
+      roomId: typeof statePublic.roomId === "string" ? statePublic.roomId : roomId || tableId,
       seats: publicSeats,
       stacks: publicStacks,
       bigBlind: Number.isInteger(statePublic?.bigBlind) && statePublic.bigBlind > 0 ? statePublic.bigBlind : null,
@@ -2400,7 +2744,7 @@
       committedByUserId: normalizeNumericUserMap(statePublic.committedByUserId),
       lastBettingRoundActionByUserId: normalizeLastBettingRoundActionByUserId(statePublic.lastBettingRoundActionByUserId),
       private: resolvePrivateBranch({
-        state: state2,
+        state,
         statePublic,
         userId,
         youSeat: effectiveYouSeat,
@@ -2411,87 +2755,320 @@
     };
     const showdown = normalizeShowdown(statePublic.showdown);
     if (showdown) {
-      const revealedShowdownParticipants = resolveRevealedShowdownParticipants({ statePublic, state: state2 });
+      const revealedShowdownParticipants = resolveRevealedShowdownParticipants({ statePublic, state });
       if (revealedShowdownParticipants.length > 0) {
         showdown.revealedShowdownParticipants = revealedShowdownParticipants;
       }
-      snapshot2.showdown = showdown;
+      snapshot.showdown = showdown;
     }
     const handSettlement = normalizeHandSettlement(statePublic.handSettlement);
     if (handSettlement) {
-      snapshot2.handSettlement = handSettlement;
+      snapshot.handSettlement = handSettlement;
     }
-    return snapshot2;
+    return snapshot;
   }
 
   // poker/offline/offline-game.mjs
-  var human = "offline-human";
-  var botIds = ["bot-offline-1", "bot-offline-2"];
-  var members = [human, ...botIds].map((userId, i) => ({ userId, seat: i + 1 }));
-  var tableId = "offline-" + crypto.randomUUID();
-  var state;
-  var version = 0;
-  var listener;
-  var started = false;
-  var random = Math.random;
-  var history = [];
-  function legal(userId) {
-    return computeSharedLegalActions({ statePublic: state, userId });
-  }
-  function snapshot() {
-    const coreState = {
-      pokerState: state,
-      seats: Object.fromEntries(members.map((m) => [m.userId, m.seat])),
-      seatDetailsByUserId: Object.fromEntries(members.map((m) => [m.userId, { isBot: m.userId !== human, botProfile: "NORMAL" }]))
-    };
+  var STORAGE_KEY = "arcade.poker.offline.v1";
+  var HUMAN = "offline-human";
+  var ids = [HUMAN, "bot-offline-1", "bot-offline-2"];
+  var members = ids.map((userId, i) => ({ userId, seat: i + 1 }));
+  var clone = (value) => JSON.parse(JSON.stringify(value));
+  var integer = (value) => Number.isSafeInteger(value) && value >= 0;
+  function core(session) {
     return {
-      ...projectRoomCoreSnapshot({ tableId, roomId: tableId, coreState, members, userId: human, youSeat: 1 }),
-      tableId,
-      stateVersion: version,
-      youSeat: 1,
-      table: { status: "OPEN", maxSeats: 3, buyIn: 100 }
+      version: session.hand,
+      roomId: session.tableId,
+      members,
+      seats: Object.fromEntries(members.map((m) => [m.userId, m.seat])),
+      seatDetailsByUserId: Object.fromEntries(ids.map((id) => [id, { isBot: id !== HUMAN, botProfile: "NORMAL" }])),
+      pokerState: session.state
     };
+  }
+  function createOfflineGame({ storage, prepare = prepareSeed, random = Math.random, uuid = () => crypto.randomUUID() } = {}) {
+    function read() {
+      const raw = storage.getItem(STORAGE_KEY);
+      if (raw === null) return { schema: 1, revision: 0, wallet: 5e3, session: null };
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error("Offline storage is corrupt; reset local practice data to continue");
+      }
+      if (data?.schema !== 1 || !integer(data.wallet) || !integer(data.revision)) throw new Error("Unsupported offline storage");
+      if (data.session) {
+        const s = data.session;
+        if (typeof s.tableId !== "string" || !s.tableId.startsWith("offline-") || !integer(s.hand) || s.hand < 1 || ![100, 500, 1e3].includes(s.buyIn) || !s.state || s.state.roomId !== s.tableId || typeof s.state.handId !== "string" || !integer(s.state.potTotal) || !ids.every((id) => integer(s.state.stacks?.[id]))) throw new Error("Invalid offline storage session");
+      }
+      return data;
+    }
+    function save(data, revision) {
+      if (read().revision !== revision) throw new Error("Offline session changed in another tab; resume it");
+      data.revision = revision + 1;
+      storage.setItem(STORAGE_KEY, JSON.stringify(data));
+      return clone(data);
+    }
+    function mutate(fn) {
+      const data = read(), revision = data.revision;
+      const result = fn(data);
+      save(data, revision);
+      return result;
+    }
+    function session(data) {
+      if (!data.session) throw new Error("No offline session");
+      return data.session;
+    }
+    function legalFor(s, id) {
+      return computeSharedLegalActions({ statePublic: s.state, userId: id });
+    }
+    function apply(s, id, action) {
+      if (s.state.turnUserId !== id) throw new Error("Not your turn");
+      const result = applyAction({ pokerState: s.state, userId: id, action: action.type, amount: action.amount, nowIso: (/* @__PURE__ */ new Date()).toISOString() });
+      if (!result.ok) throw new Error(result.reason);
+      s.state = result.state;
+    }
+    function bot(s) {
+      const id = s.state.turnUserId;
+      if (!id || id === HUMAN) return false;
+      const action = chooseBotActionProfiled(enrichBotLegalActions(legalFor(s, id)), { userId: id, profile: "NORMAL", state: s.state, random });
+      if (!action) throw new Error("No legal bot decision");
+      apply(s, id, action);
+      return true;
+    }
+    return {
+      read,
+      async newGame(buyIn) {
+        if (![100, 500, 1e3].includes(buyIn)) throw new Error("Invalid Practice Chips buy-in");
+        const data = read(), revision = data.revision;
+        if (data.session) throw new Error("Leave the current session before New Game");
+        if (data.wallet < buyIn) throw new Error("Not enough Practice Chips; use free refill");
+        const s = { tableId: "offline-" + uuid(), buyIn, hand: 1, state: null };
+        await prepare(`ws_seed_${s.tableId}_1_3`);
+        s.state = buildBootstrappedPokerState({ tableId: s.tableId, coreState: core(s), startingStacks: Object.fromEntries(ids.map((id) => [id, buyIn])) });
+        if (!s.state) throw new Error("Offline deal failed");
+        data.wallet -= buyIn;
+        data.session = s;
+        save(data, revision);
+      },
+      async nextHand() {
+        const data = read(), revision = data.revision, s = session(data);
+        if (s.state.phase !== "SETTLED") throw new Error("Hand is not settled");
+        if (s.state.stacks[HUMAN] < 2) throw new Error("Rebuy or Leave to continue");
+        for (const id of ids.slice(1)) if (s.state.stacks[id] < 2) s.state.stacks[id] = s.buyIn;
+        s.hand++;
+        await prepare(`ws_seed_${s.tableId}_${s.hand}_3`);
+        const next = buildNextHandStateFromSettled({ tableId: s.tableId, coreState: core(s), settledState: s.state, nextVersion: s.hand });
+        if (!next) throw new Error("Offline rollover failed");
+        s.state = next;
+        save(data, revision);
+      },
+      legal() {
+        return legalFor(session(read()), HUMAN);
+      },
+      act(action) {
+        return mutate((data) => apply(session(data), HUMAN, action));
+      },
+      botStep() {
+        return mutate((data) => bot(session(data)));
+      },
+      leave() {
+        const data = read();
+        if (!data.session) return { wallet: data.wallet, cashout: 0 };
+        const revision = data.revision, s = data.session;
+        for (let n = 0; s.state.phase !== "SETTLED" && n < 300; n++) {
+          if (s.state.turnUserId === HUMAN) apply(s, HUMAN, { type: "FOLD" });
+          else if (!bot(s)) throw new Error("Offline hand cannot finish");
+        }
+        if (s.state.phase !== "SETTLED") throw new Error("Offline hand did not settle");
+        const cashout = s.state.stacks[HUMAN];
+        data.wallet += cashout;
+        data.session = null;
+        save(data, revision);
+        return { wallet: data.wallet, cashout };
+      },
+      rebuy() {
+        return mutate((data) => {
+          const s = session(data);
+          if (s.state.phase !== "SETTLED") throw new Error("Rebuy requires settled hand");
+          const amount = Math.max(0, s.buyIn - s.state.stacks[HUMAN]);
+          if (data.wallet < amount) throw new Error("Not enough Practice Chips; use free refill");
+          data.wallet -= amount;
+          s.state.stacks[HUMAN] += amount;
+        });
+      },
+      refill() {
+        return mutate((data) => {
+          data.wallet = Math.max(5e3, data.wallet);
+        });
+      },
+      snapshot() {
+        const data = read(), s = session(data);
+        return {
+          ...projectRoomCoreSnapshot({ tableId: s.tableId, roomId: s.tableId, coreState: core(s), members, userId: HUMAN, youSeat: 1 }),
+          tableId: s.tableId,
+          stateVersion: data.revision,
+          youSeat: 1,
+          table: { status: "OPEN", maxSeats: 3, buyIn: s.buyIn }
+        };
+      }
+    };
+  }
+
+  // poker/offline/browser-entry.mjs
+  var game = createOfflineGame({ storage: window.localStorage });
+  var listener;
+  var timer;
+  var busy = false;
+  var reactionListener;
+  var lastBotReaction = 0;
+  var botSeats = [{ userId: "bot-offline-1", seatNo: 2 }, { userId: "bot-offline-2", seatNo: 3 }];
+  function botReaction(before) {
+    if (!reactionListener || Date.now() - lastBotReaction < 4e3) return;
+    const s = game.read().session?.state;
+    if (!s) return;
+    const candidate = s.phase === "SETTLED" && before.phase !== "SETTLED" ? classifySettlementReaction({ state: s, botSeats }) : s.currentBet > before.currentBet ? classifyRaiseReaction({ actorUserId: before.turnUserId, actorSeatNo: before.turnUserId === HUMAN ? 1 : before.turnUserId === "bot-offline-1" ? 2 : 3, street: s.phase, botSeats }) : classifyAmbientReaction({ botSeats });
+    if (candidate) {
+      lastBotReaction = Date.now();
+      reactionListener({ payload: { ...candidate, seatNo: candidate.botSeatNo } });
+    }
   }
   function publish() {
-    version++;
-    if (listener) listener(snapshot());
+    if (listener && game.read().session) listener(game.snapshot());
+    updateWallet();
   }
-  function apply(userId, action) {
-    if (state.turnUserId !== userId) throw new Error("Not your turn");
-    const result = applyAction({ pokerState: state, userId, action: action.type, amount: action.amount, nowIso: (/* @__PURE__ */ new Date()).toISOString() });
-    if (!result.ok) throw new Error(result.reason);
-    history.push({ userId, ...action, phase: state.phase });
-    state = result.state;
-    publish();
+  function fail(error) {
+    const node = document.getElementById("offlineError");
+    if (node) node.textContent = error.message;
   }
-  async function advanceBots() {
-    for (let n = 0; state.turnUserId && state.turnUserId !== human && n < 100; n++) {
-      await new Promise((resolve) => setTimeout(resolve, 180));
-      const userId = state.turnUserId;
-      const action = chooseBotActionProfiled(enrichBotLegalActions(legal(userId)), { userId, profile: "NORMAL", state, random });
-      if (!action) throw new Error("No legal bot decision");
-      apply(userId, action);
+  function updateWallet() {
+    const data = game.read();
+    document.querySelectorAll("[data-practice-balance]").forEach((el) => {
+      el.textContent = data.wallet.toLocaleString() + " Practice Chips";
+    });
+    const resume = document.getElementById("offlineResume");
+    if (resume) resume.hidden = !data.session;
+    const controls = document.getElementById("offlineSessionControls");
+    if (controls) {
+      const settled = data.session?.state.phase === "SETTLED";
+      document.getElementById("offlineNext").disabled = !settled || data.session.state.stacks[HUMAN] < 2;
+      document.getElementById("offlineRebuy").disabled = !settled;
     }
   }
-  window.PokerOfflinePoc = {
-    tableId,
-    human,
-    async start(onSnapshot, options = {}) {
-      if (started) throw new Error("One hand only: reload for a new game");
-      started = true;
-      listener = onSnapshot;
-      if (typeof options.random === "function") random = options.random;
-      await prepareSeed(`ws_seed_${tableId}_1_3`);
-      state = buildBootstrappedPokerState({ tableId, coreState: { version: 1, members }, startingStacks: Object.fromEntries(members.map((m) => [m.userId, 100])) });
+  function scheduleBots() {
+    clearTimeout(timer);
+    const s = game.read().session;
+    if (document.hidden || !s || !s.state.turnUserId || s.state.turnUserId === HUMAN) return;
+    timer = setTimeout(() => {
+      run(() => {
+        const before = game.read().session.state;
+        game.botStep();
+        publish();
+        botReaction(before);
+      }).catch(fail);
+    }, 350);
+  }
+  async function run(fn) {
+    if (busy) throw new Error("Offline operation already in progress");
+    busy = true;
+    try {
+      if (!navigator.locks) throw new Error("This browser cannot safely save Offline play");
+      await navigator.locks.request(STORAGE_KEY, async () => {
+        await fn();
+        publish();
+        scheduleBots();
+      });
+    } finally {
+      busy = false;
+    }
+  }
+  window.PokerOffline = {
+    human: HUMAN,
+    read: game.read,
+    start(fn, reactions) {
+      listener = fn;
+      reactionListener = reactions;
       publish();
-      await advanceBots();
+      scheduleBots();
     },
-    async act(action) {
-      apply(human, action);
-      await advanceBots();
+    act(action) {
+      return run(() => {
+        const before = game.read().session.state;
+        game.act(action);
+        publish();
+        botReaction(before);
+      });
+    },
+    leave() {
+      clearTimeout(timer);
+      return run(() => game.leave());
+    },
+    rebuy() {
+      return run(() => game.rebuy());
+    },
+    reaction(key) {
+      if (reactionListener) reactionListener({ payload: { seatNo: 1, reactionKey: key } });
     },
     inspect() {
-      return { tableId, state, history: history.slice(), total: state && Object.values(state.stacks).reduce((a, b) => a + b, 0) + state.potTotal };
+      return game.read();
     }
   };
+  function init() {
+    if (window.location.pathname === "/poker/offline/play.html") {
+      const plugins = window.Capacitor?.Plugins;
+      if (plugins?.App) plugins.App.addListener("backButton", () => document.getElementById("pokerLobbyLink")?.click());
+      if (plugins?.SystemBars) Promise.resolve(plugins.SystemBars.hide()).catch(() => {
+      });
+    }
+    try {
+      updateWallet();
+    } catch (error) {
+      fail(error);
+    }
+    const action = (id, fn) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("click", () => run(fn).catch(fail));
+    };
+    action("offlinePlay", async () => {
+      const buyIn = Number(document.querySelector('[name="offlineBuyIn"]:checked')?.value || 100);
+      if (game.read().session) {
+        if (!window.confirm("Settle and leave the current Offline session before starting a new game?")) return;
+        game.leave();
+      }
+      await game.newGame(buyIn);
+      window.location.assign("/poker/offline/play.html");
+    });
+    const resume = document.getElementById("offlineResume");
+    if (resume) resume.addEventListener("click", () => window.location.assign("/poker/offline/play.html"));
+    action("offlineRefill", () => game.refill());
+    action("offlineNext", () => game.nextHand());
+    action("offlineRebuy", () => game.rebuy());
+    action("offlineLeave", () => {
+      game.leave();
+      window.location.assign("/poker/");
+    });
+    action("offlineReset", () => {
+      if (window.confirm("Reset only local Practice Chips and offline session? Online CH is unaffected.")) {
+        clearTimeout(timer);
+        window.localStorage.removeItem(STORAGE_KEY);
+        window.location.assign("/poker/");
+      }
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) clearTimeout(timer);
+      else scheduleBots();
+    });
+    window.addEventListener("storage", (event) => {
+      if (event.key === STORAGE_KEY) {
+        clearTimeout(timer);
+        try {
+          publish();
+          scheduleBots();
+        } catch (error) {
+          fail(error);
+        }
+      }
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
 })();

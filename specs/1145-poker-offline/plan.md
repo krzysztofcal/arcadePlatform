@@ -1,3 +1,7 @@
+# Current execution: T003–T008 continuation below
+
+The original PoC plan is retained as architectural history; its stop is superseded by owner GO.
+
 # Plan — T001/T002 only
 
 1. Move pure strategy block from `ws-server/poker/runtime/accepted-bot-autoplay-adapter.mjs` into `ws-server/poker/shared/poker-bot-strategy.mjs`; keep WS adapter imports and semantics.
@@ -8,3 +12,12 @@
 6. Draft PR + Netlify Deploy Preview via normal PR build; report SHA/results/limits. No WS/Production deployment, migrations or merge. T003–T008 blocked on separate owner GO.
 
 Generated PoC has no auth bootstrap, chips client, remote telemetry, APIs or online wallet; disabled non-PoC menu/social controls. No config/tool cleanup outside exact esbuild build requirement. No financial Stage effects.
+
+## T003–T008 continuation (owner approved)
+
+1. `poker/offline/offline-game.mjs::createOfflineGame` owns synchronous atomic record transactions and async revision-checked deal; uses canonical `buildNextHandStateFromSettled`, reducer and existing projector. No persistence service/ledger abstraction.
+2. `poker/offline/browser-entry.mjs` bundles global `PokerOffline` and independently binds existing lobby card/Next/rebuy/refill/Leave. One timer advances one bot per persisted action. Existing shared reaction classifiers feed V2 `handleTableReaction`, with local cooldown/history. Storage-event resync rereads current committed state.
+3. Extend existing `scripts/build-poker-offline-poc.mjs` generator seams for full local session transport, local Leave, reactions, wallet isolation and silent local diagnostics; generate play.html plus shared-source IIFEs and SHA/SRI CSP. Keep Online renderer unchanged, source remains single V2 DOM/renderer. No preaction transport emulation; manual canonical controls only.
+4. `poker/index.html`/`poker.js` third working card; separate PC labels and fixed buy-in radios, Resume, free refill and explicit local reset. Remove Coming Soon modes. Generic lobby online behavior remains independent; no offline data sent to it.
+5. `mobile/poker/package-web.mjs` includes generated isolated play page without online/native-auth bootstrap, bundles scripts/CSS/all theme assets; packaging preserves CSP/SRI. Existing Stage Android shell configuration remains Stage; this work does not claim signed Production Play release. Build artifact and record exact SHA/hash; no device means physical cold-airplane gate pending owner.
+6. `tests/poker-offline.test.mjs` fundamental domain/storage cases and existing accepted-adapter/settlement/Leave tests. Temporary Playwright (outside repo) only for actual Preview verification, not a maintained UI suite. Exact-SHA WS Preview gate still applies to initial strategy extraction; do not repeat already accepted broad #1149/#1151 smoke. No Stage gameplay/DB writes unless separately authorized.

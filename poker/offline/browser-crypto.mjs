@@ -2,6 +2,7 @@
 const digests = new Map();
 export async function prepareSeed(seed) {
   const bytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed));
+  digests.clear();
   digests.set(seed, new DataView(bytes));
 }
 export function createHash(algorithm) {

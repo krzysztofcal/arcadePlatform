@@ -1,3 +1,7 @@
+# Current scope: T001–T008 authorized; implementation in progress
+
+The T002 boundary below is historical. The approved continuation at the end supersedes its stop/non-goals.
+
 # #1145 — T001/T002 bounded Offline spike
 
 Baseline: origin/main 6ecbc8a3; read agents.md, skills.md and full issue including owner amendments on 2026-10-24.
@@ -17,3 +21,13 @@ Acceptance: real reducer accepts each action; at least one hand reaches five-car
 
 ## Risk / stop criterion
 Moderate WS regression risk from moving strategy functions (import/source-sensitive tests); rules and protocol unchanged. Netlify green is not WS runtime evidence. Exact latest runtime SHA requires manual WS Preview Deploy using workflow definition main and application ref SHA plus relevant Online/Single Player smoke before merge readiness. No WS deploy in T001/T002. Stop if this needs a major Online engine rewrite; current pure imports permit bounded extraction.
+
+## Approved continuation — T003–T008 (2026-10-25)
+
+Owner authorizes completing the existing PR, superseding the T002 stop/non-goals above. Merge current main without rewriting history; preserve #1149 one-step FIFO fairness, #1151 authoritative Leave/recovery, #1153 system-owner guard and common strategy. No World Tour/Seasons/PWA/service worker, migrations, remote financial operations, Production or PR merge.
+
+Local session uses canonical bootstrap/rollover/reducer/settlement/legality and shared NORMAL strategy. Start5000 PC, fixed100/500/1000 PC buy-ins, free refill to at least5000. One versioned localStorage record `arcade.poker.offline.v1` atomically stores wallet/session/revision; synchronous read-modify-write and revision check across asynchronous deal prevent stale writes. Storage errors fail closed, no online fallback. Reset explicitly discards only local practice. Bots replenish only when broke between hands; this is explicit local play funding, never CH. Human Leave folds/resolves current hand canonically before refunding stack once. Reload resumes each committed action; next-hand button advances dealer via canonical rollover. No automatic human timeout fold in Offline.
+
+Existing lobby is shared; its independent Offline card needs neither login nor successful online bootstrap. Isolated generated play.html excludes all online/auth/log/analytics scripts and blocks connections/frames/forms with CSP. Reuse V2 renderer source/controls/themes/animations/social catalog, hide paid gifts and online wallet. Fresh local tableId for New Game; persisted ID/theme for Resume. Practice never enters shared profile, CH cache, telemetry or sync, even after reconnect. Audio remains separate #1146; no new audio engine.
+
+Acceptance: deterministic fundamental sessions, legality/conservation, atomic failure/concurrency, Resume/idempotent Leave, output privacy; relevant existing WS tests/parity. Netlify disconnected after load through real controls and restored-network silence. Package same assets for Android cold airplane launch. Physical device acceptance pending if no device; implementation review-ready does not imply merge-ready without required exact-SHA WS evidence and device acceptance.
