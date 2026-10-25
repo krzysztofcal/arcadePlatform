@@ -6682,7 +6682,7 @@
       renderSocialPreferences();
     });
     if (els.rebuyBtn) els.rebuyBtn.addEventListener('click', requestManualRebuy);
-    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ window.PokerOffline.backToLobby(); });
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ openLeaveConfirm('/poker/'); });
     if (els.rebuyWatchBtn) els.rebuyWatchBtn.addEventListener('click', function(){
       rebuyPanelDismissed = true;
       renderRebuyPanel();

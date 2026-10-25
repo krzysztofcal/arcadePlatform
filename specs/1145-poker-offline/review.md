@@ -6,6 +6,8 @@ Current changes: PC in existing HUD; rebuy/refill in menu/shared bust panel; aut
 
 Fundamental14/14PASS (Offline8,mobile3,shared timeout3), including simultaneous rollover callbacks, FOLD/CHECK, stale timer rejection, pause/old v1 resume, bust/rebuy and write failure. Temporary412×915/915×412 probe: scene starts at0 and fits viewport, both Hero cards within bounds, active avatar clock present. No maintained layout suite. Independent review found stale rendered-action token and failed-Leave deactivation gaps; both addressed in local controller. Focused Preview and initial APK build338c3d27 PASS; final documentation HEAD artifact is linked in PR after build. Physical re-test still required. No WS Preview replay: shared runtime unchanged.
 
+The bust panel explicitly offers Rebuy / Free refill / Leave (the old Return-to-lobby button is locally relabeled and opens existing Leave confirmation). Scoped confirmation layer sits above the bust panel in landscape, so Cancel/Escape remain reachable. Ordinary menu/native Back still parks the session.
+
 ## Final focused evidence
 
 Tested application SHA `338c3d27555a6201e15ae5e85841fec47774a9ce`. [Immutable Netlify Preview](https://6ade583710baf8078474cb5a--playkcswh.netlify.app/poker/), ready/exact commit_ref confirmed. Later evidence-only commits do not change runtime. [Session evidence](evidence/preview-t009-t012-2026-10-25.json), [portrait](evidence/preview-t009-portrait.png), [landscape](evidence/preview-t009-landscape.png).

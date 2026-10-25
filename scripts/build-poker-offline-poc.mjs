@@ -68,7 +68,7 @@ const replacements = {
 renderer = renderer.replace(/ CH\b/g, ' PC');
 const rebuyBack = "if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', leaveAndReturnToLobby);";
 if (!renderer.includes(rebuyBack)) throw new Error('Offline rebuy Back seam changed');
-renderer = renderer.replace(rebuyBack, "if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ window.PokerOffline.backToLobby(); });");
+renderer = renderer.replace(rebuyBack, "if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ openLeaveConfirm('/poker/'); });");
 const ast = parse(renderer, { ecmaVersion: 'latest' });
 const edits = [];
 function visit(node) {
@@ -106,6 +106,7 @@ html = html.replace('</head>', '<link rel="stylesheet" href="/poker/offline/offl
 // Local controls live inside the shared menu, never before the 100dvh table.
 html = html.replace('<nav class="poker-menu-panel" id="pokerMenuPanel" hidden>', '<nav class="poker-menu-panel" id="pokerMenuPanel" hidden><section id="offlineSessionControls" class="offline-session" aria-label="Local practice"><strong data-practice-balance></strong><button id="offlineRebuy" type="button">Rebuy</button><button id="offlineRefill" type="button">Free refill</button><p id="offlineError" role="alert"></p></section>');
 html = html.replace('<button type="button" class="poker-live-btn" id="pokerV2RebuyLobbyBtn">', '<button type="button" class="poker-live-btn" data-offline-refill>Free refill</button><button type="button" class="poker-live-btn" id="pokerV2RebuyLobbyBtn">');
+html = html.replace('id="pokerV2RebuyLobbyBtn">Return to lobby', 'id="pokerV2RebuyLobbyBtn">Leave');
 const lobbyHtml = await readFile('poker/index.html','utf8');
 const confirmation = lobbyHtml.split('<!-- offline-confirm:start -->')[1]?.split('<!-- offline-confirm:end -->')[0];
 if (!confirmation) throw new Error('Offline confirmation source missing');

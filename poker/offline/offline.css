@@ -11,3 +11,4 @@ body:has(#offlineSessionControls) #pokerAutoRebuyPreferenceWrap,body:has(#offlin
 .offline-confirm { padding:0; border:0; background:transparent; color:#e7edf8; width:min(360px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); }
 .offline-confirm::backdrop { background:rgba(3,7,18,.72); }
 .offline-confirm .poker-confirm-dialog { box-sizing:border-box; width:100%; }
+body:has(#offlineSessionControls) .poker-confirm-modal { z-index:70; }
