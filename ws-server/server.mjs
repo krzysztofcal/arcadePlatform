@@ -5808,6 +5808,7 @@ wss.on("connection", (ws) => {
           tableId,
           tableManager,
           loadAuthoritativeLeaveExecutor,
+          restoreTableFromPersisted,
           sendCommandResult,
           broadcastStateSnapshots,
           broadcastTableState,
