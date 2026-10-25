@@ -29,12 +29,14 @@ The bootstrap reload also resets the existing private-hole-card acknowledgment c
 - Existing adapter/writer/manager/bootstrap targeted run: 172/172 PASS.
 - Existing reconnect/adapter run: 70/70 PASS.
 - Existing shared Leave/deferred cashout/manager Leave restore/live Leave race run: 15/15 PASS.
-- Existing socket Leave subset: 10/10 PASS.
+- Existing socket Leave subset: 10/10 PASS. Table socket suite: 11/11 PASS.
 - Root `npm test`: exit 0, 148 groups passed. Five optional PostgreSQL groups skipped without CHIPS_MIGRATIONS_TEST_DB_URL / POKER_RLS_TEST_DB_URL; also the existing daily-campaign PostgreSQL subtest and three PostgreSQL 16 CLI subtests skipped. No external DB configured/used.
 - Syntax and whitespace checks PASS.
 - First full WS server run: 140/141, one failure from removing classified `ws_leave_restore_rejected` diagnostic while replacing restore code. Restored the existing diagnostic on full-reload rejection; focused log-policy test PASS. Final full rerun: **141/141 PASS**, exit 0.
 - Initial regression invocation needed existing dependencies linked into the isolated worktree; after resolving that setup error, RED was the expected undefined-map assertion (not an import failure).
 - The first socket fixture adaptation also made invalid Leave fixtures into bootstrap fixtures and broke their preliminary JOINs. Restricted adaptation to successful coherent results with stacks; all 10 Leave cases then PASS. No runtime bypass.
+
+The first PR WS harness also found the implicit-tableId Leave socket fixture lacked persisted state. Added its committed-state fixture and updated the initial observer expectation to an available empty table; all 11 table socket cases PASS locally. This follow-up changes tests/docs only; runtime remains commit `8ca505906f586878ce2e7ea9b1519510a3db8901`.
 
 No Stage/Production database access, financial mutation, migration, deploy or merge was performed for this implementation.
 
