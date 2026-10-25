@@ -1,0 +1,562 @@
+{
+  "runtimeSha": "33fbe284859884fd2538774ae756f11aee154a04",
+  "frontendSha": "a6f5ea26ba167f57b162a88c40969a4504b24e56",
+  "runtimePid": 295769,
+  "runtimeRestartAt": "2026-10-25T08:56:16Z",
+  "moduleHashes": {
+    "ws-server/server.mjs": "71565bd98fd72e24d8deb52c9e33c4129b214392e7c3557cd0fae17b20163464",
+    "ws-server/poker/handlers/leave.mjs": "bbe2fcc605dc25415b00f2c7a53e55ac0bca8a2fa12a2702946ee7df1fdbb3cc",
+    "ws-server/poker/runtime/account-deletion.mjs": "aff06b5d14637ec74303d7ac2c05f30f99641c35b9f8d54cdaf61bfeb427c2d2",
+    "ws-server/poker/table/table-manager.mjs": "0a28067a903bdc782b62bc37ebe04a96656f0b8870efb4ac9ca6483f6042c648",
+    "ws-server/poker/runtime/accepted-bot-autoplay-adapter.mjs": "fbc0dd8e59a3e6ac5d000a026b99e870630e33641e46f25846df791a4bd25333"
+  },
+  "preflight": {
+    "wallet": 448,
+    "activeConnections": 0,
+    "humanClaims": 0,
+    "pendingRequests": 0,
+    "pendingDeletions": 0,
+    "previousSPClosedEscrowZero": true
+  },
+  "smoke": {
+    "origin": "https://deploy-preview-1152--playkcswh.netlify.app",
+    "sha": "33fbe284859884fd2538774ae756f11aee154a04",
+    "startedAt": "2026-10-25T12:49:37.537Z",
+    "events": [
+      {
+        "at": "2026-10-25T12:49:41.400Z",
+        "kind": "socket_open",
+        "url": "wss://ws-preview.kcswh.pl/ws"
+      },
+      {
+        "at": "2026-10-25T12:49:44.218Z",
+        "kind": "drawer_before_funding",
+        "iframeCount": 0,
+        "url": "https://deploy-preview-1152--playkcswh.netlify.app/poker/?ntl-drawer-state=hidden"
+      },
+      {
+        "at": "2026-10-25T12:49:51.671Z",
+        "kind": "socket_open",
+        "url": "wss://ws-preview.kcswh.pl/ws"
+      },
+      {
+        "at": "2026-10-25T12:49:52.448Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "INIT",
+        "handId": null,
+        "version": 0,
+        "seat": null,
+        "turnSeat": null,
+        "botCount": 0,
+        "ownCardCount": 0
+      },
+      {
+        "at": "2026-10-25T12:49:52.449Z",
+        "kind": "sent",
+        "type": "join",
+        "requestId": "join_mvntrubg_2n286rtr",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944"
+      },
+      {
+        "at": "2026-10-25T12:49:54.500Z",
+        "kind": "command_result",
+        "requestId": "join_mvntrubg_2n286rtr",
+        "status": "accepted",
+        "reason": "already_joined",
+        "serverTs": "2026-10-25T12:49:54.490Z",
+        "elapsedMs": 2051
+      },
+      {
+        "at": "2026-10-25T12:49:54.564Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "PREFLOP",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 2,
+        "seat": 1,
+        "turnSeat": 1,
+        "status": "ACTIVE",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:49:54.568Z",
+        "kind": "single_joined",
+        "snapshot": {
+          "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+          "phase": "PREFLOP",
+          "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+          "version": 2,
+          "seat": 1,
+          "turnSeat": 1,
+          "status": "ACTIVE",
+          "botCount": 2,
+          "ownCardCount": 2
+        },
+        "url": "https://deploy-preview-1152--playkcswh.netlify.app/poker/table-v2.html?tableId=48cd70ff-1704-4f29-ad09-fb6125e05944&seatNo=1&autoJoin=1&ntl-drawer-state=hidden"
+      },
+      {
+        "at": "2026-10-25T12:49:54.575Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "PREFLOP",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 2,
+        "seat": 1,
+        "turnSeat": 1,
+        "status": "ACTIVE",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:49:54.604Z",
+        "kind": "fold_dom_ready",
+        "selector": "#pokerV2FoldBtn",
+        "hidden": false,
+        "disabled": false,
+        "classes": "poker-action-btn poker-action-btn--fold",
+        "box": {
+          "x": 1035,
+          "y": 930,
+          "width": 90.5,
+          "height": 50
+        },
+        "pointerEvents": "auto",
+        "visibility": "visible",
+        "display": "flex",
+        "hitTarget": true,
+        "interceptor": {
+          "tag": "BUTTON",
+          "id": "pokerV2FoldBtn",
+          "classes": "poker-action-btn poker-action-btn--fold",
+          "title": null
+        },
+        "drawerIframes": 0,
+        "query": "?tableId=48cd70ff-1704-4f29-ad09-fb6125e05944&seatNo=1&autoJoin=1&ntl-drawer-state=hidden"
+      },
+      {
+        "at": "2026-10-25T12:49:54.604Z",
+        "kind": "readonly_checkpoint",
+        "n": 1,
+        "checkpoint": "capture_map",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3"
+      },
+      {
+        "at": "2026-10-25T12:49:56.318Z",
+        "kind": "sent",
+        "type": "act",
+        "requestId": "ws_1a1731c4a5a_9b09f3b6",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "action": "FOLD"
+      },
+      {
+        "at": "2026-10-25T12:49:56.575Z",
+        "kind": "command_result",
+        "requestId": "ws_1a1731c4a5a_9b09f3b6",
+        "status": "accepted",
+        "reason": null,
+        "serverTs": "2026-10-25T12:49:56.572Z",
+        "elapsedMs": 257
+      },
+      {
+        "at": "2026-10-25T12:49:56.589Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "PREFLOP",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 3,
+        "seat": 1,
+        "turnSeat": 2,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:49:56.625Z",
+        "kind": "manual_fold_ack",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "requestId": "ws_1a1731c4a5a_9b09f3b6",
+        "result": {
+          "requestId": "ws_1a1731c4a5a_9b09f3b6",
+          "status": "accepted",
+          "reason": null,
+          "serverTs": "2026-10-25T12:49:56.572Z",
+          "elapsedMs": 257
+        }
+      },
+      {
+        "at": "2026-10-25T12:49:56.626Z",
+        "kind": "readonly_checkpoint",
+        "n": 2,
+        "checkpoint": "fold_proof",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "requestId": "ws_1a1731c4a5a_9b09f3b6"
+      },
+      {
+        "at": "2026-10-25T12:50:00.157Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "FLOP",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 4,
+        "seat": 1,
+        "turnSeat": 2,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:50:03.786Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "FLOP",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 5,
+        "seat": 1,
+        "turnSeat": 3,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:50:06.578Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "TURN",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 6,
+        "seat": 1,
+        "turnSeat": 2,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:50:09.776Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "TURN",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 7,
+        "seat": 1,
+        "turnSeat": 3,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:50:12.644Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "RIVER",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 8,
+        "seat": 1,
+        "turnSeat": 2,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:50:16.704Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "RIVER",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 9,
+        "seat": 1,
+        "turnSeat": 3,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:50:19.660Z",
+        "kind": "snapshot",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "SETTLED",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 10,
+        "seat": 1,
+        "turnSeat": null,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2
+      },
+      {
+        "at": "2026-10-25T12:50:19.710Z",
+        "kind": "settlement_observed",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "phase": "SETTLED",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "version": 10,
+        "seat": 1,
+        "turnSeat": null,
+        "status": "FOLDED",
+        "botCount": 2,
+        "ownCardCount": 2,
+        "settlementHandId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3"
+      },
+      {
+        "at": "2026-10-25T12:50:19.711Z",
+        "kind": "readonly_checkpoint",
+        "n": 3,
+        "checkpoint": "audit",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3"
+      },
+      {
+        "at": "2026-10-25T12:50:20.854Z",
+        "kind": "leave_confirm_dom",
+        "selector": "#pokerV2LeaveConfirmYes",
+        "hidden": false,
+        "disabled": false,
+        "classes": "poker-live-btn poker-live-btn--accent",
+        "box": {
+          "x": 642.5625,
+          "y": 498.5,
+          "width": 60.484375,
+          "height": 42
+        },
+        "pointerEvents": "auto",
+        "visibility": "visible",
+        "display": "block",
+        "hitTarget": true,
+        "interceptor": {
+          "tag": "BUTTON",
+          "id": "pokerV2LeaveConfirmYes",
+          "classes": "poker-live-btn poker-live-btn--accent",
+          "title": null
+        },
+        "drawerIframes": 0,
+        "query": "?tableId=48cd70ff-1704-4f29-ad09-fb6125e05944&seatNo=1&autoJoin=1&ntl-drawer-state=hidden"
+      },
+      {
+        "at": "2026-10-25T12:50:21.145Z",
+        "kind": "sent",
+        "type": "leave",
+        "requestId": "ws_1a1731cab55_d326da47",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944"
+      },
+      {
+        "at": "2026-10-25T12:50:21.337Z",
+        "kind": "socket_open",
+        "url": "wss://ws-preview.kcswh.pl/ws"
+      },
+      {
+        "at": "2026-10-25T12:50:33.256Z",
+        "kind": "FAIL",
+        "reason": "timeout_leave_ack",
+        "stack": "Error: timeout_leave_ack\n    at until (/tmp/1152-final-single.cjs:8:193)\n    at async /tmp/1152-final-single.cjs:24:444",
+        "foldDom": {
+          "exists": false
+        }
+      }
+    ],
+    "frontendSha": "a6f5ea26ba167f57b162a88c40969a4504b24e56",
+    "finishedAt": "2026-10-25T12:50:33.458Z",
+    "incomingFrames": 59
+  },
+  "readOnlyChecks": [
+    {
+      "at": "2026-10-25T12:49:56.137Z",
+      "checkpoint": {
+        "n": 1,
+        "kind": "capture_map",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3"
+      },
+      "ok": true,
+      "result": {
+        "version": 2,
+        "hand_id": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "map_hash": "d18e3d6b1dad36c45acfe2638f40b2be",
+        "map_count": 3,
+        "map_total": "300"
+      }
+    },
+    {
+      "at": "2026-10-25T12:49:57.755Z",
+      "checkpoint": {
+        "n": 2,
+        "kind": "fold_proof",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+        "requestId": "ws_1a1731c4a5a_9b09f3b6"
+      },
+      "ok": true,
+      "result": {
+        "request_id": "ws_1a1731c4a5a_9b09f3b6",
+        "action_type": "FOLD",
+        "user_id": "93449cf9-86fd-4f49-9d9b-2bd42f40dc8d",
+        "created_at": "2026-10-25 12:49:56.391819+00",
+        "source": "human",
+        "is_bot": false
+      }
+    },
+    {
+      "at": "2026-10-25T12:50:20.583Z",
+      "checkpoint": {
+        "n": 3,
+        "kind": "audit",
+        "tableId": "48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3"
+      },
+      "ok": true,
+      "result": {
+        "version": 10,
+        "created_at": "2026-10-25 12:50:19.461327+00",
+        "integrity": {
+          "flags": [],
+          "status": "OK",
+          "payoutTotal": 8,
+          "returnedTotal": 0,
+          "awardedPotTotal": 8,
+          "endingStackTotal": 300,
+          "contributionTotal": 8,
+          "startingStackTotal": 300,
+          "contestablePotTotal": 8,
+          "potConservationDelta": 0,
+          "stackConservationDelta": 0,
+          "payoutConservationDelta": 0
+        },
+        "participant_count": 3,
+        "starting_map_hash": "d18e3d6b1dad36c45acfe2638f40b2be"
+      }
+    }
+  ],
+  "finalReconciliation": {
+    "at": "2026-10-25T12:52:32.946238+00:00",
+    "fold": {
+      "at": "2026-10-25T12:49:56.391819+00:00",
+      "isBot": false,
+      "source": "human",
+      "requestId": "ws_1a1731c4a5a_9b09f3b6"
+    },
+    "audit": {
+      "at": "2026-10-25T12:50:19.461327+00:00",
+      "handId": "ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3",
+      "version": 10,
+      "integrity": {
+        "flags": [],
+        "status": "OK",
+        "payoutTotal": 8,
+        "returnedTotal": 0,
+        "awardedPotTotal": 8,
+        "endingStackTotal": 300,
+        "contributionTotal": 8,
+        "startingStackTotal": 300,
+        "contestablePotTotal": 8,
+        "potConservationDelta": 0,
+        "stackConservationDelta": 0,
+        "payoutConservationDelta": 0
+      },
+      "participant_count": 3,
+      "starting_map_hash": "d18e3d6b1dad36c45acfe2638f40b2be"
+    },
+    "escrow": 0,
+    "wallet": 448,
+    "bot_actions": [
+      {
+        "at": "2026-10-25T12:49:59.99115+00:00",
+        "to": "FLOP",
+        "from": "PREFLOP",
+        "action": "CALL",
+        "version": 4
+      },
+      {
+        "at": "2026-10-25T12:50:03.662407+00:00",
+        "to": "FLOP",
+        "from": "FLOP",
+        "action": "CHECK",
+        "version": 5
+      },
+      {
+        "at": "2026-10-25T12:50:06.451907+00:00",
+        "to": "TURN",
+        "from": "FLOP",
+        "action": "CHECK",
+        "version": 6
+      },
+      {
+        "at": "2026-10-25T12:50:09.630524+00:00",
+        "to": "TURN",
+        "from": "TURN",
+        "action": "BET",
+        "version": 7
+      },
+      {
+        "at": "2026-10-25T12:50:12.500626+00:00",
+        "to": "RIVER",
+        "from": "TURN",
+        "action": "CALL",
+        "version": 8
+      },
+      {
+        "at": "2026-10-25T12:50:16.563294+00:00",
+        "to": "RIVER",
+        "from": "RIVER",
+        "action": "CHECK",
+        "version": 9
+      },
+      {
+        "at": "2026-10-25T12:50:19.461327+00:00",
+        "to": "SETTLED",
+        "from": "RIVER",
+        "action": "CHECK",
+        "version": 10
+      }
+    ],
+    "human_claims": 0,
+    "table_status": "CLOSED",
+    "transactions": [
+      {
+        "id": "28a9ae59-a393-4024-8fbb-463fe01563f5",
+        "tx_type": "TABLE_BUY_IN",
+        "reference": "table:48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "created_at": "2026-10-25T12:49:52.459841+00:00",
+        "user_delta": -100,
+        "transaction_sum": 0
+      },
+      {
+        "id": "3298ef25-7587-407e-9527-4ac01d0e674e",
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "created_at": "2026-10-25T12:50:21.150497+00:00",
+        "user_delta": 100,
+        "transaction_sum": 0
+      },
+      {
+        "id": "731a54f7-fe28-432e-b490-41469f101d77",
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "created_at": "2026-10-25T12:50:21.150497+00:00",
+        "user_delta": 0,
+        "transaction_sum": 0
+      },
+      {
+        "id": "bc0e2976-6372-46bb-acd4-b5fd3e9cc6d5",
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:48cd70ff-1704-4f29-ad09-fb6125e05944",
+        "created_at": "2026-10-25T12:50:21.150497+00:00",
+        "user_delta": 0,
+        "transaction_sum": 0
+      }
+    ],
+    "leave_requests": [
+      {
+        "at": "2026-10-25T12:50:21.150497+00:00",
+        "ok": true,
+        "kind": "LEAVE",
+        "requestId": "ws_1a1731cab55_d326da47"
+      }
+    ],
+    "pending_requests": 0
+  },
+  "leaveAck": "NOT OBSERVED within12s; UI sends queued command and immediately navigates, pre-existing main behavior",
+  "verdict": "NOT READY: required ordinary UI Leave ACK remains unverified; all other requested SP checks passed; earlier Online PASS retained, not repeated"
+}

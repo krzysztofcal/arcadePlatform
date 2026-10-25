@@ -167,3 +167,52 @@ Read-only final12:28:56: both test tables CLOSED/escrow0, zero active/nonzero hu
 [Reduced resumed evidence, full sanitized failure, audit/transactions](preview-resume-2026-10-25.json). Existing runtime CI/local fundamental results remain valid; this follow-up is docs/evidence only. No additional public breaking impact or runtime regression demonstrated. **Separate finding: Netlify Preview Drawer blocks the SP Fold control in the1440×1000 browser viewport.** No application/Netlify configuration fix or drawer bypass was applied. A future authorized bounded SP-only attempt should first verify the Drawer can be dismissed through its normal UI and hit-test Fold; no repeat is authorized by this report.
 
 **NOT READY for complete integration verification or downstream rollout.** Online gates are now evidenced, but SP manual scenario remains open. Do not execute the proposed #1149→main→Production, update/verify #1151→merge→Production, close #1152 sequence now. Keep all PRs Draft; seek separate owner review/GO for any remaining smoke or rollout. No performance improvement claim: measured client RTTs include queue/DB/transport; reload-only latency was not separately observable with existing logging.
+
+
+## Final authorized SP-only smoke — 2026-10-25, 12:46–12:53 UTC
+
+**LATEST VERDICT: NOT READY — manual SP FOLD/settlement and ordinary UI Leave financial effects PASS, but the required observed Leave ACK<12s remains unverified.** No Online replay, deployment, product code/configuration/secret/permission change, source PR modification, new maintained UI test, real deletion, Production or merge.
+
+### Preflight and Drawer
+
+Exact Preview metadata `33fbe284859884fd2538774ae756f11aee154a04`, same PID295769/start08:56:16UTC; five module hash comparisons PASS, healthz200/ok. Live main still6ecbc8a3. No active WS connections/human claims/pending requests/deletions/other live agents; five OPEN bot-only tables each300CH escrow/stacks. Previous SP CLOSED/escrow0. Stage wallet448CH. Netlify Preview #1152 served docs-only `a6f5ea26ba167f57b162a88c40969a4504b24e56`; diff versus deployed runtime only spec/evidence files. Pinned Stage Auth and actual WS Preview transport verified.
+
+**`ntl-drawer-state=hidden` effective, CONFIRMED.** Used query option on initial account/lobby addresses and preserved all page parameters when appending it to navigated URLs in the temporary browser context (`history.replaceState`, no game handler call). Official Netlify injected script recognizes the option and persists hidden state. Before funded JOIN, iframe count0. On real turn, Fold DOM: visible/enabled, pointer-events auto, bounding box x1035/y930/90.5×50; elementFromPoint returned Fold button, iframe count0. URL retained tableId/seatNo/autoJoin plus hidden option. Ordinary Playwright trial actionability and click succeeded. No force click, direct WS FOLD, handler invocation, CSS/app/iframe modification or Netlify configuration change. No manual Drawer fallback was needed.
+
+### Actual Single Player commands and audit
+
+One table **48cd70ff-1704-4f29-ad09-fb6125e05944**, buy-in100CH, hand **ws_hand_48cd70ff-1704-4f29-ad09-fb6125e05944_1_3**. JOIN `join_mvntrubg_2n286rtr`: sent12:49:52.449; actual accepted ACK12:49:54.500 (**2051ms**).
+
+Manual UI **FOLD `ws_1a1731c4a5a_9b09f3b6`** sent12:49:56.318; accepted ACK12:49:56.575 (**257ms**), well before human timer. Durable action12:49:56.391819 has **source=human,isBot=false**, exact requestId. No timeout FOLD substituted. Original three-entry300CH private map captured before FOLD atv2.
+
+Bots legally continued v4–10: CALL,CHECK,CHECK,BET,CALL,CHECK,CHECK; PREFLOP→FLOP→TURN→RIVER→SETTLED. HAND_SETTLED v10 at12:50:19.461327: **OK**, flags[], contribution/payout8CH, starting/ending300CH, all pot/stack/payout deltas0. Audited participant starting stacks reconstruct exactly the original map fingerprint `d18e3d6b1dad36c45acfe2638f40b2be`; three complete entries, no STARTING_STACK_DERIVED.
+
+Ordinary UI menu→Leave→confirm used real buttons; confirm hit-test passed and Drawer count0. **Leave `ws_1a1731cab55_d326da47`** sent12:50:21.145. Browser navigated to lobby (new lobby socket12:50:21.337), but **no received Leave commandResult** was captured during the next12s. Harness observation wait expired12:50:33.256; no further gameplay command followed. This is not a claim of an application pending-command timeout: the normal queued UI path does not register one.
+
+### Read-only diagnosis: existing immediate-navigation Leave contract
+
+`poker/poker-v2.js::leaveAndReturnToLobby()` takes `queueLeaveAndNavigateImmediately()`, which calls `sendLeaveQueued()` and `navigateAfterLeave()` immediately. `poker/poker-ws-client.js::queueCommand()` sends/returns a requestId without adding a pending Promise/timer. Consequently the page may unload its table WS before receipt of a commandResult. The fallback `sendLeave()` await path is used only when queueing cannot run.
+
+These two files are **byte-unchanged from live main6ecbc8a3 to integration33fbe284**. The immediate navigation is CONFIRMED by code and observed browser transition; exact server ACK emission/delivery is UNKNOWN (no per-request journald events in12:50:15–40). This evidence does **not** establish a #1149/#1151 regression or a12s server queue stall. It also does **not** satisfy the user's explicit observed ACK gate. No navigation interception, runtime/logging change, second Leave/retry or silent relaxation to financial completion was attempted.
+
+### Financial reconciliation / privacy
+
+Durable LEAVE request with exact UI requestId has ok=true, timestamp12:50:21.150497. Buy-in tx **28a9ae59-a393-4024-8fbb-463fe01563f5**100CH. Exactly one human cashout tx **3298ef25-7587-407e-9527-4ac01d0e674e**100CH at12:50:21.150497 (ordinary Leave execution, not later cleanup); other cashouts belong to bots. Wallet **448−100+100=448CH**, table CLOSED, escrow0, no human seat/stack, pending0. Every returned ledger transaction sums0. No manual balance/history repair.59 incoming WS frames inspected; no private-map key exposed, and saved evidence contains no card values/JWT/password/private snapshots.
+
+| Required SP gate | Result |
+|---|---|
+| Correct runtime/Stage/Netlify/health/shared-host preflight | PASS |
+| Drawer hidden; ordinary Fold click actionable | PASS |
+| Single Player100CH JOIN | PASS,2051ms ACK |
+| Real manual FOLD/sourcehuman | PASS,257ms ACK |
+| Legal bots / original complete map / HAND_SETTLED OK / flags[] / deltas0 | PASS |
+| Ordinary UI Leave actually sent/executed, exactly one cashout | PASS financial/operation evidence |
+| **Actually observed ordinary UI Leave ACK<12s** | **NOT VERIFIED**, harness observation timed out after immediate navigation |
+| Wallet / CLOSED / escrow0 / no orphan / captured-frame privacy | PASS |
+| Earlier Online gates | PASS retained; **not repeated** |
+
+[Full reduced final SP evidence, timings, DOM, audit and reconciliation](preview-single-final-2026-10-25.json). No new breaking impact, regression or economic discrepancy demonstrated; only documentation/evidence changed in this task. Existing fundamental local/runtime CI results remain as previously recorded.
+
+**Do not label READY FOR ROLLOUT REVIEW while the explicit ACK gate is unresolved.** Further review should decide whether the existing ordinary Leave UI contract needs a separate minimal fix to await an accepted ACK (using existing mechanisms), or explicitly approve an alternative verification criterion; neither decision/change is assumed here. Repeating the same immediate-navigation smoke is not a justified substitute. No product fix implemented.
+
+Prepared downstream order remains conditional, with separate GO for each stage: **(1)** #1149→main→Production; **(2)** update #1151 against resulting main, confirm runtime composition equals tested integration plus approved changes, required checks/exact-SHA gates→merge→Production; **(3)** close #1152 without merge. None executed. All source PRs still Draft/unchanged; temporary #1152 remains DO NOT MERGE.
