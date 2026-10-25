@@ -1,3 +1,18 @@
+# T015–T016 — shared preactions and unified Offline UI (awaiting focused Preview)
+
+Owner T013–T014 Galaxy S24+ PASS retained. New reported empty action panel traced to historical generator removal of V2 checkbox wrappers. Those wrappers are now unchanged source markup; existing buildQueuedPreaction/resolveQueuedPreactionExecution/maybeExecuteQueuedPreaction and canonical projectedLegalActions reused. Snapshot callback merges first, clears changed-hand intent and invokes queued execution as Online does. No second action engine or renderer.
+
+Queue remains volatile. Park/Leave clear it via local renderer callback; an epoch guard plus existing rendered revision/hand/actor token prevents delayed requests surviving pause/Resume. Renderer transport-ready seam reads actual local active state; isSignedIn/Auth methods are not overridden or supplied fake JWTs. Local human is the genuine local participant, not an online authenticated user. Manual/preaction/timer mutations use one existing Web Lock.
+
+T016 supersedes earlier visible Practice Chips requirement: **Offline Chips**, Poker Offline/OFFLINE and discreet local/independent-CH disclosure. Existing quick-tiers, tile-action, quick-resume-shell and Poker secondary buttons replace radio controls/custom Practice balance styling. Existing V2 menu buttons/modals/slider/fonts/animations/themes unchanged; isolated CSP denies transport, no online clients/gifts enabled. Technical PC key/schema/session unchanged. Issue #1145 decision/title updated, historical requirements retained with supersession notice.
+
+Fundamentals23/23PASS (17Offline+3mobile+3canonical timeout); existing targeted V2 preaction cases4/4PASS. New tests evaluate common queue rules without a DOM framework and verify wait/legality/invalidation/exactly-once/stale timer+manual token/pause reset. Local actual-control probe: selecting Fold leaves revision unchanged until Hero, then one legal human FOLD. Independent review: no critical/important findings. Temporary Playwright uses visible checkbox label, not forced clicks on the intentionally non-interactive styled input.
+
+Source Online renderer/CSS for table and all shared WS modules unchanged; no WS Preview replay needed. Poker lobby CSS delta is scoped only to local tools and inherits existing button typography. No public protocol/finance breaking impact. Intended Offline UI changes: restored preactions and renamed visible currency. v1 records unaffected; queue is not persisted and cannot restore. No new dependency/framework/DB change. Preview/APK proof will be linked after completion; retain Draft, no merge/Production.
+
+---
+## Prior accepted physical review/evidence
+
 # T013–T014 — physical PASS retained, bot clock/roster corrections
 
 Owner S24+ PASS: airplane mode, both orientations/cards, auto-next, dialogs, Back/Resume and other exercised cases. Retain Draft; these two corrections require new Stage APK/owner confirmation.

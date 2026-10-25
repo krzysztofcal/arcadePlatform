@@ -26,7 +26,7 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
     const raw=storage.getItem(STORAGE_KEY);
     if(raw===null) return {schema:1,revision:0,wallet:5000,session:null};
     let data;
-    try {data=JSON.parse(raw);} catch {throw new Error('Offline storage is corrupt; reset local practice data to continue');}
+    try {data=JSON.parse(raw);} catch {throw new Error('Offline storage is corrupt; reset local offline data to continue');}
     if(data?.schema!==1 || !integer(data.wallet) || !integer(data.revision)) throw new Error('Unsupported offline storage');
     if(data.session) {
       const s=data.session;
@@ -106,10 +106,10 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
       save(data,data.revision);return true;
     },
     async newGame(buyIn) {
-      if(![100,500,1000].includes(buyIn)) throw new Error('Invalid Practice Chips buy-in');
+      if(![100,500,1000].includes(buyIn)) throw new Error('Invalid Offline Chips buy-in');
       const data=read(),revision=data.revision;
       if(data.session) throw new Error('Leave the current session before New Game');
-      if(data.wallet<buyIn) throw new Error('Not enough Practice Chips; use free refill');
+      if(data.wallet<buyIn) throw new Error('Not enough Offline Chips; use free refill');
       const count=computeTargetBotCount({maxPlayers:6,humanCount:1,minBots:2,maxBots:5,random});
       const members=Array.from({length:count+1},(_,i)=>({userId:i===0?HUMAN:'bot-offline-'+i,seat:i+1}));
       const ids=members.map(m=>m.userId);
@@ -151,7 +151,7 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
     rebuy() {return mutate(data=>{
       const s=session(data);if(s.state.phase!=='SETTLED') throw new Error('Rebuy requires settled hand');
       const amount=Math.max(0,s.buyIn-s.state.stacks[HUMAN]);
-      if(data.wallet<amount) throw new Error('Not enough Practice Chips; use free refill');
+      if(data.wallet<amount) throw new Error('Not enough Offline Chips; use free refill');
       data.wallet-=amount;s.state.stacks[HUMAN]+=amount;stampClock(s);
     });},
     refill() {return mutate(data=>{data.wallet=Math.max(5000,data.wallet);});},

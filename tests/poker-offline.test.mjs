@@ -105,3 +105,28 @@ test('pause preserves independent bot-decision and 20-second turn budgets withou
  t.advance(600000);t.g.resume();const state=t.g.read().session.state;assert.equal(state.turnDeadlineAt-state.turnStartedAt,20000);const pending=t.g.pendingTimer();assert.equal(pending.delayMs,start.delayMs-500);
  t.advance(pending.delayMs-1);assert.equal(await t.g.tick(pending.token),false);t.advance(1);assert.equal(await t.g.tick(pending.token),true);assert.equal(t.g.read().session.lastAction.source,'bot');assert.equal(await t.g.tick(pending.token),false);
 });
+
+// Fundamental intent/legality rules from the single V2 renderer, without a DOM suite.
+async function preactionRules(g){
+ const {readFileSync}=await import('node:fs');const {parse}=await import('acorn');const vm=await import('node:vm');
+ const source=readFileSync('poker/poker-v2.js','utf8'),names=new Set(['buildQueuedPreaction','readQueuedAmount','resolveQueuedPreactionExecution','syncQueuedPreactionWithPreactionState','maybeExecuteQueuedPreaction','clearQueuedPreaction','resetQueuedPreactionState']);const bodies=[];
+ function visit(n){if(!n||typeof n!=='object')return;if(n.type==='FunctionDeclaration'&&names.has(n.id?.name))bodies.push(source.slice(n.start,n.end));for(const v of Object.values(n)){if(Array.isArray(v))v.forEach(visit);else if(v&&typeof v==='object')visit(v);}}
+ visit(parse(source,{ecmaVersion:'latest'}));assert.equal(bodies.length,names.size);
+ const context=vm.createContext({state:{reconnectGate:false},els:{amountInput:{value:'20'},primaryPreaction:{dataset:{action:'CHECK'}},amountPreaction:{dataset:{action:'RAISE'}}},notifyPreactionCancelled:()=>{},getAllowedActions:()=>g.legal().actions,isUsersTurn:()=>g.read().session.state.turnUserId==='offline-human',isFoldAvailable:()=>g.legal().actions.includes('FOLD'),resolvePrimaryAction:a=>a.includes('CHECK')?'CHECK':a.includes('CALL')?'CALL':null,resolveAmountAction:()=>null,resolveAllInPlan:()=>null,resolveStack:()=>g.read().session.state.stacks['offline-human'],resolveAmountBounds:()=>null,renderControls:()=>{},handleAction:(type,amount)=>Promise.resolve(g.act({type,amount,handId:g.read().session.state.handId},g.timerToken()))});
+ vm.runInContext('var queuedPreaction=null,queuedPreactionInFlight=false;'+bodies.join('\n'),context);return context;
+}
+test('V2 queued intent waits, executes legally once and loses the race safely against stale timer/manual tokens',async()=>{
+ const t=timedGame();await t.g.newGame(100);t.g.act({type:'CALL'});const r=await preactionRules(t.g);
+ assert.ok(t.g.snapshot().projectedLegalActions.actions.includes('FOLD'));r.queuedPreaction=r.buildQueuedPreaction('fold');const stored=t.storage.getItem(STORAGE_KEY);r.maybeExecuteQueuedPreaction();assert.equal(t.storage.getItem(STORAGE_KEY),stored);
+ for(let n=0;n<100&&t.g.read().session.state.turnUserId!=='offline-human'&&t.g.read().session.state.phase!=='SETTLED';n++)t.g.botStep();
+ assert.equal(t.g.read().session.state.turnUserId,'offline-human');const token=t.g.timerToken(),rev=t.g.read().revision;r.maybeExecuteQueuedPreaction();r.maybeExecuteQueuedPreaction();await Promise.resolve();
+ assert.equal(t.g.read().revision,rev+1);assert.equal(t.g.read().session.state.foldedByUserId['offline-human'],true);assert.equal(t.g.act({type:'FOLD'},token),false);t.advance(20000);assert.equal(await t.g.tick(token),false);
+});
+test('V2 invalidates changed action/bet intent; pause/Resume and new-hand reset never resurrect it',async()=>{
+ const t=timedGame();await t.g.newGame(100);const r=await preactionRules(t.g);
+ r.queuedPreaction=r.buildQueuedPreaction('amount');assert.equal(r.resolveQueuedPreactionExecution({amountAction:'RAISE',amountBounds:{min:40,max:100}}),null);
+ r.syncQueuedPreactionWithPreactionState({amountAction:'RAISE',amountBounds:{min:40,max:100}});assert.equal(r.queuedPreaction,null);
+ r.queuedPreaction=r.buildQueuedPreaction('primary');assert.equal(r.resolveQueuedPreactionExecution({primaryAction:'CALL'}),null);r.syncQueuedPreactionWithPreactionState({primaryAction:'CALL'});assert.equal(r.queuedPreaction,null);
+ r.queuedPreaction=r.buildQueuedPreaction('fold');r.resetQueuedPreactionState();t.g.pause();t.advance(600000);t.g.resume();const rev=t.g.read().revision;r.maybeExecuteQueuedPreaction();assert.equal(t.g.read().revision,rev);
+ const oldHand=t.g.read().session.state.handId;finish(t.g);if(t.g.read().session.state.stacks['offline-human']>=2){await t.g.nextHand();assert.equal(t.g.act({type:'FOLD',handId:oldHand},t.g.timerToken()),false);}
+});

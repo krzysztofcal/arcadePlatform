@@ -584,8 +584,8 @@
     var caption = document.createElement('span');
     caption.className = 'poker-celebration__caption';
     caption.textContent = demo
-      ? selection.kind === 'pot' ? 'DEMO · ' + formatNumber(Number.isSafeInteger(selection.amount) ? selection.amount : 1250) + ' PC' : 'PREVIEW · VISUAL DEMO'
-      : selection.kind === 'pot' ? tf('pokerCelebrationWinAmount', { amount: formatNumber(selection.amount) }, 'WIN {amount} PC') : 'EXCEPTIONAL HAND';
+      ? selection.kind === 'pot' ? 'DEMO · ' + formatNumber(Number.isSafeInteger(selection.amount) ? selection.amount : 1250) + ' Offline Chips' : 'PREVIEW · VISUAL DEMO'
+      : selection.kind === 'pot' ? tf('pokerCelebrationWinAmount', { amount: formatNumber(selection.amount) }, 'WIN {amount} Offline Chips') : 'EXCEPTIONAL HAND';
     art.appendChild(hero);
     art.appendChild(title);
     art.appendChild(caption);
@@ -645,7 +645,7 @@
     });
     var potAmount = document.createElement('strong');
     potAmount.className = 'poker-celebration-preview__amount';
-    potAmount.textContent = 'DEMO Monster Pot · ' + formatNumber(1250) + ' PC';
+    potAmount.textContent = 'DEMO Monster Pot · ' + formatNumber(1250) + ' Offline Chips';
     panel.appendChild(streakCount);
     panel.appendChild(potAmount);
     var giftDemoLabel = document.createElement('label');
@@ -668,7 +668,7 @@
       { kind: 'hand', title: 'FOUR OF A KIND', label: 'Four of a Kind', cards: ['7S', '7H', '7D', '7C', 'AH'] },
       { kind: 'hand', title: 'STRAIGHT FLUSH', label: 'Straight Flush', cards: ['6S', '7S', '8S', '9S', '10S'] },
       { kind: 'hand', title: 'ROYAL FLUSH', label: 'Royal Flush', cards: ['10S', 'JS', 'QS', 'KS', 'AS'] },
-      { kind: 'pot', label: 'Monster Pot · ' + formatNumber(1250) + ' PC (demo)' },
+      { kind: 'pot', label: 'Monster Pot · ' + formatNumber(1250) + ' Offline Chips (demo)' },
       { kind: 'streak', label: 'Win Streak' },
       { kind: 'close', label: 'Close' }
     ].forEach(function(entry){
@@ -979,12 +979,12 @@
     if (els.autoRebuyPreferenceLabel){
       els.autoRebuyPreferenceLabel.textContent = buyIn == null
         ? 'Auto rebuy at the table buy-in when out of chips'
-        : 'Auto rebuy ' + formatNumber(buyIn) + ' PC when out of chips';
+        : 'Auto rebuy ' + formatNumber(buyIn) + ' Offline Chips when out of chips';
     }
     if (els.autoRebuyPreferenceHint){
       els.autoRebuyPreferenceHint.textContent = buyIn == null
         ? 'Auto rebuy becomes available once this table reports its authoritative buy-in.'
-        : 'Automatically uses ' + formatNumber(buyIn) + ' PC from your account each time you run out of chips.';
+        : 'Automatically uses ' + formatNumber(buyIn) + ' Offline Chips from your account each time you run out of chips.';
     }
   }
 
@@ -993,7 +993,7 @@
     var visible = autoRebuyFeedbackState.visible === true && normalizeAuthoritativeBuyIn(autoRebuyFeedbackState.buyIn) != null;
     els.autoRebuyBalanceToast.hidden = !visible;
     els.autoRebuyBalanceToast.textContent = visible
-      ? ('-' + formatNumber(autoRebuyFeedbackState.buyIn) + ' PC')
+      ? ('-' + formatNumber(autoRebuyFeedbackState.buyIn) + ' Offline Chips')
       : '';
   }
 
@@ -1032,7 +1032,7 @@
   function renderAutoRebuyConfirmationCopy(buyIn){
     if (!els.autoRebuyConfirmCopy) return;
     els.autoRebuyConfirmCopy.textContent = 'Auto rebuy will use ' + formatNumber(buyIn)
-      + ' PC from your account each time you run out of chips. You can disable it later.';
+      + ' Offline Chips from your account each time you run out of chips. You can disable it later.';
   }
 
   function closeAutoRebuyConfirm(restoreFocus){
@@ -2833,8 +2833,8 @@
       if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = code !== 'insufficient_chips';
       setError(code === 'insufficient_chips'
         ? (currentTableBuyIn() == null
-          ? 'Not enough PC for this table buy-in'
-          : 'Not enough PC for a ' + formatNumber(currentTableBuyIn()) + ' PC buy-in')
+          ? 'Not enough Offline Chips for this table buy-in'
+          : 'Not enough Offline Chips for a ' + formatNumber(currentTableBuyIn()) + ' Offline Chips buy-in')
         : code);
       render();
       return null;
@@ -4799,7 +4799,7 @@
     if (!available) { els.giftShop.hidden = true; els.giftShopButton.setAttribute('aria-expanded', 'false'); }
     giftCatalog.forEach(function(gift){
       var button = els.giftSelect.querySelector('[data-gift-key="' + gift.key + '"]');
-      button.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' PC';
+      button.textContent = gift.emoji + ' ' + giftName(gift) + ' · ' + formatNumber(gift.price) + ' Offline Chips';
       button.setAttribute('aria-pressed', String(els.giftSelect.dataset.value === gift.key));
       button.disabled = !available || giftPending;
     });
@@ -4936,7 +4936,7 @@
           ['emoji', 'name', 'price'].forEach(function(part){
             var value = document.createElement('span');
             value.className = 'poker-quick-gift-choice__' + part;
-            value.textContent = part === 'emoji' ? gift.emoji : part === 'name' ? giftName(gift) : formatNumber(gift.price) + ' PC';
+            value.textContent = part === 'emoji' ? gift.emoji : part === 'name' ? giftName(gift) : formatNumber(gift.price) + ' Offline Chips';
             choice.appendChild(value);
           });
           choice.addEventListener('click', function(){ sendSelectedGift(gift.key, seat.seatNo); });
@@ -5101,7 +5101,7 @@
         autoRebuyAvatarToast.className = 'poker-auto-rebuy-toast poker-auto-rebuy-toast--avatar';
         autoRebuyAvatarToast.setAttribute('role', 'status');
         autoRebuyAvatarToast.setAttribute('aria-live', 'polite');
-        autoRebuyAvatarToast.textContent = 'Auto rebuy: +' + formatNumber(autoRebuyFeedbackState.buyIn) + ' PC';
+        autoRebuyAvatarToast.textContent = 'Auto rebuy: +' + formatNumber(autoRebuyFeedbackState.buyIn) + ' Offline Chips';
       }
 
       var seatNumber = null;
@@ -5456,7 +5456,7 @@
     placeSeatNode(els.dealerChip,{origin:[0,0]},point,20,20);
   }
 
-  function isWsReady(){return true;}
+  function isWsReady(){return window.PokerOffline.isActive();}
 
   function currentPlayerStatus(){
     return state.playerState && typeof state.playerState.status === 'string' ? state.playerState.status : 'ACTIVE';
@@ -5475,9 +5475,9 @@
     var show = !!session && session.state.phase === 'SETTLED' && session.state.stacks['offline-human'] < 2;
     els.rebuyPanel.hidden = !show;
     if (!show) return;
-    if (els.rebuyTitle) els.rebuyTitle.textContent = 'Out of Practice Chips';
+    if (els.rebuyTitle) els.rebuyTitle.textContent = 'Out of Offline Chips';
     if (els.rebuyCopy) els.rebuyCopy.textContent = 'Rebuy locally or use a free refill. No automatic purchase.';
-    if (els.rebuyBalance) els.rebuyBalance.textContent = data.wallet + ' PC · Buy-in ' + session.buyIn + ' PC';
+    if (els.rebuyBalance) els.rebuyBalance.textContent = data.wallet + ' Offline Chips · Buy-in ' + session.buyIn;
     if (els.rebuyBtn) { els.rebuyBtn.disabled = data.wallet < session.buyIn - session.state.stacks['offline-human']; els.rebuyBtn.textContent = 'Rebuy'; }
     if (els.rebuyWatchBtn) els.rebuyWatchBtn.hidden = true;
     if (els.rebuyAccountLink) els.rebuyAccountLink.hidden = true;
@@ -5521,7 +5521,7 @@
     return !isGuestMode && state.mode === 'live' && isSignedIn() ? state.currentUserId + ':' + state.tableId : null;
   }
 
-  function syncAccountHud(){if (els.accountHud) { var data = window.PokerOffline.read(); els.accountHud.hidden = false; els.accountHud.textContent = 'OFFLINE · ' + formatNumber(data.wallet) + ' PC'; els.accountHud.title = 'Device-local Practice Chips'; }}
+  function syncAccountHud(){if (els.accountHud) { var data = window.PokerOffline.read(); els.accountHud.hidden = false; els.accountHud.textContent = 'OFFLINE · ' + formatNumber(data.wallet) + ' Offline Chips'; els.accountHud.title = 'Device-local Offline Chips'; }}
 
   async function refreshAccountHud(){syncAccountHud();}
 
@@ -5788,7 +5788,7 @@
       });
     }
 
-    var accountActionText = isGuestMode ? 'Create account and get 500 PC Welcome Bonus' : 'Sign in to join this table';
+    var accountActionText = isGuestMode ? 'Poker Offline' : 'Sign in to join this table';
     if (els.menuSignIn) {
       els.menuSignIn.hidden = signedIn && !isGuestMode;
       els.menuSignIn.textContent = accountActionText;
@@ -6225,12 +6225,12 @@
         && balance >= requiredBankroll;
       if (alreadyUnlocked){
         return Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0
-          ? formatNumber(tableBuyIn) + ' PC tables are unlocked but not currently available at your progression level.'
+          ? formatNumber(tableBuyIn) + ' Offline Chips tables are unlocked but not currently available at your progression level.'
           : 'This table tier is unlocked but not currently available at your progression level.';
       }
       if (Number.isSafeInteger(requiredBankroll) && requiredBankroll > 0){
-        var tierLabel = Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0 ? (' to unlock ' + formatNumber(tableBuyIn) + ' PC tables') : '';
-        return 'You need at least ' + formatNumber(requiredBankroll) + ' PC' + tierLabel + '.';
+        var tierLabel = Number.isSafeInteger(tableBuyIn) && tableBuyIn > 0 ? (' to unlock ' + formatNumber(tableBuyIn) + ' Offline Chips tables') : '';
+        return 'You need at least ' + formatNumber(requiredBankroll) + ' Offline Chips' + tierLabel + '.';
       }
       return 'This table tier is locked for your current bankroll.';
     }
@@ -6238,8 +6238,8 @@
       return error && error.message ? error.message : 'Failed to join';
     }
     var buyIn = currentTableBuyIn();
-    if (buyIn == null) return 'Not enough PC to join this table.';
-    return t('pokerErrInsufficientChips', 'You need at least {amount} PC to join a table.').replace('{amount}', String(buyIn));
+    if (buyIn == null) return 'Not enough Offline Chips to join this table.';
+    return t('pokerErrInsufficientChips', 'You need at least {amount} Offline Chips to join a table.').replace('{amount}', String(buyIn));
   }
 
   function isRetryableAutoJoinError(error){
@@ -7411,22 +7411,25 @@
     bindControls();
     bindMenu();
     startTurnClock();
+    [els.menuLeave, els.rebuyLobbyBtn].forEach(function(el){ if (el) el.addEventListener('click', function(){ resetQueuedPreactionState(); renderControls(); }); });
     if (els.sceneViewport && window.ResizeObserver) new ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
     markBootReady();
     offline.start(function(payload){
       var frame = {kind:'stateSnapshot', initial:!state.hasAppliedAuthoritativeSnapshot, cardFxEligible:!!state.hasAppliedAuthoritativeSnapshot};
-      var previousVisual = captureVisualSnapshot();
+      var previousVisual = captureVisualSnapshot(), previousHandId = state.handId;
       observeCelebrationSnapshot(payload, frame);
       mergeSnapshot(payload, frame);
+      if (previousHandId && previousHandId !== state.handId) resetQueuedPreactionState();
       state.hasAppliedAuthoritativeSnapshot = true;
-      state.statusText = 'OFFLINE · Practice Chips';
+      if (offline.isActive()) maybeExecuteQueuedPreaction();
+      state.statusText = 'OFFLINE · Offline Chips';
       render();
       var nextVisual = captureVisualSnapshot();
       animateChipDiff(previousVisual, nextVisual, frame);
       animateCardDiff(previousVisual, nextVisual, frame);
       [els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
-    }, handleTableReaction);
+    }, handleTableReaction, function(){ resetQueuedPreactionState(); renderControls(); });
     } catch(error) { document.getElementById('offlineError').textContent = error.message; }
   }
 

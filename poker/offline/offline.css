@@ -1,10 +1,4 @@
-.practice-balance { display:block; color:#8ff0cb; margin:8px 0; }
-.offline-buyins { display:flex; gap:12px; border:0; padding:8px 0; }
-.offline-buyins label { cursor:pointer; }
-.offline-buyins input { accent-color:#8ff0cb; }
-.offline-session { display:grid; gap:6px; color:#8ff0cb; font-size:12px; }
-.offline-session button { padding:6px 10px; background:#223646; color:#fff; border:1px solid #467269; border-radius:8px; cursor:pointer; }
-.offline-session button:disabled { opacity:.45; cursor:default; }
+.offline-session { display:grid; gap:6px; font-size:inherit; }
 .offline-session p { margin:0; color:#ffbbac; }
 body:has(#offlineSessionControls) #pokerGiftShopButton,body:has(#offlineSessionControls) .poker-quick-gift-button,body:has(#offlineSessionControls) .poker-quick-gift-picker,body:has(#offlineSessionControls) .poker-seat-gift-button,body:has(#offlineSessionControls) .poker-seat-gift-trigger,body:has(#offlineSessionControls) [data-gift-target-seat] { display:none!important; }
 body:has(#offlineSessionControls) #pokerAutoRebuyPreferenceWrap,body:has(#offlineSessionControls) #pokerMenuProfile,body:has(#offlineSessionControls) #pokerMenuAccount { display:none!important; }

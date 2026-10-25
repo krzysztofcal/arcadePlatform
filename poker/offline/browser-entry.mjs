@@ -1,7 +1,7 @@
 import {classifyRaiseReaction, classifySettlementReaction, classifyAmbientReaction} from '../../ws-server/poker/handlers/reaction.mjs';
 import {createOfflineGame, HUMAN, STORAGE_KEY} from './offline-game.mjs';
 const game=createOfflineGame({storage:window.localStorage});
-let listener, timer, active=false, epoch=0, reactionListener, lastBotReaction=0, renderedToken;
+let listener, timer, active=false, epoch=0, reactionListener, lastBotReaction=0, renderedToken, clearPreactions;
 function botReaction(before){
   if(!reactionListener || Date.now()-lastBotReaction<4000) return;
   const session=game.read().session,s=session?.state;if(!s)return;
@@ -26,8 +26,10 @@ function fail(error){
 }
 function updateWallet(){
   const data=game.read(),settled=data.session?.state.phase==='SETTLED';
-  document.querySelectorAll('[data-practice-balance]').forEach(el=>{el.textContent=data.wallet.toLocaleString()+' Practice Chips';});
+  document.querySelectorAll('[data-offline-balance]').forEach(el=>{el.textContent=data.wallet.toLocaleString()+' Offline Chips';});
   const resume=document.getElementById('offlineResume');if(resume) resume.hidden=!data.session;
+  const shell=document.getElementById('offlineResumeShell');if(shell)shell.hidden=!data.session;
+  const play=document.getElementById('offlinePlay');if(play)play.textContent=data.session?'NEW GAME':'PLAY NOW';
   const rebuy=document.getElementById('offlineRebuy');if(rebuy)rebuy.disabled=!settled;
 }
 function schedule(){
@@ -51,7 +53,7 @@ async function activate(){
   await run(()=>{if(generation!==epoch||document.hidden)return;game.resume(true);active=true;});
 }
 async function park(){
-  epoch++;active=false;clearTimeout(timer);
+  epoch++;active=false;clearTimeout(timer);if(clearPreactions)clearPreactions();
   if(listener){
     try{await run(()=>game.pause());}
     catch(error){if(!document.hidden){active=true;schedule();}throw error;}
@@ -67,7 +69,7 @@ function cancelDialog(){
 }
 function ask(title,message){
   const dialog=document.getElementById('offlineConfirm');
-  if(!dialog)return Promise.reject(new Error('Practice confirmation unavailable'));
+  if(!dialog)return Promise.reject(new Error('Offline confirmation unavailable'));
   document.getElementById('offlineConfirmTitle').textContent=title;
   document.getElementById('offlineConfirmCopy').textContent=message;
   return new Promise(resolve=>{resolveConfirmation=resolve;dialog.showModal();document.getElementById('offlineConfirmCancel').focus();});
@@ -77,12 +79,12 @@ async function backToLobby(){
   await park();window.location.assign('/poker/');
 }
 window.PokerOffline={
-  human:HUMAN,read:game.read,backToLobby,cancelDialog,
-  start(fn,reactions){listener=fn;reactionListener=reactions;activate().catch(fail);},
-  act(action){const expected=renderedToken;return run(()=>active&&expected?game.act(action,expected):false);},
+  human:HUMAN,read:game.read,backToLobby,cancelDialog,isActive:()=>active,
+  start(fn,reactions,onPause){listener=fn;reactionListener=reactions;clearPreactions=onPause;activate().catch(fail);},
+  act(action){const expected=renderedToken,generation=epoch;return run(()=>active&&expected&&generation===epoch?game.act(action,expected):false);},
   leave(){
-    clearTimeout(timer);
-    return run(()=>{const result=game.leave();active=false;epoch++;return result;}).catch(error=>{schedule();throw error;});
+    epoch++;clearTimeout(timer);if(clearPreactions)clearPreactions();
+    return run(()=>{const result=game.leave();active=false;return result;}).catch(error=>{schedule();throw error;});
   },
   rebuy(){return run(()=>game.rebuy());},
   reaction(key,targetSeatNo){if(reactionListener)reactionListener({payload:{seatNo:1,reactionKey:key,...(targetSeatNo?{targetSeatNo}:{})}});},
@@ -107,10 +109,13 @@ function init(){
   }
   try{updateWallet();}catch(error){fail(error);}
   const action=(id,fn)=>{const el=document.getElementById(id);if(el)el.addEventListener('click',()=>run(fn).catch(fail));};
+  document.querySelectorAll('[data-offline-buy-in]').forEach(button=>button.addEventListener('click',()=>{
+    document.querySelectorAll('[data-offline-buy-in]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));
+  }));
   action('offlinePlay',async()=>{
-    const buyIn=Number(document.querySelector('[name="offlineBuyIn"]:checked')?.value||100);
+    const buyIn=Number(document.querySelector('[data-offline-buy-in][aria-pressed="true"]')?.dataset.offlineBuyIn||100);
     if(game.read().session){
-      if(!await ask('New Offline game','Settle and leave the current practice session before starting a new game?'))return;
+      if(!await ask('New Offline game','Settle and leave the current offline session before starting a new game?'))return;
       game.leave();
     }
     await game.newGame(buyIn);window.location.assign('/poker/offline/play.html');
@@ -120,7 +125,7 @@ function init(){
   action('offlineRefill',()=>game.refill());
   action('offlineRebuy',()=>game.rebuy());
   action('offlineReset',async()=>{
-    if(await ask('Reset Practice Chips','Discard only this device’s Practice Chips and Offline session? Online CH is unaffected.')){
+    if(await ask('Reset Offline Progress','Discard only this device’s Offline Chips and Offline session? Online CH is unaffected.')){
       clearTimeout(timer);window.localStorage.removeItem(STORAGE_KEY);window.location.assign('/poker/');
     }
   });

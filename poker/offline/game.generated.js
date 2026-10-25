@@ -2888,7 +2888,7 @@
       try {
         data = JSON.parse(raw);
       } catch {
-        throw new Error("Offline storage is corrupt; reset local practice data to continue");
+        throw new Error("Offline storage is corrupt; reset local offline data to continue");
       }
       if (data?.schema !== 1 || !integer(data.wallet) || !integer(data.revision)) throw new Error("Unsupported offline storage");
       if (data.session) {
@@ -3002,10 +3002,10 @@
         return true;
       },
       async newGame(buyIn) {
-        if (![100, 500, 1e3].includes(buyIn)) throw new Error("Invalid Practice Chips buy-in");
+        if (![100, 500, 1e3].includes(buyIn)) throw new Error("Invalid Offline Chips buy-in");
         const data = read(), revision = data.revision;
         if (data.session) throw new Error("Leave the current session before New Game");
-        if (data.wallet < buyIn) throw new Error("Not enough Practice Chips; use free refill");
+        if (data.wallet < buyIn) throw new Error("Not enough Offline Chips; use free refill");
         const count = computeTargetBotCount({ maxPlayers: 6, humanCount: 1, minBots: 2, maxBots: 5, random });
         const members = Array.from({ length: count + 1 }, (_, i) => ({ userId: i === 0 ? HUMAN : "bot-offline-" + i, seat: i + 1 }));
         const ids = members.map((m) => m.userId);
@@ -3070,7 +3070,7 @@
           const s = session(data);
           if (s.state.phase !== "SETTLED") throw new Error("Rebuy requires settled hand");
           const amount = Math.max(0, s.buyIn - s.state.stacks[HUMAN]);
-          if (data.wallet < amount) throw new Error("Not enough Practice Chips; use free refill");
+          if (data.wallet < amount) throw new Error("Not enough Offline Chips; use free refill");
           data.wallet -= amount;
           s.state.stacks[HUMAN] += amount;
           stampClock(s);
@@ -3104,6 +3104,7 @@
   var reactionListener;
   var lastBotReaction = 0;
   var renderedToken;
+  var clearPreactions;
   function botReaction(before) {
     if (!reactionListener || Date.now() - lastBotReaction < 4e3) return;
     const session = game.read().session, s = session?.state;
@@ -3132,11 +3133,15 @@
   }
   function updateWallet() {
     const data = game.read(), settled = data.session?.state.phase === "SETTLED";
-    document.querySelectorAll("[data-practice-balance]").forEach((el) => {
-      el.textContent = data.wallet.toLocaleString() + " Practice Chips";
+    document.querySelectorAll("[data-offline-balance]").forEach((el) => {
+      el.textContent = data.wallet.toLocaleString() + " Offline Chips";
     });
     const resume = document.getElementById("offlineResume");
     if (resume) resume.hidden = !data.session;
+    const shell = document.getElementById("offlineResumeShell");
+    if (shell) shell.hidden = !data.session;
+    const play = document.getElementById("offlinePlay");
+    if (play) play.textContent = data.session ? "NEW GAME" : "PLAY NOW";
     const rebuy = document.getElementById("offlineRebuy");
     if (rebuy) rebuy.disabled = !settled;
   }
@@ -3171,6 +3176,7 @@
     epoch++;
     active = false;
     clearTimeout(timer);
+    if (clearPreactions) clearPreactions();
     if (listener) {
       try {
         await run(() => game.pause());
@@ -3199,7 +3205,7 @@
   }
   function ask(title, message) {
     const dialog = document.getElementById("offlineConfirm");
-    if (!dialog) return Promise.reject(new Error("Practice confirmation unavailable"));
+    if (!dialog) return Promise.reject(new Error("Offline confirmation unavailable"));
     document.getElementById("offlineConfirmTitle").textContent = title;
     document.getElementById("offlineConfirmCopy").textContent = message;
     return new Promise((resolve) => {
@@ -3218,21 +3224,24 @@
     read: game.read,
     backToLobby,
     cancelDialog,
-    start(fn, reactions) {
+    isActive: () => active,
+    start(fn, reactions, onPause) {
       listener = fn;
       reactionListener = reactions;
+      clearPreactions = onPause;
       activate().catch(fail);
     },
     act(action) {
-      const expected = renderedToken;
-      return run(() => active && expected ? game.act(action, expected) : false);
+      const expected = renderedToken, generation = epoch;
+      return run(() => active && expected && generation === epoch ? game.act(action, expected) : false);
     },
     leave() {
+      epoch++;
       clearTimeout(timer);
+      if (clearPreactions) clearPreactions();
       return run(() => {
         const result = game.leave();
         active = false;
-        epoch++;
         return result;
       }).catch((error) => {
         schedule();
@@ -3285,10 +3294,13 @@
       const el = document.getElementById(id);
       if (el) el.addEventListener("click", () => run(fn).catch(fail));
     };
+    document.querySelectorAll("[data-offline-buy-in]").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll("[data-offline-buy-in]").forEach((other) => other.setAttribute("aria-pressed", String(other === button)));
+    }));
     action("offlinePlay", async () => {
-      const buyIn = Number(document.querySelector('[name="offlineBuyIn"]:checked')?.value || 100);
+      const buyIn = Number(document.querySelector('[data-offline-buy-in][aria-pressed="true"]')?.dataset.offlineBuyIn || 100);
       if (game.read().session) {
-        if (!await ask("New Offline game", "Settle and leave the current practice session before starting a new game?")) return;
+        if (!await ask("New Offline game", "Settle and leave the current offline session before starting a new game?")) return;
         game.leave();
       }
       await game.newGame(buyIn);
@@ -3300,7 +3312,7 @@
     action("offlineRefill", () => game.refill());
     action("offlineRebuy", () => game.rebuy());
     action("offlineReset", async () => {
-      if (await ask("Reset Practice Chips", "Discard only this device\u2019s Practice Chips and Offline session? Online CH is unaffected.")) {
+      if (await ask("Reset Offline Progress", "Discard only this device\u2019s Offline Chips and Offline session? Online CH is unaffected.")) {
         clearTimeout(timer);
         window.localStorage.removeItem(STORAGE_KEY);
         window.location.assign("/poker/");
