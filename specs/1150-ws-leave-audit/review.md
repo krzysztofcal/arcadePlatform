@@ -1,6 +1,14 @@
 # #1150 / Draft #1151 — private audit metadata after WS Leave
 
-**2026-10-25 runtime verdict: NOT READY.** Exact-SHA deploy and Online audit/cashout/privacy passed; retry timed out at the existing client deadline, Single Player stopped, and isolated reload timing could not be captured. See the controlled smoke results below.
+**CURRENT final owner review: runtime verification accepted via #1152; READY FOR ROLLOUT REVIEW. Production rollout BLOCKED by pre-existing managed-bot supervisor invalid_identity, before either merge.**
+
+Combined deployed Preview runtime `33fbe284859884fd2538774ae756f11aee154a04` exactly matches the source runtime union. Online JOIN/CALL/Leave/retry/reconnect/audit/CH/privacy and SP JOIN/manual UI FOLD/bot settlement/audit/ordinary UI Leave durable execution/one cashout/closure accepted as PASS. SP UI Leave received ACK remains **NOT OBSERVED**, an intentional existing contract covered by `tests/poker-v2-live.behavior.test.mjs:4922` (targeted test1/1 PASS); it is not an integration blocker under current owner acceptance. No UI/protocol change, new test or smoke replay. Account Deletion V2 remains active; local recovery/BURN/Auth-last coverage retained, no real deletion.
+
+Production read-only preflight: service41bb6185/PID147840 and healthz/Redis identity pass; no active human claims/connections/pending work or nonzero closed escrow. But supervisor logs invalid_identity every10s, zero OPEN tables despite enabled desired count2. Existing system creation userIdnull hits account lifecycle UUID guard. Same code in Production/main/integration; local stub confirms failure before SQL. No merge/restart/deploy/data change made. Separate narrow trusted-system-owner guard fix/review and successful preflight are needed before rollout. [Full accepted integration evidence and blocker](https://github.com/krzysztofcal/arcadePlatform/pull/1152). Source PR stays Draft because deployment gate failed.
+
+## Historical implementation and standalone evidence — preserved, superseded by final review above
+
+**Historical 2026-10-25 standalone runtime verdict: NOT READY.** Exact-SHA deploy and Online audit/cashout/privacy passed; retry timed out at the existing client deadline, Single Player stopped, and isolated reload timing could not be captured. See the controlled smoke results below.
 
 Medium/P2, before public 1.0. Issue: https://github.com/krzysztofcal/arcadePlatform/issues/1150
 
