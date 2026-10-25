@@ -3005,8 +3005,8 @@
     rebuy() {
       return run(() => game.rebuy());
     },
-    reaction(key) {
-      if (reactionListener) reactionListener({ payload: { seatNo: 1, reactionKey: key } });
+    reaction(key, targetSeatNo) {
+      if (reactionListener) reactionListener({ payload: { seatNo: 1, reactionKey: key, ...targetSeatNo ? { targetSeatNo } : {} } });
     },
     inspect() {
       return game.read();

@@ -23,10 +23,16 @@ const replacements = {
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
     markBootReady();
     offline.start(function(payload){
-      mergeSnapshot(payload, {kind:'stateSnapshot', initial:false});
+      var frame = {kind:'stateSnapshot', initial:!state.hasAppliedAuthoritativeSnapshot, cardFxEligible:!!state.hasAppliedAuthoritativeSnapshot};
+      var previousVisual = captureVisualSnapshot();
+      observeCelebrationSnapshot(payload, frame);
+      mergeSnapshot(payload, frame);
       state.hasAppliedAuthoritativeSnapshot = true;
       state.statusText = 'OFFLINE · Practice Chips';
       render();
+      var nextVisual = captureVisualSnapshot();
+      animateChipDiff(previousVisual, nextVisual, frame);
+      animateCardDiff(previousVisual, nextVisual, frame);
       [els.accountHud, els.rebuyPanel, els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
     }, handleTableReaction);
     } catch(error) { document.getElementById('offlineError').textContent = error.message; }
@@ -36,6 +42,7 @@ const replacements = {
   leaveAndReturnToLobby: `return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/'); }).catch(function(error){setError(error.message);});`,
   requestManualRebuy: `return window.PokerOffline.rebuy().catch(function(error){setError(error.message);});`,
   sendReaction: `if (Date.now() < reactionControlUntilMs || !deriveCurrentSeat()) return Promise.resolve(); closeReactionMenu(); window.PokerOffline.reaction(reactionKey); startReactionCooldown(); return Promise.resolve({ok:true});`,
+  sendTargetedReaction: `if (Date.now() < reactionControlUntilMs || !deriveCurrentSeat() || targetSeatNo === 1) return Promise.resolve(); window.PokerOffline.reaction('nice_hand', targetSeatNo); startReactionCooldown(); return Promise.resolve({ok:true});`,
   refreshAccountHud: 'return;',
   refreshRebuyBalance: 'return;',
   persistSocialPreferences: 'return;',

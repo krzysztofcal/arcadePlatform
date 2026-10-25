@@ -49,7 +49,7 @@ window.PokerOffline={
   act(action){return run(()=>{const before=game.read().session.state;game.act(action);publish();botReaction(before);});},
   leave(){clearTimeout(timer);return run(()=>game.leave());},
   rebuy(){return run(()=>game.rebuy());},
-  reaction(key){if(reactionListener) reactionListener({payload:{seatNo:1,reactionKey:key}});},
+  reaction(key,targetSeatNo){if(reactionListener) reactionListener({payload:{seatNo:1,reactionKey:key,...(targetSeatNo?{targetSeatNo}: {})}});},
   inspect(){return game.read();}
 };
 function init(){

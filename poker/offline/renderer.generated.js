@@ -3464,53 +3464,7 @@
     }, 4_000);
   }
 
-  function sendTargetedReaction(targetSeatNo, handId){
-    if (inactivityExit || !wsClient || typeof wsClient.sendTargetedReaction !== 'function' || !isWsReady() || !deriveCurrentSeat()) {
-      return Promise.resolve(null);
-    }
-    var offerKey = targetedReactionOfferKey(handId, targetSeatNo);
-    if (pendingTargetedReactionOfferKeys.has(offerKey) || dismissedTargetedReactionOffersByKey[offerKey]) return Promise.resolve(null);
-    pendingTargetedReactionOfferKeys.add(offerKey);
-    renderSeats();
-    return wsClient.sendTargetedReaction(targetSeatNo, handId).then(function(result){
-      pendingTargetedReactionOfferKeys.delete(offerKey);
-      dismissTargetedReactionOffer(handId, targetSeatNo);
-      renderSeats();
-      return result;
-    }).catch(function(error){
-      pendingTargetedReactionOfferKeys.delete(offerKey);
-      var code = normalizeSignalCode(error && (error.code || error.message));
-      if (code === 'reaction_already_sent'){
-        dismissTargetedReactionOffer(handId, targetSeatNo);
-        renderSeats();
-        return null;
-      }
-      if (code === 'reaction_rate_limited'){
-        renderSeats();
-        return null;
-      }
-      if (code === 'settlement_reaction_window_closed' || code === 'settlement_mismatch'){
-        dismissTargetedReactionOffersForHand(handId);
-        renderSeats();
-        return null;
-      }
-      if (code === 'target_not_available' || code === 'invalid_reaction'){
-        dismissTargetedReactionOffer(handId, targetSeatNo);
-        renderSeats();
-        if (code === 'invalid_reaction') klog('poker_targeted_reaction_invalid', { targetSeatNo: targetSeatNo });
-        return null;
-      }
-      if (code === 'not_seated' || code === 'table_closed'){
-        renderSeats();
-        renderControls();
-        if (wsClient && typeof wsClient.requestGameplaySnapshot === 'function') wsClient.requestGameplaySnapshot();
-        return null;
-      }
-      klog('poker_targeted_reaction_error', { code: code || 'targeted_reaction_failed' });
-      renderSeats();
-      return null;
-    });
-  }
+  function sendTargetedReaction(targetSeatNo, handId){if (Date.now() < reactionControlUntilMs || !deriveCurrentSeat() || targetSeatNo === 1) return Promise.resolve(); window.PokerOffline.reaction('nice_hand', targetSeatNo); startReactionCooldown(); return Promise.resolve({ok:true});}
 
   function resolveBotAvatarReactionMotion(reactionKey){
     switch (reactionKey){
@@ -7497,10 +7451,16 @@
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
     markBootReady();
     offline.start(function(payload){
-      mergeSnapshot(payload, {kind:'stateSnapshot', initial:false});
+      var frame = {kind:'stateSnapshot', initial:!state.hasAppliedAuthoritativeSnapshot, cardFxEligible:!!state.hasAppliedAuthoritativeSnapshot};
+      var previousVisual = captureVisualSnapshot();
+      observeCelebrationSnapshot(payload, frame);
+      mergeSnapshot(payload, frame);
       state.hasAppliedAuthoritativeSnapshot = true;
       state.statusText = 'OFFLINE · Practice Chips';
       render();
+      var nextVisual = captureVisualSnapshot();
+      animateChipDiff(previousVisual, nextVisual, frame);
+      animateCardDiff(previousVisual, nextVisual, frame);
       [els.accountHud, els.rebuyPanel, els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
     }, handleTableReaction);
     } catch(error) { document.getElementById('offlineError').textContent = error.message; }
