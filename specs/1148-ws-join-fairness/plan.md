@@ -1,0 +1,10 @@
+# #1148 — WS bot-step queue fairness
+
+Goal: admit Online JOIN between bot actions, including bots-only hands, without changing rules/strategy/ledger or UI timeouts. Separate branch from main 6ecbc8a3; no Offline code or dependency on #1147.
+
+- [x] RED: extend `ws-server/poker/runtime/accepted-bot-autoplay-adapter.behavior.test.mjs` with deterministic real FIFO + cascade scheduler + accepted adapter + engine cases. Enqueue admission during first bot reaction; assert it runs after one action, before settlement, with no starvation. Run both initial bot-only Online and Single Player after a real human FOLD. Continue all bot steps to settlement; verify legal order, unique action IDs and CH/payout conservation. Fake only storage/clock/sleep boundaries, not the reducer/strategy/settlement.
+- [x] GREEN: accepted adapter calls shared `runBotAutoplayLoop` with both per-invocation budgets 1; remove its unused full-hand budget ENV parsing. Keep `shared/poker-domain/poker-autoplay.mjs`, Netlify wrapper and `shared/poker-domain/leave.mjs` unchanged. Existing scheduler submits next step through FIFO.
+- [x] Verify relevant adapter/scheduler/queue/engine/settlement/admission tests, shared post-Leave and Netlify bot tests, plus root test command; report any baseline/environment failure. Existing tests assuming whole-hand completion in one WS call must instead drive the existing cascade.
+- [x] Independent review, concise diff/test/cost report, Draft PR closing #1148. No WS Preview/Production deploy, migrations or merge. Pending exact-SHA deployment and human smoke explicitly prevent merge readiness.
+
+Timing/cost: normal reaction delays and per-action writes remain. One FIFO entry per bot action adds scheduler turns and state reads; JOIN waits for the current action, not the whole hand. Human-folded Single Player must still drain through the cascade. Proposed later smoke: exact-SHA WS Preview Deploy after separate GO; capture JOIN requestId/WAITING_NEXT_HAND while bots act, verify normal Leave/cashout, then folded-human Single Player settlement/reconnect.
