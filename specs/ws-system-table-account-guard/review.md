@@ -1,5 +1,7 @@
 # Managed system table creation with active Account Deletion
 
+**Current runtime verification: BLOCKED at Preview preflight (2026-10-25).** Approved deploy SHAe3020b4f remains uninstalled; deletion-enabled runtime prerequisite could not be established. No deploy/configuration/data change. Not READY TO MERGE; local tests/CI remain green.
+
 ## Scope and decision
 
 Separate bugfix from current main6ecbc8a36a19952b7e86255436e8be903ea5d646. Unblocks future rollouts #1149/#1151; contains neither source PR nor Offline. Draft review only, no merge or deployment authorized. Production's existing supervisor fails every10s with invalid_identity; enabled profile wants2 tables but has0. Account Deletion V2 is active; disabling it is not a resolution.
@@ -46,3 +48,27 @@ Only after verified healthy restoration resume #1149→main→verified Productio
 ## Risk / breaking impact
 
 No public protocol/schema/economic/JSP change. Intended difference: valid internal managed system creation succeeds while deletion flag is on. Security depends on existing internal-only option construction, audited above; exact strings and strict null/false prevent widening the human bypass. Future system profiles require explicit review rather than silent fallback. Restored supervisor will execute its already configured normal bot funding and table lifecycle; that expected financial effect must be reconciled during approved rollout. No Production/Stage deployment, real deletion, fault injection, manual data write or source #1149/#1151/#1152 modification in this task. Stop for Draft review.
+
+
+## Authorized Preview attempt — 2026-10-25
+
+HEAD matched approved **e3020b4f30cdb1cb0a3d13963da0a4a1e25588e5**, Draft; required/all applicable CI checks green. Shared Preview had0 established port3001 connections, human claims, pending Poker/deletion work, or overlapping deploy/live agent. Runtime remained **33fbe284859884fd2538774ae756f11aee154a04**, PID295769/start08:56:16UTC; public healthzok. Approved readonly env preflight returned LIVE RedisV3Stage PASS and validated pinned Stage project configuration.
+
+Profile CONTINUOUS_BOT_DEFAULT enabled,desired5,min2,target3,max3,rotation900s. All five ownerless managed non-SP100CH tables had3 bots/300CH stacks/300CH escrow: total1500CH stacks=1500CH escrow. Natural rotation opportunity was available: two old tables due14:06:08/14:06:38 were naturally replaced by `fe8413bd-4ca3-4bb5-ba55-9e9bc63f3cd9`14:06:38.181255 and `1ad971bc-4554-4590-87f9-511389658dd3`14:07:08.181623. **This occurred on the old unpatched runtime and is not a smoke PASS for #1153 or its flag1 path.** No manual rotation/profile/funding/INSERT performed.
+
+### Blocking prerequisite: actual ACCOUNT_DELETION_ENABLED=1 not verifiable
+
+EnvironmentFile `/opt/arcade-ws-preview/.env.preview` is root-owned0600; running `/proc/295769/environ` is arcade-owned0400. No authorized reader exposes its selected flag. Systemd inline Environment has no exported value. Existing sudo env-preflight validates a protected approved window and accepts eitherOFF orON, but outputs only Redis status; its protected window manifest is not readable. No permission/helper/logging/configuration change or secret dump attempted. Therefore the **literal running flag value remains UNKNOWN**, not asserted as0 or1.
+
+Old initializer module hash7a2940aae36bcde7134bf8db233426c96ce09cdf186190b6282c93ebfa952b34 differs from approved373b0b583fcaba07358c0ebdc44c63f554c9210b2002f6b3b11cd90a8683b29a. Its successful ownerless creation strongly indicates its human guard is inactive, since enabled-deletion requiresUUID(null) and fails before SQL. This inference is separated from the unavailable direct flag reading. Under current authorization (no flag/config changes) it cannot provide positive live coverage of the enabled-deletion fix.
+
+| Gate | Result |
+|---|---|
+| Approved HEAD / CI / Stage pin / health / shared occupancy | PASS |
+| Natural rotation window / existing profile and aggregate escrow | PASS preflight, old runtime only |
+| Actual live ACCOUNT_DELETION_ENABLED=1 | **NOT ESTABLISHED** |
+| Exact-SHA deploy / restart / new module hash | **NOT RUN**, stopped before dispatch |
+| Corrected supervisor + flag1 / seed ledger IDs / no duplicate seed | **BLOCKED**, not claimed from old-runtime observations |
+| Live human guard regression | NOT RUN; existing fundamental coverage remains30/30 |
+
+[Reduced preflight evidence](preview-preflight-2026-10-25.json). No authenticated human gameplay, real deletion, financial write, environment/secret change, Production operation, deploy or merge. Source #1149/#1151/#1152 untouched. Literal flag value needs a sanctioned selected-field readonly status/owner verification; if it isOFF, a separately authorized controlled StageON window is needed before the requested live branch check. Do not silently enable it, bypass approved window protections or deploy as if an OFF smoke established ON coverage. Existing local flag1/human-fencing tests30/30, deletion35/35,npm147 groups and implementation CI remain valid. Production's previously recorded blocker remains unresolved; no new Production inspection in this Stage-only attempt. Preserve the prior conditional rollout plan, keep Draft, stop for review.
