@@ -19,4 +19,4 @@ Owner PASS on Galaxy S24+: Offline play, multiple hands, human actions, Resume, 
 - [x] T010 Persisted3s automatic rollover, bust stop, guarded idempotent callbacks.
 - [x] T011 Canonical Hero20s CHECK/FOLD timeout, random1000–2000ms bot delay, V2 clocks; pause/Resume without closed-time penalty; v1 compatibility.
 - [x] T012 Existing-style local dialogs for New Game/Reset; safe Cancel/Escape/native Back and explicit Leave.
-- [ ] Focused exact-SHA Netlify smoke and APK evidence, then owner physical re-test. No maintained UI suite, WS Preview replay, merge or Production.
+- [x] Focused exact-SHA Netlify smoke PASS and Stage APK build PASS; final artifact linked in PR. **Owner physical re-test PENDING**. No maintained UI suite, WS Preview replay, merge or Production.

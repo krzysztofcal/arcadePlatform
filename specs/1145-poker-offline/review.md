@@ -1,10 +1,26 @@
-# T009–T012 physical review changes — implementation awaiting focused Preview and new APK
+# T009–T012 — focused Preview PASS; awaiting owner Android re-test
 
 Owner Galaxy S24+ PASS: cold Offline gameplay, several full hands, human actions, Resume, Leave. Rebuy/Refill physically NOT VERIFIED. Prior browser layout acceptance did not establish correct physical framing; clipping reported by owner is addressed by removing the extra banner and sharing Online viewport/inset ownership. Physical layout acceptance remains pending re-test.
 
 Current changes: PC in existing HUD; rebuy/refill in menu/shared bust panel; automatic3s canonical rollover; Hero20s canonical CHECK/FOLD timeout; random1–2s bot turns, shared avatar clocks; durable token-guarded timer/action writes, local pause budgets and backward-compatible v1 initialization; local dialogs replace system confirm. Online renderer/CSS, shared WS rules/strategy and finance unchanged. Android initializer merely adds Offline to existing table-mode path and same inset substitutions; package rehashes modified renderer CSP/SRI. No new renderer/framework/runtime/config/dependency.
 
-Fundamental14/14PASS (Offline8,mobile3,shared timeout3), including simultaneous rollover callbacks, FOLD/CHECK, stale timer rejection, pause/old v1 resume, bust/rebuy and write failure. Temporary412×915/915×412 probe: scene starts at0 and fits viewport, both Hero cards within bounds, active avatar clock present. No maintained layout suite. Independent review found stale rendered-action token and failed-Leave deactivation gaps; both addressed in local controller. Runtime Preview/actual APK results will be linked in PR after build; physical re-test still required. No WS Preview replay: shared runtime unchanged.
+Fundamental14/14PASS (Offline8,mobile3,shared timeout3), including simultaneous rollover callbacks, FOLD/CHECK, stale timer rejection, pause/old v1 resume, bust/rebuy and write failure. Temporary412×915/915×412 probe: scene starts at0 and fits viewport, both Hero cards within bounds, active avatar clock present. No maintained layout suite. Independent review found stale rendered-action token and failed-Leave deactivation gaps; both addressed in local controller. Focused Preview and initial APK build338c3d27 PASS; final documentation HEAD artifact is linked in PR after build. Physical re-test still required. No WS Preview replay: shared runtime unchanged.
+
+## Final focused evidence
+
+Tested application SHA `338c3d27555a6201e15ae5e85841fec47774a9ce`. [Immutable Netlify Preview](https://6ade583710baf8078474cb5a--playkcswh.netlify.app/poker/), ready/exact commit_ref confirmed. Later evidence-only commits do not change runtime. [Session evidence](evidence/preview-t009-t012-2026-10-25.json), [portrait](evidence/preview-t009-portrait.png), [landscape](evidence/preview-t009-landscape.png).
+
+- Portrait412×915: screen(0,0,412,915), Hero cards y799.69,h88, two cards visible. Landscape915×412: screen(0,0,915,412), Hero cards y321.90,h68.41. Existing V2 scene/controls/styles, active avatar clock present. Browser geometry is PASS; physical safe-area/rotation is still an owner gate.
+- Hero real20s deadline observed with legal FOLD, source=timeout. Canonical CHECK path covered by fundamental test. Auto-next **3003ms** after settlement, hand counter1→2, no button required.
+- Bot scheduled delays1016–1877ms; measured1019–1883ms in this run. Shared strategy unchanged. First settled stacks100/104/96,total300,pot0.
+- Actual UI Rebuy wallet4900/stack98→wallet4898/stack100 (sum4998 unchanged); free Refill wallet5000; parked clock2796ms persists/resumes without charging lobby time. Explicit Leave produces wallet5100/sessionnull: includes intentional free local refill, not online earnings or CH.
+- Custom New Game Cancel, Reset Escape, Leave Escape and explicit Leave confirmation PASS. Back/Resume preserve ID and parked hand budget; physical native Back remains pending owner. No system confirm remains in Offline bootstrap.
+- Network disabled after table load: **0 requests/0 fetch/XHR/WS/beacon attempts**,0JS errors. Generic lobby/navigation loads are outside this isolated phase. An initial temporary probe read Refill before its asynchronous locked write; corrected harness waits for committed revision/balance. No wallet fix or extra gameplay infrastructure was needed.
+- Runtime CI, CodeQL, required Netlify and initial Stage APK workflow40226152100 SUCCESS. No WS/shared runtime/Online renderer/CSS diff, so no WS Preview rerun. No Production/merge/migrations/remote finance.
+
+Compatibility: Offline v1 key/schema retained; optional clock/last-action fields initialized on Resume without changing tableId/stacks/wallet/theme. Old APK ignores extra fields, can still load the local session, but lacks new timing/UI behavior until updated. This is not bidirectional synchronization. Failed writes preserve prior record; old callbacks cannot apply across revision/hand/table/actor changes. No public Online breaking change; deliberate Offline UX changes are auto-next,20s CHECK/FOLD, paused background budgets and replacing system popup.
+
+New Stage APK uses existing native table-mode inset owner for both Online and Offline paths and the same env→native variable transformation; packaged renderer SRI/CSP is recomputed after that existing transformation. Owner must retest S24+ cold airplane launch, portrait/landscape/cards, countdown/action timing/auto-next/bust stop, PC Rebuy/Refill/Leave, Back/process-kill Resume/background/rotation, themes and reconnect privacy. **Retain Draft; no merge-ready claim before this physical re-test.**
 
 ---
 ## Earlier owner review and implementation history
