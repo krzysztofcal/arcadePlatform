@@ -1,5 +1,13 @@
 # #1148 — WS bot-step queue fairness review
 
+**CURRENT final owner review: runtime verification accepted via #1152; READY FOR ROLLOUT REVIEW. Production rollout BLOCKED by pre-existing managed-bot supervisor invalid_identity, before either merge.**
+
+Combined deployed Preview runtime `33fbe284859884fd2538774ae756f11aee154a04` exactly matches the source runtime union. Online JOIN/CALL/Leave/retry/reconnect/audit/CH/privacy and SP JOIN/manual UI FOLD/bot settlement/audit/ordinary UI Leave durable execution/one cashout/closure accepted as PASS. SP UI Leave received ACK remains **NOT OBSERVED**, an intentional existing contract covered by `tests/poker-v2-live.behavior.test.mjs:4922` (targeted test1/1 PASS); it is not an integration blocker under current owner acceptance. No UI/protocol change, new test or smoke replay. Account Deletion V2 remains active; local recovery/BURN/Auth-last coverage retained, no real deletion.
+
+Production read-only preflight: service41bb6185/PID147840 and healthz/Redis identity pass; no active human claims/connections/pending work or nonzero closed escrow. But supervisor logs invalid_identity every10s, zero OPEN tables despite enabled desired count2. Existing system creation userIdnull hits account lifecycle UUID guard. Same code in Production/main/integration; local stub confirms failure before SQL. No merge/restart/deploy/data change made. Separate narrow trusted-system-owner guard fix/review and successful preflight are needed before rollout. [Full accepted integration evidence and blocker](https://github.com/krzysztofcal/arcadePlatform/pull/1152). Source PR stays Draft because deployment gate failed.
+
+## Historical implementation and standalone evidence — preserved, superseded by final review above
+
 Independent bugfix from main `6ecbc8a36a19952b7e86255436e8be903ea5d646`. No commits or artifacts from Offline PR #1147. Issue: https://github.com/krzysztofcal/arcadePlatform/issues/1148
 
 ## Change
