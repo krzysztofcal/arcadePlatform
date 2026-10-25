@@ -33,4 +33,4 @@ Owner S24+ PASS retained for T013–T014 clocks, bot delay/roster and Resume.
 
 - [x] T015 Restore common preaction markup/rules/snapshot execution; projected legality, exactly-once guard, hand/lifecycle invalidation; fundamental tests.
 - [x] T016 Common lobby/table components and Offline Chips wording; PC/v1 unchanged, existing issue decision updated; no paid/network functions restored.
-- [ ] Focused Preview portrait/landscape/preaction+visual comparison and final Stage APK; then owner final review. No merge/Production/WS replay/migrations/manual data changes.
+- [x] Focused Preview portrait/landscape/preaction+visual comparison PASS; Stage APK workflow PASS, final artifact linked in PR. **Owner final review PENDING**. No merge/Production/WS replay/migrations/manual data changes.

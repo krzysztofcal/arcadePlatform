@@ -1,4 +1,4 @@
-# T015–T016 — shared preactions and unified Offline UI (awaiting focused Preview)
+# T015–T016 — focused Preview PASS; new Stage APK for owner review
 
 Owner T013–T014 Galaxy S24+ PASS retained. New reported empty action panel traced to historical generator removal of V2 checkbox wrappers. Those wrappers are now unchanged source markup; existing buildQueuedPreaction/resolveQueuedPreactionExecution/maybeExecuteQueuedPreaction and canonical projectedLegalActions reused. Snapshot callback merges first, clears changed-hand intent and invokes queued execution as Online does. No second action engine or renderer.
 
@@ -9,6 +9,19 @@ T016 supersedes earlier visible Practice Chips requirement: **Offline Chips**, P
 Fundamentals23/23PASS (17Offline+3mobile+3canonical timeout); existing targeted V2 preaction cases4/4PASS. New tests evaluate common queue rules without a DOM framework and verify wait/legality/invalidation/exactly-once/stale timer+manual token/pause reset. Local actual-control probe: selecting Fold leaves revision unchanged until Hero, then one legal human FOLD. Independent review: no critical/important findings. Temporary Playwright uses visible checkbox label, not forced clicks on the intentionally non-interactive styled input.
 
 Source Online renderer/CSS for table and all shared WS modules unchanged; no WS Preview replay needed. Poker lobby CSS delta is scoped only to local tools and inherits existing button typography. No public protocol/finance breaking impact. Intended Offline UI changes: restored preactions and renamed visible currency. v1 records unaffected; queue is not persisted and cannot restore. No new dependency/framework/DB change. Preview/APK proof will be linked after completion; retain Draft, no merge/Production.
+
+## Current runtime evidence
+
+Tested `01c80359c3471ae443248c1dc3d9a23ed29ea39d`; [immutable Preview](https://6ade792e895465f3e23b5e56--playkcswh.netlify.app/poker/). [Session proof](evidence/preview-t015-t016-2026-10-25.json), [lobby comparison](evidence/preview-t015-lobby.png), [portrait preactions](evidence/preview-t015-portrait.png), [landscape preactions](evidence/preview-t015-landscape.png), [original Online presentation reference](evidence/preview-t015-online-reference.png).
+
+- Original three queue function bodies (`buildQueuedPreaction`, `resolveQueuedPreactionExecution`, `maybeExecuteQueuedPreaction`) byte-identical in generated renderer. Canonical projector unchanged. Source original Online table HTML/JS and all shared WS files unchanged.
+- Actual UI selected buy-in500 using `.quick-tier`, wallet5000→4500; no radio controls or visible Practice text. Hero turn showed normal buttons, opponent turn showed original four checkbox wrappers; normal button hidden when corresponding checkbox visible. Selecting Fold did not fold immediately; one unique later human FOLD committed in that hand. No force clicks/direct action handler/WS command. Styled input is deliberately covered by its normal label, so temporary probe clicks label as users do.
+- Another checkbox intent selected before Back; parked JSON contains no preaction. Resume reset checkbox, preserved hand/roster/wallet; Hero reached a legal turn without unexpected fold. Explicit Leave closed session, wallet4998/sessionnull (local only). No remote data mutation.
+- Portrait412×915 and landscape915×412 reviewed visually; Hero cards/frame/controls remain visible and source V2 action slider/checkbox styling retained. Lobby reviewed with Online/SinglePlayer/Offline cards side by side. Online table reference used its existing built-in demo with no tableId/login/JOIN in a separate fresh context: visual comparison only, **not a replay or claim of authenticated WS smoke**.
+- Disconnected table phase0requests/0fetch/XHR/WS/beacon attempts,0JS errors. Public lobby/reference loads outside this isolated phase. Timing/roster accepted S24+ results preserved.
+-23fundamental tests,4existing targeted Online V2 preaction tests, syntax/CSP/rebuild/whitespace PASS. Runtime CI/CodeQL/required Netlify/initial APK workflow40237214741 SUCCESS. Final evidence-only HEAD APK linked in PR once built; no further runtime change implied by evidence commit.
+
+Current verdict: ready for final owner review/new APK, **retain Draft**, no merge/Production. Offline Chips is a UI-only rename, no PC wallet/session migration or financial/protocol break. Existing data,20s clocks/1–2s bot decisions,2–5persisted bot composition,3s auto-next, reactions and six themes unchanged. Outstanding acceptance is owner confirmation of restored preactions and unified Offline UI on the new APK. No shared-runtime WS repeat.
 
 ---
 ## Prior accepted physical review/evidence
