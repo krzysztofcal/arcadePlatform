@@ -1,0 +1,105 @@
+{
+  "runtimeSha": "33fbe284859884fd2538774ae756f11aee154a04",
+  "origin": "https://deploy-preview-1152--playkcswh.netlify.app",
+  "workflow": "https://github.com/krzysztofcal/arcadePlatform/actions/runs/40178548341",
+  "workflowDefinitionSha": "6ecbc8a36a19952b7e86255436e8be903ea5d646",
+  "startedAt": "2026-10-25T08:57:33.370Z",
+  "finishedAt": "2026-10-25T08:58:15.298Z",
+  "restartAt": "2026-10-25T08:56:16Z",
+  "pidBefore": 285476,
+  "pidAfter": 295769,
+  "healthz": {
+    "local": "ok",
+    "public": "ok"
+  },
+  "moduleHashes": {
+    "ws-server/server.mjs": "71565bd98fd72e24d8deb52c9e33c4129b214392e7c3557cd0fae17b20163464",
+    "ws-server/poker/handlers/leave.mjs": "bbe2fcc605dc25415b00f2c7a53e55ac0bca8a2fa12a2702946ee7df1fdbb3cc",
+    "ws-server/poker/runtime/account-deletion.mjs": "aff06b5d14637ec74303d7ac2c05f30f99641c35b9f8d54cdaf61bfeb427c2d2",
+    "ws-server/poker/table/table-manager.mjs": "0a28067a903bdc782b62bc37ebe04a96656f0b8870efb4ac9ca6483f6042c648",
+    "ws-server/poker/runtime/accepted-bot-autoplay-adapter.mjs": "fbc0dd8e59a3e6ac5d000a026b99e870630e33641e46f25846df791a4bd25333"
+  },
+  "events": [
+    {
+      "at": "2026-10-25T08:57:38.633Z",
+      "kind": "socket_open",
+      "mode": "online",
+      "socket": 1,
+      "url": "wss://ws-preview.kcswh.pl/ws"
+    },
+    {
+      "at": "2026-10-25T08:57:44.305Z",
+      "kind": "socket_open",
+      "mode": "online",
+      "socket": 2,
+      "url": "wss://ws-preview.kcswh.pl/ws"
+    },
+    {
+      "at": "2026-10-25T08:57:45.021Z",
+      "kind": "ready_to_join",
+      "mode": "online",
+      "snapshot": {
+        "socket": 2,
+        "sequence": 1,
+        "tableId": "251abfb6-b333-4791-b446-536f4ff7f09f",
+        "requestId": "ws_1a17247b661_824ce599",
+        "version": 120,
+        "phase": "RIVER",
+        "handId": "ws_hand_251abfb6-b333-4791-b446-536f4ff7f09f_106_3",
+        "seat": null,
+        "humanStatus": null,
+        "botCount": 3,
+        "memberCount": 3,
+        "pot": 34,
+        "turnSeat": 1,
+        "humanBetPresent": false,
+        "humanFolded": false,
+        "ownCardCount": 0,
+        "legal": {
+          "seat": null,
+          "actions": []
+        }
+      }
+    },
+    {
+      "at": "2026-10-25T08:58:15.077Z",
+      "kind": "FAIL",
+      "mode": "online",
+      "reason": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('#pokerSpectatorJoinIntroBtn')\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" id=\"pokerSpec",
+      "snapshot": {
+        "socket": 2,
+        "sequence": 9,
+        "tableId": "251abfb6-b333-4791-b446-536f4ff7f09f",
+        "requestId": null,
+        "version": 128,
+        "phase": "FLOP",
+        "handId": "ws_hand_251abfb6-b333-4791-b446-536f4ff7f09f_124_3",
+        "seat": null,
+        "humanStatus": null,
+        "botCount": 3,
+        "memberCount": 3,
+        "pot": 6,
+        "turnSeat": 1,
+        "humanBetPresent": false,
+        "humanFolded": false,
+        "ownCardCount": 0,
+        "legal": {
+          "seat": null,
+          "actions": []
+        }
+      }
+    }
+  ],
+  "commandFramesSent": [],
+  "reconciliation": {
+    "walletBefore": 454,
+    "walletAfter": 454,
+    "userTransactionsSinceStart": 0,
+    "userPokerRequestsSinceStart": 0,
+    "tableId": "251abfb6-b333-4791-b446-536f4ff7f09f",
+    "tableStatus": "CLOSED",
+    "escrow": 0,
+    "humanSeats": 0
+  },
+  "verdict": "NOT READY \u2014 smoke BLOCKED before JOIN; no retry after timeout"
+}

@@ -77,3 +77,34 @@ No additional protocol, economic, schema or environment change. The source #1151
 8. On timeout, unclear operational result, audit/CH/privacy discrepancy: stop further gameplay mutations, read-only reconcile, no fault injection, repeats, balance/history repair or silent timeout workaround. Report PASS/FAIL/BLOCKED honestly, retain Draft and stop for review.
 
 Recommendation after green local/CI: **GO for the separately authorized bounded integration Preview test**, not merge-ready and not a deploy authorization. Historical timeout cause remains LIKELY until better evidence; integration smoke can validate the combined behavior, not manufacture missing historical logs.
+
+
+## Authorized exact-SHA Preview attempt — 2026-10-25
+
+**Verdict: NOT READY. Deployment PASS; required gameplay smoke BLOCKED before JOIN.** Do not interpret the local/CI results or deployment as completed integration verification. Source PRs remain unchanged and Draft; temporary #1152 must not be merged.
+
+Preflight: #1152 HEAD matched approved `33fbe284859884fd2538774ae756f11aee154a04`, CI green. No active Preview port3001 connections, active human stacks or concurrent live agents/deploys. Five OPEN tables contained only three bots/300CH escrow each. No pending Poker requests/deletion work observed. Previous table `2d200475-11f7-4069-8377-0ab8b9e9590f` CLOSED, escrow0. Old harness processes had finished reports and no live WS; not killed. Dedicated Stage wallet454CH. Root workspace unrelated changes untouched.
+
+Manual [WS Preview Deploy run40178548341](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40178548341) used workflow definition from main `6ecbc8a36a19952b7e86255436e8be903ea5d646`, application exact `33fbe284859884fd2538774ae756f11aee154a04`, existing Redis version3 input. SUCCESS. Installed release metadata matches exact SHA/ref/preview. Journald confirms stop/start08:56:16UTC, PID285476→295769; service active. Local/public healthz both200/ok. Five SHA256 module hashes equal source bytes (see evidence JSON). No configuration/secrets/logging changed.
+
+Authenticated browser verified Netlify #1152 build-info commit equals runtime SHA, Preview flag, pinned Stage project and WS Preview URL. Actual browser sockets connected to `wss://ws-preview.kcswh.pl/ws`. No private `handStartStacksByUserId` appeared in observed spectator frames, but funded Leave privacy remains untested.
+
+At08:57:45.021, observer saw table `251abfb6-b333-4791-b446-536f4ff7f09f`, RIVER hand `ws_hand_251abfb6-b333-4791-b446-536f4ff7f09f_106_3`, three bots/no human seat. Playwright selected `#pokerSpectatorJoinIntroBtn`; click timed out after30000ms at08:58:15.077. Browser captured **zero join/act/leave frames**. No JOIN requestId exists; no server ACK latency can be measured. The saved locator error is truncated, so precise DOM/actionability cause is UNKNOWN; do not infer a WS queue regression. This was an automation failure before dispatch, not a measured JOIN/Leave/retry ACK failure. An initial local harness startup also failed before opening a browser because its read-only DB probe could not open the root-owned service env file; no secrets/permissions were changed, and evidence reads used Stage MCP instead.
+
+| Scenario | Result |
+|---|---|
+| Preflight / exact-SHA deployment / restart / five hashes / health | PASS |
+| Matching Netlify source, Stage auth, actual WS Preview transport | PASS |
+| Observer bots continue across RIVER settlement/next hand | Observed; not funded audit verification |
+| Online JOIN ACK / WAITING_NEXT_HAND / exclusion from pot | BLOCKED — click never dispatched JOIN |
+| Legal human action / in-hand Leave ACK | BLOCKED — not run |
+| Original private map / target settlement audit / accounting deltas | BLOCKED — target human hand never created |
+| Reconnect and same-request Leave retry ACK<12s / single cashout | BLOCKED — not run |
+| Single Player FOLD→bots→settlement→Leave | BLOCKED — not run after stop |
+| Real Account Deletion | NOT RUN by authorization boundary; local fundamentals only |
+
+Read-only reconciliation after stop: wallet454→454CH; zero user transactions/Poker request records since08:55UTC; no human seat created. Observer table subsequently CLOSED by ordinary lifecycle, escrow0/human seats0. No financial test transaction IDs exist. No cashout, funded escrow or settlement claim can be made for the requested scenario. No later gameplay command, repeat attempt, manual correction, fault injection, real deletion, Production operation, merge or source PR modification followed the timeout.
+
+[Reduced deployment/smoke evidence](preview-smoke-2026-10-25.json). JOIN/Leave/retry ACK timings: **unavailable**, not zero and not PASS. Historical retry diagnosis remains LIKELY/UNKNOWN as above; this attempt does not resolve it.
+
+Next review: correct only the temporary browser harness's join actionability/selector handling, retain complete sanitized locator diagnostics, then seek owner GO for one bounded resumed smoke after fresh preflight. No product/runtime fix is justified by this evidence. The runtime remains installed at the approved SHA. The prospective #1149→main→Production, rebase/verify #1151→merge→Production, close #1152 without merge sequence remains **conditional on all required smoke gates passing and separate owner GO**; no progression is recommended now.
