@@ -1,5 +1,7 @@
 # Managed system table creation with active Account Deletion
 
+**CURRENT — owner-authorized conditional rollout (2026-10-25): Stage live creation NOT VERIFIED, explicitly accepted as residual risk; test window safely OFF.** Production preflight passed; merge/deploy proceeds only through required checks. Historical BLOCKED outcomes below remain unchanged as evidence, not reclassified as PASS.
+
 **Current runtime verification: BLOCKED at Preview preflight (2026-10-25).** Approved deploy SHAe3020b4f remains uninstalled; deletion-enabled runtime prerequisite could not be established. No deploy/configuration/data change. Not READY TO MERGE; local tests/CI remain green.
 
 ## Scope and decision
@@ -72,3 +74,16 @@ Old initializer module hash7a2940aae36bcde7134bf8db233426c96ce09cdf186190b6282c9
 | Live human guard regression | NOT RUN; existing fundamental coverage remains30/30 |
 
 [Reduced preflight evidence](preview-preflight-2026-10-25.json). No authenticated human gameplay, real deletion, financial write, environment/secret change, Production operation, deploy or merge. Source #1149/#1151/#1152 untouched. Literal flag value needs a sanctioned selected-field readonly status/owner verification; if it isOFF, a separately authorized controlled StageON window is needed before the requested live branch check. Do not silently enable it, bypass approved window protections or deploy as if an OFF smoke established ON coverage. Existing local flag1/human-fencing tests30/30, deletion35/35,npm147 groups and implementation CI remain valid. Production's previously recorded blocker remains unresolved; no new Production inspection in this Stage-only attempt. Preserve the prior conditional rollout plan, keep Draft, stop for review.
+
+
+## Owner acceptance and Production handoff — 2026-10-25
+
+[WS Preview Deploy40203427908](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40203427908) SUCCESS from main workflow/applicatione3020b4f. Installed metadata matched, initializer SHA256373b0b583fcaba07358c0ebdc44c63f554c9210b2002f6b3b11cd90a8683b29a, PID316167/start14:42:23UTC, local/public healthzok. Owner root subsequently proved that process had ACCOUNT_DELETION_ENABLED=1. Stage DB releasefalse and Netlify deletionOFF throughout; no accepted deletion, human gameplay or manual financial action.
+
+Observed until14:50:54UTC:5/5 existing managed tables, no new table/seed transaction despite passed rotation deadlines. Bot hands continued; no invalid_identity appeared. Aggregate escrow/stacks1500CH; POKER_BOT_BANKROLL_10017253→17253CH; zero ledger transactions since restart. No forcing/deficit/config manipulation. **Positive live creation/seeding remains NOT VERIFIED**, cause of absent rotation not established by existing logs.
+
+Owner root then used protected deactivate/verify/preflight, controlled Preview-only restart and selected-field process inspection: PID316167flag1→PID316767flag0,restartedtrue. Agent rechecked active service and healthzok. OFF is proved, not inferred from file alone. User explicitly accepts missing positive Stage creation witness because pool5/5 had no natural deficit and deterministic RED→GREEN/CI are green; this is a conscious residual-risk acceptance, not a smoke PASS. No further Stage smoke authorized/needed in this handoff.
+
+Fresh Production read-only preflight15:05:13UTC: no sockets/human claims/pending Poker or deletion requests; no nonzero closed/unbound escrow;0OPEN tables. Profile enabled desired2/target3,min2,max3,maxSeats6; tier100 enabled. NORMAL bankroll4760CH, SLOW2000CH, both active:600CH normal seed fits existing4760without top-up/refill (expected post-seed4160CH, above2000threshold). LIVE RedisV3prod PASS; service41bb6185/PID147840 healthzok with known invalid_identity baseline; no incompatible deploy/shared maintenance lock observed. No state/data/config changes by agent.
+
+Final diff remains one7-line production helper guard plus existing fundamental test and review/evidence. No production-code change after exact e3020b4f; follow-up commits documentation only. User GO allows **only #1153 merge and automatic WS/Netlify Production deployment**, then read-only proof of actual SHA/health/two tables/bots/6balanced seeds/escrow/no duplicate/invalid_identity. Stop on error/ambiguity. #1149/#1151 may be prepared only, **not merged in this task**; #1152 never merge. Owner risk acceptance and rollout result are also recorded in the PR for durable audit.
