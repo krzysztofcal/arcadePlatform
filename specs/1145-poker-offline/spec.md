@@ -31,3 +31,7 @@ Local session uses canonical bootstrap/rollover/reducer/settlement/legality and 
 Existing lobby is shared; its independent Offline card needs neither login nor successful online bootstrap. Isolated generated play.html excludes all online/auth/log/analytics scripts and blocks connections/frames/forms with CSP. Reuse V2 renderer source/controls/themes/animations/social catalog, hide paid gifts and online wallet. Fresh local tableId for New Game; persisted ID/theme for Resume. Practice never enters shared profile, CH cache, telemetry or sync, even after reconnect. Audio remains separate #1146; no new audio engine.
 
 Acceptance: deterministic fundamental sessions, legality/conservation, atomic failure/concurrency, Resume/idempotent Leave, output privacy; relevant existing WS tests/parity. Netlify disconnected after load through real controls and restored-network silence. Package same assets for Android cold airplane launch. Physical device acceptance pending if no device; implementation review-ready does not imply merge-ready without required exact-SHA WS evidence and device acceptance.
+
+## Review clarification — Back versus Leave
+
+Normal Back to lobby, including native Android Back, parks the committed local session unchanged for Resume; it does not invoke Leave or cashout. Only explicit Leave settles/refunds/closes it. Reuse V2 bindMenu/settings through the generator; no Online menu/transport changes.

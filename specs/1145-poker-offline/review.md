@@ -1,3 +1,18 @@
+# Owner review follow-up — menu and Back semantics (2026-10-25)
+
+REQUEST CHANGES addressed in the existing Draft PR. Generator calls the **same V2 `bindMenu()`**, with only its nested destination-link seam routed to local `PokerOffline.backToLobby()`. The shared Online renderer is unchanged. Back to lobby and native App `backButton` clear the local bot timer and navigate **without Leave/cashout/session mutation**; Resume retains the committed hand/tableId/theme. Bot scheduling now requires the table snapshot listener so lobby visibility/storage events cannot advance a parked session. Explicit menu Leave (with existing confirmation) and explicit session Leave still resolve/refund/remove session through the existing local path. No auth/WS/gifts/CH path activated.
+
+Local Offline header was intercepting the fixed hamburger: scoped CSS lowers only the header layer below V2 menu/settings and reserves left padding for the hamburger. One-line selector formatting preserved; no Online/global CSS changes.
+
+Temporary Playwright probe (outside repo): hamburger→Table settings→toggle reaction-bubbles option→Back→Resume→native Back callback→Resume→explicit menu Leave PASS. Back snapshots including wallet/revision/session match exactly; explicit Leave closes session and restores5000PC in the fresh100PC test. JS errors0. Native bridge callback was a browser probe, **not physical Android acceptance**. No new maintained UI test. Fundamental Offline+mobile security7/7PASS; syntax229files, CSP and SHA/SRI verification PASS. Generated artifacts rebuild deterministically. No `ws-server/**`/`shared/**`/online protocol/configuration changes, so no WS Preview replay; prior shared-WS proof354af80c retained.
+
+Build the Stage debug APK from this exact PR HEAD via the existing Android Poker M0 APK workflow. Artifact/run, exact SHA and SHA256 are linked in the PR and owner handoff once complete. No further docs-only commit is needed after that build. Still Draft, no merge/Production; **await owner physical device test**.
+
+Physical checklist: install Stage debug APK (a different ephemeral debug signature may require uninstall; uninstall loses local data). For cold-start verification clear only Stage app data, enable airplane mode before launching, and do not log in. Existing lobby→Offline→New Game;100/500/1000PC, legal actions/showdown/next hands, refill/rebuy. Back returns to lobby with Resume and no cashout; explicit Leave refunds once and removes Resume. Kill process during a session and Resume; test Android Back, background/foreground and rotation. Fresh tableID chooses existing theme, Resume keeps it. Restore internet and confirm Offline remains local with no CH/XP/gifts/sync. This is not authorization for Online funded play or real Account Deletion.
+
+---
+## Previous implementation evidence (retained)
+
 # T003–T008 — implementation ready for review; physical Android gate pending
 
 2026-10-25 continuation in **existing Draft PR #1147**, branch `feat/1145-offline-poc`. Owner GO supersedes historical T002 stop. No merge/Production/migration/manual finance or Offline/Online currency synchronization.

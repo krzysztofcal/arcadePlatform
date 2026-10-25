@@ -19,6 +19,7 @@ const replacements = {
     socialPreferencesIdentity = 'offline-human';
     applyTableTheme(resolveTableThemeId(tableId));
     bindControls();
+    bindMenu();
     if (els.sceneViewport && window.ResizeObserver) new ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
     markBootReady();
@@ -37,6 +38,7 @@ const replacements = {
     }, handleTableReaction);
     } catch(error) { document.getElementById('offlineError').textContent = error.message; }
   `,
+  bindDestinationLink: `if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby(); });`,
   isWsReady: 'return true;',
   sendCommand: `if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable offline')); return window.PokerOffline.act({type:payload.action, amount:payload.amount});`,
   leaveAndReturnToLobby: `return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/'); }).catch(function(error){setError(error.message);});`,

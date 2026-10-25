@@ -2957,7 +2957,7 @@
   function scheduleBots() {
     clearTimeout(timer);
     const s = game.read().session;
-    if (document.hidden || !s || !s.state.turnUserId || s.state.turnUserId === HUMAN) return;
+    if (!listener || document.hidden || !s || !s.state.turnUserId || s.state.turnUserId === HUMAN) return;
     timer = setTimeout(() => {
       run(() => {
         const before = game.read().session.state;
@@ -2981,9 +2981,14 @@
       busy = false;
     }
   }
+  function backToLobby() {
+    clearTimeout(timer);
+    window.location.assign("/poker/");
+  }
   window.PokerOffline = {
     human: HUMAN,
     read: game.read,
+    backToLobby,
     start(fn, reactions) {
       listener = fn;
       reactionListener = reactions;
@@ -3015,7 +3020,7 @@
   function init() {
     if (window.location.pathname === "/poker/offline/play.html") {
       const plugins = window.Capacitor?.Plugins;
-      if (plugins?.App) plugins.App.addListener("backButton", () => document.getElementById("pokerLobbyLink")?.click());
+      if (plugins?.App) plugins.App.addListener("backButton", backToLobby);
       if (plugins?.SystemBars) Promise.resolve(plugins.SystemBars.hide()).catch(() => {
       });
     }

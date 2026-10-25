@@ -6599,19 +6599,7 @@
       else els.menuPanel.setAttribute('hidden', 'hidden');
       els.menuToggle.setAttribute('aria-expanded', hidden ? 'true' : 'false');
     });
-    function bindDestinationLink(link, destination){
-      if (!link) return;
-      link.addEventListener('click', function(event){
-        if (!isSeatedAtLiveTable()){
-          closeMenu();
-          return;
-        }
-        if (event && typeof event.preventDefault === 'function') event.preventDefault();
-        closeMenu();
-        setError('');
-        openLeaveConfirm(destination);
-      });
-    }
+    function bindDestinationLink(link, destination){if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby(); });}
     bindDestinationLink(els.lobbyLink, '/poker/');
     function toggleSocialSettings(trigger){
       var opening = !!(els.socialSettingsPanel && els.socialSettingsPanel.hidden);
@@ -7447,6 +7435,7 @@
     socialPreferencesIdentity = 'offline-human';
     applyTableTheme(resolveTableThemeId(tableId));
     bindControls();
+    bindMenu();
     if (els.sceneViewport && window.ResizeObserver) new ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
     markBootReady();

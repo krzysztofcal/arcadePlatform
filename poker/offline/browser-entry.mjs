@@ -30,7 +30,7 @@ function updateWallet(){
 function scheduleBots(){
   clearTimeout(timer);
   const s=game.read().session;
-  if(document.hidden||!s||!s.state.turnUserId||s.state.turnUserId===HUMAN) return;
+  if(!listener||document.hidden||!s||!s.state.turnUserId||s.state.turnUserId===HUMAN) return;
   timer=setTimeout(()=>{
     run(()=>{const before=game.read().session.state;game.botStep();publish();botReaction(before);}).catch(fail);
   },350);
@@ -43,8 +43,10 @@ async function run(fn){
     await navigator.locks.request(STORAGE_KEY,async()=>{await fn();publish();scheduleBots();});
   }finally{busy=false;}
 }
+// Back pauses navigation only; the committed session remains available to Resume.
+function backToLobby(){clearTimeout(timer);window.location.assign('/poker/');}
 window.PokerOffline={
-  human:HUMAN, read:game.read,
+  human:HUMAN, read:game.read, backToLobby,
   start(fn,reactions){listener=fn;reactionListener=reactions;publish();scheduleBots();},
   act(action){return run(()=>{const before=game.read().session.state;game.act(action);publish();botReaction(before);});},
   leave(){clearTimeout(timer);return run(()=>game.leave());},
@@ -56,7 +58,7 @@ function init(){
   if(window.location.pathname==='/poker/offline/play.html'){
     // Existing native bridge only; no Auth/config/WS bootstrap on this entrypoint.
     const plugins=window.Capacitor?.Plugins;
-    if(plugins?.App) plugins.App.addListener('backButton',()=>document.getElementById('pokerLobbyLink')?.click());
+    if(plugins?.App) plugins.App.addListener('backButton',backToLobby);
     if(plugins?.SystemBars) Promise.resolve(plugins.SystemBars.hide()).catch(()=>{});
   }
   try{updateWallet();}catch(error){fail(error);}
