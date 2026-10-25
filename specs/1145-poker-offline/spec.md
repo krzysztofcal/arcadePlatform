@@ -63,3 +63,7 @@ Visible currency is **Offline Chips**, superseding every earlier Practice Chips 
 ## T017 — confirmed Back navigation
 
 Owner S24+ physical PASS for T015–T016 retained. Both menu Back and native Android Back use existing local styled dialog: title `Return to lobby?`, message `Your Offline game will be saved. You can continue later using Resume.`, buttons `Keep playing` / `Return to lobby`. Park clocks and clear volatile preactions before showing it. Cancel/Escape/repeat Back resume exact saved budgets, Confirm stays parked and navigates without cashout. Foreground events must not start timers behind an open confirmation. Single-flight covers pending pause, visible modal and confirmed navigation. Explicit Leave remains separate and settles/refunds only after its existing confirmation. Earlier immediate Back behavior is superseded; wallet key/schema and all game data unchanged.
+
+## T018–T019 — Android launch and Offline key art
+
+Owner physical acceptance T001–T017 retained. Stage Android starts with a branded dark native splash followed by an immediately styled local loading screen. No white default page, raw hyperlink or unstyled lobby. Reveal lobby only after bundled styles, fonts, main tile images and layout frames are ready; no dependency on authentication or network. Native cold-start appearance requires physical owner confirmation. Poker Offline gets its own portable-table teal/gold artwork; Single Player retains the robot. No engine, WS, wallet, data schema or Online behavior changes.

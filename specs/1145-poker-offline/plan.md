@@ -50,3 +50,10 @@ Generated PoC has no auth bootstrap, chips client, remote telemetry, APIs or onl
 - Generator destination link calls same local Back method with local error presentation. Three fundamental actual-function tests cover Cancel/Confirm/session budget, quick repeated Back and BFCache restoration; one short Preview probe plus exact-HEAD Stage APK. No Online/WS/CH/migration/dependency or CSS changes.
 
 - Existing pageshow lifecycle clears confirmed-navigation latch on BFCache restore; a pending unconfirmed modal remains paused, and repeated Back still cancels it.
+
+## T018–T019 minimal approach
+
+1. Reuse pinned Android template core-splashscreen dependency (already present): configure native dark launch theme/vector mark, install compat splash before BridgeActivity and dark WebView/window surfaces. No new package.
+2. Replace packaged raw entry link with launch.html. Its inline critical style and markup are reused in packaged lobby by existing package-web.mjs. launch.js redirects entry, then hides lobby overlay only after DOMContentLoaded/styles/fonts/main images/two layout frames; no minimum wait, network or Auth requirement. This composition applies only to mobile bundle.
+3. Offline tile alone references new offline-v1.webp, generated with built-in imagegen and optimized to768×1152WebP. Prompt: polished cinematic3D portable poker case/table with teal/gold chips, two aces, sunset mountains, indigo lower negative space, no people/robots/text; match glossy Arcade Poker styling while distinct from Single Player. Web/native chip/spade launch mark is code-native.
+4. Reuse fundamental suites, no new tests of CSS/simple glue. One focused Netlify tile/start-page smoke, inspect packaged startup under delayed styles in temporary browser automation; hosted exact-SHA Stage APK. Physical cold start remains owner acceptance. Preserve T017 and isolated table CSP/SRI.

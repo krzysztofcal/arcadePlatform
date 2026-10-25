@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, copyFile } from 'node:fs/promises';
 const file = new URL('./android/app/src/main/AndroidManifest.xml', import.meta.url);
 let xml = await readFile(file, 'utf8');
 if (xml.includes('arcadepoker-stage')) throw new Error('Callback already configured');
@@ -26,6 +26,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.WebView;
 import androidx.activity.EdgeToEdge;
+import androidx.core.splashscreen.SplashScreen;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -40,7 +41,9 @@ activity = activity.replace('public class MainActivity extends BridgeActivity {}
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        SplashScreen.installSplashScreen(this);
         super.onCreate(savedInstanceState);
+        getWindow().getDecorView().setBackgroundColor(android.graphics.Color.rgb(11, 16, 32));
         EdgeToEdge.enable(this);
         WindowManager.LayoutParams window = getWindow().getAttributes();
         if (Build.VERSION.SDK_INT >= 30) {
@@ -98,3 +101,14 @@ activity = activity.replace('public class MainActivity extends BridgeActivity {}
     }
 }`);
 await writeFile(activityFile, activity);
+
+// Keep the launch window and WebView on the same dark brand surface.
+const stylesFile = new URL('./android/app/src/main/res/values/styles.xml', import.meta.url);
+let styles = await readFile(stylesFile, 'utf8');
+if (!styles.includes('<item name="android:background">@drawable/splash</item>')) throw new Error('Unexpected launch theme template');
+styles = styles.replace('<item name="android:background">@null</item>', '<item name="android:windowBackground">#0b1020</item>');
+styles = styles.replace('<item name="android:background">@drawable/splash</item>', `<item name="windowSplashScreenBackground">#0b1020</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/poker_launch_mark</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>`);
+await writeFile(stylesFile, styles);
+await copyFile(new URL('./launch-mark.xml', import.meta.url), new URL('./android/app/src/main/res/drawable/poker_launch_mark.xml', import.meta.url));

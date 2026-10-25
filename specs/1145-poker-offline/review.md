@@ -1,3 +1,10 @@
+# T018–T019 — launch polish and Offline artwork (verification in progress)
+
+Owner physical T017 and earlier fixes accepted. Confirmed source of raw blue link: package-web generated default white entry body containing Open Poker Lobby before redirect. Replaced with branded inline-painted loading document, shared into mobile lobby only. Android already depends on core-splashscreen; install its compat API, dark launch/window/WebView surfaces and chip/spade vector. Lobby readiness waits local styles/DOM/fonts/main artwork and layout frames without login/network. No new dependency or Online bootstrap/runtime behavior change. Offline tile now uses dedicated portable-table teal/gold artwork; Single Player unchanged.
+
+No financial/schema/protocol breaking impact. Intentional presentation changes only, existing v1 saves and T001–T017 untouched. New launch files CSP/SRI, native compile and focused browser/Preview checks recorded after build. Native first-frame/cold-start claim remains PENDING physical Android owner verification; browser screenshot is not proof of Android compositor behavior. No emulator/local Android build, WS replay, merge or Production.
+
+---
 # T017 — Back confirmation: focused Preview PASS; awaiting owner APK acceptance
 
 Owner S24+ physical PASS for T015–T016 retained. New immediate-navigation report confirmed: former backToLobby parked then navigated directly. Updated only local controller/generator and generated artifacts: existing offlineConfirm now asks `Return to lobby?` with saved/Resume message and Keep playing/Return to lobby labels. Same styles; ask defaults reset for New Game/Reset.

@@ -42,3 +42,9 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] Add existing-styled Back confirmation, clock pause, Cancel/Confirm labels and single-flight lifecycle handling; keep explicit Leave separate.
 - [x] Fundamental Cancel/Confirm/Resume and rapid repeated-Back tests; preserve wallet and preaction reset.
 - [ ] Short Netlify Preview/Stage APK evidence, then owner final acceptance. Retain Draft; no Online/WS/CH/Production/migration changes.
+
+## T018–T019
+
+- [x] Trace raw entry link/default white surfaces; add dark branded native splash with existing dependency and local loader readiness; dedicated Offline key art.
+- [ ] Fundamental checks, focused Preview and packaged startup evidence; current-SHA Stage APK.
+- [ ] Owner physical cold start (airplane mode): no white flash/raw text, smooth splash→loading→lobby; verify Offline artwork. Keep Draft, no merge/Production/WS replay.
