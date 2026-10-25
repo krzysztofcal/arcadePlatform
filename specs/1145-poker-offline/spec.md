@@ -1,4 +1,4 @@
-# Current scope: T001–T008 authorized; implementation in progress
+# Current scope: T001–T008 implemented; review-ready, physical Android acceptance pending
 
 The T002 boundary below is historical. The approved continuation at the end supersedes its stop/non-goals.
 

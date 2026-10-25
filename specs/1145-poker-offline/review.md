@@ -1,3 +1,52 @@
+# T003–T008 — implementation ready for review; physical Android gate pending
+
+2026-10-25 continuation in **existing Draft PR #1147**, branch `feat/1145-offline-poc`. Owner GO supersedes historical T002 stop. No merge/Production/migration/manual finance or Offline/Online currency synchronization.
+
+## Result and runtime
+
+- Main `892661f44f4e9fdbe3df24f0553fa1191bf1752e` merged preserving history (`2af27654`); only conflict was adjacent adapter tests, retaining both strategy and FIFO fairness cases. No force push/new PR.
+- Final tested runtime/artifacts **`354af80c0a93d927fb8cf6f827fa77ffad81988c`**. Later evidence/spec commits contain no runtime/configuration change.
+- [Immutable Netlify Preview](https://6ade3e5b7840a0c0a03e244f--playkcswh.netlify.app/poker/) / [isolated table](https://6ade3e5b7840a0c0a03e244f--playkcswh.netlify.app/poker/offline/play.html). Netlify API: ready, deploy-preview, exact commit_ref354af80c. Current route is play.html; historical poc.html links refer to the immutable PoC build.
+- [Exact-SHA WS Preview Deploy](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40217453669): workflow from main, application354af80c, SUCCESS. Installed release metadata preview/exactSHA, PID328965 restarted17:39:35UTC, local/public healthzOK. Adapter SHA256 `ea11185645e0ee557adbccb9d22c0b391f007e3241ae166336170154481903ea`; strategy `8e924c2c24d293b3355b753c26f8143b0f9f8eba4190e38e6a2d4320e9a076ec`, source/deployed match.
+
+## Implemented
+
+`offline-game.mjs::createOfflineGame` now exposes newGame/nextHand/act/botStep/rebuy/leave/refill/read/snapshot. Canonical `buildNextHandStateFromSettled` rotates dealer; bootstrap, legality, betting, showdown, side pots and settlement remain the accepted WS sources listed below. All18 moved strategy function bodies are byte-identical to current main; one focused NORMAL/AA strategy case and existing adapter tests pass. Adapter retains maxActions1/WS strict cap from #1149; server/Leave/deletion-runtime/table-manager/initializer byte-match main (#1151/#1153).
+
+Versioned localStorage key `arcade.poker.offline.v1` holds wallet+session+revision in one atomic record: start5000PC, fixed100/500/1000, local free refill, explicit local-only reset. Each action rereads committed data; async deal checks revision; browser Web Locks serialize writers, including reset and bot ticks. Failed writes preserve prior record. Leave resolves current hand through canonical rules then credits only human stack and removes session in one commit; repeat Leave returns0. New Game on an existing session asks before settling/leaving it. Rebuy between settled hands tops human up to buy-in; broke bots replenish from local play currency only, never human wallet/CH. Next hand is explicit; hidden/background page pauses bot timer, Resume continues persisted turn without timeout-folding the human.
+
+`browser-entry.mjs` independently binds Offline card and local controls. Existing lobby has third playable mode regardless Auth; Coming Soon World Tour/Seasons/Sit&Go tiles removed. V2 HTML/source renderer/CSS/animations/six-theme hash reused via generated isolated play.html and IIFEs; no maintained duplicate engine/table. New Game generates fresh local ID; Resume preserves ID/theme. Existing predefined reactions/history and pure contextual bot classifiers run locally, including targeted Nice hand. Gift Shop/paid gifts/online wallet hidden; no arbitrary chat. No second audio engine; **#1146 remains separately OPEN**.
+
+Isolated table loads no auth, WS client, ChipsClient, API, analytics or remote logging scripts. Hash/SRI CSP denies connections/frames/forms, including injected Netlify toolbar. No data enters online profiles/CH/XP/cache/sync. Generic lobby online functionality remains separate; network monitoring below measures the actual isolated session, not a claim that the shared Online lobby is network-free.
+
+## Verification
+
+- **4 fundamental Offline tests PASS**: illegal action leaves committed bytes unchanged, pot/stack/payout conservation, multi-hand/Resume, idempotent cashout, failed write and stale async deal, refill/rebuy, corrupt/version fail-closed, public projection excludes private seed/deck/start-stack map.
+- **94 relevant shared/domain/projector/adapter tests PASS**; **full npm test148 runner groups PASS**, syntax228files/CSP56documents/whitespace PASS. Initial full local run lacked existing WS package dependency; locked `ws-server npm ci` fixed environment only, no dependency/config change. Maintenance8/8 then full suite passed.
+- Current runtime CI: core, ws-harness, ws-persistence-integration, account-deletion-fundamentals, CodeQL analyses, actionlint, required Netlify checks SUCCESS; expected filter SKIPPED/informational NEUTRAL only. [Tests](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40217366053), [WS PR Checks](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40217366025), [WS validation](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40217366172).
+- [Browser session/network proof](evidence/preview-session-2026-10-25.json), [settled screenshot](evidence/preview-session-settled.png): real lobby New Game, local reaction, real V2 Call/Check through five-card showdown while network disabled, Next Hand, restore internet4500ms, reload/Resume, disconnect/manual Fold/bot finish, normal local Leave, fresh New Game. **0 requests and0 fetch/XHR/WS/beacon attempts in disconnected/restored-idle/second-disconnected session phases;0 JS errors.** All transport wrappers only observed, did not mock/block actions. No direct WS commands/forced clicks. The initial lobby/navigation loads are separately recorded and may use normal online bootstrap.
+- Board2C KD4H7S QD, stacks108/96/96,pot0,total300. Hand2 Resume same Classic ID `offline-0cc8b490-683e-4c5f-83ee-0c5dcb1d0876`; wallet4900 +106cashout =5006,sessionnull. Fresh ID `offline-089a42f5-e20d-4151-af3e-3d024ef15624` chooses Royal Gold, wallet4906 after new100buy-in. Earlier local diagnostic used Crimson Velvet and same-theme Resume; all six asset sets are packaged, not all visually certified on device.
+- Independent code review: reset serialization race fixed before review completion; animation and targeted-reaction integration findings fixed and covered by actual final Preview smoke. No remaining critical/important finding. Earlier temporary local primary-click timeout had no captured state sufficient for attribution; harness now observes committed revision and enabled real control. Final remote scenario PASS does not retroactively label that diagnostic PASS.
+
+## Limited WS observation (no repeated funded smoke)
+
+Read-only preflight17:38UTC:0established WS connections,0human seats/stacks,0pending/deletion operations,0nonzero closed escrow; five OPEN bot tables each300CH =stacks+active contributions. No concurrent workflow/agent test. No environment flag/secret changes.
+
+After exact deploy, naturally running bots produced **21 HAND_SETTLED across5tables by17:42:14UTC,0bad audits**. Sample hands: `ws_hand_fe482114-837e-4d08-aeb1-555eeb55d83a_199_3`, `ws_hand_8ce5b6f0-a3f3-4705-a319-ce6e279f0c9c_271_3`, `ws_hand_6b45940d-7343-4092-8cf6-11f5c77c921e_209_3`: integrityOK,flags[],original300 ending300,pot/stack/payout deltas0. New PID journal shows no errors. This is focused shared-strategy/bot settlement evidence, not a repeated authenticated Online/SinglePlayer/gift campaign. Existing accepted #1152 source-smoke evidence was not replayed.
+
+## Android artifact and remaining owner acceptance
+
+[Android APK workflow40217366017](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40217366017) SUCCESS; artifact `arcade-poker-stage-354af80c0a93d927fb8cf6f827fa77ffad81988c` (7-day retention). Debug APK10318137bytes (~10.3MB), bundled web7474583bytes; SHA256 **`cf45da83cf4a66dfd7c3902386a916e5c3b7ac6c56b2a93fe21a9ba743d2bc86`**. [Package integrity](evidence/android-package-2026-10-25.json): all99Pokerassets included, five theme directories+Classic art; isolated HTML/JS/CSS byte-match repo and both script SRI hashes PASS. Generated engine131755bytes, renderer350246bytes uncompressed. Existing Stage shell/config remains Stage; **not a signed Production Play build**.
+
+**PENDING OWNER — actual Android device, no device attached here.** Install artifact (ephemeral debug signature may require uninstall, which erases local data), clear only this Stage app data, enable airplane mode *before first launch*, open existing lobby→Offline without login,100/500/1000 selection/refill, legal play→showdown, several hands/rebuy/Leave, Resume after process kill, Back/background/rotation, fresh-ID/theme and preserved Resume theme, theme fallback, no gifts/free text; restore internet and confirm session remains local. Do not perform online funded actions/deletion as part of this acceptance. Browser Preview after-load offline proof does not replace cold Android proof.
+
+## Risk / breaking impact / recommendation
+
+**READY FOR IMPLEMENTATION REVIEW; retain Draft, NOT merge-ready pending physical Android acceptance.** No public WS/API/CH/XP/protocol/schema changes, no Production effect. Strategy extraction is behavior-preserving and exact-SHA Preview verified; future common-source changes require regenerating checked browser bundles and rebuilding APK. Storage is origin/device-local, tamperable practice only; clear/uninstall loses it. Requires secure-context Web Crypto and Web Locks (unsupported browsers fail visibly, no online fallback). Next-hand/refill are explicit local controls; no PWA/browser cold-load promise. Intentional UI change: hide deferred Coming Soon modes. Audio remains #1146; no final Play packaging/submission or live Account Deletion. No manual financial repair/mutation.
+
+---
+# Historical T001–T002 evidence (superseded stop/readiness labels retained)
+
 # T001–T002 review handoff — STOP
 
 Subsequent authorized WS verification: [deployment/smoke/CodeQL report](ws-verification.md). CodeQL neutral has since resolved to success; human Online smoke stopped at joined-snapshot timeout, so runtime regression risk remains open.
