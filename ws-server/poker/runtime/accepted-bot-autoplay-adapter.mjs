@@ -350,8 +350,6 @@ function buildSeatUserIdsInOrder(state) {
 }
 
 function getBotAutoplayConfig(env = process.env, runtimeOverride = null) {
-  const hardCapRaw = Number(env?.POKER_BOTS_BOTS_ONLY_HAND_HARD_CAP);
-  const botsOnlyHandCompletionHardCap = Number.isInteger(hardCapRaw) && hardCapRaw > 0 ? hardCapRaw : 80;
   const configuredMinRaw = Number(env?.WS_BOT_REACTION_MIN_MS);
   const configuredMaxRaw = Number(env?.WS_BOT_REACTION_MAX_MS);
   const overrideMinRaw = Number(runtimeOverride?.minMs);
@@ -371,7 +369,6 @@ function getBotAutoplayConfig(env = process.env, runtimeOverride = null) {
       ? Math.trunc(configuredMaxRaw)
       : DEFAULT_BOT_REACTION_MAX_MS;
   return {
-    botsOnlyHandCompletionHardCap,
     minReactionMs,
     maxReactionMs,
     policyVersion: "WS_SHARED_AUTOPLAY"
@@ -878,7 +875,9 @@ export function createAcceptedBotStepExecutor({
         seatBotMap,
         seatUserIdsInOrder,
         maxActions: 1,
-        botsOnlyHandCompletionHardCap: cfg.botsOnlyHandCompletionHardCap,
+        // One FIFO entry must never drain a whole bots-only hand. The WS
+        // cascade schedules the next action after pending JOIN/Leave commands.
+        botsOnlyHandCompletionHardCap: 1,
         policyVersion: cfg.policyVersion,
         botActionRandom: random,
         klog,
