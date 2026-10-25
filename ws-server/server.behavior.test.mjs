@@ -1741,6 +1741,22 @@ function waitForExit(proc) {
 }
 
 function createServer({ env = {}, nodeArgs = [] } = {}) {
+  // Leave's public-result override models a committed external transaction.
+  // Supply its persisted counterpart for the production post-commit reload.
+  const left = env.WS_TEST_LEAVE_RESULT_JSON ? JSON.parse(env.WS_TEST_LEAVE_RESULT_JSON) : null;
+  const state = left?.state?.state;
+  if (left?.ok && state?.tableId === left.tableId && state?.stacks && Array.isArray(state.seats) && !env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON) {
+    const tableId = state.tableId;
+    env = { ...env, WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify({ [tableId]: {
+      tableRow: { id: tableId, status: left.tableStatus || 'OPEN', max_players: 6, buy_in: 100, is_single_player: false },
+      seatRows: state.seats.filter(seat => !state.leftTableByUserId?.[seat.userId]).map(seat => ({
+        user_id: seat.userId, seat_no: seat.seatNo ?? seat.seat, status: 'ACTIVE',
+        is_bot: seat.isBot === true, stack: state.stacks?.[seat.userId] ?? 0
+      })),
+      stateRow: left.state
+    } }) };
+  }
+
   return getFreePort().then((port) => {
     const child = spawn(process.execPath, [...nodeArgs, "ws-server/server.mjs"], {
       env: {
