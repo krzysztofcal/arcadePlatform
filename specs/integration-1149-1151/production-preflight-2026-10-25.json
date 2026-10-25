@@ -1,0 +1,49 @@
+{
+  "at": "2026-10-25T13:07:12.799477Z",
+  "productionRuntimeSha": "41bb6185d38201e727cb9953a98b22e9a2711edc",
+  "main": "6ecbc8a36a19952b7e86255436e8be903ea5d646",
+  "service": {
+    "active": true,
+    "pid": 147840,
+    "startedAt": "2026-10-23T10:13:58Z",
+    "localHealthz": "ok",
+    "publicHealthz": "ok",
+    "redisEnvPreflight": "PASS LIVE Redis V3 prod",
+    "establishedWsConnections": 0
+  },
+  "database": {
+    "project": "otbqfijerkieoxwpxjnm",
+    "openTables": 0,
+    "activeOrNonzeroHumanClaims": 0,
+    "pendingRequests": 0,
+    "pendingDeletions": 0,
+    "closedNonzeroEscrow": 0,
+    "managedProfileEnabled": true,
+    "desiredManagedTables": 2
+  },
+  "logs": {
+    "event": "ws_continuous_bot_table_supervisor_failed",
+    "reason": "invalid_identity",
+    "severity": "ERROR",
+    "observedEverySeconds": 10,
+    "sampleFrom": "2026-10-25T12:59:16Z",
+    "sampleTo": "2026-10-25T13:07:26Z"
+  },
+  "codePath": [
+    "createManagedTable(userId:null)",
+    "createPokerTableWithState(accountDeletionEnabled)->assertAccountActive(null)",
+    "requireUuid(null)->invalid_identity"
+  ],
+  "unchangedInDeployedRuntimeMainAndIntegration": [
+    "ws-server/poker/persistence/continuous-bot-table-repository.mjs",
+    "netlify/functions/_shared/poker-table-init.mjs",
+    "shared/account-deletion.mjs"
+  ],
+  "localStubConfirmation": {
+    "error": "invalid_identity",
+    "sqlCalls": 0,
+    "providerCalls": 0
+  },
+  "decision": "STOP before merge #1149; #1151 not advanced; integration evidence accepted, Production rollout BLOCKED",
+  "writes": "none to Production; no restart/deploy/merge; documentation-only source branch updates allowed"
+}
