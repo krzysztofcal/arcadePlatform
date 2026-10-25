@@ -1,0 +1,1127 @@
+{
+  "runtimeSha": "33fbe284859884fd2538774ae756f11aee154a04",
+  "frontendSha": "4bc5512ea2b9fed618651960753447d8afb67fed",
+  "preflight": {
+    "humanActiveOrNonzero": 0,
+    "pendingRequests": 0,
+    "pendingDeletions": 0,
+    "activeConnections": 0,
+    "wallet": 454
+  },
+  "segments": {
+    "smoke": {
+      "startedAt": "2026-10-25T12:20:51.627Z",
+      "finishedAt": "2026-10-25T12:24:58.633Z",
+      "events": [
+        {
+          "at": "2026-10-25T12:20:55.732Z",
+          "kind": "socket_open",
+          "mode": "online",
+          "socket": 1,
+          "url": "wss://ws-preview.kcswh.pl/ws"
+        },
+        {
+          "at": "2026-10-25T12:21:01.641Z",
+          "kind": "socket_open",
+          "mode": "online",
+          "socket": 2,
+          "url": "wss://ws-preview.kcswh.pl/ws"
+        },
+        {
+          "at": "2026-10-25T12:21:05.357Z",
+          "kind": "standard_join_ready",
+          "mode": "online",
+          "dom": {
+            "button": {
+              "selector": "#pokerV2JoinBtn",
+              "hidden": false,
+              "disabled": false,
+              "classes": "poker-live-btn poker-live-btn--accent",
+              "box": {
+                "x": 1309,
+                "y": 8,
+                "width": 51,
+                "height": 36
+              },
+              "pointerEvents": "auto",
+              "display": "block",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": true,
+              "interceptor": {
+                "tag": "BUTTON",
+                "id": "pokerV2JoinBtn",
+                "classes": "poker-live-btn poker-live-btn--accent"
+              }
+            },
+            "intro": {
+              "selector": "#pokerSpectatorJoinIntro",
+              "hidden": true,
+              "disabled": null,
+              "classes": "poker-spectator-join-intro",
+              "box": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "pointerEvents": "none",
+              "display": "none",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": false,
+              "interceptor": {
+                "tag": "DIV",
+                "id": "pokerTableScreen",
+                "classes": "poker-table-screen"
+              }
+            },
+            "introButton": {
+              "selector": "#pokerSpectatorJoinIntroBtn",
+              "hidden": false,
+              "disabled": false,
+              "classes": "poker-spectator-join-intro__btn",
+              "box": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "pointerEvents": "auto",
+              "display": "flex",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": false,
+              "interceptor": {
+                "tag": "DIV",
+                "id": "pokerTableScreen",
+                "classes": "poker-table-screen"
+              }
+            }
+          },
+          "snapshot": {
+            "socket": 2,
+            "sequence": 2,
+            "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+            "requestId": null,
+            "version": 235,
+            "phase": "FLOP",
+            "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_232_3",
+            "seat": null,
+            "humanStatus": null,
+            "botCount": 3,
+            "memberCount": 3,
+            "pot": 6,
+            "turnSeat": 3,
+            "humanBetPresent": false,
+            "humanFolded": false,
+            "ownCardCount": 0,
+            "legal": {
+              "seat": null,
+              "actions": []
+            }
+          }
+        },
+        {
+          "at": "2026-10-25T12:21:05.461Z",
+          "kind": "sent",
+          "mode": "online",
+          "type": "join",
+          "requestId": "join_mvnsqtri_qn0i883b",
+          "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0"
+        },
+        {
+          "at": "2026-10-25T12:21:08.030Z",
+          "kind": "command_result",
+          "mode": "online",
+          "requestId": "join_mvnsqtri_qn0i883b",
+          "serverTs": "2026-10-25T12:21:08.022Z",
+          "status": "accepted",
+          "reason": "already_joined",
+          "seatNo": 4,
+          "joinStatus": "WAITING_NEXT_HAND",
+          "elapsedMs": 2569
+        },
+        {
+          "at": "2026-10-25T12:21:08.076Z",
+          "kind": "online_join_pass",
+          "mode": "online",
+          "before": {
+            "socket": 2,
+            "sequence": 2,
+            "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+            "requestId": null,
+            "version": 235,
+            "phase": "FLOP",
+            "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_232_3",
+            "seat": null,
+            "humanStatus": null,
+            "botCount": 3,
+            "memberCount": 3,
+            "pot": 6,
+            "turnSeat": 3,
+            "humanBetPresent": false,
+            "humanFolded": false,
+            "ownCardCount": 0,
+            "legal": {
+              "seat": null,
+              "actions": []
+            }
+          },
+          "result": {
+            "requestId": "join_mvnsqtri_qn0i883b",
+            "serverTs": "2026-10-25T12:21:08.022Z",
+            "status": "accepted",
+            "reason": "already_joined",
+            "seatNo": 4,
+            "joinStatus": "WAITING_NEXT_HAND",
+            "elapsedMs": 2569
+          },
+          "assigned": {
+            "socket": 2,
+            "sequence": 4,
+            "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+            "requestId": "join_mvnsqtri_qn0i883b",
+            "version": 237,
+            "phase": "FLOP",
+            "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_232_3",
+            "seat": 4,
+            "humanStatus": "WAITING_NEXT_HAND",
+            "botCount": 4,
+            "memberCount": 5,
+            "pot": 6,
+            "turnSeat": 1,
+            "humanBetPresent": false,
+            "humanFolded": false,
+            "humanStack": 100,
+            "ownCardCount": 0,
+            "legal": {
+              "seat": 4,
+              "actions": []
+            }
+          }
+        },
+        {
+          "at": "2026-10-25T12:21:52.376Z",
+          "kind": "readonly_checkpoint",
+          "mode": "online",
+          "n": 1,
+          "checkpoint": "capture_map",
+          "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+          "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5"
+        },
+        {
+          "at": "2026-10-25T12:21:53.652Z",
+          "kind": "sent",
+          "mode": "online",
+          "type": "act",
+          "requestId": "ws_1a173029d70_34190a2a",
+          "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5",
+          "action": "CALL"
+        },
+        {
+          "at": "2026-10-25T12:21:53.887Z",
+          "kind": "command_result",
+          "mode": "online",
+          "requestId": "ws_1a173029d70_34190a2a",
+          "serverTs": "2026-10-25T12:21:53.882Z",
+          "status": "accepted",
+          "reason": null,
+          "elapsedMs": 235
+        },
+        {
+          "at": "2026-10-25T12:21:53.958Z",
+          "kind": "player_action_pass",
+          "mode": "online",
+          "label": "Call (2)",
+          "requestId": "ws_1a173029d70_34190a2a",
+          "result": {
+            "requestId": "ws_1a173029d70_34190a2a",
+            "serverTs": "2026-10-25T12:21:53.882Z",
+            "status": "accepted",
+            "reason": null,
+            "elapsedMs": 235
+          }
+        },
+        {
+          "at": "2026-10-25T12:21:53.973Z",
+          "kind": "sent",
+          "mode": "online",
+          "type": "leave",
+          "requestId": "leave_1152_mvnsrv6v",
+          "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0"
+        },
+        {
+          "at": "2026-10-25T12:21:57.795Z",
+          "kind": "command_result",
+          "mode": "online",
+          "requestId": "leave_1152_mvnsrv6v",
+          "serverTs": "2026-10-25T12:21:57.792Z",
+          "status": "accepted",
+          "reason": null,
+          "elapsedMs": 3822
+        },
+        {
+          "at": "2026-10-25T12:21:57.796Z",
+          "kind": "leave_accepted",
+          "mode": "online",
+          "requestId": "leave_1152_mvnsrv6v",
+          "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+          "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5",
+          "before": {
+            "socket": 2,
+            "sequence": 18,
+            "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+            "requestId": null,
+            "version": 251,
+            "phase": "FLOP",
+            "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5",
+            "seat": 4,
+            "humanStatus": "ACTIVE",
+            "botCount": 4,
+            "memberCount": 5,
+            "pot": 12,
+            "turnSeat": 5,
+            "humanBetPresent": true,
+            "humanFolded": false,
+            "humanStack": 96,
+            "ownCardCount": 2,
+            "legal": {
+              "seat": 4,
+              "actions": [
+                "FOLD"
+              ]
+            }
+          },
+          "result": {
+            "requestId": "leave_1152_mvnsrv6v",
+            "serverTs": "2026-10-25T12:21:57.792Z",
+            "status": "accepted",
+            "reason": null,
+            "elapsedMs": 3822
+          }
+        },
+        {
+          "at": "2026-10-25T12:21:57.797Z",
+          "kind": "readonly_checkpoint",
+          "mode": "online",
+          "n": 2,
+          "checkpoint": "after_leave_map",
+          "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+          "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5"
+        },
+        {
+          "at": "2026-10-25T12:24:58.629Z",
+          "kind": "FAIL",
+          "mode": "online",
+          "reason": "timeout_settlement_snapshot",
+          "stack": "Error: timeout_settlement_snapshot\n    at until (/tmp/1152-resume-smoke.cjs:14:202)\n    at async audit (/tmp/1152-resume-smoke.cjs:9:38)\n    at async /tmp/1152-resume-smoke.cjs:59:33",
+          "dom": null,
+          "snapshot": {
+            "socket": 2,
+            "sequence": 19,
+            "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+            "requestId": null,
+            "version": 252,
+            "phase": "FLOP",
+            "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5",
+            "seat": 4,
+            "humanStatus": "ACTIVE",
+            "botCount": 4,
+            "memberCount": 5,
+            "pot": 16,
+            "turnSeat": 1,
+            "humanBetPresent": true,
+            "humanFolded": false,
+            "humanStack": 96,
+            "ownCardCount": 2,
+            "legal": {
+              "seat": 4,
+              "actions": [
+                "FOLD"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "continuation": {
+      "startedAt": "2026-10-25T12:24:38.523Z",
+      "finishedAt": "2026-10-25T12:24:48.373Z",
+      "events": [
+        {
+          "at": "2026-10-25T12:24:44.430Z",
+          "kind": "socket_open",
+          "mode": "online",
+          "socket": 1,
+          "url": "wss://ws-preview.kcswh.pl/ws"
+        },
+        {
+          "at": "2026-10-25T12:24:45.149Z",
+          "kind": "observer_reconnect_pass",
+          "mode": "online",
+          "snapshot": {
+            "socket": 1,
+            "sequence": 1,
+            "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+            "requestId": "ws_1a173053a78_ec5890eb",
+            "version": 304,
+            "phase": "PREFLOP",
+            "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_300_4",
+            "seat": null,
+            "humanStatus": null,
+            "botCount": 4,
+            "memberCount": 4,
+            "pot": 18,
+            "turnSeat": 5,
+            "humanBetPresent": false,
+            "humanFolded": false,
+            "ownCardCount": 0,
+            "legal": {
+              "seat": null,
+              "actions": []
+            }
+          },
+          "noJoin": true
+        },
+        {
+          "at": "2026-10-25T12:24:45.151Z",
+          "kind": "readonly_checkpoint",
+          "mode": "online",
+          "n": 1,
+          "checkpoint": "accounting",
+          "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+          "single": false
+        },
+        {
+          "at": "2026-10-25T12:24:46.773Z",
+          "kind": "sent",
+          "mode": "online",
+          "type": "leave",
+          "requestId": "leave_1152_mvnsrv6v",
+          "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0"
+        },
+        {
+          "at": "2026-10-25T12:24:48.197Z",
+          "kind": "command_result",
+          "mode": "online",
+          "requestId": "leave_1152_mvnsrv6v",
+          "serverTs": "2026-10-25T12:24:48.183Z",
+          "status": "accepted",
+          "reason": null,
+          "elapsedMs": 1424
+        },
+        {
+          "at": "2026-10-25T12:24:48.209Z",
+          "kind": "FAIL",
+          "mode": "online",
+          "reason": "Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'accepted'\n",
+          "stack": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'accepted'\n\n    at /tmp/1152-resume-continuation.cjs:66:10",
+          "dom": {
+            "button": {
+              "selector": "#pokerV2JoinBtn",
+              "hidden": false,
+              "disabled": false,
+              "classes": "poker-live-btn poker-live-btn--accent",
+              "box": {
+                "x": 1309,
+                "y": 8,
+                "width": 51,
+                "height": 36
+              },
+              "pointerEvents": "auto",
+              "display": "block",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": true,
+              "interceptor": {
+                "tag": "BUTTON",
+                "id": "pokerV2JoinBtn",
+                "classes": "poker-live-btn poker-live-btn--accent"
+              }
+            },
+            "intro": {
+              "selector": "#pokerSpectatorJoinIntro",
+              "hidden": true,
+              "disabled": null,
+              "classes": "poker-spectator-join-intro",
+              "box": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "pointerEvents": "none",
+              "display": "none",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": false,
+              "interceptor": {
+                "tag": "DIV",
+                "id": "pokerTableScreen",
+                "classes": "poker-table-screen"
+              }
+            },
+            "introButton": {
+              "selector": "#pokerSpectatorJoinIntroBtn",
+              "hidden": false,
+              "disabled": false,
+              "classes": "poker-spectator-join-intro__btn",
+              "box": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "pointerEvents": "auto",
+              "display": "flex",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": false,
+              "interceptor": {
+                "tag": "DIV",
+                "id": "pokerTableScreen",
+                "classes": "poker-table-screen"
+              }
+            }
+          },
+          "snapshot": {
+            "socket": 1,
+            "sequence": 2,
+            "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+            "requestId": null,
+            "version": 305,
+            "phase": "PREFLOP",
+            "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_300_4",
+            "seat": null,
+            "humanStatus": null,
+            "botCount": 4,
+            "memberCount": 4,
+            "pot": 20,
+            "turnSeat": 1,
+            "humanBetPresent": false,
+            "humanFolded": false,
+            "ownCardCount": 0,
+            "legal": {
+              "seat": null,
+              "actions": []
+            }
+          }
+        }
+      ]
+    },
+    "single": {
+      "startedAt": "2026-10-25T12:25:24.566Z",
+      "finishedAt": "2026-10-25T12:26:13.559Z",
+      "events": [
+        {
+          "at": "2026-10-25T12:25:27.819Z",
+          "kind": "socket_open",
+          "mode": "single",
+          "socket": 1,
+          "url": "wss://ws-preview.kcswh.pl/ws"
+        },
+        {
+          "at": "2026-10-25T12:25:30.321Z",
+          "kind": "socket_open",
+          "mode": "single",
+          "socket": 2,
+          "url": "wss://ws-preview.kcswh.pl/ws"
+        },
+        {
+          "at": "2026-10-25T12:25:39.078Z",
+          "kind": "socket_open",
+          "mode": "single",
+          "socket": 3,
+          "url": "wss://ws-preview.kcswh.pl/ws"
+        },
+        {
+          "at": "2026-10-25T12:25:39.754Z",
+          "kind": "sent",
+          "mode": "single",
+          "type": "join",
+          "requestId": "join_mvnswpes_w7feiiuq",
+          "tableId": "30f558a9-3f28-4d26-8cfc-077597215a2c"
+        },
+        {
+          "at": "2026-10-25T12:25:41.479Z",
+          "kind": "command_result",
+          "mode": "single",
+          "requestId": "join_mvnswpes_w7feiiuq",
+          "serverTs": "2026-10-25T12:25:41.471Z",
+          "status": "accepted",
+          "reason": "already_joined",
+          "seatNo": 1,
+          "joinStatus": "ACTIVE",
+          "elapsedMs": 1725
+        },
+        {
+          "at": "2026-10-25T12:25:41.565Z",
+          "kind": "single_joined",
+          "mode": "single",
+          "snapshot": {
+            "socket": 3,
+            "sequence": 3,
+            "tableId": "30f558a9-3f28-4d26-8cfc-077597215a2c",
+            "requestId": null,
+            "version": 2,
+            "phase": "PREFLOP",
+            "handId": "ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_1_3",
+            "seat": 1,
+            "humanStatus": "ACTIVE",
+            "botCount": 2,
+            "memberCount": 3,
+            "pot": 3,
+            "turnSeat": 1,
+            "humanBetPresent": true,
+            "humanFolded": false,
+            "humanStack": 100,
+            "ownCardCount": 2,
+            "legal": {
+              "seat": 1,
+              "actions": [
+                "FOLD",
+                "CALL",
+                "RAISE"
+              ]
+            }
+          }
+        },
+        {
+          "at": "2026-10-25T12:25:41.598Z",
+          "kind": "readonly_checkpoint",
+          "mode": "single",
+          "n": 1,
+          "checkpoint": "capture_map",
+          "tableId": "30f558a9-3f28-4d26-8cfc-077597215a2c",
+          "handId": "ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_1_3"
+        },
+        {
+          "at": "2026-10-25T12:26:13.350Z",
+          "kind": "FAIL",
+          "mode": "single",
+          "reason": "locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('#pokerV2FoldBtn')\n    - locator resolved to <button type=\"button\" data-action=\"FOLD\" id=\"pokerV2FoldBtn\" class=\"poker-action-btn poker-action-btn--fold\">Fold</button>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <iframe title=\"Netlify Drawer\" allow=\"microphone; camera; clipboard-write; display-capture\" src=\"https://app.netlify.com/cdp/?deployID=6addef0b8a7f63f1c3e2d498&siteID=f7e19a84-28f7-41f7-978a-f3b4552a404d&vcs=github\"></iframe> from <div data-vcs=\"github\" data-netlify-deploy-id=\"6addef0b8a7f63f1c3e2d498\" data-netlify-site-id=\"f7e19a84-28f7-41f7-978a-f3b4552a404d\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <iframe title=\"Netlify Drawer\" allow=\"microphone; camera; clipboard-write; display-capture\" src=\"https://app.netlify.com/cdp/?deployID=6addef0b8a7f63f1c3e2d498&siteID=f7e19a84-28f7-41f7-978a-f3b4552a404d&vcs=github\"></iframe> from <div data-vcs=\"github\" data-netlify-deploy-id=\"6addef0b8a7f63f1c3e2d498\" data-netlify-site-id=\"f7e19a84-28f7-41f7-978a-f3b4552a404d\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    33 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <iframe title=\"Netlify Drawer\" allow=\"microphone; camera; clipboard-write; display-capture\" src=\"https://app.netlify.com/cdp/?deployID=6addef0b8a7f63f1c3e2d498&siteID=f7e19a84-28f7-41f7-978a-f3b4552a404d&vcs=github\"></iframe> from <div data-vcs=\"github\" data-netlify-deploy-id=\"6addef0b8a7f63f1c3e2d498\" data-netlify-site-id=\"f7e19a84-28f7-41f7-978a-f3b4552a404d\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n    16 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not enabled\n     - retrying click action\n       - waiting 500ms\n    5 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 500ms\n",
+          "stack": "locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('#pokerV2FoldBtn')\n    - locator resolved to <button type=\"button\" data-action=\"FOLD\" id=\"pokerV2FoldBtn\" class=\"poker-action-btn poker-action-btn--fold\">Fold</button>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <iframe title=\"Netlify Drawer\" allow=\"microphone; camera; clipboard-write; display-capture\" src=\"https://app.netlify.com/cdp/?deployID=6addef0b8a7f63f1c3e2d498&siteID=f7e19a84-28f7-41f7-978a-f3b4552a404d&vcs=github\"></iframe> from <div data-vcs=\"github\" data-netlify-deploy-id=\"6addef0b8a7f63f1c3e2d498\" data-netlify-site-id=\"f7e19a84-28f7-41f7-978a-f3b4552a404d\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <iframe title=\"Netlify Drawer\" allow=\"microphone; camera; clipboard-write; display-capture\" src=\"https://app.netlify.com/cdp/?deployID=6addef0b8a7f63f1c3e2d498&siteID=f7e19a84-28f7-41f7-978a-f3b4552a404d&vcs=github\"></iframe> from <div data-vcs=\"github\" data-netlify-deploy-id=\"6addef0b8a7f63f1c3e2d498\" data-netlify-site-id=\"f7e19a84-28f7-41f7-978a-f3b4552a404d\">\u2026</div> subtree intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    33 \u00d7 waiting for element to be visible, enabled and stable\n       - element is visible, enabled and stable\n       - scrolling into view if needed\n       - done scrolling\n       - <iframe title=\"Netlify Drawer\" allow=\"microphone; camera; clipboard-write; display-capture\" src=\"https://app.netlify.com/cdp/?deployID=6addef0b8a7f63f1c3e2d498&siteID=f7e19a84-28f7-41f7-978a-f3b4552a404d&vcs=github\"></iframe> from <div data-vcs=\"github\" data-netlify-deploy-id=\"6addef0b8a7f63f1c3e2d498\" data-netlify-site-id=\"f7e19a84-28f7-41f7-978a-f3b4552a404d\">\u2026</div> subtree intercepts pointer events\n     - retrying click action\n       - waiting 500ms\n    16 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not enabled\n     - retrying click action\n       - waiting 500ms\n    5 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 500ms\n\n    at /tmp/1152-resume-single.cjs:76:260",
+          "dom": {
+            "button": {
+              "selector": "#pokerV2JoinBtn",
+              "hidden": true,
+              "disabled": true,
+              "classes": "poker-live-btn poker-live-btn--accent",
+              "box": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "pointerEvents": "auto",
+              "display": "none",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": false,
+              "interceptor": {
+                "tag": "DIV",
+                "id": "pokerTableScreen",
+                "classes": "poker-table-screen"
+              }
+            },
+            "intro": {
+              "selector": "#pokerSpectatorJoinIntro",
+              "hidden": true,
+              "disabled": null,
+              "classes": "poker-spectator-join-intro",
+              "box": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "pointerEvents": "none",
+              "display": "none",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": false,
+              "interceptor": {
+                "tag": "DIV",
+                "id": "pokerTableScreen",
+                "classes": "poker-table-screen"
+              }
+            },
+            "introButton": {
+              "selector": "#pokerSpectatorJoinIntroBtn",
+              "hidden": false,
+              "disabled": false,
+              "classes": "poker-spectator-join-intro__btn",
+              "box": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "pointerEvents": "auto",
+              "display": "flex",
+              "visibility": "visible",
+              "opacity": "1",
+              "hitTarget": false,
+              "interceptor": {
+                "tag": "DIV",
+                "id": "pokerTableScreen",
+                "classes": "poker-table-screen"
+              }
+            }
+          },
+          "snapshot": {
+            "socket": 3,
+            "sequence": 7,
+            "tableId": "30f558a9-3f28-4d26-8cfc-077597215a2c",
+            "requestId": null,
+            "version": 6,
+            "phase": "PREFLOP",
+            "handId": "ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_5_3",
+            "seat": 1,
+            "humanStatus": "ACTIVE",
+            "botCount": 2,
+            "memberCount": 3,
+            "pot": 5,
+            "turnSeat": 3,
+            "humanBetPresent": true,
+            "humanFolded": false,
+            "humanStack": 98,
+            "ownCardCount": 2,
+            "legal": {
+              "seat": 1,
+              "actions": [
+                "FOLD"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "privateMapComparisons": [
+    {
+      "at": "2026-10-25T12:21:53.466Z",
+      "checkpoint": {
+        "n": 1,
+        "kind": "capture_map",
+        "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+        "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5"
+      },
+      "ok": true,
+      "result": {
+        "version": 250,
+        "hand_id": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5",
+        "map_hash": "679b7e12897a8aa6cae0feeb5a41b414",
+        "map_count": 5,
+        "map_total": "500"
+      }
+    },
+    {
+      "at": "2026-10-25T12:21:58.522Z",
+      "checkpoint": {
+        "n": 2,
+        "kind": "after_leave_map",
+        "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+        "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5"
+      },
+      "ok": true,
+      "result": {
+        "version": 253,
+        "hand_id": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5",
+        "map_hash": "679b7e12897a8aa6cae0feeb5a41b414",
+        "map_count": 5,
+        "map_total": "500"
+      }
+    }
+  ],
+  "singleMapCapture": {
+    "at": "2026-10-25T12:25:43.188Z",
+    "checkpoint": {
+      "n": 1,
+      "kind": "capture_map",
+      "tableId": "30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "handId": "ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_1_3"
+    },
+    "ok": true,
+    "result": {
+      "version": 2,
+      "hand_id": "ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_1_3",
+      "map_hash": "b1a853196ce063787ff215ef9b3869f7",
+      "map_count": 3,
+      "map_total": "300"
+    }
+  },
+  "beforeRetryAccounting": {
+    "at": "2026-10-25T12:24:46.641Z",
+    "checkpoint": {
+      "n": 1,
+      "kind": "accounting",
+      "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "single": false
+    },
+    "ok": true,
+    "result": {
+      "escrow": 404,
+      "wallet": 450,
+      "human_stacks": 0,
+      "table_status": "OPEN",
+      "transactions": [
+        {
+          "id": "38cc2a85-cc22-494b-85fb-f533fa4094e2",
+          "tx_sum": 0,
+          "tx_type": "TABLE_BUY_IN",
+          "created_at": "2026-10-25T12:21:06.473366+00:00",
+          "user_delta": -100
+        },
+        {
+          "id": "519a02e7-271f-4dd7-b675-53a8c12c4f08",
+          "tx_sum": 0,
+          "tx_type": "TABLE_CASH_OUT",
+          "created_at": "2026-10-25T12:22:20.794567+00:00",
+          "user_delta": 96
+        }
+      ],
+      "state_pot_total": 18,
+      "state_stack_total": 386
+    }
+  },
+  "finalReconciliation": {
+    "at": "2026-10-25T12:28:56.142461+00:00",
+    "online": {
+      "escrow": 0,
+      "tableId": "64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "table_status": "CLOSED",
+      "target_audit": {
+        "at": "2026-10-25T12:22:15.643127+00:00",
+        "handId": "ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5",
+        "version": 259,
+        "integrity": {
+          "flags": [],
+          "status": "OK",
+          "payoutTotal": 20,
+          "returnedTotal": 0,
+          "awardedPotTotal": 20,
+          "endingStackTotal": 500,
+          "contributionTotal": 20,
+          "startingStackTotal": 500,
+          "contestablePotTotal": 20,
+          "potConservationDelta": 0,
+          "stackConservationDelta": 0,
+          "payoutConservationDelta": 0
+        },
+        "participants": 5,
+        "startingMapHash": "679b7e12897a8aa6cae0feeb5a41b414"
+      },
+      "bot_actions_after_leave": [
+        {
+          "at": "2026-10-25T12:22:00.453343+00:00",
+          "to": "FLOP",
+          "from": "FLOP",
+          "type": "CALL",
+          "version": 254
+        },
+        {
+          "at": "2026-10-25T12:22:04.23478+00:00",
+          "to": "TURN",
+          "from": "FLOP",
+          "type": "FOLD",
+          "version": 255
+        },
+        {
+          "at": "2026-10-25T12:22:07.445583+00:00",
+          "to": "TURN",
+          "from": "TURN",
+          "type": "CHECK",
+          "version": 256
+        },
+        {
+          "at": "2026-10-25T12:22:10.530177+00:00",
+          "to": "RIVER",
+          "from": "TURN",
+          "type": "CHECK",
+          "version": 257
+        },
+        {
+          "at": "2026-10-25T12:22:13.146913+00:00",
+          "to": "RIVER",
+          "from": "RIVER",
+          "type": "CHECK",
+          "version": 258
+        },
+        {
+          "at": "2026-10-25T12:22:15.643127+00:00",
+          "to": "SETTLED",
+          "from": "RIVER",
+          "type": "CHECK",
+          "version": 259
+        }
+      ],
+      "joining_hand_settled_at": "2026-10-25T12:21:30.142256+00:00"
+    },
+    "single": {
+      "fold": {
+        "at": "2026-10-25T12:26:01.470487+00:00",
+        "isBot": false,
+        "source": "timeout",
+        "requestId": "timeout:30f558a9-3f28-4d26-8cfc-077597215a2c:ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_1_3:PREFLOP:93449cf9-86fd-4f49-9d9b-2bd42f40dc8d:1792931161348"
+      },
+      "human": [
+        {
+          "stack": 0,
+          "status": "INACTIVE"
+        }
+      ],
+      "audits": [
+        {
+          "at": "2026-10-25T12:26:04.924353+00:00",
+          "handId": "ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_1_3",
+          "version": 4,
+          "integrity": {
+            "flags": [],
+            "status": "OK",
+            "payoutTotal": 3,
+            "returnedTotal": 0,
+            "awardedPotTotal": 3,
+            "endingStackTotal": 300,
+            "contributionTotal": 3,
+            "startingStackTotal": 300,
+            "contestablePotTotal": 3,
+            "potConservationDelta": 0,
+            "stackConservationDelta": 0,
+            "payoutConservationDelta": 0
+          },
+          "startingMapHash": "b1a853196ce063787ff215ef9b3869f7"
+        },
+        {
+          "at": "2026-10-25T12:27:16.83365+00:00",
+          "handId": "ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_5_3",
+          "version": 16,
+          "integrity": {
+            "flags": [],
+            "status": "OK",
+            "payoutTotal": 6,
+            "returnedTotal": 0,
+            "awardedPotTotal": 6,
+            "endingStackTotal": 300,
+            "contributionTotal": 6,
+            "startingStackTotal": 300,
+            "contestablePotTotal": 6,
+            "potConservationDelta": 0,
+            "stackConservationDelta": 0,
+            "payoutConservationDelta": 0
+          },
+          "startingMapHash": "b0fa58af72b985bd0e5b4ac447983c66"
+        }
+      ],
+      "escrow": 0,
+      "tableId": "30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "table_status": "CLOSED"
+    },
+    "wallet": 448,
+    "transactions": [
+      {
+        "id": "38cc2a85-cc22-494b-85fb-f533fa4094e2",
+        "tx_sum": 0,
+        "tx_type": "TABLE_BUY_IN",
+        "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+        "created_at": "2026-10-25T12:21:06.473366+00:00",
+        "user_delta": -100
+      },
+      {
+        "id": "519a02e7-271f-4dd7-b675-53a8c12c4f08",
+        "tx_sum": 0,
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+        "created_at": "2026-10-25T12:22:20.794567+00:00",
+        "user_delta": 96
+      },
+      {
+        "id": "58c37a3c-d7f5-4810-a389-12bc3d9e9eed",
+        "tx_sum": 0,
+        "tx_type": "TABLE_BUY_IN",
+        "reference": "table:30f558a9-3f28-4d26-8cfc-077597215a2c",
+        "created_at": "2026-10-25T12:25:39.759552+00:00",
+        "user_delta": -100
+      },
+      {
+        "id": "1a3c476f-22d2-48e4-9edd-ab78f088b928",
+        "tx_sum": 0,
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:30f558a9-3f28-4d26-8cfc-077597215a2c",
+        "created_at": "2026-10-25T12:27:21.977784+00:00",
+        "user_delta": 98
+      },
+      {
+        "id": "75d19dfc-6943-4cbc-85e9-853f0355fb92",
+        "tx_sum": 0,
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:30f558a9-3f28-4d26-8cfc-077597215a2c",
+        "created_at": "2026-10-25T12:27:21.977784+00:00",
+        "user_delta": 0
+      },
+      {
+        "id": "e4004b4d-b966-4b46-a9c7-5735699340d6",
+        "tx_sum": 0,
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:30f558a9-3f28-4d26-8cfc-077597215a2c",
+        "created_at": "2026-10-25T12:27:21.977784+00:00",
+        "user_delta": 0
+      },
+      {
+        "id": "f2843818-0b14-4dfa-98e2-fea90a91526f",
+        "tx_sum": 0,
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+        "created_at": "2026-10-25T12:28:47.626586+00:00",
+        "user_delta": 0
+      },
+      {
+        "id": "a763f0c0-1724-49e2-a78d-a6c93188bc16",
+        "tx_sum": 0,
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+        "created_at": "2026-10-25T12:28:47.626586+00:00",
+        "user_delta": 0
+      },
+      {
+        "id": "33660b72-06ce-4325-a8b8-002c9198d197",
+        "tx_sum": 0,
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+        "created_at": "2026-10-25T12:28:47.626586+00:00",
+        "user_delta": 0
+      },
+      {
+        "id": "2799f575-cdb0-4d06-8960-4ca21dfc82bf",
+        "tx_sum": 0,
+        "tx_type": "TABLE_CASH_OUT",
+        "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+        "created_at": "2026-10-25T12:28:47.626586+00:00",
+        "user_delta": 0
+      }
+    ],
+    "pending_requests": 0,
+    "active_human_claims": 0
+  },
+  "escrowEntries": [
+    {
+      "id": "38cc2a85-cc22-494b-85fb-f533fa4094e2",
+      "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "tx_type": "TABLE_BUY_IN",
+      "created_at": "2026-10-25 12:21:06.473366+00",
+      "system_key": "POKER_TABLE:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "escrow_delta": 100,
+      "transaction_sum": 0
+    },
+    {
+      "id": "120a2989-993c-4aee-9db3-ea07d4914da3",
+      "reference": "BOT_SEED_BUY_IN:64bba5ce-7431-45d9-a51c-4bab29a2c1d0:5",
+      "tx_type": "TABLE_BUY_IN",
+      "created_at": "2026-10-25 12:21:06.473366+00",
+      "system_key": "POKER_TABLE:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "escrow_delta": 100,
+      "transaction_sum": 0
+    },
+    {
+      "id": "519a02e7-271f-4dd7-b675-53a8c12c4f08",
+      "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "tx_type": "TABLE_CASH_OUT",
+      "created_at": "2026-10-25 12:22:20.794567+00",
+      "system_key": "POKER_TABLE:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "escrow_delta": -96,
+      "transaction_sum": 0
+    },
+    {
+      "id": "fccc74d3-1b65-426b-9eb6-21005e55df45",
+      "reference": "BOT_SEED_BUY_IN:30f558a9-3f28-4d26-8cfc-077597215a2c:2",
+      "tx_type": "TABLE_BUY_IN",
+      "created_at": "2026-10-25 12:25:39.759552+00",
+      "system_key": "POKER_TABLE:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "escrow_delta": 100,
+      "transaction_sum": 0
+    },
+    {
+      "id": "53f7a8cf-604a-426c-a64e-01ed7de77add",
+      "reference": "BOT_SEED_BUY_IN:30f558a9-3f28-4d26-8cfc-077597215a2c:3",
+      "tx_type": "TABLE_BUY_IN",
+      "created_at": "2026-10-25 12:25:39.759552+00",
+      "system_key": "POKER_TABLE:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "escrow_delta": 100,
+      "transaction_sum": 0
+    },
+    {
+      "id": "58c37a3c-d7f5-4810-a389-12bc3d9e9eed",
+      "reference": "table:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "tx_type": "TABLE_BUY_IN",
+      "created_at": "2026-10-25 12:25:39.759552+00",
+      "system_key": "POKER_TABLE:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "escrow_delta": 100,
+      "transaction_sum": 0
+    },
+    {
+      "id": "e4004b4d-b966-4b46-a9c7-5735699340d6",
+      "reference": "table:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "tx_type": "TABLE_CASH_OUT",
+      "created_at": "2026-10-25 12:27:21.977784+00",
+      "system_key": "POKER_TABLE:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "escrow_delta": -99,
+      "transaction_sum": 0
+    },
+    {
+      "id": "75d19dfc-6943-4cbc-85e9-853f0355fb92",
+      "reference": "table:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "tx_type": "TABLE_CASH_OUT",
+      "created_at": "2026-10-25 12:27:21.977784+00",
+      "system_key": "POKER_TABLE:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "escrow_delta": -103,
+      "transaction_sum": 0
+    },
+    {
+      "id": "1a3c476f-22d2-48e4-9edd-ab78f088b928",
+      "reference": "table:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "tx_type": "TABLE_CASH_OUT",
+      "created_at": "2026-10-25 12:27:21.977784+00",
+      "system_key": "POKER_TABLE:30f558a9-3f28-4d26-8cfc-077597215a2c",
+      "escrow_delta": -98,
+      "transaction_sum": 0
+    },
+    {
+      "id": "2799f575-cdb0-4d06-8960-4ca21dfc82bf",
+      "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "tx_type": "TABLE_CASH_OUT",
+      "created_at": "2026-10-25 12:28:47.626586+00",
+      "system_key": "POKER_TABLE:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "escrow_delta": -121,
+      "transaction_sum": 0
+    },
+    {
+      "id": "a763f0c0-1724-49e2-a78d-a6c93188bc16",
+      "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "tx_type": "TABLE_CASH_OUT",
+      "created_at": "2026-10-25 12:28:47.626586+00",
+      "system_key": "POKER_TABLE:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "escrow_delta": -54,
+      "transaction_sum": 0
+    },
+    {
+      "id": "f2843818-0b14-4dfa-98e2-fea90a91526f",
+      "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "tx_type": "TABLE_CASH_OUT",
+      "created_at": "2026-10-25 12:28:47.626586+00",
+      "system_key": "POKER_TABLE:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "escrow_delta": -122,
+      "transaction_sum": 0
+    },
+    {
+      "id": "33660b72-06ce-4325-a8b8-002c9198d197",
+      "reference": "table:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "tx_type": "TABLE_CASH_OUT",
+      "created_at": "2026-10-25 12:28:47.626586+00",
+      "system_key": "POKER_TABLE:64bba5ce-7431-45d9-a51c-4bab29a2c1d0",
+      "escrow_delta": -107,
+      "transaction_sum": 0
+    }
+  ],
+  "verdict": "NOT READY \u2014 Online PASS; Single Player manual FOLD blocked by Netlify Drawer, no ordinary Leave sent; lifecycle cleanup verified"
+}

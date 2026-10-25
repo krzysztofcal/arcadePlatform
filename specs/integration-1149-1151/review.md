@@ -108,3 +108,62 @@ Read-only reconciliation after stop: wallet454→454CH; zero user transactions/P
 [Reduced deployment/smoke evidence](preview-smoke-2026-10-25.json). JOIN/Leave/retry ACK timings: **unavailable**, not zero and not PASS. Historical retry diagnosis remains LIKELY/UNKNOWN as above; this attempt does not resolve it.
 
 Next review: correct only the temporary browser harness's join actionability/selector handling, retain complete sanitized locator diagnostics, then seek owner GO for one bounded resumed smoke after fresh preflight. No product/runtime fix is justified by this evidence. The runtime remains installed at the approved SHA. The prospective #1149→main→Production, rebase/verify #1151→merge→Production, close #1152 without merge sequence remains **conditional on all required smoke gates passing and separate owner GO**; no progression is recommended now.
+
+
+## Authorized single resumed smoke — 2026-10-25, 12:20–12:29 UTC
+
+**LATEST VERDICT: NOT READY. Online runtime gates PASS; required Single Player manual FOLD/ordinary Leave blocked by a confirmed Preview overlay.** This supersedes the earlier pre-JOIN blocker, not its historical evidence. No deployment, Production operation, configuration/secret/permission/log-level change, product code, source PR update or maintained UI test was made in this resumed task.
+
+### Harness correction and historical click diagnosis
+
+Only temporary `/tmp` browser automation changed. JOIN now waits on DOM: intro hidden; standard `#pokerV2JoinBtn` visible/enabled; `poker-join-btn--intro-target` and `--settled` absent. It checks current authoritative spectator/bot-only active hand, button bounding box/computed pointer-events and `elementFromPoint` hit target, then Playwright trial actionability and an ordinary click. No force click, handler invocation or direct WS JOIN. The successful readiness evidence records hidden/disabled/classes/box/pointer-events/interceptor. Failure capture retains the full sanitized Playwright message/stack plus DOM diagnostics; no credentials/JWT/cards/private snapshot stored.
+
+Previous08:58 intro-click timeout cause: **LIKELY temporary-button/animation race; not CONFIRMED**. Source shows1800ms intro+550ms fly+hidden target. Standard-button path now succeeded. Historical truncated error cannot exclude another interceptor. A later **different** FOLD click is conclusively intercepted by Netlify Drawer; that must not be retroactively asserted as the historical JOIN cause.
+
+### Fresh preflight / runtime provenance
+
+Runtime metadata remains exact `33fbe284859884fd2538774ae756f11aee154a04`; PID295769 and start08:56:16UTC unchanged. Rechecked all five module source/deployed SHA256 comparisons PASS and public healthz200/ok. No new deploy. Initial shared-host scan: zero WS connections, active/nonzero human claims, pending Poker requests or deletion requests; five bot-only OPEN tables each300CH escrow/stacks. Previous observer table CLOSED/escrow0. No other live agents/deploy workflows. Dedicated Stage wallet454CH.
+
+Netlify #1152 served docs-only HEAD `4bc5512ea2b9fed618651960753447d8afb67fed`, Preview flag and WS Preview URL. Diff from runtime contains only two spec/evidence files, so deployable/browser bytes unchanged. Auth verified pinned Stage project `krydukthwdvccggbyjfw`; actual sockets `wss://ws-preview.kcswh.pl/ws`. Source heads remain #1149 f39d9695 / #1151 4fd5a2b8, Draft and untouched.
+
+### Online — PASS, with automation limitations below
+
+Table **64bba5ce-7431-45d9-a51c-4bab29a2c1d0**. JOIN `join_mvnsqtri_qn0i883b` sent12:21:05.461; accepted ACK12:21:08.030: **2569ms**. Seat4 observed12:21:08.071 snapshot (2610ms from send; harness assertion completed08.076), `WAITING_NEXT_HAND`, no cards/bet contribution. Same joining hand `ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_232_3` remained active; durable settlement12:21:30.142256, over22s after ACK. Existing lifecycle normally funded a fourth bot; this is not a new integration feature.
+
+Next human hand **ws_hand_64bba5ce-7431-45d9-a51c-4bab29a2c1d0_245_5**. Real-turn UI CALL `ws_1a173029d70_34190a2a` sent12:21:53.652, accepted53.887 (**235ms**); no human turn timeout in this Online scenario. In-hand Leave **leave_1152_mvnsrv6v** sent12:21:53.973, accepted12:21:57.795 (**3822ms**, existing12s deadline unchanged).
+
+Private start map captured before CALL/Leave at v250 and after Leave at v253: same target hand, five entries/500CH, identical fingerprint. Target HAND_SETTLED v259 at12:22:15.643127: **integrity OK**, flags[], starting/ending500CH, contributions/payout20CH, pot/stack/payout deltas0. Audited starting stacks reconstruct the identical complete original map. Post-Leave bot actions v254–259: CALL,FOLD,CHECK,CHECK,CHECK,CHECK; FLOP→TURN→RIVER→SETTLED, no illegal-action error. No cross-hand metadata copying was performed.
+
+Cashout after deferred settlement: buy-in tx **38cc2a85-cc22-494b-85fb-f533fa4094e2**100CH; cashout tx **519a02e7-271f-4dd7-b675-53a8c12c4f08**96CH at12:22:20.794567. Wallet **454−100+96=450CH**. Escrow300 initial+100human+100ordinary bot seed=500; after human cashout404CH, all bot liabilities. At12:24:46 read-only runtime-financial persistence386 stacks+18 pot=404 escrow, no active/nonzero human claim.
+
+Normal fresh observer reconnect at12:24:45.149 saw seatnull/bots4; **no JOIN/buy-in** on reconnect. Exactly **one** retry of `leave_1152_mvnsrv6v` sent12:24:46.773 during bot-only PREFLOP hand `_300_4`; actual accepted WS commandResult12:24:48.197 (**1424ms**, before12s). One buy-in and one human cashout still; wallet450/escrow404, pending0. Reused durable request row is not used as ACK proof—the captured received frame is.
+
+Automation limitations, retained transparently: the first harness waited for a settlement snapshot after Leave had unsubscribed the socket; settlement was instead verified read-only. That observer-only wait eventually expired (no outstanding game command). Remaining authorized steps used fresh observer/Single Player harness segments, without another Online JOIN or another retry. The retry segment also made a **false harness assertion** on `p.status`; actual `sendLeave()` resolves `{ok:true,...}` and omits status (poker-ws-client.js handleCommandResult). Its captured WS payload unambiguously contained accepted/1424ms; read-only accounting confirmed no duplicate. No product/protocol change and no command re-send were used to fix that assertion. Do not describe all temporary script exit/assertion results as green.
+
+### Single Player — JOIN PASS; manual FOLD/Leave BLOCKED
+
+Table **30f558a9-3f28-4d26-8cfc-077597215a2c**, hand **ws_hand_30f558a9-3f28-4d26-8cfc-077597215a2c_1_3**. JOIN `join_mvnswpes_w7feiiuq`: sent12:25:39.754, accepted12:25:41.479 (**1725ms**). Human real turn/three-entry300CH map captured. Playwright tried normal `#pokerV2FoldBtn` click; full error confirms **iframe title="Netlify Drawer" intercepts pointer events** repeatedly. At12:26:13.350 click reached30s timeout. No client ACT/FOLD or Leave frame was sent. Actual human FOLD at12:26:01.470487 has `source=timeout` and timeout requestId—**not manual FOLD PASS**. Subsequent bot FOLD settled v4 with integrityOK/flags[]/all deltas0,300CH total and original map fingerprint; observed only, not fulfillment of the requested manual chain.
+
+Stopped further game mutations after click timeout. No manual Leave/ledger repair. Browser closed; ordinary existing lifecycle subsequently settled next hand v16 at12:27:16.833650 (OK,300CH,6CH pot,all deltas0) and auto-cashed out/closed table at12:27:21.977784. Human refund98CH (tx **1a3c476f-22d2-48e4-9edd-ab78f088b928**), bots103+99CH. Wallet **450−100+98=448CH**. All seats INACTIVE/stack0; escrow0. This confirms cleanup/reconciliation, **not ordinary UI Leave PASS**.
+
+### Final reconciliation / privacy / decision
+
+Read-only final12:28:56: both test tables CLOSED/escrow0, zero active/nonzero human claims and pending Poker requests. Online lifecycle refunded remaining bot stacks122+54+107+121=404CH at12:28:47.626586. All captured escrow-related transaction sums0, including normal bot seed transactions. Wallet total **454−100+96−100+98=448CH**: Online loss4CH + subsequent SP lifecycle hand loss2CH. No unexplained discrepancy or duplicate human cashout. No `handStartStacksByUserId` key in any observed incoming WS response/public snapshot across the segments; original maps are represented only by count/total/fingerprint, no cards/JWT/full private snapshots.
+
+| Required gate | Result |
+|---|---|
+| Runtime/source/Stage/WS/preflight | PASS |
+| Standard DOM-ready JOIN during bot-only hand; waiting/exclusion | PASS,2569ms ACK |
+| Real legal Online action; active-hand Leave | PASS,235ms/3822ms ACK |
+| Original map survives Leave; bot continuation; auditOK/zero deltas | PASS |
+| Online cashout/escrow/conservation/no duplicate | PASS |
+| Observer reconnect/no JOIN + exactly one same-id retry | PASS,1424ms observed ACK |
+| Observed WS/public-map privacy | PASS within captured-frame scope |
+| SP JOIN | PASS,1725ms ACK |
+| SP manual FOLD → bots → ordinary Leave | **BLOCKED**, Netlify Drawer interception; auto-FOLD not substituted |
+| SP eventual lifecycle settlement/refund/closure | PASS read-only cleanup, not ordinary Leave verification |
+| Real Account Deletion | NOT RUN; existing local fundamental coverage only |
+
+[Reduced resumed evidence, full sanitized failure, audit/transactions](preview-resume-2026-10-25.json). Existing runtime CI/local fundamental results remain valid; this follow-up is docs/evidence only. No additional public breaking impact or runtime regression demonstrated. **Separate finding: Netlify Preview Drawer blocks the SP Fold control in the1440×1000 browser viewport.** No application/Netlify configuration fix or drawer bypass was applied. A future authorized bounded SP-only attempt should first verify the Drawer can be dismissed through its normal UI and hit-test Fold; no repeat is authorized by this report.
+
+**NOT READY for complete integration verification or downstream rollout.** Online gates are now evidenced, but SP manual scenario remains open. Do not execute the proposed #1149→main→Production, update/verify #1151→merge→Production, close #1152 sequence now. Keep all PRs Draft; seek separate owner review/GO for any remaining smoke or rollout. No performance improvement claim: measured client RTTs include queue/DB/transport; reload-only latency was not separately observable with existing logging.
