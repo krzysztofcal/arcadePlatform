@@ -1,8 +1,16 @@
-# T018–T019 — launch polish and Offline artwork (verification in progress)
+# T018–T019 — launch polish and Offline artwork browser/Preview PASS; awaiting physical cold start
 
 Owner physical T017 and earlier fixes accepted. Confirmed source of raw blue link: package-web generated default white entry body containing Open Poker Lobby before redirect. Replaced with branded inline-painted loading document, shared into mobile lobby only. Android already depends on core-splashscreen; install its compat API, dark launch/window/WebView surfaces and chip/spade vector. Lobby readiness waits local styles/DOM/fonts/main artwork and layout frames without login/network. No new dependency or Online bootstrap/runtime behavior change. Offline tile now uses dedicated portable-table teal/gold artwork; Single Player unchanged.
 
 No financial/schema/protocol breaking impact. Intentional presentation changes only, existing v1 saves and T001–T017 untouched. New launch files CSP/SRI, native compile and focused browser/Preview checks recorded after build. Native first-frame/cold-start claim remains PENDING physical Android owner verification; browser screenshot is not proof of Android compositor behavior. No emulator/local Android build, WS replay, merge or Production.
+
+## T018–T019 evidence
+
+First runtime `fc9e7cb726504f6f1211dd3231ab90fdb89ac979`; [immutable Preview](https://6ade8c174872188a6acd41ab--playkcswh.netlify.app/poker/?ntl-drawer-state=hidden). [Preview result](evidence/preview-t018-t019-2026-10-25.json), [launch](evidence/preview-t018-launch.png), [lobby comparison](evidence/preview-t019-lobby.png), [mobile tile](evidence/preview-t019-tile.png). Normal launch redirect verified; no fallback link, inline dark surface and styled mark/loader. Offline artwork decoded768×1152 and differs from Single Player. Zero JS errors.
+
+Hosted APK build40243453428 SUCCESS (native splash compiles). Actual APK assets/public extracted unchanged for temporary Chromium startup probe: hold entry script → branded screen/no raw link; defer lobby stylesheet/artwork → overlay remains; release assets → overlay hides after readiness. [Packaged proof](evidence/apk-t018-web-smoke.json), [loading screenshot](evidence/apk-t018-loading.png). No native device/compositor claim. The probe initially expected the splash background color after lobby reveal; corrected temporary assertion to the existing dark lobby color. This was a harness mismatch, not an app failure. Visual QA additionally scopes normal font-style/text-shadow for the splash heading so lobby typography cannot change its appearance; final APK carries that presentation-only adjustment.
+
+26/26 existing fundamental checks PASS, syntax/CSP56documents/whitespace PASS; CI/CodeQL/Android PASS for first runtime. Independent review no critical/important findings. No new maintained simple-glue/layout tests. Final current-HEAD APK, checksum and checks linked in PR after build; T018 physical cold start and T019 artwork acceptance pending owner. No merge/Production/WS Preview. Asset created with built-in imagegen (prompt in plan), saved at poker/assets/lobby/offline-v1.webp, encodedWebP without content changes.
 
 ---
 # T017 — Back confirmation: focused Preview PASS; awaiting owner APK acceptance

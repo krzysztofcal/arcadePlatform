@@ -46,5 +46,5 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 ## T018–T019
 
 - [x] Trace raw entry link/default white surfaces; add dark branded native splash with existing dependency and local loader readiness; dedicated Offline key art.
-- [ ] Fundamental checks, focused Preview and packaged startup evidence; current-SHA Stage APK.
+- [x] Fundamental checks, focused Preview and packaged startup evidence; hosted Stage APK build PASS, final artifact linked in PR.
 - [ ] Owner physical cold start (airplane mode): no white flash/raw text, smooth splash→loading→lobby; verify Offline artwork. Keep Draft, no merge/Production/WS replay.
