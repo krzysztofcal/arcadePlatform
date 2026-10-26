@@ -114,6 +114,10 @@ test('WS reaction reuses its lifecycle transaction rather than requesting a seco
  const globals={frame:{type:'reaction_send',requestId:'reaction-terms-1',payload:{tableId:'table-test',reactionKey:'invalid'}},ws:{},connState:{session:{identityMode:'registered',userId:id}},resolveRoomId:()=>({ok:true,roomId:'table-test'}),tableManager:{connectionTableAssociation:()=>({joinedTableId:'table-test'}),tableSnapshot:()=>({youSeat:1}),isBotUser:()=>false,isTableClosed:()=>false},sendCommandResult:(_ws,_state,r)=>results.push(r),accountDeletionEnabled:()=>true,loadBeginSqlWs:async()=>begin,assertAccountActive:async value=>assert.equal(value,tx),beginTermsSql:begin,requireCurrentTerms:async value=>{assert.equal(value,tx);checked++;},evaluateHumanReactionCommand:()=>({ok:false,reason:'invalid_reaction'})};
  await new AsyncFunction(...Object.keys(globals),body)(...Object.values(globals));
  assert.equal(begins,1);assert.equal(checked,1);assert.equal(results[0].reason,'invalid_reaction');
+ globals.requireCurrentTerms=async()=>{throw Object.assign(Error('terms_required'),{code:'terms_required'});};
+ globals.evaluateHumanReactionCommand=()=>assert.fail('pending Terms must not publish/evaluate a new reaction');
+ await new AsyncFunction(...Object.keys(globals),body)(...Object.values(globals));
+ assert.equal(results[1].reason,'terms_required');assert.equal(begins,2);
 });
 async function termsClientFixture(){
  const vm=await import('node:vm');

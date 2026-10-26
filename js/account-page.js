@@ -270,7 +270,7 @@
   }
 
 
-  function setPublicProfileSaveState(state, message){
+  function setPublicProfileSaveState(state, message, messageKey){
     if (publicProfileSaveResetTimer){ clearTimeout(publicProfileSaveResetTimer); publicProfileSaveResetTimer = null; }
     if (nodes.publicProfileSave){
       nodes.publicProfileSave.dataset.state = state;
@@ -280,9 +280,10 @@
     if (nodes.publicProfileSaveLabel){
       nodes.publicProfileSaveLabel.textContent = state === 'saving'
         ? t('savingPublicProfile', 'Saving...')
-        : state === 'saved' ? t('publicProfileSavedShort', 'Saved') : t('savePublicProfile', 'Save public profile');
+        : state === 'saved' ? t('publicProfileSavedShort', 'Saved') : t('profileSaveVisibility', 'Save visibility');
     }
-    if (nodes.publicProfileSaveStatus) nodes.publicProfileSaveStatus.textContent = message || '';
+    if(nodes.publicProfileSaveLabel)nodes.publicProfileSaveLabel.dataset.i18n=state==='saving'?'savingPublicProfile':state==='saved'?'publicProfileSavedShort':'profileSaveVisibility';
+    if (nodes.publicProfileSaveStatus){nodes.publicProfileSaveStatus.textContent = message || '';if(messageKey)nodes.publicProfileSaveStatus.dataset.i18n=messageKey;else delete nodes.publicProfileSaveStatus.dataset.i18n;}
     if (state === 'saved'){
       publicProfileSaveResetTimer = setTimeout(function(){ setPublicProfileSaveState('idle', ''); }, 1800);
     }
@@ -386,7 +387,7 @@
     gallery.textContent='';
     window.ArcadeAvatars.variants.forEach(function(variant){
       var button=doc.createElement('button'),img=doc.createElement('img');
-      button.type='button';button.className='arcade-avatar-choice';button.title=variant;button.setAttribute('aria-label',variant);
+      button.type='button';button.className='arcade-avatar-choice';button.title=variant;button.setAttribute('aria-label',t('arcadeAvatarChoice','Choose avatar')+' '+variant);
       button.setAttribute('aria-pressed',String(variant===publicProfile.avatarVariant));
       img.src=window.ArcadeAvatars.url(variant);img.alt='';img.width=48;img.height=48;button.appendChild(img);
       button.addEventListener('click',function(){
@@ -394,9 +395,9 @@
         var profileAtClick=publicProfile;
         window.ProfileClient.updateMe({avatarVariant:variant,expectedRevision:profileAtClick.avatarRevision}).then(function(profile){
           renderPublicProfile(profile);
-          if(nodes.publicAvatarStatus)nodes.publicAvatarStatus.textContent=t('publicProfileSaved','Avatar saved.');
+          if(nodes.publicAvatarStatus){nodes.publicAvatarStatus.dataset.i18n='arcadeAvatarSaved';nodes.publicAvatarStatus.textContent=t('arcadeAvatarSaved','Avatar saved.');}
         }).catch(function(error){
-          if(nodes.publicAvatarStatus)nodes.publicAvatarStatus.textContent=error.code==='terms_required'?'Accept the current Terms to choose an avatar.':error.code==='avatar_variants_not_active'?'This avatar is awaiting catalog activation.':'Could not save avatar. Refresh and try again.';
+          if(nodes.publicAvatarStatus){var key=error.code==='terms_required'?'arcadeAvatarTermsRequired':error.code==='avatar_variants_not_active'?'arcadeAvatarNotActive':'arcadeAvatarSaveError';nodes.publicAvatarStatus.dataset.i18n=key;nodes.publicAvatarStatus.textContent=t(key,'Could not save avatar. Refresh and try again.');}
           if(error.code==='terms_required'&&window.ArcadeTerms)window.ArcadeTerms.open();
         }).finally(function(){button.disabled=false;});
       });
@@ -431,8 +432,8 @@
     event.preventDefault();
     if(!publicProfile||!window.ProfileClient)return;
     var visible=nodes.hideFromLeaderboard?!nodes.hideFromLeaderboard.checked:publicProfile.leaderboardVisible;
-    setPublicProfileSaveState('saving','Saving...');
-    window.ProfileClient.updateMe({leaderboardVisible:visible}).then(function(profile){renderPublicProfile(profile);setPublicProfileSaveState('saved','Visibility saved.');}).catch(function(){setPublicProfileSaveState('idle','Could not save visibility.');});
+    setPublicProfileSaveState('saving',t('savingPublicProfile','Saving...'),'savingPublicProfile');
+    window.ProfileClient.updateMe({leaderboardVisible:visible}).then(function(profile){renderPublicProfile(profile);setPublicProfileSaveState('saved',t('profileVisibilitySaved','Visibility saved.'),'profileVisibilitySaved');}).catch(function(){setPublicProfileSaveState('idle',t('profileVisibilityError','Could not save visibility.'),'profileVisibilityError');});
   }
 
   function clearChips(){
@@ -1412,6 +1413,7 @@
     doc.addEventListener('chips:tx-complete', loadChips);
     doc.addEventListener('profile:updated', function(event){ renderPublicProfile(event && event.detail ? event.detail : null); });
     doc.addEventListener('langchange', function(){
+      if(publicProfile)renderAvatarGallery();
       setWelcomeBonusVisibility(nodes.welcomeBonusPanel && !nodes.welcomeBonusPanel.hidden);
       if (currentUser){ refreshWelcomeBonus(currentUser); }
       if (accountPokerProjection !== undefined) renderPokerState(accountPokerProjection);

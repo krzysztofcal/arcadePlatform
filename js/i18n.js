@@ -1,6 +1,18 @@
 // Minimal footer i18n + language toggle (PL/EN)
 (function(){
   const dict = {
+    profileTermsSignupNote: { en: 'After email verification, accept the current Terms before using your account.', pl: 'Po weryfikacji adresu e-mail zaakceptuj aktualny regulamin przed korzystaniem z konta.' },
+    arcadeAvatarGallery: { en: 'Arcade avatars', pl: 'Awatary Arcade' },
+    arcadeAvatarChoice: { en: 'Choose avatar', pl: 'Wybierz awatar' },
+    arcadeAvatarSaved: { en: 'Avatar saved.', pl: 'Awatar zapisany.' },
+    arcadeAvatarTermsRequired: { en: 'Accept the current Terms to choose an avatar.', pl: 'Zaakceptuj aktualny regulamin, aby wybrać awatar.' },
+    arcadeAvatarNotActive: { en: 'This avatar is awaiting catalog activation.', pl: 'Ten awatar oczekuje na aktywację katalogu.' },
+    arcadeAvatarSaveError: { en: 'Could not save avatar. Refresh and try again.', pl: 'Nie udało się zapisać awatara. Odśwież stronę i spróbuj ponownie.' },
+    profileSaveVisibility: { en: 'Save visibility', pl: 'Zapisz widoczność' },
+    profileVisibilitySaved: { en: 'Visibility saved.', pl: 'Widoczność zapisana.' },
+    profileVisibilityError: { en: 'Could not save visibility.', pl: 'Nie udało się zapisać widoczności.' },
+    profileRemainsPublic: { en: 'This does not hide your public profile.', pl: 'To nie ukrywa Twojego profilu publicznego.' },
+
     pokerGiftShop: { en: 'Gift Shop', pl: 'Sklep z prezentami' },
     pokerGiftSignInRequired: { en: 'Gift Shop is available only to signed-in players', pl: 'Sklep z prezentami dostępny tylko dla zalogowanych graczy' },
     pokerGiftChoose: { en: 'Choose a gift', pl: 'Wybierz prezent' },
@@ -217,7 +229,7 @@ homeBonusLoadError: { en: 'Could not load available bonuses.', pl: 'Nie udało s
     publicDisplayName: { en: 'Display name', pl: 'Nazwa wyświetlana' },
     publicHandle: { en: 'Handle', pl: 'Identyfikator' },
     publicBio: { en: 'Bio', pl: 'Opis' },
-    publicProfileNotice: { en: 'Your handle, display name, bio, and avatar are public. Email and account details are never shown.', pl: 'Twój identyfikator, nazwa wyświetlana, opis i awatar są publiczne. E-mail i dane konta nigdy nie są pokazywane.' },
+    publicProfileNotice: { en: 'Your Arcade name, handle and avatar are public. Your account email stays private.', pl: 'Twoja nazwa Arcade, identyfikator i awatar są publiczne. Adres e-mail konta pozostaje prywatny.' },
     leaderboardSettingsTitle: { en: 'Leaderboard settings', pl: 'Ustawienia rankingu' },
     hideFromLeaderboard: { en: 'Hide my profile from the leaderboard', pl: 'Ukryj mój profil w rankingu' },
     hideFromLeaderboardHint: { en: 'Your public profile remains available by handle. This setting removes you from XP rankings.', pl: 'Twój profil publiczny nadal będzie dostępny pod identyfikatorem. To ustawienie usuwa Cię z rankingów XP.' },

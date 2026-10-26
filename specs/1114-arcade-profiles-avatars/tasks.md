@@ -70,3 +70,5 @@ Zaznaczone zadania A oznaczają **lokalny kod i testy**, nie wdrożenie lub prze
 Implementacja używa `shared/profile-terms.mjs` zamiast osobnego Netlify-only helpera, aby WS i HTTP egzekwowały ten sam kontrakt. Zamknięta lista entrypoints: nowe create/quick-seat/authoritative JOIN; publiczny wybór avatara; reakcje i prezenty WS. Istniejące opłacone miejsce/reconnect/Leave i kontynuacja gry omijają nowy gate. Bez zmian mintu, bettingu, rebuy, settlement, CH lub XP. Legal gate ocenia wystarczalność granic przed aktywacją.
 
 Lokalne wyniki i dokładne kolejne bramki: [review.md](review.md). Nie dodano nowych issue ani PR.
+
+Follow-up review lokalny: domknięte PL/EN, gift Terms w canonical transaction po paid replay i przed BURN, bez zmian cen/entries. Wyniki212 PASS i pełne materiały do niezależnego review: [review-followup.md](review-followup.md). Bez operacyjnego GO.

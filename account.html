@@ -260,7 +260,7 @@
               <label for="signupPasswordConfirm" data-i18n="confirmPassword">Confirm password</label>
               <input id="signupPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" minlength="8" required placeholder="••••••••">
               <p class="account-note" data-i18n="passwordRequirements">Use at least 8 characters.</p>
-              <p class="account-note">After email verification, accept the <a href="/legal/terms.en.html" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> before new account use. Read our <a href="/legal/privacy.en.html" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy Policy</a>.</p>
+              <p class="account-note"><span data-i18n="profileTermsSignupNote">After email verification, accept the current Terms before using your account.</span> <a href="/legal/terms.en.html" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> · <a href="/legal/privacy.en.html" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy</a>.</p>
               <button type="submit" data-i18n="signUp">Sign up</button>
             </form>
             <p class="account-note" data-i18n="accountVerification">We may ask you to verify your email before unlocking cloud sync.</p>
@@ -289,13 +289,13 @@
                 <a class="public-profile-editor__url" id="publicProfileUrl" href="#">/u/handle</a>
               </div>
             </div>
-            <p class="account-note">Your Arcade name, handle and avatar are public. Your account email stays private.</p>
+            <p class="account-note" data-i18n="publicProfileNotice">Your Arcade name, handle and avatar are public. Your account email stays private.</p>
             <p><strong id="publicDisplayName"></strong> <span id="publicHandle"></span></p>
-            <div id="arcadeAvatarGallery" class="arcade-avatar-gallery" role="group" aria-label="Arcade avatars"></div>
+            <div id="arcadeAvatarGallery" class="arcade-avatar-gallery" role="group" data-i18n-aria="arcadeAvatarGallery" aria-label="Arcade avatars"></div>
             <p id="publicAvatarStatus" class="account-note" role="status"></p>
             <form class="account-form" id="publicProfileForm">
-              <fieldset class="public-profile-editor__privacy"><label><input id="hideFromLeaderboard" type="checkbox"> Hide my profile from the leaderboard</label><p class="account-note">This does not hide your public profile.</p></fieldset>
-              <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle"><span id="publicProfileSaveLabel">Save visibility</span></button>
+              <fieldset class="public-profile-editor__privacy"><label><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note" data-i18n="profileRemainsPublic">This does not hide your public profile.</p></fieldset>
+              <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle"><span id="publicProfileSaveLabel" data-i18n="profileSaveVisibility">Save visibility</span></button>
               <span id="publicProfileSaveStatus" role="status"></span>
             </form>
           </section>

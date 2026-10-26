@@ -1,14 +1,32 @@
-# Zmienione pliki — lokalna faza A
+# Zmienione pliki — kompletna faza A z follow-up
 
-Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Brak push/PR/deploy. Standardowe kontenery HTML otrzymały wyłącznie wspólne skrypty katalogu/onboardingu; właściwy edytor zmieniono w Account. Grafiki są oddzielnymi plikami. Pliki operacyjne SQL przygotowano, nie zastosowano.
+Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Bez push/PR/deploy. `css/xp.css` jest istniejącym, niezmienionym zasobem dołączanym przez zmieniony `account.html`; nowe reguły galerii są w `css/profile-account.css`.
 
-## WWW HTML
+## Runtime / UI / assets
 
 - `about.en.html`
 - `about.pl.html`
 - `about/licenses.html`
 - `account.html`
 - `admin.html`
+- `assets/avatars/arcade/ace-silver.webp`
+- `assets/avatars/arcade/bolt-yellow.webp`
+- `assets/avatars/arcade/comet-blue.webp`
+- `assets/avatars/arcade/ember-coral.webp`
+- `assets/avatars/arcade/falcon-orange.webp`
+- `assets/avatars/arcade/fox-blue.webp`
+- `assets/avatars/arcade/nova-purple.webp`
+- `assets/avatars/arcade/orbit-green.webp`
+- `assets/avatars/arcade/panda-pink.webp`
+- `assets/avatars/arcade/pixel-teal.webp`
+- `assets/avatars/arcade/raven-violet.webp`
+- `assets/avatars/arcade/rocket-red.webp`
+- `assets/avatars/arcade/tiger-gold.webp`
+- `assets/avatars/arcade/wave-cyan.webp`
+- `assets/avatars/arcade/wizard-indigo.webp`
+- `assets/avatars/arcade/zen-lime.webp`
+- `css/legal-document.css`
+- `css/profile-account.css`
 - `favorites.html`
 - `game.html`
 - `game_cats.html`
@@ -38,6 +56,13 @@ Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Brak push/PR/deploy. Standa
 - `games-open/tic-tac-toe/index.html`
 - `games-open/whac-a-mole/index.html`
 - `index.html`
+- `js/account-page.js`
+- `js/auth/supabaseClient.js`
+- `js/i18n.js`
+- `js/profile-avatar-catalog.js`
+- `js/profile-client.js`
+- `js/profile-onboarding.js`
+- `js/public-profile-page.js`
 - `leaderboard.html`
 - `legal/cookies-notice.en.html`
 - `legal/cookies-notice.pl.html`
@@ -47,43 +72,8 @@ Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Brak push/PR/deploy. Standa
 - `legal/terms.2026-10-26-a1.pl.html`
 - `legal/terms.en.html`
 - `legal/terms.pl.html`
-- `play.html`
-- `poker/index.html`
-- `poker/table-v2.html`
-- `profile.html`
-- `recently-played.html`
-- `xp.html`
-
-## Browser JS/CSS
-
-- `assets/avatars/arcade/ace-silver.webp`
-- `assets/avatars/arcade/bolt-yellow.webp`
-- `assets/avatars/arcade/comet-blue.webp`
-- `assets/avatars/arcade/ember-coral.webp`
-- `assets/avatars/arcade/falcon-orange.webp`
-- `assets/avatars/arcade/fox-blue.webp`
-- `assets/avatars/arcade/nova-purple.webp`
-- `assets/avatars/arcade/orbit-green.webp`
-- `assets/avatars/arcade/panda-pink.webp`
-- `assets/avatars/arcade/pixel-teal.webp`
-- `assets/avatars/arcade/raven-violet.webp`
-- `assets/avatars/arcade/rocket-red.webp`
-- `assets/avatars/arcade/tiger-gold.webp`
-- `assets/avatars/arcade/wave-cyan.webp`
-- `assets/avatars/arcade/wizard-indigo.webp`
-- `assets/avatars/arcade/zen-lime.webp`
-- `css/legal-document.css`
-- `css/profile-account.css`
-- `js/account-page.js`
-- `js/auth/supabaseClient.js`
-- `js/profile-avatar-catalog.js`
-- `js/profile-client.js`
-- `js/profile-onboarding.js`
-- `js/public-profile-page.js`
-- `poker/poker-v2.js`
-
-## API / shared / WS
-
+- `mobile/poker/package-web.mjs`
+- `mobile/poker/runtime.js`
 - `netlify/functions/_shared/user-profile.mjs`
 - `netlify/functions/_shared/xp-leaderboard-read.mjs`
 - `netlify/functions/poker-create-table.mjs`
@@ -93,30 +83,40 @@ Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Brak push/PR/deploy. Standa
 - `netlify/functions/profile-avatar-upload-url.mjs`
 - `netlify/functions/profile-me.mjs`
 - `netlify/functions/profile-onboarding.mjs`
-- `shared/poker-domain/join.mjs`
-- `shared/profile-avatar-projection.mjs`
-- `shared/profile-terms.mjs`
-- `ws-server/poker/persistence/authoritative-join-adapter.mjs`
-- `ws-server/server.mjs`
-
-## Android / generators / generated Offline
-
-- `mobile/poker/package-web.mjs`
-- `mobile/poker/runtime.js`
+- `play.html`
+- `poker/index.html`
 - `poker/offline/avatar-catalog.generated.js`
 - `poker/offline/game.generated.js`
 - `poker/offline/play.html`
 - `poker/offline/renderer.generated.js`
+- `poker/poker-v2.js`
+- `poker/table-v2.html`
+- `profile.html`
+- `recently-played.html`
 - `scripts/build-poker-offline-poc.mjs`
 - `scripts/build-profile-avatar-catalog.mjs`
+- `shared/poker-domain/gift-purchase.mjs`
+- `shared/poker-domain/join.mjs`
+- `shared/profile-avatar-projection.mjs`
+- `shared/profile-terms.mjs`
+- `ws-server/poker/persistence/authoritative-join-adapter.mjs`
+- `ws-server/poker/persistence/gift-adapter.mjs`
+- `ws-server/server.mjs`
+- `xp.html`
 
-## Schema / inventory manifest
+## SQL / manifest
 
+- `specs/1114-arcade-profiles-avatars/operations/contract.sql`
+- `specs/1114-arcade-profiles-avatars/operations/enable-catalog.sql`
+- `specs/1114-arcade-profiles-avatars/operations/enable-terms.sql`
+- `specs/1114-arcade-profiles-avatars/operations/inventory.sql`
+- `specs/1114-arcade-profiles-avatars/operations/normalize-profiles.sql`
 - `supabase/migrations/20261026120000_profile_phase_a.sql`
 - `supabase/production-migrations/manifest.json`
 
-## Fundamental tests
+## Tests
 
+- `shared/poker-domain/gift-purchase.behavior.test.mjs`
 - `shared/poker-domain/join.behavior.test.mjs`
 - `tests/account-deletion-storage.behavior.test.mjs`
 - `tests/helpers/poker-test-helpers.mjs`
@@ -126,8 +126,9 @@ Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Brak push/PR/deploy. Standa
 - `tests/public-profile-provisioning.contract.test.mjs`
 - `tests/public-profile-ui.contract.test.mjs`
 - `tests/public-profiles.behavior.test.mjs`
+- `ws-server/poker/handlers/gift.behavior.test.mjs`
 
-## SpecKit / artwork / evidence
+## SpecKit / evidence
 
 - `specs/1114-arcade-profiles-avatars/artwork/README.md`
 - `specs/1114-arcade-profiles-avatars/artwork/avatars-contact-sheet-v1.png`
@@ -135,17 +136,16 @@ Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Brak push/PR/deploy. Standa
 - `specs/1114-arcade-profiles-avatars/artwork/size-review.png`
 - `specs/1114-arcade-profiles-avatars/changed-files.md`
 - `specs/1114-arcade-profiles-avatars/evidence/account-gallery-local.png`
+- `specs/1114-arcade-profiles-avatars/evidence/account-gallery-pl-local.png`
 - `specs/1114-arcade-profiles-avatars/evidence/asset-verification.json`
 - `specs/1114-arcade-profiles-avatars/evidence/local-smoke.json`
+- `specs/1114-arcade-profiles-avatars/evidence/localization-smoke.json`
 - `specs/1114-arcade-profiles-avatars/evidence/offline-avatar-local.png`
 - `specs/1114-arcade-profiles-avatars/evidence/terms-local.png`
+- `specs/1114-arcade-profiles-avatars/evidence/terms-pl-local.png`
 - `specs/1114-arcade-profiles-avatars/evidence/tests-local.json`
-- `specs/1114-arcade-profiles-avatars/operations/contract.sql`
-- `specs/1114-arcade-profiles-avatars/operations/enable-catalog.sql`
-- `specs/1114-arcade-profiles-avatars/operations/enable-terms.sql`
-- `specs/1114-arcade-profiles-avatars/operations/inventory.sql`
-- `specs/1114-arcade-profiles-avatars/operations/normalize-profiles.sql`
 - `specs/1114-arcade-profiles-avatars/plan.md`
+- `specs/1114-arcade-profiles-avatars/review-followup.md`
 - `specs/1114-arcade-profiles-avatars/review.md`
 - `specs/1114-arcade-profiles-avatars/spec.md`
 - `specs/1114-arcade-profiles-avatars/tasks.md`

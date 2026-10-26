@@ -27,5 +27,18 @@
     "/tmp/phase-a-review-red1.log",
     "/tmp/phase-a-review-red-consent.log",
     "/tmp/phase-a-review-green2.log"
-  ]
+  ],
+  "followup": {
+    "passed": 212,
+    "failed": 0,
+    "skipped": 0,
+    "fileSuites": 13,
+    "log": "/tmp/phase-a-followup-final-tests.log",
+    "giftRED": "/tmp/phase-a-gift-red.log",
+    "scope": "targeted Terms/admission/gift/reaction + profile/i18n + Account Deletion/storage",
+    "legalAndOperationalGates": "OPEN; no PR/Stage/deploy",
+    "cspDocuments": 58,
+    "syntaxFiles": 235,
+    "localizationSmoke": "local packaged assets; mocked Auth/API; PL PASS; zero external requests"
+  }
 }

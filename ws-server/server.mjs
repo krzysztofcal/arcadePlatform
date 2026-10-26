@@ -5125,8 +5125,6 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolved.roomId;
       await runGiftWork(tableId, async () => {
-        try { const transact=await loadBeginSqlWs(); await transact(tx=>requireCurrentTerms(tx,{kind:connState.session.identityMode==="guest"?"guest":"account",id:connState.session.userId})); }
-        catch(error){sendCommandResult(ws,connState,{requestId:frame.requestId,tableId,status:"rejected",reason:error?.code==="terms_required"?"terms_required":"terms_unavailable"});return;}
         const association = tableManager.connectionTableAssociation(ws);
         const snapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         const outcome = await handleGiftSendCommand({ payload: frame.payload, identityMode: connState.session.identityMode,

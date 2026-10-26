@@ -53,6 +53,8 @@
   }
   dialog.querySelector('#arcadeTermsTitle').textContent=label('Terms & Conditions','Regulamin');
   dialog.querySelector('[data-terms-copy]').textContent=label('Accept the current Terms before starting new use of your account. This does not consent to publishing a Google photo.','Zaakceptuj aktualny regulamin przed nowym korzystaniem z konta. Nie oznacza to zgody na publikację zdjęcia Google.')+' ('+status.version+')';
+  dialog.querySelector('[data-terms-link]').textContent=label('Terms','Regulamin');
+  dialog.querySelector('[data-privacy-link]').textContent=label('Privacy','Prywatność');
   dialog.querySelector('[data-terms-link]').href='/legal/terms.'+status.version+'.'+(pl()?'pl':'en')+'.html';
   dialog.querySelector('[data-privacy-link]').href='/legal/privacy.'+(pl()?'pl':'en')+'.html';
   dialog.querySelector('[data-terms-accept]').textContent=label('I accept the Terms','Akceptuję regulamin');
@@ -88,6 +90,10 @@
   if(window.SupabaseAuth)window.SupabaseAuth.onAuthChange(function(){generation++;status=null;requestId=null;close();setTimeout(function(){refresh(true);},0);});
   refresh(true);
   document.addEventListener('profile:terms-required',function(){window.ArcadeTerms.open();});
+  document.addEventListener('langchange',function(){
+   if(dialog&&dialog.open){show();var error=dialog.querySelector('[data-terms-error]');if(error.textContent)error.textContent=label('Could not record acceptance. Reconnect and retry.','Nie udało się zapisać akceptacji. Połącz się i spróbuj ponownie.');}
+   if(prompt)prompt.textContent=label('Review Terms','Akceptuj regulamin');
+  });
  }
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
