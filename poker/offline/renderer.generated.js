@@ -36,25 +36,25 @@
     var theme = TABLE_THEME_CATALOG.find(function(entry){ return entry.id === themeId; });
     var request = ++tableThemeRequest;
     els.screen.removeAttribute('data-table-theme');
-    if (!theme || !theme.assets || theme.id === 'classic-casino') return;
-    Promise.all(theme.assets.map(function(file){
-      return new Promise(function(resolve, reject){
+    if (!theme || !theme.assets) return Promise.resolve();
+    return Promise.all(theme.assets.map(function(file){ return '/poker/assets/themes/' + theme.id + '/' + file; }).concat(["/poker/assets/scene/casino-room-v2.webp","/poker/assets/scene/dealer-v2.webp","/poker/assets/scene/felt-house-mark.svg","/poker/assets/scene/felt-weave.webp"]).map(function(file){
+      return new Promise(function(resolve){
         var image = new Image();
         var timeout = window.setTimeout(function(){ finish(false); }, 15000);
         function finish(loaded){
           window.clearTimeout(timeout);
           image.onload = null;
           image.onerror = null;
-          if (loaded) resolve();
-          else reject(new Error('Theme artwork unavailable'));
+          resolve(loaded);
+
         }
-        image.onload = function(){ finish(image.naturalWidth > 0); };
+        image.onload = function(){ if(image.decode) image.decode().then(function(){ finish(image.naturalWidth > 0); },function(){ finish(false); }); else finish(image.naturalWidth > 0); };
         image.onerror = function(){ finish(false); };
-        image.src = '/poker/assets/themes/' + theme.id + '/' + file;
+        image.src = file;
       });
-    })).then(function(){
+    })).then(function(loaded){
       if (request !== tableThemeRequest) return;
-      els.screen.setAttribute('data-table-theme', theme.id);
+      if(loaded.every(Boolean) && theme.id !== 'classic-casino') els.screen.setAttribute('data-table-theme', theme.id); else if(!loaded.every(Boolean)) klog('poker_table_theme_load_failed', {themeId:theme.id});
     }).catch(function(){
       if (request !== tableThemeRequest) return;
       els.screen.removeAttribute('data-table-theme');
@@ -7397,6 +7397,25 @@
     startAuthWatch();
   }
 
+  function prepareOfflineFrame(themeReady){
+    return themeReady.then(function(){
+      render();
+      var images = Array.prototype.map.call(els.screen.querySelectorAll('img'), function(image){
+        return new Promise(function(resolve){
+          var timeout = window.setTimeout(resolve, 15000);
+          Promise.resolve(image.decode ? image.decode() : undefined).catch(function(){}).then(function(){ window.clearTimeout(timeout); resolve(); });
+        });
+      });
+      return Promise.all(images.concat(document.fonts ? document.fonts.ready : Promise.resolve()));
+    }).then(function(){
+      return new Promise(function(resolve){
+        window.requestAnimationFrame(function(){
+          render();fitTableScene();
+          window.requestAnimationFrame(function(){fitTableScene();markBootReady();resolve();});
+        });
+      });
+    });
+  }
   function init(){
     selectElements();
     try {
@@ -7407,14 +7426,13 @@
     state = createEmptyLiveState(tableId, offline.human);
     state.wsReady = true; state.reconnectGate = false;
     socialPreferencesIdentity = 'offline-human';
-    applyTableTheme(resolveTableThemeId(tableId));
+    var themeReady = Promise.resolve(applyTableTheme(resolveTableThemeId(tableId)));
     bindControls();
     bindMenu();
     startTurnClock();
     [els.menuLeave, els.rebuyLobbyBtn].forEach(function(el){ if (el) el.addEventListener('click', function(){ resetQueuedPreactionState(); renderControls(); }); });
     if (els.sceneViewport && window.ResizeObserver) new ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
     window.addEventListener('resize', scheduleLayoutPresentationRefresh);
-    markBootReady();
     offline.start(function(payload){
       var frame = {kind:'stateSnapshot', initial:!state.hasAppliedAuthoritativeSnapshot, cardFxEligible:!!state.hasAppliedAuthoritativeSnapshot};
       var previousVisual = captureVisualSnapshot(), previousHandId = state.handId;
@@ -7429,7 +7447,7 @@
       animateChipDiff(previousVisual, nextVisual, frame);
       animateCardDiff(previousVisual, nextVisual, frame);
       [els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
-    }, handleTableReaction, function(){ resetQueuedPreactionState(); renderControls(); });
+    }, handleTableReaction, function(){ resetQueuedPreactionState(); renderControls(); }, function(){ return prepareOfflineFrame(themeReady); });
     } catch(error) { if(error.code === 'OFFLINE_STORAGE_INVALID'){window.location.replace('/poker/index.html');return;} document.getElementById('offlineError').textContent = error.message; }
   }
 

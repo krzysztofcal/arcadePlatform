@@ -81,3 +81,7 @@ Lobby retains Offline balance,100/500/1000tiers, Play/New Game and Resume only; 
 ## T023 — recovery for invalid Offline storage
 
 Lobby has an emergency Reset Offline Progress button hidden by default beside offlineError. Only errors tagged from invalid/corrupt/unsupported Offline read validation reveal it; healthy records and action/quota/lock errors do not. Existing custom Reset confirmation and one shared handler serve lobby recovery and Table settings. Handler uses existing STORAGE_KEY Web Lock directly, without run()/game.read(), removes only that key after Confirm and navigates /poker/index.html. Cancel never removes storage. Normal startup after reset reads default5000 and can play. Preserve other app data/online CH and auto-refill T022. No automatic deletion/migration or new normal-lobby control.
+
+## T024 — table readiness without theme flash
+
+Owner physical T023 PASS retained. Reuse existing Loading table splash/hidden table for New Game and Resume. First paused snapshot, actual theme/common image decode, rendered avatars/cards/HUD and layout frames must precede markBootReady. Resume actor clocks only after reveal; saved budget unchanged by graphics wait. New Game pauses before navigation. No artificial readiness sleep, Auth/WS/remote wait, new loader/framework or Online behavior change. Existing15s image-failure bound resolves stable Classic fallback without late theme activation. markBootReady stays once per document init. Canonical Back/Reset/Resume,20s actor/1–2s bot/3s rollover unchanged.

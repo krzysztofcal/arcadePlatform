@@ -1,3 +1,12 @@
+# T024 — table theme loading (verification in progress)
+
+Owner physical T023 PASS retained. Root cause confirmed: generated init called markBootReady before first offline.start snapshot and before asynchronous applyTableTheme finished. Reuse same splash/hidden-screen styles; now prepareOfflineFrame waits actual theme/common-scene decode, first paused snapshot/current img decode and2layout frames before calling existing guarded markBootReady. Theme loader is the original V2 body with guarded Offline-only transformations: Promise return/decoded assets/bounded fallback. Source Online renderer/HTML/CSS unchanged. No new loader framework or artificial success delay.
+
+New Game browser action pauses before document navigation. startView publishes paused state and gates generic activate until view readiness; unpaused cold legacy state rebases saved budget before pause. No hidden bot action/actor time while graphics wait. Reveal then activate;20s/1–2s/3s rules preserved. Existing15s image guard leads to stable Classic fallback; late loads cannot activate rejected theme. Startup errors return canonical lobby; Back/Reset/recovery unaffected.
+
+Three fundamental tests RED26pass/3fail → GREEN35/35 cover paused snapshot before deferred ready, preserved20s despite60s loading/foreground attempt, theme+frame ordering/single completion, success/failure/timeout fallback/no late switch. No protocol/v1 format/finance breaking impact. Internal Offline start accepts a readiness callback; only generated renderer consumes it. Actual APK/CI evidence follows; retain Draft, physical owner acceptance pending.
+
+---
 # T023 — Offline storage recovery packaged recovery PASS; owner review pending
 
 Review confirmed the dead end: read rejects corrupt/unsupported records, lobby no longer has ordinary Reset, and former Table Reset used run's pre-read. Added an emergency button hidden by default, shown only on OFFLINE_STORAGE_INVALID validation errors. Other errors do not expose deletion UI. Existing read messages/fail-closed behavior retained, primitive/array sessions explicitly classified as invalid rather than leaking TypeError.

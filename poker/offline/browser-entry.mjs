@@ -1,7 +1,7 @@
 import {classifyRaiseReaction, classifySettlementReaction, classifyAmbientReaction} from '../../ws-server/poker/handlers/reaction.mjs';
 import {createOfflineGame, HUMAN, STORAGE_KEY} from './offline-game.mjs';
 const game=createOfflineGame({storage:window.localStorage});
-let listener, timer, active=false, epoch=0, reactionListener, lastBotReaction=0, renderedToken, clearPreactions;
+let listener, timer, active=false, epoch=0, reactionListener, lastBotReaction=0, renderedToken, clearPreactions, viewReady=false;
 function botReaction(before){
   if(!reactionListener || Date.now()-lastBotReaction<4000) return;
   const session=game.read().session,s=session?.state;if(!s)return;
@@ -52,7 +52,7 @@ async function run(fn){
   });
 }
 async function activate(afterBack=false){
-  if(active||!listener||document.hidden||(backNavigation&&!afterBack))return;
+  if(active||!viewReady||!listener||document.hidden||(backNavigation&&!afterBack))return;
   const generation=++epoch;
   await run(()=>{if(generation!==epoch||document.hidden)return;game.resume(true);active=true;});
 }
@@ -110,9 +110,19 @@ async function restorePage(event){
   if(backNavigation?.navigating)backNavigation=null;
   await activate();
 }
+async function startView(fn,reactions,onPause,ready){
+  listener=fn;reactionListener=reactions;clearPreactions=onPause;active=false;viewReady=false;
+  await run(()=>{
+    const session=game.read().session;
+    if(session&&!session.clock?.paused){game.resume(true);game.pause();}
+  });
+  await ready();
+  viewReady=true;
+  await activate();
+}
 window.PokerOffline={
   human:HUMAN,read:game.read,backToLobby,cancelDialog,isActive:()=>active,
-  start(fn,reactions,onPause){listener=fn;reactionListener=reactions;clearPreactions=onPause;activate().catch(fail);},
+  start(fn,reactions,onPause,ready){return startView(fn,reactions,onPause,ready).catch(error=>{fail(error);window.location.replace('/poker/index.html');});},
   act(action){const expected=renderedToken,generation=epoch;return run(()=>active&&expected&&generation===epoch?game.act(action,expected):false);},
   leave(){
     epoch++;clearTimeout(timer);if(clearPreactions)clearPreactions();
@@ -159,7 +169,7 @@ function init(){
       if(!await ask('New Offline game','Settle and leave the current offline session before starting a new game?'))return;
       game.leave();
     }
-    await game.newGame(buyIn);window.location.assign('/poker/offline/play.html');
+    await game.newGame(buyIn);game.pause();window.location.assign('/poker/offline/play.html');
   });
   const resume=document.getElementById('offlineResume');if(resume)resume.addEventListener('click',()=>window.location.assign('/poker/offline/play.html'));
   action('offlineRebuy',()=>game.rebuy());

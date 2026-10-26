@@ -3119,6 +3119,7 @@
   var lastBotReaction = 0;
   var renderedToken;
   var clearPreactions;
+  var viewReady = false;
   function botReaction(before) {
     if (!reactionListener || Date.now() - lastBotReaction < 4e3) return;
     const session = game.read().session, s = session?.state;
@@ -3186,7 +3187,7 @@
     });
   }
   async function activate(afterBack = false) {
-    if (active || !listener || document.hidden || backNavigation && !afterBack) return;
+    if (active || !viewReady || !listener || document.hidden || backNavigation && !afterBack) return;
     const generation = ++epoch;
     await run(() => {
       if (generation !== epoch || document.hidden) return;
@@ -3279,17 +3280,34 @@
     if (backNavigation?.navigating) backNavigation = null;
     await activate();
   }
+  async function startView(fn, reactions, onPause, ready) {
+    listener = fn;
+    reactionListener = reactions;
+    clearPreactions = onPause;
+    active = false;
+    viewReady = false;
+    await run(() => {
+      const session = game.read().session;
+      if (session && !session.clock?.paused) {
+        game.resume(true);
+        game.pause();
+      }
+    });
+    await ready();
+    viewReady = true;
+    await activate();
+  }
   window.PokerOffline = {
     human: HUMAN,
     read: game.read,
     backToLobby,
     cancelDialog,
     isActive: () => active,
-    start(fn, reactions, onPause) {
-      listener = fn;
-      reactionListener = reactions;
-      clearPreactions = onPause;
-      activate().catch(fail);
+    start(fn, reactions, onPause, ready) {
+      return startView(fn, reactions, onPause, ready).catch((error) => {
+        fail(error);
+        window.location.replace("/poker/index.html");
+      });
     },
     act(action) {
       const expected = renderedToken, generation = epoch;
@@ -3372,6 +3390,7 @@
         game.leave();
       }
       await game.newGame(buyIn);
+      game.pause();
       window.location.assign("/poker/offline/play.html");
     });
     const resume = document.getElementById("offlineResume");

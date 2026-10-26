@@ -55,7 +55,7 @@ test('all-in payouts conserve the original local stake and public projection kee
  assert.equal(Object.values(s.handSettlement.payouts).reduce((a,b)=>a+b,0),Object.values(s.contributionsByUserId).reduce((a,b)=>a+b,0));
  const before=g.read().wallet;const stack=s.stacks['offline-human'];g.leave();assert.equal(g.read().wallet,before+stack);
 });
-function timedGame(storage=store()) {let time=100000;const g=createOfflineGame({storage,prepare:async()=>{},random:()=>0.2,uuid:()=>'timing-fixture-0',now:()=>time});return {g,storage,advance:ms=>time+=ms};}
+function timedGame(storage=store()) {let time=100000;const g=createOfflineGame({storage,prepare:async()=>{},random:()=>0.2,uuid:()=>'timing-fixture-0',now:()=>time});return {g,storage,advance:ms=>time+=ms,now:()=>time};}
 test('automatic settled rollover runs after three seconds once; stale callbacks cannot start another hand',async()=>{
  const {g,advance}=timedGame();await g.newGame(100);finish(g);const token=g.timerToken(),wallet=g.read().wallet;
  advance(2999);assert.equal(await g.tick(token),false);advance(1);assert.deepEqual(await Promise.all([g.tick(token),g.tick(token)]),[true,false]);
@@ -215,5 +215,32 @@ test('shared locked Reset recovers invalid storage without read and only deletes
   const context=vm.createContext({STORAGE_KEY,epoch:0,active:true,timer:null,clearTimeout,clearPreactions:()=>{},game:{read(){reads++;throw new Error('must not read');}},run(){assert.fail('Reset must bypass run');},navigator:{locks:{request:async(key,fn)=>{assert.equal(key,STORAGE_KEY);locked=true;try{return await fn();}finally{locked=false;}}}},ask:async()=>{assert.equal(locked,true);return confirmed;},window:{localStorage:storage,location:{assign:url=>{assert.equal(locked,true);destinations.push(url);}}}});
   vm.runInContext(source.slice(node.start,node.end),context);await context.resetOfflineProgress();assert.equal(storage.getItem(STORAGE_KEY),raw);assert.equal(removals,0);assert.equal(reads,0);
   confirmed=true;await context.resetOfflineProgress();assert.equal(removals,1);assert.equal(reads,0);assert.equal(data.has(STORAGE_KEY),false);assert.equal(data.get('chips'),'unchanged-CH');assert.equal(data.get('other-app-data'),'keep');assert.deepEqual(destinations,['/poker/index.html']);const g=game(storage);assert.equal(g.read().wallet,5000);await g.newGame(100);assert.equal(g.read().wallet,4900);
+ }
+});
+
+async function bootFunctions(names){
+ const{readFileSync}=await import('node:fs'),{parse}=await import('acorn');const source=readFileSync('poker/offline/renderer.generated.js','utf8'),bodies=[];
+ function visit(n){if(!n||typeof n!=='object')return;if(n.type==='FunctionDeclaration'&&names.includes(n.id?.name))bodies.push(source.slice(n.start,n.end));for(const v of Object.values(n)){if(Array.isArray(v))v.forEach(visit);else if(v&&typeof v==='object')visit(v);}}
+ visit(parse(source,{ecmaVersion:'latest'}));assert.equal(bodies.length,names.length);return bodies.join('\n');
+}
+test('Offline startup publishes paused snapshot before readiness and spends no clock budget while loading',async()=>{
+ const{readFileSync}=await import('node:fs'),{parse}=await import('acorn'),vm=await import('node:vm');const source=readFileSync('poker/offline/browser-entry.mjs','utf8'),nodes=parse(source,{ecmaVersion:'latest',sourceType:'module'}).body.filter(n=>n.type==='FunctionDeclaration'&&['startView','activate'].includes(n.id.name));assert.equal(nodes.length,2);
+ const t=timedGame();await t.g.newGame(100);t.advance(5000);let context,release;const snapshots=[],ready=new Promise(r=>release=r);
+ context=vm.createContext({game:t.g,document:{hidden:false},run:async fn=>{await fn();if(context.listener){snapshots.push(t.g.read().session.clock.paused);context.listener(t.g.snapshot());}},clearTimeout});
+ vm.runInContext('var listener,reactionListener,clearPreactions,viewReady=false,active=false,epoch=0,backNavigation=null,timer;'+nodes.map(n=>source.slice(n.start,n.end)).join('\n'),context);
+ const pending=context.startView(()=>{},()=>{},()=>{},()=>ready);await new Promise(setImmediate);assert.equal(context.active,false);assert.deepEqual(snapshots,[true]);assert.equal(t.g.pendingTimer(),null);const before=t.g.read();t.advance(60000);await context.activate();assert.deepEqual(t.g.read(),before);release();await pending;assert.equal(context.active,true);assert.equal(t.g.read().session.clock.remainingMs,20000);assert.equal(t.g.read().session.clock.dueAt-t.now(),20000);
+});
+test('Offline boot waits for theme and layout frames; completion remains exactly once',async()=>{
+ const vm=await import('node:vm'),source=await bootFunctions(['prepareOfflineFrame','markBootReady']);let release;const theme=new Promise(r=>release=r),frames=[],attrs=new Map();let marks=0,renders=0;
+ const context=vm.createContext({Promise,document:{fonts:{ready:Promise.resolve()}},window:{requestAnimationFrame:fn=>frames.push(fn),setTimeout,clearTimeout},els:{screen:{querySelectorAll:()=>[],setAttribute:(k,v)=>{attrs.set(k,v);marks++;}},bootSplash:{hidden:false}},render:()=>renders++,fitTableScene:()=>{}});vm.runInContext('var bootReady=false;'+source,context);
+ const pending=context.prepareOfflineFrame(theme);await new Promise(setImmediate);assert.equal(marks,0);assert.equal(frames.length,0);release();await new Promise(setImmediate);assert.ok(renders>0);assert.equal(marks,0);assert.equal(frames.length,1);frames.shift()();assert.equal(marks,0);frames.shift()();await pending;assert.equal(marks,1);assert.equal(context.els.bootSplash.hidden,true);context.markBootReady();assert.equal(marks,1);
+});
+test('Offline theme readiness resolves success or bounded stable Classic fallback without late switching',async()=>{
+ const vm=await import('node:vm'),source=await bootFunctions(['applyTableTheme']);
+ for(const mode of['success','failure','timeout','classic']){
+  const attrs=new Map(),timers=new Map(),images=[];let id=0;
+  class Image {constructor(){images.push(this);}set src(url){this.url=url;this.naturalWidth=1;if(mode==='timeout'&&url.includes('/themes/'))return;queueMicrotask(()=>{if(mode==='failure'&&url.includes('/themes/'))this.onerror?.();else this.onload?.();});}decode(){return Promise.resolve();}}
+  const context=vm.createContext({Promise,Image,window:{setTimeout:fn=>{timers.set(++id,fn);return id;},clearTimeout:key=>timers.delete(key)},els:{screen:{removeAttribute:k=>attrs.delete(k),setAttribute:(k,v)=>attrs.set(k,v)}},TABLE_THEME_CATALOG:[{id:'classic-casino',assets:[]},{id:'midnight-sapphire',assets:['room.webp']}],tableThemeRequest:0,klog:()=>{}});vm.runInContext(source,context);
+  const pending=context.applyTableTheme(mode==='classic'?'classic-casino':'midnight-sapphire');assert.equal(typeof pending?.then,'function');await new Promise(setImmediate);if(mode==='timeout')for(const fn of [...timers.values()])fn();await pending;assert.equal(attrs.get('data-table-theme'),mode==='success'?'midnight-sapphire':undefined);for(const image of images)image.onload?.();await new Promise(setImmediate);assert.equal(attrs.get('data-table-theme'),mode==='success'?'midnight-sapphire':undefined);
  }
 });
