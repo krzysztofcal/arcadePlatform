@@ -171,9 +171,9 @@ test('Offline Leave and Reset commit once then navigate to the packaged lobby do
  const context=vm.createContext({window,setError:message=>assert.fail(message),game:g,STORAGE_KEY,timer:null,clearTimeout,ask:async()=>false});
  const executeLeave=vm.runInContext('(function(){'+leave+'})',context);
  await executeLeave();const wallet=g.read().wallet;assert.equal(g.read().session,null);await executeLeave();assert.equal(g.read().wallet,wallet);assert.deepEqual(destinations,['/poker/index.html','/poker/index.html']);
- await g.newGame(100);const saved=storage.getItem(STORAGE_KEY),source=readFileSync('poker/offline/browser-entry.mjs','utf8');let reset;
- function visit(n){if(!n||typeof n!=='object')return;if(n.type==='CallExpression'&&n.callee.name==='action'&&n.arguments[0]?.value==='offlineReset')reset=n.arguments[1];for(const v of Object.values(n)){if(Array.isArray(v))v.forEach(visit);else if(v&&typeof v==='object')visit(v);}}
- visit(parse(source,{ecmaVersion:'latest',sourceType:'module'}));assert.ok(reset);
+ await g.newGame(100);const saved=storage.getItem(STORAGE_KEY),source=readFileSync('poker/offline/browser-entry.mjs','utf8');
+ const reset=parse(source,{ecmaVersion:'latest',sourceType:'module'}).body.find(n=>n.type==='FunctionDeclaration'&&n.id.name==='resetOfflineProgress');assert.ok(reset);
+ context.navigator={locks:{request:async(key,fn)=>fn()}};context.epoch=0;context.active=true;context.clearPreactions=null;
  const executeReset=vm.runInContext('('+source.slice(reset.start,reset.end)+')',context);
  await executeReset();assert.equal(storage.getItem(STORAGE_KEY),saved);assert.equal(destinations.length,2);
  context.ask=async()=>true;await executeReset();assert.equal(storage.getItem(STORAGE_KEY),null);assert.equal(destinations.at(-1),'/poker/index.html');
@@ -199,4 +199,21 @@ test('Rebuy and Leave enforce wallet threshold without automatic Rebuy or duplic
  const storage=store(),g=game(storage);await g.newGame(100);finish(g);const data=g.read();data.wallet=100;data.session.state.stacks['offline-human']=0;storage.setItem(STORAGE_KEY,JSON.stringify(data));const bots={...data.session.state.stacks};delete bots['offline-human'];
  assert.equal(g.refill(),false);assert.equal(g.read().session.state.stacks['offline-human'],0);g.rebuy();assert.equal(g.read().wallet,5000);assert.equal(g.read().session.state.stacks['offline-human'],100);for(const[id,stack]of Object.entries(bots))assert.equal(g.read().session.state.stacks[id],stack);
  const empty=g.read();empty.wallet=0;empty.session.state.stacks['offline-human']=0;storage.setItem(STORAGE_KEY,JSON.stringify(empty));assert.deepEqual(g.leave(),{wallet:5000,cashout:0});const saved=storage.getItem(STORAGE_KEY);assert.deepEqual(g.leave(),{wallet:5000,cashout:0});assert.equal(storage.getItem(STORAGE_KEY),saved);
+});
+
+test('only invalid Offline storage errors expose emergency recovery',async()=>{
+ const{readFileSync}=await import('node:fs'),{parse}=await import('acorn'),vm=await import('node:vm');const source=readFileSync('poker/offline/browser-entry.mjs','utf8'),node=parse(source,{ecmaVersion:'latest',sourceType:'module'}).body.find(n=>n.type==='FunctionDeclaration'&&n.id.name==='fail');
+ const errorNode={textContent:'',hidden:true},recovery={hidden:true},context=vm.createContext({document:{getElementById:id=>id==='offlineError'?errorNode:id==='offlineRecoveryReset'?recovery:null}});vm.runInContext(source.slice(node.start,node.end),context);
+ for(const raw of['{bad','{"schema":99}',JSON.stringify({schema:1,revision:0,wallet:99,session:1})]){const storage=store();storage.setItem(STORAGE_KEY,raw);const g=game(storage);let error;try{g.read();}catch(e){error=e;}assert.equal(error?.code,'OFFLINE_STORAGE_INVALID');context.fail(error);assert.equal(recovery.hidden,false);assert.ok(errorNode.textContent);assert.equal(storage.getItem(STORAGE_KEY),raw);}
+ context.fail(new Error('Not enough Offline Chips for this buy-in'));assert.equal(recovery.hidden,true);context.fail(new Error('quota'));assert.equal(recovery.hidden,true);
+});
+test('shared locked Reset recovers invalid storage without read and only deletes the Offline key',async()=>{
+ const{readFileSync}=await import('node:fs'),{parse}=await import('acorn'),vm=await import('node:vm');const source=readFileSync('poker/offline/browser-entry.mjs','utf8'),node=parse(source,{ecmaVersion:'latest',sourceType:'module'}).body.find(n=>n.type==='FunctionDeclaration'&&n.id.name==='resetOfflineProgress');assert.ok(node);
+ for(const raw of['{bad','{"schema":99}',JSON.stringify({schema:1,revision:0,wallet:100,session:null})]){
+  const data=new Map([[STORAGE_KEY,raw],['chips','unchanged-CH'],['other-app-data','keep']]),destinations=[];let locked=false,confirmed=false,reads=0,removals=0;
+  const storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v),removeItem:k=>{assert.equal(locked,true);assert.equal(k,STORAGE_KEY);removals++;data.delete(k);}};
+  const context=vm.createContext({STORAGE_KEY,epoch:0,active:true,timer:null,clearTimeout,clearPreactions:()=>{},game:{read(){reads++;throw new Error('must not read');}},run(){assert.fail('Reset must bypass run');},navigator:{locks:{request:async(key,fn)=>{assert.equal(key,STORAGE_KEY);locked=true;try{return await fn();}finally{locked=false;}}}},ask:async()=>{assert.equal(locked,true);return confirmed;},window:{localStorage:storage,location:{assign:url=>{assert.equal(locked,true);destinations.push(url);}}}});
+  vm.runInContext(source.slice(node.start,node.end),context);await context.resetOfflineProgress();assert.equal(storage.getItem(STORAGE_KEY),raw);assert.equal(removals,0);assert.equal(reads,0);
+  confirmed=true;await context.resetOfflineProgress();assert.equal(removals,1);assert.equal(reads,0);assert.equal(data.has(STORAGE_KEY),false);assert.equal(data.get('chips'),'unchanged-CH');assert.equal(data.get('other-app-data'),'keep');assert.deepEqual(destinations,['/poker/index.html']);const g=game(storage);assert.equal(g.read().wallet,5000);await g.newGame(100);assert.equal(g.read().wallet,4900);
+ }
 });

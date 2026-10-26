@@ -1,3 +1,12 @@
+# T023 — Offline storage recovery (verification in progress)
+
+Review confirmed the dead end: read rejects corrupt/unsupported records, lobby no longer has ordinary Reset, and former Table Reset used run's pre-read. Added an emergency button hidden by default, shown only on OFFLINE_STORAGE_INVALID validation errors. Other errors do not expose deletion UI. Existing read messages/fail-closed behavior retained, primitive/array sessions explicitly classified as invalid rather than leaking TypeError.
+
+One resetOfflineProgress handler requests existing STORAGE_KEY Web Lock without run/read, asks existing custom confirmation, then invalidates local timers/preactions, removes only STORAGE_KEY and navigates explicit lobby. Cancel does not remove data. Table Settings and recovery share handler. Invalid initial table read redirects to lobby recovery instead of leaving an unbound table. No automatic deletion, new modal, normal-lobby control, financial/refill/WS/config/dependency/schema change. T022 automatic threshold and all previous navigation rules unchanged.
+
+Fundamentals RED24pass/2fail → GREEN32/32. Actual core validation + actual fail/reset function bodies verify invalid/schema/primitive records, code-specific recovery UI, business/quota exclusion, Cancel/no deletion, Confirm/only-key deletion under lock, no read/run during reset and default5000/New Game100 after recovery. Existing healthy Table reset/auto-refill/navigation checks retained. No public protocol/v1 format breaking impact; internal validation errors gain code property, UI gains error-only recovery option. Actual APK/CI evidence follows; physical owner acceptance pending.
+
+---
 # T022 — automatic Offline Chips refill Preview/packaged smoke PASS; new APK pending owner acceptance
 
 Owner replaces manual refill UX. Minimal change: guarded existing refill logic participates in save's single wallet/session record commit after revision check. Startup runs conditional refill under existing Web Lock. New Game/Rebuy can use a valid old wallet<100 before affordability; post-debit save normalizes below100 in the same commit. Leave still returns only Hero stack, then enforces threshold; already-left retry does not write/refill again once normalized. read remains pure and failed writes preserve previous record. Never funds Hero or triggers automatic Rebuy.

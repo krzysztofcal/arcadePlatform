@@ -63,3 +63,10 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] RED21pass/3fail → GREEN30/30 fundamental checks, generator/CSP.
 - [x] Focused Preview and actual packaged APK smoke PASS; runtime CI/Android PASS. Final current-HEAD APK/checksum linked in PR after build.
 - [ ] Physical owner acceptance of automatic refill/simplified lobby and Table settings Reset. No merge/Production/WS/schema/migration changes.
+
+## T023
+
+- [x] Typed invalid-storage classification and normally hidden emergency lobby reset.
+- [x] Shared confirmation/direct-Web-Lock reset without read/run; only STORAGE_KEY deleted, canonical return.
+- [x] RED24pass/2fail → GREEN32/32fundamentals; T022 tests retained, generator/CSP PASS.
+- [ ] Actual packaged-assets recovery smoke, final CI/new Stage APK; physical owner review pending. No merge/Production/WS/schema/migration changes.

@@ -2868,6 +2868,7 @@
   var HUMAN = "offline-human";
   var legacyMembers = [HUMAN, "bot-offline-1", "bot-offline-2"].map((userId, i) => ({ userId, seat: i + 1 }));
   var clone = (value) => JSON.parse(JSON.stringify(value));
+  var storageError = (message) => Object.assign(new Error(message), { code: "OFFLINE_STORAGE_INVALID" });
   var integer = (value) => Number.isSafeInteger(value) && value >= 0;
   function core(session) {
     const members = session.members, ids = members.map((m) => m.userId);
@@ -2888,17 +2889,18 @@
       try {
         data = JSON.parse(raw);
       } catch {
-        throw new Error("Offline storage is corrupt; reset local offline data to continue");
+        throw storageError("Offline storage is corrupt; reset local offline data to continue");
       }
-      if (data?.schema !== 1 || !integer(data.wallet) || !integer(data.revision)) throw new Error("Unsupported offline storage");
+      if (data?.schema !== 1 || !integer(data.wallet) || !integer(data.revision)) throw storageError("Unsupported offline storage");
       if (data.session) {
         const s = data.session;
+        if (typeof s !== "object" || Array.isArray(s)) throw storageError("Invalid offline storage session");
         if (!s.members) s.members = legacyMembers.map((m) => ({ ...m }));
-        if (!Array.isArray(s.members) || s.members.length < 3 || s.members.length > 6 || !s.members.every((m, i) => m?.seat === i + 1 && m.userId === (i === 0 ? HUMAN : "bot-offline-" + i))) throw new Error("Invalid offline storage roster");
+        if (!Array.isArray(s.members) || s.members.length < 3 || s.members.length > 6 || !s.members.every((m, i) => m?.seat === i + 1 && m.userId === (i === 0 ? HUMAN : "bot-offline-" + i))) throw storageError("Invalid offline storage roster");
         const ids = s.members.map((m) => m.userId);
-        if (typeof s.tableId !== "string" || !s.tableId.startsWith("offline-") || !integer(s.hand) || s.hand < 1 || ![100, 500, 1e3].includes(s.buyIn) || !s.state || s.state.roomId !== s.tableId || typeof s.state.handId !== "string" || !integer(s.state.potTotal) || !ids.every((id) => integer(s.state.stacks?.[id])) || Object.keys(s.state.stacks).length !== ids.length) throw new Error("Invalid offline storage session");
-        if (s.clock && (typeof s.clock.paused !== "boolean" || !integer(s.clock.durationMs) || s.clock.durationMs < 1 || s.clock.durationMs > 2e4 || !integer(s.clock.remainingMs) || s.clock.remainingMs > s.clock.durationMs || !integer(s.clock.dueAt))) throw new Error("Invalid offline storage clock");
-        if (s.clock && (s.clock.botDueAt != null && !integer(s.clock.botDueAt) || s.clock.botRemainingMs != null && (!integer(s.clock.botRemainingMs) || s.clock.botRemainingMs > 2e3))) throw new Error("Invalid offline storage bot timer");
+        if (typeof s.tableId !== "string" || !s.tableId.startsWith("offline-") || !integer(s.hand) || s.hand < 1 || ![100, 500, 1e3].includes(s.buyIn) || !s.state || s.state.roomId !== s.tableId || typeof s.state.handId !== "string" || !integer(s.state.potTotal) || !ids.every((id) => integer(s.state.stacks?.[id])) || Object.keys(s.state.stacks).length !== ids.length) throw storageError("Invalid offline storage session");
+        if (s.clock && (typeof s.clock.paused !== "boolean" || !integer(s.clock.durationMs) || s.clock.durationMs < 1 || s.clock.durationMs > 2e4 || !integer(s.clock.remainingMs) || s.clock.remainingMs > s.clock.durationMs || !integer(s.clock.dueAt))) throw storageError("Invalid offline storage clock");
+        if (s.clock && (s.clock.botDueAt != null && !integer(s.clock.botDueAt) || s.clock.botRemainingMs != null && (!integer(s.clock.botRemainingMs) || s.clock.botRemainingMs > 2e3))) throw storageError("Invalid offline storage bot timer");
       }
       return data;
     }
@@ -3137,6 +3139,8 @@
     updateWallet();
   }
   function fail(error) {
+    const recovery = document.getElementById("offlineRecoveryReset");
+    if (recovery) recovery.hidden = error.code !== "OFFLINE_STORAGE_INVALID";
     const node = document.getElementById("offlineError") || document.getElementById("pokerV2ErrorText");
     if (node) {
       node.textContent = error.message;
@@ -3145,6 +3149,12 @@
   }
   function updateWallet() {
     const data = game.read(), settled = data.session?.state.phase === "SETTLED";
+    const recovery = document.getElementById("offlineRecoveryReset");
+    if (recovery && !recovery.hidden) {
+      recovery.hidden = true;
+      const error = document.getElementById("offlineError");
+      if (error) error.textContent = "";
+    }
     document.querySelectorAll("[data-offline-balance]").forEach((el) => {
       el.textContent = data.wallet.toLocaleString() + " Offline Chips";
     });
@@ -3308,6 +3318,18 @@
       return game.read();
     }
   };
+  async function resetOfflineProgress() {
+    if (!navigator.locks) throw new Error("This browser cannot safely save Offline play");
+    return navigator.locks.request(STORAGE_KEY, async () => {
+      if (!await ask("Reset Offline Progress", "Discard only this device\u2019s Offline Chips and Offline session? Online CH is unaffected.")) return;
+      epoch++;
+      active = false;
+      clearTimeout(timer);
+      if (clearPreactions) clearPreactions();
+      window.localStorage.removeItem(STORAGE_KEY);
+      window.location.assign("/poker/index.html");
+    });
+  }
   function init() {
     const dialog = document.getElementById("offlineConfirm");
     if (dialog) {
@@ -3355,12 +3377,9 @@
     const resume = document.getElementById("offlineResume");
     if (resume) resume.addEventListener("click", () => window.location.assign("/poker/offline/play.html"));
     action("offlineRebuy", () => game.rebuy());
-    action("offlineReset", async () => {
-      if (await ask("Reset Offline Progress", "Discard only this device\u2019s Offline Chips and Offline session? Online CH is unaffected.")) {
-        clearTimeout(timer);
-        window.localStorage.removeItem(STORAGE_KEY);
-        window.location.assign("/poker/index.html");
-      }
+    ["offlineReset", "offlineRecoveryReset"].forEach((id) => {
+      const button = document.getElementById(id);
+      if (button) button.addEventListener("click", () => resetOfflineProgress().catch(fail));
     });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) cancelDialog();

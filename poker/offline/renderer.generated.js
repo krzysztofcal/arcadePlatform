@@ -7430,7 +7430,7 @@
       animateCardDiff(previousVisual, nextVisual, frame);
       [els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
     }, handleTableReaction, function(){ resetQueuedPreactionState(); renderControls(); });
-    } catch(error) { document.getElementById('offlineError').textContent = error.message; }
+    } catch(error) { if(error.code === 'OFFLINE_STORAGE_INVALID'){window.location.replace('/poker/index.html');return;} document.getElementById('offlineError').textContent = error.message; }
   }
 
   window.__PokerV2 = {

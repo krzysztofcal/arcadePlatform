@@ -11,6 +11,7 @@ export const STORAGE_KEY = 'arcade.poker.offline.v1';
 export const HUMAN = 'offline-human';
 const legacyMembers = [HUMAN, 'bot-offline-1', 'bot-offline-2'].map((userId,i)=>({userId,seat:i+1}));
 const clone = value => JSON.parse(JSON.stringify(value));
+const storageError = message => Object.assign(new Error(message),{code:'OFFLINE_STORAGE_INVALID'});
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 function core(session) {
   const members=session.members,ids=members.map(m=>m.userId);
@@ -26,17 +27,18 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
     const raw=storage.getItem(STORAGE_KEY);
     if(raw===null) return {schema:1,revision:0,wallet:5000,session:null};
     let data;
-    try {data=JSON.parse(raw);} catch {throw new Error('Offline storage is corrupt; reset local offline data to continue');}
-    if(data?.schema!==1 || !integer(data.wallet) || !integer(data.revision)) throw new Error('Unsupported offline storage');
+    try {data=JSON.parse(raw);} catch {throw storageError('Offline storage is corrupt; reset local offline data to continue');}
+    if(data?.schema!==1 || !integer(data.wallet) || !integer(data.revision)) throw storageError('Unsupported offline storage');
     if(data.session) {
       const s=data.session;
+      if(typeof s!=='object'||Array.isArray(s)) throw storageError('Invalid offline storage session');
       // Existing v1 sessions predate the persisted roster and always have two bots.
       if(!s.members)s.members=legacyMembers.map(m=>({...m}));
-      if(!Array.isArray(s.members)||s.members.length<3||s.members.length>6||!s.members.every((m,i)=>m?.seat===i+1&&m.userId===(i===0?HUMAN:'bot-offline-'+i)))throw new Error('Invalid offline storage roster');
+      if(!Array.isArray(s.members)||s.members.length<3||s.members.length>6||!s.members.every((m,i)=>m?.seat===i+1&&m.userId===(i===0?HUMAN:'bot-offline-'+i)))throw storageError('Invalid offline storage roster');
       const ids=s.members.map(m=>m.userId);
-      if(typeof s.tableId!=='string'||!s.tableId.startsWith('offline-')||!integer(s.hand)||s.hand<1||![100,500,1000].includes(s.buyIn)||!s.state||s.state.roomId!==s.tableId||typeof s.state.handId!=='string'||!integer(s.state.potTotal)||!ids.every(id=>integer(s.state.stacks?.[id]))||Object.keys(s.state.stacks).length!==ids.length) throw new Error('Invalid offline storage session');
-      if(s.clock && (typeof s.clock.paused!=='boolean'||!integer(s.clock.durationMs)||s.clock.durationMs<1||s.clock.durationMs>20000||!integer(s.clock.remainingMs)||s.clock.remainingMs>s.clock.durationMs||!integer(s.clock.dueAt)))throw new Error('Invalid offline storage clock');
-      if(s.clock && ((s.clock.botDueAt!=null&&!integer(s.clock.botDueAt))||(s.clock.botRemainingMs!=null&&(!integer(s.clock.botRemainingMs)||s.clock.botRemainingMs>2000))))throw new Error('Invalid offline storage bot timer');
+      if(typeof s.tableId!=='string'||!s.tableId.startsWith('offline-')||!integer(s.hand)||s.hand<1||![100,500,1000].includes(s.buyIn)||!s.state||s.state.roomId!==s.tableId||typeof s.state.handId!=='string'||!integer(s.state.potTotal)||!ids.every(id=>integer(s.state.stacks?.[id]))||Object.keys(s.state.stacks).length!==ids.length) throw storageError('Invalid offline storage session');
+      if(s.clock && (typeof s.clock.paused!=='boolean'||!integer(s.clock.durationMs)||s.clock.durationMs<1||s.clock.durationMs>20000||!integer(s.clock.remainingMs)||s.clock.remainingMs>s.clock.durationMs||!integer(s.clock.dueAt)))throw storageError('Invalid offline storage clock');
+      if(s.clock && ((s.clock.botDueAt!=null&&!integer(s.clock.botDueAt))||(s.clock.botRemainingMs!=null&&(!integer(s.clock.botRemainingMs)||s.clock.botRemainingMs>2000))))throw storageError('Invalid offline storage bot timer');
     }
     return data;
   }

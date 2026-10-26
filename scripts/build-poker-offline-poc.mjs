@@ -40,7 +40,7 @@ const replacements = {
       animateCardDiff(previousVisual, nextVisual, frame);
       [els.menuSignIn, els.joinBtn].forEach(function(el){ if(el) el.hidden = true; });
     }, handleTableReaction, function(){ resetQueuedPreactionState(); renderControls(); });
-    } catch(error) { document.getElementById('offlineError').textContent = error.message; }
+    } catch(error) { if(error.code === 'OFFLINE_STORAGE_INVALID'){window.location.replace('/poker/index.html');return;} document.getElementById('offlineError').textContent = error.message; }
   `,
   bindDestinationLink: `if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby().catch(function(error){ setError(error.message); }); });`,
   isWsReady: 'return window.PokerOffline.isActive();',

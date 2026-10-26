@@ -21,11 +21,15 @@ function publish(){
   updateWallet();
 }
 function fail(error){
+  const recovery=document.getElementById('offlineRecoveryReset');
+  if(recovery)recovery.hidden=error.code!=='OFFLINE_STORAGE_INVALID';
   const node=document.getElementById('offlineError')||document.getElementById('pokerV2ErrorText');
   if(node){node.textContent=error.message;node.hidden=false;}
 }
 function updateWallet(){
   const data=game.read(),settled=data.session?.state.phase==='SETTLED';
+  const recovery=document.getElementById('offlineRecoveryReset');
+  if(recovery&&!recovery.hidden){recovery.hidden=true;const error=document.getElementById('offlineError');if(error)error.textContent='';}
   document.querySelectorAll('[data-offline-balance]').forEach(el=>{el.textContent=data.wallet.toLocaleString()+' Offline Chips';});
   const resume=document.getElementById('offlineResume');if(resume) resume.hidden=!data.session;
   const shell=document.getElementById('offlineResumeShell');if(shell)shell.hidden=!data.session;
@@ -118,6 +122,15 @@ window.PokerOffline={
   reaction(key,targetSeatNo){if(reactionListener)reactionListener({payload:{seatNo:1,reactionKey:key,...(targetSeatNo?{targetSeatNo}:{})}});},
   inspect(){return game.read();}
 };
+async function resetOfflineProgress(){
+  if(!navigator.locks)throw new Error('This browser cannot safely save Offline play');
+  return navigator.locks.request(STORAGE_KEY,async()=>{
+    if(!await ask('Reset Offline Progress','Discard only this device’s Offline Chips and Offline session? Online CH is unaffected.'))return;
+    epoch++;active=false;clearTimeout(timer);if(clearPreactions)clearPreactions();
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.location.assign('/poker/index.html');
+  });
+}
 function init(){
   const dialog=document.getElementById('offlineConfirm');
   if(dialog){
@@ -150,10 +163,9 @@ function init(){
   });
   const resume=document.getElementById('offlineResume');if(resume)resume.addEventListener('click',()=>window.location.assign('/poker/offline/play.html'));
   action('offlineRebuy',()=>game.rebuy());
-  action('offlineReset',async()=>{
-    if(await ask('Reset Offline Progress','Discard only this device’s Offline Chips and Offline session? Online CH is unaffected.')){
-      clearTimeout(timer);window.localStorage.removeItem(STORAGE_KEY);window.location.assign('/poker/index.html');
-    }
+  ['offlineReset','offlineRecoveryReset'].forEach(id=>{
+    const button=document.getElementById(id);
+    if(button)button.addEventListener('click',()=>resetOfflineProgress().catch(fail));
   });
   document.addEventListener('visibilitychange',()=>{
     if(document.hidden)cancelDialog();
