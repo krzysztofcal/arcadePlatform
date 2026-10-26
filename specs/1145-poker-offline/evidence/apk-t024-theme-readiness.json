@@ -1,0 +1,111 @@
+{
+  "sha": "d673ffa6a20dba4355c28425217ab96fca70b2a6",
+  "mode": "actual APK assets, Capacitor routes, network offline; deterministic test UUID selects theme for genuine UI New Game",
+  "results": [
+    {
+      "theme": "classic-casino",
+      "shown": "classic-casino",
+      "resume": false,
+      "viewport": [
+        412,
+        915
+      ],
+      "delayedMs": 300,
+      "failedAsset": false,
+      "bootCompletions": 1,
+      "firstFrameTheme": "classic-casino",
+      "heroCards": 2,
+      "clockPausedAtBoot": true,
+      "budgetBefore": 20000,
+      "budgetAfter": 20000,
+      "hiddenActions": false,
+      "lateThemeChanges": [],
+      "errors": [],
+      "sockets": []
+    },
+    {
+      "theme": "midnight-sapphire",
+      "shown": "midnight-sapphire",
+      "resume": false,
+      "viewport": [
+        412,
+        915
+      ],
+      "delayedMs": 2300,
+      "failedAsset": false,
+      "bootCompletions": 1,
+      "firstFrameTheme": "midnight-sapphire",
+      "heroCards": 2,
+      "clockPausedAtBoot": true,
+      "budgetBefore": 20000,
+      "budgetAfter": 20000,
+      "hiddenActions": false,
+      "lateThemeChanges": [],
+      "errors": [],
+      "sockets": []
+    },
+    {
+      "theme": "royal-gold",
+      "shown": "royal-gold",
+      "resume": false,
+      "viewport": [
+        915,
+        412
+      ],
+      "delayedMs": 300,
+      "failedAsset": false,
+      "bootCompletions": 1,
+      "firstFrameTheme": "royal-gold",
+      "heroCards": 2,
+      "clockPausedAtBoot": true,
+      "budgetBefore": 19999,
+      "budgetAfter": 19999,
+      "hiddenActions": false,
+      "lateThemeChanges": [],
+      "errors": [],
+      "sockets": []
+    },
+    {
+      "theme": "midnight-sapphire",
+      "shown": "midnight-sapphire",
+      "resume": true,
+      "viewport": [
+        915,
+        412
+      ],
+      "delayedMs": 2300,
+      "failedAsset": false,
+      "bootCompletions": 1,
+      "firstFrameTheme": "midnight-sapphire",
+      "heroCards": 2,
+      "clockPausedAtBoot": true,
+      "budgetBefore": 19135,
+      "budgetAfter": 19135,
+      "hiddenActions": false,
+      "lateThemeChanges": [],
+      "errors": [],
+      "sockets": []
+    },
+    {
+      "theme": "midnight-sapphire",
+      "shown": "classic-casino",
+      "resume": false,
+      "viewport": [
+        412,
+        915
+      ],
+      "delayedMs": 0,
+      "failedAsset": true,
+      "bootCompletions": 1,
+      "firstFrameTheme": "classic-casino",
+      "heroCards": 2,
+      "clockPausedAtBoot": true,
+      "budgetAfter": 19999,
+      "hiddenActions": false,
+      "lateThemeChanges": [],
+      "errors": [],
+      "sockets": []
+    }
+  ],
+  "physicalAndroid": "PENDING owner"
+}

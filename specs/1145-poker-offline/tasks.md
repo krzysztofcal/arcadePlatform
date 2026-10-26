@@ -70,11 +70,12 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] Shared confirmation/direct-Web-Lock reset without read/run; only STORAGE_KEY deleted, canonical return.
 - [x] RED24pass/2fail → GREEN32/32fundamentals; T022 tests retained, generator/CSP PASS.
 - [x] Actual packaged-assets recovery smoke PASS; runtime CI/Android PASS, exact-current-HEAD artifact/checksum linked in PR after build.
-- [ ] Physical owner recovery/healthy-lobby/Table Settings acceptance. No merge/Production/WS/schema/migration changes.
+- [x] Owner confirmed T023 physical Galaxy S24+ PASS (recovery/healthy lobby/Table Settings). No merge/Production/WS/schema/migration changes.
 
 ## T024
 
 - [x] Existing splash retained until paused first snapshot/theme/image decode/layout frames; bounded stable fallback, single completion.
 - [x] New Game navigation paused; startView readiness gate/legacy rebase prevents hidden clock or bot actions. Online untouched.
 - [x] RED26pass/3fail → GREEN35/35fundamentals, generator/CSP PASS.
-- [ ] Actual APK readiness smoke, CI/current-HEAD Stage APK, then owner physical review. No WS/CH/schema/migration/Production/merge.
+- [x] Actual five-case APK readiness smoke and runtime CI/Android PASS; final current-HEAD artifact/checksum linked in PR after build.
+- [ ] Owner physical T024 first-frame/theme/clock acceptance. No WS/CH/schema/migration/Production/merge.

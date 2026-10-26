@@ -1,10 +1,18 @@
-# T024 — table theme loading (verification in progress)
+# T024 — table theme loading packaged readiness PASS; physical owner review pending
 
 Owner physical T023 PASS retained. Root cause confirmed: generated init called markBootReady before first offline.start snapshot and before asynchronous applyTableTheme finished. Reuse same splash/hidden-screen styles; now prepareOfflineFrame waits actual theme/common-scene decode, first paused snapshot/current img decode and2layout frames before calling existing guarded markBootReady. Theme loader is the original V2 body with guarded Offline-only transformations: Promise return/decoded assets/bounded fallback. Source Online renderer/HTML/CSS unchanged. No new loader framework or artificial success delay.
 
 New Game browser action pauses before document navigation. startView publishes paused state and gates generic activate until view readiness; unpaused cold legacy state rebases saved budget before pause. No hidden bot action/actor time while graphics wait. Reveal then activate;20s/1–2s/3s rules preserved. Existing15s image guard leads to stable Classic fallback; late loads cannot activate rejected theme. Startup errors return canonical lobby; Back/Reset/recovery unaffected.
 
 Three fundamental tests RED26pass/3fail → GREEN35/35 cover paused snapshot before deferred ready, preserved20s despite60s loading/foreground attempt, theme+frame ordering/single completion, success/failure/timeout fallback/no late switch. No protocol/v1 format/finance breaking impact. Internal Offline start accepts a readiness callback; only generated renderer consumes it. Actual APK/CI evidence follows; retain Draft, physical owner acceptance pending.
+
+## T024 actual APK results
+
+Runtime `d673ffa6a20dba4355c28425217ab96fca70b2a6`, Android build40295066697 SUCCESS; current runtime CI/CodeQL PASS. [Five-case packaged proof](evidence/apk-t024-theme-readiness.json), [held graphics/loading](evidence/apk-t024-loading.png), [Sapphire portrait](evidence/apk-t024-sapphire.png), [Royal Gold landscape](evidence/apk-t024-gold-landscape.png). Actual APK assets, pinned Capacitor routes/external network offline. Temporary test UUID pins theme for genuine UI New Game; deck/bots/actions remain actual shared engine. Resume uses unmodified record saved via real confirmed Back, opened in a fresh browser context (cold cache/process simulation). No app artifact edits.
+
+PASS: Classic New Game portrait, Sapphire New Game portrait, Royal Gold New Game landscape, existing Sapphire Resume landscape, failed Sapphire artwork→stable Classic. Local artwork held300ms/2300ms; until release table visibility hidden, splash visible, coordinator inactive and full persisted state unchanged. At first reveal correct target/fallback,2Hero cards, clock paused and exactly1boot completion. No post-reveal theme changes,0JS errors/0WS. Sample budgets: Sapphire New Game20000→20000 after2300ms wait; Resume19135→19135 after2300ms; Gold19999→19999. The1ms initial creation elapsed before pause is not loading consumption;20s duration unchanged. Forced image failure resolves fallback without endless spinner, and fundamental simulated15s timeout/late completion remains stable.
+
+35/35fundamentals (29Offline/3mobile/3canonical timeout), generator/CSP56documents/whitespace PASS. Independent review no critical/important findings or material simplification required. Original Online renderer/CSS/HTML, WS/shared rules, PC schema/refill/settlement and native config unchanged. Final evidence-only HEAD/source-identical APK and checksum/CI linked in PR after build. Native physical first-frame acceptance still pending owner; do not call this physical Android PASS. No merge/Production/WS replay.
 
 ---
 # T023 — Offline storage recovery packaged recovery PASS; owner review pending
