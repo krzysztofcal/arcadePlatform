@@ -72,3 +72,5 @@ Implementacja używa `shared/profile-terms.mjs` zamiast osobnego Netlify-only he
 Lokalne wyniki i dokładne kolejne bramki: [review.md](review.md). Nie dodano nowych issue ani PR.
 
 Follow-up review lokalny: domknięte PL/EN, gift Terms w canonical transaction po paid replay i przed BURN, bez zmian cen/entries. Wyniki212 PASS i pełne materiały do niezależnego review: [review-followup.md](review-followup.md). Bez operacyjnego GO.
+
+**Schema-first również przy Terms OFF:** nowy runtime zawsze odczytuje `private.profile_terms_policy` i receipts. Addytywna schema i nowe pola profilu muszą istnieć przed uruchomieniem nowych readerów; OFF nie zabezpiecza starej schemy. Końcowa korekta legal, odczyt Production i bezpieczna propozycja Draft: [review-final-legal.md](review-final-legal.md). Bez wykonania kolejnej bramki.

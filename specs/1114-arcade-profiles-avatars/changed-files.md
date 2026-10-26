@@ -149,3 +149,5 @@ Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Bez push/PR/deploy. `css/xp
 - `specs/1114-arcade-profiles-avatars/review.md`
 - `specs/1114-arcade-profiles-avatars/spec.md`
 - `specs/1114-arcade-profiles-avatars/tasks.md`
+- `specs/1114-arcade-profiles-avatars/evidence/legal-final-readonly.json`
+- `specs/1114-arcade-profiles-avatars/review-final-legal.md`

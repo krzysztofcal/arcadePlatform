@@ -40,5 +40,16 @@
     "cspDocuments": 58,
     "syntaxFiles": 235,
     "localizationSmoke": "local packaged assets; mocked Auth/API; PL PASS; zero external requests"
+  },
+  "legalFinal": {
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/tmp/phase-a-legal-final-tests.log",
+    "missingPolicyWhileOFF": "PASS",
+    "missingPolicyRowWhileOFF": "PASS",
+    "canonicalVersionedDateAndLinks": "PASS PL/EN",
+    "runtimeAndSqlChangesSince7840": "none",
+    "productionReadOnlyProof": "legal-final-readonly.json"
   }
 }

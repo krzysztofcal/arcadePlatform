@@ -40,6 +40,13 @@ test('Terms require current version, preserve one server timestamp on retry and 
   await db.exec('update private.profile_terms_policy set active=false');
   await requireCurrentTerms(tx,{kind:'account',id});
   await assert.rejects(acceptTerms(tx,{kind:'account',id},{version:'next-version',requestId:'test-terms-request-3'}),{code:'terms_not_active'});
+  // OFF is a policy value, not a schema bypass. New runtime still requires the policy table/row.
+  assert.equal((await readTermsStatus(tx,{kind:'account',id})).required,false);
+  await db.exec('alter table private.profile_terms_policy rename to hidden_profile_terms_policy');
+  await assert.rejects(requireCurrentTerms(tx,{kind:'account',id}),error=>error.code==='42P01');
+  await db.exec('alter table private.hidden_profile_terms_policy rename to profile_terms_policy;delete from private.profile_terms_policy');
+  await assert.rejects(requireCurrentTerms(tx,{kind:'account',id}),{code:'terms_unavailable',status:503});
+
  }finally{await db.close();}
 });
 test('one-shot normalization preserves UUID, assigned variants and game/CH/XP; repeated execution changes nothing',async()=>{

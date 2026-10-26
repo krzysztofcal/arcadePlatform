@@ -66,3 +66,5 @@ Decyzje implementacyjne: jeden helper Terms w `shared/` dla HTTP/WS zamiast dupl
 7. Production/deploy/merge/publikacja APK oraz B–D nadal wymagają osobnego GO. Merge zmian WS/Netlify może automatycznie wdrożyć/restartować Production; nie traktować zatwierdzenia lokalnego kodu jako zgody na taki skutek.
 
 **Werdykt: lokalna faza A przygotowana do review; Stage/WS/legal/Production pozostają OPEN. Nie MERGE READY i nie Google Play release-ready.**
+
+**Schema-first również przy Terms OFF:** nowy runtime zawsze odczytuje `private.profile_terms_policy` i receipts. Addytywna schema i nowe pola profilu muszą istnieć przed uruchomieniem nowych readerów; OFF nie zabezpiecza starej schemy. Końcowa korekta legal, odczyt Production i bezpieczna propozycja Draft: [review-final-legal.md](review-final-legal.md). Bez wykonania kolejnej bramki.
