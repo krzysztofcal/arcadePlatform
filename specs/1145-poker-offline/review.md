@@ -1,10 +1,18 @@
-# T023 — Offline storage recovery (verification in progress)
+# T023 — Offline storage recovery packaged recovery PASS; owner review pending
 
 Review confirmed the dead end: read rejects corrupt/unsupported records, lobby no longer has ordinary Reset, and former Table Reset used run's pre-read. Added an emergency button hidden by default, shown only on OFFLINE_STORAGE_INVALID validation errors. Other errors do not expose deletion UI. Existing read messages/fail-closed behavior retained, primitive/array sessions explicitly classified as invalid rather than leaking TypeError.
 
 One resetOfflineProgress handler requests existing STORAGE_KEY Web Lock without run/read, asks existing custom confirmation, then invalidates local timers/preactions, removes only STORAGE_KEY and navigates explicit lobby. Cancel does not remove data. Table Settings and recovery share handler. Invalid initial table read redirects to lobby recovery instead of leaving an unbound table. No automatic deletion, new modal, normal-lobby control, financial/refill/WS/config/dependency/schema change. T022 automatic threshold and all previous navigation rules unchanged.
 
 Fundamentals RED24pass/2fail → GREEN32/32. Actual core validation + actual fail/reset function bodies verify invalid/schema/primitive records, code-specific recovery UI, business/quota exclusion, Cancel/no deletion, Confirm/only-key deletion under lock, no read/run during reset and default5000/New Game100 after recovery. Existing healthy Table reset/auto-refill/navigation checks retained. No public protocol/v1 format breaking impact; internal validation errors gain code property, UI gains error-only recovery option. Actual APK/CI evidence follows; physical owner acceptance pending.
+
+## T023 packaged evidence
+
+[Previous APK reproduction](evidence/apk-t023-reproduction.json): d14ca4f6 with corrupt JSON displays error but has0recovery controls. New runtime `20607142af37f77e754b34acb7cac71057abfcdc`, hosted Android build40278351892 SUCCESS, CI/CodeQL PASS. [Actual APK smoke](evidence/apk-t023-recovery-smoke.json), [error-only UI](evidence/apk-t023-recovery.png). Temporary Chromium reads unchanged APK assets with pinned Capacitor routes/external network offline; no directory-index substitution or app edits.
+
+PASS for corrupt JSON and unsupported schema: visible error/recovery, Cancel leaves raw record intact, Confirm removes only Offline record and preserves unrelated data, canonical lobby/default5000, then actual New Game100→wallet4900. Shared Table Settings Reset Cancel/Confirm works on recovered healthy session. Corrupt initial table URL redirects to recovery lobby. Healthy wallet100 remains100 under T022 and recovery stays hidden.0JS errors/0WS. Native physical behavior remains owner acceptance.
+
+32/32fundamentals (26Offline/3mobile/3canonical timeout), generator/CSP56documents/whitespace PASS; independent review no important/critical findings. No T022 refill logic, shared WS/Online, native config, dependencies, CH or schema change. Final evidence-only HEAD is source-identical to tested runtime; exact-current-HEAD APK/checksum/CI published in PR after build. Retain Draft; no merge/Production or broad WS replay.
 
 ---
 # T022 — automatic Offline Chips refill Preview/packaged smoke PASS; new APK pending owner acceptance

@@ -1,0 +1,36 @@
+{
+  "sha": "20607142af37f77e754b34acb7cac71057abfcdc",
+  "mode": "actual APK assets/Capacitor routes, external network offline",
+  "results": [
+    {
+      "case": "corrupt",
+      "errorAndRecovery": true,
+      "cancelPreserves": true,
+      "confirmRemovesOnlyOfflineKey": true,
+      "restoredWallet": 5000,
+      "newGameWallet": 4900,
+      "tableSettingsReset": "PASS",
+      "invalidTableRedirect": true,
+      "errors": [],
+      "sockets": []
+    },
+    {
+      "case": "unsupported",
+      "errorAndRecovery": true,
+      "cancelPreserves": true,
+      "confirmRemovesOnlyOfflineKey": true,
+      "restoredWallet": 5000,
+      "newGameWallet": 4900,
+      "tableSettingsReset": "PASS",
+      "invalidTableRedirect": false,
+      "errors": [],
+      "sockets": []
+    },
+    {
+      "case": "healthy",
+      "recoveryVisible": false,
+      "T022wallet100Unchanged": true
+    }
+  ],
+  "physicalAndroid": "PENDING owner"
+}
