@@ -1,4 +1,4 @@
-# T022 — automatic Offline Chips refill (verification in progress)
+# T022 — automatic Offline Chips refill Preview/packaged smoke PASS; new APK pending owner acceptance
 
 Owner replaces manual refill UX. Minimal change: guarded existing refill logic participates in save's single wallet/session record commit after revision check. Startup runs conditional refill under existing Web Lock. New Game/Rebuy can use a valid old wallet<100 before affordability; post-debit save normalizes below100 in the same commit. Leave still returns only Hero stack, then enforces threshold; already-left retry does not write/refill again once normalized. read remains pure and failed writes preserve previous record. Never funds Hero or triggers automatic Rebuy.
 
@@ -7,6 +7,14 @@ Intentional local behavior change: wallet below100 becomes5000 automatically, re
 Lobby only keeps balance/tiers/play/resume. Reset/disclosures moved into Table settings using existing shared styling/confirmation. Free Refill removed from lobby/menu/rebuy and stale handlers/scoped CSS removed. Rebuy remains explicit; default timing, splash/artwork and canonical lobby routing unchanged.
 
 RED21pass/3fail demonstrates old refill semantics; GREEN30fundamentals covers threshold0/99/100, pure read/no-op revision, write failure, competing deals/stale deal versus refill, unchanged Hero stack/legacy Resume, explicit Rebuy/Leave; existing Reset tests retained. Focused Preview/actual APK and CI results recorded after build. No public protocol or v1 format breaking impact; physical owner acceptance pending after new APK.
+
+## T022 verification
+
+Runtime `85f6c4cdf8f461fbfe44fa5875393122cb13eba5`; [immutable Preview](https://6adeaa1c8d8778789ef413f2--playkcswh.netlify.app/poker/?ntl-drawer-state=hidden), hosted Android build40253484068 SUCCESS, CI/CodeQL PASS. [Preview proof](evidence/preview-t022.json), [actual APK assets proof](evidence/apk-t022-smoke.json), [simplified bundled lobby](evidence/apk-t022-lobby.png). Temporary two-page smoke seeded a valid old v1 wallet99/session without roster: exactly one refill commit/revision+1 to5000, unchanged session/Hero stack, Resume preserves hand/table/stacks, no manual refill controls, lobby copy removed, Table settings disclosures and Reset Cancel/Confirm PASS. Actual APK assets use Capacitor routes with external network offline.0JS errors/0WS/API calls during isolated table; local bundled image loads are permitted and not network transport. No physical Android claim.
+
+The temporary fixture initially reseeded itself after Reset navigation; corrected to seed once. APK probe also initially counted legitimate bundled avatar file requests as network; corrected to check non-asset transport. No app behavior changes to bypass either assertion. Visual QA found the Reset button inherited menu-only styling outside that menu; final generated HTML uses shared poker-live-btn. Final current-HEAD APK, hash/CSP/SRI and this visual correction are checked/published in PR after build. No change to engine/financial logic after functional smoke.
+
+30/30 fundamentals, generator/CSP56documents/whitespace PASS. Independent review found no critical/important issues. Intentional local change only: manual top-up replaced by automatic threshold grant, which may increase wallet+table total by that local grant; no increase to Hero stake and no effect on online CH. Existing v1 storage and canonical navigation unchanged. Retain Draft; physical owner review pending, no merge/Production/WS deploy.
 
 ---
 # T020–T021 — packaged Return to lobby blocker packaged smoke PASS; physical acceptance pending

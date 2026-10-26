@@ -61,4 +61,5 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] Automatic conditional local refill in atomic revision commit and locked startup; old v1/low-wallet buy-in support, no auto Rebuy/stack funding.
 - [x] Simplified lobby; no manual refill controls/handlers/CSS; Reset and disclosures in Table settings, existing confirmation.
 - [x] RED21pass/3fail → GREEN30/30 fundamental checks, generator/CSP.
-- [ ] Focused Preview and packaged APK smoke, CI and new current-HEAD Stage APK for owner. No merge/Production/WS/schema/migration changes.
+- [x] Focused Preview and actual packaged APK smoke PASS; runtime CI/Android PASS. Final current-HEAD APK/checksum linked in PR after build.
+- [ ] Physical owner acceptance of automatic refill/simplified lobby and Table settings Reset. No merge/Production/WS/schema/migration changes.
