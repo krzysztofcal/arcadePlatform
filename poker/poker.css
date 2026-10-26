@@ -711,5 +711,3 @@ body.poker-lobby .daily-flyin{display:none;animation:none;}
 24%{opacity:1;transform:translateX(320%) skewX(-20deg);}
 28%,100%{opacity:0;transform:translateX(350%) skewX(-20deg);}
 }
-
-body.poker-lobby .offline-lobby-tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font:600 13px Poppins,sans-serif;}

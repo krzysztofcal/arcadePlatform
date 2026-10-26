@@ -2902,8 +2902,14 @@
       }
       return data;
     }
+    function refillWallet(data) {
+      if (data.wallet >= 100) return false;
+      data.wallet = Math.max(5e3, data.wallet);
+      return true;
+    }
     function save(data, revision) {
       if (read().revision !== revision) throw new Error("Offline session changed in another tab; resume it");
+      refillWallet(data);
       data.revision = revision + 1;
       storage.setItem(STORAGE_KEY, JSON.stringify(data));
       return clone(data);
@@ -3005,7 +3011,8 @@
         if (![100, 500, 1e3].includes(buyIn)) throw new Error("Invalid Offline Chips buy-in");
         const data = read(), revision = data.revision;
         if (data.session) throw new Error("Leave the current session before New Game");
-        if (data.wallet < buyIn) throw new Error("Not enough Offline Chips; use free refill");
+        refillWallet(data);
+        if (data.wallet < buyIn) throw new Error("Not enough Offline Chips for this buy-in");
         const count = computeTargetBotCount({ maxPlayers: 6, humanCount: 1, minBots: 2, maxBots: 5, random });
         const members = Array.from({ length: count + 1 }, (_, i) => ({ userId: i === 0 ? HUMAN : "bot-offline-" + i, seat: i + 1 }));
         const ids = members.map((m) => m.userId);
@@ -3052,7 +3059,10 @@
       },
       leave() {
         const data = read();
-        if (!data.session) return { wallet: data.wallet, cashout: 0 };
+        if (!data.session) {
+          if (refillWallet(data)) save(data, data.revision);
+          return { wallet: data.wallet, cashout: 0 };
+        }
         const revision = data.revision, s = data.session;
         for (let n = 0; s.state.phase !== "SETTLED" && n < 300; n++) {
           if (s.state.turnUserId === HUMAN) apply(s, HUMAN, { type: "FOLD" });
@@ -3069,17 +3079,19 @@
         return mutate((data) => {
           const s = session(data);
           if (s.state.phase !== "SETTLED") throw new Error("Rebuy requires settled hand");
+          refillWallet(data);
           const amount = Math.max(0, s.buyIn - s.state.stacks[HUMAN]);
-          if (data.wallet < amount) throw new Error("Not enough Offline Chips; use free refill");
+          if (data.wallet < amount) throw new Error("Not enough Offline Chips for Rebuy");
           data.wallet -= amount;
           s.state.stacks[HUMAN] += amount;
           stampClock(s);
         });
       },
       refill() {
-        return mutate((data) => {
-          data.wallet = Math.max(5e3, data.wallet);
-        });
+        const data = read();
+        if (!refillWallet(data)) return false;
+        save(data, data.revision);
+        return true;
       },
       snapshot() {
         const data = read(), s = session(data), members = s.members;
@@ -3323,11 +3335,7 @@
       if (plugins?.SystemBars) Promise.resolve(plugins.SystemBars.hide()).catch(() => {
       });
     }
-    try {
-      updateWallet();
-    } catch (error) {
-      fail(error);
-    }
+    run(() => game.refill()).catch(fail);
     const action = (id, fn) => {
       const el = document.getElementById(id);
       if (el) el.addEventListener("click", () => run(fn).catch(fail));
@@ -3346,8 +3354,6 @@
     });
     const resume = document.getElementById("offlineResume");
     if (resume) resume.addEventListener("click", () => window.location.assign("/poker/offline/play.html"));
-    document.querySelectorAll("[data-offline-refill]").forEach((el) => el.addEventListener("click", () => run(() => game.refill()).catch(fail)));
-    action("offlineRefill", () => game.refill());
     action("offlineRebuy", () => game.rebuy());
     action("offlineReset", async () => {
       if (await ask("Reset Offline Progress", "Discard only this device\u2019s Offline Chips and Offline session? Online CH is unaffected.")) {

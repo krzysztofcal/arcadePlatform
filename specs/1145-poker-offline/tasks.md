@@ -55,3 +55,10 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] Canonical local document exits, loader correction, remove normal developer status; preserve auth/bridge feedback, regenerate CSP/SRI.
 - [x] Fundamental checks and exact packaged-assets navigation/loader smoke PASS; hosted Android build PASS, current-HEAD artifact/checksum linked in PR.
 - [ ] Physical Galaxy S24+ acceptance: menu/native Back Confirm, Keep playing/Resume, Leave, Reset; airplane mode, no banner. Retain Draft; no merge/Production.
+
+## T022
+
+- [x] Automatic conditional local refill in atomic revision commit and locked startup; old v1/low-wallet buy-in support, no auto Rebuy/stack funding.
+- [x] Simplified lobby; no manual refill controls/handlers/CSS; Reset and disclosures in Table settings, existing confirmation.
+- [x] RED21pass/3fail → GREEN30/30 fundamental checks, generator/CSP.
+- [ ] Focused Preview and packaged APK smoke, CI and new current-HEAD Stage APK for owner. No merge/Production/WS/schema/migration changes.

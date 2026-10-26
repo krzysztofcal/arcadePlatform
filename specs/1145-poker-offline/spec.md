@@ -71,3 +71,9 @@ Owner physical acceptance T001–T017 retained. Stage Android starts with a bran
 ## T020–T021 — packaged navigation and production-quality status UX
 
 All local Offline exits (confirmed Back, explicit Leave, Reset, no-session fallback, rebuy exit/link) use canonical `/poker/index.html` supported by both Android assets and Netlify. Do not depend on directory-index hosting. Loader must redirect legacy extensionless paths to real lobby instead of hiding over the entry document. Preserve paused session/remaining time/Resume and idempotent cashout. No restart workaround. Normal mobile startup/connectivity changes must not create Stage PoC/SHA/status banners; keep auth feedback and actionable failures in Account status or contextual error UI, engineering details in klog. No WS, PC ledger/schema or Online changes. Physical Android re-test pending owner.
+
+## T022 — Automatic Offline Chips Refill (authoritative replacement)
+
+Supersedes earlier manual/conditional Free Refill UI requirements. Wallet below100 is replenished to5000 atomically with local mutation or at startup under existing Web Lock/revision guard. Wallet100orabove unchanged. read() remains pure. Never replenish Hero stack or trigger Rebuy automatically; canonical buy-ins/rules/settlement unaffected. Low-wallet valid v1 records recover without migration. Buy-in100 remains possible, including a debit that triggers refill in the same commit.
+
+Lobby retains Offline balance,100/500/1000tiers, Play/New Game and Resume only; remove local/online disclosure, refill/reset buttons and clearing-data copy there. Table settings contain Reset Offline Progress with existing confirmation plus device-local/independent-online-CH and data-clearing disclosure. No visible manual refill anywhere, no extra modal/control near Join. Reset semantics, canonical lobby exits and current splash/artwork retained. No WS/CH/XP/network/sync/schema changes.

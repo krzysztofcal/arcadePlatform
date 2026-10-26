@@ -5476,7 +5476,7 @@
     els.rebuyPanel.hidden = !show;
     if (!show) return;
     if (els.rebuyTitle) els.rebuyTitle.textContent = 'Out of Offline Chips';
-    if (els.rebuyCopy) els.rebuyCopy.textContent = 'Rebuy locally or use a free refill. No automatic purchase.';
+    if (els.rebuyCopy) els.rebuyCopy.textContent = 'Rebuy uses your Offline Chips. No automatic rebuy.';
     if (els.rebuyBalance) els.rebuyBalance.textContent = data.wallet + ' Offline Chips · Buy-in ' + session.buyIn;
     if (els.rebuyBtn) { els.rebuyBtn.disabled = data.wallet < session.buyIn - session.state.stacks['offline-human']; els.rebuyBtn.textContent = 'Rebuy'; }
     if (els.rebuyWatchBtn) els.rebuyWatchBtn.hidden = true;

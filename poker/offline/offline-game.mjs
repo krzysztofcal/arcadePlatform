@@ -40,8 +40,14 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
     }
     return data;
   }
+  function refillWallet(data) {
+    if(data.wallet>=100) return false;
+    data.wallet=Math.max(5000,data.wallet);return true;
+  }
   function save(data, revision) {
     if(read().revision!==revision) throw new Error('Offline session changed in another tab; resume it');
+    // Refill is part of this same wallet/session commit, never a second write.
+    refillWallet(data);
     data.revision=revision+1; storage.setItem(STORAGE_KEY,JSON.stringify(data));
     return clone(data);
   }
@@ -109,7 +115,8 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
       if(![100,500,1000].includes(buyIn)) throw new Error('Invalid Offline Chips buy-in');
       const data=read(),revision=data.revision;
       if(data.session) throw new Error('Leave the current session before New Game');
-      if(data.wallet<buyIn) throw new Error('Not enough Offline Chips; use free refill');
+      refillWallet(data);
+      if(data.wallet<buyIn) throw new Error('Not enough Offline Chips for this buy-in');
       const count=computeTargetBotCount({maxPlayers:6,humanCount:1,minBots:2,maxBots:5,random});
       const members=Array.from({length:count+1},(_,i)=>({userId:i===0?HUMAN:'bot-offline-'+i,seat:i+1}));
       const ids=members.map(m=>m.userId);
@@ -138,7 +145,10 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
     },
     botStep() {return mutate(data=>bot(session(data)));},
     leave() {
-      const data=read(); if(!data.session) return {wallet:data.wallet,cashout:0};
+      const data=read(); if(!data.session) {
+        if(refillWallet(data)) save(data,data.revision);
+        return {wallet:data.wallet,cashout:0};
+      }
       const revision=data.revision,s=data.session;
       // Resolve the existing hand with canonical rules before refunding only the human stack.
       for(let n=0;s.state.phase!=='SETTLED'&&n<300;n++) {
@@ -150,11 +160,12 @@ export function createOfflineGame({storage, prepare=prepareSeed, random=Math.ran
     },
     rebuy() {return mutate(data=>{
       const s=session(data);if(s.state.phase!=='SETTLED') throw new Error('Rebuy requires settled hand');
+      refillWallet(data);
       const amount=Math.max(0,s.buyIn-s.state.stacks[HUMAN]);
-      if(data.wallet<amount) throw new Error('Not enough Offline Chips; use free refill');
+      if(data.wallet<amount) throw new Error('Not enough Offline Chips for Rebuy');
       data.wallet-=amount;s.state.stacks[HUMAN]+=amount;stampClock(s);
     });},
-    refill() {return mutate(data=>{data.wallet=Math.max(5000,data.wallet);});},
+    refill() {const data=read();if(!refillWallet(data))return false;save(data,data.revision);return true;},
     snapshot() {
       const data=read(),s=session(data),members=s.members;
       return {...projectRoomCoreSnapshot({tableId:s.tableId,roomId:s.tableId,coreState:core(s),members,userId:HUMAN,youSeat:1}),

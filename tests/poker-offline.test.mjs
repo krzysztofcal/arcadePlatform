@@ -39,7 +39,7 @@ test('atomic failed write and stale async deal cannot debit wallet or overwrite 
 });
 test('version/corruption fails closed; refill and rebuy remain local and do not destroy active stake',async()=>{
  const storage=store(),g=game(storage); await g.newGame(1000); const id=g.read().session.tableId;
- g.refill(); assert.equal(g.read().wallet,5000); assert.equal(g.read().session.tableId,id);
+ assert.equal(g.refill(),false); assert.equal(g.read().wallet,4000); assert.equal(g.read().session.tableId,id);
  assert.throws(()=>g.rebuy(),/settled/); finish(g);
  const before=g.read();g.rebuy();const after=g.read();
  assert.equal(after.wallet+after.session.state.stacks['offline-human'],before.wallet+before.session.state.stacks['offline-human']);
@@ -177,4 +177,26 @@ test('Offline Leave and Reset commit once then navigate to the packaged lobby do
  const executeReset=vm.runInContext('('+source.slice(reset.start,reset.end)+')',context);
  await executeReset();assert.equal(storage.getItem(STORAGE_KEY),saved);assert.equal(destinations.length,2);
  context.ask=async()=>true;await executeReset();assert.equal(storage.getItem(STORAGE_KEY),null);assert.equal(destinations.at(-1),'/poker/index.html');
+});
+
+test('automatic refill thresholds are idempotent, read stays pure and failed writes are atomic',()=>{
+ for(const wallet of[99,100,0]){
+  const storage=store(),raw=JSON.stringify({schema:1,revision:7,wallet,session:null});storage.setItem(STORAGE_KEY,raw);storage.setItem('chips','online-untouched');const g=game(storage);
+  assert.equal(g.read().wallet,wallet);assert.equal(storage.getItem(STORAGE_KEY),raw);
+  assert.equal(g.refill(),wallet<100);assert.equal(g.read().wallet,wallet<100?5000:100);assert.equal(g.read().revision,wallet<100?8:7);
+  const saved=storage.getItem(STORAGE_KEY);assert.equal(g.refill(),false);assert.equal(storage.getItem(STORAGE_KEY),saved);assert.equal(storage.getItem('chips'),'online-untouched');
+ }
+ const storage=store(),raw=JSON.stringify({schema:1,revision:0,wallet:0,session:null});storage.setItem(STORAGE_KEY,raw);const write=storage.setItem;storage.setItem=()=>{throw new Error('quota');};const g=game(storage);assert.throws(()=>g.refill(),/quota/);assert.equal(storage.getItem(STORAGE_KEY),raw);storage.setItem=write;g.refill();assert.equal(g.read().wallet,5000);
+});
+test('concurrent deals commit debit and refill once; legacy low-wallet Resume never funds the Hero stack',async()=>{
+ const storage=store();storage.setItem(STORAGE_KEY,JSON.stringify({schema:1,revision:0,wallet:100,session:null}));let writes=0;const write=storage.setItem;storage.setItem=(...args)=>{writes++;write(...args);};const a=game(storage),b=game(storage);
+ const results=await Promise.allSettled([a.newGame(100),b.newGame(100)]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(writes,1);assert.equal(a.read().wallet,5000);assert.equal(a.read().session.state.stacks['offline-human'],100);
+ const legacy=a.read();legacy.wallet=0;delete legacy.session.members;storage.setItem(STORAGE_KEY,JSON.stringify(legacy));const restored=game(storage),before=restored.read().session;assert.equal(restored.refill(),true);assert.deepEqual(restored.read().session,before);restored.resume();assert.deepEqual(restored.read().session.state.stacks,before.state.stacks);assert.equal(restored.read().session.state.handId,before.state.handId);assert.equal(restored.read().wallet,5000);
+ const low=store();low.setItem(STORAGE_KEY,JSON.stringify({schema:1,revision:0,wallet:0,session:null}));const fresh=game(low);await fresh.newGame(100);assert.equal(fresh.read().wallet,4900);assert.equal(fresh.read().session.buyIn,100);
+ const raced=store();raced.setItem(STORAGE_KEY,JSON.stringify({schema:1,revision:0,wallet:99,session:null}));let release;const delayed=createOfflineGame({storage:raced,prepare:()=>new Promise(r=>release=r)}),other=game(raced);const pending=delayed.newGame(100);assert.equal(other.refill(),true);release();await assert.rejects(pending,/changed/);assert.equal(other.read().wallet,5000);assert.equal(other.read().session,null);await other.newGame(100);assert.equal(other.read().wallet,4900);
+});
+test('Rebuy and Leave enforce wallet threshold without automatic Rebuy or duplicate cashout',async()=>{
+ const storage=store(),g=game(storage);await g.newGame(100);finish(g);const data=g.read();data.wallet=100;data.session.state.stacks['offline-human']=0;storage.setItem(STORAGE_KEY,JSON.stringify(data));const bots={...data.session.state.stacks};delete bots['offline-human'];
+ assert.equal(g.refill(),false);assert.equal(g.read().session.state.stacks['offline-human'],0);g.rebuy();assert.equal(g.read().wallet,5000);assert.equal(g.read().session.state.stacks['offline-human'],100);for(const[id,stack]of Object.entries(bots))assert.equal(g.read().session.state.stacks[id],stack);
+ const empty=g.read();empty.wallet=0;empty.session.state.stacks['offline-human']=0;storage.setItem(STORAGE_KEY,JSON.stringify(empty));assert.deepEqual(g.leave(),{wallet:5000,cashout:0});const saved=storage.getItem(STORAGE_KEY);assert.deepEqual(g.leave(),{wallet:5000,cashout:0});assert.equal(storage.getItem(STORAGE_KEY),saved);
 });

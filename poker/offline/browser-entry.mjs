@@ -135,7 +135,7 @@ function init(){
     }
     if(plugins?.SystemBars)Promise.resolve(plugins.SystemBars.hide()).catch(()=>{});
   }
-  try{updateWallet();}catch(error){fail(error);}
+  run(()=>game.refill()).catch(fail);
   const action=(id,fn)=>{const el=document.getElementById(id);if(el)el.addEventListener('click',()=>run(fn).catch(fail));};
   document.querySelectorAll('[data-offline-buy-in]').forEach(button=>button.addEventListener('click',()=>{
     document.querySelectorAll('[data-offline-buy-in]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));
@@ -149,8 +149,6 @@ function init(){
     await game.newGame(buyIn);window.location.assign('/poker/offline/play.html');
   });
   const resume=document.getElementById('offlineResume');if(resume)resume.addEventListener('click',()=>window.location.assign('/poker/offline/play.html'));
-  document.querySelectorAll('[data-offline-refill]').forEach(el=>el.addEventListener('click',()=>run(()=>game.refill()).catch(fail)));
-  action('offlineRefill',()=>game.refill());
   action('offlineRebuy',()=>game.rebuy());
   action('offlineReset',async()=>{
     if(await ask('Reset Offline Progress','Discard only this device’s Offline Chips and Offline session? Online CH is unaffected.')){

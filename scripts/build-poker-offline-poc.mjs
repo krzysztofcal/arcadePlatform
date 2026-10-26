@@ -58,7 +58,7 @@ const replacements = {
     els.rebuyPanel.hidden = !show;
     if (!show) return;
     if (els.rebuyTitle) els.rebuyTitle.textContent = 'Out of Offline Chips';
-    if (els.rebuyCopy) els.rebuyCopy.textContent = 'Rebuy locally or use a free refill. No automatic purchase.';
+    if (els.rebuyCopy) els.rebuyCopy.textContent = 'Rebuy uses your Offline Chips. No automatic rebuy.';
     if (els.rebuyBalance) els.rebuyBalance.textContent = data.wallet + ' Offline Chips · Buy-in ' + session.buyIn;
     if (els.rebuyBtn) { els.rebuyBtn.disabled = data.wallet < session.buyIn - session.state.stacks['offline-human']; els.rebuyBtn.textContent = 'Rebuy'; }
     if (els.rebuyWatchBtn) els.rebuyWatchBtn.hidden = true;
@@ -106,8 +106,7 @@ const chips = await readdir('poker/assets/chips');
 html = html.replace('</head>', chips.filter(name => /\.(png|webp|svg)$/.test(name)).map(name => '<link rel="preload" as="image" href="/poker/assets/chips/' + name + '">').join('') + '</head>');
 html = html.replace('</head>', '<link rel="stylesheet" href="/poker/offline/offline.css"></head>');
 // Local controls live inside the shared menu, never before the 100dvh table.
-html = html.replace('<nav class="poker-menu-panel" id="pokerMenuPanel" hidden>', '<nav class="poker-menu-panel" id="pokerMenuPanel" hidden><section id="offlineSessionControls" class="offline-session" aria-label="Local offline session"><strong data-offline-balance></strong><button id="offlineRebuy" class="poker-menu-action" type="button">Rebuy</button><button id="offlineRefill" class="poker-menu-action" type="button">Free refill</button><p id="offlineError" role="alert"></p></section>');
-html = html.replace('<button type="button" class="poker-live-btn" id="pokerV2RebuyLobbyBtn">', '<button type="button" class="poker-live-btn" data-offline-refill>Free refill</button><button type="button" class="poker-live-btn" id="pokerV2RebuyLobbyBtn">');
+html = html.replace('<nav class="poker-menu-panel" id="pokerMenuPanel" hidden>', '<nav class="poker-menu-panel" id="pokerMenuPanel" hidden><section id="offlineSessionControls" class="offline-session" aria-label="Local offline session"><strong data-offline-balance></strong><button id="offlineRebuy" class="poker-menu-action" type="button">Rebuy</button><p id="offlineError" role="alert"></p></section>');
 html = html.replace('id="pokerV2RebuyLobbyBtn">Return to lobby', 'id="pokerV2RebuyLobbyBtn">Leave');
 const lobbyHtml = await readFile('poker/index.html','utf8');
 const confirmation = lobbyHtml.split('<!-- offline-confirm:start -->')[1]?.split('<!-- offline-confirm:end -->')[0];
@@ -116,4 +115,5 @@ html = html.replace('</body>', confirmation + '</body>');
 html = html.replace('</head>', scriptPaths.map((name, i) => '<script src="/poker/offline/' + name + '" integrity="' + scriptHashes[i] + '" defer></script>').join('\n') + '</head>');
 html = html.replace('Practice poker', 'Poker Offline').replace('Create an account to unlock 500 CH, multiplayer, XP and persistent chips.', 'Offline Chips stay on this device.').replace(/ CH\b/g, ' Offline Chips');
 html = html.replace('Poker Table v2 - Arcade Hub', 'Poker Offline — Offline Chips');
+html = html.replace('aria-label="Close table settings">×</button></div>', 'aria-label="Close table settings">×</button></div><p class="poker-social-settings__hint">Offline Chips and your game are saved on this device, independently of online CH. Clearing app data removes Offline progress.</p><button id="offlineReset" class="poker-menu-action" type="button">Reset Offline Progress</button>');
 await writeFile('poker/offline/play.html', '<!-- GENERATED from poker/table-v2.html; isolated local session -->\n' + html.replace(/[ \t]+$/gm, ''));

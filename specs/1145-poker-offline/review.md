@@ -1,3 +1,14 @@
+# T022 — automatic Offline Chips refill (verification in progress)
+
+Owner replaces manual refill UX. Minimal change: guarded existing refill logic participates in save's single wallet/session record commit after revision check. Startup runs conditional refill under existing Web Lock. New Game/Rebuy can use a valid old wallet<100 before affordability; post-debit save normalizes below100 in the same commit. Leave still returns only Hero stack, then enforces threshold; already-left retry does not write/refill again once normalized. read remains pure and failed writes preserve previous record. Never funds Hero or triggers automatic Rebuy.
+
+Intentional local behavior change: wallet below100 becomes5000 automatically, replacing manual refills; stack+wallet total may increase by exactly the local refill grant. Poker stake conservation/rules unchanged; no online CH/XP/bankroll/API/Supabase/WS operation, schema or migration change. Valid v1 saves retain session/cards/stacks/roster/table/clock; refill only changes wallet and revision. Existing internal refill() now no-op at>=100; no remaining manual UI consumers.
+
+Lobby only keeps balance/tiers/play/resume. Reset/disclosures moved into Table settings using existing shared styling/confirmation. Free Refill removed from lobby/menu/rebuy and stale handlers/scoped CSS removed. Rebuy remains explicit; default timing, splash/artwork and canonical lobby routing unchanged.
+
+RED21pass/3fail demonstrates old refill semantics; GREEN30fundamentals covers threshold0/99/100, pure read/no-op revision, write failure, competing deals/stale deal versus refill, unchanged Hero stack/legacy Resume, explicit Rebuy/Leave; existing Reset tests retained. Focused Preview/actual APK and CI results recorded after build. No public protocol or v1 format breaking impact; physical owner acceptance pending after new APK.
+
+---
 # T020–T021 — packaged Return to lobby blocker packaged smoke PASS; physical acceptance pending
 
 Owner reported a947151d Android blank screen after confirmed menu/native Back, plus Stage PoC banner. [Reproduction](evidence/apk-t020-reproduction.json), [blank view](evidence/apk-t020-blank.png): actual APK assets with pinned Capacitor route semantics, confirmed Back→/poker/→root entry→loader hidden→0tiles/empty body. Native code WebViewLocalServer maps extensionless routes to root index.html; launch.js wrongly accepted /poker/ as the real lobby. Earlier Python directory-index smoke masked this routing difference. No game/PC loss observed; session remains paused.
