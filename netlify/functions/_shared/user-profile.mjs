@@ -1,7 +1,8 @@
 import { accountDeletionEnabled, assertAccountActive } from "../../../shared/account-deletion.mjs";
+import { requireCurrentTerms } from "../../../shared/profile-terms.mjs";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 import { syncUserLeaderboardVisibility } from "./xp-leaderboard-visibility.mjs";
-import { projectPublicAvatar } from "../../../shared/profile-avatar-projection.mjs";
+import { PUBLIC_AVATAR_VARIANTS, projectPublicAvatar } from "../../../shared/profile-avatar-projection.mjs";
 
 const RESERVED_HANDLES = new Set(["admin", "admin-api", "about", "account", "api", "assets", "auth", "contact", "game", "games", "help", "leaderboard", "legal", "login", "logout", "me", "poker", "privacy", "profile", "register", "settings", "signup", "static", "support", "terms", "user", "users", "xp"]);
 const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{2,23}$/;
@@ -13,31 +14,11 @@ function profileError(code, status = 400) {
   return error;
 }
 
-function normalizeWhitespace(value) {
-  return value.trim().replace(/\s+/g, " ");
-}
-
 function normalizeHandle(value) {
   const handle = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!HANDLE_RE.test(handle)) throw profileError("invalid_handle");
   if (RESERVED_HANDLES.has(handle)) throw profileError("reserved_handle");
   return handle;
-}
-
-function normalizeDisplayName(value) {
-  const displayName = typeof value === "string" ? normalizeWhitespace(value) : "";
-  if (displayName.length < 2 || displayName.length > 40 || /[\u0000-\u001f\u007f]/.test(displayName)) {
-    throw profileError("invalid_display_name");
-  }
-  return displayName;
-}
-
-function normalizeBio(value) {
-  const bio = typeof value === "string" ? value.trim() : "";
-  if (bio.length > 160 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(bio)) {
-    throw profileError("bio_too_long");
-  }
-  return bio;
 }
 
 function normalizeProfileRow(row) {
@@ -46,10 +27,10 @@ function normalizeProfileRow(row) {
     userId: row.user_id,
     handle: row.handle,
     displayName: row.display_name,
-    bio: row.bio || "",
     avatarKey: row.avatar_key || null,
     avatarVariant: row.avatar_variant,
-    handleCustomizedAt: row.handle_customized_at || null,
+    avatarRevision: Number(row.avatar_revision || 1),
+    googlePhotoSuppressed: row.google_photo_suppressed === true,
     leaderboardVisible: row.leaderboard_visible !== false,
   };
 }
@@ -66,7 +47,6 @@ function publicProfile(profile, stats = null) {
   const result = {
     handle: profile.handle,
     displayName: profile.displayName,
-    bio: profile.bio,
     avatar: profileAvatar(profile),
   };
   if (stats) {
@@ -79,18 +59,15 @@ function publicProfile(profile, stats = null) {
 function ownerProfile(profile) {
   return {
     ...publicProfile(profile),
-    handleCanBeCustomized: !profile.handleCustomizedAt,
+    avatarRevision: profile.avatarRevision || 1,
+    avatarVariant: profile.avatarVariant,
     leaderboardVisible: profile.leaderboardVisible !== false,
   };
 }
 
-function isHandleConflict(error) {
-  return error?.code === "23505" && String(error?.constraint || "").includes("user_profiles_handle_lower_unique");
-}
-
 async function readProfile(userId, runSql = executeSql) {
   const rows = await runSql(
-    `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
+    `select user_id::text, handle, display_name, avatar_key, avatar_variant, avatar_revision, google_photo_suppressed, leaderboard_visible
      from public.user_profiles where user_id = $1 limit 1;`,
     [userId],
   );
@@ -107,8 +84,8 @@ async function ensureUserProfile(userId, deps = {}) {
   if (typeof userId !== "string" || !userId.trim()) throw profileError("unauthorized", 401);
   const runSql = deps.executeSql || executeSql;
   const rows = await runSql(
-    `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant,
-            handle_customized_at, leaderboard_visible
+    `select user_id::text, handle, display_name, avatar_key, avatar_variant,
+            avatar_revision, google_photo_suppressed, leaderboard_visible
      from public.ensure_user_profile($1::uuid);`,
     [userId],
   );
@@ -121,7 +98,7 @@ async function findPublicProfile(handle, runSql = executeSql) {
   const normalized = typeof handle === "string" ? handle.trim().toLowerCase() : "";
   if (!HANDLE_RE.test(normalized) || RESERVED_HANDLES.has(normalized)) return null;
   const rows = await runSql(
-    `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
+    `select user_id::text, handle, display_name, avatar_key, avatar_variant, avatar_revision, google_photo_suppressed, leaderboard_visible
      from public.user_profiles where lower(handle) = $1 limit 1;`,
     [normalized],
   );
@@ -129,54 +106,37 @@ async function findPublicProfile(handle, runSql = executeSql) {
 }
 
 async function updateUserProfile(userId, payload = {}, deps = {}) {
-  const profile = await ensureUserProfile(userId, deps);
-  const hasDisplayName = Object.prototype.hasOwnProperty.call(payload, "displayName");
-  const hasBio = Object.prototype.hasOwnProperty.call(payload, "bio");
-  const hasHandle = Object.prototype.hasOwnProperty.call(payload, "handle");
-  const hasLeaderboardVisible = Object.prototype.hasOwnProperty.call(payload, "leaderboardVisible");
-  if (hasLeaderboardVisible && typeof payload.leaderboardVisible !== "boolean") throw profileError("invalid_leaderboard_visibility");
-  const displayName = hasDisplayName ? normalizeDisplayName(payload.displayName) : profile.displayName;
-  const bio = hasBio ? normalizeBio(payload.bio) : profile.bio;
-  const requestedHandle = hasHandle ? normalizeHandle(payload.handle) : profile.handle;
-  const leaderboardVisible = hasLeaderboardVisible ? payload.leaderboardVisible : profile.leaderboardVisible;
-  const changesHandle = requestedHandle !== profile.handle;
-  if (!hasDisplayName && !hasBio && !changesHandle && !hasLeaderboardVisible) return profile;
-
-  const runTransaction = deps.beginSql || beginSql;
+  const allowed = new Set(['avatarVariant','expectedRevision','leaderboardVisible']);
+  if(Object.keys(payload).some(key=>!allowed.has(key))) throw profileError('profile_field_read_only');
+  const choose = Object.hasOwn(payload,'avatarVariant');
+  const visible = Object.hasOwn(payload,'leaderboardVisible');
+  if(choose && (!PUBLIC_AVATAR_VARIANTS.includes(payload.avatarVariant) || !Number.isSafeInteger(payload.expectedRevision) || payload.expectedRevision<1)) throw profileError('invalid_avatar_choice');
+  if(visible && typeof payload.leaderboardVisible!=='boolean')throw profileError('invalid_leaderboard_visibility');
+  await ensureUserProfile(userId,deps);
+  const lifecycle = accountDeletionEnabled(deps.env || process.env);
   const syncVisibility = deps.syncLeaderboardVisibility || syncUserLeaderboardVisibility;
-  try {
-    if (!accountDeletionEnabled(deps.env || process.env) && hasLeaderboardVisible && !leaderboardVisible) await syncVisibility(userId, false, deps);
-    const updatedProfile = await runTransaction(async (tx) => {
-      if (accountDeletionEnabled(deps.env || process.env)) await assertAccountActive(tx, userId);
-      const rows = await tx.unsafe(
-        `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
-         from public.user_profiles where user_id = $1 for update;`,
-        [userId],
-      );
-      const current = normalizeProfileRow(rows?.[0]);
-      if (!current) throw profileError("profile_not_found", 404);
-      const finalDisplayName = hasDisplayName ? displayName : current.displayName;
-      const finalBio = hasBio ? bio : current.bio;
-      const finalLeaderboardVisible = hasLeaderboardVisible ? leaderboardVisible : current.leaderboardVisible;
-      if (changesHandle && current.handleCustomizedAt) throw profileError("handle_locked");
-      const finalHandle = changesHandle ? requestedHandle : current.handle;
-      const updated = await tx.unsafe(
-        `update public.user_profiles
-         set handle = $1, display_name = $2, bio = $3,
-             handle_customized_at = case when $4 then timezone('utc', now()) else handle_customized_at end,
-             leaderboard_visible = $5
-         where user_id = $6
-         returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible;`,
-        [finalHandle, finalDisplayName, finalBio, changesHandle, finalLeaderboardVisible, userId],
-      );
-      return normalizeProfileRow(updated?.[0]);
-    });
-    if (hasLeaderboardVisible && (updatedProfile.leaderboardVisible || accountDeletionEnabled(deps.env || process.env))) await syncVisibility(userId, updatedProfile.leaderboardVisible, deps);
-    return updatedProfile;
-  } catch (error) {
-    if (isHandleConflict(error)) throw profileError("handle_taken", 409);
-    throw error;
-  }
+  if(visible && !payload.leaderboardVisible && !lifecycle)await syncVisibility(userId,false,deps);
+  const profile = await (deps.beginSql || beginSql)(async tx=>{
+    if(accountDeletionEnabled(deps.env || process.env))await assertAccountActive(tx,userId);
+    const policy=choose ? await requireCurrentTerms(tx,{kind:'account',id:userId}) : null;
+    if(choose && !policy.variantsEnabled && PUBLIC_AVATAR_VARIANTS.indexOf(payload.avatarVariant)>=6)throw profileError('avatar_variants_not_active',409);
+    const [row]=await tx.unsafe(`select user_id::text,handle,display_name,avatar_key,avatar_variant,avatar_revision,google_photo_suppressed,leaderboard_visible from public.user_profiles where user_id=$1 for update;`,[userId]);
+    const current=normalizeProfileRow(row);
+    if(!current)throw profileError('profile_not_found',404);
+    const same=choose&&current.avatarVariant===payload.avatarVariant&&!current.avatarKey&&current.googlePhotoSuppressed;
+    if(choose&&!same&&current.avatarRevision!==payload.expectedRevision)throw profileError('stale_avatar_revision',409);
+    if(choose&&current.avatarKey)await tx.unsafe(`insert into private.account_avatar_objects(user_id,output_path) values($1,$2) on conflict(user_id,output_path) do nothing;`,[userId,current.avatarKey]);
+    const [updated]=await tx.unsafe(`update public.user_profiles set avatar_variant=$2,
+      avatar_key=case when $3 then null else avatar_key end,
+      google_photo_suppressed=case when $3 then true else google_photo_suppressed end,
+      avatar_revision=avatar_revision+case when $3 and not $4 then 1 else 0 end,
+      leaderboard_visible=$5 where user_id=$1
+      returning user_id::text,handle,display_name,avatar_key,avatar_variant,avatar_revision,google_photo_suppressed,leaderboard_visible;`,
+      [userId,choose?payload.avatarVariant:current.avatarVariant,choose,same,visible?payload.leaderboardVisible:current.leaderboardVisible]);
+    return normalizeProfileRow(updated);
+  });
+  if(visible && (profile.leaderboardVisible || lifecycle))await syncVisibility(userId,profile.leaderboardVisible,deps);
+  return profile;
 }
 
 async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
@@ -188,7 +148,7 @@ async function updateUserAvatarKey(userId, avatarKey, deps = {}) {
   return runTransaction(async (tx) => {
     if (tracking) await assertAccountActive(tx, userId);
     const currentRows = await tx.unsafe(
-      `select user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible
+      `select user_id::text, handle, display_name, avatar_key, avatar_variant, avatar_revision, google_photo_suppressed, leaderboard_visible
        from public.user_profiles where user_id = $1 for update;`,
       [userId],
     );
@@ -202,7 +162,7 @@ on conflict (user_id,output_path) do nothing;`, [userId,key]);
     }
     const updatedRows = await tx.unsafe(
       `update public.user_profiles set avatar_key = $1 where user_id = $2
-       returning user_id::text, handle, display_name, bio, avatar_key, avatar_variant, handle_customized_at, leaderboard_visible;`,
+       returning user_id::text, handle, display_name, avatar_key, avatar_variant, avatar_revision, google_photo_suppressed, leaderboard_visible;`,
       [avatarKey, userId],
     );
     return { profile: normalizeProfileRow(updatedRows?.[0]), previousAvatarKey: current.avatarKey };
@@ -212,8 +172,6 @@ on conflict (user_id,output_path) do nothing;`, [userId,key]);
 export {
   ensureUserProfile,
   findPublicProfile,
-  normalizeBio,
-  normalizeDisplayName,
   normalizeHandle,
   ownerProfile,
   profileError,

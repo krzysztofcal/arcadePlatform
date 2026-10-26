@@ -27,7 +27,7 @@ function parseBody(raw) {
 }
 
 function validatePatch(payload) {
-  const allowed = new Set(["displayName", "bio", "handle", "leaderboardVisible"]);
+  const allowed = new Set(["avatarVariant", "expectedRevision", "leaderboardVisible"]);
   const keys = Object.keys(payload);
   if (keys.length === 0 || keys.some((key) => !allowed.has(key))) {
     const error = new Error("invalid_request");
@@ -117,7 +117,7 @@ function createProfileMeHandler(deps = {}) {
       });
     } catch (error) {
       const status = Number(error?.status) || 500;
-      const publicCodes = new Set(["invalid_json", "invalid_request", "invalid_handle", "handle_taken", "reserved_handle", "handle_locked", "invalid_display_name", "bio_too_long", "invalid_leaderboard_visibility"]);
+      const publicCodes = new Set(["invalid_json", "invalid_request", "invalid_handle", "handle_taken", "reserved_handle", "handle_locked", "invalid_display_name", "invalid_leaderboard_visibility", "profile_field_read_only", "invalid_avatar_choice", "stale_avatar_revision", "terms_required", "avatar_variants_not_active"]);
       const code = publicCodes.has(error?.code) ? error.code : "server_error";
       klog("profile_me_failed", { userId: auth.userId, code, status });
       return json(status, cors, { error: code });

@@ -1,3 +1,4 @@
+import {requireCurrentTerms} from '../shared/profile-terms.mjs';
 import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle, queueAccountPrivateFrame } from '../shared/account-deletion.mjs';
 import { createGiftAdapter } from './poker/persistence/gift-adapter.mjs';
 import { handleGiftSendCommand } from './poker/handlers/gift.mjs';
@@ -5124,6 +5125,8 @@ wss.on("connection", (ws) => {
       }
       const tableId = resolved.roomId;
       await runGiftWork(tableId, async () => {
+        try { const transact=await loadBeginSqlWs(); await transact(tx=>requireCurrentTerms(tx,{kind:connState.session.identityMode==="guest"?"guest":"account",id:connState.session.userId})); }
+        catch(error){sendCommandResult(ws,connState,{requestId:frame.requestId,tableId,status:"rejected",reason:error?.code==="terms_required"?"terms_required":"terms_unavailable"});return;}
         const association = tableManager.connectionTableAssociation(ws);
         const snapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
         const outcome = await handleGiftSendCommand({ payload: frame.payload, identityMode: connState.session.identityMode,
@@ -5144,7 +5147,7 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "reaction_send") {
-      const react = async () => {
+      const react = async (termsTx) => {
       const resolvedRoomId = resolveRoomId(frame);
       if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
@@ -5188,6 +5191,15 @@ wss.on("connection", (ws) => {
           status: "rejected",
           reason: "not_seated"
         });
+        return;
+      }
+
+      try {
+        const principal={kind:connState.session.identityMode==='guest'?'guest':'account',id:senderUserId};
+        if(termsTx)await requireCurrentTerms(termsTx,principal);
+        else {const transact=await loadBeginSqlWs();await transact(tx=>requireCurrentTerms(tx,principal));}
+      } catch(error) {
+        sendCommandResult(ws,connState,{requestId:frame.requestId??null,tableId,status:'rejected',reason:error?.code==='terms_required'?'terms_required':'terms_unavailable'});
         return;
       }
 
@@ -5294,7 +5306,7 @@ wss.on("connection", (ws) => {
         const transact = await loadBeginSqlWs();
         await transact(async (tx) => {
           await assertAccountActive(tx, connState.session.userId);
-          await react();
+          await react(tx);
         });
       } else await react();
       return;

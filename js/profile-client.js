@@ -3,13 +3,6 @@
 
   var ME_URL = '/.netlify/functions/profile-me';
   var PUBLIC_URL = '/.netlify/functions/profile-public?handle=';
-  var AVATAR_UPLOAD_URL = '/.netlify/functions/profile-avatar-upload-url';
-  var AVATAR_FINALIZE_URL = '/.netlify/functions/profile-avatar-finalize';
-  var AVATAR_REMOVE_URL = '/.netlify/functions/profile-avatar-remove';
-  var AVATAR_MAX_BYTES = 1024 * 1024;
-  var AVATAR_MAX_DIMENSION = 1024;
-  var AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-  var AVATAR_TYPE_ALIASES = { 'image/jpg': 'image/jpeg', 'image/pjpeg': 'image/jpeg', 'image/x-png': 'image/png' };
   var cache = null;
   var inFlight = null;
 
@@ -25,12 +18,8 @@
 
   function applyAvatar(node, profile){
     if (!node) return;
-    var avatar = profile && profile.avatar ? profile.avatar : {};
-    var uploaded = avatar.type === 'uploaded' && typeof avatar.url === 'string' && avatar.url;
-    node.textContent = uploaded ? '' : initials(profile && profile.displayName);
-    node.dataset.avatarVariant = avatar.variant || 'default';
-    node.classList.toggle('profile-avatar--uploaded', !!uploaded);
-    node.style.backgroundImage = uploaded ? 'url("' + avatar.url.replace(/["\\]/g, '') + '")' : '';
+    if(window.ArcadeAvatars){window.ArcadeAvatars.apply(node,profile);return;}
+    node.textContent = initials(profile && profile.displayName);
   }
 
   async function token(){
@@ -107,80 +96,6 @@
     return profile;
   }
 
-  async function uploadAvatar(file){
-    var mimeType = file ? (AVATAR_TYPE_ALIASES[String(file.type || '').toLowerCase()] || String(file.type || '').toLowerCase()) : '';
-    if (!file || AVATAR_TYPES.indexOf(mimeType) === -1){
-      var typeError = new Error('unsupported_avatar_type');
-      typeError.code = 'unsupported_avatar_type';
-      throw typeError;
-    }
-    if (!Number.isFinite(file.size) || file.size < 1 || file.size > AVATAR_MAX_BYTES){
-      var sizeError = new Error('avatar_too_large');
-      sizeError.code = 'avatar_too_large';
-      throw sizeError;
-    }
-    await validateAvatarDimensions(file);
-    var onProgress = arguments.length > 1 && typeof arguments[1] === 'function' ? arguments[1] : function(){};
-    onProgress('uploading');
-    var signed = await parse(await authedFetch(AVATAR_UPLOAD_URL, {
-      method: 'POST',
-      body: JSON.stringify({ mimeType: mimeType, size: file.size })
-    }));
-    var uploadUrl = String(signed.uploadUrl || '');
-    if (signed.token && uploadUrl.indexOf('token=') === -1){
-      uploadUrl += (uploadUrl.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(signed.token);
-    }
-    var uploadResponse = await fetch(window.ArcadeApi ? window.ArcadeApi.url(uploadUrl) : uploadUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: file });
-    if (!uploadResponse.ok){
-      var uploadError = new Error('avatar_upload_failed');
-      uploadError.code = 'avatar_upload_failed';
-      uploadError.status = uploadResponse.status;
-      throw uploadError;
-    }
-    onProgress('processing');
-    var profile = await parse(await authedFetch(AVATAR_FINALIZE_URL, {
-      method: 'POST',
-      body: JSON.stringify({ uploadId: signed.uploadId })
-    }));
-    var userId = await currentUserId();
-    if (!userId) throw staleIdentityError();
-    cache = { userId: userId, profile: profile, includePoker: false };
-    notify(profile);
-    onProgress('done');
-    return profile;
-  }
-
-  function validateAvatarDimensions(file){
-    return new Promise(function(resolve, reject){
-      if (typeof window.FileReader !== 'function' || typeof window.Image !== 'function') return resolve();
-      var reader = new window.FileReader();
-      var image = new window.Image();
-      function finish(error){ if (error) reject(error); else resolve(); }
-      image.onload = function(){
-        if (!image.naturalWidth || !image.naturalHeight){
-          var invalid = new Error('invalid_avatar_file'); invalid.code = 'invalid_avatar_file'; finish(invalid); return;
-        }
-        if (image.naturalWidth > AVATAR_MAX_DIMENSION || image.naturalHeight > AVATAR_MAX_DIMENSION){
-          var dimensions = new Error('avatar_dimensions_too_large'); dimensions.code = 'avatar_dimensions_too_large'; finish(dimensions); return;
-        }
-        finish();
-      };
-      image.onerror = function(){ var error = new Error('invalid_avatar_file'); error.code = 'invalid_avatar_file'; finish(error); };
-      reader.onload = function(){ image.src = String(reader.result || ''); };
-      reader.onerror = function(){ var error = new Error('invalid_avatar_file'); error.code = 'invalid_avatar_file'; finish(error); };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function removeAvatar(){
-    var profile = await parse(await authedFetch(AVATAR_REMOVE_URL, { method: 'DELETE' }));
-    var userId = await currentUserId();
-    if (!userId) throw staleIdentityError();
-    cache = { userId: userId, profile: profile, includePoker: false };
-    notify(profile);
-    return profile;
-  }
-
   async function getPublic(handle){
     var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(PUBLIC_URL + encodeURIComponent(String(handle || ''))) : PUBLIC_URL + encodeURIComponent(String(handle || '')), { headers: { Accept: 'application/json' } });
     return parse(response);
@@ -188,6 +103,6 @@
 
   function clear(){ cache = null; inFlight = null; }
 
-  window.ProfileClient = { getMe: getMe, updateMe: updateMe, uploadAvatar: uploadAvatar, removeAvatar: removeAvatar, getPublic: getPublic, clear: clear, applyAvatar: applyAvatar, initials: initials };
+  window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, applyAvatar: applyAvatar, initials: initials };
   klog('profile:client_ready', {});
 })();

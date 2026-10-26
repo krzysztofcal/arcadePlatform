@@ -1,0 +1,10 @@
+{
+  "count": 16,
+  "totalBytes": 240002,
+  "standaloneWebP": "PASS",
+  "packagedAvatarHashes": "PASS",
+  "packagedControllerAndCatalogHashes": "PASS",
+  "offlineSRIAndCSP": "PASS",
+  "sourceSha": "f4320786a0f4bfe6aad5d541334c717068f80262557e98081c173daa60d5b1fa",
+  "note": "Local bundle only; no APK or deploy published"
+}

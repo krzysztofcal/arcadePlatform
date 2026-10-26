@@ -73,15 +73,7 @@
     QUADS: 8,
     STRAIGHT_FLUSH: 9
   };
-  var POKER_AVATAR_VARIANTS = {
-    'default': true,
-    'comet-blue': true,
-    'falcon-orange': true,
-    'fox-blue': true,
-    'nova-purple': true,
-    'orbit-green': true,
-    'panda-pink': true
-  };
+  var POKER_AVATAR_VARIANTS = Object.fromEntries((window.ArcadeAvatars ? window.ArcadeAvatars.variants : ['default']).concat(['default']).map(function(v){return [v,true];}));
   var BOT_AVATAR_BASE_PATH = '/poker/assets/avatars/bots/';
   var BOT_PRESENTATION_ENTRIES = [
     { key: 'viktor', displayName: 'Viktor', gender: 'male', file: 'bot-male-01-v1.webp' },
@@ -3658,7 +3650,7 @@
     if (!imageUrl && !profileAvatar) return;
     if (!imageUrl && profileAvatar.type === 'default'){
       avatar.dataset.avatarVariant = profileAvatar.variant;
-      return;
+      imageUrl=window.ArcadeAvatars ? window.ArcadeAvatars.url(profileAvatar.variant) : '';
     }
     if (!imageUrl && profileAvatar.type === 'uploaded') imageUrl = profileAvatar.url;
     if (!imageUrl) return;
@@ -7244,6 +7236,7 @@
           renderInfoPanel();
           renderControls();
         } else if (status === 'command_result') {
+          if(info && info.reason==='terms_required')document.dispatchEvent(new CustomEvent('profile:terms-required'));
           syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
         } else if (status === 'resync'){
           cancelSettlementAnimations();
@@ -7437,6 +7430,7 @@
       var frame = {kind:'stateSnapshot', initial:!state.hasAppliedAuthoritativeSnapshot, cardFxEligible:!!state.hasAppliedAuthoritativeSnapshot};
       var previousVisual = captureVisualSnapshot(), previousHandId = state.handId;
       observeCelebrationSnapshot(payload, frame);
+      if(payload.seats)payload.seats.forEach(function(seat){if(seat.userId===offline.human)seat.profile={handle:'offline-player',displayName:'You',avatar:{type:'default',variant:'comet-blue'}};});
       mergeSnapshot(payload, frame);
       if (previousHandId && previousHandId !== state.handId) resetQueuedPreactionState();
       state.hasAppliedAuthoritativeSnapshot = true;

@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
   <link rel="stylesheet" href="css/portal.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
+  <link rel="stylesheet" href="/css/xp.css">
   <style>
     .account-grid{ display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); }
 
@@ -102,7 +103,9 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/user-ui-state.js" defer></script>
+  <script src="/js/profile-avatar-catalog.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-onboarding.js" defer></script>
   <script src="/js/profile-client.js" defer></script>
   <script src="js/chips/client.js" defer></script>
   <script src="js/core/number-format.js" defer></script>
@@ -121,6 +124,7 @@
   <script src="js/klaro-config.js" defer></script>
   <script src="js/vendor/klaro/klaro.js" defer></script>
   <script src="js/consent-services.js" defer></script>
+  <link rel="stylesheet" href="/css/profile-account.css">
 </head>
 <body class="page-account">
   <div class="page-boot" id="pageBoot" role="status" aria-label="Loading account">
@@ -256,6 +260,7 @@
               <label for="signupPasswordConfirm" data-i18n="confirmPassword">Confirm password</label>
               <input id="signupPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" minlength="8" required placeholder="••••••••">
               <p class="account-note" data-i18n="passwordRequirements">Use at least 8 characters.</p>
+              <p class="account-note">After email verification, accept the <a href="/legal/terms.en.html" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> before new account use. Read our <a href="/legal/privacy.en.html" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy Policy</a>.</p>
               <button type="submit" data-i18n="signUp">Sign up</button>
             </form>
             <p class="account-note" data-i18n="accountVerification">We may ask you to verify your email before unlocking cloud sync.</p>
@@ -284,31 +289,14 @@
                 <a class="public-profile-editor__url" id="publicProfileUrl" href="#">/u/handle</a>
               </div>
             </div>
-            <p class="account-note" data-i18n="publicProfileNotice">Your handle, display name, bio, and avatar are public. Email and account details are never shown.</p>
-            <div class="public-profile-editor__avatar-actions">
-              <input class="public-profile-editor__avatar-input" id="publicAvatarInput" type="file" accept="image/jpeg,image/png,image/webp">
-              <button class="public-profile-editor__avatar-btn" id="publicAvatarChoose" type="button" data-i18n="choosePublicAvatar">Choose avatar</button>
-              <button class="public-profile-editor__avatar-btn" id="publicAvatarRemove" type="button" data-i18n="removePublicAvatar" hidden>Restore default</button>
-            </div>
-            <p class="public-profile-editor__avatar-status" id="publicAvatarStatus" aria-live="polite" data-i18n="publicAvatarRequirements">JPEG, PNG or WebP, up to 1 MB.</p>
+            <p class="account-note">Your Arcade name, handle and avatar are public. Your account email stays private.</p>
+            <p><strong id="publicDisplayName"></strong> <span id="publicHandle"></span></p>
+            <div id="arcadeAvatarGallery" class="arcade-avatar-gallery" role="group" aria-label="Arcade avatars"></div>
+            <p id="publicAvatarStatus" class="account-note" role="status"></p>
             <form class="account-form" id="publicProfileForm">
-              <label for="publicDisplayName" data-i18n="publicDisplayName">Display name</label>
-              <input id="publicDisplayName" name="displayName" type="text" minlength="2" maxlength="40" required>
-              <p class="public-profile-editor__field-error" id="publicDisplayNameError" aria-live="polite"></p>
-              <label for="publicHandle" data-i18n="publicHandle">Handle</label>
-              <input id="publicHandle" name="handle" type="text" minlength="3" maxlength="24" pattern="[a-z0-9_-]+" autocomplete="off">
-              <p class="account-note" id="publicHandleHint" data-i18n="publicHandleHint">You can change your generated handle once. It then becomes permanent.</p>
-              <p class="public-profile-editor__field-error" id="publicHandleError" aria-live="polite"></p>
-              <label for="publicBio" data-i18n="publicBio">Bio</label>
-              <textarea id="publicBio" name="bio" maxlength="160"></textarea>
-              <p class="public-profile-editor__field-error" id="publicBioError" aria-live="polite"></p>
-              <fieldset class="leaderboard-privacy-setting">
-                <legend data-i18n="leaderboardSettingsTitle">Leaderboard settings</legend>
-                <label for="hideFromLeaderboard"><input id="hideFromLeaderboard" name="hideFromLeaderboard" type="checkbox"><span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label>
-                <p class="account-note" data-i18n="hideFromLeaderboardHint">Your public profile remains available by handle. This setting removes you from XP rankings.</p>
-              </fieldset>
-              <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle" aria-busy="false"><span class="public-profile-save__spinner" aria-hidden="true"></span><span id="publicProfileSaveLabel" data-i18n="savePublicProfile">Save public profile</span></button>
-              <span class="public-profile-save__status" id="publicProfileSaveStatus" aria-live="polite"></span>
+              <fieldset class="public-profile-editor__privacy"><label><input id="hideFromLeaderboard" type="checkbox"> Hide my profile from the leaderboard</label><p class="account-note">This does not hide your public profile.</p></fieldset>
+              <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle"><span id="publicProfileSaveLabel">Save visibility</span></button>
+              <span id="publicProfileSaveStatus" role="status"></span>
             </form>
           </section>
           <div class="account-panel__actions">

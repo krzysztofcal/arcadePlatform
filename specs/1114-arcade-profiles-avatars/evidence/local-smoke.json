@@ -1,0 +1,10 @@
+{
+  "environment": "local packaged resources; mocked Auth/API only; no Stage/Production",
+  "avatarCount": 16,
+  "termsSingleAction": true,
+  "persistedChoice": "zen-lime",
+  "offlineExternalRequests": 0,
+  "legalOfflineDocuments": 4,
+  "blockedNonlocalResources": [],
+  "errors": []
+}

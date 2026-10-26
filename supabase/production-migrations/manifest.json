@@ -1227,6 +1227,13 @@
       "sha256": "f2d4c1b9a1c461581af922e17d5d0f920cfb52ffce48b5207d36a938ce6f1f8c",
       "category": "needs-production-equivalent",
       "purpose": "#1117 owner-approved unobserved capability risk: optional truthful waiver of fixed global wait only; known capabilities and unresolved operations remain fail-closed. No remote application or activation."
+    },
+    {
+      "file": "20261026120000_profile_phase_a.sql",
+      "version": "20261026120000",
+      "sha256": "a773676e127c733eccc0c645278ded8b8e1c96fdac4e45209ba509e60c7b346d",
+      "category": "needs-production-equivalent",
+      "purpose": "#1114 phase A additive profile revision/suppression and inactive Terms/catalog policy. Prepared locally only; separate Stage/Production GO and reader compatibility required. No data cleanup or activation."
     }
   ]
 }

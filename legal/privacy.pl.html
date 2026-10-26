@@ -16,7 +16,9 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/user-ui-state.js" defer></script>
+  <script src="/js/profile-avatar-catalog.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-onboarding.js" defer></script>
   <script src="/js/chips/client.js" defer></script>
   <script src="/js/core/number-format.js" defer></script>
   <script src="/js/topbar.js" defer></script>
@@ -96,7 +98,7 @@
       <li>Hash hasła przechowywany wyłącznie w Supabase; nigdy nie zapisujemy haseł w formie jawnej.</li>
       <li>Tokeny sesji i cookies uwierzytelniające wydawane przez Supabase.</li>
       <li>Metadane konta, np. nazwa wyświetlana i inicjały awatara.</li>
-      <li>Dane profilu publicznego: wygenerowany lub dostosowany identyfikator, nazwa wyświetlana, opcjonalny opis i tożsamość awatara.</li>
+      <li>Dane profilu: automatyczny identyfikator i nazwa gracza, awatar katalogowy oraz wersja i czas akceptacji regulaminu.</li>
       <li>XP oraz postępy w grach powiązane z Twoim identyfikatorem użytkownika na potrzeby synchronizacji w chmurze.</li>
       <li>Logi bezpieczeństwa i aktywności (np. zdarzenia logowania, diagnostyka błędów).</li>
       <li>Dane o zgodach i analityce, jeśli wyrazisz zgodę w menedżerze zgód.</li>
@@ -124,9 +126,9 @@
     </ul>
 
     <h2>Publiczne profile graczy</h2>
-    <p>Każde uwierzytelnione konto Arcade Hub otrzymuje publiczny profil gracza. Każda osoba znająca jego adres może zobaczyć identyfikator profilu, nazwę wyświetlaną, opcjonalny opis, awatar, łączną liczbę XP i poziom. Na profilu publicznym nie pokazujemy adresu e-mail, identyfikatora użytkownika Supabase, salda żetonów, ledgera, danych pokera, danych sesji, szczegółowych rekordów XP, dziennych ani tygodniowych przyrostów XP oraz prywatnych metadanych konta.</p>
-    <p>Domyślne awatary są generowanymi wizualizacjami tożsamości. Przesłane awatary są przetwarzane do publicznego obrazu profilu, a oryginalne pliki pozostają prywatne i tymczasowe.</p>
+    <p>Konta otrzymują automatyczną nazwę i identyfikator gracza oraz trwały awatar katalogowy. Możesz wybrać inny awatar z galerii. BIO, ręczna edycja tożsamości i przesyłanie plików są niedostępne. Dane Google pozostają prywatnymi danymi uwierzytelniania; ta wersja nie importuje zdjęć Google. Publiczny profil pokazuje tożsamość gracza, awatar, łączne XP i poziom, ale nie e-mail, UUID konta, CH ani dane gry. Dawne własne dane profilu są porządkowane; stare adresy zmienionych profili mogą przestać działać.</p>
 
+    <h2>Zapis akceptacji i lokalne dane Offline</h2><p>Zapisujemy wersję regulaminu, serwerowy czas oraz identyfikator żądania przypisane do konta w celu wykazania akceptacji i ochrony integralności usługi. Potwierdzenia konta są usuwane wraz z kontem. Potwierdzenia gościa wygasają po godzinie i są usuwane w ramach retencji. Akceptacja regulaminu jest niezależna od ewentualnej przyszłej dobrowolnej zgody na zdjęcie Google. Dawne obiekty zdjęć podlegają istniejącej kontrolowanej retencji, bez ponownej publikacji lub wykorzystania. Offline Chips, karty i sesje pozostają na urządzeniu i nie synchronizują się z CH ani XP.</p>
     <h2>Publiczny ranking XP</h2>
     <p>Uwierzytelnione konta są domyślnie uwzględniane w publicznym rankingu XP. Wpis w rankingu może pokazywać pozycję, identyfikator profilu, nazwę wyświetlaną, awatar, XP dla wybranego okresu (dzisiaj, w tym tygodniu lub łącznie), poziom i link do profilu publicznego. Gracze korzystający z trybu gościa nie są uwzględniani. Ranking nie pokazuje adresu e-mail, identyfikatora użytkownika Supabase, salda żetonów, ledgera, danych pokera, danych sesji ani szczegółowych zdarzeń XP.</p>
     <p>Możesz ukryć konto w rankingu w Ustawieniach. Spowoduje to usunięcie go z wyników i obliczeń pozycji, ale nie ustawi profilu pod adresem <code>/u/&lt;handle&gt;</code> jako prywatnego.</p>
@@ -159,7 +161,7 @@
     <p>Przysługują Ci prawa dostępu, sprostowania, usunięcia, ograniczenia, przenoszenia danych oraz sprzeciwu. Zgodę na analitykę możesz wycofać w dowolnym momencie przez menedżera zgód. Aby skorzystać z praw, napisz na <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Skargę możesz wnieść do Prezesa UODO.</p>
 
     <h2>Usuwanie konta</h2>
-    <p>Możesz zażądać usunięcia konta, wysyłając e-mail na <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Automatyczne usuwanie w aplikacji jest planowane; do tego czasu realizujemy wnioski ręcznie i usuwamy powiązane rekordy XP, sesje i metadane w zakresie dozwolonym prawem.</p>
+    <p>Usunięcie konta jest dostępne w <a href="/account.html">Koncie</a>; pomoc: <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Istniejący proces usuwa dane konta i śledzone zdjęcia; ograniczone dowody księgowe lub bezpieczeństwa mogą pozostać wyłącznie zgodnie z zatwierdzoną polityką retencji.</p>
 
     <h2>Bezpieczeństwo</h2>
     <p>Stosujemy środki zgodne z dobrymi praktykami, korzystamy z zabezpieczeń zarządzanych przez Supabase i ograniczamy dostęp do danych osobowych. Żaden system nie jest w 100% bezpieczny – chroń urządzenie i dane logowania.</p>

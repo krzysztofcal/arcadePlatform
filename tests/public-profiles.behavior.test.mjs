@@ -30,7 +30,6 @@ function profile(overrides = {}) {
     userId: USER_ID,
     handle: "blue-fox-482731",
     displayName: "Blue Fox 482731",
-    bio: "",
     avatarKey: "internal/private-key.webp",
     avatarVariant: "fox-blue",
     handleCustomizedAt: null,
@@ -87,7 +86,6 @@ test("public projection never returns internal identity or avatar storage key", 
   assert.deepEqual(projected, {
     handle: "blue-fox-482731",
     displayName: "Blue Fox 482731",
-    bio: "",
     avatar: { type: "default", variant: "fox-blue" },
   });
   assert.equal("userId" in projected, false);
@@ -101,21 +99,8 @@ test("owner projection exposes leaderboard visibility without leaking it publicl
   assert.equal("leaderboardVisible" in publicProfile(profile({ leaderboardVisible: false })), false);
 });
 
-test("uploaded avatar projection exposes only an opaque stable public URL", () => {
-  const previous = process.env.SUPABASE_URL;
-  process.env.SUPABASE_URL = "https://stageabc.supabase.co";
-  try {
-    const key = "10000000-0000-4000-8000-000000000001.webp";
-    const projected = publicProfile(profile({ avatarKey: key }));
-    assert.deepEqual(projected.avatar, {
-      type: "uploaded",
-      url: `https://stageabc.supabase.co/storage/v1/object/public/profile-avatars/${key}`,
-    });
-    assert.equal("avatarKey" in projected, false);
-  } finally {
-    if (previous === undefined) delete process.env.SUPABASE_URL;
-    else process.env.SUPABASE_URL = previous;
-  }
+test("phase A projects a catalog avatar even when a legacy upload exists", () => {
+  assert.deepEqual(publicProfile(profile({avatarKey:"10000000-0000-4000-8000-000000000001.webp"})).avatar,{type:"default",variant:"fox-blue"});
 });
 
 test("public projection exposes only current XP and computed level", () => {
@@ -230,21 +215,9 @@ test("profile helper rejects non-boolean leaderboard visibility before a databas
   assert.equal(writes, 0);
 });
 
-test("profile-me maps locked and taken handle errors", async () => {
-  for (const [code, status] of [["handle_locked", 400], ["handle_taken", 409]]) {
-    const handler = createProfileMeHandler({
-      verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
-      updateUserProfile: async () => {
-        const error = new Error(code);
-        error.code = code;
-        error.status = status;
-        throw error;
-      },
-    });
-    const response = await handler(event("PATCH", { handle: "custom-player" }));
-    assert.equal(response.statusCode, status);
-    assert.deepEqual(JSON.parse(response.body), { error: code });
-  }
+test("profile-me rejects all former manual identity fields before invoking persistence", async () => {
+ const handler=createProfileMeHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),updateUserProfile:async()=>{throw Error("must not write");}});
+ for(const payload of [{handle:"custom-player"},{displayName:"Manual"},{bio:"Text"}])assert.equal((await handler(event("PATCH",payload))).statusCode,400);
 });
 
 test("profile-me includePoker returns the full authoritative table projection and balance", async () => {
@@ -317,25 +290,8 @@ test("profile-me preserves wallet when the public WS proxy returns a successful 
   assert.ok(logs.some(log => log.data.reason === "invalid_json"));
 });
 
-test("one-time handle lock and unique conflicts are enforced by profile updates", async () => {
-  await assert.rejects(
-    () => updateUserProfile(USER_ID, { handle: "second-handle" }, {
-      beginSql: transactionForProfile(dbProfile({ handleCustomizedAt: "2026-07-10T00:00:00.000Z" })),
-      executeSql: async () => [dbProfile({ handleCustomizedAt: "2026-07-10T00:00:00.000Z" })],
-    }),
-    { code: "handle_locked" },
-  );
-
-  const conflict = new Error("duplicate_handle");
-  conflict.code = "23505";
-  conflict.constraint = "user_profiles_handle_lower_unique";
-  await assert.rejects(
-    () => updateUserProfile(USER_ID, { handle: "taken-handle" }, {
-      beginSql: transactionForProfile(dbProfile(), conflict),
-      executeSql: async () => [dbProfile()],
-    }),
-    { code: "handle_taken", status: 409 },
-  );
+test("manual identity updates are rejected regardless of historical handle state", async () => {
+ for(const payload of [{handle:"second-handle"},{displayName:"Manual"},{bio:"Text"}])await assert.rejects(updateUserProfile(USER_ID,payload),{code:"profile_field_read_only"});
 });
 
 test("leaderboard opt-out synchronizes Redis before the database write", async () => {
@@ -419,7 +375,6 @@ test("profile-public returns current XP and level without internal fields", asyn
   assert.deepEqual(body, {
     handle: "blue-fox-482731",
     displayName: "Blue Fox 482731",
-    bio: "",
     avatar: { type: "default", variant: "fox-blue" },
     xp: 235,
     level: 3,

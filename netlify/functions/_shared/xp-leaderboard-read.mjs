@@ -61,7 +61,6 @@ function normalizeProfileRow(row) {
     userId: row.user_id,
     handle: row.handle,
     displayName: row.display_name,
-    bio: "",
     avatarKey: row.avatar_key || null,
     avatarVariant: row.avatar_variant,
     handleCustomizedAt: null,

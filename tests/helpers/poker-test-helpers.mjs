@@ -98,7 +98,7 @@ export const loadPokerHandler = (filePath, mocks) => {
   }
   const declared = getDeclaredIdentifiers(rewritten);
   const injectable = [
-    "accountDeletionEnabled", "assertAccountActive",
+    "accountDeletionEnabled", "assertAccountActive", "requireCurrentTerms",
     "baseHeaders",
     "beginSql",
     "awardPotsAtShowdown",
@@ -216,6 +216,7 @@ return handler;`
   try {
     const resolvedMocks = {
       accountDeletionEnabled, assertAccountActive,
+      requireCurrentTerms: async()=>({required:false}),
       parseStakes,
       formatStakes,
       ensurePokerRequest,

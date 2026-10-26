@@ -19,9 +19,10 @@ const callQuickSeat = async (handler, body = {}) => {
   });
 };
 
-const makeHandler = ({ enabledBuyIns = [100, 500], poolSchema = true, activeTables = 0, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, resumeTable = null, activeSeatLeft = false, activeSeatSql = null, authenticatedUserId = userId, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
+const makeHandler = ({ requireCurrentTerms = async()=>({required:false}), enabledBuyIns = [100, 500], poolSchema = true, activeTables = 0, pendingTables = 0, mode, queries, notifications = [], logs = [], events = [], balance = 110, balanceError = false, candidateBuyIn = 100, activeSeatNo = 2, effectiveClass = "NORMAL", storedRequests = null, hasActiveSeat = false, createTableIds = null, resumeTable = null, activeSeatLeft = false, activeSeatSql = null, authenticatedUserId = userId, checkWsBuyInCapability = async () => ({ ok: true }) }) => {
   const tableIdsQueue = Array.isArray(createTableIds) ? [...createTableIds] : null;
   return loadPokerHandler("netlify/functions/poker-quick-seat.mjs", {
+    requireCurrentTerms,
     baseHeaders: () => ({}),
     corsHeaders: () => ({ "access-control-allow-origin": "https://example.test" }),
     extractBearerToken: () => "token",
@@ -147,6 +148,22 @@ const assertCanonicalLockKey = (queries, expectedKey) => {
 };
 
 const run = async () => {
+  {
+    let pending=false,checks=0;
+    const requireCurrentTerms=async()=>{checks++;if(pending)throw Object.assign(Error('terms_required'),{code:'terms_required',status:409});};
+    const queries=[],storedRequests=new Map();
+    const handler=makeHandler({mode:'create',queries,storedRequests,hasActiveSeat:true,balance:1000,requireCurrentTerms,createTableIds:['table-terms']});
+    const intent=singleRequestId('terms-replay');
+    assert.equal((await callQuickSeat(handler,{mode:'single_player',buyIn:500,requestId:intent})).statusCode,200);
+    pending=true;const before=checks;
+    assert.equal((await callQuickSeat(handler,{mode:'single_player',buyIn:500,requestId:intent})).statusCode,200,'funded request replay remains available with pending Terms');
+    assert.equal(checks,before,'no new-admission gate for funded replay');
+    const resume=makeHandler({mode:'already_seated',queries,hasActiveSeat:true,requireCurrentTerms});
+    assert.equal((await callQuickSeat(resume,{mode:'single_player',tableId:'00000000-0000-0000-0000-000000000009'})).statusCode,200,'funded Resume remains available');
+    assert.equal(checks,before);
+    assert.equal((await callQuickSeat(handler,{mode:'single_player',buyIn:500,requestId:singleRequestId('terms-new')})).statusCode,409,'new admission still requires Terms');
+  }
+
   {
     for (const tableId of ['not-a-uuid', '', null, 123, {}, [], '00000000-0000-4000-8000-000000000123']) {
       const queries = [];

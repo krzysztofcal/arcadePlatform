@@ -48,11 +48,16 @@ const launch = await readFile(path.join(here, 'launch.html'), 'utf8');
 const launchStyle = launch.match(/<style id="pokerLaunchStyle">[\s\S]*?<\/style>/)[0];
 const launchBody = launch.match(/<div id="pokerLaunch"[\s\S]*?<\/div>\n<\/div>/)[0];
 await put('mobile/poker/launch.js', await readFile(path.join(here, 'launch.js')));
-const pages = ['poker/index.html', 'poker/table-v2.html', 'poker/offline/play.html', 'account.html'];
+const legalPages = ['legal/privacy.en.html','legal/privacy.pl.html','legal/terms.en.html','legal/terms.pl.html','legal/terms.2026-10-26-a1.en.html','legal/terms.2026-10-26-a1.pl.html'];
+const pages = ['poker/index.html', 'poker/table-v2.html', 'poker/offline/play.html', 'account.html', ...legalPages];
+await copy('css/profile-account.css');
+await copy('js/profile-onboarding.js');
+for(const variant of (await import('../../shared/profile-avatar-projection.mjs')).PUBLIC_AVATAR_VARIANTS)await copy('assets/avatars/arcade/'+variant+'.webp');
 for (const name of pages) {
   let html = await readFile(path.join(root, name), 'utf8');
   if (name === 'poker/offline/play.html') {
     // Preserve isolated CSP/SRI: no auth, online mobile bootstrap or remote config.
+    await copy('poker/offline/avatar-catalog.generated.js');
     await copy('poker/offline/game.generated.js');
     await copy('poker/offline/renderer.generated.js');
     await copy('poker/offline/offline.css');
@@ -65,6 +70,10 @@ for (const name of pages) {
     html = html.replace('</head>', '<link rel="stylesheet" href="/mobile/mobile.css"></head>');
     await put(name, html);
     continue;
+  }
+  if (legalPages.includes(name)) {
+    var main = html.match(/<main\b[^>]*>[\s\S]*?<\/main>/)[0];
+    html = '<!doctype html><html lang="'+(name.includes('.pl.html')?'pl':'en')+'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arcade Poker</title><link rel="stylesheet" href="/css/legal-document.css"></head><body>'+main+'</body></html>';
   }
   if (name === 'poker/index.html') {
     html = html.replace('<head>', '<head>' + launchStyle + launch.match(/<script src="\/mobile\/poker\/launch\.js"[^>]*><\/script>/)[0]);
@@ -84,7 +93,7 @@ for (const name of pages) {
     let target = url.pathname;
     if (target === '/index.html' || target === '/poker/') target = '/poker/index.html';
     if (target === '/xp.html') target = '/account.html';
-    if (!['/poker/', '/poker/index.html', '/poker/table-v2.html', '/poker/offline/play.html', '/account.html'].includes(target) && !target.endsWith('.css')) {
+    if (!['/poker/', '/poker/index.html', '/poker/table-v2.html', '/poker/offline/play.html', '/account.html', ...legalPages.map(page=>'/'+page)].includes(target) && !target.endsWith('.css')) {
       if (/^\/(legal\/|about[./])/.test(target)) target = config.apiOrigin + target;
       else return match.replace(value, '/account.html');
     }

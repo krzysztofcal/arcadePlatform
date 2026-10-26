@@ -2363,7 +2363,17 @@
     "fox-blue",
     "nova-purple",
     "orbit-green",
-    "panda-pink"
+    "panda-pink",
+    "raven-violet",
+    "tiger-gold",
+    "wave-cyan",
+    "wizard-indigo",
+    "bolt-yellow",
+    "rocket-red",
+    "ace-silver",
+    "ember-coral",
+    "pixel-teal",
+    "zen-lime"
   ]);
   var PUBLIC_AVATAR_VARIANT_SET = new Set(PUBLIC_AVATAR_VARIANTS);
 
