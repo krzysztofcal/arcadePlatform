@@ -53,5 +53,5 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 
 - [x] Reproduce old packaged Confirm blank screen and Stage banner using real APK assets/Capacitor route mapping; record RED tests.
 - [x] Canonical local document exits, loader correction, remove normal developer status; preserve auth/bridge feedback, regenerate CSP/SRI.
-- [ ] Fundamental checks and exact packaged-assets navigation/loader smoke; current-HEAD Stage APK and CI.
+- [x] Fundamental checks and exact packaged-assets navigation/loader smoke PASS; hosted Android build PASS, current-HEAD artifact/checksum linked in PR.
 - [ ] Physical Galaxy S24+ acceptance: menu/native Back Confirm, Keep playing/Resume, Leave, Reset; airplane mode, no banner. Retain Draft; no merge/Production.

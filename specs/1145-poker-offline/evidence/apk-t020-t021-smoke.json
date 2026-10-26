@@ -1,0 +1,28 @@
+{
+  "sha": "e04b699f9f8d7db42031bf77e2fb63f89d05eca2",
+  "source": "actual APK web assets, pinned Capacitor extensionless root fallback (not directory-index HTTP)",
+  "airplaneSimulation": true,
+  "menuConfirm": "PASS",
+  "keepPlaying": "PASS",
+  "nativeBackCallbackConfirm": "PASS",
+  "resumeHandCardsStacksRosterClock": "PASS",
+  "leaveCashoutOnce": "PASS",
+  "resetCancelConfirm": "PASS",
+  "legacyRouteAndMissingSession": "PASS",
+  "loaderHiddenOnlyInRealLobby": "PASS",
+  "noDeveloperBanner": "PASS",
+  "balances": {
+    "initial": 5000,
+    "afterBuyIn": 4900,
+    "beforeLeave": 4900,
+    "heroCashout": 100,
+    "afterLeave": 5000,
+    "afterReset": 5000
+  },
+  "blockedRemoteHosts": [
+    "deploy-preview-1141--playkcswh.netlify.app"
+  ],
+  "webSockets": [],
+  "errors": [],
+  "physicalAndroid": "PENDING owner"
+}

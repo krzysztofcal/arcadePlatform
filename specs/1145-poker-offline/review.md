@@ -1,10 +1,20 @@
-# T020–T021 — packaged Return to lobby blocker (verification in progress)
+# T020–T021 — packaged Return to lobby blocker packaged smoke PASS; physical acceptance pending
 
 Owner reported a947151d Android blank screen after confirmed menu/native Back, plus Stage PoC banner. [Reproduction](evidence/apk-t020-reproduction.json), [blank view](evidence/apk-t020-blank.png): actual APK assets with pinned Capacitor route semantics, confirmed Back→/poker/→root entry→loader hidden→0tiles/empty body. Native code WebViewLocalServer maps extensionless routes to root index.html; launch.js wrongly accepted /poker/ as the real lobby. Earlier Python directory-index smoke masked this routing difference. No game/PC loss observed; session remains paused.
 
 Canonical /poker/index.html now used for all local exits/fallbacks/generated anchor, while loader redirects legacy paths before hiding. Normal Stage PoC/SHA and connectivity notices removed from runtime, not hidden with CSS. Retain auth feedback via accountStatus and contextual mobileError for bridge failures; engineering logs via klog. No shared Online/WS, rules/strategy, PC finance/schema, dependencies or migration changes. Intentional route/UI changes only; existing v1 sessions compatible.
 
 Fundamental RED20pass/4fail confirmed old destination/banner behavior; GREEN and actual new APK smoke recorded after build. No extra maintained rendering suite, no restart workaround. Previous physical passes remain historical, but T020 physical owner acceptance is required; do not mark merge-ready.
+
+## T020–T021 results
+
+Runtime `e04b699f9f8d7db42031bf77e2fb63f89d05eca2`; hosted Android build40248297456 SUCCESS. [Actual packaged smoke](evidence/apk-t020-t021-smoke.json), [lobby after Confirm](evidence/apk-t020-confirm-lobby.png), [clean lobby/artwork](evidence/apk-t021-clean-lobby.png). Temporary Chromium loads APK assets with identical pinned Capacitor extensionless root fallback, navigator offline before first load and all remote requests aborted. This replaces the misleading directory-index test server for navigation verification. Native App callback supplied through temporary bridge stub, not physical Android proof.
+
+PASS: menu Confirm, Keep playing, native Back callback Confirm, Resume preserving hand/cards/stacks/members/table/remaining actor budget, explicit UI Leave and one cashout, reload without another cashout, Reset Cancel/Confirm, legacy /poker/ redirect and missing-session fallback. All land at explicit /poker/index.html with real lobby visible and loader hidden. Normal UI contains neither mobileStatus nor mobileError; normal startup/connectivity does not insert developer banner. Existing fundamental tests also confirm auth failure and unavailable bridge still surface messages.
+
+Local PC observations: initial5000 → buy-in100 leaves4900; Hero cashout100 →5000; reload unchanged5000; reset5000/sessionnull. No CH/backend mutations.0WebSockets,0JS errors; only a blocked unauthenticated Stage API host attempt from existing lobby startup, no remote connection success. Table remains isolated. Splash/artwork retained.
+
+27/27 fundamentals PASS (21Offline/3mobile/3canonical timeout); syntax/CSP56documents/rebuild/whitespace PASS. Independent review: no critical/important findings. Source Online renderer/lobby runtime and all shared WS/engine modules unchanged; no WS Preview replay. Final evidence-only HEAD source-identical to tested runtime, new exact-current-HEAD APK/CI and checksum published in PR. Physical Galaxy S24+ Confirm/Leave/Reset acceptance pending; retain Draft, no merge/Production.
 
 ---
 # T018–T019 — launch polish and Offline artwork browser/Preview PASS; awaiting physical cold start
