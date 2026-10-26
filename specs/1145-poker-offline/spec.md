@@ -85,3 +85,11 @@ Lobby has an emergency Reset Offline Progress button hidden by default beside of
 ## T024 — table readiness without theme flash
 
 Owner physical T023 PASS retained. Reuse existing Loading table splash/hidden table for New Game and Resume. First paused snapshot, actual theme/common image decode, rendered avatars/cards/HUD and layout frames must precede markBootReady. Resume actor clocks only after reveal; saved budget unchanged by graphics wait. New Game pauses before navigation. No artificial readiness sleep, Auth/WS/remote wait, new loader/framework or Online behavior change. Existing15s image-failure bound resolves stable Classic fallback without late theme activation. markBootReady stays once per document init. Canonical Back/Reset/Resume,20s actor/1–2s bot/3s rollover unchanged.
+
+
+## T025 — accepted Offline / pending WS integration gate
+
+Owner confirmed T024 physical Galaxy S24+ PASS on source 8c05fc11b00586e8944480dec76bfd6b4cd3882c; all reported Offline issues accepted. No further cosmetics. Final read-only preflight retains Draft and issue #1145 open. Current main 892661f44f4e9fdbe3df24f0553fa1191bf1752e is an ancestor. Required remaining work is a separately authorized bounded exact-SHA WS Preview Online/Single Player/reconnect smoke, not another Offline campaign. Production merge/deployment remain unauthorized; see review.md and ws-verification.md for gates and independently verified deployment controls. No runtime changes in T025.
+
+
+T025 execution2026-10-26: separate owner GO exercised once. Exact8c05fc11 WS Preview deployment40307557291 and bounded authenticated Online/Single Player/reconnect/settlement/Leave PASS. Leave ACK NOT OBSERVED under existing immediate-navigation contract; durable result/cashout verified. Final wallet442CH, test tables CLOSED/escrow0/no seats. Owner physical Offline PASS remains valid. WS gate closed; technically MERGE-READY, Draft retained pending explicit owner decision and safe Production deployment policy. No runtime changes. Current execution details supersede earlier pending-gate status; historical failures retained in review.md/ws-verification.md.

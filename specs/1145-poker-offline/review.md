@@ -1,3 +1,82 @@
+# T025 execution — exact-SHA WS gate PASS / MERGE-READY for owner rollout decision
+
+2026-10-26, owner-authorized single bounded Preview deployment and smoke. Supersedes the missing-runtime-evidence verdict below; previous failed/blocked observations retained. No runtime change, Production, merge, Account Deletion, manual financial repair or migration. PR remains Draft; issue #1145 stays open.
+
+## Deployment / preflight PASS
+
+[WS Preview Deploy40307557291](https://github.com/krzysztofcal/arcadePlatform/actions/runs/40307557291) SUCCESS. Workflow definition main `892661f44f4e9fdbe3df24f0553fa1191bf1752e`; application input/ref and installed releaseSha/deployRef **8c05fc11b00586e8944480dec76bfd6b4cd3882c**. Process restarted10:28:21UTC, PID379636; /healthz ok. Installed adapter SHA256ea11185645e0ee557adbccb9d22c0b391f007e3241ae166336170154481903ea and strategy SHA2568e924c2c24d293b3355b753c26f8143b0f9f8eba4190e38e6a2d4320e9a076ec match repository. Generated context preview/ws-preview/Redis3/stage; protected LIVE Redis V3 Stage preflight PASS before and after. Process environment not readable by agent; no attempt to bypass protected access. Netlify Preview1147 build-info reports same8c05fc11 SHA, actual login config pins krydukthwdvccggbyjfw, all observed sockets wss://ws-preview.kcswh.pl/ws.
+
+Before restart:0established Preview connections,0active human seats,0pending requests,0unfinished deletions, DB deletion release=false,0escrow mismatch. Five bot-only100CH tables with300CH escrow each. Historical67human seats were CLOSED/INACTIVE/stack0, not active players. No queued/running workflows or conflicting active harness found; no formal reservation service. Dedicated Stage user baseline448CH, no funding/bonus claim. Existing stage account used normal UI email/password Auth; no impersonation/mock transport. Drawer hidden by documented URL parameter; genuine UI clicks, no force or bypass.
+
+## Scenario results
+
+| Scenario | Result / observed timing |
+| --- | --- |
+| Stage login / Preview identity | PASS |
+| Online JOIN during bot-only RIVER | PASS: request join_mvp46q3d_5qqmdmh7 sent10:29:09.151; accepted ACK10:29:10.937 (1786ms); assigned snapshot10:29:10.987 (1836ms), harness detection1880ms. WAITING_NEXT_HAND, same hand,0private cards/no current bet entry; old hand settled10:29:13.978, after admission. No excessive delay. |
+| Online real action | PASS: next human hand CALL ws_1a177c20df6_b4f1e1c2 ACK243ms; later manual FOLD ws_1a177c22aec_8e3c005e ACK240ms. Both source human/isBot=false; no timeout FOLD. |
+| Online bot continuation / settlement | PASS:22bot actions; HAND_SETTLED10:30:32.469807, version287,5participants, starting/ending500, payout/contributions46, integrity OK/flags[], all3conservation deltas0. |
+| Basic reconnect | PASS: normal page reload/new socket, same table/hand/seat4/version287 and2own cards,0additional JOIN/buy-in. Tested at SETTLED boundary, not mid-action transport-fault recovery. |
+| Online ordinary UI Leave | PASS for transmission/durable result/exactly1human cashout/closed table. Request ws_1a177c31a09_dfddb7c9 sent10:30:37.324, persisted LEAVE ok=true at10:30:37.334560. **ACK NOT OBSERVED** due existing immediate queued navigation; not claimed as ACK PASS. |
+| Single Player JOIN | PASS: join_mvp49giw_e69f27hy sent10:31:16.718, ACK2331ms, assigned snapshot2362ms, ACTIVE/seat1/2own cards/5bots. |
+| Single Player Hero + bots | PASS: UI FOLD ws_1a177c3e4eb_5bd9ce25 ACK239ms; persisted source human/isBot=false.24bot actions finish hand. |
+| Single Player settlement | PASS: HAND_SETTLED10:32:33.780183, version27,6participants, starting/ending600, payout/contributions32, integrity OK/flags[], all3deltas0. |
+| Single Player ordinary UI Leave | PASS for transmission/durable result/exactly1human cashout/closed table. Request ws_1a177c4e37f_c90c1b1f sent10:32:34.433, persisted LEAVE ok=true at10:32:34.439442. **ACK NOT OBSERVED**, same immediate navigation contract. |
+| Privacy / final health | PASS: no private starting-map field in observed WS responses/snapshots, no page errors/WS error frames; /healthz ok, no new failed/invalid_identity/error journal match during window. |
+
+UI Leave intentionally calls queueLeaveAndNavigateImmediately; existing tests/poker-v2-live.behavior.test.mjs test “poker v2 queued leave navigates to lobby immediately without waiting for leave ack” documents this unchanged contract. Durable DB receipt is not mislabeled as observed ACK latency. No retry was added to broaden this smoke.
+
+## Identifiers / finance / evidence
+
+Online table07e8e43f-e731-4845-96e9-d8df2c05c080, human handws_hand_07e8e43f-e731-4845-96e9-d8df2c05c080_263_5. Starting map captured during hand:5entries,total500,hash3098c7b8a0ec8726d7d02ddd5048583a. Single tablef1650226-5fa2-40e4-9dcc-d4bc0cd8b54c, handws_hand_f1650226-5fa2-40e4-9dcc-d4bc0cd8b54c_1_6; starting map6entries,total600,hash739653b0829e1e6d29709e6f998dd6ff. Both audits OK/no STARTING_STACK_DERIVED; [audit participant-map hashes](evidence/ws-t025-audit-map-hashes.json) exactly match both original in-hand starting-map hashes. This verifies #1147's strategy integration; not a new destructive/active-hand Leave reproduction of #1150, whose fix #1151 is already inherited from main.
+
+Wallet Online448→348(buy-in100)→442(cashout94), game loss6. Single442→342(buy-in100)→442(cashout100). Human transaction IDs: Online buy-in81f2d1c2-c5b3-45d5-a069-bde4d7a7c9d4 / cashouta3074a2f-c6c5-47b7-91c0-a7dc66dfff76; Single buy-in3d7f8b6c-59a8-4758-9f07-b4902d3c1486 / cashoutdb64d2ec-9500-45fb-b602-c7058b98fa3f. Both table escrows0, CLOSED, all seat stacks0/no human seat. Every recorded transaction sums0, exactly1human debit/cashout per table, bot cashouts separate. Final0active human seats/0pending/0unfinished deletion/0Preview connections. No manual correction.
+
+[Browser summaries](evidence/ws-t025-browser.json), [settlement audits](evidence/ws-t025-audits.json), [reconciliation/transaction IDs](evidence/ws-t025-reconciliation.json), [Single starting map summary](evidence/ws-t025-starting-map.json). No password/JWT/full private snapshot committed. No new maintained test/UI framework, no broad accepted Offline campaign replayed.
+
+**Verdict: MERGE-READY technically, pending owner's explicit merge/rollout decision and fresh required-check/main review.** Exact-SHA gate closed for the bounded paths; no regression/breaking impact identified. Do not merge automatically. A future merge deploys WS and both linked Netlify Production sites unless independently held. For merge without Production, separately authorize/coordinate disable WS Server Deploy, verify disabled state and no running deploy, stop builds on both Netlify sites and verify no in-flight publish; preserve required CI/rules. No controls changed now; skip-netlify is not WS protection. Hold procedure/official references remain in T025 preflight below. Simplest option is retain Draft until explicit combined rollout GO.
+
+---
+
+# T025 — final preflight: NO-GO for merge, required WS evidence OPEN
+
+2026-10-26. Owner physically accepted T024 on Samsung Galaxy S24+: **PASS**. All previously reported Offline issues accepted. This supersedes the T024 physical-pending notes below; historical runs remain unchanged. No additional cosmetic/gameplay change, deployment, funded JOIN, merge or issue closure performed. Documentation-only local update; reviewed PR HEAD remains unchanged.
+
+## Revision/check evidence
+
+- PR #1147 remains Draft, HEAD `8c05fc11b00586e8944480dec76bfd6b4cd3882c`; current main `892661f44f4e9fdbe3df24f0553fa1191bf1752e`, live API verified and fetched. Main is an ancestor; GitHub MERGEABLE / CLEAN. No update/rebase/conflict fix needed.
+- Active main ruleset 12958021: strict required checks `netlify/playkcswh/deploy-preview` and `actionlint`, plus code-owner review rule. Both named checks SUCCESS. All reported CI/CodeQL/Android execution checks SUCCESS; expected nonapplicable jobs SKIPPED, Netlify summary annotations NEUTRAL. No failing/pending check. Review decision empty/latest review COMMENTED; owner acceptance is recorded here, not misreported as GitHub APPROVED. Recheck applicable review/rules before merge; never bypass.
+- Complete main diff: 71 files, 16582 additions/241 deletions, dominated by generated renderer/bundle and retained evidence. Runtime sources inspected along with generator, packaging, mobile bootstrap, lobby, dependencies and test registration. No changes to workflows, Netlify config/functions, shared rules, WS server/Leave/Account Deletion/table-manager or Online renderer/HTML/CSS versus main. No migrations. One pinned dev-only build dependency esbuild 0.25.12; lockfile adds its platform packages, not a new WS runtime library.
+- Fresh fundamental tests: 99/99 accepted-bot adapter + Offline + mobile security + WS client. Engine/bootstrap/action/rollover 36/36 PASS. CSP inline guard PASS for56served documents; diff whitespace clean. Local reconnect suite could not observe server-start readiness and timed out; stopped temporary test processes rather than count this as PASS. Cause of local startup observation failure remains UNKNOWN; no application/config change attempted. Exact-HEAD CI run40296472017 independently reports reconnect/resync20/20 PASS (0fail). The bounded live reconnect remains required, not substituted by CI. Strategy equivalence checked structurally: all 18 function declaration bodies in the new module exactly equal their main adapter originals; six exports/imports preserve all callsites.
+
+## Queue cap: PASS, inherited #1149 rather than new #1147 behavior
+
+`f39d9695da5c00ee1ff59498aeba3806d2483cd8` (#1149, already in main) removed `getBotAutoplayConfig`'s POKER_BOTS_BOTS_ONLY_HAND_HARD_CAP consumption and fixed accepted WS `botsOnlyHandCompletionHardCap:1`. Current PR keeps it unchanged. `runBotAutoplayLoop` otherwise raises maxActions to that cap when no participating human remains; the WS adapter's maxActions:1 plus cap:1 ensures one action per FIFO entry. Existing cascade/scheduler requeues subsequent steps. Online JOIN/Leave can run between steps, including Single Player after human FOLD. Existing deterministic tests use env cap80 and prove bot/admission/bot ordering, one action/persist per step, legal completion and chip conservation.
+
+The env knob remains ineffective in accepted WS, exactly as on current main; do not restore it. Generic domain autoplay/Leave callers keep their own caps. No new hand-duration, DB/queue-write or strategy change relative to Production main; per-action queue/persist costs were introduced/accepted in #1149. Extraction adds one local module import only. Strategy hash `8e924c2c24d293b3355b753c26f8143b0f9f8eba4190e38e6a2d4320e9a076ec`; adapter hash `ea11185645e0ee557adbccb9d22c0b391f007e3241ae166336170154481903ea`.
+
+## WS runtime gate: OPEN, merge blocker
+
+Historical ws-verification.md deployed `ddb21224d99e07dead0164bf14dcbfb52356dec4`; Online JOIN eventually seated after ~37.5s, smoke stopped before player action/reconnect/Single Player. Later #1149 diagnosis/fix explains FIFO starvation; #1152 proves those fixes together, but does not prove this extracted-strategy runtime end-to-end. New main fixes also changed WS files after ddb21224 (13 WS/shared/function files differ). Neither the old failed smoke nor accepted #1152 nor green Netlify closes #1147 exact-SHA gate.
+
+Read-only current Preview: installed release metadata `354af80c0a93d927fb8cf6f827fa77ffad81988c`, PID328965 active; public /healthz ok. Last deploy workflow definition ran from main892661f; application ref must be read from installed metadata, not workflow head. Preview is not running #1147. No availability/funding clearance inferred from health alone.
+
+After separate GO, deploy application **8c05fc11b00586e8944480dec76bfd6b4cd3882c**, workflow definition from then-current main, Stage Redis V3. The earlier WS-specific merge commit2af27654 is insufficient as the selected full PR artifact; use current reviewed full revision. Docs-only later commits can retain this evidence after proving no deployable/config changes. Bounded plan is in ws-verification.md. No broad Offline/WS campaign, Account Deletion or fault injection needed.
+
+## Breaking impacts / deployment safety
+
+No public WS protocol, strategy decisions, online CH/XP/ledger, Account Deletion, storage-v1 schema or dependency runtime break identified. Intentional visible changes: Offline lobby replaces World Tour/Seasons/Sit&Go coming-soon cards; mobile startup/status/Back presentation changes; local PC wallet/session and Web Locks/Web Crypto require a capable secure browser. Stage APK remains Stage identity/debug delivery, not Play release certification. Offline table CSP connect-src none and no Auth/WS bootstrap; online lobby retains its existing online initialization. Generated artifacts must be regenerated when source seams change; generator fails closed on known seams. Physical accepted APK remains valid; T025 adds no executable change.
+
+**Merge is a Production action here.** Classifying actual diff sets deploy_ws=true. Active workflow241316948 (`WS Server Deploy`) accepts main push; deploy job runs after validation and atomically switches release then restarts ws-server.service. No environment approval barrier is declared. PR validation/deploy-skipped is not a future deployment hold. Netlify linked playkcswh and landing-kcswh both build previews; a main merge can publish web/functions Production. No config change in this PR disables either path. `[skip netlify]` does not stop GitHub WS deploy.
+
+Verified supported hold method (proposal only, not executed): before an authorized merge-only window, disable **only WS Server Deploy** in GitHub Actions and read back state disabled_manually; ensure no queued/running prior deployment (disable does not cancel existing runs). Stop builds on **both** linked Netlify projects through their normal Continuous deployment > Build settings > Build status=Stopped builds, verify both stopped and no in-flight publish. Keep CI/required checks/rules unchanged. Stop builds blocks automated builds including build hooks; auto-publish lock alone is weaker and does not stop builds. No manual deploys while held. Re-enable later only under Production GO and an explicitly selected current revision; no assumptions about deferred publication. This site-wide temporary hold affects other work and needs owner coordination/approval; no hold was applied during this read-only task. If hold cannot be verified, do not merge. Simplest safe current method remains no merge until explicit combined rollout approval.
+
+Sources: [GitHub disable/enable workflow](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows), [Netlify stop/activate builds](https://docs.netlify.com/build/configure-builds/stop-or-activate-builds/). Verified against official documentation and current repository trigger/impact code; controls were not experimentally toggled on shared services.
+
+**Verdict:** Offline owner acceptance PASS; source compatibility/local fundamentals/CI/conflicts PASS; exact-SHA WS integration evidence OPEN (merge blocker); any merge/deployment authorization OPEN. **NO-GO for merge now.** Next decision is only permission for the bounded WS Preview preflight/deploy/funded smoke described below; Production approval remains separate.
+
+---
+
 # T024 — table theme loading packaged readiness PASS; physical owner review pending
 
 Owner physical T023 PASS retained. Root cause confirmed: generated init called markBootReady before first offline.start snapshot and before asynchronous applyTableTheme finished. Reuse same splash/hidden-screen styles; now prepareOfflineFrame waits actual theme/common-scene decode, first paused snapshot/current img decode and2layout frames before calling existing guarded markBootReady. Theme loader is the original V2 body with guarded Offline-only transformations: Promise return/decoded assets/bounded fallback. Source Online renderer/HTML/CSS unchanged. No new loader framework or artificial success delay.

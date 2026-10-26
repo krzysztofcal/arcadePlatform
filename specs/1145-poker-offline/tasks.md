@@ -78,4 +78,13 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] New Game navigation paused; startView readiness gate/legacy rebase prevents hidden clock or bot actions. Online untouched.
 - [x] RED26pass/3fail → GREEN35/35fundamentals, generator/CSP PASS.
 - [x] Actual five-case APK readiness smoke and runtime CI/Android PASS; final current-HEAD artifact/checksum linked in PR after build.
-- [ ] Owner physical T024 first-frame/theme/clock acceptance. No WS/CH/schema/migration/Production/merge.
+- [x] Owner physical T024 first-frame/theme/clock acceptance: Galaxy S24+ PASS, confirmed 2026-10-26. No WS/CH/schema/migration/Production/merge.
+
+
+## T025 — final read-only merge preflight
+
+- [x] Record owner physical T024 PASS; no further cosmetic work.
+- [x] Review current main/PR diff, rules/checks, strategy equivalence and inherited queue cap; see review.md.
+- [x] Prepare bounded exact-SHA WS Preview verification and independent Production deployment controls; no execution.
+- [x] Separate owner GO, fresh shared Preview preflight, exact-SHA deploy and bounded Online/Single Player/reconnect evidence:40307557291 SUCCESS, both audits OK, cashout/escrow reconciled; UI Leave ACK NOT OBSERVED under existing contract.
+- [ ] Recheck required CI and approve deployment policy before any merge. PR remains Draft; issue remains open.
