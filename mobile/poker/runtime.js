@@ -6,15 +6,16 @@
     if (window.KLog && window.KLog.log) window.KLog.log(kind, {});
   }
   function notice(message){
-    var node = document.getElementById('mobileStatus');
+    var node = document.getElementById('accountStatus') || document.getElementById('mobileError');
     if (!node){
       node = document.createElement('div');
-      node.id = 'mobileStatus';
-      node.setAttribute('role', 'status');
-      // Diagnostics belong in normal flow, or inside the table's explicit menu.
-      (document.getElementById('pokerMenuPanel') || document.body).appendChild(node);
+      node.id = 'mobileError';
+      node.setAttribute('role', 'alert');
+      // Only actionable failures create a notice; normal startup stays silent.
+      (document.getElementById('pokerMenuPanel') || document.querySelector('.intro') || document.body).appendChild(node);
     }
     node.textContent = message;
+    node.hidden = false;
   }
   function plugin(name){
     if (!cap || !cap.Plugins || !cap.Plugins[name]) throw new Error('Native plugin bridge unavailable');
@@ -60,7 +61,7 @@
       if (result.error || !result.data || !result.data.session) throw new Error('Auth callback failed');
       sessionStorage.setItem('mobilePokerConsumedAuthCode', code);
       await browser.close().catch(function(){});
-      notice('Signed in to Stage. Account is ready.');
+      notice('Signed in. Account is ready.');
     } catch (_err){
       notice('Sign-in return failed or expired. Please retry from Account.');
       klog('mobile:auth_callback_failed');
@@ -69,7 +70,6 @@
     }
   }
   document.addEventListener('DOMContentLoaded', function(){
-    notice(navigator.onLine ? 'Stage PoC · ' + config.sha.slice(0, 8) : 'Offline · reconnect to use Poker');
     try {
       browser = plugin('Browser');
       app = plugin('App');
@@ -81,6 +81,7 @@
       if (pendingCode) setTimeout(function(){ callback(window.MobilePokerSecurity.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
       app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
+        if (window.PokerOffline && window.PokerOffline.cancelDialog && window.PokerOffline.cancelDialog()) return;
         // Avoid a blind history back into a stale table or out of the local package.
         if (window.location.pathname.indexOf('/poker/table-v2.html') === 0) {
           var lobby = document.getElementById('pokerLobbyLink');
@@ -99,7 +100,7 @@
           if (navigator.onLine) window.dispatchEvent(new Event('online'));
         } else client.auth.stopAutoRefresh();
       });
-    } catch (_err){ notice('Native bridge unavailable. Install the APK to test mobile sign-in.'); }
+    } catch (_err){ klog('mobile:bridge_unavailable'); notice('Mobile sign-in is unavailable. Please reopen the app.'); }
     document.addEventListener('click', function(event){
       var anchor = event.target.closest && event.target.closest('a[href]');
       if (!anchor) return;
@@ -109,6 +110,4 @@
       if (url.protocol === 'https:' && browser) browser.open({ url: url.href }).catch(function(){ klog('mobile:external_link_failed'); });
     }, true);
   });
-  window.addEventListener('offline', function(){ notice('Offline · reconnect to use Poker'); });
-  window.addEventListener('online', function(){ notice('Stage PoC · ' + config.sha.slice(0, 8)); });
 })();

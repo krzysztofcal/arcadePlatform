@@ -3,6 +3,6 @@
   "appName": "Arcade Poker Stage",
   "webDir": "www",
   "server": { "hostname": "localhost", "androidScheme": "https", "cleartext": false },
-  "android": { "allowMixedContent": false, "webContentsDebuggingEnabled": false },
+  "android": { "backgroundColor": "#0b1020", "allowMixedContent": false, "webContentsDebuggingEnabled": false },
   "plugins": { "CapacitorHttp": { "enabled": false }, "CapacitorCookies": { "enabled": false }, "SystemBars": { "insetsHandling": "disable", "style": "DARK" } }
 }

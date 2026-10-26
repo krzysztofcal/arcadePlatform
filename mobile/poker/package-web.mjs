@@ -28,7 +28,7 @@ async function copy(name){
   if (name.startsWith('../') || path.isAbsolute(name)) throw new Error('Asset outside repository');
   let value = await readFile(path.join(root, name));
   // Reuse table styles (including JS panel styles) with the native single-owner values.
-  if (name === 'poker/poker-v2.css' || name === 'poker/poker-v2.js') value = Buffer.from(value.toString().replace(/env\(safe-area-inset-(top|right|bottom|left)(?:,\s*0px)?\)/g, 'var(--mobile-safe-$1,0px)'));
+  if (name === 'poker/poker-v2.css' || name === 'poker/poker-v2.js' || name === 'poker/offline/renderer.generated.js') value = Buffer.from(value.toString().replace(/env\(safe-area-inset-(top|right|bottom|left)(?:,\s*0px)?\)/g, 'var(--mobile-safe-$1,0px)'));
   await put(name, value);
   if (name.endsWith('.css')) {
     for (const match of value.toString().matchAll(/url\(["']?([^\s)"']+)/g)) {
@@ -44,9 +44,32 @@ await put('mobile/mobile.css', await readFile(path.join(here, 'mobile.css')));
 await put('js/auth/supabase-config.js', 'window.SUPABASE_CONFIG = ' + JSON.stringify({ SUPABASE_URL: config.supabaseUrl, SUPABASE_ANON_KEY: config.supabaseAnonKey, AUTH_GOOGLE_ENABLED: true }) + ';\n');
 await put('js/build-info.js', 'window.BUILD_INFO = ' + JSON.stringify({ commit: config.sha, pokerWsUrl: config.wsUrl, mobileVersion: '0.0.1' }) + '; window.__POKER_WS_URL = ' + JSON.stringify(config.wsUrl) + ';\n');
 await put('js/vendor/supabase.js', await readFile(path.join(here, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')));
-const pages = ['poker/index.html', 'poker/table-v2.html', 'account.html'];
+const launch = await readFile(path.join(here, 'launch.html'), 'utf8');
+const launchStyle = launch.match(/<style id="pokerLaunchStyle">[\s\S]*?<\/style>/)[0];
+const launchBody = launch.match(/<div id="pokerLaunch"[\s\S]*?<\/div>\n<\/div>/)[0];
+await put('mobile/poker/launch.js', await readFile(path.join(here, 'launch.js')));
+const pages = ['poker/index.html', 'poker/table-v2.html', 'poker/offline/play.html', 'account.html'];
 for (const name of pages) {
   let html = await readFile(path.join(root, name), 'utf8');
+  if (name === 'poker/offline/play.html') {
+    // Preserve isolated CSP/SRI: no auth, online mobile bootstrap or remote config.
+    await copy('poker/offline/game.generated.js');
+    await copy('poker/offline/renderer.generated.js');
+    await copy('poker/offline/offline.css');
+    // Apply the same native-inset substitutions as Online, then rehash the isolated renderer.
+    const hash = value => 'sha256-' + createHash('sha256').update(value).digest('base64');
+    const rendererPath = 'poker/offline/renderer.generated.js';
+    const sourceHash = hash(await readFile(path.join(root, rendererPath)));
+    const packagedHash = hash(await readFile(path.join(out, rendererPath)));
+    html = html.replaceAll(sourceHash, packagedHash);
+    html = html.replace('</head>', '<link rel="stylesheet" href="/mobile/mobile.css"></head>');
+    await put(name, html);
+    continue;
+  }
+  if (name === 'poker/index.html') {
+    html = html.replace('<head>', '<head>' + launchStyle + launch.match(/<script src="\/mobile\/poker\/launch\.js"[^>]*><\/script>/)[0]);
+    html = html.replace('<body class="poker-lobby">', '<body class="poker-lobby">' + launchBody);
+  }
   // Only the table draws behind cutouts; other pages retain native viewport margins.
   if (name !== 'poker/table-v2.html') html = html.replace('viewport-fit=cover', 'viewport-fit=auto');
   // Presentation composition only; account forms and Poker DOM remain shared.
@@ -61,7 +84,7 @@ for (const name of pages) {
     let target = url.pathname;
     if (target === '/index.html' || target === '/poker/') target = '/poker/index.html';
     if (target === '/xp.html') target = '/account.html';
-    if (!['/poker/', '/poker/index.html', '/poker/table-v2.html', '/account.html'].includes(target) && !target.endsWith('.css')) {
+    if (!['/poker/', '/poker/index.html', '/poker/table-v2.html', '/poker/offline/play.html', '/account.html'].includes(target) && !target.endsWith('.css')) {
       if (/^\/(legal\/|about[./])/.test(target)) target = config.apiOrigin + target;
       else return match.replace(value, '/account.html');
     }
@@ -74,12 +97,11 @@ for (const name of pages) {
     if (/\.(js|css|png|webp|svg|jpg|woff2?)$/.test(url.pathname)) await copy(url.pathname.slice(1));
   }
   const hashes = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => "'sha256-" + createHash('sha256').update(m[1]).digest('base64') + "'");
-  const csp = `default-src 'self'; script-src 'self' ${hashes.join(' ')}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${config.supabaseUrl}; connect-src 'self' ${config.apiOrigin} ${config.supabaseUrl} ${config.wsUrl}; font-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'`;
+  const csp = `default-src 'self'; script-src 'self' ${hashes.join(' ')} ${name === 'poker/index.html' ? "'" + launch.match(/integrity="([^"]+)"/)[1] + "'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${config.supabaseUrl}; connect-src 'self' ${config.apiOrigin} ${config.supabaseUrl} ${config.wsUrl}; font-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'`;
   html = html.replace('<head>', '<head>\n<meta http-equiv="Content-Security-Policy" content="' + csp + '">\n<script src="/mobile/config.js"></script>\n<script src="/mobile/security.js"></script>\n<script src="/mobile/runtime.js" defer></script>\n<link rel="stylesheet" href="/mobile/mobile.css">');
   await put(name, html);
 }
 await cp(path.join(root, 'poker/assets'), path.join(out, 'poker/assets'), { recursive: true });
-await put('mobile/entry.js', "window.location.replace('/poker/index.html');\n");
-await put('index.html', '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &#39;self&#39;; script-src &#39;self&#39;; object-src &#39;none&#39;; base-uri &#39;none&#39;"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Arcade Poker Stage</title><script src="/mobile/entry.js" defer></script></head><body><a href="/poker/index.html">Open Poker Lobby</a></body></html>');
+await put('index.html', launch);
 await put('build-receipt.json', JSON.stringify({ sha: config.sha, appId: 'pl.kcswh.arcadepoker.stage', version: '0.0.1', apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, wsUrl: config.wsUrl, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
 process.stdout.write('Packaged shared Poker/account assets at SHA ' + config.sha + '\n');

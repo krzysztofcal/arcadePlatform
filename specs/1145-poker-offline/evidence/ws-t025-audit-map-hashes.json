@@ -1,0 +1,14 @@
+[
+  {
+    "evidence": {
+      "handId": "ws_hand_07e8e43f-e731-4845-96e9-d8df2c05c080_263_5",
+      "auditStartingMapHash": "3098c7b8a0ec8726d7d02ddd5048583a"
+    }
+  },
+  {
+    "evidence": {
+      "handId": "ws_hand_f1650226-5fa2-40e4-9dcc-d4bc0cd8b54c_1_6",
+      "auditStartingMapHash": "739653b0829e1e6d29709e6f998dd6ff"
+    }
+  }
+]

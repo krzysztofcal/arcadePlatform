@@ -44,6 +44,7 @@ run("node", ["tests/recorder-admin-only.test.mjs"], "recorder-admin-only");
 run("node", ["tests/secureStorage.test.mjs"], "secure-storage");
 run("node", ["tests/favorites-service.test.mjs"], "favorites-service");
 run("node", ["tests/poker-stakes.test.mjs"], "poker-stakes");
+run("node", ["--test", "tests/poker-offline.test.mjs"], "poker-offline");
 run("node", ["tests/poker-bots.unit.test.mjs"], "poker-bots-unit");
 run("node", ["--test", "shared/poker-domain/demand-refill.behavior.test.mjs"], "poker-demand-refill");
 run("node", ["tests/poker-bot-cashout.userId-is-bot.unit.test.mjs"], "poker-bot-cashout-userid-is-bot-unit");
