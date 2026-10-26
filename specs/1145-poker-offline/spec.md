@@ -67,3 +67,7 @@ Owner S24+ physical PASS for T015–T016 retained. Both menu Back and native And
 ## T018–T019 — Android launch and Offline key art
 
 Owner physical acceptance T001–T017 retained. Stage Android starts with a branded dark native splash followed by an immediately styled local loading screen. No white default page, raw hyperlink or unstyled lobby. Reveal lobby only after bundled styles, fonts, main tile images and layout frames are ready; no dependency on authentication or network. Native cold-start appearance requires physical owner confirmation. Poker Offline gets its own portable-table teal/gold artwork; Single Player retains the robot. No engine, WS, wallet, data schema or Online behavior changes.
+
+## T020–T021 — packaged navigation and production-quality status UX
+
+All local Offline exits (confirmed Back, explicit Leave, Reset, no-session fallback, rebuy exit/link) use canonical `/poker/index.html` supported by both Android assets and Netlify. Do not depend on directory-index hosting. Loader must redirect legacy extensionless paths to real lobby instead of hiding over the entry document. Preserve paused session/remaining time/Resume and idempotent cashout. No restart workaround. Normal mobile startup/connectivity changes must not create Stage PoC/SHA/status banners; keep auth feedback and actionable failures in Account status or contextual error UI, engineering details in klog. No WS, PC ledger/schema or Online changes. Physical Android re-test pending owner.

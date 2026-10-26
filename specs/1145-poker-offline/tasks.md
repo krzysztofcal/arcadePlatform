@@ -48,3 +48,10 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] Trace raw entry link/default white surfaces; add dark branded native splash with existing dependency and local loader readiness; dedicated Offline key art.
 - [x] Fundamental checks, focused Preview and packaged startup evidence; hosted Stage APK build PASS, final artifact linked in PR.
 - [ ] Owner physical cold start (airplane mode): no white flash/raw text, smooth splash→loading→lobby; verify Offline artwork. Keep Draft, no merge/Production/WS replay.
+
+## T020–T021
+
+- [x] Reproduce old packaged Confirm blank screen and Stage banner using real APK assets/Capacitor route mapping; record RED tests.
+- [x] Canonical local document exits, loader correction, remove normal developer status; preserve auth/bridge feedback, regenerate CSP/SRI.
+- [ ] Fundamental checks and exact packaged-assets navigation/loader smoke; current-HEAD Stage APK and CI.
+- [ ] Physical Galaxy S24+ acceptance: menu/native Back Confirm, Keep playing/Resume, Leave, Reset; airplane mode, no banner. Retain Draft; no merge/Production.

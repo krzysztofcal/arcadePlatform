@@ -32,6 +32,7 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   let exchangeCount = 0;
   const connectivity = { onLine: false };
   const events = [];
+  const pageListeners = {};
   const barCalls = [];
   let refreshStarts = 0;
   const storage = new Map();
@@ -46,10 +47,14 @@ test('native PKCE callback uses injected plugins and preserves recovery document
       App: { addListener(name, fn) { listeners[name] = fn; }, getLaunchUrl: async () => null }
     } },
     supabaseClient: { auth: { startAutoRefresh() { refreshStarts++; }, stopAutoRefresh() {}, exchangeCodeForSession: async code => { exchanged = code; exchangeCount++; return { data: { session: {} } }; } } },
-    location: { pathname: '/account.html', replace() { navigated = true; } }, addEventListener() {}, dispatchEvent(event) { events.push(event.type); }
+    location: { pathname: '/account.html', replace() { navigated = true; } }, addEventListener(name, fn) { pageListeners[name] = fn; }, dispatchEvent(event) { events.push(event.type); }
   };
   vm.runInNewContext(source, { window, document, URL, Event, navigator: connectivity, sessionStorage: { getItem(key) { return storage.get(key) || null; }, setItem(key, value) { storage.set(key, value); }, removeItem(key) { storage.delete(key); } } });
   ready();
+  assert.equal(node.textContent, '', 'normal boot has no developer/connectivity status');
+  if (pageListeners.offline) pageListeners.offline();
+  if (pageListeners.online) pageListeners.online();
+  assert.equal(node.textContent, '', 'connectivity changes create no diagnostic banner');
   assert.deepEqual(barCalls, ['show'], 'Account is never immersive');
   listeners.appStateChange({ isActive: true });
   assert.deepEqual(events, [], 'offline resume must not emit online');
@@ -79,4 +84,11 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   window.location.pathname = '/account.html';
   ready();
   assert.deepEqual(barCalls, ['hide','show','hide','show','hide','show']);
+  await listeners.appUrlOpen({ url: 'https://evil.test/?code=invalid' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(node.textContent, /Sign-in return failed/);
+  assert.equal(node.hidden, false);
+  window.Capacitor.Plugins = {};
+  ready();
+  assert.match(node.textContent, /Mobile sign-in is unavailable/);
 });

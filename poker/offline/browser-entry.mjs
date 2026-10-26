@@ -95,7 +95,7 @@ async function backToLobby(){
     );
     if(confirmed&&!request.cancelled){
       request.navigating=true;
-      try{window.location.assign('/poker/');}
+      try{window.location.assign('/poker/index.html');}
       catch(error){request.navigating=false;await activate(true);throw error;}
     }else await activate(true);
   })().finally(()=>{if(!request.navigating)backNavigation=null;});
@@ -154,7 +154,7 @@ function init(){
   action('offlineRebuy',()=>game.rebuy());
   action('offlineReset',async()=>{
     if(await ask('Reset Offline Progress','Discard only this device’s Offline Chips and Offline session? Online CH is unaffected.')){
-      clearTimeout(timer);window.localStorage.removeItem(STORAGE_KEY);window.location.assign('/poker/');
+      clearTimeout(timer);window.localStorage.removeItem(STORAGE_KEY);window.location.assign('/poker/index.html');
     }
   });
   document.addEventListener('visibilitychange',()=>{

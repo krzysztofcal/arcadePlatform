@@ -12,7 +12,7 @@ const replacements = {
     try {
     var offline = window.PokerOffline;
     var session = offline.read().session;
-    if (!session) { window.location.replace('/poker/'); return; }
+    if (!session) { window.location.replace('/poker/index.html'); return; }
     tableId = session.tableId;
     state = createEmptyLiveState(tableId, offline.human);
     state.wsReady = true; state.reconnectGate = false;
@@ -45,7 +45,7 @@ const replacements = {
   bindDestinationLink: `if (link) link.addEventListener('click', function(event){ event.preventDefault(); closeMenu(); window.PokerOffline.backToLobby().catch(function(error){ setError(error.message); }); });`,
   isWsReady: 'return window.PokerOffline.isActive();',
   sendCommand: `if (methodName !== 'sendAct') return Promise.reject(new Error('Unavailable offline')); return window.PokerOffline.act({type:payload.action, amount:payload.amount, handId:payload.handId});`,
-  leaveAndReturnToLobby: `return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/'); }).catch(function(error){setError(error.message);});`,
+  leaveAndReturnToLobby: `return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/index.html'); }).catch(function(error){setError(error.message);});`,
   requestManualRebuy: `return window.PokerOffline.rebuy().catch(function(error){setError(error.message);});`,
   sendReaction: `if (Date.now() < reactionControlUntilMs || !deriveCurrentSeat()) return Promise.resolve(); closeReactionMenu(); window.PokerOffline.reaction(reactionKey); startReactionCooldown(); return Promise.resolve({ok:true});`,
   sendTargetedReaction: `if (Date.now() < reactionControlUntilMs || !deriveCurrentSeat() || targetSeatNo === 1) return Promise.resolve(); window.PokerOffline.reaction('nice_hand', targetSeatNo); startReactionCooldown(); return Promise.resolve({ok:true});`,
@@ -71,7 +71,7 @@ const replacements = {
 renderer = renderer.replace('Create account and get 500 CH Welcome Bonus', 'Poker Offline').replace(/ CH\b/g, ' Offline Chips');
 const rebuyBack = "if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', leaveAndReturnToLobby);";
 if (!renderer.includes(rebuyBack)) throw new Error('Offline rebuy Back seam changed');
-renderer = renderer.replace(rebuyBack, "if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ openLeaveConfirm('/poker/'); });");
+renderer = renderer.replace(rebuyBack, "if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ openLeaveConfirm('/poker/index.html'); });");
 const ast = parse(renderer, { ecmaVersion: 'latest' });
 const edits = [];
 function visit(node) {
@@ -91,6 +91,7 @@ await writeFile('poker/offline/renderer.generated.js', '// GENERATED from poker/
 await build({ entryPoints: ['poker/offline/browser-entry.mjs'], outfile: 'poker/offline/game.generated.js', bundle: true, format: 'iife', platform: 'browser', target: 'es2020', define: { 'process.env.WS_POKER_TURN_MS': 'undefined' }, alias: { 'node:crypto': './poker/offline/browser-crypto.mjs' }, banner: { js: '// GENERATED from shared accepted WS rules and strategy. Do not edit.' } });
 
 let html = await readFile('poker/table-v2.html','utf8');
+html = html.replace('id="pokerLobbyLink" href="/poker/"', 'id="pokerLobbyLink" href="/poker/index.html"');
 // This is a transformation of a checked-in source format, not an HTML sanitizer.
 // Only single-line script elements are supported; reject any source-format drift.
 html = html.split('\n').filter(line => !line.trimStart().startsWith('<script ')).join('\n');

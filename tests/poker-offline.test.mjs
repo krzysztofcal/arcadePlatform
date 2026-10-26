@@ -135,10 +135,10 @@ async function backHarness(){
  const{readFileSync}=await import('node:fs'),{parse}=await import('acorn'),vm=await import('node:vm');
  const source=readFileSync('poker/offline/browser-entry.mjs','utf8'),names=new Set(['backToLobby','ask','cancelDialog','restorePage']);
  const bodies=parse(source,{ecmaVersion:'latest',sourceType:'module'}).body.filter(n=>n.type==='FunctionDeclaration'&&names.has(n.id.name)).map(n=>source.slice(n.start,n.end));
- const counts={park:0,resume:0,show:0,navigate:0};let context;
+ const counts={park:0,resume:0,show:0,navigate:0,destinations:[]};let context;
  const nodes={offlineConfirmTitle:{},offlineConfirmCopy:{},offlineConfirmYes:{},offlineConfirmCancel:{focus(){}}};
  const dialog={open:false,showModal(){this.open=true;counts.show++;},close(value){this.open=false;queueMicrotask(()=>{const resolve=context.resolveConfirmation;context.resolveConfirmation=null;if(resolve)resolve(value==='confirm');});}};nodes.offlineConfirm=dialog;
- context=vm.createContext({document:{getElementById:id=>nodes[id]||null},window:{location:{assign(){counts.navigate++;}}},park:async()=>{counts.park++;t.g.pause();},activate:async()=>{counts.resume++;t.g.resume(true);}});
+ context=vm.createContext({document:{getElementById:id=>nodes[id]||null},window:{location:{assign(url){counts.navigate++;counts.destinations.push(url);}}},park:async()=>{counts.park++;t.g.pause();},activate:async()=>{counts.resume++;t.g.resume(true);}});
  vm.runInContext('var backNavigation=null,resolveConfirmation;'+bodies.join('\n'),context);
  return{...t,counts,nodes,dialog,back:()=>context.backToLobby(),restore:()=>context.restorePage({persisted:true}),flush:()=>new Promise(setImmediate)};
 }
@@ -146,7 +146,7 @@ test('Back confirmation Cancel preserves budget; Confirm parks exact session for
  const h=await backHarness(),original=h.g.read(),first=h.back();await h.flush();assert.equal(h.dialog.open,true);assert.equal(h.g.read().session.clock.paused,true);assert.equal(h.g.read().session.clock.remainingMs,15000);
  assert.equal(h.nodes.offlineConfirmTitle.textContent,'Return to lobby?');assert.equal(h.nodes.offlineConfirmCancel.textContent,'Keep playing');assert.equal(h.nodes.offlineConfirmYes.textContent,'Return to lobby');
  h.advance(60000);h.dialog.close('cancel');await first;assert.equal(h.counts.navigate,0);assert.equal(h.counts.resume,1);assert.equal(h.g.pendingTimer().delayMs,15000);
- const second=h.back();await h.flush();const parked=h.g.read();h.advance(60000);h.dialog.close('confirm');await second;assert.equal(h.counts.navigate,1);await h.back();assert.equal(h.counts.navigate,1);assert.equal(h.counts.park,2);assert.equal(h.g.read().session.clock.paused,true);assert.equal(h.g.read().wallet,original.wallet);
+ const second=h.back();await h.flush();const parked=h.g.read();h.advance(60000);h.dialog.close('confirm');await second;assert.equal(h.counts.navigate,1);assert.deepEqual(h.counts.destinations,['/poker/index.html']);await h.back();assert.equal(h.counts.navigate,1);assert.deepEqual(h.counts.destinations,['/poker/index.html']);assert.equal(h.counts.park,2);assert.equal(h.g.read().session.clock.paused,true);assert.equal(h.g.read().wallet,original.wallet);
  h.g.resume(true);const resumed=h.g.read();assert.equal(resumed.session.tableId,original.session.tableId);assert.equal(resumed.session.state.handId,original.session.state.handId);assert.deepEqual(resumed.session.state.stacks,original.session.state.stacks);assert.deepEqual(resumed.session.state.holeCardsByUserId,original.session.state.holeCardsByUserId);assert.deepEqual(resumed.session.members,original.session.members);assert.equal(h.g.pendingTimer().delayMs,parked.session.clock.remainingMs);
 });
 test('rapid Back while pausing or while modal open creates one pause/modal/resume and no financial operation',async()=>{
@@ -158,6 +158,23 @@ test('rapid Back while pausing or while modal open creates one pause/modal/resum
 });
 
 test('confirmed Back BFCache return clears navigation latch and permits a fresh confirmation',async()=>{
- const h=await backHarness(),first=h.back();await h.flush();h.dialog.close('confirm');await first;assert.equal(h.counts.navigate,1);h.advance(60000);await h.restore();assert.equal(h.g.pendingTimer().delayMs,15000);
- const again=h.back();await h.flush();assert.equal(h.dialog.open,true);h.dialog.close('cancel');await again;assert.equal(h.counts.show,2);assert.equal(h.counts.navigate,1);assert.equal(h.g.read().wallet,4900);
+ const h=await backHarness(),first=h.back();await h.flush();h.dialog.close('confirm');await first;assert.equal(h.counts.navigate,1);assert.deepEqual(h.counts.destinations,['/poker/index.html']);h.advance(60000);await h.restore();assert.equal(h.g.pendingTimer().delayMs,15000);
+ const again=h.back();await h.flush();assert.equal(h.dialog.open,true);h.dialog.close('cancel');await again;assert.equal(h.counts.show,2);assert.equal(h.counts.navigate,1);assert.deepEqual(h.counts.destinations,['/poker/index.html']);assert.equal(h.g.read().wallet,4900);
+});
+
+test('Offline Leave and Reset commit once then navigate to the packaged lobby document',async()=>{
+ const{readFileSync}=await import('node:fs'),{parse}=await import('acorn'),vm=await import('node:vm');
+ const storage=store(),g=game(storage);await g.newGame(100);const destinations=[];
+ const window={location:{assign:url=>destinations.push(url)},PokerOffline:{leave:async()=>g.leave()},localStorage:{removeItem:key=>storage.setItem(key,null)}};
+ const generator=readFileSync('scripts/build-poker-offline-poc.mjs','utf8');
+ const leave=generator.match(/leaveAndReturnToLobby: `([^`]+)`/)[1];
+ const context=vm.createContext({window,setError:message=>assert.fail(message),game:g,STORAGE_KEY,timer:null,clearTimeout,ask:async()=>false});
+ const executeLeave=vm.runInContext('(function(){'+leave+'})',context);
+ await executeLeave();const wallet=g.read().wallet;assert.equal(g.read().session,null);await executeLeave();assert.equal(g.read().wallet,wallet);assert.deepEqual(destinations,['/poker/index.html','/poker/index.html']);
+ await g.newGame(100);const saved=storage.getItem(STORAGE_KEY),source=readFileSync('poker/offline/browser-entry.mjs','utf8');let reset;
+ function visit(n){if(!n||typeof n!=='object')return;if(n.type==='CallExpression'&&n.callee.name==='action'&&n.arguments[0]?.value==='offlineReset')reset=n.arguments[1];for(const v of Object.values(n)){if(Array.isArray(v))v.forEach(visit);else if(v&&typeof v==='object')visit(v);}}
+ visit(parse(source,{ecmaVersion:'latest',sourceType:'module'}));assert.ok(reset);
+ const executeReset=vm.runInContext('('+source.slice(reset.start,reset.end)+')',context);
+ await executeReset();assert.equal(storage.getItem(STORAGE_KEY),saved);assert.equal(destinations.length,2);
+ context.ask=async()=>true;await executeReset();assert.equal(storage.getItem(STORAGE_KEY),null);assert.equal(destinations.at(-1),'/poker/index.html');
 });

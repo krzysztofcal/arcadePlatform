@@ -3240,7 +3240,7 @@
       if (confirmed && !request.cancelled) {
         request.navigating = true;
         try {
-          window.location.assign("/poker/");
+          window.location.assign("/poker/index.html");
         } catch (error) {
           request.navigating = false;
           await activate(true);
@@ -3353,7 +3353,7 @@
       if (await ask("Reset Offline Progress", "Discard only this device\u2019s Offline Chips and Offline session? Online CH is unaffected.")) {
         clearTimeout(timer);
         window.localStorage.removeItem(STORAGE_KEY);
-        window.location.assign("/poker/");
+        window.location.assign("/poker/index.html");
       }
     });
     document.addEventListener("visibilitychange", () => {

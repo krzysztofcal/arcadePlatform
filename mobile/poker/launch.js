@@ -1,7 +1,7 @@
 (function(){
   'use strict';
   // Entry and lobby share the same critical, inline-painted loading screen.
-  if (window.location.pathname !== '/poker/index.html' && window.location.pathname !== '/poker/') {
+  if (window.location.pathname !== '/poker/index.html') {
     window.location.replace('/poker/index.html');
     return;
   }

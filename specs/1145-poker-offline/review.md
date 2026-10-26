@@ -1,3 +1,12 @@
+# T020–T021 — packaged Return to lobby blocker (verification in progress)
+
+Owner reported a947151d Android blank screen after confirmed menu/native Back, plus Stage PoC banner. [Reproduction](evidence/apk-t020-reproduction.json), [blank view](evidence/apk-t020-blank.png): actual APK assets with pinned Capacitor route semantics, confirmed Back→/poker/→root entry→loader hidden→0tiles/empty body. Native code WebViewLocalServer maps extensionless routes to root index.html; launch.js wrongly accepted /poker/ as the real lobby. Earlier Python directory-index smoke masked this routing difference. No game/PC loss observed; session remains paused.
+
+Canonical /poker/index.html now used for all local exits/fallbacks/generated anchor, while loader redirects legacy paths before hiding. Normal Stage PoC/SHA and connectivity notices removed from runtime, not hidden with CSS. Retain auth feedback via accountStatus and contextual mobileError for bridge failures; engineering logs via klog. No shared Online/WS, rules/strategy, PC finance/schema, dependencies or migration changes. Intentional route/UI changes only; existing v1 sessions compatible.
+
+Fundamental RED20pass/4fail confirmed old destination/banner behavior; GREEN and actual new APK smoke recorded after build. No extra maintained rendering suite, no restart workaround. Previous physical passes remain historical, but T020 physical owner acceptance is required; do not mark merge-ready.
+
+---
 # T018–T019 — launch polish and Offline artwork browser/Preview PASS; awaiting physical cold start
 
 Owner physical T017 and earlier fixes accepted. Confirmed source of raw blue link: package-web generated default white entry body containing Open Poker Lobby before redirect. Replaced with branded inline-painted loading document, shared into mobile lobby only. Android already depends on core-splashscreen; install its compat API, dark launch/window/WebView surfaces and chip/spade vector. Lobby readiness waits local styles/DOM/fonts/main artwork and layout frames without login/network. No new dependency or Online bootstrap/runtime behavior change. Offline tile now uses dedicated portable-table teal/gold artwork; Single Player unchanged.

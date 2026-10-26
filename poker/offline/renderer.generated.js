@@ -6540,7 +6540,7 @@
     return code === 'STALE_SESSION' || code === 'session_rebound' || code === 'ws_closed' || code === 'timeout' || code === 'ws_unavailable';
   }
 
-  function leaveAndReturnToLobby(destination){return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/'); }).catch(function(error){setError(error.message);});}
+  function leaveAndReturnToLobby(destination){return window.PokerOffline.leave().then(function(){ window.location.assign('/poker/index.html'); }).catch(function(error){setError(error.message);});}
 
   function requestManualRebuy(source){return window.PokerOffline.rebuy().catch(function(error){setError(error.message);});}
 
@@ -6682,7 +6682,7 @@
       renderSocialPreferences();
     });
     if (els.rebuyBtn) els.rebuyBtn.addEventListener('click', requestManualRebuy);
-    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ openLeaveConfirm('/poker/'); });
+    if (els.rebuyLobbyBtn) els.rebuyLobbyBtn.addEventListener('click', function(){ openLeaveConfirm('/poker/index.html'); });
     if (els.rebuyWatchBtn) els.rebuyWatchBtn.addEventListener('click', function(){
       rebuyPanelDismissed = true;
       renderRebuyPanel();
@@ -7402,7 +7402,7 @@
     try {
     var offline = window.PokerOffline;
     var session = offline.read().session;
-    if (!session) { window.location.replace('/poker/'); return; }
+    if (!session) { window.location.replace('/poker/index.html'); return; }
     tableId = session.tableId;
     state = createEmptyLiveState(tableId, offline.human);
     state.wsReady = true; state.reconnectGate = false;
