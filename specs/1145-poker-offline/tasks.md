@@ -95,5 +95,5 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] A002 Bind confirmed variant cache to existing user lifecycle; no Auth/profile/token reads in Offline, safe logout/account fallback.
 - [x] A003 Replace generator hardcoding, regenerate artifacts/HTML/CSP/SRI; leave session/Offline Chips/revision untouched.
 - [x] A004 Fundamental RED2→GREEN31 Offline cases, existing UserUiState/mobile security/syntax/CSP checks.
-- [ ] A005 Verify hosted CI/Preview/new signed APK and hand off artifact/receipt (results in PR report).
-- [ ] A006 Owner physical New Game/Resume/airplane/logout/account-switch retest; no funded smoke.
+- [x] A005 Hosted CI/Preview/signed APK e370e461 verified; artifact40508480671/12736600804 and receipt in PR report.
+- [x] A006 Owner confirms physical Offline avatar acceptance PASS on e370e461; individual airplane/logout/account-switch cases were not separately enumerated. No funded smoke.

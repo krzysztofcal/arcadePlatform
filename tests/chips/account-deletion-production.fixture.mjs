@@ -11,6 +11,7 @@ import { postTransaction } from '../../netlify/functions/_shared/chips-ledger.mj
 import { claimBonusCampaign } from '../../netlify/functions/_shared/bonus-campaigns.mjs';
 import { claimWelcomeBonus } from '../../netlify/functions/_shared/welcome-bonus.mjs';
 import { createPendingUpload, finalizeAvatar } from '../../netlify/functions/_shared/profile-avatar.mjs';
+import { ensureUserProfile, updateUserProfile } from '../../netlify/functions/_shared/user-profile.mjs';
 
 const canonicalId='7575202818581710058';
 const normalize=value=>JSON.parse(JSON.stringify(value));
@@ -185,4 +186,40 @@ export async function assertProductionDeletionCompatibility({runMigration,migrat
  process.stdout.write('[klog] production_avatar_policy '+JSON.stringify({history:67,changedTimePredicates:3,newReadOnlyFunction:1,financialHistoryUnchanged:true,existingAclTriggersRlsUnchanged:true,apiRolesCannotAcceptRisk:true,backendSharesOwnerPrincipal:true,deletion:false,avatarV3:'DISABLED'})+'\n');
  process.stdout.write('[klog] production_deletion_compatibility '+JSON.stringify({migration:true,history:66,oldRuntime:oldDir?'executed':'SQL writer contract',newRuntime:'executed',deletion:false,avatarV3:'DISABLED',historicalPromo:5,historyRepaid:0,financialHistoryUnchanged:true,wrapperUnchanged:true,rls:true,legacyAvatar:true,unknownTriggerRejected:true})+'\n');
  } finally {await sql.end({timeout:1});const oldDir=process.env.CHIPS_PRODUCTION_COMPAT_OLD_RUNTIME_DIR;if(oldDir){const admin=await import(pathToFileURL(path.join(oldDir,'netlify/functions/_shared/supabase-admin.mjs')));await admin.closeSql?.();}}
+}
+
+
+// Real two-connection regression for the always-installed owned-write trigger.
+export async function assertAvatarLifecycleContention(sql, dbUrl) {
+ const target=new URL(dbUrl);assert.ok(['127.0.0.1','localhost','postgres'].includes(target.hostname),'disposable local PostgreSQL only');assert.ok(/_test$/.test(target.pathname)||target.pathname==='/chips_test_db');
+ const userId=randomUUID(),env={ACCOUNT_DELETION_ENABLED:'0'};
+ const executeSql=(q,p)=>sql.unsafe(q,p);
+ await sql.unsafe('insert into auth.users(id) values($1)',[userId]);
+ const initial=await ensureUserProfile(userId,{executeSql,env});
+ const variant=initial.avatarVariant==='fox-blue'?'panda-pink':'fox-blue';
+ const holder=postgres(dbUrl,{max:1,prepare:false}),writer=postgres(dbUrl,{max:1,prepare:false});
+ let release,locked,attempt,holding,updates=0,outcome='pending';
+ const ready=new Promise(resolve=>{locked=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ try {
+  const [{pid}]=await writer.unsafe('select pg_backend_pid() as pid');
+  holding=holder.begin(async tx=>{await tx.unsafe('select pg_advisory_xact_lock(hashtextextended($1,0))',['account-lifecycle:'+userId]);locked();await gate;});
+  await Promise.race([ready,holding]);
+  const beginSql=fn=>writer.begin(tx=>fn({unsafe(q,p){if(/^update public.user_profiles set avatar_variant=/.test(q))updates++;return tx.unsafe(q,p);}}));
+  attempt=updateUserProfile(userId,{avatarVariant:variant,expectedRevision:initial.avatarRevision},{executeSql,beginSql,env});
+  attempt.then(()=>{outcome='success';},error=>{outcome=error.code;});
+  let waiting=false;
+  for(let i=0;i<200&&outcome==='pending';i++){
+   const [activity]=await sql.unsafe("select wait_event_type='Lock' and wait_event='advisory' as waiting from pg_stat_activity where pid=$1",[pid]);
+   if(activity?.waiting){waiting=true;break;}
+   await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.equal(outcome,'pending','PATCH must wait for lifecycle owner instead of trigger40001; actual='+outcome);
+  assert.equal(waiting,true,'writer must acquire the canonical advisory lock BEFORE profile UPDATE');
+  assert.equal(updates,0,'no profile UPDATE while another transaction owns lifecycle');
+  release();await holding;
+  const profile=await attempt;
+  assert.equal(profile.avatarVariant,variant);assert.equal(profile.avatarRevision,initial.avatarRevision+1);assert.equal(updates,1,'one UPDATE, no retry');
+  await assert.rejects(updateUserProfile(userId,{avatarVariant:initial.avatarVariant,expectedRevision:initial.avatarRevision},{executeSql,beginSql,env}),{code:'stale_avatar_revision'});
+  assert.equal(updates,1,'stale CAS must fail before another write');
+ } finally {release();if(holding)await holding;if(attempt)await attempt.catch(()=>{});await holder.end();await writer.end();}
 }

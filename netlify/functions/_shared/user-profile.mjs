@@ -1,4 +1,4 @@
-import { accountDeletionEnabled, assertAccountActive } from "../../../shared/account-deletion.mjs";
+import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 import { requireCurrentTerms } from "../../../shared/profile-terms.mjs";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 import { syncUserLeaderboardVisibility } from "./xp-leaderboard-visibility.mjs";
@@ -118,6 +118,7 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
   if(visible && !payload.leaderboardVisible && !lifecycle)await syncVisibility(userId,false,deps);
   const profile = await (deps.beginSql || beginSql)(async tx=>{
     if(accountDeletionEnabled(deps.env || process.env))await assertAccountActive(tx,userId);
+    else await lockAccountLifecycle(tx,[userId]);
     const policy=choose ? await requireCurrentTerms(tx,{kind:'account',id:userId}) : null;
     if(choose && !policy.variantsEnabled && PUBLIC_AVATAR_VARIANTS.indexOf(payload.avatarVariant)>=6)throw profileError('avatar_variants_not_active',409);
     const [row]=await tx.unsafe(`select user_id::text,handle,display_name,avatar_key,avatar_variant,avatar_revision,google_photo_suppressed,leaderboard_visible from public.user_profiles where user_id=$1 for update;`,[userId]);

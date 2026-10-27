@@ -4925,7 +4925,7 @@ async function main() {
   // This already-authorized disposable DB fixture also isolates XP from Redis.
   process.env.XP_TEST_MODE = "1";
   process.env.ACCOUNT_DELETION_ENABLED = "0";
-  const { assertProductionDeletionCompatibility } = await import("./account-deletion-production.fixture.mjs");
+  const { assertProductionDeletionCompatibility, assertAvatarLifecycleContention } = await import("./account-deletion-production.fixture.mjs");
   await assertProductionDeletionCompatibility({ runMigration, migrationFiles });
 
   // The integration workflow reuses this disposable database for the
@@ -4936,6 +4936,8 @@ async function main() {
   await runMigrations(sql, migrationsWithoutBootstrapSeeds);
   await runMigration(sql, seedMigration);
   await runMigration(sql, botBankrollMigration);
+
+  await assertAvatarLifecycleContention(sql, dbUrl);
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");

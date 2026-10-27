@@ -54,7 +54,11 @@ function dbProfile(overrides = {}) {
 
 function transactionForProfile(row, updateError = null) {
   return async (callback) => callback({
-    unsafe: async (query) => {
+    unsafe: async (query, params) => {
+      if (query === "select pg_advisory_xact_lock(hashtextextended($1, 0));"){
+        assert.deepEqual(params, ["account-lifecycle:" + row.user_id]);
+        return [];
+      }
       if (query.includes("insert into public.user_profiles")) return [row];
       if (query.includes("for update")) return [row];
       if (query.includes("update public.user_profiles")) {
