@@ -44,3 +44,31 @@ Brak runtime WS/protocol/dependency zmian, więc ta poprawka nie wymaga WS Previ
 Robocze Privacy PL/EN w lokalnym SpecKit PR1155 zaktualizowano wyłącznie o docelowy brak własnych reklam po rollout; to nie część runtime diffu ani publikacja dokumentów. Rzeczywisty aktualny stan Production i dalszy odbiór LEGAL pozostają oddzielne.
 
 Zasoby: przed checkout5.8GB, po checkout5.7GB; brak npm install, cache download lub cleanup. Wykorzystano istniejące node_modules i Chromium.
+
+## Osobny Draft PR / Hosted Preview — 2026-10-27
+
+OWNER zatwierdził publikację tej niezależnej poprawki. Utworzono od początku Draft **#1156**: https://github.com/krzysztofcal/arcadePlatform/pull/1156 . Pierwszy code SHA **4fdb599b333c2aabaede4d997e0856aebba59d60**, base maina63e44b0…; dokładnie13 zatwierdzonych plików. Wcześniejszy opis „bez push/PR creation” jest historycznym stanem lokalnego odbioru, nie aktualnym stanem tego PR. PR1155 pozostaje nietknięty/Draft63186718… . Nie wniesiono jego Terms SQL, retencji, aplikacji ani schemy do #1156.
+
+### Checki pierwszego code SHA
+
+- Wymagane według efektywnego ruleset: `actionlint` i `netlify/playkcswh/deploy-preview`: **SUCCESS**; strict up-to-date zachowane. Nie zmieniono reguł ani nie użyto bypassu.
+- CI40595341541, Tests40595341417, WS PR Checks40595341420, WS Server Deploy40595341447, Infra VPS40595341476, Validate games40595341491 i CodeQL40595336818: SUCCESS. `deploy_ws=false`, WS deploy job SKIPPED, infra apply SKIPPED; brak DB Stage Apply triggera i brak finansowego live chips-integration (SKIPPED).
+- Istniejący opcjonalny Android workflow ma szeroki trigger js/** i wystartował automatycznie. Anulowany świadomie40595341443 w celu zachowania zakresu bez APK; upload SKIPPED i artifacts0. Nie jest required checkiem i nie anulowano go z powodu porażki testów. Nie dispatchowano żadnego workflow.
+- Netlify playkcswh deploy **6ae126067f0f41d0646e300d**, ready/deploy-preview, exactcodeSHA4fdb599b… . URL https://deploy-preview-1156--playkcswh.netlify.app .
+
+### Rzeczywisty Hosted smoke
+
+Skrypt `/tmp/arcade-adsense-hosted-smoke.mjs`, wynik `/tmp/arcade-adsense-hosted-results.json`. Headless Chromium, bez konta/loginu. Wszystkie endpointy Functions/API, WebSocket i pozostałe mutujące żądania zablokowano w harnessie: nie dostarczono Auth/XP/finansowych smoke do backendu. To **UI/static compatibility**, nie potwierdzenie zalogowanego profilu, listy stołów lub rozgrywki WS.
+
+- Portal `/`, wariant `/landing/`, Account, Poker Lobby i Privacy: HTTP200, rzeczywiście serwowana CSP bez hostów AdSense i z zachowanymi domenami GA; stare cookie googleAds=true/GA=false nie uruchamia reklam ani GA. Brak slotów/meta publishera i widocznej usługi AdSense.
+- Portal i `/landing/`: udzielenie zgody prawdziwym Klaro ładuje Google gtag HTTP200 i uruchamia config/collect; kolekcja została przechwycona204 bez dostarczenia do GA. showManager PASS. **0 reklamowych żądań sieciowych.**
+- Freedoom: właściwa scoped CSP, załadowany runtime Dwasm, ukryty loading overlay/pokazany restart, canvas i API gry; zero naruszeń CSP. Snake: canvas, reset/start i kierunek z klawiatury PASS, zero naruszeń CSP; wszystkie próby sieci XP zablokowane. Bez nowych finansowanych scenariuszy.
+- `/landing/` zgłasza istniejące naruszenie script-src-attr dla onload font-preload. Dokładnie ten handler jest już w bazowym main(landing/index.html14), a zasady inline pozostają identyczne — CSP diff usuwa tylko domeny reklam. Nie dodano handlera ani nie osłabiono CSP. Jest to pre-existing landing issue, nie regresja AdSense; nie rozszerzamy tej poprawki o zmianę ładowania fontów.
+
+### Dedykowana witryna landing — BLOCKED, nie ukrywać ograniczenia
+
+Read-only oficjalne Netlify API potwierdza dla **landing-kcswh** idd40103ad-1fd9-4896-9e65-584e34f9833b `build_settings.stop_builds=true`, base/landing. Brak deploya#1156; https://deploy-preview-1156--landing-kcswh.netlify.app/ zwraca404. Ostatnie istniejące Preview są historyczne/failed, nie mają kodu tego PR. Nie odblokowano witryny ani nie zmieniono konfiguracji/stop_builds — mogłoby to uruchomić nieautoryzowany Production build.
+
+Hosted `/landing/` na play Preview potwierdza kod wariantu i faktycznie serwowaną tam CSP, **ale NIE dowodzi CSP ani deploya osobnej witryny landing-kcswh**. Pełny odbiór obu osobnych publikacji pozostaje BLOCKED tym stanem środowiska. Rozwiązanie wymaga oddzielnego ustalenia bezpiecznego Preview-only sposobu dla landing, bez globalnego odblokowania buildów Production; nie zmieniamy workflowów/konfiguracji w tej poprawce i nie zastępujemy tego wyniku lokalnym PASS.
+
+Weryfikacja statusów i aktualnego dokładnego HEAD po docs-only uzupełnieniu będzie w opisie PR. Aktualizacja raportu nie zmienia zweryfikowanego kodu runtime; przy nowym SHA należy potwierdzić ready deploy/required checks i identyczność statycznych plików. Production site metadata przed publikacją PR: play6adf43aa3debf6e93a3fa53a, landing6acfd5effa83daccd5de95d4; brak autoryzacji do Production i brak merge.
