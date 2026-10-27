@@ -93,6 +93,9 @@ export async function assertProductionDeletionCompatibility({runMigration,migrat
  assert.equal((await sql`select private.account_avatar_guards_ready() ready`)[0].ready,false);
  assert.equal((await sql`select to_regclass('private.account_reward_config') x`)[0].x,null);
  assert.deepEqual(normalize(await sql`select paid_count::int n from private.bonus_campaign_paid_totals where campaign_id=any(${campaigns}::uuid[]) order by paid_count`),[{n:2},{n:3}]);
+ // Current profile readers require the additive Phase A schema even with Terms OFF.
+ // Historical Production migration/rollback assertions above remain on their exact baseline.
+ await runMigration(sql,migrationFiles.find(file=>file==='20261026120000_profile_phase_a.sql'));
  for(const r of new Set([old,current])){
   assert.equal((await r.claimBonusCampaign(users[0],codes[0],deps)).claimed,false);
   const uid=await user();const first=await r.claimWelcomeBonus(uid,deps);assert.equal(first.claimed,true);assert.equal((await r.claimWelcomeBonus(uid,deps)).claimed,false);
