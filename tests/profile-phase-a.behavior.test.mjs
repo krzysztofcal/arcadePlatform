@@ -49,24 +49,68 @@ test('Terms require current version, preserve one server timestamp on retry and 
 
  }finally{await db.close();}
 });
-test('one-shot normalization preserves UUID, assigned variants and game/CH/XP; repeated execution changes nothing',async()=>{
- const db=new PGlite();try{
-  await db.exec('create role anon;create role authenticated;create role service_role;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql as $$select null::uuid$$;create schema private;create table public.account_deletion_requests(old_user_id uuid);create table private.account_avatar_objects(user_id uuid,output_path text,unique(user_id,output_path));');
+test('one-shot normalization touches only dirty profiles, preserves avatar revisions unless detaching a photo and is idempotent',async()=>{
+ const url=process.env.PROFILE_NORMALIZATION_TEST_DB_URL;
+ let db;
+ if(url){
+  const parsed=new URL(url);assert.ok(['127.0.0.1','localhost'].includes(parsed.hostname));assert.match(parsed.pathname,/_test$/);
+  const {default:postgres}=await import('postgres');const sql=postgres(url,{max:1,prepare:false});
+  db={exec:q=>sql.unsafe(q),query:async(q,p=[])=>( {rows:await sql.unsafe(q,p)} ),close:()=>sql.end()};
+ }else db=new PGlite();
+ try{
+  await db.exec(`do $$begin if not exists(select 1 from pg_roles where rolname='anon') then create role anon; end if;if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated; end if;if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role; end if;end$$;
+   create schema auth;create schema private;create schema storage;create table storage.objects(bucket_id text);create table auth.users(id uuid primary key,email text);create table public.account_deletion_requests(old_user_id uuid);
+   create table private.account_avatar_objects(user_id uuid,output_path text,unique(user_id,output_path));`);
   await db.exec(await readFile(new URL('../supabase/migrations/20260710130000_user_profiles.sql',import.meta.url),'utf8'));
-  await db.exec('alter table public.user_profiles add column leaderboard_visible boolean not null default true; create table public.phase_a_invariant(user_id uuid,ch integer,xp integer,game jsonb);');
+  await db.exec('alter table public.user_profiles add column leaderboard_visible boolean not null default true;create table public.phase_a_invariant(user_id uuid,ch integer,xp integer,escrow integer,ledger jsonb,game jsonb);');
   await db.exec(await readFile(new URL('../supabase/migrations/20261026120000_profile_phase_a.sql',import.meta.url),'utf8'));
-  await db.query('insert into auth.users values($1)',[id]);
-  await db.query("insert into public.user_profiles(user_id,handle,display_name,bio,avatar_variant) values($1,'blue-fox-482731','Private Manual Name','private bio','fox-blue')",[id]);
-  await db.query("insert into public.phase_a_invariant values($1,464,200,'{\"handId\":\"same-hand\"}')",[id]);
-  const before=(await db.query('select * from public.phase_a_invariant')).rows;
+  const guardMigration=await readFile(new URL('../supabase/migrations/20261018184941_account_self_deletion_v2.sql',import.meta.url),'utf8');
+  const guard=guardMigration.match(/create function public\.account_guard_owned_write_v2\(\)[\s\S]*?end\$\$;/)[0];
+  await db.exec(guard+"create trigger account_owned_write_v2 before insert or update on public.user_profiles for each row execute function public.account_guard_owned_write_v2('user_id');");
+  const fixture=[
+   ['blue-fox-482731','Blue Fox 482731','',null,null,'zen-lime'],
+   ['blue-fox-482732','Manual Name','',null,null,'pixel-teal'],
+   ['blue-fox-482733','Blue Fox 482733','legacy bio',null,null,'fox-blue'],
+   ['blue-fox-482734','Blue Fox 482734','','old-avatar.webp',null,'ace-silver'],
+   ['manual-handle','Manual Identity','legacy bio','combined.webp','2026-01-01T00:00:00Z','tiger-gold'],
+   ['blue-fox-482736','Blue Fox 482736','',null,'2026-01-01T00:00:00Z','raven-violet'],
+   ['unknown-identity','Unknown Identity','',null,null,'wave-cyan'],
+   ['deletion-profile','Deletion Name','keep bio','keep.webp','2026-01-01T00:00:00Z','ember-coral']
+  ];
+  const ids=fixture.map((_,i)=>'00000000-0000-4000-8000-'+String(i+101).padStart(12,'0'));
+  for(let i=0;i<fixture.length;i++){
+   await db.query('insert into auth.users values($1,$2)',[ids[i],'synthetic-'+i+'@example.test']);
+   await db.query('insert into public.user_profiles(user_id,handle,display_name,bio,avatar_key,handle_customized_at,avatar_variant,avatar_revision,leaderboard_visible) values($1,$2,$3,$4,$5,$6,$7,$8,false)',[ids[i],...fixture[i].slice(0,5),fixture[i][5],i+5]);
+   await db.query(`insert into public.phase_a_invariant values($1,464,200,300,'{"entries":[-300,300]}','{"handId":"same-hand"}')`,[ids[i]]);
+  }
+  await db.query('update public.user_profiles set google_photo_suppressed=true where user_id=$1',[ids[0]]);
+  await db.query('insert into public.account_deletion_requests values($1)',[ids[7]]);
+  const rows=async()=>JSON.parse(JSON.stringify((await db.query('select * from public.user_profiles order by user_id')).rows));
+  const preserved=async()=>JSON.parse(JSON.stringify({auth:(await db.query('select * from auth.users order by id')).rows,game:(await db.query('select * from public.phase_a_invariant order by user_id')).rows,deletion:(await db.query('select * from public.account_deletion_requests')).rows}));
+  const before=await rows(),invariants=await preserved();
   const cleanup=await readFile(new URL('../specs/1114-arcade-profiles-avatars/operations/normalize-profiles.sql',import.meta.url),'utf8');
-  await db.exec(cleanup);
-  const after=(await db.query('select * from public.user_profiles')).rows[0];
-  assert.equal(after.user_id,id);assert.equal(after.avatar_variant,'fox-blue');assert.equal(after.handle,'blue-fox-482731');assert.equal(after.display_name,'Blue Fox 482731');assert.equal(after.bio,'');assert.equal(after.google_photo_suppressed,true);
-  await db.exec(cleanup);assert.deepEqual((await db.query('select * from public.user_profiles')).rows[0],after);
-  assert.deepEqual((await db.query('select * from public.phase_a_invariant')).rows,before);
-  await db.exec(await readFile(new URL('../specs/1114-arcade-profiles-avatars/operations/enable-catalog.sql',import.meta.url),'utf8'));
-  assert.equal((await db.query('select (public.ensure_user_profile($1)).avatar_variant',[id])).rows[0].avatar_variant,'fox-blue');
+  const inventorySql=(await readFile(new URL('../specs/1114-arcade-profiles-avatars/operations/inventory.sql',import.meta.url),'utf8')).replace('BEGIN TRANSACTION READ ONLY;','').replace('COMMIT;','');
+  const inventory=(await db.query(inventorySql)).rows[0].inventory;
+  for(const [key,value] of Object.entries({profiles:8,eligible:6,excludedDeletion:1,customizedHandle:2,unknownHandle:1,displayName:4,bio:2,detachPhoto:2,revisionIncrement:2,setSuppression:2,missingPhotoTracker:2,handleMarkerWrites:0}))assert.equal(inventory[key],value,key);
+  await assert.rejects(db.exec(cleanup.replace(' update private.profile_terms_policy set identity_normalized_at='," raise exception 'synthetic late failure'; update private.profile_terms_policy set identity_normalized_at=")),/synthetic late failure/);
+  await db.exec('rollback');assert.deepEqual(await rows(),before);assert.deepEqual(await preserved(),invariants);assert.equal(Number((await db.query('select count(*) n from private.account_avatar_objects')).rows[0].n),0);
+  await db.exec(cleanup);const after=await rows();
+  assert.deepEqual(after[0],before[0],'already correct new-catalog profile must be byte-for-byte unchanged');
+  assert.deepEqual(after[7],before[7],'deletion profile is excluded');
+  for(let i=0;i<after.length;i++){
+   for(const field of ['user_id','avatar_variant','leaderboard_visible','handle_customized_at','created_at'])assert.deepEqual(after[i][field],before[i][field],field);
+   const detach=[3,4].includes(i);assert.equal(after[i].avatar_revision,before[i].avatar_revision+(detach?1:0));
+   assert.equal(after[i].google_photo_suppressed,before[i].google_photo_suppressed||detach);
+  }
+  for(const i of [0,1,2,3])assert.equal(after[i].handle,before[i].handle);
+  for(const i of [4,5,6])assert.notEqual(after[i].handle,before[i].handle,'customized/unknown handle gets a generated identity');
+  for(let i=1;i<7;i++){assert.equal(after[i].display_name,after[i].handle.split('-').map(v=>v[0].toUpperCase()+v.slice(1)).join(' '));assert.equal(after[i].bio,'');assert.equal(after[i].avatar_key,null);}
+  assert.deepEqual((await db.query('select output_path from private.account_avatar_objects order by output_path')).rows.map(r=>r.output_path),['combined.webp','old-avatar.webp']);
+  assert.deepEqual(await preserved(),invariants,'Auth/email/CH/XP/escrow/ledger/game/deletion unchanged');
+  assert.equal((await db.query(inventorySql)).rows[0].inventory.eligible,0);
+  const policy=(await db.query('select * from private.profile_terms_policy')).rows;
+  await db.exec(cleanup);assert.deepEqual(await rows(),after);assert.deepEqual((await db.query('select * from private.profile_terms_policy')).rows,policy);
+  assert.deepEqual(await preserved(),invariants);
  }finally{await db.close();}
 });
 test('chooser uses a revision guard, idempotent retry, persistent variant and suppression without changing identity or balances',async()=>{

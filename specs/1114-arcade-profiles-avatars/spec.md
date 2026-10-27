@@ -116,3 +116,7 @@ Zatwierdzić uproszczony Terms wzorzec z LEGAL (moment zawarcia umowy/UGC), graf
 ## Aktualizacja operacyjna — 2026-10-27
 
 Owner zaakceptował fizycznie zapis avatara i Account/Online/Single Player/Offline oraz UX galerii. Aktualny stan zastępuje historyczny lokalny zakres opisany wyżej: schema119/119, Preview1155, WS ea178bb3 i zaakceptowany APK e370e461 wdrożone; Terms i katalog nadal OFF. Wyłącznie read-only przygotowanie katalogu16 i inventory T012: [stage-catalog-preflight.md](stage-catalog-preflight.md). Aktywacja/normalizacja/cleanup/contract i Production wymagają odrębnego GO.
+
+## T012 selective normalization review — 2026-10-27
+
+Owner physical PASS for catalog16 and save/render across Account/Online/Single Player/Offline. Catalog is ON on Stage; Terms remains OFF. Normalization is prepared only: affect dirty rows, preserve historical handle_customized_at, increment revision/set suppression only for withdrawal of a non-NULL photo key. Stage dry-run2 affected/49 unchanged, no operation executed. Exact criteria, tests, breaking impacts and separate GO: [t012-normalization-review.md](t012-normalization-review.md).

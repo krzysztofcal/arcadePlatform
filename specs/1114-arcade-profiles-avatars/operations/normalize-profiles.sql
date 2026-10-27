@@ -1,38 +1,52 @@
--- Separate cleanup GO after inventory and compatible readers. NOT an automatic migration.
+-- Separate normalization GO after inventory. No Storage purge or financial/game writes.
 BEGIN;
+set local lock_timeout='2s';
+set local statement_timeout='15s';
 select pg_advisory_xact_lock(hashtextextended('arcade-profile-normalize-a1',0));
 DO $$
-declare p record; fresh public.user_profiles; generated record; ids uuid[]; uid uuid;
+declare fresh public.user_profiles; generated record; ids uuid[]; uid uuid; needs_handle boolean; final_handle text; final_name text;
 begin
- if exists(select 1 from private.profile_terms_policy where identity_normalized_at is not null) then return; end if;
+ if not exists(select 1 from private.profile_terms_policy where singleton=true and version='2026-10-26-a1') then raise exception 'Profile policy unavailable or version mismatch'; end if;
+ if exists(select 1 from private.profile_terms_policy where singleton=true and identity_normalized_at is not null) then return; end if;
  if (select count(*) from public.user_profiles)>1000 then raise exception 'Inventory too large for approved one-shot cleanup; review required'; end if;
- -- Acquire lifecycle locks in UUID order before the policy lock, then profile rows.
- -- The fixed inventory prevents newly created accounts from entering this one-shot batch.
- ids:=array(select user_id from public.user_profiles order by user_id);
+ -- Legacy API stamps handle_customized_at on every actual handle change (not on display-name edits).
+ -- NULL marker plus the exact provisioning vocabulary/range is retained; appearance alone is insufficient.
+ ids:=array(select p.user_id from public.user_profiles p
+  where not exists(select 1 from public.account_deletion_requests d where d.old_user_id=p.user_id)
+   and (p.handle_customized_at is not null
+    or p.handle !~ '^(apex|blue|bold|bright|cosmic|echo|ember|neon|nova|pixel|rapid|rocket|solar|swift|turbo|ultra|vivid|zen)-(ace|bolt|comet|falcon|fox|nova|orbit|panda|raven|tiger|wave|wizard)-[1-9][0-9]{5}$'
+    or p.display_name is distinct from initcap(replace(p.handle,'-',' ')) or p.bio<>'' or p.avatar_key is not null)
+  order by p.user_id);
+ -- Fixed candidates, lifecycle locks in UUID order, then policy, then fresh profile rows.
  foreach uid in array ids loop
   perform pg_advisory_xact_lock(hashtextextended('account-lifecycle:'||uid::text,0));
  end loop;
  perform 1 from private.profile_terms_policy where singleton=true for update;
- for p in select * from public.user_profiles where user_id=any(ids) order by user_id loop
-  if exists(select 1 from public.account_deletion_requests where old_user_id=p.user_id) then continue; end if;
-  select * into fresh from public.user_profiles where user_id=p.user_id for update;
+ foreach uid in array ids loop
+  if exists(select 1 from public.account_deletion_requests where old_user_id=uid) then continue; end if;
+  select * into fresh from public.user_profiles where user_id=uid for update;
+  if not found then continue; end if;
+  needs_handle:=fresh.handle_customized_at is not null or fresh.handle !~ '^(apex|blue|bold|bright|cosmic|echo|ember|neon|nova|pixel|rapid|rocket|solar|swift|turbo|ultra|vivid|zen)-(ace|bolt|comet|falcon|fox|nova|orbit|panda|raven|tiger|wave|wizard)-[1-9][0-9]{5}$';
+  if not needs_handle and fresh.display_name=initcap(replace(fresh.handle,'-',' ')) and fresh.bio='' and fresh.avatar_key is null then continue; end if;
   if fresh.avatar_key is not null then
-   insert into private.account_avatar_objects(user_id,output_path) values(p.user_id,fresh.avatar_key) on conflict(user_id,output_path) do nothing;
+   insert into private.account_avatar_objects(user_id,output_path) values(uid,fresh.avatar_key) on conflict(user_id,output_path) do nothing;
   end if;
-  -- Retain the provisioning vocabulary only with the existing authoritative no-customization marker; inventory must confirm the known writer path.
-  -- Unknown/manual handles get a fresh automatic identity; no historical routing.
-  if fresh.handle_customized_at is not null or fresh.handle !~ '^(apex|blue|bold|bright|cosmic|echo|ember|neon|nova|pixel|rapid|rocket|solar|swift|turbo|ultra|vivid|zen)-(ace|bolt|comet|falcon|fox|nova|orbit|panda|raven|tiger|wave|wizard)-[1-9][0-9]{5}$' then
-   for attempt in 1..16 loop
-    begin
-     select * into generated from private.arcade_profile_identity();
-     update public.user_profiles set handle=generated.handle where user_id=p.user_id returning * into fresh;
-     exit;
-    exception when unique_violation then if attempt=16 then raise; end if;
-    end;
-   end loop;
-  end if;
-  update public.user_profiles set display_name=initcap(replace(fresh.handle,'-',' ')),bio='',avatar_key=null,
-    google_photo_suppressed=true,avatar_revision=avatar_revision+1,handle_customized_at=coalesce(handle_customized_at,now()) where user_id=p.user_id;
+  for attempt in 1..16 loop
+   final_handle:=fresh.handle;
+   final_name:=initcap(replace(fresh.handle,'-',' '));
+   if needs_handle then
+    select * into generated from private.arcade_profile_identity();
+    final_handle:=generated.handle; final_name:=generated.display_name;
+   end if;
+   begin
+    update public.user_profiles set handle=final_handle,display_name=final_name,bio='',avatar_key=null,
+     google_photo_suppressed=case when fresh.avatar_key is not null then true else fresh.google_photo_suppressed end,
+     avatar_revision=fresh.avatar_revision+case when fresh.avatar_key is not null then 1 else 0 end
+     where user_id=uid;
+    exit;
+   exception when unique_violation then if not needs_handle or attempt=16 then raise; end if;
+   end;
+  end loop;
  end loop;
  update private.profile_terms_policy set identity_normalized_at=now() where singleton=true;
 end $$;
