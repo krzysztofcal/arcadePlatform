@@ -191,6 +191,14 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   const sudoersCommands = sudoers.replace(/^#.*$/gm, "");
   assert.doesNotMatch(sudoersCommands, /(?:^|[ /])(bash|sh|node|python|tar|rsync|cp|mv|rm|install)(?:["\s]|$)/m);
   assert.doesNotMatch(sudoersCommands, /ALL\s*$/m);
+  assert.deepEqual(sudoersCommands.match(/^\s+\/.*$/gm).map(line => line.trim().replace(/, \\$/, "")), [
+    "/usr/bin/systemctl restart ws-server.service",
+    "/usr/bin/systemctl restart ws-server-preview.service",
+    "/usr/bin/systemctl stop ws-server-preview.service",
+    "/usr/bin/systemctl reload caddy.service",
+    '/usr/local/sbin/arcade-ws-preview-env-preflight ""',
+    '/usr/local/sbin/arcade-ws-production-env-preflight ""'
+  ]);
   assert.match(helper, /\/opt\/arcade-ws-preview\/\.env\.preview/);
   assert.match(helper, /O_NOFOLLOW/);
   assert.match(helper, /uid !== 0/);

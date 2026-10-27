@@ -310,7 +310,7 @@ The root-owned `/usr/local/sbin/arcade-ws-preview-env-preflight` helper always
 opens exactly `/opt/arcade-ws-preview/.env.preview` with descriptor-pinned
 `O_NOFOLLOW`, requires a regular `root:root` `0600` file, validates the required
 Preview/Stage variables and binding, and prints only `PASS` or a failure reason.
-The only Preview root operations are that fixed helper and the exact command-specific sudo grant for `/usr/bin/systemctl restart ws-server-preview.service`; there is no `sudo bash`, `sudo node`, `sudo rsync`, or filesystem-operation sudo.
+The only Preview root operations are that fixed helper and the exact command-specific sudo grants for `/usr/bin/systemctl restart ws-server-preview.service` and `/usr/bin/systemctl stop ws-server-preview.service`; there is no `sudo bash`, `sudo node`, `sudo rsync`, or filesystem-operation sudo.
 
 The workflow fails fast before mutating Preview app contents when the deploy
 paths, helper, service, Node.js, `tar`, `rsync`, `curl`, required
@@ -342,7 +342,7 @@ Table DEBUG is the normal diagnostic scope. The selector reuses the authenticate
 The control does not read journald, store logs in Supabase, change poker state, or suppress `ERROR`. Disable submits the exact active scope returned by WS. A restart clears all process-local overrides.
 
 The narrow sudoers contract is versioned in `infra/vps/arcade-deploy.sudoers`.
-After Phase B staging it grants `copilot` only the exact Preview restart,
+After Phase B staging it grants `copilot` only the exact Preview restart/stop,
 Production restart, Caddy reload, and fixed env-preflight commands
 (`/usr/local/sbin/arcade-ws-preview-env-preflight` and
 `/usr/local/sbin/arcade-ws-production-env-preflight`). It grants
@@ -352,6 +352,21 @@ write, and validation run as `copilot`; only the exact service restart/reload
 and env preflight commands use `sudo`.
 Keep `/etc/sudoers.d/arcade-deploy` `root:root` mode `0440` and validate it with
 `visudo` before installation.
+
+The Preview stop grant is solely for a separately authorized deployment/rollback;
+Production stop is not allowed. Install this narrow contract only from an
+existing authorized root session after `visudo -cf` succeeds; preserve
+`root:root 0440` and all other sudoers entries. Do not run the broad VPS bootstrap
+to install this one change. Validate the effective permission without stopping
+anything using `sudo -n -l /usr/bin/systemctl stop ws-server-preview.service`
+and compare the complete effective allowlist before/after. If no authorized
+administrator session is available, leave the host untouched and stop before
+dispatch. The versioned file alone does not grant live permission. Stop before
+synchronizing the five runtime roots; monitor the entire dispatch and restore
+all five verified backup roots plus restart/health on any failure, including a
+failure before the workflow reaches its restart. Never leave Preview stopped
+merely because an Actions run failed.
+
 
 The production `WS_USER` Actions secret for both Production WS Deploy and
 Infra VPS must be `copilot` before this contract is exercised. Its SSH key must
