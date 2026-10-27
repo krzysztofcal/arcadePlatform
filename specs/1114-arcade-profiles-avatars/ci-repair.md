@@ -18,3 +18,7 @@ First repair SHA6bcd2233 passes CI, migration/Playwright/Netlify/APK, but WS har
 ## Real WS image packaging regression
 
 Follow-up SHA682a7dbd passes full server.behavior, but the next existing image dependency test fails: ws-server/Dockerfile copies poker-domain and account-deletion dependencies but omits new shared/profile-terms.mjs. Both static server import and dynamic authoritative JOIN chain need it. Add this one module to existing COPY; existing image test explicitly checks its presence and imports it before exercising the adapter, preserving the original failure assertion. This is a genuine Phase A Docker artifact startup/import regression, not a UUID fixture issue. Hosted Docker tests validate it; no heavy image build/cache on VPS and no WS deployment. Other existing RSYNC workflows already copy the complete shared directory, so no deployment/configuration change there.
+
+## Final protocol fixtures
+
+The existing final protocol-compliance step exposes the same contract in three more cases (ephemeral reaction, targeted nice_hand, historical-seat JOIN): synthetic non-UUID principals; reaction fixtures inject bootstrap table JSON but supply no database/file source for Terms queries. Reuse existing writePersistedStateFile helper with explicit OFF policy and matching UUIDs in exactly these cases. Keep protocol rejection, target-hand mismatch, no-event-replay and historical-seat assertions intact. No runtime reaction/admission policy changes.
