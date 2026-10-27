@@ -14,3 +14,7 @@ Operational gate: keep Draft so DB Stage Apply PR skips before runner allocation
 ## Downstream WS fixture follow-up
 
 First repair SHA6bcd2233 passes CI, migration/Playwright/Netlify/APK, but WS harness progresses past repaired join-runtime into server.behavior and exposes three previously unreachable identical fixture mismatches: historical_user, bot_seed_human and reaction_human are not UUIDs; these three file fixtures lack an explicit OFF Terms policy. Reaction admission is correctly gated too. Targeted original cases reproduce3FAIL; replace only these three IDs and supply OFF policy on exactly these fixtures, preserving historical-seat retry/bot/reaction assertions and Production gate. No engine/timeout/reaction rules changed.
+
+## Real WS image packaging regression
+
+Follow-up SHA682a7dbd passes full server.behavior, but the next existing image dependency test fails: ws-server/Dockerfile copies poker-domain and account-deletion dependencies but omits new shared/profile-terms.mjs. Both static server import and dynamic authoritative JOIN chain need it. Add this one module to existing COPY; existing image test explicitly checks its presence and imports it before exercising the adapter, preserving the original failure assertion. This is a genuine Phase A Docker artifact startup/import regression, not a UUID fixture issue. Hosted Docker tests validate it; no heavy image build/cache on VPS and no WS deployment. Other existing RSYNC workflows already copy the complete shared directory, so no deployment/configuration change there.
