@@ -22,6 +22,12 @@ decisions and `public.poker_seats.stack` must not contradict funds-safety
 outcomes. This prevents stranded escrow balances and avoids gameplay issues such
 as "stack = 0" with no legal actions.
 
+## Deployment activity and recovery gate
+
+Bot-only hands and tables do not block deployment or restart. Active human games, human seats eligible for reconnect/resume, and unresolved human financial operations do block deployment. Check persisted seats, authoritative state and financial evidence as well as live connections immediately before restart; no sockets alone is insufficient.
+
+A bot-only restart must preserve persisted state, escrow and CH and verify bot recovery. Retain a consistent application backup, manifest/hash and an isolated restore check, then verify that live rollback is executable with available permissions before overwriting the runtime. The current WS Preview workflow rsyncs five live roots with `--delete` and has no automatic rollback. An isolated extraction proves backup contents, not safe live restoration: restoration of these roots must not race a running process or its dynamic imports. Do not improvise privilege/configuration changes. Stop before dispatch if the recovery gate fails. Never restore database/ledger state from an application backup; existing financial guards and separate deployment/funded-smoke authorizations remain mandatory.
+
 ## Retired HTTP gameplay endpoints
 
 HTTP gameplay endpoints are intentionally retired and return `410 Gone`:
