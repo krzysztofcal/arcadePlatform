@@ -1171,6 +1171,14 @@
       "source_versions": [
         "20261022091126"
       ]
+    },
+    {
+      "file": "20261027173627_profile_phase_a_bio_contract.sql",
+      "sha256": "f297185dfeb1df38e32b681d2db2a20edc4c83e8f54d7dda2e151cf55a013bcd",
+      "purpose": "#1114 prepared BIO-only contract; separate Production schema/runtime/history preflight and exact-file GO required. No activation, profile data or Storage change.",
+      "source_versions": [
+        "20261027173627"
+      ]
     }
   ],
   "provenance_rules": [
@@ -1234,6 +1242,13 @@
       "sha256": "a773676e127c733eccc0c645278ded8b8e1c96fdac4e45209ba509e60c7b346d",
       "category": "needs-production-equivalent",
       "purpose": "#1114 phase A additive profile revision/suppression and inactive Terms/catalog policy. Prepared locally only; separate Stage/Production GO and reader compatibility required. No data cleanup or activation."
+    },
+    {
+      "file": "20261027173627_profile_phase_a_bio_contract.sql",
+      "version": "20261027173627",
+      "sha256": "6d98db786488dedb53d5c41ddf167a845aa8110f358a788a879f92aa58dacf1e",
+      "category": "needs-production-equivalent",
+      "purpose": "#1114 G1 BIO-only contract preparation. Requires normalized Phase A, explicit environment GO and compatible readers; Draft Stage apply must stay skipped. No remote DDL authorized."
     }
   ]
 }

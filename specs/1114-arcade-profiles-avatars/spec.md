@@ -120,3 +120,15 @@ Owner zaakceptował fizycznie zapis avatara i Account/Online/Single Player/Offli
 ## T012 selective normalization review — 2026-10-27
 
 Owner physical PASS for catalog16 and save/render across Account/Online/Single Player/Offline. Catalog is ON on Stage; Terms remains OFF. Normalization is prepared only: affect dirty rows, preserve historical handle_customized_at, increment revision/set suppression only for withdrawal of a non-NULL photo key. Stage dry-run2 affected/49 unchanged, no operation executed. Exact criteria, tests, breaking impacts and separate GO: [t012-normalization-review.md](t012-normalization-review.md).
+
+## T012 Stage executed — 2026-10-27
+
+COMMITTED at2026-10-27T16:27:07.558528Z, independent verification PASS:2 changed/49 untouched, all51 variants/UUID/privacy/history markers retained, one avatar revision increment only. TermsOFF/catalogON and migration119/119 unchanged; Auth/financial/Poker/Storage/tracker writes0 except approved profile/policy updates. No contract/drop/purge/Production/WS/APK/Ready/merge. Exact fingerprints and remaining A gates: [t012-normalization-review.md](t012-normalization-review.md). This supersedes earlier preparation-only status.
+
+## T010 scope clarification for owner review — 2026-10-27
+
+Read-only/source audit complete; no contract executed. Minimal proposal is BIO-only drop after compatible readers and a post-contract fundamental fixture, retaining the historical customization marker and deletion/capability records. This is a recommendation for a separate GO, not an approved SQL change. T012 owner independently confirmed PASS; T010 final acceptance and legal/Terms gates remain OPEN. [Contract review and gates](t010-contract-reference-review.md).
+
+## G1 BIO-only preparation — 2026-10-27
+
+Owner GO authorizes SQL/test/docs preparation only. New forward-only version20261027173627 and sealed Production-equivalent are prepared;119 historical files unchanged. Mandatory intended future Stage effect is BIO-only DDL after separate G2; no current automatic Stage Apply is authorized. Keep Draft so apply-stage stays SKIPPED; explicit SQL identity/confirmation/preconditions also fail closed. Existing avatar pipeline/helpers, JS/CSS/i18n, APK and WS unchanged by owner decision. Isolated PostgreSQL contract and existing38 tests PASS; live Stage remains119/BIO-present, TermsOFF/catalogON. [Exact hashes, fixtures and G2 gate](t010-contract-reference-review.md).

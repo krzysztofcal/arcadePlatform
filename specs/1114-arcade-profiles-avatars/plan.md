@@ -21,7 +21,7 @@ Przyszły PR z `supabase/migrations/**` może automatycznie wykonać DB Stage Ap
 | Provisioning | `supabase/migrations/20260713090000_user_profile_provisioning_visibility.sql::ensure_user_profile()` i signup trigger | Nowa forward-only definicja istniejącej funkcji: docelowo16, bez nowego triggera i resetu sześciu wariantów |
 | Model/projekcja | `shared/profile-avatar-projection.mjs::PUBLIC_AVATAR_VARIANTS/projectPublicAvatar()`, `_shared/user-profile.mjs::publicProfile()/ownerProfile()/updateUserProfile()/updateUserAvatarKey()` | 10 nowych kluczy, brak BIO/manual writes, jeden kontrolowany wybór; zachować wire default/uploaded |
 | API profilu | `netlify/functions/profile-me.mjs::validatePatch()`, `profile-public.mjs`, `_shared/xp-leaderboard-read.mjs` | Picker/visibility, bez name/handle/BIO upload; public read po bieżącym handle, zwykły not-found dla starego zmienionego URL |
-| Prezentacja | `js/profile-client.js::applyAvatar()/updateMe()`, `js/auth/supabaseClient.js::applyProfileAvatar()/renderUser()`, `account.html`, `js/account-page.js`, `public-profile.html`, `js/public-profile-page.js`, `js/leaderboard-page.js` | Jeden katalog i read-only name/handle; prosty Terms krok; bez BIO/file input |
+| Prezentacja | `js/profile-client.js::applyAvatar()/updateMe()`, `js/auth/supabaseClient.js::applyProfileAvatar()/renderUser()`, `account.html`, `js/account-page.js`, `profile.html`, `js/public-profile-page.js`, `js/leaderboard-page.js` | Jeden katalog i read-only name/handle; prosty Terms krok; bez BIO/file input |
 | Poker identity | `poker/poker-v2.js::renderSeatAvatar()`, `ws-server/poker/read-model/public-poker-identity.mjs`, `poker/profile/public-profile-repository.mjs`, `table/table-manager.mjs` profile cache | Rozpoznawanie nowych wariantów i odświeżenie tożsamości, bez zmiany seat/game state |
 | Reakcje | `ws-server/poker/handlers/reaction.mjs`, `poker/poker-v2.js::appendReactionHistory()/renderReactionHistory()` i bubbles | Terms tylko przy nowej społecznościowej publikacji; w B viewer filter/sender-safe block, bez ingerencji w betting |
 | Zdjęcia/lifecycle | `_shared/profile-avatar.mjs::finalizeAvatar()/removeAvatar()`, Sharp, `shared/account-deletion-storage.mjs`, `private.account_avatar_objects` i `profile_avatar_uploads` V3 | A zamyka publiczny upload i wycofuje legacy; C reużywa transform/manifestów z intent przed I/O |
@@ -173,3 +173,15 @@ Owner zaakceptował fizycznie zapis avatara i Account/Online/Single Player/Offli
 ## T012 current plan — 2026-10-27
 
 Owner accepted catalog16 on Android; no APK rebuild/retest. Use existing inventory/normalize-profiles operations, now candidate-only and fresh-row rechecked. Preserve marker, selected16 variants/privacy; revision/suppression change only on legacy-key withdrawal. Real isolated PostgreSQL test PASS. Stage inventory2 dirty/49 untouched; no Stage normalization, contract/drop or purge. Execution/recovery boundaries and exact reviewed SQL hash: [t012-normalization-review.md](t012-normalization-review.md).
+
+## T012 Stage executed — 2026-10-27
+
+COMMITTED at2026-10-27T16:27:07.558528Z, independent verification PASS:2 changed/49 untouched, all51 variants/UUID/privacy/history markers retained, one avatar revision increment only. TermsOFF/catalogON and migration119/119 unchanged; Auth/financial/Poker/Storage/tracker writes0 except approved profile/policy updates. No contract/drop/purge/Production/WS/APK/Ready/merge. Exact fingerprints and remaining A gates: [t012-normalization-review.md](t012-normalization-review.md). This supersedes earlier preparation-only status.
+
+## T010 audit / contract plan — 2026-10-27
+
+Owner independent T012 PASS recorded. Documentation-only audit PASS; actual T010 remains OPEN. Current contract.sql is NO-GO pending narrowed BIO-only review, code/reference cleanup and isolated post-contract fixture. Keep handle_customized_at/history and all V2 Storage/capability machinery. Stage compatible readers precede contract; Production needs separately approved additive schema/runtime before any drop. Exact files/methods, fundamental tests and G0–G3 STOP/GO gates: [t010-contract-reference-review.md](t010-contract-reference-review.md). No SQL/runtime/test/environment change in this audit.
+
+## G1 BIO-only preparation — 2026-10-27
+
+Owner GO authorizes SQL/test/docs preparation only. New forward-only version20261027173627 and sealed Production-equivalent are prepared;119 historical files unchanged. Mandatory intended future Stage effect is BIO-only DDL after separate G2; no current automatic Stage Apply is authorized. Keep Draft so apply-stage stays SKIPPED; explicit SQL identity/confirmation/preconditions also fail closed. Existing avatar pipeline/helpers, JS/CSS/i18n, APK and WS unchanged by owner decision. Isolated PostgreSQL contract and existing38 tests PASS; live Stage remains119/BIO-present, TermsOFF/catalogON. [Exact hashes, fixtures and G2 gate](t010-contract-reference-review.md).

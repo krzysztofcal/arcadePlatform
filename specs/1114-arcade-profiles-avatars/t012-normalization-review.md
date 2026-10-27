@@ -1,4 +1,4 @@
-# T012 — selective normalization, preparation only (2026-10-27)
+# T012 — selective normalization, Stage COMMITTED (2026-10-27)
 
 ## Owner acceptance
 
@@ -52,7 +52,7 @@ Control fingerprint of full existing profiles:3e7af0ac758f53ff769837b039f25556. 
 
 One old /u/<handle> link is expected to become normal not-found; no alias history or permanent reservation of the old handle. One legacy name/BIO is replaced/cleared. One stored photo key is detached while the selected catalog variant stays unchanged; existing catalog projection already ignores uploaded photos. Old cached clients/media can remain stale until refresh, and an in-flight old revision can correctly receive stale_avatar_revision. No automatic retry. Storage content/trackers stay for a separately approved retention/purge operation. No consent/import, recurring photo suppression, deletion reset or B/C/D functionality is implemented. This one-shot Phase A operation must occur before any future C importer is enabled; do not reuse it to revoke a later valid C photo.
 
-## Exact future GO and execution plan — NOT executed
+## Reviewed execution plan — subsequently executed under explicit GO
 
 Authorize only normalization on Stage after reviewing this SQL and renewed aggregate counts. Pinned normalize-profiles.sql SHA256:240727315086dbaae08017e4874aceab63ee1efb05c0407c6bed9a2cb12e054b. This is an operations file, not a historical migration or pending-migrations workflow.
 
@@ -61,4 +61,28 @@ Authorize only normalization on Stage after reviewing this SQL and renewed aggre
 3. Read back policy timestamp, counts/fingerprints, one detached key/revision increment, unchanged marker/51 variants/privacy/Auth/deletion and trackers/Storage counts. Do not call public-profile rate-limited endpoints or create sessions/accounts without the separately approved smoke scope. Existing shared WS needs no restart; APK needs no rebuild. Do not claim one historical privacy/financial snapshot freezes concurrent unrelated bot activity.
 4. Unexpected postcommit result: STOP and inspect; no automatic restoration of personal content or reset of flags/revisions. No Storage purge/contract/drop/TermsON, Production or financial operation is included. Record the one-shot completion in existing identity_normalized_at; do not fabricate a119th/120th migration history entry for this operation.
 
-T012 preparation/inventory/tests PASS; actual normalization remains OPEN pending separate GO. T033 catalog/accepted client gates PASS; independent legal/Terms-ON integration remains OPEN. No new funded acceptance requirement, Ready or merge.
+Historical preparation result: T012 preparation/inventory/tests PASS; actual execution was still gated then. The executed result below supersedes that status. T033 catalog/accepted client gates PASS; independent legal/Terms-ON integration remains OPEN. No new funded acceptance requirement, Ready or merge.
+
+
+## Executed owner GO — COMMITTED / independently verified PASS
+
+Application/source commit bc4a5e1cd9f016a31ab98a9686b9ba7aa15c8201; approved file SHA256240727315086dbaae08017e4874aceab63ee1efb05c0407c6bed9a2cb12e054b unchanged. Stage identity7656985631720456337/project krydukthwdvccggbyjfw and119/119 matching migration hashes reconfirmed. Before fingerprints/counts exactly matched the approved dry run; no pending deletion, competing normalization or unexpected lock. WWW Preview exactbc4a5e1c; WS ea178bb3/PID442909/start11:36:33UTC/healthok unchanged; accepted APK unchanged.
+
+Exactly ONE Stage write request ran the unmodified operational block inside a controlled single transaction (no nested BEGIN/COMMIT). Lifecycle locks for the two approved candidates, then policy, then profile locks; profile table SHARE lock only after lifecycle/policy stabilized the49 untouched records for assertions. Existing2s lock/15s statement timeout plus bounded transaction/idle timeout. In-memory before/after row comparisons checked every field and exact category counts; no personal contents exported. Transaction-local pg_stat_xact_user_tables delta check allowed only user_profiles UPDATE2 and profile_terms_policy UPDATE1, all other user-table INSERT/UPDATE/DELETE0, including Auth, finances, XP, Poker, Storage and trackers.
+
+Successful COMMIT and independent later read agree on identity_normalized_at **2026-10-27T16:27:07.558528+00:00**, version2026-10-26-a1, active=false, variants_enabled=true.51 profiles and51 Auth users remain. Raw after counts: nonempty BIO0, attached avatar_key0, noncanonical display names0, historical customization markers1 (preserved). Current16-catalog assignments/counts unchanged. Existing tracker rows3 and profile Storage objects2 unchanged; all Storage objects104267 unchanged. Migration history/file hashes119/119 unchanged, no synthetic migration entry.
+
+| Fingerprint (MD5, same aggregate ordering before/after) | Before | After |
+|---|---|---|
+| All51 full profile rows | 3e7af0ac758f53ff769837b039f25556 | 7354a08664e6bc8308ee6d4fffbcdacb |
+|49 entirely untouched rows | 9bee3eba3c733dac0d5a282ee0d159b1 | 9bee3eba3c733dac0d5a282ee0d159b1 |
+| Two approved changed rows | e59d12185f54e4f551c634e23d36eea5 | eb75ffab7b380d361746d380320e71b0 |
+| UUID/variant/privacy/historical-marker/created_at | 3c4326c4219289f8f90ccc1339614505 | 3c4326c4219289f8f90ccc1339614505 |
+
+The first row changed only handle/display_name/BIO/updated_at; the second only avatar_key/avatar_revision(+1)/google_photo_suppressed/updated_at. No revision bump on the identity/BIO-only profile. Before-COMMIT assertions enforced this exact delta, exactly one change per approved field category and zero extra profile changes. Auth/deletion/tracker/scoped-Storage/history hashes were also independently identical before/after. A running bot service is not claimed globally frozen: zero transaction-local writes to all financial/game tables proves this operation did not alter them; no financial transaction or smoke was initiated.
+
+Read-only preflight initially timed out hashing all104267 Storage metadata rows. It was stopped BEFORE any mutation; the control was narrowed to the two relevant avatar objects plus the overall object count and zero Storage writes. Scoped snapshot passed. No Stage write was retried. The transaction-control block was additionally checked on retained isolated PostgreSQL17: forced late error rolled back all changes; successful path and exact write-set assertions passed. A later independent verification SELECT had a corrected parentheses typo; it was read-only and repeated no mutation. No Stage rollback was necessary or performed.
+
+Restricted receipt directory: /home/copilot/.local/state/arcadeplatform/t012-stage-normalize-2026-10-27T16-27-06-803Z (0700/files0600): source controller/controlled SQL, before hashes, actual response and independent after read. Only aggregate/hashes, no raw profile snapshots persisted. No Auth codes/tokens/credentials logged. Local PostgreSQL stopped, retained test files untouched, VPS5.3GB free.
+
+T012 actual normalization PASS/complete. T001 legal/Terms and the independent Terms-ON/current-receipt/UGC branch of T033 remain OPEN; T010 reference/contract review and final Phase A acceptance still need their own GO. Storage retention/purge is independently gated. No contract/drop, enable-terms, Storage purge, funded action, Production, WS deployment/restart, APK rebuild, Ready or merge. Stop before next Stage mutation. Evidence docs are updated locally and PR description remotely; no documentation push triggering another automatic APK build in this operational task.

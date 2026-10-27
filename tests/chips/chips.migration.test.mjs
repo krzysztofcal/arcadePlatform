@@ -149,7 +149,10 @@ const idempotencyGapMigration = migrationFiles.find((file) => file.includes("chi
 if (!idempotencyGapMigration) {
   throw new Error("Idempotency gap migration not found; cannot run tests.");
 }
-const migrationsWithoutBootstrapSeeds = migrationFiles.filter((file) => file !== seedMigration && file !== botBankrollMigration);
+const profileContractMigration=migrationFiles.find(file=>file.endsWith('_profile_phase_a_bio_contract.sql'));
+// Historical contracts deliberately remain on their pre-contract schema. The guarded
+// forward contract is applied and validated explicitly after normalization below.
+const migrationsWithoutBootstrapSeeds = migrationFiles.filter((file) => file !== seedMigration && file !== botBankrollMigration && file !== profileContractMigration);
 
 const runMigration = async (sql, file) => {
   const content = fs.readFileSync(path.join(migrationsDir, file), "utf8");
@@ -4938,6 +4941,8 @@ async function main() {
   await runMigration(sql, botBankrollMigration);
 
   await assertAvatarLifecycleContention(sql, dbUrl);
+  const {assertProfileBioContract}=await import("./profile-bio-contract.fixture.mjs");
+  await assertProfileBioContract(sql,dbUrl);
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");
