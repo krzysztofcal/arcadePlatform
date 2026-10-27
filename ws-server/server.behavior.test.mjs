@@ -5869,7 +5869,7 @@ test("active replacement: seated act accepted and observer act rejected under ob
 test("human hello gets one bot reply while preflop raise and duplicate request schedule no bluff accusation", async () => {
   const secret = "reaction-integration-secret";
   const tableId = "table_reaction_integration";
-  const humanUserId = "reaction_human";
+  const humanUserId = "00000000-0000-4000-8000-000000000007";
   const botSeat2 = makeBotUserId(tableId, 2);
   const botSeat3 = makeBotUserId(tableId, 3);
   const coreState = {
@@ -5907,6 +5907,7 @@ test("human hello gets one bot reply while preflop raise and duplicate request s
   };
   assert.equal(liveState.turnUserId, humanUserId);
   const { dir, filePath } = await writePersistedFile({
+    profileTermsPolicy: { version: "2026-10-26-a1", active: false, variants_enabled: false },
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
@@ -8922,15 +8923,16 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
   const secret = "auth-join-historical-seat-secret";
   const tableId = "table_auth_join_historical_non_active";
   const store = {
-    accounts: [{ user_id: "historical_user", account_type: "USER", balance: 110 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000008", account_type: "USER", balance: 110 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
-        seatRows: [{ user_id: "historical_user", seat_no: 1, status: "INACTIVE", is_bot: false }],
+        seatRows: [{ user_id: "00000000-0000-4000-8000-000000000008", seat_no: 1, status: "INACTIVE", is_bot: false }],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
     }
   };
+  store.profileTermsPolicy = { version: "2026-10-26-a1", active: false, variants_enabled: false };
   store.pokerTierPolicies = pokerTierPolicyRows([100]);
   store.pokerAccessPolicy = { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 };
   store.accounts = store.accounts.map((account) => ({ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1, ...account }));
@@ -8949,7 +8951,7 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "historical_user" }), "auth-join-historical");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000008" }), "auth-join-historical");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-historical", ts: "2026-02-28T05:50:00Z", payload: { tableId, buyIn: 100 } });
     const ack = await nextCommandResultForRequest(ws, "join-historical");
@@ -8963,7 +8965,7 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
     });
     const state = await nextMessageOfType(ws, "table_state");
     assert.deepEqual(state.payload.seats, [
-      { userId: "historical_user", seatNo: 2, status: "ACTIVE" }
+      { userId: "00000000-0000-4000-8000-000000000008", seatNo: 2, status: "ACTIVE" }
     ]);
     ws.close();
   } finally {
@@ -8977,7 +8979,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
   const secret = "auth-join-bots-secret";
   const tableId = "table_auth_join_bots";
   const store = {
-    accounts: [{ user_id: "bot_seed_human", account_type: "USER", balance: 110 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000009", account_type: "USER", balance: 110 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
@@ -8986,6 +8988,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       }
     }
   };
+  store.profileTermsPolicy = { version: "2026-10-26-a1", active: false, variants_enabled: false };
   store.pokerTierPolicies = pokerTierPolicyRows([100]);
   store.pokerAccessPolicy = { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 };
   store.accounts = store.accounts.map((account) => ({ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1, ...account }));
@@ -9009,7 +9012,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "bot_seed_human" }), "auth-join-bots");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000009" }), "auth-join-bots");
 
     sendFrame(ws, {
       version: "1.0",
@@ -9031,14 +9034,14 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       assert.fail(`first authoritative join ack payload: ${JSON.stringify(firstAck.payload)}`);
     }
     assert.deepEqual(firstState.payload.authoritativeMembers, [
-      { userId: "bot_seed_human", seat: 1 },
+      { userId: "00000000-0000-4000-8000-000000000009", seat: 1 },
       { userId: botSeat2, seat: 2 },
       { userId: botSeat3, seat: 3 }
     ]);
-    assert.equal(firstState.payload.members.some((entry) => entry.userId === "bot_seed_human"), true);
+    assert.equal(firstState.payload.members.some((entry) => entry.userId === "00000000-0000-4000-8000-000000000009"), true);
     assert.equal(firstState.payload.members.some((entry) => entry.userId === botSeat2), false);
     assert.deepEqual(firstState.payload.seats, [
-      { userId: "bot_seed_human", seatNo: 1, status: "ACTIVE" },
+      { userId: "00000000-0000-4000-8000-000000000009", seatNo: 1, status: "ACTIVE" },
       { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
       { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
     ]);
