@@ -28,7 +28,7 @@ const replacements = {
       var frame = {kind:'stateSnapshot', initial:!state.hasAppliedAuthoritativeSnapshot, cardFxEligible:!!state.hasAppliedAuthoritativeSnapshot};
       var previousVisual = captureVisualSnapshot(), previousHandId = state.handId;
       observeCelebrationSnapshot(payload, frame);
-      if(payload.seats)payload.seats.forEach(function(seat){if(seat.userId===offline.human)seat.profile={handle:'offline-player',displayName:'You',avatar:{type:'default',variant:'comet-blue'}};});
+      if(payload.seats)payload.seats.forEach(function(seat){if(seat.userId===offline.human)seat.profile={handle:'offline-player',displayName:'You',avatar:{type:'default',variant:offline.avatarVariant()}};});
       mergeSnapshot(payload, frame);
       if (previousHandId && previousHandId !== state.handId) resetQueuedPreactionState();
       state.hasAppliedAuthoritativeSnapshot = true;

@@ -88,3 +88,12 @@ Owner S24+ physical PASS retained for T015–T016 preactions/unified UI.
 - [x] Prepare bounded exact-SHA WS Preview verification and independent Production deployment controls; no execution.
 - [x] Separate owner GO, fresh shared Preview preflight, exact-SHA deploy and bounded Online/Single Player/reconnect evidence:40307557291 SUCCESS, both audits OK, cashout/escrow reconciled; UI Leave ACK NOT OBSERVED under existing contract.
 - [ ] Recheck required CI and approve deployment policy before any merge. PR remains Draft; issue remains open.
+
+
+## Owner GO — confirmed local avatar
+- [x] A001 Record owner Account/Online/Single Player PASS and Offline FAIL; allow one-way local visual projection only.
+- [x] A002 Bind confirmed variant cache to existing user lifecycle; no Auth/profile/token reads in Offline, safe logout/account fallback.
+- [x] A003 Replace generator hardcoding, regenerate artifacts/HTML/CSP/SRI; leave session/Offline Chips/revision untouched.
+- [x] A004 Fundamental RED2→GREEN31 Offline cases, existing UserUiState/mobile security/syntax/CSP checks.
+- [ ] A005 Verify hosted CI/Preview/new signed APK and hand off artifact/receipt (results in PR report).
+- [ ] A006 Owner physical New Game/Resume/airplane/logout/account-switch retest; no funded smoke.

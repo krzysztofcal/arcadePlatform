@@ -4,6 +4,7 @@
   var VERSION = 1;
   var PREFIX = 'kcswh:user-ui:';
   var CHANNEL_NAME = 'kcswh:user-ui:v1';
+  var OFFLINE_AVATAR_KEY = 'kcswh:offline-avatar:v1';
   var MAX_AGE = { profile: 7 * 24 * 60 * 60 * 1000, xp: 15 * 60 * 1000, chips: 5 * 60 * 1000 };
   var listeners = [];
   var activeUserId = null;
@@ -106,6 +107,21 @@
     try { document.dispatchEvent(new CustomEvent('user-ui:change', { detail: detail })); } catch (_err){}
   }
 
+  // Visual-only projection. Offline never needs the account cache or Auth records.
+  function syncOfflineAvatar(userId, profile){
+    var store = storage();
+    if (!store || activeUserId !== userId) return;
+    try {
+      store.removeItem(OFFLINE_AVATAR_KEY);
+      var ownKey = key('offline-avatar', userId);
+      var variant = profile ? profile.avatar && profile.avatar.type !== 'uploaded' && profile.avatar.variant : store.getItem(ownKey);
+      var catalog = window.ArcadeAvatars;
+      if (!catalog || catalog.variants.indexOf(variant) === -1){ if (profile) store.removeItem(ownKey); return; }
+      if (profile) store.setItem(ownKey, variant);
+      store.setItem(OFFLINE_AVATAR_KEY, variant);
+    } catch (_err){ klog('user_ui_offline_avatar_unavailable'); }
+  }
+
   function hydrate(userId){
     if (!validUserId(userId)) return { generation: generation, profile: null, xp: null, chips: null };
     if (activeUserId !== userId){
@@ -122,6 +138,7 @@
         appliedAt[slice] = record.confirmedAt;
       }
     });
+    syncOfflineAvatar(userId, result.profile);
     return result;
   }
 
@@ -148,6 +165,7 @@
     if (!Number.isSafeInteger(timestamp) || timestamp < 1) timestamp = Date.now();
     var record = { version: VERSION, userId: userId, slice: slice, confirmedAt: timestamp, value: normalized };
     writeRecord(record);
+    if (slice === 'profile') syncOfflineAvatar(userId, normalized);
     appliedAt[slice] = timestamp;
     setSliceState(slice, 'ready');
     emit(record);
@@ -165,12 +183,13 @@
     if (!validUserId(userId)) return;
     var store = storage();
     if (store){
-      ['profile', 'xp', 'chips'].forEach(function(slice){ try { store.removeItem(key(slice, userId)); } catch (_err){} });
+      ['profile', 'xp', 'chips', 'offline-avatar'].forEach(function(slice){ try { store.removeItem(key(slice, userId)); } catch (_err){} });
+      if (activeUserId === userId){ try { store.removeItem(OFFLINE_AVATAR_KEY); } catch (_err){} }
     }
     if (activeUserId === userId){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setAllSliceStates('pending'); }
   }
 
-  function setAnonymous(){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setAllSliceStates('anonymous'); }
+  function setAnonymous(){ try { var store = storage(); if (store) store.removeItem(OFFLINE_AVATAR_KEY); } catch (_err){} activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setAllSliceStates('anonymous'); }
 
   function markSliceApplied(userId, slice, value){
     if (activeUserId !== userId) return false;
@@ -201,6 +220,7 @@
     if (appliedAt[record.slice] >= confirmedAt) return;
     var accepted = { version: VERSION, userId: activeUserId, slice: record.slice, confirmedAt: confirmedAt, value: normalized };
     writeRecord(accepted);
+    if (record.slice === 'profile') syncOfflineAvatar(activeUserId, normalized);
     appliedAt[record.slice] = confirmedAt;
     setSliceState(record.slice, 'ready');
     emit(accepted);

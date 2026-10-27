@@ -3141,6 +3141,14 @@
       reactionListener({ payload: { ...candidate, seatNo: candidate.botSeatNo } });
     }
   }
+  function avatarVariant() {
+    try {
+      const variant = window.localStorage.getItem("kcswh:offline-avatar:v1");
+      if (window.ArcadeAvatars?.variants.includes(variant)) return variant;
+    } catch {
+    }
+    return "comet-blue";
+  }
   function publish() {
     if (listener && game.read().session) {
       const token = game.timerToken(), snapshot = game.snapshot();
@@ -3310,6 +3318,7 @@
   window.PokerOffline = {
     human: HUMAN,
     read: game.read,
+    avatarVariant,
     backToLobby,
     cancelDialog,
     isActive: () => active,
