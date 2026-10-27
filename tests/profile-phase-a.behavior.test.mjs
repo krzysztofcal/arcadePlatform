@@ -126,22 +126,25 @@ test('WS reaction reuses its lifecycle transaction rather than requesting a seco
  await new AsyncFunction(...Object.keys(globals),body)(...Object.values(globals));
  assert.equal(results[1].reason,'terms_required');assert.equal(begins,2);
 });
-async function termsClientFixture(){
+async function termsClientFixture({autoInit=true,required=true}={}){
  const vm=await import('node:vm');
- let user=id,serverVersion='2026-10-26-a1',tokenHook=null,rejectOldVersion=false;const posts=[],events={},nodes=[];
+ let user=id,serverVersion='2026-10-26-a1',tokenHook=null,rejectOldVersion=false,variantsEnabled=false,getHook=null,failGet=false;const posts=[],events={},nodes=[],emitted=[];
  const node=()=>({textContent:'',hidden:false,disabled:false,open:false,fields:{},setAttribute(){},addEventListener(type,fn){this[type]=fn;},querySelector(key){return this.fields[key]||(this.fields[key]=node());},showModal(){this.open=true;},close(){this.open=false;}});
- const doc={readyState:'loading',documentElement:{lang:'en'},head:{appendChild(){}},body:{appendChild(n){nodes.push(n);}},createElement:node,querySelector:()=>({sheet:{}}),addEventListener(type,fn){events[type]=fn;},dispatchEvent(){}};
+ const doc={readyState:'loading',documentElement:{lang:'en'},head:{appendChild(){}},body:{appendChild(n){nodes.push(n);}},createElement:node,querySelector:()=>({sheet:{}}),addEventListener(type,fn){events[type]=fn;},dispatchEvent(event){emitted.push(event.type);}};
  let authChanged;
  const token=value=>'eyJhbGciOiJub25lIn0.'+Buffer.from(JSON.stringify({sub:value})).toString('base64url')+'.fixture';
  const window={SupabaseAuth:{getCurrentUser:async()=>({id:user}),onAuthChange:fn=>{authChanged=fn;}},SupabaseAuthBridge:{getAccessToken:async()=>{if(tokenHook){const hook=tokenHook;tokenHook=null;return hook();}return token(user);}},crypto:globalThis.crypto};
  const fetch=async(_url,options)=>{
   if(options.method==='POST'){posts.push({body:JSON.parse(options.body),token:options.headers.Authorization});if(rejectOldVersion){rejectOldVersion=false;serverVersion='next-version';return {ok:false,json:async()=>({error:'terms_version_changed'})};}}
-  return {ok:true,json:async()=>({required:true,version:serverVersion,current:options.method==='POST'})};
+  const result={required:required,version:serverVersion,current:options.method==='POST',variantsEnabled:variantsEnabled,avatarVariants:PUBLIC_AVATAR_VARIANTS.slice(0,variantsEnabled?16:6)};
+  if(options.method==='GET'&&getHook){const hook=getHook;getHook=null;await hook();}
+  if(options.method==='GET'&&failGet){failGet=false;throw Error('offline');}
+  return {ok:true,json:async()=>result};
  };
- vm.runInNewContext(await readFile(new URL('../js/profile-onboarding.js',import.meta.url),'utf8'),{window,document:doc,fetch,location:{pathname:'/account.html',search:''},URLSearchParams,sessionStorage:{getItem:()=>null},crypto:globalThis.crypto,atob:globalThis.atob,CustomEvent:class{},setTimeout,clearTimeout});
+ vm.runInNewContext(await readFile(new URL('../js/profile-onboarding.js',import.meta.url),'utf8'),{window,document:doc,fetch,location:{pathname:'/account.html',search:''},URLSearchParams,sessionStorage:{getItem:()=>null},crypto:globalThis.crypto,atob:globalThis.atob,CustomEvent:class{constructor(type){this.type=type;}},setTimeout,clearTimeout});
  const flush=async()=>{await new Promise(r=>setTimeout(r,0));await new Promise(r=>setTimeout(r,0));};
- events.DOMContentLoaded();await flush();
- return {window,posts,dialog:()=>nodes.find(n=>n.open),flush,token,setUser:value=>{user=value;authChanged();},holdToken:fn=>{tokenHook=fn;},rejectNextVersion:()=>{rejectOldVersion=true;}};
+ if(autoInit){events.DOMContentLoaded();await flush();}
+ return {window,posts,emitted,start:()=>events.DOMContentLoaded(),setVariants:value=>{variantsEnabled=value;},holdGet:fn=>{getHook=fn;},failNextGet:()=>{failGet=true;},dialog:()=>nodes.find(n=>n.open),flush,token,setUser:value=>{user=value;authChanged();},holdToken:fn=>{tokenHook=fn;},rejectNextVersion:()=>{rejectOldVersion=true;}};
 }
 test('Terms acceptance never posts under a replacement identity while credentials are pending',async()=>{
  const h=await termsClientFixture();const dialog=h.dialog();assert.ok(dialog);
@@ -165,4 +168,31 @@ test('human table creation acquires lifecycle before the Terms policy lock',asyn
  const before=process.env.CHIPS_ENABLED;process.env.CHIPS_ENABLED='1';try{
   const result=await handler({httpMethod:'POST',headers:{origin:'https://arcade.test'},body:JSON.stringify({maxPlayers:6,buyIn:100})});assert.equal(result.statusCode,200);assert.deepEqual(order.slice(0,2),['lifecycle','policy']);
  }finally{if(before===undefined)delete process.env.CHIPS_ENABLED;else process.env.CHIPS_ENABLED=before;}
+});
+
+test('avatar permissions fail closed before policy arrives and expose only the backend OFF/ON list',async()=>{
+ const h=await termsClientFixture({autoInit:false,required:false});
+ const choices=()=>Array.from(h.window.ArcadeTerms.getAvatarVariants(id));
+ assert.deepEqual(choices(),[]);
+ let release;h.holdGet(()=>new Promise(resolve=>{release=resolve;}));h.start();await h.flush();
+ assert.deepEqual(choices(),[],'pending policy must expose no active choices');
+ release();await h.flush();assert.deepEqual(choices(),PUBLIC_AVATAR_VARIANTS.slice(0,6));
+ h.setVariants(true);await h.window.ArcadeTerms.refresh(false);
+ assert.deepEqual(choices(),PUBLIC_AVATAR_VARIANTS);
+ const copy=h.window.ArcadeTerms.getAvatarVariants(id);copy.length=0;
+ assert.equal(choices().length,16,'callers cannot mutate the shared status');
+ h.failNextGet();await h.window.ArcadeTerms.refresh(false);
+ assert.deepEqual(choices(),[],'failed revalidation must not retain ON permissions');
+ assert.ok(h.emitted.filter(type=>type==='profile:terms-status').length>=4);
+});
+test('avatar permissions belong to the current identity and ignore a late response after switching accounts',async()=>{
+ const h=await termsClientFixture({required:false});h.setVariants(true);
+ let release;h.holdGet(()=>new Promise(resolve=>{release=resolve;}));
+ const stale=h.window.ArcadeTerms.refresh(false);await h.flush();
+ const other='00000000-0000-4000-8000-000000000004';h.setVariants(false);h.setUser(other);
+ assert.deepEqual(Array.from(h.window.ArcadeTerms.getAvatarVariants(other)),[]);
+ await h.flush();assert.deepEqual(Array.from(h.window.ArcadeTerms.getAvatarVariants(other)),PUBLIC_AVATAR_VARIANTS.slice(0,6));
+ release();await stale;await h.flush();
+ assert.deepEqual(Array.from(h.window.ArcadeTerms.getAvatarVariants(id)),[]);
+ assert.deepEqual(Array.from(h.window.ArcadeTerms.getAvatarVariants(other)),PUBLIC_AVATAR_VARIANTS.slice(0,6));
 });

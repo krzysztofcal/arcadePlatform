@@ -236,6 +236,8 @@
     }
     if (previousUserKey !== nextUserKey){
       if (nextUserKey && deletionAttempt && nextUserKey !== deletionAttempt.ownerId) resetDeletionAttempt();
+      publicProfile = null;
+      renderAvatarGallery();
       publicProfileGeneration += 1;
       publicProfileInFlight = null;
       if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
@@ -383,9 +385,11 @@
 
   function renderAvatarGallery(){
     var gallery=doc.getElementById('arcadeAvatarGallery');
-    if(!gallery||!window.ArcadeAvatars||!publicProfile)return;
+    if(!gallery)return;
     gallery.textContent='';
-    window.ArcadeAvatars.variants.forEach(function(variant){
+    if(!window.ArcadeAvatars||!publicProfile||!currentUser)return;
+    var allowed=window.ArcadeTerms&&typeof window.ArcadeTerms.getAvatarVariants==='function'?window.ArcadeTerms.getAvatarVariants(getUserKey(currentUser)):[];
+    window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;}).forEach(function(variant){
       var button=doc.createElement('button'),img=doc.createElement('img');
       button.type='button';button.className='arcade-avatar-choice';button.title=variant;button.setAttribute('aria-label',t('arcadeAvatarChoice','Choose avatar')+' '+variant);
       button.setAttribute('aria-pressed',String(variant===publicProfile.avatarVariant));
@@ -1411,6 +1415,7 @@
     hydrateUser();
 
     doc.addEventListener('chips:tx-complete', loadChips);
+    doc.addEventListener('profile:terms-status', renderAvatarGallery);
     doc.addEventListener('profile:updated', function(event){ renderPublicProfile(event && event.detail ? event.detail : null); });
     doc.addEventListener('langchange', function(){
       if(publicProfile)renderAvatarGallery();

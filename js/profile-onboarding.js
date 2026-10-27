@@ -30,7 +30,9 @@
   identity=principal.id;return data;
  }
  function close(){displayed=null;if(dialog&&dialog.open)dialog.close();if(pending){pending(false);pending=null;}}
+ function setStatus(value){status=value;document.dispatchEvent(new CustomEvent('profile:terms-status'));}
  function show(){
+  if(!status)return;
   if(!dialog){
    dialog=document.createElement('dialog');dialog.className='arcade-terms-dialog';dialog.setAttribute('aria-labelledby','arcadeTermsTitle');
    dialog.innerHTML='<h2 id="arcadeTermsTitle"></h2><p data-terms-copy></p><p><a data-terms-link target="_blank" rel="noopener">Terms</a> · <a data-privacy-link target="_blank" rel="noopener">Privacy</a></p><p data-terms-error role="status"></p><button type="button" data-terms-accept></button><button type="button" data-terms-back></button><p><a href="/account.html" data-terms-account></a> · <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a></p>';
@@ -43,7 +45,7 @@
      if(!requestId)requestId='terms_'+(window.crypto&&crypto.randomUUID?crypto.randomUUID():Date.now()+'_'+Math.random().toString(36).slice(2));
      var intent=displayed;if(!intent)throw Error('stale_identity');
      var result=await api('POST',{action:'acceptTerms',version:intent.version,requestId:requestId},intent);
-     if(intent.id!==identity||intent.generation!==generation)throw Error('stale_identity');status=result;requestId=null;displayed=null;
+     if(intent.id!==identity||intent.generation!==generation)throw Error('stale_identity');setStatus(result);requestId=null;displayed=null;
      if(prompt)prompt.hidden=true;if(dialog.open)dialog.close();
      if(pending){pending(true);pending=null;}
      document.dispatchEvent(new CustomEvent('profile:terms-accepted'));
@@ -64,19 +66,22 @@
   if(!dialog.open)dialog.showModal();
  }
  async function refresh(open){
-  var version=++generation;
+  var version=++generation;setStatus(null);
   try{
    var principal=await credentials();if(version!==generation)return;
    if(!principal){identity=null;status=null;requestId=null;close();if(prompt)prompt.hidden=true;return;}
    if(identity!==principal.id){identity=principal.id;status=null;requestId=null;close();}
-   var result=await api('GET');if(version!==generation)return;status=result;
+   var result=await api('GET');if(version!==generation)return;setStatus(result);
    if(!result.required||result.current){if(prompt)prompt.hidden=true;close();return;}
    if(!prompt){prompt=document.createElement('button');prompt.type='button';prompt.className='arcade-terms-prompt';prompt.onclick=show;document.body.appendChild(prompt);}
    prompt.textContent=label('Review Terms','Akceptuj regulamin');prompt.hidden=false;
    if(open&&location.pathname.indexOf('table-v2.html')===-1)show();
-  }catch(err){log(err.code||'unavailable');}
+  }catch(err){if(version===generation)setStatus(null);log(err.code||'unavailable');}
  }
- window.ArcadeTerms={open:function(){if(status&&status.required&&!status.current)show();else refresh(true);},refresh:refresh,requireAcceptance:async function(){
+ window.ArcadeTerms={getAvatarVariants:function(userId){
+  if(!status||identity!==userId||status.required&&!status.current||!Array.isArray(status.avatarVariants))return [];
+  return status.avatarVariants.slice(0,status.variantsEnabled===true?16:6);
+ },open:function(){if(status&&status.required&&!status.current)show();else refresh(true);},refresh:refresh,requireAcceptance:async function(){
   await refresh(false);if(!status)throw Error('terms_unavailable');if(!status.required||status.current)return true;
   if(pending)return false;return new Promise(function(resolve){pending=resolve;show();});
  }};
@@ -87,7 +92,7 @@
   initReady();
  }
  function initReady(){
-  if(window.SupabaseAuth)window.SupabaseAuth.onAuthChange(function(){generation++;status=null;requestId=null;close();setTimeout(function(){refresh(true);},0);});
+  if(window.SupabaseAuth)window.SupabaseAuth.onAuthChange(function(){generation++;identity=null;setStatus(null);requestId=null;close();setTimeout(function(){refresh(true);},0);});
   refresh(true);
   document.addEventListener('profile:terms-required',function(){window.ArcadeTerms.open();});
   document.addEventListener('langchange',function(){
