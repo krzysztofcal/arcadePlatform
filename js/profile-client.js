@@ -51,12 +51,17 @@
     throw error;
   }
 
-  async function authedFetch(url, options){
+  async function authedFetch(url, options, guard){
     var accessToken = await token();
     if (!accessToken){
       var error = new Error('not_authenticated');
       error.code = 'not_authenticated';
       throw error;
+    }
+    if(guard){
+      var subject;try{subject=JSON.parse(atob(accessToken.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sub;}catch(_err){}
+      if(subject!==guard.userId||await currentUserId()!==guard.userId)throw staleIdentityError();
+      if(!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
     }
     var opts = options || {};
     var headers = Object.assign({ Authorization: 'Bearer ' + accessToken }, opts.headers || {});
@@ -85,12 +90,13 @@
     return request;
   }
 
-  async function updateMe(payload){
-    var userId = await currentUserId();
+  async function updateMe(payload, guard){
+    var userId = guard?guard.userId:await currentUserId();
     if (!userId) throw staleIdentityError();
-    var response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) });
+    var response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) }, guard);
     var profile = await parse(response);
     if (await currentUserId() !== userId) throw staleIdentityError();
+    if(guard&&!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
     cache = { userId: userId, profile: profile, includePoker: false };
     notify(profile);
     return profile;

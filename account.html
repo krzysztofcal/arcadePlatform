@@ -292,7 +292,8 @@
             <p class="account-note" data-i18n="publicProfileNotice">Your Arcade name, handle and avatar are public. Your account email stays private.</p>
             <p><strong id="publicDisplayName"></strong> <span id="publicHandle"></span></p>
             <div id="arcadeAvatarGallery" class="arcade-avatar-gallery" role="group" data-i18n-aria="arcadeAvatarGallery" aria-label="Arcade avatars"></div>
-            <p id="publicAvatarStatus" class="account-note" role="status"></p>
+            <button id="publicAvatarSave" type="button" class="account-panel__btn account-panel__btn--primary arcade-avatar-save" aria-describedby="publicAvatarStatus" aria-busy="false" disabled><span id="publicAvatarSaveLabel" data-i18n="arcadeAvatarSet">Set avatar</span></button>
+            <p id="publicAvatarStatus" class="account-note" role="status" aria-live="polite" aria-atomic="true"></p>
             <form class="account-form" id="publicProfileForm">
               <fieldset class="public-profile-editor__privacy"><label><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note" data-i18n="profileRemainsPublic">This does not hide your public profile.</p></fieldset>
               <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle"><span id="publicProfileSaveLabel" data-i18n="profileSaveVisibility">Save visibility</span></button>
