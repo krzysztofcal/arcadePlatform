@@ -165,3 +165,7 @@ Przygotowano [planszę16 projektów](artwork/avatars-contact-sheet-v1.png); kluc
 Follow-up review lokalny: domknięte PL/EN, gift Terms w canonical transaction po paid replay i przed BURN, bez zmian cen/entries. Wyniki212 PASS i pełne materiały do niezależnego review: [review-followup.md](review-followup.md). Bez operacyjnego GO.
 
 **Schema-first również przy Terms OFF:** nowy runtime zawsze odczytuje `private.profile_terms_policy` i receipts. Addytywna schema i nowe pola profilu muszą istnieć przed uruchomieniem nowych readerów; OFF nie zabezpiecza starej schemy. Końcowa korekta legal, odczyt Production i bezpieczna propozycja Draft: [review-final-legal.md](review-final-legal.md). Bez wykonania kolejnej bramki.
+
+## Aktualizacja operacyjna — 2026-10-27
+
+Owner zaakceptował fizycznie zapis avatara i Account/Online/Single Player/Offline oraz UX galerii. Aktualny stan zastępuje historyczny lokalny zakres opisany wyżej: schema119/119, Preview1155, WS ea178bb3 i zaakceptowany APK e370e461 wdrożone; Terms i katalog nadal OFF. Wyłącznie read-only przygotowanie katalogu16 i inventory T012: [stage-catalog-preflight.md](stage-catalog-preflight.md). Aktywacja/normalizacja/cleanup/contract i Production wymagają odrębnego GO.

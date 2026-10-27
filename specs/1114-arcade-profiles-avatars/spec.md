@@ -112,3 +112,7 @@ Istniejący `user_profiles` i `avatar_variant/avatar_key`, jedna revision i flag
 ## Decyzje i bramki właściciela
 
 Zatwierdzić uproszczony Terms wzorzec z LEGAL (moment zawarcia umowy/UGC), grafikę16, krótki plan jednorazowego cleanup i retencję zdjęć, operatora B oraz photo disclosure C i transport D. Zgoda na plan nie jest zgodą na migrację lub Stage. Brak nowych providerów, IAP, audio, World Tour/Seasons/Sit & Go i nowych funkcji gameplay. Nie zmieniać już zaakceptowanego Offline.
+
+## Aktualizacja operacyjna — 2026-10-27
+
+Owner zaakceptował fizycznie zapis avatara i Account/Online/Single Player/Offline oraz UX galerii. Aktualny stan zastępuje historyczny lokalny zakres opisany wyżej: schema119/119, Preview1155, WS ea178bb3 i zaakceptowany APK e370e461 wdrożone; Terms i katalog nadal OFF. Wyłącznie read-only przygotowanie katalogu16 i inventory T012: [stage-catalog-preflight.md](stage-catalog-preflight.md). Aktywacja/normalizacja/cleanup/contract i Production wymagają odrębnego GO.
