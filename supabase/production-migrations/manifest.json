@@ -1249,6 +1249,13 @@
       "sha256": "6d98db786488dedb53d5c41ddf167a845aa8110f358a788a879f92aa58dacf1e",
       "category": "needs-production-equivalent",
       "purpose": "#1114 G1 BIO-only contract preparation. Requires normalized Phase A, explicit environment GO and compatible readers; Draft Stage apply must stay skipped. No remote DDL authorized."
+    },
+    {
+      "file": "20261028180000_public_profile_block.sql",
+      "version": "20261028180000",
+      "sha256": "73b4bfefce21b8e59c1d20c21344ee7d182b8c90140d2b6d41a0c57379c30f6d",
+      "category": "needs-production-equivalent",
+      "purpose": "#1114 additive public profile block; separate Production schema-first GO required; no profile blocks activated."
     }
   ]
 }
