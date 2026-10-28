@@ -201,6 +201,7 @@ homeBonusLoadError: { en: 'Could not load available bonuses.', pl: 'Nie udało s
     signingIn: { en: 'Signing in...', pl: 'Logowanie...' },
     signedInSuccessfully: { en: 'Signed in successfully.', pl: 'Zalogowano pomyślnie.' },
     signedInRedirecting: { en: 'Signed in. Redirecting...', pl: 'Zalogowano. Przekierowywanie...' },
+    publicProfileSignupNotice: { en: 'Creating an account gives you a public player profile with an automatically generated name and avatar. Anyone, including people who are not signed in, can view your profile, level and achievements. Your email and sign-in credentials remain private.', pl: 'Tworząc konto, otrzymasz publiczny profil gracza z automatyczną nazwą i avatarem. Każdy, również osoba niezalogowana, może zobaczyć Twój profil, poziom i osiągnięcia. Twój e-mail i dane logowania pozostają prywatne.' },
     continueWithGoogle: { en: 'Continue with Google', pl: 'Kontynuuj z Google' },
     orSignInWithEmail: { en: 'or sign in with email', pl: 'lub zaloguj się przez e-mail' },
     googleSigningIn: { en: 'Connecting to Google…', pl: 'Łączenie z Google…' },

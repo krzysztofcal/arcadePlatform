@@ -5,6 +5,14 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// Replay cannot re-publish an identity whose database visibility may have changed.
+function containsPublicProfile(value) {
+  if (!value || typeof value !== "object") return false;
+  if (value.profile && typeof value.profile === "object" &&
+    ("handle" in value.profile || "displayName" in value.profile || "avatar" in value.profile)) return true;
+  return Object.values(value).some(containsPublicProfile);
+}
+
 function normalizeReceiverKey(receiverKey) {
   return typeof receiverKey === "string" && receiverKey.length > 0 ? receiverKey : GLOBAL_RECEIVER_KEY;
 }
@@ -77,6 +85,10 @@ export function createStreamLog({ cap = DEFAULT_STREAM_CAP } = {}) {
     }
 
     const frames = receiverEntries.filter((entry) => entry.seq > lastSeq).map((entry) => clone(entry.frame));
+    if (frames.some(containsPublicProfile)) {
+      return { ok: false, reason: "public_profile_refresh_required", latestSeq: latest, earliestSeq: earliest };
+    }
+
 
     return {
       ok: true,

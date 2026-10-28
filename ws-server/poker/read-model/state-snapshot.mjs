@@ -287,3 +287,9 @@ export function buildStateSnapshotPayload({ tableSnapshot, userId, publicProfile
 
   return payload;
 }
+
+// Shared by the resume handler and its fundamental regression: never replay old identity.
+export async function refreshResumeSnapshot({ tableManager, tableId, userId, reason }) {
+  await tableManager.refreshPublicProfiles(tableId, { force: reason === "public_profile_refresh_required" });
+  return tableManager.tableSnapshot(tableId, userId);
+}

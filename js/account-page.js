@@ -49,6 +49,7 @@
     nodes.deletionConfirm = doc.getElementById('accountDeletionConfirmButton');
     nodes.deletionClose = doc.getElementById('accountDeletionClose');
     nodes.googleSignIn = doc.getElementById('googleSignInButton');
+    nodes.googleProfileNotice = doc.getElementById('googleProfileNotice');
     nodes.googleDivider = doc.getElementById('googleSignInDivider');
     nodes.signInForm = doc.getElementById('signinForm');
     nodes.signUpForm = doc.getElementById('signupForm');
@@ -1373,6 +1374,7 @@
 
   function wireEvents(){
     var googleEnabled = !!(auth && auth.isGoogleEnabled && auth.isGoogleEnabled());
+    setBlockVisibility(nodes.googleProfileNotice, googleEnabled);
     setBlockVisibility(nodes.googleSignIn, googleEnabled);
     setBlockVisibility(nodes.googleDivider, googleEnabled);
     if (nodes.googleSignIn) nodes.googleSignIn.addEventListener('click', handleGoogleSignIn);

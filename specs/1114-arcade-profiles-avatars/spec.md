@@ -1,7 +1,12 @@
 # Feature Specification: profile i avatary Arcade Hub
 
+> **Aktualny stan 2026-10-28 (zastępuje historyczne GO/statusy poniżej):** main0f77574d z #1156 zsynchronizowany lokalnie, bez przywrócenia AdSense. T012 owner PASS/COMMITTED; T010 G1/G2 PASS120/120/BIO absent, lokalny cleanup przygotowany; T001 i końcowy T010/T033 OPEN. Katalog16 i dotychczasowe avatary WWW/APK/WS owner PASS. Nowy bounded guest-retention runtime i kandydat legal2026-10-28-a2 wymagają przyszłego exact-SHA Stage odbioru. Terms nadal OFF; nowe dokumenty tylko szkice z placeholderem. Brak push/deploy/SQL/nowych receipts lub faz B/C/D.
+>
+> [Jeden kompletny diff, wyniki i następne GO](g-legal-a-consolidated.md), [cztery teksty/decyzje](legal-drafts/README.md), [LIA](g-legal-a-lia.md). Żadnego checklist OPEN nie oznaczać jako PASS samym CI.
+
+
 **Data**: 2026-10-26  
-**Status**: v3.2 — lokalna faza A — architektura i16 grafik zaakceptowane; lokalny kod A do review, bez aktywacji  
+**Status**: v3.3 — skonsolidowana lokalna faza A — architektura i16 grafik zaakceptowane; lokalny kod A do review, bez aktywacji
 **Baseline odczytu kodu**: main `a63e44b0d9a1d3625956ed98b75c1242989efdd3`  
 **Issues**: #1114, #1140, #1138; częściowo nieaktualne discovery #1116.
 
@@ -132,3 +137,37 @@ Read-only/source audit complete; no contract executed. Minimal proposal is BIO-o
 ## G1 BIO-only preparation — 2026-10-27
 
 Owner GO authorizes SQL/test/docs preparation only. New forward-only version20261027173627 and sealed Production-equivalent are prepared;119 historical files unchanged. Mandatory intended future Stage effect is BIO-only DDL after separate G2; no current automatic Stage Apply is authorized. Keep Draft so apply-stage stays SKIPPED; explicit SQL identity/confirmation/preconditions also fail closed. Existing avatar pipeline/helpers, JS/CSS/i18n, APK and WS unchanged by owner decision. Isolated PostgreSQL contract and existing38 tests PASS; live Stage remains119/BIO-present, TermsOFF/catalogON. [Exact hashes, fixtures and G2 gate](t010-contract-reference-review.md).
+
+## G2 Stage BIO-only contract executed — 2026-10-27
+
+COMMITTED version20261027173627 and exact SHA6d98db78… atomically; independent120/120 source/history/hash verification PASS. BIO absent, historical marker and all51 retained profiles unchanged; current WWW/API/Account GET smoke PASS. TermsOFF/catalogON, V2/V3/Storage untouched. Production-equivalent not executed. This supersedes historical119/BIO-present preparation status. Full fingerprints, timestamp, HTTP IDs and remaining independent legal/Terms/final-A gates: [t010-contract-reference-review.md](t010-contract-reference-review.md). No further mutation authorized.
+
+### G-LEGAL-A scope clarification (2026-10-27, not legal approval)
+
+Current signup may provision public gaming identity before a Terms receipt; private guest bot-game creation is distinct from account authoritative new JOIN and has no current Terms gate. Contract timing/scope and permitted pre-acceptance activity require explicit OWNER/LEGAL approval or a separately authorized targeted fix. See [PL/EN proposals](g-legal-a-pl-en-proposals.md). Do not claim universal pre-acceptance blocking, Play compliance or updated APK content. Version a1/accepted package unchanged; new guarded activation remains intentionally fail-closed pending approved legal/version/reader pins and unexecuted isolated regression.
+
+
+**G-LEGAL-A owner facts / hobby update:** Arcade is a free noncommercial personal hobby project; KCSWH is a project name, not a legal entity; unrelated suspended JDG must not be attributed. Updated conditional UŚUDE scope, independent GDPR/Play review and minimal bilingual proposals/owner decision table: [g-legal-a-hobby-proposal.md](g-legal-a-hobby-proposal.md). Legal identity/contact, lawful pre-Terms provisioning/publication, retention and final content/version remain OPEN. No legal HTML/version/SQL/test/runtime/APK/environment change; validated guarded SQL351de467… and local PostgreSQL PASS preserved.
+
+
+**G-LEGAL-A final owner-identity draft preparation:** owner approves KCSWH brand plus natural-person real name/contact only in legal documents, never game UI/JDG/home by default. Four complete PL/EN drafts and four remaining decisions are in [legal-drafts/README.md](legal-drafts/README.md). Name placeholder and unverified provider/retention fields are explicit publication STOP. Guest purge plan reuses bounded SQL and existing WS maintenance, not implemented. WWW Ads loader discrepancy noted without assuming actual revenue. Active documents/version/SQL/test/runtime/APK unchanged; no activation or new phase. LEGAL/T033 remain OPEN.
+
+
+**OWNER decision 2026-10-28:** zachować domyślnie publiczny profil (gaming name/handle, katalog, XP/poziom), istniejący ranking opt-out. Bez nowego opt-in/przełącznika. Google photo poza A/odrębna zgoda. Produkt zatwierdzony, LEGAL nadal OPEN: art.25(2), przedrejestracyjna informacja/interwencja i małoletni ocenione oddzielnie od widoczności przy stole w [LIA](g-legal-a-lia.md). Propozycja wyłącznie minimalnego copy istniejącego signup, bez implementacji. Pozostałe przygotowane prace/testy A bez zmian.
+
+
+**OWNER signup disclosure GO, lokalnie wykonane:** account.html + js/i18n.js + js/account-page.js; dokładny zatwierdzony tekst przy signup i przed Google, językowe Terms/Privacy, bez nowego ekranu/przełącznika lub zmiany OAuth.51/51 istniejących fundamentalnych auth/Account/mobile PASS, syntax/CSP PASS. WWW i przyszły APK współdzielą Account; obecnego APK nie przebudowano. Produkt zatwierdzony, T001/LEGAL i końcowy T010/T033 nadal OPEN. Szczegóły w g-legal-a-consolidated.md.
+
+
+**arcade-legal-docs finalization:** skill z załącznika w .agents/skills/arcade-legal-docs wraz z references; cztery kompletne teksty a2 z Krzysztof Cal, bez placeholderów/komentarzy technicznych. Kryteria retencji i źródła Netlify/Supabase/Upstash oraz warunkowe UŚUDE/nowelizacja06.11.2026 opisane w [raporcie finalizacji](g-legal-a-finalization.md). T001/T033/końcowy T010 nadal OPEN dla treści, ryzyka publiczności i nieograniczonej retencji. Brak push/publikacji/TermsON/SQL/APK.
+
+
+**Final OWNER review correction:** cztery teksty a2 po pełnej redakcji PL/EN; KCSWH=marka, Hub/Poker=usługi, Krzysztof Cal. Disclosure obejmuje niezalogowanych. Guest cleanup opisany jako obecny opportunistic + przygotowany niewdrożony niezależny WS. Manifest odświeżony. T001/T033/final T010 OPEN: prawne ryzyko publiczności oraz konkretna procedura żądań wobec historycznych danych bez TTL nie są zastąpione ogólną deklaracją. Brak mutacji/publikacji.
+
+
+### OWNER review — minimalna obsługa praw, 2026-10-28
+Privacy PL/EN opisują wyłącznie obecne oportunistyczne czyszczenie guest receipts; usunięto wzmiankę o niewdrożonym cyklu WS. Terms bez zmian. [Minimalna procedura i propozycja indywidualnego ukrycia profilu](g-legal-a-rights-minimal-procedure.md): TECH OPEN (brak indywidualnej blokady WWW, ograniczenia częściowej minimalizacji historii), LEGAL OPEN (art.25(2)/małoletni oraz konkretne uzasadnienie retencji). Default public ON zachowany; bez implementacji, mutacji i publikacji. T001/T033/finalny odbiór OPEN.
+
+
+### Indywidualna blokada profilu — lokalna implementacja 2026-10-28
+Zobacz [raport i bramki](g-legal-a-public-profile-block.md). Nowa migracja default false, operator-only flag, publiczne readery HTTP/rankingu/WS i cache fail-closed; testy lokalne PASS, pełny kontrakt schematu/hosted CI/rollout OPEN. Bez push i mutacji Stage. Terms i Privacy bez zmian. Retencja selektywna oraz LEGAL/finalny odbiór nadal OPEN. Nowa migracja może uruchomić DB Stage Apply: wymagany świadomie zatwierdzony schema-first rollout, nie przypadkowy push.

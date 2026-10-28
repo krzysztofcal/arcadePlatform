@@ -72,6 +72,34 @@ export async function assertProfileBioContract(sql,dbUrl){
  assert.equal((await updateUserProfile(owner,{leaderboardVisible:true},deps)).leaderboardVisible,true);
  assert.deepEqual((await sql`select avatar_variant from public.user_profiles where user_id=any(${ids.slice(1)}::uuid[]) order by avatar_variant`).map(r=>r.avatar_variant),PUBLIC_AVATAR_VARIANTS.slice(1).sort());
  await cleanupExpiredUploads(deps);assert.deepEqual(await tableRows('public.profile_avatar_uploads'),before.uploads,'known signed capability survives expiry cleanup');
+ // Public block on the complete post-contract schema: owner/provisioning/CAS remain valid.
+ const blockBefore=(await sql`select to_jsonb(p) value from public.user_profiles p where user_id=${owner}`)[0].value;
+ const protectedBefore=await invariant();
+ await sql`update public.user_profiles set public_profile_blocked=true where user_id=${owner}`;
+ assert.equal(await findPublicProfile(current.handle,deps.executeSql),null);
+ const ensuredBlocked=await ensureUserProfile(owner,deps);
+ assert.equal(ensuredBlocked.userId,owner);
+ assert.equal((await sql`select public_profile_blocked from public.ensure_user_profile(${owner}::uuid)`)[0].public_profile_blocked,true);
+ const changed=await updateUserProfile(owner,{avatarVariant:'pixel-teal',expectedRevision:ensuredBlocked.avatarRevision},deps);
+ assert.equal(changed.avatarVariant,'pixel-teal');
+ assert.equal((await sql`select public_profile_blocked from user_profiles where user_id=${owner}`)[0].public_profile_blocked,true);
+ // This role is the real fixture service_role, not a renamed operator.
+ await assert.rejects(sql.begin(async tx=>{
+  // Temporary permissive fixture access proves the trigger itself, not a missing grant.
+  // Entire transaction rolls back, including these grants/policy.
+  await tx.unsafe('grant usage on schema public to service_role;grant select,update on public.user_profiles to service_role;create policy profile_block_fixture_access on public.user_profiles to service_role using(true) with check(true)');
+  await tx.unsafe('set local role service_role');
+  assert.equal((await tx`select public_profile_blocked from public.ensure_user_profile(${owner}::uuid)`)[0].public_profile_blocked,true);
+  await tx`update public.user_profiles set public_profile_blocked=false where user_id=${owner}`;
+ }),e=>e.code==='42501' && /requires database administrator/.test(e.message));
+ await sql`update public.user_profiles set public_profile_blocked=false where user_id=${owner}`;
+ assert.equal((await findPublicProfile(current.handle,deps.executeSql)).userId,owner);
+ const afterBlock=(await sql`select to_jsonb(p) value from public.user_profiles p where user_id=${owner}`)[0].value;
+ for(const key of Object.keys(blockBefore).filter(k=>!['avatar_variant','avatar_revision','updated_at'].includes(k)))assert.deepEqual(afterBlock[key],blockBefore[key],key);
+ assert.deepEqual(await invariant(),protectedBefore,'block and unblock preserve Auth, finance, Poker, deletion and Storage');
+ const newId=randomUUID();await sql`insert into auth.users(id) values(${newId})`;
+ assert.equal((await sql`select public_profile_blocked from public.ensure_user_profile(${newId}::uuid)`)[0].public_profile_blocked,false,'signup trigger and composite default public ON');
+ await sql`update public.user_profiles set public_profile_blocked=true where user_id=${capUser}`;
  const request=await deps.beginSql(tx=>requestDeletion(tx,capUser));
  await sql`update public.account_deletion_requests set status='PROCESSING',phase='cleanup',accepted_at=now(),lease_generation=1,lease_until=now()+interval '2 minutes' where request_id=${request.request_id}`;
  await assert.rejects(updateUserProfile(capUser,{leaderboardVisible:false},deps),{code:'account_not_active'});

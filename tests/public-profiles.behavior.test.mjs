@@ -3,7 +3,6 @@ import test from "node:test";
 
 const {
   ensureUserProfile,
-  normalizeHandle,
   ownerProfile,
   publicProfile,
   updateUserProfile,
@@ -70,11 +69,6 @@ function transactionForProfile(row, updateError = null) {
   });
 }
 
-test("profile handles reject reserved and invalid values", () => {
-  assert.throws(() => normalizeHandle("admin"), { code: "reserved_handle" });
-  assert.throws(() => normalizeHandle("not valid"), { code: "invalid_handle" });
-});
-
 test("profile helper delegates idempotent creation to the database function", async () => {
   let called = null;
   const result = await ensureUserProfile(USER_ID, {
@@ -122,6 +116,7 @@ test("poker identity shares avatar rules without inheriting full public profile 
     storageBaseUrl: "https://stageabc.supabase.co"
   });
   const projected = projectPublicPokerIdentity({
+    public_profile_blocked: false,
     handle: "blue-fox-482731",
     display_name: "Blue Fox 482731",
     bio: "public but not a poker field",
@@ -162,6 +157,7 @@ test("poker identity accepts uploaded avatars only from the configured Arcade Hu
 test("shared avatar projection falls back for unknown variants and untrusted storage origins", () => {
   assert.deepEqual(projectPublicAvatar({ avatarVariant: "unknown" }), { type: "default", variant: "default" });
   assert.deepEqual(projectPublicPokerIdentity({
+    public_profile_blocked: false,
     handle: "default-avatar-101",
     display_name: "Default Avatar 101",
     avatar_variant: "unknown"
@@ -410,3 +406,81 @@ test("profile-public enables deploy previews when the function scope lacks the f
   assert.equal(publicProfilesEnabled({}, { headers: { host: "deploy-preview-677--playkcswh.netlify.app" } }), true);
   assert.equal(publicProfilesEnabled({}, { headers: { host: "play.kcswh.pl" } }), false);
 });
+
+ test("blocked public identities are absent while owner projection remains available", async () => {
+ const blocked = profile({publicProfileBlocked:true});
+ assert.equal(publicProfile(blocked),null);
+ assert.equal(ownerProfile(blocked).handle,blocked.handle);
+ assert.equal(projectPublicPokerIdentity({public_profile_blocked:true,handle:blocked.handle,display_name:blocked.displayName,avatar_variant:"fox-blue"}),null);
+ assert.equal(projectPublicPokerIdentity({handle:blocked.handle,display_name:blocked.displayName,avatar_variant:"fox-blue"}),null);
+ const handler=createProfilePublicHandler({findPublicProfile:async()=>blocked,allowPublicRead:async()=>true});
+ const response=await handler(event("GET",null,{handle:blocked.handle}));
+ assert.equal(response.statusCode,404);
+ assert.equal(response.headers["cache-control"],"no-store");
+ assert.equal(JSON.stringify(response).includes(blocked.handle),false);
+ });
+
+test('public profile block migration: disposable PostgreSQL17, default, operator guard and unblock', {skip:!process.env.PROFILE_BLOCK_TEST_DB_URL}, async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const {default:postgres}=await import('postgres');
+ const url=new URL(process.env.PROFILE_BLOCK_TEST_DB_URL);
+ assert.equal(url.hostname,'127.0.0.1'); assert.match(url.pathname,/_test$/);
+ const sql=postgres(url.href,{max:1,prepare:false});
+ try {
+  assert.match((await sql`show server_version`)[0].server_version,/^17\./);
+  assert.equal((await sql`select count(*)::int n from pg_tables where schemaname='public'`)[0].n,0);
+  await sql.unsafe(`create schema private; create table public.user_profiles(user_id uuid primary key,avatar_variant text,avatar_revision int,leaderboard_visible boolean,protected jsonb);
+   insert into public.user_profiles values ('${USER_ID}','fox-blue',7,true,'{"CH":100,"XP":20,"poker":"unchanged"}');`);
+  await sql.unsafe(await readFile(new URL('../supabase/migrations/20261028180000_public_profile_block.sql',import.meta.url),'utf8'));
+  const before=(await sql`select * from user_profiles`)[0];assert.equal(before.public_profile_blocked,false);
+  // Reuse an existing unprivileged role or create one only inside this disposable cluster.
+  await sql.unsafe(`do $$begin if not exists(select 1 from pg_roles where rolname='profile_block_test_user') then create role profile_block_test_user; end if; end$$;
+   grant usage on schema public to profile_block_test_user;grant select,insert,update on public.user_profiles to profile_block_test_user;`);
+  await sql.unsafe('set role profile_block_test_user');
+  await assert.rejects(sql`update user_profiles set public_profile_blocked=true`,e=>e.code==='42501');
+  await sql.unsafe('reset role');
+  await sql`update user_profiles set public_profile_blocked=true`;
+  assert.equal((await sql`select * from user_profiles where not public_profile_blocked`).length,0);
+  await sql`update user_profiles set public_profile_blocked=true`;
+  await sql`update user_profiles set public_profile_blocked=false`;
+  assert.deepEqual((await sql`select * from user_profiles`)[0],before);
+  await sql.unsafe('alter table user_profiles drop column public_profile_blocked');
+  await assert.rejects(sql`select * from user_profiles where not public_profile_blocked`,e=>e.code==='42703');
+ }finally{await sql.end();}
+});
+
+ test("profile-me keeps complete owner access for a publicly blocked account",async()=>{
+ const blocked=profile({publicProfileBlocked:true,avatarRevision:9,leaderboardVisible:false});
+ const expected=ownerProfile(profile({avatarRevision:9,leaderboardVisible:false}));
+ const handler=createProfileMeHandler({
+  verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),
+  ensureUserProfile:async(id)=>{assert.equal(id,USER_ID);return blocked;},
+  updateUserProfile:async(id)=>{assert.equal(id,USER_ID);return blocked;},
+  getUserBalance:async()=>({balance:735}),loadPokerProjection:async()=>null
+ });
+ for(const request of [event("GET"),event("PATCH",{avatarVariant:"fox-blue",expectedRevision:9})]){
+  const response=await handler(request);assert.equal(response.statusCode,200);
+  assert.deepEqual(JSON.parse(response.body),expected);
+ }
+ const response=await handler(event("GET",null,{includePoker:"1"}));
+ assert.equal(response.statusCode,200);
+ assert.deepEqual(JSON.parse(response.body),{...expected,balance:735,poker:null});
+ assert.equal(publicProfile(blocked),null);
+ });
+
+ test("findPublicProfile retains the block flag as defense in depth without restricting owner projection",async()=>{
+ const {findPublicProfile}=await import("../netlify/functions/_shared/user-profile.mjs");
+ for(const blocked of [false,true]){
+  const result=await findPublicProfile("fox-123",async(query)=>{
+   assert.match(query,/select[^;]*leaderboard_visible, public_profile_blocked/);
+   assert.match(query,/and public_profile_blocked = false/);
+   // Deliberately return a blocked row to test projection independently of the SQL filter.
+   return [{user_id:USER_ID,handle:"fox-123",display_name:"Fox",avatar_variant:"fox-blue",avatar_revision:7,leaderboard_visible:false,public_profile_blocked:blocked}];
+  });
+  assert.equal(result.publicProfileBlocked,blocked);
+  assert.equal(publicProfile(result)===null,blocked);
+  assert.equal(ownerProfile(result).handle,"fox-123");
+  assert.equal(ownerProfile(result).avatarRevision,7);
+  assert.equal(ownerProfile(result).leaderboardVisible,false);
+ }
+ });

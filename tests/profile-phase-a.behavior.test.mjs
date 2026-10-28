@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
 import { readFile } from 'node:fs/promises';
 import { PUBLIC_AVATAR_VARIANTS, projectPublicAvatar } from '../shared/profile-avatar-projection.mjs';
-import { readTermsStatus, acceptTerms, requireCurrentTerms } from '../shared/profile-terms.mjs';
+import { readTermsStatus, acceptTerms, requireCurrentTerms, cleanupExpiredGuestReceipts } from '../shared/profile-terms.mjs';
 import { publicProfile, updateUserProfile } from '../netlify/functions/_shared/user-profile.mjs';
 const id='00000000-0000-4000-8000-000000000003';
 test('catalog adds ten variants without changing six legacy identifiers; phase A never projects an uploaded image or BIO',()=>{
@@ -109,7 +109,7 @@ test('one-shot normalization touches only dirty profiles, preserves avatar revis
   assert.deepEqual(await preserved(),invariants,'Auth/email/CH/XP/escrow/ledger/game/deletion unchanged');
   assert.equal((await db.query(inventorySql)).rows[0].inventory.eligible,0);
   const policy=(await db.query('select * from private.profile_terms_policy')).rows;
-  await db.exec(cleanup);assert.deepEqual(await rows(),after);assert.deepEqual((await db.query('select * from private.profile_terms_policy')).rows,policy);
+  await db.exec(cleanup);assert.deepEqual(await rows(),after);assert.deepEqual(Array.from((await db.query('select * from private.profile_terms_policy')).rows),policy);
   assert.deepEqual(await preserved(),invariants);
  }finally{await db.close();}
 });
@@ -239,4 +239,72 @@ test('avatar permissions belong to the current identity and ignore a late respon
  release();await stale;await h.flush();
  assert.deepEqual(Array.from(h.window.ArcadeTerms.getAvatarVariants(id)),[]);
  assert.deepEqual(Array.from(h.window.ArcadeTerms.getAvatarVariants(other)),PUBLIC_AVATAR_VARIANTS.slice(0,6));
+});
+
+// Same bounded query is exercised on real disposable PostgreSQL when configured.
+test('expired guest receipt retention is bounded, repeatable and independent of Terms/deletion flags',async()=>{
+ const url=process.env.PROFILE_GUEST_RETENTION_TEST_DB_URL;
+ let db,sql;
+ if(url){
+  const target=new URL(url);assert.equal(target.hostname,'127.0.0.1');assert.match(target.pathname,/_test$/);
+  const {default:postgres}=await import('postgres');sql=postgres(url,{max:1,prepare:false});
+  assert.match((await sql`show server_version`)[0].server_version,/^17\./);
+  assert.notEqual((await sql`select system_identifier::text id from pg_control_system()`)[0].id,'7656985631720456337');
+  assert.equal((await sql`select count(*)::int n from pg_tables where schemaname='private'`)[0].n,0);
+  db={exec:q=>sql.unsafe(q),query:async(q,p=[])=>({rows:await sql.unsafe(q,p)}),close:()=>sql.end()};
+ }else db=new PGlite();
+ try{
+  await db.exec(`create schema private;
+   create table private.profile_terms_policy(active boolean,variants_enabled boolean);
+   insert into private.profile_terms_policy values(false,true);
+   create table private.profile_terms_receipts(subject_kind text,subject_id text,terms_version text,expires_at timestamptz,primary key(subject_kind,subject_id,terms_version));
+   create table public.protected_retention_fixture(kind text primary key,value text);
+   insert into public.protected_retention_fixture values('Auth','same'),('profile','same'),('CH','same'),('XP','same'),('Poker','same'),('Storage','same');
+   insert into private.profile_terms_receipts select 'guest','expired_'||n,'a1',now()-interval '1 hour' from generate_series(1,102) n;
+   insert into private.profile_terms_receipts values('account','owner','a1',null),('guest','live','a1',now()+interval '1 hour'),('guest','no_expiry','a1',null);`);
+  if(sql)await db.exec(`do $$begin if not exists(select 1 from pg_roles where rolname='profile_retention_fixture') then create role profile_retention_fixture;end if;end$$;
+   grant usage on schema private,public to profile_retention_fixture;
+   grant select on all tables in schema private,public to profile_retention_fixture;
+   grant insert,delete on private.profile_terms_receipts to profile_retention_fixture;
+   set role profile_retention_fixture;`);
+  const tx={unsafe:async(q,p=[]) => (await db.query(q,p)).rows};
+  const before=await db.query('select * from public.protected_retention_fixture order by kind');
+  let blocker;
+  if(sql){
+   const {default:postgres}=await import('postgres');blocker=postgres(url,{max:1,prepare:false});
+   await blocker.unsafe('begin');
+   await blocker.unsafe("select pg_advisory_xact_lock(hashtextextended('profile-terms:guest-retention',0))");
+   assert.equal(await cleanupExpiredGuestReceipts(tx),0,'another sweep owns retention; do not wait or mutate');
+   await blocker.unsafe('rollback');await blocker.unsafe('begin');await blocker.unsafe("select pg_advisory_xact_lock(hashtextextended('profile-terms:guest:expired_1',0))");await blocker.unsafe("select * from private.profile_terms_receipts where subject_id='expired_1' for update");
+  }
+  try{
+   assert.equal(await cleanupExpiredGuestReceipts(tx),sql?99:100);
+   assert.equal(await cleanupExpiredGuestReceipts(tx),2);
+   assert.equal(await cleanupExpiredGuestReceipts(tx),0);
+   if(blocker){
+    // Concurrent acceptance/renewal owns this row: sweep skips it, then keeps it live.
+    await blocker.unsafe("update private.profile_terms_receipts set expires_at=now()+interval '1 hour' where subject_id='expired_1'");
+    await blocker.unsafe('commit');assert.equal(await cleanupExpiredGuestReceipts(tx),0);
+   }
+  }finally{if(blocker)await blocker.end();}
+  const kept=(await db.query('select subject_id from private.profile_terms_receipts order by subject_id')).rows.map(r=>r.subject_id);
+  assert.deepEqual(kept,sql?['expired_1','live','no_expiry','owner']:['live','no_expiry','owner']);
+  assert.deepEqual(await db.query('select * from public.protected_retention_fixture order by kind'),before);
+  assert.deepEqual(Array.from((await db.query('select * from private.profile_terms_policy')).rows),[{active:false,variants_enabled:true}]);
+ }finally{await db.close();}
+});
+
+test('WS guest retention uses the existing cadence, serializes ticks and recovers after failure',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const source=await readFile(new URL('../ws-server/server.mjs',import.meta.url),'utf8');
+ const start=source.indexOf('let guestReceiptCleanupRunning=false;'),end=source.indexOf('const pokerAccessRefreshTimer =',start);
+ let release,calls=0,fail=false;const statements=[];
+ const context={loadBeginSqlWs:async()=>async fn=>{calls++;if(fail)throw Error('unavailable');return fn({unsafe:async q=>{statements.push(q);}});},cleanupExpiredGuestReceipts:async()=>new Promise(resolve=>{release=resolve;})};
+ runInNewContext(source.slice(start,end)+';this.tick=runGuestReceiptCleanupTick;',context);
+ const first=context.tick();await new Promise(resolve=>setImmediate(resolve));await context.tick();assert.equal(calls,1);
+ assert.deepEqual(statements,["set local lock_timeout='250ms';","set local statement_timeout='2s';"]);
+ release(0);await first;fail=true;await assert.rejects(context.tick(),/unavailable/);
+ fail=false;const recovered=context.tick();await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,3);release(0);await recovered;
+ const timer=source.slice(end,source.indexOf('pokerAccessRefreshTimer.unref();',end));
+ assert.match(timer,/void runGuestReceiptCleanupTick\(\)\.catch/);assert.doesNotMatch(timer,/if\s*\(/);
 });

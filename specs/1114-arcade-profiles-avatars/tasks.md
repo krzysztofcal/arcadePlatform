@@ -1,6 +1,11 @@
 # Tasks: profile i avatary — fazy A–D
 
-**Status**: v3.2 — lokalna faza A; architektura przyjęta, GO wyłącznie na lokalny kod i testy fazy A. **Spec**: [spec.md](spec.md), **Plan**: [plan.md](plan.md).
+> **Aktualny stan 2026-10-28 (zastępuje historyczne GO/statusy poniżej):** main0f77574d z #1156 zsynchronizowany lokalnie, bez przywrócenia AdSense. T012 owner PASS/COMMITTED; T010 G1/G2 PASS120/120/BIO absent, lokalny cleanup przygotowany; T001 i końcowy T010/T033 OPEN. Katalog16 i dotychczasowe avatary WWW/APK/WS owner PASS. Nowy bounded guest-retention runtime i kandydat legal2026-10-28-a2 wymagają przyszłego exact-SHA Stage odbioru. Terms nadal OFF; nowe dokumenty tylko szkice z placeholderem. Brak push/deploy/SQL/nowych receipts lub faz B/C/D.
+>
+> [Jeden kompletny diff, wyniki i następne GO](g-legal-a-consolidated.md), [cztery teksty/decyzje](legal-drafts/README.md), [LIA](g-legal-a-lia.md). Żadnego checklist OPEN nie oznaczać jako PASS samym CI.
+
+
+**Status**: v3.3 — skonsolidowana lokalna faza A; architektura przyjęta, GO wyłącznie na lokalny kod i testy fazy A. **Spec**: [spec.md](spec.md), **Plan**: [plan.md](plan.md).
 
 21 małych zadań zamiast33. Aktualna zgoda obejmuje wyłącznie lokalną implementację A; T004/T005 mają owner PASS, w tym zielony liściasty `zen-lime`, bez wariantu żółwia. Operacyjne części T007/T012/T033/T010 pozostają niedozwolone bez osobnego GO. Zachowano przydatne identyfikatory z review; luki numeracji są zamierzone, a wykonanie określają zależności. Usunięte zadania nie są prerequisites. Żadne pole nie oznacza GO migracji/PR/Stage/Production. Brak nowych issue.
 
@@ -88,3 +93,46 @@ Owner physical PASS: zapis bez500, Account/Online/Single Player/Offline avatar i
 **T010 audit PASS / implementation and contract OPEN (2026-10-27):** owner independently confirms T012 COMMITTED. No current Stage app BIO SQL reader found; existing contract.sql additionally drops preserved marker and is NOT approved for execution. Next G1: code-only reference cleanup + isolated post-contract fundamental fixture and guarded BIO-only forward step preparation. G2: separate exact-hash Stage contract GO; G3: independent Production schema-first/runtime-first GO. Preserve410 endpoints and V2 tracking/capabilities; no purge or Terms activation inferred. [Full reference matrix and files/methods](t010-contract-reference-review.md).
 
 **T010/G1 prepared (2026-10-27):** BIO-only guarded operations/versioned migration20261027173627 and Production-equivalent/manifest ready for review;119 applied files unchanged. Real PostgreSQL17 contract RED→GREEN, current composite/provisioning/CAS/privacy/V2-V3/rollback proven; existing38 tests PASS. Owner explicitly retains legacy helpers/security tests and freezes Account/CSS/i18n/APK. Stage119/BIO-present confirmed read-only; no current migration/activation authorized, remain Draft/apply-stage SKIPPED. G2 exact-file Stage GO required; T010 checkbox remains OPEN until actual contract/validation/final acceptance. [Prepared SQL hashes and receipts](t010-contract-reference-review.md).
+
+**T010/G2 actual Stage contract PASS (2026-10-27):** COMMITTED and independently verified120/120; BIO absent, handle_customized_at retained,51 profile projections/revisions/privacy/UUID unchanged. Two history/hash records inserted atomically, zero application-table DML. Existing-profile GET/onboarding/Account200, no PATCH/signup/funding, bounded42703/0A000 log count0. G1/G2 contract work complete; overall T010/final A acceptance remains OPEN pending independent legal/Terms T001/T033 owner gate. No Production-equivalent, purge, WS/APK, Ready/merge. [Executed receipt](t010-contract-reference-review.md).
+
+**G-LEGAL-A/T033 audit (2026-10-27):** owner independently confirms G2 PASS120/120/BIO absent/marker retained/51 accounts/catalog16ON/TermsOFF. G1/G2 contract complete; T010 final phase A and T033 Terms branch remain OPEN. Source boundaries and APK six legal documents reviewed; OWNER/LEGAL timing/content/retention/Play decisions and guarded activation SQL require review before separate Stage execution GO. No activation or receipt created. [Readiness report](g-legal-a-readiness.md).
+
+**G-LEGAL-A follow-up preparation:** legal PL/EN corrections and missing identity/contract/retention decisions documented in [g-legal-a-pl-en-proposals.md](g-legal-a-pl-en-proposals.md). Guarded enable-terms.sql prepared with unapproved version/reader pins, deliberately non-executable. PostgreSQL17 control regression prepared but NOT RUN per “SQL i testy … bez wykonania”; syntax/diff only. Guest private bot-game JOIN is not covered by account authoritative Terms gate; legal scope decision OPEN. No legal docs/APK/runtime/Stage change. G1/G2 PASS; T033/phase A OPEN.
+
+**G-LEGAL-A local validation GO executed:** real isolated PostgreSQL17.11 control test PASS1/1 (0 skipped). Fixed actual SQL42601 with CASE parentheses and fixture-only timestamptz precision; tested exact guards, changed receipt, late-error/trigger rollback, competing activation and2s row-lock timeout, one synthetic active update/repeat refusal. Corrected SQL SHA256351de4675eb77802a1736c1e217b8a48665dcd3cb76e8921c409de6826948338. Stage/Production untouched; actual legal/readers pins remain unapproved, LEGAL and activation OPEN. [Execution evidence and self-review](g-legal-a-pl-en-proposals.md#authorized-local-postgresql17-execution--2026-10-27).
+
+
+**G-LEGAL-A owner facts / hobby update:** Arcade is a free noncommercial personal hobby project; KCSWH is a project name, not a legal entity; unrelated suspended JDG must not be attributed. Updated conditional UŚUDE scope, independent GDPR/Play review and minimal bilingual proposals/owner decision table: [g-legal-a-hobby-proposal.md](g-legal-a-hobby-proposal.md). Legal identity/contact, lawful pre-Terms provisioning/publication, retention and final content/version remain OPEN. No legal HTML/version/SQL/test/runtime/APK/environment change; validated guarded SQL351de467… and local PostgreSQL PASS preserved.
+
+
+**G-LEGAL-A final owner-identity draft preparation:** owner approves KCSWH brand plus natural-person real name/contact only in legal documents, never game UI/JDG/home by default. Four complete PL/EN drafts and four remaining decisions are in [legal-drafts/README.md](legal-drafts/README.md). Name placeholder and unverified provider/retention fields are explicit publication STOP. Guest purge plan reuses bounded SQL and existing WS maintenance, not implemented. WWW Ads loader discrepancy noted without assuming actual revenue. Active documents/version/SQL/test/runtime/APK unchanged; no activation or new phase. LEGAL/T033 remain OPEN.
+
+
+**OWNER decision 2026-10-28:** zachować domyślnie publiczny profil (gaming name/handle, katalog, XP/poziom), istniejący ranking opt-out. Bez nowego opt-in/przełącznika. Google photo poza A/odrębna zgoda. Produkt zatwierdzony, LEGAL nadal OPEN: art.25(2), przedrejestracyjna informacja/interwencja i małoletni ocenione oddzielnie od widoczności przy stole w [LIA](g-legal-a-lia.md). Propozycja wyłącznie minimalnego copy istniejącego signup, bez implementacji. Pozostałe przygotowane prace/testy A bez zmian.
+
+
+**OWNER signup disclosure GO, lokalnie wykonane:** account.html + js/i18n.js + js/account-page.js; dokładny zatwierdzony tekst przy signup i przed Google, językowe Terms/Privacy, bez nowego ekranu/przełącznika lub zmiany OAuth.51/51 istniejących fundamentalnych auth/Account/mobile PASS, syntax/CSP PASS. WWW i przyszły APK współdzielą Account; obecnego APK nie przebudowano. Produkt zatwierdzony, T001/LEGAL i końcowy T010/T033 nadal OPEN. Szczegóły w g-legal-a-consolidated.md.
+
+
+**arcade-legal-docs finalization:** skill z załącznika w .agents/skills/arcade-legal-docs wraz z references; cztery kompletne teksty a2 z Krzysztof Cal, bez placeholderów/komentarzy technicznych. Kryteria retencji i źródła Netlify/Supabase/Upstash oraz warunkowe UŚUDE/nowelizacja06.11.2026 opisane w [raporcie finalizacji](g-legal-a-finalization.md). T001/T033/końcowy T010 nadal OPEN dla treści, ryzyka publiczności i nieograniczonej retencji. Brak push/publikacji/TermsON/SQL/APK.
+
+
+**Final OWNER review correction:** cztery teksty a2 po pełnej redakcji PL/EN; KCSWH=marka, Hub/Poker=usługi, Krzysztof Cal. Disclosure obejmuje niezalogowanych. Guest cleanup opisany jako obecny opportunistic + przygotowany niewdrożony niezależny WS. Manifest odświeżony. T001/T033/final T010 OPEN: prawne ryzyko publiczności oraz konkretna procedura żądań wobec historycznych danych bez TTL nie są zastąpione ogólną deklaracją. Brak mutacji/publikacji.
+
+
+### OWNER review — minimalna obsługa praw, 2026-10-28
+Privacy PL/EN opisują wyłącznie obecne oportunistyczne czyszczenie guest receipts; usunięto wzmiankę o niewdrożonym cyklu WS. Terms bez zmian. [Minimalna procedura i propozycja indywidualnego ukrycia profilu](g-legal-a-rights-minimal-procedure.md): TECH OPEN (brak indywidualnej blokady WWW, ograniczenia częściowej minimalizacji historii), LEGAL OPEN (art.25(2)/małoletni oraz konkretne uzasadnienie retencji). Default public ON zachowany; bez implementacji, mutacji i publikacji. T001/T033/finalny odbiór OPEN.
+
+
+### Indywidualna blokada profilu — lokalna implementacja 2026-10-28
+Zobacz [raport i bramki](g-legal-a-public-profile-block.md). Nowa migracja default false, operator-only flag, publiczne readery HTTP/rankingu/WS i cache fail-closed; testy lokalne PASS, pełny kontrakt schematu/hosted CI/rollout OPEN. Bez push i mutacji Stage. Terms i Privacy bez zmian. Retencja selektywna oraz LEGAL/finalny odbiór nadal OPEN. Nowa migracja może uruchomić DB Stage Apply: wymagany świadomie zatwierdzony schema-first rollout, nie przypadkowy push.
+
+
+Końcowe review G-LEGAL-A A/B/C lokalnie PASS — pełny PostgreSQL17 kontrakt oraz owner GET/PATCH/includePoker; usunięty replay bypass tożsamości. Szczegóły w g-legal-a-public-profile-block.md. Wdrożenie/LEGAL pozostają OPEN; bez push i Stage I/O.
+
+
+Stage schema-only APPLY: **BLOCKED / ROLLED BACK** — timeout osłony fingerprintów archiwum, bez COMMIT. Niezależny odczyt potwierdza 120/120 i brak nowej kolumny/guardów. Szczegóły: [raport operacyjny](stage-public-profile-block-apply.md). Bez retry i dalszego rollout.
+
+
+Stage schema-only, druga pojedyncza próba po osobnym GO: **COMMITTED PASS, 121/121, pending 0**, 51 profili bez zmian, wszystkie public_profile_blocked=false, Terms OFF/a1 i katalog16 ON. Pierwszy rollback pozostaje historią; aktualny wynik w stage-public-profile-block-apply.md. Brak push/deploy; rollout readerów oraz LEGAL nadal OPEN.

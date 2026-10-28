@@ -26,9 +26,9 @@ export function createPublicProfileRepository({ env = process.env, beginSql = be
 
     return beginSql(async (tx) => {
       const rows = await tx.unsafe(
-        `select user_id::text, handle, display_name, avatar_key, avatar_variant
+        `select user_id::text, handle, display_name, avatar_key, avatar_variant, public_profile_blocked
          from public.user_profiles
-         where user_id = any($1::uuid[]);`,
+         where user_id = any($1::uuid[]) and public_profile_blocked = false;`,
         [candidates]
       );
       const allowedIds = new Set(candidates);

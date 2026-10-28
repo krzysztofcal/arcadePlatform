@@ -14,13 +14,6 @@ function profileError(code, status = 400) {
   return error;
 }
 
-function normalizeHandle(value) {
-  const handle = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!HANDLE_RE.test(handle)) throw profileError("invalid_handle");
-  if (RESERVED_HANDLES.has(handle)) throw profileError("reserved_handle");
-  return handle;
-}
-
 function normalizeProfileRow(row) {
   if (!row) return null;
   return {
@@ -32,6 +25,7 @@ function normalizeProfileRow(row) {
     avatarRevision: Number(row.avatar_revision || 1),
     googlePhotoSuppressed: row.google_photo_suppressed === true,
     leaderboardVisible: row.leaderboard_visible !== false,
+    publicProfileBlocked: row.public_profile_blocked === true,
   };
 }
 
@@ -44,6 +38,7 @@ function profileAvatar(profile) {
 }
 
 function publicProfile(profile, stats = null) {
+  if (profile.publicProfileBlocked === true) return null;
   const result = {
     handle: profile.handle,
     displayName: profile.displayName,
@@ -58,7 +53,7 @@ function publicProfile(profile, stats = null) {
 
 function ownerProfile(profile) {
   return {
-    ...publicProfile(profile),
+    ...publicProfile({ ...profile, publicProfileBlocked: false }),
     avatarRevision: profile.avatarRevision || 1,
     avatarVariant: profile.avatarVariant,
     leaderboardVisible: profile.leaderboardVisible !== false,
@@ -98,8 +93,8 @@ async function findPublicProfile(handle, runSql = executeSql) {
   const normalized = typeof handle === "string" ? handle.trim().toLowerCase() : "";
   if (!HANDLE_RE.test(normalized) || RESERVED_HANDLES.has(normalized)) return null;
   const rows = await runSql(
-    `select user_id::text, handle, display_name, avatar_key, avatar_variant, avatar_revision, google_photo_suppressed, leaderboard_visible
-     from public.user_profiles where lower(handle) = $1 limit 1;`,
+    `select user_id::text, handle, display_name, avatar_key, avatar_variant, avatar_revision, google_photo_suppressed, leaderboard_visible, public_profile_blocked
+     from public.user_profiles where lower(handle) = $1 and public_profile_blocked = false limit 1;`,
     [normalized],
   );
   return normalizeProfileRow(rows?.[0]);
@@ -173,7 +168,6 @@ on conflict (user_id,output_path) do nothing;`, [userId,key]);
 export {
   ensureUserProfile,
   findPublicProfile,
-  normalizeHandle,
   ownerProfile,
   profileError,
   publicProfile,
