@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const security = require('../mobile/poker/security.cjs');
 const config = JSON.parse(readFileSync(new URL('../mobile/poker/stage-public.json', import.meta.url), 'utf8'));
 test('mobile cannot target Production, foreign Preview or credential-bearing origins', () => {
-  assert.equal(config.apiOrigin, 'https://deploy-preview-1155--playkcswh.netlify.app');
+  assert.equal(config.apiOrigin, 'https://deploy-preview-1161--playkcswh.netlify.app');
   const anon = JSON.parse(Buffer.from(config.supabaseAnonKey.split('.')[1], 'base64url').toString());
   assert.equal(anon.ref, 'krydukthwdvccggbyjfw');
   assert.equal(anon.role, 'anon');
