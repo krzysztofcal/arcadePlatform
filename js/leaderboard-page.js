@@ -289,6 +289,7 @@
 
   function load(){
     invalidate();
+    if (document.hidden) return Promise.resolve();
     var generation = state.generation;
     var meGeneration = state.meGeneration;
     var viewerId = null;
@@ -298,14 +299,14 @@
     showLoading();
     resetText(null);
     return Promise.resolve().then(function(){ return window.SupabaseAuth && window.SupabaseAuth.getCurrentUser(); }).then(function(user){
-      if (generation !== state.generation) return null;
+      if (generation !== state.generation || document.hidden) return null;
       if (!user || !user.id) throw { status: 401 };
       viewerId = user.id;
       return Promise.all([publicRequest(signal), meRequest(signal)]);
     }).then(async function(results){
-      if (generation !== state.generation) return;
+      if (generation !== state.generation || document.hidden) return;
       var viewer = await window.SupabaseAuth.getCurrentUser();
-      if (generation !== state.generation) return;
+      if (generation !== state.generation || document.hidden) return;
       if (!viewer || viewer.id !== viewerId) throw { status: 401 };
       state.publicData = results[0];
       if (meGeneration === state.meGeneration) state.me = results[1];
@@ -344,8 +345,9 @@
     nodes.retry.addEventListener('click', load);
     window.addEventListener('popstate', function(){ readRoute(); load(); });
     document.addEventListener('langchange', renderCurrent);
-    window.addEventListener('pageshow', load);
-    window.addEventListener('pagehide', invalidate);
+    document.addEventListener('visibilitychange', function(){
+      if (document.hidden) invalidate(); else load();
+    });
     try {
       if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function') window.SupabaseAuth.onAuthChange(function(){ invalidate(); showLoading(); setTimeout(load, 0); });
     } catch (_err){}

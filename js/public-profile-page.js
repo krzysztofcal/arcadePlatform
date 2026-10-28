@@ -72,16 +72,17 @@
 
   async function load(){
     reset();
+    if (document.hidden) return;
     var request = generation;
     setStatus(t('publicProfileLoading', 'Loading profile...'), '');
     try {
       var user = window.SupabaseAuth && await window.SupabaseAuth.getCurrentUser();
-      if (request !== generation) return;
+      if (request !== generation || document.hidden) return;
       if (!user){ showSignIn(); return; }
       var value = routeHandle();
       if (!value || !window.ProfileClient) throw { status: 404 };
       var profile = await window.ProfileClient.getPublic(value);
-      if (request !== generation) return;
+      if (request !== generation || document.hidden) return;
       render(profile);
     } catch (error){
       if (request !== generation || error && error.code === 'stale_identity') return;
@@ -94,8 +95,9 @@
     if (window.SupabaseAuth && window.SupabaseAuth.onAuthChange){
       window.SupabaseAuth.onAuthChange(function(){ reset(); setTimeout(load, 0); });
     }
-    window.addEventListener('pageshow', load);
-    window.addEventListener('pagehide', reset);
+    document.addEventListener('visibilitychange', function(){
+      if (document.hidden) reset(); else load();
+    });
     load();
   }
 
