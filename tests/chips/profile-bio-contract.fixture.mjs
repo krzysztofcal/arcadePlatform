@@ -110,3 +110,111 @@ export async function assertProfileBioContract(sql,dbUrl){
  const again=await invariant();for(const k of ['accounts','entries','ledger','poker','uploads'])assert.deepEqual(again[k],before[k],k);for(const object of before.objects)assert.ok(again.objects.some(o=>JSON.stringify(o)===JSON.stringify(object)),'historical tracker retained');
  process.stdout.write('Profile BIO contract: PostgreSQL provisioning/CAS/privacy/composite/V2-V3/rollback PASS\n');
 }
+
+// Same dedicated disposable harness, actual Production 67 shape; no BIO contract here.
+export async function assertProductionProfileEquivalents(sql,dbUrl){
+ const target=new URL(dbUrl);assert.ok(['127.0.0.1','localhost','[::1]'].includes(target.hostname));
+ assert.equal(process.env.CHIPS_MIGRATIONS_DISPOSABLE_CLUSTER_CONFIRMATION,'I_CONFIRM_THIS_CLUSTER_IS_DEDICATED_AND_DISPOSABLE');
+ const [cluster]=await sql`select system_identifier::text from pg_control_system()`;assert.equal(cluster.system_identifier,process.env.CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER);
+ // The historical runner creates a version-only history table; model observed Supabase metadata columns.
+ await sql.unsafe('alter table supabase_migrations.schema_migrations add column if not exists name text,add column if not exists statements text[]');
+ assert.equal(Number((await sql`select count(*) n from supabase_migrations.schema_migrations`)[0].n),67);
+ assert.equal((await sql`select to_regclass('private.profile_terms_policy') t`)[0].t,null,'no Stage Phase A hidden inside Production baseline');
+ // Model Supabase's observed per-role function defaults absent in bare PostgreSQL CI.
+ await sql.unsafe('grant usage on schema public to anon,authenticated,service_role;revoke all on function public.ensure_user_profile(uuid),public.create_user_profile_after_signup() from public,anon,authenticated,service_role;grant execute on function public.ensure_user_profile(uuid),public.create_user_profile_after_signup() to anon,authenticated,service_role');
+ const owner=(await sql`select user_id from public.user_profiles order by user_id limit 1`)[0].user_id;
+ await sql`update public.user_profiles set avatar_key=${randomUUID()+'.webp'},bio='Synthetic legacy BIO' where user_id=${owner}`;
+ const table=randomUUID();await sql`insert into public.poker_tables(id,created_by,max_players) values(${table},${owner},2)`;
+ await sql`insert into public.chips_accounts(account_type,system_key,balance) values('ESCROW',${'POKER_TABLE:'+table},0)`;
+ await sql`insert into public.poker_seats(table_id,user_id,seat_no,status,stack) values(${table},${owner},1,'INACTIVE',0)`;
+ await sql`insert into public.poker_state(table_id,version,state) values(${table},42,${JSON.stringify({stacks:{[owner]:0},potTotal:0,phase:'WAITING',handId:'synthetic-contract'})})`;
+ await sql`insert into public.poker_actions(table_id,user_id,version,action_type,amount) values(${table},${owner},42,'CHECK',0)`;
+
+ const rows=async table=>plain(await sql.unsafe(`select to_jsonb(t) value from ${table} t order by to_jsonb(t)::text`));
+ const tables=['auth.users','public.user_profiles','public.chips_accounts','public.chips_transactions','public.chips_entries','public.chips_transaction_idempotency','public.poker_state','public.poker_tables','public.poker_seats','public.poker_actions','public.account_deletion_requests','public.account_deletion_release','public.profile_avatar_uploads','private.account_avatar_objects','private.avatar_tracking_cutover','storage.buckets','storage.objects'];
+ const snapshot=async()=>{const data={};for(const t of tables)data[t]=await rows(t);return data;};
+ const before=await snapshot();
+ const rawPhase=read('supabase/production-migrations/20261026120000_profile_phase_a.sql');
+ const rawBlock=read('supabase/production-migrations/20261028180000_public_profile_block.sql');
+ const {createHash}=await import('node:crypto');const hash=s=>createHash('sha256').update(s).digest('hex');
+ const phase=rawPhase.replaceAll('7575202818581710058',cluster.system_identifier),block=rawBlock.replaceAll('7575202818581710058',cluster.system_identifier);
+ const reject=async(text,pattern)=>{await assert.rejects(sql.unsafe(text),pattern);await sql.unsafe('rollback');};
+ const metadata=async()=>plain(await sql`select * from supabase_migrations.schema_migrations order by version`);
+ const originalHistory=await metadata();
+ await reject(phase,/identity\/confirmation/);
+ await sql.unsafe("set arcade.production_profile_confirmation='INSTALL PROFILE PHASE A otbqfijerkieoxwpxjnm'");
+ await reject(phase,/source hash/);
+ await sql`select set_config('arcade.production_profile_source_sha256',${hash(rawPhase)},false)`;
+ await sql`insert into supabase_migrations.schema_migrations(version) values('20990101000000')`;
+ await reject(phase,/history drift/);await sql`delete from supabase_migrations.schema_migrations where version='20990101000000'`;
+ await reject(phase.replaceAll(cluster.system_identifier,'0'),/identity\/confirmation/);
+ await sql.unsafe('create function public.fixture_profile_reader(uuid) returns public.user_profiles language sql security definer as $$select p.* from public.user_profiles p where user_id=$1$$');
+ await reject(phase,/Unexpected related SECURITY DEFINER/);await sql.unsafe('drop function public.fixture_profile_reader(uuid)');
+ const locker=postgres(dbUrl,{max:1,prepare:false});try{await locker.begin(async tx=>{await tx.unsafe("select pg_advisory_xact_lock(hashtextextended('chips-ledger-production-automation-v1:otbqfijerkieoxwpxjnm',0))");await reject(phase,/coordination busy/);});}finally{await locker.end();}
+ await reject(phase.replace(/commit;\s*$/i,'select 1/0;commit;'),e=>e.code==='22012');
+ assert.equal((await sql`select to_regclass('private.profile_terms_policy') t`)[0].t,null);assert.deepEqual(await snapshot(),before);assert.deepEqual(await metadata(),originalHistory);
+ // Operator batch: exactly the two reviewed operational bodies, no nested BEGIN/COMMIT.
+ const core=text=>text.replace(/^begin;$/m,'').replace(/commit;\s*$/i,'');
+ const pair="begin;set local arcade.production_profile_confirmation='INSTALL PROFILE PHASE A otbqfijerkieoxwpxjnm';set local arcade.production_profile_source_sha256='"+hash(rawPhase)+"';\n"+core(phase)+"\nset local arcade.production_profile_confirmation='INSTALL PUBLIC PROFILE BLOCK otbqfijerkieoxwpxjnm';set local arcade.production_profile_source_sha256='"+hash(rawBlock)+"';\n"+core(block)+"\ncommit;";
+ await reject(pair.replace(/commit;\s*$/i,'select 1/0;commit;'),e=>e.code==='22012');assert.deepEqual(await snapshot(),before);assert.deepEqual(await metadata(),originalHistory);assert.equal((await sql`select to_regclass('private.profile_terms_policy') t`)[0].t,null);
+ await sql.unsafe('begin;'+core(phase));
+ const phaseData=await snapshot();for(const row of phaseData['public.user_profiles']){assert.equal(row.value.avatar_revision,1);assert.equal(row.value.google_photo_suppressed,false);delete row.value.avatar_revision;delete row.value.google_photo_suppressed;}assert.deepEqual(phaseData,before);
+ await sql.unsafe("set arcade.production_profile_confirmation='INSTALL PUBLIC PROFILE BLOCK otbqfijerkieoxwpxjnm'");
+ await sql`select set_config('arcade.production_profile_source_sha256',${hash(rawBlock)},false)`;
+ const beforeBlock=await snapshot(),history68=await metadata();
+ const rejectBlock=async(text,pattern)=>{await sql.unsafe('savepoint block_attempt');await assert.rejects(sql.unsafe(text),pattern);await sql.unsafe('rollback to savepoint block_attempt');};
+ await sql`update supabase_migrations.schema_migrations set statements=array['source_sha256=drift'] where version='20261026120000'`;await rejectBlock(core(block),/source receipt drift/);await sql`update supabase_migrations.schema_migrations set statements=${['source_sha256='+hash(rawPhase)]} where version='20261026120000'`;
+ await rejectBlock(core(block)+'select 1/0;',e=>e.code==='22012');assert.deepEqual(await snapshot(),beforeBlock);assert.deepEqual(await metadata(),history68);
+ await sql.unsafe(core(block));
+ const after=await snapshot();for(const row of after['public.user_profiles']){assert.equal(row.value.public_profile_blocked,false);delete row.value.public_profile_blocked;}assert.deepEqual(after,beforeBlock);
+ await sql.unsafe('rollback');assert.deepEqual(await snapshot(),before);assert.deepEqual(await metadata(),originalHistory);
+ // Positive Production path: one outer BEGIN, unchanged operational bodies, one final COMMIT.
+ assert.equal((pair.match(/^begin;|^commit;$/gm)||[]).length,2);
+ await sql.unsafe(pair);
+ const committed=await snapshot();for(const row of committed['public.user_profiles']){assert.equal(row.value.avatar_revision,1);assert.equal(row.value.google_photo_suppressed,false);assert.equal(row.value.public_profile_blocked,false);delete row.value.avatar_revision;delete row.value.google_photo_suppressed;delete row.value.public_profile_blocked;}assert.deepEqual(committed,before);
+ const committedHistory=await metadata();assert.deepEqual(committedHistory.filter(r=>!['20261026120000','20261028180000'].includes(r.version)),originalHistory);
+ for(const [version,source] of [['20261026120000',rawPhase],['20261028180000',rawBlock]])assert.deepEqual(committedHistory.find(r=>r.version===version).statements,['source_sha256='+hash(source)]);
+ assert.equal(Number((await sql`select count(*) n from supabase_migrations.schema_migrations`)[0].n),69);
+ await sql.unsafe("set arcade.production_profile_confirmation='INSTALL PUBLIC PROFILE BLOCK otbqfijerkieoxwpxjnm'");
+ await sql`select set_config('arcade.production_profile_source_sha256',${hash(rawBlock)},false)`;
+ await reject(block,/history drift/);
+ for(const role of ['anon','authenticated']){
+  await assert.rejects(sql.begin(async tx=>{await tx.unsafe('set local role '+role);await tx`select public.ensure_user_profile(${owner}::uuid)`;}),e=>e.code==='42501');
+  assert.equal((await sql`select has_function_privilege(${role},'public.create_user_profile_after_signup()','EXECUTE') allowed`)[0].allowed,false);
+ }
+ assert.equal((await sql`select has_table_privilege('service_role','private.profile_terms_policy','INSERT,UPDATE,DELETE,TRUNCATE') or has_table_privilege('service_role','private.profile_terms_receipts','UPDATE,TRUNCATE') unexpected`)[0].unexpected,false);
+ const id=randomUUID();await sql`insert into auth.users(id) values(${id})`;
+ await sql.begin(async tx=>{await tx.unsafe('set local role service_role');const [p]=await tx`select * from public.ensure_user_profile(${id}::uuid)`;assert.equal(p.user_id,id);assert.ok(PUBLIC_AVATAR_VARIANTS.slice(0,6).includes(p.avatar_variant));assert.equal(p.public_profile_blocked,false);});
+ const deps={env:{ACCOUNT_DELETION_ENABLED:'0'},executeSql:(q,p=[])=>sql.unsafe(q,p),beginSql:fn=>sql.begin(fn),syncLeaderboardVisibility:async()=>{}};
+ const p=await ensureUserProfile(owner,deps);assert.ok(p.avatarKey,'legacy avatar key retained');
+ const status=await import('../../shared/profile-terms.mjs');const terms=await sql.begin(tx=>status.readTermsStatus(tx,{kind:'account',id:owner}));assert.equal(terms.required,false);assert.equal(terms.variantsEnabled,false);assert.equal(terms.version,'2026-10-26-a1');
+ const {readLeaderboardProfiles}=await import('../../netlify/functions/_shared/xp-leaderboard-read.mjs');
+ await updateUserProfile(owner,{leaderboardVisible:true},deps);assert.equal((await readLeaderboardProfiles([owner],deps.executeSql)).size,1);
+ await sql`update public.user_profiles set public_profile_blocked=true where user_id=${owner}`;assert.equal(await findPublicProfile(p.handle,deps.executeSql),null);assert.equal((await readLeaderboardProfiles([owner],deps.executeSql)).size,0);
+ const {createProfileMeHandler}=await import('../../netlify/functions/profile-me.mjs');
+ const handler=createProfileMeHandler({verifySupabaseJwt:async()=>({valid:true,userId:owner}),ensureUserProfile:id=>ensureUserProfile(id,deps),updateUserProfile:(id,patch)=>updateUserProfile(id,patch,deps)});
+ const event={httpMethod:'GET',headers:{origin:'https://arcade.test',authorization:'Bearer fixture'},queryStringParameters:{}};
+ assert.equal((await handler(event)).statusCode,200);
+ assert.equal((await handler({...event,httpMethod:'PATCH',body:JSON.stringify({leaderboardVisible:true})})).statusCode,200);
+ const freshProfile=await ensureUserProfile(id,deps);assert.equal((await updateUserProfile(id,{avatarVariant:'fox-blue',expectedRevision:freshProfile.avatarRevision},deps)).avatarVariant,'fox-blue');
+ await assert.rejects(updateUserProfile(id,{avatarVariant:'zen-lime',expectedRevision:freshProfile.avatarRevision},deps),{code:'avatar_variants_not_active'});
+ await assert.rejects(updateUserProfile(id,{avatarVariant:'falcon-orange',expectedRevision:freshProfile.avatarRevision},deps),{code:'stale_avatar_revision'});
+ assert.equal((await sql`select public_profile_blocked from public.ensure_user_profile(${owner}::uuid)`)[0].public_profile_blocked,true);
+ await assert.rejects(sql.begin(async tx=>{await tx.unsafe('grant select,update on public.user_profiles to service_role;create policy fixture_profile_operator_guard on public.user_profiles to service_role using(true) with check(true);set local role service_role');await tx`update public.user_profiles set public_profile_blocked=false where user_id=${owner}`;}),e=>e.code==='42501');
+ await sql`update public.user_profiles set public_profile_blocked=false where user_id=${owner}`;
+ // Execute actual old deployed reader/owner/WS source, with all SQL pinned to this fixture.
+ const {execFileSync}=await import('node:child_process');const {pathToFileURL}=await import('node:url');const path=await import('node:path');const os=await import('node:os');
+ const sha='a63e44b0d9a1d3625956ed98b75c1242989efdd3';
+ const files=['netlify/functions/_shared/user-profile.mjs','netlify/functions/profile-me.mjs','shared/profile-avatar-projection.mjs','ws-server/poker/profile/public-profile-repository.mjs','ws-server/poker/read-model/public-poker-identity.mjs'];
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pr1155-old-readers-'));const locations=new Map(files.map(f=>[f,path.join(dir,f)]));
+ for(const f of files){const source=execFileSync('git',['show',sha+':'+f],{encoding:'utf8'});const code=source.replace(/(from\s+|import\s*)(['"])(\.[^'"]+)\2/g,(all,prefix,quote,relative)=>{const resolved=path.posix.normalize(path.posix.join(path.posix.dirname(f),relative));return prefix+quote+pathToFileURL(locations.get(resolved)||path.resolve(resolved)).href+quote;});fs.mkdirSync(path.dirname(locations.get(f)),{recursive:true});fs.writeFileSync(locations.get(f),code);}
+ const old=await import(pathToFileURL(locations.get(files[0])).href);const oldProfile=await old.ensureUserProfile(owner,deps);assert.equal(oldProfile.userId,owner);assert.equal(old.ownerProfile(oldProfile).bio,'Synthetic legacy BIO');assert.equal((await old.findPublicProfile(oldProfile.handle,deps.executeSql)).userId,owner);
+ const {createProfileMeHandler:oldHandler}=await import(pathToFileURL(locations.get(files[1])).href);assert.equal((await oldHandler({verifySupabaseJwt:async()=>({valid:true,userId:owner}),ensureUserProfile:id=>old.ensureUserProfile(id,deps)})(event)).statusCode,200);
+ const {createPublicProfileRepository}=await import(pathToFileURL(locations.get(files[3])).href);const ws=await createPublicProfileRepository({env:{SUPABASE_DB_URL:dbUrl},beginSql:fn=>sql.begin(fn)}).loadPublicProfiles([owner]);assert.equal(ws[owner].handle,p.handle);
+ const oldApi=oldHandler({verifySupabaseJwt:async()=>({valid:true,userId:owner}),ensureUserProfile:id=>old.ensureUserProfile(id,deps),updateUserProfile:(id,patch)=>old.updateUserProfile(id,patch,deps)});
+ assert.equal((await oldApi({...event,httpMethod:'PATCH',body:JSON.stringify({bio:'Synthetic legacy BIO'})})).statusCode,200);
+ const {assertAccountActive}=await import('../../shared/account-deletion.mjs');
+ await sql.begin(async tx=>{await requestDeletion(tx,id);await assert.rejects(tx.savepoint(sp=>assertAccountActive(sp,id)),{code:'account_not_active'});throw Object.assign(new Error('synthetic deletion rollback'),{fixtureRollback:true});}).catch(e=>{if(!e.fixtureRollback)throw e;});
+ const financialAfter=await snapshot();for(const t of tables.filter(t=>!['auth.users','public.user_profiles'].includes(t)))assert.deepEqual(financialAfter[t],before[t],t);
+ process.stdout.write('[klog] production_profile_equivalents PASS: exact67→69; OFF/6; profiles preserved; RPC denied; signup/backend/owner/CAS/leaderboard/block; late rollback; actual old deployed SQL readers/owner PATCH executed; protectedProfiles='+before['public.user_profiles'].length+'\n');
+}

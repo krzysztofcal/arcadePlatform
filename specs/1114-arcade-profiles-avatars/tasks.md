@@ -136,3 +136,13 @@ Stage schema-only APPLY: **BLOCKED / ROLLED BACK** — timeout osłony fingerpri
 
 
 Stage schema-only, druga pojedyncza próba po osobnym GO: **COMMITTED PASS, 121/121, pending 0**, 51 profili bez zmian, wszystkie public_profile_blocked=false, Terms OFF/a1 i katalog16 ON. Pierwszy rollback pozostaje historią; aktualny wynik w stage-public-profile-block-apply.md. Brak push/deploy; rollout readerów oraz LEGAL nadal OPEN.
+
+
+Finalny niefinansowy block/unblock Stage smoke **PASS**: dokładnie przypięte konto false→true→false, HTTP200→404→200, ranking widoczny→brak→widoczny, owner GET przed/w trakcie i Lobby authOk potwierdzone przez OWNER. Chronione pola przywrócone; expected updated_at zmienione przez trigger. Seated WS snapshot/replay **NOT TESTED** (brak miejsca, bez fundedJOIN). 121/121, zero blokad, Terms OFF/a1. Raport stage-block-unblock-smoke.md; dokumentacja lokalna bez push. LEGAL pozostaje OPEN.
+
+### OWNER-accepted Stage and Production schema — 2026-10-28
+Stage block/unblock smoke is OWNER-ACCEPTED PASS in the documented nonfinancial scope; live seated WS snapshot/replay remains NOT TESTED, existing fundamental regressions PASS, no funded JOIN required just for coverage. See [Stage smoke](stage-block-unblock-smoke.md).
+
+Production schema-only pair is **COMMITTED / OWNER-ACCEPTED PASS, 67→69**: both exact source receipts, eleven original profiles and protected fields unchanged; Terms OFF/a1, catalog OFF/six, zero blocks, legacy BIO/avatar_key retained. Existing Production WWW/WS releases unchanged. See [execution report](production-schema-67-69-execution.md) and [equivalent SQL/test review](production-equivalents-review.md). The two applied SQL files and historical hashes are immutable; manifest contains14 replacements. Stage remains independently121/121 as last verified, not a claim of Production historical69/69 file hashes.
+
+T001/LEGAL, T033 Terms/publication acceptance and final Phase A sign-off remain OPEN. #1158 authenticated profile/leaderboard reads are a separate proposed stack; #1157 retention is outside this PR. [Publication handoff](publication-handoff.md) defines the local allowlist, automatic Preview/CI/APK effects and the STOP before push. No new runtime changes, remote mutations or release authorization are introduced by this documentation.

@@ -1179,6 +1179,22 @@
       "source_versions": [
         "20261027173627"
       ]
+    },
+    {
+      "file": "20261026120000_profile_phase_a.sql",
+      "purpose": "#1114 guarded additive Production schema only; separate exact-file GO; Terms/catalog/profile blocks remain OFF",
+      "sha256": "edf83e55891441213695b8c9f04d72b2ffd34151aa58239179fa60056ff6a862",
+      "prerequisites": [
+        "20261022091126_account_avatar_known_capability_policy.sql"
+      ]
+    },
+    {
+      "file": "20261028180000_public_profile_block.sql",
+      "purpose": "#1114 guarded additive Production schema only; separate exact-file GO; Terms/catalog/profile blocks remain OFF",
+      "sha256": "87d747891527dbe85fe542af91fe0965a2fb67ebd4222dab5f40bee52fb32eaa",
+      "prerequisites": [
+        "20261026120000_profile_phase_a.sql"
+      ]
     }
   ],
   "provenance_rules": [
