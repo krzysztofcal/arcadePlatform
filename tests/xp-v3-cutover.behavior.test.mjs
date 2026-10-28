@@ -51,17 +51,22 @@ test('V3 missing Redis credentials denies reads, writes, rate limits and XP HTTP
     await symlink(resolve('node_modules'),join(cwd,'node_modules'),'dir');
     await writeFile(join(cwd,'netlify/functions/_generated/deploy-context.mjs'),'export const BUILD_DEPLOY_CONTEXT="deploy-preview"; export const BUILD_DEPLOY_ORIGIN="https://deploy-preview-1124--playkcswh.netlify.app"; export const BUILD_ARTIFACT_IDENTITY="netlify-functions"; export const BUILD_XP_REDIS_VERSION="3"; export const BUILD_XP_REDIS_ENV="stage";');
     const script=`import assert from 'node:assert/strict';
+      import {createHmac} from 'node:crypto';
+      const header=Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
+      const payload=Buffer.from(JSON.stringify({sub:'${OWNER}',exp:Math.floor(Date.now()/1000)+60})).toString('base64url');
+      const jwt=header+'.'+payload+'.'+createHmac('sha256','fixture-jwt-secret').update(header+'.'+payload).digest('base64url');
       globalThis.fetch=()=>{throw new Error('unexpected network');};
       const m=await import('./netlify/functions/_shared/store-upstash.mjs');
       assert.equal(m.isMemoryStore,false); assert.equal(m.xpStoreUnavailable,true);
       for(const operation of [()=>m.store.get('key'),()=>m.store.set('key','value'),()=>m.atomicRateLimitIncr('key'),()=>m.getUserProfile('id'),()=>m.saveUserProfile({userId:'id',totalXp:1})])await assert.rejects(operation,{code:'xp_store_unavailable',status:503});
       for(const name of ['calculate-xp','start-session','xp-leaderboard','xp-leaderboard-me','profile-public','admin-xp-leaderboard-maintenance']){
         const {handler}=await import('./netlify/functions/'+name+'.mjs');
-        const result=await handler({httpMethod:'POST',headers:{origin:'https://deploy-preview-1124--playkcswh.netlify.app'},body:'{}'});
+        const gated=['profile-public','xp-leaderboard'].includes(name);
+        const result=await handler({httpMethod:gated?'GET':'POST',headers:{origin:'https://deploy-preview-1124--playkcswh.netlify.app',authorization:'Bearer '+jwt},body:'{}'});
         assert.equal(result.statusCode,503,name); assert.equal(JSON.parse(result.body).error,'xp_store_unavailable',name);
       }`;
     for(const [url,token] of [['',''],['https://fixture.invalid',''],['','fixture'],[' ','fixture']]){
-      const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd,encoding:'utf8',env:{...process.env,XP_CORS_ALLOW:'https://deploy-preview-1124--playkcswh.netlify.app',XP_TEST_MODE:'0',ACCOUNT_DELETION_ENABLED:'0',CONTEXT:'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:'stage',XP_KEY_NS:ns,ARCADE_STAGE_REDIS_TOKEN:'',UPSTASH_REDIS_REST_URL:url,UPSTASH_REDIS_REST_TOKEN:token}});
+      const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd,encoding:'utf8',env:{...process.env,XP_CORS_ALLOW:'https://deploy-preview-1124--playkcswh.netlify.app',XP_TEST_MODE:'0',SUPABASE_JWT_SECRET:'fixture-jwt-secret',ACCOUNT_DELETION_ENABLED:'0',CONTEXT:'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:'stage',XP_KEY_NS:ns,ARCADE_STAGE_REDIS_TOKEN:'',UPSTASH_REDIS_REST_URL:url,UPSTASH_REDIS_REST_TOKEN:token}});
       assert.equal(result.status,0,result.stderr+result.stdout);
     }
     const memoryScript="import assert from 'node:assert/strict'; const m=await import('./netlify/functions/_shared/store-upstash.mjs'); assert.equal(m.isMemoryStore,true); await m.store.set('fixture','ok'); assert.equal(await m.store.get('fixture'),'ok');";
@@ -126,8 +131,8 @@ test('Redis read quota/error never bypasses leaderboard rate limits',async()=>{
  const {allowLeaderboardRead}=await import('../netlify/functions/_shared/xp-leaderboard-http.mjs');
  await assert.rejects(allowLeaderboardRead({headers:{}},{increment:async()=>{throw Error('quota');}}),{status:503});
  const {createXpLeaderboardHandler}=await import('../netlify/functions/xp-leaderboard.mjs');
- const handler=createXpLeaderboardHandler({leaderboardEnabled:()=>true,allowLeaderboardRead:async()=>{throw Object.assign(Error('quota'),{status:503});}});
- const result=await handler({httpMethod:'GET',headers:{origin:'https://arcade.test'}});
+ const handler=createXpLeaderboardHandler({verifySupabaseJwt:async()=>({valid:true,userId:OTHER}),leaderboardEnabled:()=>true,allowLeaderboardRead:async()=>{throw Object.assign(Error('quota'),{status:503});}});
+ const result=await handler({httpMethod:'GET',headers:{origin:'https://arcade.test',authorization:'Bearer fixture'}});
  assert.equal(result.statusCode,503);
 });
 

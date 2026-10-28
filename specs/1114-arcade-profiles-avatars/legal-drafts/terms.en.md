@@ -18,7 +18,7 @@ The website requires a browser supporting JavaScript, cookies and local storage.
 
 Registration creates an account. Signing in with Google for the first time may also create one. An account and automatically generated profile may be created before you accept the Terms. Signing in does not itself mean acceptance.
 
-Player profiles are public by default. Anyone, including someone who is not signed in, can see the automatically assigned player name and public handle, catalog avatar, XP and level. Your email and sign-in credentials are not part of the public profile. Accounts appear in the leaderboard by default; you can opt out in Account, but this does not hide the public profile. At a table, names and avatars help participants recognize each other.
+Player profiles are available to signed-in users by default. After signing in, they can see the automatically assigned player name and public handle, catalog avatar, XP and level. Your email and sign-in credentials are not part of the public profile. Leaderboard data is available after signing in. Accounts appear in the leaderboard by default; you can opt out in Account, but this does not hide the public profile. At a table, names and avatars help participants recognize each other.
 
 When acceptance of the current Terms is required, you must accept the displayed version before starting a new game while signed in, changing your public avatar, or sending a reaction or gift. We record the version and confirmation time. Acceptance has no retroactive effect and is not consent to analytics or publication of a Google photo. “Not now” records no acceptance.
 

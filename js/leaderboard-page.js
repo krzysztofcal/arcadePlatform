@@ -87,8 +87,11 @@
   }
 
   function publicRequest(signal){
-    var params = new URLSearchParams({ period: state.period, page: String(state.page), limit: String(PAGE_LIMIT) });
-    return fetch(PUBLIC_URL + '?' + params.toString(), { method: 'GET', headers: { Accept: 'application/json' }, credentials: 'omit', signal: signal }).then(parsePayload);
+    return accessToken().then(function(token){
+      if (!token) throw { status: 401 };
+      var params = new URLSearchParams({ period: state.period, page: String(state.page), limit: String(PAGE_LIMIT) });
+      return fetch(PUBLIC_URL + '?' + params.toString(), { method: 'GET', headers: { Accept: 'application/json', Authorization: 'Bearer ' + token }, credentials: 'omit', cache: 'no-store', signal: signal }).then(parsePayload);
+    });
   }
 
   function accessToken(){
@@ -182,6 +185,8 @@
   }
 
   function showLoading(){
+    state.kind = null;
+    if (nodes.signIn) nodes.signIn.hidden = true;
     nodes.loading.hidden = false;
     nodes.results.hidden = true;
     nodes.state.hidden = true;
@@ -189,7 +194,11 @@
   }
 
   function showState(kind){
-    var content = kind === 'rate_limit'
+    state.kind = kind;
+    if (nodes.signIn) nodes.signIn.hidden = kind !== 'signin';
+    var content = kind === 'signin'
+      ? ['leaderboardSignInTitle', 'Sign in to view the leaderboard', 'browserSignInHint', 'Browser sign-in is separate from the app. After signing in, return to this page.']
+      : kind === 'rate_limit'
       ? ['leaderboardRateLimitTitle', 'Please wait a moment', 'leaderboardRateLimitText', 'The leaderboard was refreshed too often. Try again in one minute.']
       : kind === 'not_enabled'
         ? ['leaderboardUnavailableTitle', 'Leaderboard unavailable', 'leaderboardNotEnabledText', 'The leaderboard is not available in this environment yet.']
@@ -201,7 +210,7 @@
     nodes.state.hidden = false;
     nodes.stateTitle.textContent = t(content[0], content[1]);
     nodes.stateText.textContent = t(content[2], content[3]);
-    nodes.retry.hidden = kind === 'empty' || kind === 'not_enabled';
+    nodes.retry.hidden = kind === 'empty' || kind === 'not_enabled' || kind === 'signin';
     nodes.live.textContent = nodes.stateTitle.textContent + '. ' + nodes.stateText.textContent;
   }
 
@@ -260,25 +269,44 @@
   function renderCurrent(){
     setPeriodControls();
     if (state.publicData) renderResults(state.publicData, state.me);
+    else if (state.kind) showState(state.kind);
     document.title = t('leaderboardPageTitle', 'XP Leaderboard') + ' - Arcade Hub';
   }
 
-  function load(){
+  function invalidate(){
     state.generation += 1;
     state.meGeneration += 1;
-    var generation = state.generation;
-    var meGeneration = state.meGeneration;
     if (state.controller) state.controller.abort();
-    state.controller = typeof AbortController === 'function' ? new AbortController() : null;
-    var signal = state.controller ? state.controller.signal : undefined;
     state.publicData = null;
     state.me = null;
     state.hasMore = false;
+    clear(nodes.podium);
+    clear(nodes.list);
+    clear(nodes.meRow);
+    nodes.results.hidden = true;
+    nodes.live.textContent = '';
+  }
+
+  function load(){
+    invalidate();
+    var generation = state.generation;
+    var meGeneration = state.meGeneration;
+    var viewerId = null;
+    state.controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var signal = state.controller ? state.controller.signal : undefined;
     setPeriodControls();
     showLoading();
     resetText(null);
-    return Promise.all([publicRequest(signal), meRequest(signal)]).then(function(results){
+    return Promise.resolve().then(function(){ return window.SupabaseAuth && window.SupabaseAuth.getCurrentUser(); }).then(function(user){
+      if (generation !== state.generation) return null;
+      if (!user || !user.id) throw { status: 401 };
+      viewerId = user.id;
+      return Promise.all([publicRequest(signal), meRequest(signal)]);
+    }).then(async function(results){
       if (generation !== state.generation) return;
+      var viewer = await window.SupabaseAuth.getCurrentUser();
+      if (generation !== state.generation) return;
+      if (!viewer || viewer.id !== viewerId) throw { status: 401 };
       state.publicData = results[0];
       if (meGeneration === state.meGeneration) state.me = results[1];
       renderResults(state.publicData, state.me);
@@ -286,22 +314,11 @@
     }).catch(function(error){
       if (error && error.name === 'AbortError') return;
       if (generation !== state.generation) return;
-      if (error && (error.status === 429 || error.code === 'rate_limit_exceeded')) showState('rate_limit');
+      if (error && error.status === 401) showState('signin');
+      else if (error && (error.status === 429 || error.code === 'rate_limit_exceeded')) showState('rate_limit');
       else if (error && error.status === 404) showState('not_enabled');
       else showState('error');
       klog('leaderboard_page_failed', { period: state.period, page: state.page, status: error && error.status ? error.status : 0 });
-    });
-  }
-
-  function refreshMe(){
-    state.meGeneration += 1;
-    var generation = state.meGeneration;
-    state.me = null;
-    if (state.publicData) renderCurrent();
-    return meRequest().then(function(me){
-      if (generation !== state.meGeneration) return;
-      state.me = me;
-      if (state.publicData) renderCurrent();
     });
   }
 
@@ -327,8 +344,10 @@
     nodes.retry.addEventListener('click', load);
     window.addEventListener('popstate', function(){ readRoute(); load(); });
     document.addEventListener('langchange', renderCurrent);
+    window.addEventListener('pageshow', load);
+    window.addEventListener('pagehide', invalidate);
     try {
-      if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function') window.SupabaseAuth.onAuthChange(function(){ refreshMe().catch(function(){}); });
+      if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function') window.SupabaseAuth.onAuthChange(function(){ invalidate(); showLoading(); setTimeout(load, 0); });
     } catch (_err){}
   }
 
@@ -340,6 +359,7 @@
       live: document.getElementById('leaderboardLive'),
       loading: document.getElementById('leaderboardLoading'),
       state: document.getElementById('leaderboardState'),
+      signIn: document.getElementById('leaderboardSignIn'),
       stateTitle: document.getElementById('leaderboardStateTitle'),
       stateText: document.getElementById('leaderboardStateText'),
       retry: document.getElementById('leaderboardRetry'),

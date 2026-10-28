@@ -200,3 +200,19 @@
   from = "/u/:handle"
   to = "/profile.html"
   status = 200
+
+# Player data requires authenticated API access; noindex is not authorization.
+[[headers]]
+  for = "/u/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/profile.html"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/leaderboard.html"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"

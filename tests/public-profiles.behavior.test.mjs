@@ -338,7 +338,7 @@ test("leaderboard opt-in commits the database before Redis and an identical retr
 
 test("profile-public is disabled by default and uses generic not found responses", async () => {
   let reads = 0;
-  const disabled = createProfilePublicHandler({
+  const disabled = createProfilePublicHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),
     env: { PUBLIC_PROFILES_ENABLED: "0" },
     findPublicProfile: async () => { reads += 1; return profile(); },
     allowPublicRead: async () => true,
@@ -348,7 +348,7 @@ test("profile-public is disabled by default and uses generic not found responses
   assert.deepEqual(JSON.parse(disabledResponse.body), { error: "not_found" });
   assert.equal(reads, 0);
 
-  const enabled = createProfilePublicHandler({
+  const enabled = createProfilePublicHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),
     env: { PUBLIC_PROFILES_ENABLED: "1" },
     findPublicProfile: async () => null,
     allowPublicRead: async () => true,
@@ -360,7 +360,7 @@ test("profile-public is disabled by default and uses generic not found responses
 });
 
 test("profile-public returns current XP and level without internal fields", async () => {
-  const handler = createProfilePublicHandler({
+  const handler = createProfilePublicHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),
     env: { PUBLIC_PROFILES_ENABLED: "1" },
     findPublicProfile: async () => profile(),
     getUserXpTotal: async (userId) => {
@@ -386,7 +386,7 @@ test("profile-public returns current XP and level without internal fields", asyn
 });
 
 test("profile-public fails closed when the XP store read fails", async () => {
-  const handler = createProfilePublicHandler({
+  const handler = createProfilePublicHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),
     env: { PUBLIC_PROFILES_ENABLED: "1" },
     findPublicProfile: async () => profile(),
     getUserXpTotal: async () => { throw new Error("upstash_unavailable"); },
@@ -413,7 +413,7 @@ test("profile-public enables deploy previews when the function scope lacks the f
  assert.equal(ownerProfile(blocked).handle,blocked.handle);
  assert.equal(projectPublicPokerIdentity({public_profile_blocked:true,handle:blocked.handle,display_name:blocked.displayName,avatar_variant:"fox-blue"}),null);
  assert.equal(projectPublicPokerIdentity({handle:blocked.handle,display_name:blocked.displayName,avatar_variant:"fox-blue"}),null);
- const handler=createProfilePublicHandler({findPublicProfile:async()=>blocked,allowPublicRead:async()=>true});
+ const handler=createProfilePublicHandler({env:{PUBLIC_PROFILES_ENABLED:"1"},verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),findPublicProfile:async()=>blocked,allowPublicRead:async()=>true});
  const response=await handler(event("GET",null,{handle:blocked.handle}));
  assert.equal(response.statusCode,404);
  assert.equal(response.headers["cache-control"],"no-store");
@@ -484,3 +484,19 @@ test('public profile block migration: disposable PostgreSQL17, default, operator
   assert.equal(ownerProfile(result).leaderboardVisible,false);
  }
  });
+
+
+test("profile-public requires a verified viewer before any profile, XP or rate read", async () => {
+ for(const token of ["", "invalid", "expired", "wrong-project"]){
+  let reads=0;
+  const handler=createProfilePublicHandler({env:{PUBLIC_PROFILES_ENABLED:"1"},verifySupabaseJwt:async()=>({valid:false}),findPublicProfile:async()=>{reads++;return profile();},allowPublicRead:async()=>{reads++;return true;},getUserXpTotal:async()=>{reads++;return 10;}});
+  const request=event("GET",null,{handle:profile().handle});request.headers.authorization=token?"Bearer "+token:"";
+  const response=await handler(request);assert.equal(response.statusCode,401);assert.deepEqual(JSON.parse(response.body),{error:"unauthorized"});assert.equal(response.headers["cache-control"],"no-store");assert.equal(reads,0);
+ }
+});
+
+test("profile-public OPTIONS stays unauthenticated and verifier errors fail closed", async()=>{
+ let calls=0;const handler=createProfilePublicHandler({env:{PUBLIC_PROFILES_ENABLED:"1"},verifySupabaseJwt:async()=>{calls++;throw Error("private verifier detail");},findPublicProfile:async()=>{throw Error("must not read");}});
+ const options=await handler(event("OPTIONS"));assert.equal(options.statusCode,204);assert.equal(calls,0);
+ const response=await handler(event("GET"));assert.equal(response.statusCode,500);assert.equal(calls,1);assert.equal(response.headers["cache-control"],"no-store");assert.equal(response.body.includes("private verifier detail"),false);
+});
