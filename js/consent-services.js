@@ -1,6 +1,5 @@
 (function(){
   var GA_ID = 'G-JRP62LCXYK';
-  var ADS_CLIENT = 'ca-pub-4054734235779751';
   var loaded = {};
 
   function loadScript(id, src, attrs, onload){
@@ -33,57 +32,19 @@
     });
   }
 
-  function initAds(){
-    if (!Array.isArray(window.adsbygoogle)) return false;
-    var slots = document.querySelectorAll('ins.adsbygoogle:not([data-adsbygoogle-status]):not([data-ad-init="1"])');
-    slots.forEach(function(slot){
-      try {
-        (window.adsbygoogle = window.adsbygoogle || []).push({});
-        slot.setAttribute('data-ad-init', '1');
-      } catch (_err) {}
-    });
-    return true;
-  }
-
-  function scheduleAds(){
-    if (initAds()) return;
-    var attempts = 0;
-    var timer = window.setInterval(function(){
-      attempts += 1;
-      if (initAds() || attempts >= 20) window.clearInterval(timer);
-    }, 500);
-  }
-
-  function ensureAds(){
-    if (loaded.googleAds) {
-      scheduleAds();
-      return;
-    }
-    loaded.googleAds = true;
-    loadScript(
-      'adsense-runtime',
-      'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=' + encodeURIComponent(ADS_CLIENT),
-      { crossorigin: 'anonymous' },
-      scheduleAds
-    );
-  }
-
   function handleConsent(name, consent){
     if (!consent) return;
     if (name === 'googleAnalytics') ensureAnalytics();
-    if (name === 'googleAds') ensureAds();
   }
 
   function syncFromKlaro(){
     if (!window.klaro || !window.klaroConfig || typeof window.klaro.getManager !== 'function') return false;
     var manager = window.klaro.getManager(window.klaroConfig);
     handleConsent('googleAnalytics', manager.getConsent('googleAnalytics'));
-    handleConsent('googleAds', manager.getConsent('googleAds'));
     manager.watch({
       update: function(_obj, name, data){
         if (name !== 'consents' || !data) return;
         handleConsent('googleAnalytics', data.googleAnalytics);
-        handleConsent('googleAds', data.googleAds);
         window.dispatchEvent(new CustomEvent('arcadeConsentChanged', { detail: data }));
       },
     });
