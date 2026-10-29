@@ -1,140 +1,92 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const read=p=>fs.readFileSync(p,'utf8');
+test('migration validation never receives Stage credentials',()=>{
+ const s=read('.github/workflows/db-migration-check.yml');
+ assert.match(s,/node scripts\/check-db-migrations.mjs/);
+ assert.doesNotMatch(s,/SUPABASE_STAGE_DB_URL|stage-db-migrate\.mjs --apply/);
+});
+test('Stage mutation is dispatch-only from trusted main, with approved SQL data only',()=>{
+ const s=read('.github/workflows/db-stage-apply-pr.yml');
+ assert.match(s,/workflow_dispatch:/);assert.doesNotMatch(s,/pull_request:|pull_request_target:/);
+ assert.match(s,/github.ref == 'refs\/heads\/main'/);assert.match(s,/ref: \$\{\{ github.sha \}\}/);
+ assert.match(s,/persist-credentials: false/);assert.match(s,/group: db-stage/);assert.match(s,/cancel-in-progress: false/);
+ assert.match(s,/--prepare/);assert.match(s,/--apply/);assert.match(s,/SUPABASE_STAGE_DIRECT_DB_URL/);
+ assert.doesNotMatch(s,/ref: \$\{\{ inputs\./);assert.doesNotMatch(s,/npm (ci|install)/);
+ assert.equal(fs.existsSync('.github/workflows/db-stage-prepare.yml'),false,'unsafe alternate Stage executor must be retired');
+});
 
-const MIGRATION_CHECK = ".github/workflows/db-migration-check.yml";
-const STAGE_APPLY = ".github/workflows/db-stage-apply-pr.yml";
-const STAGE_PREPARE = ".github/workflows/db-stage-prepare.yml";
-
-function read(file) {
-  return fs.readFileSync(file, "utf8");
+import { spawnSync, spawn } from 'node:child_process';
+import { digest, approvalDigest, confirmation, validateApproval, connectionEnv, psql, historyDigest, inspect, operationalSql, planPending, applyBundle, prepare } from '../scripts/stage-db-migrate.mjs';
+const sourceSha='a'.repeat(40);
+function bundle(sqls, rows=[]) {
+ const names=sqls.map((_,i)=>`2099010${rows.length ? 2 : 1}00000${i}_fixture.sql`);
+ return {approval:{sourceSha,pr:1,historyCount:rows.length,historySha256:historyDigest(rows),migrations:names.map((file,i)=>({file,sha256:digest(sqls[i])}))},files:[...rows.map(r=>r.file),...names].sort(),sql:sqls};
 }
-
-test("db migration check validates migration files without cloud mutation", () => {
-  const text = read(MIGRATION_CHECK);
-
-  assert.match(text, /^name: DB Migration Check/m);
-  assert.match(text, /pull_request:/);
-  assert.match(text, /"supabase\/\*\*"/);
-  assert.match(text, /node scripts\/check-db-migrations\.mjs/);
-  assert.doesNotMatch(text, /SUPABASE_STAGE_DB_URL/);
-  assert.doesNotMatch(text, /stage-db-migrate\.mjs --apply/);
+test('approval/hash/pending/transaction boundaries fail closed',()=>{
+ const b=bundle(['begin; create table fixture(id int); commit;']);
+ assert.equal(validateApproval(b.approval),b.approval);assert.match(approvalDigest(b.approval),/^[a-f0-9]{64}$/);
+ assert.equal(operationalSql(b.sql[0]),'create table fixture(id int);');
+ assert.match(operationalSql("begin; do $$ begin perform 1; end $$; commit;"),/do \$\$/);
+ for(const sql of ['select 1; commit; select 2;','\\! echo unsafe','begin; select 1; rollback;','begin; commit; begin; select 1; commit;'])assert.throws(()=>operationalSql(sql));
+ const state={rows:[],historyCount:0,historySha256:historyDigest([])};
+ assert.equal(planPending(b,state).length,1);
+ assert.throws(()=>planPending({...b,sql:['select 42;']},state),/hash/);
+ assert.throws(()=>planPending({...b,files:[...b.files,'20990201000000_unapproved.sql']},state),/unapproved_pending/);
+ assert.throws(()=>planPending(b,{...state,historySha256:'0'.repeat(64)}),/history_approval/);
+ assert.throws(()=>applyBundle(b,{},state,'wrong'),/operator_confirmation/);
+});
+test('connection is exact Stage; no password URL/SQL output reaches process args or diagnostics',()=>{
+ const raw='postgresql://postgres:sentinel_password@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres';
+ const env=connectionEnv(raw,'krydukthwdvccggbyjfw');assert.equal(env.PGPASSWORD,'sentinel_password');assert.equal(connectionEnv(raw+'?sslmode=require','krydukthwdvccggbyjfw').PGSSLMODE,'require');
+ for(const x of [raw.replace('krydukthwdvccggbyjfw','otbqfijerkieoxwpxjnm'),raw+'?host=other',raw.replace(':5432',':6543')])assert.throws(()=>connectionEnv(x,'krydukthwdvccggbyjfw'));
+ let captured;assert.throws(()=>psql('select secret;',env,(bin,args,opts)=>{captured={bin,args,opts};return {status:1,stdout:'sentinel_password',stderr:raw};}),/^Error: stage_sql_failed$/);
+ assert.equal(captured.bin,'psql');assert.ok(!JSON.stringify(captured.args).includes('sentinel_password'));assert.ok(!captured.args.includes(raw));assert.equal(captured.opts.env.PGPASSWORD,'sentinel_password');assert.equal(captured.opts.input,'select secret;');
+});
+const dbUrl=process.env.CHIPS_MIGRATIONS_TEST_DB_URL;
+const consent=process.env.STAGE_MIGRATION_DISPOSABLE_CONFIRMATION;
+test('disposable PostgreSQL: read-only missing metadata, exact batch receipts, rollback/noop/identity/locks', {skip:!dbUrl||consent!=='I_CONFIRM_LOCAL_DISPOSABLE_STAGE_CONTRACT'},async()=>{
+ const u=new URL(dbUrl);assert.ok(['127.0.0.1','localhost'].includes(u.hostname),'no remote test DB');
+ const admin={PGHOST:u.hostname,PGPORT:u.port||'5432',PGUSER:decodeURIComponent(u.username),PGPASSWORD:decodeURIComponent(u.password),PGDATABASE:u.pathname.slice(1),PGSSLMODE:'disable'};
+ const identity=psql("select json_build_object('id',(select system_identifier::text from pg_control_system()),'version',current_setting('server_version_num')::int);",admin);assert.ok(identity.version>=160000);assert.ok(!['7656985631720456337','7575202818581710058'].includes(identity.id));
+ if(process.env.CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER)assert.equal(identity.id,process.env.CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER);
+ const database=`stage_apply_contract_${process.pid}`;
+ function execute(sql,pg=admin){const r=spawnSync('psql',['--no-psqlrc','--no-password','-qAt','-v','ON_ERROR_STOP=1','-f','-'],{env:{PATH:process.env.PATH,...pg},input:sql,encoding:'utf8'});assert.equal(r.status,0,'disposable fixture SQL failed');return r.stdout;}
+ execute(`create database ${database};`);const pg={...admin,PGDATABASE:database};
+ assert.throws(()=>inspect(pg,identity.id),/stage_sql_failed/);assert.equal(psql("select json_build_object('exists',to_regnamespace('supabase_migrations') is not null);",pg).exists,false);
+ execute(`create schema supabase_migrations; create table supabase_migrations.schema_migrations(version text primary key,name text,statements text[]);create table supabase_migrations.schema_migration_files(version text primary key,name text,file text,sha256 text not null,recorded_at timestamptz default now());create type public.chips_tx_type as enum('TEST');create table public.chips_transactions(id int);create table public.chips_entries(id int);create table public.chips_accounts(account_type text,system_key text);insert into public.chips_accounts values('SYSTEM','GENESIS');create table protected_state(id int primary key, ch bigint, xp bigint, avatar text, privacy boolean, poker jsonb);insert into protected_state values(1,123,456,'comet-blue',false,'{"stack":100,"stateVersion":7}');`,pg);
+ const protectedBefore=psql('select row_to_json(p) from protected_state p;',pg);
+ const empty=inspect(pg,identity.id);assert.equal(empty.historySha256,historyDigest([]));
+ const bad=bundle(['begin; create table should_rollback(id int); commit;','begin; do $$ begin raise exception \'late failure\'; end $$; commit;']);
+ assert.throws(()=>applyBundle(bad,pg,empty,confirmation(bad.approval),identity.id),/stage_sql_failed/);
+ assert.deepEqual(inspect(pg,identity.id),empty);assert.equal(psql("select json_build_object('exists',to_regclass('should_rollback') is not null);",pg).exists,false);
+ const badSmoke=bundle(["begin; delete from public.chips_accounts where system_key='GENESIS'; create table smoke_rollback(id int); commit;"]);
+ assert.throws(()=>applyBundle(badSmoke,pg,empty,confirmation(badSmoke.approval),identity.id),/stage_sql_failed/);assert.deepEqual(inspect(pg,identity.id),empty);assert.equal(psql("select json_build_object('n',count(*)) from public.chips_accounts where system_key='GENESIS';",pg).n,1);
+ const good=bundle(['begin; create table approved_one(id int); commit;','create table approved_two(id int);']);
+ const out=applyBundle(good,pg,empty,confirmation(good.approval),identity.id);assert.equal(out.applied,2);
+ const after=inspect(pg,identity.id);assert.equal(after.rows.length,2);assert.equal(after.rows[0].sha256,good.approval.migrations[0].sha256);assert.equal(after.rows[1].sha256,good.approval.migrations[1].sha256);assert.deepEqual(psql('select row_to_json(p) from protected_state p;',pg),protectedBefore);
+ assert.equal(applyBundle(good,pg,after,confirmation(good.approval),identity.id).applied,0);
+ const noop={...good,approval:{...good.approval,historyCount:2,historySha256:after.historySha256}};assert.equal(applyBundle(noop,pg,after,confirmation(noop.approval),identity.id).applied,0);assert.deepEqual(inspect(pg,identity.id),after);
+ assert.throws(()=>inspect(pg,'wrong-system'),/wrong_stage_system/);
+ const next=bundle(['create table never_applied(id int);'],after.rows);const changed={...after,historySha256:'f'.repeat(64)};assert.throws(()=>planPending(next,changed),/history_approval/);
+ // Competing DDL/history lock is bounded and must not create a receipt/table.
+ const blocker=spawn('psql',['--no-psqlrc','--no-password','-qAt','-v','ON_ERROR_STOP=1','-f','-'],{env:{PATH:process.env.PATH,...pg},stdio:['pipe','pipe','pipe']});
+ const ready=new Promise((resolve,reject)=>{blocker.stdout.on('data',b=>{if(b.toString().includes('locked'))resolve();});blocker.on('error',reject);blocker.on('close',()=>reject(new Error('fixture lock holder closed before ready')));});
+ blocker.stdin.write("begin; lock table supabase_migrations.schema_migrations in access exclusive mode; select 'locked';\n");await ready;
+ try{assert.throws(()=>applyBundle(next,pg,after,confirmation(next.approval),identity.id),/stage_sql_failed/);}finally{const closed=new Promise(resolve=>blocker.on('close',resolve));blocker.stdin.end('rollback;\n');await closed;}
+ assert.deepEqual(inspect(pg,identity.id),after);
+ // Snapshot drifts after initial inspect: transaction guard must still roll back.
+ execute("update supabase_migrations.schema_migration_files set sha256=repeat('f',64) where version='20990101000000';",pg);
+ assert.throws(()=>applyBundle(next,pg,after,confirmation(next.approval),identity.id),/stage_sql_failed/);assert.equal(psql("select json_build_object('exists',to_regclass('never_applied') is not null);",pg).exists,false);
+ process.stdout.write(`Disposable PostgreSQL ${Math.floor(identity.version/10000)}: exact batch/rollback/receipts/protected data PASS\n`);
 });
 
-test("db stage apply PR is guarded to repo PRs and shared stage only", () => {
-  const text = read(STAGE_APPLY);
-
-  assert.match(text, /^name: DB Stage Apply PR/m);
-  assert.match(text, /pull_request:/);
-  assert.match(text, /"supabase\/migrations\/\*\*"/);
-  assert.match(text, /group: db-stage/);
-  assert.match(text, /cancel-in-progress: false/);
-  assert.match(text, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
-  assert.match(text, /runs-on: \[self-hosted, linux, x64, stage-db-ipv6\]/);
-  assert.match(text, /SUPABASE_STAGE_DB_URL: \$\{\{ secrets\.SUPABASE_STAGE_DIRECT_DB_URL \}\}/);
-  assert.match(text, /SUPABASE_STAGE_DIRECT_DB_URL must target the exact direct Stage host and port/);
-  assert.match(text, /SUPABASE_STAGE_PROJECT_REF: \$\{\{ secrets\.SUPABASE_STAGE_PROJECT_REF \}\}/);
-  assert.match(text, /SUPABASE_STAGE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /PR_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
-  assert.match(text, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
-  assert.match(text, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
-  assert.match(text, /fetch-depth: 1/);
-  assert.match(text, /git fetch --no-tags --prune --unshallow origin/);
-  assert.match(text, /\+\$PR_BASE_SHA:refs\/remotes\/origin\/pr-base/);
-  assert.match(text, /\+\$PR_HEAD_SHA:refs\/remotes\/origin\/pr-head/);
-  assert.match(text, /git merge-base "\$PR_BASE_SHA" "\$PR_HEAD_SHA"/);
-  assert.match(text, /git diff --name-only "\$PR_BASE_SHA\.\.\.\$PR_HEAD_SHA" -- supabase\/migrations/);
-  assert.match(text, /node scripts\/check-db-migrations\.mjs/);
-  assert.match(text, /node scripts\/stage-db-migrate\.mjs --apply --changed-from "\$PR_BASE_SHA"/);
-  assert.match(text, /if: \$\{\{ steps\.changed\.outputs\.count != '0' \}\}/);
-  assert.match(text, /if: \$\{\{ steps\.changed\.outputs\.count == '0' \}\}/);
-  assert.match(text, /No supabase\/migrations changes detected; stage DB apply skipped\./);
-  assert.doesNotMatch(text, /pull_request_target:/);
-  assert.doesNotMatch(text, /github\.base_ref/);
-  assert.doesNotMatch(text, /secrets\.SUPABASE_STAGE_DB_URL/);
-  assert.doesNotMatch(text, /SUPABASE_DB_URL: \$\{\{ secrets\.SUPABASE_DB_URL \}\}/);
-  assert.doesNotMatch(text, /db reset|drop schema|drop database|supabase db reset/i);
-});
-
-function git(cwd, args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-}
-
-test("db stage apply materializes base/head history from a shallow checkout", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "db-stage-apply-pr-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const origin = path.join(root, "origin.git");
-  const seed = path.join(root, "seed");
-  const shallow = path.join(root, "shallow");
-  fs.mkdirSync(seed);
-
-  git(seed, ["init", "-b", "main"]);
-  git(seed, ["config", "user.email", "workflow-test@example.invalid"]);
-  git(seed, ["config", "user.name", "workflow-test"]);
-  fs.mkdirSync(path.join(seed, "supabase", "migrations"), { recursive: true });
-  fs.writeFileSync(path.join(seed, "README.md"), "base\n");
-  git(seed, ["add", "."]);
-  git(seed, ["commit", "-m", "base"]);
-  const baseSha = git(seed, ["rev-parse", "HEAD"]);
-  fs.writeFileSync(path.join(seed, "supabase", "migrations", "20260101000000_fixture.sql"), "select 1;\n");
-  git(seed, ["add", "."]);
-  git(seed, ["commit", "-m", "migration"]);
-  const headSha = git(seed, ["rev-parse", "HEAD"]);
-
-  git(root, ["init", "--bare", origin]);
-  git(seed, ["remote", "add", "origin", origin]);
-  git(seed, ["push", "origin", "main"]);
-
-  git(root, ["clone", "--depth=1", "file://" + origin, "--branch", "main", shallow]);
-  assert.equal(git(shallow, ["rev-parse", "--is-shallow-repository"]), "true");
-  assert.equal(git(shallow, ["rev-parse", "HEAD"]), headSha);
-
-  git(shallow, [
-    "fetch", "--no-tags", "--prune", "--unshallow", "origin",
-    "+" + baseSha + ":refs/remotes/origin/pr-base",
-    "+" + headSha + ":refs/remotes/origin/pr-head",
-  ]);
-  assert.equal(git(shallow, ["rev-parse", "refs/remotes/origin/pr-base"]), baseSha);
-  assert.equal(git(shallow, ["rev-parse", "refs/remotes/origin/pr-head"]), headSha);
-  assert.equal(git(shallow, ["merge-base", baseSha, headSha]), baseSha);
-  assert.equal(
-    git(shallow, ["diff", "--name-only", baseSha + "..." + headSha, "--", "supabase/migrations"]),
-    "supabase/migrations/20260101000000_fixture.sql",
-  );
-});
-
-test("db stage prepare is manual, ref-scoped, and non-destructive", () => {
-  const text = read(STAGE_PREPARE);
-
-  assert.match(text, /^name: DB Stage Prepare/m);
-  assert.match(text, /workflow_dispatch:/);
-  assert.match(text, /inputs:\n\s+ref:/);
-  assert.match(text, /group: db-stage/);
-  assert.match(text, /cancel-in-progress: false/);
-  assert.match(text, /ref: \$\{\{ inputs\.ref \}\}/);
-  assert.match(text, /SUPABASE_STAGE_DB_URL: \$\{\{ secrets\.SUPABASE_STAGE_DB_URL \}\}/);
-  assert.match(text, /SUPABASE_STAGE_PROJECT_REF: \$\{\{ secrets\.SUPABASE_STAGE_PROJECT_REF \}\}/);
-  assert.match(text, /SUPABASE_STAGE_DB_URL must target SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /node scripts\/check-db-migrations\.mjs/);
-  assert.match(text, /node scripts\/stage-db-migrate\.mjs --apply/);
-  assert.doesNotMatch(text, /pull_request:/);
-  assert.doesNotMatch(text, /db reset|drop schema|drop database|supabase db reset/i);
-});
-
-test("stage migration helper refuses non-stage targets and unrelated remote migrations", () => {
-  const text = read("scripts/stage-db-migrate.mjs");
-
-  assert.match(text, /SUPABASE_STAGE_DB_URL is required/);
-  assert.match(text, /SUPABASE_STAGE_PROJECT_REF is required/);
-  assert.match(text, /does not contain SUPABASE_STAGE_PROJECT_REF/);
-  assert.match(text, /Stage DB contains migration versions that are not present in this checkout/);
-  assert.match(text, /Stage already has this migration version but no recorded contents hash; bump timestamp or reset\/recreate stage/);
-  assert.match(text, /Stage already has this migration version with different contents; bump timestamp or reset\/recreate stage/);
-  assert.match(text, /--changed-from/);
-  assert.match(text, /schema_migration_files/);
-  assert.match(text, /Refusing to continue/);
-  assert.doesNotMatch(text, /drop schema|drop database|truncate/i);
+test('prepare reads trusted main executor and only approved SQL blobs, refusing fork/head drift',async()=>{
+ const b=bundle(['select 1;']);const a=b.approval;const calls=[];const env={GITHUB_REF:'refs/heads/main',GITHUB_SHA:'b'.repeat(40),GITHUB_REPOSITORY:'krzysztofcal/arcadePlatform'};
+ const read=async path=>{calls.push(path);if(path==='/commits/main')return {sha:env.GITHUB_SHA};if(path==='/pulls/1')return {state:'open',head:{sha:sourceSha,repo:{full_name:env.GITHUB_REPOSITORY}}};if(path.startsWith('/git/trees/'))return {truncated:false,tree:[{path:'supabase/migrations/'+a.migrations[0].file,type:'blob',mode:'100644',sha:'c'.repeat(40)},{path:'scripts/stage-db-migrate.mjs',type:'blob',mode:'100644',sha:'d'.repeat(40)}]};if(path==='/git/blobs/'+'c'.repeat(40))return {encoding:'base64',content:Buffer.from(b.sql[0]).toString('base64')};throw Error('unapproved_download');};
+ const prepared=await prepare(a,read,env);assert.deepEqual(prepared.sql,b.sql);assert.equal(calls.filter(p=>p.startsWith('/git/blobs/')).length,1);assert.ok(!calls.some(p=>p.includes('d'.repeat(40))));
+ await assert.rejects(prepare(a,read,{...env,GITHUB_REF:'refs/heads/untrusted'}),/trusted_main/);
+ await assert.rejects(prepare(a,async path=>path==='/pulls/1'?{state:'open',head:{sha:sourceSha,repo:{full_name:'fork/repo'}}}:read(path),env),/source_pr/);
+ await assert.rejects(prepare(a,async path=>path==='/pulls/1'?{state:'open',head:{sha:'e'.repeat(40),repo:{full_name:env.GITHUB_REPOSITORY}}}:read(path),env),/source_pr/);
 });

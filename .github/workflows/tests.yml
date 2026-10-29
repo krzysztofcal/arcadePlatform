@@ -133,6 +133,7 @@ jobs:
         run: |
           export CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER="$(psql "$CHIPS_MIGRATIONS_TEST_DB_URL" -X -At -v ON_ERROR_STOP=1 -c 'select system_identifier::text from pg_catalog.pg_control_system()')"
           node tests/chips/chips.migration.test.mjs
+          STAGE_MIGRATION_DISPOSABLE_CONFIRMATION=I_CONFIRM_LOCAL_DISPOSABLE_STAGE_CONTRACT node --test tests/db-stage-workflows.guard.test.mjs
 
       - name: Daily Bonus atomic claim contracts (disposable PostgreSQL)
         run: node --test tests/bonus-campaigns.transaction.test.mjs

@@ -1,83 +1,15 @@
-# AI Agent DB Migration Checklist
+# Explicit Stage migration operator checklist (#1159 PR1)
 
-Use this checklist when an AI agent works on a task that may touch database schema, seed data, Supabase SQL, chips ledger tables, bonus campaigns, or `supabase/migrations/**`.
+This procedure becomes available only after the reviewed workflow/executor are on main. Preparing or validating this PR does not authorize shared Stage SQL. DB Stage Apply PR is dispatch-only; Draft/Ready has no database side effect. DB Migration Check still runs normally. DB Stage Prepare is retired; never execute a PR-provided migrator with Stage credentials.
 
-## Detect Whether Migration Tooling Is Needed
+1. Obtain one scoped OWNER GO naming Stage project `krydukthwdvccggbyjfw`, system `7656985631720456337`, exact open same-repo PR/application SHA and migration filenames/SHA256. Workflow definition/executor must be the approved current main, with no branch runner code, dependencies or hooks from the PR.
+2. Use inspect only under read-only Stage authorization. Inputs approval JSON contain sourceSha (40hex), pr (number), historyCount, historySha256, migrations (ordered array of {file,sha256}). For initial inspect the history values may be provisional and migrations empty; inspect does not apply or initialize anything. Read back actual history and pending names. Missing/orphan history metadata is STOP, not bootstrap/backfill.
+3. Review the exact approved pending set, compare independent original-byte hashes and current history count/fingerprint. Fingerprint is SHA256 of sorted `version:file:sha256` rows joined by newline, without a trailing newline. The source catalog cannot omit remote versions or introduce additional pending files. Applied hashes are immutable; no reset/cleanup is implied.
+4. Dispatch apply only after mutation GO and with final approval JSON and exact confirmation phrase printed by trusted prepare: `APPLY <Stage project> <source SHA> <approval SHA256>`. Confirmation pins the complete canonical approval, not just the code SHA. Before SQL, main/PR identities and all blob hashes are checked again. Workflow file cannot come from the PR; only approved SQL is treated as executable database data.
+5. Under the shared db-stage queue, the executor obtains bounded PostgreSQL advisory/history locks, repeats identity and full history fingerprint, then executes the approved batch and both receipt tables in ONE transaction. Existing sole BEGIN/COMMIT wrappers are stripped only after lexical validation; any extra transaction control/psql command fails closed. SQL requiring unsupported transaction syntax must be separately reviewed; never bypass this guard.
+6. Inspect connection uses read-only transaction. Apply keeps lock timeout3s/statement timeout60s, CH schema/GENESIS smoke and receipt check before COMMIT. Late failure rolls the whole batch back. No retry/timeout increase. Original approved batch already applied with matching receipts is verified no-op; no new hashes are written to historical rows.
+7. Independently inspect after operation. A lost COMMIT response is UNKNOWN until read back; never reapply automatically. No DROP-based rollback. No new feature/Terms/catalog activation or Production apply is implied.
 
-Start by checking the PR diff and local working tree:
+Connection secret: existing SUPABASE_STAGE_DIRECT_DB_URL is parsed in-process into libpq PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE/PGSSLMODE. Password URL is not passed as argv; psql gets SQL over stdin, no startup rc/password prompt. stdout/stderr on failure are suppressed because statements/NOTICE/DETAIL can contain private data. Only controlled error codes and sanitized metadata are logged. Do not print env, tokens, raw SQL or database errors.
 
-```bash
-git fetch origin main
-git diff --name-only origin/main...HEAD -- supabase/migrations
-git status --short -- supabase/migrations scripts/check-db-migrations.mjs scripts/stage-db-migrate.mjs .github/workflows/db-*.yml
-```
-
-If no migration files changed, tell the user:
-
-```text
-No Supabase migration files changed, so the stage DB migration workflow is not needed for this PR.
-```
-
-If migration files changed, tell the user:
-
-```text
-This PR changes Supabase migrations.
-Run locally: node scripts/check-db-migrations.mjs
-Expect GitHub checks: DB Migration Check and DB Stage Apply PR.
-Test the deploy preview only after DB Stage Apply PR is green.
-```
-
-Then run:
-
-```bash
-node scripts/check-db-migrations.mjs
-```
-
-## Changed Already-Applied Migrations
-
-Do not edit an already-applied migration in place. If a PR changes SQL under an existing timestamp, stage may reject the PR with:
-
-```text
-Stage already has this migration version; bump timestamp or reset/recreate stage.
-```
-
-Preferred agent recommendation:
-
-```text
-Create a new timestamped migration with the additional SQL. Do not modify the previously applied migration file.
-```
-
-Only suggest resetting/recreating stage when the owner explicitly wants to discard shared stage state.
-
-## Multiple PRs And Shared Stage
-
-The stage DB is shared and can represent only one compatible migration history at a time.
-
-When the user switches between DB-heavy PRs:
-
-1. Check the target PR's `DB Stage Apply PR` result.
-2. If it is green, stage is compatible with that PR.
-3. If it fails with unrelated remote migration versions, explain that stage likely contains migrations from another branch.
-4. Suggest manual prepare only when the user intentionally wants stage to target the selected branch:
-
-```bash
-gh workflow run db-stage-prepare.yml --ref main -f ref=<branch-or-sha>
-```
-
-If manual prepare still fails with unrelated versions, do not force more SQL. Recommend finishing the currently staged PR first, resetting/recreating stage, or making the target branch migration history compatible.
-
-## What Agents Should Not Do
-
-- Do not run `scripts/stage-db-migrate.mjs --apply` locally by default.
-- Do not mutate stage DB outside GitHub Actions unless the user explicitly asks and provides the required stage DB environment.
-- Do not hide a failed `DB Stage Apply PR`; summarize the failure and the next safe action.
-- Do not advise raw production `psql -f` unless the migration version is also recorded in `supabase_migrations.schema_migrations`.
-
-## Short User Reminder Template
-
-```text
-Migration reminder: this branch changes supabase/migrations.
-Local guard: node scripts/check-db-migrations.mjs
-PR gates: DB Migration Check + DB Stage Apply PR
-If stage says the version already exists, add a new timestamped migration instead of editing the old one.
-```
+The runner needs existing Node20, psql and direct Stage access. No new VPS permission/configuration or installation is part of PR1. Tests connect only to explicitly opted-in disposable loopback PostgreSQL, with a non-Stage/non-Production system identifier and dedicated fixture database; not to shared Stage.
