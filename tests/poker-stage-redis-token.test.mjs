@@ -96,7 +96,7 @@ test('Stage CORS adds exact WebView origin only for immutable recognized Netlify
  const cases=[['deploy-preview',origin,'netlify-functions',true],['branch-deploy','https://feat-1114-profiles-phase-a--playkcswh.netlify.app','netlify-stage-parent',true],['production','https://play.kcswh.pl','netlify-functions',false],['branch-deploy','https://other--playkcswh.netlify.app','netlify-stage-parent',false],['deploy-preview',null,'ws-preview',false],['deploy-preview',origin,'ws-server',false]];
  for(const [buildContext,buildDeployOrigin,buildArtifactIdentity,allowed] of cases){
   const policy=buildApiCorsPolicy({configuredOrigins:'https://play.kcswh.pl,http://localhost:4173',buildContext,buildDeployOrigin,buildArtifactIdentity});
-  assert.equal(policy.origins.includes('https://localhost'),allowed);assert.ok(policy.origins.includes('https://play.kcswh.pl'));
+  assert.equal(new Set(policy.origins).has('https://localhost'),allowed);assert.ok(new Set(policy.origins).has('https://play.kcswh.pl'));
   const headers=buildCorsHeaders({origin:'https://localhost',policy,methods:'GET, OPTIONS',allowedHeaders:'authorization,content-type'});
   assert.equal(!!headers,allowed);if(allowed){assert.equal(headers['access-control-allow-origin'],'https://localhost');assert.equal(headers['access-control-allow-methods'],'GET, OPTIONS');assert.equal(headers['access-control-allow-headers'],'authorization,content-type');}
   assert.equal(buildCorsHeaders({origin:'https://evil.invalid',policy}),null);
