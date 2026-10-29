@@ -60,7 +60,7 @@
   WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"
   WELCOME_BONUS_CHIPS = "500"
 
-# Branch deploy context - same as production
+# Branch deploys require explicit Stage-only enrollment/configuration; never inherit Production credentials.
 [context.branch-deploy.environment]
   XP_DEBUG = "0"
   XP_RATE_LIMIT_ENABLED = "1"
@@ -68,7 +68,7 @@
   WELCOME_BONUS_START_AT = "2025-06-01T00:00:00Z"
   WELCOME_BONUS_CHIPS = "500"
 
-# Deploy preview context - relaxed for testing
+# Deploy Preview context - Stage only; trusted immutable context adds exact Android https://localhost CORS in api-cors.mjs.
 # Supabase deploy-preview credentials must be configured in Netlify UI with stage DB values.
 # Set SUPABASE_STAGE_PROJECT_REF in Netlify UI to the non-secret stage project ref.
 [context.deploy-preview.environment]

@@ -75,10 +75,11 @@ Bot-only hands/tables do not block deployment or restart. Block deployment for a
   - `journalctl -u ws-server.service`
 - When debugging a specific poker table, filter by `tableId` and correlate `ws_state_persist_*`, `ws_settled_rollover_*`, `ws_bot_autoplay_*`, `ws_table_janitor_*`, and cleanup logs with `poker_state`, `poker_actions`, `poker_seats`, and `poker_tables`.
 
-### Intentional automatic Stage migrations
-- A same-repository PR touching `supabase/migrations/**` can trigger `DB Stage Apply PR` and mutate shared Stage; this is not a read-only check.
-- Agents may intentionally use automatic Stage apply without a separate GO for each ordinary migration. Before push/PR, spec/plan/tasks must explicitly declare that intended shared Stage effect.
-- Never include migrations accidentally. Applied Stage migrations are immutable; corrections use new, forward-only migrations. Production still requires separate explicit authorization.
+### Explicit Stage migrations
+- PR creation, Draft/Ready and synchronize never authorize or execute shared Stage SQL. Keep ordinary DB Migration Check read-only/local.
+- Only an explicitly authorized main-definition DB Stage Apply PR dispatch may apply the exact approved source SHA/file/hash set. Executor comes from trusted main; source PR supplies only approved SQL data, never runner code.
+- Inspect must not create metadata/backfill hashes. DDL/version/hash receipts commit atomically; wrong identity/history, additional pending, locks or missing confirmation fail closed. No automatic retry or schema rollback.
+- Applied migrations are immutable. Stage apply, Production equivalents and feature activation require separate explicit scope; a green PR is not proof of applied schema.
 
 ---
 
