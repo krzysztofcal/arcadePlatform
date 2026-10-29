@@ -80,3 +80,9 @@ The owner confirmed installation/Lobby/Account/basic navigation on bebbdc6a, but
 ## Approved API integration (2026-10-23)
 
 The current APK pins API Preview1141, superseding the historical1095 diagnostics above; Supabase Stage and WS Preview are unchanged. Exact-branch XP_CORS_ALLOW adds only https://localhost. Actual19 OPTIONS combinations passed on deploy6adbc543278f8840161bc416/source2c6f23daf5f47f4e0b59f6c4489f36dc6fc1532d. Stage password login, progression GET and token mint200; WS helloAck/authOk without JOIN PASS. OAuth provider/redirect configuration untouched and phone callback NOT TESTED. Redis shared Preview repair PASS is recorded in SpecKit; the old stopped-Redis notes are historical. See android-api-integration.md in SpecKit for current evidence and safe phone checklist.
+
+## #1159 PR3: own-PR debug APK
+
+Automatic same-repository Draft PR builds wait at most 10 minutes for their own native Deploy Preview at the exact current source SHA. They validate Netlify site, review ID, deploy context and Stage receipt before dependency/Gradle costs, then recheck before packaging and upload. CI never falls back to the static API origin in stage-public.json (local packaging only). Manual dispatch now requires an open Draft PR number and its exact current HEAD SHA; branch-only dispatch is unsupported. No new secret or environment setting is required.
+
+The artifact includes build-receipt.json (PR/source/deploy/origins/app version/CSP/SRI), SHA256SUMS and verified debug signature evidence. Known docs/test-only synchronize skips compilation and produces no replacement APK; existing artifacts keep their original source receipts. Installed static APKs retain their bundled endpoint and do not update automatically. Physical installation remains separate from CI acceptance.

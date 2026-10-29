@@ -10,7 +10,10 @@ const out = path.join(here, 'www');
 // Refuse stale output instead of deleting any existing data.
 try { await access(out); throw new Error('www already exists: use a fresh build workspace'); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
-const config = security.validate(JSON.parse(await readFile(path.join(here, 'stage-public.json'), 'utf8')));
+const localConfig = JSON.parse(await readFile(path.join(here, 'stage-public.json'), 'utf8'));
+const binding = process.env.MOBILE_PREVIEW_BINDING ? JSON.parse(await readFile(process.env.MOBILE_PREVIEW_BINDING, 'utf8')) : null;
+if ((process.env.CI || process.env.GITHUB_ACTIONS) && !binding) throw new Error('CI requires a verified own-PR Preview binding');
+const config = binding ? security.forPreview(localConfig, binding, Number(process.env.PR_NUMBER), process.env.SOURCE_SHA) : security.validate(localConfig);
 const key = JSON.parse(Buffer.from(config.supabaseAnonKey.split('.')[1], 'base64url').toString());
 if (key.ref !== 'krydukthwdvccggbyjfw' || key.role !== 'anon') throw new Error('Only pinned public Stage anon key permitted');
 config.sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -103,5 +106,23 @@ for (const name of pages) {
 }
 await cp(path.join(root, 'poker/assets'), path.join(out, 'poker/assets'), { recursive: true });
 await put('index.html', launch);
-await put('build-receipt.json', JSON.stringify({ sha: config.sha, appId: 'pl.kcswh.arcadepoker.stage', version: '0.0.1', apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, wsUrl: config.wsUrl, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
+// Validate the composed documents, including isolated Offline, before claiming CSP/SRI PASS.
+for (const name of [...pages, 'index.html']) {
+  const html = await readFile(path.join(out, name), 'utf8');
+  const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/i)?.[1];
+  if (!csp || /script-src[^;]*'unsafe-inline'/.test(csp)) throw new Error('Invalid packaged script policy');
+  for (const match of html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
+    if (!csp.includes("'sha256-" + createHash('sha256').update(match[1]).digest('base64') + "'")) throw new Error('Packaged inline CSP mismatch');
+  }
+  for (const match of html.matchAll(/<(?:script|link)\b[^>]*>/g)) {
+    const tag = match[0], src = tag.match(/\b(?:src|href)="([^"]+)"/)?.[1], integrity = tag.match(/\bintegrity="([^"]+)"/)?.[1];
+    if (tag.startsWith('<script') && /^(?:https?:)?\/\//.test(src || '')) throw new Error('External packaged script');
+    if (integrity) {
+      const bytes = await readFile(path.join(out, new URL(src, 'https://localhost/' + name).pathname.slice(1)));
+      if (!integrity.split(/\s+/).some(token => { const parts = token.split('-'); return /^sha(256|384|512)$/.test(parts[0]) && createHash(parts[0]).update(bytes).digest('base64') === parts[1]; })) throw new Error('Packaged SRI mismatch');
+    }
+  }
+}
+const version = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8')).version;
+await put('build-receipt.json', JSON.stringify({ sha: config.sha, prNumber: binding?.prNumber || null, preview: binding || null, appId: 'pl.kcswh.arcadepoker.stage', version, versionCode: 1, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
 process.stdout.write('Packaged shared Poker/account assets at SHA ' + config.sha + '\n');

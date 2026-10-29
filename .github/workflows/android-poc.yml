@@ -2,6 +2,15 @@ name: Android Poker M0 APK
 
 on:
   workflow_dispatch:
+    inputs:
+      prNumber:
+        description: Open same-repository Draft PR number
+        required: true
+        type: string
+      sourceSha:
+        description: Exact current PR HEAD SHA with a matching native Preview
+        required: true
+        type: string
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -10,12 +19,29 @@ on:
       - 'poker/**'
       - 'account.html'
       - 'js/**'
+      - 'css/**'
+      - 'assets/**'
+      - 'images/**'
+      - 'img/**'
+      - 'fonts/**'
+      - 'vendor/**'
+      - 'legal/**'
+      - '*.html'
+      - '*.png'
+      - '*.webp'
+      - '*.svg'
+      - '*.jpg'
+      - '*.woff*'
+      - 'package*.json'
+      - 'scripts/build-poker-offline-poc.mjs'
 
 permissions:
   contents: read
+  pull-requests: read
+  statuses: read
 
 concurrency:
-  group: android-poc-${{ github.event.pull_request.number || github.ref }}
+  group: android-poc-${{ github.event.pull_request.number || inputs.prNumber }}
   cancel-in-progress: true
 
 jobs:
@@ -24,7 +50,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
-      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || inputs.sourceSha }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.prNumber }}
       GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Xmx2g'
     steps:
       - uses: actions/checkout@v4
@@ -40,19 +67,37 @@ jobs:
           free -h
           test "$(df -Pk . | awk 'NR==2 {print $4}')" -ge 6291456
           test "$RUNNER_ENVIRONMENT" = github-hosted
+          echo "MOBILE_PREVIEW_BINDING=$RUNNER_TEMP/mobile-preview-binding.json" >> "$GITHUB_ENV"
+      - name: Resolve matching native Preview before build costs
+        id: preview
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node mobile/poker/preview-preflight.mjs
       - uses: actions/setup-node@v4
+        if: steps.preview.outputs.build == 'true'
         with:
           node-version: '22.23.1'
+          cache: npm
+          cache-dependency-path: mobile/poker/package-lock.json
       - uses: actions/setup-java@v4
+        if: steps.preview.outputs.build == 'true'
         with:
           distribution: temurin
           java-version: '21.0.10+7.0.LTS'
       - name: Fundamental security checks
-        run: node --test tests/mobile-poker-security.test.mjs
+        if: steps.preview.outputs.build == 'true'
+        run: node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-preview.test.mjs
       - name: Locked mobile dependencies
+        if: steps.preview.outputs.build == 'true'
         working-directory: mobile/poker
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Revalidate source and Preview before packaging
+        if: steps.preview.outputs.build == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node mobile/poker/preview-preflight.mjs --verify
       - name: Package shared frontend and generate Android template
+        if: steps.preview.outputs.build == 'true'
         working-directory: mobile/poker
         run: |
           set -euo pipefail
@@ -61,6 +106,7 @@ jobs:
           node configure-android.mjs
           ./node_modules/.bin/cap sync android
       - name: Build debug APK on hosted runner only
+        if: steps.preview.outputs.build == 'true'
         working-directory: mobile/poker/android
         run: |
           set -euo pipefail
@@ -68,17 +114,27 @@ jobs:
           test "$(df -Pk . | awk 'NR==2 {print $4}')" -ge 4194304
           chmod +x gradlew
           ./gradlew --no-daemon --max-workers=2 assembleDebug
+      - name: Revalidate source and Preview before artifact publication
+        if: steps.preview.outputs.build == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node mobile/poker/preview-preflight.mjs --verify
       - name: APK and exact-source receipt
+        if: steps.preview.outputs.build == 'true'
         working-directory: mobile/poker
         run: |
           set -euo pipefail
           mkdir artifacts
           cp android/app/build/outputs/apk/debug/app-debug.apk "artifacts/arcade-poker-stage-${SOURCE_SHA}.apk"
+          APK_SIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          "$APK_SIGNER" verify --verbose --print-certs "artifacts/arcade-poker-stage-${SOURCE_SHA}.apk" > artifacts/signature.txt
+          grep -q 'CN=Android Debug' artifacts/signature.txt
           cp www/build-receipt.json artifacts/
           (node --version; java -version 2>&1; cat android/variables.gradle; cat android/gradle/wrapper/gradle-wrapper.properties; ./android/gradlew -p android --version; df -h .) > artifacts/toolchain.txt
           (cd artifacts && sha256sum *.apk > SHA256SUMS)
           cat artifacts/build-receipt.json >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
+        if: steps.preview.outputs.build == 'true'
         with:
           name: arcade-poker-stage-${{ env.SOURCE_SHA }}
           path: mobile/poker/artifacts/
