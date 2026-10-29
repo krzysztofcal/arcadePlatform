@@ -242,6 +242,7 @@ function normalizeDeployOrigin(raw) {
 // Validate existing Stage credentials in-process; never print secret values or URLs.
 function validateStageNetlifyConfig(env, ref) {
   try {
+    if (env.POKER_DEAL_SECRET) throw new Error();
     if (env.SUPABASE_URL !== `https://${ref}.supabase.co`) throw new Error();
     const db = new URL(env.SUPABASE_DB_URL);
     const direct = db.hostname === `db.${ref}.supabase.co`;

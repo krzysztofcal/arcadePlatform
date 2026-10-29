@@ -115,5 +115,9 @@ test('native parent generator pins Stage credentials/origin, publishes safe rece
  const receipt=JSON.parse(files['stage-context-receipt.json']);assert.equal(receipt.origin,env.DEPLOY_PRIME_URL);assert.equal(receipt.supabaseProjectRef,ref);assert.equal(receipt.sourceSha,env.COMMIT_REF);assert.equal(receipt.wsUrl,'wss://ws-preview.kcswh.pl/ws');
  assert.ok(!JSON.stringify(receipt).includes(secret));assert.ok(!JSON.stringify(receipt).includes(env.SUPABASE_SERVICE_ROLE_KEY));assert.ok(!JSON.stringify(receipt).includes('synthetic@'));
  for(const patch of [{POKER_WS_PREVIEW_URL:'wss://ws.kcswh.pl/ws'},{BRANCH:'unapproved'},{DEPLOY_PRIME_URL:origin},{SUPABASE_URL:'https://otbqfijerkieoxwpxjnm.supabase.co'},{SUPABASE_DB_URL:'postgresql://postgres:synthetic@db.otbqfijerkieoxwpxjnm.supabase.co/postgres'},{SUPABASE_JWT_SECRET:'wrong-key'},{SUPABASE_JWT_SECRET_V2:'wrong-inherited-key'},{SUPABASE_DB_URL:env.SUPABASE_DB_URL+'?host=db.otbqfijerkieoxwpxjnm.supabase.co'},{SUPABASE_SERVICE_ROLE_KEY:jwt('anon')},{ARCADE_STAGE_REDIS_TOKEN:''},{XP_REDIS_ENV:'prod'},{XP_KEY_NS:'kcswh:prod:xp:v3'}])assert.throws(()=>build(patch),/stage_|xp_redis_/);
+ build({POKER_DEAL_SECRET:''});
+ assert.throws(()=>build({POKER_DEAL_SECRET:'synthetic-forbidden-key'}),/stage_netlify_credentials_invalid/);
+ build({CONTEXT:'deploy-preview',BRANCH:'feat/child',DEPLOY_PRIME_URL:origin,POKER_DEAL_SECRET:''});
+ assert.throws(()=>build({CONTEXT:'deploy-preview',BRANCH:'feat/child',DEPLOY_PRIME_URL:origin,POKER_DEAL_SECRET:'synthetic-forbidden-key'}),/stage_netlify_credentials_invalid/);
  build({CONTEXT:'deploy-preview',BRANCH:'feat/child',DEPLOY_PRIME_URL:origin});assert.match(files['deploy-context.mjs'],/BUILD_ARTIFACT_IDENTITY = "netlify-functions"/);assert.equal(files['_headers'],undefined);
 });
