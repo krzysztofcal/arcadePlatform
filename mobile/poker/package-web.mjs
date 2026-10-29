@@ -111,12 +111,12 @@ for (const name of [...pages, 'index.html']) {
   const html = await readFile(path.join(out, name), 'utf8');
   const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/i)?.[1];
   if (!csp || /script-src[^;]*'unsafe-inline'/.test(csp)) throw new Error('Invalid packaged script policy');
-  for (const match of html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
+  for (const match of html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
     if (!csp.includes("'sha256-" + createHash('sha256').update(match[1]).digest('base64') + "'")) throw new Error('Packaged inline CSP mismatch');
   }
-  for (const match of html.matchAll(/<(?:script|link)\b[^>]*>/g)) {
-    const tag = match[0], src = tag.match(/\b(?:src|href)="([^"]+)"/)?.[1], integrity = tag.match(/\bintegrity="([^"]+)"/)?.[1];
-    if (tag.startsWith('<script') && /^(?:https?:)?\/\//.test(src || '')) throw new Error('External packaged script');
+  for (const match of html.matchAll(/<(?:script|link)\b[^>]*>/gi)) {
+    const tag = match[0], src = tag.match(/\b(?:src|href)="([^"]+)"/i)?.[1], integrity = tag.match(/\bintegrity="([^"]+)"/i)?.[1];
+    if (tag.toLowerCase().startsWith('<script') && /^(?:https?:)?\/\//.test(src || '')) throw new Error('External packaged script');
     if (integrity) {
       const bytes = await readFile(path.join(out, new URL(src, 'https://localhost/' + name).pathname.slice(1)));
       if (!integrity.split(/\s+/).some(token => { const parts = token.split('-'); return /^sha(256|384|512)$/.test(parts[0]) && createHash(parts[0]).update(bytes).digest('base64') === parts[1]; })) throw new Error('Packaged SRI mismatch');
