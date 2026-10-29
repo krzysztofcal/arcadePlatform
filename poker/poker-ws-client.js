@@ -33,7 +33,7 @@
       || 'wss://ws.kcswh.pl/ws';
     var previewUrl = nonEmptyString(buildInfo && buildInfo.pokerWsPreviewUrl);
 
-    if (buildInfo && buildInfo.isPreview === true && previewUrl) {
+    if (buildInfo && (buildInfo.isPreview === true || buildInfo.stageParent === true) && previewUrl) {
       return previewUrl;
     }
 
