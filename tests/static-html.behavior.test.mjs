@@ -282,6 +282,7 @@ try {
     env: {
       ...process.env,
       CONTEXT: "deploy-preview",
+      POKER_DEAL_SECRET: "",
       XP_REDIS_VERSION: "3", XP_REDIS_ENV: "stage", XP_KEY_NS: "kcswh:stage:xp:v3",
       DEPLOY_PRIME_URL: "https://deploy-preview-388--playkcswh.netlify.app",
       SUPABASE_URL: `https://${fixtureStageRef}.supabase.co`,
