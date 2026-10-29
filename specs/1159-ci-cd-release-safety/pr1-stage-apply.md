@@ -25,3 +25,9 @@ Local isolated PostgreSQL17 system7701225723289707303 (neither Stage nor Product
 Ready no longer enables shared Stage SQL. Arbitrary-ref prepare, metadata bootstrap/backfill and old --db-url/--changed-from CLI paths are retired. Operators must provide exact approval and confirmation; missing history or a different branch's Stage versions blocks the request. Production/WWW/WS/Android runtime and SQL files are unchanged; no WS Preview deployment required. Keep current required check names/financial coverage. This PR cannot change already-running historical workflow runs; no apply was dispatched here.
 
 Publishing this Draft PR runs nonmutating hosted checks/Netlify Preview only; no SQL file added, no Stage workflow event, no Production push. Separate OWNER GO required for merge or actual Stage inspect/apply. Production auto-deploy remains as before; neither WWW nor WS cutover is attempted. LEGAL OPEN.
+
+## Review correction — OWNER-only apply
+
+Mutating apply requires exact GitHub actor AND triggering_actor `krzysztofcal`. Job admission blocks other dispatch/rerun users before runner allocation; executor repeats the same check before bundle/credential processing. OWNER rerunning another writer's original dispatch is also refused. Confirmation remains the scope pin, not authorization. Inspect remains trusted-main/read-only under approved scope. No new auth framework/Environment or settings mutation; no claim of two-person approval.
+
+Public repo currently lists only OWNER as collaborator; existing two Production environments have no reviewers. Required Environment review is available for public repos but would require separate settings GO. Removed DB Stage Prepare has no active caller/required check; old design is explicitly historical. New fundamental test denies writer/foreign/missing actor, mismatched rerun, PR/branch context and verifies early CLI refusal; SQL/transactions/receipts unchanged.

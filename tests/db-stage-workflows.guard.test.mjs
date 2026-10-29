@@ -90,3 +90,18 @@ test('prepare reads trusted main executor and only approved SQL blobs, refusing 
  await assert.rejects(prepare(a,async path=>path==='/pulls/1'?{state:'open',head:{sha:sourceSha,repo:{full_name:'fork/repo'}}}:read(path),env),/source_pr/);
  await assert.rejects(prepare(a,async path=>path==='/pulls/1'?{state:'open',head:{sha:'e'.repeat(40),repo:{full_name:env.GITHUB_REPOSITORY}}}:read(path),env),/source_pr/);
 });
+
+import * as stageExecutor from '../scripts/stage-db-migrate.mjs';
+test('apply requires OWNER dispatch and OWNER rerun, before Stage credentials or SQL',()=>{
+ assert.equal(typeof stageExecutor.authorizeApply,'function');
+ const env={GITHUB_ACTOR:'krzysztofcal',GITHUB_TRIGGERING_ACTOR:'krzysztofcal',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main',GITHUB_REPOSITORY:'krzysztofcal/arcadePlatform'};
+ assert.doesNotThrow(()=>stageExecutor.authorizeApply(env));
+ for(const denied of [ {...env,GITHUB_ACTOR:'other-writer'}, {...env,GITHUB_TRIGGERING_ACTOR:'other-writer'}, {...env,GITHUB_ACTOR:'other-writer',GITHUB_TRIGGERING_ACTOR:'krzysztofcal'}, {...env,GITHUB_TRIGGERING_ACTOR:undefined}, {...env,GITHUB_EVENT_NAME:'pull_request'}, {...env,GITHUB_REF:'refs/heads/feature'} ])assert.throws(()=>stageExecutor.authorizeApply(denied),/owner_apply_required/);
+ const s=read('.github/workflows/db-stage-apply-pr.yml');
+ assert.match(s,/github\.actor == 'krzysztofcal' && github\.triggering_actor == 'krzysztofcal'/);
+ assert.match(s,/inputs\.operation == 'inspect' \|\|/);
+ assert.doesNotMatch(s,/^\s+environment:/m,'no unconfigured Environment auto-creation');
+ const script=read('scripts/stage-db-migrate.mjs');assert.ok(script.indexOf("if(args[0]==='--apply')authorizeApply()")<script.indexOf('const file=process.env.STAGE_MIGRATION_BUNDLE'));
+ const deniedRun=spawnSync(process.execPath,['scripts/stage-db-migrate.mjs','--apply'],{env:{PATH:process.env.PATH,...env,GITHUB_TRIGGERING_ACTOR:'other-writer'},encoding:'utf8'});
+ assert.equal(deniedRun.status,1);assert.match(deniedRun.stderr,/owner_apply_required/);assert.equal(deniedRun.stdout,'');
+});

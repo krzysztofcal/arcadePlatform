@@ -148,8 +148,17 @@ export async function prepare(a, read=github, env=process.env) {
   for(const m of a.migrations){const entry=entries.find(e=>e.path===`supabase/migrations/${m.file}`);check(entry,'approved_file_missing');const blob=await read(`/git/blobs/${entry.sha}`);check(blob.encoding==='base64','unsupported_blob');const bytes=Buffer.from(blob.content,'base64');check(digest(bytes)===m.sha256,'migration_hash_mismatch');sql.push(bytes.toString('utf8'));}
   const bundle={approval:a,files:entries.map(e=>e.path.slice('supabase/migrations/'.length)).sort(),sql};validateBundle(bundle);return bundle;
 }
+
+// Dispatch permission/confirmation alone are not OWNER authorization.
+export function authorizeApply(env = process.env) {
+  check(env.GITHUB_EVENT_NAME === 'workflow_dispatch' && env.GITHUB_REF === 'refs/heads/main' &&
+    env.GITHUB_REPOSITORY === REPO && env.GITHUB_ACTOR === 'krzysztofcal' &&
+    env.GITHUB_TRIGGERING_ACTOR === 'krzysztofcal', 'owner_apply_required');
+}
+
 async function main() {
   const args=process.argv.slice(2);check(args.length===1 && ['--prepare','--inspect','--apply'].includes(args[0]),'explicit_mode_required');
+  if(args[0]==='--apply')authorizeApply();
   const file=process.env.STAGE_MIGRATION_BUNDLE;check(file,'bundle_path_required');
   if(args[0]==='--prepare') {const a=validateApproval(JSON.parse(process.env.STAGE_MIGRATION_APPROVAL||'null'));const b=await prepare(a);fs.writeFileSync(file,JSON.stringify(b),{mode:0o600,flag:'wx'});process.stdout.write(JSON.stringify({approvalSha256:approvalDigest(a),confirmation:confirmation(a)})+'\n');return;}
   const b=JSON.parse(fs.readFileSync(file,'utf8'));validateBundle(b);await verifySource(b.approval);
