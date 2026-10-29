@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 const { execSync } = require('child_process');
 
 function getGitCommit() {
@@ -238,15 +239,47 @@ function normalizeDeployOrigin(raw) {
   }
 }
 
+// Validate existing Stage credentials in-process; never print secret values or URLs.
+function validateStageNetlifyConfig(env, ref) {
+  try {
+    if (env.SUPABASE_URL !== `https://${ref}.supabase.co`) throw new Error();
+    const db = new URL(env.SUPABASE_DB_URL);
+    const direct = db.hostname === `db.${ref}.supabase.co`;
+    const pooled = db.hostname.endsWith('.pooler.supabase.com') && decodeURIComponent(db.username) === `postgres.${ref}`;
+    if (!['postgres:','postgresql:'].includes(db.protocol) || (!direct && !pooled) || !['','5432',...(pooled?['6543']:[])].includes(db.port) || !db.password || db.pathname !== '/postgres' || db.hash || [...db.searchParams.keys()].some(k=>!['sslmode','pgbouncer'].includes(k))) throw new Error();
+    if (env.POKER_WS_PREVIEW_URL && env.POKER_WS_PREVIEW_URL !== 'wss://ws-preview.kcswh.pl/ws') throw new Error();
+    if (!env.SUPABASE_JWT_SECRET || !env.ARCADE_STAGE_REDIS_TOKEN?.trim()) throw new Error();
+    if (env.SUPABASE_JWT_SECRET_V2 && env.SUPABASE_JWT_SECRET_V2 !== env.SUPABASE_JWT_SECRET) throw new Error();
+    if (env.SUPABASE_URL_V2 && env.SUPABASE_URL_V2 !== env.SUPABASE_URL) throw new Error();
+    for (const [key, role] of [['SUPABASE_ANON_KEY','anon'], ['SUPABASE_SERVICE_ROLE_KEY','service_role'], ...(env.SUPABASE_ANON_KEY_V2 ? [['SUPABASE_ANON_KEY_V2','anon']] : [])]) {
+      const parts = env[key].split('.');
+      const header = JSON.parse(Buffer.from(parts[0],'base64url').toString());
+      const claims = JSON.parse(Buffer.from(parts[1],'base64url').toString());
+      const signature = crypto.createHmac('sha256', env.SUPABASE_JWT_SECRET).update(parts.slice(0,2).join('.')).digest('base64url');
+      if (parts.length !== 3 || header.alg !== 'HS256' || claims.ref !== ref || claims.role !== role || signature !== parts[2]) throw new Error();
+    }
+  } catch { throw new Error('stage_netlify_credentials_invalid'); }
+}
+
 // Committed activation floor, changed only by the separately approved cutover.
 // Unlike deployment variables it survives their accidental deletion on rebuild.
 const XP_REDIS_MIN_VERSION = Object.freeze({ stage: '3', prod: '3' });
 function generateServerDeployContext(context, deployPrimeUrl, artifactIdentity = 'netlify-functions') {
+  const stageContext = require('../shared/netlify-stage-context.cjs');
   const supported = new Set(['production', 'deploy-preview', 'branch-deploy', 'dev', 'development']);
   const value = supported.has(context) ? context : 'unknown';
-  if (!['netlify-functions','ws-server','ws-preview'].includes(artifactIdentity) ||
+  if (!['netlify-functions','netlify-stage-parent','ws-server','ws-preview'].includes(artifactIdentity) ||
       artifactIdentity === 'ws-preview' && (value !== 'deploy-preview' || !!deployPrimeUrl)) {
     throw new Error('redis_artifact_identity_invalid');
+  }
+  if (value === 'branch-deploy' && artifactIdentity === 'netlify-functions') {
+    if (process.env.BRANCH !== stageContext.STAGE_PARENT_BRANCH || deployPrimeUrl !== stageContext.STAGE_PARENT_ORIGIN) throw new Error('stage_parent_identity_invalid');
+    artifactIdentity = 'netlify-stage-parent';
+  }
+  if (artifactIdentity === 'netlify-stage-parent' && !stageContext.isStageNetlifyContext(value, deployPrimeUrl, artifactIdentity)) throw new Error('stage_parent_identity_invalid');
+  if (['netlify-functions','netlify-stage-parent'].includes(artifactIdentity) && ['deploy-preview','branch-deploy'].includes(value)) {
+    if (!stageContext.isStageNetlifyContext(value, deployPrimeUrl, artifactIdentity)) throw new Error('stage_netlify_origin_invalid');
+    validateStageNetlifyConfig(process.env, stageContext.STAGE_PROJECT_REF);
   }
   const version = process.env.XP_REDIS_VERSION;
   const environment = process.env.XP_REDIS_ENV;
@@ -273,11 +306,30 @@ function generateServerDeployContext(context, deployPrimeUrl, artifactIdentity =
     `export const BUILD_XP_REDIS_ENV = ${JSON.stringify(v3 ? environment : null)};`,
     '',
   ].join('\n'), 'utf8');
+  if (stageContext.isStageNetlifyContext(value, normalizeDeployOrigin(deployPrimeUrl), artifactIdentity)) {
+    if (artifactIdentity === 'netlify-stage-parent') fs.appendFileSync(path.join(process.cwd(),'_headers'),'\n/*\n  X-Robots-Tag: noindex\n','utf8');
+    const receipt = { sourceSha:process.env.COMMIT_REF || getGitCommit(), deployId:process.env.DEPLOY_ID || null,
+      context:value, artifactIdentity, branch:process.env.BRANCH || null, origin:normalizeDeployOrigin(deployPrimeUrl),
+      supabaseProjectRef:stageContext.STAGE_PROJECT_REF, redisVersion:version, redisEnvironment:environment, namespace,
+      credentialValidation:'Stage JWT signatures/project and DB target checked; protected-variable policy requires Netlify operator verification',
+      wsUrl:stageContext.STAGE_WS_URL, androidOrigin:'https://localhost' };
+    fs.writeFileSync(path.join(outputDir,'stage-context-receipt.json'), JSON.stringify(receipt,null,2)+'\n','utf8');
+  }
   console.log(`Server deploy context generated: ${value}`);
+  return { artifactIdentity, stageWsUrl:stageContext.STAGE_WS_URL };
 }
 
 function main() {
   const buildInfo = generateBuildInfo();
+  // The separate static landing site has no Functions or XP Redis runtime.
+  if (path.resolve(process.cwd()) !== path.resolve(__dirname, "../landing")) {
+    const server = generateServerDeployContext(buildInfo.context, process.env.DEPLOY_PRIME_URL);
+    if (server.artifactIdentity === 'netlify-stage-parent') {
+      buildInfo.stageParent = true;
+      buildInfo.pokerWsUrl = server.stageWsUrl;
+      buildInfo.pokerWsPreviewUrl = server.stageWsUrl;
+    }
+  }
 
   // Output relative to current working directory (where build runs from)
   const outputDir = path.join(process.cwd(), 'js');
@@ -312,10 +364,6 @@ window.BUILD_INFO = ${JSON.stringify(buildInfo, null, 2)};
 
   if (!generateSupabaseConfig(process.env)) {
     console.log("Supabase public config not generated: SUPABASE_URL/SUPABASE_ANON_KEY missing");
-  }
-  // The separate static landing site has no Functions or XP Redis runtime.
-  if (path.resolve(process.cwd()) !== path.resolve(__dirname, "../landing")) {
-    generateServerDeployContext(buildInfo.context, process.env.DEPLOY_PRIME_URL);
   }
 }
 
