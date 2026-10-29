@@ -68,6 +68,22 @@ const run = async () => {
     assert.equal(result.user?.id, "user-abc");
     assert.equal(result.user?.sub, "user-abc");
   });
+
+  await withEnv({ SUPABASE_JWT_SECRET: secret, ACCOUNT_DELETION_ENABLED: "0" }, async () => {
+    const verify = await loadVerify();
+    const {createProfilePublicHandler}=await import('../netlify/functions/profile-public.mjs');
+    const {createXpLeaderboardHandler}=await import('../netlify/functions/xp-leaderboard.mjs');
+    const userId='00000000-0000-4000-8000-000000000001';let reads=0;
+    const handlers=[
+      createProfilePublicHandler({verifySupabaseJwt:verify,env:{PUBLIC_PROFILES_ENABLED:'1'},allowPublicRead:async()=>true,findPublicProfile:async()=>{reads++;return {userId,handle:'test-player',displayName:'Test Player',avatarVariant:'fox-blue'};},getUserXpTotal:async()=>0}),
+      createXpLeaderboardHandler({verifySupabaseJwt:verify,leaderboardEnabled:()=>true,allowLeaderboardRead:async()=>true,readLeaderboardPage:async()=>{reads++;return {response:{rows:[]},diagnostics:{publicRows:0}};}})
+    ];
+    const cases=[['',401],['malformed',401],[createSupabaseJwt({sub:userId,secret,expOffsetSec:-1}),401],[createSupabaseJwt({sub:userId,secret:'another-project-secret'}),401],[createSupabaseJwt({sub:userId,secret}),200]];
+    for(const [index,handler] of handlers.entries())for(const [token,status] of cases){
+      const before=reads;const response=await handler({httpMethod:'GET',headers:{authorization:token?'Bearer '+token:''},queryStringParameters:index===0?{handle:'test-player'}:{}});
+      assert.equal(response.statusCode,status);assert.equal(response.headers['cache-control'],'no-store');assert.equal(reads-before,status===200?1:0);
+    }
+  });
 };
 
 run().catch((error) => {

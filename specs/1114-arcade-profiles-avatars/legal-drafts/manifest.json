@@ -1,11 +1,11 @@
 {
   "candidateVersion": "2026-10-28-a2",
-  "status": "OWNER_REVIEW_READY_LEGAL_DESIGN_RISK_OPEN_NOT_PUBLISHED",
+  "status": "LOCAL_AUTHENTICATED_AUDIENCE_PROPOSAL_OWNER_REVIEW_LEGAL_OPEN_NOT_PUBLISHED",
   "previousVersion": "2026-10-26-a1",
   "files": {
-    "terms.pl.md": "6d9a0da270125345f61597df9994d2c4a8de28682e1b19c60f2e5f0cf88fba2d",
-    "terms.en.md": "42bf929fc3418f4a670ed1d3ceab5fb50b4214bf18dbaaf7ef85bcc8e84208d8",
-    "privacy.pl.md": "29aab76a68b625916616525ce58beb2c22994d535cb9e9e0cb85760ceb7290aa",
-    "privacy.en.md": "579a66890adbef5cb198651a08b892c119bae9210707d5081415d50da93e3844"
+    "terms.pl.md": "59127cbdb196995b0e46220ca1b73b68ee9e1ff26ff85bc529bf1acf9716232c",
+    "terms.en.md": "93f1fcf81bea487adaf63a9ad14316866a7aed0906397838c859b06b9fb3bda2",
+    "privacy.pl.md": "b60f2d7f72cb0ae380fee0a23101c197caa4c3c9de713f8c1991d965e6fa0a2b",
+    "privacy.en.md": "0b737c1a5b80e98c046cfdd4a2c3a7f188ed1292182cac2524a6e6cecc0a2481"
   }
 }

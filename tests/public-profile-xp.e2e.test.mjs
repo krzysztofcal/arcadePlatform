@@ -37,13 +37,14 @@ function response(body) {
 test("authenticated badge and public profile use the same canonical XP total", async () => {
   await store.set(`kcswh:xp:v2:total:${USER_ID}`, String(SNAPSHOT.totalXp));
   const publicHandler = createProfilePublicHandler({
+    verifySupabaseJwt: async()=>({valid:true,userId:USER_ID}),
     env: { PUBLIC_PROFILES_ENABLED: "1" },
     findPublicProfile: async () => profile(),
     allowPublicRead: async () => true,
   });
   const publicResponse = await publicHandler({
     httpMethod: "GET",
-    headers: { origin: "https://arcade.test" },
+    headers: { origin: "https://arcade.test", authorization: "Bearer fixture" },
     queryStringParameters: { handle: "smoke-676-04933930" },
   });
   const publicBody = JSON.parse(publicResponse.body);

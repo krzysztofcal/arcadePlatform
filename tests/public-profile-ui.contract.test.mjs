@@ -146,3 +146,40 @@ test("every HTML page with a topbar loads the shared auth avatar bridge first", 
     assert.ok(topbarIndex > chipsIndex, `${file} must load the chips client before topbar`);
   }
 });
+
+
+test("public profile reads require viewer auth, never put token in URL and discard stale sessions", async()=>{
+ let userId=null,requests=0;
+ const anon=await loadProfileClient(async()=>{requests++;},()=>userId);
+ await assert.rejects(anon.getPublic('target'),{code:'not_authenticated'});assert.equal(requests,0);
+ for(const next of [null,'user-b','user-a']){
+  userId='user-a';let release;let request;
+  const client=await loadProfileClient((url,options)=>{request={url,options};return new Promise(resolve=>{release=resolve;});},()=>userId);
+  const pending=client.getPublic('target');await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(request.options.headers.Authorization,'Bearer token-user-a');assert.equal(request.options.cache,'no-store');assert.equal(request.url.includes('token-user-a'),false);
+  userId=next;client.clear();release({ok:true,json:async()=>({handle:'target'})});await assert.rejects(pending,{code:'stale_identity'});
+ }
+});
+
+test("profile page clears on logout, account switch and hiding; visibility return rechecks session", async()=>{
+ const source=await read('js/public-profile-page.js');
+ for(const mode of ['logout','switch','hidden-return']){
+  const nodes=new Map(),listeners={};let authChange,release,user={id:'viewer-a'},reads=0;
+  function node(){return {hidden:false,textContent:'',dataset:{},setAttribute(){},removeAttribute(){},classList:{remove(){}}};}
+  const document={hidden:false,readyState:'complete',getElementById:id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);},addEventListener:(name,fn)=>{listeners[name]=fn;}};
+  const window={location:{pathname:'/u/target'},SupabaseAuth:{getCurrentUser:async()=>user,onAuthChange:fn=>{authChange=fn;}},ProfileClient:{applyAvatar(){},getPublic:()=>{reads++;return reads===1?new Promise(resolve=>{release=resolve;}):Promise.resolve({handle:'target',displayName:'Fresh identity',xp:2,level:1});}}};
+  vm.runInNewContext(source,{window,document,Intl,setTimeout,clearTimeout});await new Promise(resolve=>setTimeout(resolve,0));
+  nodes.get('publicProfileName').textContent='old identity';
+  if(mode==='hidden-return'){document.hidden=true;listeners.visibilitychange();}
+  user=mode==='logout'?null:{id:'viewer-b'};authChange('SIGNED_OUT',null);
+  assert.equal(nodes.get('publicProfileCard').hidden,true);assert.equal(nodes.get('publicProfileName').textContent,'');
+  release({handle:'target',displayName:'must not reappear',xp:1,level:1});await new Promise(resolve=>setTimeout(resolve,0));
+  assert.notEqual(nodes.get('publicProfileName').textContent,'must not reappear');
+  if(mode==='logout'){assert.equal(nodes.get('publicProfileCard').hidden,true);assert.equal(nodes.get('publicProfileSignIn').hidden,false);}
+  if(mode==='hidden-return'){
+   assert.equal(reads,1,'no auth-triggered read or rendering while hidden');assert.equal(nodes.get('publicProfileCard').hidden,true);
+   document.hidden=false;listeners.visibilitychange();await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  if(mode!=='logout'){assert.equal(reads,2);assert.equal(nodes.get('publicProfileName').textContent,'Fresh identity');}
+ }
+});

@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0b1020">
   <title>Public profile • Arcade Hub</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -55,7 +56,8 @@
     <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation"><nav class="sb-nav"><ul class="sb-list"></ul></nav></aside>
     <main class="public-profile" aria-labelledby="publicProfileName">
       <p class="public-profile__status" id="publicProfileStatus" aria-live="polite" data-i18n="publicProfileLoading">Loading profile...</p>
-      <article class="public-profile__card" id="publicProfileCard" aria-busy="true">
+      <p class="public-profile__status" id="publicProfileSignIn" hidden><span data-i18n="browserSignInHint">Browser sign-in is separate from the app. After signing in, return to this page.</span> <a href="/account.html" data-i18n="signIn">Sign in</a></p>
+      <article class="public-profile__card" id="publicProfileCard" aria-busy="true" hidden>
         <div class="public-profile__identity" id="publicProfileIdentity" hidden>
           <div class="public-profile__avatar" id="publicProfileAvatar" role="img">AH</div>
           <div><h1 class="public-profile__name" id="publicProfileName"></h1><p class="public-profile__handle" id="publicProfileHandle"></p></div>

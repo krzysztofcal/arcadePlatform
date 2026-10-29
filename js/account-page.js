@@ -95,6 +95,7 @@
     nodes.publicProfileForm = doc.getElementById('publicProfileForm');
     nodes.publicProfileAvatar = doc.getElementById('publicProfileAvatar');
     nodes.publicProfileUrl = doc.getElementById('publicProfileUrl');
+    nodes.publicProfileBrowserHint = doc.getElementById('publicProfileBrowserHint');
     nodes.publicDisplayName = doc.getElementById('publicDisplayName');
     nodes.publicHandle = doc.getElementById('publicHandle');
     nodes.hideFromLeaderboard = doc.getElementById('hideFromLeaderboard');
@@ -301,6 +302,7 @@
   function renderPublicProfile(profile){
     publicProfile = profile || null;
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
+    if (nodes.publicProfileBrowserHint) nodes.publicProfileBrowserHint.hidden = !window.MobilePoker;
     if (!profile) return;
     if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
     if (nodes.publicDisplayName) nodes.publicDisplayName.textContent = profile.displayName || '';
