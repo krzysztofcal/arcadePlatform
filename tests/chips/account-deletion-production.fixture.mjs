@@ -11,6 +11,7 @@ import { postTransaction } from '../../netlify/functions/_shared/chips-ledger.mj
 import { claimBonusCampaign } from '../../netlify/functions/_shared/bonus-campaigns.mjs';
 import { claimWelcomeBonus } from '../../netlify/functions/_shared/welcome-bonus.mjs';
 import { createPendingUpload, finalizeAvatar } from '../../netlify/functions/_shared/profile-avatar.mjs';
+import { ensureUserProfile, updateUserProfile } from '../../netlify/functions/_shared/user-profile.mjs';
 
 const canonicalId='7575202818581710058';
 const normalize=value=>JSON.parse(JSON.stringify(value));
@@ -93,39 +94,6 @@ export async function assertProductionDeletionCompatibility({runMigration,migrat
  assert.equal((await sql`select private.account_avatar_guards_ready() ready`)[0].ready,false);
  assert.equal((await sql`select to_regclass('private.account_reward_config') x`)[0].x,null);
  assert.deepEqual(normalize(await sql`select paid_count::int n from private.bonus_campaign_paid_totals where campaign_id=any(${campaigns}::uuid[]) order by paid_count`),[{n:2},{n:3}]);
- for(const r of new Set([old,current])){
-  assert.equal((await r.claimBonusCampaign(users[0],codes[0],deps)).claimed,false);
-  const uid=await user();const first=await r.claimWelcomeBonus(uid,deps);assert.equal(first.claimed,true);assert.equal((await r.claimWelcomeBonus(uid,deps)).claimed,false);
-  const freshCode='pc-'+randomUUID();await campaign(freshCode,1);const a=await r.claimBonusCampaign(uid,freshCode,deps);assert.equal(a.claimed,true);assert.equal((await r.claimBonusCampaign(await user(),freshCode,deps)).claimed,false);
-  const image=await sharp({create:{width:2,height:2,channels:3,background:'#123456'}}).png().toBuffer();let output;
-  const avatarDeps={...deps,storageConfig:{baseUrl:'https://fixture.supabase.co',serviceKey:'fixture'},fetch:async(url,options={})=>{
-   if(url.includes('/upload/sign/'))return new Response(JSON.stringify({url:'/object/upload/sign/profile-avatar-uploads/pending/test?token=fixture'}),{status:200});
-   if(options.method==='GET')return new Response(image,{status:200,headers:{'content-type':'image/png'}});
-   if(options.method==='POST')output=url;return new Response('[]',{status:200});
-  }};
-  const pending=await r.createPendingUpload(uid,{mimeType:'image/png',size:image.length},avatarDeps);assert(pending.uploadId);await r.finalizeAvatar(uid,pending.uploadId,avatarDeps);assert(output);assert((await sql`select avatar_key from user_profiles where user_id=${uid}`)[0].avatar_key);
- }
- assert.deepEqual(normalize(await sql`select paid_count::int n from private.bonus_campaign_paid_totals where campaign_id=any(${campaigns}::uuid[]) order by paid_count`),[{n:2},{n:3}]);
- const uid=users[0],other=users[1];await sql`insert into favorites(user_id,game_id) values(${uid},'compat-own'),(${other},'compat-other')`;
- await sql.unsafe("create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth,public to authenticated;grant select on public.favorites to authenticated");
- await sql.begin(async tx=>{await tx`select set_config('request.jwt.claim.sub',${uid},true)`;await tx.unsafe('set local role authenticated');const f=await tx`select game_id from favorites`;assert(f.some(x=>x.game_id==='compat-own'));assert(!f.some(x=>x.game_id==='compat-other'));});
- await sql.begin(async tx=>{
-  const retired=randomUUID();await tx.unsafe("set local session_replication_role='replica'");
-  // Synthetic final row shape only; no deletion request/BURN/Auth action.
-  await tx`insert into chips_accounts(account_type,retired_user_id,retired_at,status,balance) values('USER',${retired},now(),'closed',0)`;
-  await tx.unsafe("set local session_replication_role='origin'");
-  assert.equal((await tx`select public.chips_retention_user_matches_v2(a,${retired}) ok from chips_accounts a where retired_user_id=${retired}`)[0].ok,true);
-  assert.equal((await tx`select public.chips_retention_user_matches_v2(a,${users[0]}) ok from chips_accounts a where user_id=${users[0]}`)[0].ok,true);
-  await assert.rejects(()=>tx.savepoint(sp=>sp`update chips_accounts set balance=1 where retired_user_id=${retired}`),error=>error.code==='23514');
-  throw Object.assign(new Error('fixture rollback'),{fixtureRollback:true});
- }).catch(e=>{if(!e.fixtureRollback)throw e;});
- const changed=await sql`select pg_get_functiondef('public.chips_retire_production_escrow_accounts(bigint,uuid[],text,text,text,boolean,text)'::regprocedure) definition`;
- assert.equal((changed[0].definition.match(/md5\(pg_catalog.pg_get_functiondef/g)||[]).length,2);
- const predicate=changed[0].definition.match(/exists\(select 1 from pg_catalog.pg_trigger triggers.*?\) then/s)[0].replace(/\) then$/,' )');
- assert.equal((await sql.unsafe('select '+predicate+' bad'))[0].bad,false);
- await sql.begin(async tx=>{await tx.unsafe("create function public.compat_unknown_delete() returns trigger language plpgsql as $$begin return old;end$$;create trigger compat_unknown before delete on chips_accounts for each row execute function public.compat_unknown_delete()");assert.equal((await tx.unsafe('select '+predicate+' bad'))[0].bad,true);throw Object.assign(new Error('fixture rollback'),{fixtureRollback:true});}).catch(e=>{if(!e.fixtureRollback)throw e;});
- assert.equal(Number((await sql`select count(*) n from (select transaction_id from chips_entries group by transaction_id having sum(amount)<>0)x`)[0].n),0);
- await assert.rejects(()=>sql.unsafe(migration),/migration history drift/);await sql.unsafe('rollback');
  // #1132: one forward-only schema-only equivalent against the reconstructed Production 66.
  const policyFile='20261022091126_account_avatar_known_capability_policy.sql';
  const policy=fixtureSQL(policyFile);
@@ -179,7 +147,78 @@ export async function assertProductionDeletionCompatibility({runMigration,migrat
  assert.equal((await sql`select enabled from public.account_deletion_release`)[0].enabled,false);
  assert.equal((await sql`select tgenabled from pg_trigger where tgname='account_avatar_manifest_guard_v3'`)[0].tgenabled,'D');
  await assert.rejects(()=>sql.unsafe(policy),/history drift/);await sql.unsafe('rollback');
+ const {assertProductionProfileEquivalents}=await import('./profile-bio-contract.fixture.mjs');
+ await assertProductionProfileEquivalents(sql,process.env.CHIPS_MIGRATIONS_TEST_DB_URL);
+ for(const r of new Set([old,current])){
+  assert.equal((await r.claimBonusCampaign(users[0],codes[0],deps)).claimed,false);
+  const uid=await user();const first=await r.claimWelcomeBonus(uid,deps);assert.equal(first.claimed,true);assert.equal((await r.claimWelcomeBonus(uid,deps)).claimed,false);
+  const freshCode='pc-'+randomUUID();await campaign(freshCode,1);const a=await r.claimBonusCampaign(uid,freshCode,deps);assert.equal(a.claimed,true);assert.equal((await r.claimBonusCampaign(await user(),freshCode,deps)).claimed,false);
+  const image=await sharp({create:{width:2,height:2,channels:3,background:'#123456'}}).png().toBuffer();let output;
+  const avatarDeps={...deps,storageConfig:{baseUrl:'https://fixture.supabase.co',serviceKey:'fixture'},fetch:async(url,options={})=>{
+   if(url.includes('/upload/sign/'))return new Response(JSON.stringify({url:'/object/upload/sign/profile-avatar-uploads/pending/test?token=fixture'}),{status:200});
+   if(options.method==='GET')return new Response(image,{status:200,headers:{'content-type':'image/png'}});
+   if(options.method==='POST')output=url;return new Response('[]',{status:200});
+  }};
+  const pending=await r.createPendingUpload(uid,{mimeType:'image/png',size:image.length},avatarDeps);assert(pending.uploadId);await r.finalizeAvatar(uid,pending.uploadId,avatarDeps);assert(output);assert((await sql`select avatar_key from user_profiles where user_id=${uid}`)[0].avatar_key);
+ }
+ assert.deepEqual(normalize(await sql`select paid_count::int n from private.bonus_campaign_paid_totals where campaign_id=any(${campaigns}::uuid[]) order by paid_count`),[{n:2},{n:3}]);
+ const uid=users[0],other=users[1];await sql`insert into favorites(user_id,game_id) values(${uid},'compat-own'),(${other},'compat-other')`;
+ await sql.unsafe("create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth,public to authenticated;grant select on public.favorites to authenticated");
+ await sql.begin(async tx=>{await tx`select set_config('request.jwt.claim.sub',${uid},true)`;await tx.unsafe('set local role authenticated');const f=await tx`select game_id from favorites`;assert(f.some(x=>x.game_id==='compat-own'));assert(!f.some(x=>x.game_id==='compat-other'));});
+ await sql.begin(async tx=>{
+  const retired=randomUUID();await tx.unsafe("set local session_replication_role='replica'");
+  // Synthetic final row shape only; no deletion request/BURN/Auth action.
+  await tx`insert into chips_accounts(account_type,retired_user_id,retired_at,status,balance) values('USER',${retired},now(),'closed',0)`;
+  await tx.unsafe("set local session_replication_role='origin'");
+  assert.equal((await tx`select public.chips_retention_user_matches_v2(a,${retired}) ok from chips_accounts a where retired_user_id=${retired}`)[0].ok,true);
+  assert.equal((await tx`select public.chips_retention_user_matches_v2(a,${users[0]}) ok from chips_accounts a where user_id=${users[0]}`)[0].ok,true);
+  await assert.rejects(()=>tx.savepoint(sp=>sp`update chips_accounts set balance=1 where retired_user_id=${retired}`),error=>error.code==='23514');
+  throw Object.assign(new Error('fixture rollback'),{fixtureRollback:true});
+ }).catch(e=>{if(!e.fixtureRollback)throw e;});
+ const changed=await sql`select pg_get_functiondef('public.chips_retire_production_escrow_accounts(bigint,uuid[],text,text,text,boolean,text)'::regprocedure) definition`;
+ assert.equal((changed[0].definition.match(/md5\(pg_catalog.pg_get_functiondef/g)||[]).length,2);
+ const predicate=changed[0].definition.match(/exists\(select 1 from pg_catalog.pg_trigger triggers.*?\) then/s)[0].replace(/\) then$/,' )');
+ assert.equal((await sql.unsafe('select '+predicate+' bad'))[0].bad,false);
+ await sql.begin(async tx=>{await tx.unsafe("create function public.compat_unknown_delete() returns trigger language plpgsql as $$begin return old;end$$;create trigger compat_unknown before delete on chips_accounts for each row execute function public.compat_unknown_delete()");assert.equal((await tx.unsafe('select '+predicate+' bad'))[0].bad,true);throw Object.assign(new Error('fixture rollback'),{fixtureRollback:true});}).catch(e=>{if(!e.fixtureRollback)throw e;});
+ assert.equal(Number((await sql`select count(*) n from (select transaction_id from chips_entries group by transaction_id having sum(amount)<>0)x`)[0].n),0);
+ await assert.rejects(()=>sql.unsafe(migration),/migration history drift/);await sql.unsafe('rollback');
  process.stdout.write('[klog] production_avatar_policy '+JSON.stringify({history:67,changedTimePredicates:3,newReadOnlyFunction:1,financialHistoryUnchanged:true,existingAclTriggersRlsUnchanged:true,apiRolesCannotAcceptRisk:true,backendSharesOwnerPrincipal:true,deletion:false,avatarV3:'DISABLED'})+'\n');
  process.stdout.write('[klog] production_deletion_compatibility '+JSON.stringify({migration:true,history:66,oldRuntime:oldDir?'executed':'SQL writer contract',newRuntime:'executed',deletion:false,avatarV3:'DISABLED',historicalPromo:5,historyRepaid:0,financialHistoryUnchanged:true,wrapperUnchanged:true,rls:true,legacyAvatar:true,unknownTriggerRejected:true})+'\n');
  } finally {await sql.end({timeout:1});const oldDir=process.env.CHIPS_PRODUCTION_COMPAT_OLD_RUNTIME_DIR;if(oldDir){const admin=await import(pathToFileURL(path.join(oldDir,'netlify/functions/_shared/supabase-admin.mjs')));await admin.closeSql?.();}}
+}
+
+
+// Real two-connection regression for the always-installed owned-write trigger.
+export async function assertAvatarLifecycleContention(sql, dbUrl) {
+ const target=new URL(dbUrl);assert.ok(['127.0.0.1','localhost','postgres'].includes(target.hostname),'disposable local PostgreSQL only');assert.ok(/_test$/.test(target.pathname)||target.pathname==='/chips_test_db');
+ const userId=randomUUID(),env={ACCOUNT_DELETION_ENABLED:'0'};
+ const executeSql=(q,p)=>sql.unsafe(q,p);
+ await sql.unsafe('insert into auth.users(id) values($1)',[userId]);
+ const initial=await ensureUserProfile(userId,{executeSql,env});
+ const variant=initial.avatarVariant==='fox-blue'?'panda-pink':'fox-blue';
+ const holder=postgres(dbUrl,{max:1,prepare:false}),writer=postgres(dbUrl,{max:1,prepare:false});
+ let release,locked,attempt,holding,updates=0,outcome='pending';
+ const ready=new Promise(resolve=>{locked=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ try {
+  const [{pid}]=await writer.unsafe('select pg_backend_pid() as pid');
+  holding=holder.begin(async tx=>{await tx.unsafe('select pg_advisory_xact_lock(hashtextextended($1,0))',['account-lifecycle:'+userId]);locked();await gate;});
+  await Promise.race([ready,holding]);
+  const beginSql=fn=>writer.begin(tx=>fn({unsafe(q,p){if(/^update public.user_profiles set avatar_variant=/.test(q))updates++;return tx.unsafe(q,p);}}));
+  attempt=updateUserProfile(userId,{avatarVariant:variant,expectedRevision:initial.avatarRevision},{executeSql,beginSql,env});
+  attempt.then(()=>{outcome='success';},error=>{outcome=error.code;});
+  let waiting=false;
+  for(let i=0;i<200&&outcome==='pending';i++){
+   const [activity]=await sql.unsafe("select wait_event_type='Lock' and wait_event='advisory' as waiting from pg_stat_activity where pid=$1",[pid]);
+   if(activity?.waiting){waiting=true;break;}
+   await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.equal(outcome,'pending','PATCH must wait for lifecycle owner instead of trigger40001; actual='+outcome);
+  assert.equal(waiting,true,'writer must acquire the canonical advisory lock BEFORE profile UPDATE');
+  assert.equal(updates,0,'no profile UPDATE while another transaction owns lifecycle');
+  release();await holding;
+  const profile=await attempt;
+  assert.equal(profile.avatarVariant,variant);assert.equal(profile.avatarRevision,initial.avatarRevision+1);assert.equal(updates,1,'one UPDATE, no retry');
+  await assert.rejects(updateUserProfile(userId,{avatarVariant:initial.avatarVariant,expectedRevision:initial.avatarRevision},{executeSql,beginSql,env}),{code:'stale_avatar_revision'});
+  assert.equal(updates,1,'stale CAS must fail before another write');
+ } finally {release();if(holding)await holding;if(attempt)await attempt.catch(()=>{});await holder.end();await writer.end();}
 }

@@ -4,7 +4,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { executePokerJoinAuthoritative } from "./join.mjs";
+import { executePokerJoinAuthoritative as executeJoin } from "./join.mjs";
+// Existing synthetic fixtures model an inactive Terms policy; dedicated cases below exercise admission.
+const executePokerJoinAuthoritative=args=>executeJoin({requireTerms:async()=>({required:false}),...args});
 import { pokerTierPolicyRows } from "../../tests/helpers/poker-tier-policy-fixture.mjs";
 import { calculateCanonicalPokerStakes } from "./table-economy.mjs";
 import { isStateStorageValid } from "../../ws-server/poker/snapshot-runtime/poker-state-utils.mjs";
@@ -136,6 +138,8 @@ test("shared join module imports without Netlify adapter dependency at module lo
   try {
     await fs.mkdir(stagedDir, { recursive: true });
     await fs.copyFile("shared/poker-domain/join.mjs", stagedJoin);
+    await fs.copyFile("shared/profile-terms.mjs",path.join(tempDir,"shared/profile-terms.mjs"));
+    await fs.copyFile("shared/account-deletion.mjs",path.join(tempDir,"shared/account-deletion.mjs"));
     await fs.copyFile("shared/poker-domain/poker-missed-turns.mjs", path.join(stagedDir, "poker-missed-turns.mjs"));
     await fs.copyFile("shared/poker-domain/bots.mjs", stagedBots);
     await fs.copyFile("shared/poker-domain/demand-refill.mjs", path.join(stagedDir, "demand-refill.mjs"));
@@ -3147,7 +3151,7 @@ test("Single Player atomic rollback: fails closed if minimum required bots canno
   assert.equal(ledgerCalls.length, 0, "no committed buy-in after rollback");
 });
 
-function createSinglePlayerSmokeHarness({ bots = [], participated = false, humanActive = false, singlePlayer = true, poolBalance = 10000, target = 2, status = 'OPEN', fundingSql = null } = {}) {
+function createSinglePlayerSmokeHarness({ bots = [], participated = false, humanActive = false, singlePlayer = true, poolBalance = 10000, target = 2, status = 'OPEN', fundingSql = null, requireTerms = async()=>({required:false}) } = {}) {
   const tableId = 't-sp-smoke', userId = 'smoke-owner';
   const table = { id: tableId, status, max_players: 6, stakes: { sb: 1, bb: 2 }, buy_in: 100, created_by: userId, lifecycle_kind: 'STANDARD', has_human_participant: participated, is_slow_only: false, is_single_player: singlePlayer };
   const initialRows = bots.map((bot, i) => ({ table_id: tableId, user_id: 'smoke-bot-' + i, seat_no: i + 2, status: bot.inactive ? 'INACTIVE' : 'ACTIVE', is_bot: true, stack: 100, bot_profile: 'NORMAL' }));
@@ -3186,7 +3190,7 @@ function createSinglePlayerSmokeHarness({ bots = [], participated = false, human
   };
   const join = () => executePokerJoinAuthoritative({
     beginSql: async fn => { const saved = structuredClone(data); try { return await fn(tx); } catch (error) { data = saved; throw error; } },
-    tableId, userId, requestId: 'smoke-resume-intent', buyIn: 100,
+    tableId, userId, requestId: 'smoke-resume-intent', buyIn: 100, requireTerms,
     env: { POKER_BOTS_ENABLED: '1', POKER_BOTS_MIN_PER_TABLE: String(target), POKER_BOTS_MAX_PER_TABLE: String(target) },
     postTransactionFn: async payload => {
       attempts.push(payload);
@@ -3486,4 +3490,15 @@ for (const singlePlayer of [false, true]) test(`funded reconnect preserves pre-t
   assert.equal(result.rejoin, true);
   assert.equal(h.read().state.missedTurnsByUserId['smoke-owner'], 1);
   assert.deepEqual(h.read().ledger, beforeLedger);
+});
+
+for(const singlePlayer of [false,true])test(`current Terms gate rejects only new admission, not funded reconnect; singlePlayer=${singlePlayer}`,async()=>{
+ let calls=0;
+ const requireTerms=async()=>{calls++;throw Object.assign(Error('terms_required'),{code:'terms_required',status:409});};
+ const fresh=createSinglePlayerSmokeHarness({singlePlayer,requireTerms});
+ const before=structuredClone(fresh.read());
+ await assert.rejects(fresh.join,{code:'terms_required'});assert.equal(calls,1);assert.deepEqual(fresh.read(),before);assert.equal(fresh.attempts.length,0);
+ const reconnect=createSinglePlayerSmokeHarness({singlePlayer,requireTerms,participated:true,humanActive:true,bots:[{stack:78},{stack:90}]});
+ const balanceBefore=structuredClone(reconnect.read().balances);
+ const result=await reconnect.join();assert.equal(result.rejoin,true);assert.equal(calls,1);assert.deepEqual(reconnect.read().balances,balanceBefore);assert.equal(reconnect.attempts.length,0);
 });

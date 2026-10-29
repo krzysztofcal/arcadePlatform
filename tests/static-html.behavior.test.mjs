@@ -5,6 +5,7 @@ import os from 'node:os';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { createHmac } from 'node:crypto';
 
 const root = process.cwd();
 const portalIndexHtml = await readFile(path.join(root, 'index.html'), 'utf8');
@@ -268,6 +269,12 @@ const supabaseClientSource = await readFile(path.join(root, "js", "auth", "supab
   assert.equal(signUpPayload.options.emailRedirectTo, "https://deploy-preview-656--playkcswh.netlify.app/account.html", "signup confirmation should redirect back to the current deploy origin");
 }
 
+const fixtureStageRef = 'krydukthwdvccggbyjfw';
+const fixtureStageSecret = 'synthetic-build-test-secret';
+function stageBuildJwt(role) {
+  const input = Buffer.from(JSON.stringify({alg:'HS256'})).toString('base64url')+'.'+Buffer.from(JSON.stringify({ref:fixtureStageRef,role})).toString('base64url');
+  return input+'.'+createHmac('sha256',fixtureStageSecret).update(input).digest('base64url');
+}
 const buildTmpDir = await mkdtemp(path.join(os.tmpdir(), "arcade-build-config-"));
 try {
   execFileSync(process.execPath, [path.join(root, "scripts", "generate-build-info.js")], {
@@ -275,20 +282,25 @@ try {
     env: {
       ...process.env,
       CONTEXT: "deploy-preview",
+      POKER_DEAL_SECRET: "",
       XP_REDIS_VERSION: "3", XP_REDIS_ENV: "stage", XP_KEY_NS: "kcswh:stage:xp:v3",
-      DEPLOY_PRIME_URL: "https://deploy-preview-388--arcade.netlify.app/build/path",
-      SUPABASE_URL: "https://stageabc.supabase.co",
-      SUPABASE_ANON_KEY: "stage-anon-key",
+      DEPLOY_PRIME_URL: "https://deploy-preview-388--playkcswh.netlify.app",
+      SUPABASE_URL: `https://${fixtureStageRef}.supabase.co`,
+      SUPABASE_DB_URL: `postgresql://postgres:synthetic@db.${fixtureStageRef}.supabase.co/postgres`,
+      SUPABASE_JWT_SECRET: fixtureStageSecret,
+      SUPABASE_SERVICE_ROLE_KEY: stageBuildJwt('service_role'),
+      ARCADE_STAGE_REDIS_TOKEN: 'synthetic-stage-alias',
+      SUPABASE_ANON_KEY: stageBuildJwt('anon'),
     },
     stdio: "pipe",
   });
   const generatedSupabaseConfig = await readFile(path.join(buildTmpDir, "js", "auth", "supabase-config.js"), "utf8");
   const generatedDeployContext = await readFile(path.join(buildTmpDir, "netlify", "functions", "_generated", "deploy-context.mjs"), "utf8");
-  assert.match(generatedSupabaseConfig, /https:\/\/stageabc\.supabase\.co/, "build should publish the deploy context Supabase URL to the browser config");
-  assert.match(generatedSupabaseConfig, /stage-anon-key/, "build should publish the deploy context Supabase anon key to the browser config");
+  assert.match(generatedSupabaseConfig, /https:\/\/krydukthwdvccggbyjfw\.supabase\.co/, "build should publish the deploy context Supabase URL to the browser config");
+  assert.ok(generatedSupabaseConfig.includes(stageBuildJwt('anon')), "build should publish the deploy context Supabase anon key to the browser config");
   assert.doesNotMatch(generatedSupabaseConfig, /otbqfijerkieoxwpxjnm/, "deploy-preview browser config should not retain the production project ref");
   assert.match(generatedDeployContext, /BUILD_DEPLOY_CONTEXT = "deploy-preview"/, "build should embed the Netlify context for server functions");
-  assert.match(generatedDeployContext, /BUILD_DEPLOY_ORIGIN = "https:\/\/deploy-preview-388--arcade\.netlify\.app"/, "build should embed only the exact deploy origin for server functions");
+  assert.match(generatedDeployContext, /BUILD_DEPLOY_ORIGIN = "https:\/\/deploy-preview-388--playkcswh\.netlify\.app"/, "build should embed only the exact deploy origin for server functions");
 } finally {
   await rm(buildTmpDir, { recursive: true, force: true });
 }

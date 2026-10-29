@@ -149,7 +149,10 @@ const idempotencyGapMigration = migrationFiles.find((file) => file.includes("chi
 if (!idempotencyGapMigration) {
   throw new Error("Idempotency gap migration not found; cannot run tests.");
 }
-const migrationsWithoutBootstrapSeeds = migrationFiles.filter((file) => file !== seedMigration && file !== botBankrollMigration);
+const profileContractMigration=migrationFiles.find(file=>file.endsWith('_profile_phase_a_bio_contract.sql'));
+// Historical contracts deliberately remain on their pre-contract schema. The guarded
+// forward contract is applied and validated explicitly after normalization below.
+const migrationsWithoutBootstrapSeeds = migrationFiles.filter((file) => file !== seedMigration && file !== botBankrollMigration && file !== profileContractMigration);
 
 const runMigration = async (sql, file) => {
   const content = fs.readFileSync(path.join(migrationsDir, file), "utf8");
@@ -4925,7 +4928,7 @@ async function main() {
   // This already-authorized disposable DB fixture also isolates XP from Redis.
   process.env.XP_TEST_MODE = "1";
   process.env.ACCOUNT_DELETION_ENABLED = "0";
-  const { assertProductionDeletionCompatibility } = await import("./account-deletion-production.fixture.mjs");
+  const { assertProductionDeletionCompatibility, assertAvatarLifecycleContention } = await import("./account-deletion-production.fixture.mjs");
   await assertProductionDeletionCompatibility({ runMigration, migrationFiles });
 
   // The integration workflow reuses this disposable database for the
@@ -4936,6 +4939,10 @@ async function main() {
   await runMigrations(sql, migrationsWithoutBootstrapSeeds);
   await runMigration(sql, seedMigration);
   await runMigration(sql, botBankrollMigration);
+
+  await assertAvatarLifecycleContention(sql, dbUrl);
+  const {assertProfileBioContract}=await import("./profile-bio-contract.fixture.mjs");
+  await assertProfileBioContract(sql,dbUrl);
 
   await sql.end({ timeout: 5 });
   const adminModule = await import("../../netlify/functions/_shared/supabase-admin.mjs");

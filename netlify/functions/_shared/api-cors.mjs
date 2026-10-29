@@ -1,4 +1,5 @@
-import { BUILD_DEPLOY_CONTEXT, BUILD_DEPLOY_ORIGIN } from "../_generated/deploy-context.mjs";
+import stageContext from '../../../shared/netlify-stage-context.cjs';
+import { BUILD_DEPLOY_CONTEXT, BUILD_DEPLOY_ORIGIN, BUILD_ARTIFACT_IDENTITY } from "../_generated/deploy-context.mjs";
 
 const LOCAL_HTTP_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -21,6 +22,7 @@ export function buildApiCorsPolicy({
   configuredOrigins = process.env.XP_CORS_ALLOW,
   buildContext = BUILD_DEPLOY_CONTEXT,
   buildDeployOrigin = BUILD_DEPLOY_ORIGIN,
+  buildArtifactIdentity = BUILD_ARTIFACT_IDENTITY,
 } = {}) {
   const origins = new Set();
   let invalidConfiguredOriginCount = 0;
@@ -34,6 +36,8 @@ export function buildApiCorsPolicy({
     const normalizedDeployOrigin = normalizeCorsOrigin(buildDeployOrigin);
     if (normalizedDeployOrigin) origins.add(normalizedDeployOrigin);
   }
+  // Native WebView origin is Stage-only and cannot be enabled by removable runtime flags.
+  if (stageContext.isStageNetlifyContext(buildContext, buildDeployOrigin, buildArtifactIdentity)) origins.add('https://localhost');
   return Object.freeze({
     origins: Object.freeze([...origins]),
     invalidConfiguredOriginCount,

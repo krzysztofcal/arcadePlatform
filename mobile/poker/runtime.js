@@ -105,7 +105,7 @@
       var anchor = event.target.closest && event.target.closest('a[href]');
       if (!anchor) return;
       var url = new URL(anchor.href, window.location.href);
-      if (url.origin === window.location.origin) return;
+      if (url.origin === window.location.origin || url.protocol === 'mailto:') return;
       event.preventDefault();
       if (url.protocol === 'https:' && browser) browser.open({ url: url.href }).catch(function(){ klog('mobile:external_link_failed'); });
     }, true);

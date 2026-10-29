@@ -20,6 +20,6 @@ test("auth signup creates an idempotent default-visible profile in the database"
 test("account Settings exposes an unchecked leaderboard opt-out through profile-me", () => {
   assert.match(accountHtml, /id="hideFromLeaderboard"[^>]*type="checkbox"/);
   assert.doesNotMatch(accountHtml, /id="hideFromLeaderboard"[^>]*checked/);
-  assert.match(accountController, /payload\.leaderboardVisible\s*=\s*leaderboardVisible/);
+  assert.match(accountController, /leaderboardVisible:\s*visible/);
   assert.match(accountController, /profile\.leaderboardVisible\s*===\s*false/);
 });

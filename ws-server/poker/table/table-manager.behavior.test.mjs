@@ -3118,8 +3118,9 @@ test("public profile hydration queries only current UUID human seats and reuses 
     }
   });
 
-  const first = await tableManager.refreshPublicProfiles(tableId, { force: true, nowMs: 1_000 });
-  const cached = await tableManager.refreshPublicProfiles(tableId, { nowMs: 1_001 });
+  const nowMs = Date.now();
+  const first = await tableManager.refreshPublicProfiles(tableId, { force: true, nowMs });
+  const cached = await tableManager.refreshPublicProfiles(tableId, { nowMs: nowMs + 1 });
   const snapshot = tableManager.tableSnapshot(tableId, humanId);
 
   assert.equal(first.ok, true);
@@ -3132,6 +3133,12 @@ test("public profile hydration queries only current UUID human seats and reuses 
   });
   assert.equal("profile" in snapshot.seats.find((seat) => seat.userId === botId), false);
   assert.equal("profile" in snapshot.seats.find((seat) => seat.userId === "guest_user_3"), false);
+  const realNow = Date.now;
+  try {
+    Date.now = () => nowMs + 60_001;
+    assert.equal("profile" in tableManager.tableSnapshot(tableId, humanId).seats.find((seat) => seat.userId === humanId), false);
+  } finally { Date.now = realNow; }
+
 });
 
 test("public profile hydration deduplicates refreshes and ignores results for an old seat fingerprint", async () => {
@@ -3238,10 +3245,14 @@ test("a stale profile failure cannot clear a newer seat fingerprint result", asy
 test("public profile failure and timeout return initials fallback without rejecting table state", async () => {
   const userId = "00000000-0000-4000-8000-000000000301";
   const tableId = "table_public_profile_failure";
+  let loaded=false;
   const tableManager = createTableManager({
     maxSeats: 2,
     publicProfileTimeoutMs: 5,
-    publicProfileLoader: async () => new Promise(() => {})
+    publicProfileLoader: async () => {
+      if (!loaded) { loaded=true;return {[userId]:{handle:"safe-user-301",displayName:"Safe User",avatar:{type:"default",variant:"fox-blue"}}}; }
+      return new Promise(() => {});
+    }
   });
   tableManager.restoreTableFromPersisted(tableId, {
     coreState: {
@@ -3256,6 +3267,8 @@ test("public profile failure and timeout return initials fallback without reject
     }
   });
 
+  assert.equal((await tableManager.refreshPublicProfiles(tableId,{force:true})).ok,true);
+  assert.equal(tableManager.tableSnapshot(tableId,userId).seats[0].profile.handle,"safe-user-301");
   const result = await tableManager.refreshPublicProfiles(tableId, { force: true });
   const snapshot = tableManager.tableSnapshot(tableId, userId);
 

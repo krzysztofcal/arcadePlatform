@@ -3,7 +3,6 @@ import test from "node:test";
 
 const {
   ensureUserProfile,
-  normalizeHandle,
   ownerProfile,
   publicProfile,
   updateUserProfile,
@@ -30,7 +29,6 @@ function profile(overrides = {}) {
     userId: USER_ID,
     handle: "blue-fox-482731",
     displayName: "Blue Fox 482731",
-    bio: "",
     avatarKey: "internal/private-key.webp",
     avatarVariant: "fox-blue",
     handleCustomizedAt: null,
@@ -55,7 +53,11 @@ function dbProfile(overrides = {}) {
 
 function transactionForProfile(row, updateError = null) {
   return async (callback) => callback({
-    unsafe: async (query) => {
+    unsafe: async (query, params) => {
+      if (query === "select pg_advisory_xact_lock(hashtextextended($1, 0));"){
+        assert.deepEqual(params, ["account-lifecycle:" + row.user_id]);
+        return [];
+      }
       if (query.includes("insert into public.user_profiles")) return [row];
       if (query.includes("for update")) return [row];
       if (query.includes("update public.user_profiles")) {
@@ -66,11 +68,6 @@ function transactionForProfile(row, updateError = null) {
     },
   });
 }
-
-test("profile handles reject reserved and invalid values", () => {
-  assert.throws(() => normalizeHandle("admin"), { code: "reserved_handle" });
-  assert.throws(() => normalizeHandle("not valid"), { code: "invalid_handle" });
-});
 
 test("profile helper delegates idempotent creation to the database function", async () => {
   let called = null;
@@ -87,7 +84,6 @@ test("public projection never returns internal identity or avatar storage key", 
   assert.deepEqual(projected, {
     handle: "blue-fox-482731",
     displayName: "Blue Fox 482731",
-    bio: "",
     avatar: { type: "default", variant: "fox-blue" },
   });
   assert.equal("userId" in projected, false);
@@ -101,21 +97,8 @@ test("owner projection exposes leaderboard visibility without leaking it publicl
   assert.equal("leaderboardVisible" in publicProfile(profile({ leaderboardVisible: false })), false);
 });
 
-test("uploaded avatar projection exposes only an opaque stable public URL", () => {
-  const previous = process.env.SUPABASE_URL;
-  process.env.SUPABASE_URL = "https://stageabc.supabase.co";
-  try {
-    const key = "10000000-0000-4000-8000-000000000001.webp";
-    const projected = publicProfile(profile({ avatarKey: key }));
-    assert.deepEqual(projected.avatar, {
-      type: "uploaded",
-      url: `https://stageabc.supabase.co/storage/v1/object/public/profile-avatars/${key}`,
-    });
-    assert.equal("avatarKey" in projected, false);
-  } finally {
-    if (previous === undefined) delete process.env.SUPABASE_URL;
-    else process.env.SUPABASE_URL = previous;
-  }
+test("phase A projects a catalog avatar even when a legacy upload exists", () => {
+  assert.deepEqual(publicProfile(profile({avatarKey:"10000000-0000-4000-8000-000000000001.webp"})).avatar,{type:"default",variant:"fox-blue"});
 });
 
 test("public projection exposes only current XP and computed level", () => {
@@ -133,6 +116,7 @@ test("poker identity shares avatar rules without inheriting full public profile 
     storageBaseUrl: "https://stageabc.supabase.co"
   });
   const projected = projectPublicPokerIdentity({
+    public_profile_blocked: false,
     handle: "blue-fox-482731",
     display_name: "Blue Fox 482731",
     bio: "public but not a poker field",
@@ -173,6 +157,7 @@ test("poker identity accepts uploaded avatars only from the configured Arcade Hu
 test("shared avatar projection falls back for unknown variants and untrusted storage origins", () => {
   assert.deepEqual(projectPublicAvatar({ avatarVariant: "unknown" }), { type: "default", variant: "default" });
   assert.deepEqual(projectPublicPokerIdentity({
+    public_profile_blocked: false,
     handle: "default-avatar-101",
     display_name: "Default Avatar 101",
     avatar_variant: "unknown"
@@ -230,21 +215,9 @@ test("profile helper rejects non-boolean leaderboard visibility before a databas
   assert.equal(writes, 0);
 });
 
-test("profile-me maps locked and taken handle errors", async () => {
-  for (const [code, status] of [["handle_locked", 400], ["handle_taken", 409]]) {
-    const handler = createProfileMeHandler({
-      verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
-      updateUserProfile: async () => {
-        const error = new Error(code);
-        error.code = code;
-        error.status = status;
-        throw error;
-      },
-    });
-    const response = await handler(event("PATCH", { handle: "custom-player" }));
-    assert.equal(response.statusCode, status);
-    assert.deepEqual(JSON.parse(response.body), { error: code });
-  }
+test("profile-me rejects all former manual identity fields before invoking persistence", async () => {
+ const handler=createProfileMeHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),updateUserProfile:async()=>{throw Error("must not write");}});
+ for(const payload of [{handle:"custom-player"},{displayName:"Manual"},{bio:"Text"}])assert.equal((await handler(event("PATCH",payload))).statusCode,400);
 });
 
 test("profile-me includePoker returns the full authoritative table projection and balance", async () => {
@@ -317,25 +290,8 @@ test("profile-me preserves wallet when the public WS proxy returns a successful 
   assert.ok(logs.some(log => log.data.reason === "invalid_json"));
 });
 
-test("one-time handle lock and unique conflicts are enforced by profile updates", async () => {
-  await assert.rejects(
-    () => updateUserProfile(USER_ID, { handle: "second-handle" }, {
-      beginSql: transactionForProfile(dbProfile({ handleCustomizedAt: "2026-07-10T00:00:00.000Z" })),
-      executeSql: async () => [dbProfile({ handleCustomizedAt: "2026-07-10T00:00:00.000Z" })],
-    }),
-    { code: "handle_locked" },
-  );
-
-  const conflict = new Error("duplicate_handle");
-  conflict.code = "23505";
-  conflict.constraint = "user_profiles_handle_lower_unique";
-  await assert.rejects(
-    () => updateUserProfile(USER_ID, { handle: "taken-handle" }, {
-      beginSql: transactionForProfile(dbProfile(), conflict),
-      executeSql: async () => [dbProfile()],
-    }),
-    { code: "handle_taken", status: 409 },
-  );
+test("manual identity updates are rejected regardless of historical handle state", async () => {
+ for(const payload of [{handle:"second-handle"},{displayName:"Manual"},{bio:"Text"}])await assert.rejects(updateUserProfile(USER_ID,payload),{code:"profile_field_read_only"});
 });
 
 test("leaderboard opt-out synchronizes Redis before the database write", async () => {
@@ -419,7 +375,6 @@ test("profile-public returns current XP and level without internal fields", asyn
   assert.deepEqual(body, {
     handle: "blue-fox-482731",
     displayName: "Blue Fox 482731",
-    bio: "",
     avatar: { type: "default", variant: "fox-blue" },
     xp: 235,
     level: 3,
@@ -451,3 +406,81 @@ test("profile-public enables deploy previews when the function scope lacks the f
   assert.equal(publicProfilesEnabled({}, { headers: { host: "deploy-preview-677--playkcswh.netlify.app" } }), true);
   assert.equal(publicProfilesEnabled({}, { headers: { host: "play.kcswh.pl" } }), false);
 });
+
+ test("blocked public identities are absent while owner projection remains available", async () => {
+ const blocked = profile({publicProfileBlocked:true});
+ assert.equal(publicProfile(blocked),null);
+ assert.equal(ownerProfile(blocked).handle,blocked.handle);
+ assert.equal(projectPublicPokerIdentity({public_profile_blocked:true,handle:blocked.handle,display_name:blocked.displayName,avatar_variant:"fox-blue"}),null);
+ assert.equal(projectPublicPokerIdentity({handle:blocked.handle,display_name:blocked.displayName,avatar_variant:"fox-blue"}),null);
+ const handler=createProfilePublicHandler({findPublicProfile:async()=>blocked,allowPublicRead:async()=>true});
+ const response=await handler(event("GET",null,{handle:blocked.handle}));
+ assert.equal(response.statusCode,404);
+ assert.equal(response.headers["cache-control"],"no-store");
+ assert.equal(JSON.stringify(response).includes(blocked.handle),false);
+ });
+
+test('public profile block migration: disposable PostgreSQL17, default, operator guard and unblock', {skip:!process.env.PROFILE_BLOCK_TEST_DB_URL}, async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const {default:postgres}=await import('postgres');
+ const url=new URL(process.env.PROFILE_BLOCK_TEST_DB_URL);
+ assert.equal(url.hostname,'127.0.0.1'); assert.match(url.pathname,/_test$/);
+ const sql=postgres(url.href,{max:1,prepare:false});
+ try {
+  assert.match((await sql`show server_version`)[0].server_version,/^17\./);
+  assert.equal((await sql`select count(*)::int n from pg_tables where schemaname='public'`)[0].n,0);
+  await sql.unsafe(`create schema private; create table public.user_profiles(user_id uuid primary key,avatar_variant text,avatar_revision int,leaderboard_visible boolean,protected jsonb);
+   insert into public.user_profiles values ('${USER_ID}','fox-blue',7,true,'{"CH":100,"XP":20,"poker":"unchanged"}');`);
+  await sql.unsafe(await readFile(new URL('../supabase/migrations/20261028180000_public_profile_block.sql',import.meta.url),'utf8'));
+  const before=(await sql`select * from user_profiles`)[0];assert.equal(before.public_profile_blocked,false);
+  // Reuse an existing unprivileged role or create one only inside this disposable cluster.
+  await sql.unsafe(`do $$begin if not exists(select 1 from pg_roles where rolname='profile_block_test_user') then create role profile_block_test_user; end if; end$$;
+   grant usage on schema public to profile_block_test_user;grant select,insert,update on public.user_profiles to profile_block_test_user;`);
+  await sql.unsafe('set role profile_block_test_user');
+  await assert.rejects(sql`update user_profiles set public_profile_blocked=true`,e=>e.code==='42501');
+  await sql.unsafe('reset role');
+  await sql`update user_profiles set public_profile_blocked=true`;
+  assert.equal((await sql`select * from user_profiles where not public_profile_blocked`).length,0);
+  await sql`update user_profiles set public_profile_blocked=true`;
+  await sql`update user_profiles set public_profile_blocked=false`;
+  assert.deepEqual((await sql`select * from user_profiles`)[0],before);
+  await sql.unsafe('alter table user_profiles drop column public_profile_blocked');
+  await assert.rejects(sql`select * from user_profiles where not public_profile_blocked`,e=>e.code==='42703');
+ }finally{await sql.end();}
+});
+
+ test("profile-me keeps complete owner access for a publicly blocked account",async()=>{
+ const blocked=profile({publicProfileBlocked:true,avatarRevision:9,leaderboardVisible:false});
+ const expected=ownerProfile(profile({avatarRevision:9,leaderboardVisible:false}));
+ const handler=createProfileMeHandler({
+  verifySupabaseJwt:async()=>({valid:true,userId:USER_ID}),
+  ensureUserProfile:async(id)=>{assert.equal(id,USER_ID);return blocked;},
+  updateUserProfile:async(id)=>{assert.equal(id,USER_ID);return blocked;},
+  getUserBalance:async()=>({balance:735}),loadPokerProjection:async()=>null
+ });
+ for(const request of [event("GET"),event("PATCH",{avatarVariant:"fox-blue",expectedRevision:9})]){
+  const response=await handler(request);assert.equal(response.statusCode,200);
+  assert.deepEqual(JSON.parse(response.body),expected);
+ }
+ const response=await handler(event("GET",null,{includePoker:"1"}));
+ assert.equal(response.statusCode,200);
+ assert.deepEqual(JSON.parse(response.body),{...expected,balance:735,poker:null});
+ assert.equal(publicProfile(blocked),null);
+ });
+
+ test("findPublicProfile retains the block flag as defense in depth without restricting owner projection",async()=>{
+ const {findPublicProfile}=await import("../netlify/functions/_shared/user-profile.mjs");
+ for(const blocked of [false,true]){
+  const result=await findPublicProfile("fox-123",async(query)=>{
+   assert.match(query,/select[^;]*leaderboard_visible, public_profile_blocked/);
+   assert.match(query,/and public_profile_blocked = false/);
+   // Deliberately return a blocked row to test projection independently of the SQL filter.
+   return [{user_id:USER_ID,handle:"fox-123",display_name:"Fox",avatar_variant:"fox-blue",avatar_revision:7,leaderboard_visible:false,public_profile_blocked:blocked}];
+  });
+  assert.equal(result.publicProfileBlocked,blocked);
+  assert.equal(publicProfile(result)===null,blocked);
+  assert.equal(ownerProfile(result).handle,"fox-123");
+  assert.equal(ownerProfile(result).avatarRevision,7);
+  assert.equal(ownerProfile(result).leaderboardVisible,false);
+ }
+ });

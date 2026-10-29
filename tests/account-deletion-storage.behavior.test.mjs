@@ -27,6 +27,7 @@ create table public.profile_avatar_uploads(id uuid primary key,user_id uuid refe
     await db.exec(await readFile(new URL('../supabase/migrations/20261020082604_account_avatar_mvp_closure.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261020094224_account_avatar_reconciliation.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/20261022091126_account_avatar_known_capability_policy.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/20261026120000_profile_phase_a.sql',import.meta.url),'utf8'));
     assert.equal((await db.query('select private.account_avatar_guards_ready() as ready')).rows[0].ready,false,'installation must not activate restrictive guards');
     await db.exec('alter table public.profile_avatar_uploads enable trigger account_avatar_manifest_guard_v3');
   }
@@ -62,7 +63,7 @@ test('enabled ensure/profile/avatar mutations check lifecycle in the SQL transac
   await updateUserAvatarKey(userId,randomUUID()+'.webp',deps);
   assert.equal((await executeSql('select count(*)::int n from private.account_avatar_objects'))[0].n,1);
   await deletion();
-  for(const action of [()=>ensureUserProfile(userId,deps),()=>updateUserProfile(userId,{displayName:'After'},deps),()=>updateUserAvatarKey(userId,null,deps),()=>createPendingUpload(userId,{mimeType:'image/png',size:100},deps)]) await assert.rejects(action(),/account_not_active/);
+  for(const action of [()=>ensureUserProfile(userId,deps),()=>updateUserProfile(userId,{leaderboardVisible:false},deps),()=>updateUserAvatarKey(userId,null,deps),()=>createPendingUpload(userId,{mimeType:'image/png',size:100},deps)]) await assert.rejects(action(),/account_not_active/);
 });
 
 test('signed upload capability is retained after five minutes and acceptance during signing prevents response without losing manifest',async()=>{

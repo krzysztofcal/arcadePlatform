@@ -75,6 +75,10 @@ jobs:
           mkdir artifacts
           cp android/app/build/outputs/apk/debug/app-debug.apk "artifacts/arcade-poker-stage-${SOURCE_SHA}.apk"
           cp www/build-receipt.json artifacts/
+          APK_SIGNER="$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APK_SIGNER"
+          "$APK_SIGNER" verify --verbose --print-certs "artifacts/arcade-poker-stage-${SOURCE_SHA}.apk" > artifacts/signature.txt
+          grep -F 'CN=Android Debug' artifacts/signature.txt
           (node --version; java -version 2>&1; cat android/variables.gradle; cat android/gradle/wrapper/gradle-wrapper.properties; ./android/gradlew -p android --version; df -h .) > artifacts/toolchain.txt
           (cd artifacts && sha256sum *.apk > SHA256SUMS)
           cat artifacts/build-receipt.json >> "$GITHUB_STEP_SUMMARY"

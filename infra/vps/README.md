@@ -54,7 +54,7 @@ installed at `/usr/local/sbin/arcade-ws-preview-env-preflight` and
 `/usr/local/sbin/arcade-ws-production-env-preflight`.
 
 The versioned `/etc/sudoers.d/arcade-deploy` contract gives `copilot` only the
-exact Preview restart, Production restart, Caddy reload, and fixed Preview/Production
+exact Preview restart/stop, Production restart, Caddy reload, and fixed Preview/Production
 env preflight commands. It contains no shell, interpreter, archive, file
 operation, generic `systemctl`, or wildcard grant. No runner `.credentials`
 file is part of the recovery source. On an existing host, use
@@ -101,7 +101,7 @@ Phase A already staged only Preview. The Phase B staging order is:
 5. Change `/etc/caddy/Caddyfile` to `root:arcade-deploy` mode `0664`. Keep its
    parent `/etc/caddy` root-owned and non-group-writable.
 6. Verify the root-owned Preview env helper and install/validate the exact
-   four-command sudoers contract from this repository. Keep the helper
+   exact-command sudoers contract from this repository. Keep the helper
    `root:root 0755` and sudoers `root:root 0440`.
 
 During Task 9 staging, retain all existing broad grants as a recovery

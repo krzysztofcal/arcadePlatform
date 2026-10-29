@@ -12,6 +12,8 @@
       "landing/*.html",
       "landing/legal/*.html",
       "legal/*.html",
+      ":(exclude)legal/terms.2026-10-26-a1.pl.html",
+      ":(exclude)legal/terms.2026-10-26-a1.en.html",
       "tests/index.html"
     ]
   },

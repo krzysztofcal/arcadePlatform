@@ -1,0 +1,11 @@
+{
+  "candidateVersion": "2026-10-28-a2",
+  "status": "OWNER_REVIEW_READY_LEGAL_DESIGN_RISK_OPEN_NOT_PUBLISHED",
+  "previousVersion": "2026-10-26-a1",
+  "files": {
+    "terms.pl.md": "6d9a0da270125345f61597df9994d2c4a8de28682e1b19c60f2e5f0cf88fba2d",
+    "terms.en.md": "42bf929fc3418f4a670ed1d3ceab5fb50b4214bf18dbaaf7ef85bcc8e84208d8",
+    "privacy.pl.md": "29aab76a68b625916616525ce58beb2c22994d535cb9e9e0cb85760ceb7290aa",
+    "privacy.en.md": "579a66890adbef5cb198651a08b892c119bae9210707d5081415d50da93e3844"
+  }
+}

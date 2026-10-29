@@ -1,3 +1,4 @@
+import {requireCurrentTerms,cleanupExpiredGuestReceipts} from '../shared/profile-terms.mjs';
 import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle, queueAccountPrivateFrame } from '../shared/account-deletion.mjs';
 import { createGiftAdapter } from './poker/persistence/gift-adapter.mjs';
 import { handleGiftSendCommand } from './poker/handlers/gift.mjs';
@@ -32,7 +33,7 @@ import {
   matchesNonRetryableTerminalJanitorSuppression,
   runTableJanitor
 } from "./poker/runtime/table-janitor.mjs";
-import { buildStateSnapshotPayload, normalizePrivateBranch } from "./poker/read-model/state-snapshot.mjs";
+import { buildStateSnapshotPayload, normalizePrivateBranch, refreshResumeSnapshot } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
 import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
@@ -1255,7 +1256,22 @@ async function runAccountDeletionTick() {
   })().catch((error) => { accountDeletionRuntimePromise=null; throw error; });
   await (await accountDeletionRuntimePromise).tick();
 }
+// Reuse the maintenance cadence; no Terms/deletion flag and no overlapping local run.
+let guestReceiptCleanupRunning=false;
+async function runGuestReceiptCleanupTick(){
+  if(guestReceiptCleanupRunning)return;
+  guestReceiptCleanupRunning=true;
+  try{
+    const beginSql=await loadBeginSqlWs();
+    await beginSql(async tx=>{
+      await tx.unsafe("set local lock_timeout='250ms';");
+      await tx.unsafe("set local statement_timeout='2s';");
+      await cleanupExpiredGuestReceipts(tx);
+    });
+  }finally{guestReceiptCleanupRunning=false;}
+}
 const pokerAccessRefreshTimer = setInterval(() => {
+  void runGuestReceiptCleanupTick().catch(()=>klogSafe('profile_terms_retention_failed',{code:'dependency_unavailable'}));
   void runAccountDeletionTick().catch(() => klogSafe('account_deletion_tick_failed',{code:'dependency_unavailable'}));
   void refreshActivePokerAccess().catch((error) => {
     klogSafe("ws_poker_access_refresh_sweep_failed", { code: error?.code || "access_refresh_sweep_failed" });
@@ -5144,7 +5160,7 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "reaction_send") {
-      const react = async () => {
+      const react = async (termsTx) => {
       const resolvedRoomId = resolveRoomId(frame);
       if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
@@ -5188,6 +5204,15 @@ wss.on("connection", (ws) => {
           status: "rejected",
           reason: "not_seated"
         });
+        return;
+      }
+
+      try {
+        const principal={kind:connState.session.identityMode==='guest'?'guest':'account',id:senderUserId};
+        if(termsTx)await requireCurrentTerms(termsTx,principal);
+        else {const transact=await loadBeginSqlWs();await transact(tx=>requireCurrentTerms(tx,principal));}
+      } catch(error) {
+        sendCommandResult(ws,connState,{requestId:frame.requestId??null,tableId,status:'rejected',reason:error?.code==='terms_required'?'terms_required':'terms_unavailable'});
         return;
       }
 
@@ -5294,7 +5319,7 @@ wss.on("connection", (ws) => {
         const transact = await loadBeginSqlWs();
         await transact(async (tx) => {
           await assertAccountActive(tx, connState.session.userId);
-          await react();
+          await react(tx);
         });
       } else await react();
       return;
@@ -5632,8 +5657,9 @@ wss.on("connection", (ws) => {
           reason: replay.reason,
           expectedSeq: replay.latestSeq ?? 0
         });
-        await tableManager.refreshPublicProfiles(tableId);
-        const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+        const tableSnapshot = await refreshResumeSnapshot({
+          tableManager, tableId, userId: connState.session.userId, reason: replay.reason
+        });
         await nextEventLoopTurn();
         sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
         void recoverGiftState(ws, connState, tableId).catch(() => {});

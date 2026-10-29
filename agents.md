@@ -63,6 +63,10 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - A successful exact-SHA deploy plus confirmed smoke remains valid across later docs/spec/test/comment-only commits after a diff proves no runtime/deployable artifact or environment configuration changed. Any runtime/deployable/configuration change requires a new exact-SHA deploy and relevant smoke.
 - The preview WS host is shared. Do not make every PR auto-deploy to `ws-preview.kcswh.pl`; concurrent PRs would overwrite each other's runtime. Keep deployment explicit unless preview infrastructure becomes isolated per PR.
 
+### WS deployment activity gate
+
+Bot-only hands/tables do not block deployment or restart. Block deployment for active human games, human seats eligible for reconnect/resume, or their unresolved financial operations. Verify these conditions immediately before restart; do not infer human absence from socket count alone. Bot-only restart still requires persisted-state/escrow/CH safety, recovery verification and a verified executable rollback. All existing environment, authorization and financial guards remain binding.
+
 ### WS Runtime Logs
 - For preview incidents, agents may inspect:
   - `sudo journalctl -u ws-server-preview -f`

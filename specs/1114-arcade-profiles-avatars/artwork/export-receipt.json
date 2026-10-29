@@ -1,0 +1,242 @@
+[
+  {
+    "variant": "comet-blue",
+    "width": 256,
+    "height": 256,
+    "bytes": 15872,
+    "sourceRect": {
+      "left": 43,
+      "top": 22,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "655781f2908ff6713660d20d4d1f526cf7bd9cf2f32cd80332b0dc639052e469"
+  },
+  {
+    "variant": "falcon-orange",
+    "width": 256,
+    "height": 256,
+    "bytes": 15058,
+    "sourceRect": {
+      "left": 344,
+      "top": 22,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "526d5e1d0bf9e141da0c1cadfcb5ce973247208ed3b612a657f47c74b63b9f89"
+  },
+  {
+    "variant": "fox-blue",
+    "width": 256,
+    "height": 256,
+    "bytes": 17280,
+    "sourceRect": {
+      "left": 649,
+      "top": 22,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "6b3fad6ab17df1e7345be5304e936ae614667d3156e2c395249df15ca9370c9c"
+  },
+  {
+    "variant": "nova-purple",
+    "width": 256,
+    "height": 256,
+    "bytes": 14364,
+    "sourceRect": {
+      "left": 954,
+      "top": 22,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "b54d9bb2c49a7163bf7959b1498d2d9b65cb4ea5d97e71f28b8241b48adcc6ae"
+  },
+  {
+    "variant": "orbit-green",
+    "width": 256,
+    "height": 256,
+    "bytes": 14874,
+    "sourceRect": {
+      "left": 43,
+      "top": 322,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "013ada9859c976a8470732e820c5740e9685ca99045d61b305ebf2af13c1d71c"
+  },
+  {
+    "variant": "panda-pink",
+    "width": 256,
+    "height": 256,
+    "bytes": 14290,
+    "sourceRect": {
+      "left": 344,
+      "top": 322,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "31a26e559bf03129c85c80dbd2703f6c757cd7bb0c7ab21e9524b5925822b5bb"
+  },
+  {
+    "variant": "raven-violet",
+    "width": 256,
+    "height": 256,
+    "bytes": 13226,
+    "sourceRect": {
+      "left": 649,
+      "top": 322,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "4a57caea3da13000d2b216720743f8644257cdfa68c3881eadfd34c38bc309b7"
+  },
+  {
+    "variant": "tiger-gold",
+    "width": 256,
+    "height": 256,
+    "bytes": 17752,
+    "sourceRect": {
+      "left": 954,
+      "top": 322,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "39238a573c6c38d9aca9d74b509a39a5acc925c3a894709554793920db9ae6c2"
+  },
+  {
+    "variant": "wave-cyan",
+    "width": 256,
+    "height": 256,
+    "bytes": 15782,
+    "sourceRect": {
+      "left": 43,
+      "top": 621,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "eb9cfa168c2b0abed230ab6fc1e1af8cc4ff6e69dd0b7ea0ba8144e265df064f"
+  },
+  {
+    "variant": "wizard-indigo",
+    "width": 256,
+    "height": 256,
+    "bytes": 16078,
+    "sourceRect": {
+      "left": 344,
+      "top": 621,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "be5c5b28cbe5df594fd20147af2bb617dc089d9db4db249b778c4bb34ecabb10"
+  },
+  {
+    "variant": "bolt-yellow",
+    "width": 256,
+    "height": 256,
+    "bytes": 14180,
+    "sourceRect": {
+      "left": 649,
+      "top": 621,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "35735089e360a527bca5343f5063d0e37c53d3e539a8e9974c09c03630e0ca7c"
+  },
+  {
+    "variant": "rocket-red",
+    "width": 256,
+    "height": 256,
+    "bytes": 15786,
+    "sourceRect": {
+      "left": 954,
+      "top": 621,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "12a34a461576a5fb8936015fae1accd3e41441ed3940ea3acdcdd6ba82f5669b"
+  },
+  {
+    "variant": "ace-silver",
+    "width": 256,
+    "height": 256,
+    "bytes": 14754,
+    "sourceRect": {
+      "left": 43,
+      "top": 921,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "5bd3d1174017e09c9bf219564c7e1a5ab9527b0a943e7b446ae0bc13fab4a4f1"
+  },
+  {
+    "variant": "ember-coral",
+    "width": 256,
+    "height": 256,
+    "bytes": 14772,
+    "sourceRect": {
+      "left": 344,
+      "top": 921,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "791967d9225eb80f35955945293d344b826965ad5f9f9ecaddbbafecfcac921f"
+  },
+  {
+    "variant": "pixel-teal",
+    "width": 256,
+    "height": 256,
+    "bytes": 12280,
+    "sourceRect": {
+      "left": 649,
+      "top": 921,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "22331b4800cb559881eb8f09416393e008948066126dee4e7a806c28df4da9ce"
+  },
+  {
+    "variant": "zen-lime",
+    "width": 256,
+    "height": 256,
+    "bytes": 13654,
+    "sourceRect": {
+      "left": 954,
+      "top": 921,
+      "width": 256,
+      "height": 256
+    },
+    "resampled": false,
+    "encoding": "WebP quality 90, native 256px, no upscaling",
+    "sha256": "3e15e65bee84f58f992f421b330cf707a9322e169fea6a7810b57c0511854851"
+  }
+]

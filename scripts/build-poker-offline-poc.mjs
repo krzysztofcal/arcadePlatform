@@ -28,6 +28,7 @@ const replacements = {
       var frame = {kind:'stateSnapshot', initial:!state.hasAppliedAuthoritativeSnapshot, cardFxEligible:!!state.hasAppliedAuthoritativeSnapshot};
       var previousVisual = captureVisualSnapshot(), previousHandId = state.handId;
       observeCelebrationSnapshot(payload, frame);
+      if(payload.seats)payload.seats.forEach(function(seat){if(seat.userId===offline.human)seat.profile={handle:'offline-player',displayName:'You',avatar:{type:'default',variant:offline.avatarVariant()}};});
       mergeSnapshot(payload, frame);
       if (previousHandId && previousHandId !== state.handId) resetQueuedPreactionState();
       state.hasAppliedAuthoritativeSnapshot = true;
@@ -134,7 +135,8 @@ html = html.replace('id="pokerLobbyLink" href="/poker/"', 'id="pokerLobbyLink" h
 html = html.split('\n').filter(line => !line.trimStart().startsWith('<script ')).join('\n');
 if (/<script/i.test(html)) throw new Error('Unsupported script markup in V2 source');
 html = html.split('\n').filter(line => !(line.trimStart().startsWith('<link ') && line.includes('https://'))).join('\n');
-const scriptPaths = ['game.generated.js', 'renderer.generated.js'];
+const scriptPaths = ['avatar-catalog.generated.js', 'game.generated.js', 'renderer.generated.js'];
+await writeFile('poker/offline/avatar-catalog.generated.js',await readFile('js/profile-avatar-catalog.js'));
 const scriptHashes = await Promise.all(scriptPaths.map(async name => 'sha256-' + createHash('sha256').update(await readFile('poker/offline/' + name)).digest('base64')));
 // Scoped to this isolated page: also excludes Netlify's injected Preview toolbar.
 const policy = "default-src 'none'; script-src " + scriptHashes.map(hash => "'" + hash + "'").join(' ') + "; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; connect-src 'none'; frame-src 'none'; form-action 'none'";

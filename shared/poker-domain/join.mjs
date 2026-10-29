@@ -1,3 +1,4 @@
+import { requireCurrentTerms } from "../profile-terms.mjs";
 import { clearInactivityPenalty } from "./poker-missed-turns.mjs";
 import { attemptDemandRefill } from "./demand-refill.mjs";
 import { asSeatSnapshot, computeTargetBotCount, getBotConfig, loadSeatRows, seedBotsForJoin, shouldSeedBotsOnJoin } from "./bots.mjs";
@@ -778,7 +779,7 @@ returning user_id;
   };
 }
 
-export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = null, loadStateForUpdate, updateStateLocked, validateStateForStorage, env = process.env }) {
+export async function executePokerJoinAuthoritative({ beginSql, tableId, userId, requestId, seatNo = null, autoSeat = false, preferredSeatNo = null, buyIn = null, klog = () => {}, postTransactionFn = null, loadStateForUpdate, updateStateLocked, validateStateForStorage, requireTerms = requireCurrentTerms, env = process.env }) {
   if (typeof loadStateForUpdate !== "function" || typeof updateStateLocked !== "function" || typeof validateStateForStorage !== "function") {
     throw makeError("temporarily_unavailable");
   }
@@ -918,6 +919,8 @@ export async function executePokerJoinAuthoritative({ beginSql, tableId, userId,
           })
         };
       }
+
+      await requireTerms(tx,{kind:"account",id:userId});
 
       if (isSinglePlayer) {
         if (String(table.status || '').toUpperCase() === 'CLOSED') throw makeError('table_closed');

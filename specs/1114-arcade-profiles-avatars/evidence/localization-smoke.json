@@ -1,0 +1,11 @@
+{
+  "environment": "local packaged assets; mocked Auth/API only",
+  "language": "pl",
+  "gallery": 16,
+  "termsLabelsAndFailure": "PASS",
+  "signupAndPrivacyLabels": "PASS",
+  "avatarErrors": "PASS",
+  "visibilitySuccessAndFailure": "PASS",
+  "errors": [],
+  "externalRequests": 0
+}

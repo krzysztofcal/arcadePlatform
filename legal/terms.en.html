@@ -16,7 +16,9 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/user-ui-state.js" defer></script>
+  <script src="/js/profile-avatar-catalog.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-onboarding.js" defer></script>
   <script src="/js/chips/client.js" defer></script>
   <script src="/js/core/number-format.js" defer></script>
   <script src="/js/topbar.js" defer></script>
@@ -85,7 +87,7 @@
 
     <main style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
     <h1>Terms of Service</h1>
-    <p>Last updated: 2026-07-13</p>
+    <p>Last updated: 2026-10-26</p>
 
     <h2>About the service</h2>
     <p>Arcade Hub is a browser arcade operated by KCSWH, offering casual games, an XP system, and an optional user account for cloud sync powered by Supabase. You may play as a guest or sign in to save XP and progress.</p>
@@ -97,6 +99,7 @@
       <li>Accounts are optional; deleting your account will stop cloud sync and remove associated data as described in the Privacy Policy.</li>
     </ul>
 
+    <h2>Terms acceptance — version 2026-10-26-a1</h2><p>Before starting new account use, select “I accept the Terms”. We record the version and server acceptance time. No extra checkbox is required. This is not consent to publishing a Google photo. Existing play is not interrupted. Sign-out, account deletion and support remain available without acceptance.</p>
     <h2>XP and cloud sync</h2>
     <ul>
       <li>XP earned while signed in is linked to your user ID and stored with Supabase.</li>
@@ -109,20 +112,21 @@
       <li>Do not manipulate XP, use cheat tools, or attempt to hack the service.</li>
       <li>Do not interfere with security, reverse engineer, or disrupt other players.</li>
       <li>Use the service lawfully and respect intellectual property rights.</li>
-      <li>Do not use a public profile name, bio, or avatar to impersonate others or publish unlawful, infringing, abusive, or harmful content.</li>
+      <li>Do not use a gaming identity or avatar to impersonate others or publish unlawful, infringing, abusive, or harmful content.</li>
     </ul>
 
     <h2>Public gaming profile</h2>
-    <p>Every authenticated account receives a public gaming profile. Its handle, display name, optional bio, avatar, current total XP, and level are visible to anyone who knows the profile URL. Do not include personal or confidential information in those public fields. Email, account identifiers, chips, ledger, poker data, session data, detailed XP records, and daily or weekly XP gains are not displayed there.</p>
+    <p>Each account has an automatic gaming name and handle and a persistent Arcade avatar selected from a fixed gallery. You cannot upload files, edit a name or handle, or publish a BIO. Google names and photos are not published as gaming identity in this release. Legacy custom identity fields are normalized; old changed profile links may stop working. The public profile contains only gaming identity, avatar, total XP and level; email, account UUID, wallet and game records are private.</p>
 
     <h2>Public XP leaderboard</h2>
     <p>Authenticated accounts participate in the public XP leaderboard by default. The leaderboard may display rank, handle, display name, avatar, XP gained for today, this week, or all time, level, and a public-profile link. Guests do not participate. You can opt out in Settings; opting out removes the account from leaderboard results and rank calculations but does not make its public profile private.</p>
 
+    <h2>Poker chips</h2><p>Online CH and device-local Offline Chips are separate virtual game units with no cash value, cash redemption or real-money rewards. Offline progress is stored only on this device; clearing app data removes it. Offline play requires no account or Terms acceptance receipt.</p>
     <h2>Accounts and security</h2>
     <ul>
       <li>Keep your login details confidential. You are responsible for actions under your account.</li>
       <li>We may suspend or terminate accounts that violate these terms, our Privacy Policy, or applicable law.</li>
-      <li>Account deletion currently requires emailing <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Automated deletion is planned.</li>
+      <li>You can request account deletion in <a href="/account.html">Account</a> when the in-app feature is available. You can also request deletion or assistance by emailing <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Requests follow the existing account-deletion process; restricted accounting or security evidence may be retained as required by the retention policy and applicable law.</li>
     </ul>
 
     <h2>Content and third parties</h2>
@@ -144,7 +148,6 @@
     <h2>Related documents</h2>
     <p>Please also read our <a class="ft-link" href="privacy.en.html">Privacy Policy</a> and <a class="ft-link" href="cookies-notice.en.html">Cookies Notice</a>.</p>
 
-    <p style="margin-top:16px;"><a class="ft-link manage-cookies" id="manageCookies" data-i18n="manageCookies" href="#">Manage cookies</a></p>
     <p><a class="ft-link" href="../index.html?lang=en">Back to portal</a></p>
     </main>
   </div>

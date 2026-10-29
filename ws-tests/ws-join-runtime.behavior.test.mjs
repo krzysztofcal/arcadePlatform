@@ -1,4 +1,6 @@
 import test from "node:test";
+import { beginSqlWs } from "../ws-server/poker/bootstrap/persisted-bootstrap-db.mjs";
+import { readTermsStatus } from "../shared/profile-terms.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
@@ -331,6 +333,7 @@ async function writePersistedFile(fixture) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-persist-"));
   const filePath = path.join(dir, "persisted-state.json");
   // Model the existing operational schema; missing policy remains fail-closed.
+  fixture.profileTermsPolicy = fixture.profileTermsPolicy === undefined ? { version: "2026-10-26-a1", active: false, variants_enabled: false } : fixture.profileTermsPolicy;
   fixture.pokerTierPolicies = pokerTierPolicyRows();
   fixture.pokerAccessPolicy = { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 };
   fixture.accounts = (fixture.accounts || []).map((account) => ({
@@ -403,7 +406,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
   const secret = "auth-join-runtime-secret";
   const tableId = "table_auth_join_runtime";
   const store = {
-    accounts: [{ user_id: "runtime_human", account_type: "USER", balance: 120 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000001", account_type: "USER", balance: 120 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
@@ -424,7 +427,7 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "runtime_human" }), "auth-runtime");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000001" }), "auth-runtime");
 
     sendFrame(ws, {
       version: "1.0",
@@ -446,11 +449,11 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
     const joinedState = await nextMessageOfType(ws, "table_state");
     assert.equal(joinedState.payload.stateVersion > 0, true);
     assert.deepEqual(joinedState.payload.authoritativeMembers, [
-      { userId: "runtime_human", seat: 1 },
+      { userId: "00000000-0000-4000-8000-000000000001", seat: 1 },
       { userId: botSeat2, seat: 2 },
       { userId: botSeat3, seat: 3 }
     ]);
-    assert.equal(joinedState.payload.members.some((entry) => entry.userId === "runtime_human"), true);
+    assert.equal(joinedState.payload.members.some((entry) => entry.userId === "00000000-0000-4000-8000-000000000001"), true);
     assert.equal(joinedState.payload.members.some((entry) => entry.userId === botSeat2), false);
     assert.equal(joinedState.payload.members.some((entry) => entry.userId === botSeat3), false);
     assert.equal(joinedState.payload.members.length < joinedState.payload.seats.length, true);
@@ -458,12 +461,12 @@ test("authoritative WS table_join returns a fully seated stacked snapshot and ke
     assert.equal(joinedState.payload.hand.status, "PREFLOP");
     assert.equal(typeof joinedState.payload.hand.handId, "string");
     assert.deepEqual(joinedState.payload.seats, [
-      { userId: "runtime_human", seatNo: 1, status: "ACTIVE" },
+      { userId: "00000000-0000-4000-8000-000000000001", seatNo: 1, status: "ACTIVE" },
       { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
       { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
     ]);
     assert.equal(joinedState.payload.seats.filter((seat) => seat?.status === "ACTIVE").length >= 3, true);
-    assert.equal(typeof joinedState.payload.stacks.runtime_human, "number");
+    assert.equal(typeof joinedState.payload.stacks["00000000-0000-4000-8000-000000000001"], "number");
     assert.equal(typeof joinedState.payload.stacks[botSeat2], "number");
     assert.equal(typeof joinedState.payload.stacks[botSeat3], "number");
     assert.equal(Object.keys(joinedState.payload.stacks || {}).length >= 3, true);
@@ -520,7 +523,7 @@ test("authoritative WS join preserves buy-in tier metadata in the rejected comma
   const secret = "auth-join-tier-locked-secret";
   const tableId = "table_auth_join_tier_locked";
   const store = {
-    accounts: [{ user_id: "locked_human", account_type: "USER", balance: 549 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000002", account_type: "USER", balance: 549 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":5,"bb":10}', buy_in: 500 },
@@ -536,7 +539,7 @@ test("authoritative WS join preserves buy-in tier metadata in the rejected comma
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "locked_human" }), "auth-tier-locked");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000002" }), "auth-tier-locked");
 
     sendFrame(ws, {
       version: "1.0",
@@ -563,7 +566,7 @@ test("authoritative WS table_join can progress through human act and bot timeout
   const secret = "auth-join-act-secret";
   const tableId = "table_auth_join_act";
   const store = {
-    accounts: [{ user_id: "act_human", account_type: "USER", balance: 120 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000003", account_type: "USER", balance: 120 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
@@ -579,7 +582,7 @@ test("authoritative WS table_join can progress through human act and bot timeout
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "act_human" }), "auth-act-runtime");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000003" }), "auth-act-runtime");
 
     sendFrame(ws, {
       version: "1.0",
@@ -600,7 +603,7 @@ test("authoritative WS table_join can progress through human act and bot timeout
     });
     const initialSnapshot = await nextMessageOfType(ws, "stateSnapshot");
     const humanTurnSnapshot = await waitForHumanTurn(ws, {
-      userId: "act_human",
+      userId: "00000000-0000-4000-8000-000000000003",
       baseline: initialSnapshot.payload,
       timeoutMs: 5000
     });
@@ -652,7 +655,7 @@ test("authoritative WS table_join can progress through human act and bot timeout
     assert.equal(postAutoplaySnapshot.payload.stateVersion >= afterBotAutoplay.payload.stateVersion, true);
     assert.equal(typeof postAutoplaySnapshot.payload.public.hand.handId, "string");
     const postAutoplayHumanTurn = await waitForHumanTurn(ws, {
-      userId: "act_human",
+      userId: "00000000-0000-4000-8000-000000000003",
       baseline: postAutoplaySnapshot.payload,
       timeoutMs: 6000
     });
@@ -694,7 +697,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
   const secret = "auth-join-replay-secret";
   const tableId = "table_auth_join_replay";
   const store = {
-    accounts: [{ user_id: "replay_human", account_type: "USER", balance: 120 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000004", account_type: "USER", balance: 120 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
@@ -712,7 +715,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "replay_human" }), "auth-replay");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000004" }), "auth-replay");
 
     sendFrame(ws, {
       version: "1.0",
@@ -741,7 +744,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
     const replayOutcome = await nextJoinReplayOutcome(ws, {
       requestId: "join-replay-runtime",
       tableId,
-      userId: "replay_human",
+      userId: "00000000-0000-4000-8000-000000000004",
       botSeat2,
       botSeat3,
       timeoutMs: 10000
@@ -749,7 +752,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
     if (replayOutcome.type === "commandResult") {
       assert.equal(replayOutcome.payload.status, "accepted");
     } else {
-      assert.equal(isStableReplayJoinState(replayOutcome, { tableId, userId: "replay_human", botSeat2, botSeat3 }), true);
+      assert.equal(isStableReplayJoinState(replayOutcome, { tableId, userId: "00000000-0000-4000-8000-000000000004", botSeat2, botSeat3 }), true);
     }
 
     sendFrame(ws, {
@@ -772,7 +775,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
     });
     const state = await nextMessageOfType(ws, "table_state");
     assert.deepEqual(state.payload.authoritativeMembers, [
-      { userId: "replay_human", seat: 1 },
+      { userId: "00000000-0000-4000-8000-000000000004", seat: 1 },
       { userId: botSeat2, seat: 2 },
       { userId: botSeat3, seat: 3 }
     ]);
@@ -787,7 +790,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
     });
     const snapshot = await nextMessageOfType(ws, "stateSnapshot");
     const humanTurnSnapshot = await waitForHumanTurn(ws, {
-      userId: "replay_human",
+      userId: "00000000-0000-4000-8000-000000000004",
       baseline: snapshot.payload,
       timeoutMs: 5000
     });
@@ -818,7 +821,7 @@ test("authoritative repeated and replayed table_join keep bot seating stable and
     const persisted = await readPersistedFile(filePath);
     const activeSeats = persisted.tables[tableId].seatRows.filter((seat) => seat.status === "ACTIVE");
     assert.equal(activeSeats.length, 3);
-    assert.equal(activeSeats.filter((seat) => seat.user_id === "replay_human").length, 1);
+    assert.equal(activeSeats.filter((seat) => seat.user_id === "00000000-0000-4000-8000-000000000004").length, 1);
     assert.equal(activeSeats.filter((seat) => seat.is_bot).length, 2);
 
     ws.close();
@@ -896,7 +899,7 @@ test("authoritative join adapter resolves in ws artifact layout without netlify 
 test("SETTLED boundary join publishes waiting then includes the human in next hand without refresh", async (t) => {
   const secret = "settled-boundary-smoke-secret";
   const tableId = "table_settled_boundary_join";
-  const userId = "boundary_human";
+  const userId = "00000000-0000-4000-8000-000000000005";
   const bots = [1, 2, 3].map(seatNo => ({ userId: makeBotUserId(tableId, seatNo), seatNo, isBot: true, botProfile: "NORMAL", status: "ACTIVE" }));
   const stacks = Object.fromEntries(bots.map(bot => [bot.userId, 100]));
   const store = {
@@ -959,4 +962,62 @@ test("SETTLED boundary join publishes waiting then includes the human in next ha
     await waitForExit(child);
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test("file-store JOIN models Terms OFF, missing policy, required receipt and admitted replay", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000006";
+  const version = "2026-10-26-a1";
+  for (const scenario of [
+    { name: "missing policy fails closed", policy: null, reason: "authoritative_join_failed" },
+    { name: "Terms OFF permits admission", policy: { version, active: false } },
+    { name: "Terms ON without acceptance denies admission", policy: { version, active: true }, reason: "terms_required" },
+    { name: "Terms ON with acceptance permits admission and safe replay", policy: { version, active: true }, accepted: true }
+  ]) await t.test(scenario.name, async () => {
+    const tableId = "terms_contract_table";
+    const fixture = {
+      profileTermsPolicy: scenario.policy,
+      profileTermsReceipts: scenario.accepted ? [{ subject_kind: "account", subject_id: userId, terms_version: version, accepted_at: new Date().toISOString(), expires_at: null }] : [],
+      accounts: [{ user_id: userId, account_type: "USER", balance: 120 }],
+      tables: { [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
+        seatRows: [], stateRow: { version: 0, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
+      } }
+    };
+    const { dir, filePath } = await writePersistedFile(fixture);
+    if (!scenario.policy) await assert.rejects(
+      () => beginSqlWs(tx => readTermsStatus(tx, { kind: "account", id: userId }), { env: { WS_PERSISTED_STATE_FILE: filePath } }),
+      { code: "terms_unavailable" }
+    );
+    const secret = "terms-contract-secret";
+    const { port, child } = await createServer({ env: { ...runtimeJoinEnv({ secret, filePath }), WS_POKER_TURN_MS: "60000" } });
+    let ws;
+    try {
+      await waitForListening(child, 5000);
+      ws = await connectClient(port);
+      await hello(ws); await auth(ws, makeHs256Jwt({ secret, sub: userId }));
+      const join = requestId => sendFrame(ws, { version: "1.0", type: "table_join", requestId, ts: new Date().toISOString(), payload: { tableId, autoSeat: true } });
+      join("terms-admission");
+      const result = await nextCommandResultForRequest(ws, "terms-admission");
+      assert.equal(result.payload.status, scenario.reason ? "rejected" : "accepted");
+      if (scenario.reason) {
+        assert.equal(result.payload.reason, scenario.reason);
+        assert.equal((await readPersistedFile(filePath)).tables[tableId].seatRows.length, 0);
+      } else {
+        const before = await readPersistedFile(filePath);
+        assert.equal(before.tables[tableId].seatRows.filter(row => row.user_id === userId).length, 1);
+        // Existing admission is not a new buy-in: neither replay nor rejoin may duplicate seats.
+        for (const requestId of ["terms-admission", "terms-rejoin"]) {
+          join(requestId);
+          assert.equal((await nextCommandResultForRequest(ws, requestId)).payload.status, "accepted");
+        }
+        const after = await readPersistedFile(filePath);
+        assert.deepEqual(after.tables[tableId].seatRows, before.tables[tableId].seatRows);
+        assert.deepEqual(after.profileTermsReceipts || [], before.profileTermsReceipts || []);
+      }
+    } finally {
+      if (ws) ws.close();
+      child.kill("SIGTERM"); await waitForExit(child);
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -16,7 +16,9 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/user-ui-state.js" defer></script>
+  <script src="/js/profile-avatar-catalog.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-onboarding.js" defer></script>
   <script src="/js/chips/client.js" defer></script>
   <script src="/js/core/number-format.js" defer></script>
   <script src="/js/topbar.js" defer></script>
@@ -85,7 +87,7 @@
 
     <main style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
     <h1>Privacy Policy</h1>
-    <p>Last updated: 2026-10-13</p>
+    <p>Last updated: 2026-10-26</p>
 
     <h2>Who we are</h2>
     <p>Data controller: KCSWH, contact@kcswh.pl. This policy covers the Arcade Hub portal, its games, XP system, and optional Supabase-backed user accounts.</p>
@@ -96,7 +98,7 @@
       <li>Password hash stored only by Supabase; we never store raw passwords.</li>
       <li>Session tokens and authentication cookies issued by Supabase.</li>
       <li>Account metadata such as display name and avatar initials.</li>
-      <li>Public-profile data: a generated or customized handle, display name, optional bio, and avatar identity.</li>
+      <li>Public-profile data: automatic gaming handle and display name, chosen catalog avatar, Terms version and acceptance time.</li>
       <li>XP and game progress tied to your user ID for cloud sync.</li>
       <li>Security and activity logs (e.g., sign-in events, error diagnostics).</li>
       <li>Consent and analytics data when you opt in via the consent manager.</li>
@@ -124,9 +126,9 @@
     </ul>
 
     <h2>Public gaming profiles</h2>
-    <p>Each authenticated Arcade Hub account receives a public gaming profile. Anyone who knows its URL can view the profile handle, display name, optional bio, avatar, current total XP, and level. Your email address, Supabase user ID, chip balance, ledger, poker data, session data, detailed XP records, daily or weekly XP gains, and private account metadata are not displayed on the public profile.</p>
-    <p>Default avatars are generated identity visuals. Uploaded avatars are processed into a public profile image; original uploads remain private and temporary.</p>
+    <p>Accounts receive an automatic gaming name/handle and a permanent catalog avatar. You may choose a different catalog avatar. BIO, manual identity editing and file uploads are unavailable. Google identity data remain private authentication data; this release does not import Google photos. The public profile shows gaming identity, avatar, total XP and level, not email, account UUID, CH or game records. Legacy custom identity is normalized; changed old profile URLs may no longer work.</p>
 
+    <h2>Terms records and local Offline data</h2><p>We store the accepted Terms version, server timestamp and a request identifier linked to your account, to demonstrate acceptance and protect service integrity. Account receipts are removed with the account. Guest receipts expire after one hour and are removed by routine retention. Accepting Terms is separate from any future voluntary Google-photo consent. Old profile image objects are removed through the existing controlled retention process, not by publishing or reusing them. Offline Chips, cards and sessions stay on the device and are not synchronized with CH or XP.</p>
     <h2>Public XP leaderboard</h2>
     <p>Authenticated accounts are included in the public XP leaderboard by default. Leaderboard entries may show rank, profile handle, display name, avatar, XP for the selected period (today, this week, or all time), level, and a link to the public profile. Guest players are not included. The leaderboard does not display email addresses, Supabase user IDs, chip balances, ledger or poker data, session data, or detailed XP events.</p>
     <p>You can hide your account from the leaderboard in Settings. This removes it from leaderboard results and rank calculations, but does not make the public profile at <code>/u/&lt;handle&gt;</code> private.</p>
@@ -159,7 +161,7 @@
     <p>You can request access, rectification, deletion, restriction, portability, or objection to processing. You may withdraw consent for analytics at any time via the consent manager. To exercise rights, email <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. You may lodge a complaint with the Polish Data Protection Authority (UODO).</p>
 
     <h2>Account deletion</h2>
-    <p>You can request deletion by emailing <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Automated in-app deletion is planned; until then, we will process requests manually and remove associated XP records, sessions, and metadata where legally permissible.</p>
+    <p>You can request account deletion in <a href="/account.html">Account</a> when the in-app feature is available. You can also request deletion or assistance by emailing <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Requests follow the existing account-deletion process; restricted accounting or security evidence may be retained as required by the retention policy and applicable law.</p>
 
     <h2>Security</h2>
     <p>We apply industry-standard measures, use Supabase’s managed security controls, and limit access to personal data. No system is perfectly secure; please keep your device and credentials safe.</p>

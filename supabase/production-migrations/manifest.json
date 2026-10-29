@@ -1171,6 +1171,30 @@
       "source_versions": [
         "20261022091126"
       ]
+    },
+    {
+      "file": "20261027173627_profile_phase_a_bio_contract.sql",
+      "sha256": "f297185dfeb1df38e32b681d2db2a20edc4c83e8f54d7dda2e151cf55a013bcd",
+      "purpose": "#1114 prepared BIO-only contract; separate Production schema/runtime/history preflight and exact-file GO required. No activation, profile data or Storage change.",
+      "source_versions": [
+        "20261027173627"
+      ]
+    },
+    {
+      "file": "20261026120000_profile_phase_a.sql",
+      "purpose": "#1114 guarded additive Production schema only; separate exact-file GO; Terms/catalog/profile blocks remain OFF",
+      "sha256": "edf83e55891441213695b8c9f04d72b2ffd34151aa58239179fa60056ff6a862",
+      "prerequisites": [
+        "20261022091126_account_avatar_known_capability_policy.sql"
+      ]
+    },
+    {
+      "file": "20261028180000_public_profile_block.sql",
+      "purpose": "#1114 guarded additive Production schema only; separate exact-file GO; Terms/catalog/profile blocks remain OFF",
+      "sha256": "87d747891527dbe85fe542af91fe0965a2fb67ebd4222dab5f40bee52fb32eaa",
+      "prerequisites": [
+        "20261026120000_profile_phase_a.sql"
+      ]
     }
   ],
   "provenance_rules": [
@@ -1227,6 +1251,27 @@
       "sha256": "f2d4c1b9a1c461581af922e17d5d0f920cfb52ffce48b5207d36a938ce6f1f8c",
       "category": "needs-production-equivalent",
       "purpose": "#1117 owner-approved unobserved capability risk: optional truthful waiver of fixed global wait only; known capabilities and unresolved operations remain fail-closed. No remote application or activation."
+    },
+    {
+      "file": "20261026120000_profile_phase_a.sql",
+      "version": "20261026120000",
+      "sha256": "a773676e127c733eccc0c645278ded8b8e1c96fdac4e45209ba509e60c7b346d",
+      "category": "needs-production-equivalent",
+      "purpose": "#1114 phase A additive profile revision/suppression and inactive Terms/catalog policy. Prepared locally only; separate Stage/Production GO and reader compatibility required. No data cleanup or activation."
+    },
+    {
+      "file": "20261027173627_profile_phase_a_bio_contract.sql",
+      "version": "20261027173627",
+      "sha256": "6d98db786488dedb53d5c41ddf167a845aa8110f358a788a879f92aa58dacf1e",
+      "category": "needs-production-equivalent",
+      "purpose": "#1114 G1 BIO-only contract preparation. Requires normalized Phase A, explicit environment GO and compatible readers; Draft Stage apply must stay skipped. No remote DDL authorized."
+    },
+    {
+      "file": "20261028180000_public_profile_block.sql",
+      "version": "20261028180000",
+      "sha256": "73b4bfefce21b8e59c1d20c21344ee7d182b8c90140d2b6d41a0c57379c30f6d",
+      "category": "needs-production-equivalent",
+      "purpose": "#1114 additive public profile block; separate Production schema-first GO required; no profile blocks activated."
     }
   ]
 }

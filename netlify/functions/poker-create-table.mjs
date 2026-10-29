@@ -1,3 +1,5 @@
+import { accountDeletionEnabled, assertAccountActive } from "../../shared/account-deletion.mjs";
+import { requireCurrentTerms } from "../../shared/profile-terms.mjs";
 import { readPokerTierPolicySnapshot, resolvePokerEnabledBuyIns } from "../../shared/poker-domain/bot-access.mjs";
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { formatStakes } from "./_shared/poker-stakes.mjs";
@@ -116,12 +118,15 @@ export async function handler(event) {
   let transactionResult = null;
   try {
     transactionResult = await beginSql(async (tx) => {
+      if(accountDeletionEnabled())await assertAccountActive(tx,auth.userId);
+      await requireCurrentTerms(tx,{kind:"account",id:auth.userId});
       const tierPolicySnapshot = await readPokerTierPolicySnapshot(tx);
       if (!resolvePokerEnabledBuyIns(tierPolicySnapshot, tiers).includes(buyIn)) return { kind: "tier_disabled" };
       const created = await createPokerTableWithState(tx, { userId: auth.userId, maxPlayers, stakesJson, buyIn });
       return { kind: "created", tableId: created.tableId };
     });
   } catch (error) {
+    if(error?.code==="terms_required")return {statusCode:409,headers:mergeHeaders(cors),body:JSON.stringify({error:"terms_required"})};
     if (error?.code === "pending_table_limit") {
       return {
         statusCode: 409,

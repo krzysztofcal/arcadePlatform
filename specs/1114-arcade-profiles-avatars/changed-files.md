@@ -1,0 +1,153 @@
+# Zmienione pliki — kompletna faza A z follow-up
+
+Baseline `a63e44b0d9a1d3625956ed98b75c1242989efdd3`. Bez push/PR/deploy. `css/xp.css` jest istniejącym, niezmienionym zasobem dołączanym przez zmieniony `account.html`; nowe reguły galerii są w `css/profile-account.css`.
+
+## Runtime / UI / assets
+
+- `about.en.html`
+- `about.pl.html`
+- `about/licenses.html`
+- `account.html`
+- `admin.html`
+- `assets/avatars/arcade/ace-silver.webp`
+- `assets/avatars/arcade/bolt-yellow.webp`
+- `assets/avatars/arcade/comet-blue.webp`
+- `assets/avatars/arcade/ember-coral.webp`
+- `assets/avatars/arcade/falcon-orange.webp`
+- `assets/avatars/arcade/fox-blue.webp`
+- `assets/avatars/arcade/nova-purple.webp`
+- `assets/avatars/arcade/orbit-green.webp`
+- `assets/avatars/arcade/panda-pink.webp`
+- `assets/avatars/arcade/pixel-teal.webp`
+- `assets/avatars/arcade/raven-violet.webp`
+- `assets/avatars/arcade/rocket-red.webp`
+- `assets/avatars/arcade/tiger-gold.webp`
+- `assets/avatars/arcade/wave-cyan.webp`
+- `assets/avatars/arcade/wizard-indigo.webp`
+- `assets/avatars/arcade/zen-lime.webp`
+- `css/legal-document.css`
+- `css/profile-account.css`
+- `favorites.html`
+- `game.html`
+- `game_cats.html`
+- `game_trex.html`
+- `games-open/2048/index.html`
+- `games-open/asteroids/index.html`
+- `games-open/breakout/index.html`
+- `games-open/brick-breaker/index.html`
+- `games-open/connect-four/index.html`
+- `games-open/flappy/index.html`
+- `games-open/freedoom/index.html`
+- `games-open/frogger/index.html`
+- `games-open/galaga/index.html`
+- `games-open/hangman/index.html`
+- `games-open/memory-match/index.html`
+- `games-open/minesweeper/index.html`
+- `games-open/missile-command/index.html`
+- `games-open/pacman/index.html`
+- `games-open/pong/index.html`
+- `games-open/simon/index.html`
+- `games-open/snake/index.html`
+- `games-open/sokoban/index.html`
+- `games-open/solitaire/index.html`
+- `games-open/space-invaders/index.html`
+- `games-open/sudoku/index.html`
+- `games-open/tetris/index.html`
+- `games-open/tic-tac-toe/index.html`
+- `games-open/whac-a-mole/index.html`
+- `index.html`
+- `js/account-page.js`
+- `js/auth/supabaseClient.js`
+- `js/i18n.js`
+- `js/profile-avatar-catalog.js`
+- `js/profile-client.js`
+- `js/profile-onboarding.js`
+- `js/public-profile-page.js`
+- `leaderboard.html`
+- `legal/cookies-notice.en.html`
+- `legal/cookies-notice.pl.html`
+- `legal/privacy.en.html`
+- `legal/privacy.pl.html`
+- `legal/terms.2026-10-26-a1.en.html`
+- `legal/terms.2026-10-26-a1.pl.html`
+- `legal/terms.en.html`
+- `legal/terms.pl.html`
+- `mobile/poker/package-web.mjs`
+- `mobile/poker/runtime.js`
+- `netlify/functions/_shared/user-profile.mjs`
+- `netlify/functions/_shared/xp-leaderboard-read.mjs`
+- `netlify/functions/poker-create-table.mjs`
+- `netlify/functions/poker-quick-seat.mjs`
+- `netlify/functions/profile-avatar-finalize.mjs`
+- `netlify/functions/profile-avatar-remove.mjs`
+- `netlify/functions/profile-avatar-upload-url.mjs`
+- `netlify/functions/profile-me.mjs`
+- `netlify/functions/profile-onboarding.mjs`
+- `play.html`
+- `poker/index.html`
+- `poker/offline/avatar-catalog.generated.js`
+- `poker/offline/game.generated.js`
+- `poker/offline/play.html`
+- `poker/offline/renderer.generated.js`
+- `poker/poker-v2.js`
+- `poker/table-v2.html`
+- `profile.html`
+- `recently-played.html`
+- `scripts/build-poker-offline-poc.mjs`
+- `scripts/build-profile-avatar-catalog.mjs`
+- `shared/poker-domain/gift-purchase.mjs`
+- `shared/poker-domain/join.mjs`
+- `shared/profile-avatar-projection.mjs`
+- `shared/profile-terms.mjs`
+- `ws-server/poker/persistence/authoritative-join-adapter.mjs`
+- `ws-server/poker/persistence/gift-adapter.mjs`
+- `ws-server/server.mjs`
+- `xp.html`
+
+## SQL / manifest
+
+- `specs/1114-arcade-profiles-avatars/operations/contract.sql`
+- `specs/1114-arcade-profiles-avatars/operations/enable-catalog.sql`
+- `specs/1114-arcade-profiles-avatars/operations/enable-terms.sql`
+- `specs/1114-arcade-profiles-avatars/operations/inventory.sql`
+- `specs/1114-arcade-profiles-avatars/operations/normalize-profiles.sql`
+- `supabase/migrations/20261026120000_profile_phase_a.sql`
+- `supabase/production-migrations/manifest.json`
+
+## Tests
+
+- `shared/poker-domain/gift-purchase.behavior.test.mjs`
+- `shared/poker-domain/join.behavior.test.mjs`
+- `tests/account-deletion-storage.behavior.test.mjs`
+- `tests/helpers/poker-test-helpers.mjs`
+- `tests/poker-quick-seat.behavior.test.mjs`
+- `tests/profile-avatar.behavior.test.mjs`
+- `tests/profile-phase-a.behavior.test.mjs`
+- `tests/public-profile-provisioning.contract.test.mjs`
+- `tests/public-profile-ui.contract.test.mjs`
+- `tests/public-profiles.behavior.test.mjs`
+- `ws-server/poker/handlers/gift.behavior.test.mjs`
+
+## SpecKit / evidence
+
+- `specs/1114-arcade-profiles-avatars/artwork/README.md`
+- `specs/1114-arcade-profiles-avatars/artwork/avatars-contact-sheet-v1.png`
+- `specs/1114-arcade-profiles-avatars/artwork/export-receipt.json`
+- `specs/1114-arcade-profiles-avatars/artwork/size-review.png`
+- `specs/1114-arcade-profiles-avatars/changed-files.md`
+- `specs/1114-arcade-profiles-avatars/evidence/account-gallery-local.png`
+- `specs/1114-arcade-profiles-avatars/evidence/account-gallery-pl-local.png`
+- `specs/1114-arcade-profiles-avatars/evidence/asset-verification.json`
+- `specs/1114-arcade-profiles-avatars/evidence/local-smoke.json`
+- `specs/1114-arcade-profiles-avatars/evidence/localization-smoke.json`
+- `specs/1114-arcade-profiles-avatars/evidence/offline-avatar-local.png`
+- `specs/1114-arcade-profiles-avatars/evidence/terms-local.png`
+- `specs/1114-arcade-profiles-avatars/evidence/terms-pl-local.png`
+- `specs/1114-arcade-profiles-avatars/evidence/tests-local.json`
+- `specs/1114-arcade-profiles-avatars/plan.md`
+- `specs/1114-arcade-profiles-avatars/review-followup.md`
+- `specs/1114-arcade-profiles-avatars/review.md`
+- `specs/1114-arcade-profiles-avatars/spec.md`
+- `specs/1114-arcade-profiles-avatars/tasks.md`
+- `specs/1114-arcade-profiles-avatars/evidence/legal-final-readonly.json`
+- `specs/1114-arcade-profiles-avatars/review-final-legal.md`

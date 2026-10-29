@@ -1,3 +1,4 @@
+import { requireCurrentTerms } from "../../shared/profile-terms.mjs";
 import { accountDeletionEnabled, assertAccountActive } from '../../shared/account-deletion.mjs';
 import { baseHeaders, beginSql, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
 import { createPokerTableWithState } from "./_shared/poker-table-init.mjs";
@@ -395,6 +396,7 @@ export async function handler(event) {
 
   try {
     const result = await beginSql(async (tx) => {
+      if(accountDeletionEnabled())await assertAccountActive(tx,auth.userId);
       const matchKey = isSinglePlayer ? `quickseat:sp:${auth.userId}` : `quickseat:${maxPlayers}`;
       const humanSeatFreshCutoffIso = new Date(Date.now() - resolveHumanSeatFreshMs(process.env.POKER_ACTIVE_HUMAN_SEAT_FRESH_MS)).toISOString();
 
@@ -486,6 +488,7 @@ export async function handler(event) {
         if (Date.now() - singlePlayerRequestIssuedAt > SINGLE_PLAYER_REQUEST_WINDOW_MS) {
           return { kind: "single_player_request_expired" };
         }
+        await requireCurrentTerms(tx,{kind:"account",id:auth.userId});
         progression.availableBuyIns = (progression.availableBuyIns || []).filter((b) => b <= 1000);
         progression.enabledBuyIns = (progression.enabledBuyIns || []).filter((b) => b <= 1000);
 
@@ -519,6 +522,7 @@ export async function handler(event) {
       }
 
 
+      await requireCurrentTerms(tx,{kind:"account",id:auth.userId});
       if (selectedBuyIn !== null && !progression.availableBuyIns.includes(selectedBuyIn)) {
         const tier = progression.tiers.find((item) => item.buyIn === selectedBuyIn);
         return {
@@ -684,6 +688,7 @@ export async function handler(event) {
       body: JSON.stringify({ ok: true, tableId: result.tableId, seatNo: result.seatNo }),
     };
   } catch (error) {
+    if(error?.code==="terms_required")return {statusCode:409,headers:mergeHeaders(cors),body:JSON.stringify({error:"terms_required"})};
     if (error?.code === "pending_table_limit" || error?.code === "active_table_limit") {
       return {
         statusCode: 409,

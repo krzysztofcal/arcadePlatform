@@ -7,6 +7,15 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("account auth UI supports validated signup and Supabase password recovery", async () => {
   const [html, page, auth] = await Promise.all([read("account.html"), read("js/account-page.js"), read("js/auth/supabaseClient.js")]);
+  const signup=html.slice(html.indexOf('id="signupForm"'),html.indexOf('</form>',html.indexOf('id="signupForm"')));
+  assert.match(signup,/data-i18n="publicProfileSignupNotice"/);
+  assert.ok(signup.indexOf('data-i18n="publicProfileSignupNotice"')<signup.indexOf('type="submit"'));
+  assert.ok(html.indexOf('id="googleProfileNotice"')<html.indexOf('id="googleSignInButton"'));
+  assert.match(page,/setBlockVisibility\(nodes.googleProfileNotice, googleEnabled\)/);
+  assert.equal((html.match(/data-i18n="publicProfileSignupNotice"/g)||[]).length,2);
+  assert.match(html,/Anyone, including people who are not signed in, can view your profile/);
+  const translations=await read('js/i18n.js');
+  assert.match(translations,/Każdy, również osoba niezalogowana, może zobaczyć Twój profil/);
   assert.match(html, /id="signupPassword"[^>]*minlength="8"/);
   assert.match(html, /id="signupPasswordConfirm"[^>]*minlength="8"/);
   assert.match(html, /id="forgotPasswordButton"/);
