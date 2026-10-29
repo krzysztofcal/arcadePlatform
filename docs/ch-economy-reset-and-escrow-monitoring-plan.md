@@ -78,7 +78,7 @@ Bonus jest późniejszą, osobną transakcją. Po resecie kwalifikujący się u�
 Nie tworzymy fingerprintów danych ani osobnych manifestów. Repo ma istniejący wzorzec weryfikowania project ref:
 
 - .github/workflows/db-stage-apply-pr.yml;
-- .github/workflows/db-stage-prepare.yml;
+- .github/workflows/db-stage-apply-pr.yml (explicit authorized Stage apply only);
 - netlify/functions/admin-stage-identity.mjs::parseProjectRefFromDbUrl();
 - netlify/functions/admin-stage-identity.mjs::parseProjectRefFromSupabaseUrl();
 - netlify/functions/admin-stage-identity.mjs::buildStageIdentity().
