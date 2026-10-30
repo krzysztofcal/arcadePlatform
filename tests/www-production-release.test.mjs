@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { SITE, activeWsRelease, candidateFailures, expectedCsp, headerFailures, parseBuildInfo, phrase, publishLocked } from '../scripts/www-production-release.mjs';
+import { SITE, activeWsRelease, candidateFailures, discardCandidate, expectedCsp, githubWsRelease, headerFailures, parseBuildInfo, phrase, publishLocked, vpsWsRelease } from '../scripts/www-production-release.mjs';
 
 const sha = 'a'.repeat(40);
 const ws = 'f'.repeat(40);
@@ -35,15 +35,53 @@ test('candidate fails closed on lock, context, stale SHA, identity, functions an
   assert.deepEqual(with_(c => { c.site.published_deploy.id = id; }), ['already_published']);
 });
 
-test('active WS release requires the latest started deploy job to have succeeded', () => {
+test('GitHub WS evidence: latest started deploy succeeded and nothing unfinished can still change Production', () => {
   const job = (conclusion, started_at, status = 'completed') => ({ name: 'deploy', status, conclusion, started_at });
-  const older = { head_sha: 'e'.repeat(40), jobs: [job('success', '2026-10-25T10:00:00Z')] };
-  assert.equal(activeWsRelease([{ head_sha: ws, jobs: [job('success', '2026-10-26T10:00:00Z'), { name: 'validate', status: 'completed', conclusion: 'success', started_at: '2026-10-27T00:00:00Z' }] }, older]), ws);
-  assert.equal(activeWsRelease([{ head_sha: sha, jobs: [job('skipped', null)] }, older]), 'e'.repeat(40));
-  assert.equal(activeWsRelease([{ head_sha: ws, jobs: [job('failure', '2026-10-26T10:00:00Z')] }, older]), null);
-  assert.equal(activeWsRelease([{ head_sha: ws, jobs: [job(null, '2026-10-26T10:00:00Z', 'in_progress')] }, older]), null);
-  assert.equal(activeWsRelease([{ head_sha: ws, jobs: [job('failure', '2026-10-26T10:00:00Z'), job('success', '2026-10-26T11:00:00Z')] }]), ws);
-  assert.equal(activeWsRelease([]), null);
+  const run = (head_sha, jobs, status = 'completed') => ({ head_sha, status, jobs });
+  const older = run('e'.repeat(40), [job('success', '2026-10-25T10:00:00Z')]);
+  assert.equal(githubWsRelease([run(ws, [job('success', '2026-10-26T10:00:00Z'), { name: 'validate', status: 'completed', conclusion: 'success', started_at: '2026-10-27T00:00:00Z' }]), older]), ws);
+  assert.equal(githubWsRelease([run(sha, [job('skipped', null)]), older]), 'e'.repeat(40));
+  assert.equal(githubWsRelease([run(ws, [job('failure', '2026-10-26T10:00:00Z')]), older]), null);
+  assert.equal(githubWsRelease([run(ws, [job(null, '2026-10-26T10:00:00Z', 'in_progress')]), older]), null);
+  assert.equal(githubWsRelease([run(ws, [job(null, null, 'queued')]), older]), null);
+  assert.equal(githubWsRelease([run(ws, [job(null, null, 'waiting')]), older]), null);
+  assert.equal(githubWsRelease([run(ws, [], 'queued'), older]), null);
+  assert.equal(githubWsRelease([run(ws, [job('failure', '2026-10-26T10:00:00Z'), job('success', '2026-10-26T11:00:00Z')])]), ws);
+  assert.equal(githubWsRelease([]), null);
+});
+
+test('VPS WS evidence: current release, metadata and a service started after installation; both sources must agree', () => {
+  const out = (o = {}) => [o.dir ?? `/opt/ws-server/releases/${ws}/ws-server`, JSON.stringify({ releaseSha: o.meta ?? ws, deployRef: 'main', environment: o.env ?? 'production' }), '', '2026-10-26T12:10:52Z', `MainPID=582106`, `ExecMainStartTimestamp=@${o.start ?? 1793292839}`, `ActiveState=${o.state ?? 'active'}`].join('\n');
+  assert.equal(vpsWsRelease(out()), ws);
+  assert.equal(vpsWsRelease(out({ meta: sha })), null);
+  assert.equal(vpsWsRelease(out({ env: 'preview' })), null);
+  assert.equal(vpsWsRelease(out({ dir: '/opt/arcade-ws/ws-server' })), null);
+  assert.equal(vpsWsRelease(out({ state: 'failed' })), null);
+  assert.equal(vpsWsRelease(out({ start: Date.parse('2026-10-26T12:00:00Z') / 1000 })), null);
+  assert.equal(vpsWsRelease(''), null);
+  assert.equal(activeWsRelease(ws, ws), ws);
+  assert.equal(activeWsRelease(ws, 'e'.repeat(40)), null);
+  assert.equal(activeWsRelease(null, ws), null);
+  assert.equal(activeWsRelease(ws, null), null);
+});
+
+test('discard deletes only an unpublished candidate and reports deletion only when API and permalink are gone', async () => {
+  const api = (deploy, after = 'gone') => {
+    const calls = [];
+    let deleted = false;
+    return { calls, site: async () => ({ published_deploy: { id: live } }), deploy: async () => { if (deleted && after === 'gone') throw new Error('netlify_api_404'); return deploy; }, discard: async x => { calls.push(`discard:${x}`); deleted = true; } };
+  };
+  const cand = { id, site_id: SITE.id, context: 'production', state: 'ready', published_at: null };
+  assert.deepEqual(await discardCandidate(api(cand), id, async () => 404), { apiGone: true, permalinkStatus: 404, discarded: true });
+  assert.equal((await discardCandidate(api(cand), id, async () => 200)).discarded, false);
+  assert.equal((await discardCandidate(api(cand, 'kept'), id, async () => 404)).discarded, false);
+  for (const bad of [{ ...cand, published_at: '2026-10-29T16:53:56Z' }, { ...cand, state: 'building' }, { ...cand, context: 'deploy-preview' }]) {
+    const a = api(bad);
+    await assert.rejects(discardCandidate(a, id, async () => 404), /not_discardable_candidate/);
+    assert.deepEqual(a.calls, []);
+  }
+  const current = api({ ...cand, id: live });
+  await assert.rejects(discardCandidate(current, live, async () => 404), /not_discardable_candidate/);
 });
 
 test('build info, CSP and HSTS checks use the deployed files', () => {

@@ -53,6 +53,7 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [x] Read-only Netlify audit; official lock, `ignore` and build-hook behavior; design, coverage table, limitations and breaking impact in `pr5-www-production-publish.md`.
 - [x] Unpublished Production permalinks can mutate Production: `ignore` skips `main` Git builds (Previews/branch deploys kept); candidates only from an OWNER build hook.
 - [x] OWNER-run `scripts/www-production-release.mjs`: dry-run default; lock, exact main HEAD, ready Production deploy, build-info identity, function names, root CSP/HSTS; WS release proven from GitHub deploy evidence; relock-or-uncertain; receipt on every outcome; rollback mode removed until T004. Fundamental tests registered.
+- [x] WS evidence: read-only VPS `current`/metadata/service start must agree with GitHub deploy history; unfinished/queued WS runs block; both rechecked before restore. Mandatory candidate discard with API+permalink 404 proof, else STOP.
 - [ ] OWNER GO 1: lock auto publishing on the current published deploy and verify.
 - [ ] OWNER GO 2: merge; observe skipped main Production build, unchanged published deploy, working PR Preview.
 - [ ] OWNER GO 3/4: OWNER-only build hook; first release with WS compatibility decision, recorded receipt and restore/lock behavior.
