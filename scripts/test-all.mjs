@@ -22,6 +22,8 @@ function run(cmd, args, name){
 const has = s => !!(process.env[s] && process.env[s] !== "0");
 
 run("node", ["scripts/syntax-check.mjs"], "syntax");
+run("node", ["--test", "tests/account-page.test.mjs"], "account-page");
+run("node", ["--test", "tests/mobile-poker-security.test.mjs", "tests/mobile-poker-preview.test.mjs"], "mobile-poker-fundamentals");
 
 run("node", ["tests/xp-client.test.mjs"], "xp-client");
 run("node", ["tests/xp-client-contract.test.mjs"], "xp-client-contract");
@@ -43,6 +45,7 @@ run("node", ["tests/recorder-admin-only.test.mjs"], "recorder-admin-only");
 run("node", ["tests/secureStorage.test.mjs"], "secure-storage");
 run("node", ["tests/favorites-service.test.mjs"], "favorites-service");
 run("node", ["tests/poker-stakes.test.mjs"], "poker-stakes");
+run("node", ["--test", "tests/poker-offline.test.mjs"], "poker-offline");
 run("node", ["tests/poker-bots.unit.test.mjs"], "poker-bots-unit");
 run("node", ["--test", "shared/poker-domain/demand-refill.behavior.test.mjs"], "poker-demand-refill");
 run("node", ["tests/poker-bot-cashout.userId-is-bot.unit.test.mjs"], "poker-bot-cashout-userid-is-bot-unit");

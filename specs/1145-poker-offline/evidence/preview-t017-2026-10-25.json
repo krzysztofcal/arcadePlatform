@@ -1,0 +1,11 @@
+{
+  "sha": "4fe03732221c4ea75add47948cf2f58a0845bfd8",
+  "cancel": true,
+  "pausedWhileConfirming": true,
+  "nativeCallbackCancel": true,
+  "foregroundCannotResumeDialog": true,
+  "singleHandler": true,
+  "confirmResume": true,
+  "separateLeave": true,
+  "errors": []
+}

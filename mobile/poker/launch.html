@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-lmKHqvmIrzM/+A5vPY/urBQmgccRAo9JvT26b9xunQc='; style-src 'unsafe-inline'; img-src 'self'; object-src 'none'; base-uri 'none'">
+<title>Arcade Poker</title>
+<style id="pokerLaunchStyle">
+html,body{margin:0;background:#0b1020;color:#eef3ff;}
+#pokerLaunch{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:22px;padding:32px;box-sizing:border-box;background:radial-gradient(ellipse at 50% 35%,#203258 0%,#10192f 38%,#0b1020 75%);font-family:Arial,Helvetica,sans-serif;text-align:center;}
+#pokerLaunch[hidden]{display:none;}
+#pokerLaunch svg{width:112px;height:112px;filter:drop-shadow(0 0 24px #61e2d333);}
+#pokerLaunch h1{margin:0;font-size:clamp(28px,7vw,40px);letter-spacing:5px;font-weight:800;line-height:1.25;font-style:normal;text-shadow:none;}
+#pokerLaunch h1 span{display:block;color:#74ead5;font-size:.6em;letter-spacing:10px;margin-top:8px;padding-left:10px;}
+#pokerLaunch .launch-loader{width:110px;height:3px;border-radius:4px;overflow:hidden;background:#ffffff1a;}
+#pokerLaunch .launch-loader::after{content:"";display:block;width:45%;height:100%;border-radius:inherit;background:#74ead5;animation:pokerLaunchPulse 1.2s ease-in-out infinite alternate;}
+@keyframes pokerLaunchPulse{from{transform:translateX(0);opacity:.5;}to{transform:translateX(125%);opacity:1;}}
+@media(prefers-reduced-motion:reduce){#pokerLaunch .launch-loader::after{animation:none;width:100%;}}
+</style>
+<script src="/mobile/poker/launch.js" integrity="sha256-lmKHqvmIrzM/+A5vPY/urBQmgccRAo9JvT26b9xunQc=" defer></script>
+</head>
+<body>
+<div id="pokerLaunch" role="status" aria-label="Loading Arcade Poker">
+<svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="54" fill="#15253d" stroke="#74ead5" stroke-width="3"/><circle cx="60" cy="60" r="44" fill="none" stroke="#d6b971" stroke-width="5" stroke-dasharray="12 15.65"/><path d="M60 30C51 41 34 48 34 62C34 75 49 80 57 70L53 87H67L63 70C71 80 86 75 86 62C86 48 69 41 60 30Z" fill="#74ead5"/></svg>
+<h1>ARCADE<span>POKER</span></h1>
+<div class="launch-loader" aria-hidden="true"></div>
+</div>
+<noscript>Enable JavaScript to open Arcade Poker.</noscript>
+</body>
+</html>

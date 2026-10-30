@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import base64
 
 spec = importlib.util.spec_from_file_location('preview_config', Path(__file__).parents[1] / 'infra/vps/prepare-ws-preview-v3.py')
 config = importlib.util.module_from_spec(spec)
@@ -260,6 +261,11 @@ prod = importlib.util.module_from_spec(prod_spec)
 prod_spec.loader.exec_module(prod)
 
 
+def service_key(project='otbqfijerkieoxwpxjnm', role='service_role'):
+    payload = base64.urlsafe_b64encode(json.dumps({'ref': project, 'role': role, 'exp': 4102444800}).encode()).decode().rstrip('=')
+    return 'eyJhbGciOiJIUzI1NiJ9.' + payload + '.synthetic-signature'
+
+
 class ProductionDeletionWindow(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -268,6 +274,7 @@ class ProductionDeletionWindow(unittest.TestCase):
         self.env, self.helper = self.root / 'env', self.root / 'helper'
         self.approval, self.directory = self.root / 'approval', self.root / 'window'
         self.before = BASE.replace(b'krydukthwdvccggbyjfw', b'otbqfijerkieoxwpxjnm').replace(b'SUPABASE_STAGE_PROJECT_REF=', b'FIXTURE_PROJECT_REF=').replace(b'PORT=3001', b'PORT=3000') + b'ACCOUNT_DELETION_ENABLED=0\nXP_REDIS_VERSION=3\nXP_REDIS_ENV=prod\nXP_KEY_NS=kcswh:prod:xp:v3\nUPSTASH_REDIS_REST_URL=https://fixture.upstash.io\nUPSTASH_REDIS_REST_TOKEN=fixture-token\n'
+        self.before += ('SUPABASE_SERVICE_ROLE_KEY=' + service_key() + '\n').encode()
         self.env.write_bytes(self.before); self.env.chmod(0o600)
         self.old = b'fixture old protected production helper'
         self.helper.write_bytes(self.old); self.helper.chmod(0o755)
@@ -289,8 +296,8 @@ class ProductionDeletionWindow(unittest.TestCase):
         # while the new helper/module hash and all configuration derivation are real.
         script = """import {runPreflight} from './infra/vps/ws-production-env-preflight.mjs';
 const [envFile,directory,anchor,helper,boundary]=process.argv.slice(1);
-try {runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>process.argv[6]==='1',querySystemIdentifier:()=> '7575202818581710058',protection:{directory,anchor,helper,boundary}});process.exit(0);}catch {process.exit(1);}"""
-        result = subprocess.run(['node','--input-type=module','-e',script,str(self.env),str(self.directory),str(self.approval),str(self.helper),str(self.root),'1' if live else '0'],cwd=Path(__file__).parents[1],capture_output=True)
+try {runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>process.argv[6]==='1',querySystemIdentifier:()=> '7575202818581710058',protection:{directory,anchor,helper,boundary,legacyHelperHash:process.argv[7]}});process.exit(0);}catch {process.exit(1);}"""
+        result = subprocess.run(['node','--input-type=module','-e',script,str(self.env),str(self.directory),str(self.approval),str(self.helper),str(self.root),'1' if live else '0',prod.LEGACY_WINDOW_HELPER],cwd=Path(__file__).parents[1],capture_output=True)
         self.assertEqual(result.returncode,0 if good else 1)
 
     def test_off_on_exact_restore_and_only_two_keys_change(self):
@@ -357,6 +364,107 @@ try {runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()
     def test_reviewed_bundle_pins(self):
         self.assertEqual(config.digest(self.new),prod.HELPER_SHA256)
         self.assertEqual(config.digest((Path(__file__).parents[1]/'infra/vps/prepare-ws-preview-v3.py').read_bytes()),prod.SECURE_SHA256)
+
+    def credential_fixture(self):
+        self.before = b''.join(line for line in self.before.splitlines(keepends=True)
+                               if not line.startswith(b'SUPABASE_SERVICE_ROLE_KEY='))
+        self.env.write_bytes(self.before)
+        self.record['after']['prod'] = config.digest(self.before)
+        self.approval.write_text(json.dumps(self.record))
+        self.action('prepare')
+        legacy = b'previous reviewed Production window preflight'
+        previous = prod.LEGACY_WINDOW_HELPER
+        prod.LEGACY_WINDOW_HELPER = config.digest(legacy)
+        self.addCleanup(setattr, prod, 'LEGACY_WINDOW_HELPER', previous)
+        parent = json.loads((self.directory/'manifest.json').read_text())
+        parent.update(helper=prod.LEGACY_WINDOW_HELPER, phase='on')
+        (self.directory/'manifest.json').write_text(json.dumps(parent))
+        self.helper.write_bytes(legacy)
+        self.env.write_bytes(prod.render_on(self.before))
+        self.historical = {p: p.read_bytes() for p in [self.approval,self.directory/'manifest.json',self.directory/'env.before',self.directory/'helper.before']}
+
+    def install_credential(self, files=None, key=None, verifier=None):
+        return prod.operate('prepare-service-role', self.env, self.helper,self.approval,self.directory,self.new,
+                            files or self.files, {prod.SERVICE_KEY: key or service_key()}, verifier or (lambda value: None))
+
+    def test_service_role_upgrade_preserves_anchor_and_restores_off_with_key(self):
+        self.credential_fixture()
+        self.preflight(False)
+        unchanged=self.env.read_bytes()
+        self.assertEqual(prod.operate('dry-run-service-role',self.env,self.helper,self.approval,self.directory,self.new,
+                                     self.files,{prod.SERVICE_KEY:service_key()},lambda key: None),'service-role-ready')
+        self.assertEqual(self.env.read_bytes(),unchanged)
+        self.assertFalse((self.directory/'service-role.json').exists())
+        self.assertFalse((self.directory/'service-role.env').exists())
+        self.assertEqual(self.install_credential(), 'on'); self.preflight()
+        self.assertEqual(self.install_credential(), 'on')
+        for path, source in self.historical.items(): self.assertEqual(path.read_bytes(), source)
+        self.assertEqual(self.action('restore'), 'off'); self.preflight()
+        expected=self.before+('SUPABASE_SERVICE_ROLE_KEY='+service_key()+'\n').encode()
+        self.assertEqual(self.env.read_bytes(), expected)
+        self.assertEqual(self.action('activate'), 'on'); self.preflight()
+        values=config.parse_env(self.env.read_bytes())
+        self.assertEqual(values[prod.SERVICE_KEY], service_key())
+        self.assertEqual(values['UPSTASH_REDIS_REST_TOKEN'],'fixture-token')
+        for path, source in self.historical.items(): self.assertEqual(path.read_bytes(), source)
+
+    def test_service_role_wrong_identity_provider_denial_and_missing_key_on_fail_closed(self):
+        self.before=b''.join(line for line in self.before.splitlines(keepends=True)
+                             if not line.startswith(b'SUPABASE_SERVICE_ROLE_KEY='))
+        self.env.write_bytes(self.before)
+        self.record['after']['prod']=config.digest(self.before)
+        self.approval.write_text(json.dumps(self.record))
+        self.action('prepare')
+        with self.assertRaisesRegex(prod.secure.Refused,'invalid_service_role_format'): self.action('activate')
+        state=json.loads((self.directory/'manifest.json').read_text())
+        state['phase']='on'
+        (self.directory/'manifest.json').write_text(json.dumps(state))
+        self.env.write_bytes(prod.render_on(self.before)); self.preflight(False)
+        # Rebuild only the synthetic fixture, then exercise historical-helper upgrade.
+        import shutil
+        shutil.rmtree(self.directory)
+        self.env.write_bytes(self.before); self.helper.write_bytes(self.old)
+        self.credential_fixture()
+        with self.assertRaises(prod.secure.Refused): self.action('activate')
+        for key in [service_key(project='krydukthwdvccggbyjfw'), service_key(role='anon'), 'not-a-credential']:
+            with self.assertRaises(prod.secure.Refused): self.install_credential(key=key)
+        def denied(key): raise prod.secure.Refused('provider_denied_fixture')
+        with self.assertRaises(prod.secure.Refused): self.install_credential(verifier=denied)
+        self.assertFalse((self.directory/'service-role.json').exists())
+
+    def test_service_role_interrupted_helper_env_and_restore_resume_without_losing_backups(self):
+        self.credential_fixture()
+        outer=self
+        class Interrupted(prod.secure.SecureFiles):
+            fail_path=None
+            def atomic(self,path,*args,**kwargs):
+                super().atomic(path,*args,**kwargs)
+                if path==self.fail_path: raise OSError('fixture interruption after atomic replace')
+        files=Interrupted(os.getuid(),os.getgid(),self.root)
+        for target in [self.helper,self.env]:
+            files.fail_path=target
+            with self.assertRaises(OSError): self.install_credential(files)
+            self.preflight(False)
+        self.assertEqual(self.install_credential(),'on'); self.preflight()
+        files.fail_path=self.env
+        with self.assertRaises(OSError): self.action('restore',files)
+        self.preflight(False)
+        self.assertEqual(self.action('restore'),'off'); self.preflight()
+        for path,source in self.historical.items(): self.assertEqual(path.read_bytes(),source)
+
+    def test_service_role_secret_or_env_drift_and_unsafe_permissions_are_denied(self):
+        self.credential_fixture(); self.install_credential()
+        secret=self.directory/'service-role.env'
+        original=secret.read_bytes()
+        secret.write_bytes(original.replace(b'synthetic-signature',b'changed-signature'))
+        self.preflight(False)
+        with self.assertRaises(prod.secure.Refused): self.action('verify')
+        secret.write_bytes(original)
+        secret.chmod(0o644); self.preflight(False)
+        with self.assertRaises(prod.secure.Refused): self.action('verify')
+        secret.chmod(0o600)
+        self.env.write_bytes(self.env.read_bytes()+b'EXTRA=changed\n'); self.preflight(False)
+        with self.assertRaises(prod.secure.Refused): self.action('restore')
 
 
 if __name__ == '__main__':

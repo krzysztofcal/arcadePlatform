@@ -11,13 +11,23 @@ import {
   parseDbUrl,
   sanitizeOutput,
   PSQL_BIN,
-  defaultQuerySystemIdentifier
+  defaultQuerySystemIdentifier,
+  validateServiceRole
 } from "../infra/vps/ws-production-env-preflight.mjs";
 
 const CANONICAL_PROD_PROJECT_REF = "otbqfijerkieoxwpxjnm";
 const CANONICAL_PROD_SYSTEM_IDENTIFIER = "7575202818581710058";
 const STAGE_PROJECT_REF = "krydukthwdvccggbyjfw";
 const STAGE_SYSTEM_IDENTIFIER = "7656985631720456337";
+
+test('service role requires a nonexpired Production service_role claim; errors contain no token', () => {
+  const token = claims => 'eyJhbGciOiJIUzI1NiJ9.' + Buffer.from(JSON.stringify(claims)).toString('base64url') + '.synthetic-signature';
+  const claims={ref:CANONICAL_PROD_PROJECT_REF,role:'service_role',exp:4102444800};
+  assert.doesNotThrow(()=>validateServiceRole(token(claims)));
+  for (const key of [undefined,'',token({...claims,ref:STAGE_PROJECT_REF}),token({...claims,role:'anon'}),token({...claims,exp:1})]) {
+    assert.throws(()=>validateServiceRole(key), error=>error instanceof PreflightError && error.message==='Production service role missing, foreign or expired');
+  }
+});
 
 function withTempEnvFile(content, callback, { mode = 0o600 } = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ws-prod-preflight-test-"));
@@ -465,9 +475,10 @@ test('V3 production gate denies legacy, foreign namespace, missing credentials a
       assert.throws(() => runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>true,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}), PreflightError);
     });
   }
-  withTempEnvFile(validEnvContent(v3), envFile => {
-    assert.throws(() => runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>false,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}), PreflightError);
-    assert.equal(runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>true,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}),'PASS LIVE Redis V3 prod');
+  withTempEnvFile(validEnvContent(v3), (envFile,boundary) => {
+    const protection={boundary,directory:path.join(boundary,'window')};
+    assert.throws(() => runPreflight({envFile,protection,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>false,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}), PreflightError);
+    assert.equal(runPreflight({envFile,protection,allowTestUid:true,requireRedisV3:true,queryRedisV3:()=>true,querySystemIdentifier:()=>CANONICAL_PROD_SYSTEM_IDENTIFIER}),'PASS LIVE Redis V3 prod');
   });
 });
 

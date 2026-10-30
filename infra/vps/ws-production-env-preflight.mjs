@@ -143,7 +143,18 @@ const WINDOW_DIRECTORY = "/var/backups/arcade-production-deletion-window";
 const WINDOW_ANCHOR = "/var/backups/arcade-xp-v3-cutover/state.json";
 const INSTALLED_HELPER = "/usr/local/sbin/arcade-ws-production-env-preflight";
 const PRODUCTION_MARKER = "prod-avatar-authority-20261022";
+const LEGACY_WINDOW_HELPER = "af861b5eb2d63429114fd064c88ff575179df6d955293e24a458f3c65cc00562";
 const sha = source => createHash("sha256").update(source).digest("hex");
+
+export function validateServiceRole(key) {
+  try {
+    if (typeof key !== "string" || key.length < 41 || key.length >= 8192 || !/^[A-Za-z0-9_.-]+$/.test(key)) throw Error();
+    const parts = key.split(".");
+    if (parts.length !== 3) throw Error();
+    const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    if (claims.ref !== CANONICAL_PROD_PROJECT_REF || claims.role !== "service_role" || !Number.isFinite(claims.exp) || claims.exp * 1000 <= Date.now()) throw Error();
+  } catch { reject("Production service role missing, foreign or expired"); }
+}
 
 function protectedRead(filename, mode, {allowTestUid, boundary = "/"}) {
   const uid = allowTestUid ? process.getuid() : 0;
@@ -178,7 +189,8 @@ function approvedSource(source, allowTestUid, protection) {
   if (!m.isDirectory() || (m.mode & 0o7777) !== 0o700) reject("untrusted window directory");
   const read = (file,mode=0o600) => protectedRead(file,mode,options);
   const record = read(anchor), baseline = read(path.join(directory,"env.before"));
-  const approval = JSON.parse(record), state = JSON.parse(read(path.join(directory,"manifest.json")));
+  const parentBytes = read(path.join(directory,"manifest.json"));
+  const approval = JSON.parse(record), state = JSON.parse(parentBytes);
   const v = parseEnv(baseline);
   if (approval.version !== 1 || approval.phase !== "committed" || state.version !== 1
     || state.anchor !== sha(record) || state.off !== sha(baseline) || approval.after?.prod !== sha(baseline)
@@ -187,6 +199,29 @@ function approvedSource(source, allowTestUid, protection) {
   if (on && !on.endsWith("\n")) on += "\n";
   on += "ACCOUNT_DELETION_ENABLED=1\nACCOUNT_DELETION_AVATAR_TRACKING_MARKER=" + PRODUCTION_MARKER + "\n";
   const moduleSource = fs.readFileSync(fileURLToPath(import.meta.url),"utf8");
+  const credentialPath = path.join(directory,"service-role.env");
+  const credentialManifest = path.join(directory,"service-role.json");
+  if (fs.existsSync(credentialPath) || fs.existsSync(credentialManifest)) {
+    const credential = read(credentialPath), extension = JSON.parse(read(credentialManifest));
+    const values = parseEnv(credential);
+    if (Object.keys(values).length !== 1 || !values.SUPABASE_SERVICE_ROLE_KEY
+      || credential !== "SUPABASE_SERVICE_ROLE_KEY=" + values.SUPABASE_SERVICE_ROLE_KEY + "\n"
+      || v.SUPABASE_SERVICE_ROLE_KEY !== undefined) reject("Production credential source invalid");
+    validateServiceRole(values.SUPABASE_SERVICE_ROLE_KEY);
+    const legacyHelper = allowTestUid && protection?.legacyHelperHash || LEGACY_WINDOW_HELPER;
+    const off = baseline + (baseline.endsWith("\n") ? "" : "\n") + credential;
+    let withKey = off.split(/(?<=\n)/).filter(line => !["ACCOUNT_DELETION_ENABLED","ACCOUNT_DELETION_AVATAR_TRACKING_MARKER"].includes(line.split("=",1)[0].trim())).join("");
+    withKey += "ACCOUNT_DELETION_ENABLED=1\nACCOUNT_DELETION_AVATAR_TRACKING_MARKER=" + PRODUCTION_MARKER + "\n";
+    if (state.helper !== legacyHelper || !["on","off","prepared"].includes(state.phase)
+      || state.on !== sha(on) || sha(read(path.join(directory,"helper.before"))) !== approval.after?.helper
+      || sha(read(path.join(directory,"service-role.helper.before"))) !== legacyHelper
+      || extension.version !== 1 || !["on","off"].includes(extension.initialPhase)
+      || extension.anchor !== sha(record) || extension.parent !== sha(parentBytes)
+      || extension.credential !== sha(credential) || extension.off !== sha(off) || extension.on !== sha(withKey)
+      || extension.helper !== sha(moduleSource) || read(helper,0o755) !== moduleSource
+      || !((extension.phase === "on" && source === withKey) || (extension.phase === "off" && source === off))) reject("Production service-role window incomplete or drifted");
+    return;
+  }
   if (state.helper !== sha(moduleSource) || read(helper,0o755) !== moduleSource || state.on !== sha(on)
     || !((state.phase === "on" && source === on) || (["prepared","off"].includes(state.phase) && source === baseline))) reject("Production window incomplete or drifted");
 }
@@ -279,6 +314,7 @@ export function runPreflight({
       if (endpoint.protocol!=='https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname!=='/' || !endpoint.hostname.endsWith('.upstash.io')) reject('production Redis endpoint invalid');
       approvedSource(source,allowTestUid,protection);
       if (values.ACCOUNT_DELETION_ENABLED === '1') {
+        validateServiceRole(values.SUPABASE_SERVICE_ROLE_KEY);
         const db = parseDbUrl(dbUrl);
         if (!((db.host === `db.${CANONICAL_PROD_PROJECT_REF}.supabase.co` && db.user === 'postgres')
           || (db.host.endsWith('.pooler.supabase.com') && db.user === `postgres.${CANONICAL_PROD_PROJECT_REF}`))

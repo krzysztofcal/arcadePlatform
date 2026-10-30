@@ -168,7 +168,7 @@
       headers['Content-Type'] = 'application/json';
     }
 
-    return fetch(url, Object.assign({}, opts, { headers: headers }));
+    return fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, Object.assign({}, opts, { headers: headers }));
   }
 
   async function parseResponse(res){

@@ -643,7 +643,7 @@
     state.serverSessionPromise = (async () => {
       try {
         const headers = await buildAuthHeaders({ "content-type": "application/json" });
-        const res = await fetch(START_SESSION_URL, {
+        const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(START_SESSION_URL) : START_SESSION_URL, {
           method: "POST",
           headers,
           body: JSON.stringify({ userId }),
@@ -799,7 +799,7 @@
       throw new Error("XP status requires an authenticated token");
     }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
-    const res = await fetch(CALC_URL, {
+    const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -896,7 +896,7 @@
       let lastError = null;
       let res = null;
       try {
-        res = await fetch(CALC_URL, {
+        res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
           method: "POST",
           headers,
           body: payloadJson,

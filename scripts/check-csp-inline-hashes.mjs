@@ -19,7 +19,7 @@ function routeFor(documentPath) {
   return "/*";
 }
 
-function parseHeaders(headersText) {
+function parseHeaders(headersText, routes = ROUTES) {
   const blocks = new Map();
   const lines = headersText.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
@@ -32,11 +32,11 @@ function parseHeaders(headersText) {
     }
     index -= 1;
     if (!csp) continue;
-    if (!ROUTES.includes(route)) throw new Error(`unsupported CSP route in _headers: ${route}`);
+    if (!routes.includes(route)) throw new Error(`unsupported CSP route in _headers: ${route}`);
     if (blocks.has(route)) throw new Error(`duplicate CSP route in _headers: ${route}`);
     blocks.set(route, csp);
   }
-  for (const route of ROUTES) if (!blocks.has(route)) throw new Error(`missing CSP route in _headers: ${route}`);
+  for (const route of routes) if (!blocks.has(route)) throw new Error(`missing CSP route in _headers: ${route}`);
   return blocks;
 }
 
@@ -73,8 +73,8 @@ async function collectServedDocuments(rootDir) {
   return Promise.all(files.sort().map(async (file) => ({ path: path.relative(rootDir, file), content: await readFile(file, "utf8") })));
 }
 
-export function verifyInlineScriptHashes({ documents, headersText }) {
-  const policies = parseHeaders(headersText);
+export function verifyInlineScriptHashes({ documents, headersText, routes = ROUTES }) {
+  const policies = parseHeaders(headersText, routes);
   const missing = [];
   for (const [route, csp] of policies) {
     const scriptSource = csp.match(/(?:^|;)\s*script-src\s+([^;]+)/i)?.[1] ?? "";
@@ -82,6 +82,7 @@ export function verifyInlineScriptHashes({ documents, headersText }) {
     if (allowsUnsafeInline !== (route === "/games-open/freedoom/*")) throw new Error(`unsafe-inline policy mismatch for route: ${route}`);
   }
   for (const document of documents) {
+    if (routes.length === 1 && /<[^>]+\son[a-z]+\s*=/i.test(document.content)) throw new Error(`${document.path}: inline event handler is not allowed`);
     const route = routeFor(document.path);
     const csp = policies.get(route);
     if (route === "/games-open/freedoom/*") continue;
@@ -98,7 +99,9 @@ async function main() {
   const rootDir = process.cwd();
   const [documents, headersText] = await Promise.all([collectServedDocuments(rootDir), readFile(path.join(rootDir, "_headers"), "utf8")]);
   verifyInlineScriptHashes({ documents, headersText });
-  process.stdout.write(`CSP inline hash guard passed for ${documents.length} served documents.\n`);
+  const landingDocuments = documents.filter((document) => document.path.replaceAll(path.sep, "/").startsWith("landing/"));
+  verifyInlineScriptHashes({ documents: landingDocuments, headersText: await readFile(path.join(rootDir, "landing/_headers"), "utf8"), routes: ["/*"] });
+  process.stdout.write(`CSP inline hash guard passed for ${documents.length} served documents and standalone landing (${landingDocuments.length} documents).\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

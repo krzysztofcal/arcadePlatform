@@ -61,7 +61,7 @@
     var hasSupabase = !!(window.supabase && window.supabase.createClient);
     if (hasSupabase && env.url && env.key){
       try {
-        state.client = window.supabase.createClient(env.url, env.key);
+        state.client = window.supabase.createClient(env.url, env.key, window.MobilePoker ? window.MobilePoker.authOptions : undefined);
         window.supabaseClient = state.client;
         logDiag('supabase:init_ok', { urlPresent: !!env.url, keyPresent: !!env.key });
       } catch (_err){
@@ -205,6 +205,7 @@
   }
 
   function getAuthRedirectTo(){
+    if (window.MobilePoker) return window.MobilePoker.redirectTo;
     try {
       if (!window || !window.location || !window.location.origin) return null;
       var protocol = window.location.protocol || '';
@@ -244,6 +245,7 @@
       if (target.origin !== new URL(env.url).origin || target.pathname !== '/auth/v1/authorize' || target.searchParams.get('provider') !== 'google'){
         throw new Error('google_failed');
       }
+      if (window.MobilePoker) return window.MobilePoker.openOAuth(target.href);
       window.location.assign(target.href);
     }).catch(function(error){
       // Never expose raw SDK/provider errors or credential-bearing URLs.
@@ -381,7 +383,7 @@
       ? window.ProfileClient.getMe()
       : getAccessToken().then(function(accessToken){
         if (!accessToken) throw new Error('not_authenticated');
-        return fetch('/.netlify/functions/profile-me', { headers: { Authorization: 'Bearer ' + accessToken } }).then(function(response){
+        return fetch(window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/profile-me') : '/.netlify/functions/profile-me', { headers: { Authorization: 'Bearer ' + accessToken } }).then(function(response){
           if (!response.ok) throw new Error('profile_request_failed');
           return response.json();
         });
