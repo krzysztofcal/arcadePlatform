@@ -32,7 +32,7 @@ Every Production deploy, published or not, is reachable at `https://<deployId>--
 | Functions | set of names equals `netlify/functions` at `sha` | code digests, env values |
 | Headers | `/` CSP equals first `_headers` CSP at `sha`; HSTS present | other paths and header rules |
 | Redirects | — | not checked |
-| WS | VPS `current`/metadata/service and GitHub evidence agree; no unfinished WS run; no diff on `ws-server/`, `shared/`, `poker/poker-ws-client.js`; rechecked before restore | protocol semantics beyond that diff; the process's loaded code beyond "started after installation" |
+| WS | VPS `current`/metadata/service and GitHub evidence agree; no unfinished WS run; no diff on the WS artifact surface between the active WS release and `sha`; rechecked before restore | protocol semantics beyond that diff; the process's loaded code beyond "started after installation" |
 
 Smoke is GET-only on static files, because permalink functions use Production env.
 
@@ -44,6 +44,15 @@ Publication requires two independent sources to name the same SHA, and fails clo
 - **GitHub:** across the latest 50 non-PR `WS Server Deploy` runs on `main`, any run that is not completed, or any non-skipped `deploy` job that is queued, waiting, running or not yet started, yields no evidence. Otherwise the most recently started `deploy` job (all attempts) must be `success`.
 
 Both sources are read again immediately before `restore`; a change fails with `ws_release_changed`. Limitation: the service start time does not prove which files the process loaded beyond that ordering. Follow-up (needs a WS runtime change): expose the release SHA in `/healthz`.
+
+### WS artifact surface
+
+The compared paths are read from the package step of `.github/workflows/ws-server-deploy.yml` at both the active WS release and `sha` (union), so no list is duplicated:
+- every `cp` source copied into the WS artifact: `ws-server/*`, `shared`, and `netlify/functions/_shared/{chips-ledger,poker-*,supabase-admin,api-cors,store-upstash,xp-ledger}.mjs`;
+- `netlify/functions/_generated/deploy-context.mjs`, plus its generator `scripts/generate-build-info.js --server-context-only`;
+- the browser client `poker/poker-ws-client.js`.
+
+Packaging that cannot be parsed, or a failed `git show`/`git diff`, fails closed (`ws_surface_unknown`). This is wider than `scripts/ci-impact.mjs::deployPath`, which omits `store-upstash.mjs`, `xp-ledger.mjs` and the generator. Current pair: WS `a63e44b0` and live WWW `0f77574d` are equal on this surface; main HEAD is not.
 
 ### Auditable result (P2)
 

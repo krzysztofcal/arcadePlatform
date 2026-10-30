@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 // OWNER-run WWW Production publication of one immutable, already built Netlify deploy (#1159 PR5).
 // Precondition: auto publishing is locked. This tool never removes the lock, never builds and has no rollback mode.
 export const SITE = Object.freeze({ id: 'f7e19a84-28f7-41f7-978a-f3b4552a404d', name: 'playkcswh', url: 'https://play.kcswh.pl', ws: 'wss://ws.kcswh.pl/ws' });
-export const WS_SURFACE = ['ws-server/', 'shared/', 'poker/poker-ws-client.js'];
+const WS_WORKFLOW = '.github/workflows/ws-server-deploy.yml';
 // Partial by design: redirects, function code digests and runtime Supabase/Redis identity are not verified here.
 export const CHECKED = ['deploy-metadata', 'build-info-identity', 'function-names', 'root-csp-hsts', 'ws-vps-current-and-github-evidence'];
 // Read-only on the VPS: no sudo, no writes; OWNER supplies the SSH target (WS_PROD_SSH).
@@ -43,6 +43,28 @@ export function vpsWsRelease(output) {
   const startedAt = Number((/^@(\d+)$/.exec(prop('ExecMainStartTimestamp')) || [])[1]) * 1000;
   const ok = dir && meta?.releaseSha === dir[1] && meta.environment === 'production' && meta.deployRef === 'main' && prop('ActiveState') === 'active' && startedAt >= installedAt;
   return ok ? dir[1] : null;
+}
+
+// WS artifact surface read from the WS Server Deploy package step itself (copied sources + server-context generator),
+// plus the browser WS client. Unparseable packaging fails closed.
+export function wsPackagedPaths(workflow) {
+  const text = String(workflow || '');
+  const paths = new Set(['poker/poker-ws-client.js']);
+  for (const m of text.matchAll(/^\s*cp\s+(?:-R\s+)?(.+?)\s+"\$STAGE_[A-Z_]+"/gm)) m[1].split(/\s+/).forEach(p => paths.add(p));
+  for (const m of text.matchAll(/node (scripts\/[\w.-]+\.js) --server-context-only/g)) paths.add(m[1]);
+  if (!paths.has('ws-server/server.mjs') || ![...paths].some(p => p.startsWith('netlify/functions/'))) throw new Error('ws_surface_unknown');
+  return [...paths].sort();
+}
+
+// True when any file packaged by either revision's WS workflow differs between the active WS release and the candidate.
+export function wsSurfaceChanged(wsSha, sha, cwd = process.cwd()) {
+  const show = rev => spawnSync('git', ['show', `${rev}:${WS_WORKFLOW}`], { cwd, encoding: 'utf8' });
+  const [a, b] = [show(wsSha), show(sha)];
+  if (a.status !== 0 || b.status !== 0) throw new Error('ws_surface_unknown');
+  const paths = [...new Set([...wsPackagedPaths(a.stdout), ...wsPackagedPaths(b.stdout)])];
+  const diff = spawnSync('git', ['diff', '--quiet', wsSha, sha, '--', ...paths], { cwd });
+  if (diff.status !== 0 && diff.status !== 1) throw new Error('ws_surface_unknown');
+  return diff.status === 1;
 }
 
 // Active WS release only when the VPS and GitHub evidence agree.
@@ -181,9 +203,9 @@ async function main(argv, env) {
     receipt.ws = readWsRelease(env.WS_PROD_SSH);
     receipt.wsRelease = receipt.ws.active;
     receipt.previousDeployId = site.published_deploy?.id || null;
-    const wsSurfaceChanged = receipt.wsRelease ? spawnSync('git', ['diff', '--quiet', receipt.wsRelease, sha, '--', ...WS_SURFACE]).status !== 0 : null;
+    const wsChanged = receipt.wsRelease ? wsSurfaceChanged(receipt.wsRelease, sha) : null;
     receipt.failures = [
-      ...candidateFailures({ sha, mainSha: mainSha(), site, deploy, buildInfo: parseBuildInfo(info.body), functions, wsRelease: receipt.wsRelease, wsSurfaceChanged }),
+      ...candidateFailures({ sha, mainSha: mainSha(), site, deploy, buildInfo: parseBuildInfo(info.body), functions, wsRelease: receipt.wsRelease, wsSurfaceChanged: wsChanged }),
       ...headerFailures(root.headers, expectedCsp(run('git', ['show', `${sha}:_headers`])))
     ];
     if (receipt.failures.length) receipt.status = 'checks_failed';

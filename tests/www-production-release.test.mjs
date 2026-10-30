@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { SITE, activeWsRelease, candidateFailures, discardCandidate, expectedCsp, githubWsRelease, headerFailures, parseBuildInfo, phrase, publishLocked, vpsWsRelease } from '../scripts/www-production-release.mjs';
+import os from 'node:os';
+import path from 'node:path';
+import { SITE, activeWsRelease, candidateFailures, discardCandidate, expectedCsp, githubWsRelease, headerFailures, parseBuildInfo, phrase, publishLocked, vpsWsRelease, wsPackagedPaths, wsSurfaceChanged } from '../scripts/www-production-release.mjs';
 
 const sha = 'a'.repeat(40);
 const ws = 'f'.repeat(40);
@@ -63,6 +65,38 @@ test('VPS WS evidence: current release, metadata and a service started after ins
   assert.equal(activeWsRelease(ws, 'e'.repeat(40)), null);
   assert.equal(activeWsRelease(null, ws), null);
   assert.equal(activeWsRelease(ws, null), null);
+});
+
+test('WS compatibility covers every module packaged by WS Server Deploy, including netlify/functions/_shared', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/ws-server-deploy.yml', import.meta.url), 'utf8');
+  const paths = wsPackagedPaths(workflow);
+  for (const p of ['netlify/functions/_shared/chips-ledger.mjs', 'netlify/functions/_shared/poker-*.mjs', 'netlify/functions/_shared/supabase-admin.mjs', 'netlify/functions/_shared/api-cors.mjs', 'netlify/functions/_shared/store-upstash.mjs', 'netlify/functions/_shared/xp-ledger.mjs', 'netlify/functions/_generated/deploy-context.mjs', 'scripts/generate-build-info.js', 'shared', 'ws-server/server.mjs']) assert.ok(paths.includes(p), p);
+  assert.throws(() => wsPackagedPaths('steps: []'), /ws_surface_unknown/);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'www-ws-surface-'));
+  const git = (...a) => { const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+  const write = (f, c) => { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), c); };
+  try {
+    git('init', '-q');
+    write('.github/workflows/ws-server-deploy.yml', workflow);
+    write('netlify/functions/_shared/xp-ledger.mjs', 'export const v = 1;\n');
+    write('netlify/functions/_shared/poker-state.mjs', 'export const v = 1;\n');
+    write('netlify/functions/_shared/browser-only.mjs', 'export const v = 1;\n');
+    git('add', '-A'); git('commit', '-qm', 'ws');
+    const ws = git('rev-parse', 'HEAD');
+    write('netlify/functions/_shared/browser-only.mjs', 'export const v = 2;\n');
+    git('commit', '-qam', 'www only');
+    assert.equal(wsSurfaceChanged(ws, git('rev-parse', 'HEAD'), dir), false);
+    write('netlify/functions/_shared/xp-ledger.mjs', 'export const v = 2;\n');
+    git('commit', '-qam', 'shared ws module');
+    assert.equal(wsSurfaceChanged(ws, git('rev-parse', 'HEAD'), dir), true);
+    git('reset', '-q', '--hard', ws);
+    write('netlify/functions/_shared/poker-state.mjs', 'export const v = 2;\n');
+    git('commit', '-qam', 'poker glob');
+    assert.equal(wsSurfaceChanged(ws, git('rev-parse', 'HEAD'), dir), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('discard deletes only an unpublished candidate and reports deletion only when API and permalink are gone', async () => {
