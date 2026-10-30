@@ -37,3 +37,7 @@ Compare the candidate artifact's actual source to the current HEAD: ancestry mus
 Local deterministic regression covers app A in progress/cancelled/missing/expired followed by docs B (must build), completed compatible A (skip while retaining A SHA), changed app inputs, wrong provenance/repo/PR and API/ancestry uncertainty. 10 fundamental tests PASS; hosted acceptance of the corrected race gate pending.
 
 Hosted race exercise: app-fix A=5e190991e88b7a53ad6e7cb72f6df17f99d4b43e started automatic Android run41022955800; observed IN_PROGRESS in Preview prerequisite, artifacts=0. This documentation-only B update intentionally arrives before A finishes. B must build its own current source after READY Preview; no manual retry/dispatch and no relabelling A or the older accepted artifact. Final observed results will be recorded in the PR description.
+
+## Final review correction — fundamental tests on skip
+
+Race run41022955800 (A=5e190991) failed closed at pre-packaging revalidation and was cancelled with zero artifacts; run41023036979 built B=f9f7d81 against its own READY deploy6ae44d6114880a9bf5b18bc9 (artifact12962995772 independently verified). Review found that tests/mobile-poker-*.test.mjs run only in this workflow, yet test-only synchronize skipped them together with compilation. The fundamental test step now runs before the Preview prerequisite on every run; compilation/upload gating is unchanged.

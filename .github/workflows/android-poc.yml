@@ -69,6 +69,9 @@ jobs:
           test "$(df -Pk . | awk 'NR==2 {print $4}')" -ge 6291456
           test "$RUNNER_ENVIRONMENT" = github-hosted
           echo "MOBILE_PREVIEW_BINDING=$RUNNER_TEMP/mobile-preview-binding.json" >> "$GITHUB_ENV"
+      # These tests run only here, so test-only synchronize must not skip them.
+      - name: Fundamental security checks
+        run: node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-preview.test.mjs
       - name: Resolve matching native Preview before build costs
         id: preview
         env:
@@ -85,9 +88,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '21.0.10+7.0.LTS'
-      - name: Fundamental security checks
-        if: steps.preview.outputs.build == 'true'
-        run: node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-preview.test.mjs
       - name: Locked mobile dependencies
         if: steps.preview.outputs.build == 'true'
         working-directory: mobile/poker
