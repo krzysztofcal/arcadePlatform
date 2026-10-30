@@ -55,7 +55,7 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [x] OWNER-run `scripts/www-production-release.mjs`: dry-run default; lock, exact main HEAD, ready Production deploy, build-info identity, function names, root CSP/HSTS; WS release proven from GitHub deploy evidence; relock-or-uncertain; receipt on every outcome; rollback mode removed until T004. Fundamental tests registered.
 - [x] WS evidence: read-only VPS `current`/metadata/service start must agree with GitHub deploy history; unfinished/queued WS runs block; both rechecked before restore. Mandatory candidate discard with API+permalink 404 proof, else STOP.
 - [x] WS compatibility surface derived from the WS Server Deploy package step (incl. packaged `netlify/functions/_shared` modules and the deploy-context generator); fail closed if unparseable.
-- [ ] OWNER GO 1: lock auto publishing on the current published deploy and verify.
+- [x] OWNER GO 1 (2026-10-30): #1168 merge published `6ae52b31a745a6e69b60b668` (`83c8da88`, backlog included, accepted by OWNER); auto publishing then locked on it via API; verified `locked=true`, id unchanged, `stop_builds=false`. PR4 push acceptance on `83c8da88`: validate SUCCESS, notice present, deploy SKIPPED.
 - [ ] OWNER GO 2: merge; observe skipped main Production build, unchanged published deploy, working PR Preview.
 - [ ] OWNER GO 3/4: OWNER-only build hook; first release with WS compatibility decision, recorded receipt and restore/lock behavior.
 - [ ] OPEN: historical permalink exposure / visitor protection; WS `/healthz` release SHA; redirects and function digest coverage.

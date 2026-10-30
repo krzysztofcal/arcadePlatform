@@ -74,7 +74,7 @@ The receipt is always written: `dry_run_pass`, `checks_failed`, `not_published`,
 
 ## OWNER GO required (separate, in order)
 
-1. Lock auto publishing on `6ae3785cd7852c1a7f9588b0` and verify (`locked=true`, id unchanged).
+1. DONE 2026-10-30: locked on `6ae52b31a745a6e69b60b668` (`83c8da88`, published by the #1168 merge; the audited backlog is live); `locked=true`, id unchanged.
 2. Merge this PR (squash, empty body; the Netlify marker is optional). Acceptance: the main Production build is skipped by `ignore`, the published deploy is unchanged, and a PR Preview still builds.
 3. Create the OWNER-only `main` build hook (Netlify setting).
 4. First release: decide WS compatibility first (main HEAD differs on the WS surface: release WS for that SHA through PR4 or wait), trigger the hook, dry-run, then `--execute`. If the release is aborted at any point, discard the candidate and require `discarded` (permalink 404); `discard_unverified` = STOP. Record the receipts and the restore/lock behavior in #1159.
