@@ -1,51 +1,66 @@
 # #1159 PR5 / T003 — WWW Production publication separated from merge
 
-Status: Draft. Code is inert until the separate OWNER GO below; no Netlify setting, deploy or publication was changed while preparing it.
+Status: Draft. Inert until the separate OWNER GO below; no Netlify setting, deploy or publication was changed while preparing it.
 
 ## Read-only audit (2026-10-30, site `playkcswh`)
 
-- Published Production deploy `6ae3785cd7852c1a7f9588b0`, `commit_ref` `0f77574d`, published 2026-10-29T16:53Z, `locked=false`. Live `/js/build-info.js` matches (context `production`, `pokerWsUrl` `wss://ws.kcswh.pl/ws`).
-- `stop_builds=false`, `skip_prs=null`, `untrusted_flow=review`, no build hooks, no scheduled functions, 56 functions. `allowed_branches` = `main`, `feat/1114-profiles-phase-a` (branch deploys of that branch use `branch-deploy`/branch-scoped values, never the main URL).
-- Merges #1162, #1163, #1166, #1167 used `[skip netlify]`, so WWW Production lags main by four commits. Runtime files among them: `netlify.toml`, `api-cors.mjs`, `store-upstash.mjs`, `poker/poker-ws-client.js`, `generate-build-info.js`, `shared/netlify-stage-context.cjs`. The next merge without the marker would auto-publish all of them today.
-- Last successful WS Production deploy recorded by GitHub: `a63e44b0` (2026-10-26). WS surface (`ws-server/`, `shared/`, `poker/poker-ws-client.js`) is identical between `a63e44b0` and live WWW `0f77574d`; main HEAD differs from both.
+- Published Production deploy `6ae3785cd7852c1a7f9588b0`, `commit_ref` `0f77574d`, `locked=false`. Live `/js/build-info.js` matches (context `production`, `pokerWsUrl` `wss://ws.kcswh.pl/ws`).
+- `stop_builds=false`, no build hooks, no scheduled functions, 56 functions. `allowed_branches` = `main`, `feat/1114-profiles-phase-a`.
+- WWW Production lags main by four `[skip netlify]` merges (#1162, #1163, #1166, #1167) with runtime changes (`netlify.toml`, `api-cors.mjs`, `store-upstash.mjs`, `poker/poker-ws-client.js`, `generate-build-info.js`, `shared/netlify-stage-context.cjs`).
+- Active WS Production per GitHub deploy evidence: `a63e44b0`. WS surface equal to live WWW, different from main HEAD.
+- `landing-kcswh` (base `/landing`, `stop_builds=true`) is published manually by CLI; Netlify `ignore` does not run for CLI deploys.
 
-## Netlify mechanism (official)
+## Why Lock alone is not enough (P1)
 
-- **Lock to stop auto publishing** (Deploys list; API `POST /deploys/{id}/lock`, `POST /deploys/{id}/unlock`): pins the main site to the published deploy. New Production builds still run and end `ready` but unpublished. Unlocking does not auto-publish earlier builds. No documented auto-unlock.
-- **Publish deploy** (`POST /sites/{site}/deploys/{id}/restore`): instant atomic switch of static files, functions, headers and redirects of that immutable deploy; no rebuild. Deploy env/functions are those captured at its build.
-- Deploy Previews, stacked PR previews and branch deploys never publish to the main site, so the lock does not change them. `Stop builds` is not used: it would also stop Previews.
-- Hazard: `netlify deploy --prod` on a locked site interactively offers to **unlock** (netlify-cli 26.2.0 `prepareProductionDeploy`). It is forbidden for this site.
-- Not documented, so measured under GO step 2: whether `restore` keeps `locked=true` on the new deploy. The tool handles both outcomes (relocks the target once, then fails closed).
+Every Production deploy, published or not, is reachable at `https://<deployId>--playkcswh.netlify.app`, including `/.netlify/functions/*` and `/api/*`, with Production env. `isOriginAllowed` accepts requests without `Origin`, and `start-session` / `poker-guest-session` need no account; with any Production user token, chips/XP/profile/account functions also run. So an unpublished candidate **can mutate Production** (Redis XP, Supabase) before release. Lock stops publication only, not these side effects.
 
-## Design
+## Mechanism
 
-1. **Pin**: OWNER locks the currently published deploy `6ae3785c` (one API call or UI). Verify `published_deploy.locked=true` and id unchanged.
-2. **Candidates**: after the lock is verified, main merges stop using `[skip netlify]` (still never any Actions marker). Every main SHA then gets one immutable, unpublished Production-context deploy; Previews stay automatic.
-3. **Publish** `scripts/www-production-release.mjs`, run locally by OWNER with their own `NETLIFY_AUTH_TOKEN` (an account-wide Netlify token is not stored in GitHub):
-   - Inputs `--sha`, `--deploy`, `--ws-release`; dry-run by default; `--execute --confirm "PUBLISH WWW PRODUCTION <sha> <deployId>"`.
-   - Fails closed unless: site locked; deploy is this site, `production`, `main`, `ready`, not a PR, `commit_ref == sha`; `sha` is the current `origin/main` HEAD (no stale/backlog commits); deploy permalink `build-info.js` has the same SHA/deploy id/context/site URL/WS URL; its function set equals `netlify/functions` at `sha`; `/` CSP equals `_headers` at `sha` and HSTS is present; WS surface has no diff between the deployed WS release and `sha`.
-   - Execute: recheck lock and main HEAD, `restore`, require `published_deploy.id == target` and `locked=true` (relock once if Netlify dropped it), then live smoke of `https://play.kcswh.pl/js/build-info.js`. JSON receipt to stdout and `--receipt <file>` (previous/published deploy, SHA, WS release, checks, relocked, live smoke).
-   - Env/identity: a `ready` Production deploy already passed `generate-build-info.js` build validation (`XP_REDIS_*` Production target, Stage/Production separation); the permalink identity check proves the context. Functions on the permalink run with Production env, so smoke is GET-only static files.
-4. **Rollback**: same tool, `--rollback`, phrase `ROLLBACK WWW PRODUCTION <sha> <deployId>`; target must have been published before and pass every other check (including WS compatibility). Previous deploy id is in the receipt. Emergency fallback: UI "Publish deploy" on that id, then verify lock.
+1. **No automatic Production builds** (`netlify.toml` `[build] ignore`): a Git build is skipped unless it is a PR (`PULL_REQUEST=true`) or a non-`main` branch; missing metadata skips. PR Previews, stacked Previews and branch deploys keep building. `Stop builds` is not used. Merging no longer needs `[skip netlify]`.
+2. **Lock** auto publishing on the current deploy: protects against a candidate or an accidental build being auto-published, including if `ignore` is ever removed.
+3. **Candidate on demand**: a Netlify build hook on `main`, known only to OWNER (not in GitHub). Netlify documents that `ignore` never cancels build-hook builds. A candidate therefore exists only for the approved release, minutes before publication. A candidate that is not published is deleted by OWNER. The exposure window is limited to the approved code.
+4. **Publish** `scripts/www-production-release.mjs`, run locally by OWNER with their own `NETLIFY_AUTH_TOKEN` and `gh`. Dry-run by default; `--execute --confirm "PUBLISH WWW PRODUCTION <sha> <deployId>"`.
+5. **No rollback mode** until T004: restoring an older WWW could bring back removed auth/privacy/legal restrictions or mismatch the DB schema. Recovery is roll-forward through the same tool. Emergency UI "Publish deploy" stays a separate, manual OWNER decision outside the tool.
+
+### What the tool verifies (partial, listed in `receipt.checked`)
+
+| Area | Verified | Not verified |
+| --- | --- | --- |
+| Build context | API: `production`, `main`, `ready`, not PR, `commit_ref == sha`, current `origin/main` HEAD (rechecked before restore) | — |
+| Identity | permalink `build-info.js`: SHA, deploy id, context, site URL, WS URL | Supabase/Redis targets of functions at runtime (only the build-time `generate-build-info.js` validation) |
+| Functions | set of names equals `netlify/functions` at `sha` | code digests, env values |
+| Headers | `/` CSP equals first `_headers` CSP at `sha`; HSTS present | other paths and header rules |
+| Redirects | — | not checked |
+| WS | active WS release from evidence; no diff on `ws-server/`, `shared/`, `poker/poker-ws-client.js` | protocol semantics beyond that diff |
+
+Smoke is GET-only on static files, because permalink functions use Production env.
+
+### WS evidence (P1)
+
+The active WS SHA is taken from GitHub, not from operator input: across the latest 50 non-PR `WS Server Deploy` runs on `main` (all attempts), the most recently started, non-skipped `deploy` job must be `completed/success`. A later failed, cancelled or running deploy, or no evidence, fails closed (`ws_release_unproven`). The deploy job health-gates the switch and fails on rollback, so success means it switched. Limitation: out-of-band VPS changes are invisible. Follow-up (needs a WS runtime change and release): expose the release SHA in `/healthz`.
+
+### Auditable result (P2)
+
+The receipt is always written: `dry_run_pass`, `checks_failed`, `not_published`, `published`, `published_smoke_failed` or `uncertain`. Any error from the `restore` call onwards is `uncertain` and records the observed published deploy and lock. Only `published` exits 0 with `--execute`.
 
 ## Limitations / OPEN
 
-- Permalinks of every Production deploy (old and unpublished candidates) are publicly reachable with Production env functions. This already exists for historical deploys; unpublished candidates extend it to merged-but-unreleased code. Options: Netlify non-production protection (plan-dependent) — OPEN.
-- WS release SHA is an operator input taken from the WS deploy receipt; automatic lookup is a follow-up. A WS surface diff blocks publication: release WS for that SHA first (PR4 dispatch) or keep WWW.
-- Exact-SHA window: a merge between the main-HEAD recheck and `restore` cannot change the published files (the deploy is immutable), but makes the release no longer main HEAD. Operator rule: no merges during a release.
-- Lock state is not monitored continuously; the tool and `agents.md` forbid unlock, and every run verifies the lock. Lock/unlock notifications are plan-dependent — OPEN.
+- Historical published deploys stay reachable at permalinks with Production env (pre-existing). Visitor access protection for non-production URLs depends on the Netlify plan — OPEN.
+- Not documented: whether `restore` keeps the lock (the tool relocks once or fails `uncertain`), and the exact Netlify state of an `ignore`-skipped Production build. Both are measured after GO.
+- No merges during a release (the candidate stops being main HEAD).
 - Combined WWW+WS ordering, T004 preflight and GitHub Environment remain later scopes.
 
 ## Breaking impact
 
-- After GO step 1, a merge no longer changes WWW Production. Releases need the tool; forgotten releases leave Production behind main (visible in the dry-run receipt).
-- `[skip netlify]` merge convention ends after the lock is verified; before that it must stay.
-- `netlify deploy --prod` and UI unlock become prohibited for this site.
+- After merge, main pushes no longer build or change WWW Production. Releases need the hook and the tool; a forgotten release leaves WWW behind main.
+- `netlify deploy --prod`, unlock and Stop builds are prohibited for this site (`agents.md`).
+- No tool rollback; recovery is roll-forward.
 
 ## OWNER GO required (separate, in order)
 
-1. Lock auto publishing on deploy `6ae3785cd7852c1a7f9588b0` and verify (`locked=true`, id unchanged). Reversible by unlock (would not publish backlog by itself).
-2. Merge this PR with `[skip netlify]` and an empty squash body.
-3. First release: one main merge without `[skip netlify]` to create a candidate; dry-run, then `--execute` with the exact phrase; WS compatibility decided first (current main differs on the WS surface). Record restore/lock behavior and the receipt in #1159.
+1. Lock auto publishing on `6ae3785cd7852c1a7f9588b0` and verify (`locked=true`, id unchanged).
+2. Merge this PR (squash, empty body; the Netlify marker is optional). Acceptance: the main Production build is skipped by `ignore`, the published deploy is unchanged, and a PR Preview still builds.
+3. Create the OWNER-only `main` build hook (Netlify setting).
+4. First release: decide WS compatibility first (main HEAD differs on the WS surface: release WS for that SHA through PR4 or wait), trigger the hook, dry-run, then `--execute`. Record the receipt and the restore/lock behavior in #1159.
 
-Rollback of the mechanism: unlock (only after confirming the published deploy is the intended one, because the next main build would publish), revert this PR, resume the previous merge convention.
+Rollback of the mechanism: revert this PR (Git Production builds resume, still unpublished while locked). Unlock only after confirming the published deploy is the intended one.

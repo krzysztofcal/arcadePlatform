@@ -50,8 +50,10 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 
 ## PR5 — WWW Production publication separated from merge (T003)
 
-- [x] Read-only Netlify audit and official lock/publish mechanism; design, limitations and breaking impact in `pr5-www-production-publish.md`.
-- [x] OWNER-run `scripts/www-production-release.mjs`: dry-run by default; locked site, exact main HEAD, immutable ready Production deploy, build-info identity, functions, CSP/HSTS, WS surface; relock-or-fail; receipt; rollback mode. Fundamental tests registered.
+- [x] Read-only Netlify audit; official lock, `ignore` and build-hook behavior; design, coverage table, limitations and breaking impact in `pr5-www-production-publish.md`.
+- [x] Unpublished Production permalinks can mutate Production: `ignore` skips `main` Git builds (Previews/branch deploys kept); candidates only from an OWNER build hook.
+- [x] OWNER-run `scripts/www-production-release.mjs`: dry-run default; lock, exact main HEAD, ready Production deploy, build-info identity, function names, root CSP/HSTS; WS release proven from GitHub deploy evidence; relock-or-uncertain; receipt on every outcome; rollback mode removed until T004. Fundamental tests registered.
 - [ ] OWNER GO 1: lock auto publishing on the current published deploy and verify.
-- [ ] OWNER GO 2/3: merge, first candidate release with recorded restore/lock behavior and receipt.
-- [ ] OPEN: permalink exposure of unpublished Production deploys; lock monitoring/notifications; automatic WS release lookup.
+- [ ] OWNER GO 2: merge; observe skipped main Production build, unchanged published deploy, working PR Preview.
+- [ ] OWNER GO 3/4: OWNER-only build hook; first release with WS compatibility decision, recorded receipt and restore/lock behavior.
+- [ ] OPEN: historical permalink exposure / visitor protection; WS `/healthz` release SHA; redirects and function digest coverage.
