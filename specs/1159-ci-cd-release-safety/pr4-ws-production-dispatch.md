@@ -33,6 +33,7 @@ Merges no longer refresh WS Production. Any commit with `deploy_ws=true` leaves 
 
 1. Until PR4 is merged, do not merge other `deploy_ws=true` PRs without the existing hold procedure (the old main definition still auto-deploys).
 2. Merge PR4 with **Squash and merge**; the resulting commit message must contain `[skip netlify]` and must **not** contain `[skip actions]`. Netlify Production still follows `main`, so an unmarked merge could publish previously held WWW changes; `[skip actions]` would hide the acceptance run below.
+   GitHub pre-fills the squash body with all commit messages; one PR4 commit body quotes the actions skip marker, so edit the body to keep only `[skip netlify]`.
 3. Post-merge acceptance, observed before declaring PASS:
    - `WS Server Deploy` push run on the squash SHA: `validate` SUCCESS, notice `WS Production was NOT deployed` present, `deploy` SKIPPED.
    - Netlify Production published deploy ID unchanged versus the ID recorded immediately before the merge.
