@@ -47,3 +47,11 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [x] Hosted CI on Draft PR, including the workflow guard in `validate`.
 - [ ] OWNER GO: squash merge with `[skip netlify]` (no `[skip actions]`) and observed post-merge acceptance.
 - [ ] OPEN: `ws-production` Environment; T004 automatic human/resume/escrow preflight. Current dispatch is not a complete safe release process.
+
+## PR5 — WWW Production publication separated from merge (T003)
+
+- [x] Read-only Netlify audit and official lock/publish mechanism; design, limitations and breaking impact in `pr5-www-production-publish.md`.
+- [x] OWNER-run `scripts/www-production-release.mjs`: dry-run by default; locked site, exact main HEAD, immutable ready Production deploy, build-info identity, functions, CSP/HSTS, WS surface; relock-or-fail; receipt; rollback mode. Fundamental tests registered.
+- [ ] OWNER GO 1: lock auto publishing on the current published deploy and verify.
+- [ ] OWNER GO 2/3: merge, first candidate release with recorded restore/lock behavior and receipt.
+- [ ] OPEN: permalink exposure of unpublished Production deploys; lock monitoring/notifications; automatic WS release lookup.
