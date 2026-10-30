@@ -1,6 +1,7 @@
 name: WS Server Deploy
 on:
   pull_request:
+  # Release procedure and post-merge acceptance: specs/1159-ci-cd-release-safety/pr4-ws-production-dispatch.md
   push:
     branches: [ main ]
   # Production deploy is explicit only: an ordinary main push validates and never deploys.
