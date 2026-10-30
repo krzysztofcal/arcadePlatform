@@ -6,7 +6,7 @@ Locally bundled Stage-only Capacitor PoC for #1139. Source: existing `poker/inde
 
 Build only on GitHub-hosted ubuntu-24.04 using **Android Poker M0 APK**, from a same-repo Draft PR or manual dispatch after the workflow exists on main. Workflow checks exact source HEAD, disk, hosted identity, uses locked Capacitor 8.5.3 dependencies, Node 22.23.1 and JDK 21.0.10+7.0.LTS, generates Android from the pinned template, uses its Gradle Wrapper and runs assembleDebug. SDK/build-tools/Gradle versions are controlled by the pinned template and recorded in toolchain.txt. No emulator, release key or environment secrets. Debug signing is ephemeral; APK bytes/signature can differ between builds; reproduction means the same locked sources/toolchain and behavior, not byte-identical debug signatures. Installed builds signed by a different ephemeral key require uninstall first (loses app-local session).
 
-Actions artifact `arcade-poker-stage-<full SHA>` expires after seven days and contains APK, SHA256SUMS, build-receipt.json and toolchain.txt. The receipt pins Stage API/Supabase/WS and source SHA. The APK workflow itself never deploys anything. Existing repository PR checks/Netlify Preview automation are separate; they do not deploy the packaged app or WS.
+Actions artifact `arcade-poker-stage-pr-<PR>-<full SHA>` expires after seven days and contains APK, SHA256SUMS, build-receipt.json and toolchain.txt. The receipt pins Stage API/Supabase/WS and source SHA. The APK workflow itself never deploys anything. Existing repository PR checks/Netlify Preview automation are separate; they do not deploy the packaged app or WS.
 
 Hosted build steps (single-line commands, run in mobile/poker):
 
@@ -80,3 +80,9 @@ The owner confirmed installation/Lobby/Account/basic navigation on bebbdc6a, but
 ## Approved API integration (2026-10-23)
 
 The current APK pins API Preview1141, superseding the historical1095 diagnostics above; Supabase Stage and WS Preview are unchanged. Exact-branch XP_CORS_ALLOW adds only https://localhost. Actual19 OPTIONS combinations passed on deploy6adbc543278f8840161bc416/source2c6f23daf5f47f4e0b59f6c4489f36dc6fc1532d. Stage password login, progression GET and token mint200; WS helloAck/authOk without JOIN PASS. OAuth provider/redirect configuration untouched and phone callback NOT TESTED. Redis shared Preview repair PASS is recorded in SpecKit; the old stopped-Redis notes are historical. See android-api-integration.md in SpecKit for current evidence and safe phone checklist.
+
+## #1159 PR3: own-PR debug APK
+
+Automatic same-repository Draft PR builds wait at most 10 minutes for their own native Deploy Preview at the exact current source SHA. They validate Netlify site, review ID, deploy context and Stage receipt before dependency/Gradle costs, then recheck before packaging and upload. CI never falls back to the static API origin in stage-public.json (local packaging only). Manual dispatch now requires an open Draft PR number and its exact current HEAD SHA; branch-only dispatch is unsupported. No new secret or environment setting is required.
+
+The artifact includes build-receipt.json (PR/source/deploy/origins/app version/CSP/SRI), SHA256SUMS and verified debug signature evidence. Synchronize skips compilation only after read-only Actions evidence confirms a completed successful, nonexpired APK for the same PR whose source is an ancestor with unchanged application inputs. In-progress/cancelled/missing/uncertain artifacts require a new build at the current HEAD, even for docs-only changes. Existing artifacts keep their original source receipts. Installed static APKs retain their bundled endpoint and do not update automatically. Physical installation remains separate from CI acceptance.

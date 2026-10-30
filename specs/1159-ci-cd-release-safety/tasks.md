@@ -33,3 +33,10 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [ ] Administrator executes already authorized protected C/Redis exact-parent copy using existing root custody; no copilot privilege expansion.
 - [ ] Native parent then child exact-SHA READY and nonfinancial acceptance, with mandatory exact-SHA WS Preview runtime gate still outstanding.
 - [ ] Separate technical debt: historical snapshot/replay derivation after a future deal-key change lacks key provenance; preserve materialized cards and refuse unsupported reconstruction. Do not implement dual-key or rotate in PR2.
+
+## PR3 implementation (current)
+
+- [x] Own-PR/source binding, bounded pending→ready prerequisite, stale/foreign/failed/timeout fail-closed, explicit dispatch inputs, no CI static-origin fallback.
+- [x] Conservative synchronize classification skips known docs/test-only compilation without changing other CI/Preview checks; enrich existing receipt and verify packaged CSP/SRI.
+- [x] Local fundamental tests, actionlint, syntax and guards; read-only stacked #1160 validation binds child source/deploy rather than parent.
+- [x] Hosted own-PR READY → automatic APK run40975904744, embedded receipt/checksum/debug signature PASS, 22.779s wait. All hosted checks PASS at a1ed1ace. Physical installation NOT TESTED. Documentation-only synchronize acceptance recorded in PR #1166 without relabelling the existing artifact.

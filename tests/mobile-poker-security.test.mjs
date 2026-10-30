@@ -92,3 +92,12 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   ready();
   assert.match(node.textContent, /Mobile sign-in is unavailable/);
 });
+
+test('verified binding pins own PR/SHA/site and never reuses parent or Production origin', () => {
+  const sha = 'a'.repeat(40);
+  const binding = { prNumber: 1160, sourceSha: sha, apiOrigin: 'https://deploy-preview-1160--playkcswh.netlify.app', netlify: { deployId: '6ae3c8f8dfcc32f97a6aba47', sourceSha: sha, reviewId: 1160, context: 'deploy-preview', state: 'ready', siteId: 'f7e19a84-28f7-41f7-978a-f3b4552a404d', siteName: 'playkcswh', origin: 'https://deploy-preview-1160--playkcswh.netlify.app' } };
+  assert.equal(security.forPreview(config, binding, 1160, sha).apiOrigin, binding.apiOrigin);
+  for (const patch of [{ apiOrigin: config.apiOrigin }, { apiOrigin: 'https://play.kcswh.pl' }, { sourceSha: 'b'.repeat(40) }, { prNumber: 1155 }, { netlify: { ...binding.netlify, siteId: 'other' } }, { netlify: { ...binding.netlify, context: 'production' } }]) {
+    assert.throws(() => security.forPreview(config, { ...binding, ...patch }, 1160, sha));
+  }
+});

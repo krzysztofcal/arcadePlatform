@@ -1,0 +1,43 @@
+# PR3 — exact-PR Android debug binding
+
+## Approved scope / design
+
+Main baseline 1e6a2ae42ecaa7b79772053303319ea9104c1be3. A same-repository open Draft PR supplies its actual head SHA. Existing Android workflow waits read-only up to10min/20s polling for its own successful native Netlify status, validates public build metadata and Netlify deployment site/review/context/SHA, and rechecks the PR head. No Netlify credential, setting change, deploy, WS or SQL operation. Static Stage API origin remains local-only; CI requires a verified binding file.
+
+## Implementation
+
+- mobile/poker/preview-preflight.mjs: bounded wait, before/after changed-file classification for synchronize, immediate verification before packaging/artifact publication. Existing GitHub statuses/PR API and public Netlify deploy API only. Minimal read permissions; no token forwarded to Netlify.
+- security.cjs: pure binding validation and exact own-PR origin selection, preserving Stage Supabase/WS constraints and browser IIFE compatibility.
+- package-web.mjs: consume binding, verify exact checkout, package shared UI once, check packaged CSP/SRI and enrich existing build receipt. No UI/gameplay changes.
+- android-poc.yml: early prerequisite before dependency/Gradle costs; dispatch requires PR number+exact source; skip compile on known docs/test-only synchronize; normal checks/Preview unaffected. Existing hosted toolchain/signature/SHA256SUMS/artifact handling retained.
+- Existing mobile security tests plus one fundamental preflight test; no new library or UI framework. Fundamental negative cases include parent/foreign/Production origin, stale/mismatched source/context/site, failed/timeout, pending→ready and no-build classification.
+
+## Acceptance / impacts
+
+Draft PR on current main, actual automatic debug APK only after matching READY Preview. Inspect receipt, packaged origin/config, debug signature and APK checksum. #1160 is read-only stacked reference only. No physical install required; mark NOT TESTED. Old static APKs keep old endpoints. Dispatch becomes intentionally stricter: open same-repo Draft and explicit current SHA; old branch-only dispatch unsupported. Docs/test-only skip produces no new artifact and never relabels an older receipt as the latest source. Changes in packaged input bytes, including code comments, conservatively rebuild. Uncertain classification builds rather than suppressing validation. Existing PR2 runtime/Production controls remain untouched. No Production release, Stage mutation, Terms, APK publication or merge.
+
+## Hosted acceptance — 2026-10-29
+
+Draft PR #1166, base main. Application source a1ed1ace02d4dbfa083cd22078f5e566a018af9c, Netlify deploy 6ae3dbf5c040a944431ad43e, review1166/context deploy-preview/site playkcswh. Canonical API origin https://deploy-preview-1166--playkcswh.netlify.app. Existing Supabase Stage krydukthwdvccggbyjfw and WS Preview unchanged. All hosted checks PASS, including CodeQL, CI/actionlint, Tests and WS PR Checks. WS Production deploy/infra apply SKIPPED; no WS Preview dispatch or database operation performed.
+
+Automatic Android run40975904744 SUCCESS: pending→ready continued without Retry/dispatch. Receipt measured 22,779ms prerequisite wait; job 23:51:22–23:53:45 UTC (143s), Gradle 92s. Downloaded artifact12942612396 and independently compared SHA256SUMS, embedded receipt and mobile config. APK SHA256 91fd97e4201279bc3ae6fff9de989ccd4c44f04c22ea45c8c02242b36bb938b1. Verified Android Debug certificate/v2 signature, version0.0.1/code1, CSP/SRI PASS across5 packaged documents and Offline connect-src none. No install/distribution: physical Android NOT TESTED.
+
+Initial run40975505683 also proved pending→ready (44,766ms) and built successfully; its source d11c4a3a was superseded after CodeQL identified case-sensitive HTML tag matching in the new CSP validator. Corrected tag/attribute case handling, preserved the check and rebuilt normally. This necessary corrective build is not classified as redundant compilation.
+
+Read-only stacked reference #1160: source4c75dae1288bbb2d00fb6ad295b0edc89680b76b/deploy6ae3c8f8dfcc32f97a6aba47 accepted by the same verifier, no modification/build of that PR.
+
+Historical baseline: run40744040776 compiled APK for810a77b1 (only tests workflow changed), job158s. The new classifier excludes that change. This is one observed historical redundant build, not a repository-wide estimate. The documentation-only acceptance commit adds no application input; its actual no-build result will be recorded in the Draft PR description without another documentation push. Previous artifact retains its original a1ed1ace receipt even if documentation advances HEAD. Other CI/Preview checks stay active.
+
+## Review correction — cancellation / docs race (current procedure)
+
+This supersedes the unconditional docs-only skip described in the initial acceptance above. Keep cancellation of obsolete runs and exact-HEAD verification. For synchronize, query up to10 recent successful Android PR runs on the same branch, verify same repository/PR/workflow and a nonexpired nonempty artifact with matching workflow-run/source identity. Only the PR-aware artifact contract `arcade-poker-stage-pr-<PR>-<actual-source-SHA>` is eligible. Earlier artifacts lack this provenance contract and conservatively require rebuilding once.
+
+Compare the candidate artifact's actual source to the current HEAD: ancestry must be ahead/identical, complete bounded comparison, no changed packaged/app/unknown inputs. If any evidence is unavailable (including Actions permission/API failure, cancellation, in-progress, expiration or bounded-search uncertainty), build the current source against its own verified READY Preview. Add only actions:read. Never rewrite an old artifact/receipt to the newer documentation SHA. The successful packaging/upload workflow is the source of receipt verification; metadata is used without downloading/executing prior artifacts. No new service, dependency or scheduler.
+
+Local deterministic regression covers app A in progress/cancelled/missing/expired followed by docs B (must build), completed compatible A (skip while retaining A SHA), changed app inputs, wrong provenance/repo/PR and API/ancestry uncertainty. 10 fundamental tests PASS; hosted acceptance of the corrected race gate pending.
+
+Hosted race exercise: app-fix A=5e190991e88b7a53ad6e7cb72f6df17f99d4b43e started automatic Android run41022955800; observed IN_PROGRESS in Preview prerequisite, artifacts=0. This documentation-only B update intentionally arrives before A finishes. B must build its own current source after READY Preview; no manual retry/dispatch and no relabelling A or the older accepted artifact. Final observed results will be recorded in the PR description.
+
+## Final review correction — fundamental tests on skip
+
+Race run41022955800 (A=5e190991) failed closed at pre-packaging revalidation and was cancelled with zero artifacts; run41023036979 built B=f9f7d81 against its own READY deploy6ae44d6114880a9bf5b18bc9 (artifact12962995772 independently verified). Review found that tests/mobile-poker-*.test.mjs run only in this workflow, yet test-only synchronize skipped them together with compilation. The fundamental test step now runs before the Preview prerequisite on every run; compilation/upload gating is unchanged. Both tests are also registered in scripts/test-all.mjs, so the standard Tests core job (tests/** impact) runs them for an independent tests-only PR; no APK trigger was added for tests.
