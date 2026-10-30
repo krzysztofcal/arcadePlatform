@@ -40,3 +40,8 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [x] Conservative synchronize classification skips known docs/test-only compilation without changing other CI/Preview checks; enrich existing receipt and verify packaged CSP/SRI.
 - [x] Local fundamental tests, actionlint, syntax and guards; read-only stacked #1160 validation binds child source/deploy rather than parent.
 - [x] Hosted own-PR READY → automatic APK run40975904744, embedded receipt/checksum/debug signature PASS, 22.779s wait. All hosted checks PASS at a1ed1ace. Physical installation NOT TESTED. Documentation-only synchronize acceptance recorded in PR #1166 without relabelling the existing artifact.
+
+## PR4 — WS Production explicit dispatch (T002)
+
+- [x] Push/merge validates only; deploy requires OWNER main dispatch with exact current-main `releaseSha` and confirmation; existing safety/rollback unchanged. See `pr4-ws-production-dispatch.md`.
+- [ ] Hosted CI on Draft PR; OWNER GO for merge, optional `ws-production` Environment and first explicit release.

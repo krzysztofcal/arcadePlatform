@@ -3,7 +3,17 @@ on:
   pull_request:
   push:
     branches: [ main ]
+  # Production deploy is explicit only: an ordinary main push validates and never deploys.
   workflow_dispatch:
+    inputs:
+      releaseSha:
+        description: Exact approved SHA; must be the current main HEAD this run was dispatched on
+        required: true
+        type: string
+      confirmation:
+        description: 'Exact phrase: DEPLOY WS PRODUCTION <releaseSha>'
+        required: true
+        type: string
 
 concurrency:
   group: ws-server-${{ github.ref }}
@@ -332,11 +342,16 @@ jobs:
       - name: WS poker protocol compliance test
         if: ${{ github.event_name != 'pull_request' }}
         run: node --test ws-tests/ws-poker-protocol-compliance.test.mjs
+
+      - name: Report pending explicit WS Production release
+        if: ${{ github.event_name == 'push' && needs.impact.outputs.deploy_ws == 'true' }}
+        run: |
+          echo "::notice::WS Production was NOT deployed. This main commit changes the WS deploy surface; release it only by OWNER dispatch with releaseSha=$GITHUB_SHA."
+          echo "WS Production NOT deployed: explicit release required for $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
   deploy:
     needs: [impact, validate]
-    # #1018 T108 Production DB compatibility gate completed under owner GO.
-    # Restore the normal main-push Production deployment path; manual dispatch remains available.
-    if: ${{ needs.impact.outputs.deploy_ws == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    # #1159 PR4: only an OWNER dispatch (and OWNER rerun) of the main definition may deploy.
+    if: ${{ needs.impact.outputs.deploy_ws == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'krzysztofcal' && github.triggering_actor == 'krzysztofcal' }}
     runs-on: ubuntu-latest
     env:
       WS_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-${{ github.run_id }}-${{ github.run_attempt }}
@@ -345,6 +360,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Authorize exact approved main release
+        env:
+          RELEASE_SHA_INPUT: ${{ inputs.releaseSha }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]] || { echo "releaseSha must be a full lowercase commit SHA"; exit 1; }
+          [[ "$RELEASE_SHA_INPUT" == "$GITHUB_SHA" ]] || { echo "releaseSha does not match the dispatched main revision"; exit 1; }
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA_INPUT" ]] || { echo "checkout does not match releaseSha"; exit 1; }
+          [[ "$RELEASE_CONFIRMATION" == "DEPLOY WS PRODUCTION $RELEASE_SHA_INPUT" ]] || { echo "confirmation phrase mismatch"; exit 1; }
+          # A stale rerun must not silently roll Production back to an older main commit.
+          MAIN_HEAD="$(git ls-remote origin refs/heads/main | cut -f1)"
+          [[ "$MAIN_HEAD" == "$RELEASE_SHA_INPUT" ]] || { echo "main advanced to $MAIN_HEAD; approve and dispatch the current main SHA"; exit 1; }
+          echo "WS Production release authorized for $RELEASE_SHA_INPUT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node
         uses: actions/setup-node@v4
