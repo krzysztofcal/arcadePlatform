@@ -69,6 +69,13 @@ test("deploy authorizes the exact current main SHA before any VPS mutation", () 
   assert.match(step, /"\$RELEASE_CONFIRMATION" == "DEPLOY WS PRODUCTION \$RELEASE_SHA_INPUT"/);
   assert.match(step, /git ls-remote origin refs\/heads\/main/);
   assert.match(step, /"\$MAIN_HEAD" == "\$RELEASE_SHA_INPUT"/);
+  // main can advance during packaging/upload: recheck directly before the release switch.
+  const revalidate = deploy.indexOf("name: Revalidate current main HEAD before release switch");
+  assert.ok(deploy.indexOf("uses: appleboy/scp-action@v0.1.7") < revalidate, "recheck after upload");
+  const recheck = deploy.slice(revalidate, deploy.indexOf("- name:", revalidate + 1));
+  assert.match(recheck, /git ls-remote origin refs\/heads\/main/);
+  assert.match(recheck, /"\$MAIN_HEAD" == "\$GITHUB_SHA"/);
+  assert.equal(deploy.indexOf("- name:", revalidate + 1), deploy.indexOf("- name: Atomic release switch + restart + health gate on VPS"), "no step between recheck and switch");
   // The released artifact and VPS release id stay bound to the authorized revision.
   assert.equal((deploy.match(/RELEASE_SHA: \$\{\{ github\.sha \}\}/g) || []).length, 2);
 });

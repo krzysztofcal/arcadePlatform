@@ -575,6 +575,13 @@ jobs:
           source: .artifacts/ws-server/ws-server-dist.tgz
           target: ${{ env.WS_REMOTE_TMP_DIR }}
 
+      # main may advance during packaging/upload; recheck immediately before the switch.
+      - name: Revalidate current main HEAD before release switch
+        run: |
+          set -euo pipefail
+          MAIN_HEAD="$(git ls-remote origin refs/heads/main | cut -f1)"
+          [[ "$MAIN_HEAD" == "$GITHUB_SHA" ]] || { echo "main advanced to $MAIN_HEAD before release switch; nothing switched"; exit 1; }
+
       - name: Atomic release switch + restart + health gate on VPS
         uses: appleboy/ssh-action@v1.0.3
         env:

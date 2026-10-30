@@ -44,4 +44,6 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 ## PR4 — WS Production explicit dispatch (T002)
 
 - [x] Push/merge validates only; deploy requires OWNER main dispatch with exact current-main `releaseSha` and confirmation; existing safety/rollback unchanged. See `pr4-ws-production-dispatch.md`.
-- [ ] Hosted CI on Draft PR; OWNER GO for merge, optional `ws-production` Environment and first explicit release.
+- [x] Hosted CI on Draft PR, including the workflow guard in `validate`.
+- [ ] OWNER GO: squash merge with `[skip netlify]` (no `[skip actions]`) and observed post-merge acceptance.
+- [ ] OPEN: `ws-production` Environment; T004 automatic human/resume/escrow preflight. Current dispatch is not a complete safe release process.
