@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { waitForPreview, needsApk } from '../mobile/poker/preview-preflight.mjs';
+import { waitForPreview, needsApk, findCompatibleApk } from '../mobile/poker/preview-preflight.mjs';
 const repository='krzysztofcal/arcadePlatform',sourceSha='a'.repeat(40),prNumber=1160,origin='https://deploy-preview-1160--playkcswh.netlify.app';
 function fixture({states=['pending','success'],head=sourceSha,deployPatch={},buildPatch={}}={}) {
   let statusReads=0,time=0,prReads=0;
@@ -29,13 +29,35 @@ test('stale HEAD, foreign repository, failed preview and timeout do not build',a
   await assert.rejects(waitForPreview(fixture({states:['failure']}).options),/preview_failed/);
   await assert.rejects(waitForPreview(fixture({states:['pending']}).options),/preview_timeout/);
 });
-test('known docs/test-only synchronize skips compile; app and unknown inputs rebuild',()=>{
+test('input classification excludes docs/tests but includes packaged and unknown inputs',()=>{
   assert.equal(needsApk([{filename:'specs/1159/report.md'},{filename:'tests/mobile-poker-security.test.mjs'}]),false);
   assert.equal(needsApk([{filename:'mobile/poker/README.md'}]),false);
   assert.equal(needsApk([{filename:'js/account-page.js'}]),true);
   assert.equal(needsApk([{filename:'.github/workflows/android-poc.yml'}]),true);
   assert.equal(needsApk([{filename:'unclassified-input.bin'}]),true);
   assert.equal(needsApk([{filename:'docs/renamed.md',previous_filename:'poker/assets/table.png'}]),true);
+  assert.equal(needsApk([{filename:'poker/assets/catalog.md'}]),true);
   assert.equal(needsApk(null),true);
   assert.equal(needsApk([{}]),true);
+});
+
+function artifactFixture({status='completed',conclusion='success',artifact=true,expired=false,files=[{filename:'specs/report.md'}],runPatch={},artifactPatch={},comparisonPatch={}}={}) {
+  const run={id:42,status,conclusion,event:'pull_request',path:'.github/workflows/android-poc.yml',head_sha:sourceSha,head_branch:'feature',repository:{id:1,full_name:repository},head_repository:{full_name:repository},pull_requests:[{number:prNumber}],...runPatch};
+  const entry={id:7,name:`arcade-poker-stage-pr-${prNumber}-${sourceSha}`,expired,size_in_bytes:100,workflow_run:{id:42,head_sha:sourceSha,repository_id:1,head_repository_id:1},...artifactPatch};
+  const fetch=async url=>new Response(JSON.stringify(url.includes('/artifacts')?{artifacts:artifact?[entry]:[]}:url.includes('/compare/')?{status:'ahead',base_commit:{sha:sourceSha},merge_base_commit:{sha:sourceSha},total_commits:1,files,...comparisonPatch}:{workflow_runs:[run]}));
+  return {repository,prNumber,sourceSha:'b'.repeat(40),branch:'feature',token:'synthetic-read-token',fetch};
+}
+test('app A building then docs B must build unless a completed compatible APK exists',async()=>{
+  for(const options of [{status:'in_progress',conclusion:null},{conclusion:'cancelled'},{artifact:false},{expired:true}]) {
+    assert.equal(await findCompatibleApk(artifactFixture(options)),null,'B must build after incomplete/cancelled/missing/expired A');
+  }
+  const proof=await findCompatibleApk(artifactFixture());
+  assert.deepEqual(proof,{sourceSha,runId:42,artifactId:7},'ready A covers docs B but keeps its actual A provenance');
+  assert.equal(await findCompatibleApk(artifactFixture({files:[{filename:'js/account-page.js'}]})),null,'A cannot cover changed app inputs');
+});
+test('uncertain or foreign artifact provenance never permits skipping compilation',async()=>{
+  for(const patch of [{name:`arcade-poker-stage-${sourceSha}`},{workflow_run:{id:99}},{size_in_bytes:0}])assert.equal(await findCompatibleApk(artifactFixture({artifactPatch:patch})),null);
+  for(const patch of [{pull_requests:[{number:1155}]},{head_branch:'other'},{head_repository:{full_name:'foreign/repo'}}])assert.equal(await findCompatibleApk(artifactFixture({runPatch:patch})),null);
+  for(const patch of [{status:'diverged'},{total_commits:251},{files:null},{merge_base_commit:{sha:'c'.repeat(40)}}])assert.equal(await findCompatibleApk(artifactFixture({comparisonPatch:patch})),null);
+  assert.equal(await findCompatibleApk({...artifactFixture(),fetch:async()=>{throw new Error('synthetic API failure');}}),null);
 });
