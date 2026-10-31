@@ -7,6 +7,9 @@
   command = "if [ -f scripts/generate-build-info.js ]; then node scripts/generate-build-info.js; else node ../scripts/generate-build-info.js; fi"
   publish = "."
   functions = "netlify/functions"
+  # #1159 PR5: Git builds of main (Production) are skipped; PR Previews and branch deploys still build.
+  # Exit 0 skips, 1 builds; unknown metadata skips. Build-hook builds ignore this (OWNER release candidates only).
+  ignore = "[ \"$PULL_REQUEST\" = true ] && exit 1; [ -n \"$BRANCH\" ] && [ \"$BRANCH\" != main ] && exit 1; exit 0"
 
 [functions]
   # Function bundling settings
