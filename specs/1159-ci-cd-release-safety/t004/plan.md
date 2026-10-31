@@ -23,8 +23,8 @@ Reuse first. There is no new service, framework or workflow. Five small PRs; eac
 | --- | --- |
 | `begin({ requestId, deadlineMs })` | Starts draining with a clamped deadline. |
 | `freeze()` | Moves to frozen. |
-| `cancel()` | Returns to idle. |
-| `phase(now)` | Reports the phase; past the deadline it auto-returns to idle. |
+| `cancel()` | Returns to idle. It is the only way to reopen a frozen process. |
+| `phase(now)` | Reports the phase. Past the deadline, only `draining` returns to idle (drain failed). `frozen` never expires: it ends only with an explicit `cancel` or the process restart. |
 | `blocksCommand(commandName, now)` | While draining, allows only `act`, `bot_step`, `turn_timeout`, `bot_timeout_safety`, `leave`, `guest_leave`, `disconnect_cleanup` and `guest_disconnect_cleanup`; anything else, unknown names included, is blocked. While frozen, everything is blocked. |
 | `blocksWork(now)` | Blocks gifts, internal POSTs and cleanup sweeps. |
 
@@ -36,16 +36,17 @@ Reuse first. There is no new service, framework or workflow. Five small PRs; eac
   - `handleHttpRequest()`: internal POSTs (except the drain route) answer 503 `release_drain_active`;
   - the action-history/closed-table sweep is skipped while draining;
   - new route `/internal/admin/release-drain`, GET for status, POST `{operation: begin|freeze|cancel, requestId}`, with the same token check as `handleInternalPokerMaintenance`;
-  - status `{ phase, deadlineMs, inFlight: { tableCommands, giftWork }, loadedTables, liveHandTables, connectedHumans }`.
+  - status `{ phase, deadlineMs, frozenAt, inFlight: { tableCommands, giftWork }, loadedTables, liveHandTables, connectedHumans, persistedVersions }` (`persistedVersions`: the in-memory `persistedStateVersion` per loaded table, used by the T004-2 external-write check).
 - **Client:** `poker/poker-ws-client.js` needs no change; a rejected command already shows a generic reason. Release-time UX is accepted as breaking impact.
 
 **Tests:**
-- new `ws-server/poker/runtime/release-drain.behavior.test.mjs` (allowlist, unknown command blocked, frozen blocks all, deadline clamp and auto-expiry, cancel);
+- new `ws-server/poker/runtime/release-drain.behavior.test.mjs` (allowlist, unknown command blocked, frozen blocks all, deadline clamp, draining expiry, frozen does not expire, cancel);
 - extend `table-command-queue.behavior.test.mjs` (`pendingCount` across tables and after a rejection); this test is not run by any workflow today;
 - register both in `ws-server-deploy.yml` `validate` and `ws-pr-checks.yml`, next to the existing `conn-state` step.
 
 **Exit:** CI green, plus an exact-SHA WS Preview check:
 - begin, then bot tables stop at SETTLED with no new hand;
+- freeze, then wait past the deadline: still frozen, no command accepted;
 - cancel resumes them;
 - a freeze followed by a Preview restart resumes the bot tables, and a seated human after the restart keeps seat and stack.
 
@@ -57,15 +58,19 @@ Reuse first. There is no new service, framework or workflow. Five small PRs; eac
 - `escrowMismatches`:
   - OPEN tables whose `POKER_TABLE:<id>` balance differs from the claims of the persisted boundary state; the claims projection reuses `shared/poker-domain/terminal-close.mjs`, exporting the existing helper without a copy;
   - CLOSED tables with escrow different from 0;
-- `schemaFingerprint` and `schemaCount`.
+- `schemaFingerprint` and `schemaCount`;
+- `externalWrites` (writers outside this process: Netlify `poker-create-table` / `poker-quick-seat` / admin functions, the chips-ledger automation, manual SQL):
+  - `poker_state.version` of every loaded table equals the in-memory `persistedStateVersion`, and there is no OPEN table with an ACTIVE seat that is not loaded;
+  - no `chips_transactions` row, `poker_seats` change or `poker_requests` row created after `frozenAt`;
+  - `ledgerWatermark`: the max `chips_transactions` id plus the per-table versions, so that the gate can compare two readings.
 
 Any query error returns `{ ok: false, reason }`. No writes.
 
 **Changes:**
 - `server.mjs` drain GET adds `readiness`;
-- `ready = phase === "frozen" && every in-flight count is 0 && liveHandTables === 0 && connectedHumans === 0 && readiness.ok && activeHumanSeats === 0 && pendingRequests === 0 && escrowMismatches === 0`.
+- `ready = phase === "frozen" && every in-flight count is 0 && liveHandTables === 0 && connectedHumans === 0 && readiness.ok && activeHumanSeats === 0 && pendingRequests === 0 && escrowMismatches === 0 && externalWrites === 0`.
 
-**Tests:** new `release-readiness.behavior.test.mjs` with the existing fake-SQL pattern (`persisted-bootstrap-db.mjs`): mismatch, CLOSED non-zero, pending request, query failure means not ready, fingerprint order independence.
+**Tests:** new `release-readiness.behavior.test.mjs` with the existing fake-SQL pattern (`persisted-bootstrap-db.mjs`): mismatch, CLOSED non-zero, pending request, DB version ahead of memory, ledger row after `frozenAt`, query failure means not ready, fingerprint order independence.
 
 **Exit:** CI plus a WS Preview readout (no Production read).
 
@@ -73,7 +78,7 @@ Any query error returns `{ ok: false, reason }`. No writes.
 
 **New helper:** `infra/vps/ws-production-release-gate.mjs`, modelled on `ws-production-env-preflight.mjs` (`protectedRead`, `parseEnv`, `sanitizeOutput` reused by import):
 - `status`: read-only;
-- `drain`: begin, poll until boundary or deadline, freeze, then the final status;
+- `drain`: begin, poll until boundary or deadline, freeze, then read readiness twice (a few seconds apart) and require an unchanged `ledgerWatermark`;
 - `cancel`.
 
 Output is a single JSON line; exit 0 only if ready.
@@ -84,10 +89,14 @@ Output is a single JSON line; exit 0 only if ready.
 - in the package step, `sha256sum` of the artifact goes to the summary;
 - a runner step computes `EXPECTED_SCHEMA_FINGERPRINT` with `scripts/production-schema-fingerprint.mjs` (about 30 LOC, a pure function plus a CLI);
 - the revalidate step also refuses a queued or in-progress `Chips Ledger Production Automation` run (`actions: read`);
-- in the remote script, after `PROD_PREFLIGHT`: `GATE="$(sudo -n …release-gate drain)"`. Require `ready:true` and a matching fingerprint; otherwise call `…release-gate cancel` and exit before `ln -sfn` (a trap is set before the switch and cleared after `HAVE_SWITCHED=1`).
+- in the remote script, after `PROD_PREFLIGHT`: `GATE="$(sudo -n …release-gate drain)"`. Require `ready:true` and a matching fingerprint; otherwise call `…release-gate cancel` and exit before `ln -sfn` (a trap is set before the switch and cleared after `HAVE_SWITCHED=1`). After a successful gate nothing calls `cancel`: the frozen process is ended only by the restart.
+- **Rollback-restart path (ERR trap after the switch):** the new process starts unfrozen, so it may already have started hands when its health check fails. The rollback restart runs only when one of these holds:
+  - `systemctl is-active ws-server.service` is not `active` (no live process memory to lose; DB recovery as after a crash);
+  - `release-gate drain` against the new process returns `ready:true` with the same schema fingerprint.
+  Otherwise the trap does not restart. It leaves the new release running, prints `ROLLBACK_BLOCKED` with the gate JSON and fails the job for an OWNER decision. A runner smoke failure still causes no rollback.
 
 **Tests:**
-- extend `ws-tests/ws-server-deploy.workflow.guard.test.mjs`: gate after the env preflight and before `ln -sfn`, cancel on failure, the fingerprint passed through env;
+- extend `ws-tests/ws-server-deploy.workflow.guard.test.mjs`: gate after the env preflight and before `ln -sfn`, cancel only on the pre-switch failure path, no cancel after a ready gate, the rollback restart guarded by `is-active` or a ready gate, the fingerprint passed through env;
 - new `ws-tests/ws-production-release-gate.behavior.test.mjs`: fake HTTP for ready / not ready / timeout / missing token; sanitized output.
 
 **Breaking:** until the root install, deploys fail closed. Activation is a separate admin GO (install plus sudoers), followed by a `status` check.
@@ -136,8 +145,9 @@ Only after T004-5. Add a WS `rollbackToRelease` dispatch input (existing release
 
 - **R1** Crash/OOM/reboot during a live hand: not addressed (separate engine scope).
 - **R2** Every activation step needs an admin root install.
-- **R3** The chips-ledger dispatcher can dispatch after the check; its writes are transactional; the freeze-time escrow check catches a mismatch.
-- **R4** Netlify `poker-create-table` / `poker-quick-seat` / admin functions are not drained; an operator rule forbids admin operations during a release.
-- **R5** The rollback restart after a failed health check is ungated (recovery).
+- **R3** The chips-ledger dispatcher can dispatch after the check. Mitigated by the run guard plus the `externalWrites` check and the second `ledgerWatermark` reading; a write between the last reading and the restart remains possible and is transactional.
+- **R4** Netlify `poker-create-table` / `poker-quick-seat` / admin functions are not drained. They are detected (not blocked) by `externalWrites`; the operator rule forbids admin operations during a release.
+- **R5** The rollback restart is gated (`is-active` or a ready gate). When blocked, the unhealthy new release keeps running until the OWNER decides: this is a deliberate fail-closed choice that can extend an outage.
+- **R8** A frozen process that loses its runner (cancelled job, SSH drop) stays frozen until `release-gate cancel` or a restart. Breaking impact: the tables stay paused; the operator command is documented in `agents.md`.
 - **R6** The 300 s maximum flock wait plus the drain window extends PR4's merge-during-release window; the operator rule stays.
 - **R7** Protocol compatibility between the old WWW client and the new WS for a few minutes is attested, not proven; mitigated by the WS→WWW order and the browser-client coupling rule.

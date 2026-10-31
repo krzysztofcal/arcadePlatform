@@ -68,8 +68,10 @@ The current crash and auto-restart behavior (OOM, VPS reboot) during a live hand
 1. **R-DRAIN:** an inert WS "release drain" with phases `idle → draining → frozen`.
    - Draining blocks new work: joins, rebuys, start_hand, settled_rollover (and so the next hand), gifts, materialize/admin/deletion commands and internal POSTs. It keeps act, bot_step, the turn/bot timeouts, leave and the disconnect cleanups so the current hands finish.
    - Frozen blocks every command and waits until in-flight work reaches 0.
-   - Bounded: the deadline defaults to 120 s (maximum 300 s); expiry or `cancel` returns to idle; a restart clears it. Unknown commands are blocked (fail closed).
+   - Bounded: the drain deadline defaults to 120 s (maximum 300 s); expiry while draining returns to idle (drain failed). Frozen never expires and never reopens by itself: only an explicit `cancel` on the pre-switch failure path, or the restart, ends it. Unknown commands are blocked (fail closed).
 2. **R-READY:** a read-only readiness report covering all boundary items above, built in one read-only DB transaction plus runtime state. Missing evidence means not ready.
+   - It also covers writers outside the WS process (Netlify functions, the chips-ledger automation, manual SQL): DB state versions equal to memory, no ledger/seat/request rows after the freeze, and an unchanged ledger watermark across two readings.
+   - It also covers the rollback-restart path: the rollback restart runs only when the WS service is not active or a fresh gate is ready; otherwise the restart is blocked for an OWNER decision.
 3. **R-GATE:** the WS deploy calls the gate after the env preflight and before the switch.
    - Any failure means `cancel` and nothing switched.
    - The schema set expected at the SHA is computed on the runner from `supabase/production-migrations/manifest.json` (`baseline_applied`) plus the `supabase/production-migrations/*.sql` versions.
@@ -98,5 +100,6 @@ The current crash and auto-restart behavior (OOM, VPS reboot) during a live hand
 
 - **During a WS release (≤ 5 min):** new joins/rebuys/gifts/hands are rejected with `release_drain_active`; current bot hands finish; then all sockets drop and clients reconnect.
 - **The WS deploy fails closed** until the root gate helper is installed (admin action). WS releases stop entirely until then.
+- **A blocked rollback** leaves an unhealthy new release running until the OWNER decides; a frozen process without its runner stays paused until `release-gate cancel`.
 - **A release is refused** while any human is seated or connected. This is the existing rule, now enforced.
 - **The WWW CLI entry moves** to the new orchestrator; `www-production-release.mjs` stays a library.
