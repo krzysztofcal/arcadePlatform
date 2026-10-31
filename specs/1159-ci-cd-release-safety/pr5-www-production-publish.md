@@ -1,6 +1,6 @@
 # #1159 PR5 / T003 — WWW Production publication separated from merge
 
-Status: Draft. Inert until the separate OWNER GO below; no Netlify setting, deploy or publication was changed while preparing it.
+Status: merged (`3fe60fc5`). Lock and `ignore` active; build hook and first release await separate OWNER GO.
 
 ## Read-only audit (2026-10-30, site `playkcswh`)
 
@@ -62,7 +62,7 @@ The receipt is always written: `dry_run_pass`, `checks_failed`, `not_published`,
 
 - Historical published deploys stay reachable at permalinks with Production env (pre-existing). Visitor access protection for non-production URLs depends on the Netlify plan — OPEN.
 - Netlify deploy deletion is irreversible; the tool deletes only unpublished candidates.
-- Not documented: whether `restore` keeps the lock (the tool relocks once or fails `uncertain`), and the exact Netlify state of an `ignore`-skipped Production build. Both are measured after GO.
+- Not documented: whether `restore` keeps the lock (the tool relocks once or fails `uncertain`), and the exact Netlify state of an `ignore`-skipped Production build. The latter was measured on `3fe60fc5`: a deploy record with `state=error` and no content; the former is measured on the first release.
 - No merges during a release (the candidate stops being main HEAD).
 - Combined WWW+WS ordering, T004 preflight and GitHub Environment remain later scopes.
 
@@ -75,7 +75,7 @@ The receipt is always written: `dry_run_pass`, `checks_failed`, `not_published`,
 ## OWNER GO required (separate, in order)
 
 1. DONE 2026-10-30: locked on `6ae52b31a745a6e69b60b668` (`83c8da88`, published by the #1168 merge; the audited backlog is live); `locked=true`, id unchanged.
-2. Merge this PR (squash, empty body; the Netlify marker is optional). Acceptance: the main Production build is skipped by `ignore`, the published deploy is unchanged, and a PR Preview still builds.
+2. DONE 2026-10-31: merged as `3fe60fc5` without a Netlify marker. Netlify recorded the main Production build as deploy `6ae5a688d0733085c009316b`, `state=error` "Canceled build due to no content change" (the `ignore` exit 0): no files, no functions, never published, permalink 500. Published deploy unchanged (`6ae52b31…`, `locked=true`). The PR Preview on `d14c1b91` built with the same `ignore`.
 3. Create the OWNER-only `main` build hook (Netlify setting).
 4. First release: decide WS compatibility first (main HEAD differs on the WS surface: release WS for that SHA through PR4 or wait), trigger the hook, dry-run, then `--execute`. If the release is aborted at any point, discard the candidate and require `discarded` (permalink 404); `discard_unverified` = STOP. Record the receipts and the restore/lock behavior in #1159.
 
