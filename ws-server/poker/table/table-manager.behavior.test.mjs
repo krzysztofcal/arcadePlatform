@@ -1,7 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { decideSettledBotFunding, readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "../runtime/settled-bot-funding.mjs";
 import { __testOnly, createTableManager as createRuntimeTableManager } from "./table-manager.mjs";
+import { isNewHandsHoldActive } from "../runtime/new-hands-hold.mjs";
+
+function holdNewHands(t) {
+  const holdFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ws-hold-")), "hold-new-hands");
+  const previous = process.env.WS_POKER_NEW_HANDS_HOLD_FILE;
+  process.env.WS_POKER_NEW_HANDS_HOLD_FILE = holdFile;
+  fs.writeFileSync(holdFile, "");
+  t.after(() => { if (previous === undefined) delete process.env.WS_POKER_NEW_HANDS_HOLD_FILE; else process.env.WS_POKER_NEW_HANDS_HOLD_FILE = previous; });
+  return () => fs.rmSync(holdFile);
+}
 
 function createTableManager(options = {}) {
   const manager = createRuntimeTableManager({ defaultBuyIn: 100, ...options });
@@ -409,7 +422,7 @@ test("applyAction returns accepted action audit context without private cards", 
   assert.equal(serialized.includes("AD"), false);
 });
 
-test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", () => {
+test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", (t) => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_settled_rollover";
   const wsA = fakeWs("ws-rollover-a");
@@ -473,6 +486,11 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(bootstrap.bootstrap, "settlement_pending");
   assert.equal(bootstrap.stateVersion, 7);
   assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+
+  const releaseHold = holdNewHands(t);
+  assert.deepEqual(tableManager.rolloverSettledHand({ tableId, nowMs: 5_000 }), { ok: true, changed: false, reason: "new_hands_on_hold", stateVersion: 7 });
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+  releaseHold();
 
   const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 5_000 });
 
@@ -801,7 +819,16 @@ test("authenticated resubscribe restores seated human presence so a fold settlem
   assert.equal(nextState.holeCardsByUserId[humanUserId].length, 2);
 });
 
-test("bootstrapHand excludes disconnected human ghost seats from the next hand", () => {
+test("new-hands hold is off when unset or absent and fails closed on an unreadable path", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ws-hold-"));
+  fs.writeFileSync(path.join(dir, "file"), "");
+  assert.equal(isNewHandsHoldActive({}), false);
+  assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "absent") }), false);
+  assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file") }), true);
+  assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file", "hold") }), true);
+});
+
+test("bootstrapHand excludes disconnected human ghost seats from the next hand", (t) => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_bootstrap_connected_human_only";
   const wsHuman = fakeWs("ws-bootstrap-human");
@@ -836,6 +863,11 @@ test("bootstrapHand excludes disconnected human ghost seats from the next hand",
   });
 
   assert.equal(restored.ok, true);
+
+  const releaseHold = holdNewHands(t);
+  assert.deepEqual(tableManager.bootstrapHand(tableId, { nowMs: 1_000 }), { ok: true, changed: false, bootstrap: "new_hands_on_hold", stateVersion: 9, handId: null });
+  assert.equal(tableManager.persistedPokerState(tableId), null);
+  releaseHold();
 
   const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: 1_000 });
 

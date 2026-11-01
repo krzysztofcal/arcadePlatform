@@ -24,6 +24,7 @@ import { createTableManager } from "./poker/table/table-manager.mjs";
 import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
+import { newHandsHoldStatus } from "./poker/runtime/new-hands-hold.mjs";
 import { createBotReactionOverrideStore } from "./poker/runtime/bot-reaction-override.mjs";
 import { createReactionTimers, shouldObservePersistedReactionMutation } from "./poker/runtime/reaction-timers.mjs";
 import {
@@ -2799,6 +2800,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     managedBotProfile,
     allowBotFunding
   });
+  if (prepared?.reason === "new_hands_on_hold") {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+  }
   if (!prepared?.ok || !prepared.changed) {
     return finishSettledRollover(prepared);
   }
@@ -4235,10 +4239,18 @@ function getPokerMaintenanceEnvironment() {
   return environment === "preview" || environment === "production" ? environment : null;
 }
 
+// Counts only. Unloaded tables are not covered; check persisted states separately.
+function buildNewHandsHoldStatus() {
+  const loadedHandsInProgress = tableManager.listTableIds()
+    .filter((tableId) => ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"].includes(tableManager.persistedPokerState(tableId)?.phase))
+    .length;
+  return { ...newHandsHoldStatus(), loadedHandsInProgress };
+}
+
 async function buildInternalPokerMaintenanceStatus(environment) {
   const repositoryStatus = await continuousBotTableRepository?.readStatus?.();
   if (!repositoryStatus?.ok) {
-    return { ok: false, error: repositoryStatus?.reason || "continuous_maintenance_unavailable" };
+    return { ok: false, error: repositoryStatus?.reason || "continuous_maintenance_unavailable", newHandsHold: buildNewHandsHoldStatus() };
   }
   const loadedTableIds = new Set(tableManager.listTableIds());
   const tables = repositoryStatus.tables.map((table) => {
@@ -4284,7 +4296,8 @@ async function buildInternalPokerMaintenanceStatus(environment) {
       }
     },
     cleanup,
-    closedTableCleanup: closedTableCleanupStatus
+    closedTableCleanup: closedTableCleanupStatus,
+    newHandsHold: buildNewHandsHoldStatus()
   };
 }
 

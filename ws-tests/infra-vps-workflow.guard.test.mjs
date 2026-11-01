@@ -303,7 +303,8 @@ test("infra VPS environment examples expose only the audited variable names with
     "WS_POKER_HUMAN_SETTLED_RETENTION_MS",
     "WS_POKER_ACTION_HISTORY_SWEEP_MS",
     "WS_POKER_ACTION_HISTORY_BATCH_SIZE",
-    "WS_POKER_CLOSED_TABLE_RETENTION_MS"
+    "WS_POKER_CLOSED_TABLE_RETENTION_MS",
+    "WS_POKER_NEW_HANDS_HOLD_FILE"
   ];
   const expectedPreviewKeys = [
     "NODE_ENV",
@@ -346,6 +347,7 @@ test("infra VPS environment examples expose only the audited variable names with
     assert.doesNotMatch(text, /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|-----BEGIN|eyJ[A-Za-z0-9_-]{20,}/);
     if (path === "infra/vps/ws-production.env.example") {
       assert.match(text, /^WS_POKER_CLOSED_TABLE_RETENTION_MS=0$/m);
+      assert.match(text, /^WS_POKER_NEW_HANDS_HOLD_FILE=\/opt\/ws-server\/hold-new-hands$/m);
     }
   }
 });
