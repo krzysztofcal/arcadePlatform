@@ -28,8 +28,8 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.match(text, /tar -xzf "\$TMP_ARCHIVE" -C "\$NEW_RELEASE_DIR"/);
   assert.match(text, /mv -Tf "\$CURRENT_LINK\.tmp" "\$CURRENT_LINK"/);
 
-  assert.match(text, /systemctl restart ws-server\.service/);
-  assert.match(text, /sudo -n \/usr\/bin\/systemctl restart ws-server\.service/);
+  assert.doesNotMatch(text, /systemctl restart ws-server\.service/);
+  assert.match(text, /sudo -n \/usr\/local\/sbin\/arcade-ws-restart-gate restart/);
   assert.doesNotMatch(text, /sudo -n (?:cat|test|rm|mkdir|tar|ln|mv|node|bash|rsync)\b/);
   assert.match(text, /curl -fsS http:\/\/127\.0\.0\.1:3000/);
   assert.match(text, /curl -fsS https:\/\/ws\.kcswh\.pl/);
@@ -53,7 +53,7 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
 
   assert.match(text, /rollback\(\)/);
   assert.match(text, /on_error\(\)/);
-  assert.match(text, /sudo -n \/usr\/bin\/systemctl restart ws-server\.service \|\| true/);
+  assert.match(text, /ROLLBACK_RESULT="\$\(sudo -n \/usr\/local\/sbin\/arcade-ws-restart-gate restart \|\| true\)"/);
 });
 
 test("remote deploy script coordinates release mutations and records canonical deployment time", () => {

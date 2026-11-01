@@ -443,7 +443,7 @@ test("workflow guard confirms Production preflight is executed before current sw
 
   const preflightCall = "sudo -n /usr/local/sbin/arcade-ws-production-env-preflight";
   const currentSwitch = 'ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"';
-  const serviceRestart = "sudo -n /usr/bin/systemctl restart ws-server.service";
+  const serviceRestart = "sudo -n /usr/local/sbin/arcade-ws-restart-gate restart";
 
   const preflightIdx = deployScript.indexOf(preflightCall);
   const currentSwitchIdx = deployScript.indexOf(currentSwitch);

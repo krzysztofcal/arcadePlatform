@@ -628,6 +628,7 @@ jobs:
             NEW_RELEASE_APP_DIR="$NEW_RELEASE_DIR/ws-server"
             PREVIOUS_TARGET=""
             HAVE_SWITCHED=0
+            HAVE_RESTARTED=0
             HEALTH_RETRIES=30
             HEALTH_SLEEP_SEC=1
 
@@ -698,21 +699,28 @@ jobs:
               if [ "$HAVE_SWITCHED" != "1" ] || [ -z "$PREVIOUS_TARGET" ]; then
                 return 0
               fi
+              # Not restarted yet: the previous process still runs, so only the release link is restored.
+              if [ "$HAVE_RESTARTED" != "1" ]; then
+                ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
+                mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+                echo "release link restored; no restart was performed"
+                return 0
+              fi
               # Never restore a V2 runtime after the coordinated V3 cutover.
               if ! node --input-type=module -e 'const p=process.argv[1]; const c=await import("file://"+p+"/../netlify/functions/_generated/deploy-context.mjs"); if(c.BUILD_XP_REDIS_VERSION!=="3" || c.BUILD_XP_REDIS_ENV!=="prod") process.exit(1)' "$PREVIOUS_TARGET"; then
                 echo "Previous release is not V3 prod; roll-forward required"
                 return 0
               fi
-              # Automatic rollback restarts only behind the same gate; otherwise the operator decides.
-              ROLLBACK_GATE="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate || true)"
-              printf '%s\n' "$ROLLBACK_GATE"
-              if [[ "$ROLLBACK_GATE" != RESTART_SAFE* ]]; then
-                echo "ROLLBACK_BLOCKED: restart gate is not safe; current release left in place for operator decision"
-                return 0
-              fi
+              # Automatic rollback restarts only through the gated helper; otherwise the operator decides.
               ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
               mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
-              sudo -n /usr/bin/systemctl restart ws-server.service || true
+              ROLLBACK_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"
+              printf '%s\n' "$ROLLBACK_RESULT"
+              if [[ "$ROLLBACK_RESULT" != RESTARTED* ]]; then
+                ln -sfn -- "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
+                mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+                echo "ROLLBACK_BLOCKED: restart gate is not safe; current release left in place for operator decision"
+              fi
             }
 
             on_error() {
@@ -760,8 +768,9 @@ jobs:
             printf '%s\n' "$PROD_PREFLIGHT"
             [[ "$PROD_PREFLIGHT" == 'PASS LIVE Redis V3 prod' ]]
 
-            # Fail-closed restart gate under the deploy lock: a running WS must be held, drained and verified.
-            RESTART_GATE="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate || true)"
+            # Fail-closed restart gate under the deploy lock: a running WS must be held, drained and verified;
+            # a stopped one needs root's single-use safe-stop evidence and a quiet database.
+            RESTART_GATE="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate check || true)"
             printf '%s\n' "$RESTART_GATE"
             if [[ "$RESTART_GATE" != RESTART_SAFE* ]]; then
               echo "STOP: restart gate is not safe; nothing switched"
@@ -772,7 +781,14 @@ jobs:
             mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
             HAVE_SWITCHED=1
 
-            sudo -n /usr/bin/systemctl restart ws-server.service
+            # The helper re-runs the gate as root and restarts only if it still passes.
+            RESTART_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"
+            printf '%s\n' "$RESTART_RESULT"
+            if [[ "$RESTART_RESULT" != RESTARTED* ]]; then
+              echo "STOP: gated restart refused or failed"
+              false
+            fi
+            HAVE_RESTARTED=1
 
             LOCAL_HEALTHZ_BODY=""
             for i in $(seq 1 "$HEALTH_RETRIES"); do

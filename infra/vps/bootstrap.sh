@@ -138,6 +138,7 @@ install -D -o root -g root -m 0755 \
 install -D -o root -g root -m 0755 \
   "$REPO_ROOT/infra/vps/ws-restart-gate.mjs" \
   /usr/local/sbin/arcade-ws-restart-gate
+install -d -o root -g root -m 0755 /etc/arcadeplatform/ws-hold
 
 if ! visudo -cf "$REPO_ROOT/infra/vps/arcade-deploy.sudoers"; then
   echo "refusing bootstrap: invalid arcade deploy sudoers contract" >&2

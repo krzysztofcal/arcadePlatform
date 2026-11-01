@@ -182,7 +182,8 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   assert.match(bootstrap, /visudo -cf/);
   assert.match(bootstrap, /arcade-deploy\.sudoers/);
   assert.match(sudoers, /copilot ALL=\(root\) NOPASSWD:/);
-  assert.match(sudoers, /restart ws-server\.service/);
+  assert.doesNotMatch(sudoers, /systemctl restart ws-server\.service/);
+  assert.match(sudoers, /\/usr\/local\/sbin\/arcade-ws-restart-gate check, \\\n\s+\/usr\/local\/sbin\/arcade-ws-restart-gate restart\n/);
   assert.match(sudoers, /restart ws-server-preview\.service/);
   assert.match(sudoers, /reload caddy\.service/);
   assert.match(sudoers, /arcade-ws-preview-env-preflight ""/);
@@ -347,7 +348,8 @@ test("infra VPS environment examples expose only the audited variable names with
     assert.doesNotMatch(text, /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|-----BEGIN|eyJ[A-Za-z0-9_-]{20,}/);
     if (path === "infra/vps/ws-production.env.example") {
       assert.match(text, /^WS_POKER_CLOSED_TABLE_RETENTION_MS=0$/m);
-      assert.match(text, /^WS_POKER_NEW_HANDS_HOLD_FILE=\/opt\/ws-server\/hold-new-hands$/m);
+      // The hold lives in a root-only directory the deploy account cannot change.
+      assert.match(text, /^WS_POKER_NEW_HANDS_HOLD_FILE=\/etc\/arcadeplatform\/ws-hold\/new-hands$/m);
     }
   }
 });
