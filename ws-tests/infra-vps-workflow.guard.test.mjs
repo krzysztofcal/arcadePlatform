@@ -235,6 +235,10 @@ test("infra VPS repository versions the audited production WS and Stage schedule
 
   const override = fileText("infra/vps/ws-server.service.d/override.conf");
   assert.match(override, /^EnvironmentFile=\/etc\/arcadeplatform\/ws-server\.env$/m);
+  assert.equal(
+    fileText("infra/vps/ws-server.service.d/50-new-hands-hold.conf"),
+    "[Service]\nEnvironment=WS_POKER_NEW_HANDS_HOLD_FILE=/etc/arcadeplatform/ws-hold/new-hands\n"
+  );
 
   const schedulerService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
   for (const line of [
@@ -304,8 +308,7 @@ test("infra VPS environment examples expose only the audited variable names with
     "WS_POKER_HUMAN_SETTLED_RETENTION_MS",
     "WS_POKER_ACTION_HISTORY_SWEEP_MS",
     "WS_POKER_ACTION_HISTORY_BATCH_SIZE",
-    "WS_POKER_CLOSED_TABLE_RETENTION_MS",
-    "WS_POKER_NEW_HANDS_HOLD_FILE"
+    "WS_POKER_CLOSED_TABLE_RETENTION_MS"
   ];
   const expectedPreviewKeys = [
     "NODE_ENV",
@@ -348,8 +351,8 @@ test("infra VPS environment examples expose only the audited variable names with
     assert.doesNotMatch(text, /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|-----BEGIN|eyJ[A-Za-z0-9_-]{20,}/);
     if (path === "infra/vps/ws-production.env.example") {
       assert.match(text, /^WS_POKER_CLOSED_TABLE_RETENTION_MS=0$/m);
-      // The hold lives in a root-only directory the deploy account cannot change.
-      assert.match(text, /^WS_POKER_NEW_HANDS_HOLD_FILE=\/etc\/arcadeplatform\/ws-hold\/new-hands$/m);
+      // The attested env never carries the hold path; the ws-server.service drop-in does.
+      assert.doesNotMatch(text, /WS_POKER_NEW_HANDS_HOLD_FILE/);
     }
   }
 });

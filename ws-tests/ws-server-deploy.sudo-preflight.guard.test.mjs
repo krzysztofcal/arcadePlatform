@@ -42,11 +42,17 @@ test("ws-server deploy gates the release switch and the automatic rollback on th
   assert.ok(stage.indexOf('visudo -cf "$SUDOERS_SRC"') < stage.indexOf('install -o root -g root -m 0440 "$SUDOERS_SRC"'));
   assert.match(stage, /install -d -o root -g root -m 0755 "\$HOLD_DIR"/);
   assert.match(stage, /HOLD_DIR="\/etc\/arcadeplatform\/ws-hold"/);
+  const refuseEnvIdx = stage.indexOf("grep -q '^WS_POKER_NEW_HANDS_HOLD_FILE=' \"$PROD_ENV\"");
+  const dropInIdx = stage.indexOf('install -D -o root -g root -m 0644 "$DROPIN_SRC" "$DROPIN_DEST"');
+  assert.ok(refuseEnvIdx !== -1 && refuseEnvIdx < dropInIdx && dropInIdx < stage.indexOf("systemctl daemon-reload"));
+  assert.match(stage, /systemctl show ws-server\.service -p Environment --value/);
+  assert.doesNotMatch(stage, />>?\s*"?\$PROD_ENV/);
+  assert.match(fs.readFileSync("infra/vps/bootstrap.sh", "utf8"), /ws-server\.service\.d\/50-new-hands-hold\.conf" \/etc\/systemd\/system\/ws-server\.service\.d\/50-new-hands-hold\.conf/);
   assert.doesNotMatch(stage, /systemctl (?:restart|reload|stop|start)/);
 });
 
 test("restart gate is fail-closed for every unverifiable runtime state", async () => {
-  const { evaluateRestartGate, holdPathIssue, readSafeStopEvidence, readHoldDrain, parseDbQuiet, readEnvValues } = await import("../infra/vps/ws-restart-gate.mjs");
+  const { evaluateRestartGate, holdPathIssue, unitHoldIssue, HOLD_FILE, readSafeStopEvidence, readHoldDrain, parseDbQuiet, readEnvValues } = await import("../infra/vps/ws-restart-gate.mjs");
   const ready = {
     active: true, drain: true, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
     supervisorSweepInProgress: false, dbHandsInProgress: 0, dbVersionMismatches: 0,
@@ -65,6 +71,20 @@ test("restart gate is fail-closed for every unverifiable runtime state", async (
   assert.equal(running({ ...ready, dbHandsInProgress: null }).line, "RESTART_BLOCKED dbHandsInProgress=unknown");
   assert.equal(running({ ...ready, dbFinancialIssues: null }).line, "RESTART_BLOCKED financial_unverified");
   assert.equal(evaluateRestartGate({ serviceState: "active", holdPathIssue: "unprotected", httpStatus: 200, holdStatus: ready }).line, "RESTART_BLOCKED hold_path_unprotected");
+
+  // The hold path comes only from the unit drop-in: exactly once, the protected value, never from the env file.
+  const assignment = `WS_POKER_NEW_HANDS_HOLD_FILE=${HOLD_FILE}`;
+  assert.equal(HOLD_FILE, "/etc/arcadeplatform/ws-hold/new-hands");
+  assert.equal(unitHoldIssue(`NODE_ENV=production PORT=3000 ${assignment}\n`), null);
+  assert.equal(unitHoldIssue("NODE_ENV=production PORT=3000\n"), "unset");
+  assert.equal(unitHoldIssue(""), "unset");
+  assert.equal(unitHoldIssue(`${assignment} ${assignment}`), "duplicate");
+  assert.equal(unitHoldIssue("WS_POKER_NEW_HANDS_HOLD_FILE=/opt/ws-server/hold-new-hands"), "mismatch");
+  assert.equal(unitHoldIssue(`X${assignment}`), "unset");
+  assert.equal(unitHoldIssue(assignment, { WS_POKER_NEW_HANDS_HOLD_FILE: HOLD_FILE }), "conflict");
+  for (const issue of ["unset", "duplicate", "mismatch", "conflict"]) {
+    assert.equal(evaluateRestartGate({ serviceState: "active", holdPathIssue: issue, httpStatus: 200, holdStatus: ready }).line, `RESTART_BLOCKED hold_path_${issue}`);
+  }
 
   // A stopped service never passes on its state alone.
   const quiet = parseDbQuiet("0|0|0|0|0|0\n");

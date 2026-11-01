@@ -9,6 +9,9 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_ENV_FILE = "/etc/arcadeplatform/ws-server.env";
+// Delivered by the ws-server.service drop-in; the attested env file must not define it.
+export const HOLD_FILE = "/etc/arcadeplatform/ws-hold/new-hands";
+const HOLD_VARIABLE = "WS_POKER_NEW_HANDS_HOLD_FILE";
 const STATUS_URL = "http://127.0.0.1:3000/internal/admin/poker-maintenance";
 const PSQL_BIN = "/usr/bin/psql";
 const SAFE_STOP_FILE = "safe-stop";
@@ -109,6 +112,15 @@ export function holdPathIssue(holdFile, { expectedUid = 0, boundary = "/" } = {}
   return null;
 }
 
+// `systemctl show -p Environment --value` must carry exactly one hold assignment with the protected path.
+export function unitHoldIssue(unitEnvironment, envValues = {}) {
+  if (Object.hasOwn(envValues, HOLD_VARIABLE)) return "conflict";
+  const values = [...String(unitEnvironment || "").matchAll(/(?:^|\s)"?WS_POKER_NEW_HANDS_HOLD_FILE=([^\s"]*)"?/g)].map((match) => match[1]);
+  if (values.length === 0) return "unset";
+  if (values.length > 1) return "duplicate";
+  return values[0] === HOLD_FILE ? null : "mismatch";
+}
+
 export function readSafeStopEvidence(holdFile, { expectedUid = 0, nowMs = Date.now() } = {}) {
   const evidenceFile = path.join(path.dirname(holdFile), SAFE_STOP_FILE);
   let entry;
@@ -178,7 +190,10 @@ function queryDbQuiet(dbUrl) {
 
 async function runGate() {
   const values = readEnvValues();
-  const holdFile = values.WS_POKER_NEW_HANDS_HOLD_FILE;
+  const unit = spawnSync("/usr/bin/systemctl", ["show", "ws-server.service", "-p", "Environment", "--value"], { encoding: "utf8", timeout: 5000 });
+  const unitIssue = unit.status === 0 ? unitHoldIssue(unit.stdout, values) : "unset";
+  if (unitIssue) return evaluateRestartGate({ serviceState: "unknown", holdPathIssue: unitIssue });
+  const holdFile = HOLD_FILE;
   const pathIssue = holdPathIssue(holdFile);
   if (pathIssue) return evaluateRestartGate({ serviceState: "unknown", holdPathIssue: pathIssue });
   const service = spawnSync("/usr/bin/systemctl", ["is-active", "ws-server.service"], { encoding: "utf8", timeout: 5000 });
