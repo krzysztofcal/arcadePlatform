@@ -62,7 +62,14 @@ export function createTableCommandQueue({ onError = noop } = {}) {
     return queuedPromise;
   }
 
+  function pendingTotal() {
+    let total = 0;
+    for (const state of queueStateByTableId.values()) total += state.pendingCount;
+    return total;
+  }
+
   return {
-    enqueue
+    enqueue,
+    pendingTotal
   };
 }

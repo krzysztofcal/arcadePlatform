@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { decideSettledBotFunding, readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "../runtime/settled-bot-funding.mjs";
 import { __testOnly, createTableManager as createRuntimeTableManager } from "./table-manager.mjs";
-import { isNewHandsHoldActive } from "../runtime/new-hands-hold.mjs";
+import { isNewHandsHoldActive, isWsDrainActive } from "../runtime/new-hands-hold.mjs";
 
 function holdNewHands(t) {
   const holdFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ws-hold-")), "hold-new-hands");
@@ -819,13 +819,18 @@ test("authenticated resubscribe restores seated human presence so a fold settlem
   assert.equal(nextState.holeCardsByUserId[humanUserId].length, 2);
 });
 
-test("new-hands hold is off when unset or absent and fails closed on an unreadable path", () => {
+test("new-hands hold and drain are off when unset or absent and fail closed on an unreadable path", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ws-hold-"));
   fs.writeFileSync(path.join(dir, "file"), "");
   assert.equal(isNewHandsHoldActive({}), false);
   assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "absent") }), false);
   assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file") }), true);
   assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file", "hold") }), true);
+  assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file") }), false);
+  fs.writeFileSync(path.join(dir, "file"), "drain\n");
+  assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file") }), true);
+  assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "absent") }), false);
+  assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file", "hold") }), true);
 });
 
 test("bootstrapHand excludes disconnected human ghost seats from the next hand", (t) => {
