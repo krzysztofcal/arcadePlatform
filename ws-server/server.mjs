@@ -2742,6 +2742,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
 
   if (isGuestTableId(tableId)) {
     const guestRollover = tableManager.rolloverSettledHand({ tableId, nowMs: Date.now(), economyMode: "none" });
+    if (guestRollover?.reason === "new_hands_on_hold") {
+      scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    }
     if (!guestRollover?.ok || !guestRollover.changed) {
       return finishSettledRollover(guestRollover);
     }
