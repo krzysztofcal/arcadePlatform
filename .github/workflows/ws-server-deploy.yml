@@ -703,6 +703,13 @@ jobs:
                 echo "Previous release is not V3 prod; roll-forward required"
                 return 0
               fi
+              # Automatic rollback restarts only behind the same gate; otherwise the operator decides.
+              ROLLBACK_GATE="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate || true)"
+              printf '%s\n' "$ROLLBACK_GATE"
+              if [[ "$ROLLBACK_GATE" != RESTART_SAFE* ]]; then
+                echo "ROLLBACK_BLOCKED: restart gate is not safe; current release left in place for operator decision"
+                return 0
+              fi
               ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
               mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
               sudo -n /usr/bin/systemctl restart ws-server.service || true
@@ -752,6 +759,14 @@ jobs:
             PROD_PREFLIGHT="$(sudo -n /usr/local/sbin/arcade-ws-production-env-preflight)"
             printf '%s\n' "$PROD_PREFLIGHT"
             [[ "$PROD_PREFLIGHT" == 'PASS LIVE Redis V3 prod' ]]
+
+            # Fail-closed restart gate under the deploy lock: a running WS must be held, drained and verified.
+            RESTART_GATE="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate || true)"
+            printf '%s\n' "$RESTART_GATE"
+            if [[ "$RESTART_GATE" != RESTART_SAFE* ]]; then
+              echo "STOP: restart gate is not safe; nothing switched"
+              exit 1
+            fi
 
             ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
             mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"

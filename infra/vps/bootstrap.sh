@@ -135,6 +135,10 @@ install -D -o root -g root -m 0755 \
   "$REPO_ROOT/infra/vps/ws-production-env-preflight.mjs" \
   /usr/local/sbin/arcade-ws-production-env-preflight
 
+install -D -o root -g root -m 0755 \
+  "$REPO_ROOT/infra/vps/ws-restart-gate.mjs" \
+  /usr/local/sbin/arcade-ws-restart-gate
+
 if ! visudo -cf "$REPO_ROOT/infra/vps/arcade-deploy.sudoers"; then
   echo "refusing bootstrap: invalid arcade deploy sudoers contract" >&2
   exit 1
