@@ -35,7 +35,7 @@ import {
 import { buildStateSnapshotPayload, normalizePrivateBranch } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
-import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
+import { createPersistedStateWriter, maybeWriteSettlementAudit } from "./poker/persistence/persisted-state-writer.mjs";
 import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
 import { handleJoinCommand } from "./poker/handlers/join.mjs";
 import { handleActCommand } from "./poker/handlers/act.mjs";
@@ -422,7 +422,8 @@ async function loadAuthoritativeLeaveExecutor() {
       .then((module) => module.createAuthoritativeLeaveExecutor({
         env: process.env,
         klog: klogSafe,
-        hasConnectedHumanPresence: ({ tableId }) => tableManager.hasConnectedHumanPresence(tableId)
+        hasConnectedHumanPresence: ({ tableId }) => tableManager.hasConnectedHumanPresence(tableId),
+        writeSettlementAudit: maybeWriteSettlementAudit
       }));
   }
   return authoritativeLeaveExecutorPromise;

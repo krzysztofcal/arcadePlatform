@@ -502,7 +502,7 @@ function buildSettlementAuditMeta({ tableId, state }) {
   return meta;
 }
 
-async function maybeWriteSettlementAudit({ tx, tableId, stateVersion, state, klog = () => {} }) {
+export async function maybeWriteSettlementAudit({ tx, tableId, stateVersion, state, klog = () => {} }) {
   const auditMeta = buildSettlementAuditMeta({ tableId, state });
   if (!auditMeta) {
     return { ok: true, skipped: true };
