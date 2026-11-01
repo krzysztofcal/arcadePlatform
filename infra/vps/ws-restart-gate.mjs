@@ -61,10 +61,12 @@ function blocked(reasons) {
 
 // A stopped service needs root's one-time safe-stop evidence and a quiet database; a running one must
 // answer 200 and report every condition itself.
-export function evaluateRestartGate({ serviceState, holdPathIssue = null, httpStatus = null, holdStatus = null, safeStop = null, dbQuiet = null }) {
+export function evaluateRestartGate({ serviceState, holdPathIssue = null, httpStatus = null, holdStatus = null, safeStop = null, holdDrain = false, dbQuiet = null }) {
   if (holdPathIssue) return blocked(`hold_path_${holdPathIssue}`);
   if (serviceState === "inactive" || serviceState === "failed") {
     if (safeStop?.valid !== true) return blocked(`service_${serviceState}_without_safe_stop_evidence`);
+    // The started process must come up drained, so the protected hold file has to say exactly "drain".
+    if (holdDrain !== true) return blocked("hold_file_not_drain");
     if (!dbQuiet || typeof dbQuiet !== "object") return blocked("db_unverified");
     const reasons = DB_QUIET_KEYS.map((key) => countReason(key, dbQuiet[key])).filter(Boolean);
     return reasons.length ? blocked(reasons) : { safe: true, line: "RESTART_SAFE safe_stop_evidence", usesSafeStop: true };
@@ -122,6 +124,15 @@ export function readSafeStopEvidence(holdFile, { expectedUid = 0, nowMs = Date.n
   return { valid: fresh, file: evidenceFile };
 }
 
+export function readHoldDrain(holdFile, { expectedUid = 0 } = {}) {
+  try {
+    const entry = fs.lstatSync(holdFile);
+    return entry.isFile() && protectedEntry(entry, expectedUid) && /^drain\n?$/.test(fs.readFileSync(holdFile, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 export function parseDbQuiet(output) {
   const values = String(output || "").trim().split("|");
   if (values.length !== DB_QUIET_KEYS.length || !values.every((value) => /^[0-9]+$/.test(value))) return null;
@@ -174,8 +185,9 @@ async function runGate() {
   const serviceState = String(service.stdout || "").trim() || "unknown";
   if (serviceState === "inactive" || serviceState === "failed") {
     const safeStop = readSafeStopEvidence(holdFile);
-    const dbQuiet = safeStop.valid && values.SUPABASE_DB_URL ? queryDbQuiet(values.SUPABASE_DB_URL) : null;
-    return { ...evaluateRestartGate({ serviceState, safeStop, dbQuiet }), safeStopFile: safeStop.file };
+    const holdDrain = readHoldDrain(holdFile);
+    const dbQuiet = safeStop.valid && holdDrain && values.SUPABASE_DB_URL ? queryDbQuiet(values.SUPABASE_DB_URL) : null;
+    return { ...evaluateRestartGate({ serviceState, safeStop, holdDrain, dbQuiet }), safeStopFile: safeStop.file };
   }
   if (serviceState !== "active") return evaluateRestartGate({ serviceState });
   if (!values.POKER_WS_INTERNAL_TOKEN) return blocked("internal_token_missing");

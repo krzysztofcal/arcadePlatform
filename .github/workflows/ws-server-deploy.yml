@@ -699,6 +699,11 @@ jobs:
               if [ "$HAVE_SWITCHED" != "1" ] || [ -z "$PREVIOUS_TARGET" ]; then
                 return 0
               fi
+              # A restart was attempted with an unknown outcome: never guess, leave everything to the operator.
+              if [ "$HAVE_RESTARTED" = "uncertain" ]; then
+                echo "RESTART_UNCERTAIN: service state unknown after the restart attempt; no automatic rollback, operator decision required"
+                return 0
+              fi
               # Not restarted yet: the previous process still runs, so only the release link is restored.
               if [ "$HAVE_RESTARTED" != "1" ]; then
                 ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
@@ -716,10 +721,12 @@ jobs:
               mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
               ROLLBACK_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"
               printf '%s\n' "$ROLLBACK_RESULT"
-              if [[ "$ROLLBACK_RESULT" != RESTARTED* ]]; then
+              if [[ "$ROLLBACK_RESULT" == RESTART_BLOCKED* ]]; then
                 ln -sfn -- "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
                 mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
                 echo "ROLLBACK_BLOCKED: restart gate is not safe; current release left in place for operator decision"
+              elif [[ "$ROLLBACK_RESULT" != RESTARTED* ]]; then
+                echo "RESTART_UNCERTAIN: rollback restart outcome unknown; release link left as is, operator decision required"
               fi
             }
 
@@ -784,8 +791,14 @@ jobs:
             # The helper re-runs the gate as root and restarts only if it still passes.
             RESTART_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"
             printf '%s\n' "$RESTART_RESULT"
+            if [[ "$RESTART_RESULT" == RESTART_BLOCKED* ]]; then
+              echo "STOP: gate refused before restart; nothing was restarted"
+              false
+            fi
             if [[ "$RESTART_RESULT" != RESTARTED* ]]; then
-              echo "STOP: gated restart refused or failed"
+              # RESTART_FAILED, empty or unknown output: systemctl may have run, so the service state is uncertain.
+              HAVE_RESTARTED=uncertain
+              echo "STOP: restart outcome uncertain; no automatic rollback"
               false
             fi
             HAVE_RESTARTED=1

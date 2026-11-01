@@ -24,13 +24,13 @@ test("ws-server deploy gates the release switch and the automatic rollback on th
   const restartIdx = script.indexOf('RESTART_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"');
   assert.ok(lockIdx !== -1 && lockIdx < gateIdx && gateIdx < switchIdx && switchIdx < restartIdx, "check under the lock, switch, then gated restart");
   assert.match(script.slice(gateIdx, switchIdx), /!= RESTART_SAFE\*[\s\S]*STOP: restart gate is not safe; nothing switched[\s\S]*exit 1/);
-  assert.match(script.slice(restartIdx), /!= RESTARTED\*[\s\S]*STOP: gated restart refused or failed[\s\S]*false\n\s*fi\n\s*HAVE_RESTARTED=1/);
+  assert.match(script.slice(restartIdx), /== RESTART_BLOCKED\*[\s\S]*!= RESTARTED\*[\s\S]*HAVE_RESTARTED=uncertain[\s\S]*false\n\s*fi\n\s*HAVE_RESTARTED=1/);
 
   const rollback = script.slice(script.indexOf("rollback() {"), script.indexOf("on_error() {"));
   assert.match(rollback, /if \[ "\$HAVE_RESTARTED" != "1" \]; then[\s\S]*release link restored; no restart was performed"\n\s*return 0/);
   const rollbackRestartIdx = rollback.indexOf('ROLLBACK_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"');
   assert.ok(rollbackRestartIdx !== -1);
-  assert.match(rollback.slice(rollbackRestartIdx), /!= RESTARTED\*[\s\S]*ln -sfn -- "\$NEW_RELEASE_APP_DIR"[\s\S]*ROLLBACK_BLOCKED: restart gate is not safe/);
+  assert.match(rollback.slice(rollbackRestartIdx), /== RESTART_BLOCKED\*[\s\S]*ln -sfn -- "\$NEW_RELEASE_APP_DIR"[\s\S]*ROLLBACK_BLOCKED: restart gate is not safe[\s\S]*RESTART_UNCERTAIN/);
   assert.doesNotMatch(text, /sudo -n \/usr\/bin\/systemctl restart ws-server\.service/);
   const sudoers = fs.readFileSync("infra/vps/arcade-deploy.sudoers", "utf8");
   assert.match(sudoers, /\/usr\/local\/sbin\/arcade-ws-restart-gate check, \\\n\s+\/usr\/local\/sbin\/arcade-ws-restart-gate restart\n/);
@@ -46,7 +46,7 @@ test("ws-server deploy gates the release switch and the automatic rollback on th
 });
 
 test("restart gate is fail-closed for every unverifiable runtime state", async () => {
-  const { evaluateRestartGate, holdPathIssue, readSafeStopEvidence, parseDbQuiet, readEnvValues } = await import("../infra/vps/ws-restart-gate.mjs");
+  const { evaluateRestartGate, holdPathIssue, readSafeStopEvidence, readHoldDrain, parseDbQuiet, readEnvValues } = await import("../infra/vps/ws-restart-gate.mjs");
   const ready = {
     active: true, drain: true, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
     supervisorSweepInProgress: false, dbHandsInProgress: 0, dbVersionMismatches: 0,
@@ -70,11 +70,12 @@ test("restart gate is fail-closed for every unverifiable runtime state", async (
   const quiet = parseDbQuiet("0|0|0|0|0|0\n");
   const evidence = { valid: true };
   for (const serviceState of ["inactive", "failed"]) {
-    assert.equal(evaluateRestartGate({ serviceState, safeStop: { valid: false }, dbQuiet: quiet }).line, `RESTART_BLOCKED service_${serviceState}_without_safe_stop_evidence`);
-    assert.equal(evaluateRestartGate({ serviceState, safeStop: evidence, dbQuiet: null }).line, "RESTART_BLOCKED db_unverified");
-    assert.deepEqual(evaluateRestartGate({ serviceState, safeStop: evidence, dbQuiet: quiet }), { safe: true, line: "RESTART_SAFE safe_stop_evidence", usesSafeStop: true });
+    assert.equal(evaluateRestartGate({ serviceState, safeStop: { valid: false }, holdDrain: true, dbQuiet: quiet }).line, `RESTART_BLOCKED service_${serviceState}_without_safe_stop_evidence`);
+    assert.equal(evaluateRestartGate({ serviceState, safeStop: evidence, holdDrain: false, dbQuiet: quiet }).line, "RESTART_BLOCKED hold_file_not_drain");
+    assert.equal(evaluateRestartGate({ serviceState, safeStop: evidence, holdDrain: true, dbQuiet: null }).line, "RESTART_BLOCKED db_unverified");
+    assert.deepEqual(evaluateRestartGate({ serviceState, safeStop: evidence, holdDrain: true, dbQuiet: quiet }), { safe: true, line: "RESTART_SAFE safe_stop_evidence", usesSafeStop: true });
   }
-  assert.equal(evaluateRestartGate({ serviceState: "failed", safeStop: evidence, dbQuiet: parseDbQuiet("1|0|0|0|2|0") }).line, "RESTART_BLOCKED handsInProgress=1,balanceMismatches=2");
+  assert.equal(evaluateRestartGate({ serviceState: "failed", safeStop: evidence, holdDrain: true, dbQuiet: parseDbQuiet("1|0|0|0|2|0") }).line, "RESTART_BLOCKED handsInProgress=1,balanceMismatches=2");
   for (const output of ["", "0|0|0|0|0", "0|0|0|0|0|x", "error"]) assert.equal(parseDbQuiet(output), null, output);
 
   // Hold file and evidence must sit in a directory chain the deploy account cannot change.
@@ -98,6 +99,20 @@ test("restart gate is fail-closed for every unverifiable runtime state", async (
   assert.equal(holdPathIssue("relative/new-hands", { expectedUid: uid, boundary }), "unset");
   assert.equal(holdPathIssue("/opt/ws-server/hold-new-hands"), "unprotected");
 
+  // A stopped service restarts only into drain: the protected hold file must say exactly "drain".
+  assert.equal(readHoldDrain(holdFile, { expectedUid: uid }), true);
+  for (const content of ["", "drain now\n", " drain", "hold\n", "drain\n\n"]) {
+    fs.writeFileSync(holdFile, content);
+    assert.equal(readHoldDrain(holdFile, { expectedUid: uid }), false, JSON.stringify(content));
+  }
+  fs.writeFileSync(holdFile, "drain");
+  assert.equal(readHoldDrain(holdFile, { expectedUid: uid }), true);
+  fs.chmodSync(holdFile, 0o666);
+  assert.equal(readHoldDrain(holdFile, { expectedUid: uid }), false);
+  fs.chmodSync(holdFile, 0o644);
+  assert.equal(readHoldDrain(`${boundary}/ws-hold/absent`, { expectedUid: uid }), false);
+  fs.writeFileSync(holdFile, "drain\n");
+
   const nowMs = Date.parse("2026-11-01T12:00:00Z");
   assert.equal(readSafeStopEvidence(holdFile, { expectedUid: uid, nowMs }).valid, false);
   fs.writeFileSync(`${boundary}/ws-hold/safe-stop`, "safe-stop 2026-11-01T11:30:00Z\n", { mode: 0o600 });
@@ -111,4 +126,48 @@ test("restart gate is fail-closed for every unverifiable runtime state", async (
   assert.equal(readEnvValues(envFile, { allowTestUid: true }).POKER_WS_INTERNAL_TOKEN, "gate-token");
   fs.chmodSync(envFile, 0o644);
   assert.throws(() => readEnvValues(envFile, { allowTestUid: true }), /env_file_untrusted/);
+});
+
+test("an uncertain gated restart stops without touching the release link, a refused one only restores it", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const text = fs.readFileSync(".github/workflows/ws-server-deploy.yml", "utf8");
+  const script = text.slice(text.indexOf("- name: Atomic release switch + restart + health gate on VPS"));
+  const rollback = script.slice(script.indexOf("rollback() {"), script.indexOf("on_error() {"));
+  const restartStart = script.indexOf('RESTART_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"');
+  const restart = script.slice(restartStart, script.indexOf("HAVE_RESTARTED=1", restartStart) + "HAVE_RESTARTED=1".length);
+  const run = (fakeResult) => {
+    const calls = `${fs.mkdtempSync(`${os.tmpdir()}/ws-gated-restart-`)}/calls`;
+    const harness = [
+      "set -Eeuo pipefail",
+      `ln() { echo "ln $*" >> "${calls}"; }`,
+      `mv() { echo "mv $*" >> "${calls}"; }`,
+      `node() { return 0; }`,
+      `sudo() { echo "sudo $*" >> "${calls}"; printf '%s\\n' "$FAKE_RESULT"; return 1; }`,
+      "HAVE_SWITCHED=1; HAVE_RESTARTED=0; PREVIOUS_TARGET=/releases/prev/ws-server; NEW_RELEASE_APP_DIR=/releases/new/ws-server; CURRENT_LINK=/opt/current",
+      rollback,
+      'on_error() { rc=$?; rollback; exit "$rc"; }',
+      "trap 'on_error' ERR",
+      restart,
+      "echo reached_health_gate"
+    ].join("\n");
+    const result = spawnSync("bash", ["-c", harness], { env: { PATH: process.env.PATH, FAKE_RESULT: fakeResult }, encoding: "utf8" });
+    return { status: result.status, stdout: result.stdout, calls: fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").trim().split("\n") : [] };
+  };
+
+  for (const fakeResult of ["RESTART_FAILED systemctl", "", "garbage"]) {
+    const uncertain = run(fakeResult);
+    assert.notEqual(uncertain.status, 0, fakeResult);
+    assert.match(uncertain.stdout, /STOP: restart outcome uncertain; no automatic rollback[\s\S]*RESTART_UNCERTAIN/);
+    assert.deepEqual(uncertain.calls, ["sudo -n /usr/local/sbin/arcade-ws-restart-gate restart"], "no link change and no second restart");
+  }
+
+  const refused = run("RESTART_BLOCKED http_503");
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stdout, /STOP: gate refused before restart[\s\S]*release link restored; no restart was performed/);
+  assert.deepEqual(refused.calls, [
+    "sudo -n /usr/local/sbin/arcade-ws-restart-gate restart",
+    "ln -sfn /releases/prev/ws-server /opt/current.tmp",
+    "mv -Tf /opt/current.tmp /opt/current"
+  ]);
+  assert.doesNotMatch(refused.stdout + run("RESTART_FAILED systemctl").stdout, /reached_health_gate/);
 });
