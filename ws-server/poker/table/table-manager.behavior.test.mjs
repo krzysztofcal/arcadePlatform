@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { decideSettledBotFunding, readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "../runtime/settled-bot-funding.mjs";
 import { __testOnly, createTableManager as createRuntimeTableManager } from "./table-manager.mjs";
-import { isNewHandsHoldActive, isWsDrainActive } from "../runtime/new-hands-hold.mjs";
+import { isNewHandsHoldActive, isWsDrainActive, summarizeRestartFinancials } from "../runtime/new-hands-hold.mjs";
 
 function holdNewHands(t) {
   const holdFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ws-hold-")), "hold-new-hands");
@@ -831,6 +831,21 @@ test("new-hands hold and drain are off when unset or absent and fail closed on a
   assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file") }), true);
   assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "absent") }), false);
   assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file", "hold") }), true);
+});
+
+test("restart financial summary fails closed on missing, invalid or unbalanced money", () => {
+  const row = (overrides) => ({ has_state: true, stacks: { a: 60, b: 40 }, pot: 0, pot_total: null, escrow_status: "active", escrow_balance: "100", ...overrides });
+  const clean = { missingState: 0, missingEscrow: 0, invalidAmounts: 0, balanceMismatches: 0, unresolvedRequests: 0 };
+  assert.deepEqual(summarizeRestartFinancials([row({}), row({ stacks: {}, escrow_status: null, escrow_balance: null })], 0), clean);
+  assert.deepEqual(summarizeRestartFinancials([row({ has_state: false })], 0), { ...clean, missingState: 1 });
+  assert.deepEqual(summarizeRestartFinancials([row({ escrow_status: null, escrow_balance: null })], 0), { ...clean, missingEscrow: 1 });
+  assert.deepEqual(summarizeRestartFinancials([row({ escrow_status: "closed" })], 0), { ...clean, missingEscrow: 1 });
+  for (const invalid of [{ stacks: { a: -1 } }, { stacks: { a: 1.5 } }, { stacks: null }, { pot: 4 }, { pot_total: "x" }, { escrow_balance: "-3" }]) {
+    assert.deepEqual(summarizeRestartFinancials([row(invalid)], 0), { ...clean, invalidAmounts: 1 }, JSON.stringify(invalid));
+  }
+  assert.deepEqual(summarizeRestartFinancials([row({ escrow_balance: 101 })], 0), { ...clean, balanceMismatches: 1 });
+  assert.deepEqual(summarizeRestartFinancials([], 2), { ...clean, unresolvedRequests: 2 });
+  assert.deepEqual(summarizeRestartFinancials([], undefined), { ...clean, unresolvedRequests: null, invalidAmounts: 1 });
 });
 
 test("bootstrapHand excludes disconnected human ghost seats from the next hand", (t) => {

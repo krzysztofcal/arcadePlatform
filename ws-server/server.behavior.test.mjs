@@ -1396,7 +1396,7 @@ test("internal poker maintenance route is token-protected and does not expose a 
     assert.equal(authorized.status, 503);
     const newHandsHold = {
       configured: true, active: true, drain: false, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
-      supervisorSweepInProgress: false, dbHandsInProgress: null, dbVersionMismatches: null, restartSafe: false
+      supervisorSweepInProgress: false, dbHandsInProgress: null, dbVersionMismatches: null, dbFinancialIssues: null, restartSafe: false
     };
     assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable", newHandsHold });
     await fs.writeFile(holdFile, "drain\n");

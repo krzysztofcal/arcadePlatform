@@ -24,7 +24,7 @@ import { createTableManager } from "./poker/table/table-manager.mjs";
 import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
-import { isWsDrainActive, newHandsHoldStatus } from "./poker/runtime/new-hands-hold.mjs";
+import { isWsDrainActive, newHandsHoldStatus, summarizeRestartFinancials } from "./poker/runtime/new-hands-hold.mjs";
 import { createBotReactionOverrideStore } from "./poker/runtime/bot-reaction-override.mjs";
 import { createReactionTimers, shouldObservePersistedReactionMutation } from "./poker/runtime/reaction-timers.mjs";
 import {
@@ -4266,9 +4266,17 @@ const RESTART_PREFLIGHT_SQL = `select ps.table_id::text as table_id, ps.version,
 from public.poker_state ps join public.poker_tables t on t.id = ps.table_id
 where ps.table_id::text = any($1::text[])
   or (t.status = 'OPEN' and ps.state->>'phase' = any($2::text[])); -- ws_restart_preflight`;
+const RESTART_PREFLIGHT_MONEY_SQL = `select t.id::text as table_id, ps.table_id is not null as has_state, ps.state->'stacks' as stacks,
+  ps.state->'pot' as pot, ps.state->'potTotal' as pot_total, a.status as escrow_status, a.balance as escrow_balance
+from public.poker_tables t
+left join public.poker_state ps on ps.table_id = t.id
+left join public.chips_accounts a on a.account_type = 'ESCROW' and a.system_key = 'POKER_TABLE:' || t.id::text
+where t.status = 'OPEN'; -- ws_restart_preflight_money`;
+const RESTART_PREFLIGHT_REQUESTS_SQL = "select count(*)::int as unresolved from public.poker_requests where result_json is null; -- ws_restart_preflight_requests";
 
 // Counts only: no card data or player ids. restartSafe needs hold+drain, an idle queue,
-// no state write, no hand in progress in memory or DB, and DB versions equal to the loaded tables.
+// no state write, no hand in progress in memory or DB, DB versions equal to the loaded tables,
+// and verifiable money: state and escrow for every OPEN table, valid amounts, escrow equal to stacks, no open requests.
 async function buildNewHandsHoldStatus() {
   const hold = newHandsHoldStatus();
   const persistedTableIds = [];
@@ -4285,12 +4293,18 @@ async function buildNewHandsHoldStatus() {
     supervisorSweepInProgress: continuousBotTableSupervisor?.status?.()?.sweepInProgress === true,
     dbHandsInProgress: null,
     dbVersionMismatches: null,
+    dbFinancialIssues: null,
     restartSafe: false
   };
   if (!hold.active || !persistedStateWriteEnabled) return status;
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    const rows = await beginSqlWs((tx) => tx.unsafe(RESTART_PREFLIGHT_SQL, [persistedTableIds, RESTART_PREFLIGHT_LIVE_PHASES]));
+    const { rows, moneyRows, requestRows } = await beginSqlWs(async (tx) => ({
+      rows: await tx.unsafe(RESTART_PREFLIGHT_SQL, [persistedTableIds, RESTART_PREFLIGHT_LIVE_PHASES]),
+      moneyRows: await tx.unsafe(RESTART_PREFLIGHT_MONEY_SQL),
+      requestRows: await tx.unsafe(RESTART_PREFLIGHT_REQUESTS_SQL)
+    }));
+    status.dbFinancialIssues = summarizeRestartFinancials(moneyRows, requestRows?.[0]?.unresolved);
     const versionByTableId = new Map(rows.map((row) => [row.table_id, Number(row.version)]));
     status.dbHandsInProgress = rows.filter((row) => row.status === "OPEN" && RESTART_PREFLIGHT_LIVE_PHASES.includes(row.phase)).length;
     status.dbVersionMismatches = persistedTableIds
@@ -4302,7 +4316,8 @@ async function buildNewHandsHoldStatus() {
   }
   status.restartSafe = hold.drain && loadedHandsInProgress === 0 && status.tableCommandsInFlight === 0
     && stateWritesInFlight === 0 && !status.supervisorSweepInProgress
-    && status.dbHandsInProgress === 0 && status.dbVersionMismatches === 0;
+    && status.dbHandsInProgress === 0 && status.dbVersionMismatches === 0
+    && Object.values(status.dbFinancialIssues).every((count) => count === 0);
   return status;
 }
 

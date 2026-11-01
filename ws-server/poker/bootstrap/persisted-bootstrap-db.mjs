@@ -36,6 +36,26 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
   const tx = {
     unsafe: async (query, params = []) => {
       const sql = String(query).toLowerCase();
+      if (sql.includes("ws_restart_preflight_money")) {
+        return Object.entries(tables)
+          .filter(([, candidate]) => String(candidate?.tableRow?.status || "OPEN").toUpperCase() === "OPEN")
+          .map(([candidateTableId, candidate]) => {
+            const state = candidate?.stateRow?.state;
+            const escrow = accounts.find((account) => account.account_type === "ESCROW" && account.system_key === `POKER_TABLE:${candidateTableId}`);
+            return {
+              table_id: candidateTableId,
+              has_state: Boolean(candidate?.stateRow),
+              stacks: state?.stacks ?? null,
+              pot: state?.pot ?? null,
+              pot_total: state?.potTotal ?? null,
+              escrow_status: escrow ? (escrow.status || "active") : null,
+              escrow_balance: escrow ? escrow.balance : null
+            };
+          });
+      }
+      if (sql.includes("ws_restart_preflight_requests")) {
+        return [{ unresolved: (Array.isArray(doc?.pokerRequests) ? doc.pokerRequests : []).filter((row) => row?.result_json == null).length }];
+      }
       if (sql.includes("ws_restart_preflight")) {
         return Object.entries(tables)
           .filter(([candidateTableId, candidate]) => candidate?.stateRow && (params[0].includes(candidateTableId)
