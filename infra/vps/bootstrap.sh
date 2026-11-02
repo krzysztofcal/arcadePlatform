@@ -135,6 +135,11 @@ install -D -o root -g root -m 0755 \
   "$REPO_ROOT/infra/vps/ws-production-env-preflight.mjs" \
   /usr/local/sbin/arcade-ws-production-env-preflight
 
+install -D -o root -g root -m 0755 \
+  "$REPO_ROOT/infra/vps/ws-restart-gate.mjs" \
+  /usr/local/sbin/arcade-ws-restart-gate
+install -d -o root -g root -m 0755 /etc/arcadeplatform/ws-hold
+
 if ! visudo -cf "$REPO_ROOT/infra/vps/arcade-deploy.sudoers"; then
   echo "refusing bootstrap: invalid arcade deploy sudoers contract" >&2
   exit 1
@@ -170,6 +175,7 @@ ufw --force enable
 
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server.service" /etc/systemd/system/ws-server.service
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server.service.d/override.conf" /etc/systemd/system/ws-server.service.d/override.conf
+install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server.service.d/50-new-hands-hold.conf" /etc/systemd/system/ws-server.service.d/50-new-hands-hold.conf
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server-preview.service.example" /etc/systemd/system/ws-server-preview.service
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.service" /etc/systemd/system/arcade-chips-ledger-dispatch.service
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.timer" /etc/systemd/system/arcade-chips-ledger-dispatch.timer

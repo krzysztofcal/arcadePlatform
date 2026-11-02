@@ -1,11 +1,13 @@
 # Exact privileged operations for the copilot deployment account.
 # The deploy group owns only application state and the Caddyfile; it does not
 # grant access to secrets, systemd units, sudoers, shells or interpreters.
+# Production WS restarts only through the root restart gate (check, or gate + restart).
 Cmnd_Alias ARCADE_DEPLOY_COMMANDS = \
-    /usr/bin/systemctl restart ws-server.service, \
     /usr/bin/systemctl restart ws-server-preview.service, \
     /usr/bin/systemctl reload caddy.service, \
     /usr/local/sbin/arcade-ws-preview-env-preflight "", \
-    /usr/local/sbin/arcade-ws-production-env-preflight ""
+    /usr/local/sbin/arcade-ws-production-env-preflight "", \
+    /usr/local/sbin/arcade-ws-restart-gate check, \
+    /usr/local/sbin/arcade-ws-restart-gate restart
 
 copilot ALL=(root) NOPASSWD: ARCADE_DEPLOY_COMMANDS

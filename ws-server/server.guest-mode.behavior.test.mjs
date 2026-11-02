@@ -800,6 +800,61 @@ test("guest can play at least one action and bot autoplay continues", async () =
   }
 });
 
+test("guest SETTLED table waits under the new-hands hold and resumes by itself after release", async () => {
+  const secret = "guest-hold-secret";
+  const guestTableId = "guest_table_hold";
+  const holdFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "ws-hold-")), "hold-new-hands");
+  const { port, child } = await createServer({
+    env: {
+      WS_AUTH_REQUIRED: "1",
+      WS_AUTH_TEST_SECRET: secret,
+      WS_POKER_NEW_HANDS_HOLD_FILE: holdFile,
+      WS_POKER_SETTLED_REVEAL_MS: "0",
+      WS_POKER_TURN_MS: "300",
+      WS_TIMEOUT_SWEEP_MS: "20",
+      WS_BOT_REACTION_MIN_MS: "0",
+      WS_BOT_REACTION_MAX_MS: "0",
+    },
+  });
+  const hands = [];
+  const handOf = (frame) => frame?.type === "stateSnapshot" || frame?.type === "statePatch" ? frame.payload?.public?.hand : null;
+  const waitForHand = async (predicate, timeoutMs) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const found = hands.find(predicate);
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return null;
+  };
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeGuestJwt({ secret, sub: "guest_user_hold", tableId: guestTableId, nickname: "Guest7001" }), "auth-guest-hold");
+    ws.on("message", (data) => {
+      const hand = handOf(JSON.parse(String(data)));
+      if (hand?.handId) hands.push(hand);
+    });
+    assert.equal((await joinTable(ws, guestTableId, "join-guest-hold")).ack.payload.status, "accepted");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "guest-hold-sub", ts: "2026-02-28T00:00:06Z", payload: { tableId: guestTableId, view: "snapshot" } });
+    const first = await waitForHand(() => true, 10000);
+    assert.ok(first);
+    await fs.writeFile(holdFile, "");
+
+    assert.ok(await waitForHand((hand) => hand.handId === first.handId && hand.status === "SETTLED", 30000));
+    assert.equal(await waitForHand((hand) => hand.handId !== first.handId, 2500), null);
+    await fs.rm(holdFile);
+    const resumed = await waitForHand((hand) => hand.handId !== first.handId, 20000);
+    assert.equal(resumed?.status, "PREFLOP");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+  }
+});
+
 test("authenticated poker flow still works", async () => {
   const secret = "auth-flow-secret";
   const normalTableId = "table_auth_flow";
