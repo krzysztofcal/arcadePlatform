@@ -193,6 +193,69 @@ test('deletion Leave retains audit metadata and recovers committed cashout reloa
   assert.equal((await db.query('select count(*)::int n from auth.users where id=$1',[USER])).rows[0].n,1,'Auth remains last, not called by this regression');
 });
 
+test('Leave that ends a hand rolls back SETTLED, cashout, seats and request when HAND_SETTLED is not written',async(t)=>{
+  const {maybeWriteSettlementAudit}=await import('../ws-server/poker/persistence/persisted-state-writer.mjs');
+  const {begin}=await fixture(75);
+  await db.exec('delete from account_deletion_requests'); // ordinary Leave, no deletion in progress
+  const TABLE='99999999-9999-4999-8999-999999999999',BOT2='55555555-5555-4555-8555-555555555555',BOT3='66666666-6666-4666-8666-666666666666';
+  t.after(async()=>{
+    for(const table of ['poker_actions','poker_state','poker_seats','poker_requests'])await db.query(`delete from ${table} where table_id=$1`,[TABLE]);
+    await db.query('delete from poker_tables where id=$1',[TABLE]);
+  });
+  await db.exec(`create table if not exists poker_hole_cards(table_id uuid,hand_id text,user_id uuid,cards jsonb,primary key(table_id,hand_id,user_id));
+    create unique index if not exists deletion_test_settlement on poker_actions(table_id,hand_id)
+    where hand_id is not null and btrim(hand_id)<>'' and action_type='HAND_SETTLED'`);
+  await db.query("insert into poker_tables(id,status,lifecycle_kind,is_single_player) values($1,'OPEN','STANDARD',false)",[TABLE]);
+  await db.query("insert into chips_accounts(account_type,system_key,balance) values('ESCROW',$1,400)",['POKER_TABLE:'+TABLE]);
+  // Earlier folds leave one bot against the leaving human; Leave ends the hand by fold.
+  const seats=[{userId:OTHER,seatNo:1},{userId:BOT2,seatNo:2,isBot:true},{userId:BOT3,seatNo:3,isBot:true},{userId:USER,seatNo:4}];
+  const per=values=>Object.fromEntries(seats.map(({userId},i)=>[userId,values[i]]));
+  const state={tableId:TABLE,phase:'PREFLOP',handId:'leave-ends-hand',handSeed:'leave-ends-hand-seed',seats,
+    handSeats:seats.map(({userId,seatNo})=>({userId,seatNo})),stacks:per([112,96,94,94]),handStartStacksByUserId:per([112,96,96,96]),
+    potTotal:4,sidePots:[],leftTableByUserId:{},foldedByUserId:per([true,true,false,false]),actedThisRoundByUserId:per([true,true,false,true]),
+    betThisRoundByUserId:per([0,0,2,2]),toCallByUserId:per([0,0,0,0]),contributionsByUserId:per([0,0,2,2]),
+    currentBet:2,communityDealt:0,community:[],turnUserId:BOT3};
+  await db.query('insert into poker_state(table_id,version,state) values($1,7,$2)',[TABLE,state]);
+  for(const seat of seats)await db.query("insert into poker_seats values($1,$2,$3,'ACTIVE',$4,$5)",[TABLE,seat.userId,seat.seatNo,!!seat.isBot,state.stacks[seat.userId]]);
+  const snapshot=async()=>(await db.query(`select
+    (select row_to_json(s) from (select version,state from poker_state where table_id=$1) s) as state,
+    (select json_agg(row_to_json(a) order by account_type,system_key) from (select account_type,system_key,balance from chips_accounts) a) as accounts,
+    (select count(*)::int from chips_transactions) as transactions,(select count(*)::int from chips_entries) as entries,
+    (select json_agg(row_to_json(p) order by seat_no) from (select user_id,seat_no,status,is_bot,stack from poker_seats where table_id=$1) p) as seats,
+    (select count(*)::int from poker_requests where table_id=$1) as requests,
+    (select count(*)::int from poker_actions where table_id=$1) as actions`,[TABLE])).rows[0];
+  const before=await snapshot();
+  const leave=writeSettlementAudit=>executePokerLeave({beginSql:begin,tableId:TABLE,userId:USER,requestId:'leave-ends-hand',
+    klog:()=>{},runPostLeaveBotAutoplay:false,writeSettlementAudit});
+  // The real writer inserts HAND_SETTLED after the SETTLED write; a later throw or a skipped
+  // (also alreadyApplied) result must undo both.
+  for(const outcome of [()=>{throw new Error('audit_insert_failed');},()=>({ok:true,skipped:true,alreadyApplied:true})]){
+    let reached=null;
+    await assert.rejects(leave(async input=>{
+      const written=await maybeWriteSettlementAudit(input);
+      const [row]=await input.tx.unsafe('select version,state->>\'phase\' as phase from poker_state where table_id=$1',[TABLE]);
+      reached={written:written.ok===true&&!written.skipped,version:Number(row.version),phase:row.phase};
+      return outcome();
+    }),/audit_insert_failed|settlement_audit_unavailable/);
+    assert.deepEqual(reached,{written:true,version:8,phase:'SETTLED'});
+    assert.deepEqual(await snapshot(),before);
+  }
+  // Control: with the real writer the same Leave commits.
+  const result=await leave(maybeWriteSettlementAudit);
+  assert.equal(result.cashedOut,94);
+  assert.equal((await db.query("select balance::int n from chips_accounts where user_id=$1",[USER])).rows[0].n,75+94);
+  assert.equal((await db.query("select count(*)::int n from poker_actions where table_id=$1 and action_type='HAND_SETTLED'",[TABLE])).rows[0].n,1);
+  const committed=(await db.query('select state from poker_state where table_id=$1',[TABLE])).rows[0].state;
+  assert.equal(committed.phase,'SETTLED');assert.deepEqual(committed.stacks,{[OTHER]:112,[BOT2]:96,[BOT3]:98});
+  // Idempotent retries never reach the writer: the stored request replays, and a new request sees SETTLED (not live).
+  const writerMustNotRun=async()=>{throw new Error('writer_must_not_run');};
+  assert.deepEqual(await leave(writerMustNotRun),result);
+  const retried=await executePokerLeave({beginSql:begin,tableId:TABLE,userId:USER,requestId:'leave-ends-hand-retry',
+    klog:()=>{},runPostLeaveBotAutoplay:false,writeSettlementAudit:writerMustNotRun});
+  assert.equal(retried.ok,true);assert.equal(retried.cashedOut,0);
+  assert.equal((await db.query("select balance::int n from chips_accounts where user_id=$1",[USER])).rows[0].n,75+94);
+});
+
 test('local request → all-in showdown/side-pot → real cashout+BURN → indexed cleanup → official Auth delete, restart/retry',async()=>{
   const {begin}=await fixture(75);
   await db.exec('delete from account_deletion_requests');
